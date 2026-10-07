@@ -76,9 +76,14 @@ BIN_SWEEP_EVERY = 15
 
 
 @functools.cache
+def served_page():
+    """The assets this process serves and their version, read once so a version URL never serves other bytes."""
+    assets = {name: path.read_bytes() for name, path in core.static_assets().items()}
+    return core.page_version(assets), assets
+
+
 def served_version():
-    """The page version of this process: code_stamp re-execs the server when a page asset changes."""
-    return core.page_version()
+    return served_page()[0]
 
 
 def ledger_view(state):
@@ -677,12 +682,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_static(self, route):
         match = STATIC_RE.fullmatch(route)
-        path = match and core.static_assets().get(f"{match.group(2) or ''}{match.group(3)}")
-        if not path or match.group(1) != served_version():
+        version, assets = served_page()
+        data = match and assets.get(f"{match.group(2) or ''}{match.group(3)}")
+        if data is None or match.group(1) != version:
             return self.send(404, "no such asset", "text/plain")
-        data = path.read_bytes()
         self.send_response(200)
-        self.send_header("Content-Type", STATIC_TYPES[path.suffix[1:]])
+        self.send_header("Content-Type", STATIC_TYPES[match.group(3).rsplit(".", 1)[1]])
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "public, max-age=31536000, immutable")
         self.send_header("X-Content-Type-Options", "nosniff")

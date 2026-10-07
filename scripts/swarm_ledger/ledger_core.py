@@ -311,10 +311,12 @@ def static_assets():
     }
 
 
-def page_version():
+def page_version(assets=None):
+    if assets is None:
+        assets = {name: path.read_bytes() for name, path in static_assets().items()}
     digest = hashlib.sha256(TEMPLATE.read_bytes() + SHELL.read_bytes() + HOME.read_bytes())
-    for name, path in static_assets().items():
-        digest.update(name.encode() + b"\0" + path.read_bytes())
+    for name, data in assets.items():
+        digest.update(name.encode() + b"\0" + data)
     return digest.hexdigest()[:12]
 
 

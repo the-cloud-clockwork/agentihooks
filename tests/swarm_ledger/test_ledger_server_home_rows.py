@@ -117,7 +117,7 @@ def test_the_fold_arrow_names_its_ledger_escaped(browser):
     with listed(rows=[{**summaries()[1], "title": "Beta <plan><img src=x>"}]):
         page = rendered_home(server, browser, "home", NOW)
     assert "<img" not in page.split('<ul id="rows">', 1)[1]
-    assert re.search(r'aria-label="Show all of Beta (&lt;|<)plan(&gt;|>)(&lt;|<)img src=x(&gt;|>)"', page)
+    assert 'aria-label="Show all of Beta &lt;plan&gt;&lt;img src=x&gt;"' in page
 
 
 def test_bin_has_no_fold_or_sort_controls(home_html):

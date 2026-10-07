@@ -104,3 +104,18 @@ def test_a_module_edit_changes_the_page_version(tmp_path):
     (tmp_path / "chat.js").write_text((tmp_path / "chat.js").read_text() + ";")
     with patch.object(core, "MODULES", tmp_path):
         assert core.page_version() != before
+
+
+def test_a_version_url_serves_the_bytes_its_version_was_computed_from(base, tmp_path):
+    server.served_page.cache_clear()
+    version = server.served_version()
+    original = (MODULES / "chat.js").read_text(encoding="utf-8")
+    for path in MODULES.glob("*.js"):
+        (tmp_path / path.name).write_text(path.read_text())
+    (tmp_path / "chat.js").write_text(original + ";")
+    try:
+        with patch.object(core, "MODULES", tmp_path):
+            served = get(f"{base}/static/{version}/js/chat.js")
+    finally:
+        server.served_page.cache_clear()
+    assert served == (200, "text/javascript; charset=utf-8", original)

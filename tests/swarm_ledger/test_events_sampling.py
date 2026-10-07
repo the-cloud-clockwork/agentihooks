@@ -87,8 +87,8 @@ def test_sampling_skips_a_watched_ledger_without_a_loaded_copy(folders, monkeypa
 
 def test_the_served_page_version_is_computed_once_per_process(monkeypatch):
     calls = []
-    monkeypatch.setattr(server.core, "page_version", lambda: calls.append(1) or "v1")
-    server.served_version.cache_clear()
+    monkeypatch.setattr(server.core, "page_version", lambda assets: calls.append(1) or "v1")
+    server.served_page.cache_clear()
     try:
         assert server.ledger_view({"tasks": [], "_meta": {"rev": 1, "seeds": {}, "api_operations": {}}})["_meta"] == {
             "rev": 1,
@@ -98,7 +98,7 @@ def test_the_served_page_version_is_computed_once_per_process(monkeypatch):
         server.ledger_view({"_meta": {"rev": 2}})
         assert calls == [1]
     finally:
-        server.served_version.cache_clear()
+        server.served_page.cache_clear()
 
 
 def test_a_published_view_is_a_copy_the_caller_cannot_change(monkeypatch):
