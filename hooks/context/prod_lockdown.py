@@ -205,8 +205,9 @@ def _strip_safe_content(command: str) -> str:
     echo/printf bodies, curl payloads, python -c strings, and jq/awk args.
     """
     from hooks.context._strip import strip_non_command_content
+    from hooks.context.branch_guard import _command_lines
 
-    return strip_non_command_content(command)
+    return _command_lines(strip_non_command_content(command))
 
 
 def _has_release_signal(session_id: str) -> bool:
@@ -246,11 +247,11 @@ def check_prod_lockdown(payload: dict) -> None:
     check_text = _strip_safe_content(command)
 
     for pattern, name, reason, category in _BLOCKED:
-        if not pattern.search(check_text):
+        if not any(pattern.search(line) for line in check_text.splitlines()):
             continue
         # Bypass mode never opens a merge into a protected branch.
         if controls_off and name != "gh pr merge to main/master/v1":
-            return
+            continue
         if full_bypass or hotfix_unlock:
             return
         if category == "release" and release_unlock:
