@@ -76,6 +76,7 @@ def hooks(home: Path, harness: str) -> bool:
 def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
     from scripts.profiles import binding
     from scripts.select_profile import _native_options
+    from scripts.swarm import launch_check
 
     try:
         found, harness, env, account = binding.process(proc, pid)
@@ -90,6 +91,7 @@ def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
             "effort": effort,
             "account": account,
             "hooks": bool(home) and hooks(Path(home), harness),
+            "chain": launch_check.chain(home) if home else [],
         }
     except (OSError, ValueError, StopIteration):
         return {"process": False}

@@ -12,7 +12,7 @@ from scripts.gates import quiet as quiet_gate
 from scripts.gates.talk import WORKER_LANES
 from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
-from scripts.swarm import affinity, live_binding, snapshot
+from scripts.swarm import affinity, launch_check, live_binding, snapshot
 from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
@@ -62,7 +62,8 @@ def findings(store, slug, config, tasks, events):
             checks.green(tasks, checks.cached_green(store.redis, store.key(slug, "checks"))),
             talk_since_outcome(store, slug, rows),
         )
-        + live_binding.findings(store, slug),
+        + live_binding.findings(store, slug)
+        + launch_check.findings(store, slug),
         now_ms(),
         limits.cooldown_minutes * 60_000,
     )
