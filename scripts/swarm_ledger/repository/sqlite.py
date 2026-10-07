@@ -67,29 +67,74 @@ class SQLiteLedgerRepository:
         deleted_at: int | None = None,
         restored_at: int | None = None,
         source_signature: str | None = None,
+        registries: dict | None = None,
     ) -> None:
         with self.connect() as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
-            before = connection.execute(
-                "SELECT revision,deleted_at,restored_at,source_signature FROM ledgers WHERE slug=?", (slug,)
-            ).fetchone()
-            target = (state["_meta"]["rev"], deleted_at, restored_at, source_signature)
-            if source_signature is not None and before == target:
-                return
-            document = copy.deepcopy(state)
-            meta = document["_meta"]
-            seeds, events = meta.pop("seeds"), meta.get("events", [])
-            if "events" in meta:
-                meta["events"] = []
-            if before != target:
-                connection.execute(
-                    "INSERT INTO ledgers VALUES (?, ?, ?, ?, ?) ON CONFLICT(slug) DO UPDATE SET revision=excluded.revision,deleted_at=excluded.deleted_at,restored_at=excluded.restored_at,source_signature=excluded.source_signature",
-                    (slug, *target),
+            if registries is not None:
+                self._registries(connection, registries)
+            self._write_document(connection, slug, state, (deleted_at, restored_at, source_signature))
+
+    def _write_document(self, connection, slug: str, state: dict, lifecycle: tuple) -> None:
+        before = connection.execute(
+            "SELECT revision,deleted_at,restored_at,source_signature FROM ledgers WHERE slug=?", (slug,)
+        ).fetchone()
+        target = (state["_meta"]["rev"], *lifecycle)
+        if lifecycle[2] is not None and before == target:
+            return
+        document = copy.deepcopy(state)
+        meta = document["_meta"]
+        seeds, events = meta.pop("seeds"), meta.get("events", [])
+        if "events" in meta:
+            meta["events"] = []
+        if before != target:
+            connection.execute(
+                "INSERT INTO ledgers VALUES (?, ?, ?, ?, ?) ON CONFLICT(slug) DO UPDATE SET revision=excluded.revision,deleted_at=excluded.deleted_at,restored_at=excluded.restored_at,source_signature=excluded.source_signature",
+                (slug, *target),
+            )
+        write_rows(connection, slug, read_rows(connection, slug), flatten(document))
+        write_seeds(connection, slug, seeds)
+        write_events(connection, slug, events)
+        self.verify(connection, slug, state)
+
+    def _registries(self, connection, registries: dict) -> None:
+        for name, entries in registries.items():
+            sync_values(connection, "registry", name, {key: encode(value) for key, value in entries.items()})
+            actual = {
+                key: json.loads(value)
+                for key, value in connection.execute("SELECT path,value FROM registry WHERE slug=?", (name,))
+            }
+            if actual != entries:
+                raise ValueError(f"SQLite shadow registry differs for {name}")
+
+    def apply_lifecycle(self, directory: Path, registries: dict, removed: list | None = None) -> None:
+        with self.connect() as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._registries(connection, registries)
+            for slug in removed or []:
+                for table in (*TABLES, "ledgers", "revisions", "seed_base", "seed_deltas", "events"):
+                    connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
+            known = {
+                slug: (deleted, restored)
+                for slug, deleted, restored in connection.execute("SELECT slug,deleted_at,restored_at FROM ledgers")
+            }
+            paths = {path.stem: path for path in directory.glob("*.json") if path.with_suffix(".html").exists()}
+            candidates = known.keys() | registries["bin"].keys() | registries["restored"].keys()
+            for slug in candidates - set(removed or []):
+                target = tuple(
+                    registries[name].get(slug) if isinstance(registries[name].get(slug), int) else None
+                    for name in ("bin", "restored")
                 )
-            write_rows(connection, slug, read_rows(connection, slug), flatten(document))
-            write_seeds(connection, slug, seeds)
-            write_events(connection, slug, events)
-            self.verify(connection, slug, state)
+                if slug in known:
+                    if known[slug] != target:
+                        connection.execute(
+                            "UPDATE ledgers SET deleted_at=?,restored_at=? WHERE slug=?", (*target, slug)
+                        )
+                else:
+                    path = paths.get(slug)
+                    if path is not None:
+                        state = json.loads(path.read_text(encoding="utf-8"))
+                        self._write_document(connection, slug, state, (*target, None))
 
     def verify(self, connection, slug: str, state: dict) -> None:
         if self._document(connection, slug) != state:

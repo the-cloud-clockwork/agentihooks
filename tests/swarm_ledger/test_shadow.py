@@ -96,3 +96,34 @@ def test_unchanged_file_skips_shadow_reconstruction(files, monkeypatch):
     assert SQLiteLedgerRepository(core.LEDGER_DIR / "ledger-shadow.sqlite3").get_document(
         "shadow"
     ) == files.get_document("shadow", reconcile=False)
+
+
+def test_bin_registry_and_automatic_expiry_equal_files(files):
+    from scripts.swarm_ledger.repository import bin_storage
+
+    shadow = SQLiteLedgerRepository(core.LEDGER_DIR / "ledger-shadow.sqlite3")
+    assert bin_storage.bin_closed("shadow", 1, now=12)
+    assert shadow.lifecycle("shadow")["deleted_at"] == 12
+    assert shadow.registry("bin") == bin_storage.registries()["bin"]
+    assert files.restore("shadow", now=15)
+    assert shadow.registry("restored") == bin_storage.registries()["restored"]
+    files.delete("shadow", now=20)
+    assert shadow.registry("bin") == bin_storage.registries()["bin"]
+    assert bin_storage.purge_expired(now=20 + 31 * bin_storage.domain.DAY_MS) == ["shadow"]
+    assert shadow.registry("bin") == bin_storage.registries()["bin"]
+    with pytest.raises(KeyError):
+        shadow.get_document("shadow")
+    with pytest.raises(KeyError):
+        shadow.events_since("shadow", 0)
+
+
+def test_idle_ledgers_are_binned_with_equal_shadow_records(files):
+    from scripts.swarm_ledger.repository import bin_storage
+
+    state = files.get_document("shadow", reconcile=False)
+    now = state["_meta"]["updated_at"] + 8 * bin_storage.domain.DAY_MS
+    assert bin_storage.auto_bin(now=now) == ["shadow"]
+    shadow = SQLiteLedgerRepository(core.LEDGER_DIR / "ledger-shadow.sqlite3")
+    assert shadow.registry("bin") == bin_storage.registries()["bin"]
+    assert shadow.lifecycle("shadow")["deleted_at"] == now
+    assert shadow.get_document("shadow") == state

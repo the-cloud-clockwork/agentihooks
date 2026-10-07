@@ -8,6 +8,8 @@ def read_events(connection, slug: str, revision: int | None = None) -> list:
     query = "SELECT value FROM events WHERE slug=?"
     parameters = (slug,)
     if revision is not None:
+        if connection.execute("SELECT 1 FROM events WHERE slug=? AND revision IS NULL LIMIT 1", (slug,)).fetchone():
+            raise KeyError("rev")
         query += " AND revision>?"
         parameters += (revision,)
     return [json.loads(value) for (value,) in connection.execute(query + " ORDER BY position", parameters)]
@@ -21,7 +23,7 @@ def write_events(connection, slug: str, events: list) -> None:
         digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
         occurrence = occurrences.get(digest, 0)
         occurrences[digest] = occurrence + 1
-        desired[f"{digest}:{occurrence}"] = (event["rev"], position, value)
+        desired[f"{digest}:{occurrence}"] = (event.get("rev"), position, value)
     old = {
         key: (revision, position, value)
         for key, revision, position, value in connection.execute(

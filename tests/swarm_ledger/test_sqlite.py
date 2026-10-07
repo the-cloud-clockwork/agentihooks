@@ -89,7 +89,7 @@ def test_changed_item_writes_only_affected_rows_and_seed_delta(tmp_path):
 def test_failed_verification_rolls_back_every_row(tmp_path, monkeypatch):
     repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
     before = document()
-    repo.import_document("ledger", before)
+    repo.import_document("ledger", before, registries={"bin": {}, "restored": {}})
     after = copy.deepcopy(before)
     after["_meta"]["rev"] = 2
     after["title"] = "Changed"
@@ -99,9 +99,10 @@ def test_failed_verification_rolls_back_every_row(tmp_path, monkeypatch):
     with monkeypatch.context() as patch:
         patch.setattr(repo, "verify", lambda *args: (_ for _ in ()).throw(RuntimeError("crash")))
         with pytest.raises(RuntimeError, match="crash"):
-            repo.import_document("ledger", after)
+            repo.import_document("ledger", after, registries={"bin": {"ledger": 12}, "restored": {}})
     assert SQLiteLedgerRepository(repo.path).get_document("ledger") == before
     assert repo.events_since("ledger", 0) == before["_meta"]["events"]
+    assert repo.registry("bin") == {}
 
 
 @pytest.mark.parametrize(

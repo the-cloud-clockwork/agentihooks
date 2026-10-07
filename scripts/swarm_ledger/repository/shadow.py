@@ -22,5 +22,16 @@ def persist(directory: Path, slug: str, state: dict) -> None:
     stat = (directory / f"{slug}.json").stat()
     signature = encode((stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size))
     SQLiteLedgerRepository(directory / "ledger-shadow.sqlite3").import_document(
-        slug, state, bin_storage.entries().get(slug), bin_storage.restored().get(slug), signature
+        slug,
+        state,
+        bin_storage.entries().get(slug),
+        bin_storage.restored().get(slug),
+        signature,
+        bin_storage.registries(),
+    )
+
+
+def persist_lifecycle(directory: Path, removed: list | None = None) -> None:
+    SQLiteLedgerRepository(directory / "ledger-shadow.sqlite3").apply_lifecycle(
+        directory, bin_storage.registries(), removed
     )

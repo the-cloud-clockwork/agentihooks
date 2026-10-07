@@ -16,10 +16,10 @@ def import_directory(directory: Path, database: Path | None = None) -> list:
             path = directory / filename
             registries[name] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
             repository.import_registry(name, registries[name])
-        for path in sorted(directory.glob("*.json")):
-            if not path.with_suffix(".html").exists():
-                continue
-            document, meta, _ = load_state(path, None, core)
+        for page in sorted(directory.glob("*.html")):
+            path = page.with_suffix(".json")
+            seed = None if path.exists() else core.parse_seed(page.read_text(encoding="utf-8"))
+            document, meta, _ = load_state(path, seed, core)
             repository.import_document(
                 path.stem,
                 {**document, "_meta": meta},
