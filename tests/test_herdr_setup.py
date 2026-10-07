@@ -99,6 +99,20 @@ def test_a_rewritten_integration_file_marks_sessions_changed(runner, tmp_path):
     assert runner.marked == [["mark-changed", "--reason", "herdr-integration:claude"]]
 
 
+def test_integration_files_reads_each_installed_file_from_the_status_paths(runner, tmp_path):
+    folder = tmp_path / "home:with colon"
+    folder.mkdir()
+    (folder / "hook.sh").write_bytes(b"v10")
+    runner.status = (
+        f"claude: current (v10) ({folder / 'hook.sh'})\n"
+        f"codex: not installed ({folder / 'absent.sh'})\n"
+        "kimi: failed (exit 1) see log\n"
+        "header without paths\n"
+    )
+    assert herdr_setup.integration_files() == {"claude": b"v10", "codex": None}
+    assert runner.options[("/bin/herdr", "integration", "status")] == {"capture_output": True, "text": True}
+
+
 def test_a_missing_binary_is_installed_before_configuring(monkeypatch, runner):
     present = iter([None])
     monkeypatch.setattr(herdr_setup, "binary", lambda: next(present, "/bin/herdr"))

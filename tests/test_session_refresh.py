@@ -98,16 +98,22 @@ def test_original_reads_the_profile_model_and_effort_the_session_was_launched_wi
     assert original == ORIGINAL
 
 
-def _restart(monkeypatch, tmp_path, kill_rc: int, live: list[str]) -> list[list[str]]:
+DETACHED = {"stdin": subprocess.DEVNULL, "capture_output": True, "timeout": 300, "check": False}
+
+
+def _restart(monkeypatch, tmp_path, kill_rc: int, live: list[str], consumed: bool = False) -> list[list[str]]:
     ran = []
+    marker = tmp_path / "closing-1"
 
     def run(argv, **kwargs):
+        assert kwargs == DETACHED
         ran.append(argv)
-        return subprocess.CompletedProcess(argv, kill_rc if argv[1] == "terminate-agent" else 0)
+        if consumed:
+            marker.unlink(missing_ok=True)
+        return subprocess.CompletedProcess(argv, kill_rc if argv[1] == "terminate-agent" else 0, "", "refused")
 
     monkeypatch.setattr(refresh.subprocess, "run", run)
     monkeypatch.setattr(refresh, "live_session_ids", lambda: live)
-    marker = tmp_path / "closing-1"
     refresh.restart([["ah", "terminate-agent", "4242"], ["ah", "init-agent"]], marker, "sid-1")
     return ran
 
@@ -115,17 +121,59 @@ def _restart(monkeypatch, tmp_path, kill_rc: int, live: list[str]) -> list[list[
 def test_restart_resumes_only_once_no_process_carries_the_session(monkeypatch, tmp_path):
     ran = _restart(monkeypatch, tmp_path, 0, ["sid-other"])
     assert ran == [["ah", "terminate-agent", "4242"], ["ah", "init-agent"]]
+    assert (tmp_path / "closing-1").exists()
 
 
-def test_a_refused_kill_never_launches_a_second_copy(monkeypatch, tmp_path):
+def test_a_refused_kill_never_launches_a_second_copy(monkeypatch, tmp_path, capsys):
     ran = _restart(monkeypatch, tmp_path, 2, [])
     assert ran == [["ah", "terminate-agent", "4242"]]
     assert not (tmp_path / "closing-1").exists()
+    assert "session-refresh: sid-1 still running, resume skipped: 'refused'" in capsys.readouterr().err
 
 
 def test_a_surviving_process_with_the_session_id_never_gets_a_resumed_copy(monkeypatch, tmp_path):
-    ran = _restart(monkeypatch, tmp_path, 0, ["sid-1"])
+    ran = _restart(monkeypatch, tmp_path, 0, ["sid-1"], consumed=True)
     assert ran == [["ah", "terminate-agent", "4242"]]
+
+
+def test_live_session_ids_lists_every_live_agent_session(monkeypatch):
+    from scripts import terminate_agent
+
+    found = [type("S", (), {"session_id": "sid-1"})(), type("S", (), {"session_id": "sid-2"})()]
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: found)
+    assert refresh.live_session_ids() == ["sid-1", "sid-2"]
+
+
+def test_on_stop_restarts_this_agent_through_its_launch_profile(monkeypatch, tmp_path):
+    from hooks import _async
+    from hooks.context import account_sessions, broadcast
+
+    _log_change(tmp_path, time.time() + 60)
+    calls = []
+    monkeypatch.setattr(refresh, "_home", lambda: tmp_path)
+    monkeypatch.setattr(account_sessions, "agent_pid", os.getpid)
+    monkeypatch.setattr(broadcast, "_load_sessions", lambda: {"sid-1": {"cwd": "/work/wt", "account": "acct2"}})
+    monkeypatch.setattr(refresh, "_closing_marker", lambda pid, environ: tmp_path / f"closing-{pid}")
+    monkeypatch.setattr(refresh.shutil, "which", lambda name: "/bin/agentihooks")
+    monkeypatch.setattr(_async, "fork_and_call", lambda *args, **kwargs: calls.append((args, kwargs)))
+    for key, value in {
+        refresh.LAUNCH_ENV: "1",
+        "AGENTIHOOKS_PROFILE": "engineer",
+        "AGENTIHOOKS_RUN_MODEL": "opus",
+        "AGENTIHOOKS_RUN_EFFORT": "high",
+    }.items():
+        monkeypatch.setenv(key, value)
+    assert refresh.on_stop({"session_id": "sid-1"}) is True
+    (func, commands, marker, session_id), kwargs = calls[0]
+    expected = refresh.Original("sid-1", "sid-1", "/work/wt", "acct2", os.getpid(), "engineer", "opus", "high")
+    assert (func, commands, marker, session_id) == (
+        refresh.restart,
+        refresh.restart_commands(expected),
+        tmp_path / f"closing-{os.getpid()}",
+        "sid-1",
+    )
+    assert kwargs == {"timeout_sec": 600, "task_name": "session-refresh"}
+    assert refresh.on_stop({"session_id": "sid-1"}) is False
 
 
 def test_launcher_marks_the_launch_and_closes_its_tab_after_a_refresh(tmp_path):
