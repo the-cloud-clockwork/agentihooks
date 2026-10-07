@@ -6,12 +6,11 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts import agent_choice, claude_trust, herdr_host, operator_env
+from scripts import agent_choice, claude_trust, herdr_host, herdr_panes, operator_env
 from scripts.swarm import effort_range
 from scripts.targets.codex_target import codex_home, restore_hook_order
 
@@ -46,7 +45,7 @@ def _resolve_directory(requested: str, environ: dict[str, str]) -> Path:
 
 
 def _runtime_dir(environ: dict[str, str]) -> Path:
-    root = Path(environ.get("XDG_RUNTIME_DIR", tempfile.gettempdir())) / "agentihooks-claude-terminal"
+    root = herdr_panes.run_folder(environ)
     root.mkdir(parents=True, exist_ok=True)
     root.chmod(0o700)
     return root
@@ -503,6 +502,7 @@ def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, e
     started = herdr_host.ensure_server(environ)
     env = {"HERDR_AGENT": agent}
     placed = herdr_host.open_pane(directory, name, env, args.placement, args.workspace, environ)
+    herdr_panes.record(placed, "init-agent", name, environ, int(time.time() * 1000))
     herdr_host.run(placed.pane_id, launcher, environ)
     return [
         f"workspace_id={placed.workspace_id}",
@@ -668,6 +668,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     if route.get("error"):
         report.append(f"route_error={route['error']}")
     pane = next((line.split("=", 1)[1] for line in report if line.startswith("pane_id=")), "")
+    herdr_panes.mark(pane, active_env, route_status=route.get("status", "pending"))
     if pane and route.get("status") in ("routed", "bare", "direct"):
         renamed = herdr_host.rename_agent(pane, name, active_env)
         report.append(f"agent_name={herdr_host.agent_name(name) if renamed else 'unset'}")

@@ -316,16 +316,25 @@ def test_overlays_reads_the_declared_overlays(tmp_path, manifest, expected):
     assert profile_chain.overlays(tmp_path) == expected
 
 
-def test_rendered_overlays_read_the_home_stamp(tmp_path):
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_rendered_overlays_read_the_home_stamp(tmp_path, wrapped):
     stamp = tmp_path / profile_chain.RENDER_STAMP
     assert profile_chain.rendered_overlays(tmp_path) == []
-    stamp.write_text(json.dumps({"chain": ["a", "brain"], "overlays": ["brain"]}))
+    data = {"chain": ["a", "brain"], "overlays": ["brain"]}
+    stamp.write_text(json.dumps({"render": data, "operator": "digest"} if wrapped else data))
     assert profile_chain.rendered_overlays(tmp_path) == ["brain"]
-    stamp.write_text(json.dumps({"chain": ["a", "brain"]}))
-    assert profile_chain.rendered_overlays(tmp_path) == []
+    for data in (
+        {"chain": ["a", "brain"]},
+        {"overlays": None},
+        [],
+        None,
+        {"render": {}},
+        {"render": None},
+        {"render": []},
+    ):
+        stamp.write_text(json.dumps(data))
+        assert profile_chain.rendered_overlays(tmp_path) == []
     stamp.write_text("{")
-    assert profile_chain.rendered_overlays(tmp_path) == []
-    stamp.write_text("[]")
     assert profile_chain.rendered_overlays(tmp_path) == []
 
 

@@ -237,7 +237,7 @@ def test_rewritten_full_source_replays_no_paged_history(tmp_path, monkeypatch, q
 
 
 def test_open_tool_call_keeps_its_records_until_the_result_lands(tmp_path, monkeypatch, quiet):
-    records = _claude(3, 2)
+    records = _claude(1, 2)
     late = next(index for index, record in enumerate(records) if record["uuid"] == "r0-1")
     pending_result = records.pop(late)
     receiver, _, path = _run(tmp_path, monkeypatch, "capped", CAP, records, len(records))
@@ -248,6 +248,43 @@ def test_open_tool_call_keeps_its_records_until_the_result_lands(tmp_path, monke
     tool = receiver.observations[agent_trace._span_id("session", "t0-1")]
     assert tool.attributes["langfuse.observation.output"].startswith("0-1 x")
     assert "a0-1-tool_use" not in agent_trace._cursor("session")["records"]
+
+
+def _without_results(records: list[dict], calls: set[str]) -> list[dict]:
+    def answers(record: dict) -> bool:
+        payload = record.get("payload") or {}
+        if payload.get("type") == "function_call_output":
+            return payload.get("call_id") in calls
+        content = (record.get("message") or {}).get("content")
+        blocks = content if isinstance(content, list) else []
+        return any(block.get("type") == "tool_result" and block.get("tool_use_id") in calls for block in blocks)
+
+    return [record for record in records if not answers(record)]
+
+
+@pytest.mark.parametrize("build", [_claude, _codex])
+def test_call_without_a_result_closes_when_the_next_turn_arrives(build, tmp_path, monkeypatch, quiet):
+    records = _without_results(build(2, 2), {"t0-1"})
+    receiver, _, _ = _run(tmp_path, monkeypatch, "capped", CAP, records, len(records))
+    tool = receiver.observations[agent_trace._span_id("session", "t0-1")]
+    assert tool.attributes["tool.outcome.state"] == "missing"
+    assert agent_trace._cursor("session").get("paged", {}).get("turns") == 1
+
+
+@pytest.mark.parametrize("build", [_claude, _codex])
+def test_calls_without_results_keep_stored_state_bounded(build, tmp_path, monkeypatch, quiet):
+    turns = 40
+    records = _without_results(build(turns, 3), {f"t{turn}-2" for turn in range(turns)})
+    receiver, cursor_sizes, path = _run(tmp_path, monkeypatch, "capped", CAP, records, 9)
+    state = agent_trace._cursor("session")
+    assert path.stat().st_size > 8 * CAP
+    assert "overflow" not in state and not state["pending"]
+    assert state["source"]["accepted_bytes"] == path.stat().st_size
+    assert max(cursor_sizes) < 4 * CAP
+    assert len(state["records"]) < len(records) / 4
+    assert state["paged"]["turns"] == turns - 1
+    missing = [receiver.observations[agent_trace._span_id("session", f"t{turn}-2")] for turn in range(turns)]
+    assert {span.attributes["tool.outcome.state"] for span in missing} == {"missing"}
 
 
 def test_metadata_wider_than_the_window_does_not_stall_export(tmp_path, monkeypatch, quiet):

@@ -28,6 +28,7 @@ def env(monkeypatch, tmp_path):
     ledger.said = []
     ledger.comments = []
     ledger.say = lambda slug, text, by=None: ledger.said.append((text, by))
+    ledger.relay = lambda slug, text, by: ledger.said.append((text, by))
     ledger.comment = lambda slug, task, text, by: ledger.comments.append((task, text, by))
     rt = FakeRuntime()
     monkeypatch.setattr(cli, "connect", lambda: store)
@@ -37,6 +38,7 @@ def env(monkeypatch, tmp_path):
     ledger.chat = lambda slug: [{"id": "old", "by": "operator", "at": 50, "text": "old talk"}]
     monkeypatch.setattr(cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
     ledger.pulls = {}
+    monkeypatch.setattr(cli, "pull_branch", lambda url: "")
     monkeypatch.setattr(
         cli.ledger_events, "view", lambda url: ledger.pulls.get(url, PullRequest("MERGED", 1, 1, False))
     )
@@ -823,7 +825,7 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
     def refuse(slug, text, by=None):
         raise SwarmError("ledger sw refused: chat refused: clock time '18:45'")
 
-    ledger.say = refuse
+    ledger.relay = refuse
     ran = []
     for module, name in ((cli.ledger_events, "event_pass"), (cli.phases, "phase_pass"), (cli.wake, "wake_pass")):
         real = getattr(module, name)
@@ -1020,10 +1022,133 @@ def test_the_master_takes_no_task_commands(env, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     store.put_agent("sw", AgentRecord("master@a1b2c3-0001", "master", "master"))
-    for argv in (("issue", "https://x/issues/1"), ("pr", "https://x/pull/1"), ("done",), ("block", "why")):
+    for argv in (("issue", "https://x/issues/1"), ("pr", "https://x/pull/1"), ("branch",), ("done",), ("block", "why")):
         assert run("sw", "--as", "master@a1b2c3-0001", *argv) == 1
         assert "master works no task" in capsys.readouterr().err
     assert ledger.comments == [] and [a.state for a in store.agents("sw")] == ["working"]
+
+
+def git_answers(answers):
+    calls = []
+
+    def fake(argv, **kwargs):
+        calls.append((argv, kwargs))
+        code, out = answers[argv[1]]
+        return subprocess.CompletedProcess(argv, code, out, "")
+
+    return calls, fake
+
+
+GIT_OPTS = {"capture_output": True, "text": True, "timeout": 20}
+URL3 = "https://github.com/o/r/pull/3"
+
+
+def test_the_worktree_branch_is_read_and_checked_on_origin():
+    calls, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "ls-remote": (0, "abc\trefs/heads/x\n")})
+    assert cli.worktree_branch(run=fake) == "engineer-a1b2c3-0001"
+    assert calls == [
+        (["git", "branch", "--show-current"], GIT_OPTS),
+        (["git", "ls-remote", "--exit-code", "--heads", "origin", "engineer-a1b2c3-0001"], GIT_OPTS),
+    ]
+
+
+def test_a_branch_missing_on_origin_is_refused():
+    _, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "ls-remote": (2, "")})
+    with pytest.raises(SwarmError) as refused:
+        cli.worktree_branch(run=fake)
+    assert str(refused.value) == (
+        "branch engineer-a1b2c3-0001 is not on origin; push it first with git push -u origin engineer-a1b2c3-0001"
+    )
+
+
+@pytest.mark.parametrize("answer", [(0, "\n"), (128, "engineer-a1b2c3-0001\n")])
+def test_a_checkout_on_no_branch_is_refused(answer):
+    calls, fake = git_answers({"branch": answer})
+    with pytest.raises(SwarmError) as refused:
+        cli.worktree_branch(run=fake)
+    assert str(refused.value) == "swarm branch runs in a worktree on a branch; this checkout is on none"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("failure", [subprocess.TimeoutExpired(["git"], 20), FileNotFoundError("git")])
+@pytest.mark.parametrize("step", ["branch", "ls-remote"])
+def test_a_git_call_that_cannot_run_is_a_clean_refusal(failure, step):
+    def fake(argv, **kwargs):
+        if argv[1] == step:
+            raise failure
+        return subprocess.CompletedProcess(argv, 0, "engineer-a1b2c3-0001\n", "")
+
+    with pytest.raises(SwarmError) as refused:
+        cli.worktree_branch(run=fake)
+    assert str(refused.value) == f"git {step} could not run: {failure}"
+
+
+def test_the_pull_request_head_branch_is_read_from_github():
+    calls = []
+
+    def fake(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, '{"headRefName": "engineer-a1b2c3-0001"}', "")
+
+    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == "engineer-a1b2c3-0001"
+    assert calls == [(["gh", "pr", "view", "https://github.com/o/r/pull/3", "--json", "headRefName"], GIT_OPTS)]
+
+
+@pytest.mark.parametrize("answer", [(1, '{"headRefName": "x"}'), (0, "not json"), (0, "{}")])
+def test_an_unreadable_pull_request_gives_no_branch(answer):
+    def fake(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, answer[0], answer[1], "")
+
+    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ""
+
+
+def test_a_failing_github_call_gives_no_branch():
+    def fake(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, 20)
+
+    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ""
+
+
+def test_swarm_branch_records_the_worktree_branch_on_the_agent_task(env, monkeypatch, capsys):
+    _, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setattr(cli, "worktree_branch", lambda: "engineer-a1b2c3-0001")
+    writes, update = [], ledger.update_task
+    ledger.update_task = lambda slug, task, fields, by="swarm": (
+        writes.append((task, fields, by)) or update(slug, task, fields)
+    )
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "branch") == 0
+    assert writes == [("t1", {"branch": "engineer-a1b2c3-0001"}, "engineer@a1b2c3-0001")]
+    assert ledger.rows["t1"]["branch"] == "engineer-a1b2c3-0001"
+    assert json.loads(capsys.readouterr().out) == {"task": "t1", "branch": "engineer-a1b2c3-0001"}
+
+
+def test_swarm_branch_writes_nothing_when_the_branch_is_refused(env, monkeypatch, capsys):
+    _, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+
+    def refused():
+        raise SwarmError("branch x is not on origin")
+
+    monkeypatch.setattr(cli, "worktree_branch", refused)
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "branch") == 1
+    assert "branch x is not on origin" in capsys.readouterr().err and "branch" not in ledger.rows["t1"]
+
+
+@pytest.mark.parametrize(("head", "fields"), [("engineer-a1b2c3-0001", {"branch": "engineer-a1b2c3-0001"}), ("", {})])
+def test_swarm_pr_records_the_pull_request_head_branch(env, monkeypatch, capsys, head, fields):
+    _, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setattr(cli, "pull_branch", lambda url: head if url == URL3 else "wrong")
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL3) == 0
+    assert ledger.rows["t1"].get("branch") == fields.get("branch")
+    out = json.loads(capsys.readouterr().out)
+    assert {key: out[key] for key in out if key != "intent"} == {"task": "t1", "pr_url": URL3, **fields}
 
 
 def test_a_master_handoff_stores_the_doc_for_its_successor(env, tmp_path):

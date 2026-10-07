@@ -53,7 +53,9 @@ def forget(store: RedisStore, slug: str, name: str) -> None:
 
 def chain(home) -> list[str]:
     try:
-        return [str(name) for name in json.loads((Path(home) / STAMP).read_text())["chain"]]
+        stamp = json.loads((Path(home) / STAMP).read_text())
+        rendered = stamp["render"] if "render" in stamp else stamp
+        return [str(name) for name in rendered["chain"]]
     except (OSError, ValueError, KeyError, TypeError):
         return []
 

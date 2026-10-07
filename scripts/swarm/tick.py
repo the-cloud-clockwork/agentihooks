@@ -336,6 +336,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             if runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
                 store.release(slug, agent.task, agent.name)
                 store.drop_agent(slug, agent.name)
+                _refund_parked(slug, store, rows, agent.task)
                 goes_on = bool(store.handoff(slug, agent.task)) and rows.get(agent.task, {}).get("state") in ACTIVE
                 if goes_on:
                     _reopen(slug, ledger, rows, agent.task)
@@ -479,9 +480,27 @@ def _claimable(slug, store, rows, doc, lane):
 
 
 def _unblocked(task, rows, held):
-    if any(rows.get(dep, {}).get("state") != "done" for dep in task.get("depends_on") or []):
+    if _parked(task, rows) or not all(_stackable(rows.get(dep, {})) for dep in task.get("depends_on") or []):
         return False
     return not any(_overlaps(task.get("territory") or [], other) for other in held)
+
+
+def _parked(task, rows):
+    return any(rows.get(dep, {}).get("state") != "done" for dep in task.get("parked_on") or [])
+
+
+def _stackable(dep):
+    return dep.get("state") == "done" or (dep.get("state") in ACTIVE and bool(dep.get("branch")))
+
+
+def _stack_base(task, rows):
+    deps = task.get("depends_on") or []
+    return [{"task": dep, "branch": rows[dep]["branch"]} for dep in deps if rows[dep].get("state") != "done"]
+
+
+def _refund_parked(slug, store, rows, task_id):
+    if _parked(rows.get(task_id, {}), rows):
+        store.refund_claim(slug, task_id)
 
 
 def _overlaps(mine, theirs):
@@ -513,6 +532,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             handoff = store.handoff(slug, task["id"])
             if handoff:
                 task["handoff"] = handoff
+            task["stack_base"] = _stack_base(task, rows)
             saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
             preferred = json.loads(saved)["seat"] if saved else store.handoff_seat(slug, task["id"])
             seat = _free_seat(slug, lane, taken, preferred)
@@ -537,7 +557,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                     actions.append(f"task {task['id']} is {live['state']} on the ledger, not claimed")
                     continue
                 task.update(fields)
-                store.count_claim(slug, task["id"])
+                store.record_launch(slug, record, "pending")
                 store.seats.occupy(seat, name, now_ms)
                 task["transfer"] = transfers.attach(store, slug, record)
                 placed = runtime.spawn(
@@ -546,10 +566,13 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             except Exception as exc:
                 transfers.failed(store, slug, record)
                 store.note_launch_failure(slug, task["id"], str(exc))
+                store.record_launch(slug, record, "failed", str(exc))
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
                 if isinstance(exc, ProfileUnresolved):
                     actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
                 return actions
+            store.count_claim(slug, task["id"])
+            store.record_launch(slug, record, "started")
             store.put_agent(slug, placed_record(record, placed))
             launch_check.begin(store, slug, record, now_ms)
             store.count_spawn(slug, placed.harness)

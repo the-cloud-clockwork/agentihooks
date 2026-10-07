@@ -1216,6 +1216,72 @@ def test_stamp_redoes_render_when_agentihooks_base_settings_change(world, target
     assert render.render(target, "rb-role") is not None
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_stamp_redoes_render_when_a_package_rule_changes(world, target, tmp_path, monkeypatch):
+    from scripts.profiles import binding, render
+
+    install = world["install"]
+    package = tmp_path / "agentihooks-package"
+    shutil.copytree(install.PACKAGE_FEATURES_DIR, package)
+    monkeypatch.setattr(install, "PACKAGE_FEATURES_DIR", package)
+    assert render.render(target, "rb-role") is not None
+    assert render.render(target, "rb-role") is None
+
+    _write(package / "rules" / "fresh-rule.md", "FRESH PACKAGE RULE MARKER\n")
+    out = render.render(target, "rb-role")
+    assert out is not None
+    assert "FRESH PACKAGE RULE MARKER" in (out / binding.PERSONAS[target]).read_text()
+    assert render.render(target, "rb-role") is None
+
+    _write(package / "skills" / "fresh-skill" / "__pycache__" / "run.cpython-313.pyc", "bytecode\n")
+    assert render.render(target, "rb-role") is None
+
+    (package / "rules" / "fresh-rule.md").rename(package / "rules" / "renamed-rule.md")
+    assert render.render(target, "rb-role") is not None
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_stamp_redoes_render_when_a_linked_profile_changes(world, named_brain, target):
+    from scripts.profiles import binding, render
+
+    assert render.render(target, "rb-role") is not None
+    assert render.render(target, "rb-role") is None
+
+    _write(named_brain / ".claude" / "skills" / "brain-memory" / "SKILL.md", "---\nname: brain-memory\n---\n")
+    out = render.render(target, "rb-role")
+    assert out is not None
+    assert (out / "skills" / "brain-memory" / "SKILL.md").is_file()
+    assert render.render(target, "rb-role") is None
+
+    _write(named_brain / "CLAUDE.md", "BRAIN PERSONA MARKER\n")
+    out = render.render(target, "rb-role")
+    assert out is not None
+    assert "BRAIN PERSONA MARKER" in (out / binding.PERSONAS[target]).read_text()
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_a_running_agent_stays_valid_after_a_package_rule_rerenders_its_home(world, target, tmp_path, monkeypatch):
+    from scripts.profiles import binding, render
+
+    install = world["install"]
+    package = tmp_path / "agentihooks-package"
+    shutil.copytree(install.PACKAGE_FEATURES_DIR, package)
+    monkeypatch.setattr(install, "PACKAGE_FEATURES_DIR", package)
+    home = render.render(target, "rb-role")
+    report = tmp_path / "report.json"
+    binding.request(report, "rb-role", target, home)
+    env = {"AGENTIHOOKS_PROFILE": "rb-role", binding.HOMES[target]: str(home), binding.REPORT: str(report)}
+    monkeypatch.setattr(binding, "process", lambda: (123, target, env, "default"))
+    launched = binding.validate(binding.inspect(home, "rb-role", target)["canary"])
+
+    _write(package / "rules" / "fresh-rule.md", "FRESH PACKAGE RULE MARKER\n")
+    assert render.render(target, "rb-role") == home
+    fresh = binding.inspect(home, "rb-role", target)
+    assert fresh["canary"] != launched["canary"]
+
+    assert binding.validate(launched["canary"])["persona"] == launched["persona"]
+
+
 def test_stamp_names_the_chain_role_defaults(world, monkeypatch):
     from scripts.profiles import plugins, render
 
@@ -1324,9 +1390,11 @@ def test_stamp_names_bundle_commit_and_chain(world):
     head = _git(world["bundle"], "rev-parse", "HEAD").strip()
     chain = ["rb-base", "rb-kit", "rb-role"]
     base = render._base_digest()
+    profiles = render._profiles_digest(render._chain("rb-role"))
     assert render.stamp("rb-role") == {
         "bundle_commit": head,
         "base": base,
+        "profiles": profiles,
         "chain": chain,
         "overlays": [],
         "plugins": {},
@@ -1335,6 +1403,7 @@ def test_stamp_names_bundle_commit_and_chain(world):
     assert render._stamp(None, []) == {
         "bundle_commit": "",
         "base": base,
+        "profiles": render._profiles_digest([]),
         "chain": [],
         "overlays": [],
         "plugins": {},

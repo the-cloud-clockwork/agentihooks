@@ -134,6 +134,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
 
     from scripts.ci_mutation.selection import run_selected
 
+    monkeypatch.setenv("CI", "true")
     monkeypatch.setattr(engine_config, "_config", None)
     project = tmp_path / "mutants"
     (project / "scripts").mkdir(parents=True)
@@ -555,3 +556,49 @@ def test_clean_and_fault_controls_skip_tests_that_reach_no_selected_mutant(tmp_p
     assert report["not_mutated"] == []
     assert report["files"][0]["counts"] == {"killed": 2}
     assert runs.read_text() == "run\n"
+
+
+@pytest.mark.parametrize(
+    ("ci", "requested", "expected"),
+    [(None, 1, 1), (None, 2, 2), (None, 20, 2), ("", 20, 2), ("true", 1, 1), ("true", 2, 2), ("true", 20, 20)],
+)
+def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, ci, requested, expected, capsys):
+    from scripts.ci_mutation.selection import run_selected
+
+    if ci is None:
+        monkeypatch.delenv("CI", raising=False)
+    else:
+        monkeypatch.setenv("CI", ci)
+    monkeypatch.setattr(os, "cpu_count", lambda: requested)
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(requested)))
+    selection = tmp_path / "selection.json"
+    selection.write_text(json.dumps({"scripts/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]}}))
+    counts = []
+    config = SimpleNamespace(source_paths=[], pytest_add_cli_args_test_selection=[])
+    data = SimpleNamespace(exit_code_by_key={"selected": None}, load=lambda: None)
+    engine = SimpleNamespace(tests_by_mangled_function_name={})
+    runner = SimpleNamespace(
+        SourceFileMutationData=lambda **kwargs: data,
+        Config=SimpleNamespace(get=lambda: config),
+        PytestRunner=type("PytestRunner", (), {"run_tests": lambda *args, **kwargs: 0}),
+        mutmut=engine,
+    )
+
+    def shards(root, tests, count):
+        counts.append(count)
+        return []
+
+    def cli(args):
+        assert args == ["run", "--max-children", str(expected)]
+        runner.collect_or_load_stats(object())
+
+    runner.cli = cli
+    monkeypatch.setattr("scripts.ci_mutation.selection.stats_shards", shards)
+    monkeypatch.setattr("scripts.ci_mutation.selection.collect_parallel_stats", lambda *args: None)
+    monkeypatch.setitem(sys.modules, "mutmut", SimpleNamespace(__main__=runner))
+    for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
+        monkeypatch.setitem(sys.modules, name, sys.modules[name])
+    run_selected(selection)
+    assert counts == [expected]
+    output = capsys.readouterr().out
+    assert output == ("" if ci else "Local mutation worker cap: 2 (mutation and stats)\n")

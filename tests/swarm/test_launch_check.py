@@ -135,11 +135,17 @@ def test_name_not_parsing_to_lane_code_and_number_is_named(store, launched, name
     assert list(misses(store, renamed, facts, doc)) == ["name"]
 
 
-def test_chain_reads_the_rendered_stamp(tmp_path):
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_chain_reads_the_rendered_stamp(tmp_path, wrapped):
+    stamp = tmp_path / ".agentihooks-render.json"
     assert launch_check.chain(tmp_path) == []
-    (tmp_path / ".agentihooks-render.json").write_text(json.dumps({"chain": ["a", "b"]}))
+    data = {"chain": ["a", "b"]}
+    stamp.write_text(json.dumps({"render": data, "operator": "digest"} if wrapped else data))
     assert launch_check.chain(tmp_path) == ["a", "b"]
-    (tmp_path / ".agentihooks-render.json").write_text("{")
+    for data in ({}, {"chain": None}, [], None, {"render": {}}, {"render": None}, {"render": []}):
+        stamp.write_text(json.dumps(data))
+        assert launch_check.chain(tmp_path) == []
+    stamp.write_text("{")
     assert launch_check.chain(tmp_path) == []
 
 
