@@ -19,7 +19,6 @@ LEDGER = {
 def folders(tmp_path, monkeypatch):
     real = server.ledger_workspace.folder
     monkeypatch.setattr(server.ledger_workspace, "folder", lambda slug, task: (real(slug, task), tmp_path / task)[1])
-    monkeypatch.setattr(server, "TAIL_MARKS", {})
     monkeypatch.setattr(server, "HUB", Hub())
     (tmp_path / "t1").mkdir()
     return tmp_path
@@ -32,44 +31,24 @@ def counted(monkeypatch, module, name):
     return calls
 
 
-def test_tails_are_read_again_only_when_a_work_file_changes(folders, monkeypatch):
+def test_a_work_folder_read_returns_the_current_tails_of_one_task(folders, monkeypatch):
     reads = counted(monkeypatch, server.ledger_workspace, "tails")
     progress = folders / "t1" / "progress.md"
+    assert server.workspace_tails("s", "t1") == {}
     progress.write_text("first step\n")
-    assert server.workspace_tails("s", LEDGER) == {"t1": {"latest_progress": "first step"}}
-    assert server.workspace_tails("s", LEDGER) == {"t1": {"latest_progress": "first step"}}
-    assert len(reads) == 1
+    assert server.workspace_tails("s", "t1") == {"latest_progress": "first step"}
     progress.write_text("first step\nsecond step\n")
-    os.utime(progress, ns=(progress.stat().st_atime_ns, progress.stat().st_mtime_ns + 1_000_000))
-    assert server.workspace_tails("s", LEDGER) == {"t1": {"latest_progress": "first step\nsecond step"}}
-    assert len(reads) == 2
     (folders / "t1" / "proof.md").write_text("run green\n")
-    assert server.workspace_tails("s", LEDGER)["t1"]["latest_proof"] == "run green"
-    assert len(reads) == 3
+    assert server.workspace_tails("s", "t1") == {
+        "latest_progress": "first step\nsecond step",
+        "latest_proof": "run green",
+    }
+    assert reads == [("s", "t1")] * 3
 
 
-def test_tails_skip_tasks_without_a_folder_or_with_an_unsafe_id(folders):
-    assert server.workspace_tails("s", LEDGER) == {"t1": {}}
-    assert list(server.TAIL_MARKS["s"]) == ["t1"]
-    skipped_first = {"tasks": [LEDGER["tasks"][1], LEDGER["tasks"][2], LEDGER["tasks"][0]], "_meta": {"rev": 3}}
-    assert server.workspace_tails("s", skipped_first) == {"t1": {}}
-    assert server.workspace_tails("s", {"_meta": {"rev": 4}}) == {}
-
-
-def test_marks_follow_the_current_tasks_and_ledgers(folders):
-    server.workspace_tails("s", LEDGER)
-    server.workspace_tails("s", {"tasks": [], "_meta": {"rev": 4}})
-    assert server.TAIL_MARKS["s"] == {}
-    server.HUB.open("s", lambda: {"ledger": LEDGER})
-    server.TAIL_MARKS["gone"] = {"t9": ((None, None), {})}
-    server.sample_streams()
-    assert set(server.TAIL_MARKS) == {"s"}
-
-
-def test_tail_stamp_is_none_for_a_missing_file(tmp_path):
-    (tmp_path / "f").write_text("x")
-    assert server.tail_stamp(tmp_path / "f") == (tmp_path / "f").stat().st_mtime_ns
-    assert server.tail_stamp(tmp_path / "missing") is None
+def test_a_work_folder_read_refuses_an_unsafe_task_id(folders):
+    with pytest.raises(ValueError):
+        server.workspace_tails("s", "bad id")
 
 
 def test_one_ledger_failing_its_swarm_read_never_stops_the_others(folders, monkeypatch, capsys):
@@ -80,7 +59,7 @@ def test_one_ledger_failing_its_swarm_read_never_stops_the_others(folders, monke
 
     monkeypatch.setattr(server, "swarm_status", status)
     for slug in ("a", "b"):
-        server.HUB.open(slug, lambda: {"ledger": LEDGER, "swarm": None, "workspaces": {}})
+        server.HUB.open(slug, lambda: {"ledger": LEDGER, "swarm": None})
     server.sample_streams()
     assert "stream sample a: redis went away" in capsys.readouterr().err
     assert server.HUB.resource("b", "swarm") == {"config": {"state": 3}}
@@ -89,15 +68,11 @@ def test_one_ledger_failing_its_swarm_read_never_stops_the_others(folders, monke
 
 def test_idle_sampling_reads_no_ledger_document_and_sends_nothing(folders, monkeypatch):
     monkeypatch.setattr(server, "swarm_status", lambda slug, state=None: {"config": {"state": "running"}})
-    server.HUB.open(
-        "s", lambda: {"ledger": LEDGER, "swarm": {"config": {"state": "running"}}, "workspaces": {"t1": {}}}
-    )
+    server.HUB.open("s", lambda: {"ledger": LEDGER, "swarm": {"config": {"state": "running"}}})
     snapshots = counted(monkeypatch, server.repository, "read_snapshot")
     documents = counted(monkeypatch, server.repository, "get_document")
     versions = counted(monkeypatch, server.core, "page_version")
     tails = counted(monkeypatch, server.ledger_workspace, "tails")
-    server.workspace_tails("s", LEDGER)
-    tails.clear()
     for _ in range(5):
         server.sample_streams()
     assert (snapshots, documents, versions, tails) == ([], [], [], [])
@@ -161,22 +136,22 @@ def test_stream_resources_loads_the_stored_view_without_reconciling(monkeypatch)
     monkeypatch.setattr(server.repository, "get_document", get_document)
     monkeypatch.setattr(server, "ledger_view", lambda given: {**given, "view": True})
     monkeypatch.setattr(server, "swarm_status", lambda slug, ledger: calls.append(("swarm", slug, ledger)) or "S")
-    monkeypatch.setattr(server, "workspace_tails", lambda slug, ledger: calls.append(("tails", slug, ledger)) or "W")
+    monkeypatch.setattr(server, "workspace_tails", lambda *a: calls.append(("tails", *a)))
     view = {**state, "view": True}
-    assert server.stream_resources("s") == {"ledger": view, "swarm": "S", "workspaces": "W"}
-    assert calls == [("document", "s", False), ("swarm", "s", view), ("tails", "s", view)]
+    assert server.stream_resources("s") == {"ledger": view, "swarm": "S"}
+    assert calls == [("document", "s", False), ("swarm", "s", view)]
 
 
-def test_sampling_publishes_work_folder_changes_after_a_ledger_without_a_copy(folders, monkeypatch):
+def test_sampling_leaves_work_folder_changes_to_the_lazy_read(folders, monkeypatch):
     monkeypatch.setattr(server, "swarm_status", lambda slug, state=None: None)
     server.HUB.open("empty", lambda: {"swarm": None})
-    server.HUB.open("s", lambda: {"ledger": LEDGER, "swarm": None, "workspaces": {"t1": {}}})
+    server.HUB.open("s", lambda: {"ledger": LEDGER, "swarm": None})
+    tails = counted(monkeypatch, server.ledger_workspace, "tails")
     (folders / "t1" / "progress.md").write_text("step one\n")
     server.sample_streams()
-    assert server.HUB.resource("s", "workspaces") == {"t1": {"latest_progress": "step one"}}
-    assert [(name, data) for _, _, name, data in server.HUB.channels["s"].log] == [
-        ("workspaces", {"patch": {"o": {"t1": {"o": {"latest_progress": {"v": "step one"}}}}}})
-    ]
+    assert tails == []
+    assert server.HUB.resource("s", "workspaces") is None
+    assert list(server.HUB.channels["s"].log) == []
 
 
 def test_swarm_status_reads_the_snapshot_only_without_a_given_state(monkeypatch):

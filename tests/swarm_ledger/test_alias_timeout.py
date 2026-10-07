@@ -8,15 +8,16 @@ import pytest
 from redis.exceptions import TimeoutError
 
 from scripts.swarm_ledger import ledger_server as server
+from scripts.swarm_ledger import new_ledger
 
 
 @pytest.fixture
 def ledger_page(monkeypatch, tmp_path):
     core = server.core
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
-    doc = server.new_ledger.build_doc({"title": "Alias timeout proof", "phases": [{"title": "Keep requests readable"}]})
+    doc = new_ledger.build_doc({"title": "Alias timeout proof", "phases": [{"title": "Keep requests readable"}]})
     html_path, _ = core.paths("demo")
-    html_path.write_text(server.new_ledger.render(doc, "demo", server.PORT))
+    html_path.write_text(new_ledger.render(doc, "demo", server.PORT))
     core.sync("demo", ops=[{"op": "join", "id": "join", "by": "engineer"}])
     token = core.read_token(html_path.read_text())
     redis = Mock()
