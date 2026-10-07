@@ -12,7 +12,6 @@ def sent(monkeypatch):
     ops = []
 
     def call(slug, batch, service):
-        assert service is True
         ops.extend((slug, op) for op in batch)
         return {"rejected": [], "tasks": ROWS}
 

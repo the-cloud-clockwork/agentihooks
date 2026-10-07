@@ -7,6 +7,7 @@ from pathlib import Path
 from scripts.swarm.store import SwarmError
 
 LEDGER_DIR = Path(__file__).resolve().parents[1] / "swarm_ledger"
+SERVICE_AUTHORS = ("swarm", None)
 
 
 def _ledger():
@@ -18,9 +19,13 @@ def _ledger():
 
 
 class LedgerClient:
+    def __init__(self, service=False):
+        self.service = service
+
     def _call(self, slug, ops=None):
+        service = self.service or all(op.get("by") in SERVICE_AUTHORS for op in ops or ())
         try:
-            state = _ledger().call(slug, ops, service=True)
+            state = _ledger().call(slug, ops, service=service)
         except SystemExit as exc:
             raise SwarmError(f"ledger {slug}: {exc}") from exc
         if state.get("rejected"):

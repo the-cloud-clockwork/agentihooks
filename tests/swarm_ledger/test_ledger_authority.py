@@ -16,6 +16,7 @@ import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm.ledger_client import LedgerClient  # noqa: E402
+from scripts.swarm.store import SwarmError  # noqa: E402
 from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
 from scripts.swarm_ledger import ledger_authority as authority  # noqa: E402
 
@@ -173,8 +174,27 @@ def test_the_operator_credential_keeps_full_administration(crew):
 def test_the_swarm_client_keeps_service_authority_inside_a_pinned_session(crew):
     with pinned():
         LedgerClient().say(SLUG, "Service control", by="swarm")
+        LedgerClient().say(SLUG, "Unsigned control")
+        LedgerClient(service=True).say(SLUG, "Tick relay", by=OTHER)
         chat = LedgerClient().chat(SLUG)
-    assert ("swarm", "Service control") in [(entry.get("by"), entry["text"]) for entry in chat]
+    said = [(entry.get("by"), entry["text"]) for entry in chat]
+    assert ("swarm", "Service control") in said
+    assert ("operator", "Unsigned control") in said
+    assert (OTHER, "Tick relay") in said
+
+
+def test_the_swarm_client_binds_agent_authored_writes_to_the_session(crew):
+    with pinned():
+        LedgerClient().say(SLUG, "Own swarm line", by=WORKER)
+        with pytest.raises(SwarmError) as refused:
+            LedgerClient().say(SLUG, "Forged swarm line", by=MASTER)
+        chat = LedgerClient().chat(SLUG)
+    said = [(entry.get("by"), entry["text"]) for entry in chat]
+    assert (WORKER, "Own swarm line") in said
+    assert "Forged swarm line" not in [text for _, text in said]
+    assert str(refused.value).endswith(
+        f"refused: phase p1 description has 101 words, limit 100; {WORKER} cannot write as {MASTER}"
+    )
 
 
 def test_a_credential_for_one_name_refuses_another_agent_header(crew):
