@@ -233,3 +233,20 @@ def test_metadata_schema_and_authority_boundary(repositories):
     with pytest.raises(ValidationError):
         validator.validate({**metadata, "grant_ref": "forged-display-grant"})
     assert "grant_ref" not in metadata
+
+
+def test_git_registration_and_swarm_worktree_expand_tilde(monkeypatch, tmp_path, repositories):
+    first, _, _, _, linked = repositories
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    identity = project_identity.resolve_project(
+        "~/first/common", {"AGENTIHOOKS_PROJECT_ID": "local:registered-project"}
+    )
+    assert identity.project_id == "github.com/first/common"
+    config = tmp_path / "state" / "swarm" / "fixture" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({"repo": "~/first/common"}))
+    monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path / "state")
+    identity = project_identity.resolve_project(str(linked), {"AGENTIHOOKS_SWARM": "fixture"})
+    assert identity.project_id == "github.com/first/common"
+    assert identity.worktree == "linked"

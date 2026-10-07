@@ -11,6 +11,7 @@ CASES = {
         "swarm_does_not_confuse",
         "explicit_non_git",
         "git_remote_cannot",
+        "git_registration",
         "normalized_forge",
         "metadata_schema",
     ),
