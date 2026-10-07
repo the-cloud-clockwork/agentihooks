@@ -4,6 +4,7 @@ import pytest
 
 from hooks.context.version_guard import check_version_guard
 from hooks.hook_manager import BlockAction
+from hooks.targets.normalizer import _codex_tool_call
 
 
 def _write(path, cwd=""):
@@ -339,3 +340,72 @@ def test_switch_changing_another_version_key_is_refused(tmp_path):
 def test_unrelated_key_ending_in_version_is_not_a_version_key(tmp_path):
     target = _manifest(tmp_path, _STATIC + '\n[tool.ruff]\ntarget-version = "py311"\n')
     check_version_guard(_edit(target, 'target-version = "py311"', 'target-version = "py312"'))
+
+
+def _codex_patch(target, *lines, action="Update", tail=()):
+    body = "\n".join(("*** Begin Patch", f"*** {action} File: {target}", *lines, *tail, "*** End Patch"))
+    name, args = _codex_tool_call("apply_patch", {"command": body})
+    return {"tool_name": name, "tool_input": args, "cwd": ""}
+
+
+_SWITCH = ("@@", '-version = "2.17.0"', '+dynamic = ["version"]')
+
+
+def test_codex_patch_switching_to_tag_derived_version_is_allowed(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    check_version_guard(_codex_patch(target, *_SWITCH))
+
+
+def test_codex_patch_adding_the_tag_source_with_the_switch_is_allowed(tmp_path):
+    target = _manifest(tmp_path)
+    check_version_guard(_codex_patch(target, "@@", ' name = "x"', *_SWITCH[1:], "@@", "+", "+[tool.setuptools_scm]"))
+
+
+def test_codex_patch_switch_without_tag_source_is_refused(tmp_path):
+    _refused(_codex_patch(_manifest(tmp_path), *_SWITCH))
+
+
+def test_codex_patch_version_bump_is_refused(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    _refused(_codex_patch(target, "@@", '-version = "2.17.0"', '+version = "2.18.0"'))
+
+
+def test_codex_patch_with_version_context_and_unrelated_change_is_allowed(tmp_path):
+    target = _manifest(tmp_path)
+    check_version_guard(
+        _codex_patch(target, "@@", ' version = "2.17.0"', '-description = "old"', '+description = "new"')
+    )
+
+
+def test_codex_patch_hunks_apply_in_order(tmp_path):
+    text = '[tool.poetry]\nkey = "v"\n\n' + _STATIC + '\n[tool.setuptools_scm]\n\n[tool.other]\nkey = "v"\n'
+    target = _manifest(tmp_path, text)
+    check_version_guard(_codex_patch(target, *_SWITCH, "@@", '-key = "v"', '+version = "1.0"'))
+
+
+def test_codex_patch_that_does_not_match_the_file_is_refused(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    _refused(_codex_patch(target, "@@", '-version = "9.9.9"', '+dynamic = ["version"]'))
+
+
+def test_codex_patch_judges_only_the_manifest_section(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    other = ("*** Update File: README.md", "@@", '-version = "2.17.0"', '+version = "3.0.0"')
+    check_version_guard(_codex_patch(target, *_SWITCH, tail=other))
+
+
+def test_codex_patch_deleting_the_manifest_is_refused(tmp_path):
+    _refused(_codex_patch(_manifest(tmp_path), action="Delete"))
+
+
+def test_codex_patch_adding_over_the_manifest_is_judged_by_its_lines(tmp_path):
+    target = _manifest(tmp_path)
+    check_version_guard(_codex_patch(target, *(f"+{line}" for line in _TAGGED.splitlines()), action="Add"))
+    bumped = _STATIC.replace("2.17.0", "2.18.0")
+    _refused(_codex_patch(target, *(f"+{line}" for line in bumped.splitlines()), action="Add"))
+
+
+def test_codex_patch_bumping_a_version_file_is_refused(tmp_path):
+    target = _manifest(tmp_path, "1.0.0\n", "VERSION")
+    _refused(_codex_patch(target, "@@", "-1.0.0", "+1.1.0"), "VERSION")
+    check_version_guard(_codex_patch(target, "@@", " 1.0.0", "+"))

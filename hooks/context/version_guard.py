@@ -53,6 +53,10 @@ _PLAIN_FILES = {"VERSION", "version.txt"}
 
 _UNREADABLE = object()
 
+_PATCH_START = "*** Begin Patch"
+_PATCH_END = "*** End Patch"
+_PATCH_FILE = re.compile(r"^\*\*\* (Add|Update|Delete) File: (.+)$")
+
 _TAG_SWITCH_HINT = (
     " Switching to a setuptools-scm tag derived version is allowed once [tool.setuptools_scm] exists:"
     ' replace the version line with dynamic = ["version"] and add no version literal.'
@@ -118,7 +122,58 @@ def _edited_text(tool_name: str, tool_input: dict, before: str) -> str:
     if tool_name == "Write":
         return tool_input.get("content", "")
     old, new = tool_input.get("old_string", ""), tool_input.get("new_string", "")
+    if "old_string" not in tool_input and new.startswith(_PATCH_START):
+        patched = _patched_text(new, tool_input.get("file_path", ""), before)
+        if patched is not None:
+            return patched
     return before.replace(old, new) if tool_input.get("replace_all") else before.replace(old, new, 1)
+
+
+def _patch_section(patch: str, file_path: str) -> tuple[str, list[str]] | None:
+    action, lines = "", []
+    for line in patch.splitlines():
+        header = _PATCH_FILE.match(line)
+        if action and (header or line == _PATCH_END):
+            break
+        if header and header.group(2).strip() == file_path:
+            action = header.group(1)
+        elif action:
+            lines.append(line)
+    return (action, lines) if action else None
+
+
+def _hunks(lines: list[str]):
+    hunk: list[str] = []
+    for line in [*lines, "@@"]:
+        if line.startswith("@@"):
+            if hunk:
+                yield _side(hunk, "-"), _side(hunk, "+")
+            hunk = []
+        elif not line.startswith("*** "):
+            hunk.append(line)
+
+
+def _side(hunk: list[str], sign: str) -> str:
+    return "".join(f"{line[1:]}\n" for line in hunk if line[:1] in ("", " ", sign))
+
+
+def _patched_text(patch: str, file_path: str, before: str) -> str | None:
+    section = _patch_section(patch, file_path)
+    if section is None:
+        return None
+    action, lines = section
+    if action == "Delete":
+        return ""
+    if action == "Add":
+        return _side(lines, "+")
+    text, start = before, 0
+    for old, new in _hunks(lines):
+        at = text.find(old, start) if old else len(text)
+        if at < 0:
+            return None
+        text = text[:at] + new + text[at + len(old) :]
+        start = at + len(new)
+    return text
 
 
 def _version_literals(text: str) -> set[str]:
