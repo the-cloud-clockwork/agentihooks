@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -179,6 +180,7 @@ def test_git_and_command_timeouts_are_unresolved(monkeypatch):
         raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
 
     monkeypatch.setattr(baseline.subprocess, "run", hang)
+    assert baseline._git_ok("x", "status") is None
     assert baseline.resolve_head("x.git", "dev") == {
         "branch": "dev",
         "status": "unresolved",
@@ -387,6 +389,11 @@ def test_sanitize_redacts_addresses_and_bearers(raw, clean):
         ("node 2001:db8::8a2e:370:7334 down", "node <redacted-ip> down"),
         ("loop ::1 and fe80::1", "loop <redacted-ip> and <redacted-ip>"),
         ("at 19:28:16 and a:b", "at 19:28:16 and a:b"),
+        ("git@anton:repo.git ok", "<redacted-url> ok"),
+        ("dial tcp anton.internal:6443 refused", "dial tcp <redacted-host> refused"),
+        ("registry localhost:5000 up", "registry <redacted-host> up"),
+        ("cluster-autoscaler:v1.33.0 exit 1: error", "cluster-autoscaler:v1.33.0 exit 1: error"),
+        ("digest sha256:1234567 ok", "digest sha256:1234567 ok"),
     ],
 )
 def test_sanitize_redacts_ssh_and_ipv6_addresses(raw, clean):
@@ -398,10 +405,18 @@ def test_sanitize_redacts_colon_credentials(key):
     assert baseline.sanitize(f"{key}: v1 rest") == f"{key}: <redacted> rest"
 
 
-@pytest.mark.parametrize("prefix", ["gh" + "p_", "gh" + "s_", "github" + "_pat_", "s" + "k-", "xo" + "xb-"])
+@pytest.mark.parametrize(
+    "prefix", ["gh" + "p_", "gh" + "r_", "gh" + "s_", "github" + "_pat_", "gl" + "pat-", "s" + "k-", "xo" + "xb-"]
+)
 def test_sanitize_redacts_bare_tokens(prefix):
     assert baseline.sanitize(f"use {prefix}{'A1' * 6} now") == "use <redacted> now"
     assert baseline.sanitize(f"use {prefix}short now") == f"use {prefix}short now"
+
+
+def test_sanitize_redacts_aws_access_key_ids():
+    key = "AK" + "IA" + "Q" * 16
+    assert baseline.sanitize(f"id {key} ok") == "id <redacted> ok"
+    assert baseline.sanitize(f"id {key[:-1]} ok") == f"id {key[:-1]} ok"
 
 
 def test_missing_git_binary(monkeypatch, planted):
@@ -582,10 +597,14 @@ def test_markdown_from_planted_fixture(planted):
     ) in text
 
 
-def test_utc_now_format():
-    stamp = baseline._utc_now()
-    assert len(stamp) == 20
-    assert stamp[4] + stamp[7] + stamp[10] + stamp[13] + stamp[16] + stamp[19] == "--T::Z"
+def test_utc_now_format(monkeypatch):
+    class Clock:
+        @staticmethod
+        def now(tz):
+            return datetime(2026, 10, 7, 15, 4, 5, tzinfo=tz)
+
+    monkeypatch.setattr(baseline, "datetime", Clock)
+    assert baseline._utc_now() == "2026-10-07T15:04:05Z"
 
 
 def test_cli_writes_json_and_markdown_and_reads_previous(planted, tmp_path, monkeypatch):

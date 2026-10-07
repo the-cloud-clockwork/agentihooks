@@ -27,9 +27,11 @@ REGENERATE = (
 _REDACTIONS = (
     (re.compile(r"(Bearer\s+)\S+"), r"\1<redacted>"),
     (re.compile(r"((?:token|password|secret|api_?key)\s*[:=]\s*)[^\s&]+", re.IGNORECASE), r"\1<redacted>"),
-    (re.compile(r"\b(?:gh[opsu]_|github_pat_|sk-|xox[abp]-)[A-Za-z0-9_-]{8,}"), "<redacted>"),
+    (re.compile(r"\b(?:gh[oprsu]_|github_pat_|glpat-|sk-|xox[abp]-)[A-Za-z0-9_-]{8,}"), "<redacted>"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "<redacted>"),
     (re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'<>]+"), "<redacted-url>"),
-    (re.compile(r"\b[\w.-]+@[\w-]+(?:\.[\w-]+)+:[^\s\"'<>]+"), "<redacted-url>"),
+    (re.compile(r"\b[\w.-]+@(?!sha\d+:)[\w-]+(?:\.[\w-]+)*:[^\s\"'<>]+"), "<redacted-url>"),
+    (re.compile(r"\b(?=[\w.-]*[A-Za-z])[\w-]+(?:\.[\w-]+)*:\d{2,5}\b"), "<redacted-host>"),
     (re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b"), "<redacted-ip>"),
 )
 _IPV6 = re.compile(r"(?<![\w:])[0-9A-Fa-f:]*:[0-9A-Fa-f:]*(?![\w:])")
@@ -73,9 +75,10 @@ def _ipv6(match: re.Match) -> str:
 
 
 def sanitize(text: str) -> str:
+    text = _IPV6.sub(_ipv6, text)
     for pattern, replacement in _REDACTIONS:
         text = pattern.sub(replacement, text)
-    return _IPV6.sub(_ipv6, text)
+    return text
 
 
 def _repo_url(url: str, base: Path) -> str:
