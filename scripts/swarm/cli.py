@@ -420,14 +420,14 @@ def setting(config, key):
         return modes.label(catalog.current(config.gates)[GATE_KEYS[key]])
     if key in LANE_KEYS:
         lane, field = LANE_KEYS[key]
-        return config.lanes.get(lane, {}).get(field, "")
+        return config.lanes.get(lane, {}).get(field) or "unset"
     return getattr(config, {**SETTABLE, **EFFORT_KEYS}.get(key, key))
 
 
 def lifecycle_control(args):
     if args.command == "close":
         return "close ledger"
-    return "stop now" if getattr(args, "now", False) else args.command
+    return "stop now" if vars(args).get("now") else args.command
 
 
 def control_readings(store, args):
