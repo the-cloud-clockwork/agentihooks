@@ -58,15 +58,12 @@ def owner(event, members, tasks=()):
 def owes(event, members, name, tasks=()):
     from scripts.swarm.naming import resolve_name
 
-    return owed_to(event, members, resolve_name(name), tasks)
-
-
-def owed_to(event, members, name, tasks=()):
+    name = resolve_name(name)
     who = owner(event, members, tasks)
     return event.get("kind") == "sync requested" or who == name or who is None
 
 
-def unhandled_for(meta, name, tasks=()):
+def unhandled_for(meta, name, tasks=(), owners=None):
     from scripts.swarm.naming import resolve_name
 
     name = resolve_name(name)
@@ -75,11 +72,14 @@ def unhandled_for(meta, name, tasks=()):
     if me is None:
         return []
     since = me.get("handled_rev", 0)
+    owners = {} if owners is None else owners
     mine = []
-    for event in meta.get("events", []):
+    for index, event in enumerate(meta.get("events", [])):
         if event.get("rev", 0) <= since or event.get("by") != "operator" or event.get("kind") in IGNORED_KINDS:
             continue
-        if owed_to(event, members, name, tasks):
+        if index not in owners:
+            owners[index] = owner(event, members, tasks)
+        if event.get("kind") == "sync requested" or owners[index] in (name, None):
             mine.append(event)
     return mine
 
@@ -111,13 +111,14 @@ def sync_summary(doc, meta):
 
 
 def crew(meta):
+    owners = {}
     return [
         {
             "name": name,
             "role": member.get("role", "member"),
             "last_seen": member.get("last_seen", 0),
             "handled_rev": member.get("handled_rev", 0),
-            "unhandled": len(unhandled_for(meta, name)),
+            "unhandled": len(unhandled_for(meta, name, owners=owners)),
         }
         for name, member in meta.get("members", {}).items()
     ]
