@@ -308,7 +308,10 @@ def test_missing_profile_skips_reconcile_and_is_named(monkeypatch, capsys):
 
     _seed_managed_mcp(monkeypatch, {"keep"})
 
-    ClaudeAdapter().post_install_reconcile(["parent", "child"], "child,gone")
+    ClaudeAdapter().post_install_reconcile(["parent", "child"], "child,gone,lost")
 
     assert set(json.loads(install._CLAUDE_JSON.read_text())["mcpServers"]) == {"keep", "stale", "hand"}
-    assert "gone" in capsys.readouterr().out
+    assert (
+        "  [--] Skipping MCP ledger reconcile — profile(s) gone, lost did not resolve this run "
+        "(transient source loss); ledger left unchanged."
+    ) in capsys.readouterr().out
