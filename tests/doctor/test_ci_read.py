@@ -46,7 +46,7 @@ def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs():
     assert [r["id"] for r in record["runs"]] == [37323835080]
     assert [a["attempt"] for a in record["attempts"]] == [1, 2]
     assert len(ci.flaky_tests(record)) == 1
-    assert ci.reruns(record)[0].measure == 1
+    assert ci.reruns(record) == []
     assert all("--paginate" in c and "--jq" in c for c in calls if c[1] == "api" and "?" in c[2])
 
 

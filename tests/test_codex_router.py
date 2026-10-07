@@ -15,6 +15,11 @@ ENV = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _no_stored_caps(monkeypatch):
+    monkeypatch.setattr("scripts.session_caps.stored", lambda harness="claude": {})
+
+
 def _quota(used):
     return CodexQuota(observed_at=0, plan_type="team", seven_day=QuotaWindow(used=used))
 
