@@ -190,16 +190,24 @@ class TestMultilineEnvValues:
         _, err = self._load(home, monkeypatch, capsys, inherited=inherited)
         assert "FAKE_INHERITED_0001" not in err
 
-    def test_loader_reports_a_value_once_and_marks_it_for_child_processes(self, tmp_path, monkeypatch, capsys):
+    @pytest.mark.parametrize(
+        ("earlier", "marked"), [(None, "FAKE_MULTI_0001"), ("EARLIER_0001", "EARLIER_0001 FAKE_MULTI_0001")]
+    )
+    def test_loader_reports_a_value_once_and_marks_it_for_child_processes(
+        self, tmp_path, monkeypatch, capsys, earlier, marked
+    ):
         from hooks import config
 
         monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
         env = {"AGENTIHOOKS_HOME": str(self._home(tmp_path))}
         with patch.dict(os.environ, env, clear=False):
+            for k in [k for k, v in os.environ.items() if "\n" in v]:
+                del os.environ[k]
             os.environ.pop("AGENTIHOOKS_MULTILINE_REPORTED", None)
+            if earlier:
+                os.environ["AGENTIHOOKS_MULTILINE_REPORTED"] = earlier
             config._load_user_env()
             config._load_user_env()
-            marked = os.environ.get("AGENTIHOOKS_MULTILINE_REPORTED", "").split()
+            assert os.environ["AGENTIHOOKS_MULTILINE_REPORTED"] == marked
         err = capsys.readouterr().err
         assert err.count("[agentihooks] these values span several lines") == 1
-        assert "FAKE_MULTI_0001" in marked
