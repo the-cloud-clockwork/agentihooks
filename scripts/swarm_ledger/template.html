@@ -946,8 +946,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     for (let m = re.exec(text); m; m = re.exec(text)) {
       out.push(text.slice(last, m.index));
       if (m[1]) out.push(h("code", { text: m[1].slice(1, -1) }));
-      else if (m[2]) out.push(h("strong", { text: m[2] }));
-      else if (m[3]) out.push(h("em", { text: m[3] }));
+      else if (m[2]) out.push(h("strong", {}, ...inline(m[2])));
+      else if (m[3]) out.push(h("em", {}, ...inline(m[3])));
       else out.push(h("a", { href: m[5], target: "_blank", rel: "noopener noreferrer", text: m[4] }));
       last = re.lastIndex;
     }
