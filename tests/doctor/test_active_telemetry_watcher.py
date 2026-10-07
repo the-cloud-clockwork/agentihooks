@@ -52,7 +52,7 @@ def test_a_claude_backlog_without_a_request_alerts_the_master_again_after_recove
     path = agent_trace._cursor_path("sid-1")
     assert not trace_flush.request_path("sid-1").exists()
 
-    def cursor(since, accepted_bytes=0):
+    def cursor(since, accepted_bytes=0, generated_bytes=5000):
         pending = [{"parent_id": None, "start_ns": (NOW - 600_000) * 1_000_000, "end_ns": (since + 10_000) * 1_000_000}]
         if not root_only:
             pending += [
@@ -62,8 +62,8 @@ def test_a_claude_backlog_without_a_request_alerts_the_master_again_after_recove
         path.write_text(
             json.dumps(
                 {
-                    "source": {"buffered_bytes": 5000, "accepted_bytes": accepted_bytes},
-                    "pending": pending if accepted_bytes == 0 else [],
+                    "source": {"buffered_bytes": generated_bytes, "accepted_bytes": accepted_bytes},
+                    "pending": pending if generated_bytes > accepted_bytes else [],
                     "accepted": {str(n): "revision" for n in range(40)},
                 }
             )
@@ -85,7 +85,7 @@ def test_a_claude_backlog_without_a_request_alerts_the_master_again_after_recove
     cursor(NOW - 90_000, accepted_bytes=5000)
     assert scan(NOW + 1_200_000) == ([], [])
 
-    cursor(NOW + 1_500_000)
+    cursor(NOW + 1_500_000, accepted_bytes=5000, generated_bytes=9000)
     found, actions = scan(NOW + 1_800_000)
     assert [f.kind for f in found] == ["exporter backlog"]
     assert actions == ["doctor pass: 1 new finding sent to the Doctor master"]
