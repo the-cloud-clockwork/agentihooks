@@ -421,6 +421,19 @@ def test_each_domain_schema_rejects_unknown_fields_without_mutation(live):
     assert request(live, "GET", "metadata") == before
 
 
+def test_a_schema_mismatch_names_the_first_unknown_key_and_the_top_field(live):
+    cases = [
+        ({"op": "sync", "id": "two-unknown", "zz": 1, "aa": 1}, "sync", "aa"),
+        ({"op": "task_add", "id": "nested", "depends_on": [1]}, "task_add", "depends_on"),
+    ]
+    for operation, kind, field in cases:
+        message = f"Operation {kind} does not match its schema at field {field}"
+        assert request(live, "POST", "operations", {"ops": [operation], "guards": {}}) == (
+            400,
+            {"error": {"code": "schema_invalid", "message": message}},
+        )
+
+
 def test_stale_cursor_missing_guard_and_origin_are_rejected(live):
     status, page = request(live, "GET", "chat?limit=1")
     assert status == 200
