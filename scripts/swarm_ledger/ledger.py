@@ -126,12 +126,18 @@ def export(slug: str, service: bool = False) -> dict:
     return ResourceClient(BASE, credentials(slug, service)).request(slug, "export", {})["data"]
 
 
+class Missing(SystemExit):
+    pass
+
+
 def call(slug, ops=None, service=False):
     try:
         return request(slug, ops, service)
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
     except OSError:
+        if not repository.exists(slug):
+            raise Missing(f"ledger {slug} does not exist") from None
         subprocess.run([sys.executable, str(HERE / "ledger_server.py"), "--ensure"], check=False, capture_output=True)
     try:
         return request(slug, ops, service)
