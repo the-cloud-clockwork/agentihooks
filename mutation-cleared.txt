@@ -762,5 +762,9 @@
   "scripts/gates/intent_history.py:scripts.gates.intent_history.x_masked__mutmut_34:9c51a3907bd4aee652398441fa5330acc1ce49f6bd5c8bb3e6e36b095a603e19": {
     "reader": "Standards",
     "reason": "Uppercasing Bearer in the regex under re.I changes no matches or replacement outputs. Standards independently verified all Unicode code points and case variants."
+  },
+  "hooks/context/swarm_pin.py:hooks.context.swarm_pin.x_nested__mutmut_11:5a7dc3df22dcf856f0f307f58e0aeba24bfc3c63c09daa4a54599feb56c5510a": {
+    "reader": "Standards",
+    "reason": "Stopping the walk at pid 2 instead of pid 1 changes no output: pid 2 is never claude or codex and never the launcher, so the session count and the final launcher comparison are identical."
   }
 }
