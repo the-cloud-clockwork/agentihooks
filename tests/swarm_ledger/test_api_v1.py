@@ -1039,6 +1039,11 @@ def test_client_transport_retains_timeout_and_json_headers(live):
         assert outgoing.get_header("Content-type") == "application/json"
         assert outgoing.get_method() == "GET"
         assert outgoing.data is None
+        with pytest.raises(ledger.urllib.error.HTTPError) as error:
+            client.request(f"{SLUG}/chat", "metadata")
+        assert error.value.code == 404
+        assert json.loads(error.value.read()) == {"error": {"code": "ledger_missing", "message": "No such ledger"}}
+        assert opened.call_args.args[0].full_url == f"{ledger.BASE}/api/v1/ledgers/{SLUG}%2Fchat/metadata"
 
 
 def test_operation_string_and_identifier_limits_are_central(live):
@@ -2333,6 +2338,9 @@ def test_success_resources_and_acknowledgments_keep_the_exact_byte_boundary():
     with pytest.raises(APIError) as error:
         page([text + "x"], "a" * 64, {"limit": 1})
     assert error.value.status == 413
+    assert error.value.envelope() == {
+        "error": {"code": "resource_too_large", "message": "Use the explicit export operation for this resource"}
+    }
 
 
 def test_relay_requires_its_literal_item_revision(live):
@@ -2442,3 +2450,155 @@ def test_page_byte_budget_preserves_digit_transitions_and_last_page(offset, extr
     next_cursor = f"{rev}:{offset + len(selected)}" if offset + len(selected) < len(rows) else None
     assert result == {"data": selected, "revision": rev, "next_cursor": next_cursor}
     assert reply_size(result) <= MAX_REPLY
+
+
+def test_receipt_for_existing_domain_entry_advances_metadata_once(live):
+    metadata = request(live, "GET", "metadata")[1]["data"]["_meta"]["rev"]
+    chat = request(live, "GET", "chat")[1]
+    payload = {
+        "operation_id": "existing-entry-receipt",
+        "ops": [{"op": "add", "id": "seed-chat-one", "thread": "chat", "text": "First message"}],
+        "guards": {"chat": chat["revision"]},
+    }
+    first = request(live, "POST", "operations", payload)
+    assert first[0] == 200
+    assert first[1]["applied"] == ["seed-chat-one"]
+    assert request(live, "GET", "chat")[1] == chat
+    after = request(live, "GET", "metadata")[1]["data"]["_meta"]["rev"]
+    assert after > metadata
+    assert request(live, "POST", "operations", payload) == first
+    assert request(live, "GET", "metadata")[1]["data"]["_meta"]["rev"] == after
+
+
+def test_bin_actions_validate_origin_body_and_slug_before_delete(live):
+    status, data, _ = send(
+        live,
+        "POST",
+        "/api/v1/bin/actions",
+        json.dumps({"action": "delete", "slug": SLUG}).encode(),
+        **{"Content-Type": "application/json"},
+    )
+    assert (status, json.loads(data)) == (
+        403,
+        {"error": {"code": "forbidden", "message": "Origin not allowed"}},
+    )
+    for payload in (
+        None,
+        [],
+        "invalid",
+        3,
+        {"action": "delete", "slug": 3},
+        {"action": "delete", "slug": "***"},
+    ):
+        status, data, _ = send(
+            live,
+            "POST",
+            "/api/v1/bin/actions",
+            json.dumps(payload).encode(),
+            **{"Content-Type": "application/json", "Origin": sorted(server.ALLOWED_ORIGINS)[0]},
+        )
+        assert (status, json.loads(data)) == (
+            400,
+            {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}},
+        )
+        assert request(live, "GET", "metadata")[0] == 200
+
+
+def test_unsupported_global_action_routes_never_delete(live):
+    for method, path in (("PUT", "/api/v1/bin/actions"), ("POST", "/api/v1/absent-route")):
+        status, data, _ = send(
+            live,
+            method,
+            path,
+            json.dumps({"action": "delete", "slug": SLUG}).encode(),
+            **{"Content-Type": "application/json", "Origin": sorted(server.ALLOWED_ORIGINS)[0]},
+        )
+        assert (status, json.loads(data)) == (
+            404,
+            {"error": {"code": "resource_missing", "message": "No such resource"}},
+        )
+        assert request(live, "GET", "metadata")[0] == 200
+
+
+def test_swarm_read_and_bin_stop_use_the_requested_ledger(live, monkeypatch):
+    from unittest.mock import Mock
+
+    status = Mock(return_value={"slug": SLUG, "running": True})
+    monkeypatch.setattr(server, "swarm_status", status)
+    assert request(live, "GET", "swarm")[0] == 200
+    status.assert_called_once_with(SLUG)
+    status.reset_mock()
+    control = Mock(return_value=({}, None))
+    monkeypatch.setattr(server, "swarm_control", control)
+    code, data, _ = send(
+        live,
+        "POST",
+        "/api/v1/bin/actions",
+        json.dumps({"action": "delete", "slug": SLUG}).encode(),
+        **{"Content-Type": "application/json", "Origin": sorted(server.ALLOWED_ORIGINS)[0]},
+    )
+    assert (code, json.loads(data)) == (200, {"slug": SLUG, "action": "delete"})
+    status.assert_called_once_with(SLUG)
+    control.assert_called_once_with(SLUG, ["stop", "--now"])
+
+
+def test_bin_summaries_keep_item_revisions_and_pagination(live, monkeypatch):
+    from scripts.swarm_ledger.api.resources import revision
+
+    rows = [{"slug": "one", "title": "First"}, {"slug": "two", "title": "Second"}]
+    monkeypatch.setattr(server, "bin_summaries", lambda: rows)
+    code, data, _ = send(live, "GET", "/api/v1/bin?limit=1")
+    assert (code, json.loads(data)) == (
+        200,
+        {
+            "data": [{**rows[0], "revision": revision(rows[0])}],
+            "revision": revision(rows),
+            "next_cursor": f"{revision(rows)}:1",
+        },
+    )
+    code, data, _ = send(live, "GET", f"/api/v1/bin?limit=1&cursor={revision(rows)}:1")
+    assert (code, json.loads(data)) == (
+        200,
+        {"data": [{**rows[1], "revision": revision(rows[1])}], "revision": revision(rows), "next_cursor": None},
+    )
+    code, data, _ = send(live, "GET", "/api/v1/bin/two")
+    assert (code, json.loads(data)) == (200, {"data": rows[1], "revision": revision(rows[1])})
+
+
+def test_oversized_global_item_obeys_the_transport_byte_cap(live, monkeypatch):
+    from scripts.swarm_ledger.api.resources import MAX_REPLY
+
+    monkeypatch.setattr(server, "bin_summaries", lambda: [{"slug": "oversized", "title": "x" * MAX_REPLY}])
+    code, data, _ = send(live, "GET", "/api/v1/bin/oversized")
+    assert (code, json.loads(data)) == (
+        413,
+        {"error": {"code": "resource_too_large", "message": "Use the explicit export operation for this resource"}},
+    )
+
+
+def test_json_body_without_content_length_has_a_stable_error(live):
+    import http.client
+
+    connection = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=5)
+    try:
+        connection.putrequest("POST", f"/api/v1/ledgers/{SLUG}/operations")
+        connection.putheader("X-Ledger-Token", live["admin"])
+        connection.putheader("Content-Type", "application/json")
+        connection.endheaders()
+        response = connection.getresponse()
+        assert (response.status, json.loads(response.read())) == (
+            400,
+            {"error": {"code": "schema_invalid", "message": "Request body must be a bounded JSON object"}},
+        )
+    finally:
+        connection.close()
+
+
+def test_unicode_resources_preserve_utf8_wire_encoding(live):
+    from tests.swarm_ledger.test_ledger_authority import core
+
+    core.sync(SLUG, ops=[{"op": "title_set", "id": "unicode-wire", "text": "Málaga"}])
+    code, data, _ = send(live, "GET", f"/api/v1/ledgers/{SLUG}/metadata", **{"X-Ledger-Token": live["admin"]})
+    assert code == 200
+    assert "Málaga".encode() in data
+    assert data == json.dumps(json.loads(data), ensure_ascii=False).encode()

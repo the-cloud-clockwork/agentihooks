@@ -1786,5 +1786,33 @@
   "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x_apply__mutmut_3:c17282c2288e4872deccebe95114c773a3098907548257657c614efd5596a4be": {
     "reader": "Standards /root/standards_reader",
     "reason": "Both concrete get_document implementations branch only on the truth value of reconcile: File uses if reconcile, SQLite uses if reconcile and files is not None. False and None select exactly the same non-reconciling path in each, with the same slug, lock/storage operations, document and exceptions. This changes no caller-visible result or mutation for either supported repository."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_bin_action__mutmut_71:5c1b7315aad57f7cacd180726207b4523257d60a955accf17cb7ff00ff7e96ee": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The local error sentinel is initialized to None or empty string. Its only later use is truth testing in the final conditional dictionary expansion. Both are false; delete with active swarm overwrites error with exactly the same returned domain value in both versions. Neither original sentinel is otherwise read, logged, passed to the domain or returned, so responses, authorization and side effects are identical."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_97:657c1f3b85562b8035725b201d0f15fd82bb418e71640a691198915f90d1eb10": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The actual diff changes only the X-Ledger-Token HTTPMessage lookup key to lowercase. HTTPMessage field-name lookup is case insensitive, so every present or absent credential value reaches authority.principal unchanged; token comparison, principal, rejection, storage and response are identical."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_98:1d8c1b50cc87e8b856209adf807ff3fa2c93b0d5f61a512cd1634c4cfa0a8187": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The actual diff changes only the X-Ledger-Token HTTPMessage lookup key to uppercase. HTTPMessage field-name lookup is case insensitive, so every present or absent credential value reaches authority.principal unchanged; token comparison, principal, rejection, storage and response are identical."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_101:d59856bfa2ce2a9a3dd25510c44c26bfc5136d5026f92abe68a4387a78e32335": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The actual diff changes only the X-Ledger-Agent HTTPMessage lookup key to lowercase. HTTPMessage field-name lookup is case insensitive, so every present or absent identity value reaches authority.principal unchanged. The derived principal, role/author checks, mutations and response are identical."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_handle__mutmut_18:b6540f59ec9ff37750011b5f6b4d558de6050e074de7d4df04aa57804405ba48": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Within the OSError/ValueError handler, the response status is the independent literal 500 in status,result assignment. APIError stores its first argument only as self.status; envelope reads only code, message and details. This instance is immediately converted to its envelope and never raised or otherwise observed, so replacing its unused internal status by None leaves the external status 500, JSON bytes and side effects unchanged."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_handle__mutmut_24:f65decbd357e550643d875db6816aa9f3e63b40b8f038d803bbbf4274eb70299": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Within the OSError/ValueError handler, the response status is the independent literal 500 in status,result assignment. APIError stores its first argument only as self.status; envelope reads only code, message and details. This instance is immediately converted to its envelope and never raised or otherwise observed, so replacing its unused internal status by 501 leaves the external status 500, JSON bytes and side effects unchanged."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_handle__mutmut_37:82a72b4914de5035f38345486e2d13ae9a07c0657b2c4535e9fa9c583b12cfac": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The only changed expression is json.dumps ensure_ascii=False to ensure_ascii=None on the final wire serialization. Both select the same false branch of the JSON encoder and produce identical unescaped Unicode text for every serializable result. All other serialization options, status, content type and handler.send arguments remain unchanged; exceptions retain the same behavior."
   }
 }
