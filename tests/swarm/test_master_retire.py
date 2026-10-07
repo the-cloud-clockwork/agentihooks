@@ -1,7 +1,6 @@
 import json
 from dataclasses import replace
 
-import fakeredis
 import pytest
 
 from scripts.inbox import exits
@@ -18,6 +17,8 @@ LAUNCH_CHECKED = True
 
 @pytest.fixture
 def swarm():
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0))
     runtime, ledger = FakeRuntime(), FakeLedger([])
@@ -193,6 +194,8 @@ def test_a_zero_wait_retires_without_asking(swarm, monkeypatch):
 
 
 def test_a_worker_record_with_an_empty_field_is_flagged_and_never_retired():
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
     runtime, ledger = FakeRuntime(), FakeLedger([{"id": "one"}])
@@ -212,14 +215,15 @@ def test_unknown_names_each_empty_field_the_live_process_holds():
 
     live = {"harness": "claude", "home": "/h", "profile": "master", "model": "opus", "effort": "high", "account": "t"}
     bare = AgentRecord("master@zz", MASTER, MASTER)
-    assert live_binding.unknown(bare, live) == ["harness", "home", "profile", "model", "effort", "account"]
-    assert live_binding.unknown(bare, {**live, "account": "", "model": ""}) == ["harness", "home", "profile", "effort"]
+    assert live_binding.unknown(bare, live) == ["harness", "profile", "model", "effort", "account"]
+    assert live_binding.unknown(bare, {**live, "account": "", "model": ""}) == ["harness", "profile", "effort"]
     held = replace(bare, harness="claude", profile="master", model="opus", effort="high", account="team")
     assert live_binding.unknown(held, live) == []
     validated = replace(bare, profile_decision={"validation": {"home": "/h", "model": "opus", "effort": "high"}})
     assert live_binding.unknown(validated, live) == ["harness", "profile", "account"]
-    assert live_binding.unknown(replace(held, harness=""), live) == ["harness", "home"]
-    assert live_binding.unknown(replace(held, profile=""), live) == ["home", "profile"]
+    assert live_binding.unknown(replace(held, harness=""), live) == ["harness"]
+    assert live_binding.unknown(replace(held, profile=""), live) == ["profile"]
+    assert live_binding.compare(replace(held, profile=""), {**live, "account": "team", "hooks": True}) == {}
     assert live_binding.compare(bare, {**live, "hooks": True}) == {}
     assert live_binding.compare(bare, {**live, "hooks": False}) == {"hooks": {"expected": True, "actual": False}}
 

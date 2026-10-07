@@ -151,7 +151,7 @@ def _unheld(agent: AgentRecord) -> list[str]:
 
 
 def unknown(agent: AgentRecord, facts: dict) -> list[str]:
-    return [field for field in _unheld(agent) if facts.get(field)]
+    return [field for field in _unheld(agent) if field in RECORDED and facts.get(field)]
 
 
 def compare(agent: AgentRecord, facts: dict) -> dict:

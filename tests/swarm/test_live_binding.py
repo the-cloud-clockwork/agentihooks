@@ -321,7 +321,7 @@ def test_finished_pane_is_closed_without_a_pane_finding(ticking):
     tick("sw", store, ledger, runtime, 200)
     assert old.pane_id in runtime.closed
     assert old not in store.agents("sw")
-    assert [f for f in live_binding.findings(store, "sw") if f.subject.endswith("/pane")] == []
+    assert live_binding.findings(store, "sw") == []
 
 
 def test_relaunch_preserves_native_assignment_options(tmp_path, monkeypatch):
@@ -534,7 +534,7 @@ def test_ended_task_closes_its_pane_on_the_same_tick_without_a_pane_finding(tick
     tick("sw", store, ledger, runtime, 200)
     assert old.pane_id in runtime.closed
     assert store.redis.hget(store.key("sw", "live-bindings"), old.name) is None
-    assert [f for f in live_binding.findings(store, "sw") if f.subject.endswith("/pane")] == []
+    assert live_binding.findings(store, "sw") == []
     assert runtime.tasks[-1].get("launch_assignment") is None
 
 
