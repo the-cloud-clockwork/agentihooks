@@ -137,8 +137,8 @@ def test_codex_trace_input_is_opening_prompt(tmp_path, instructions):
     assert [span.name for span in spans] == ["manual", "turn 1", "turn 2"]
 
 
-@pytest.mark.parametrize("uuid", ["claude-prompt", "", "codex-prompt"])
-def test_non_codex_instruction_prompt_remains_trace_input(uuid):
+@pytest.mark.parametrize("uuid", ["claude-prompt", "", "codex-prompt", None])
+def test_instruction_question_remains_trace_input(uuid):
     prompt = "# AGENTS.md instructions for /workspace\nPlease explain these rules"
     entries = [
         {
@@ -148,6 +148,8 @@ def test_non_codex_instruction_prompt_remains_trace_input(uuid):
             "message": {"content": [{"type": "text", "text": prompt}]},
         }
     ]
+    if uuid is None:
+        entries[0].pop("uuid")
     spans = agent_trace.session_spans(entries, agent_trace.Identity("claude-opening", "manual", "", "", "", ""))
     assert spans[0].attributes["langfuse.trace.input"] == prompt
     assert spans[0].attributes["agent.turns"] == 1
