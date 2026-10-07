@@ -61,13 +61,18 @@ def _global_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
 
 
+def declared(name: str) -> list[str]:
+    _i = _install_module()
+    found = [o for _, path in _i._resolve_profile_chain(name) for o in profile_chain.overlays(path)]
+    return [o for o in dict.fromkeys(found) if _i._resolve_profile_dir(o) is not None]
+
+
 def _chain(name: str) -> list[tuple[str, Path]]:
     _i = _install_module()
     if _i._resolve_profile_dir(name) is None:
         raise ValueError(f"Profile '{name}' not found")
-    dirs = _i._resolve_profile_chain(name)
-    declared = [o for _, path in dirs for o in profile_chain.overlays(path) if _i._resolve_profile_dir(o) is not None]
-    return _i._resolve_profile_chain(",".join([name, *declared])) if declared else dirs
+    overlays = declared(name)
+    return _i._resolve_profile_chain(",".join([name, *overlays]))
 
 
 def _bundle() -> Path | None:
@@ -89,6 +94,20 @@ def _base_digest() -> str:
     return digest.hexdigest()
 
 
+def _overlays(dirs: list[tuple[str, Path]]) -> list[str]:
+    declared_names = {o for _, path in dirs for o in profile_chain.overlays(path)}
+    return [n for n, _ in dirs if n in declared_names]
+
+
+def _profiles_digest(dirs: list[tuple[str, Path]]) -> str:
+    digest = hashlib.sha256()
+    for root in [_install_module().PACKAGE_FEATURES_DIR, *(d for _, d in dirs)]:
+        for path in sorted(p for p in root.rglob("*") if p.is_file() and "__pycache__" not in p.parts):
+            digest.update(f"{path}\0".encode())
+            digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
 def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     commit = ""
     if bundle is not None:
@@ -98,7 +117,9 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     return {
         "bundle_commit": commit,
         "base": _base_digest(),
+        "profiles": _profiles_digest(dirs),
         "chain": chain,
+        "overlays": _overlays(dirs),
         "plugins": plugins.role_defaults(chain),
         **({"browser": browser.spec()} if browser.enabled(chain) else {}),
         "corrections": quarantine.digest(),
@@ -143,7 +164,9 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     _i = _install_module()
     doc = _settings("claude", bundle, dirs)
     env = doc["env"]
-    env[CHANNELS] = _with_brain(env.get(CHANNELS, ""))
+    subscribed = _channels(env.get(CHANNELS, ""), dirs)
+    if subscribed:
+        env[CHANNELS] = subscribed
     apply_langfuse_env(doc, dirs, None)
     apply_collector_env(doc)
     default_home = claude_home(_global_env())
@@ -164,14 +187,16 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     }
 
 
-def _with_brain(channels: str) -> str:
+def _channels(channels: str, dirs: list[tuple[str, Path]]) -> str:
     names = [name.strip() for name in channels.split(",") if name.strip()]
-    return ",".join(names if BRAIN in names else [*names, BRAIN])
+    if BRAIN in _overlays(dirs) and BRAIN not in names:
+        names.append(BRAIN)
+    return ",".join(names)
 
 
 def channels(name: str) -> str:
-    env = _settings("claude", _bundle(), _chain(name))["env"]
-    return _with_brain(env.get(CHANNELS, ""))
+    dirs = _chain(name)
+    return _channels(_settings("claude", _bundle(), dirs)["env"].get(CHANNELS, ""), dirs)
 
 
 def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:

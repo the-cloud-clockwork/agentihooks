@@ -80,6 +80,9 @@ class LedgerClient:
             op.pop("by")
         self._call(slug, [op])
 
+    def relay(self, slug, text, by):
+        LedgerClient(service=True)._call(slug, [_op("add", by, thread="chat", text=text)])
+
     def notify(self, slug, text):
         self.say(slug, text, by="swarm")
 

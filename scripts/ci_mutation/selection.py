@@ -116,9 +116,15 @@ def collect_parallel_stats(runner, test_runner, shards: list[list[str]], work: P
     runner.save_stats()
 
 
+def worker_count(requested: int) -> int:
+    return requested if os.environ.get("CI") else min(requested, 2)
+
+
 def run_selected(selection: Path) -> None:
     from mutmut import __main__ as runner
 
+    if not os.environ.get("CI"):
+        print("Local mutation worker cap: 2 (mutation and stats)")
     changes = json.loads(selection.read_text())
     tests_by_prefix = {get_mutant_name(Path(path), ""): set(change["tests"]) for path, change in changes.items()}
     related = set()
@@ -174,7 +180,9 @@ def run_selected(selection: Path) -> None:
         config = runner.Config.get()
         relative = config.source_paths
         config.source_paths = [(Path("mutants") / path).resolve() for path in relative]
-        shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, len(os.sched_getaffinity(0)))
+        shards = stats_shards(
+            Path.cwd(), config.pytest_add_cli_args_test_selection, worker_count(len(os.sched_getaffinity(0)))
+        )
         try:
             collect_parallel_stats(runner, test_runner, shards, Path.cwd())
         finally:
@@ -198,7 +206,7 @@ def run_selected(selection: Path) -> None:
     runner.write_all_mutants_to_file = write_selected
     for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
         sys.modules.pop(name)
-    runner.cli(["run", "--max-children", str(os.cpu_count())])
+    runner.cli(["run", "--max-children", str(worker_count(os.cpu_count()))])
 
 
 if __name__ == "__main__":

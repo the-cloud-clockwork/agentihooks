@@ -12,6 +12,7 @@ import yaml
 BUILT_IN_PROFILES = Path(__file__).resolve().parents[2] / "profiles"
 PACKAGE_ROLES = BUILT_IN_PROFILES / "package" / "roles"
 PACKAGE_PREFIX = "package:"
+RENDER_STAMP = ".agentihooks-render.json"
 
 
 def state_path() -> Path:
@@ -67,6 +68,15 @@ def overlays(path: Path) -> list[str]:
     manifest = path / "profile.yml"
     data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
     return data.get("allowedOverlays", [])
+
+
+def rendered_overlays(home: Path) -> list[str]:
+    try:
+        stamp = json.loads((Path(home) / RENDER_STAMP).read_text())
+        rendered = stamp["render"] if "render" in stamp else stamp
+        return [str(name) for name in rendered["overlays"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
 
 
 def inherited(profile_dirs: list[tuple[str, Path]]) -> set[str]:

@@ -74,6 +74,7 @@ def hooks(home: Path, harness: str) -> bool:
 
 
 def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
+    from hooks.context import profile_chain
     from scripts.profiles import binding
     from scripts.select_profile import _native_options
     from scripts.swarm import launch_check
@@ -92,6 +93,7 @@ def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
             "account": account,
             "hooks": bool(home) and hooks(Path(home), harness),
             "chain": launch_check.chain(home) if home else [],
+            "overlays": profile_chain.rendered_overlays(home) if home else [],
         }
     except (OSError, ValueError, StopIteration):
         return {"process": False}

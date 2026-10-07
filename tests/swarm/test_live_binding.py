@@ -54,6 +54,7 @@ def mounted(tmp_path):
 
 def test_matching_process_facts_exclude_credential_values(mounted):
     agent, proc, home = mounted
+    (home / ".agentihooks-render.json").write_text(json.dumps({"chain": ["engineer", "brain"], "overlays": ["brain"]}))
     facts = live_binding.read(agent, 42, proc)
     assert facts == {
         "harness": "claude",
@@ -63,7 +64,8 @@ def test_matching_process_facts_exclude_credential_values(mounted):
         "effort": "high",
         "account": "team",
         "hooks": True,
-        "chain": [],
+        "chain": ["engineer", "brain"],
+        "overlays": ["brain"],
     }
     assert live_binding.compare(agent, facts) == {}
     assert "private-value" not in json.dumps(facts)
@@ -105,10 +107,20 @@ def test_removed_hooks_are_read_again(mounted):
     assert live_binding.read(agent, 42, proc)["hooks"] is False
 
 
-def test_the_rendered_profile_chain_is_read_from_the_home(mounted):
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_the_rendered_profile_chain_is_read_from_the_home(mounted, harness):
     agent, proc, home = mounted
-    (home / ".agentihooks-render.json").write_text(json.dumps({"chain": ["package:engineer", "engineer"]}))
-    assert live_binding.read(agent, 42, proc)["chain"] == ["package:engineer", "engineer"]
+    data = {"chain": ["anton-base", "package:engineer", "engineer", "brain"], "overlays": ["brain"]}
+    if harness == "codex":
+        root = proc / "42"
+        (root / "comm").write_text("codex")
+        (root / "cmdline").write_bytes(b"codex\0--model\0gpt-6.1-sol\0")
+        (root / "environ").write_bytes(f"CODEX_HOME={home}\0AGENTIHOOKS_PROFILE=engineer\0".encode())
+        data = {"render": data, "operator": "digest"}
+    (home / ".agentihooks-render.json").write_text(json.dumps(data))
+    facts = live_binding.read(agent, 42, proc)
+    assert facts["chain"] == ["anton-base", "package:engineer", "engineer", "brain"]
+    assert facts["overlays"] == ["brain"]
 
 
 def test_original_launch_model_remains_expected_after_telemetry_switch(mounted):
