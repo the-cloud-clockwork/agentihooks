@@ -200,8 +200,7 @@ def run_selected(selection: Path) -> None:
             try:
                 return run_tests(self, mutant_name=mutant_name, tests=tests)
             except runner.BadTestExecutionCommandsException:
-                # A selected function a test module runs at import fails its collection, and pytest then reports the
-                # node id it cannot find as a usage error; the stats shards already proved these node ids collect.
+                # The stats shards proved these node ids collect, so a usage error here is the forced failure at import.
                 return 1
         return run_tests(self, mutant_name=mutant_name, tests=tests)
 
