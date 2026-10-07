@@ -1738,5 +1738,33 @@
   "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_83:d40a89f77f6f7968bbe7e787f101c1b8f8419d6973cc4262c486571fc58677ba": {
     "reader": "Standards /root/standards_reader",
     "reason": "Only the fallback in the internal synthetic validation dictionary changes from empty to XXXX. If the header exists the fallback is unused. If absent both fallback strings satisfy the unchanged string/maxLength200 rule. Neither fallback is forwarded to the upload handler, which receives exactly the same handler, slug and path and reads the original headers. Thus status, delegation and response are unchanged for every HTTP request."
+  },
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x\u01c1GuardedOperations\u01c1__init____mutmut_4:a5857935580f13a7f8614c7f472409a727bc2cdb5dc9022cad3d092a856b32b1": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Source evidence: the complete GuardedOperations class from parent Serena export shows checked is initialized once, read only by if not self.checked in apply, and set True at the end of check. Both False and None take that same initial branch; all later reads see identical True. No response, receipt, state, guard or domain argument includes checked. The changed internal initialization preserves every reachable transport result."
+  },
+  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_revision__mutmut_5:1c143cfd64f6fc6fc1eeb1ef9edaab180de51d0fce6e5599b8b4ef525d5abf38": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Source evidence: revision differs only in json.dumps ensure_ascii=False versus None. Both flags select the JSON encoders false branch, retaining the exact unescaped Unicode encoder. sort_keys, separators, input, UTF-8 encoding and sha256 are unchanged. Therefore canonical bytes and digest remain identical for every JSON-serializable input; failed serializations also retain their errors."
+  },
+  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_page__mutmut_50:58a2cd9fa812ad1cd0ea75c8f3a3d59dfe16b7da8261be66aaf18c8dba42fc93": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Source evidence: this data key is changed only in the local candidate dictionary used solely by reply_size before page append/break. Its uppercase form is the same number of unescaped ASCII bytes; all dictionary values and separator counts are unchanged, making the measured byte size identical for every row. The actual return dictionary is built independently with the original keys. Selection, exceptions, revisions, cursor and output bytes are identical."
+  },
+  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_page__mutmut_52:a5c7a4eccc0e8bf5890a64fb09c71917a365e334a39d8bb125f12857ae6171ec": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Source evidence: this revision key is changed only in the local candidate dictionary used solely by reply_size before page append/break. Its uppercase form is the same number of unescaped ASCII bytes; all dictionary values and separator counts are unchanged, making the measured byte size identical for every row. The actual return dictionary is built independently with the original keys. Selection, exceptions, revisions, cursor and output bytes are identical."
+  },
+  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_page__mutmut_54:7255cb06f546c83407ea05a8c69a5118ef8dff50a2b6d3cf911199cb0ccf52ef": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Source evidence: this next_cursor key is changed only in the local candidate dictionary used solely by reply_size before page append/break. Its uppercase form is the same number of unescaped ASCII bytes; all dictionary values and separator counts are unchanged, making the measured byte size identical for every row. The actual return dictionary is built independently with the original keys. Selection, exceptions, revisions, cursor and output bytes are identical."
+  },
+  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_value__mutmut_33:a9a0ec36f0a5ce5d0faac1d1c19fdaf269eb7ae672e4f68bafd1f3c45e86f835": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Concrete HTTP producer evidence: dispatch handles resource GET with repository.get_document using its default reconcile=True, and FileLedgerRepository.get_document then returns sync state. sync unconditionally executes meta.setdefault(members,{}) before operations and constructing returned state. The only mutation-time resource_revision consumer substitutes that same ctx.meta after the member default is applied. Therefore every reachable members read or revision has an explicit members key: get fallback None versus empty dictionary is never selected. Existing present values, successful replies and original invalid-value failures are unchanged."
+  },
+  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_value__mutmut_35:6c06a57246b80c6392a30cfe5e945e4888037ac8957da835f447f2523cb775f7": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Concrete HTTP producer evidence: dispatch handles resource GET with repository.get_document using its default reconcile=True, and FileLedgerRepository.get_document then returns sync state. sync unconditionally executes meta.setdefault(members,{}) before operations and constructing returned state. The only mutation-time resource_revision consumer substitutes that same ctx.meta after the member default is applied. Therefore every reachable members read or revision has an explicit members key: get fallback None versus empty dictionary is never selected. Existing present values, successful replies and original invalid-value failures are unchanged."
   }
 }
