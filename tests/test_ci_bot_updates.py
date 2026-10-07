@@ -48,7 +48,7 @@ def test_a_newer_dev_push_never_cancels_a_running_dev_push_run():
 
 
 @pytest.mark.parametrize("mode", ["download", "no_run", "missing", "invalid"])
-def test_pr_shards_use_last_green_dev_durations_or_the_committed_fallback(tmp_path, mode):
+def test_pr_shards_use_the_newest_dev_durations_artifact_or_the_committed_fallback(tmp_path, mode):
     steps = _workflow("test.yml")["jobs"]["unit"]["steps"]
     step = next(s for s in steps if s.get("name") == "Download latest dev durations")
     assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
