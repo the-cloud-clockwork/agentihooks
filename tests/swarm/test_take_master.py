@@ -185,6 +185,16 @@ def test_take_master_reopens_a_closed_ledger_and_runs_a_stopped_swarm(taker):
     assert store.config("sw").state == "running"
 
 
+def test_take_master_on_a_stopped_swarm_writes_the_timer_with_the_installed_entry_point(taker, monkeypatch):
+    store, _, _, _ = taker
+    written = []
+    monkeypatch.setattr(cli.timer, "entry_point", lambda: "/installed/bin/agentihooks")
+    monkeypatch.setattr(cli.timer, "ensure", lambda binary: written.append(binary) or True)
+    store.update("sw", state="stopped")
+    assert run("sw", "take-master") == 0
+    assert written == ["/installed/bin/agentihooks"]
+
+
 def test_an_open_ledger_and_a_paused_swarm_stay_as_they_are(taker):
     store, ledger, _, _ = taker
     assert run("sw", "take-master") == 0

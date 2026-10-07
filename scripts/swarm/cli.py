@@ -85,7 +85,7 @@ from scripts.swarm import (
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.runtime import HerdrRuntime, _bin
+from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
 from scripts.swarm.tick import agent_status, primed, tick
@@ -182,6 +182,8 @@ def cmd_list(store, args):
 def cmd_tick(store, args):
     from scripts import operator_env
 
+    if why := timer.installed_refusal():
+        raise SwarmError(f"the tick refused to run: {why}")
     operator_env.fill(os.environ)
     for slug in store.slugs():
         try:
@@ -233,7 +235,7 @@ def _state(store, args, state):
     if state == "running":
         store.redis.delete(store.key(args.slug, "master-retired-tasks"))
     store.update(args.slug, state=state)
-    if state == "running" and not timer.ensure(_bin()):
+    if state == "running" and not timer.ensure(timer.entry_point()):
         print("warning: the systemd timer could not be enabled; run agentihooks swarm tick yourself", file=sys.stderr)
     for action in run_tick(store, args.slug):
         print(action)
@@ -357,7 +359,7 @@ def cmd_take_master(store, args):
         ledger.reopen(args.slug, record.name)
     if store.config(args.slug).state in ("stopped", "stopping"):
         store.update(args.slug, state="running")
-        timer.ensure(_bin())
+        timer.ensure(timer.entry_point())
     config = store.config(args.slug)
     task = {
         "id": MASTER,
