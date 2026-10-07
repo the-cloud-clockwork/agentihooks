@@ -66,5 +66,5 @@ def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, r
         slug,
         "The master reported no hook within two minutes on either launch. Automatic retry is exhausted; operator action is required. The original handoff is retained.",
     )
-    save(store, slug, {**pending, "name": "", "alerted": True})
+    save(store, slug, {**pending, "alerted": True})
     return ["master startup failed twice, raised to the operator"]
