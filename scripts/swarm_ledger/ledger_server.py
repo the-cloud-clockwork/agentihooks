@@ -340,13 +340,12 @@ FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
 
 
 def session_cap_argv(body):
+    from scripts import session_caps
+
     account, cap, harness = body.get("account"), body.get("cap"), body.get("harness", "claude")
-    if not isinstance(account, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,200}", account) or account.startswith("-"):
-        raise ValueError("session_cap needs an exact account name")
-    if type(cap) is not int or not 1 <= cap <= MAX_CAP:
-        raise ValueError(f"cap must be a whole number from 1 to {MAX_CAP}")
-    if harness not in MASTER_AGENTS:
-        raise ValueError(f"harness must be one of {', '.join(MASTER_AGENTS)}")
+    if cap is None:
+        raise ValueError("session_cap needs a cap")
+    session_caps.check(account, cap, harness)
     return ["session-cap", account, str(cap), "--harness", harness]
 
 

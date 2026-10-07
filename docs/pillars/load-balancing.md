@@ -39,10 +39,10 @@ account a session runs on. Token values are never printed or logged.
    `100 − max(5h used, 7d used)`: the tighter of the two windows.
 2. Drop accounts already running `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` live
    sessions (default 3; Codex counts as one account with the same cap), as long as another account is still below the cap.
-   An account's own cap, stored in the shared Redis, replaces the default for that account. Set it from the
-   ledger page's Quota panel (the minus and plus beside each sessions count) or with
-   `agentihooks swarm <slug> session-cap <account> <n|default> [--harness claude|codex]`; `agentihooks balance`
-   shows each account against its own cap.
+   An account's own cap, stored in the shared Redis, replaces the default for that account. Set it
+   from the Quota panel on the ledger page (minus and plus beside each sessions count) or with
+   `agentihooks swarm <slug> session-cap <account> <n|default> [--harness claude|codex]`.
+   `agentihooks balance` shows each account against its own cap.
 3. Take the account with the most routing left.
 
 When every routable account is at the cap, the one with the fewest live sessions

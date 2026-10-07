@@ -469,13 +469,12 @@ def cmd_set(store, args):
 
 
 def cmd_session_cap(store, args):
-    cap = None if args.cap == "default" else int(args.cap) if args.cap.isdigit() else 0
     try:
+        cap = None if args.cap == "default" else int(args.cap)
         session_caps.set_cap(args.account, cap, harness=args.harness)
     except ValueError as exc:
         raise SwarmError(f"session-cap takes an account and a cap from 1 to {session_caps.MAX_CAP}, or default: {exc}")
-    found = session_caps.stored(args.harness).get(args.account)
-    print(json.dumps({"account": args.account, "harness": args.harness, "cap": found or "default"}))
+    print(json.dumps({"account": args.account, "harness": args.harness, "cap": "default" if cap is None else cap}))
 
 
 def cmd_templates(store, args):

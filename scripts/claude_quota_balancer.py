@@ -17,6 +17,7 @@ from functools import partial
 from pathlib import Path
 
 from scripts.claude_config import claude_home
+from scripts.session_caps import SessionCaps
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
 OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
@@ -646,9 +647,8 @@ def select_credential(
     cache_file: Path | None = None,
     claude_bin: str = "claude",
     sessions: Mapping[str, int] | None = None,
-    max_sessions: int = 3,
+    caps: SessionCaps = SessionCaps(3),
     exclude: Iterable[str] = (),
-    caps: Mapping[str, int] | None = None,
 ) -> RouteDecision:
     """Pick the account with the most routing left among those below the per-account session cap.
 
@@ -673,11 +673,9 @@ def select_credential(
         outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
         raise RoutingError(f"no Claude account has verified routing capacity{outside}", results)
     reserve = {slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", "").split(",") if slug.strip()}
-    counts, limits = sessions or {}, caps or {}
+    counts = sessions or {}
     below_cap = [
-        result
-        for result in eligible
-        if sessions is None or counts.get(result.account, 0) < limits.get(result.account, max_sessions)
+        result for result in eligible if sessions is None or counts.get(result.account, 0) < caps.of(result.account)
     ]
     pool = below_cap or eligible
     pool = [result for result in pool if result.account not in reserve] or pool
@@ -692,7 +690,7 @@ def select_credential(
         winner,
         source,
         sessions=None if sessions is None else counts.get(winner.account, 0),
-        max_sessions=None if sessions is None else limits.get(winner.account, max_sessions),
+        max_sessions=None if sessions is None else caps.of(winner.account),
         placement=placement,
     )
 
@@ -762,8 +760,7 @@ def render_table(
     current: str = "",
     observed: Mapping[str, float] | None = None,
     sessions: Mapping[str, int] | None = None,
-    max_sessions: int | None = None,
-    caps: Mapping[str, int] | None = None,
+    caps: SessionCaps | None = None,
 ) -> str:
     timestamp = int(time.time()) if now is None else now
     headers = [
@@ -788,7 +785,7 @@ def render_table(
             f"{result.account} (current)" if current and result.account == current else result.account,
             result.state,
             *(
-                [f"{sessions.get(result.account, 0)}/{(caps or {}).get(result.account, max_sessions)}"]
+                [f"{sessions.get(result.account, 0)}/{caps.of(result.account) if caps else '?'}"]
                 if sessions is not None
                 else []
             ),

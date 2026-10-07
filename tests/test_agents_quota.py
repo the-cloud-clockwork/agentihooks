@@ -1,6 +1,8 @@
 import json
 import os
 
+import pytest
+
 from scripts import agents_quota, codex_quota
 from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
 from scripts.codex_router import CodexAccount
@@ -219,6 +221,13 @@ def test_page_quota_reads_the_balance_cache_and_codex_logs_without_probing(monke
     assert quota["rows"][1]["five_hour_left"] is None
     assert quota["rows"][0]["observed_at"] == 1.0
     assert quota["probed_at"] == 1.0
+
+
+@pytest.fixture(autouse=True)
+def no_stored_caps(monkeypatch):
+    from scripts import session_caps
+
+    monkeypatch.setattr(session_caps, "stored", lambda harness="claude": {})
 
 
 def test_page_quota_refresh_probes_once_a_minute_and_drops_the_page_cache(monkeypatch):

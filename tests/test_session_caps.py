@@ -5,6 +5,7 @@ import pytest
 
 from scripts import agent_choice, agents_quota, codex_router, session_caps
 from scripts import claude_quota_balancer as balancer
+from scripts.session_caps import SessionCaps
 from tests.test_claude_quota_balancer import _stream, _three
 from tests.test_codex_router import _accounts, _quota
 
@@ -38,16 +39,25 @@ def test_a_cap_outside_its_bounds_is_refused(client, account, cap, harness):
     assert client.hgetall(session_caps.KEY) == {}
 
 
-def test_an_unreachable_store_reads_as_no_stored_caps():
+def test_an_unreachable_store_reads_as_no_stored_caps_and_says_so(monkeypatch, capsys):
+    import redis
+
+    class Down:
+        def hgetall(self, key):
+            raise redis.ConnectionError("refused")
+
+    monkeypatch.setattr(session_caps, "_client", Down)
     assert session_caps.stored() == {}
+    assert session_caps.caps(3).of("luna") == 3
+    assert "every account takes the default cap" in capsys.readouterr().err
 
 
 def test_a_stored_cap_lets_placement_open_an_account_past_the_default(monkeypatch, tmp_path):
     env = _three(monkeypatch)
     sessions = {"BEST": 3, "MID": 1}
-    plain = balancer.select_credential(env, cache_file=tmp_path / "c.json", sessions=sessions, max_sessions=3)
+    plain = balancer.select_credential(env, cache_file=tmp_path / "c.json", sessions=sessions, caps=SessionCaps(3))
     raised = balancer.select_credential(
-        env, cache_file=tmp_path / "c.json", sessions=sessions, max_sessions=3, caps={"BEST": 7}
+        env, cache_file=tmp_path / "c.json", sessions=sessions, caps=SessionCaps(3, {"BEST": 7})
     )
     assert plain.result.account == "MID"
     assert (raised.result.account, raised.placement, raised.max_sessions) == ("BEST", "open", 7)
@@ -57,7 +67,7 @@ def test_a_stored_cap_lets_placement_open_an_account_past_the_default(monkeypatc
 def test_a_stored_cap_below_the_default_closes_that_account(monkeypatch, tmp_path):
     env = _three(monkeypatch)
     decision = balancer.select_credential(
-        env, cache_file=tmp_path / "c.json", sessions={"BEST": 1}, max_sessions=3, caps={"BEST": 1}
+        env, cache_file=tmp_path / "c.json", sessions={"BEST": 1}, caps=SessionCaps(3, {"BEST": 1})
     )
     assert decision.result.account == "MID"
 
@@ -66,7 +76,7 @@ def test_the_balance_table_shows_each_account_against_its_own_cap():
     alpha = balancer.parse_probe("alpha", _stream(0.10, 0.20), 100)
     beta = balancer.parse_probe("beta", _stream(0.30, 0.40), 100)
     table = balancer.render_table(
-        [alpha, beta], now=0, sessions={"alpha": 4, "beta": 1}, max_sessions=3, caps={"alpha": 7}
+        [alpha, beta], now=0, sessions={"alpha": 4, "beta": 1}, caps=SessionCaps(3, {"alpha": 7})
     )
     rows = {line.split()[1]: line for line in table.splitlines()[2:4]}
     assert "4/7" in rows["alpha"]
@@ -104,7 +114,8 @@ def test_launch_placement_passes_the_stored_caps(monkeypatch, client, tmp_path):
     session_caps.set_cap("luna", 6)
     with pytest.raises(SystemExit):
         install.cmd_claude([])
-    assert seen["caps"] == {"luna": 6}
+    assert seen["caps"].stored == {"luna": 6}
+    assert seen["caps"].of("luna") == 6
 
 
 def test_the_codex_router_reads_a_cap_per_account():

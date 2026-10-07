@@ -5629,9 +5629,8 @@ def cmd_claude(extra_args: list[str]) -> None:
                 include_fable=include_fable,
                 claude_bin=claude_bin,
                 sessions=sessions_by_account(),
-                max_sessions=cap,
+                caps=session_caps.caps(cap),
                 exclude=excluded,
-                caps=session_caps.stored(),
             )
             selected_credential = decision.credential
     except RoutingError as exc:
@@ -5698,7 +5697,7 @@ def cmd_balance(
     credentials = discover_credentials(os.environ)
     live = sessions_by_account()
     cap = max_sessions(os.environ)
-    caps = session_caps.stored()
+    caps = session_caps.caps(cap)
     if current:
         known = discover_credentials(session_env) + credentials
         session = identify_session_account(session_env, known, ancestor_oauth_token())
@@ -5725,7 +5724,6 @@ def cmd_balance(
                     current=session.account,
                     observed=observed,
                     sessions=live,
-                    max_sessions=cap,
                     caps=caps,
                 )
             )
@@ -5755,7 +5753,7 @@ def cmd_balance(
         timeout=timeout,
         claude_bin=shutil.which("claude") or "claude",
     )
-    print(render_table(results, include_fable=include_fable, sessions=live, max_sessions=cap, caps=caps))
+    print(render_table(results, include_fable=include_fable, sessions=live, caps=caps))
     print(f"\nsource={source} max_sessions_per_account={cap}")
     print(f"\n{codex_table()}")
     return 0 if any(is_routable(result) for result in results) else 1
