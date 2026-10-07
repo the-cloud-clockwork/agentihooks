@@ -168,5 +168,61 @@ class TaskProofOnThePage(unittest.TestCase):
             self.assertNotRegex(rule, r"(?<![-\w])(background|border):", rule)
 
 
+def blockers(tasks):
+    script = (
+        function_source("taskBlockers")
+        + f"\nconst ts = {json.dumps(tasks)};\nprocess.stdout.write(JSON.stringify(ts.map((t) => taskBlockers(t, ts))));"
+    )
+    return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
+
+
+INBOX = {"id": "t1", "title": "Build the inbox", "state": "claimed", "branch": "engineer-a1-0001"}
+TICK = {"id": "t2", "title": "Speed up the tick", "state": "pr", "branch": "engineer-a1-0002"}
+
+
+class TaskBlockersMirrorTheClaimRule(unittest.TestCase):
+    def test_a_task_on_branched_dependencies_reads_ready_to_start_on_their_branches(self):
+        task = {"id": "t3", "title": "Deliver messages", "state": "open", "depends_on": ["t1", "t2"]}
+        self.assertEqual(
+            blockers([INBOX, TICK, task])[2],
+            "Ready to start on branch engineer-a1-0001 of Build the inbox, and branch engineer-a1-0002 of Speed up the tick",
+        )
+
+    def test_a_parked_task_reads_parked_on_its_branch_until_its_blocker_is_done(self):
+        parked = {
+            "id": "t3",
+            "title": "Deliver messages",
+            "state": "open",
+            "branch": "engineer-a1-0003",
+            "depends_on": ["t1"],
+            "parked_on": ["t1"],
+        }
+        bare = {**parked, "id": "t4", "branch": ""}
+        finished = {**parked, "id": "t5", "parked_on": ["t6"]}
+        merged = {"id": "t6", "title": "Old work", "state": "done"}
+        self.assertEqual(
+            blockers([INBOX, parked, bare, finished, merged])[1:4],
+            [
+                "Parked on branch engineer-a1-0003 until Build the inbox is done",
+                "Parked on its branch until Build the inbox is done",
+                "Ready to start on branch engineer-a1-0001 of Build the inbox",
+            ],
+        )
+
+    def test_only_dependencies_without_a_branch_hold_a_task(self):
+        tasks = [
+            INBOX,
+            {"id": "t2", "title": "Speed up the tick", "state": "claimed"},
+            {"id": "t3", "title": "Write docs", "state": "blocked", "branch": "engineer-a1-0004"},
+            {"id": "t4", "title": "Deliver messages", "state": "open", "depends_on": ["t1", "t2", "t3"]},
+        ]
+        self.assertEqual(blockers(tasks)[3], "Waiting until Speed up the tick is done, and Write docs is done")
+
+    def test_territory_overlap_is_no_waiting_reason(self):
+        running = {**INBOX, "territory": ["scripts/swarm"]}
+        task = {"id": "t2", "title": "Deliver messages", "state": "open", "territory": ["scripts/swarm/tick.py"]}
+        self.assertEqual(blockers([running, task]), ["", ""])
+
+
 if __name__ == "__main__":
     unittest.main()
