@@ -119,7 +119,7 @@ def run_selected(selection: Path) -> None:
     runner.PytestRunner.run_tests = run_related_tests
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
     runner.write_all_mutants_to_file = write_selected
-    for name in ("scripts.ci_mutation", "scripts"):
+    for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
         sys.modules.pop(name)
     runner.cli(["run", "--max-children", str(os.cpu_count())])
 

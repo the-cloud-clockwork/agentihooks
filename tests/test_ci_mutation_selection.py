@@ -219,6 +219,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         assert empty.value.code == 0
         assert "scripts" not in sys.modules
         assert "scripts.ci_mutation" not in sys.modules
+        assert "scripts.ci_mutation.report" not in sys.modules
         raise SystemExit(7)
 
     calls = []
@@ -231,7 +232,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     runner.cli = cli
     monkeypatch.setitem(sys.modules, "mutmut", mutmut)
     monkeypatch.setitem(sys.modules, "mutmut.__main__", SimpleNamespace(cli=cli))
-    for name in ("scripts", "scripts.ci_mutation"):
+    for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
         monkeypatch.setitem(sys.modules, name, sys.modules[name])
     with pytest.raises(SystemExit) as error:
         run_selected(selection)
