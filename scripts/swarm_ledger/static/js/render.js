@@ -120,7 +120,7 @@ function proofBody(item) {
   const list = proofList(proofRows(item.contract, item.proof));
   if (item.workspace) readWorkspace(item.id).then((resp) => (resp.ok ? resp.json() : null)).then((tails) => {
     if (tails) list.replaceWith(proofList(proofRows(item.contract, item.proof, tails.data)));
-  }).catch(() => { /* the fold keeps the contract and proof; the work folder lines come with the next render */ });
+  }).catch(() => null);
   return list;
 }
 

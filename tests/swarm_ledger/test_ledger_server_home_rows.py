@@ -1,5 +1,7 @@
 import contextlib
+import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -269,3 +271,38 @@ def test_blocked_storage_still_folds_and_sorts(context):
     assert len(opened(tab)) == len(LEDGERS)
     tab.locator(".sort[data-sort=open]").click()
     assert order(tab) == "bfeagcd"
+
+
+HOME_JS = Path(server.__file__).with_name("static") / "home" / "home.js"
+NODE_DOM = """
+class El {
+  constructor(tag) { this.tag = tag; this.attrs = {}; this.kids = []; this.textContent = ""; this.content = {}; }
+  setAttribute(k, v) { this.attrs[k] = String(v); }
+  append(...kids) { this.kids.push(...kids); }
+}
+const document = { createElement: (tag) => new El(tag), querySelector: () => ({ className: "home" }), getElementById: () => new El("ul"), addEventListener: () => {} };
+const fetch = () => new Promise(() => {});
+"""
+
+
+def node_home_rows(rows):
+    source = HOME_JS.read_text(encoding="utf-8").removesuffix("start();\n")
+    shown = "rows.map((s) => homeRow(s, NOW)).map((r) => ({ attrs: r.attrs, label: r.kids[0].attrs['aria-label'], title: r.kids[1].textContent }))"
+    script = f"{NODE_DOM}{source}\nconst NOW = {NOW}; const rows = {json.dumps(rows)};\nconsole.log(JSON.stringify({shown}));"
+    return json.loads(subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True).stdout)
+
+
+def test_rows_carry_the_swarm_rank_and_activity_the_sort_reads():
+    states = ["running", "paused", "stopping", "drained", "stopped", None, "rebooting"]
+    rows = [{**summaries()[0], "slug": f"s{n}", "swarm": state} for n, state in enumerate(states)]
+    rows.append({**summaries()[0], "slug": "closed", "closed_at": 5, "swarm": "running"})
+    rows.append({**summaries()[0], "slug": "quiet", "updated_at": None})
+    shown = [row["attrs"] for row in node_home_rows(rows)]
+    assert [row["data-swarm"] for row in shown[:-1]] == ["0", "1", "1", "2", "3", "4", "4", "5"]
+    assert shown[-1]["data-at"] == "0"
+
+
+def test_a_row_names_its_ledger_as_text_never_as_markup():
+    [row] = node_home_rows([{**summaries()[1], "title": "Beta <plan><img src=x>"}])
+    assert row["label"] == "Show all of Beta <plan><img src=x>"
+    assert row["title"] == "Beta <plan><img src=x>"

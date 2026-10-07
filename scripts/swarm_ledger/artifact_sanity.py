@@ -184,6 +184,8 @@ def page_html() -> str:
 
 
 def assets() -> dict[str, Path]:
+    if str(SHELL.parent) not in sys.path:
+        sys.path.insert(0, str(SHELL.parent))
     from scripts.swarm_ledger import ledger_core
 
     return ledger_core.static_assets()

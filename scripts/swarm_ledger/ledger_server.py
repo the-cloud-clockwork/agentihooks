@@ -63,7 +63,6 @@ ALLOWED_ORIGINS = ledger_link.allowed_origins()
 CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
 LOGO = ROOT / "media" / "agentihooks-logo.png"
-HOME_PAGE = CODE_DIR / "home.html"
 CODE_DIRS = (
     CODE_DIR,
     *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates")),
@@ -191,7 +190,7 @@ def page_for(slug):
     values = {
         "TOKEN": html.escape(core.read_token(page) or ""),
         "PAGE": served_version(),
-        "SLUG": slug,
+        "SLUG": html.escape(slug),
         "PORT": str(PORT),
         "TITLE": html.escape(title),
     }
@@ -529,13 +528,16 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
-        if ctype.startswith("text/html"):
-            self.send_header("Content-Security-Policy", PAGE_POLICY)
-            self.send_header("X-Content-Type-Options", "nosniff")
         if self.path.startswith("/api/") and self.headers.get("Origin") == FILE_ORIGIN:
             self.send_header("Access-Control-Allow-Origin", FILE_ORIGIN)
         self.end_headers()
         self.wfile.write(data)
+
+    def send_header(self, keyword, value):
+        super().send_header(keyword, value)
+        if keyword.lower() == "content-type" and value.startswith("text/html"):
+            super().send_header("Content-Security-Policy", PAGE_POLICY)
+            super().send_header("X-Content-Type-Options", "nosniff")
 
     def slug(self):
         return self.path.split("?", 1)[0].strip("/").removeprefix("api/").removesuffix(".html")

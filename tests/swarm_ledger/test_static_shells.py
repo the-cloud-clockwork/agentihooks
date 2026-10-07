@@ -79,6 +79,15 @@ def test_every_page_shell_carries_the_enforced_policy_and_no_inline_code(base, p
     assert "ledger-data" not in body
 
 
+def test_an_error_page_the_server_library_writes_carries_the_policy_too(base):
+    request = urllib.request.Request(base + "/", method="BREW")
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(request, timeout=5)
+    assert refused.value.code == 501
+    assert refused.value.headers["Content-Type"].startswith("text/html")
+    assert policy(refused.value.headers) == POLICY
+
+
 def test_the_ledger_shell_holds_metadata_but_no_record_seed(base):
     _, _, body = get(f"{base}/{SLUG}")
     token = core.read_token(core.paths(SLUG)[0].read_text())

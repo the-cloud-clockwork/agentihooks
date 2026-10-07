@@ -57,6 +57,7 @@ class Home(unittest.TestCase):
         home, bell = shell.index('id="home"'), shell.index('id="bell"')
         self.assertLess(home, bell)
         self.assertIn("fab-home", shell)
+        self.assertIn(".fab-home", (SCRIPTS / "static" / "css" / "ledger.css").read_text(encoding="utf-8"))
 
     def test_home_and_bin_render_from_the_home_html_source(self):
         source = core.HOME.read_text(encoding="utf-8")

@@ -183,5 +183,5 @@ export async function loadMetadata() {
     if (rev >= 0) return;
     Object.assign(doc, { title: data.title || doc.title, overview: data.overview || doc.overview });
     render();
-  } catch (e) { /* the event stream snapshot fills the page */ }
+  } catch (e) { return; }
 }

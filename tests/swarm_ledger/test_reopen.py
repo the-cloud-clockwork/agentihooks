@@ -43,7 +43,7 @@ def test_reopen_buttons_call_the_existing_authenticated_swarm_endpoint():
     assert '$("closed-label").textContent = closedText(doc.closed_at)' in page
     assert '$("closed-banner").addEventListener("click", (event) => {' in page
     assert '$("closed-banner").querySelectorAll("button[data-swarm]")' in page
-    home_js = (server.HOME_PAGE.parent / "static" / "home" / "home.js").read_text(encoding="utf-8")
+    home_js = (server.core.HOME.parent / "static" / "home" / "home.js").read_text(encoding="utf-8")
     script = re.search(r"(async function reopenLedger.*?\n\})", home_js, re.S).group(1)
     probe = (
         """

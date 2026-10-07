@@ -4,6 +4,7 @@ import { readLayout, writeLayout } from "./api.js";
 import { showArtifacts } from "./artifacts.js";
 import { anchorPanel, showAlerts, showNotifications } from "./notices.js";
 import { revealTarget } from "./outline.js";
+import { renderSwarm, swarm } from "./swarm.js";
 
 const tabScroll = {};
 
@@ -17,6 +18,7 @@ export function selectTab(id, updateHash = true) {
     $("tab-" + name).setAttribute("aria-selected", String(active));
     $("tab-" + name).tabIndex = active ? 0 : -1;
   }
+  if (previous !== id && id === "swarm") renderSwarm(swarm);
   if (previous !== id) $("main-content").scrollTop = tabScroll[id] || 0;
   store(`plan-ledger:${SLUG}:tab`, id);
   if (updateHash) history.replaceState(null, "", "#" + id);
