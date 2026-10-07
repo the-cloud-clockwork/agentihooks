@@ -57,7 +57,8 @@ hooks pointing at `~/.codex/agentihooks-hook.sh`, which sets
 
 Codex trusts hooks **by content hash**. Until trusted, it SILENTLY skips them —
 run `/hooks` once inside a codex session, or launch automation with
-`--dangerously-bypass-hook-trust`.
+`--dangerously-bypass-hook-trust`. `init` leaves an unchanged `hooks.json`
+untouched and prints the trust advice only when it rewrites the file.
 
 ### §2.3 stdout contract
 

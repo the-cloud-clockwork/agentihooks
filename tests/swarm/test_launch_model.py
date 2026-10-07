@@ -64,3 +64,14 @@ def test_nothing_named_and_unreadable_config_leave_both_empty(homes):
     (Path(homes["CLAUDE_CONFIG_DIR"]) / "settings.json").write_text("{")
     assert launch_model.read("codex", ("codex",)) == ("", "")
     assert launch_model.read("claude", ("claude",)) == ("", "")
+
+
+def test_configured_reads_the_given_home_not_the_callers(homes, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    (Path(homes["CLAUDE_CONFIG_DIR"]) / "settings.json").write_text(json.dumps({"model": "sonnet"}))
+    (other / "settings.json").write_text(json.dumps({"model": "opus", "effortLevel": "high"}))
+    (other / "config.toml").write_text('model = "gpt-6.1-sol"\nmodel_reasoning_effort = "medium"\n')
+    assert launch_model.configured("claude", other) == {"model": "opus", "effort": "high"}
+    assert launch_model.configured("codex", other) == {"model": "gpt-6.1-sol", "effort": "medium"}
+    assert launch_model.configured("claude", tmp_path / "missing") == {}

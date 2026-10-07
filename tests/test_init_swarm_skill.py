@@ -44,6 +44,14 @@ def test_every_command_exists():
     assert all(re.search(rf"\b{c}\b", ledger_help) for c in ledger - {"new"})
 
 
+def test_the_skill_describes_stacked_claims_and_territory_as_order_only():
+    text = " ".join(SKILL.read_text().split())
+    assert "claimed or in review with a recorded branch" in text
+    assert "`swarm park`" in text and "`swarm restack`" in text
+    assert "Territory only orders claims" in text
+    assert "never while its territory overlaps" not in text
+
+
 def test_a_plan_continuing_a_ledger_appends_its_phases_with_a_parsed_command():
     from scripts.swarm_ledger import ledger
 

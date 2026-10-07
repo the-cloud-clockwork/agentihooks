@@ -38,6 +38,7 @@ ALL_SHORT = re.compile(r"^-[A-Za-z]*a[A-Za-z]*$")
 SHOWN = 5
 NO_VALUE = ""
 WHOLE_PROJECT = ""
+ALWAYS = (trace_plan.CLEARANCE.as_posix(),)
 
 
 def _area(entry):
@@ -192,7 +193,7 @@ class BuildGate:
             return Decision()
         if status != trace_plan.PASS:
             return Decision.deny(value)
-        outside = [path for path in paths if not within(path, value)]
+        outside = [path for path in paths if not within(path, [*value, *ALWAYS])]
         if outside:
             territory = task_territory(ledger_dir, who.swarm, who.task)
             value = value + territory

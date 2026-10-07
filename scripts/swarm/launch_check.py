@@ -23,7 +23,7 @@ WORDS = {
     "overlay": "every overlay its profile declares",
     "name": "its name",
 }
-REPORT_ONLY = frozenset({"base"})
+REPORT_ONLY = frozenset()
 OUTCOMES = {
     "relaunch": "It is being retired and relaunched once.",
     "spent": "Its one automatic relaunch is spent; operator action is required.",
@@ -73,6 +73,10 @@ def declared(profile: str) -> list[str]:
 
 def joined_at(agent: AgentRecord, doc: dict) -> int | None:
     return doc.get("_meta", {}).get("members", {}).get(agent.name, {}).get("joined_at")
+
+
+def launched_at(agent: AgentRecord) -> int:
+    return agent.launched_at or agent.started_at
 
 
 def _joined(store, agent, doc, started_at):
@@ -130,7 +134,7 @@ def misses(
     store: RedisStore, slug: str, agent: AgentRecord, facts: dict, doc: dict, on_bundle: bool, declared: list[str]
 ) -> dict:
     return {
-        **_joined(store, agent, doc, agent.started_at),
+        **_joined(store, agent, doc, launched_at(agent)),
         **_process(agent, facts),
         **_base(agent, facts, on_bundle),
         **_overlays(facts, declared),

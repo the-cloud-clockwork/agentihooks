@@ -246,6 +246,25 @@ def test_the_join_clock_starts_at_the_launch_not_at_the_tick(store, monkeypatch)
     assert f"{name} passed its launch check in 50 seconds" in actions
 
 
+def test_a_failed_launch_names_every_miss_and_times_from_the_launch(store, monkeypatch, scratch):
+    scratch("t1")
+    ledger, runtime = checked(store, monkeypatch)
+    runtime.profile = "anton"
+    spawn = runtime.spawn
+
+    def late(config, lane, name, task, spawns=None):
+        return replace(spawn(config, lane, name, task, spawns), launched_at=LAUNCH + 50_000)
+
+    runtime.spawn = late
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (name,) = [n for _, n, _ in runtime.spawned]
+    waiting = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert not any(name in a and "launch check" in a for a in waiting)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + 50_000 + launch_check.DEADLINE_MS)
+    assert any(a.startswith(f"retired {name} after its launch check failed on joined, profile") for a in actions)
+    assert launch_check.report(store, "sw", "t1")["elapsed_ms"] == launch_check.DEADLINE_MS
+
+
 def test_tick_waits_until_the_deadline_before_failing(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     tick("sw", store, ledger, runtime, LAUNCH)
@@ -301,7 +320,7 @@ def test_master_failure_is_posted_to_the_operator_chat_and_relaunched(store, mon
     assert len(runtime.masters) == 2
 
 
-def test_master_notification_names_only_enforced_misses(store, monkeypatch, tmp_path):
+def test_master_notification_names_every_miss(store, monkeypatch, tmp_path):
     from hooks.context import profile_chain
 
     ledger, runtime = checked(store, monkeypatch)
@@ -314,16 +333,20 @@ def test_master_notification_names_only_enforced_misses(store, monkeypatch, tmp_
     (tmp_path / "profiles" / agent.profile).mkdir(parents=True)
     tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
     assert ledger.notes == [
-        "The master failed its launch check within a minute on joining the ledger and holding its seat. "
-        "It is being retired and relaunched once."
+        "The master failed its launch check within a minute on joining the ledger and holding its seat, "
+        "its role on the package base role. It is being retired and relaunched once."
     ]
-    assert [f.id for f in launch_check.findings(store, "sw")] == [f"launch-check/{first}/joined"]
+    assert [f.id for f in launch_check.findings(store, "sw")] == [
+        f"launch-check/{first}/joined",
+        f"launch-check/{first}/base",
+    ]
     assert list(launch_check.report(store, "sw", "master")["misses"]) == ["joined", "base"]
 
 
-def test_a_base_only_miss_is_reported_without_a_relaunch(store, monkeypatch, tmp_path):
+def test_a_wrong_base_retires_and_relaunches_the_launch(store, monkeypatch, tmp_path, scratch):
     from hooks.context import profile_chain
 
+    scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
     (tmp_path / "profiles" / "engineer").mkdir(parents=True)
     monkeypatch.setattr(profile_chain, "read_state", lambda: {"bundle": {"path": str(tmp_path)}})
@@ -331,13 +354,13 @@ def test_a_base_only_miss_is_reported_without_a_relaunch(store, monkeypatch, tmp
     first = runtime.spawned[0][1]
     joined(ledger, runtime, LAUNCH + 1)
     actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
-    assert f"{first} failed its launch check on base; reported only" in actions
-    assert first not in runtime.killed
-    assert len(runtime.spawned) == 1
-    assert launch_check.findings(store, "sw") == []
+    assert any(a.startswith(f"retired {first} after its launch check failed on base") for a in actions)
+    assert first in runtime.killed
+    assert [f.id for f in launch_check.findings(store, "sw") if f.subject.startswith(first)] == [
+        f"launch-check/{first}/base"
+    ]
     assert list(launch_check.report(store, "sw", "t1")["misses"]) == ["base"]
-    assert first not in launch_check.judged(store, "sw")
-    assert ledger.notes == []
+    assert launch_check.relaunched(store, "sw", "t1") is True
 
 
 def test_tick_retires_and_relaunches_a_launch_missing_a_declared_overlay(store, monkeypatch, scratch):

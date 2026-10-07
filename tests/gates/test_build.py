@@ -163,6 +163,19 @@ class TestAreas:
         assert "power/generator/diesel.py" in denied.reason
         assert "doghouse/frame, doghouse/roof, doghouse/light" in denied.reason
 
+    def test_the_shared_clearance_file_is_always_allowed_and_nothing_beside_it(self, world):
+        world.plan()
+        assert edit(world, "mutation-cleared.txt").allowed
+        assert not edit(world, "mutation-cleared.txt.bak").allowed
+        assert not edit(world, "scripts/mutation-cleared.txt").allowed
+        assert not edit(world, "power/generator/diesel.py").allowed
+
+    def test_a_kept_clearance_piece_passes_the_gate_and_a_cut_area_is_refused(self, world):
+        plan = DOGHOUSE + "- append the rulings | mutation-cleared.txt | the mutation gate reads them\n"
+        world.plan(plan, kept=(True, True, False, True))
+        assert edit(world, "mutation-cleared.txt").allowed
+        assert not edit(world, "power/generator/diesel.py").allowed
+
     def test_a_sibling_whose_name_extends_an_area_is_outside_it(self, world):
         world.plan()
         assert not edit(world, "doghouse/lightning.py").allowed
