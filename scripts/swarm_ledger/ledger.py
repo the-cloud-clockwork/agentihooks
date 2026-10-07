@@ -79,7 +79,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import ledger_artifacts  # noqa: E402
 import ledger_authority as authority  # noqa: E402
 import ledger_comments  # noqa: E402
 import ledger_core as core  # noqa: E402
@@ -95,7 +94,6 @@ from scripts.gates.base import Who
 from scripts.swarm_ledger.repository import repository
 
 BASE = ledger_link.base()
-TALK_REFUSED = "talk refused"
 
 
 def credentials(slug, service=False):
@@ -151,25 +149,20 @@ def op(kind, args, /, **fields):
     return {"op": kind, "id": f"{kind}-{uuid.uuid4().hex[:10]}", "by": args.name, **fields}
 
 
-def talk_refused(state):
-    if state.get("rejected"):
-        gated = [w for w in state.get("_meta", {}).get("warnings", []) if w.startswith(TALK_REFUSED)]
-        if gated:
-            sys.exit("; ".join(gated))
+def refused(state, fallback=""):
+    if rejected := state.get("rejected"):
+        reasons = [w for w in state.get("_meta", {}).get("warnings", []) if not core.size_warning(w)]
+        sys.exit("; ".join(reasons) or fallback or f"rejected: {rejected}")
 
 
 def posted(state):
-    talk_refused(state)
-    print(json.dumps({"posted": not state.get("rejected")}))
+    refused(state)
+    print(json.dumps({"posted": True}))
 
 
 def send(args, kind, /, **fields):
     state = call(args.slug, [op(kind, args, **fields)])
-    talk_refused(state)
-    if state.get("rejected"):
-        if kind.startswith("phase_") or kind == "task_add":
-            sys.exit("; ".join(state.get("_meta", {}).get("warnings", [])) or f"rejected: {state['rejected']}")
-        sys.exit(f"rejected: {state['rejected']}")
+    refused(state)
     return state
 
 
@@ -270,11 +263,8 @@ def cmd_artifact(args):
     request = {"request": args.request} if args.request else {}
     file = upload_artifact(args.slug, args.name, args.path, {"task": task, "title": args.title, **request})
     state = call(args.slug, [op("artifact_add", args, task=task, title=args.title, file=file, **request)])
-    print(json.dumps({"published": not state.get("rejected")}))
-    if state.get("rejected"):
-        if ledger_artifacts.REFUSED in state.get("_meta", {}).get("warnings", []):
-            sys.exit(f"rejected: {ledger_artifacts.REFUSED}")
-        sys.exit("rejected: join the ledger first and name a task it holds")
+    refused(state, "rejected: join the ledger first and name a task it holds")
+    print(json.dumps({"published": True}))
 
 
 def cmd_publish_plan(args):
@@ -308,9 +298,7 @@ def cmd_publish_plan(args):
                 "by": args.name,
             }
         )
-    state = call(args.slug, ops)
-    if state.get("rejected"):
-        sys.exit("; ".join(state.get("_meta", {}).get("warnings", [])) or f"rejected: {state['rejected']}")
+    refused(call(args.slug, ops))
     print(json.dumps({"plan_url": url, "published_to": where, "phases": phases}))
 
 
@@ -384,8 +372,7 @@ def cmd_priority(args):
     rejected = state.get("rejected", [])
     cleared = [o["target"] for o in ops if o["id"] not in rejected]
     print(json.dumps({"cleared": cleared, "rejected": rejected}))
-    if rejected:
-        sys.exit(1)
+    refused(state)
 
 
 def cmd_alert(args):
@@ -447,8 +434,7 @@ def cmd_edit(args):
         args.slug,
         [{"op": "edit", "thread": thread_of(args.target), "id": args.entry, "text": args.text, "by": args.name}],
     )
-    if state.get("rejected"):
-        sys.exit(f"rejected: {state['rejected']} (not yours, the operator's, or missing)")
+    refused(state, f"rejected: {state.get('rejected')} (not yours, the operator's, or missing)")
     print(json.dumps({"edited": args.entry}))
 
 
@@ -463,6 +449,7 @@ def cmd_delete(args):
             }
         )
     )
+    refused(state)
 
 
 def cmd_audit(args):

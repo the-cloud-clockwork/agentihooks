@@ -31,7 +31,7 @@ def test_cli_rejected_clear_exits_nonzero_and_reports_only_successes(monkeypatch
     args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "boss", "priority", "clear", *targets])
     with pytest.raises(SystemExit) as exc:
         ledger.cmd_priority(args)
-    assert exc.value.code == 1
+    assert exc.value.code.startswith("rejected: ['priority_clear-")
     result = json.loads(capsys.readouterr().out)
     assert result["cleared"] == cleared
     assert len(result["rejected"]) == 1

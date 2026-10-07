@@ -220,12 +220,6 @@ def test_an_unknown_mode_reads_as_observe():
     assert talk.mode_of(SwarmConfig(SLUG, "r", 1, 1, gates={"talk": "enforce"})) == "enforce"
 
 
-def test_the_cli_and_the_gate_share_the_refusal_prefix():
-    from scripts.swarm_ledger import ledger
-
-    assert ledger.TALK_REFUSED == talk.REFUSED
-
-
 def test_the_operator_lift_arms_the_talk_gate_beside_the_condition_gates(tmp_path):
     from scripts.gates import lift
     from scripts.gates.base import Who
@@ -391,30 +385,26 @@ def refused_state(*warnings, rejected=("m1",)):
     return {"rejected": list(rejected), "_meta": {"warnings": list(warnings)}}
 
 
-def test_the_cli_exits_with_every_talk_refusal():
+def test_the_cli_exits_with_every_refusal_reason():
     from scripts.swarm_ledger import ledger
 
     with pytest.raises(SystemExit) as stop:
-        ledger.talk_refused(refused_state("talk refused: one", "stale page", "talk refused: two"))
-    assert stop.value.code == "talk refused: one; talk refused: two"
+        ledger.refused(refused_state("talk refused: one", "stale page", "talk refused: two"))
+    assert stop.value.code == "talk refused: one; stale page; talk refused: two"
 
 
-@pytest.mark.parametrize(
-    "state",
-    [refused_state("stale page"), refused_state("talk refused: old", rejected=()), {"rejected": ["m1"]}],
-)
-def test_the_cli_passes_other_rejections_and_accepted_writes(state):
+@pytest.mark.parametrize("state", [refused_state("talk refused: old", rejected=()), {"rejected": []}, {}])
+def test_the_cli_passes_accepted_writes(state):
     from scripts.swarm_ledger import ledger
 
-    assert ledger.talk_refused(state) is None
+    assert ledger.refused(state) is None
 
 
-@pytest.mark.parametrize(("state", "printed"), [({"rejected": []}, True), (refused_state("stale page"), False)])
-def test_posted_prints_whether_the_write_landed(capsys, state, printed):
+def test_posted_prints_a_landed_write(capsys):
     from scripts.swarm_ledger import ledger
 
-    ledger.posted(state)
-    assert json.loads(capsys.readouterr().out) == {"posted": printed}
+    ledger.posted({"rejected": []})
+    assert json.loads(capsys.readouterr().out) == {"posted": True}
 
 
 def test_say_stops_on_a_talk_refusal(monkeypatch):
