@@ -179,7 +179,9 @@ def test_launch_environment_preserves_settings_and_pins_the_owner(tmp_path, monk
 def test_shared_launch_discards_test_owner_markers(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     monkeypatch.setattr(
-        server_lifetime.os, "environ", {"LEDGER_RUN_PID": "7", "LEDGER_RUN_START": "99", "OTHER": "keep"}
+        server_lifetime,
+        "os",
+        SimpleNamespace(environ={"LEDGER_RUN_PID": "7", "LEDGER_RUN_START": "99", "OTHER": "keep"}),
     )
     assert server_lifetime.environment(tmp_path / "development-ledger", 8765) == {"OTHER": "keep"}
 
@@ -273,3 +275,20 @@ def test_hook_pins_the_run_before_detaching_the_ensure_process(tmp_path, monkeyp
     assert start.call_args.kwargs["env"] == env
     assert start.call_args.kwargs["start_new_session"] is True
     assert start.call_args.args[0][-1] == "--ensure"
+
+
+def test_ensure_passes_its_effective_folder_and_port_to_the_lifetime_owner(tmp_path, monkeypatch):
+    from scripts.swarm_ledger import ledger_server
+
+    monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(ledger_server, "LOGFILE", tmp_path / ".server.log")
+    monkeypatch.setattr(ledger_server, "serving_dir", Mock(side_effect=[None, str(tmp_path)]))
+    monkeypatch.setattr(ledger_server, "port_held", lambda: False)
+    monkeypatch.setattr(ledger_server, "server_process_alive", lambda: False)
+    monkeypatch.setattr(ledger_server.subprocess, "Popen", Mock())
+    environment = Mock(return_value={"LEDGER_RUN_PID": "7", "LEDGER_RUN_START": "99"})
+    monkeypatch.setattr(server_lifetime, "environment", environment)
+    ledger_server.ensure()
+    environment.assert_called_once_with(tmp_path, ledger_server.PORT)
+    assert ledger_server.subprocess.Popen.call_args.kwargs["env"]["LEDGER_RUN_PID"] == "7"
+    assert ledger_server.subprocess.Popen.call_args.kwargs["env"]["LEDGER_RUN_START"] == "99"
