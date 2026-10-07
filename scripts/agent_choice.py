@@ -1,6 +1,7 @@
 AGENTS = ("claude", "codex")
 DEFAULT_PRIORITY = "claude,codex"
 ALL_FULL = "every agent is at its session cap"
+SHARE_WINDOW_MS = 6 * 3_600_000
 
 
 def priority(environ: dict[str, str]) -> list[str]:
@@ -102,8 +103,8 @@ def choose_shared(
     min_week_left: int,
     choose=choose,
 ) -> tuple[str, str]:
-    """Codex while its share of the swarm's spawns is below the target and its week has room, else the priority
-    choice; a zero share or a known week under the minimum turns any Codex choice into Claude."""
+    """Codex while its share of the swarm's recent share picks is below the target and its week has room, else the
+    priority choice; a zero share or a known week under the minimum turns any Codex choice into Claude."""
     if not requested and spawns is not None:
         codex, total = spawns.get("codex", 0), sum(spawns.values())
         if codex * 100 < share * max(total, 1) and not at_cap("codex", environ):
@@ -121,3 +122,22 @@ def codex_open(environ: dict[str, str], share: int, min_week_left: int) -> bool:
         return False
     left = codex_week_left(environ)
     return left is None or left >= min_week_left
+
+
+def choice_kind(reason: str) -> str:
+    if reason == "requested":
+        return "forced"
+    if reason == "priority" or reason.startswith("codex share "):
+        return "share"
+    if reason.startswith("fallthrough:"):
+        return "overflow"
+    return "other"
+
+
+def share_picks(rows: list[dict], since: int) -> dict[str, int]:
+    """Share picks by harness among spawn rows started at or after since; a later row of the same name wins."""
+    picks: dict[str, int] = {}
+    for row in {row["name"]: row for row in rows}.values():
+        if row.get("choice") == "share" and row.get("started_at", 0) >= since:
+            picks[row["harness"]] = picks.get(row["harness"], 0) + 1
+    return picks

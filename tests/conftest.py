@@ -129,7 +129,13 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     # machine, which is luck, not isolation — an operator who exports it (the
     # installer supports a comma list) would have the whole suite writing into
     # their real codex install.
-    for name in ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME", "AGENTIHOOKS_PROFILE"):
+    for name in (
+        "CLAUDE_CONFIG_DIR",
+        "CLAUDE_CODE_HOME_DIR",
+        "AGENTIHOOKS_CLAUDE_HOME",
+        "AGENTIHOOKS_PROFILE",
+        "AGENTIHOOKS_PROFILE_REPORT",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("CODEX_HOME", raising=False)
     # Same for COPILOT_HOME, read first by targets.copilot_target.copilot_home.
@@ -290,8 +296,8 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
         ("agents_skills_home", agents_skills_home()),
         ("copilot managed env file", CopilotAdapter._bypass_env_file()),
     ):
-        assert real_home not in value.parents and value != real_home, (
-            f"{label}() still resolves under the real home ({value}) — refusing to run"
+        assert not any(value.resolve().is_relative_to(root) for root in installer_isolation.PROTECTED_PATHS), (
+            f"{label}() still resolves to a live install path ({value}) — refusing to run"
         )
     yield
 

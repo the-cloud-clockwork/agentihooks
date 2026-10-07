@@ -11,6 +11,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 from hooks.classifier import ClassifierError, Score, YesNo, decide
 from scripts.gates import log as gate_log
@@ -123,7 +124,11 @@ def questions(fresh, start, sized):
         for i, piece in enumerate(fresh)
     }
     if sized:
-        asked["size"] = Score("How much work is the whole plan?", SIZES)
+        asked["size"] = Score(
+            "How much source work is the plan? Judge only pieces with nonempty areas; "
+            "test only pieces and the shared mutation clearance file are supporting proof, not additional scope.",
+            SIZES,
+        )
     return asked
 
 
@@ -144,11 +149,22 @@ def failures(rows, size):
     return reasons
 
 
+def _source_areas(areas: tuple) -> list[str]:
+    return [
+        area
+        for area in areas
+        if PurePosixPath(area).parts[:1] != ("tests",) and PurePosixPath(area) != PurePosixPath("mutation-cleared.txt")
+    ]
+
+
 def trace(pieces, state, previous, now_ms=None):
     previous = previous or {}
     known = _known(previous, pieces)
     start, fresh = len(known), pieces[len(known) :]
-    wire = [{"piece": start + i + 1, "what": p.what, "areas": list(p.areas), "why": p.why} for i, p in enumerate(fresh)]
+    wire = [
+        {"piece": start + i + 1, "what": p.what, "areas": _source_areas(p.areas), "why": p.why}
+        for i, p in enumerate(fresh)
+    ]
     base = {
         "plan_hash": plan_hash(pieces),
         "failures": previous.get("failures", 0),

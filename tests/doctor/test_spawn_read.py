@@ -27,7 +27,7 @@ def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):
     before = store.export(slug)
 
     def journal(argv, **kwargs):
-        assert argv[:4] == ["journalctl", "--user", "-u", "agentihooks-swarm.service"]
+        assert argv[:6] == ["journalctl", "--user", "-u", "agentihooks-swarm.service", "--since", "1 hour ago"]
         assert kwargs["check"] is True
         return subprocess.CompletedProcess(
             argv,
@@ -36,7 +36,18 @@ def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):
             "",
         )
 
-    record = spawn_read.records(store, slug, run=journal)
+    for at, name in enumerate(("first", "second", "ended"), start=7):
+        store.put_agent(slug, AgentRecord(name, "eng", "dt1", harness="claude", choice="share"))
+        store.drop_agent(slug, name, at=at)
+    store.put_agent(slug, agent)
+    before = store.export(slug)
+    record = spawn_read.records(store, slug, 5, run=journal)
+    assert record["now"] == 5
+    assert [(row["name"], row["choice"], row["ended_at"]) for row in record["history"]] == [
+        ("first", "share", 7),
+        ("second", "share", 8),
+        ("ended", "share", 9),
+    ]
     assert record["target"] == 30
     assert record["agents"] == [asdict(agent)]
     assert record["spawns"] == {"codex": 3, "claude": 5}

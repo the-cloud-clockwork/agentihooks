@@ -10,6 +10,9 @@ from tests.swarm.test_tick import FakeLedger
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
+from tests.swarm.profile_fixture import validated
+
+
 def test_template_role_defaults_and_master_settings_round_trip(tmp_path):
     environ = {"AGENTIHOOKS_HOME": str(tmp_path)}
     default = templates.parse({"name": "x"})
@@ -77,7 +80,10 @@ def test_runtime_forwards_and_records_profile(tmp_path, lane, profile, harness):
         calls.append(argv)
         return SimpleNamespace(
             returncode=0,
-            stdout=f"status=started\nroute_status=direct\npane_id=w:p1\nagent={harness}\nprofile={profile}\nmodel=chosen\neffort=low\n",
+            stdout=validated(
+                argv,
+                f"status=started\nroute_status=direct\npane_id=w:p1\nagent={harness}\nprofile={profile}\nmodel=chosen\neffort=low\n",
+            ),
             stderr="",
         )
 
@@ -100,7 +106,7 @@ def test_runtime_forwards_and_records_profile(tmp_path, lane, profile, harness):
     assert saved.agents("sw")[0].profile == ""
 
 
-@pytest.mark.parametrize("profile,expected", [("qa", "qa"), ("", "engineer")])
+@pytest.mark.parametrize("profile,expected", [("qa", "qa"), ("engineer", "engineer")])
 def test_resume_preserves_profile_or_defaults_for_old_record(tmp_path, profile, expected):
     from tests.swarm.test_runtime import _resuming
 

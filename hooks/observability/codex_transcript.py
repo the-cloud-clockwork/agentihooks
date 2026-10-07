@@ -14,7 +14,15 @@ def _content(item: dict) -> list[dict]:
                 pass
         return [{"type": "tool_use", "id": item.get("call_id", ""), "name": item.get("name", ""), "input": arguments}]
     if kind in ("function_call_output", "custom_tool_call_output"):
-        return [{"type": "tool_result", "tool_use_id": item.get("call_id", ""), "content": item.get("output", "")}]
+        output = item.get("output", "")
+        if isinstance(output, list):
+            output = [
+                {"type": "text", "text": block["text"]}
+                if isinstance(block, dict) and block.get("type") in ("input_text", "output_text")
+                else block
+                for block in output
+            ]
+        return [{"type": "tool_result", "tool_use_id": item.get("call_id", ""), "content": output}]
     return []
 
 
@@ -23,7 +31,10 @@ def normalize_entries(records: list[dict]) -> list[dict]:
     model = ""
     generation = None
     last_total = None
-    for index, record in enumerate(records):
+    from hooks.observability.transcript import record_id
+
+    for record in records:
+        source_id = record.get("_source_id") or record_id(record)
         item = record.get("payload", {})
         if record.get("type") == "turn_context":
             model = item.get("model", model)
@@ -46,9 +57,14 @@ def normalize_entries(records: list[dict]) -> list[dict]:
             role = item.get("role", "user" if item.get("type", "").endswith("_output") else "assistant")
             message = {"role": role, "content": content}
             if role == "assistant":
-                message.update(id=item.get("id") or f"codex-{index}", model=model)
+                message.update(id=item.get("id") or f"codex-{source_id}", model=model)
                 generation = message
             entries.append(
-                {"type": role, "uuid": f"codex-{index}", "timestamp": record.get("timestamp", ""), "message": message}
+                {
+                    "type": role,
+                    "uuid": f"codex-{source_id}",
+                    "timestamp": record.get("timestamp", ""),
+                    "message": message,
+                }
             )
     return entries

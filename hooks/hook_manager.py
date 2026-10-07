@@ -330,6 +330,8 @@ def on_session_start(payload: dict) -> None:
         },
     )
 
+    _request_trace_flush(payload, "start")
+
     # Emit a trace span for session start (visible in Langfuse)
     tracer = otel.get_tracer()
     if tracer:
@@ -560,6 +562,7 @@ def on_session_end(payload: dict) -> None:
             "duration_ms": metrics.get("duration_ms"),
         },
     )
+    _request_trace_flush(payload, "end")
 
     # Log transcript entries to hooks.log (for debugging)
     if session_id and transcript_path:
@@ -698,6 +701,7 @@ def on_user_prompt_submit(payload: dict) -> None:
     _swarm_heartbeat("working", payload.get("prompt", ""))
     typed = _operator_words(payload)
     _operator_mode(payload, typed)
+    _request_trace_flush(payload, "prompt")
 
     try:
         from hooks.config import QUOTA_USAGE_INJECTION_ENABLED
@@ -2089,14 +2093,7 @@ def on_stop(payload: dict) -> None:
     except Exception as e:
         log("brain_writer_hook dispatch failed", {"error": str(e)})
 
-    try:
-        if transcript_path and otel.langfuse_exporter_config() is not None:
-            from hooks._async import fork_and_call
-            from hooks.observability.agent_trace import export_session
-
-            fork_and_call(export_session, session_id, transcript_path, timeout_sec=60, task_name="agent_trace")
-    except Exception as e:
-        log("agent_trace dispatch failed", {"error": str(e)})
+    _request_trace_flush(payload, "stop")
 
     # Emit a trace span for session end (visible in Langfuse)
     tracer = otel.get_tracer()
@@ -2416,6 +2413,16 @@ def on_pre_compact(payload: dict) -> None:
         mark_compacted(session_id)
     except Exception as e:
         log("swarm refocus compact mark failed", {"error": str(e)})
+    _request_trace_flush(payload, "compact")
+
+
+def _request_trace_flush(payload: dict, reason: str) -> None:
+    try:
+        from hooks.observability import trace_flush
+
+        trace_flush.request(payload.get("session_id", ""), payload.get("transcript_path", ""), reason)
+    except Exception as e:
+        log("trace flush request failed", {"error": str(e)})
 
 
 def on_permission_request(payload: dict) -> None:
@@ -2552,6 +2559,10 @@ def main() -> None:
         from hooks.targets.normalizer import normalize_payload
 
         payload = normalize_payload(payload)
+
+        from hooks.observability.token_monitor import record_lifecycle_context
+
+        record_lifecycle_context(payload)
 
         # Get event name from payload
         event_name = payload.get("hook_event_name", "Unknown")

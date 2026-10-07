@@ -9,6 +9,9 @@ from scripts.swarm.runtime import HerdrRuntime
 SEAT = "eng-2@sw"
 
 
+from tests.swarm.profile_fixture import validated
+
+
 def _task(**extra):
     recaps = [{"occupant": f"e{n}", "task": "t", "text": f"recap {n}"} for n in (5, 4, 3, 2, 1)]
     learned = [
@@ -58,7 +61,7 @@ def test_spawn_writes_the_priming_rows_beside_the_prompt(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
 
     def run(argv, **kwargs):
-        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
     config = SimpleNamespace(

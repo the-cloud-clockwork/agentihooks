@@ -29,14 +29,32 @@ stay off unless that variable comes from an AgentiHooks env file
 
 ## The agent trace exporter
 
-On every `Stop`, the hook runs `export_session`
-(`hooks/observability/agent_trace.py`) in a fresh interpreter with a 60 second
-limit. It reads the session transcript and posts spans to Langfuse.
+Each session has one background exporter (`hooks/observability/trace_flush.py`),
+started by the first SessionStart, UserPromptSubmit, PreCompact, Stop or
+SessionEnd hook that finds none alive. Those hooks only record a flush request
+and return; none of them waits on the network. The exporter holds an exclusive
+lock for its whole life, so a session never has two.
 
+- **While the agent works.** It wakes every
+  `AGENTIHOOKS_TRACE_FLUSH_INTERVAL_SEC` (15) seconds, and at once on a hook's
+  request, and exports when the transcript grew or earlier work is pending. A
+  wake makes at most `AGENTIHOOKS_TRACE_FLUSH_ATTEMPTS` (3) attempts, each a
+  child running `export_session` (`hooks/observability/agent_trace.py`) killed
+  after `AGENTIHOOKS_TRACE_FLUSH_ATTEMPT_TIMEOUT_SEC` (5) seconds. An open turn
+  is exported as it stands; a tool call without its result yet carries
+  `tool.outcome.state=missing` and is updated on a later wake.
+- **When the agent process ends** (Stop and exit, retirement, a kill mid turn)
+  the exporter drains once more with the same budget and exits. A resume of the
+  same session under a new process hands it the running exporter instead of
+  starting a second one.
+- **Freshness fields.** The root carries `agentihooks.export.trigger`
+  (`request:<hook>`, `interval` or `final`) and
+  `agentihooks.export.unwritten_events.state=unavailable`: events the harness
+  has not yet written to its transcript cannot be exported.
 - **One trace per session.** The trace id is derived from the session id, so
-  every Stop of a session lands in the same trace. A cursor in
-  `~/.agentihooks/agent_trace/<session id>.json` records how many turns were
-  exported; each Stop sends only the new turns plus the refreshed root span.
+  every export of a session lands in the same trace. A cursor in
+  `~/.agentihooks/agent_trace/<session id>.json` records what the backend
+  accepted; each export sends only new or changed observations.
 - **Span tree.** Root `agent` observation named after the agent
   (`AGENTIHOOKS_AGENT_NAME`, else `agent-session`); a `turn N` span per user
   prompt; a `generation` per model message with token usage; a `tool` span per
@@ -52,9 +70,9 @@ limit. It reads the session transcript and posts spans to Langfuse.
   same entries, so Codex sessions get the same trace shape.
 - **Failures.** A failed export writes
   `agent_trace export failed endpoint=… status=… reason=…` to
-  `~/.agentihooks/logs/async-hooks.log` and leaves the cursor unchanged, so the
-  next Stop retries those turns. A run past 60 seconds logs
-  `[async] agent_trace: TIMEOUT after 60s`.
+  `~/.agentihooks/logs/async-hooks.log` and leaves the work pending in the
+  cursor, so the next wake retries it. An attempt past its limit logs
+  `trace_flush <session id>: attempt timed out after 5.0s`.
 
 ## Settings
 

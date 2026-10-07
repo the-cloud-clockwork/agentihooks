@@ -1,3 +1,5 @@
+import hashlib
+
 """Automatic transcript logging - logs new entries on each PostToolUse.
 
 Deliberately NOT migrated to hooks.memory.transcript_reader: this is an
@@ -133,3 +135,74 @@ def extract_content(entry: dict) -> str | None:
             return content
 
     return None
+
+
+def record_id(record: dict) -> str:
+    native = record.get("uuid")
+    if native:
+        return str(native)
+    identity = record
+    if record.get("type") == "response_item":
+        item = record.get("payload", {})
+        native = item.get("id") or item.get("call_id")
+        if native:
+            identity = {"type": record["type"], "kind": item.get("type"), "id": native}
+    payload = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def complete_records(transcript_path: str) -> tuple[list[dict], int, int]:
+    records = []
+    position = 0
+    unsupported = 0
+    with open(transcript_path, "rb") as handle:
+        for line in handle:
+            if not line.endswith(b"\n"):
+                break
+            position += len(line)
+            try:
+                record = json.loads(line)
+            except (ValueError, UnicodeDecodeError):
+                unsupported += 1
+                continue
+            if isinstance(record, dict):
+                records.append(record)
+            else:
+                unsupported += 1
+    return records, position, unsupported
+
+
+def mask_value(value: object) -> object:
+    from hooks.secrets import redact
+
+    if isinstance(value, str):
+        if value.lstrip().startswith(("{", "[")):
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                return redact(value, mode="strict")
+            masked = mask_value(parsed)
+            if masked != parsed:
+                return json.dumps(masked, ensure_ascii=False)
+        return redact(value, mode="strict")
+    if isinstance(value, (list, tuple)):
+        return [mask_value(item) for item in value]
+    if isinstance(value, dict):
+        return {redact(key, mode="strict"): mask_member(key, item) for key, item in value.items()}
+    return value
+
+
+def mask_member(key: str, value: object) -> object:
+    from hooks.secrets import contains_generic_secret, redact
+
+    if isinstance(value, (list, tuple)):
+        return [mask_member(key, item) for item in value]
+    if isinstance(value, dict):
+        probe = f"{key}=12345678"
+        context = key if contains_generic_secret(probe) else ""
+        return {redact(name, mode="strict"): mask_member(context or name, item) for name, item in value.items()}
+    masked = mask_value(value)
+    contextual = f"{key}={json.dumps(masked, ensure_ascii=False)}"
+    if contains_generic_secret(contextual):
+        return "[REDACTED:generic_secret]"
+    return masked

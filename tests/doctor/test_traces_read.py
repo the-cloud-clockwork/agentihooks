@@ -70,6 +70,12 @@ def test_reader_walks_every_page_of_traces_and_observations_and_keeps_no_text():
     assert "secret text" not in str(read)
 
 
+def test_generation_tokens_leave_out_cache_reads():
+    usage = {"input": 4, "output": 24, "cache_read_input_tokens": 291980, "cache_creation_input_tokens": 237}
+    row = {"type": "GENERATION", "startTime": "2026-10-05T15:00:00Z", "totalTokens": 292245, "usageDetails": usage}
+    assert traces_read._observation(row)["tokens"] == 4 + 24 + 237
+
+
 def test_sessions_join_task_holders_and_live_agents():
     tasks = [
         {"id": "a", "state": "done", "claimed_by": "s-eng-1", "pr_url": "https://github.com/o/r/pull/1"},

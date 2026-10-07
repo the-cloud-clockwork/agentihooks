@@ -179,8 +179,12 @@ def test_an_unread_fyi_for_a_stopped_swarm_master_never_becomes_a_followup(inbox
     assert ledger.followups == [] and events(inbox, item.id) == []
 
 
-def test_a_refused_operator_notification_closes_that_item_and_the_pass_goes_on(inbox):
+def test_a_refused_operator_notification_closes_that_item_and_the_pass_goes_on(inbox, monkeypatch):
     from scripts.swarm.store import SwarmError
+
+    monkeypatch.setattr(
+        "scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {"sender": {"name": "sw-eng-2"}}
+    )
 
     class StrictLedger(FakeLedger):
         def followup(self, slug, text):
@@ -223,7 +227,10 @@ def test_a_delivered_or_closed_item_is_never_woken(inbox):
     assert herdr.prompts == [] and ledger.followups == [] and inbox.inbox(MASTER_NAME) == []
 
 
-def test_a_session_outside_herdr_gets_no_wake_and_goes_straight_to_escalation(inbox):
+def test_a_session_outside_herdr_gets_no_wake_and_goes_straight_to_escalation(inbox, monkeypatch):
+    monkeypatch.setattr(
+        "scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {"desk": {"name": "operator-desk"}}
+    )
     item = inbox.send("sw-eng-1", "operator-desk", "need a decision")
     herdr, ledger = FakeHerdr({"p1": "idle"}), FakeLedger()
     t = sent_at(item)
@@ -285,7 +292,10 @@ def test_the_wake_says_to_answer_through_the_inbox_never_in_the_terminal():
     assert "never as text in this terminal" in wake.WAKE_TEXT
 
 
-def test_items_outside_the_swarm_are_left_alone(inbox):
+def test_items_outside_the_swarm_are_left_alone(inbox, monkeypatch):
+    monkeypatch.setattr(
+        "scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {"outside": {"name": "someone-else"}}
+    )
     item = inbox.send("someone", "someone-else", "hi")
     herdr, ledger = FakeHerdr({}), FakeLedger()
     for n in range(6):

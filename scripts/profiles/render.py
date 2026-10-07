@@ -14,7 +14,7 @@ from pathlib import Path
 
 from hooks.context import quarantine
 from scripts.claude_config import claude_home, claude_json
-from scripts.profiles import browser, connectors, plugins, sources
+from scripts.profiles import binding, browser, connectors, plugins, sources
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
 from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_target import codex_home
@@ -68,6 +68,17 @@ def _chain(name: str) -> list[tuple[str, Path]]:
     return _i._resolve_profile_chain(name)
 
 
+def _bundle() -> Path | None:
+    _i = _install_module()
+    bundle = _i._get_bundle_path()
+    linked = (_i._load_state().get("bundle") or {}).get("path")
+    if bundle is None and linked:
+        raise ValueError(
+            f"linked bundle {linked} is missing; relink it with agentihooks bundle link <path> before rendering"
+        )
+    return bundle
+
+
 def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     commit = ""
     if bundle is not None:
@@ -84,7 +95,7 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
 
 
 def stamp(name: str) -> dict:
-    return _stamp(_install_module()._get_bundle_path(), _chain(name))
+    return _stamp(_bundle(), _chain(name))
 
 
 def _roots(bundle: Path | None, dirs: list[tuple[str, Path]]) -> list[Path]:
@@ -148,7 +159,7 @@ def _with_brain(channels: str) -> str:
 
 
 def channels(name: str) -> str:
-    env = _settings("claude", _install_module()._get_bundle_path(), _chain(name))["env"]
+    env = _settings("claude", _bundle(), _chain(name))["env"]
     return _with_brain(env.get(CHANNELS, ""))
 
 
@@ -215,7 +226,9 @@ def _persona(name: str, target: str, bundle: Path | None, dirs: list[tuple[str, 
     items = _features("rules", _is_doc, bundle, dirs)
     sources.write(sources.path(name, target, rendered_root()), sources.rows(bundle, dirs, items))
     rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
-    return quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER))
+    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER))
+    ending = f"\n\n{FOOTER}\n"
+    return binding.persona(text.removesuffix(ending)) + ending
 
 
 def _read_json(path: Path) -> dict | None:
@@ -228,20 +241,30 @@ def _read_json(path: Path) -> dict | None:
 def render_claude(name: str, force: bool = False) -> Path | None:
     _refuse_live_render_from_another_checkout(name)
     _i = _install_module()
-    bundle, dirs = _i._get_bundle_path(), _chain(name)
+    _i._load_claude_runtime_env()
+    bundle, dirs = _bundle(), _chain(name)
     current = _stamp(bundle, dirs)
+    declared = _mcp_servers("claude", bundle, dirs)
+    connectors.require_environment(declared)
+    required = {server for server, spec in declared.items() if spec.get("enabled_tools") is not None}
     out = rendered_root() / name / "claude"
     if (
         not force
         and _read_json(out / STAMP) == current
         and not (out / "rules").exists()
         and sources.path(name, "claude", rendered_root()).is_file()
+        and (out / binding.FILE).is_file()
         and connectors.path(name, "claude", rendered_root()).is_file()
+        and all(
+            (_read_json(connectors.path(name, "claude", rendered_root())) or {}).get(server, {}).get("mounted")
+            for server in required
+        )
+        and required <= (_read_json(out / ".claude.json") or {}).get("mcpServers", {}).keys()
         and "hasCompletedOnboarding" in (_read_json(out / ".claude.json") or {})
     ):
         return None
     out.mkdir(parents=True, exist_ok=True)
-    servers, deny, mounts = connectors.claude(_mcp_servers("claude", bundle, dirs), str(out / ".claude.json"))
+    servers, deny, mounts = connectors.claude(declared, str(out / ".claude.json"))
     connectors.write(connectors.path(name, "claude", rendered_root()), mounts, name, "claude")
     settings = _claude_settings(bundle, dirs)
     if deny:
@@ -266,7 +289,11 @@ def render_claude(name: str, force: bool = False) -> Path | None:
     if plans.is_symlink():
         plans.unlink()
     plans.mkdir(exist_ok=True)
-    _i.save_json(out / STAMP, current)
+    if all(mounts[server]["mounted"] for server in required):
+        _i.save_json(out / STAMP, current)
+    else:
+        (out / STAMP).unlink(missing_ok=True)
+    binding.write(out, name, "claude")
     return out
 
 
@@ -275,13 +302,6 @@ def _codex_stamp(path: Path) -> dict | None:
         return tomllib.loads(path.read_text()).get("agentihooks", {}).get("render")
     except (OSError, ValueError):
         return None
-
-
-def _read_toml(path: Path) -> dict:
-    try:
-        return tomllib.loads(path.read_text())
-    except (OSError, ValueError):
-        return {}
 
 
 def _operator_codex_home() -> Path:
@@ -317,7 +337,7 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     from scripts.profiles import codex_master
 
     _i = _install_module()
-    bundle, dirs = _i._get_bundle_path(), _chain(name)
+    bundle, dirs = _bundle(), _chain(name)
     master = any(n.removeprefix("package:") == "master" for n, _ in dirs)
     claude_fresh = render_claude(name, force=force) is None
     operator = _operator_codex_home()
@@ -331,8 +351,9 @@ def render_codex(name: str, force: bool = False) -> Path | None:
         not force
         and claude_fresh
         and manifest.is_file()
+        and (out / binding.FILE).is_file()
         and connectors.path(name, "codex", rendered_root()).is_file()
-        and _read_toml(out / "config.toml").get("agentihooks") == current
+        and _read_json(out / STAMP) == current
         and (not master or ((out / "AGENTS.md").is_file() and not (out / "AGENTS.md").is_symlink()))
     ):
         return None
@@ -360,8 +381,9 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     hidden_skills = [p for p in sorted(root.iterdir()) if p.is_dir()] if root.is_dir() else []
     if hidden_skills:
         doc["skills"] = {"config": [{"path": str(p / "SKILL.md"), "enabled": False} for p in hidden_skills]}
-    doc["agentihooks"] = current
     _atomic_write(out / "config.toml", tomlkit.dumps(doc))
+    _i.save_json(out / STAMP, current)
+    binding.write(out, name, "codex")
     legacy = operator / f"{name}.config.toml"
     if _codex_stamp(legacy):
         legacy.unlink()
@@ -386,7 +408,7 @@ def rendered_profiles(target: str) -> list[str]:
 
 
 def _render_scratch(args: argparse.Namespace) -> int:
-    bundle = args.bundle or _install_module()._get_bundle_path()
+    bundle = args.bundle or _bundle()
     env = {**os.environ, "AGENTIHOOKS_HOME": str(args.out.resolve())}
     if bundle is not None:
         env["AGENTIHOOKS_BUNDLE_PATH"] = str(bundle.resolve())
@@ -408,7 +430,11 @@ def main(argv: list[str] | None = None) -> int:
     from scripts.profiles import measure
 
     measure.add_arguments(commands.add_parser("measure", help="Print a profile's first turn input tokens"))
+    validate = commands.add_parser("validate", help="Validate the mounted profile through its live harness")
+    validate.add_argument("--canary", required=True)
     args = parser.parse_args(argv)
+    if args.command == "validate":
+        return binding.main(args.canary)
     if args.command == "measure":
         return measure.main(args)
     if args.bundle is not None and args.out is None:
@@ -416,9 +442,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.target == "copilot":
         print("copilot per-run profiles are not supported", file=sys.stderr)
         return 2
-    if args.out is not None:
-        return _render_scratch(args)
     try:
+        if args.out is not None:
+            return _render_scratch(args)
         out = render(args.target, args.name, force=args.force)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

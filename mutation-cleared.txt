@@ -1,4 +1,24 @@
 {
+  "scripts/init_agent.py:scripts.init_agent.x_main__mutmut_7:9278452f74c086ae83e213fd3a422b61e1b96f750ca792ec23358bc7608879d5": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Fallback case is erased by capitalize: claude and CLAUDE both become Claude. Truthy inputs bypass the fallback identically; every falsy input yields the same source label and refusal behavior."
+  },
+  "scripts/init_agent.py:scripts.init_agent.x_main__mutmut_11:566e87d72b4f0bb3a386c33004ec7ecbad48f56f7cc907978b94124ed71f68bc": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Fallback case is erased by capitalize: claude and CLAUDE both become Claude. Truthy inputs bypass the fallback identically; every falsy input yields the same target label and refusal behavior."
+  },
+  "hooks/observability/token_monitor.py:hooks.observability.token_monitor.x_record_lifecycle_context__mutmut_17:475406d3dc221f9ae78405c3632364f0217f831a0f5ce30c84a8abaa3e059547": {
+    "reader": "Standards",
+    "reason": "An absent session returns no context for both empty and None defaults. Native absent-session controls emit and persist no metrics in the original and mutant; the status return is discarded."
+  },
+  "hooks/observability/token_monitor.py:hooks.observability.token_monitor.x_record_lifecycle_context__mutmut_19:fe0762cc957e9fc2f73761b6a7da98c91cf6a137168340346b05bcef2033d002": {
+    "reader": "Standards",
+    "reason": "Omitting the dictionary default returns None only for an absent session. Native absent-session controls emit and persist no metrics in the original and mutant; the status return is discarded."
+  },
+  "hooks/observability/token_monitor.py:hooks.observability.token_monitor.x_record_lifecycle_context__mutmut_22:c7f4af87e3d96deb9de1f35ba0a9955c505444a8be1a9f8fe3ba59c2f7e7bae0": {
+    "reader": "Standards",
+    "reason": "Even with a valid matching XXXX rollout, the original payload lacks a session and update_context_metrics emits and persists no metrics. Original and mutant controls produce identical output; the computed status is discarded."
+  },
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_13:eda446540d9ed0c4b259edff4160e8726c85cf8d1828349d86401b102412ae2f": {
     "reader": "Standards",
     "reason": "core.sync returns normalized state with the tasks key present; changing this unused dictionary default changes no output. Independent empty and populated task list comparisons agree."
@@ -651,7 +671,7 @@
     "reader": "Standards",
     "reason": "The mutant omits the precomputed review argument; the same pure calculator receives identical document, events and time before mutation and yields identical persisted stats and review."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁreceive__mutmut_3:47b0a5f5739a912849451da407cb6339e358d2d3c322d33c37aa97a1e532db78": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1receive__mutmut_3:47b0a5f5739a912849451da407cb6339e358d2d3c322d33c37aa97a1e532db78": {
     "reader": "Standards",
     "reason": "FileLedgerRepository.get_document branches on reconcile truthiness; False and None select the identical locked persisted-document read."
   },
@@ -719,19 +739,19 @@
     "reader": "Standards",
     "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
   },
-  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁevents_since__mutmut_6:a4b51e8d9e868bfc09267f83c4b792fd822fe5b2eeded8ef384aae0a32019f92": {
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x\u01c1FileLedgerRepository\u01c1events_since__mutmut_6:a4b51e8d9e868bfc09267f83c4b792fd822fe5b2eeded8ef384aae0a32019f92": {
     "reader": "Standards",
     "reason": "These calls always load existing JSON with seed None. The default and supplied canonical core expose identical pure loads/normalize code and constants; locks and paths remain bound to self.domain."
   },
-  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁget_document__mutmut_12:5564d2623e14c85100e77a910247efd21328caebb4f372d48c565eb6827086a2": {
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x\u01c1FileLedgerRepository\u01c1get_document__mutmut_12:5564d2623e14c85100e77a910247efd21328caebb4f372d48c565eb6827086a2": {
     "reader": "Standards",
     "reason": "These calls always load existing JSON with seed None. The default and supplied canonical core expose identical pure loads/normalize code and constants; locks and paths remain bound to self.domain."
   },
-  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁread_page__mutmut_5:74518b453d780af5cd921081ceb0b72eb7683386c0ae327941c00863fdf4bc1d": {
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x\u01c1FileLedgerRepository\u01c1read_page__mutmut_5:74518b453d780af5cd921081ceb0b72eb7683386c0ae327941c00863fdf4bc1d": {
     "reader": "Standards",
     "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
   },
-  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁread_snapshot__mutmut_6:4cf49a8e028eef0200c330b480f3e0598383a25882b4167acf0cf88fcc4f6f48": {
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x\u01c1FileLedgerRepository\u01c1read_snapshot__mutmut_6:4cf49a8e028eef0200c330b480f3e0598383a25882b4167acf0cf88fcc4f6f48": {
     "reader": "Standards",
     "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
   },
@@ -743,11 +763,11 @@
     "reader": "Standards",
     "reason": "urllib capitalizes request header names, so the changed key casing sends the same header."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁrefused__mutmut_18:a8475961407734a792c2605a007486f4f4d9bbefd15882f2223d02abaa6f7d54": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1refused__mutmut_18:a8475961407734a792c2605a007486f4f4d9bbefd15882f2223d02abaa6f7d54": {
     "reader": "Standards",
     "reason": "http.server header lookup is case insensitive, so the changed name casing reads the same header."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁrefused__mutmut_19:abd65b2f5e3dd98506b15c18eefd38150a9ca5498070281a717f5d6bb8bd21b3": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1refused__mutmut_19:abd65b2f5e3dd98506b15c18eefd38150a9ca5498070281a717f5d6bb8bd21b3": {
     "reader": "Standards",
     "reason": "http.server header lookup is case insensitive, so the changed name casing reads the same header."
   },
@@ -762,6 +782,538 @@
   "scripts/gates/intent_history.py:scripts.gates.intent_history.x_masked__mutmut_34:9c51a3907bd4aee652398441fa5330acc1ce49f6bd5c8bb3e6e36b095a603e19": {
     "reader": "Standards",
     "reason": "Uppercasing Bearer in the regex under re.I changes no matches or replacement outputs. Standards independently verified all Unicode code points and case variants."
+  },
+  "scripts/inbox/addresses.py:scripts.inbox.addresses.x_settle_unresolved__mutmut_6:3f6c79fa333f7b5e2d7bb17a56f8ba534cb5c9702c13ab9d8cbc4ebdf1a8797d": {
+    "reader": "Standards",
+    "reason": "The sole production caller passes InboxStore.pending(), sorted ascending by (created_at, sequence, id). Once an item is younger than the fixed window, every subsequent item is younger and performs no withdrawal or action append. Break and continue therefore process the same eligible items. Sorted creation-time sequences through length six were exhaustively compared with identical results."
+  },
+  "scripts/inbox/addresses.py:scripts.inbox.addresses.x_settle_unresolved__mutmut_14:39843caea8de3ffa50c93e4f6e088ec5a6454ebcd5c5e8d54bf92e794e6b27a3": {
+    "reader": "Standards",
+    "reason": "An absent name yields an empty string originally and None in the mutant. Both are removed by the comprehension's if n filter; present values and session identifiers are identical. Missing, empty, None, and present-name cases were compared with identical live sets."
+  },
+  "scripts/inbox/addresses.py:scripts.inbox.addresses.x_settle_unresolved__mutmut_16:260f69de5c9a7e375f6eb322edbe6d4bff23b9fe6bbdfa168d273b6d6fbe82cf": {
+    "reader": "Standards",
+    "reason": "Omitting dict.get's default produces None for an absent name instead of an empty string. Both are removed by if n; present values and session identifiers are identical. Missing, empty, None, and present-name cases were compared with identical live sets."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_59:05210dc1151d48d72767e750fca5d5ea4934c893d62e604012d7f92ccbdb8fe6": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_61:3c9e34017a302701402ea9ef080bc8daa13271b523eba8df48948ca572044028": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_62:44dae3fe77dbc5217311bdd59de0f0f98aed99b698b59ac6ae5a2e6578ed04ca": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_74:fb71c1343f0fc7cbe6dba69d729a2d9c91d87e47071f76900058eb30432106f5": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_76:d0db50135453e8ce52e9d625d248dc22692275822e4cec40733dc09c450e6df0": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_78:f16360a19cea468dcde40c87e391c6943baf26f3144cf17e02252dcbca6e2aaa": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_80:aba9f12bd0411ab1d79645829ef97374ce4a1faa659598b0e4a815b06d350ae1": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_82:6fd9c6f85614e9c48e1272eca176806a4e0b1b440394d40f3fafcacd850f9373": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_83:4dce6088b0e1f8757aad3b93828b0adcd3faaa824e76f6150771a83eaa482223": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_2:84251915ce8da7a4654f079de5031bf2a1d55444faee52450b56a12dd31fb2f0": {
+    "reader": "Standards",
+    "reason": "The default multiprocessing start method under Python 3.12 on the Linux runner is fork, so the context is identical."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_33:21e3550f497e9e8af4c365889827349a35e659b149e3404fb4e573789c4d78c9": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_35:626a905a8e9fb251b9bffc4935c091324bfc7b18c9f384fb4421577b7b7f5920": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_36:63fbd9250d0a15cf134170dea6833d8ce8557c996414a90d7b81e2ec139308c6": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_48:3f02d186a31ccc34fe4080f456e18348f572e6a0aea628d9465dc625a7b43a70": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_50:04100b8a8ec7facd3667fbc51c115f8b2625690bf052de4a4faab38d9eafa8a5": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_53:ccefb4d0fc70a0c5f3fe47899e3173aaf642fe4ea1c3770cab38431493b11c3d": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_read_events__mutmut_3:3b75894e457046ce180ed222bac468bbc7d2c320de78f7ffb728186797dbd937": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_read_events__mutmut_4:82f66f683758ca3e945a7a1c49e0c4aafc2980bc2d8fe14d832bbccced0a75b1": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_read_events__mutmut_12:416fa509dd030cb9de1e762ee4a5a486a161c9b57daa30735cb2b89711f05d88": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_read_events__mutmut_13:4f7c4d4c65baf39375c0678248de6d81012753b27258bdf18d420e94704e6123": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_read_events__mutmut_20:bb97c1c3d49cc415ac2817093caae1b851fb96c23667b393159d3ecdfa379455": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_read_events__mutmut_21:c2615b3f06f6596f023286b3863f0ecc54bb9bc16b9fedc98c724c24e616dae7": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_read_events__mutmut_31:f4857aaf0d9645374b67384749a9696bf8ef2abd5457b09642999e805ff50de0": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_read_events__mutmut_32:164122e57cf769474147a78ded41c671a8a1424d7af79a92799aae95d250b4e4": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_write_events__mutmut_30:934548be39ca9053c9961848f6ae8a9f32055ca13895bb91af44cbabb3b02087": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_write_events__mutmut_31:49b2041983ae07eb0db21d120f1bf0eb14d1c74556e7be1f9d79e727446a90de": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_write_events__mutmut_42:0cd6d35e7439e4c2984d21b36936a471fc3f6aebb83d574c13baa680cb5e85cc": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_write_events__mutmut_43:c73885362568cc4b56c659582e99a72634d8acc243eea40c82f16846e66a72b9": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_write_events__mutmut_54:eb159c6512dcba7e559a8653f3eb8e77c871e56708cfbb51c1633198bd9a3723": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_write_events__mutmut_55:35500487c250715b60da16695fa2a315a458eec98efbe149708150ae3d36ec3c": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_write_events__mutmut_62:cb861cef90c00d089fc46c9f9ab05ac4a1dd9ecdd9c6b3c31a7dbb0889c7f8d5": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_write_events__mutmut_63:1546dee46f41015d32ff28f117624bfc0fc8fb45383d2a1465b13b954705797e": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_read_seeds__mutmut_9:817d7643a4b729cbedc1b45dbe605c7dfd12ef07fb341bb202d228f3c30f7a40": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_read_seeds__mutmut_10:4e2a990e19957148c2900899b9062b70f07ac0006a05b736a548907c69814b25": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_read_seeds__mutmut_17:39c193202ceef9bb6b46cbc62b6b6cc25a04395d9abc69e5810f401aad1eddf2": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_read_seeds__mutmut_18:06fe68dc9ba2f07862820ac73b1bc6e1705306ef8e6a73102fd29ecf0e0fda23": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_read_seeds__mutmut_24:d5ad98f68f8b2f6c46ba508c13e2499c71a70f3410a3b285bf4b87510b73db03": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_read_seeds__mutmut_25:912b3845681c74f0a968e5d19c68db87a9a08ee3119ac4629f6fe2490a545d2d": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_write_seeds__mutmut_16:ac6abcc8a86a13610c9e39aa1dab3628e8f26db2565c46b6895e5b9e292bde85": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_write_seeds__mutmut_37:740ba9cfdd06bd9b7c7272373bd679bd4ee0ad03fb776ad537bfa9de87d3aa8b": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_write_seeds__mutmut_38:d374d8b9efd3f7c5bd3f937ee556c2de34a0f170465d0e9043715dcb997f19f0": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_write_seeds__mutmut_49:0e447522e34bfb8925d8fbde541a8bee87919fb43a7675f3f3dda14a4e82dd74": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_write_seeds__mutmut_50:30436addc680a762180ff8d2a9f46da39f821b598db65945ae28e08f1357df0a": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_write_seeds__mutmut_56:38920c48b8fdb8d78a8121863423178d59f4eb5501d0f50d202bd177ffd685e2": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_write_seeds__mutmut_57:606d8d2c4287c9df219472b01cd7ab83a9463461098c64d566c40264310fb30d": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_write_seeds__mutmut_65:dcf2706af76302f4d2836a938995f6862333950c3851d7822846e63fc983f4a6": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_write_seeds__mutmut_66:16843965df9f29414302d1d0120e5d7bda747fbf32a3cae0fa65701b82560b1c": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_write_seeds__mutmut_73:d68d73c152d52d76474b61802d7b194f3252cb8afc2f341d0548ecd683ad3dd8": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_write_seeds__mutmut_74:707ae84d9e959a74182e35d7b99b6615f2bb182c6b2c11c54e79e4def88b95bb": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_write_seeds__mutmut_82:a13d4c859e5887c5c370bfa685eb5eb17a2d579f129ff13a0ac93d1371a5ba26": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_write_seeds__mutmut_83:d2dae0120ba2456dd3e3b41703b36252d99845056f47ece392329c463998044e": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1__init____mutmut_13:c1984abd7c61b8033f39257fc48d2a200e4452f43e9d16148ab94ddc0e44ac8e": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1__init____mutmut_14:cd266ee5340d10786e4ed439bd5fdeba44af26f5744217bb71b08f23b7e6d037": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1get_document__mutmut_7:a8bae9d63d94b3769440076b9252053de47991910c125363b36233836d852b93": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1import_document__mutmut_3:a064a8bf437b76d2adad694b161eaaf0de35ef6faed86d4dc926169eb20a5f07": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1_write_document__mutmut_7:9a7ce9aac2ae5143eda5a839f21d4cb0dfdd7c911a14ed50e5b7dd0a61769bf4": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1_write_document__mutmut_8:cc4c1b8493687021fef01395c7ccb65c823c0d17e897c3aa07711069b5f4099a": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1_write_document__mutmut_46:deba2fb2b15fc17561e071e90526e648697f0f8e9d9ec7eec202c245a1c4cec4": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1_write_document__mutmut_47:f44651e1dea4792b12629615e86c0b23f77e80ffedcc298ce643bbad69f18f46": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1_registries__mutmut_10:4dc1d185c3f461217827495c5034f5e3e715efe3e9870af35f13ce95d8db1a16": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1_registries__mutmut_19:1e1d8d428da8ac82dbfcd811e05b5e2a962b42be15d807905df0ceb5d0f4fdc3": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1_registries__mutmut_20:ed8bafb9ca03856e665b09d097b761ec21eacd2992d40a3b03958c4ae8eda417": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_3:bc5cca5d17e0cd06e813fdef6e12b797368755aa18c01f4a8f64913879852a09": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_10:ff12c9b555117d393fe477cd2edcdcad14e76c4dba9659b9d0b98536aa7a7948": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_12:a8297b8b4555daa45dded49d91801263757f145c9841275d6021d300acb587b5": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_14:aabc97593109513a857a0d8b755b7bd577382ebe01d90fbb05e4b3b4d3fb6683": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_16:ece98a52a24bbc9278b21ae8d70b1b2d77988bed2b8a57625ab8c5912604dcbc": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_18:ee60e464038e9e877e5e692be4eb45232a6b6164f50b4def0735706cf5c24734": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_26:be5e51ed94d0c16a3a584094eab2f2bf72499f726da8d344355e9dc5b8b43a71": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_27:2f34ac0bdab5c7fae544508c7a95167b1b69295d4e48257499a459afd288544a": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_59:25badd4d21d91afd5bff5103fdd853fb1dae52b98ac78170e88953beb2b3a7ab": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_60:1194f5d9e0fcae79c5d2537dc410657c390d1c34f6328218e9394f6ecb4a3836": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1events_since__mutmut_6:0ded6777aa9641bec761e2a4586258f72300c7d6ddcb151fef0537848f8fec33": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1events_since__mutmut_7:974862cb48e745c1aa750c4e3d78f926feb2b86f175ffd7a5b42c44a67e5b6be": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1import_registry__mutmut_3:fa066ffd8b9c4ae7ff11b66fb6ebc71464ece3b5931ef39b48eb8f6b335d6f12": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1import_registry__mutmut_13:96e95d262dc84ba38eff177bb98d3b6dee7b72b94d8197beee4c640ba3b55cfd": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1registry__mutmut_7:3537fc7a006a6f7f0196a949f0066a21c9623c6bca32bc51a27d5dd508ba96e9": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1registry__mutmut_8:bc96b238c73e7a7f9d548f5468e4dc660c8f6231a5fb36f47754caea1e736d2e": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1lifecycle__mutmut_7:933f6c82bb1f69d45de1396625dc2ed7e202c482cf5fa43ff8b12dc6ed04dc4b": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1lifecycle__mutmut_8:7d189a590c1f68e8991f7b1ebb21e5c8b4cec5d8b76fb511244f1fd600ff806d": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  },
+  "scripts/swarm_ledger/repository/bin_storage.py:scripts.swarm_ledger.repository.bin_storage.x_registries__mutmut_10:986e45fe577f4cdfe5489813b0d4ce845a72b64ddd800f9779f76fb114fdb04e": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same Python codec. Encoding, decoding, values and errors are unchanged."
+  },
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_write_events__mutmut_10:40d057e7aae8c8b0fb069ac01a00b6031e72baaf147f620ac7330e128d62b434": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same Python codec. Encoding, decoding, values and errors are unchanged."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_68:a335f35c5b84d10752d4fdf523c6603a555c179da001077c6ec0ff7ca6c6a56f": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same Python codec. Encoding, decoding, values and errors are unchanged."
+  },
+  "scripts/swarm_ledger/storage_migration/__init__.py:scripts.swarm_ledger.storage_migration.x_import_directory__mutmut_26:4a49e6d0cee30b417454a4e0f6d6570e54f5baec84ebf4d064ec8d4a33e84fc0": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same Python codec. Encoding, decoding, values and errors are unchanged."
+  },
+  "scripts/swarm_ledger/storage_migration/__init__.py:scripts.swarm_ledger.storage_migration.x_import_directory__mutmut_43:e8490a7a01d1f9b8595e7a10ea2f834266fd95563294073c843dd68d5e13afc2": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same Python codec. Encoding, decoding, values and errors are unchanged."
+  },
+  "scripts/swarm_ledger/repository/bin_storage.py:scripts.swarm_ledger.repository.bin_storage.x_registries__mutmut_11:ce5aa3da083d203f550c2a88573bee049b45960e85f87cfc021a79599f0e88fe": {
+    "reader": "Standards",
+    "reason": "The exception branch still returns an empty dictionary: both None and {} fail the following isinstance(value, dict) decision or yield {}."
+  },
+  "scripts/swarm_ledger/repository/rows.py:scripts.swarm_ledger.repository.rows.x_encode__mutmut_2:eb26588b1d634ac8cb56f7137962936171c65585c40c8368c7750f45c2436f63": {
+    "reader": "Standards",
+    "reason": "ensure_ascii=None is falsy exactly as ensure_ascii=False; JSONEncoder follows the same Unicode output branch for every input."
+  },
+  "scripts/swarm_ledger/repository/rows.py:scripts.swarm_ledger.repository.rows.x_encode__mutmut_4:bb3b43c39e04260e61d96320214b476c4a6a7ab00bdd53ee9a7f3ac302525501": {
+    "reader": "Standards",
+    "reason": "allow_nan=None is falsy exactly as allow_nan=False; JSONEncoder rejects the same nonfinite values and emits identical finite values."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1get_seed__mutmut_2:65f455d34e261e479370870f2af00334543765d6c39d4a8a34a16e8afd104411": {
+    "reader": "Standards",
+    "reason": "reconcile=None is falsy exactly as reconcile=False; get_document follows the same no-file-reconciliation branch."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_3:bb14f27e3dfa0501c6fb9cb640fe8994e9d8a41d3259948544845fdf6981b2a6": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_11:14eb1109ee4e87538c5fd64ed2c56744ce554b892fb8b119256ead78764b8cd3": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_12:6f7379e1d3513dcb0175390818daf29ea2224926ec6d32b5d6fe1783d51afdcd": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_25:a98021c8b5da9401f483e750a96295f2ad01d4ad18ba2b2266fd602c55a2f28e": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_27:dfca2652c18c073ee47f43c39f5e66af41228deda3504c923295c16f0641ca45": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_29:3162ceb0b6c44f303ff8e5c29982f75c18f3ac29ba45e7a8923d316dc4e51412": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_31:b4542552228a84d283bc72da0a50df5e50d63948374a4fc2f2b057b55746a3e0": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_33:4e8f69dcc9d9ee0d014e97fba4998093cbf585b120fc67622f538df81ccfc3e1": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_41:183a8d7dd585b0b0043849be2a2277d91c351b7754c035ac55f4d168ad173d57": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_42:b009ca92d6ca2bd65e0004c811313afc18a9db170d1db5544eb30ccceaebef26": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_74:8d06843c547530d9295beb7e865f49258263560aa4e7e835378b4941701c6190": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_75:6831bb41c9d0bd24fd0fa0eb5548c0b58a7bf2e5f32a3d2e29ce50be3871df87": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1lifecycle__mutmut_7:569362e0cb65158b1705c529df43783618f72be67cc9c523f67899babe96f509": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1lifecycle__mutmut_8:aec7c45b51cd2fc03400fb8c50626fb8856ad69aa5fdcbc585d5987286e39972": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_83:0cbdfebb25a9f812aef21d02baa583f610987ec43e01947aaca16e46707f723a": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same Python codec; encoding, decoding and failure behavior are identical."
+  },
+  "scripts/swarm_ledger/storage_migration/__init__.py:scripts.swarm_ledger.storage_migration.x_import_directory__mutmut_26:4f7f1368e3e074dbc629cf3714b101ebfb74f35ed6d15fe703b58868327607a5": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same Python codec; encoding, decoding and failure behavior are identical."
+  },
+  "scripts/swarm_ledger/storage_migration/__init__.py:scripts.swarm_ledger.storage_migration.x_import_directory__mutmut_43:5011d80808601121eddcb535dcabaea0b94b7fde5ae6211d55a1608e628ea7cf": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same Python codec; encoding, decoding and failure behavior are identical."
+  },
+  "scripts/swarm_ledger/repository/bin_storage.py:scripts.swarm_ledger.repository.bin_storage.x_purge_expired__mutmut_3:ef6046db70c2af6394c1261aa6cef659c7b414a91b898bcc0293c720479c1655": {
+    "reader": "Standards",
+    "reason": "Within purge_expired every expired slug has had both authoritative paths unlinked before this call. apply_lifecycle derives all those same absent slugs from existing minus present. Omitting expired does not change selected deletions or persisted rows."
+  },
+  "scripts/swarm_ledger/repository/bin_storage.py:scripts.swarm_ledger.repository.bin_storage.x_purge_expired__mutmut_5:e827a58846a959ce83773b35e66f42d52c9c864f40c7d317bb0f73be74cc0573": {
+    "reader": "Standards",
+    "reason": "Within purge_expired every expired slug has had both authoritative paths unlinked before this call. apply_lifecycle derives all those same absent slugs from existing minus present. Omitting expired does not change selected deletions or persisted rows."
+  },
+  "scripts/swarm_ledger/repository/shadow.py:scripts.swarm_ledger.repository.shadow.x_persist_lifecycle__mutmut_3:e18684e2f110863cab277ff80d1a5896361677019e443afe66eccaf6a19bc6b5": {
+    "reader": "Standards",
+    "reason": "The supported caller supplying removed is purge_expired, which first unlinks both authoritative paths. apply_lifecycle derives those same removals from existing minus present. Defaulting removed therefore changes no transaction output for the file-authoritative lifecycle contract."
+  },
+  "scripts/swarm_ledger/repository/shadow.py:scripts.swarm_ledger.repository.shadow.x_persist_lifecycle__mutmut_6:41e1d692d5c1d7875e0d24e86824344c342dbfe75dbfa81ac0c1f1819eda4639": {
+    "reader": "Standards",
+    "reason": "The supported caller supplying removed is purge_expired, which first unlinks both authoritative paths. apply_lifecycle derives those same removals from existing minus present. Defaulting removed therefore changes no transaction output for the file-authoritative lifecycle contract."
+  },
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_read_seeds__mutmut_29:d68144cdf46719d59b025bcb089ce754a9b335d6eb271167179222060f0abfef": {
+    "reader": "Standards",
+    "reason": "A deletion seed delta is emitted only for a path present in the preceding flattened revision. Replay starts with that baseline and applies ordered deltas, so rows.pop always finds this path. Removing the unused absent-key default changes no supported replay output."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_59:8749921dbe8ece6890127daf239358fa11e51185022cbef58b4858daf80b1fb1": {
+    "reader": "Standards",
+    "reason": "For supported file-authoritative callers every removed slug has neither authoritative path. Its SQLite rows are already deleted before known is read; revisiting a registry candidate finds no source path and emits no writes. Changing the candidate subtraction therefore changes neither persisted rows nor returned output."
+  },
+  "scripts/swarm_ledger/storage_migration/__init__.py:scripts.swarm_ledger.storage_migration.x_import_directory__mutmut_50:1769306d531c2d7c69d3249c1ab079e886e0c7016f0f374507f85964f7e19bf2": {
+    "reader": "Standards",
+    "reason": "import_directory imports core and load_state from the same repository.file module. Runtime identity check confirms its explicit core argument is exactly load_state default core; mutating module attributes affects that same object in both versions. Omitting the duplicate argument changes no loader behavior."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__save_progress__mutmut_16:7b7035313938d6143d6ef04f1e0017853c0475147ef735f4ff95832782f2f2e5": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None take the same false branch and serialize identically."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__record_revisions__mutmut_4:3240d2852a07c877863538bf65e52a60fd838997c2278ee1b9f7ee27651ef93b": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize identically, preserving revision hashes."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__revision__mutmut_22:82c190432e4f89f407e8188a9a05bfa85256b6a656b175fc44e3a6eed1583e71": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize identically, preserving observation hashes."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_23:a354b6a6efa63c8f7cfac048264fbb435343acb765671f884d54a59aba383570": {
+    "reader": "Standards reader",
+    "reason": "HTTP field names are case insensitive; requests prepared headers preserve the same Content-Type lookup."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_24:b812c17089aadba3febbd62310f765419c92eb2a0290e4ae22030d699f006db2": {
+    "reader": "Standards reader",
+    "reason": "HTTP field names are case insensitive; requests prepared headers preserve the same Content-Type lookup."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_46:68e8c965e6cdee1afeb29f4011e5ce1f48470d29b209d18f73abeca568ed595c": {
+    "reader": "Standards reader",
+    "reason": "requests Response.headers is CaseInsensitiveDict, giving identical lookups for header name casing."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_47:a82769ca2640d9cebdd24a8b32de90b7eb5c6cf73150a0b28dc266691ac20c99": {
+    "reader": "Standards reader",
+    "reason": "requests Response.headers is CaseInsensitiveDict, giving identical lookups for header name casing."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_48:a62189ccfa77b0caa74f97d33473bb09510b70755310d76aa4447d09da3fff62": {
+    "reader": "Standards reader",
+    "reason": "Both absent-header defaults exclude the protobuf substring and select the same JSON acknowledgement branch."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__json_acknowledged__mutmut_30:7c53e8b89f449e80bb7b8de6b94c8cc57ba2e19629bf6878f522c5c6dbe44d41": {
+    "reader": "Standards reader",
+    "reason": "The enclosing presence branch guarantees at least one partial-success key exists; the changed inner default is never selected for the resulting partial value."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__json_acknowledged__mutmut_32:10a46f6eb1a70d1d383832e9ca2b0bfd3cb0658095bf6e980c6773d28661f126": {
+    "reader": "Standards reader",
+    "reason": "The enclosing presence branch guarantees at least one partial-success key exists; the changed inner default is never selected for the resulting partial value."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__send_pending__mutmut_6:d58b1f2dc2688f92de5df1510dd30b34bce4df837c85e483739026a0395ae193": {
+    "reader": "Standards reader",
+    "reason": "_batches produces an empty batch only as its terminal yield with empty specs; continue and break both end without exporting."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x_export_session__mutmut_22:6940fb1023e2b2ed9584779514a61053cba95624a5d1dfbb9072d6d89015af56": {
+    "reader": "Standards reader",
+    "reason": "Both wrappers retain the same O_RDWR descriptor; the lock stream has no reads or writes and flock and close are unchanged."
+  },
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_record_id__mutmut_44:3a8b5646d8a1577bded2a7472b025da730d578e0a45d7836f79da0dd06b2d6da": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize identically, preserving source identity hashes."
+  },
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_value__mutmut_17:c454c200db8310362b7683bbf61aaf6273820e1afa22f3036fb7e18cc8cd8b48": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize the same masked embedded JSON."
+  },
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_member__mutmut_36:3f9cd2499f322646cf1a043bca8729e57e2abb3dc348fbecf4178311ce06bee4": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None produce the same contextual string before strict redaction."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_26:c5af9b4c0b57e22d330bf31c5c125997950c723a1bfb613090e48269adeaa235": {
+    "reader": "Standards reader",
+    "reason": "Deployed Langfuse v3.163.0 traces route lowercases Content-Type before protobuf matching; APPLICATION/X-PROTOBUF and application/x-protobuf select identical decoding. Primary tagged route source and deployed version proof are recorded in final-mutation-symbols.md."
+  },
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_member__mutmut_24:fcedbddd680c1d30e117ddbc4e1035fc15d421b65072ba6f99093274f0bb567c": {
+    "reader": "Standards reader",
+    "reason": "ensure_ascii False and None take the same false branch, producing identical JSON and contextual redaction input."
   },
   "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1has_capacity__mutmut_8:0c0df51472b4d0a0db2ee7b7644138ed6275618c6f93bbc4bbc1ff050d255e39": {
     "reader": "Standards",

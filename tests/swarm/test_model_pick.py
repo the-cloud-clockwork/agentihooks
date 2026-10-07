@@ -4,6 +4,7 @@ import pytest
 
 from hooks.classifier import Answer, DecisionResult
 from scripts.swarm import model_pick
+from tests.swarm.profile_fixture import validated
 
 
 def decision(score=0, confidence=0.9):
@@ -121,7 +122,9 @@ def test_spawn_records_and_stores_classifier_choice(tmp_path, monkeypatch):
     def launch(argv, **kwargs):
         seen.extend(argv)
         return SimpleNamespace(
-            returncode=0, stdout="status=started\nroute_status=routed\nmodel=opus\neffort=high\n", stderr=""
+            returncode=0,
+            stdout=validated(argv, "status=started\nroute_status=routed\nmodel=opus\neffort=high\n"),
+            stderr="",
         )
 
     runtime = HerdrRuntime(home=tmp_path, run=launch, choose=lambda *a: ("claude", "quota"))
