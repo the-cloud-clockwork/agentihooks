@@ -48,6 +48,19 @@ def test_the_slug_or_the_name_resolves_the_same_swarm(store):
         store.config(store.names.swarm_slug("swarm@ffffff"))
 
 
+def test_agent_alias_timeout_preserves_the_name_and_logs_the_failure(store, monkeypatch, caplog):
+    from redis.exceptions import TimeoutError
+
+    def timeout(*args):
+        raise TimeoutError("Timeout reading from socket")
+
+    monkeypatch.setattr(store.redis, "get", timeout)
+    assert store.names.resolve("engineer") == "engineer"
+    assert caplog.record_tuples == [
+        ("scripts.swarm.naming", 30, "alias lookup failed for engineer: Timeout reading from socket")
+    ]
+
+
 @pytest.mark.parametrize("lookup", ["swarm", "code_of"])
 def test_swarm_slug_preserves_the_reference_on_a_store_timeout(store, monkeypatch, caplog, lookup):
     from redis.exceptions import TimeoutError
@@ -59,8 +72,9 @@ def test_swarm_slug_preserves_the_reference_on_a_store_timeout(store, monkeypatc
 
     monkeypatch.setattr(store.names, lookup, timeout)
     assert store.names.swarm_slug(name) == name
-    assert f"swarm alias lookup failed for {name}" in caplog.text
-    assert "Timeout reading from socket" in caplog.text
+    assert caplog.record_tuples == [
+        ("scripts.swarm.naming", 30, f"swarm alias lookup failed for {name}: Timeout reading from socket")
+    ]
 
 
 def test_settings_by_slug_survive_a_swarm_alias_timeout(env, monkeypatch, caplog):  # noqa: F811
