@@ -244,7 +244,7 @@ class CodexAdapter:
         """Write *value* unless the operator hand-edited that key since our last write."""
         _i = _install_module()
         current = target.get(key)
-        if current is None or current == recorded.get(key):
+        if current is None or current == value or current == recorded.get(key):
             target[key] = value
             recorded[key] = list(value) if isinstance(value, list) else value
         else:
