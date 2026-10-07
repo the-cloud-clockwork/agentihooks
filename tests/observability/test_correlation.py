@@ -18,6 +18,7 @@ ENV = {
     "AGENTIHOOKS_SWARM_TASK": "t44",
     "AGENTIHOOKS_AGENT_NAME": "engineer@1-2",
     "AGENTIHOOKS_PROFILE": "engineer",
+    "AGENTIHOOKS_PREDECESSOR_SESSION": "sess-0",
     "AH_CC_TOKEN_probeacct": TOKEN_SENTINEL,
 }
 
@@ -96,6 +97,8 @@ def test_every_field_resolves_from_its_source_with_its_type():
         f"{P}account": "probeacct",
         f"{P}revision": "agentihooks-bundle@beef,agentihooks@f00d",
         f"{P}revision.sources": "abc123",
+        f"{P}predecessor.session.id": "sess-0",
+        f"{P}predecessor.trace.id": format(agent_trace.trace_id("sess-0"), "032x"),
     }
     assert set(correlation.SOURCES) == {key[len(P) :] for key in flat} - {"schema"}
 
@@ -126,7 +129,15 @@ def test_a_session_outside_any_swarm_marks_every_field_present_or_gapped():
     missing = set(correlation.SOURCES) - unsupported - {"harness"}
     expected.update({f"{P}{name}.state": correlation.MISSING for name in missing})
     assert flat == {f"{P}schema": correlation.SCHEMA, f"{P}harness": "codex", **expected}
-    assert missing == {"agent.name", "session.id", "trace.id", "profile.requested", "account"}
+    assert missing == {
+        "agent.name",
+        "session.id",
+        "trace.id",
+        "profile.requested",
+        "account",
+        "predecessor.session.id",
+        "predecessor.trace.id",
+    }
 
 
 @pytest.mark.parametrize("state", ["pending", "failed"])

@@ -23,6 +23,7 @@ PENDING, PASS, FAIL, UNCHECKED = "pending", "pass", "fail", "unchecked"
 RUNNING = "intent check running"
 FAIL_LINE = 0.3
 REASON_LINE = 0.5
+WEAKEN_LINE = 0.5
 GRACE_MS = 2 * 60_000
 GH_TIMEOUT_SEC = 20
 PROOF_CHARS = 4000
@@ -45,6 +46,12 @@ QUESTIONS = {
         "a hook, a page or a call site?",
         true="something in the change reaches it",
         false="nothing in the change reaches it",
+    ),
+    "weakens": YesNo(
+        "Does the change turn off, loosen, weaken or bypass anything the phase builds, such as a gate default, a "
+        "threshold, a check, a published record or a review step?",
+        true="the change weakens what the phase builds",
+        false="the change weakens nothing the phase builds",
     ),
 }
 REASONS = {
@@ -165,11 +172,14 @@ def judge(state, decide=decide):
         answers = decide(state, QUESTIONS, purpose=PURPOSE).answers
     except ClassifierError:
         return UNCHECKED, "the classifier did not answer"
-    usable = answers["usable"].noul
-    if usable >= FAIL_LINE:
+    usable, weakens = answers["usable"].noul, answers["weakens"].noul
+    if usable >= FAIL_LINE and weakens < WEAKEN_LINE:
         return PASS, f"the phase can use it as delivered at probability {usable:.2f}"
+    lead = f"the phase can use this change at probability {usable:.2f}"
     reasons = [text for key, text in REASONS.items() if answers[key].noul < REASON_LINE]
-    return FAIL, "; ".join([f"the phase can use this change at probability {usable:.2f}, under {FAIL_LINE}", *reasons])
+    if weakens >= WEAKEN_LINE:
+        reasons.append(f"the change may weaken what the phase builds, at probability {weakens:.2f}")
+    return FAIL, "; ".join([f"{lead}, under {FAIL_LINE}" if usable < FAIL_LINE else lead, *reasons])
 
 
 @dataclass(frozen=True)

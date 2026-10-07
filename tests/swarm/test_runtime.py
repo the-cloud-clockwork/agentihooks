@@ -208,7 +208,7 @@ def test_a_codex_spawn_records_the_model_and_effort_init_agent_launched_with(tmp
     assert (placed.harness, placed.model, placed.effort) == ("codex", "gpt-6.1-sol", "high")
 
 
-def _spawn_env(tmp_path, monkeypatch, **config):
+def _spawn_env(tmp_path, monkeypatch, task=None, **config):
     monkeypatch.delenv("AGENTIHOOKS_COMPACT_LIMIT", raising=False)
     seen = {}
 
@@ -227,7 +227,7 @@ def _spawn_env(tmp_path, monkeypatch, **config):
         ),
         "eng",
         "engineer@a1b2c3-0001",
-        {"id": "t1", "title": "x"},
+        task or {"id": "t1", "title": "x"},
     )
     return seen["env"]
 
@@ -242,6 +242,26 @@ def test_spawn_without_a_swarm_compact_limit_leaves_the_default(tmp_path, monkey
 
 def test_spawn_marks_the_launch_as_the_tick_s_own(tmp_path, monkeypatch):
     assert _spawn_env(tmp_path, monkeypatch, compact_limit=0)["AGENTIHOOKS_SWARM_SPAWN"] == "1"
+
+
+def test_spawn_names_the_predecessor_conversation_of_an_attached_transfer(tmp_path, monkeypatch):
+    task = {"id": "t1", "title": "x", "transfer": {"id": "x1"}, "handoff_envelope": {"conversation_id": "sess-old"}}
+    env = _spawn_env(tmp_path, monkeypatch, task=task, compact_limit=0)
+    assert env["AGENTIHOOKS_PREDECESSOR_SESSION"] == "sess-old"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"handoff_envelope": {"conversation_id": "sess-old"}},
+        {"transfer": {"id": "x1"}, "handoff_envelope": {"conversation_id": "unknown"}},
+        {"transfer": {"id": "x1"}},
+    ],
+)
+def test_spawn_without_a_known_predecessor_names_none(tmp_path, monkeypatch, extra):
+    monkeypatch.setenv("AGENTIHOOKS_PREDECESSOR_SESSION", "sess-inherited")
+    env = _spawn_env(tmp_path, monkeypatch, task={"id": "t1", "title": "x", **extra}, compact_limit=0)
+    assert "AGENTIHOOKS_PREDECESSOR_SESSION" not in env
 
 
 def _spawn_seen(tmp_path, lanes, lane="eng"):

@@ -814,6 +814,65 @@ def test_a_handed_off_task_is_reopened_and_respawned_with_the_doc(store):
     assert store.handoff("sw", "t1") == ""
 
 
+RECLAIMED = {
+    "remote_branch": "engineer-a1b2c3-0001",
+    "remote_head": "4f2a9c0",
+    "continue_from": "origin/engineer-a1b2c3-0001",
+    "fresh_reason": "none",
+}
+
+
+@pytest.fixture
+def reclaims(monkeypatch):
+    seen = []
+
+    def lookup(repo, lives, recorded):
+        seen.append((repo, lives, recorded))
+        return RECLAIMED
+
+    monkeypatch.setattr("scripts.swarm.tick.reclaim", lookup)
+    return seen
+
+
+def test_a_task_reclaimed_after_its_agent_was_lost_is_given_that_agents_branch(store, reclaims):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"]["branch"] = "feature-x"
+    runtime.live.discard("engineer@a1b2c3-0001")
+    tick("sw", store, ledger, runtime, now_ms=2_000 + STARTUP_GRACE_MS)
+    assert runtime.spawned[-1] == ("eng", "engineer@a1b2c3-0002", "t1")
+    assert reclaims == [("/repo", ["engineer@a1b2c3-0001"], "feature-x")]
+    assert runtime.tasks[-1]["reclaim"] == RECLAIMED
+    assert store.reclaims("sw") == {"engineer@a1b2c3-0002": RECLAIMED}
+
+
+def test_a_reclaim_looks_at_every_earlier_life_newest_first(store, reclaims):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    runtime.live.discard("engineer@a1b2c3-0001")
+    tick("sw", store, ledger, runtime, now_ms=2_000 + STARTUP_GRACE_MS)
+    runtime.live.discard("engineer@a1b2c3-0002")
+    tick("sw", store, ledger, runtime, now_ms=4_000 + 2 * STARTUP_GRACE_MS)
+    assert reclaims[-1] == ("/repo", ["engineer@a1b2c3-0002", "engineer@a1b2c3-0001"], "")
+
+
+def test_a_first_life_has_no_reclaim_to_look_up(store, reclaims):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert reclaims == [] and "reclaim" not in runtime.tasks[-1]
+    assert store.reclaims("sw") == {}
+
+
+def test_a_handed_off_task_keeps_its_handoff_continuation_and_takes_no_reclaim(store, reclaims):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.put_handoff("sw", "t1", "seam 1 green", envelope={"continue_from": "origin/engineer-a1b2c3-0001"})
+    store.put_agent("sw", replace(workers(store)[0], state="finished"))
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.tasks[-1]["handoff_envelope"] == {"continue_from": "origin/engineer-a1b2c3-0001"}
+    assert reclaims == [] and "reclaim" not in runtime.tasks[-1]
+
+
 def test_a_spawned_agent_keeps_the_model_and_effort_it_was_placed_with(store):
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     (agent,) = workers(store)

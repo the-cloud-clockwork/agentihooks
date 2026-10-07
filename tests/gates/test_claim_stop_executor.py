@@ -23,8 +23,17 @@ URL = "https://github.com/o/r/pull/7"
 PACKAGE = ".".join(("scripts", "gates"))
 SHIM = f"import runpy\nimport sys\n\nsys.argv = ['gate', 'claim-stop']\nrunpy.run_module({PACKAGE!r}, run_name='__main__')\n"
 GH = '#!/bin/sh\n[ -f "$FAKE_GH_ANSWER" ] || exit 1\ncat "$FAKE_GH_ANSWER"\n'
-PENDING = {"state": "OPEN", "commits": [], "statusCheckRollup": [{"name": "unit", "status": "IN_PROGRESS"}]}
-MERGED = {"state": "MERGED", "mergedAt": "2026-01-01T00:00:00+00:00", "commits": [], "statusCheckRollup": []}
+PENDING = {"data": {"resource": {"state": "OPEN", "headRefOid": "first", "commits": {"nodes": []}}}}
+MERGED = {
+    "data": {
+        "resource": {
+            "state": "MERGED",
+            "mergedAt": "2026-01-01T00:00:00+00:00",
+            "headRefOid": "first",
+            "commits": {"nodes": []},
+        }
+    }
+}
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 

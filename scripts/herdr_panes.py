@@ -1,6 +1,7 @@
 """Every herdr pane agentihooks opens, one record per terminal, so the sweep closes only those and never a pane the
 operator opened."""
 
+import hashlib
 import json
 import re
 import tempfile
@@ -8,7 +9,7 @@ from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from urllib.parse import urlparse
 
-from scripts.herdr_host import Placement
+from scripts.herdr_host import Placement, server_socket
 
 ROOT_ENV = "AGENTIHOOKS_HERDR_PANES_DIR"
 STORE_ENV = "AGENTIHOOKS_SWARM_REDIS_URL"
@@ -29,6 +30,7 @@ class PaneRecord:
     route_status: str = ""
     seen: str = ""
     active_at: int = 0
+    herdr_server: str = ""
 
 
 def root(environ: dict[str, str]) -> Path:
@@ -42,7 +44,8 @@ def run_folder(environ: dict[str, str]) -> Path:
 
 
 def _path(record: PaneRecord, environ: dict[str, str]) -> Path:
-    return root(environ) / f"{re.sub(r'[^A-Za-z0-9_-]', '_', record.terminal_id or record.pane_id)}.json"
+    server = f"{hashlib.sha256(record.herdr_server.encode()).hexdigest()[:12]}_" if record.herdr_server else ""
+    return root(environ) / f"{server}{re.sub(r'[^A-Za-z0-9_-]', '_', record.terminal_id or record.pane_id)}.json"
 
 
 def _store(environ: dict[str, str]) -> str:
@@ -69,6 +72,7 @@ def record(placed: Placement, kind: str, owner_session: str, environ: dict[str, 
         launched_at=now_ms,
         owner_swarm=swarm,
         swarm_store=_store(environ) if swarm else "",
+        herdr_server=server_socket(environ),
     )
     return _write(made, environ)
 
@@ -98,4 +102,5 @@ def _read(path: Path) -> PaneRecord | None:
 def load(environ: dict[str, str]) -> list[PaneRecord]:
     folder = root(environ)
     found = [_read(path) for path in sorted(folder.glob("*.json"))] if folder.is_dir() else []
-    return [item for item in found if item is not None]
+    server, default = server_socket(environ), server_socket({})
+    return [item for item in found if item is not None and (item.herdr_server or default) == server]

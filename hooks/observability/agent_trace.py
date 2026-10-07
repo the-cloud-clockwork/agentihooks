@@ -231,6 +231,22 @@ def _outcome(result: dict) -> dict:
     return {"tool.outcome": "error" if result.get("is_error") else "success"}
 
 
+def _persisted_result(entry: dict, result: dict) -> tuple[dict, int]:
+    """Claude keeps only a preview of a large tool output in the transcript and writes the whole of it to a side file."""
+    persisted = entry.get("toolUseResult")
+    if not isinstance(persisted, dict) or not persisted.get("persistedOutputPath"):
+        return result, 0
+    side = Path(str(persisted["persistedOutputPath"]))
+    if side.parent.name == "tool-results":
+        try:
+            return {**result, "content": side.read_bytes().decode(errors="replace")}, 0
+        except OSError:
+            pass
+    size = persisted.get("persistedOutputSize")
+    text = _text(result.get("content"))
+    return result, (max(0, size - len(text)) if isinstance(size, int) and not isinstance(size, bool) else 0)
+
+
 def _turn_spans(
     session_id: str,
     number: int,
@@ -284,6 +300,7 @@ def _turn_spans(
             if entry.get("type") != "assistant" or not isinstance(block, dict) or block.get("type") != "tool_use":
                 continue
             done, result = results.get(block.get("id"), (entry, {}))
+            result, omitted = _persisted_result(done, result)
             attributes = {
                 "langfuse.observation.type": "tool",
                 "gen_ai.operation.name": "execute_tool",
@@ -293,6 +310,8 @@ def _turn_spans(
                 **_outcome(result),
                 **_io(json.dumps(block.get("input", {}), ensure_ascii=False), _text(result.get("content"))),
             }
+            if omitted:
+                attributes["agentihooks.truncation.langfuse.observation.output.chars"] = omitted
             span_id = _span_id(session_id, block.get("id", ""))
             spans.append(SpanSpec(block.get("name", "tool"), span_id, turn_id, _ns(entry), _ns(done), attributes))
     return spans

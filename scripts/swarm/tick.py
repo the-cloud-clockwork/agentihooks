@@ -15,6 +15,7 @@ from scripts.gates import Who, modes
 from scripts.gates import claims as claim_cap
 from scripts.gates import log as gate_log
 from scripts.handoff import transfers
+from scripts.handoff.envelope import reclaim
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
@@ -562,6 +563,9 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         handoff = store.handoff(slug, task["id"])
         if handoff:
             task["handoff"] = handoff
+        elif lives := store.earlier_lives(slug, task["id"]):
+            task["reclaim"] = reclaim(config.repo, lives, task.get("branch") or "")
+            store.put_reclaim(slug, name, task["reclaim"])
         task["stack_base"] = _stack_base(task, rows)
         task["overlaps"] = _sharing(task, rows)
         saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
