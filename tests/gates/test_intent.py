@@ -50,12 +50,17 @@ def answer(noul):
     return SimpleNamespace(noul=noul)
 
 
-def classifier(usable, delivers=0.9, reachable=0.9, seen=None):
+def classifier(usable, delivers=0.9, reachable=0.9, seen=None, weakens=0.1):
     def decide(state, questions, purpose):
         if seen is not None:
             seen.append((state, questions, purpose))
         return SimpleNamespace(
-            answers={"usable": answer(usable), "delivers": answer(delivers), "reachable": answer(reachable)}
+            answers={
+                "usable": answer(usable),
+                "delivers": answer(delivers),
+                "reachable": answer(reachable),
+                "weakens": answer(weakens),
+            }
         )
 
     return decide
@@ -257,7 +262,7 @@ class TestStamp:
 
 
 class TestJudge:
-    def test_judge_asks_three_yes_no_questions_under_its_purpose(self):
+    def test_judge_asks_four_yes_no_questions_under_its_purpose(self):
         seen = []
         assert intent.judge({"s": 1}, decide=classifier(0.8, seen=seen)) == (
             "pass",
@@ -265,8 +270,28 @@ class TestJudge:
         )
         [(state, questions, purpose)] = seen
         assert (state, purpose) == ({"s": 1}, "intent-check")
-        assert list(questions) == ["usable", "delivers", "reachable"]
+        assert list(questions) == ["usable", "delivers", "reachable", "weakens"]
         assert all(isinstance(q, YesNo) for q in questions.values())
+
+    def test_a_usable_change_that_weakens_the_phase_fails_with_that_reason(self):
+        assert intent.judge({}, decide=classifier(0.96, weakens=0.5)) == (
+            "fail",
+            "the phase can use this change at probability 0.96; the change may weaken what the phase builds, at "
+            "probability 0.50",
+        )
+        assert intent.judge({}, decide=classifier(0.96, weakens=0.49))[0] == "pass"
+        assert intent.judge({}, decide=classifier(0.3, weakens=0.6)) == (
+            "fail",
+            "the phase can use this change at probability 0.30; the change may weaken what the phase builds, at "
+            "probability 0.60",
+        )
+
+    def test_an_unusable_change_that_also_weakens_the_phase_names_both(self):
+        assert intent.judge({}, decide=classifier(0.1, delivers=0.2, weakens=0.97)) == (
+            "fail",
+            "the phase can use this change at probability 0.10, under 0.3; the change may not deliver what the task "
+            "text asks; the change may weaken what the phase builds, at probability 0.97",
+        )
 
     def test_exactly_the_line_passes(self):
         assert intent.judge({}, decide=classifier(0.3))[0] == "pass"
