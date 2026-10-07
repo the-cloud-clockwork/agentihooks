@@ -202,7 +202,7 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 - **Style:** bare uppercase text in its role colour, optionally led by a 6px status dot. No chip, no capsule, no glow.
 
 ### Tooltips
-- **Delay (operator decision 2026-10-07, locked):** every tooltip on ledger pages, HOME and BIN opens after one second of hover, not two. `DELAY` in `tooltips.js` is 1000 ms, and a test fails on any other value.
+- **Delay (operator decision 2026-10-07, locked):** every tooltip on ledger pages, HOME and BIN opens after one second of hover, not two. `DELAY` in `tooltips.js` is 1000 ms, and a test fails on any other value. Native `title` attributes follow the browser's own delay, so new hover text goes through `tooltips.js`.
 ### Navigation
 - **Outline:** a fixed left list of section links, muted at rest, white on hover with the hover lift, accent when current. Items lead with a red or green bullet for open or done.
 
