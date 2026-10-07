@@ -257,7 +257,13 @@ def test_inbox_wait_refuses_unbounded_duration(started, minutes, capsys, monkeyp
     )
 
 
-def test_inbox_wait_cannot_also_wait_on_checks(started):
+def test_inbox_wait_cannot_also_wait_on_checks(started, monkeypatch):
+    from scripts.inbox import receive
+
+    def unexpected(*args):
+        pytest.fail("a conflicting dependency wait must be refused before receiving")
+
+    monkeypatch.setattr(receive, "receive", unexpected)
     assert run("sw", "--as", ME, "wait", "--inbox", "--on", "checks", URL) == 1
 
 
