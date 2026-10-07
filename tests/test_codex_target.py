@@ -52,7 +52,10 @@ class TestConfigToml:
         adapter.write_settings({"project_doc_fallback_filenames": ["CLAUDE.md"]})
         text = (home / "config.toml").read_text()
         assert 'project_doc_fallback_filenames = ["CLAUDE.md"]' in text
-        assert text.count("CLAUDE.md") == 2  # the key and its managed record
+        assert text.count("CLAUDE.md") == 1
+        assert json.loads((home / ".agentihooks-managed.json").read_text()) == {
+            "project_doc_fallback_filenames": ["CLAUDE.md"]
+        }
         adapter.teardown()
         assert "project_doc_fallback_filenames" not in (home / "config.toml").read_text()
 
@@ -112,9 +115,7 @@ class TestConfigToml:
     def test_operator_hand_set_approval_policy_survives_reinit(self, adapter, capsys):
         adapter.write_settings({"approval_policy": "on-request", "sandbox_mode": "workspace-write"})
         home = codex_home()
-        # Operator hand-edits the live key only — not our internal [agentihooks.managed]
-        # record, which they don't know exists. count=1 hits the first (top-level)
-        # occurrence; the managed-table copy is left as our own record.
+        # Operator hand-edits the live key only — not our sidecar record.
         text = (
             (home / "config.toml")
             .read_text()
@@ -125,6 +126,26 @@ class TestConfigToml:
         text = (home / "config.toml").read_text()
         assert 'approval_policy = "untrusted"' in text
         assert "hand-set" in capsys.readouterr().out
+
+    def test_config_carries_no_table_codex_ignores(self, adapter):
+        adapter.write_settings({"approval_policy": "never", "tui": {"status_line": ["model"]}})
+        home = codex_home()
+        assert "agentihooks" not in adapter._load_toml(home / "config.toml")
+        record = json.loads((home / ".agentihooks-managed.json").read_text())
+        assert record == {"approval_policy": "never", "tui": {"status_line": ["model"]}}
+
+    def test_legacy_managed_table_moves_to_the_sidecar(self, adapter, capsys):
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "config.toml").write_text(
+            'approval_policy = "untrusted"\n\n[agentihooks.managed]\napproval_policy = "on-request"\n'
+        )
+        adapter.write_settings({"approval_policy": "never"})
+        doc = adapter._load_toml(home / "config.toml")
+        assert "agentihooks" not in doc
+        assert doc["approval_policy"] == "untrusted"
+        assert "hand-set" in capsys.readouterr().out
+        assert json.loads((home / ".agentihooks-managed.json").read_text()) == {"approval_policy": "on-request"}
 
     def test_status_line_keeps_context_apart_from_cumulative_tokens(self, adapter):
         old = ["model-with-reasoning", "current-dir", "context-usage", "used-tokens", "five-hour-limit"]
@@ -789,6 +810,7 @@ class TestTeardown:
         assert "agentihooks" not in text
         assert "notify" not in text
         assert "project_doc_max_bytes" not in text
+        assert not (home / ".agentihooks-managed.json").exists()
         assert install._global_record(install._load_state(), "codex").get("managed_mcp") is None
 
     def test_preserves_operator_content(self, adapter, tmp_path):

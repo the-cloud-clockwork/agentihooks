@@ -277,13 +277,6 @@ def _codex_stamp(path: Path) -> dict | None:
         return None
 
 
-def _read_toml(path: Path) -> dict:
-    try:
-        return tomllib.loads(path.read_text())
-    except (OSError, ValueError):
-        return {}
-
-
 def _operator_codex_home() -> Path:
     home = codex_home()
     # A session running in a rendered Codex home renders too; links must still reach the operator's home.
@@ -332,7 +325,7 @@ def render_codex(name: str, force: bool = False) -> Path | None:
         and claude_fresh
         and manifest.is_file()
         and connectors.path(name, "codex", rendered_root()).is_file()
-        and _read_toml(out / "config.toml").get("agentihooks") == current
+        and _read_json(out / STAMP) == current
         and (not master or ((out / "AGENTS.md").is_file() and not (out / "AGENTS.md").is_symlink()))
     ):
         return None
@@ -360,8 +353,8 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     hidden_skills = [p for p in sorted(root.iterdir()) if p.is_dir()] if root.is_dir() else []
     if hidden_skills:
         doc["skills"] = {"config": [{"path": str(p / "SKILL.md"), "enabled": False} for p in hidden_skills]}
-    doc["agentihooks"] = current
     _atomic_write(out / "config.toml", tomlkit.dumps(doc))
+    _i.save_json(out / STAMP, current)
     legacy = operator / f"{name}.config.toml"
     if _codex_stamp(legacy):
         legacy.unlink()

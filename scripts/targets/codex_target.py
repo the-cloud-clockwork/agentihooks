@@ -216,6 +216,25 @@ class CodexAdapter:
                 f"{value!r}) — leaving operator value in place"
             )
 
+    @staticmethod
+    def _managed_sidecar(home: Path) -> Path:
+        return home / ".agentihooks-managed.json"
+
+    @classmethod
+    def _take_managed(cls, home: Path, doc) -> dict:
+        """Pop the in-file record earlier releases kept in *doc*; the sidecar record wins over it."""
+        legacy = doc.pop("agentihooks", None)
+        sidecar = cls._managed_sidecar(home)
+        if sidecar.exists():
+            try:
+                recorded = json.loads(sidecar.read_text())
+            except ValueError:
+                recorded = None
+            if isinstance(recorded, dict):
+                return recorded
+        managed = legacy.get("managed") if isinstance(legacy, dict) else None
+        return managed.unwrap() if isinstance(managed, dict) else {}
+
     def write_settings(self, native: dict) -> Path:
         _i = self._i = _install_module()
         home = self.home()
@@ -237,7 +256,7 @@ class CodexAdapter:
         # Nested tables (tui, features, …) merge key-by-key rather than being
         # replaced wholesale: config.toml is a shared operator file, and
         # replacing a table would silently drop settings we never wrote.
-        managed = doc.setdefault("agentihooks", {}).setdefault("managed", {})
+        managed = self._take_managed(home, doc)
         for key, value in (native or {}).items():
             if key in ("agentihooks", "mcp_servers") or key.startswith("_"):
                 continue
@@ -261,6 +280,7 @@ class CodexAdapter:
         doc.setdefault("notify", [python_bin, "-m", "hooks.targets.notify_shim"])
 
         self._dump_toml(config_path, doc)
+        _atomic_write(self._managed_sidecar(home), json.dumps(managed, indent=2) + "\n")
         _i._cprint(f"[OK] Wrote managed keys into {config_path}")
 
         self._write_hooks_json(home, native.get("_agentihooks", {}).get("env", {}))
@@ -518,10 +538,9 @@ class CodexAdapter:
         config_path = home / "config.toml"
         if config_path.exists():
             doc = self._load_toml(config_path)
-            agentihooks_tbl = doc.get("agentihooks")
-            managed = agentihooks_tbl.get("managed", {}) if isinstance(agentihooks_tbl, dict) else {}
+            managed = self._take_managed(home, doc)
             removed_keys = []
-            for key in list(managed.keys() if hasattr(managed, "keys") else []):
+            for key in list(managed):
                 if doc.get(key) == managed.get(key):
                     doc.pop(key, None)
                     removed_keys.append(key)
@@ -531,12 +550,11 @@ class CodexAdapter:
                 # revert a deliberate operator choice — warn instead, loudly:
                 # danger-full-access left behind is worth the operator's look.
                 _i._cprint(
-                    "  [!!] no [agentihooks].managed record — approval_policy/sandbox_mode "
+                    "  [!!] no managed-key record — approval_policy/sandbox_mode "
                     "left as-is; review them (a torn-down bypass install would have set "
                     '"never"/"danger-full-access").'
                 )
-            if "agentihooks" in doc:
-                doc.pop("agentihooks", None)
+            self._managed_sidecar(home).unlink(missing_ok=True)
             notify = doc.get("notify")
             if isinstance(notify, list) and any("notify_shim" in str(part) for part in notify):
                 doc.pop("notify", None)
