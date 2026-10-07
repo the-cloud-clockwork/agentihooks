@@ -37,8 +37,8 @@ def budget(environ: Mapping[str, str] | None = None) -> Budget:
 
     def number(name: str, default: float) -> float:
         try:
-            value = float(env.get(name, ""))
-        except ValueError:
+            value = float(env[name])
+        except (KeyError, ValueError):
             return default
         return value if value > 0 else default
 

@@ -24,15 +24,23 @@ def enabled(monkeypatch):
 
 
 class Clock:
-    def __init__(self):
+    def __init__(self, limit=1000):
         self.now = 0.0
         self.hooks = []
+        self.reads = 0
+        self.limit = limit
 
     def __call__(self):
+        self.reads += 1
+        if self.reads > 100_000:
+            raise RuntimeError("clock read without progress")
         return self.now
 
     def sleep(self, seconds):
+        assert seconds == trace_flush.POLL_SEC
         self.now += seconds
+        if self.now > self.limit:
+            raise RuntimeError("supervisor never exited")
         for at, action in list(self.hooks):
             if self.now >= at:
                 self.hooks.remove((at, action))
@@ -288,10 +296,12 @@ def test_an_attempt_is_killed_at_its_timeout(tmp_path, monkeypatch):
 
 class Receiver(http.server.BaseHTTPRequestHandler):
     spans: list = []
+    posts = 0
     delay = 0.0
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers["Content-Length"]))
+        type(self).posts += 1
         time.sleep(type(self).delay)
         request = ExportTraceServiceRequest.FromString(body)
         for resource in request.resource_spans:
@@ -308,7 +318,7 @@ class Receiver(http.server.BaseHTTPRequestHandler):
 
 @pytest.fixture
 def receiver():
-    Receiver.spans, Receiver.delay = [], 0.0
+    Receiver.spans, Receiver.posts, Receiver.delay = [], 0, 0.0
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Receiver)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield server
@@ -398,17 +408,21 @@ def test_live_exporter_ships_an_open_turn_and_the_rest_after_the_owner_is_killed
 
 
 def test_slow_endpoint_is_bounded_per_attempt_and_retried_later(live_export, tmp_path):
-    Receiver.delay = 3.0
+    Receiver.delay = 30.0
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("".join(json.dumps(r) + "\n" for r in _records()))
     _request("session", transcript, owner=live_export.pid)
-    limits = trace_flush.Budget(1, 1, 2)
     started = time.monotonic()
-    assert trace_flush._drain("session", str(transcript), limits, trace_flush.attempt, "interval") is False
-    assert time.monotonic() - started < 2 * 1 + 3
+    assert (
+        trace_flush._drain("session", str(transcript), trace_flush.Budget(1, 8, 1), trace_flush.attempt, "x") is False
+    )
+    assert time.monotonic() - started < 8 + 4
+    assert Receiver.posts, "the attempt never reached the endpoint"
     assert agent_trace._cursor("session")["pending"]
     Receiver.delay = 0.0
-    assert trace_flush._drain("session", str(transcript), limits, trace_flush.attempt, "interval") is True
+    assert (
+        trace_flush._drain("session", str(transcript), trace_flush.Budget(1, 30, 1), trace_flush.attempt, "x") is True
+    )
     assert not agent_trace._cursor("session")["pending"]
 
 
@@ -437,3 +451,213 @@ def test_hooks_only_enqueue_a_flush(handler, event, reason, home, enabled, monke
     getattr(hook_manager, handler)(payload)
     assert requests == [("s", str(transcript), reason)]
     assert "export_session" not in forked
+
+
+def test_hook_request_passes_empty_defaults_and_logs_a_failure(monkeypatch):
+    from hooks import hook_manager
+
+    requests, logged = [], []
+    monkeypatch.setattr(trace_flush, "request", lambda *args: requests.append(args))
+    monkeypatch.setattr(hook_manager, "log", lambda *args: logged.append(args))
+    hook_manager._request_trace_flush({}, "stop")
+    assert requests == [("", "", "stop")]
+
+    def fail(*args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(trace_flush, "request", fail)
+    hook_manager._request_trace_flush({"session_id": "s"}, "stop")
+    assert logged == [("trace flush request failed", {"error": "disk full"})]
+
+
+def _stat(proc, pid, start):
+    (proc / str(pid)).mkdir()
+    fields = " ".join(str(n) for n in range(1, 19))
+    (proc / str(pid) / "stat").write_text(f"{pid} (agent) S {fields} {start} 0\n")
+
+
+def test_owner_liveness_reads_the_given_proc_table(tmp_path):
+    _stat(tmp_path, 1, 7)
+    _stat(tmp_path, 2, 9)
+    assert trace_flush.start_time(2, tmp_path) == 9
+    assert trace_flush.alive(trace_flush.Owner(2, 9), tmp_path)
+    assert not trace_flush.alive(trace_flush.Owner(2, 8), tmp_path)
+    assert not trace_flush.alive(trace_flush.Owner(1, 7), tmp_path)
+    assert not trace_flush.alive(trace_flush.Owner(3, 0), tmp_path)
+
+
+def test_state_file_names_and_owner_parsing(home):
+    assert trace_flush.request_path("s").name == "s.request.json"
+    assert trace_flush.owner_path("s").name == "s.owner.json"
+    assert trace_flush.owner_path("s").parent == agent_trace.CURSOR_DIR
+    assert trace_flush._owner({}, "owner_") == trace_flush.Owner(0, 0)
+    assert trace_flush._owner({"owner_pid": "5", "owner_start": 6}, "owner_") == trace_flush.Owner(5, 6)
+    assert trace_flush._owner({"owner_pid": None, "owner_start": 6}, "owner_") == trace_flush.Owner(0, 0)
+    assert trace_flush._owner({"owner_pid": "x", "owner_start": 6}, "owner_") == trace_flush.Owner(0, 0)
+
+
+def test_request_record_defaults(home, enabled, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
+    assert not trace_flush.request("", "/t", "start", owner_pid=os.getpid(), spawn=lambda s: None)
+    trace_flush.request("s", "", "start", owner_pid=os.getpid(), spawn=lambda s: None)
+    first = json.loads(trace_flush.request_path("s").read_text())
+    assert first["transcript"] == "" and first["target"] == "claude"
+    assert isinstance(first["at"], int) and first["at"] > 0
+    trace_flush.request("s", "", "stop", owner_pid=os.getpid(), spawn=lambda s: None)
+    assert json.loads(trace_flush.request_path("s").read_text())["at"] > first["at"]
+
+
+def test_spawn_detaches_the_exporter(monkeypatch):
+    calls = []
+    monkeypatch.setattr("hooks._async.fork_and_call", lambda fn, *a, **k: calls.append((fn, a, k)))
+    trace_flush._spawn("s")
+    assert calls == [(trace_flush.run, ("s",), {"timeout_sec": 7 * 24 * 3600, "task_name": "trace_flush"})]
+
+
+def test_run_clears_the_alarm_lowers_priority_and_logs_the_outcome(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(trace_flush.signal, "alarm", lambda n: calls.append(("alarm", n)))
+    monkeypatch.setattr(trace_flush.os, "nice", lambda n: calls.append(("nice", n)))
+    monkeypatch.setattr(trace_flush, "supervise", lambda s: calls.append(("supervise", s)) or "owner exited")
+    trace_flush.run("s")
+    assert calls == [("alarm", 0), ("nice", 10), ("supervise", "s")]
+    assert capsys.readouterr().err == "trace_flush s: owner exited\n"
+
+
+def test_flush_once_reports_pending_work(monkeypatch, home):
+    calls = []
+
+    def export(session, path):
+        calls.append((session, path))
+        trace_flush._write(agent_trace._cursor_path(session), {"pending": pending})
+
+    monkeypatch.setattr(agent_trace, "export_session", export)
+    pending = [{"span": 1}]
+    assert trace_flush.flush_once("s", "/t") == 1
+    pending = []
+    assert trace_flush.flush_once("s", "/t") == 0
+    assert calls == [("s", "/t"), ("s", "/t")]
+
+
+def test_size_of_a_missing_transcript(tmp_path):
+    assert trace_flush._size(str(tmp_path / "missing")) == -1
+    (tmp_path / "t").write_text("abc")
+    assert trace_flush._size(str(tmp_path / "t")) == 3
+
+
+def _run(session, limits, outcome, clock, state):
+    calls = []
+
+    def send(session, path, timeout, trigger):
+        calls.append((clock(), trigger, timeout, path))
+        return outcome
+
+    result = trace_flush.supervise(session, limits, send, clock, clock.sleep, lambda owner: state["alive"])
+    return result, calls
+
+
+def test_custom_budget_is_used_for_interval_attempts_and_timeout(home, tmp_path):
+    transcript = tmp_path / "t.jsonl"
+    _grow(transcript)
+    _request("session", transcript)
+    clock, state = Clock(), {"alive": True}
+    clock.hooks += [(25, lambda: state.update(alive=False))]
+    result, calls = _run("session", trace_flush.Budget(10, 4, 2), False, clock, state)
+    assert result == "owner exited"
+    assert [(at, trigger, timeout) for at, trigger, timeout, _ in calls] == (
+        [(0, "request:start", 4)] * 2 + [(10, "interval", 4)] * 2 + [(20, "interval", 4)] * 2 + [(25, "final", 4)] * 2
+    )
+    assert {path for *_, path in calls} == {str(transcript)}
+
+
+def test_default_budget_is_read_when_none_is_given(home, tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_TRACE_FLUSH_ATTEMPTS", "2")
+    transcript = tmp_path / "t.jsonl"
+    _grow(transcript)
+    _request("session", transcript)
+    clock, state = Clock(), {"alive": False}
+    result, calls = _run("session", None, False, clock, state)
+    assert [(at, trigger, timeout) for at, trigger, timeout, _ in calls] == [(0, "final", 5.0)] * 2
+
+
+def test_nothing_is_sent_without_a_readable_transcript(home, tmp_path):
+    _request("session", tmp_path / "missing.jsonl")
+    clock, state = Clock(), {"alive": True}
+    clock.hooks += [(20, lambda: state.update(alive=False))]
+    result, calls = _run("session", trace_flush.Budget(15, 5, 3), True, clock, state)
+    assert result == "owner exited" and calls == []
+    trace_flush._write(trace_flush.request_path("session"), {"owner_pid": 0, "reason": "start", "at": 1})
+    result, calls = _run("session", trace_flush.Budget(15, 5, 3), True, Clock(), state)
+    assert calls == []
+
+
+def test_a_wake_without_a_transcript_does_not_hold_later_requests(home, tmp_path):
+    transcript = tmp_path / "t.jsonl"
+    _grow(transcript)
+    trace_flush._write(
+        trace_flush.request_path("session"),
+        {"owner_pid": os.getpid(), "owner_start": trace_flush.start_time(os.getpid()), "target": "claude", "at": 1},
+    )
+    clock, state = Clock(), {"alive": True}
+    clock.hooks += [(4, lambda: _request("session", transcript, "prompt"))]
+    clock.hooks += [(6, lambda: state.update(alive=False))]
+    result, calls = _run("session", trace_flush.Budget(15, 5, 3), True, clock, state)
+    assert [(at, trigger) for at, trigger, *_ in calls] == [(4, "request:prompt")]
+
+
+def test_a_request_without_a_reason_is_named_plainly(home, tmp_path):
+    transcript = tmp_path / "t.jsonl"
+    _grow(transcript)
+    _request("session", transcript)
+    record = json.loads(trace_flush.request_path("session").read_text())
+    del record["reason"]
+    trace_flush._write(trace_flush.request_path("session"), record)
+    clock, state = Clock(), {"alive": True}
+    clock.hooks += [(1, lambda: state.update(alive=False))]
+    result, calls = _run("session", trace_flush.Budget(15, 5, 3), True, clock, state)
+    assert [trigger for _, trigger, *_ in calls] == ["request:"]
+
+
+def test_the_owner_record_names_the_running_exporter_until_it_exits(home, tmp_path):
+    transcript = tmp_path / "t.jsonl"
+    _grow(transcript)
+    _request("session", transcript)
+    me = {"supervisor_pid": os.getpid(), "supervisor_start": trace_flush.start_time(os.getpid())}
+    seen = []
+    clock, state = Clock(), {"alive": True}
+    clock.hooks += [(3, lambda: (_grow(transcript), state.update(alive=False)))]
+
+    def send(*args):
+        seen.append(json.loads(trace_flush.owner_path("session").read_text()))
+        return True
+
+    trace_flush.supervise("session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda o: state["alive"])
+    assert seen == [me, me]
+    assert not trace_flush.owner_path("session").exists()
+
+
+def test_exporters_create_their_state_folder_and_run_one_after_another(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "a" / "b")
+    for _ in range(2):
+        clock = Clock()
+        assert trace_flush.supervise("s", trace_flush.Budget(15, 5, 3), None, clock, clock.sleep, lambda o: False) == (
+            "owner exited"
+        )
+
+
+def test_root_reports_the_trigger_and_unwritten_events(monkeypatch, home):
+    monkeypatch.setattr("hooks.observability.correlation.resolve", lambda session: {})
+    monkeypatch.setattr("hooks.observability.signals.attributes", lambda session: {})
+    monkeypatch.delenv(agent_trace.TRIGGER_ENV, raising=False)
+    root = agent_trace._root_attributes("s")
+    assert root["agentihooks.export.trigger"] == "direct"
+    assert root["agentihooks.export.unwritten_events.state"] == "unavailable"
+    monkeypatch.setenv("AGENTIHOOKS_TRACE_FLUSH_TRIGGER", "interval")
+    assert agent_trace._root_attributes("s")["agentihooks.export.trigger"] == "interval"
+
+
+def test_the_trigger_does_not_make_an_observation_new():
+    spec = agent_trace.SpanSpec("root", 1, None, 0, 1, {"agentihooks.export.trigger": "interval", "a": 1})
+    later = agent_trace.SpanSpec("root", 1, None, 0, 1, {"agentihooks.export.trigger": "final", "a": 1})
+    changed = agent_trace.SpanSpec("root", 1, None, 0, 1, {"agentihooks.export.trigger": "final", "a": 2})
+    assert agent_trace._revision(spec) == agent_trace._revision(later) != agent_trace._revision(changed)
