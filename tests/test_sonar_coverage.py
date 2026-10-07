@@ -1,3 +1,5 @@
+import os
+import shlex
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -92,3 +94,20 @@ for shard in range(1, 5):
         f"{package}/part_{shard}.py" for package in ("hooks", "scripts") for shard in range(1, 5)
     }
     assert all(int(line.attrib["hits"]) > 0 for line in report.findall(".//line"))
+
+
+def test_coverage_options_do_not_reach_nested_test_runners(tmp_path):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
+    step = next(step for step in workflow["jobs"]["unit"]["steps"] if step.get("name") == "Run tests")
+    invocation = shlex.split(step["run"].split(" tests/", 1)[0])
+    invocation[0] = sys.executable
+    fixture = tmp_path / "test_environment.py"
+    fixture.write_text("import os\ndef test_nested_runner_environment():\n    assert not os.getenv('PYTEST_ADDOPTS')\n")
+    result = subprocess.run(
+        [*invocation, str(fixture)],
+        cwd=tmp_path,
+        env={**os.environ, "PYTEST_ADDOPTS": "-q"},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
