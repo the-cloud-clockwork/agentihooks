@@ -118,7 +118,8 @@ def pr_view(url, run=subprocess.run):
         if raw is None:
             return None
         title, body, files = raw["title"], raw["body"] or "", [f["path"] for f in raw["files"]]
-        comments = _gh(["gh", "api", "--paginate", "--slurp", f"repos/{owner}/{repo}/pulls/{number}/comments"], run)
+        path = f"repos/{owner}/{repo}/pulls/{number}/comments"
+        comments = _gh(["gh", "api", "--paginate", "--jq", ".[] | @json", path], run)
         if comments.returncode:
             return None
         return {
@@ -128,7 +129,7 @@ def pr_view(url, run=subprocess.run):
             "reviewer_findings": {
                 "reviews": raw.get("reviews", []),
                 "comments": raw.get("comments", []),
-                "inline": [comment for page in json.loads(comments.stdout) for comment in page],
+                "inline": [json.loads(line) for line in comments.stdout.splitlines() if line.strip()],
             },
         }
     except (OSError, subprocess.SubprocessError, ValueError, KeyError):
