@@ -37,7 +37,7 @@ def test_collection_reads_one_snapshot_while_writes_land(live, monkeypatch, path
     )
     work, completed = Queue(), Queue()
     calls, snapshots = [], []
-    request = ResourceClient.request
+    request, read = ResourceClient.request, resources.read
 
     def writer():
         while (index := work.get()) is not None:
@@ -59,6 +59,7 @@ def test_collection_reads_one_snapshot_while_writes_land(live, monkeypatch, path
 
     def write_after(self, slug, resource, payload=None):
         calls.append((resource, payload))
+        assert len(calls) <= 3
         reply = request(self, slug, resource, payload)
         if resource == "export":
             snapshots.append(reply["data"])
@@ -66,7 +67,12 @@ def test_collection_reads_one_snapshot_while_writes_land(live, monkeypatch, path
         assert completed.get(timeout=5) == len(calls)
         return reply
 
+    def read_snapshot(document, resource, query):
+        assert query["limit"] == 100
+        return read(document, resource, query)
+
     monkeypatch.setattr(ResourceClient, "request", write_after)
+    monkeypatch.setattr(resources, "read", read_snapshot)
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(writer)
         try:
