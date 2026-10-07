@@ -1,4 +1,8 @@
 {
+  "scripts/swarm/stack.py:scripts.swarm.stack.x__restack_base__mutmut_13:14cda51a2caf4cc4c81831736d54310a4b6a693ca5a80db277471627fe5715f9": {
+    "reader": "Standards",
+    "reason": "The parked stacked base is the producer generated merge base commit SHA. Git rev-parse --verify resolves SHA^{commit} identically with --end-of-options and --END-OF-OPTIONS: both exit zero with the same resolved SHA and empty stderr. All later operations receive that same SHA; the ruling excludes option-like metadata."
+  },
   "scripts/init_agent.py:scripts.init_agent.x_main__mutmut_7:9278452f74c086ae83e213fd3a422b61e1b96f750ca792ec23358bc7608879d5": {
     "reader": "Standards /root/standards_reader",
     "reason": "Fallback case is erased by capitalize: claude and CLAUDE both become Claude. Truthy inputs bypass the fallback identically; every falsy input yields the same source label and refusal behavior."
@@ -1819,8 +1823,8 @@
     "reader": "Standards /root/standards_reader",
     "reason": "The only changed expression is json.dumps ensure_ascii=False to ensure_ascii=None on the final wire serialization. Both select the same false branch of the JSON encoder and produce identical unescaped Unicode text for every serializable result. All other serialization options, status, content type and handler.send arguments remain unchanged; exceptions retain the same behavior."
   },
-  "scripts/swarm/stack.py:scripts.swarm.stack.x__restack_base__mutmut_13:14cda51a2caf4cc4c81831736d54310a4b6a693ca5a80db277471627fe5715f9": {
+  "scripts/gates/intent_calibration.py:scripts.gates.intent_calibration.x_verdicts__mutmut_10:fbb1829653dd6a5afd03395028b86d6066fa174c44f8559ebed783e722acd9bf": {
     "reader": "Standards",
-    "reason": "The parked stacked base is the producer generated merge base commit SHA. Git rev-parse --verify resolves SHA^{commit} identically with --end-of-options and --END-OF-OPTIONS: both exit zero with the same resolved SHA and empty stderr. All later operations receive that same SHA; the ruling excludes option-like metadata."
+    "reason": "recorded() ignores its state argument and returns the recorded answers, so passing None instead of the case state to intent.judge gives identical output in verdicts, side_of, measure and main."
   }
 }
