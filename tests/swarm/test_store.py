@@ -69,6 +69,29 @@ def test_legacy_claim_counts_do_not_prove_started_lives(store):
     assert store.redis.hget(store.key("smoke", "claims"), "t1") == "5"
 
 
+def test_verified_historical_starts_keep_their_life_budget(store):
+    failed = AgentRecord("failed", "eng", "t1", state="starting")
+    started = AgentRecord(
+        "started",
+        "eng",
+        "t1",
+        started_at=1,
+        profile_decision={"validation": {"state": "validated"}},
+    )
+    store.put_agent("smoke", failed)
+    store.drop_agent("smoke", failed.name)
+    store.put_agent("smoke", started)
+    assert store.claims("smoke", "t1") == 1
+    store.drop_agent("smoke", started.name)
+    assert store.claims("smoke", "t1") == 1
+    assert [(row["agent"], row["state"]) for row in store.launches("smoke")] == [("started", "started")]
+    store.count_claim("smoke", "t1")
+    store.record_launch("smoke", AgentRecord("next", "eng", "t1"), "started")
+    assert store.claims("smoke", "t1") == 2
+    store.reset_claims("smoke", "t1")
+    assert store.claims("smoke", "t1") == 0
+
+
 def test_a_lapsed_lease_frees_the_claim(store):
     store.create(config())
     store.claim("smoke", "t1", "engineer@a1b2c3-0001", lease_ms=60_000)

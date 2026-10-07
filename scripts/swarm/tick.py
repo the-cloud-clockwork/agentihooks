@@ -544,8 +544,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                 if isinstance(exc, ProfileUnresolved):
                     actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
                 return actions
-            store.record_launch(slug, record, "started")
             store.count_claim(slug, task["id"])
+            store.record_launch(slug, record, "started")
             store.put_agent(slug, placed_record(record, placed))
             launch_check.begin(store, slug, record, now_ms)
             store.count_spawn(slug, placed.harness)
