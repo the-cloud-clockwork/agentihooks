@@ -27,7 +27,7 @@ OPERATOR = "operator"
 ASK_WORDS = 12
 RED = {"FAILURE", "ERROR", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"}
 PASSED = {"SUCCESS", "SKIPPED"}
-FIELDS = "state,mergedAt,commits,statusCheckRollup"
+FIELDS = "state,mergedAt,commits,statusCheckRollup,headRefOid"
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,7 @@ class PullRequest:
     red: bool
     resolved: bool = False
     failed: tuple = ()
+    head: str = ""
 
 
 def iso_ms(text):
@@ -59,6 +60,7 @@ def pull_request(raw):
             for check, result in zip(checks, results)
             if result in RED
         ),
+        raw.get("headRefOid") or "",
     )
 
 
