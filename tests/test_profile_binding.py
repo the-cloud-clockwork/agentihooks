@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -57,11 +58,14 @@ def test_quota_transfer_from_codex_reports_unsupported_before_launch(tmp_path, m
         {"AGENTIHOOKS_TARGET": "codex"},
     )
     assert result == 2
-    assert "unsupported" in capsys.readouterr().err
+    assert (
+        capsys.readouterr().err
+        == "agentihooks init-agent: unsupported quota transfer: Codex cannot transfer to a Claude account\n"
+    )
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
-@pytest.mark.parametrize("control", ["valid", "wrong", "missing", "absent"])
+@pytest.mark.parametrize("control", ["valid", "wrong", "missing", "absent", "account"])
 def test_launch_success_requires_live_binding_canary(tmp_path, monkeypatch, capsys, target, control):
     from scripts import init_agent, select_profile
 
@@ -74,7 +78,7 @@ def test_launch_success_requires_live_binding_canary(tmp_path, monkeypatch, caps
     monkeypatch.setattr(
         select_profile,
         "prepare",
-        lambda *a: ({"AGENTIHOOKS_PROFILE": "engineer", binding.HOMES[target]: str(home)}, []),
+        lambda *a: ({"AGENTIHOOKS_PROFILE": "engineer", binding.HOMES[target]: str(home)}, a[4]),
     )
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda *a: (target, "explicit"))
     monkeypatch.setattr(init_agent.claude_trust, "ensure_trusted", lambda *a: ("trusted", ""))
@@ -82,13 +86,17 @@ def test_launch_success_requires_live_binding_canary(tmp_path, monkeypatch, caps
 
     def launch(launcher, directory, name, args, agent, environ):
         init_agent._started_marker(launcher).touch()
-        init_agent._route_report(launcher).write_text('{"status":"direct"}')
+        init_agent._route_report(launcher).write_text("status=routed\naccount=routed-account\n")
         env = dict(environ)
         if control == "wrong":
             env["AGENTIHOOKS_PROFILE"] = "qa"
         if control == "missing":
             env[binding.HOMES[target]] = str(tmp_path / "missing")
-        monkeypatch.setattr(binding, "process", lambda: (123, target, env, "test-account"))
+        assert env["AGENTIHOOKS_RUN_MODEL"] == "configured-model"
+        assert env["AGENTIHOOKS_RUN_EFFORT"] == "medium"
+        assert Path(environ[binding.REPORT]).is_file()
+        actual_account = "different-account" if control == "account" else "routed-account"
+        monkeypatch.setattr(binding, "process", lambda: (123, target, env, actual_account))
         if control != "absent":
             try:
                 binding.validate(rendered["canary"])
@@ -109,15 +117,38 @@ def test_launch_success_requires_live_binding_canary(tmp_path, monkeypatch, caps
         "--route-timeout",
         "0.1",
     ]
-    result = init_agent.main(args, {"XDG_RUNTIME_DIR": str(tmp_path / "runtime")})
+    native = (
+        ["--model", "configured-model", "--effort", "medium"]
+        if target == "claude"
+        else ["-m", "configured-model", "-c", 'model_reasoning_effort="medium"']
+    )
+    result = init_agent.main([*args, "--", *native], {"XDG_RUNTIME_DIR": str(tmp_path / "runtime")})
     output = capsys.readouterr()
+    from scripts.swarm.runtime import parse_fields
+
+    fields = parse_fields(output.out)
     if control == "valid":
         assert result == 0
-        assert "profile_validation=validated" in output.out
-        assert '"pid":123' in output.out
+        assert fields["profile_validation"] == "validated"
+        observed = json.loads(fields["profile_binding"])
+        assert (observed["pid"], observed["profile"], observed["harness"], observed["account"]) == (
+            123,
+            "engineer",
+            target,
+            "routed-account",
+        )
+        assert (observed["model"], observed["effort"]) == ("configured-model", "medium")
+        assert (fields["model"], fields["effort"]) == ("configured-model", "medium")
     else:
         assert result == 3
-        assert "profile_validation=failed" in output.out
+        assert fields["profile_validation"] == "failed"
+        reasons = {
+            "wrong": "live harness profile mismatch with requested choice",
+            "missing": f"missing profile home: {tmp_path / 'missing'}",
+            "absent": "mounted profile canary did not validate before timeout",
+            "account": "live process account differs from requested route",
+        }
+        assert output.err == f"agentihooks init-agent: {reasons[control]}\n"
 
 
 def test_swarm_refuses_a_started_process_without_validation(tmp_path):
@@ -136,7 +167,7 @@ def test_swarm_refuses_a_started_process_without_validation(tmp_path):
     config = SimpleNamespace(slug="proof", repo=str(tmp_path), autonomy="delegate", compact_limit=0)
     with pytest.raises(SpawnError, match="validation is missing"):
         runtime._launch(config, "eng", "task", "worker", ["init-agent", "--agent", "codex", "--profile", "engineer"])
-    assert "terminate-agent" in calls[-1]
+    assert calls[-1][1:] == ["terminate-agent", "worker", "--force-shared"]
 
 
 def test_supported_quota_transfer_preserves_resolved_run_options(monkeypatch):
@@ -206,7 +237,7 @@ def test_resume_refuses_a_missing_original_profile(tmp_path):
     from tests.swarm.test_runtime import _resuming
 
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
-    with pytest.raises(SpawnError, match="original profile"):
+    with pytest.raises(SpawnError, match="^unsupported resume: original profile is missing$"):
         runtime.resume(config, replace(agent, profile=""), "continue")
     assert not seen["runs"]
 
@@ -259,7 +290,10 @@ def test_continuation_without_required_profile_refuses_before_spawn(tmp_path, mo
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda *a: ("claude", "explicit"))
     result = init_agent.main([*args, "--dir", str(tmp_path), "--prompt", "continue"], {})
     assert result == 2
-    assert "original required profile" in capsys.readouterr().err
+    assert (
+        capsys.readouterr().err
+        == "agentihooks init-agent: unsupported continuation: original required profile is missing; pass --profile\n"
+    )
 
 
 @pytest.mark.parametrize("harness", ["claude", "codex"])
@@ -271,6 +305,6 @@ def test_resume_refuses_to_change_recorded_effort_when_policy_changed(tmp_path, 
 
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness)
     config.effort_min = config.effort_max = "high"
-    with pytest.raises(SpawnError, match="saved effort"):
+    with pytest.raises(SpawnError, match="^unsupported transfer: saved effort is outside the current swarm range$"):
         runtime.resume(config, replace(agent, effort="medium"), "continue")
     assert not seen["runs"]

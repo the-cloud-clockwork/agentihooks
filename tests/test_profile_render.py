@@ -121,6 +121,8 @@ def test_claude_render_tree(world, capsys):
     assert "KIT README" not in persona and "KIT NOTES" not in persona
     assert persona.startswith(render.HEADER)
     assert persona.endswith(f"\n\n{render.FOOTER}\n")
+    assert persona.count(render.FOOTER) == 1
+    assert render.binding.inspect(out, "rb-role", "claude")["profile"] == "rb-role"
 
 
 @pytest.mark.parametrize("role", ["engineer", "cicd", "planner", "master", "qa", "frontend"])
@@ -600,6 +602,7 @@ def test_codex_render_links_into_the_claude_profile(world):
     claude = render.rendered_root() / "rb-role" / "claude"
     assert out == render.rendered_root() / "rb-role" / "codex"
     assert os.readlink(out / "AGENTS.md") == str(claude / "CLAUDE.md")
+    assert render.binding.inspect(out, "rb-role", "codex")["profile"] == "rb-role"
     linked = {p.name: os.readlink(p) for p in (out / "skills").iterdir() if p.is_symlink()}
     assert linked == {p.name: str(p) for p in (claude / "skills").iterdir()}
     assert {"bundle-skill", "role-skill"} <= set(linked)

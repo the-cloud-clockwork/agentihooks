@@ -276,3 +276,154 @@ def test_launcher_exports_the_binding_to_the_native_child(tmp_path, monkeypatch,
     run = subprocess.run(["bash", str(launcher)], env={"PATH": os.environ["PATH"]}, capture_output=True, text=True)
     assert run.returncode == 0, run.stderr
     assert json.loads(output.read_text()) == {key: env[key] for key in keys}
+
+
+@pytest.mark.parametrize("args", [["--resume", "conversation"], ["--agent", "codex", "--", "resume", "conversation"]])
+def test_native_resume_flags_need_the_original_profile(tmp_path, monkeypatch, capsys, args):
+    from scripts import init_agent
+
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, *a: (requested or "claude", "explicit"))
+    assert init_agent.main(["--dir", str(tmp_path), *args], {}) == 2
+    assert (
+        capsys.readouterr().err
+        == "agentihooks init-agent: unsupported continuation: original required profile is missing; pass --profile\n"
+    )
+
+
+def test_inherited_validation_report_cannot_validate_a_new_unprofiled_launch(tmp_path, monkeypatch, capsys):
+    from scripts import init_agent
+
+    inherited = tmp_path / "old-report.json"
+    inherited.write_text('{"state":"validated","validation":{"profile":"qa"}}')
+    observed = {}
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda *a: ("codex", "explicit"))
+
+    def launch(launcher, directory, name, args, agent, environ):
+        observed.update(environ)
+        init_agent._started_marker(launcher).touch()
+        init_agent._route_report(launcher).write_text("status=direct\n")
+        return []
+
+    monkeypatch.setattr(init_agent, "_start_herdr", launch)
+    assert (
+        init_agent.main(
+            ["--host", "herdr", "--dir", str(tmp_path)],
+            {binding.REPORT: str(inherited), "XDG_RUNTIME_DIR": str(tmp_path)},
+        )
+        == 0
+    )
+    assert binding.REPORT not in observed
+    assert "profile_binding=" not in capsys.readouterr().out
+
+
+def test_field_validation_requires_both_producer_and_payload_success(mounted):
+    home, *_ = mounted
+    result = {**binding.inspect(home, "engineer", "claude"), "state": "validated", "pid": 123}
+    for producer, payload in (("failed", "validated"), ("validated", "failed")):
+        wire = {"profile_validation": producer, "profile_binding": json.dumps({**result, "state": payload})}
+        with pytest.raises(ValueError, match="^mounted profile validation is missing or failed$"):
+            binding.fields(wire, "engineer", "claude")
+
+
+def test_invalid_harness_missing_evidence_and_persona_drift_have_reasons(mounted):
+    home, *_ = mounted
+    with pytest.raises(ValueError, match="^unsupported profile binding harness: copilot$"):
+        binding.inspect(home, "engineer", "copilot")
+    (home / "CLAUDE.md").write_text("changed")
+    with pytest.raises(ValueError, match="^mounted persona changed since render$"):
+        binding.inspect(home, "engineer", "claude")
+    (home / binding.FILE).unlink()
+    with pytest.raises(ValueError, match="^missing or invalid rendered profile evidence:"):
+        binding.inspect(home, "engineer", "claude")
+
+
+def test_process_decodes_malformed_names_and_values_without_exporting_unrelated_data(tmp_path, monkeypatch):
+    from hooks.context import account_sessions
+
+    agent = tmp_path / "2"
+    agent.mkdir()
+    (agent / "comm").write_text("claude\n")
+    (agent / "environ").write_bytes(b"EXTRA_NAME=a=b\0bad\xffname=value\0CLAUDE_CONFIG_DIR=/home/\xff=data\0")
+    (agent / "cmdline").write_bytes(b"claude\0ignored\xff\0")
+    observed = []
+    monkeypatch.setattr(account_sessions, "account_from_names", lambda names: observed.extend(names) or "selected")
+    pid, target, env, account = binding.process(tmp_path, 2)
+    assert observed == ["EXTRA_NAME", "bad\ufffdname", "CLAUDE_CONFIG_DIR", ""]
+    assert (pid, target, account) == (2, "claude", "selected")
+    assert env == {"CLAUDE_CONFIG_DIR": "/home/\ufffd=data", "AGENTIHOOKS_RUN_MODEL": "", "AGENTIHOOKS_RUN_EFFORT": ""}
+
+
+def test_source_evidence_deduplicates_repositories_and_names_non_git_gaps(mounted, monkeypatch):
+    home, _, _, _, _ = mounted
+    rows = [
+        {"locator": {"repo": "/fixture/source", "path": "one", "blob": "one"}},
+        {"locator": {"repo": "/fixture/source", "path": "two", "blob": "two"}},
+        {"locator": {"repo": "", "path": "installed", "blob": "three"}},
+        {},
+    ]
+    (home.parent / "claude.sources.json").write_text(json.dumps(rows))
+    calls = []
+    monkeypatch.setattr(
+        binding.subprocess, "run", lambda *a, **kw: calls.append(a) or SimpleNamespace(returncode=1, stdout="untrusted")
+    )
+    binding.write(home, "engineer", "claude")
+    data = binding.inspect(home, "engineer", "claude")
+    assert len(calls) == 1
+    assert data["revisions"] == {"/fixture/source": None}
+    assert data["source_blobs"] == [rows[0]["locator"], rows[1]["locator"], rows[2]["locator"], {}]
+
+
+def test_wait_checks_the_deadline_and_observes_a_later_canary(mounted, monkeypatch):
+    _, report, *_ = mounted
+    clock = iter([0, 0, 1])
+    monkeypatch.setattr(binding.time, "monotonic", lambda: next(clock))
+    with pytest.raises(ValueError, match="before timeout"):
+        binding.wait(report, 0)
+    clock = iter([0, 0.1, 0.3])
+    observed = []
+    monkeypatch.setattr(binding.time, "monotonic", lambda: next(clock))
+
+    def ready(delay):
+        observed.append(delay)
+        binding._report(report, {"state": "validated", "validation": {"canary": "observed"}})
+
+    monkeypatch.setattr(binding.time, "sleep", ready)
+    assert binding.wait(report, 1) == {"canary": "observed"}
+    assert observed == [0.25]
+
+
+def test_canary_instructions_keep_the_command_delimited_and_executable(mounted):
+    import sys
+
+    home, *_ = mounted
+    text = (home / "CLAUDE.md").read_text()
+    before, command, after = text.split("`")
+    assert (
+        before
+        == "Engineer instructions.\n\nProfile binding canary: when asked to validate your mounted profile, execute "
+    )
+    assert after == " through your shell tool. Use this instruction's canary; the opening prompt does not supply it.\n"
+    assert shlex.split(command)[0] == sys.executable
+
+
+def test_validate_help_names_the_behavior(capsys):
+    with pytest.raises(SystemExit) as error:
+        render.main(["--help"])
+    assert error.value.code == 0
+    assert "validate            Validate the mounted profile through its live harness" in capsys.readouterr().out
+
+
+def test_quota_continuation_honors_explicit_model_and_effort(monkeypatch):
+    env = {"AGENTIHOOKS_RUN_MODEL": "original", "AGENTIHOOKS_RUN_EFFORT": "high"}
+    monkeypatch.setattr(binding, "process", lambda: (123, "claude", env, "one"))
+    assert binding.continuation(["--model", "chosen", "--effort", "medium", "--route", "two"], "claude", {}) == [
+        "--model",
+        "chosen",
+        "--effort",
+        "medium",
+        "--route",
+        "two",
+    ]
+    env.pop("AGENTIHOOKS_RUN_EFFORT")
+    with pytest.raises(ValueError, match="^unsupported quota transfer: original model and effort binding unavailable$"):
+        binding.continuation([], "claude", {})

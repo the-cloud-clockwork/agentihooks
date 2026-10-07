@@ -274,6 +274,33 @@ def test_handoff_excludes_this_account_and_never_falls_back_to_bare(monkeypatch,
     assert "--agentihooks-fallback-bare" not in text
 
 
+def test_handoff_preserves_explicit_native_choices(monkeypatch, tmp_path, capsys):
+    assert (
+        _handoff(monkeypatch, tmp_path, None, extra=["--dry-run", "--", "--model", "chosen", "--effort", "high"]) == 0
+    )
+    out = capsys.readouterr().out
+    assert "model=chosen\n" in out and "effort=high\n" in out
+    launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh"))
+    assert "--model chosen --effort high" in launcher.read_text()
+
+
+def test_handoff_refuses_changed_effort_policy_before_terminal_launch(monkeypatch, tmp_path, capsys):
+    assert (
+        _handoff(
+            monkeypatch,
+            tmp_path,
+            None,
+            extra=["--dry-run"],
+            env_extra={"AGENTIHOOKS_SWARM_LANE": "eng", "AGENTIHOOKS_SWARM_EFFORT_RANGE": "high:high"},
+        )
+        == 2
+    )
+    assert (
+        capsys.readouterr().err
+        == "agentihooks init-agent: unsupported quota transfer: saved effort is outside the current swarm range\n"
+    )
+
+
 def test_handoff_needs_a_handoff_document(monkeypatch, tmp_path, capsys):
     rc = init_agent.main(["--dir", str(tmp_path), "--handoff", "--dry-run"], {"HOME": str(tmp_path)})
 
@@ -318,7 +345,7 @@ def test_failed_route_fails_the_handoff_and_marks_nothing(monkeypatch, tmp_path,
     assert rc == 3
     assert marked == []
     assert "handoff=failed" in captured.out
-    assert "handoff failed" in captured.err
+    assert captured.err == "agentihooks init-agent: handoff failed; the new session was not routed to another account\n"
 
 
 def test_agenti_writes_the_route_report_and_honours_exclusions(monkeypatch, tmp_path):
