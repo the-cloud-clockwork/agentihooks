@@ -28,11 +28,12 @@ def past_window(items, now_ms, window_ms):
         if item["state"] in CLOSED or waited < window_ms:
             continue
         minutes = waited // MINUTE_MS
+        category = "unread delivery" if item["state"] == "pending" else "delivered backlog"
         found.append(
             Finding(
                 "inbox past window",
                 item["id"],
-                f"{item['state']} for {plural(minutes, 'minute')}",
+                f"{category}; sent {plural(minutes, 'minute')} ago",
                 (
                     _route(item),
                     gist(item["text"]),
