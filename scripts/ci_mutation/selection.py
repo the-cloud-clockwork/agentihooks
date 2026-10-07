@@ -70,7 +70,8 @@ def stats_shards(root: Path, files: list[str], durations: dict[str, float], coun
         lightest = loads.index(min(loads))
         loads[lightest] += sum(seconds[path] for path in unit)
         shards[lightest].extend(unit)
-    return shards
+    # pytest drops a package conftest for files given after a file from another folder.
+    return [sorted(shard) for shard in shards]
 
 
 def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, basetemp: str) -> None:
