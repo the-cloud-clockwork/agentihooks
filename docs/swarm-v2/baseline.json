@@ -1,0 +1,199 @@
+{
+  "schema": "swarm-v2-baseline/1",
+  "observed_at": "2026-10-07T19:28:16Z",
+  "repositories": [
+    {
+      "repo": "agentihooks",
+      "source": {
+        "branch": "dev",
+        "status": "resolved",
+        "commit": "d074deceeeb0ed58a16eccd15acf2165982385bb"
+      },
+      "interfaces": [
+        {
+          "path": "CLAUDE.md",
+          "status": "present"
+        },
+        {
+          "path": "scripts/swarm/store.py",
+          "status": "present"
+        },
+        {
+          "path": "scripts/swarm/runtime.py",
+          "status": "present"
+        },
+        {
+          "path": "scripts/terminate_agent.py",
+          "status": "present"
+        },
+        {
+          "path": "scripts/swarm_ledger/ledger.py",
+          "status": "present"
+        },
+        {
+          "path": "hooks/context/project_identity.py",
+          "status": "present"
+        },
+        {
+          "path": "hooks/memory/transcript_reader.py",
+          "status": "present"
+        },
+        {
+          "path": "hooks/targets/normalizer.py",
+          "status": "present"
+        },
+        {
+          "path": "scripts/swarm/snapshot.py",
+          "status": "present"
+        },
+        {
+          "path": "hooks/memory/store.py",
+          "status": "present"
+        },
+        {
+          "path": "hooks/context/project_cache.py",
+          "status": "present"
+        }
+      ],
+      "deployed": [
+        {
+          "name": "workstation agentihooks install",
+          "status": "verified",
+          "value": "agentihooks 2.17.0"
+        }
+      ],
+      "unknown_live": [
+        "swarm controller on Anton (not deployed yet)",
+        "editable checkout revision serving the shared ledger server"
+      ]
+    },
+    {
+      "repo": "agentibrain-kernel",
+      "source": {
+        "branch": "dev",
+        "status": "resolved",
+        "commit": "e58e687e8c9edc6acab8115e7eb15db302b704dc"
+      },
+      "interfaces": [
+        {
+          "path": "services/mcp/app/tools/arcs.py",
+          "status": "present"
+        },
+        {
+          "path": "docs/CLI.md",
+          "status": "present"
+        },
+        {
+          "path": "agentibrain/config.py",
+          "status": "present"
+        },
+        {
+          "path": "agentibrain/templates/compose/compose.yml.j2",
+          "status": "present"
+        },
+        {
+          "path": "services/brain-ops/extract.py",
+          "status": "present"
+        },
+        {
+          "path": "services/brain-ops/cluster.py",
+          "status": "present"
+        },
+        {
+          "path": "services/brain-api/app/feed.py",
+          "status": "present"
+        },
+        {
+          "path": "services/brain-ops/brain_apply.py",
+          "status": "present"
+        },
+        {
+          "path": "services/brain-ops/embed_arcs.py",
+          "status": "present"
+        },
+        {
+          "path": "services/brain-ops/brain_tick_prompt.py",
+          "status": "present"
+        }
+      ],
+      "deployed": [
+        {
+          "name": "brain-api version",
+          "status": "unverified",
+          "value": null,
+          "reason": "endpoint answered without version"
+        }
+      ],
+      "unknown_live": [
+        "brain-api image digest on its compose host",
+        "brain-api version"
+      ]
+    },
+    {
+      "repo": "antoncore",
+      "source": {
+        "branch": "dev",
+        "status": "resolved",
+        "commit": "0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c"
+      },
+      "interfaces": [
+        {
+          "path": "stacks/terraform/modules/ec2-arc-runners/asg.tf",
+          "status": "present"
+        },
+        {
+          "path": "stacks/terraform/modules/ec2-arc-runners/variables.tf",
+          "status": "present"
+        },
+        {
+          "path": "k8s/charts/cluster-autoscaler/values.yaml",
+          "status": "present"
+        },
+        {
+          "path": "automation/packer/files/anton-k3s-join.sh",
+          "status": "present"
+        }
+      ],
+      "deployed": [
+        {
+          "name": "ArgoCD synced revision",
+          "status": "verified",
+          "value": "0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c",
+          "matches_source": true
+        },
+        {
+          "name": "cluster autoscaler image",
+          "status": "verified",
+          "value": "registry.k8s.io/autoscaling/cluster-autoscaler:v1.33.0"
+        }
+      ],
+      "unknown_live": [
+        "live autoscaling group desired capacity and instance counts (AWS read access not exercised)"
+      ]
+    }
+  ],
+  "drift": [
+    {
+      "repo": "agentihooks",
+      "from": "e440d3fb7bdd0491c8896ca528440041a43c36c4",
+      "to": "d074deceeeb0ed58a16eccd15acf2165982385bb",
+      "observed_at": "2026-10-07T19:28:08Z"
+    },
+    {
+      "repo": "agentibrain-kernel",
+      "from": "80174260fee601659b94b029b9a5a58ee8e1ef04",
+      "to": "e58e687e8c9edc6acab8115e7eb15db302b704dc",
+      "observed_at": "2026-10-07T19:28:08Z"
+    },
+    {
+      "repo": "antoncore",
+      "from": "94b2a670daf11eeed02b853b08b3b29c451a6b13",
+      "to": "0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c",
+      "observed_at": "2026-10-07T19:28:08Z"
+    }
+  ],
+  "measurements": {
+    "baseline_unverified_items": 1,
+    "baseline_drift_items": 0
+  }
+}
