@@ -196,6 +196,16 @@ def test_mutation_browser_dependencies_use_the_responsive_mirror():
     assert steps[mirror]["timeout-minutes"] == 1
 
 
+def test_lint_and_equivalence_browser_installs_have_the_same_timeout():
+    lint = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    equivalence = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"][
+        "ledger-equivalence"
+    ]["steps"]
+    for steps in (lint, equivalence):
+        install = next(step for step in steps if "playwright install --with-deps chromium" in step.get("run", ""))
+        assert install["timeout-minutes"] == 2
+
+
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
 def test_workflow_badges_point_at_existing_workflows(doc):
     names = re.findall(r"actions/workflows/([\w.-]+\.yml)", (_ROOT / doc).read_text())

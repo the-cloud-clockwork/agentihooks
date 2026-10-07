@@ -55,6 +55,7 @@ jobs:
           fi
           echo 'PASS: identical base and head; planted checkbox fault rejected'
       - name: Install the page replay browser
+        timeout-minutes: 2
         run: python -m playwright install --with-deps chromium
       - name: Compare recorded page actions
         run: |

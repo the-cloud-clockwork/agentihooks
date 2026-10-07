@@ -141,6 +141,7 @@ jobs:
 
       - name: Install the artifact viewer browser
         if: steps.lookup.outputs.skip != 'true'
+        timeout-minutes: 2
         run: |
           python -m pip install "playwright>=1.44.0"
           python -m playwright install --with-deps chromium
