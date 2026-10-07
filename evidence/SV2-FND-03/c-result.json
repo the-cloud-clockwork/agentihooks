@@ -1,0 +1,44 @@
+{
+  "case": "T-SV2-FND-03-C",
+  "tested_commit": "987e447f16527107998a4f2864aeae4e84574f69",
+  "passed": 9,
+  "failed": 0,
+  "tests": [
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_writes_go_through_a_sibling_temp_file",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_newer_minor_optional_field_survives_a_relay_round_trip",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_replay_with_the_same_operation_has_no_second_effect",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_reused_operation_with_different_content_is_a_conflict",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_older_generation_cannot_overwrite_a_newer_accepted_record",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_the_same_generation_and_a_newer_one_are_both_accepted",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_interrupted_record_write_recovers_on_retry_without_a_duplicate",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_admission_waits_for_the_store_lock_held_by_another_writer",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_newer_generation_fences_every_contract_of_the_task",
+      "outcome": "passed"
+    }
+  ]
+}

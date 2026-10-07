@@ -1,0 +1,15 @@
+{
+  "schema_version": "3.0",
+  "operation_id": "heartbeat-synthetic-0007-0041",
+  "trace_id": "0123456789abcdef0123456789abcdef",
+  "authority": {
+    "execution_id": "exe-synthetic-0007",
+    "task_id": "implement-session-ingestion",
+    "task_generation": 3,
+    "controller_epoch": 12,
+    "owner_identity": "worker-synthetic-0007"
+  },
+  "renewal_sequence": 41,
+  "state": "working",
+  "observed_at": "2026-10-08T08:05:00Z"
+}

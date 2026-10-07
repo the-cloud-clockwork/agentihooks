@@ -1,0 +1,196 @@
+{
+  "schema": "swarm-v2-contracts/1",
+  "package": "SV2-FND-03",
+  "minors": {
+    "2.0": "Plan section 22 baseline",
+    "2.1": "Adds the optional trace_id correlation field"
+  },
+  "rules": [
+    "A reader accepts a record whose major equals the contract major and whose minor is at least oldest_minor; a newer minor is additive and accepted.",
+    "Every contract permits extension at the top level and inside extensions; the authority object permits none.",
+    "Authority fields live only in the closed authority object; an authority name outside it, or an unknown name inside it, is refused.",
+    "Every record names execution_id, task_id and task_generation in its authority, except the error envelope.",
+    "A relay keeps every unknown optional field and its value on read, modify and write.",
+    "A consumer vendors these schema files and validates with a JSON Schema 2020-12 validator; it never imports the owner's runtime package.",
+    "Schemas reference only urn:swarm-v2 identifiers inside this directory.",
+    "Rollback lowers write_minor so producers write the previous minor while readers keep accepting both.",
+    "Schemas fix wire layout; the field tables and examples in plan section 22 list field sets, and their authority fields travel inside the authority object.",
+    "These contracts publish checkpoint_sequence and renewal_sequence; SV2-CKP-04 orders checkpoints when it promotes the latest pointer, and SV2-LDG-02 orders heartbeat renewals.",
+    "Admission fences each task across every contract: an older task_generation, or another execution at the accepted generation, is refused as stale_generation."
+  ],
+  "contracts": {
+    "launch": {
+      "schema": "launch.json",
+      "owner": "agentihooks",
+      "consumers": [
+        "agentihooks"
+      ],
+      "major": 2,
+      "oldest_minor": 0,
+      "current_minor": 1,
+      "write_minor": 1,
+      "authority": [
+        "execution_id",
+        "task_id",
+        "task_generation",
+        "controller_epoch",
+        "swarm_id",
+        "seat_id",
+        "grant_ref",
+        "project_id"
+      ],
+      "extension": [
+        "trace_id",
+        "extensions"
+      ]
+    },
+    "heartbeat": {
+      "schema": "heartbeat.json",
+      "owner": "agentihooks",
+      "consumers": [
+        "agentihooks"
+      ],
+      "major": 2,
+      "oldest_minor": 0,
+      "current_minor": 1,
+      "write_minor": 1,
+      "authority": [
+        "execution_id",
+        "task_id",
+        "task_generation",
+        "controller_epoch",
+        "owner_identity"
+      ],
+      "extension": [
+        "trace_id",
+        "extensions"
+      ]
+    },
+    "command": {
+      "schema": "command.json",
+      "owner": "agentihooks",
+      "consumers": [
+        "agentihooks"
+      ],
+      "major": 2,
+      "oldest_minor": 0,
+      "current_minor": 1,
+      "write_minor": 1,
+      "authority": [
+        "execution_id",
+        "task_id",
+        "task_generation",
+        "controller_epoch"
+      ],
+      "extension": [
+        "trace_id",
+        "extensions"
+      ]
+    },
+    "checkpoint": {
+      "schema": "checkpoint.json",
+      "owner": "agentihooks",
+      "consumers": [
+        "agentihooks"
+      ],
+      "major": 2,
+      "oldest_minor": 0,
+      "current_minor": 1,
+      "write_minor": 1,
+      "authority": [
+        "execution_id",
+        "task_id",
+        "task_generation",
+        "project_id"
+      ],
+      "extension": [
+        "trace_id",
+        "extensions"
+      ]
+    },
+    "session_event": {
+      "schema": "session-event.json",
+      "owner": "agentihooks",
+      "consumers": [
+        "agentihooks",
+        "agentibrain-kernel"
+      ],
+      "major": 2,
+      "oldest_minor": 0,
+      "current_minor": 1,
+      "write_minor": 1,
+      "authority": [
+        "execution_id",
+        "task_id",
+        "task_generation",
+        "brain_id"
+      ],
+      "extension": [
+        "trace_id",
+        "extensions"
+      ]
+    },
+    "context_pack": {
+      "schema": "context-pack.json",
+      "owner": "agentibrain-kernel",
+      "consumers": [
+        "agentihooks"
+      ],
+      "major": 2,
+      "oldest_minor": 0,
+      "current_minor": 1,
+      "write_minor": 1,
+      "authority": [
+        "execution_id",
+        "task_id",
+        "task_generation",
+        "brain_id",
+        "project_id"
+      ],
+      "extension": [
+        "trace_id",
+        "extensions"
+      ]
+    },
+    "receipt": {
+      "schema": "receipt.json",
+      "owner": "agentibrain-kernel",
+      "consumers": [
+        "agentihooks"
+      ],
+      "major": 2,
+      "oldest_minor": 0,
+      "current_minor": 1,
+      "write_minor": 1,
+      "authority": [
+        "execution_id",
+        "task_id",
+        "task_generation",
+        "brain_id",
+        "project_id",
+        "principal_id"
+      ],
+      "extension": [
+        "trace_id",
+        "extensions"
+      ]
+    },
+    "error": {
+      "schema": "error.json",
+      "owner": "agentihooks",
+      "consumers": [
+        "agentihooks",
+        "agentibrain-kernel"
+      ],
+      "major": 2,
+      "oldest_minor": 0,
+      "current_minor": 1,
+      "write_minor": 1,
+      "authority": [],
+      "extension": [
+        "trace_id",
+        "extensions"
+      ]
+    }
+  }
+}

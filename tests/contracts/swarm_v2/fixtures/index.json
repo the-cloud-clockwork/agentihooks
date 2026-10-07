@@ -1,0 +1,326 @@
+{
+  "fixtures": [
+    {
+      "contract": "checkpoint",
+      "family": "current",
+      "file": "checkpoint/current.json",
+      "expect": "valid",
+      "sha256": "feefba867cb3a1c8465034ab5eae0100b396befdeb3c4b04278d5d247898a799"
+    },
+    {
+      "contract": "checkpoint",
+      "family": "previous-minor",
+      "file": "checkpoint/previous-minor.json",
+      "expect": "valid",
+      "sha256": "5ea54a3c81bad55cf0840d8d54cbfc5a3461c001e574af95d26ffe0999c201f0"
+    },
+    {
+      "contract": "checkpoint",
+      "family": "future-major",
+      "file": "checkpoint/future-major.json",
+      "expect": "invalid",
+      "sha256": "829bd3b3301fdb5bc6518a5d10d83a22cee1d5c537170b61c28fead6f8e0bd0b"
+    },
+    {
+      "contract": "checkpoint",
+      "family": "missing-authority",
+      "file": "checkpoint/missing-authority.json",
+      "expect": "invalid",
+      "sha256": "5ad3cd6f8dbf850cca9408af0aebf4e1d69f3a3346b790b31183a0ba087e14d6"
+    },
+    {
+      "contract": "checkpoint",
+      "family": "previous-minor-missing-authority",
+      "file": "checkpoint/previous-minor-missing-authority.json",
+      "expect": "invalid",
+      "sha256": "65b064c7fdbf017b5315ea65d0c8b363cae9e7ef0988e430f23cbc665ad5662a"
+    },
+    {
+      "contract": "checkpoint",
+      "family": "newer-minor",
+      "file": "checkpoint/newer-minor.json",
+      "expect": "valid",
+      "sha256": "6eec0d0933dfa807312855553189156a866aba95f9640c78db611debbaf9db12"
+    },
+    {
+      "contract": "command",
+      "family": "current",
+      "file": "command/current.json",
+      "expect": "valid",
+      "sha256": "5efefee2cc37035e0b933eb4c50fd8656ee3869443a99014c69aa577e4c48d84"
+    },
+    {
+      "contract": "command",
+      "family": "previous-minor",
+      "file": "command/previous-minor.json",
+      "expect": "valid",
+      "sha256": "af3f12701bff215f1eb8476fc6175075606af0b83e08ce3d2a0bd18b675c1b98"
+    },
+    {
+      "contract": "command",
+      "family": "future-major",
+      "file": "command/future-major.json",
+      "expect": "invalid",
+      "sha256": "b9fa4fe3a394858630f020bb0cc28604524f585db59b690a50d2645823530bcc"
+    },
+    {
+      "contract": "command",
+      "family": "missing-authority",
+      "file": "command/missing-authority.json",
+      "expect": "invalid",
+      "sha256": "fece884aa14d5ac362b4ba51e9ca5ac41e0188f26b1cbef38a1be6477cc068c8"
+    },
+    {
+      "contract": "command",
+      "family": "previous-minor-missing-authority",
+      "file": "command/previous-minor-missing-authority.json",
+      "expect": "invalid",
+      "sha256": "932de919a8f3665daa5dc89ce2d3e954b5fcd65f6bdd49670378848cdac54f38"
+    },
+    {
+      "contract": "command",
+      "family": "newer-minor",
+      "file": "command/newer-minor.json",
+      "expect": "valid",
+      "sha256": "a479076cd0d315fbd5467537a92fa29a6d7761213811dbae51502d143126199f"
+    },
+    {
+      "contract": "context_pack",
+      "family": "current",
+      "file": "context_pack/current.json",
+      "expect": "valid",
+      "sha256": "1323ae1003ffcf58d681a9273e48b454fbcc0db60e3bc73dd402db6c2b0a0bee"
+    },
+    {
+      "contract": "context_pack",
+      "family": "previous-minor",
+      "file": "context_pack/previous-minor.json",
+      "expect": "valid",
+      "sha256": "9f2e94bc782a27c1712d34642bb47ce05dd7e1ef4f9b9baa8a98e760cac72eb4"
+    },
+    {
+      "contract": "context_pack",
+      "family": "future-major",
+      "file": "context_pack/future-major.json",
+      "expect": "invalid",
+      "sha256": "1ab5de263142b244636deff1bf43db318d7a16732ea17cfb0fa2bb981704186e"
+    },
+    {
+      "contract": "context_pack",
+      "family": "missing-authority",
+      "file": "context_pack/missing-authority.json",
+      "expect": "invalid",
+      "sha256": "ae9ee815cb6baa522b450b2d99b65c25537924459fec77f71b1776277202347e"
+    },
+    {
+      "contract": "context_pack",
+      "family": "previous-minor-missing-authority",
+      "file": "context_pack/previous-minor-missing-authority.json",
+      "expect": "invalid",
+      "sha256": "80cc4f8d5cd3bf52a86affcd89d041f4c6d02258d1c7dd27fbb4641cb116bae5"
+    },
+    {
+      "contract": "context_pack",
+      "family": "newer-minor",
+      "file": "context_pack/newer-minor.json",
+      "expect": "valid",
+      "sha256": "f3c5cc77c67713131051adbc1197382cd3c97cb1a0567824a44995b264a4add2"
+    },
+    {
+      "contract": "error",
+      "family": "current",
+      "file": "error/current.json",
+      "expect": "valid",
+      "sha256": "aef79494e011e07707134685319382395de3333769656953ed37dc841ccf4702"
+    },
+    {
+      "contract": "error",
+      "family": "previous-minor",
+      "file": "error/previous-minor.json",
+      "expect": "valid",
+      "sha256": "f3f207b0b4002e512fc61a2caa79601fe7d574493157c9e7b1b8d1563b673b90"
+    },
+    {
+      "contract": "error",
+      "family": "future-major",
+      "file": "error/future-major.json",
+      "expect": "invalid",
+      "sha256": "1b6e77c5bffd18fd3f091ae30a56f593e5d99ed2c21b1185f78c8cc1d22b4a19"
+    },
+    {
+      "contract": "error",
+      "family": "newer-minor",
+      "file": "error/newer-minor.json",
+      "expect": "valid",
+      "sha256": "306572d54ce4b30d5ad2cd51250fb9e79f181bc2bb307d2cfc9d28b0da839ac0"
+    },
+    {
+      "contract": "heartbeat",
+      "family": "current",
+      "file": "heartbeat/current.json",
+      "expect": "valid",
+      "sha256": "f52d9a0917de800825e42bdaac76ce1037065fffea72ae0b6b8bc7a8c7cd2269"
+    },
+    {
+      "contract": "heartbeat",
+      "family": "previous-minor",
+      "file": "heartbeat/previous-minor.json",
+      "expect": "valid",
+      "sha256": "159a2cfa32e5d3825ff5e8764de8a18afa381e98fbe5cde641a36ea626cd051b"
+    },
+    {
+      "contract": "heartbeat",
+      "family": "future-major",
+      "file": "heartbeat/future-major.json",
+      "expect": "invalid",
+      "sha256": "a10747489a5f09f5d6d368c87c41b07e6a2dc2bbdaebf04985753a760c7b4ca2"
+    },
+    {
+      "contract": "heartbeat",
+      "family": "missing-authority",
+      "file": "heartbeat/missing-authority.json",
+      "expect": "invalid",
+      "sha256": "f422abdeb78c2d60cfcb55592e13a5c7b0f5b2e6364290afcc0bb7597562c19d"
+    },
+    {
+      "contract": "heartbeat",
+      "family": "previous-minor-missing-authority",
+      "file": "heartbeat/previous-minor-missing-authority.json",
+      "expect": "invalid",
+      "sha256": "ea35e1350ac46381534da938c71056fc264340918b1fe3d9a294b5389bd3cab4"
+    },
+    {
+      "contract": "heartbeat",
+      "family": "newer-minor",
+      "file": "heartbeat/newer-minor.json",
+      "expect": "valid",
+      "sha256": "c50a305bc2116a0ccebd8d8cb07f1545837eca077f6ad33393d97a263879dd33"
+    },
+    {
+      "contract": "launch",
+      "family": "current",
+      "file": "launch/current.json",
+      "expect": "valid",
+      "sha256": "d5490377c86a420d61eb967781baaf7a2acdf08a1cb83a3638301fdad0ef41c9"
+    },
+    {
+      "contract": "launch",
+      "family": "previous-minor",
+      "file": "launch/previous-minor.json",
+      "expect": "valid",
+      "sha256": "5a01e8cf8b9f81d9ed2e0a2f16c9e566149b8c18ea8e59d69fede3451b3b5917"
+    },
+    {
+      "contract": "launch",
+      "family": "future-major",
+      "file": "launch/future-major.json",
+      "expect": "invalid",
+      "sha256": "2356fefcedb45881c89df5e5469e2c7b6426c18d1c78afc30721425d2a87cc1c"
+    },
+    {
+      "contract": "launch",
+      "family": "missing-authority",
+      "file": "launch/missing-authority.json",
+      "expect": "invalid",
+      "sha256": "995d7d4864e3b80f4518782492a5480915feeb673541681ace63a3a52b118c65"
+    },
+    {
+      "contract": "launch",
+      "family": "previous-minor-missing-authority",
+      "file": "launch/previous-minor-missing-authority.json",
+      "expect": "invalid",
+      "sha256": "d328bbdffc31ce14d68e13774f1c2a8bf39114cdcf41294d42c3d804eb630d5f"
+    },
+    {
+      "contract": "launch",
+      "family": "newer-minor",
+      "file": "launch/newer-minor.json",
+      "expect": "valid",
+      "sha256": "b6c0baffe2da14257701615e1078b1be78331628d19c6164d77762b96cce3a9e"
+    },
+    {
+      "contract": "receipt",
+      "family": "current",
+      "file": "receipt/current.json",
+      "expect": "valid",
+      "sha256": "646f8826bfdf7e6b536554ce551462773fed4d32987d88f5f7d978767faa75a1"
+    },
+    {
+      "contract": "receipt",
+      "family": "previous-minor",
+      "file": "receipt/previous-minor.json",
+      "expect": "valid",
+      "sha256": "b17dc728f4c768be038669cd38f65b091a0f54bf0c1a1c44bb0f16e7e60d2214"
+    },
+    {
+      "contract": "receipt",
+      "family": "future-major",
+      "file": "receipt/future-major.json",
+      "expect": "invalid",
+      "sha256": "7f0049e76378e5945ad92e8afb70d3cda3b263637df0052a0580c220e7b07b73"
+    },
+    {
+      "contract": "receipt",
+      "family": "missing-authority",
+      "file": "receipt/missing-authority.json",
+      "expect": "invalid",
+      "sha256": "c4ce52d74844888567d591d159871caa481020ab05f454ccb7bda27c4d52a28d"
+    },
+    {
+      "contract": "receipt",
+      "family": "previous-minor-missing-authority",
+      "file": "receipt/previous-minor-missing-authority.json",
+      "expect": "invalid",
+      "sha256": "42381cbc058a60bd0b98c4480fd82c728851fa4359423bc2c7eee90847632bcb"
+    },
+    {
+      "contract": "receipt",
+      "family": "newer-minor",
+      "file": "receipt/newer-minor.json",
+      "expect": "valid",
+      "sha256": "e7b205a4a29a74e105c8040ca334520afff70a23cd8d5f3f5afcb5a898c2e39f"
+    },
+    {
+      "contract": "session_event",
+      "family": "current",
+      "file": "session_event/current.json",
+      "expect": "valid",
+      "sha256": "4c893a071f4c7f4aa76e00714e6b3b352d5664aba6b4b8f6ccff20ee5ce26589"
+    },
+    {
+      "contract": "session_event",
+      "family": "previous-minor",
+      "file": "session_event/previous-minor.json",
+      "expect": "valid",
+      "sha256": "918676fef6ca573977141e5532cf573367f7b664a4804943ac33c93d39c64a95"
+    },
+    {
+      "contract": "session_event",
+      "family": "future-major",
+      "file": "session_event/future-major.json",
+      "expect": "invalid",
+      "sha256": "f4658d4763099dd2a1bd3cd2ba66adfcada4179d1e9439971d81faab23d13892"
+    },
+    {
+      "contract": "session_event",
+      "family": "missing-authority",
+      "file": "session_event/missing-authority.json",
+      "expect": "invalid",
+      "sha256": "f28e9928dc76f2b5561c7b2fba3a4b6e2a06364a1012a13e985dd18181ed65f9"
+    },
+    {
+      "contract": "session_event",
+      "family": "previous-minor-missing-authority",
+      "file": "session_event/previous-minor-missing-authority.json",
+      "expect": "invalid",
+      "sha256": "13de38e2de256e178fe81f679f1148982cae76899842546d2abf52055ce94c6c"
+    },
+    {
+      "contract": "session_event",
+      "family": "newer-minor",
+      "file": "session_event/newer-minor.json",
+      "expect": "valid",
+      "sha256": "b477093458f574b5e3220945387bc6b1755a9ccd9c19ede42d07961a8b1d8c5a"
+    }
+  ]
+}

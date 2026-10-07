@@ -1,0 +1,21 @@
+{
+  "schema_version": "2.0",
+  "operation_id": "launch-synthetic-0007",
+  "authority": {
+    "execution_id": "exe-synthetic-0007",
+    "task_id": "implement-session-ingestion",
+    "controller_epoch": 12,
+    "swarm_id": "swarm-v2-buildout",
+    "seat_id": "eng-2",
+    "grant_ref": "launch-grant-synthetic-0007",
+    "project_id": "github.com/the-cloud-clockwork/agentihooks"
+  },
+  "agent_name": "engineer@a1b2c3-0007",
+  "runtime_backend": "kubernetes",
+  "runtime_profile": "general",
+  "harness": "codex",
+  "image_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "launch_spec_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "credential_ref": "execution-scoped-reference",
+  "created_at": "2026-10-08T08:00:00Z"
+}
