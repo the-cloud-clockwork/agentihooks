@@ -622,7 +622,10 @@ def test_an_undeclared_proposal_never_makes_a_declared_one_conflict():
 
 
 def test_names_that_differ_only_in_case_conflict():
-    inventory = _single(_proposal(id="a", name="Shared catalog"), _proposal(id="b", name="SHARED CATALOG"))
+    inventory = _single(
+        _proposal(id="a", name="Shared catalog", authoritative_state="First index"),
+        _proposal(id="b", name="SHARED CATALOG", authoritative_state="Second index"),
+    )
     result = architecture.review(architecture.load_record(RECORD), inventory)
     assert [u["id"] for u in result["unresolved"]] == ["a", "b"]
 
