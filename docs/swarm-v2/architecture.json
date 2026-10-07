@@ -1,0 +1,239 @@
+{
+  "schema": "swarm-v2-architecture/1",
+  "package": "SV2-FND-02",
+  "revision": 1,
+  "owners": [
+    "agentihooks",
+    "agentibrain-kernel",
+    "antoncore",
+    "personal installation"
+  ],
+  "backlog_carries": [
+    "transcripts",
+    "changed_content"
+  ],
+  "worker_excluded": [
+    "brain database",
+    "brain tick stack",
+    "brain model server",
+    "transcript database"
+  ],
+  "operator_changes": [],
+  "components": [
+    {
+      "name": "Swarm reconciliation controller",
+      "kind": "dispatcher",
+      "carries": "coding_tasks",
+      "code_owner": "agentihooks",
+      "state_owner": "agentihooks",
+      "deployment_owner": "antoncore",
+      "authoritative_state": "Swarm state and ledger: task claims, generations and leases"
+    },
+    {
+      "name": "Local runtime adapter",
+      "kind": "service",
+      "code_owner": "agentihooks",
+      "state_owner": "agentihooks",
+      "deployment_owner": "personal installation",
+      "authoritative_state": "Execution identity plus the observed local herdr runtime"
+    },
+    {
+      "name": "Kubernetes runtime adapter",
+      "kind": "service",
+      "code_owner": "agentihooks",
+      "state_owner": "agentihooks",
+      "deployment_owner": "antoncore",
+      "authoritative_state": "Execution identity plus observed execution Pods"
+    },
+    {
+      "name": "Worker image and entrypoint",
+      "kind": "service",
+      "code_owner": "agentihooks",
+      "state_owner": "agentihooks",
+      "deployment_owner": "antoncore",
+      "authoritative_state": "Immutable image and launch specification"
+    },
+    {
+      "name": "Session archive and catalog service",
+      "kind": "service",
+      "code_owner": "agentihooks",
+      "state_owner": "agentihooks",
+      "deployment_owner": "antoncore",
+      "authoritative_state": "Durable transcript archive and catalog"
+    },
+    {
+      "name": "Transcript ingestion backlog",
+      "kind": "backlog",
+      "carries": "transcripts",
+      "bounded": true,
+      "launches_agents": false,
+      "code_owner": "agentihooks",
+      "state_owner": "agentihooks",
+      "deployment_owner": "antoncore",
+      "authoritative_state": "Per-source accepted offsets awaiting archive"
+    },
+    {
+      "name": "Session chunk embedding backlog",
+      "kind": "backlog",
+      "carries": "changed_content",
+      "bounded": true,
+      "launches_agents": false,
+      "code_owner": "agentihooks",
+      "state_owner": "agentihooks",
+      "deployment_owner": "antoncore",
+      "authoritative_state": "Changed transcript chunks awaiting embedding"
+    },
+    {
+      "name": "Swarm brain context selection and graph retrieval",
+      "kind": "service",
+      "code_owner": "agentibrain-kernel",
+      "state_owner": "agentibrain-kernel",
+      "deployment_owner": "antoncore",
+      "authoritative_state": "Swarm brain knowledge and provenance"
+    },
+    {
+      "name": "Personal brain",
+      "kind": "service",
+      "code_owner": "agentibrain-kernel",
+      "state_owner": "agentibrain-kernel",
+      "deployment_owner": "personal installation",
+      "authoritative_state": "Personal brain knowledge, separate from the swarm corpus"
+    },
+    {
+      "name": "Brain routing and consultation gates",
+      "kind": "service",
+      "code_owner": "agentihooks",
+      "state_owner": "agentihooks",
+      "deployment_owner": "antoncore",
+      "authoritative_state": "Session brain binding and verified context receipts"
+    },
+    {
+      "name": "Cluster infrastructure",
+      "kind": "service",
+      "code_owner": "antoncore",
+      "state_owner": "antoncore",
+      "deployment_owner": "antoncore",
+      "authoritative_state": "Cluster, AMIs, autoscaling groups, taints, GitOps and secrets delivery"
+    },
+    {
+      "name": "Operator interface",
+      "kind": "service",
+      "code_owner": "agentihooks",
+      "state_owner": "agentihooks",
+      "deployment_owner": "antoncore",
+      "authoritative_state": "Ledger projections and runtime observations"
+    }
+  ],
+  "decisions": [
+    {
+      "id": "AD-01",
+      "title": "Ownership of orchestration, source evidence, cognition and infrastructure",
+      "status": "accepted",
+      "decision": "agentihooks owns orchestration and source evidence: swarm reconciliation, runtime adapters, the worker image, session capture and catalog, brain routing and consultation gates. agentibrain-kernel owns cognition: context selection, graph retrieval and synthesis. antoncore owns infrastructure and the deployment of every Anton-hosted component.",
+      "rationale": "One change has one authoritative implementation owner even when several repositories consume its contract (plan sections 0.1 and 1.1).",
+      "rejected_alternatives": [
+        {
+          "alternative": "A new standalone product housing the controller or the session archive",
+          "reason": "Code that belongs in agentihooks, agentibrain-kernel or antoncore stays there (plan section 0.1)."
+        },
+        {
+          "alternative": "Keep agentibridge as the dispatcher, agent registry or transcript service",
+          "reason": "agentibridge is deprecated; only its chunking, schema and search logic may be extracted into agentihooks (plan section 9.2)."
+        }
+      ]
+    },
+    {
+      "id": "AD-02",
+      "title": "Controller-owned execution Pods are a targeted convention exception",
+      "status": "accepted",
+      "decision": "A distributed execution attempt is a controller-owned Pod with restartPolicy Never, created and recreated only by the swarm reconciliation controller. The exception to the antoncore StatefulSet convention covers these ephemeral attempts only; long-lived services, the controller included, keep the existing conventions.",
+      "rationale": "A Pod is an execution attempt, not the identity of a seat; an automatic restart must not create a second unrecorded conversation (plan sections 1.2, 2.2 and 4.1).",
+      "rejected_alternatives": [
+        {
+          "alternative": "One StatefulSet per coding agent",
+          "reason": "A seat outlives any Pod; recreation follows a classified failure in the controller, not a StatefulSet restart."
+        },
+        {
+          "alternative": "A fixed worker pool as the scaling mechanism",
+          "reason": "Pending execution Pods drive the existing node autoscaler; a pool pins idle capacity (plan sections 4.1 and 7.4)."
+        }
+      ]
+    },
+    {
+      "id": "AD-03",
+      "title": "One main agent per Pod, with the local path kept",
+      "status": "accepted",
+      "decision": "Each execution Pod hosts one main swarm agent under one process supervisor that owns the headless herdr server, the session exporter and the agent. Sub-agents are child processes inside the Pod's resource limits unless scheduled as separate swarm tasks. The local herdr runtime stays a supported compatibility path, and distributed mode stays off until its gate passes.",
+      "rationale": "INV-R11: a local swarm stays functional when distributed mode is disabled; resource budgets must cover every child process (plan sections 1.2 and 4.1).",
+      "rejected_alternatives": [
+        {
+          "alternative": "Bespoke per-node worker daemons hosting several agents",
+          "reason": "The baseline avoids per-node daemons; Kubernetes stays the placement scheduler (plan section 1.2)."
+        }
+      ]
+    },
+    {
+      "id": "AD-04",
+      "title": "Controller and session archive are separate processes from one package",
+      "status": "accepted",
+      "decision": "The swarm controller and the session archive and catalog service may run as separate processes supplied by the agentihooks package, each deployed by antoncore. Workers reach both over authenticated HTTP.",
+      "rationale": "Deployment and source-archive services scale and fail independently while sharing one codebase and one release (plan section 1.2).",
+      "rejected_alternatives": [
+        {
+          "alternative": "A complete database stack inside every worker image",
+          "reason": "Workers carry no durable store; the archive uses the verified Postgres and pgvector infrastructure (plan section 1.2)."
+        }
+      ]
+    },
+    {
+      "id": "AD-05",
+      "title": "One coding-task authority; backlogs never dispatch work",
+      "status": "accepted",
+      "decision": "The swarm reconciliation controller and its ledger are the only authority that claims and dispatches coding tasks. Bounded backlogs are permitted for transcripts and changed content; a backlog never launches an agent. Any other component that carries coding tasks or launches agents is rejected unless the operator records an architecture change for it in operator_changes.",
+      "rationale": "Retain one swarm task model and one authority for task claims (plan section 1.2).",
+      "rejected_alternatives": [
+        {
+          "alternative": "KEDA for the baseline design",
+          "reason": "Pending execution Pods and the existing node autoscaler cover scaling (plan section 1.2)."
+        },
+        {
+          "alternative": "A second work-stealing queue for coding tasks",
+          "reason": "Two claim authorities break generation fencing (plan sections 1.2 and 4.3)."
+        },
+        {
+          "alternative": "The brain or session search as a task scheduler",
+          "reason": "Cognition and evidence retrieval inform tasks; they never dispatch them (plan section 0.1)."
+        }
+      ]
+    },
+    {
+      "id": "AD-06",
+      "title": "Workers never carry the brain stack",
+      "status": "accepted",
+      "decision": "The worker image excludes the brain database, the brain tick stack, the brain model server and any transcript database. Workers reach the selected brain and the session archive over authenticated HTTP.",
+      "rationale": "One shared swarm brain runs on durable Anton infrastructure; no brain stack per worker or per coding task (plan sections 6.1 and 12.1).",
+      "rejected_alternatives": [
+        {
+          "alternative": "A complete brain stack per worker or per coding task",
+          "reason": "Duplicates storage and inference cost per attempt and breaks brain isolation (plan section 12.1)."
+        }
+      ]
+    },
+    {
+      "id": "AD-07",
+      "title": "Swarm and personal brains are separate deployments",
+      "status": "accepted",
+      "decision": "The swarm brain is deployed by antoncore. An optional personal brain is a separate installation with its own deployment owner; it is not a second owner of the swarm brain and never joins the execution control plane.",
+      "rationale": "Plan section 1.1 names antoncore or a personal installation for brain components; splitting them gives each component one deployment owner (plan sections 0 and 12.1).",
+      "rejected_alternatives": [
+        {
+          "alternative": "One brain component deployed either by antoncore or by a personal installation",
+          "reason": "A component with two deployment owners has no single owner to answer for it."
+        }
+      ]
+    }
+  ],
+  "rejected": [],
+  "unresolved": [],
+  "operations": []
+}
