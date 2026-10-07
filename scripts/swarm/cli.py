@@ -26,7 +26,7 @@ agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a
 agentihooks swarm <id> retire SEAT NUMBER --reason TEXT           master or operator retires a learned note from every later prompt
 agentihooks swarm <id> culture set FILE | show                    the swarm's shared culture, read by every new occupant
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
-agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] [--reason R] | say TEXT [--to NAME|eng|ci]
+agentihooks swarm <id> issue URL | pr URL | branch | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] [--reason R] | say TEXT [--to NAME|eng|ci]
 agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]   (default note; canon only by the master)
 agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
 agentihooks swarm <id> trace-plan        trace plan.md in the task work folder to task, phase and project intent
@@ -39,6 +39,7 @@ import json
 import os
 import re
 import signal
+import subprocess
 import sys
 import time
 import uuid
@@ -670,15 +671,49 @@ def cmd_issue(store, args):
     print(json.dumps({"task": agent.task, "issue_url": args.url}))
 
 
+def _git(run, *args):
+    try:
+        return run(["git", *args], capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SwarmError(f"git {args[0]} could not run: {exc}") from exc
+
+
+def worktree_branch(run=subprocess.run):
+    current = _git(run, "branch", "--show-current")
+    branch = current.stdout.strip() if current.returncode == 0 else ""
+    if not branch:
+        raise SwarmError("swarm branch runs in a worktree on a branch; this checkout is on none")
+    if _git(run, "ls-remote", "--exit-code", "--heads", "origin", branch).returncode != 0:
+        raise SwarmError(f"branch {branch} is not on origin; push it first with git push -u origin {branch}")
+    return branch
+
+
+def pull_branch(url, run=subprocess.run):
+    try:
+        done = run(["gh", "pr", "view", url, "--json", "headRefName"], capture_output=True, text=True, timeout=20)
+        return json.loads(done.stdout)["headRefName"] if done.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        return ""
+
+
+def cmd_branch(store, args):
+    agent = _worker(store, args)
+    branch = worktree_branch()
+    LedgerClient().update_task(args.slug, agent.task, {"branch": branch}, by=agent.name)
+    print(json.dumps({"task": agent.task, "branch": branch}))
+
+
 def cmd_pr(store, args):
     agent = _worker(store, args)
     config = store.config(args.slug)
     awaiting = "approval" if config.autonomy == ASSIST else ""
-    fields = {"pr_url": args.url, "state": "pr", "awaiting": awaiting}
+    head = pull_branch(args.url)
+    branch = {"branch": head} if head else {}
+    fields = {"pr_url": args.url, "state": "pr", "awaiting": awaiting, **branch}
     ledger = LedgerClient()
     checked = intent.stamp(args.slug, agent.task, args.url, ledger.state(args.slug), intent.mode_of(config), now_ms())
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
-    print(json.dumps({"task": agent.task, "pr_url": args.url, "intent": checked}))
+    print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
 
 
 def cmd_done(store, args):
@@ -988,6 +1023,7 @@ def build_parser():
     lift.add_argument("gate")
     for name in ("issue", "pr"):
         sub.add_parser(name).add_argument("url")
+    sub.add_parser("branch")
     done = sub.add_parser("done")
     done.add_argument("--pr", default="")
     for key in ledger_kinds.PROOF_KEYS:
