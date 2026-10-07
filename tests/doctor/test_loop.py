@@ -152,6 +152,21 @@ def test_a_slow_tick_pulls_the_next_pass_forward_only_until_that_pass(store):
     assert ran == [later + 9 * MINUTE_MS]
 
 
+def test_the_timer_keeps_each_tick_and_the_slowest_gap_since_the_last_pass(store):
+    key = loop._timer_key(store, DOCTOR)
+    store.redis.hset(key, mapping={"last": T0, "last_new": T0})
+
+    def saved():
+        return {k: int(v) for k, v in store.redis.hgetall(key).items()}
+
+    passes(store, [T0 + MINUTE_MS])
+    assert saved() == {"last": T0, "last_new": T0, "gap": 0, "tick": T0 + MINUTE_MS}
+    passes(store, [T0 + 3 * MINUTE_MS, T0 + 4 * MINUTE_MS])
+    assert saved() == {"last": T0, "last_new": T0, "gap": 2 * MINUTE_MS, "tick": T0 + 4 * MINUTE_MS}
+    assert passes(store, [T0 + 9 * MINUTE_MS]) == [T0 + 9 * MINUTE_MS]
+    assert saved() == {"last": T0 + 9 * MINUTE_MS, "last_new": T0, "gap": 0, "tick": T0 + 9 * MINUTE_MS}
+
+
 def test_the_interval_and_the_quiet_window_come_from_the_environment(store):
     closed, environ = [], {loop.INTERVAL_ENV: "1", loop.QUIET_ENV: "5"}
     step(store, T0, closed=closed, environ=environ)
