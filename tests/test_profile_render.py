@@ -1828,6 +1828,28 @@ def test_a_home_live_sessions_run_on_is_never_rewritten(world, monkeypatch, targ
     )
 
 
+@pytest.mark.parametrize("target", ["codex", "claude"])
+def test_a_running_session_keeps_passing_its_check_after_a_bundle_content_render(world, monkeypatch, tmp_path, target):
+    from scripts.profiles import binding, render
+
+    home = render.render(target, "rb-role")
+    monkeypatch.setattr(render.homes, "live_homes", lambda: [home.resolve()])
+    report = tmp_path / "report.json"
+    binding.request(report, "rb-role", target, home)
+    env = {"AGENTIHOOKS_PROFILE": "rb-role", binding.HOMES[target]: str(home), binding.REPORT: str(report)}
+    monkeypatch.setattr(binding, "process", lambda: (123, target, env, "default"))
+    launched = binding.validate(binding.inspect(home, "rb-role", target)["canary"])
+
+    _write(world["bundle"] / ".claude" / "CLAUDE.md", "BUNDLE DIRECTIVE MARKER\nNEW MANIFESTO LINE\n")
+    _commit(world["bundle"], "manifesto change")
+    fresh = render.render(target, "rb-role")
+
+    assert fresh not in (None, home)
+    assert "NEW MANIFESTO LINE" in (fresh / binding.PERSONAS[target]).read_text()
+    assert binding.inspect(home, "rb-role", target)["persona"] == launched["persona"]
+    assert binding.validate(launched["canary"])["persona"] == launched["persona"]
+
+
 def test_old_homes_go_once_no_live_session_uses_them(world, monkeypatch):
     from scripts.profiles import render
 
