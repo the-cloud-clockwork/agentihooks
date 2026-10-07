@@ -159,6 +159,66 @@ def test_launch_success_requires_live_binding_canary(tmp_path, monkeypatch, caps
         assert output.err == f"agentihooks init-agent: {reasons[control]}\n"
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+@pytest.mark.parametrize("pane", ["refused", "routed late"])
+def test_a_pane_side_selection_failure_is_reported_before_any_timeout(tmp_path, monkeypatch, capsys, target, pane):
+    from scripts import init_agent, select_profile
+
+    home = tmp_path / "engineer" / target
+    home.mkdir(parents=True)
+    (home / binding.PERSONAS[target]).write_text(binding.persona("Engineer instructions.\n"))
+    (home.parent / f"{target}.sources.json").write_text("[]")
+    binding.write(home, "engineer", target)
+    monkeypatch.setattr(
+        select_profile,
+        "prepare",
+        lambda *a: ({"AGENTIHOOKS_PROFILE": "engineer", binding.HOMES[target]: str(home)}, a[4]),
+    )
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda *a: (target, "explicit"))
+    monkeypatch.setattr(init_agent.claude_trust, "ensure_trusted", lambda *a: ("trusted", ""))
+    waits = []
+
+    def refuse(*args):
+        raise ValueError("profile engineer render failed in the pane")
+
+    def launch(launcher, directory, name, args, agent, environ):
+        init_agent._started_marker(launcher).touch()
+        report = Path(environ[binding.REPORT])
+
+        def waited(seconds):
+            if waits or pane == "refused":
+                raise AssertionError(f"waited {seconds}s once the route outcome was known")
+            waits.append(seconds)
+            init_agent._route_report(launcher).write_text("status=routed\naccount=routed-account\n")
+            binding.refuse(report, "mounted canary refused")
+
+        if pane == "refused":
+            monkeypatch.setattr(select_profile, "prepare", refuse)
+            monkeypatch.setenv(binding.REPORT, str(report))
+            assert select_profile.main(["engineer", "--agent", target]) == 2
+        monkeypatch.setattr(init_agent.time, "sleep", waited)
+        return []
+
+    monkeypatch.setattr(init_agent, "_start_herdr", launch)
+    args = ["--host", "herdr", "--agent", target, "--profile", "engineer", "--dir", str(tmp_path)]
+    result = init_agent.main([*args, "--route-timeout", "30"], {"XDG_RUNTIME_DIR": str(tmp_path / "runtime")})
+    output = capsys.readouterr()
+    from scripts.swarm.runtime import parse_fields
+
+    fields = parse_fields(output.out)
+    assert result == 3
+    assert fields["profile_validation"] == "failed"
+    if pane == "refused":
+        assert fields["route_status"] == "pending"
+        assert output.err == (
+            "agentihooks select-profile: profile engineer render failed in the pane\n"
+            "agentihooks init-agent: profile selection failed: profile engineer render failed in the pane\n"
+        )
+    else:
+        assert (fields["route_status"], waits) == ("routed", [0.25])
+        assert output.err == "agentihooks init-agent: mounted canary refused\n"
+
+
 def test_swarm_refuses_a_started_process_without_validation(tmp_path):
     from types import SimpleNamespace
 

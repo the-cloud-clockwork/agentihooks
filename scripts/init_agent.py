@@ -318,6 +318,12 @@ def _binding_result(environ: dict[str, str], timeout: float, route: dict) -> lis
     ]
 
 
+def _selection_refused(environ: dict[str, str]) -> bool:
+    from scripts.profiles import binding
+
+    return bool(environ.get(binding.REPORT)) and binding.refused(Path(environ[binding.REPORT]))
+
+
 def _binding_export(environ: dict[str, str]) -> str:
     names = (
         "AGENTIHOOKS_PROFILE_REPORT",
@@ -623,6 +629,8 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     route_path = _route_report(launcher)
     deadline = time.monotonic() + args.route_timeout
     while not route_path.exists() and time.monotonic() < deadline:
+        if _selection_refused(active_env):
+            break
         time.sleep(0.25)
     route = _read_route_report(route_path) if route_path.exists() else {}
     route_path.unlink(missing_ok=True)
