@@ -4,6 +4,8 @@ sender told."""
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from scripts.inbox.store import InboxStore
     from scripts.swarm.store import RedisStore
 
@@ -11,14 +13,14 @@ BY = "swarm"
 
 
 def settle(inbox, name, seat, exit_text):
-    """seat is where the work goes on, '' when nobody takes it up. A registered name's mail passes to its successor of
-    the same type; a master's waits for its successor while none is spawned yet."""
+    """seat is where the work goes on, '' when nobody takes it up. A master's mail passes to its successor, or waits
+    for one while none is spawned yet."""
     from scripts.inbox.store import CLOSED
     from scripts.swarm.naming import NameRegistry
 
     inbox.seats.record_exit(name, seat, exit_text)
     names = NameRegistry(inbox.redis)
-    successor = names.successor(name)
+    successor = names.successor(name) if names.entry(name).get("type") == "master" else ""
     for item in inbox.inbox(name):
         if item.state in CLOSED:
             continue
@@ -51,20 +53,20 @@ def notice_address(inbox: "InboxStore", sender: str) -> str:
     return master
 
 
-def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", rows: dict) -> None:
+def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Callable[[], dict]") -> None:
+    """live_rows reads the ledger's tasks at sweep time: a task closed after the tick's own read settles as closed."""
     active = {agent.name for agent in store.agents(slug) if agent.state != "finished"}
-    tasks = {row.get("claimed_by"): row for row in rows.values()}
+    tasks = {row.get("claimed_by"): row for row in live_rows().values()}
     for name, seat in store.seats.agent_seats(slug):
         if name in active:
             continue
-        outcome = store.seats.exit_of(name)
-        if outcome:
-            settle(inbox, name, outcome["seat"], outcome["reason"])
-            continue
         state = tasks.get(name, {}).get("state")
+        outcome = store.seats.exit_of(name)
         if state in ("done", "blocked"):
             exit_text = "finished its task and exited" if state == "done" else "blocked its task and exited"
             settle(inbox, name, "", exit_text)
+        elif outcome:
+            settle(inbox, name, outcome["seat"], outcome["reason"])
         else:
             settle(inbox, name, seat, "exited")
 

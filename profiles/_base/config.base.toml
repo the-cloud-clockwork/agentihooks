@@ -24,11 +24,13 @@ project_doc_fallback_filenames = ["CLAUDE.md"]
 hooks = true
 
 [tui]
+# No label override exists: used-tokens renders "<N> used" (cumulative), which
+# reads as current context beside "Context <N>% used".
 status_line = [
   "model-with-reasoning",
   "current-dir",
-  "context-usage",
-  "used-tokens",
+  "context-used",
+  "context-window-size",
   "five-hour-limit",
   "weekly-limit",
 ]

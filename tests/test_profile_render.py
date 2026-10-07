@@ -661,7 +661,9 @@ def test_codex_render_config_has_no_persona_and_only_profile_servers(world):
     assert doc["sandbox_mode"] == "workspace-write"
     assert doc["approval_policy"] == "never"
     assert doc["features"]["hooks"] is True
-    assert doc["mcp_servers"] == {"role-srv": {"command": "r"}, "bundle-srv": {"command": "b"}}
+    assert set(doc["mcp_servers"]) == {"agentihooks", "bundle-srv", "role-srv", "leaky-env"}
+    assert doc["mcp_servers"]["role-srv"] == {"command": "role-server"}
+    assert doc["mcp_servers"]["bundle-srv"] == {"command": "bundle-server"}
     skills = home / ".agents" / "skills"
     assert doc["skills"]["config"] == [
         {"path": str(skills / name / "SKILL.md"), "enabled": False}
@@ -683,7 +685,180 @@ def test_codex_render_keeps_hooks_on_and_layer_servers_out(world):
     doc = tomllib.loads((render.render_codex("rb-role") / "config.toml").read_text())
 
     assert doc["features"]["hooks"] is True
-    assert set(doc["mcp_servers"]) == {"role-srv", "bundle-srv"}
+    assert "layer-srv" not in doc["mcp_servers"]
+
+
+def test_codex_render_status_line_keeps_context_apart_from_cumulative_tokens(world):
+    from scripts.profiles import render
+
+    line = tomllib.loads((render.render_codex("rb-role") / "config.toml").read_text())["tui"]["status_line"]
+
+    context = line.index("context-used")
+    assert line[context + 1] == "context-window-size"
+    assert not {"context-usage", "used-tokens"} & set(line)
+
+
+def test_codex_render_keeps_a_profile_status_line(world):
+    from scripts.profiles import render
+
+    _write(world["role"] / ".codex" / "config.overrides.toml", '[tui]\nstatus_line = ["model", "used-tokens"]\n')
+
+    doc = tomllib.loads((render.render_codex("rb-role") / "config.toml").read_text())
+
+    assert doc["tui"]["status_line"] == ["model", "used-tokens"]
+
+
+READS = ["lf-swarm_traces_by_tag", "lf-swarm_session_timeline", "lf-swarm_error_latency_summary"]
+GW_HEADERS = {"Authorization": "Bearer ${GW_KEY}", "x-mcp-servers": "lf", "X-Scope": "${GW_SCOPE}"}
+
+
+def _declare(world, **servers) -> None:
+    path = world["role"] / ".claude" / ".mcp.json"
+    doc = json.loads(path.read_text())
+    doc["mcpServers"].update(servers)
+    path.write_text(json.dumps(doc))
+
+
+def _gateway(**extra) -> dict:
+    return {"type": "http", "url": "https://gw.example/mcp/", "headers": dict(GW_HEADERS), **extra}
+
+
+def _mounts(name: str, target: str) -> dict:
+    from scripts.profiles import connectors, render
+
+    return json.loads(connectors.path(name, target, render.rendered_root()).read_text())
+
+
+@pytest.fixture
+def advertised(monkeypatch):
+    from scripts.profiles import connectors
+
+    calls = []
+
+    def fake(url, headers):
+        calls.append((url, headers))
+        return [*READS, "lf-trace_list", "lf-prompts_get"]
+
+    monkeypatch.setattr(connectors, "advertised", fake)
+    monkeypatch.setenv("GW_KEY", "k-test")
+    monkeypatch.setenv("GW_SCOPE", "s-test")
+    return calls
+
+
+def test_codex_render_mounts_the_declared_connector_not_the_installed_entry(world, advertised):
+    from scripts.profiles import render
+
+    installed = (world["home"] / ".codex" / "config.toml").read_text()
+    _write(world["home"] / ".codex" / "config.toml", installed + "\n[mcp_servers.gw]\nurl = 'https://old.example'\n")
+    _declare(world, gw=_gateway(enabled_tools=READS))
+
+    doc = tomllib.loads((render.render_codex("rb-role") / "config.toml").read_text())
+
+    assert doc["mcp_servers"]["gw"] == {
+        "url": "https://gw.example/mcp/",
+        "bearer_token_env_var": "GW_KEY",
+        "http_headers": {"x-mcp-servers": "lf"},
+        "env_http_headers": {"X-Scope": "GW_SCOPE"},
+        "enabled_tools": READS,
+    }
+    assert advertised == [
+        ("https://gw.example/mcp/", {**GW_HEADERS, "Authorization": "Bearer k-test", "X-Scope": "s-test"})
+    ]
+
+
+def test_codex_render_names_each_declared_server_it_cannot_mount(world, advertised, capsys):
+    from scripts.profiles import render
+
+    _declare(world, gw=_gateway(enabled_tools=READS), old={"type": "sse", "url": "http://x/sse"})
+
+    render.render_codex("rb-role")
+
+    mounts = _mounts("rb-role", "codex")
+    assert mounts["gw"] == {"mounted": True, "enabled_tools": READS}
+    assert mounts["role-srv"] == {"mounted": True}
+    assert mounts["old"] == {"mounted": False, "reason": "codex has no SSE transport"}
+    reason = "credential-shaped literal in url, command or args"
+    assert mounts["leaky-arg"] == {"mounted": False, "reason": reason}
+    printed = " ".join(capsys.readouterr().out.split())
+    assert f"[!!] MCP 'leaky-arg' is not mounted for rb-role (codex): {reason}" in printed
+
+
+def test_claude_render_denies_every_advertised_tool_outside_the_allowlist(world, advertised):
+    from scripts.profiles import render
+
+    _declare(world, gw=_gateway(enabled_tools=READS, disabled_tools=["lf-x"]))
+
+    out = render.render_claude("rb-role")
+
+    entry = json.loads((out / ".claude.json").read_text())["mcpServers"]["gw"]
+    assert entry == {"type": "http", "url": "https://gw.example/mcp/", "headers": GW_HEADERS}
+    deny = json.loads((out / "settings.json").read_text())["permissions"]["deny"]
+    assert [rule for rule in deny if rule.startswith("mcp__gw__")] == [
+        "mcp__gw__lf-trace_list",
+        "mcp__gw__lf-prompts_get",
+        "mcp__gw__lf-x",
+    ]
+    assert _mounts("rb-role", "claude")["gw"] == {"mounted": True, "enabled_tools": READS}
+
+
+def test_claude_render_denies_a_disabled_tool_without_listing(world, advertised):
+    from scripts.profiles import render
+
+    _declare(world, gw=_gateway(disabled_tools=["lf-trace_list"]))
+
+    out = render.render_claude("rb-role")
+
+    deny = json.loads((out / "settings.json").read_text())["permissions"]["deny"]
+    assert "mcp__gw__lf-trace_list" in deny
+    assert advertised == []
+
+
+def test_claude_render_keeps_the_profile_deny_rules_ahead_of_connector_denies(world, advertised):
+    from scripts.profiles import render
+
+    overrides = world["role"] / ".claude" / "settings.overrides.json"
+    doc = json.loads(overrides.read_text())
+    doc["permissions"] = {"deny": ["Bash(rm:*)"]}
+    overrides.write_text(json.dumps(doc))
+    _declare(world, gw=_gateway(disabled_tools=["lf-x"]))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["permissions"]["deny"] == ["Bash(rm:*)", "mcp__gw__lf-x"]
+
+
+@pytest.mark.parametrize(
+    ("spec", "env", "reason"),
+    [
+        (
+            {"command": "srv", "enabled_tools": READS},
+            {},
+            "Claude has no native tool allowlist; only an http server's tools can be listed",
+        ),
+        (_gateway(enabled_tools=READS), {"GW_KEY": None}, "environment variable GW_KEY is unset"),
+        (_gateway(enabled_tools=READS), {"FAIL": "1"}, "tool listing failed: ConnectionError: refused"),
+    ],
+)
+def test_claude_render_leaves_an_unlistable_allowlisted_server_unmounted(
+    world, advertised, monkeypatch, capsys, spec, env, reason
+):
+    from scripts.profiles import connectors, render
+
+    for key, value in env.items():
+        if value is None:
+            monkeypatch.delenv(key)
+    if "FAIL" in env:
+        monkeypatch.setattr(
+            connectors, "advertised", lambda url, headers: (_ for _ in ()).throw(ConnectionError("refused"))
+        )
+    _declare(world, gw=spec)
+
+    out = render.render_claude("rb-role")
+
+    assert "gw" not in json.loads((out / ".claude.json").read_text())["mcpServers"]
+    assert _mounts("rb-role", "claude")["gw"] == {"mounted": False, "reason": reason}
+    printed = " ".join(capsys.readouterr().out.split())
+    assert f"[!!] MCP 'gw' is not mounted for rb-role (claude): {reason}" in printed
 
 
 def test_codex_render_sizes_the_doc_cap_to_a_large_persona(world):
@@ -761,7 +936,7 @@ def test_codex_render_without_global_servers_or_skills(world, config):
 
     doc = tomllib.loads((render.render_codex("rb-role") / "config.toml").read_text())
 
-    assert "mcp_servers" not in doc
+    assert set(doc["mcp_servers"]) == {"agentihooks", "bundle-srv", "role-srv", "leaky-env"}
     assert "skills" not in doc
     assert "hooks" not in doc
 

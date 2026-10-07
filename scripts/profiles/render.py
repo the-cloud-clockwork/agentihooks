@@ -14,7 +14,7 @@ from pathlib import Path
 
 from hooks.context import quarantine
 from scripts.claude_config import claude_home, claude_json
-from scripts.profiles import browser, plugins, sources
+from scripts.profiles import browser, connectors, plugins, sources
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
 from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_target import codex_home
@@ -176,17 +176,11 @@ def _seed(src: Path) -> dict:
     return doc
 
 
-def _claude_json(out: Path, bundle: Path | None, dirs: list[tuple[str, Path]]) -> None:
-    from scripts.targets._common import drop_if_credentialed, sanitize_env_and_headers
-
+def _claude_json(out: Path, servers: dict) -> None:
     _i = _install_module()
     dst = out / ".claude.json"
     doc = _i.load_json(dst) if dst.exists() else _seed(claude_json(_global_env()))
     doc.setdefault("hasCompletedOnboarding", True)
-    servers = {}
-    for name, spec in _mcp_servers("claude", bundle, dirs).items():
-        if not drop_if_credentialed(name, spec, str(dst)):
-            servers[name] = sanitize_env_and_headers(name, spec, str(dst))
     doc["mcpServers"] = servers
     _i.save_json(dst, doc)
 
@@ -242,17 +236,24 @@ def render_claude(name: str, force: bool = False) -> Path | None:
         and _read_json(out / STAMP) == current
         and not (out / "rules").exists()
         and sources.path(name, "claude", rendered_root()).is_file()
+        and connectors.path(name, "claude", rendered_root()).is_file()
         and "hasCompletedOnboarding" in (_read_json(out / ".claude.json") or {})
     ):
         return None
     out.mkdir(parents=True, exist_ok=True)
-    _i.save_json(out / "settings.json", _claude_settings(bundle, dirs))
+    servers, deny, mounts = connectors.claude(_mcp_servers("claude", bundle, dirs), str(out / ".claude.json"))
+    connectors.write(connectors.path(name, "claude", rendered_root()), mounts, name, "claude")
+    settings = _claude_settings(bundle, dirs)
+    if deny:
+        permissions = settings["permissions"]
+        permissions["deny"] = [*permissions.get("deny", []), *deny]
+    _i.save_json(out / "settings.json", settings)
     for subdir, keep in FEATURES:
         _relink(out / subdir, _features(subdir, keep, bundle, dirs))
     if (out / "rules").is_dir():
         shutil.rmtree(out / "rules")
     _atomic_write(out / "CLAUDE.md", _persona(name, "claude", bundle, dirs, current["chain"]))
-    _claude_json(out, bundle, dirs)
+    _claude_json(out, servers)
     shared = claude_home(_global_env())
     for item in SHARED:
         link = out / item
@@ -327,6 +328,7 @@ def render_codex(name: str, force: bool = False) -> Path | None:
         not force
         and claude_fresh
         and manifest.is_file()
+        and connectors.path(name, "codex", rendered_root()).is_file()
         and _read_toml(out / "config.toml").get("agentihooks") == current
     ):
         return None
@@ -340,12 +342,10 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     _link(manifest, sources.path(name, "claude", rendered_root()))
     doc = _codex_config(installed, operator, out, _settings("codex", bundle, dirs))
     doc["project_doc_max_bytes"] = max(65536, int(len((claude / "CLAUDE.md").read_bytes()) * 1.25))
-    servers = _mcp_servers("codex", bundle, dirs)
-    allowed = {server: spec for server, spec in installed.get("mcp_servers", {}).items() if server in servers}
-    if browser.enabled([name for name, _ in dirs]):
-        allowed = browser.configure(allowed, [name for name, _ in dirs])
-    if allowed:
-        doc["mcp_servers"] = allowed
+    servers, mounts = connectors.codex(_mcp_servers("codex", bundle, dirs))
+    connectors.write(connectors.path(name, "codex", rendered_root()), mounts, name, "codex")
+    if servers:
+        doc["mcp_servers"] = servers
     root = agents_skills_home()
     hidden_skills = [p for p in sorted(root.iterdir()) if p.is_dir()] if root.is_dir() else []
     if hidden_skills:

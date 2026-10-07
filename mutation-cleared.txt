@@ -631,6 +631,14 @@
     "reader": "Standards",
     "reason": "A missing pane text defaults to a string with no input marker, confirmation line or escape codes, so selection_prompt and typed_input both return empty exactly as for an empty default."
   },
+  "scripts/swarm_ledger/ledger_stats.py:scripts.swarm_ledger.ledger_stats.x_refresh__mutmut_26:ff7d5dc88ba11da2c1bfa6f5bc2ff2add34c463730098f93f86faf30f9ca4c9b": {
+    "reader": "Standards",
+    "reason": "The mutant omits the precomputed review argument; the same pure calculator receives identical document, events and time before mutation and yields identical persisted stats and review."
+  },
+  "scripts/swarm_ledger/ledger_stats.py:scripts.swarm_ledger.ledger_stats.x_refresh__mutmut_30:4f6313b8a5da9c95982aff3a3b0fd99c52ed8c8508b50aafbddabd1330a11299": {
+    "reader": "Standards",
+    "reason": "The mutant omits the precomputed review argument; the same pure calculator receives identical document, events and time before mutation and yields identical persisted stats and review."
+  },
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁreceive__mutmut_3:47b0a5f5739a912849451da407cb6339e358d2d3c322d33c37aa97a1e532db78": {
     "reader": "Standards",
     "reason": "FileLedgerRepository.get_document branches on reconcile truthiness; False and None select the identical locked persisted-document read."

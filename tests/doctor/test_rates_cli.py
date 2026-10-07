@@ -26,7 +26,8 @@ def loaded(env, monkeypatch):  # noqa: F811
             {"at": AT_MS + HOUR, "kind": "task done", "target": "tasks/t1", "by": "swarm"},
         ]
         log = [{"gate": "talk", "kind": "deny", "at": AT_MS + HOUR}]
-        return rates.Records(events, {}, {}, {}, log, [], [], {})
+        tasks = {"t1": {"kind": "ops", "proof": {"command": "check", "output": "verified"}}}
+        return rates.Records(events, tasks, {}, {}, log, [], [], {})
 
     monkeypatch.setattr(swarm_cli, "now_ms", lambda: NOW)
     monkeypatch.setattr(rates_read, "load", load)

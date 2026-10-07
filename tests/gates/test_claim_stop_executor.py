@@ -169,6 +169,18 @@ def test_a_stop_after_the_merge_is_blocked_and_one_on_pending_checks_passes_with
     assert held["on"] == {"kind": "checks", "target": URL}
 
 
+def test_a_tune_task_with_a_merged_fix_stops_on_its_measurement_wait_and_owes_its_contract_without_it(rig):
+    rig.set_task(state="pr", pr_url=URL, kind="tune")
+    rig.answer.write_text(json.dumps(MERGED))
+    bare = rig.stop()
+    assert bare.returncode == 2
+    assert f"your pull request {URL} merged, and tune task {rig.task} closes on its proof contract" in bare.stderr
+    wait = {"until": 2**53, "reason": "after measurement", "at": 1}
+    rig.redis.set(f"agentihooks:swarm:{SLUG}:wait:{ME}", json.dumps(wait))
+    waiting = rig.stop()
+    assert waiting.returncode == 0, waiting.stderr
+
+
 def test_observe_mode_lets_the_stop_through_and_logs_it(rig):
     rig.answer.write_text(json.dumps(MERGED))
     rig.set_task(state="pr", pr_url=URL)

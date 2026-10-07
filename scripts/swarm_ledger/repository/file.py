@@ -55,7 +55,8 @@ def sync(slug, changes=None, ops=None, gate=None, core=core):
                 f"the page copy at revision {seed_rev} is too old to merge, its agent edits were ignored"
             )
         rejected = core.apply_changes(doc, changes or [], ctx)
-        rejected += [op["id"] for op in ops or [] if not core.gated(gate, doc, op, ctx)]
+        ordered_ops = sorted(ops or [], key=lambda op: op["op"] == "stats_sync")
+        rejected += [op["id"] for op in ordered_ops if not core.gated(gate, doc, op, ctx)]
         import ledger_artifacts
         import ledger_media
 

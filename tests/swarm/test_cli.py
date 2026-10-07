@@ -695,7 +695,7 @@ def test_tick_redirects_a_late_handoff_item_to_the_successor(env, tmp_path):
     cli.run_tick(store, "sw")
     successor = store.seats.occupant("eng-1@sw").occupant
     assert successor == "engineer@a1b2c3-0002"
-    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (successor, "pending")
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("eng-1@sw", "pending")
     assert inbox.deliver(item.id, successor).state == "delivered"
 
 

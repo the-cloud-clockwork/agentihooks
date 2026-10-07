@@ -43,8 +43,8 @@ master takes the next master number. A removed swarm's code stays taken; created
 
 That name is the Claude or Codex session name, the inbox address, the ledger crew name, the `status` row and the
 `terminate-agent` target. herdr refuses an at sign in agent names, so the herdr agent name carries a dash in its
-place (`engineer-a1b2c3-0002`). An inbox item left for a retired agent passes to the next agent of the same type in
-that swarm; a master's waits for its successor. `scripts/swarm/naming.py` is the only code that builds or parses an
+place (`engineer-a1b2c3-0002`). An inbox item left for a retired engineer or ci agent moves to its
+seat when its task goes on, else it is withdrawn and its sender told; a master's passes to its successor. `scripts/swarm/naming.py` is the only code that builds or parses an
 agent name, and a test walks `scripts/` and `hooks/` to keep it so.
 
 ## The master

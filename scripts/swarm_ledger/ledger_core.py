@@ -542,12 +542,13 @@ def record_sync(doc, op, ctx):
 
     kind = SYNC_KINDS[op["op"]]
     last = max((e.get("at", 0) for e in ctx.meta["events"] if e.get("kind") == kind), default=0)
-    if ctx.at - last < SYNC_COOLDOWN_MS:
+    failed = op["op"] == "stats_sync" and ctx.meta.get("stats_refresh", {}).get("state") == "failed"
+    if ctx.at - last < SYNC_COOLDOWN_MS and not failed:
         return False
     if op["op"] == "sync":
         text = ledger_gate.sync_summary(doc, ctx.meta)
     else:
-        text = ledger_stats.review(doc, ctx.meta, ctx.at)
+        text = ledger_stats.refresh(doc, ctx, op["id"])
     ctx.record("operator", kind, "", id=op["id"], text=text)
     return True
 
