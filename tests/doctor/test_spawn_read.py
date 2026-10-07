@@ -55,3 +55,42 @@ def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):
     assert {f.kind for f in spawns.findings(record)} == {"failed spawn", "account overflow"}
     assert spawns.failed(record)[0].subject == "dt2"
     assert store.export(slug) == before
+
+
+def test_spawn_reader_passes_an_explicit_upper_journal_bound(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
+    before = store.export("sw")
+
+    def journal(argv, **kwargs):
+        assert argv == [
+            "journalctl",
+            "--user",
+            "-u",
+            "agentihooks-swarm.service",
+            "--since",
+            "2026-10-07T09:58:24Z",
+            "--until",
+            "2026-10-07T12:58:24Z",
+            "-o",
+            "cat",
+            "--no-pager",
+        ]
+        assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 30}
+        return subprocess.CompletedProcess(argv, 0, "sw: spawn failed for mu1, task mu1 reopened: timeout\n", "")
+
+    record = spawn_read.records(
+        store,
+        "sw",
+        5,
+        since="2026-10-07T09:58:24Z",
+        until="2026-10-07T12:58:24Z",
+        run=journal,
+    )
+    assert record["actions"] == ["sw: spawn failed for mu1, task mu1 reopened: timeout"]
+    assert spawns.failed(record)[0].measure == 1
+    assert store.export("sw") == before
