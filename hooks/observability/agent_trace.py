@@ -172,6 +172,12 @@ def _generations(turn: list[dict]) -> dict[str, tuple[int, dict]]:
     return found
 
 
+def _outcome(result: dict) -> dict:
+    if not result:
+        return {"tool.outcome.state": "missing"}
+    return {"tool.outcome": "error" if result.get("is_error") else "success"}
+
+
 def _turn_spans(session_id: str, number: int, turn: list[dict], root: int) -> list[SpanSpec]:
     turn_id = _span_id(session_id, turn[0].get("uuid", str(number)))
     spans = [
@@ -222,6 +228,7 @@ def _turn_spans(session_id: str, number: int, turn: list[dict], root: int) -> li
                 "gen_ai.tool.name": block.get("name", ""),
                 "gen_ai.tool.call.id": block.get("id", ""),
                 "error": bool(result.get("is_error")),
+                **_outcome(result),
                 **_io(json.dumps(block.get("input", {}), ensure_ascii=False), _text(result.get("content"))),
             }
             span_id = _span_id(session_id, block.get("id", ""))
@@ -230,7 +237,11 @@ def _turn_spans(session_id: str, number: int, turn: list[dict], root: int) -> li
 
 
 def session_spans(
-    entries: list[dict], identity: Identity, cost: float | None = None, first_turn: int = 0
+    entries: list[dict],
+    identity: Identity,
+    cost: float | None = None,
+    first_turn: int = 0,
+    root: Mapping[str, object] | None = None,
 ) -> list[SpanSpec]:
     all_turns = turns(entries)
     if not all_turns:
@@ -261,6 +272,7 @@ def session_spans(
     }
     if cost is not None:
         attributes["gen_ai.usage.cost"] = float(cost)
+    attributes.update(root or {})
     trace_io = {
         "langfuse.trace.input": _prompt_text(all_turns[0]),
         "langfuse.trace.output": _assistant_text(all_turns[-1]),
@@ -297,11 +309,65 @@ def _cursor_path(session_id: str) -> Path:
     return CURSOR_DIR / f"{safe_id}.json"
 
 
+def _cursor(session_id: str) -> dict:
+    try:
+        data = json.loads(_cursor_path(session_id).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _exported_turns(session_id: str) -> int:
     try:
-        return int(json.loads(_cursor_path(session_id).read_text(encoding="utf-8"))["turns"])
-    except (OSError, ValueError, TypeError, KeyError):
+        return int(_cursor(session_id)["turns"])
+    except (ValueError, TypeError, KeyError):
         return 0
+
+
+_TRUNCATED = re.compile(r"…\[truncated \d+ chars\]\Z")
+
+
+def _truncated_fields(spans: list[SpanSpec]) -> int:
+    return sum(
+        1 for spec in spans for value in spec.attributes.values() if isinstance(value, str) and _TRUNCATED.search(value)
+    )
+
+
+def _root_attributes(session_id: str) -> dict:
+    from hooks.observability import correlation, signals
+
+    accepted = _cursor(session_id).get("accepted_at")
+    freshness = {
+        "agentihooks.export.generated_at": datetime.now(timezone.utc).isoformat(),
+        "agentihooks.export.queued.state": correlation.UNSUPPORTED,
+    }
+    if accepted:
+        freshness["agentihooks.export.last_accepted_at"] = accepted
+    else:
+        freshness["agentihooks.export.last_accepted_at.state"] = correlation.MISSING
+    return {**correlation.resolve(session_id), **signals.attributes(session_id), **freshness}
+
+
+def _collector_outcomes(session_id: str, spans: list[SpanSpec], result: str, truncated: int) -> None:
+    from hooks.observability import otel, signals
+
+    keys = ("gen_ai.tool.name", "gen_ai.tool.call.id", "tool.outcome", "tool.outcome.state")
+    for spec in spans:
+        if spec.attributes.get("langfuse.observation.type") != "tool":
+            continue
+        fields = {key: spec.attributes[key] for key in keys if key in spec.attributes}
+        otel.emit_event(
+            "agentihooks.tool.outcome",
+            {
+                "session.id": session_id,
+                **fields,
+                "tool.started_at_ns": spec.start_ns,
+                "tool.ended_at_ns": spec.end_ns,
+                "agentihooks.export.result": result,
+            },
+        )
+    signals.record({(session_id, "traces", result): len(spans), (session_id, "traces", "truncated"): truncated})
+    otel.flush()
 
 
 def _readable(spec: SpanSpec, trace: int):
@@ -375,9 +441,15 @@ def export_session(session_id: str, transcript_path: str, identity: Identity | N
     identity = identity or identity_from_env(session_id)
     entries = read_entries(transcript_path)
     exported = _exported_turns(session_id)
-    spans = session_spans(entries, identity, session_cost(session_id), first_turn=exported)
+    spans = session_spans(
+        entries, identity, session_cost(session_id), first_turn=exported, root=_root_attributes(session_id)
+    )
     if not spans:
         return
+    truncated = _truncated_fields(spans)
+    spans[0].attributes.update(
+        {"agentihooks.export.spans": len(spans), "agentihooks.export.truncated_fields": truncated}
+    )
     trace = trace_id(session_id)
     errors = _ExportErrors()
     logging.getLogger(_EXPORTER_LOGGER).addHandler(errors)
@@ -392,9 +464,12 @@ def export_session(session_id: str, transcript_path: str, identity: Identity | N
     finally:
         logging.getLogger(_EXPORTER_LOGGER).removeHandler(errors)
         exporter.shutdown()
-    if result is not SpanExportResult.SUCCESS:
+    accepted = result is SpanExportResult.SUCCESS
+    _collector_outcomes(session_id, spans, "accepted" if accepted else "failed", truncated)
+    if not accepted:
         _log_failure(errors.status, errors.reason)
         return
     path = _cursor_path(session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"turns": max(exported, len(turns(entries)))}), encoding="utf-8")
+    cursor = {"turns": max(exported, len(turns(entries))), "accepted_at": datetime.now(timezone.utc).isoformat()}
+    path.write_text(json.dumps(cursor), encoding="utf-8")

@@ -65,6 +65,8 @@ _worker: _threading.Thread | None = None
 _q: _queue.Queue | None = None
 _init_done = _threading.Event()  # set once _init_sdk finishes (success OR fail)
 _worker_lock = _threading.Lock()
+_counts: dict[tuple[str, str, str], int] = {}
+_counts_lock = _threading.Lock()
 
 
 def _ensure_worker() -> None:
@@ -108,10 +110,11 @@ def _dispatch_op(op: tuple) -> None:
     if kind == "event":
         _, name, attrs = op
         if _log_emitter is None:
+            _count(attrs, "events", "unsupported")
             return
         from opentelemetry._logs import LogRecord, SeverityNumber
 
-        attrs = dict(attrs)
+        attrs = {**_correlation(attrs), **attrs}
         attrs["event.name"] = name
         attrs["event.timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
         _log_emitter.emit(
@@ -120,10 +123,11 @@ def _dispatch_op(op: tuple) -> None:
     elif kind == "gauge":
         _, name, value, attrs = op
         if _meter is None:
+            _count(attrs, "gauges", "unsupported")
             return
         if name not in _gauges:
             _gauges[name] = _meter.create_gauge(name)
-        _gauges[name].set(value, dict(attrs))
+        _gauges[name].set(value, {**_correlation(attrs), **attrs})
     elif kind == "flush":
         try:
             succeeded = True
@@ -133,6 +137,12 @@ def _dispatch_op(op: tuple) -> None:
             op[2][0] = succeeded
         finally:
             op[1].set()
+
+
+def _correlation(attrs: dict) -> dict:
+    from hooks.observability.correlation import resolve
+
+    return resolve(str(attrs.get("session.id") or ""))
 
 
 def init() -> None:
@@ -267,31 +277,34 @@ def get_meter():
 def emit_event(name: str, attributes: dict[str, str] | None = None) -> None:
     """Enqueue an OTEL log event for the worker thread. Always non-blocking.
 
-    If the worker hasn't finished init, or the queue is full, the event is
-    dropped silently — telemetry loss is acceptable; hook latency is not.
+    A full queue drops the event and counts it; hook latency outranks telemetry.
     """
-    init()
-    if _q is None:
-        return
-    try:
-        _q.put_nowait(("event", name, dict(attributes or {})))
-    except _queue.Full:
-        pass
-    except Exception:
-        pass
+    _enqueue("events", ("event", name, dict(attributes or {})))
 
 
 def record_gauge(name: str, value: float, attributes: dict[str, str] | None = None) -> None:
     """Enqueue a gauge metric for the worker thread. Always non-blocking."""
+    _enqueue("gauges", ("gauge", name, float(value), dict(attributes or {})))
+
+
+def _count(attrs: dict, signal: str, outcome: str) -> None:
+    key = (str(attrs.get("session.id") or ""), signal, outcome)
+    with _counts_lock:
+        _counts[key] = _counts.get(key, 0) + 1
+
+
+def _enqueue(signal: str, op: tuple) -> None:
     init()
+    attrs = op[-1]
     if _q is None:
+        _count(attrs, signal, "unsupported")
         return
     try:
-        _q.put_nowait(("gauge", name, float(value), dict(attributes or {})))
+        _q.put_nowait(op)
     except _queue.Full:
-        pass
-    except Exception:
-        pass
+        _count(attrs, signal, "dropped")
+        return
+    _count(attrs, signal, "queued")
 
 
 def _flush_pending() -> bool:
@@ -307,31 +320,54 @@ def _flush_pending() -> bool:
 def flush() -> None:
     if _q is None:
         return
+    confirmed = False
+    try:
+        confirmed = _drain()
+    finally:
+        _persist_counts(confirmed)
+
+
+def _persist_counts(confirmed: bool) -> None:
+    """Writes this process's signal counts; queued signals a failed or skipped flush leaves are unconfirmed."""
+    from hooks.observability import signals
+
+    with _counts_lock:
+        counts = dict(_counts)
+        _counts.clear()
+    if not confirmed:
+        for (session, signal, outcome), count in list(counts.items()):
+            sent = count - counts.get((session, signal, "unsupported"), 0)
+            if outcome == "queued" and sent > 0:
+                counts[(session, signal, "unconfirmed")] = sent
+    signals.record(counts)
+
+
+def _drain() -> bool:
     from hooks.config import AGENTIHOOKS_HOME, hook_collector
 
     endpoint, protocol = hook_collector(os.environ)
     if not endpoint:
-        _flush_pending()
-        return
+        return _flush_pending()
     key = hashlib.sha256(f"{endpoint}|{protocol}".encode()).hexdigest()
     state = Path(AGENTIHOOKS_HOME) / "telemetry" / f"flush-{key}"
     try:
         if state.exists() and time.time() < state.stat().st_mtime + FLUSH_COOLDOWN_SEC:
-            return
+            return False
         if _flush_pending():
             state.unlink(missing_ok=True)
-            return
+            return True
         state.parent.mkdir(parents=True, exist_ok=True)
         with state.with_suffix(".lock").open("w") as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                return
+                return False
             if state.exists() and time.time() < state.stat().st_mtime + FLUSH_COOLDOWN_SEC:
-                return
+                return False
             state.touch()
             from hooks.common import log
 
             log(f"Telemetry flush failed; skipping flush waits for {FLUSH_COOLDOWN_SEC}s")
     except OSError:
-        return
+        return False
+    return False
