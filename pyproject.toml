@@ -43,6 +43,7 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.20.0",
     # The swarm keeps its claims and agent registry in Redis (scripts/swarm/store.py).
     "redis>=5.0.0",
+    "jsonschema>=4.23",
 ]
 
 [project.optional-dependencies]

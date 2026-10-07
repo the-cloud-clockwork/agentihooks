@@ -59,7 +59,7 @@ def test_joined_master_publishes_requested_markdown_without_claims(publication, 
     ledger.main()
     assert json.loads(capsys.readouterr().out) == {"published": True}
     state = ledger.call(slug)
-    [row] = state["artifacts"]
+    [row] = ledger.resource(slug, "artifacts", collection=True)
     assert (row["by"], row["task"], row["request"]) == (MASTER, "", "requested")
     assert state["_meta"]["members"][MASTER]["claims"] == []
     with urllib.request.urlopen(f"{ledger.BASE}/artifacts/{slug}/{row['file']['id']}") as response:
@@ -81,7 +81,7 @@ def test_page_server_accepts_requested_master_artifact(publication, task):
     }
     state = ledger.call(slug, [op])
     assert state["rejected"] == []
-    [row] = state["artifacts"]
+    [row] = ledger.resource(slug, "artifacts", collection=True)
     assert (row["by"], row["task"], row["request"]) == (MASTER, "", "requested")
 
 
@@ -109,7 +109,7 @@ def test_master_requires_operator_request(publication, request_id):
     state = ledger.call(slug, [op])
     assert state["rejected"] == ["refused"]
     assert artifacts.REFUSED in state["_meta"]["warnings"]
-    assert state["artifacts"] == []
+    assert ledger.resource(slug, "artifacts", collection=True) == []
 
 
 @pytest.mark.parametrize("by,role", [(MASTER, "member"), (WORKER, "orchestrator"), (WORKER, "member")])
@@ -129,7 +129,7 @@ def test_master_marker_needs_joined_master_identity_and_role(publication, monkey
     }
     state = ledger.call(slug, [op])
     assert state["rejected"] == ["refused"]
-    assert state["artifacts"] == []
+    assert ledger.resource(slug, "artifacts", collection=True) == []
 
 
 def test_unjoined_master_cannot_publish(publication):
@@ -147,7 +147,7 @@ def test_unjoined_master_cannot_publish(publication):
     }
     state = ledger.call(slug, [op])
     assert state["rejected"] == ["refused"]
-    assert state["artifacts"] == []
+    assert ledger.resource(slug, "artifacts", collection=True) == []
 
 
 @pytest.mark.parametrize("harness", ["claude", "codex"])

@@ -38,6 +38,11 @@ class FileLedger(LedgerClient):
             raise SwarmError(f"ledger {slug} refused: {rejected}")
         return state
 
+    def _resource(self, slug, path, collection=False):
+        from scripts.swarm_ledger.api.resources import value
+
+        return value(self._call(slug), path)
+
 
 @pytest.fixture
 def env(monkeypatch, tmp_path):

@@ -1,0 +1,112 @@
+import json
+from types import ModuleType
+from urllib.parse import parse_qs, urlsplit
+
+from . import resources, schemas
+from .errors import APIError
+
+
+def body(handler: object, server: ModuleType) -> dict:
+    if handler.headers.get_content_type() != "application/json":
+        raise APIError(415, "content_type", "Content-Type must be application/json")
+    try:
+        length = int(handler.headers.get("Content-Length", "0"))
+        if not 0 < length <= server.MAX_BODY:
+            raise ValueError
+        return server.core.loads(handler.rfile.read(length))
+    except ValueError:
+        raise APIError(400, "schema_invalid", "Request body must be a bounded JSON object") from None
+
+
+def dispatch(handler: object, server: ModuleType) -> dict | None:
+    if handler.headers.get("Host") not in server.ALLOWED_HOSTS:
+        raise APIError(403, "forbidden", "Host not allowed")
+    origin = handler.headers.get("Origin")
+    if origin is not None and origin not in server.ALLOWED_ORIGINS:
+        raise APIError(403, "forbidden", "Origin not allowed")
+    parts = urlsplit(handler.path).path.removeprefix("/api/v1/").split("/")
+    if parts[0] != "ledgers" or len(parts) == 1:
+        return global_resource(handler, server, parts)
+    slug, path = parts[1], "/".join(parts[2:]) or "metadata"
+    if not server.core.SLUG_RE.fullmatch(slug) or not handler.exists(slug):
+        raise APIError(404, "ledger_missing", "No such ledger")
+    principal = server.authority.principal(
+        server.core.read_token(server.repository.read_page(slug)),
+        slug,
+        handler.headers.get("X-Ledger-Token"),
+        handler.headers.get("X-Ledger-Agent"),
+    )
+    if principal is None:
+        raise APIError(403, "forbidden", "Missing or wrong ledger credential")
+    if handler.command == "GET":
+        query = pagination(handler.path)
+        if path == "swarm" or path.startswith("swarm/"):
+            return resources.swarm_read(server.swarm_status(slug), path, query)
+        return resources.read(server.repository.get_document(slug), path, query)
+    return ledger_operation(handler, server, slug, path, principal)
+
+
+def global_resource(handler: object, server: ModuleType, parts: list) -> dict:
+    from . import admin
+
+    if parts == ["layout"]:
+        return admin.layout(handler, server, None if handler.command == "GET" else body(handler, server))
+    if handler.command == "GET" and parts[0] in ("ledgers", "bin"):
+        rows = server.ledger_summaries() if parts[0] == "ledgers" else server.bin_summaries()
+        if len(parts) == 2:
+            item = next((row for row in rows if row["slug"] == parts[1]), None)
+            if item is None:
+                raise APIError(404, "resource_missing", "No such summary")
+            return {"data": item, "revision": resources.revision(item)}
+        if len(parts) == 1:
+            return resources.page(rows, resources.revision(rows), pagination(handler.path))
+    if parts == ["bin", "actions"] and handler.command == "POST":
+        return admin.bin_action(handler, server, body(handler, server))
+    raise APIError(404, "resource_missing", "No such resource")
+
+
+def ledger_operation(handler: object, server: ModuleType, slug: str, path: str, principal: str) -> dict | None:
+    from . import admin, mutations
+
+    if handler.command not in ("POST", "PUT"):
+        raise APIError(405, "method_not_allowed", "Use a resource operation")
+    if path in ("uploads/media", "uploads/artifacts"):
+        return admin.upload(handler, server, slug, path)
+    payload = body(handler, server)
+    if path == "swarm/actions":
+        return admin.control(server, slug, principal, payload)
+    if path == "export":
+        schemas.validate({"type": "object", "maxProperties": 0}, payload)
+        state = server.repository.get_document(slug)
+        state["_meta"] = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
+        return {"data": state}
+    if path == "operations":
+        return mutations.apply(server, slug, principal, payload)
+    raise APIError(404, "resource_missing", "No such operation resource")
+
+
+def handle(handler: object, server: ModuleType) -> None:
+    try:
+        result = dispatch(handler, server)
+        if result is None:
+            return None
+        status = 200
+    except APIError as exc:
+        status, result = exc.status, exc.envelope()
+    except (OSError, ValueError):
+        status, result = 500, APIError(500, "storage_error", "Resource could not be read or written").envelope()
+    return handler.send(status, json.dumps(result, ensure_ascii=False), "application/json")
+
+
+def pagination(url: str) -> dict:
+    parsed = parse_qs(urlsplit(url).query, keep_blank_values=True)
+    if any(len(values) != 1 for values in parsed.values()):
+        raise APIError(400, "schema_invalid", "Query parameters must be unique")
+    query = {key: values[0] for key, values in parsed.items()}
+    if "limit" in query:
+        try:
+            query["limit"] = int(query["limit"])
+        except ValueError:
+            raise APIError(400, "schema_invalid", "Limit must be an integer") from None
+    schemas.validate(schemas.PAGINATION, query)
+    return query

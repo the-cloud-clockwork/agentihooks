@@ -33,17 +33,20 @@ class LedgerClient:
             raise SwarmError(f"ledger {slug} refused: {detail}")
         return state
 
+    def _resource(self, slug, path, collection=False):
+        return _ledger().resource(slug, path, service=self.service, collection=collection)
+
     def state(self, slug):
         return self._call(slug)
 
     def tasks(self, slug):
-        return self._call(slug).get("tasks", [])
+        return self._resource(slug, "tasks", collection=True)
 
     def events(self, slug):
-        return self._call(slug).get("_meta", {}).get("events", [])
+        return self._resource(slug, "events", collection=True)
 
     def chat(self, slug):
-        return self._call(slug).get("chat", [])
+        return self._resource(slug, "chat", collection=True)
 
     def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
         guard = {"if_state": list(if_state)} if if_state else {}
@@ -126,7 +129,7 @@ class LedgerClient:
         return ledger_bin.bin_closed(slug, closed_at)
 
     def closed(self, slug):
-        return bool(self._call(slug).get("closed_at"))
+        return bool(self._resource(slug, "metadata").get("closed_at"))
 
     def binned(self, slug):
         _ledger()

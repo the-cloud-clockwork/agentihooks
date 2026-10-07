@@ -199,7 +199,7 @@ def test_upload_artifact_sends_bytes_name_token_and_agent(tmp_path):
         opened.return_value.__enter__.return_value.read.return_value = b'{"id": "x"}'
         assert ledger.upload_artifact("shots", "art-engineer", str(doc)) == {"id": "x"}
     req = opened.call_args.args[0]
-    assert req.full_url.endswith("/api/artifacts/shots")
+    assert req.full_url.endswith("/api/v1/ledgers/shots/uploads/artifacts")
     assert req.data == MARKDOWN
     assert req.get_header("X-artifact-name") == "proposal.md"
     assert req.get_header("X-ledger-agent") == "art-engineer"

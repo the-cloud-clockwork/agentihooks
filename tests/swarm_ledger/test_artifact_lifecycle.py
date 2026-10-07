@@ -117,6 +117,13 @@ class TestCommands:
         with (
             patch.object(ledger, "upload_artifact", return_value=file),
             patch.object(ledger, "call", return_value=state or {}) as call,
+            patch.object(
+                ledger,
+                "resource",
+                side_effect=lambda slug, path, collection=False: (
+                    state["_meta"]["events"] if path == "events" else {"artifacts": len(state["artifacts"])}
+                ),
+            ),
         ):
             getattr(ledger, f"cmd_{args.command.replace('-', '_')}")(args)
         return call.call_args.args[1][0]
@@ -282,14 +289,17 @@ class TestPurge:
 
 def test_a_purge_summary_prints_the_count(capsys):
     args = ledger.build_parser().parse_args(["--slug", "cli", "--as", AGENT, "artifact-purge"])
-    with patch.object(
-        ledger,
-        "call",
-        return_value={
-            "artifacts": [],
-            "artifact_trash": [],
-            "_meta": {"events": [{"kind": "artifacts purged", "count": 4}]},
-        },
+    with (
+        patch.object(
+            ledger,
+            "call",
+            return_value={
+                "artifacts": [],
+                "artifact_trash": [],
+                "_meta": {"events": [{"kind": "artifacts purged", "count": 4}]},
+            },
+        ),
+        patch.object(ledger, "resource", side_effect=[[{"kind": "artifacts purged", "count": 4}], {"artifacts": 0}]),
     ):
         ledger.cmd_artifact_purge(args)
     assert json.loads(capsys.readouterr().out) == {"purged": 4, "artifacts": 0}
