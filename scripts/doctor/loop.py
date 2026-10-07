@@ -76,21 +76,23 @@ def news(watched, found):
 
 
 def run(store, doctor, now_ms, collect, close, environ=None):
-    """One timer step: a detection pass when the interval is up, then the close once the quiet window passed."""
+    """One timer step: a detection pass on the last tick before the interval is up, then the close after quiet."""
     env = os.environ if environ is None else environ
     watched = store.peer(doctor)
     if not watched or store.config(doctor).state in IDLE:
         return []
     key, actions = _timer_key(store, doctor), []
     timer = {k: int(v) for k, v in store.redis.hgetall(key).items()}
-    if "last" not in timer or now_ms - timer["last"] >= _minutes(env, INTERVAL_ENV, INTERVAL_MINUTES) * MINUTE_MS:
+    timer["gap"] = max(timer.get("gap", 0), now_ms - timer.get("tick", now_ms))
+    interval = _minutes(env, INTERVAL_ENV, INTERVAL_MINUTES) * MINUTE_MS
+    if "last" not in timer or now_ms - timer["last"] + timer["gap"] > interval:
         found, actions = collect(watched)
         new = record(store, doctor, found, now_ms, limits(env).cooldown_minutes * MINUTE_MS)
-        timer = {"last": now_ms, "last_new": now_ms if new or "last_new" not in timer else timer["last_new"]}
-        store.redis.hset(key, mapping=timer)
+        timer = {"last": now_ms, "last_new": now_ms if new or "last_new" not in timer else timer["last_new"], "gap": 0}
         if new:
             InboxStore(store.redis).send(SENDER, seat_address(doctor, MASTER), news(watched, new))
             actions.append(f"doctor pass: {plural(len(new), 'new finding')} sent to the Doctor master")
+    store.redis.hset(key, mapping={**timer, "tick": now_ms})
     quiet = _minutes(env, QUIET_ENV, QUIET_MINUTES)
     if now_ms - timer["last_new"] >= quiet * MINUTE_MS:
         close()
