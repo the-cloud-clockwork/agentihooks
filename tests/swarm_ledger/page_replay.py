@@ -137,8 +137,9 @@ def quiet(page):
 
 def settle(page, ms=0):
     quiet(page)
-    if ms:
-        page.clock.run_for(ms)
+    while ms > 0:
+        page.clock.run_for(min(ms, 1000))
+        ms -= 1000
         quiet(page)
     page.clock.run_for(20)
     quiet(page)
