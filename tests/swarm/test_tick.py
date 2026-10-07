@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm.tick import STARTUP_GRACE_MS, Placed, SpawnError, tick
+from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError, tick
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -40,6 +40,7 @@ class FakeLedger:
         return dict(row)
 
     def notify(self, slug, text):
+        assert slug == "sw"
         self.notes.append(text)
 
     def mark_swarm(self, slug):
@@ -631,6 +632,90 @@ def test_a_dead_master_is_respawned(store):
     actions = tick("sw", store, tasks(), runtime, 1 + STARTUP_GRACE_MS + 1)
     assert "lost master@a1b2c3-0001" in actions and "spawned master master@a1b2c3-0002" in actions
     assert [a.name for a in masters(store)] == ["master@a1b2c3-0002"]
+
+
+def _told(inbox, item):
+    return [(e.get("state"), e.get("event"), e["by"], e["reason"]) for e in inbox.history(item.id)]
+
+
+def test_an_operator_line_with_no_live_master_posts_the_down_notice_and_reaches_the_new_master(store):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm.tick import DOWN_TOLD, REDELIVERED
+
+    inbox = InboxStore(store.redis)
+    runtime, ledger = FakeRuntime(), tasks(("t1", "eng"))
+    tick("sw", store, ledger, runtime, 1)
+    taken = inbox.send("operator", "master@sw", "the master launch failed, relaunch it")
+    assert inbox.deliver(taken.id, "master@a1b2c3-0001")
+    inbox.send("sw-eng-1", "master@sw", "status for the master")
+    runtime.live.discard("master@a1b2c3-0001")
+    runtime.full = True
+    unaddressed = inbox.send("operator", "master@sw", "can anyone reply")
+    down = 1 + STARTUP_GRACE_MS + 1
+    actions = tick("sw", store, ledger, runtime, down)
+    assert "master down, told the operator about 2 waiting lines" in actions
+    assert ledger.notes.count(MASTER_DOWN) == 1
+    told = (None, DOWN_TOLD, "swarm", MASTER_DOWN)
+    assert _told(inbox, taken)[-2:] == [("pending", None, "swarm", REDELIVERED), told]
+    assert _told(inbox, unaddressed) == [("pending", None, "operator", ""), told]
+    assert inbox.history(unaddressed.id)[-1]["at"] == down
+    tick("sw", store, ledger, runtime, down + 1)
+    assert ledger.notes.count(MASTER_DOWN) == 1
+    later = inbox.send("operator", "master@sw", "still nobody?")
+    tick("sw", store, ledger, runtime, down + 2)
+    assert ledger.notes.count(MASTER_DOWN) == 2
+    runtime.full = False
+    actions = tick("sw", store, ledger, runtime, down + 3)
+    assert "spawned master master@a1b2c3-0002" in actions and ledger.notes.count(MASTER_DOWN) == 2
+    mail = inbox.pending_mail("master@a1b2c3-0002")
+    assert {i.id for i in mail if i.sender == "operator"} == {taken.id, unaddressed.id, later.id}
+
+
+def test_an_operator_line_for_a_live_master_posts_no_down_notice(store):
+    from scripts.inbox.store import InboxStore
+
+    runtime, ledger = FakeRuntime(), tasks()
+    tick("sw", store, ledger, runtime, 1)
+    InboxStore(store.redis).send("operator", "master@sw", "how far along")
+    tick("sw", store, ledger, runtime, 1 + STARTUP_GRACE_MS + 5)
+    assert MASTER_DOWN not in ledger.notes
+
+
+def test_a_master_still_starting_posts_no_down_notice(store):
+    from scripts.inbox.store import InboxStore
+
+    start = 10**9
+    runtime, ledger = FakeRuntime(), tasks()
+    tick("sw", store, ledger, runtime, start)
+    runtime.live.clear()
+    InboxStore(store.redis).send("operator", "master@sw", "how far along")
+    tick("sw", store, ledger, runtime, start + STARTUP_GRACE_MS)
+    assert MASTER_DOWN not in ledger.notes and [a.name for a in masters(store)] == ["master@a1b2c3-0001"]
+
+
+def test_a_stopping_swarm_posts_no_down_notice(store):
+    from scripts.inbox.store import InboxStore
+
+    runtime, ledger = FakeRuntime(), tasks()
+    tick("sw", store, ledger, runtime, 1)
+    runtime.live.clear()
+    store.update("sw", state="stopping")
+    InboxStore(store.redis).send("operator", "master@sw", "how far along")
+    tick("sw", store, ledger, runtime, 1 + STARTUP_GRACE_MS + 1)
+    assert MASTER_DOWN not in ledger.notes
+
+
+def test_a_finished_master_that_will_not_retire_counts_as_down(store):
+    from scripts.inbox.store import InboxStore
+
+    runtime, ledger = FakeRuntime(), tasks()
+    tick("sw", store, ledger, runtime, 1)
+    [boss] = masters(store)
+    store.put_agent("sw", replace(boss, state="finished"))
+    runtime.stuck.add(boss.name)
+    InboxStore(store.redis).send("operator", "master@sw", "how far along")
+    tick("sw", store, ledger, runtime, 2)
+    assert MASTER_DOWN in ledger.notes
 
 
 def test_an_idle_master_is_never_nudged_or_stalled(store):
