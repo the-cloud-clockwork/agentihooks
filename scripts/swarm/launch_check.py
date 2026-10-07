@@ -23,7 +23,7 @@ WORDS = {
     "overlay": "every overlay its profile declares",
     "name": "its name",
 }
-REPORT_ONLY = frozenset({"base"})
+REPORT_ONLY = frozenset()
 OUTCOMES = {
     "relaunch": "It is being retired and relaunched once.",
     "spent": "Its one automatic relaunch is spent; operator action is required.",

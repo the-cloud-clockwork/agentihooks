@@ -264,6 +264,34 @@ def test_failed_launches_do_not_consume_lives_and_preserve_each_error(store, err
     assert [row["state"] for row in store.launches("sw")].count("started") == 1
 
 
+class FailingFor(FakeRuntime):
+    def __init__(self, *failing):
+        super().__init__()
+        self.failing, self.tried = set(failing), []
+
+    def spawn(self, config, lane, name, task, spawns=None):
+        if lane != MASTER:
+            self.tried.append(task["id"])
+        if task["id"] in self.failing:
+            raise SpawnError("MCP_KEY_GATEWAY is unset")
+        return super().spawn(config, lane, name, task, spawns)
+
+
+def test_a_failing_launch_does_not_stop_the_spawns_behind_it(store):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "ci")), FailingFor("t1")
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t2", "t3"]
+    assert ledger.rows["t1"]["state"] == "open"
+
+
+def test_a_task_whose_launch_failed_takes_only_a_slot_left_over(store):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FailingFor("t1")
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.tried == ["t1", "t2", "t3"]
+    assert [task for _, _, task in runtime.spawned] == ["t2", "t3"]
+
+
 def test_a_launch_is_pending_while_the_runtime_spawns_it(store):
     ledger, runtime, seen = tasks(("t1", "eng")), FakeRuntime(), []
     spawn = runtime.spawn

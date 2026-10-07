@@ -22,6 +22,16 @@ THROUGH_CODE = (
     "Reach that state through code: any change to what runs goes through a worktree (wt.sh new {name}), a pull "
     "request into dev and CI, never a live patch."
 )
+SERENA = (
+    "mcp__serena__activate_project with its absolute path. Python is read and edited through Serena "
+    "(find_symbol, replace_symbol_body, insert_after_symbol, replace_content); built-in Edit and shell "
+    "rewrites of existing .py files are blocked."
+)
+STACKED_KINDS = ("code", "ci")
+RESTACK = (
+    " Then run {me} restack in it: it rebases the parked work onto dev. On a conflict it lists the files: resolve "
+    "them, run git rebase --continue, then run {me} restack again."
+)
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 OLDER_RECAPS = 3
 INBOX_LINE = (
@@ -213,7 +223,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson because reason>" (a note; add '
         "--maturity data for a raw figure or insight for one that held up more than once).",
         "",
-        *continued(kind_steps(ledger_kinds.kind(task), me, led, name, phase, autonomy, task["id"]), name, task),
+        *task_steps(task, me, led, name, phase, autonomy),
         "",
         "If your context nears its limit a hook tells you to write a handoff document: use the handoff skill "
         f"for the Handoff v2 body with what you did, where you stopped and what you promised, then run {me} handoff <doc> and stop; a "
@@ -315,6 +325,8 @@ def _continue_from(task):
 def continuation_lines(task):
     envelope = task.get("handoff_envelope") or {}
     ref = _continue_from(task)
+    if task.get("parked_on"):
+        return []
     if ref:
         branch = ref.removeprefix("origin/")
         return [
@@ -391,12 +403,10 @@ def code_steps(me, led, name, phase):
     return [
         "Work it end to end with the dev-cycle skill, then stop:",
         issue_step(me, "the seams"),
-        f"2. Create your worktree: wt.sh new {name} (never edit the primary checkout), then call "
-        "mcp__serena__activate_project with its absolute path. Python is read and edited through Serena "
-        "(find_symbol, replace_symbol_body, insert_after_symbol, replace_content); built-in Edit and shell "
-        "rewrites of existing .py files are blocked.",
+        f"2. Create your worktree: wt.sh new {name} (never edit the primary checkout), then call {SERENA}",
         "3. Red test, least code to green.",
-        "4. Gates green (ruff check, ruff format --check and the tests), commit in the worktree, then review per the "
+        "4. Gates green (ruff check, ruff format --check and the tests), commit in the worktree; at your first commit "
+        f"push the branch (git push -u origin HEAD) and record it: {me} branch. Then review per the "
         "dev-cycle skill: at most two critic sub agents, Standards and Spec, that never edit and send every finding "
         "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds.",
         f"5. Push, open the pull request into dev (with Closes #<n> when there is an issue), record it: {me} pr <pr url>",
@@ -404,6 +414,54 @@ def code_steps(me, led, name, phase):
         "resolve, so no Monitor is needed. Merge on green checks, then wt.sh done.",
         f"7. Leave the crew with {led} leave, then close the task: {me} done --pr <pr url>. {CLOSES}",
     ]
+
+
+def reuse_issue_step(me, task):
+    if task.get("issue_url"):
+        return f"1. Reuse the task's issue {task['issue_url']}; open no new one."
+    return issue_step(me, "the seams")
+
+
+def stacked_steps(me, led, name, task):
+    first, *others = task["stack_base"]
+    ref = _continue_from(task) or f"origin/{first['branch']}"
+    merges = "".join(f" Merge each other open dependency into it: git merge origin/{dep['branch']}." for dep in others)
+    return [
+        "Your task depends on work still open. Build on top of it, push and park; the next engineer finishes it "
+        "once its dependency is done:",
+        *(f"Dependency {dep['task']} is still open on branch {dep['branch']}." for dep in task["stack_base"]),
+        reuse_issue_step(me, task),
+        f"2. Create your worktree from the dependency branch: wt.sh new {name} --from {ref}, then call {SERENA}"
+        f"{merges}",
+        "3. Build what you can on top of the dependency: red test, least code to green. Leave what needs the "
+        "dependency finished and name it in your handoff.",
+        "4. Gates green on what you built, commit with the issue in the message (Refs #<n>) so the branch points at "
+        f"the issue, push the branch (git push -u origin HEAD) and record it: {me} branch.",
+        "5. Write a Handoff v2 document with the handoff skill whose Stopped at names the open dependency and what "
+        f"waits on it. Leave the crew with {led} leave, then park: {me} park <doc>. Park comments the branch on the "
+        f"issue so they point at each other, and the task waits on its branch. {CLOSES}",
+    ]
+
+
+def finish_steps(steps, me, name, task):
+    branch = task["branch"]
+    cut = f"wt.sh new {name}"
+    steps = [step.replace(cut, f"{cut} --from origin/{branch}") for step in steps]
+    steps[1] = reuse_issue_step(me, task)
+    steps[2] += RESTACK.format(me=me)
+    return [f"Your task was parked on branch {branch} until its dependency finished.", *steps]
+
+
+def task_steps(task, me, led, name, phase, autonomy):
+    kind = ledger_kinds.kind(task)
+    steps = kind_steps(kind, me, led, name, phase, autonomy, task["id"])
+    if kind not in STACKED_KINDS:
+        return continued(steps, name, task)
+    if task.get("parked_on"):
+        return finish_steps(steps, me, naming.plain(name), task)
+    if task.get("stack_base"):
+        return stacked_steps(me, led, naming.plain(name), task)
+    return continued(steps, name, task)
 
 
 def ci_steps(me, led, name, phase):

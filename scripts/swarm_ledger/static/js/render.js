@@ -93,15 +93,15 @@ function questionRow(item, n) {
 function taskBlockers(task, tasks) {
   if ((task.state || "open") !== "open") return "";
   const byId = Object.fromEntries(tasks.map((t) => [t.id, t]));
-  const area = (e) => String(e).trim().replace(/^\.\//, "").replace(/\/+$/, "");
-  const nested = (a, b) => a === b || b.startsWith(`${a}/`);
-  const overlap = (x, y) => (x || []).some((a) => (y || []).some((b) => nested(area(a), area(b)) || nested(area(b), area(a))));
-  const reasons = (task.depends_on || []).filter((id) => (byId[id] || {}).state !== "done")
-    .map((id) => `${byId[id] ? byId[id].title : `task ${id}`} is done`);
-  for (const t of tasks) {
-    if (t.id !== task.id && ["claimed", "pr"].includes(t.state) && overlap(task.territory, t.territory)) reasons.push(`${t.title} leaves the same files`);
-  }
-  return reasons.length ? `Waiting until ${reasons.join(", and ")}` : "";
+  const title = (id) => (byId[id] ? byId[id].title : `task ${id}`);
+  const unfinished = (ids) => (ids || []).filter((id) => (byId[id] || {}).state !== "done");
+  const done = (ids) => ids.map((id) => `${title(id)} is done`).join(", and ");
+  const parked = unfinished(task.parked_on);
+  if (parked.length) return `Parked on ${task.branch ? `branch ${task.branch}` : "its branch"} until ${done(parked)}`;
+  const open = unfinished(task.depends_on);
+  const held = open.filter((id) => !(["claimed", "pr"].includes((byId[id] || {}).state) && byId[id].branch));
+  if (held.length) return `Waiting until ${done(held)}`;
+  return open.length ? `Ready to start on ${open.map((id) => `branch ${byId[id].branch} of ${title(id)}`).join(", and ")}` : "";
 }
 
 function taskProof(key, item) {
