@@ -502,15 +502,87 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
 
     def run(args, **kwargs):
         calls.append((args, kwargs))
-        return SimpleNamespace(returncode=0, stdout='{"state": "OPEN", "headRefOid": "first"}')
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "data": {
+                        "resource": {
+                            "state": "OPEN",
+                            "headRefOid": "first",
+                            "commits": {
+                                "nodes": [
+                                    {
+                                        "commit": {
+                                            "committedDate": "2026-10-07T17:00:00Z",
+                                            "statusCheckRollup": {
+                                                "contexts": {
+                                                    "nodes": [{"name": "lint", "conclusion": "SUCCESS"}],
+                                                    "pageInfo": {"hasNextPage": False},
+                                                }
+                                            },
+                                        }
+                                    }
+                                ]
+                            },
+                        }
+                    }
+                }
+            ),
+        )
 
-    assert github_view(URL, run).head == "first"
+    pull = github_view(URL, run)
+    assert pull.head == "first"
+    assert pull.resolved is True
+    assert pull.red is False
+    assert pull.pushed_at == 1791392400000
     assert calls == [
         (
-            ["gh", "pr", "view", URL, "--json", "state,mergedAt,commits,statusCheckRollup,headRefOid"],
+            [
+                "gh",
+                "api",
+                "graphql",
+                "-f",
+                "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
+                "commits(last:1){nodes{commit{committedDate statusCheckRollup{contexts(first:100){"
+                "nodes{...on CheckRun{name conclusion} ...on StatusContext{context state}} "
+                "pageInfo{hasNextPage}}}}}}}}}",
+                "-f",
+                f"url={URL}",
+            ],
             {"capture_output": True, "text": True, "timeout": 20},
         )
     ]
+
+
+@pytest.mark.parametrize(
+    "commits", [[], [{"commit": {"committedDate": "2026-10-07T17:00:00Z", "statusCheckRollup": None}}]]
+)
+def test_the_probe_without_checks_is_unresolved(commits):
+    from types import SimpleNamespace
+
+    raw = {"data": {"resource": {"state": "OPEN", "headRefOid": "first", "commits": {"nodes": commits}}}}
+    pull = github_view(URL, lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(raw)))
+    assert pull.head == "first"
+    assert pull.resolved is False
+
+
+@pytest.mark.parametrize(
+    "done",
+    [
+        (1, ""),
+        (0, "{}"),
+        (0, "invalid json"),
+        (
+            0,
+            '{"data":{"resource":{"state":"OPEN","headRefOid":"first","commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[{"conclusion":"SUCCESS"}],"pageInfo":{"hasNextPage":true}}}}}]}}}}',
+        ),
+    ],
+)
+def test_the_probe_refuses_failed_or_incomplete_reads(done):
+    from types import SimpleNamespace
+
+    assert github_view(URL, lambda *args, **kwargs: SimpleNamespace(returncode=done[0], stdout=done[1])) is None
 
 
 @pytest.mark.parametrize("head", ["", None])
