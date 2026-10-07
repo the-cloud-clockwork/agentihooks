@@ -5,7 +5,7 @@ import { inScope } from "./state.js";
 import { doc } from "./sync.js";
 import { renderStats } from "./render.js";
 import { renderChatTo } from "./chat.js";
-import { renderControls, renderGates, showNote } from "./controls.js";
+import { clearNoteError, renderControls, renderGates, showNote } from "./controls.js";
 
 const SESSION_CAP_MAX = 50;
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
@@ -21,6 +21,7 @@ export function receiveSwarm(sw) {
   if (!sw) return swarmLost("no swarm for this ledger");
   if (swarmReadError && !pending) $("swarm-note").textContent = "";
   swarmReadError = false;
+  clearNoteError();
   renderSwarm(sw);
   renderChatTo(sw);
 }
@@ -28,9 +29,9 @@ export function receiveSwarm(sw) {
 export function swarmLost(reason) {
   swarmReadError = true;
   renderSwarm(swarm);
+  renderControls();
   $("swarm-note").className = "sw-note bad";
   $("swarm-note").textContent = `Could not read swarm status: ${reason}. Retrying. ${swarm ? "Last observed state shown." : "State is unavailable."}`;
-  renderControls();
 }
 
 export function doctorOn(sw) {
@@ -46,7 +47,7 @@ export async function swarmControl(body, op = body.action) {
     if (resp.ok) {
       swarm = await resp.json();
       if (op === "apply") capDraft = {};
-      showNote("done", op);
+      showNote("queued", op);
     } else {
       showNote("error", op, (await resp.text()) || `server answered ${resp.status}`);
     }

@@ -1,0 +1,82 @@
+{
+  "package": "SV2-FND-04",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1425",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1427",
+  "tested_commit": "e5a1f849088231ad26379fedda84169cb084b5de",
+  "evidence_class": "local fixture runs and CI on the pull request head; mocked, no live infrastructure read or mutated",
+  "states": {
+    "observed": "the validator names the screenshot-only package in each fixture (transcript durability and scope isolation) and no finding for the fully evidenced packages",
+    "accepted": "record, restore and reopen apply only under the registry lock at the expected revision; replays have no second effect; refused requests leave the registry bytes unchanged",
+    "committed": "registry, rendered index, validator, fixtures and case results at the tested commit",
+    "externally_verified": "CI Tests run 37695042602 on the tested commit: lint, eight unit shards, sonar, mutation (validate_plan 1258 killed, runner 57 killed, 0 survived) and Gate passed"
+  },
+  "interfaces": [
+    "docs/swarm-v2/evidence-index.json (schema swarm-v2-evidence-index/1: invariant requirements with class and package ids, package claims and append-only evidence, operation log)",
+    "docs/swarm-v2/evidence-index.md (rendered projection: gates, invariants, claimed packages, findings, failed experiments, packages_missing_evidence)",
+    "scripts.swarm_v2.validate_plan: load_plan, gates, load_index, validate, check, record, restore, reopen, render, main (check, render, record, restore, reopen)",
+    "scripts.ci_mutation.runner.prepare_workspace copies evidence/ and Swarm-v2.md into the mutation workspace, skipping the workspace itself",
+    "tests/fixtures/swarm_v2/evidence (packages.json and packages-second.json: fully evidenced packages plus a screenshot-only claim each)",
+    "evidence/SV2-FND-04/generate_case_results.py (case results from junit by section marker)"
+  ],
+  "supported_versions": {
+    "registry_schema": "swarm-v2-evidence-index/1",
+    "plan": "Swarm-v2.md package headings with Repository, Dependencies, Integration gate and Positive, Negative and Recovery case lines",
+    "proof_kinds": "test and live_canary results are GitHub Actions run or job URLs or UTF-8 .json, .log, .txt or .xml repository files pinned by sha256; screenshots and failed experiments are recorded but satisfy nothing"
+  },
+  "measurements": {
+    "packages_missing_evidence": {
+      "committed_registry": 0,
+      "fixture_packages": 1,
+      "fixture_packages_second": 1
+    },
+    "invariants_mapped": 34,
+    "plan_packages": 150
+  },
+  "test_results": {
+    "a": "evidence/SV2-FND-04/a-result.json",
+    "b": "evidence/SV2-FND-04/b-result.json",
+    "c": "evidence/SV2-FND-04/c-result.json",
+    "manifest": "evidence/SV2-FND-04/manifest.json",
+    "pytest_output": "118 passed",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37695042602",
+    "mutation": {
+      "scripts/swarm_v2/validate_plan.py": {
+        "killed": 1258,
+        "survived": 0
+      },
+      "scripts/ci_mutation/runner.py": {
+        "killed": 57,
+        "survived": 0
+      }
+    }
+  },
+  "authority": "delegated to repository write access and pull request review, the same authority as the FND-02 architecture record; the validator takes no actor input, so no display label can grant anything and the B case has no grant to broaden",
+  "rollback_rehearsal": "reopen of SV2-FND-03 on a copy of the committed registry at the tested commit: the claim projection returns to open, every evidence item is byte equal, and check still reports zero findings",
+  "rollback_rehearsal_output": [
+    "$ python -m scripts.swarm_v2.validate_plan reopen --index <copy> --package SV2-FND-03 --operation rollback-rehearsal --markdown <copy>.md",
+    "{",
+    "  \"operation\": \"rollback-rehearsal\",",
+    "  \"revision\": 2,",
+    "  \"package\": \"SV2-FND-03\",",
+    "  \"claim\": \"open\"",
+    "}",
+    "exit=0",
+    "$ evidence unchanged after reopen",
+    "evidence equal: True",
+    "claims: {'SV2-FND-01': 'complete', 'SV2-FND-02': 'complete', 'SV2-FND-03': 'open'}",
+    "$ python -m scripts.swarm_v2.validate_plan check --index <copy>",
+    "  \"measurements\": {",
+    "    \"packages_missing_evidence\": 0",
+    "  }",
+    "}",
+    "exit=0"
+  ],
+  "rollback_command": "python -m scripts.swarm_v2.validate_plan reopen --package <id> --operation <id> reverts a claim projection without touching evidence; reverting the pull request removes only the registry, validator, fixtures and case results, no stored state elsewhere",
+  "limitations": [
+    "A restore over an unreadable registry cannot know the lost high-water revision; the result reports replaced: unreadable and the git history of the committed registry holds the revision.",
+    "The registry stores claims and the validator judges them, so record accepts a complete claim that check then flags; the committed registry test pins zero findings, which keeps such a claim out of dev.",
+    "SV2-FND-04 itself is not yet claimed in the registry; recording it needs a later change, because the registry tests treat the committed document as their base.",
+    "Invariant to package mapping is authored in the registry; the plan does not map invariants to packages itself.",
+    "The registry lock is a host-local flock; concurrent writers on different hosts are serialized by git and pull request review."
+  ]
+}

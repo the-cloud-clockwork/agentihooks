@@ -14,9 +14,9 @@ def base() -> str:
     return f"http://{host}:{port}"
 
 
-def shared_directory(directory: Path | None = None, environ=os.environ) -> bool:
+def shared_directory(environ=os.environ) -> bool:
     shared = Path.home() / "development-ledger"
-    selected = directory or Path(environ.get("LEDGER_DIR", shared)).expanduser()
+    selected = Path(environ.get("LEDGER_DIR", shared)).expanduser()
     return selected.resolve() == shared.resolve()
 
 

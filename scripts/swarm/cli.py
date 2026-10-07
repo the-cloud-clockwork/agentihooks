@@ -20,7 +20,7 @@ agentihooks swarm <id> set master-agent=claude|codex              master affinit
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
-agentihooks swarm <id> lift AGENT GATE                            operator lets one agent past a gate for one hour
+agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
 agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a learned note; canon only by master or operator
 agentihooks swarm <id> retire SEAT NUMBER --reason TEXT           master or operator retires a learned note from every later prompt
@@ -65,6 +65,7 @@ from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
     affinity,
+    clearance,
     control_notifications,
     delivery,
     done_gate,
@@ -112,6 +113,7 @@ LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in
 EFFORT_KEYS = {"effort-min": "effort_min", "effort-max": "effort_max"}
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
+RETIRES_MASTER = frozenset({"stop now", "close ledger"})
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
@@ -132,6 +134,11 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
     if not store.redis.set(lock, token, nx=True, px=TICK_LOCK_MS):
         return ["another tick is running"]
     try:
+        from scripts.swarm import command_runner, commands
+
+        if not commands.bind(store, slug, commands.hive_id()):
+            return ["the swarm belongs to another hive"]
+        controls = command_runner.consume(store, slug)
         if ledger.binned(slug):
             _, left = stop_now(store, slug, runtime or HerdrRuntime(), ledger)
             return [
@@ -177,7 +184,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         actions += wake.wake_pass(inbox, slug, agents, herdr, ledger, now_ms(), window, wake.quiet_ms(os.environ))
         taken = snapshot.auto(store, slug, now_ms(), os.environ)
         store.redis.set(store.key(slug, "last-tick"), now_ms())
-        return actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
+        command_runner.publish(store, slug, ledger.state(slug))
+        return controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
         if store.redis.get(lock) == token:
             store.redis.delete(lock)
@@ -246,6 +254,9 @@ def cmd_create(store, args):
         autonomy=template.autonomy or DELEGATE,
     )
     store.create(config)
+    from scripts.swarm import commands
+
+    commands.bind(store, args.slug, commands.hive_id())
     print(json.dumps({"created": args.slug, "repo": repo, "state": "paused", "template": args.template}))
     print(ledger_link.page_line(args.slug))
 
@@ -407,14 +418,58 @@ def cmd_master(store, args):
     print(json.dumps(asdict(launched)))
 
 
-def gate_mode(key, value, environ=None):
-    env = os.environ if environ is None else environ
-    if env.get("AGENTIHOOKS_AGENT_NAME", "operator") != "operator":
-        raise SwarmError(f"only the operator sets {key}, from the ledger page or his own terminal")
+def gate_mode(key, value):
     value = modes.normalize(value)
     if value not in modes.supported(GATE_KEYS[key]):
         raise SwarmError(f"{key} takes {', '.join(modes.label(mode) for mode in modes.supported(GATE_KEYS[key]))}")
     return {GATE_KEYS[key]: value}
+
+
+def setting(config, key):
+    if key in GATE_KEYS:
+        return modes.label(catalog.current(config.gates)[GATE_KEYS[key]])
+    if key in LANE_KEYS:
+        lane, field = LANE_KEYS[key]
+        return config.lanes.get(lane, {}).get(field) or "unset"
+    return getattr(config, {**SETTABLE, **EFFORT_KEYS}.get(key, key))
+
+
+def lifecycle_control(args):
+    if args.command == "close":
+        return "close ledger"
+    return "stop now" if vars(args).get("now") else args.command
+
+
+def control_readings(store, args):
+    from scripts.gates import lift
+
+    config = store.config(args.slug)
+    if args.command == "set":
+        keys = (pair.partition("=")[0] for pair in args.pairs)
+        return {
+            key: setting(config, key)
+            for key in keys
+            if key in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, *GATE_KEYS, "autonomy")
+        }
+    if args.command == "lift":
+        lifted = lift.agent_lifted(args.slug, args.agent, args.gate)
+        return {f"{args.gate} gate lift for {args.agent}": "lifted" if lifted else "not lifted"}
+    return {f"the swarm state with {lifecycle_control(args)}": config.state}
+
+
+def run_control(store, args, who, handler):
+    cleared = clearance.holder(store, args.slug, who)
+    if cleared == clearance.OPERATOR:
+        return handler(store, args)
+    before = control_readings(store, args)
+    if lifecycle_control(args) in RETIRES_MASTER:
+        stopping = dict.fromkeys(before, "stopping")
+        clearance.record(LedgerClient(), args.slug, cleared, before, stopping)
+        before = stopping
+    handler(store, args)
+    after = control_readings(store, args)
+    if after != before or lifecycle_control(args) not in RETIRES_MASTER:
+        clearance.record(LedgerClient(), args.slug, cleared, before, after)
 
 
 def cmd_set(store, args):
@@ -655,8 +710,6 @@ def cmd_lift(store, args):
     from scripts.gates import entry, lift
 
     store.config(args.slug)
-    if os.environ.get("AGENTIHOOKS_AGENT_NAME", "operator") != "operator":
-        raise SwarmError("only the operator lifts a gate, from the ledger page or by typing it in the agent's pane")
     agent = next((a for a in store.agents(args.slug) if a.name == args.agent), None)
     if agent is None:
         raise SwarmError(f"{args.agent} is not in this swarm")
@@ -1154,7 +1207,8 @@ def main(argv):
             argv = [argv[0], "set", *argv[1:]]
         args = build_parser().parse_args(argv)
         handler = globals()[f"cmd_{args.command.replace('-', '_')}"]
-    if text := refusal(vars(args).get("name"), Who.from_env()):
+    who = Who.from_env()
+    if text := refusal(vars(args).get("name"), who):
         print(f"swarm: {text}", file=sys.stderr)
         return 1
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
@@ -1164,7 +1218,10 @@ def main(argv):
             args.slug = store.names.swarm_slug(args.slug)
         action = getattr(args, "command", "")
         before = control_notifications.master(store, args.slug) if action in control_notifications.CONTROLS else None
-        handler(store, args)
+        if action in clearance.COMMANDS:
+            run_control(store, args, who, handler)
+        else:
+            handler(store, args)
         if action in control_notifications.CONTROLS:
             control_notifications.notify(store, args, LedgerClient(), before, action)
     except (SwarmError, InboxError) as exc:

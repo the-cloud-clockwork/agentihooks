@@ -175,6 +175,8 @@ def test_rows_run_header_alert_capacity_work_accounts_health_handoffs():
     box = page.split('<div id="swarm-box">', 1)[1].split('<aside id="stats-column"', 1)[0]
     positions = [box.index(f'id="{row}"') for row in ROWS]
     assert positions == sorted(positions)
+    assert 'class="fold sw-command-log" id="command-log"' in box
+    box = re.sub(r'<details[^>]*id="command-log".*?</details>', "", box, flags=re.S)
     for gone in ("crew", "needs-you", "swarm-figs", "swarm-work", "restore-box", "<section", "<details"):
         assert gone not in box, gone
 
@@ -256,7 +258,7 @@ def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
     assert page.puts == []
     assert fields["eng"].input_value() == "5"
     apply.click()
-    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('done')")
+    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('pending')")
     assert page.puts == [{"action": "set", "max_eng": 5, "max_ci": 2, "codex_share": 15, "compact_limit": 750}]
     assert apply.is_disabled()
 
@@ -270,7 +272,7 @@ def test_the_effort_range_shows_in_the_caps_row_and_apply_sends_it(open_page):
     assert page.tab.get_by_role("button", name="Raise effort ceiling").is_disabled()
     floor.fill("low")
     page.tab.get_by_role("button", name="Apply capacity").click()
-    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('done')")
+    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('pending')")
     assert page.puts == [{"action": "set", "effort_min": "low", "effort_max": "max"}]
 
 
@@ -285,7 +287,7 @@ def test_master_affinity_shows_the_live_harness_and_apply_sends_only_a_change(op
     pick.select_option("codex")
     assert not apply.is_disabled()
     apply.click()
-    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('done')")
+    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('pending')")
     assert page.puts == [{"action": "set", "master_agent": "codex"}]
 
 

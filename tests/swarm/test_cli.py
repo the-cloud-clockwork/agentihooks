@@ -188,6 +188,7 @@ def test_stop_now_terminates_reopens_claimed_but_not_finished_work(env, monkeypa
     run("sw", "start")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "ci@a1b2c3-0001")
     run("sw", "done", "--pr", "https://github.com/o/r/pull/4")
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
     assert run("sw", "stop", "--now") == 0
     assert sorted(rt.killed) == ["ci@a1b2c3-0001", "engineer@a1b2c3-0001", "master@a1b2c3-0001"]
     assert store.config("sw").state == "stopped" and store.agents("sw") == []

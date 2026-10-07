@@ -457,6 +457,8 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-btn.sw-mode[aria-pressed="true"], .sw-btn.sw-mode:hover:not(:disabled) { color: var(--accent-2); }
 .sw-note { margin: 0; padding: 0 var(--space-row) var(--space-tight); font-size: var(--fs-meta); color: var(--muted); }
 .sw-note:empty { display: none; }
+.sw-command-log { font-size: var(--fs-meta); }
+.sw-command { display: flex; flex-wrap: wrap; gap: var(--space-tight) var(--space-row); margin: var(--space-tight) 0; }
 .sw-alert { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-tight) var(--space-row); font-size: var(--fs-meta); }
 .sw-alert[hidden] { display: none; }
 .sw-alert-count { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--destructive); }
@@ -467,7 +469,7 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-caps { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-tight) var(--space-row); }
 .sw-caps { column-gap: var(--space-tight); }
 .sw-gates { --gate-w: calc(30.5ch + 3 * var(--space-tight)); display: grid; grid-template-columns: repeat(auto-fill, var(--gate-w)); gap: var(--space-tight) var(--space-row); max-width: calc(5 * var(--gate-w) + 4 * var(--space-row)); font-size: var(--fs-meta); }
-#gates-label, .sw-gates { grid-column: 1 / -1; }
+#gates-label, .sw-gates, .sw-command-log { grid-column: 1 / -1; }
 .sw-cap.sw-gate { display: grid; grid-template-columns: 12ch 5.5ch 8ch 5ch; gap: var(--space-tight); align-items: center; }
 .sw-gate .sw-cap-name { margin: 0; text-align: right; white-space: nowrap; }
 .sw-gate .sw-mode { min-height: 28px; text-align: left; padding: 4px 0; font-size: inherit; }
@@ -633,7 +635,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 <div class="sw-cap"><span class="sw-cap-name">effort max</span><button class="sw-btn sw-step" type="button" data-swarm="effort_max_down" aria-label="Lower effort ceiling">&minus;</button><label class="sw-field"><input class="sw-num" id="cap-effort_max" type="text" autocomplete="off" data-cap="effort_max" aria-label="Effort ceiling"></label><button class="sw-btn sw-step" type="button" data-swarm="effort_max_up" aria-label="Raise effort ceiling">+</button></div>
 <div class="sw-cap sw-affinity"><span class="sw-cap-name">master affinity</span><label class="sw-field"><select class="sw-num sw-select" id="cap-master_agent" data-cap="master_agent" aria-label="Master affinity"><option value="claude">Claude</option><option value="codex">Codex</option></select></label><span class="sw-unit sw-affinity-state" id="affinity-state" role="status"></span></div>
 <button class="sw-btn sw-apply" type="button" data-swarm="apply" aria-label="Apply capacity">apply</button></div>
-<span class="sw-label" id="gates-label" hidden>Gates</span><div class="sw-gates" id="swarm-gates" aria-labelledby="gates-label"></div></div>
+<span class="sw-label" id="gates-label" hidden>Gates</span><div class="sw-gates" id="swarm-gates" aria-labelledby="gates-label"></div><details class="fold sw-command-log" id="command-log" hidden><summary>Commands <span class="count" id="command-count"></span></summary><div id="command-rows"></div></details></div>
 <div class="sw-grip sw-grip-y" data-grip="height" data-row="capacity-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Capacity height" tabindex="0"></div>
 <div class="sw-row sw-pair" id="swarm-row-work"><div class="sw-block" id="agents-box"><div class="sw-blockhead"><h3>Agents</h3><span class="sw-count" id="agents-count"></span></div><div class="sw-scroll"><table class="sw-table" id="agents-table"><thead><tr><th>agent</th><th>lane</th><th>profile</th><th>model</th><th>task</th><th>state</th><th class="r">age</th><th><span class="sr-only">actions</span></th></tr></thead><tbody id="swarm-agents"></tbody></table></div></div>
 <div class="sw-grip sw-grip-x" data-grip="split" data-row="swarm-row-work" role="separator" aria-orientation="vertical" aria-label="Move the Agents and Tasks split" aria-valuemin="15" aria-valuemax="85" tabindex="0"></div><div class="sw-block" id="swarm-tasks-box"><div class="sw-blockhead"><h3>Tasks</h3><span class="sw-count" id="tasks-open"></span></div><dl class="sw-kv" id="swarm-tasks"></dl></div></div>

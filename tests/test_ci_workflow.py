@@ -412,42 +412,22 @@ def test_stored_durations_allow_new_tests_concentrated_in_one_shard(tmp_path, mo
 
 
 def test_dev_push_refreshes_stored_durations_after_tests_pass():
-    workflow = _workflow()
-    if "refresh-durations" not in workflow["jobs"]:
-        scheduled = yaml.safe_load((_ROOT / ".github/workflows/refresh-durations.yml").read_text())
-        assert len(scheduled[True]["schedule"]) == 1
-        command = next(step["run"] for step in scheduled["jobs"]["refresh"]["steps"] if "run" in step)
-        assert "python -m tests.refresh_durations --ci 5" in command
-        assert "scripts/ci_bot_pr.sh" in command
-        return
-    job = workflow["jobs"]["refresh-durations"]
+    job = _workflow()["jobs"]["refresh-durations"]
     assert job["needs"] == ["unit", "lint"]
     assert job["if"] == "github.event_name == 'push'"
-    assert job["permissions"] == {"contents": "write", "actions": "read"}
+    assert job["permissions"] == {"contents": "read", "actions": "read"}
     steps = job["steps"]
-    assert (
-        next(step for step in steps if step.get("uses") == "actions/checkout@v4")["with"]["ref"] == "${{ github.sha }}"
-    )
+    checkout = next(step for step in steps if step.get("uses") == "actions/checkout@v4")
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
     command = next(step["run"] for step in steps if step.get("name") == "Refresh measured durations")
     assert 'python -m tests.refresh_durations --ci-run "${source_run:-$GITHUB_RUN_ID}"' in command
     assert "tests-passed-$TREE" in command
-    assert "git add .test_durations" in command
-    assert "git push origin HEAD:dev" in command
+    assert "git commit" not in command
+    assert "git push" not in command
 
 
-@pytest.mark.parametrize("moved,source", [("before", "42"), ("during", "42"), ("never", "42"), ("never", "")])
-def test_duration_refresh_never_replays_old_measurements_onto_new_dev(tmp_path, moved, source):
-    if "refresh-durations" not in _workflow()["jobs"]:
-        scheduled = yaml.safe_load((_ROOT / ".github/workflows/refresh-durations.yml").read_text())
-        checkout = next(
-            step for step in scheduled["jobs"]["refresh"]["steps"] if step.get("uses") == "actions/checkout@v4"
-        )
-        assert checkout["with"]["ref"] == "dev"
-        helper = (_ROOT / "scripts/ci_bot_pr.sh").read_text()
-        assert 'git push origin "HEAD:refs/heads/$branch"' in helper
-        assert "HEAD:dev" not in helper
-        assert "pull --rebase" not in helper
-        return
+@pytest.mark.parametrize("source", ["42", ""])
+def test_duration_refresh_never_replays_old_measurements_onto_new_dev(tmp_path, source):
     command = next(
         step["run"]
         for step in _workflow()["jobs"]["refresh-durations"]["steps"]
@@ -455,62 +435,31 @@ def test_duration_refresh_never_replays_old_measurements_onto_new_dev(tmp_path, 
     )
     tools = tmp_path / "bin"
     tools.mkdir()
-    scripts = {
-        "git": """#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\\n' "git $*" >> "$COMMAND_LOG"
-case "$1 $2" in
-  "rev-parse origin/dev") cat "$REMOTE_STATE" ;;
-  "diff --cached") exit 1 ;;
-  "push origin")
-    if [[ "$MOVED" == "during" ]]; then echo newer > "$REMOTE_STATE"; exit 1; fi ;;
-esac
-""",
-        "gh": """#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\\n' "$SOURCE_RUN"
-""",
-        "python": """#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\\n' "python $*" >> "$COMMAND_LOG"
-echo measured > .test_durations
-""",
-    }
-    for name, script in scripts.items():
+    for name, script in {
+        "gh": '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%s\\n" "$SOURCE_RUN"\n',
+        "python": '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%s\\n" "$*" >> calls\necho measured > .test_durations\n',
+    }.items():
         path = tools / name
         path.write_text(script)
         path.chmod(0o755)
-    log = tmp_path / "commands"
-    remote = tmp_path / "remote"
-    remote.write_text("newer" if moved == "before" else "tested")
-    stored = tmp_path / ".test_durations"
-    stored.write_text("original")
-    env = {
-        **os.environ,
-        "PATH": f"{tools}:{os.environ['PATH']}",
-        "COMMAND_LOG": str(log),
-        "REMOTE_STATE": str(remote),
-        "SOURCE_RUN": source,
-        "GITHUB_SHA": "tested",
-        "GITHUB_RUN_ID": "43",
-        "GITHUB_REPOSITORY": "owner/repo",
-        "TREE": "tree",
-        "MOVED": moved,
-    }
-    result = subprocess.run(["bash", "-e", "-c", command], cwd=tmp_path, env=env, capture_output=True, text=True)
-    assert result.returncode == 0, result.stdout + result.stderr
-    calls = log.read_text()
-    assert "pull --rebase" not in calls
-    if moved == "before":
-        assert "python " not in calls
-        assert "push origin" not in calls
-        assert stored.read_text() == "original"
-    elif moved == "during":
-        assert "dev moved" in result.stdout
-    else:
-        assert f"python -m tests.refresh_durations --ci-run {source or '43'}" in calls
-        assert "push origin HEAD:dev" in calls
-        assert stored.read_text() == "measured\n"
+    result = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", command],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "SOURCE_RUN": source,
+            "GITHUB_RUN_ID": "43",
+            "GITHUB_REPOSITORY": "owner/repo",
+            "TREE": "tree",
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "calls").read_text() == f"-m tests.refresh_durations --ci-run {source or '43'}\n"
+    assert "git push" not in command
+    assert (tmp_path / ".test_durations").read_text() == "measured\n"
 
 
 def test_refreshed_durations_take_the_median_so_one_slow_run_does_not_move_a_test():

@@ -1,12 +1,5 @@
 name: Release
 
-# Inlined (was: The-Cloud-Clockwork/.github release-reusable.yml) because the
-# reusable workflow hardcodes `runs-on: anton`. agentihooks is a PUBLIC repo and
-# must not execute on the self-hosted fleet runner; this job runs on
-# GitHub-hosted ubuntu-latest, matching the ci/test/pages move. Behaviour mirrors
-# the reusable workflow: compute next version, bump the version file, commit +
-# tag + push to the release branch, cut a GitHub release, then dispatch
-# publish-pypi.yml at the new tag.
 on:
   workflow_dispatch:
     inputs:
@@ -15,75 +8,108 @@ on:
         required: true
         type: choice
         options: [patch, minor, major]
+      dry_run:
+        description: "Tag and build in the CI checkout without pushing or creating a release"
+        type: boolean
+        default: false
       publish_pypi:
-        description: "Publish to PyPI from the new tag right away. The release dance leaves this off and publishes from main after the dev->main PR merges"
+        description: "Publish from the new tag. The release dance leaves this off and publishes from main after its pull request merges"
         type: boolean
         default: false
 
+concurrency:
+  group: release-version
+  cancel-in-progress: false
+
 permissions:
-  contents: write
-  actions: write
+  contents: read
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment: release
+    permissions:
+      contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: dev
           fetch-depth: 0
-          token: ${{ secrets.ORG_GITHUB_TOKEN || github.token }}
+
+      - name: Require the integration branch for a real release
+        if: ${{ !inputs.dry_run }}
+        run: test "$GITHUB_REF" = refs/heads/dev
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Compute next version
         id: version
+        env:
+          BUMP: ${{ inputs.bump }}
         run: |
-          CURRENT=$(python3 - <<'EOF'
-          import tomllib
-          with open("pyproject.toml", "rb") as f:
-              print(tomllib.load(f)["project"]["version"])
-          EOF
-          )
+          CURRENT=$(git tag --list 'v*' --sort=-version:refname | python3 -c 'import re, sys; print(next(t.strip()[1:] for t in sys.stdin if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+\n?", t)))')
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-          case "${{ inputs.bump }}" in
+          case "$BUMP" in
             major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
             minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
             patch) PATCH=$((PATCH + 1)) ;;
+            *) exit 1 ;;
           esac
           NEXT="${MAJOR}.${MINOR}.${PATCH}"
           echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
           echo "next=$NEXT" >> "$GITHUB_OUTPUT"
           echo "Releasing $CURRENT -> $NEXT"
 
-      - name: Bump version in pyproject.toml
+      - name: Tag the release
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
         run: |
-          sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.next }}"/' pyproject.toml
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git tag "v$NEXT" "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse "v$NEXT^{commit}")" = "$GITHUB_SHA"
+          echo "Tag v$NEXT points at unchanged commit $GITHUB_SHA"
 
-      - name: Commit, tag, and push
+      - name: Verify the tagged package version
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml
-          git commit -m "chore: release v${{ steps.version.outputs.next }}"
-          git tag "v${{ steps.version.outputs.next }}"
-          git push origin dev
-          git push origin "v${{ steps.version.outputs.next }}"
+          python -m pip install build
+          python -m build
+          python - <<'PY'
+          import os
+          import zipfile
+          from email.parser import Parser
+          from pathlib import Path
+          wheel, = Path("dist").glob("*.whl")
+          with zipfile.ZipFile(wheel) as archive:
+              metadata, = (name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+              version = Parser().parsestr(archive.read(metadata).decode())["Version"]
+          assert version == os.environ["NEXT"], version
+          print(f"Tagged wheel version: {version}")
+          PY
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+
+      - name: Push the tag
+        if: ${{ !inputs.dry_run }}
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+        run: git push origin "refs/tags/v$NEXT"
 
       - name: Create GitHub Release
+        if: ${{ !inputs.dry_run }}
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "v${{ steps.version.outputs.next }}" \
-            --repo "${{ github.repository }}" \
-            --title "v${{ steps.version.outputs.next }}" \
-            --generate-notes \
-            --latest
+          NEXT: ${{ steps.version.outputs.next }}
+        run: gh release create "v$NEXT" --repo "$GITHUB_REPOSITORY" --title "v$NEXT" --generate-notes --latest
 
       - name: Dispatch publish-pypi at the new tag
-        if: inputs.publish_pypi
+        if: ${{ !inputs.dry_run && inputs.publish_pypi }}
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="v${{ steps.version.outputs.next }}"
-          gh workflow run publish-pypi.yml --repo "${{ github.repository }}" --ref "$TAG"
-          echo "Dispatched publish-pypi.yml at $TAG"
+          NEXT: ${{ steps.version.outputs.next }}
+        run: gh workflow run publish-pypi.yml --repo "$GITHUB_REPOSITORY" --ref "v$NEXT"
