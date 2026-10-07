@@ -27,7 +27,12 @@ def address(environ=os.environ) -> tuple[str, int]:
 
 def public_url(environ=os.environ) -> urllib.parse.SplitResult | None:
     url = environ.get("SWARM_PUBLIC_URL")
-    return urllib.parse.urlsplit(url) if url else None
+    if not url:
+        return None
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        raise ValueError(f"SWARM_PUBLIC_URL must be an http or https URL with a host, not {url!r}")
+    return parts
 
 
 def listed_hosts(environ=os.environ) -> set[str]:

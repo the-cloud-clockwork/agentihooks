@@ -52,6 +52,22 @@ def test_an_unset_public_url_adds_nothing():
     assert ledger_link.public_url({"SWARM_PUBLIC_URL": ""}) is None
 
 
+@pytest.mark.parametrize("url", ["swarm.example.com", "ftp://swarm.example.com", "https://"])
+def test_a_public_url_without_an_http_scheme_and_host_is_refused(url):
+    with pytest.raises(ValueError) as refused:
+        ledger_link.allowed_hosts({"SWARM_PUBLIC_URL": url})
+    assert str(refused.value) == f"SWARM_PUBLIC_URL must be an http or https URL with a host, not {url!r}"
+
+
+def test_a_plain_http_public_url_keeps_its_scheme():
+    env = {"LEDGER_DIR": "/data", "SWARM_PUBLIC_URL": "http://swarm.local:8080"}
+    assert ledger_link.allowed_origins(env) == {
+        "http://127.0.0.1:8765",
+        "http://localhost:8765",
+        "http://swarm.local:8080",
+    }
+
+
 def test_loopback_and_the_bind_host_are_always_allowed():
     env = {"LEDGER_HOST": "0.0.0.0", "LEDGER_PORT": "9100", "LEDGER_DIR": "/data"}
     assert ledger_link.allowed_hosts(env) == {"0.0.0.0:9100", "127.0.0.1:9100", "localhost:9100"}
