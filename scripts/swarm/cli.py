@@ -411,8 +411,8 @@ def gate_mode(key, value, environ=None):
     if env.get("AGENTIHOOKS_AGENT_NAME", "operator") != "operator":
         raise SwarmError(f"only the operator sets {key}, from the ledger page or his own terminal")
     value = modes.normalize(value)
-    if value not in GATE_MODES:
-        raise SwarmError(f"{key} takes {', '.join(modes.LABELS.values())}")
+    if value not in modes.supported(GATE_KEYS[key]):
+        raise SwarmError(f"{key} takes {', '.join(modes.label(mode) for mode in modes.supported(GATE_KEYS[key]))}")
     return {GATE_KEYS[key]: value}
 
 

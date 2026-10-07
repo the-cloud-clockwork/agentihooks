@@ -88,6 +88,7 @@ def test_ruling_follows_the_pull_request_then_the_wait():
     assert ruling(task, MERGED, {"until": 1}) == ("merged", "")
     assert ruling(task, RED, {"until": 1}) == ("red", "")
     assert ruling(task, PENDING, None) == ("", URL)
+    assert ruling(task, PullRequest("OPEN", None, 1, True, False), None) == ("", URL)
     assert ruling(task, GREEN, {"until": 1}) == ("", "")
     assert ruling(task, GREEN, None) == ("green", "")
     assert ruling(task, None, None) == ("", "")

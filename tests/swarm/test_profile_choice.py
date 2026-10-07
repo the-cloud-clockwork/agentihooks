@@ -180,22 +180,48 @@ def test_mixed_or_unclear_responsibility_refuses_with_actionable_reason(asked, c
     )
 
 
-@pytest.mark.parametrize("confidence,floor", [(0.59, {}), (0.7, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "0.75"})])
-def test_low_confidence_refuses_instead_of_guessing(asked, confidence, floor):
-    asked("frontend", confidence=confidence)
-    with pytest.raises(profile_choice.ProfileUnresolved, match=f"frontend with confidence {confidence:.2f}"):
-        profile_choice.choose("sw", "eng", {}, TASK, floor)
+@pytest.mark.parametrize(
+    "choice,confidence,floor",
+    [
+        ("frontend", 0.59, {}),
+        ("qa", 0.7, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "0.75"}),
+        ("split", 0.4, {}),
+        ("unresolved", 0.59, {}),
+    ],
+)
+def test_low_confidence_takes_the_lane_default_profile(asked, choice, confidence, floor):
+    asked(choice, confidence=confidence)
+    decision = profile_choice.choose("sw", "eng", {}, TASK, floor)
+    shown = float(floor.get("AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE", 0.6))
+    assert decision == profile_choice.ProfileDecision(
+        "engineer",
+        "lane default",
+        f"eng lane default: pplx-decider-v1-27b answered {choice} with confidence {confidence:.2f}, "
+        f"below the floor {shown:.2f}",
+        "pplx-decider-v1-27b",
+        confidence,
+        True,
+        ("task:t9", "phase:p1", "territory:scripts/swarm/tick.py", "territory:scripts/swarm_ledger/static"),
+    )
 
 
-def test_an_answer_without_confidence_refuses(asked):
+def test_an_answer_without_confidence_takes_the_lane_default(asked):
     asked("frontend", confidence=None)
-    with pytest.raises(profile_choice.ProfileUnresolved, match="frontend with confidence 0.00"):
-        profile_choice.choose("sw", "eng", {}, TASK, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "0.001"})
+    decision = profile_choice.choose("sw", "eng", {}, TASK, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "0.001"})
+    assert (decision.profile, decision.source, decision.confidence) == ("engineer", "lane default", None)
+    assert decision.responsibility.endswith("answered frontend with confidence 0.00, below the floor 0.00")
+
+
+def test_pinned_task_profile_wins_over_a_low_confidence_answer(asked):
+    calls = asked("frontend", confidence=0.1)
+    decision = profile_choice.choose("sw", "eng", {}, {**TASK, "profile": "qa"}, {})
+    assert (decision.profile, decision.source) == ("qa", "task") and calls == []
 
 
 def test_confidence_at_floor_is_accepted(asked):
     asked("engineer", confidence=0.6)
-    assert profile_choice.choose("sw", "eng", {}, TASK, {}).profile == "engineer"
+    decision = profile_choice.choose("sw", "eng", {}, TASK, {})
+    assert (decision.profile, decision.source) == ("engineer", "classifier")
 
 
 def test_unavailable_classifier_never_falls_back_to_engineer(monkeypatch):
@@ -250,6 +276,24 @@ def test_runtime_records_the_decision_and_launches_its_profile(tmp_path, asked, 
     assert placed.profile_decision["source"] == "classifier"
     assert placed.profile_decision["confidence"] == 0.9
     assert tick.placed_record(store.AgentRecord("a", "eng", "t9"), placed).profile_decision == placed.profile_decision
+
+
+def test_runtime_launches_the_lane_default_below_the_floor(tmp_path, asked, ledger_file):
+    asked("frontend", confidence=0.3)
+    calls = []
+
+    def launch(argv, **kwargs):
+        calls.append(argv)
+        out = "status=started\nroute_status=direct\npane_id=w:p1\nagent=claude\nprofile=engineer\nmodel=m\neffort=low\n"
+        return SimpleNamespace(returncode=0, stdout=validated(argv, out), stderr="")
+
+    config = store.SwarmConfig("sw", str(tmp_path), 1, 0, code="a1b2c3")
+    rt = runtime.HerdrRuntime(home=tmp_path, run=launch, choose=lambda *_: ("claude", "open"))
+    placed = rt.spawn(config, "eng", "a", TASK)
+    assert calls[0][calls[0].index("--profile") + 1] == "engineer"
+    assert placed.profile_decision["source"] == "lane default"
+    assert placed.profile_decision["confidence"] == 0.3
+    assert tick.placed_record(store.AgentRecord("a", "eng", "t9"), placed).profile_decision["source"] == "lane default"
 
 
 def test_runtime_refuses_launch_on_unresolved_profile(tmp_path, asked):

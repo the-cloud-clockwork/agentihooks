@@ -360,6 +360,10 @@ def warnings(doc):
     return found
 
 
+def size_warning(text):
+    return re.fullmatch(r"(overview|phase \S+ description) has \d+ words, limit \d+", text) is not None
+
+
 class Context:
     """One sync's clock, rev, stamps and event log."""
 
