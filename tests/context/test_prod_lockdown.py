@@ -169,3 +169,65 @@ def test_allowed_controls_operation_cannot_skip_a_protected_merge():
 
     with pytest.raises(BlockAction, match="gh pr merge to main/master/v1"):
         _check("gh workflow run release.yml; gh pr merge 123 --base main")
+
+
+_SIGNAL_SESSION = "test-prod-operands"
+_TAG_PUSH = "docker push ghcr.io/anton/agent:latest"
+_MAIN_MERGE = "gh pr merge 123 --base main"
+
+
+@pytest.fixture
+def grant(tmp_path, monkeypatch):
+    from hooks.context import prod_lockdown
+    from hooks.context.controls_toggle import set_controls_disabled
+
+    monkeypatch.setattr(prod_lockdown, "get_redis", lambda: None)
+    monkeypatch.setattr(prod_lockdown, "AGENTIHOOKS_HOME", tmp_path)
+    setters = {
+        "release": prod_lockdown.set_release_signal,
+        "hotfix": prod_lockdown.set_hotfix_signal,
+        "controls": set_controls_disabled,
+    }
+    return lambda signal: setters[signal](_SIGNAL_SESSION)
+
+
+@pytest.mark.parametrize(
+    ("signal", "command"),
+    [
+        ("release", "gh workflow run release.yml --ref dev"),
+        ("release", _MAIN_MERGE),
+        ("hotfix", _TAG_PUSH),
+        ("hotfix", _MAIN_MERGE),
+        ("controls", _TAG_PUSH),
+        ("controls", "gh workflow run release.yml --ref dev"),
+    ],
+)
+def test_signal_authorizes_its_own_operation(grant, signal, command):
+    grant(signal)
+    _check(command)
+
+
+@pytest.mark.parametrize("separator", [";", "\n", "&&", "||", "|"])
+@pytest.mark.parametrize(
+    ("signal", "authorized", "refused", "block"),
+    [
+        ("release", "gh workflow run release.yml --ref dev", _TAG_PUSH, "BLOCKED [image tag"),
+        ("release", _MAIN_MERGE, _TAG_PUSH, "BLOCKED [image tag"),
+        ("release", _MAIN_MERGE, "git push origin main", "BLOCKED: Pushing directly to main/master"),
+        ("hotfix", _TAG_PUSH, "git push origin main", "BLOCKED: Pushing directly to main/master"),
+        ("hotfix", _MAIN_MERGE, "git push origin main", "BLOCKED: Pushing directly to main/master"),
+        ("controls", _TAG_PUSH, _MAIN_MERGE, "BLOCKED [gh pr merge to main/master/v1]"),
+        ("controls", "gh workflow run release.yml --ref dev", _MAIN_MERGE, "BLOCKED [gh pr merge to main/master/v1]"),
+    ],
+)
+@pytest.mark.parametrize("refused_first", [False, True])
+def test_signal_does_not_authorize_another_command_in_the_chain(
+    grant, separator, signal, authorized, refused, block, refused_first
+):
+    from hooks.hook_manager import BlockAction
+
+    grant(signal)
+    commands = [refused, authorized] if refused_first else [authorized, refused]
+    with pytest.raises(BlockAction) as blocked:
+        _check(separator.join(commands))
+    assert str(blocked.value).startswith(block)
