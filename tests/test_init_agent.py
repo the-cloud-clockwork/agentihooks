@@ -348,6 +348,35 @@ def test_failed_route_fails_the_handoff_and_marks_nothing(monkeypatch, tmp_path,
     assert captured.err == "agentihooks init-agent: handoff failed; the new session was not routed to another account\n"
 
 
+@pytest.mark.parametrize("route,timeout", [("status=routed\naccount=alpha\n", "30"), ("", "0")])
+def test_the_route_wait_never_sleeps_once_its_outcome_is_known(monkeypatch, tmp_path, capsys, route, timeout):
+    monkeypatch.setattr(
+        init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
+    )
+    monkeypatch.setattr(
+        init_agent,
+        "_launch_command",
+        lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
+    )
+    monkeypatch.setattr(init_agent.claude_trust, "ensure_trusted", lambda *a: ("trusted", ""))
+
+    def waited(seconds):
+        raise AssertionError(f"waited {seconds}s on a route whose outcome was known")
+
+    def popen(command, **kwargs):
+        launcher = Path(command[-1])
+        launcher.with_suffix(".started").touch()
+        if route:
+            launcher.with_suffix(".route").write_text(route)
+        monkeypatch.setattr(init_agent.time, "monotonic", lambda: 100.0)
+        monkeypatch.setattr(init_agent.time, "sleep", waited)
+
+    monkeypatch.setattr(init_agent.subprocess, "Popen", popen)
+    args = ["--host", "native", "--agent", "claude", "--dir", str(tmp_path), "--route-timeout", timeout]
+    assert init_agent.main(args, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime")}) == 0
+    assert f"route_status={'routed' if route else 'pending'}\n" in capsys.readouterr().out
+
+
 def test_agenti_writes_the_route_report_and_honours_exclusions(monkeypatch, tmp_path):
     from scripts import claude_quota_balancer as balancer
     from scripts import install
