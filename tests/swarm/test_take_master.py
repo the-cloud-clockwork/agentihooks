@@ -53,6 +53,20 @@ def test_take_master_records_the_model_and_effort_the_session_launched_with(take
     assert master.started_at > 0
 
 
+def test_take_master_records_the_mounted_profile(taker, monkeypatch):
+    store, _, _, _ = taker
+    monkeypatch.setenv("AGENTIHOOKS_PROFILE", "master")
+    assert run("sw", "take-master") == 0
+    assert next(a for a in store.agents("sw") if a.lane == "master").profile == "master"
+
+
+def test_take_master_keeps_an_unreported_profile_empty(taker, monkeypatch):
+    store, _, _, _ = taker
+    monkeypatch.delenv("AGENTIHOOKS_PROFILE", raising=False)
+    assert run("sw", "take-master") == 0
+    assert next(a for a in store.agents("sw") if a.lane == "master").profile == ""
+
+
 def test_argv_of_reads_a_process_command_line():
     own = Path("/proc/self/cmdline").read_bytes().split(b"\0")
     assert take_master.argv_of(os.getpid()) == tuple(arg.decode() for arg in own if arg)

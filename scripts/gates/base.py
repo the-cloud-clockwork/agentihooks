@@ -10,6 +10,7 @@ class Call:
     tool: str
     tool_input: dict = field(default_factory=dict)
     cwd: str = ""
+    session: str = ""
 
     @classmethod
     def from_payload(cls, payload):
@@ -17,6 +18,7 @@ class Call:
             tool=str(payload.get("tool_name") or ""),
             tool_input=payload.get("tool_input") or {},
             cwd=str(payload.get("cwd") or ""),
+            session=str(payload.get("session_id") or ""),
         )
 
     @property

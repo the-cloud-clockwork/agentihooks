@@ -89,6 +89,9 @@ class FakeRuntime:
     def live_names(self):
         return set(self.live)
 
+    def reported(self, agent):
+        return agent.name in self.live
+
     def bindings(self, agents):
         from scripts.swarm.live_binding import assignment
 

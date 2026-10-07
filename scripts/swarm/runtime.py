@@ -97,6 +97,10 @@ def _conversation_id(session):
     return session.get("value") or ""
 
 
+def _complete(saved):
+    return saved if saved and all(saved.get(key) for key in ("profile", "harness", "model", "effort")) else {}
+
+
 def _transfer(task):
     saved = (task.get("handoff_envelope") or {}).get("launch")
     if not task.get("handoff") and not saved:
@@ -124,10 +128,11 @@ class HerdrRuntime:
 
     def spawn(self, config, lane, name, task, spawns=None):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
-        saved = task.get("launch_assignment") or _transfer(task)
+        relaunch = _complete(task.get("launch_assignment"))
+        saved = relaunch or _transfer(task)
         decision = (
             profile_choice.ProfileDecision(saved["profile"], "handoff", "original seat profile")
-            if saved and (task.get("launch_assignment") or not task.get("profile"))
+            if saved and (relaunch or not task.get("profile"))
             else profile_choice.choose(config.slug, lane, chosen, task, environ)
         )
         profile = decision.profile
@@ -299,6 +304,12 @@ class HerdrRuntime:
         from scripts.terminate_agent import sessions
 
         return {s.name for s in sessions() if s.name}
+
+    def reported(self, agent: AgentRecord) -> bool:
+        from scripts.terminate_agent import sessions
+
+        session = live_binding.bound_session(agent, sessions())
+        return session is not None and session.status == "alive"
 
     def bindings(self, agents: list[AgentRecord]) -> dict:
         from scripts.terminate_agent import sessions
