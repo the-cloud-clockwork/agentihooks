@@ -162,6 +162,7 @@ def checked(store, monkeypatch, profile="engineer", task_profile="engineer"):
     from hooks.context import profile_chain
 
     monkeypatch.setattr(profile_chain, "read_state", lambda: {})
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
     ledger, runtime = JoiningLedger([{"id": "t1", "profile": task_profile}]), CheckedRuntime()
     original = runtime.spawn
 
@@ -260,6 +261,26 @@ def test_master_failure_is_posted_to_the_operator_chat_and_relaunched(store, mon
     assert len(runtime.masters) == 2
 
 
+def test_master_notification_names_only_enforced_misses(store, monkeypatch, tmp_path):
+    from hooks.context import profile_chain
+
+    ledger, runtime = checked(store, monkeypatch)
+    monkeypatch.setattr(profile_chain, "read_state", lambda: {"bundle": {"path": str(tmp_path)}})
+    store.update("sw", state="running")
+    store.update("sw", max_eng=0)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    first, _ = runtime.masters[0]
+    agent = next(a for a in store.agents("sw") if a.name == first)
+    (tmp_path / "profiles" / agent.profile).mkdir(parents=True)
+    tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert ledger.notes == [
+        "The master failed its launch check within a minute on joining the ledger and holding its seat. "
+        "It is being retired and relaunched once."
+    ]
+    assert [f.id for f in launch_check.findings(store, "sw")] == [f"launch-check/{first}/joined"]
+    assert list(launch_check.report(store, "sw", "master")["misses"]) == ["joined", "overlay"]
+
+
 def test_an_overlay_only_miss_is_reported_without_a_relaunch(store, monkeypatch, tmp_path):
     from hooks.context import profile_chain
 
@@ -273,9 +294,10 @@ def test_an_overlay_only_miss_is_reported_without_a_relaunch(store, monkeypatch,
     assert f"{first} failed its launch check on overlay; reported only" in actions
     assert first not in runtime.killed
     assert len(runtime.spawned) == 1
-    assert f"launch-check/{first}/overlay" in [f.id for f in launch_check.findings(store, "sw")]
+    assert launch_check.findings(store, "sw") == []
+    assert list(launch_check.report(store, "sw", "t1")["misses"]) == ["overlay"]
     assert first not in launch_check.judged(store, "sw")
-    assert any("role overlay" in note and "reported only" in note for note in ledger.notes)
+    assert ledger.notes == []
 
 
 def test_a_take_master_launch_that_fails_is_reported_and_kept(store, monkeypatch):
@@ -293,9 +315,10 @@ def test_a_take_master_launch_that_fails_is_reported_and_kept(store, monkeypatch
     assert any("joining the ledger" in note for note in ledger.notes)
 
 
-def test_take_master_begins_a_check_that_never_relaunches(store, monkeypatch):
+def test_take_master_begins_a_check_that_never_relaunches(store, monkeypatch, tmp_path):
     from scripts.swarm import take_master
 
+    monkeypatch.setattr(take_master, "PROC", tmp_path / "no-proc")
     monkeypatch.setattr(take_master, "agent_pid", lambda: 4242)
     monkeypatch.setattr(take_master, "harness_of", lambda pid: "claude")
     monkeypatch.setattr(take_master, "argv_of", lambda pid: ())
@@ -449,6 +472,22 @@ def test_findings_carry_the_field_evidence_and_threshold(store, launched):
     ]
 
 
+@pytest.mark.parametrize("report_only", [frozenset({"overlay"}), frozenset()])
+def test_only_enforced_misses_raise_findings(store, launched, monkeypatch, report_only):
+    agent, _, _ = launched
+    monkeypatch.setattr(launch_check, "REPORT_ONLY", report_only)
+    found = {
+        "overlay": {"expected": "package:engineer", "actual": "engineer"},
+        "name": {"expected": "a", "actual": "b"},
+    }
+    launch_check.record(store, "sw", agent, found, LAUNCH, 0)
+    expected = [f"launch-check/{agent.name}/name"]
+    if not report_only:
+        expected.insert(0, f"launch-check/{agent.name}/overlay")
+    assert [f.id for f in launch_check.findings(store, "sw")] == expected
+    assert launch_check.report(store, "sw", "t1")["misses"] == found
+
+
 def test_a_pending_check_for_a_gone_agent_is_forgotten(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     store.update("sw", max_eng=0)
@@ -468,7 +507,7 @@ def test_a_waiting_launch_does_not_stop_the_next_from_being_judged(store, monkey
         launch_check.begin(store, "sw", agent, agent.started_at)
     actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
     assert early.name in launch_check.pending(store, "sw")
-    assert any(a.startswith(f"retired {late.name} after its launch check failed on joined, profile") for a in actions)
+    assert any(a.startswith(f"retired {late.name} after its launch check failed on joined") for a in actions)
 
 
 def test_a_pass_after_a_relaunch_clears_the_mark_and_reports_its_timing(store, monkeypatch):

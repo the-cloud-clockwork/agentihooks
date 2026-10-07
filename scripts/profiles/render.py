@@ -12,7 +12,7 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from hooks.context import quarantine
+from hooks.context import profile_chain, quarantine
 from scripts.claude_config import claude_home, claude_json
 from scripts.profiles import binding, browser, connectors, plugins, sources
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
@@ -65,7 +65,9 @@ def _chain(name: str) -> list[tuple[str, Path]]:
     _i = _install_module()
     if _i._resolve_profile_dir(name) is None:
         raise ValueError(f"Profile '{name}' not found")
-    return _i._resolve_profile_chain(name)
+    dirs = _i._resolve_profile_chain(name)
+    declared = [o for _, path in dirs for o in profile_chain.overlays(path) if _i._resolve_profile_dir(o) is not None]
+    return _i._resolve_profile_chain(",".join([name, *declared])) if declared else dirs
 
 
 def _bundle() -> Path | None:
