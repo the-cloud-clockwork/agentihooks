@@ -183,6 +183,10 @@ def test_spawn_without_a_swarm_compact_limit_leaves_the_default(tmp_path, monkey
     assert "AGENTIHOOKS_COMPACT_LIMIT" not in _spawn_env(tmp_path, monkeypatch, compact_limit=0)
 
 
+def test_spawn_marks_the_launch_as_the_tick_s_own(tmp_path, monkeypatch):
+    assert _spawn_env(tmp_path, monkeypatch, compact_limit=0)["AGENTIHOOKS_SWARM_SPAWN"] == "1"
+
+
 def _spawn_seen(tmp_path, lanes, lane="eng"):
     seen = {}
 

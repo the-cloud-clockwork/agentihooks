@@ -1315,6 +1315,10 @@
     "reader": "Standards reader",
     "reason": "ensure_ascii False and None take the same false branch, producing identical JSON and contextual redaction input."
   },
+  "hooks/context/swarm_pin.py:hooks.context.swarm_pin.x_nested__mutmut_11:5a7dc3df22dcf856f0f307f58e0aeba24bfc3c63c09daa4a54599feb56c5510a": {
+    "reader": "Standards",
+    "reason": "Stopping the walk at pid 2 instead of pid 1 changes no output: pid 2 is never claude or codex and never the launcher, so the session count and the final launcher comparison are identical."
+  },
   "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_39:f4dbfcc6bfe6005080e7d21501efb923cfab37e5310ea952aaa9870a5ad37696": {
     "reader": "Standards",
     "reason": "None and False are tested only for truthiness; neither reaches output."
