@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from hooks.proc import Process, _process
+from scripts.swarm_ledger.ledger_link import address
 from scripts.swarm_ledger.server_lifetime import shared
 
 
@@ -22,8 +23,10 @@ def details(row: Process, proc: Path) -> dict:
         key, _, value = item.partition(b"=")
         if key in keys:
             environ[key.decode()] = value.decode()
-    folder = Path(environ.get("LEDGER_DIR", str(Path.home() / "development-ledger")))
     cwd = os.readlink(root / "cwd")
+    selected = Path(environ.get("LEDGER_DIR", str(Path.home() / "development-ledger"))).expanduser()
+    folder = selected if selected.is_absolute() else Path(cwd) / selected
+    environ["LEDGER_DIR"] = str(folder)
     identity = None
     if "LEDGER_RUN_START" in environ:
         identity = [int(environ["LEDGER_RUN_PID"]), int(environ["LEDGER_RUN_START"])]
@@ -33,7 +36,7 @@ def details(row: Process, proc: Path) -> dict:
     uptime = float((proc / "uptime").read_text().split()[0])
     return {
         "pid": row.pid,
-        "port": int(environ.get("LEDGER_PORT", "8765")),
+        "port": address(environ)[1],
         "folder": str(folder),
         "cwd": cwd,
         "age": max(0, uptime - row.start_time / os.sysconf("SC_CLK_TCK")),

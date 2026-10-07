@@ -32,15 +32,15 @@ def owner(environ: dict, proc: Path = Path("/proc")) -> tuple[int, int] | None:
         start = environ.get("LEDGER_RUN_START")
         return pid, int(start) if start is not None else parent["start"] if parent else 0
     parent = process(os.getppid(), proc)
-    fallback = parent
     while parent and parent["pid"] > 1:
-        if any(Path(arg.decode()).name in {"pytest", "mutmut"} for arg in parent["argv"]):
+        argv = [arg.decode() for arg in parent["argv"]]
+        helper = any(
+            Path(arg).name in {"agentihooks", "ledger.py", "ledger_hook.py", "ledger_server.py"} for arg in argv[:2]
+        )
+        if not helper and argv[1:3] not in [["-m", "hooks"], ["-m", "scripts.install"]]:
             return parent["pid"], parent["start"]
-        if parent["comm"] in {"bash", "sh", "zsh", "fish", "codex", "claude"}:
-            fallback = parent
-            break
         parent = process(parent["ppid"], proc)
-    return (fallback["pid"], fallback["start"]) if fallback and fallback["pid"] > 1 else None
+    return None
 
 
 def environment(folder: Path, port: int) -> dict:

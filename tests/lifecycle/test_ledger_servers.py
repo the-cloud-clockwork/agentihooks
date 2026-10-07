@@ -54,15 +54,22 @@ def test_sweep_stops_orphan_servers_and_logs_their_identity(tmp_path, monkeypatc
     assert result[0]["folder"] == str(folder)
     assert result[0]["age"] == 3600 - 100 / os.sysconf("SC_CLK_TCK")
     assert result[0]["action"] == "stopped"
+    assert result[0]["reason"] == (
+        "working folder is gone"
+        if reason in {"folder", "cwd"}
+        else "starting run ended without an owner record"
+        if reason == "legacy"
+        else "starting run ended"
+    )
     assert json.loads((home / "gc-ledger-servers.jsonl").read_text()) == result[0]
 
 
-@pytest.mark.parametrize("kind", ["shared", "live", "unrelated", "dry", "scope"])
+@pytest.mark.parametrize("kind", ["shared", "shared stale port", "live", "unrelated", "dry", "scope"])
 def test_sweep_preserves_shared_active_and_unmatched_processes(tmp_path, monkeypatch, kind):
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    folder = tmp_path / ("development-ledger" if kind == "shared" else "ledger")
+    folder = tmp_path / ("development-ledger" if kind.startswith("shared") else "ledger")
     folder.mkdir()
-    row = process(ppid=1 if kind == "shared" else 7)
+    row = process(ppid=1 if kind.startswith("shared") else 7)
     if kind == "unrelated":
         row = Process(42, 7, 42, 42, 100, "S", "python", ("python", "other.py", "--serve"))
     proc = plant(tmp_path, row, folder, port=8765 if kind == "shared" else 9000, owner=(7, 99))
@@ -151,3 +158,58 @@ def test_scope_accepts_the_working_folder_even_when_data_is_elsewhere(tmp_path, 
     result = ledger_servers.sweep_servers({42: row}, tmp_path, scope=str(cwd), act=True, proc=proc)
     assert result[0]["action"] == "stopped"
     stopped.assert_called_once_with(row, proc)
+
+
+def test_sweep_really_terminates_a_server_from_a_deleted_working_folder(tmp_path):
+    import shutil
+    import socket
+    import subprocess
+    import sys
+    import time
+
+    from hooks.proc import _process
+
+    root = Path(__file__).resolve().parents[2]
+    cwd = tmp_path / "run"
+    folder = tmp_path / "data"
+    cwd.mkdir()
+    folder.mkdir()
+    script = cwd / "ledger_server.py"
+    script.write_text(
+        "import threading\n"
+        "from scripts.swarm_ledger import ledger_server, server_lifetime\n"
+        "server_lifetime.watch = lambda *args: threading.Event()\n"
+        "ledger_server.serve()\n"
+    )
+    with socket.socket() as spare:
+        spare.bind(("127.0.0.1", 0))
+        port = spare.getsockname()[1]
+    env = {
+        **os.environ,
+        "LEDGER_DIR": str(folder),
+        "LEDGER_PORT": str(port),
+        "PYTHONPATH": str(root),
+        "SWARM_RELOAD": "0",
+    }
+    server = subprocess.Popen([sys.executable, str(script), "--serve"], cwd=cwd, env=env)
+    try:
+        deadline = time.monotonic() + 5
+        while not (folder / ".server.pid").exists():
+            assert server.poll() is None
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        row = _process(server.pid, Path("/proc"))
+        assert row is not None
+        shutil.rmtree(cwd)
+        result = ledger_servers.sweep_servers({server.pid: row}, tmp_path, act=True)
+        assert result[0]["action"] == "stopped"
+        assert result[0]["pid"] == server.pid
+        assert result[0]["port"] == port
+        assert result[0]["folder"] == str(folder)
+        assert result[0]["reason"] == "working folder is gone"
+        assert server.wait(timeout=5) < 0
+        assert json.loads((tmp_path / "gc-ledger-servers.jsonl").read_text()) == result[0]
+    finally:
+        if server.poll() is None:
+            server.kill()
+            server.wait(timeout=5)

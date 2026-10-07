@@ -24,7 +24,9 @@ def running(pid):
 
 
 @pytest.mark.parametrize("ending", ["exit", "terminate", "kill"])
-def test_detached_server_stops_when_its_run_ends(tmp_path, ending):
+@pytest.mark.parametrize("explicit_owner", [True, False])
+@pytest.mark.parametrize("mode", ["--ensure", "--serve"])
+def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owner, mode):
     with socket.socket() as spare:
         spare.bind(("127.0.0.1", 0))
         port = spare.getsockname()[1]
@@ -39,11 +41,12 @@ def test_detached_server_stops_when_its_run_ends(tmp_path, ending):
     env.pop("LEDGER_RUN_START", None)
     script = (
         "import os, subprocess, sys, time\n"
-        "os.environ['LEDGER_RUN_PID'] = str(os.getpid())\n"
-        "subprocess.run([sys.executable, sys.argv[1], '--ensure'], check=True)\n"
+        + ("os.environ['LEDGER_RUN_PID'] = str(os.getpid())\n" if explicit_owner else "")
+        + "if sys.argv[3] == '--ensure': subprocess.run([sys.executable, sys.argv[1], sys.argv[3]], check=True)\n"
+        + "else: subprocess.Popen([sys.executable, sys.argv[1], sys.argv[3]])\n"
         "while not os.path.exists(sys.argv[2]): time.sleep(0.01)\n"
     )
-    run = subprocess.Popen([sys.executable, "-c", script, str(SERVER), str(tmp_path / "end")], env=env)
+    run = subprocess.Popen([sys.executable, "-c", script, str(SERVER), str(tmp_path / "end"), mode], env=env)
     pid = None
     try:
         deadline = time.monotonic() + 10
@@ -134,7 +137,7 @@ def test_explicit_owner_keeps_its_original_start_identity(tmp_path, configured, 
     ],
 )
 def test_owner_follows_client_processes_to_the_run(tmp_path, monkeypatch, comm, argv):
-    fake_process(tmp_path, pid=9, ppid=7, start=101)
+    fake_process(tmp_path, pid=9, ppid=7, start=101, argv=(b"python", b"ledger.py"))
     fake_process(tmp_path, comm=comm, argv=argv)
     monkeypatch.setattr(server_lifetime.os, "getppid", lambda: 9)
     assert server_lifetime.owner({}, tmp_path) == (7, 99)
