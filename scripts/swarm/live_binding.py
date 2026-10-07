@@ -1,11 +1,18 @@
+from __future__ import annotations
+
 import json
 import os
 import re
 import shlex
 import tomllib
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from scripts.swarm.health.findings import Finding
+from scripts.swarm.store import AgentRecord, RedisStore
+
+if TYPE_CHECKING:
+    from scripts.terminate_agent import Session
 
 EVENTS = (
     "SessionStart",
@@ -48,22 +55,22 @@ def hooks(home: Path, harness: str) -> bool:
             return False
         if harness == "codex":
             config = tomllib.loads((home / "config.toml").read_text())
-            if config.get("features", {}).get("hooks") is not True:
+            if config["features"]["hooks"] is not True:
                 return False
-        registered = data.get("hooks", {})
+        registered = data["hooks"]
         return all(
             any(
-                hook.get("type") == "command" and lifecycle_command(hook.get("command", ""))
-                for group in registered.get(event, [])
-                for hook in group.get("hooks", [])
+                hook["type"] == "command" and lifecycle_command(hook["command"])
+                for group in registered[event]
+                for hook in group["hooks"]
             )
             for event in EVENTS
         )
-    except (OSError, ValueError, AttributeError, TypeError):
+    except (OSError, ValueError, AttributeError, TypeError, KeyError):
         return False
 
 
-def read(agent, pid: int, proc: Path = Path("/proc")) -> dict:
+def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
     from scripts.profiles import binding
     from scripts.select_profile import _native_options
 
@@ -71,7 +78,7 @@ def read(agent, pid: int, proc: Path = Path("/proc")) -> dict:
         found, harness, env, account = binding.process(proc, pid)
         argv = (proc / str(found) / "cmdline").read_bytes().decode(errors="replace").split("\0")
         model, effort, _ = _native_options(harness, argv[1:])
-        home = env.get(binding.HOMES[harness], "")
+        home = env.get(binding.HOMES[harness])
         return {
             "harness": harness,
             "home": str(Path(home).resolve()) if home else "",
@@ -85,7 +92,7 @@ def read(agent, pid: int, proc: Path = Path("/proc")) -> dict:
         return {"process": False}
 
 
-def assignment(agent) -> dict:
+def assignment(agent: AgentRecord) -> dict:
     validated = agent.profile_decision.get("validation", {})
     home = validated.get("home") or str(Path.home() / ".agentihooks" / "profiles" / agent.profile / agent.harness)
     return {
@@ -98,7 +105,7 @@ def assignment(agent) -> dict:
     }
 
 
-def bound_session(agent, sessions):
+def bound_session(agent: AgentRecord, sessions: list[Session]) -> Session | None:
     named = {s.process.pid: s for s in sessions if s.name == agent.name}
     validated = agent.profile_decision.get("validation", {}).get("pid")
     if validated:
@@ -111,7 +118,7 @@ def bound_session(agent, sessions):
     return min(registered or named.values(), key=lambda s: s.process.start_time, default=None)
 
 
-def compare(agent, facts: dict) -> dict:
+def compare(agent: AgentRecord, facts: dict) -> dict:
     if facts.get("process") is False:
         return {"process": {"expected": True, "actual": False}}
     expected = {**assignment(agent), "hooks": True}
@@ -122,7 +129,7 @@ def compare(agent, facts: dict) -> dict:
     }
 
 
-def record(store, slug: str, agent, facts: dict, now_ms: int) -> dict:
+def record(store: RedisStore, slug: str, agent: AgentRecord, facts: dict, now_ms: int) -> dict:
     differences = (
         {"pane": {"expected": "closed", "actual": facts["pane"]}} if "pane" in facts else compare(agent, facts)
     )
@@ -136,7 +143,7 @@ def record(store, slug: str, agent, facts: dict, now_ms: int) -> dict:
     return differences
 
 
-def findings(store, slug: str) -> list[Finding]:
+def findings(store: RedisStore, slug: str) -> list[Finding]:
     result = []
     for raw in store.redis.hgetall(store.key(slug, "live-bindings")).values():
         report = json.loads(raw)

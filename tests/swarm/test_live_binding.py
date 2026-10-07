@@ -793,6 +793,7 @@ def test_retirement_uses_the_same_process_the_verifier_checked(monkeypatch):
     calls = []
 
     def run(argv, **kwargs):
+        assert kwargs == {"capture_output": True, "text": True, "timeout": 60}
         calls.append(argv)
         return SimpleNamespace(returncode=0)
 
@@ -801,3 +802,58 @@ def test_retirement_uses_the_same_process_the_verifier_checked(monkeypatch):
     runtime.bindings([agent])
     assert runtime.retire(agent, True) is True
     assert calls[0][1:] == ["terminate-agent", "11", "--force-shared"]
+
+
+def test_missing_validated_process_closes_without_terminating_foreign_session(monkeypatch):
+    from scripts import terminate_agent
+    from scripts.swarm.runtime import HerdrRuntime
+
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+
+    def refuse(*args, **kwargs):
+        pytest.fail("a missing assigned process must not select another process")
+
+    runtime = HerdrRuntime(run=refuse)
+    agent = AgentRecord("engineer", "eng", "one", profile_decision={"validation": {"pid": 99}})
+    assert runtime.bindings([agent]) == {"engineer": {"process": False}}
+    assert runtime.retire(agent, True) is True
+
+
+def test_unbound_absent_process_has_no_live_report(monkeypatch):
+    from scripts import terminate_agent
+    from scripts.swarm.runtime import HerdrRuntime
+
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    assert HerdrRuntime().bindings([AgentRecord("engineer", "eng", "one")]) == {}
+
+
+@pytest.mark.parametrize("proof_harness, proof_status", [("claude", "unregistered"), ("codex", "alive")])
+def test_legacy_reader_prefers_registered_assigned_harness(monkeypatch, proof_harness, proof_status):
+    from types import SimpleNamespace
+
+    from scripts import terminate_agent
+    from scripts.swarm.runtime import HerdrRuntime
+
+    monkeypatch.setattr(
+        terminate_agent,
+        "sessions",
+        lambda: [
+            SimpleNamespace(
+                name="engineer",
+                target=proof_harness,
+                status=proof_status,
+                session_id="",
+                process=SimpleNamespace(pid=11, start_time=1),
+            ),
+            SimpleNamespace(
+                name="engineer",
+                target="claude",
+                status="alive",
+                session_id="",
+                process=SimpleNamespace(pid=22, start_time=2),
+            ),
+        ],
+    )
+    monkeypatch.setattr(live_binding, "read", lambda agent, pid: {"pid": pid})
+    agent = AgentRecord("engineer", "eng", "one", harness="claude")
+    assert HerdrRuntime().bindings([agent]) == {"engineer": {"pid": 22}}
