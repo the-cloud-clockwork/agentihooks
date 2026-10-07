@@ -111,7 +111,10 @@ class SQLiteLedgerRepository:
         with self.connect() as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             self._registries(connection, registries)
-            for slug in removed or []:
+            existing = {slug for (slug,) in connection.execute("SELECT slug FROM ledgers")}
+            present = {path.stem for pattern in ("*.html", "*.json") for path in directory.glob(pattern)}
+            removed = set(removed or []) | (existing - present)
+            for slug in removed:
                 for table in (*TABLES, "ledgers", "revisions", "seed_base", "seed_deltas", "events"):
                     connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
             known = {

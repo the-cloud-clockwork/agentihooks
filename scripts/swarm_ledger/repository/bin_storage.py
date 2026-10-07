@@ -89,7 +89,7 @@ def purge_expired(now=None):
             del found[slug]
         if expired:
             _save(found)
-            persist_lifecycle(core.LEDGER_DIR, expired)
+        persist_lifecycle(core.LEDGER_DIR, expired)
     return expired
 
 

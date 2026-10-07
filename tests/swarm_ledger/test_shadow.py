@@ -127,3 +127,25 @@ def test_idle_ledgers_are_binned_with_equal_shadow_records(files):
     assert shadow.registry("bin") == bin_storage.registries()["bin"]
     assert shadow.lifecycle("shadow")["deleted_at"] == now
     assert shadow.get_document("shadow") == state
+
+
+@pytest.mark.parametrize("recovery", ["import", "expiry"])
+def test_interrupted_purge_reconciles_absent_shadow_on_restart(files, monkeypatch, recovery):
+    from scripts.swarm_ledger.repository import bin_storage, shadow
+    from scripts.swarm_ledger.storage_migration import import_directory
+
+    files.delete("shadow", now=20)
+    now = 20 + 31 * bin_storage.domain.DAY_MS
+    with monkeypatch.context() as patch:
+        patch.setattr(shadow, "persist_lifecycle", lambda *args: (_ for _ in ()).throw(RuntimeError("crash")))
+        with pytest.raises(RuntimeError, match="crash"):
+            bin_storage.purge_expired(now=now)
+    assert not core.paths("shadow")[1].exists()
+    if recovery == "import":
+        assert import_directory(core.LEDGER_DIR) == []
+    else:
+        assert bin_storage.purge_expired(now=now) == []
+    repo = SQLiteLedgerRepository(core.LEDGER_DIR / "ledger-shadow.sqlite3")
+    with pytest.raises(KeyError):
+        repo.get_document("shadow")
+    assert repo.registry("bin") == bin_storage.registries()["bin"]

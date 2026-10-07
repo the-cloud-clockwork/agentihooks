@@ -79,7 +79,11 @@ def test_html_only_seed_is_imported_without_creating_a_file_snapshot(tmp_path, m
     from scripts.swarm_ledger.repository.file import load_state
 
     document, meta, _ = load_state(snapshot, seed, core)
+    meta["updated_at"] = (tmp_path / "legacy.html").stat().st_mtime_ns // 1_000_000
     database = tmp_path / "import.sqlite3"
     assert import_storage(tmp_path, database) == ["legacy"]
     assert SQLiteLedgerRepository(database).get_document("legacy") == {**document, "_meta": meta}
     assert not snapshot.exists()
+    monkeypatch.setattr(core, "now_ms", lambda: 456)
+    assert import_storage(tmp_path, database) == ["legacy"]
+    assert SQLiteLedgerRepository(database).get_document("legacy") == {**document, "_meta": meta}

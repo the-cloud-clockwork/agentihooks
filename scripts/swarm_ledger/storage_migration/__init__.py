@@ -19,7 +19,9 @@ def import_directory(directory: Path, database: Path | None = None) -> list:
         for page in sorted(directory.glob("*.html")):
             path = page.with_suffix(".json")
             seed = None if path.exists() else core.parse_seed(page.read_text(encoding="utf-8"))
-            document, meta, _ = load_state(path, seed, core)
+            document, meta, created = load_state(path, seed, core)
+            if created:
+                meta["updated_at"] = page.stat().st_mtime_ns // 1_000_000
             repository.import_document(
                 path.stem,
                 {**document, "_meta": meta},
@@ -27,4 +29,5 @@ def import_directory(directory: Path, database: Path | None = None) -> list:
                 registries["restored"].get(path.stem),
             )
             imported.append(path.stem)
+        repository.apply_lifecycle(directory, registries)
     return imported
