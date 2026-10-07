@@ -3,8 +3,9 @@
 
 Usage: watch_ledger.py <slug> [--as NAME] [--since-rev N] [--interval 3] [--all]
 
-Reads <LEDGER_DIR>/<slug>.json every interval and prints each event logged after rev N
-(default: the rev at start; --as NAME: only those the owner rule gives NAME; --all: every event, agents' too):
+Follows the ledger server's event stream, one snapshot then only changes, and prints each event logged after
+rev N (default: the rev at start; --as NAME: only those the owner rule gives NAME; --all: every event, agents'
+too). A dropped stream reconnects after --interval seconds and replays from its cursor:
 
   OPERATOR rev=12 comment added on phases/p1 [c-1a2b]: "text"
   OPERATOR rev=13 comment edited on phases/p1 [c-1a2b] diff: "-old line\\n+new line"
@@ -25,21 +26,78 @@ import os
 import signal
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(1, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
+import ledger_link  # noqa: E402
 
 from scripts.inbox import seen  # noqa: E402
+from scripts.swarm_ledger.events import Expired, patch  # noqa: E402
+from scripts.swarm_ledger.events import stream as events_stream  # noqa: E402
+
+STREAM_TIMEOUT_S = 3 * events_stream.HEARTBEAT_S
 
 
-def read(json_path):
+def stream(slug, cursor=None):
+    """Yield (event, data, cursor) from the ledger server's event stream; Expired when the cursor is gone."""
+    import ledger
+
+    headers = {**ledger.credentials(slug), "Accept": "text/event-stream"}
+    if cursor:
+        headers["Last-Event-ID"] = cursor
+    url = f"{ledger_link.base()}/api/v1/ledgers/{urllib.parse.quote(slug, safe='')}/events"
     try:
-        state = json.loads(json_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return state if isinstance(state, dict) and isinstance(state.get("_meta"), dict) else None
+        response = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=STREAM_TIMEOUT_S)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 410:
+            raise Expired(cursor) from None
+        raise
+    with response:
+        yield from events_stream.parse(line.decode("utf-8") for line in response)
+
+
+class Watch:
+    """What one watcher has printed so far, so a reconnect or reset never prints an event twice."""
+
+    def __init__(self, args, json_path, marks):
+        self.args, self.json_path, self.marks = args, json_path, marks
+        self.state, self.since = None, args.since_rev
+        self.seed_error, self.warned = None, []
+
+    def show(self, state):
+        if self.state is None:
+            print(f"WATCHING {self.json_path} rev {state['_meta']['rev']}", flush=True)
+            if self.since is None:
+                self.since = state["_meta"]["rev"]
+        self.state = state
+        meta, args = state["_meta"], self.args
+        members, tasks = meta.get("members", {}), state.get("tasks", [])
+        fresh = [
+            e
+            for e in meta.get("events", [])
+            if e.get("rev", 0) > self.since
+            and (args.all or (e.get("by") == "operator" and (not args.name or gate.owes(e, members, args.name, tasks))))
+        ]
+        for event in seen.first_showing(self.marks, args.name, args.slug, fresh):
+            print(line(event, state.get("chat_instructions") or core.DEFAULT_CHAT_INSTRUCTIONS), flush=True)
+        self.since = max(self.since, meta["rev"])
+        if meta.get("seed_error") != self.seed_error:
+            self.seed_error = meta.get("seed_error")
+            print(f"SEED_ERROR {self.seed_error}" if self.seed_error else "SEED_OK", flush=True)
+        for message in set(meta.get("warnings") or []) - set(self.warned):
+            print(f"WARNING {message}", flush=True)
+        self.warned = meta.get("warnings") or []
+
+    def take(self, name, data):
+        if name == "snapshot":
+            self.show(data["ledger"])
+        elif name == "ledger":
+            self.show(patch.apply(self.state, data["patch"]))
 
 
 def line(event, rules=""):
@@ -68,6 +126,12 @@ def line(event, rules=""):
     return head + images
 
 
+def alive(beat):
+    if beat:
+        beat.parent.mkdir(parents=True, exist_ok=True)
+        beat.touch()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("slug")
@@ -77,40 +141,29 @@ def main():
     parser.add_argument("--since-rev", type=int)
     args = parser.parse_args()
     json_path = core.paths(args.slug)[1]
-    state = read(json_path)
-    if state is None:
+    if not json_path.exists():
         sys.exit(f"no ledger JSON at {json_path}")
-    since = state["_meta"]["rev"] if args.since_rev is None else args.since_rev
-    print(f"WATCHING {json_path} rev {state['_meta']['rev']}", flush=True)
-    seed_error, warned = None, []
     beat = core.watch_path(args.slug, args.name) if args.name else None
-    marks = seen.marks_for(args.slug) if args.name else None
+    watch = Watch(args, json_path, seen.marks_for(args.slug) if args.name else None)
     if beat:
         atexit.register(beat.unlink, missing_ok=True)
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    cursor = None
     while True:
-        if beat:
-            beat.parent.mkdir(parents=True, exist_ok=True)
-            beat.touch()
-        meta = state["_meta"]
-        members, tasks = meta.get("members", {}), state.get("tasks", [])
-        fresh = [
-            e
-            for e in meta.get("events", [])
-            if e.get("rev", 0) > since
-            and (args.all or (e.get("by") == "operator" and (not args.name or gate.owes(e, members, args.name, tasks))))
-        ]
-        for event in seen.first_showing(marks, args.name, args.slug, fresh):
-            print(line(event, state.get("chat_instructions") or core.DEFAULT_CHAT_INSTRUCTIONS), flush=True)
-        since = max(since, meta["rev"])
-        if meta.get("seed_error") != seed_error:
-            seed_error = meta.get("seed_error")
-            print(f"SEED_ERROR {seed_error}" if seed_error else "SEED_OK", flush=True)
-        for message in set(meta.get("warnings") or []) - set(warned):
-            print(f"WARNING {message}", flush=True)
-        warned = meta.get("warnings") or []
+        alive(beat)
+        try:
+            for name, data, event_id in stream(args.slug, cursor):
+                alive(beat)
+                watch.take(name, data)
+                cursor = event_id or cursor
+        except Expired:
+            cursor = None
+            continue
+        except (KeyError, TypeError):
+            cursor = None
+        except (OSError, ValueError):
+            pass
         time.sleep(args.interval)
-        state = read(json_path) or state
 
 
 if __name__ == "__main__":
