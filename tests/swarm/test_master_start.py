@@ -11,6 +11,11 @@ pytestmark = pytest.mark.unit
 DEADLINE = 120_000
 
 
+@pytest.fixture(autouse=True)
+def startup_inside_the_down_window(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_DOWN_MINUTES", "60")
+
+
 class StartupRuntime(FakeRuntime):
     def __init__(self):
         super().__init__()

@@ -506,6 +506,39 @@ def test_conversations_is_none_when_herdr_cannot_answer(tmp_path):
     assert HerdrRuntime(home=tmp_path, herdr=down).conversations() is None
 
 
+def _session(session_id, name):
+    from scripts.terminate_agent import Session
+
+    return Session(session_id, "claude", name, None, "", "alive")
+
+
+def test_a_pane_herdr_gives_no_id_takes_its_named_sessions_main_id(tmp_path, monkeypatch):
+    import scripts.terminate_agent
+
+    main = "891dd446-d34e-4a9b-a14f-6868322802a4"
+    monkeypatch.setattr(
+        scripts.terminate_agent,
+        "sessions",
+        lambda: [
+            _session("ac713ad0096d0dc4b", "master@a1b2c3-0002"),
+            _session(main, "master@a1b2c3-0002"),
+            _session("0b9b1c64-4c55-4d8d-9a43-0f3f0c1e2a11", ""),
+            _session("af0e1c2d-1111-4222-8333-444455556666", "engineer@a1b2c3-0001"),
+        ],
+    )
+    agents = [
+        {"name": "master-a1b2c3-0002", "pane_id": "w1:m1", "agent_session": None},
+        {
+            "name": "engineer-a1b2c3-0001",
+            "pane_id": "w1:p1",
+            "agent_session": {"kind": "id", "value": "5c90d80c"},
+        },
+        {"name": "engineer-a1b2c3-0009", "pane_id": "w1:p2", "agent_session": None},
+    ]
+    runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: {"agents": agents})
+    assert runtime.conversations() == {"w1:m1": main, "w1:p1": "5c90d80c", "w1:p2": ""}
+
+
 def _resuming(tmp_path, reported, harness="claude"):
     from scripts.swarm.store import AgentRecord
 

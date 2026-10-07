@@ -118,6 +118,12 @@ class SeatRegistry:
     def history(self, address):
         return [json.loads(entry) for entry in self.redis.lrange(f"{self.key(address)}:history", 0, -1)]
 
+    def note(self, address, event, detail, at):
+        """An event on the seat's history that leaves its occupant and generation unchanged."""
+        seat = self.occupant(address)
+        entry = {"generation": seat.generation, "occupant": seat.occupant, "at": at, "event": event, "detail": detail}
+        self.redis.rpush(f"{self.key(address)}:history", json.dumps(entry))
+
     def swarm_keys(self, slug):
         """The swarm's seats with their history and memory, and the seat pointers of its agents."""
         seat = re.compile(rf"{re.escape(PREFIX)}:[^:@]+@{re.escape(slug)}(:({'|'.join(MEMORY_KINDS)}))?")

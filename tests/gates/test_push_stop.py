@@ -1,0 +1,365 @@
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from scripts.gates import Call, Gate, Who, push_stop
+from scripts.gates.progress import Progress
+from scripts.gates.push_stop import TEMPLATE, PushStop, count, record_text
+from scripts.gates.verdicts import Verdicts
+from scripts.inbox.store import InboxStore
+from scripts.swarm.naming import plain
+from scripts.swarm.store import RedisStore, SwarmError
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+SLUG, ME = "demo", "engineer@100001-0001"
+BRANCH = "engineer-100001-0001"
+WHO = Who(name=ME, swarm=SLUG, lane="eng", task="t1")
+STOP = Call("")
+NOW = 5_000_000
+IDENTITY = ("-c", "user.name=t", "-c", "user.email=t@example.com")
+
+
+def git(path, *args):
+    done = subprocess.run(["git", "-C", str(path), *IDENTITY, *args], capture_output=True, text=True, check=True)
+    return done.stdout.strip()
+
+
+class FakeLedger:
+    def __init__(self, task):
+        self.task, self.events, self.comments = task, [], []
+
+    def state(self, slug):
+        return {"tasks": [self.task] if slug == SLUG else [], "_meta": {"events": self.events}}
+
+    def comment(self, slug, task_id, text, by):
+        self.comments.append((slug, task_id, text, by))
+
+
+@pytest.fixture
+def rig(tmp_path):
+    import fakeredis
+
+    origin, seed, root = tmp_path / "origin.git", tmp_path / "seed", tmp_path / "worktrees"
+    git(tmp_path, "init", "--bare", "-b", "dev", str(origin))
+    git(tmp_path, "clone", str(origin), str(seed))
+    (seed / "readme").write_text("seed\n")
+    git(seed, "add", "readme")
+    git(seed, "commit", "-m", "seed")
+    git(seed, "push", "origin", "HEAD:refs/heads/dev")
+    tree = root / "repo" / BRANCH
+    git(seed, "fetch", "origin")
+    git(seed, "worktree", "add", "-b", BRANCH, str(tree), "origin/dev")
+    git(seed, "remote", "set-url", "--push", "origin", str(origin))
+    git(seed, "remote", "set-url", "origin", "https://github.com/o/r.git")
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    ledger = FakeLedger({"id": "t1", "state": "claimed", "claimed_by": ME, "pr_url": "", "kind": "code"})
+    gate = PushStop(connect=lambda: store, ledger=lambda: ledger, root=root, now=lambda: NOW)
+
+    def stop(who=WHO):
+        return gate.decide(STOP, who, Verdicts(SLUG, gate.name, tmp_path))
+
+    def commit(name="work"):
+        (tree / name).write_text(name)
+        git(tree, "add", name)
+        git(tree, "commit", "-m", name)
+        return git(tree, "rev-parse", "HEAD")
+
+    def remote_head():
+        return git(tmp_path, "ls-remote", str(origin), f"refs/heads/{BRANCH}").split("\t")[0]
+
+    def inbox():
+        return [item.text for item in InboxStore(store.redis).inbox(ME)]
+
+    rig = type("Rig", (), {})()
+    rig.store, rig.ledger, rig.gate, rig.tree, rig.origin, rig.root = store, ledger, gate, tree, origin, root
+    rig.stop, rig.commit, rig.remote_head, rig.inbox, rig.seed = stop, commit, remote_head, inbox, seed
+    return rig
+
+
+def test_it_is_a_stop_gate_that_ships_enforcing():
+    gate = PushStop()
+    assert isinstance(gate, Gate)
+    assert gate.name == "push-stop"
+    assert gate.default_mode == "enforce"
+    assert gate.matches(Call(""))
+    assert not gate.matches(Call("Bash"))
+
+
+def test_the_template_is_the_operator_text():
+    assert TEMPLATE == (
+        "You cannot leave uncommitted or unpushed changes. Commit them now. If the task is done, open the pull "
+        "request. If not, update the issue and the pull request and record progress on the ledger."
+    )
+
+
+def test_a_fresh_worktree_with_no_work_stops_freely(rig):
+    assert rig.stop().allowed
+    assert rig.remote_head() == ""
+    assert rig.inbox() == []
+
+
+def test_commits_ahead_of_origin_are_pushed_by_the_hook_and_recorded_on_the_task(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    head = rig.commit()
+    assert rig.stop().allowed
+    assert rig.remote_head() == head
+    assert git(rig.tree, "rev-parse", "--abbrev-ref", "@{upstream}") == f"origin/{BRANCH}"
+    record = (
+        f"The stop hook pushed the task branch https://github.com/o/r/tree/{BRANCH} with its head at "
+        f"https://github.com/o/r/commit/{head}"
+    )
+    assert rig.ledger.comments == [("demo", "t1", record, "swarm")]
+    mark = Progress(rig.store.redis, SLUG).read(ME)
+    assert (mark.outcome, mark.outcome_at) == ("pushed", NOW)
+
+
+def test_a_clean_pushed_worktree_stops_freely_and_pushes_nothing_again(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    rig.commit()
+    assert rig.stop().allowed
+    rig.ledger.comments.clear()
+    assert rig.stop().allowed
+    assert rig.ledger.comments == []
+
+
+def test_uncommitted_changes_refuse_the_stop_with_the_template_once_in_the_inbox(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    (rig.tree / "readme").write_text("changed\n")
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, TEMPLATE)
+    assert rig.stop().reason == TEMPLATE
+    assert rig.inbox() == [TEMPLATE]
+
+
+def test_an_untracked_file_counts_as_uncommitted(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    (rig.tree / "new").write_text("new\n")
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_dirty_work_still_pushes_the_commits_it_holds(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    head = rig.commit()
+    (rig.tree / "new").write_text("new\n")
+    assert rig.stop().reason == TEMPLATE
+    assert rig.remote_head() == head
+
+
+def test_a_closed_template_item_is_sent_again(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    (rig.tree / "new").write_text("new\n")
+    rig.stop()
+    inbox = InboxStore(rig.store.redis)
+    item = inbox.inbox(ME)[0]
+    inbox.close(item.id, ME, "done", "committed")
+    rig.stop()
+    assert rig.inbox() == [TEMPLATE, TEMPLATE]
+
+
+def test_pushed_work_without_a_pull_request_or_a_line_since_the_push_is_refused(rig):
+    rig.commit()
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, TEMPLATE)
+    assert rig.remote_head()
+    assert rig.inbox() == [TEMPLATE]
+
+
+def test_a_ledger_line_by_the_agent_after_the_push_lets_the_stop_through(rig):
+    rig.commit()
+    rig.stop()
+    rig.ledger.events.append({"by": "swarm", "at": NOW + 1, "kind": "comment added"})
+    rig.ledger.events.append({"by": ME, "at": NOW, "kind": "comment added"})
+    assert not rig.stop().allowed
+    rig.ledger.events.append({"by": ME, "at": NOW + 1, "kind": "comment added"})
+    assert rig.stop().allowed
+
+
+def test_a_push_the_agent_made_itself_counts_from_its_recorded_outcome(rig):
+    rig.commit()
+    git(rig.tree, "push", "-u", "origin", BRANCH)
+    Progress(rig.store.redis, SLUG).outcome(ME, "pushed", NOW - 10)
+    assert not rig.stop().allowed
+    rig.ledger.events.append({"by": ME, "at": NOW - 5, "kind": "comment added"})
+    assert rig.stop().allowed
+    assert rig.ledger.comments == []
+
+
+def test_another_outcome_after_the_push_lets_the_stop_through(rig):
+    rig.commit()
+    git(rig.tree, "push", "-u", "origin", BRANCH)
+    Progress(rig.store.redis, SLUG).outcome(ME, "pull request opened", NOW - 10)
+    assert rig.stop().allowed
+
+
+def test_a_refused_push_refuses_the_stop(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    other = rig.root / "other"
+    git(rig.seed, "worktree", "add", "-b", "elsewhere", str(other), "origin/dev")
+    (other / "theirs").write_text("theirs")
+    git(other, "add", "theirs")
+    git(other, "commit", "-m", "theirs")
+    theirs = git(other, "rev-parse", "HEAD")
+    git(other, "push", "origin", f"HEAD:refs/heads/{BRANCH}")
+    rig.commit()
+    assert rig.stop().reason == TEMPLATE
+    assert rig.remote_head() == theirs
+    assert rig.ledger.comments == []
+
+
+def test_a_numbered_second_worktree_in_another_repo_is_pushed_too(rig):
+    second = rig.root / "other-repo" / f"{BRANCH}-2"
+    git(rig.seed, "worktree", "add", "-b", f"{BRANCH}-2", str(second), "origin/dev")
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    (second / "more").write_text("more")
+    git(second, "add", "more")
+    git(second, "commit", "-m", "more")
+    assert rig.stop().allowed
+    assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{BRANCH}-2")
+
+
+def test_a_worktree_on_dev_or_main_is_never_pushed(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    dev = git(rig.seed, "rev-parse", "origin/dev")
+    git(rig.tree, "switch", "-c", "main", "origin/dev")
+    rig.commit()
+    assert rig.stop().allowed
+    assert git(rig.seed, "ls-remote", str(rig.origin)).split("\t")[0] == dev
+    assert git(rig.seed, "ls-remote", str(rig.origin), "refs/heads/main") == ""
+    assert rig.remote_head() == ""
+
+
+def test_another_agents_worktree_is_left_alone(rig):
+    rig.commit()
+    (rig.tree / "new").write_text("new\n")
+    assert rig.stop(Who(name="engineer@100001-0002", swarm=SLUG, lane="eng", task="t1")).allowed
+    assert rig.remote_head() == ""
+
+
+@pytest.mark.parametrize(
+    "who",
+    [
+        Who(name="master@100001-0003", swarm=SLUG, lane="master", task="t1"),
+        Who(name="planner@100001-0004", swarm=SLUG, lane="plan", task="t1"),
+        Who(name=ME, swarm="", task="t1"),
+        Who(name=ME, swarm=SLUG, lane="eng", task=""),
+    ],
+)
+def test_a_master_a_planner_and_the_operators_sessions_are_never_gated(rig, who):
+    rig.ledger.state = lambda slug: {"tasks": [rig.ledger.task], "_meta": {"events": []}}
+    own = rig.root / "repo" / plain(who.name)
+    if not own.exists():
+        git(rig.seed, "worktree", "add", "-b", plain(who.name), str(own), "origin/dev")
+    (own / "work").write_text("work")
+    git(own, "add", "work")
+    git(own, "commit", "-m", "work")
+    (own / "new").write_text("new\n")
+    assert rig.stop(who).allowed
+    assert git(rig.seed, "ls-remote", "--heads", str(rig.origin)).count("refs/heads/") == 1
+
+
+def test_a_plan_task_is_never_gated(rig):
+    rig.ledger.task["kind"] = "plan"
+    rig.commit()
+    (rig.tree / "new").write_text("new\n")
+    assert rig.stop().allowed
+    assert rig.remote_head() == ""
+
+
+def test_the_record_links_branch_and_head_on_github_and_names_them_elsewhere():
+    sha = "a" * 40
+    for remote in ("git@github.com:o/r.git", "https://github.com/o/r.git", "https://github.com/o/r"):
+        assert record_text(remote, "engineer-1", sha) == (
+            "The stop hook pushed the task branch https://github.com/o/r/tree/engineer-1 with its head at "
+            f"https://github.com/o/r/commit/{sha}"
+        )
+    assert record_text("/srv/origin.git", "engineer-1", sha) == (
+        "The stop hook pushed the task branch engineer-1 to origin"
+    )
+
+
+class DownLedger(FakeLedger):
+    def state(self, slug):
+        raise SwarmError("ledger demo: ledger server not answering")
+
+    def comment(self, slug, task_id, text, by):
+        raise SwarmError("ledger demo: ledger server not answering")
+
+
+def test_a_ledger_outage_still_pushes_and_refuses_dirty_work(rig):
+    rig.gate._ledger = lambda: DownLedger({})
+    head = rig.commit()
+    assert rig.stop().allowed
+    assert rig.remote_head() == head
+    assert Progress(rig.store.redis, SLUG).read(ME).outcome == "pushed"
+    (rig.tree / "new").write_text("new\n")
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_a_refused_record_keeps_the_push(rig):
+    class Refusing(FakeLedger):
+        def comment(self, slug, task_id, text, by):
+            raise SwarmError("ledger demo refused")
+
+    refusing = Refusing(rig.ledger.task)
+    rig.gate._ledger = lambda: refusing
+    head = rig.commit()
+    assert rig.stop().reason == TEMPLATE
+    assert rig.remote_head() == head
+
+
+def test_a_branch_with_no_work_of_its_own_stops_freely_after_a_pushed_outcome(rig):
+    Progress(rig.store.redis, SLUG).outcome(ME, "pushed", NOW - 10)
+    assert rig.stop().allowed
+
+
+def test_a_pushed_outcome_at_zero_is_answered_only_by_a_later_line(rig):
+    rig.commit()
+    git(rig.tree, "push", "-u", "origin", BRANCH)
+    Progress(rig.store.redis, SLUG).outcome(ME, "pushed", 0)
+    rig.ledger.events.append({"by": ME, "at": 0, "kind": "comment added"})
+    assert not rig.stop().allowed
+
+
+def test_a_task_the_ledger_no_longer_holds_is_not_gated(rig):
+    rig.ledger.task["id"] = "t9"
+    rig.commit()
+    (rig.tree / "new").write_text("new\n")
+    assert rig.stop().allowed
+    assert rig.remote_head() == ""
+
+
+@pytest.mark.parametrize("meta", [None, {}])
+def test_a_ledger_with_no_events_counts_as_no_line_since_the_push(rig, meta):
+    rig.commit()
+    git(rig.tree, "push", "-u", "origin", BRANCH)
+    Progress(rig.store.redis, SLUG).outcome(ME, "pushed", NOW - 10)
+    doc = {"tasks": [rig.ledger.task]} | ({} if meta is None else {"_meta": meta})
+    rig.ledger.state = lambda slug: doc
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_worktrees_sit_under_the_configured_root_or_the_home_default(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "trees"))
+    assert PushStop().root() == str(tmp_path / "trees")
+    monkeypatch.delenv("WORKTREE_ROOT")
+    assert PushStop().root() == Path.home() / "dev" / "worktrees"
+
+
+def test_the_clock_is_epoch_milliseconds():
+    import time
+
+    before = int(time.time() * 1000)
+    assert before <= PushStop().now() <= int(time.time() * 1000)
+
+
+def test_git_runs_in_the_worktree_with_a_timeout(monkeypatch):
+    seen = []
+    monkeypatch.setattr(push_stop.subprocess, "run", lambda argv, **kw: seen.append((argv, kw)))
+    push_stop.git("/w", "status")
+    assert seen == [(["git", "-C", "/w", "status"], {"capture_output": True, "text": True, "timeout": 60})]
+
+
+def test_a_count_git_cannot_answer_is_zero(tmp_path):
+    assert count(tmp_path, "HEAD") == 0
