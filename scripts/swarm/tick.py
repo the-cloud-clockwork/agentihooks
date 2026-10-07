@@ -207,17 +207,24 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
             continue
         if agent.name not in facts and agent.state != "retiring":
             continue
+        filled = live_binding.fill(agent, facts.get(agent.name, {}))
+        if filled != agent:
+            store.put_agent(slug, filled)
+            agent = filled
         differences = live_binding.record(store, slug, agent, facts.get(agent.name, {"process": False}), now_ms)
         if not differences:
             if agent.state == "retiring":
                 store.put_agent(slug, replace(agent, state="working"))
             continue
         fields = ", ".join(differences)
+        saved = live_binding.relaunch_assignment(agent, task, store.config(slug))
+        if agent.lane == MASTER and "process" not in differences and not live_binding.complete(saved):
+            actions.append(f"kept {agent.name} after mismatched {fields}: its relaunch assignment is incomplete")
+            continue
         if not runtime.retire(agent, agent.name in facts):
             store.put_agent(slug, replace(agent, state="retiring"))
             actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
             continue
-        saved = live_binding.relaunch_assignment(agent, task, store.config(slug))
         store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
         actions.append(f"retired {agent.name} after mismatched {fields}" + _drop(slug, store, ledger, rows, agent))
     return actions

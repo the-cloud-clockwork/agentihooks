@@ -5,6 +5,7 @@ import os
 import re
 import shlex
 import tomllib
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,6 +27,8 @@ EVENTS = (
     "PreCompact",
     "PermissionRequest",
 )
+LAUNCH_KEYS = ("profile", "harness", "model", "effort")
+RECORDED = (*LAUNCH_KEYS, "account")
 
 
 def lifecycle_command(command: str) -> bool:
@@ -114,6 +117,17 @@ def relaunch_assignment(agent: AgentRecord, task: dict, config: SwarmConfig) -> 
             task.get("profile") or config.lanes.get(agent.lane, {}).get("profile") or DEFAULT_PROFILES[agent.lane]
         )
     return saved
+
+
+def complete(saved: dict | None) -> dict:
+    return saved if saved and all(saved.get(key) for key in LAUNCH_KEYS) else {}
+
+
+def fill(agent: AgentRecord, facts: dict) -> AgentRecord:
+    if agent.harness:
+        return agent
+    found = {key: facts[key] for key in RECORDED if not getattr(agent, key) and facts.get(key)}
+    return replace(agent, **found) if found else agent
 
 
 def bound_session(agent: AgentRecord, sessions: list[Session]) -> Session | None:
