@@ -38,6 +38,10 @@ that pending refresh once. Ordinary startup keeps refocus on the first prompt.
 
 `PostCompact` is deliberately unregistered: compact `SessionStart` covers the
 observed delivery contract, so the overlapping event adds no second refresh.
+Under exactly the `CODEX_HOOK_EVENTS` registration, with `PostCompact` only
+observed, a worker's three compactions each showed `PostCompact` firing and the
+following compact `SessionStart` carrying one refocus block; the run held four
+blocks in total, the first prompt's and one per compaction (§10).
 
 `Notification` has no codex hook event. Codex instead has a fixed `notify`
 program invoked with `agent-turn-complete` JSON as `argv[1]` and stdin closed;
@@ -271,6 +275,7 @@ uv run python -m pytest tests/test_codex_target.py tests/test_codex_e2e.py tests
 | Claim | Established by |
 |---|---|
 | Automatic compaction events and master refocus | codex-cli 0.160.0, lowered `model_auto_compact_token_limit` scratch run; captured PreCompact → PostCompact → SessionStart compact; QA payload replay controls in `tests/context/test_swarm_refocus.py` |
+| `PostCompact` unregistered, refocus once per compaction | codex-cli 0.160.0, 2026-10-07, dev 0a2fb970; Codex home registering exactly `CODEX_HOOK_EVENTS` through `python -m hooks` plus an observe-only `PostCompact` logger; worker on a swarm task, three native `compacted` records, three `PostCompact` firings with no handler, one refocus block on each compact `SessionStart` and four in the run |
 | Hook events, `hooks.json` shape, content-hash trust | codex-cli 0.147.0, 2026-08-10; encoded in `CODEX_HOOK_EVENTS` and asserted by `tests/test_codex_target.py::TestHooksJson` |
 | One-JSON-object stdout contract | reproduced pre-fix as a two-line stdout; regression-guarded by `tests/test_codex_e2e.py` |
 | PreToolUse deny-only, no context channel | codex-cli 0.147.0; encoded in `hooks/targets/capabilities.py` |
