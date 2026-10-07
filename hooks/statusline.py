@@ -190,6 +190,18 @@ def main() -> None:
                 from hooks.context.context_usage import record_context_usage
 
                 record_context_usage(session_id, cw, cost_data.get("total_cost_usd"))
+                from hooks.config import TOKEN_MONITOR_ENABLED
+
+                if TOKEN_MONITOR_ENABLED:
+                    from hooks.observability import otel
+                    from hooks.observability.token_monitor import update_context_metrics
+
+                    size = cw.get("context_window_size") or 0
+                    percentage = cw.get("used_percentage")
+                    if size > 0 and percentage is not None:
+                        used = int(size * percentage / 100)
+                        update_context_metrics({**payload, "context_window": {"used": used, "remaining": size - used}})
+                        otel.flush()
             except Exception:
                 pass
 

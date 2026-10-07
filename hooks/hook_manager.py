@@ -2553,6 +2553,10 @@ def main() -> None:
 
         payload = normalize_payload(payload)
 
+        from hooks.observability.token_monitor import record_lifecycle_context
+
+        record_lifecycle_context(payload)
+
         # Get event name from payload
         event_name = payload.get("hook_event_name", "Unknown")
         _blocked_event = event_name
