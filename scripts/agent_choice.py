@@ -120,9 +120,9 @@ def choice_kind(reason: str) -> str:
 
 
 def share_picks(rows: list[dict], since: int) -> dict[str, int]:
-    """Share picks by harness among spawn rows started at or after since, one per agent name."""
+    """Share picks by harness among spawn rows started at or after since; a later row of the same name wins."""
     picks: dict[str, int] = {}
     for row in {row["name"]: row for row in rows}.values():
-        if row.get("choice") == "share" and row.get("started_at", 0) >= since:
+        if row.get("choice") == "share" and row["started_at"] >= since:
             picks[row["harness"]] = picks.get(row["harness"], 0) + 1
     return picks

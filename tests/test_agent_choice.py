@@ -291,3 +291,14 @@ def test_codex_week_left_is_the_best_signed_in_account(monkeypatch):
     monkeypatch.setattr(codex_router, "routing_pool", lambda environ: pool)
     monkeypatch.setattr(codex_router, "quotas", lambda accounts, environ: {a.name: seen[a.name] for a in accounts})
     assert agent_choice.codex_week_left({}) == 60.0
+
+
+def test_share_picks_count_share_choices_from_since_with_the_latest_row_per_name():
+    rows = [
+        {"name": "a", "harness": "codex", "started_at": 100, "choice": "overflow"},
+        {"name": "a", "harness": "codex", "started_at": 100, "choice": "share"},
+        {"name": "b", "harness": "claude", "started_at": 99, "choice": "share"},
+        {"name": "c", "harness": "claude", "started_at": 100, "choice": "share"},
+        {"name": "d", "harness": "codex", "started_at": 200, "choice": "forced"},
+    ]
+    assert agent_choice.share_picks(rows, 100) == {"codex": 1, "claude": 1}

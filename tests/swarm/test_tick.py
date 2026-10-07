@@ -908,10 +908,11 @@ def test_overflow_on_codex_in_the_window_leaves_the_next_free_spawn_to_the_share
 
     now = 10 * 3_600_000
     rows = [
+        *[(f"s{i}", "claude", "share", now - i * 1000) for i in range(1, 3)],
         *[(f"o{i}", "codex", "overflow", now - i * 1000) for i in range(1, 4)],
-        *[(f"s{i}", "claude", "share", now - i * 1000) for i in range(1, 5)],
         ("f1", "codex", "forced", now - 9000),
         ("old", "codex", "share", now - 7 * 3_600_000),
+        *[(f"s{i}", "claude", "share", now - i * 1000) for i in range(3, 5)],
     ]
     for name, harness, choice, at in rows:
         store.put_agent("sw", AgentRecord(name, "eng", f"x-{name}", harness=harness, started_at=at, choice=choice))
