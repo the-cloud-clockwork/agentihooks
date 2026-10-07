@@ -10,6 +10,16 @@ def revision(value: object) -> str:
     ).hexdigest()
 
 
+def reply_size(reply: object) -> int:
+    return len(json.dumps(reply, ensure_ascii=False).encode())
+
+
+def bounded(reply: dict) -> dict:
+    if reply_size(reply) > MAX_REPLY:
+        raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")
+    return reply
+
+
 def metadata(doc: dict) -> dict:
     fields = (
         "size",
@@ -31,15 +41,29 @@ def metadata(doc: dict) -> dict:
     return result
 
 
+def resource_revision(doc: dict, path: str) -> str:
+    raw = value(doc, path)
+    if path == "metadata":
+        raw = {**raw, "_meta": {key: item for key, item in raw["_meta"].items() if key not in ("rev", "updated_at")}}
+    return revision(raw)
+
+
+def thread_rows(doc: dict) -> list:
+    return [
+        {"path": f"{name}/{item['id']}/{thread}", "entry": entry}
+        for name, fields in THREADS.items()
+        for item in doc.get(name, [])
+        for thread in fields
+        for entry in item.get(thread, [])
+    ]
+
+
 def read(doc: dict, path: str, query: dict | None = None) -> dict:
     raw = value(doc, path)
-    rev = revision(raw)
+    rev = resource_revision(doc, path)
     if isinstance(raw, list):
         return page(raw, rev, query or {})
-    data = project(raw)
-    if len(json.dumps(data).encode()) > MAX_REPLY:
-        raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")
-    return {"data": data, "revision": rev}
+    return bounded({"data": project(raw), "revision": rev})
 
 
 COLLECTIONS = (
@@ -70,6 +94,8 @@ def value(doc: dict, path: str) -> object:
     name = parts[0]
     if path == "metadata":
         return metadata(doc)
+    if path == "threads":
+        return thread_rows(doc)
     if path == "counts":
         return {name: len(doc.get(name, [])) for name in COLLECTIONS}
     if path == "events":
@@ -113,21 +139,24 @@ def page(rows: list, rev: str, query: dict) -> dict:
         if cursor_rev != rev:
             raise APIError(409, "revision_conflict", "Collection changed; restart pagination")
         offset = int(offset_text)
-    limit = query.get("limit", 50)
-    selected, size = [], 0
-    for row in rows[offset : offset + limit]:
+    selected = []
+    for row in rows[offset : offset + query.get("limit", 50)]:
         item = project(row)
         if isinstance(item, dict):
             item = {**item, "revision": revision(row)}
-        entry_size = len(json.dumps(item).encode())
-        if size + entry_size > MAX_REPLY:
+        end = offset + len(selected) + 1
+        candidate = {
+            "data": [*selected, item],
+            "revision": rev,
+            "next_cursor": f"{rev}:{end}" if end < len(rows) else None,
+        }
+        if reply_size(candidate) > MAX_REPLY:
             if not selected:
                 raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")
             break
         selected.append(item)
-        size += entry_size
     end = offset + len(selected)
-    return {"data": selected, "revision": rev, "next_cursor": f"{rev}:{end}" if end < len(rows) else None}
+    return bounded({"data": selected, "revision": rev, "next_cursor": f"{rev}:{end}" if end < len(rows) else None})
 
 
 def swarm_read(status: dict | None, path: str, query: dict) -> dict:
@@ -136,7 +165,7 @@ def swarm_read(status: dict | None, path: str, query: dict) -> dict:
     collections = {key: item for key, item in status.items() if isinstance(item, list)}
     if path == "swarm":
         data = {key: item for key, item in status.items() if key not in collections}
-        return {"data": data, "revision": revision(data), "collections": list(collections)}
+        return bounded({"data": data, "revision": revision(data), "collections": list(collections)})
     name = path.removeprefix("swarm/")
     if name not in collections:
         raise APIError(404, "resource_missing", "No such swarm resource")

@@ -1,6 +1,7 @@
 import json
 import urllib.error
 import urllib.request
+import uuid
 from urllib.parse import quote, urlencode
 
 from . import resources, schemas
@@ -34,6 +35,13 @@ class ResourceClient:
         state = self.request(slug, "metadata")["data"]
         for name in resources.COLLECTIONS:
             state[name] = self.collection(slug, name)
+        items = {f"{name}/{row['id']}": row for name in resources.THREADS for row in state.get(name, [])}
+        for path, row in items.items():
+            for thread in resources.THREADS[path.split("/")[0]]:
+                row[thread] = []
+        for row in self.collection(slug, "threads"):
+            parent, thread = row["path"].rsplit("/", 1)
+            items[parent][thread].append(row["entry"])
         state["_meta"]["events"] = self.collection(slug, "events")
         members = self.collection(slug, "members")
         state["_meta"]["members"] = {
@@ -51,14 +59,17 @@ class ResourceClient:
 
     def mutate(self, slug: str, operations: list) -> dict:
         guards, ops = {}, []
+        operation_id = operations[0].setdefault("operation_id", uuid.uuid4().hex)
         for operation in operations:
             path = schemas.target(operation)
             if path not in guards:
                 guards[path] = operation.get("expected_revision") or self.request(slug, path)["revision"]
             operation.setdefault("expected_revision", guards[path])
-            ops.append({key: value for key, value in operation.items() if key != "expected_revision"})
+            ops.append(
+                {key: value for key, value in operation.items() if key not in ("expected_revision", "operation_id")}
+            )
         try:
-            return self.request(slug, "operations", {"ops": ops, "guards": guards})
+            return self.request(slug, "operations", {"operation_id": operation_id, "ops": ops, "guards": guards})
         except urllib.error.HTTPError as exc:
             if exc.code != 403:
                 raise

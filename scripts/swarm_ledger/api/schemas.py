@@ -4,9 +4,10 @@ from .errors import APIError
 
 MUTATION = {
     "type": "object",
-    "required": ["ops", "guards"],
+    "required": ["operation_id", "ops", "guards"],
     "additionalProperties": False,
     "properties": {
+        "operation_id": {"type": "string", "minLength": 1, "maxLength": 200},
         "ops": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
         "id": {"type": "string", "minLength": 1, "maxLength": 200},
         "changes": {

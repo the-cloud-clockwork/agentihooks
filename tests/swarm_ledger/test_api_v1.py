@@ -1,4 +1,5 @@
 import json
+import uuid
 
 from tests.swarm_ledger.test_ledger_authority import SLUG, send, server
 
@@ -35,7 +36,16 @@ def live(authority_live):
     return {**authority_live, "admin": core.read_token(page)}
 
 
+from scripts.swarm_ledger import api as api
+from scripts.swarm_ledger.api import admin as admin
+from scripts.swarm_ledger.api import errors as errors
+from scripts.swarm_ledger.api import mutations as mutations
+from scripts.swarm_ledger.api import routes as routes
+
+
 def request(live, method, resource, body=None, **headers):
+    if resource == "operations" and isinstance(body, dict):
+        body.setdefault("operation_id", uuid.uuid4().hex)
     status, data, _ = send(
         live,
         method,
@@ -121,6 +131,7 @@ def test_retry_and_conflict_preserve_one_domain_write(live):
         "operations",
         {
             **payload,
+            "operation_id": uuid.uuid4().hex,
             "ops": [{**operation, "id": "stale-message"}],
         },
     )
@@ -229,13 +240,19 @@ def test_worker_authority_and_operation_identifier_collision(live):
     assert denied["error"]["code"] == "forbidden"
     rev = request(live, "GET", "chat")[1]["revision"]
     original = {"op": "add", "id": "retry-message", "thread": "chat", "text": "Once"}
-    assert request(live, "POST", "operations", {"ops": [original], "guards": {"chat": rev}})[0] == 200
+    assert (
+        request(
+            live, "POST", "operations", {"operation_id": "collision-proof", "ops": [original], "guards": {"chat": rev}}
+        )[0]
+        == 200
+    )
     rev = request(live, "GET", "chat")[1]["revision"]
     status, denied = request(
         live,
         "POST",
         "operations",
         {
+            "operation_id": "collision-proof",
             "ops": [{**original, "text": "Different content"}],
             "guards": {"chat": rev},
         },
@@ -403,3 +420,148 @@ def test_guarded_task_update_returns_only_the_requested_row(live):
     assert row["id"] == "t1"
     assert row["state"] == "claimed"
     assert "comments" not in row
+
+
+def test_repeated_edit_and_delete_keep_entry_identity(live):
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    added = {"op": "add", "id": "edited-entry", "thread": "chat", "text": "Before"}
+    assert client.mutate(SLUG, [added])["rejected"] == []
+    first = {"op": "edit", "id": "edited-entry", "thread": "chat", "text": "First edit"}
+    assert client.mutate(SLUG, [first])["rejected"] == []
+    assert client.mutate(SLUG, [first])["rejected"] == []
+    second = {"op": "edit", "id": "edited-entry", "thread": "chat", "text": "Second edit"}
+    assert client.mutate(SLUG, [second])["rejected"] == []
+    deleted = {"op": "delete", "id": "edited-entry", "thread": "chat"}
+    assert client.mutate(SLUG, [deleted])["rejected"] == []
+    rows = client.collection(SLUG, "chat")
+    row = next(row for row in rows if row["id"] == "edited-entry")
+    assert row["deleted"] is True
+    assert row["text"] == ""
+
+
+def test_composite_client_state_keeps_edited_threads(live):
+    from scripts.swarm.ledger_client import LedgerClient
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    client.mutate(SLUG, [{"op": "add", "id": "edited-comment", "thread": "phases/p1/comments", "text": "Before"}])
+    client.mutate(SLUG, [{"op": "edit", "id": "edited-comment", "thread": "phases/p1/comments", "text": "Resolved"}])
+    state = LedgerClient(service=True).state(SLUG)
+    assert state["phases"][0]["comments"][0]["text"] == "Resolved"
+
+
+def test_swarm_metadata_respects_total_response_byte_limit(live):
+    from unittest.mock import patch
+
+    from scripts.swarm_ledger.api.resources import MAX_REPLY
+
+    with patch.object(server, "swarm_status", return_value={"config": {"description": "x" * MAX_REPLY}}):
+        status, reply = request(live, "GET", "swarm")
+    assert status == 413
+    assert reply["error"]["code"] == "resource_too_large"
+
+
+def test_large_task_update_returns_a_bounded_acknowledgment(live):
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from scripts.swarm_ledger.api.resources import MAX_REPLY
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    client.mutate(
+        SLUG, [{"op": "task_add", "id": "big-task", "by": "swarm", "task": "t1", "title": "Proof", "lane": "eng"}]
+    )
+    reply = client.mutate(
+        SLUG,
+        [
+            {
+                "op": "task_update",
+                "id": "big-proof",
+                "by": "swarm",
+                "item": "tasks/t1",
+                "fields": {"proof": {"output": "x" * MAX_REPLY}},
+            }
+        ],
+    )
+    assert len(json.dumps(reply, ensure_ascii=False).encode()) <= MAX_REPLY
+    assert reply["applied"] == ["big-proof"]
+    exported = client.request(SLUG, "export", {})["data"]
+    assert len(exported["tasks"][0]["proof"]["output"]) == MAX_REPLY
+
+
+def test_metadata_revision_stays_independent_of_other_resources(live):
+    before = request(live, "GET", "metadata")[1]
+    rev = request(live, "GET", "chat")[1]["revision"]
+    payload = {
+        "ops": [{"op": "add", "id": "metadata-independent", "thread": "chat", "text": "Another resource"}],
+        "guards": {"chat": rev},
+    }
+    assert request(live, "POST", "operations", payload)[0] == 200
+    after = request(live, "GET", "metadata")[1]
+    assert before["revision"] == after["revision"]
+    assert before["data"]["_meta"]["rev"] < after["data"]["_meta"]["rev"]
+
+
+def test_page_budget_counts_the_envelope(live, monkeypatch):
+    from scripts.swarm_ledger.api.resources import MAX_REPLY
+
+    row = {"id": "large", "description": "x" * (MAX_REPLY // 2 - 150)}
+    document = {"tasks": [row, row], "_meta": {"rev": 1}}
+    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    status, reply = request(live, "GET", "tasks?limit=100")
+    assert status == 200
+    assert len(json.dumps(reply, ensure_ascii=False).encode()) <= MAX_REPLY
+    assert len(reply["data"]) == 1
+    assert reply["next_cursor"] is not None
+
+
+def test_control_actions_validate_before_domain_execution(live):
+    from unittest.mock import patch
+
+    with patch.object(server, "swarm_control", return_value=({}, None)) as control:
+        assert request(live, "POST", "swarm/actions", {"action": "pause"}) == (
+            200,
+            {"action": "pause", "accepted": True},
+        )
+        assert control.call_args.args[1] == ["pause"]
+    for payload in ({"action": "set", "max_eng": True}, {"action": "terminate", "name": "-bad"}, {"action": "set"}):
+        with patch.object(server, "swarm_control") as control:
+            status, error = request(live, "POST", "swarm/actions", payload)
+            assert status == 400
+            assert error["error"]["code"] == "schema_invalid"
+            control.assert_not_called()
+
+
+def test_item_revision_uses_canonical_utf8_content(live, monkeypatch):
+    document = {"tasks": [{"title": "Café", "id": "t1"}], "_meta": {"rev": 1}}
+    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    assert request(live, "GET", "tasks/t1") == (
+        200,
+        {
+            "data": {"title": "Café", "id": "t1"},
+            "revision": "e483879a300a6dae1421b8afa9f16094b2dec361357e663177417d89574b158f",
+        },
+    )
+
+
+def test_metadata_resource_reports_its_named_fields(live, monkeypatch):
+    document = {
+        "title": "Report",
+        "size": "swarm",
+        "overview": "Intent",
+        "orchestrator": "boss",
+        "chat_instructions": "Speak plainly",
+        "policy": {"control": "review"},
+        "time_left_minutes": 42,
+        "closed_at": 100,
+        "summary": "Summary",
+        "_meta": {"rev": 7, "updated_at": 200, "created_at": 10, "size": "swarm", "seed_error": None},
+    }
+    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    status, reply = request(live, "GET", "metadata")
+    assert status == 200
+    assert reply["data"] == document
+    assert len(reply["revision"]) == 64
