@@ -244,7 +244,9 @@ between ticks. `start` installs and enables it. Each tick, per swarm:
 3. Reopen claimed tasks that have no agent.
 4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left. After the down window, force a launch and promote an engineer when it fails (see [Master outage and promotion](#master-outage-and-promotion)).
 5. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room
-   under its session cap. Claimable tasks are taken highest [queue rank](#queue-rank) first.
+   under its session cap. Claimable tasks are taken highest [queue rank](#queue-rank) first. Sessions go to the
+   lanes in rounds: a lane with fewer live agents spawns before one holding more, ties in eng, ci, plan order, so
+   every lane with ready work gets an agent before any lane takes a second.
 6. Mark the swarm `stopped` when no agent is left, or `drained` when only the master is and nothing remains to do.
 7. Post inbox replies to the operator on the page chat.
 8. Run the [ledger event pass](#ledger-event-pass): agent writes and time rules become inbox items.
