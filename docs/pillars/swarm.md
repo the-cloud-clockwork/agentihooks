@@ -68,6 +68,13 @@ The master recycles like any agent: at `AGENTIHOOKS_COMPACT_LIMIT` it writes a h
 so one master is always online. `issue`, `pr`, `done` and `block` refuse the master. The swarm panel on the
 ledger page shows the master as the first card.
 
+Before the tick retires a live master that reported its hook, for any reason (a live binding mismatch, a failed
+launch check, the idle limit or a stopping swarm), it sends that master an inbox item asking for a Handoff v2 and
+waits up to `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5; 0 retires at once). A master that hands off is
+retired and its successor starts from the document; one that does not is retired at the deadline. A record field
+the tick never held (an empty harness, profile, model, effort or account) is not compared with the live process:
+`swarm status` flags it as a live binding finding, and it never retires the agent.
+
 ### Master outage and promotion
 
 When a swarm has had no live master (none whose hook reported) for `AGENTIHOOKS_MASTER_DOWN_MINUTES` (default 5),

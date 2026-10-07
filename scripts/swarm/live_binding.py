@@ -145,14 +145,24 @@ def bound_session(agent: AgentRecord, sessions: list[Session]) -> Session | None
     return min(registered or named.values(), key=lambda s: s.process.start_time, default=None)
 
 
+def _unheld(agent: AgentRecord) -> list[str]:
+    homeless = not agent.profile_decision.get("validation", {}).get("home") and not (agent.profile and agent.harness)
+    return [field for field, value in assignment(agent).items() if not value or (field == "home" and homeless)]
+
+
+def unknown(agent: AgentRecord, facts: dict) -> list[str]:
+    return [field for field in _unheld(agent) if field in RECORDED and facts.get(field)]
+
+
 def compare(agent: AgentRecord, facts: dict) -> dict:
     if facts.get("process") is False:
         return {"process": {"expected": True, "actual": False}}
     expected = {**assignment(agent), "hooks": True}
+    missing = _unheld(agent)
     return {
         field: {"expected": value, "actual": facts.get(field)}
         for field, value in expected.items()
-        if facts.get(field) != value
+        if field not in missing and facts.get(field) != value
     }
 
 
@@ -166,6 +176,8 @@ def record(store: RedisStore, slug: str, agent: AgentRecord, facts: dict, now_ms
         "state": "mismatched" if differences else "matching",
         "differences": differences,
     }
+    if "pane" not in facts and facts.get("process") is not False:
+        report["unknown"] = unknown(agent, facts)
     store.redis.hset(store.key(slug, "live-bindings"), agent.name, json.dumps(report))
     return differences
 
@@ -182,6 +194,17 @@ def findings(store: RedisStore, slug: str) -> list[Finding]:
                     f"{report['agent']} differs in {field}",
                     (f"expected {values['expected']}; observed {values['actual']}",),
                     "assigned launch must match",
+                    1,
+                )
+            )
+        for field in report.get("unknown", []):
+            result.append(
+                Finding(
+                    "live binding",
+                    f"{report['agent']}/{field}",
+                    f"{report['agent']} has no recorded {field}",
+                    (f"the record never held {field}, so it is not compared and never retires the agent",),
+                    "assigned launch must be recorded",
                     1,
                 )
             )
