@@ -1,10 +1,13 @@
 """Tests for hooks.context.version_guard."""
 
+import os
+from unittest.mock import patch
+
 import pytest
 
 from hooks.context.version_guard import check_version_guard
 from hooks.hook_manager import BlockAction
-from hooks.targets.normalizer import _codex_tool_call
+from hooks.targets.normalizer import normalize_payload
 
 
 def _write(path, cwd=""):
@@ -344,8 +347,8 @@ def test_unrelated_key_ending_in_version_is_not_a_version_key(tmp_path):
 
 def _codex_patch(target, *lines, action="Update", tail=()):
     body = "\n".join(("*** Begin Patch", f"*** {action} File: {target}", *lines, *tail, "*** End Patch"))
-    name, args = _codex_tool_call("apply_patch", {"command": body})
-    return {"tool_name": name, "tool_input": args, "cwd": ""}
+    with patch.dict(os.environ, {"AGENTIHOOKS_TARGET": "codex"}):
+        return normalize_payload({"tool_name": "apply_patch", "tool_input": {"command": body}, "cwd": ""})
 
 
 _SWITCH = ("@@", '-version = "2.17.0"', '+dynamic = ["version"]')
@@ -392,6 +395,14 @@ def test_codex_patch_judges_only_the_manifest_section(tmp_path):
     target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
     other = ("*** Update File: README.md", "@@", '-version = "2.17.0"', '+version = "3.0.0"')
     check_version_guard(_codex_patch(target, *_SWITCH, tail=other))
+
+
+def test_codex_patch_bumping_the_manifest_after_another_file_is_refused(tmp_path):
+    readme = tmp_path / "README.md"
+    readme.write_text("hello\n")
+    target = _manifest(tmp_path)
+    bump = (f"*** Update File: {target}", "@@", '-version = "2.17.0"', '+version = "2.18.0"')
+    _refused(_codex_patch(readme, "@@", "-hello", "+hi", tail=bump))
 
 
 def test_codex_patch_deleting_the_manifest_is_refused(tmp_path):

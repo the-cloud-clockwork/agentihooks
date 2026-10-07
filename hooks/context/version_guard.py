@@ -75,6 +75,22 @@ def check_version_guard(payload: dict) -> None:
     if tool_name not in ("Edit", "Write"):
         return
 
+    for file_input in _file_inputs(tool_input):
+        _check_file(payload, tool_name, file_input)
+
+
+def _patch_body(tool_input: dict) -> str:
+    new = tool_input.get("new_string", "")
+    return new if "old_string" not in tool_input and new.startswith(_PATCH_START) else ""
+
+
+def _file_inputs(tool_input: dict) -> list[dict]:
+    patch = _patch_body(tool_input)
+    headers = (_PATCH_FILE.match(line) for line in patch.splitlines())
+    return [{**tool_input, "file_path": header.group(2).strip()} for header in headers if header] or [tool_input]
+
+
+def _check_file(payload: dict, tool_name: str, tool_input: dict) -> None:
     file_path = tool_input.get("file_path", "")
     if not file_path:
         return
@@ -122,7 +138,7 @@ def _edited_text(tool_name: str, tool_input: dict, before: str) -> str:
     if tool_name == "Write":
         return tool_input.get("content", "")
     old, new = tool_input.get("old_string", ""), tool_input.get("new_string", "")
-    if "old_string" not in tool_input and new.startswith(_PATCH_START):
+    if _patch_body(tool_input):
         patched = _patched_text(new, tool_input.get("file_path", ""), before)
         if patched is not None:
             return patched
