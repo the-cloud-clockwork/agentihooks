@@ -203,7 +203,8 @@ def test_a_dead_agent_frees_its_task_after_the_startup_grace(store):
     assert runtime.spawned[-1] == ("eng", "engineer@a1b2c3-0002", "t1")
 
 
-def test_paused_spawns_nothing_and_stopping_ends_stopped_when_empty(store):
+def test_paused_spawns_nothing_and_stopping_ends_stopped_when_empty(store, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     store.update("sw", state="paused")
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -764,7 +765,8 @@ def test_a_full_house_waits_for_a_slot_before_starting_the_master(store):
     assert masters(store) == []
 
 
-def test_a_stopping_swarm_keeps_its_master_until_the_last_worker_leaves(store):
+def test_a_stopping_swarm_keeps_its_master_until_the_last_worker_leaves(store, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, 1)
     store.update("sw", state="stopping")

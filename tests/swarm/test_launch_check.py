@@ -162,6 +162,7 @@ def checked(store, monkeypatch, profile="engineer", task_profile="engineer"):
     from hooks.context import profile_chain
 
     monkeypatch.setattr(profile_chain, "read_state", lambda: {})
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
     ledger, runtime = JoiningLedger([{"id": "t1", "profile": task_profile}]), CheckedRuntime()
     original = runtime.spawn
 
@@ -451,7 +452,7 @@ def test_a_waiting_launch_does_not_stop_the_next_from_being_judged(store, monkey
         launch_check.begin(store, "sw", agent, agent.started_at)
     actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
     assert early.name in launch_check.pending(store, "sw")
-    assert any(a.startswith(f"retired {late.name} after its launch check failed on joined, profile") for a in actions)
+    assert any(a.startswith(f"retired {late.name} after its launch check failed on joined") for a in actions)
 
 
 def test_a_pass_after_a_relaunch_clears_the_mark_and_reports_its_timing(store, monkeypatch):

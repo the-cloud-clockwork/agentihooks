@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli
+from scripts.swarm import cli, master_retire
 from scripts.swarm.store import MASTER, AgentRecord
 from scripts.swarm.tick import tick
 from tests.swarm.test_cli import env as env
@@ -13,6 +13,11 @@ from tests.swarm.test_tick import store as store
 
 pytestmark = pytest.mark.unit
 HOUR = 60 * 60 * 1000
+
+
+@pytest.fixture(autouse=True)
+def no_handoff_wait(monkeypatch):
+    monkeypatch.setenv(master_retire.MINUTES, "0")
 
 
 def idle_master(store, state):
