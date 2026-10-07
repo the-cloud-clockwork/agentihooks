@@ -976,6 +976,31 @@ def test_a_stale_master_wait_stops_holding_other_swarms(store):
     assert runtime.spawned == [("eng", "engineer@a1b2c3-0001", "t1")]
 
 
+def test_a_master_wait_holds_until_exactly_ten_minutes(store):
+    from scripts.swarm.tick import MASTER_WAIT_MS, MASTER_WAITING
+
+    store.redis.hset(MASTER_WAITING, "doc", 1)
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+
+    assert "holding spawns: swarm doc waits on a session slot for its master" in tick(
+        "sw", store, ledger, runtime, MASTER_WAIT_MS
+    )
+    tick("sw", store, ledger, runtime, 1 + MASTER_WAIT_MS)
+    assert runtime.spawned == [("eng", "engineer@a1b2c3-0001", "t1")]
+
+
+def test_several_master_waits_name_one_swarm(store):
+    from scripts.swarm.tick import MASTER_WAITING
+
+    store.redis.hset(MASTER_WAITING, mapping={"zed": 1, "doc": 1})
+
+    actions = tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 2)
+
+    assert [a for a in actions if a.startswith("holding spawns")] == [
+        "holding spawns: swarm doc waits on a session slot for its master"
+    ]
+
+
 def test_a_stopping_swarm_keeps_its_master_until_the_last_worker_leaves(store, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
