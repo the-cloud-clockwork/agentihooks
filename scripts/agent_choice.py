@@ -106,7 +106,7 @@ def choose_shared(
     choice; a zero share or a known week under the minimum turns any Codex choice into Claude."""
     if not requested and spawns is not None:
         codex, total = spawns.get("codex", 0), sum(spawns.values())
-        if share > 0 and codex * 100 < share * max(total, 1) and not at_cap("codex", environ):
+        if codex * 100 < share * max(total, 1) and not at_cap("codex", environ):
             left = codex_week_left(environ)
             if left is not None and left >= min_week_left:
                 return "codex", f"codex share {codex}/{total} below {share}%"

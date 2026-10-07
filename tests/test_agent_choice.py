@@ -319,7 +319,7 @@ def test_a_codex_week_under_the_minimum_turns_a_codex_choice_into_claude(monkeyp
 def test_a_codex_choice_stands_at_the_minimum_week_or_an_unknown_week(monkeypatch, week_left):
     _share(monkeypatch, week_left=week_left)
     calls = []
-    assert agent_choice.choose_shared("", {}, None, share=30, min_week_left=5, choose=_picker(calls)) == (
+    assert agent_choice.choose_shared("", {}, None, share=1, min_week_left=5, choose=_picker(calls)) == (
         "codex",
         "priority",
     )
@@ -340,3 +340,22 @@ def test_no_spawn_counts_skip_the_share_pick(monkeypatch):
         "priority",
     )
     assert calls == [("", None)]
+
+
+def test_the_share_pick_reads_this_environment_and_takes_a_week_at_the_minimum(monkeypatch):
+    environ, seen = {"AH_PROBE": "1"}, []
+    monkeypatch.setattr(agent_choice, "codex_week_left", lambda env: seen.append(("week", env)) or 5.0)
+    monkeypatch.setattr(agent_choice, "at_cap", lambda agent, env: seen.append((agent, env)) or False)
+    assert agent_choice.choose_shared("", environ, {}, share=30, min_week_left=5) == (
+        "codex",
+        "codex share 0/0 below 30%",
+    )
+    assert seen == [("codex", environ), ("week", environ)]
+
+
+@pytest.mark.parametrize(
+    ("share", "spawns", "agent"), [(1, {"claude": 100, "codex": 1}, "codex"), (60, {"codex": 1}, "claude")]
+)
+def test_the_share_pick_holds_exactly_at_its_target(monkeypatch, share, spawns, agent):
+    _share(monkeypatch)
+    assert agent_choice.choose_shared("", {}, spawns, share=share, min_week_left=5)[0] == agent
