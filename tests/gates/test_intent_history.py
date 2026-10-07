@@ -228,3 +228,35 @@ def test_opaque_bearer_and_token_fields_are_masked_in_request_and_history(tmp_pa
         assert value not in record["classifier_input"]
     assert seen[0]["proof"] == {"refresh_token": "[REDACTED]", "token": "[REDACTED]"}
     assert seen[0]["reviewer_findings"]["comments"][0]["body"] == "Authorization: Bearer [REDACTED]"
+
+
+def test_history_append_creates_missing_directories(tmp_path):
+    from scripts.gates import intent_history
+
+    intent_history.append("proof", {"verdict": "pass"}, tmp_path)
+    assert history(tmp_path) == [{"verdict": "pass"}]
+
+
+def test_strict_masking_covers_dictionary_keys_values_and_mixed_case(monkeypatch):
+    from scripts.gates import intent_history
+
+    monkeypatch.setattr("hooks.config.SECRETS_MODE", "off")
+    token = "xoxb-" + "z" * 20
+    safe = intent_history.prepare(
+        {
+            "proof": {token: ["value " + token], "Refresh_Token": "synthetic refresh"},
+            "reviewer_findings": "authorization: bearer short",
+        }
+    )
+    assert safe["proof"] == {"[REDACTED:slack_token]": ["value [REDACTED:slack_token]"], "Refresh_Token": "[REDACTED]"}
+    assert safe["reviewer_findings"] == "authorization: Bearer [REDACTED]"
+
+
+def test_findings_limit_preserves_exact_boundary_and_truncates_the_next_byte():
+    from scripts.gates import intent_history
+
+    exact = "a" * 32766
+    assert intent_history.prepare({"reviewer_findings": exact})["reviewer_findings"] == exact
+    over = intent_history.prepare({"reviewer_findings": exact + "a"})["reviewer_findings"]
+    assert over == {"truncated": True, "json_prefix": json.dumps(exact + "a")[:16352]}
+    assert len(json.dumps(over)) <= 32768
