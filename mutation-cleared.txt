@@ -1774,5 +1774,25 @@
   "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_value__mutmut_35:6c06a57246b80c6392a30cfe5e945e4888037ac8957da835f447f2523cb775f7": {
     "reader": "Standards /root/standards_reader",
     "reason": "Concrete HTTP producer evidence: dispatch handles resource GET with repository.get_document using its default reconcile=True, and FileLedgerRepository.get_document then returns sync state. sync unconditionally executes meta.setdefault(members,{}) before operations and constructing returned state. The only mutation-time resource_revision consumer substitutes that same ctx.meta after the member default is applied. Therefore every reachable members read or revision has an explicit members key: get fallback None versus empty dictionary is never selected. Existing present values, successful replies and original invalid-value failures are unchanged."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_layout__mutmut_7:9200b3e2329c7398574af4e7f13eb7460cc4f358adaf11aad567ad6131d51de3": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage compares header field names case insensitively. Only the Origin lookup spelling changes; absent and present values, allowlist decision, layout schema validation, write delegation and response remain identical."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_layout__mutmut_8:e5fe0e10b4092fadd54ff363ba9865728d38d6fb5d461120627ee3dafd9c397d": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage compares header field names case insensitively. Only the Origin lookup spelling changes; absent and present values, allowlist decision, layout schema validation, write delegation and response remain identical."
+  },
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1snapshot__mutmut_19:097638cdbc0530c0ab5a504fa965f9056b259fc2e18d4da5488940f301164119": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Snapshot assigns every COLLECTIONS key from collection before entering the items comprehension. Actual resource constants show all five THREADS keys are in COLLECTIONS. Thus each state.get has an existing key, so its missing-key fallback is unreachable; collection failures stop before the comprehension. No snapshot, request or error changes."
+  },
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1snapshot__mutmut_21:470a9fafbd98228277aaf1cf62c4fd11c72d4a45a7b605852acd8402797051bb": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Snapshot assigns every COLLECTIONS key from collection before entering the items comprehension. Actual resource constants show all five THREADS keys are in COLLECTIONS. Thus each state.get has an existing key, so its missing-key fallback is unreachable; collection failures stop before the comprehension. No snapshot, request or error changes."
+  },
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x_apply__mutmut_3:c17282c2288e4872deccebe95114c773a3098907548257657c614efd5596a4be": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Both concrete get_document implementations branch only on the truth value of reconcile: File uses if reconcile, SQLite uses if reconcile and files is not None. False and None select exactly the same non-reconciling path in each, with the same slug, lock/storage operations, document and exceptions. This changes no caller-visible result or mutation for either supported repository."
   }
 }

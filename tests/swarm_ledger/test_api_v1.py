@@ -426,7 +426,9 @@ def test_stale_cursor_missing_guard_and_origin_are_rejected(live):
     payload = {"ops": [{"op": "add", "id": "cursor-change", "thread": "chat", "text": "Cursor changed"}], "guards": {}}
     status, reply = request(live, "POST", "operations", payload)
     assert status == 428
-    assert reply["error"]["code"] == "revision_required"
+    assert reply == {
+        "error": {"code": "revision_required", "message": "Every changed resource needs an expected revision"}
+    }
     assert request(live, "POST", "operations", payload, Origin="https://untrusted.example")[0] == 403
     payload["guards"] = {"chat": page["revision"]}
     assert request(live, "POST", "operations", payload)[0] == 200
@@ -512,7 +514,9 @@ def test_swarm_metadata_respects_total_response_byte_limit(live):
     with patch.object(server, "swarm_status", return_value={"config": {"description": "x" * MAX_REPLY}}):
         status, reply = request(live, "GET", "swarm")
     assert status == 413
-    assert reply["error"]["code"] == "resource_too_large"
+    assert reply == {
+        "error": {"code": "resource_too_large", "message": "Use the explicit export operation for this resource"}
+    }
 
 
 def test_large_task_update_returns_a_bounded_acknowledgment(live):
@@ -1526,6 +1530,9 @@ def test_layout_schema_and_bin_refusals_preserve_state(live, monkeypatch):
     initial = json.loads(send(live, "GET", "/api/v1/layout")[1])
     for payload in (
         {"capacity-box": {}},
+        {"capacity-box": []},
+        {"capacity-box": None},
+        {"capacity-box": "invalid"},
         {"capacity-box": {"height": True}},
         {"capacity-box": {"unknown": 1}},
         {"unknown": {"height": 1}},
@@ -2181,3 +2188,176 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
     ledger.cmd_plan(SimpleNamespace(slug=SLUG, path=str(plan), name="api-reader"))
     assert json.loads(capsys.readouterr().out)["appended"] == ["p106"]
     assert send_operation.call_args.kwargs["phases"][0]["phase"] == "p106"
+
+
+def test_layout_origin_and_revision_are_exact(live):
+    from scripts.swarm_ledger.api.resources import revision
+
+    before = json.loads(send(live, "GET", "/api/v1/layout")[1])
+    payload = {"capacity-box": {"height": 350}}
+    for headers in ({}, {"Origin": "https://untrusted.example"}):
+        status, data, _ = send(
+            live,
+            "PUT",
+            "/api/v1/layout",
+            json.dumps(payload).encode(),
+            **{"Content-Type": "application/json", **headers},
+        )
+        assert (status, json.loads(data)) == (
+            403,
+            {"error": {"code": "forbidden", "message": "Origin not allowed"}},
+        )
+        assert json.loads(send(live, "GET", "/api/v1/layout")[1]) == before
+    status, data, _ = send(
+        live,
+        "PUT",
+        "/api/v1/layout",
+        json.dumps(payload).encode(),
+        **{"Origin": sorted(server.ALLOWED_ORIGINS)[0], "Content-Type": "application/json"},
+    )
+    assert status == 200
+    result = json.loads(data)
+    assert result["data"] == payload
+    assert result["revision"] == revision(payload)
+    assert result["revision"] != before["revision"]
+
+
+def test_control_domain_validation_has_an_exact_envelope(live, monkeypatch):
+    from unittest.mock import Mock
+
+    control = Mock(side_effect=ValueError("Invalid control"))
+    monkeypatch.setattr(server, "swarm_control", control)
+    assert request(live, "POST", "swarm/actions", {"action": "pause"}) == (
+        400,
+        {"error": {"code": "schema_invalid", "message": "Control does not match its domain schema"}},
+    )
+    control.assert_called_once_with(SLUG, ["pause"], "swarm")
+
+
+def test_upload_schema_accepts_one_byte_and_optional_name(live, monkeypatch):
+    calls = []
+
+    def media(handler, slug):
+        calls.append((slug, handler.rfile.read(int(handler.headers["Content-Length"]))))
+        handler.send(200, json.dumps({"accepted": True}), "application/json")
+
+    monkeypatch.setattr(server.Handler, "post_media", media)
+    headers = {
+        "X-Ledger-Token": live["admin"],
+        "Origin": sorted(server.ALLOWED_ORIGINS)[0],
+        "Content-Type": "application/octet-stream",
+    }
+    status, data, _ = send(live, "POST", f"/api/v1/ledgers/{SLUG}/uploads/media", b"x", **headers)
+    assert (status, json.loads(data)) == (200, {"accepted": True})
+    assert calls == [(SLUG, b"x")]
+    for content_type in ("text/plain", "image/png"):
+        status, data, _ = send(
+            live,
+            "POST",
+            f"/api/v1/ledgers/{SLUG}/uploads/media",
+            b"x",
+            **{**headers, "Content-Type": content_type},
+        )
+        assert (status, json.loads(data)) == (
+            400,
+            {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}},
+        )
+    assert calls == [(SLUG, b"x")]
+
+
+def test_checkbox_and_domain_operations_keep_order_and_replay(live):
+    phase = request(live, "GET", "phases/p1")[1]
+    chat = request(live, "GET", "chat")[1]
+    payload = {
+        "operation_id": "combined-operation",
+        "id": "checkbox-first",
+        "ops": [{"op": "add", "id": "ordinary-second", "thread": "chat", "text": "Combined"}],
+        "changes": [{"path": "phases/p1/done", "base": False, "value": True}],
+        "guards": {"phases/p1": phase["revision"], "chat": chat["revision"]},
+    }
+    first = request(live, "POST", "operations", payload)
+    assert first[0] == 200
+    assert first[1]["applied"] == ["checkbox-first", "ordinary-second"]
+    assert first[1]["rejected"] == []
+    assert request(live, "GET", "phases/p1")[1]["data"]["done"] is True
+    assert request(live, "GET", "chat")[1]["data"][-1]["text"] == "Combined"
+    assert request(live, "POST", "operations", payload) == first
+
+
+def test_noop_receipt_advances_metadata_once(live):
+    before = request(live, "GET", "metadata")[1]["data"]["_meta"]["rev"]
+    payload = {
+        "operation_id": "noop-receipt",
+        "ops": [{"op": "sync", "id": "noop-receipt"}],
+        "guards": {"metadata": request(live, "GET", "metadata")[1]["revision"]},
+    }
+    first = request(live, "POST", "operations", payload)
+    assert first[0] == 200
+    after = request(live, "GET", "metadata")[1]["data"]["_meta"]["rev"]
+    assert after > before
+    assert request(live, "POST", "operations", payload) == first
+    assert request(live, "GET", "metadata")[1]["data"]["_meta"]["rev"] == after
+
+
+def test_success_resources_and_acknowledgments_keep_the_exact_byte_boundary():
+    from scripts.swarm_ledger.api.errors import APIError
+    from scripts.swarm_ledger.api.mutations import bounded_ack
+    from scripts.swarm_ledger.api.resources import MAX_REPLY, bounded, page, reply_size
+
+    envelope = {"data": "", "revision": "a" * 64}
+    envelope["data"] = "x" * (MAX_REPLY - reply_size(envelope))
+    assert reply_size(envelope) == MAX_REPLY
+    assert bounded(envelope) is envelope
+    overflow = {**envelope, "data": envelope["data"] + "x"}
+    with pytest.raises(APIError) as error:
+        bounded(overflow)
+    assert error.value.status == 413
+    assert error.value.envelope() == {
+        "error": {"code": "resource_too_large", "message": "Use the explicit export operation for this resource"}
+    }
+    ack = {"applied": ["a"], "rejected": [], "tasks": [{"id": "t1", "description": ""}]}
+    ack["tasks"][0]["description"] = "x" * (MAX_REPLY - reply_size(ack))
+    assert reply_size(ack) == MAX_REPLY
+    assert bounded_ack(ack) is ack
+    assert ack["tasks"][0]["description"]
+    assert "task_rows_omitted" not in ack
+    with pytest.raises(APIError) as error:
+        bounded_ack(overflow)
+    assert error.value.status == 413
+    first = page([""], "a" * 64, {"limit": 1})
+    text = "x" * (MAX_REPLY - reply_size(first))
+    result = page([text], "a" * 64, {"limit": 1})
+    assert result["data"] == [text]
+    assert result["next_cursor"] is None
+    assert reply_size(result) == MAX_REPLY
+    with pytest.raises(APIError) as error:
+        page([text + "x"], "a" * 64, {"limit": 1})
+    assert error.value.status == 413
+
+
+def test_relay_requires_its_literal_item_revision(live):
+    before = request(live, "GET", "phases/p1")[1]
+    payload = {
+        "ops": [
+            {
+                "op": "relay",
+                "id": "relay-guard",
+                "by": "api-reader",
+                "item": "phases/p1",
+                "text": "Verified",
+                "quote": "Approved",
+            }
+        ],
+        "guards": {"metadata": request(live, "GET", "metadata")[1]["revision"]},
+    }
+    assert request(live, "POST", "operations", payload) == (
+        428,
+        {"error": {"code": "revision_required", "message": "Every changed resource needs an expected revision"}},
+    )
+    assert request(live, "GET", "phases/p1")[1] == before
+    payload["guards"] = {"phases/p1": before["revision"]}
+    status, reply = request(live, "POST", "operations", payload)
+    assert status == 200
+    assert reply["applied"] == []
+    assert reply["rejected"] == ["relay-guard"]
+    assert request(live, "GET", "phases/p1")[1] == before
