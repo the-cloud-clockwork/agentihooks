@@ -310,7 +310,7 @@ def test_dev_push_refreshes_stored_durations_after_tests_pass():
     workflow = _workflow()
     if "refresh-durations" not in workflow["jobs"]:
         scheduled = yaml.safe_load((_ROOT / ".github/workflows/refresh-durations.yml").read_text())
-        assert len(scheduled["on"]["schedule"]) == 1
+        assert len(scheduled[True]["schedule"]) == 1
         command = next(step["run"] for step in scheduled["jobs"]["refresh"]["steps"] if "run" in step)
         assert "python -m tests.refresh_durations --ci 5" in command
         assert "scripts/ci_bot_pr.sh" in command
