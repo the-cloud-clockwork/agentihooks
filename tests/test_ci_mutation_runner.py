@@ -46,6 +46,12 @@ def test_process_runs_in_requested_directory_and_captures_stderr(tmp_path):
     assert sorted(log.read_text().splitlines()) == sorted([str(tmp_path), "error"])
 
 
+def test_process_writes_no_bytecode(tmp_path):
+    log = tmp_path / "process.log"
+    assert run_process([sys.executable, "-c", "import sys; print(sys.dont_write_bytecode)"], tmp_path, 10, log) == 0
+    assert log.read_text() == "True\n"
+
+
 def test_empty_scope_passes_without_mutmut(tmp_path):
     report = run_gate(tmp_path, {}, tmp_path / "output", 60)
     assert report == {"files": [], "not_mutated": [], "failed": False}
