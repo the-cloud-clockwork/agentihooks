@@ -151,3 +151,12 @@ def test_other_successors_keep_the_original_monitor_next(setup, lane, harness):
 def test_transfer_next_uses_valid_heading_whitespace(newline):
     action = "Read the inbox."
     assert transfers.first_next(newline.join(["## Next   ", "- " + action, "## Read first", "None"])) == action
+
+
+@pytest.mark.parametrize("text", ["", "# Handoff v2\n## Intent\nNone\n", "## Next\n\n"])
+def test_a_handoff_without_a_next_action_has_an_empty_confirmation(text):
+    assert transfers.first_next(text) == ""
+
+
+def test_next_action_keeps_leading_letters_and_removes_only_bullet_spacing():
+    assert transfers.first_next("## Next\n- Xray the saved proof.\n## Read first\nNone\n") == "Xray the saved proof."

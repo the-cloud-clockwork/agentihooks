@@ -27,16 +27,16 @@ def persona(text: str) -> str:
 
 def handoff(task: dict, slug: str) -> dict:
     result = dict(task)
-    lines, active, fenced = [], False, False
-    for line in task.get("handoff", "").splitlines(keepends=True):
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
-        if not fenced and line.startswith("## "):
-            active = line[3:].strip() == "Next"
-        elif active:
-            line = next_action(line, slug)
-        lines.append(line)
     if "handoff" in task:
+        lines, active, fenced = [], False, False
+        for line in task["handoff"].splitlines(keepends=True):
+            if line.lstrip().startswith("```"):
+                fenced = not fenced
+            if not fenced and line.startswith("## "):
+                active = line[3:].strip() == "Next"
+            elif active:
+                line = next_action(line, slug)
+            lines.append(line)
         result["handoff"] = "".join(lines)
     if transfer := task.get("transfer"):
         result["transfer"] = {**transfer, "next": next_action(transfer["next"], slug)}

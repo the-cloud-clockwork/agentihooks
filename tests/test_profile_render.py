@@ -645,6 +645,7 @@ def test_codex_master_updates_an_old_linked_persona(world):
     assert render.render_codex("master") == out
     assert not agents.is_symlink()
 
+
 def test_an_explicit_packaged_codex_master_uses_inbox_waits(world):
     from scripts.profiles import render
 
@@ -665,11 +666,17 @@ def test_codex_master_keeps_mixed_instruction_responsibilities():
         "Monitor its checks, fix failures, and merge immediately.\n"
     )
     result = codex_master.persona(text)
-    assert result.startswith(
-        "- Start a `agentihooks swarm <slug> wait --inbox` immediately; it is read-only; keep working.\n"
-        "| Working a ledger | join, handle OPERATOR lines, ack, then use a `agentihooks swarm <slug> wait --inbox`. |\n"
-        "- Push triggers CI, deployment and rollout; start a `agentihooks swarm <slug> wait --inbox`.\n"
-        "Watch its checks, fix failures, and merge immediately.\n"
+    assert (
+        result
+        == (
+            "- Start a `agentihooks swarm <slug> wait --inbox` immediately; it is read-only; keep working.\n"
+            "| Working a ledger | join, handle OPERATOR lines, ack, then use a `agentihooks swarm <slug> wait --inbox`. |\n"
+            "- Push triggers CI, deployment and rollout; start a `agentihooks swarm <slug> wait --inbox`.\n"
+            "Watch its checks, fix failures, and merge immediately.\n"
+        )
+        + "\n"
+        + codex_master.waiting("<slug>")
+        + "\n"
     )
 
 
@@ -699,6 +706,20 @@ def test_codex_master_preserves_a_handoff_without_a_next_section():
     assert codex_master.handoff(task, "sw") == task
     assert codex_master.handoff({}, "sw") == {}
     assert codex_master.next_action("Inspect the checks.", "sw") == "Inspect the checks."
+
+
+def test_codex_master_handoff_ignores_fenced_headings_and_preserves_the_preamble():
+    from scripts.profiles import codex_master
+
+    action = "Rearm a Monitor on the ledger."
+    prefix = (
+        "# Handoff v2\nA previous Monitor was running.\n## Intent\n"
+        "  ```text\n## Next\nRearm a Monitor on the example ledger.\n  ```\n"
+    )
+    task = {"handoff": prefix + "## Next\n" + action + "\n## Read first\nNone\n"}
+    assert codex_master.handoff(task, "sw")["handoff"] == (
+        prefix + "## Next\nRead agentihooks msg inbox and run agentihooks swarm sw wait --inbox.\n## Read first\nNone\n"
+    )
 
 
 def test_codex_master_waiting_instruction_names_the_foreground_return_contract():
