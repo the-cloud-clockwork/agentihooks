@@ -173,6 +173,80 @@ def test_a_checks_wait_stays_while_checks_run_or_github_cannot_answer(tick, pull
     assert tick.told() == []
 
 
+@pytest.mark.parametrize(
+    "check, outcome",
+    [
+        ({"conclusion": "CANCELLED"}, ""),
+        ({"conclusion": "SKIPPED"}, "green"),
+        ({"conclusion": "NEUTRAL"}, ""),
+        ({"conclusion": "STALE"}, ""),
+        ({"conclusion": ""}, ""),
+        ({"status": "IN_PROGRESS"}, ""),
+        ({"state": "PENDING"}, ""),
+        ({"state": "EXPECTED"}, ""),
+        ({"conclusion": "FAILURE"}, "red"),
+        ({"conclusion": "ERROR"}, "red"),
+        ({"conclusion": "TIMED_OUT"}, ""),
+        ({"conclusion": "STARTUP_FAILURE"}, "red"),
+        ({"conclusion": "ACTION_REQUIRED"}, "red"),
+        ({"conclusion": "SUCCESS"}, "green"),
+        ({"state": "SUCCESS"}, "green"),
+    ],
+)
+@pytest.mark.parametrize("position", [0, 1])
+def test_checks_wait_requires_success_or_failure_from_the_status_rollup(tick, check, outcome, position):
+    from scripts.swarm.ledger_events import pull_request
+
+    tick.hold("checks", URL)
+    checks = [{"name": "lint", "conclusion": "SUCCESS"}]
+    checks.insert(position, {"name": "mutation", **check})
+    tick.pulls[URL] = pull_request({"state": "OPEN", "statusCheckRollup": checks})
+    if not outcome:
+        assert tick.end() == []
+        assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL}
+        assert tick.told() == []
+        return
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert tick.told() == [
+        f"Your wait on checks on {URL}, now {outcome} has ended. Pick task t1 back up: "
+        "agentihooks swarm sw done, block, or wait on the next thing."
+    ]
+
+
+def test_checks_wait_with_no_checks_stays_unresolved(tick):
+    from scripts.swarm.ledger_events import pull_request
+
+    tick.hold("checks", URL)
+    tick.pulls[URL] = pull_request({"state": "OPEN", "statusCheckRollup": []})
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL}
+    assert tick.told() == []
+
+
+@pytest.mark.parametrize("unresolved", ["CANCELLED", "TIMED_OUT", "PENDING"])
+@pytest.mark.parametrize("failure", ["FAILURE", "ERROR", "STARTUP_FAILURE", "ACTION_REQUIRED"])
+def test_a_failure_ends_the_checks_wait_even_with_an_unresolved_check(tick, unresolved, failure):
+    from scripts.swarm.ledger_events import pull_request
+
+    tick.hold("checks", URL)
+    tick.pulls[URL] = pull_request(
+        {
+            "state": "OPEN",
+            "statusCheckRollup": [
+                {"name": "mutation", "conclusion": unresolved},
+                {"name": "lint", "conclusion": failure},
+            ],
+        }
+    )
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert tick.told() == [
+        f"Your wait on checks on {URL}, now red has ended. Pick task t1 back up: "
+        "agentihooks swarm sw done, block, or wait on the next thing."
+    ]
+
+
 @pytest.mark.parametrize("state, ends", [("done", True), ("blocked", True), ("claimed", False), ("pr", False)])
 def test_a_task_wait_ends_when_the_task_is_done_or_blocked(tick, state, ends):
     tick.hold("task", "t2")

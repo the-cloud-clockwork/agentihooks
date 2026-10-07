@@ -1,5 +1,7 @@
 """Doctor detectors over the agent inbox: items with their histories in, findings out."""
 
+from dataclasses import dataclass
+
 from scripts.doctor.words import gist, plural
 from scripts.inbox.store import CLOSED
 from scripts.inbox.wake import TO_MASTER, TO_OPERATOR, WOKEN
@@ -9,8 +11,23 @@ RAISED = {TO_MASTER: "raised to the master", TO_OPERATOR: "raised to the operato
 BARE = ("done", "cancelled")
 
 
-def findings(items, now_ms, window_ms):
-    return [*past_window(items, now_ms, window_ms), *escalated(items), *no_outcome(items)]
+@dataclass(frozen=True)
+class Receiver:
+    """Who an address reaches: scoped is False for a session outside the swarm, quiet_ms how long a live one sat idle."""
+
+    scoped: bool = True
+    live: bool = False
+    quiet_ms: int = 0
+
+
+def findings(items, now_ms, window_ms, receivers=None):
+    return [*past_window(items, now_ms, window_ms, receivers), *escalated(items), *no_outcome(items)]
+
+
+def _waiting(item, receiver, window_ms):
+    if not receiver.scoped:
+        return False
+    return item["state"] == "pending" or not receiver.live or receiver.quiet_ms >= window_ms
 
 
 def _route(item):
@@ -21,11 +38,13 @@ def _steps(item, event):
     return [e for e in item["history"] if e.get("event") == event]
 
 
-def past_window(items, now_ms, window_ms):
-    found = []
+def past_window(items, now_ms, window_ms, receivers=None):
+    found, receivers = [], receivers or {}
     for item in items:
         waited = now_ms - item["created_at"]
         if item["state"] in CLOSED or waited < window_ms:
+            continue
+        if not _waiting(item, receivers.get(item["address"], Receiver()), window_ms):
             continue
         minutes = waited // MINUTE_MS
         category = "unread delivery" if item["state"] == "pending" else "delivered backlog"
