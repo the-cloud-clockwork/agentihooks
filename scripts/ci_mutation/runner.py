@@ -36,12 +36,13 @@ def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int
 
 
 def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]) -> None:
-    for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github"):
+    for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github", "evidence"):
         source = root / name
         if source.is_dir():
-            shutil.copytree(source, work / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    if (root / ".test_durations").is_file():
-        shutil.copy(root / ".test_durations", work / ".test_durations")
+            shutil.copytree(source, work / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", work.name))
+    for name in (".test_durations", "Swarm-v2.md"):
+        if (root / name).is_file():
+            shutil.copy(root / name, work / name)
     pytest_args = ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
     # pytest would load the plugin from its own mutated copy, whose hooks raise in mutmut's forced fail run.
     if IDENTITY not in paths:
@@ -50,7 +51,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
     project["tool"]["mutmut"] = {
         "source_paths": ["hooks/", "scripts/"],
         "only_mutate": paths,
-        "also_copy": ["profiles/", "docs/", ".github/"],
+        "also_copy": ["profiles/", "docs/", ".github/", "evidence/", "Swarm-v2.md"],
         "pytest_add_cli_args_test_selection": tests,
         "pytest_add_cli_args": pytest_args,
     }

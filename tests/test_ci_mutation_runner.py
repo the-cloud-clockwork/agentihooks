@@ -129,9 +129,10 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     (root / "pyproject.toml").write_text('[tool.pytest.ini_options]\nasyncio_mode="auto"\n')
-    for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github"):
+    for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github", "evidence"):
         (root / name).mkdir()
         (root / name / "asset.txt").write_text(name)
+    (root / "Swarm-v2.md").write_text("# plan\n")
     (root / "hooks" / "__pycache__").mkdir()
     (root / "hooks" / "__pycache__" / "old.pyc").write_bytes(b"old")
     (root / "hooks" / "old.pyc").write_bytes(b"old")
@@ -144,7 +145,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
     assert config["tool"]["mutmut"]["source_paths"] == ["hooks/", "scripts/"]
     assert config["tool"]["mutmut"]["only_mutate"] == ["hooks/sample.py", "scripts/other.py"]
     assert config["tool"]["mutmut"]["pytest_add_cli_args_test_selection"] == ["tests/test_sample.py"]
-    assert config["tool"]["mutmut"]["also_copy"] == ["profiles/", "docs/", ".github/"]
+    assert config["tool"]["mutmut"]["also_copy"] == ["profiles/", "docs/", ".github/", "evidence/", "Swarm-v2.md"]
     assert config["tool"]["mutmut"]["pytest_add_cli_args"] == [
         "-q",
         "-x",
@@ -157,11 +158,25 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "--mutated-path=hooks/sample.py",
         "--mutated-path=scripts/other.py",
     ]
-    for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github"):
+    for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github", "evidence"):
         assert (work / name / "asset.txt").read_text() == name
+    assert (work / "Swarm-v2.md").read_text() == "# plan\n"
     assert not (work / "hooks/__pycache__").exists()
     assert not (work / "hooks/old.pyc").exists()
     assert (work / ".test_durations").read_text() == '{"tests/test_sample.py::t": 1.5}'
+
+
+def test_workspace_inside_a_copied_folder_is_not_copied_into_itself(tmp_path):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "evidence").mkdir(parents=True)
+    (root / "evidence" / "result.json").write_text("{}")
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    work = root / "evidence" / "0-work"
+    work.mkdir()
+    prepare_workspace(root, work, ["scripts/other.py"], ["tests/test_sample.py"])
+    assert sorted(p.name for p in (work / "evidence").iterdir()) == ["result.json"]
 
 
 def test_workspace_mutating_the_identity_plugin_does_not_load_its_mutated_copy(tmp_path):
@@ -176,6 +191,7 @@ def test_workspace_mutating_the_identity_plugin_does_not_load_its_mutated_copy(t
     work.mkdir()
     prepare_workspace(root, work, ["scripts/ci_mutation/identity.py"], ["tests/test_ci_mutation_identity.py"])
     assert not (work / ".test_durations").exists()
+    assert not (work / "Swarm-v2.md").exists()
     args = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]["pytest_add_cli_args"]
     assert args == ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
 

@@ -2272,8 +2272,9 @@ def _rerender_profile_homes(target: str) -> None:
     from scripts.profiles import render
 
     for name in render.rendered_profiles(target):
+        profile, overlays = render.split_key(name)
         try:
-            render.render(target, name, force=True)
+            render.render(target, profile, force=True, overlays=overlays)
         except ValueError as exc:
             print(f"{_DIM}[--] Profile home {name} kept as it was: {exc}{_RESET}")
             continue

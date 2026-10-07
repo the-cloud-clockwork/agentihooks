@@ -1,0 +1,60 @@
+{
+  "case": "T-SV2-FND-04-A",
+  "tested_commit": "e5a1f849088231ad26379fedda84169cb084b5de",
+  "passed": 13,
+  "failed": 0,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_plan_reader_returns_every_package_with_repository_gate_dependencies_and_cases",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_plan_reader_returns_every_invariant_in_order",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_gate_map_lists_each_gate_with_its_packages_in_plan_order",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_committed_registry_maps_every_invariant_and_checks_clean",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_fully_evidenced_package_has_no_finding_and_the_screenshot_package_lacks_recovery_proof",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_second_independent_fixture_flags_only_its_screenshot_package",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_committed_markdown_is_rendered_from_the_registry",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_render_lists_gates_requirements_claims_and_the_measurement",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_check_command_prints_clean_for_the_committed_registry",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_record_appends_evidence_and_a_claim_at_the_next_revision",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_record_without_a_claim_keeps_a_new_package_open",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_fully_evidenced_recorded_package_checks_clean",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_record_command_writes_the_registry_and_its_markdown",
+      "outcome": "passed"
+    }
+  ]
+}

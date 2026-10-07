@@ -1,0 +1,340 @@
+{
+  "case": "T-SV2-FND-04-B",
+  "tested_commit": "e5a1f849088231ad26379fedda84169cb084b5de",
+  "passed": 83,
+  "failed": 0,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_screenshot_named_for_the_recovery_case_still_does_not_satisfy_it",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_screenshot_for_another_case_is_not_named_on_the_recovery_finding",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_every_missing_case_and_the_pull_request_are_named",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_failed_test_does_not_satisfy_its_case",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_failed_experiment_does_not_satisfy_its_case",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_pull_request_from_another_repository_does_not_count",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_dependency_without_a_complete_claim_is_named",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_dependency_claimed_complete_without_its_evidence_is_named",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_an_open_package_is_never_a_finding",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_malformed_evidence_is_refused[ref-CI passed and the pod looks healthy-ref must be an https link or a repository file with its sha256]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_malformed_evidence_is_refused[ref-http://example.com/run-ref must be an https link or a repository file with its sha256]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_malformed_evidence_is_refused[ref-https://example.com/a b-ref must be an https link or a repository file with its sha256]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_malformed_evidence_is_refused[ref-/etc/passwd-ref must be an https link or a repository file with its sha256]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_malformed_evidence_is_refused[kind-summary-unknown kind 'summary']",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_malformed_evidence_is_refused[commit-abc-commit must be a full 40 character sha]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_malformed_evidence_is_refused[case-D-case must be one of A, B, C]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_malformed_evidence_is_refused[outcome-green-outcome must be passed or failed]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_test_without_a_commit_or_outcome_is_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_missing_id_is_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_repository_file_must_exist_and_match_its_sha256",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_repository_file_without_a_sha256_is_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_registry_structure_errors_are_named",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_requirement_with_no_packages_is_unmapped",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_load_index_refuses_another_schema",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_check_command_exits_one_on_findings",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_check_command_exits_one_on_errors",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_command_reports_a_refusal_on_stderr_with_exit_two",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_record_refuses_a_stale_base_revision_without_writing",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_record_refuses_an_unknown_package_without_writing",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_record_refuses_an_unknown_claim_without_writing",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_record_refuses_prose_evidence_without_writing",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_recorded_evidence_is_immutable",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_an_evidence_id_from_another_package_is_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_plan_package_without_its_gate_or_cases_is_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_dependency_cycle_is_named_instead_of_recursing",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_case_results_from_another_commit_than_the_pull_request_do_not_count",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_second_pull_request_at_the_tested_commit_satisfies_the_cases",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_an_image_cannot_be_a_test_or_live_canary_result[test]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_an_image_cannot_be_a_test_or_live_canary_result[live_canary]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_an_image_screenshot_or_experiment_is_not_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_non_string_evidence_fields_are_refused_without_crashing",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_record_refuses_evidence_without_a_string_id_without_writing[item0]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_record_refuses_evidence_without_a_string_id_without_writing[not an object]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_record_refuses_evidence_without_a_string_id_without_writing[item2]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_missing_registry_file_is_a_refusal_not_a_traceback",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_change_without_an_operation_is_a_refusal_not_a_traceback",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_change_lacking_several_keys_names_each_without_writing",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_malformed_registry_json_is_a_refusal_not_a_traceback",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_proof_must_be_an_actions_run_or_a_text_result_file[test]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_proof_must_be_an_actions_run_or_a_text_result_file[live_canary]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_proof_file_must_be_a_text_result_type[README.md-# notes\\n]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_proof_file_must_be_a_text_result_type[pod.svg-<svg></svg>\\n]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_proof_file_must_be_a_text_result_type[nul.log-\\x00\\x00]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_text_and_junit_result_files_are_accepted[result.txt-ok\\n]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_text_and_junit_result_files_are_accepted[junit.xml-<testsuite/>\\n]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_change_that_is_not_an_object_is_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_malformed_registry_is_refused_by_name[document0-is not a swarm-v2-evidence-index/1 document]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_malformed_registry_is_refused_by_name[document1-lacks requirements, packages, operations]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_registry_holding_a_non_object_evidence_item_is_refused_on_record",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_plan_package_section_ends_at_the_next_heading",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_an_empty_or_absolute_file_ref_is_refused_even_with_a_sha256[]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_an_empty_or_absolute_file_ref_is_refused_even_with_a_sha256[/etc/passwd]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_screenshot_with_an_unknown_case_is_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_screenshot_for_a_package_in_two_classes_names_both",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_replay_with_reordered_keys_is_the_same_operation",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_the_registry_is_written_as_indented_json_and_a_stale_temporary_file_is_replaced",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_each_operation_records_the_hash_of_what_it_applied",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_restore_reusing_an_operation_with_another_backup_is_a_conflict",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_a_render_command_writes_the_markdown_from_the_registry",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_the_command_line_refuses_missing_or_foreign_options[args0]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_the_command_line_refuses_missing_or_foreign_options[args1]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_the_command_line_refuses_missing_or_foreign_options[args2]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_the_command_line_refuses_missing_or_foreign_options[args3]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_the_command_line_refuses_missing_or_foreign_options[args4]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_the_command_line_refuses_missing_or_foreign_options[args5]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_the_command_line_refuses_missing_or_foreign_options[args6]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_the_command_line_refuses_missing_or_foreign_options[args7]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_the_command_line_refuses_missing_or_foreign_options[args8]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_the_command_line_refuses_missing_or_foreign_options[args9]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_the_command_line_refuses_missing_or_foreign_options[args10]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_every_command_prints_its_result_as_indented_json_and_keeps_the_operation",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_render_defaults_to_the_registry_markdown",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_evidence.py::test_the_usage_names_the_module_command",
+      "outcome": "passed"
+    }
+  ]
+}

@@ -56,3 +56,4 @@ profiles/*/.claude/settings.json
 # Impeccable live mode runtime state; only the config is tracked
 .impeccable/live/*
 !.impeccable/live/config.json
+docs/swarm-v2/.*.lock

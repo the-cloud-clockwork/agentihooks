@@ -357,3 +357,93 @@ def test_rendered_dirs_adds_the_overlays_the_chain_declares(tmp_path, monkeypatc
     assert profile_chain.rendered_dirs(bundle, "role", linked) == [("base", base), ("role", role), ("brain", brain)]
     assert profile_chain.rendered_dirs(bundle, "solo", linked) == [("solo", solo)]
     assert profile_chain.rendered_dirs(bundle, "role", {}) == [("base", base), ("role", role)]
+
+
+@pytest.fixture
+def overlay_profiles(tmp_path, monkeypatch):
+    roles = tmp_path / "roles"
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", roles)
+    found = {}
+    for name, text in {
+        "a": "kind: overlay\nwears: [engineer]\n",
+        "b": "kind: overlay\nwears: [engineer, qa]\n",
+        "c": "kind: overlay\nwears: [engineer]\n",
+        "d": "kind: overlay\nwears: [engineer]\n",
+        "planning": "kind: overlay\nwears: [planner]\n",
+        "unkinded": "wears: [engineer]\n",
+        "plain": "name: plain\n",
+    }.items():
+        found[name] = tmp_path / "bundle" / name
+        found[name].mkdir(parents=True)
+        (found[name] / "profile.yml").write_text(text)
+    (roles / "engineer").mkdir(parents=True)
+    chain = [("base", tmp_path / "bundle" / "base"), ("package:engineer", roles / "engineer"), ("eng", tmp_path / "e")]
+    return chain, found.get
+
+
+def test_wears_reads_only_an_overlay_manifest(overlay_profiles, tmp_path):
+    _, resolve = overlay_profiles
+    assert profile_chain.wears(resolve("b")) == ["engineer", "qa"]
+    assert profile_chain.wears(resolve("unkinded")) == []
+    assert profile_chain.wears(resolve("plain")) == []
+    assert profile_chain.wears(tmp_path / "absent") == []
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (empty / "profile.yml").write_text("kind: overlay\nwears:\n")
+    assert profile_chain.wears(empty) == []
+
+
+@pytest.mark.parametrize("roles", ["engineer", "5", "{engineer: true}"])
+def test_wears_refuses_a_value_that_is_not_a_list(tmp_path, roles):
+    overlay = tmp_path / "tuner"
+    overlay.mkdir()
+    (overlay / "profile.yml").write_text(f"kind: overlay\nwears: {roles}\n")
+    with pytest.raises(ValueError) as refused:
+        profile_chain.wears(overlay)
+    assert str(refused.value) == "overlay tuner wears must be a list of roles"
+    (overlay / "profile.yml").write_text(f"wears: {roles}\n")
+    assert profile_chain.wears(overlay) == []
+
+
+def test_role_is_the_package_base_role_of_the_chain(overlay_profiles, tmp_path):
+    chain, _ = overlay_profiles
+    assert profile_chain.role(chain) == "engineer"
+    assert profile_chain.role([("eng", tmp_path / "e")]) is None
+    assert profile_chain.role([]) is None
+
+
+def test_worn_lists_each_chosen_overlay_once_in_sorted_order(overlay_profiles):
+    chain, resolve = overlay_profiles
+    assert profile_chain.worn(chain, ["c", "a", "c", "b"], resolve) == ["a", "b", "c"]
+    assert profile_chain.worn(chain, [], resolve) == []
+    assert profile_chain.worn([], [], resolve) == []
+
+
+def test_worn_refuses_more_than_three_overlays(overlay_profiles):
+    chain, resolve = overlay_profiles
+    with pytest.raises(ValueError) as refused:
+        profile_chain.worn(chain, ["a", "b", "c", "d"], resolve)
+    assert str(refused.value) == "an agent wears at most 3 overlays; 4 were chosen: a, b, c, d"
+
+
+@pytest.mark.parametrize(
+    "chosen,message",
+    [
+        (["a", "planning"], "overlay planning does not wear the engineer role"),
+        (["unkinded"], "overlay unkinded does not wear the engineer role"),
+        (["plain"], "overlay plain does not wear the engineer role"),
+        (["gone"], "overlay gone not found"),
+    ],
+)
+def test_worn_refuses_an_overlay_that_does_not_wear_the_role(overlay_profiles, chosen, message):
+    chain, resolve = overlay_profiles
+    with pytest.raises(ValueError) as refused:
+        profile_chain.worn(chain, chosen, resolve)
+    assert str(refused.value) == message
+
+
+def test_worn_refuses_any_overlay_on_a_chain_without_a_base_role(overlay_profiles, tmp_path):
+    _, resolve = overlay_profiles
+    with pytest.raises(ValueError) as refused:
+        profile_chain.worn([("eng", tmp_path / "e")], ["a"], resolve)
+    assert str(refused.value) == "overlay a needs a chain with a package base role"
