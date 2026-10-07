@@ -1,0 +1,46 @@
+{
+  "package": "SV2-IDN-01",
+  "status": "awaiting dependency and CI",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1470",
+  "pull_request": null,
+  "tested_commit": "adc5491688364657155a331accfc1ddccd6b25af",
+  "evidence_class": "local isolated Git fixtures; not a CI or rollout claim",
+  "supported_versions": {
+    "project_metadata": "2.0",
+    "alias_map": "2.0"
+  },
+  "interfaces": [
+    "ProjectIdentity.project_id",
+    "ProjectIdentity.attributes",
+    "ProjectIdentity.project_identity_ambiguities_total",
+    "canonical_remote",
+    "resolve_project with optional aliases document",
+    "AGENTIHOOKS_PROJECT_ID for non Git registration"
+  ],
+  "states": {
+    "observed": "47 focused tests passed; 40 canonical identity tests; legacy identity and project memory tests passed",
+    "accepted": "identity metadata satisfies schema; unsafe remotes yield unknown and empty remote; Git configuration and alias map bytes preserved",
+    "committed": "implementation commit recorded in tested_commit; fixture case reports are additive",
+    "externally_verified": "unverified; dependency SV2-FND-05 is still open; full CI and mutation gate run after restack and PR creation"
+  },
+  "measurements": {
+    "project_identity_ambiguities_total": {
+      "a": 0,
+      "b": 11,
+      "c": 0
+    }
+  },
+  "test_results": {
+    "a": "evidence/SV2-IDN-01/a-result.json",
+    "b": "evidence/SV2-IDN-01/b-result.json",
+    "c": "evidence/SV2-IDN-01/c-result.json"
+  },
+  "rollback_rehearsal": "test_alias_rename_recovery_and_rollback repeats twice: persisted alias document restores historical ID, unrelated owner remains separate, Git config and alias bytes unchanged; removing project_id preserves the preceding five fields",
+  "rollback": "Read prior identity fields; retain evidence and alias documents. New fields remain additive. Revert via Git if disabling new resolution.",
+  "limitations": [
+    "Other forge IDs are metadata only until existing GitHub-only transport contracts are updated.",
+    "Only unambiguous HTTPS and SSH owner/repository remotes are accepted; ports and nested groups remain unknown.",
+    "Alias documents are persisted by their authoritative caller; this resolver neither writes them nor grants permissions.",
+    "Full CI, mutation, final PR link and rollout proof remain unverified; task must not be marked complete."
+  ]
+}
