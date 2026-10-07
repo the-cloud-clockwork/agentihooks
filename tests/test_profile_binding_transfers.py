@@ -110,3 +110,12 @@ def test_missing_live_validation_retires_the_named_process(tmp_path):
     with pytest.raises(SpawnError, match="validation is missing"):
         engine._launch(config, "eng", "task", "worker", ["init-agent", "--agent", "codex", "--profile", "engineer"])
     assert calls[-1][1:] == ["terminate-agent", "worker", "--force-shared"]
+
+
+def test_a_fresh_launch_clamps_a_lane_effort_into_the_swarm_range():
+    assert runtime._model_args("claude", {"model": "opus", "effort": "low"}, {}, ("medium", "high")) == [
+        "--model",
+        "opus",
+        "--effort",
+        "medium",
+    ]

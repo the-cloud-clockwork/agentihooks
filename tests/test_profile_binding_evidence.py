@@ -375,10 +375,12 @@ def test_source_evidence_deduplicates_repositories_and_names_non_git_gaps(mounte
 
 def test_wait_checks_the_deadline_and_observes_a_later_canary(mounted, monkeypatch):
     _, report, *_ = mounted
-    clock = iter([0, 0, 1])
+    clock = iter([0, 0])
     monkeypatch.setattr(binding.time, "monotonic", lambda: next(clock))
+    binding._report(report, {"state": "validated", "validation": {"canary": "after deadline"}})
     with pytest.raises(ValueError, match="before timeout"):
         binding.wait(report, 0)
+    binding.request(report, "engineer", "claude")
     clock = iter([0, 0.1, 0.3])
     observed = []
     monkeypatch.setattr(binding.time, "monotonic", lambda: next(clock))
@@ -427,3 +429,54 @@ def test_quota_continuation_honors_explicit_model_and_effort(monkeypatch):
     env.pop("AGENTIHOOKS_RUN_EFFORT")
     with pytest.raises(ValueError, match="^unsupported quota transfer: original model and effort binding unavailable$"):
         binding.continuation([], "claude", {})
+
+
+def test_codex_continuation_reads_and_writes_codex_options(monkeypatch):
+    env = {"AGENTIHOOKS_RUN_MODEL": "original", "AGENTIHOOKS_RUN_EFFORT": "medium"}
+    monkeypatch.setattr(binding, "process", lambda: (123, "codex", env, "one"))
+    args = ["-m", "chosen", "-c", 'model_reasoning_effort="high"', "resume", "conversation"]
+    assert binding.continuation(args, "codex", {}) == [
+        "-m",
+        "chosen",
+        "-c",
+        'model_reasoning_effort="high"',
+        "resume",
+        "conversation",
+    ]
+
+
+def test_binding_result_reports_the_live_options_in_compact_wire_form(monkeypatch):
+    from scripts import init_agent
+
+    live = {"account": "routed", "model": "live-model", "effort": "high"}
+    monkeypatch.setattr(binding, "wait", lambda *a: live)
+    assert init_agent._binding_result({binding.REPORT: "/fixture/report"}, 1, {"account": "routed"}) == [
+        "profile_validation=validated",
+        'profile_binding={"account":"routed","model":"live-model","effort":"high"}',
+        "model=live-model",
+        "effort=high",
+    ]
+
+
+def test_profiled_launch_keeps_the_opening_prompt_and_environment_model(tmp_path, monkeypatch):
+    from scripts import init_agent, select_profile
+
+    observed = {}
+    monkeypatch.setattr(
+        select_profile,
+        "prepare",
+        lambda *a: ({"AGENTIHOOKS_PROFILE": "engineer", "CLAUDE_CONFIG_DIR": str(tmp_path)}, a[4]),
+    )
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda *a: ("claude", "explicit"))
+    monkeypatch.setattr(binding, "inspect", lambda *a: {})
+    monkeypatch.setattr(binding, "request", lambda *a: None)
+
+    def written(directory, name, prompt, args, environ, *rest):
+        observed.update(prompt=prompt, model=environ["AGENTIHOOKS_RUN_MODEL"])
+        raise ValueError("launcher captured")
+
+    monkeypatch.setattr(init_agent, "_write_launcher", written)
+    argv = ["--profile", "engineer", "--dir", str(tmp_path), "--prompt", "opening work"]
+    env = {"XDG_RUNTIME_DIR": str(tmp_path), "AGENTIHOOKS_CLAUDE_MODEL": "environment-model"}
+    assert init_agent.main(argv, env) == 2
+    assert observed == {"prompt": f"{binding.PROMPT}\n\nopening work", "model": "environment-model"}

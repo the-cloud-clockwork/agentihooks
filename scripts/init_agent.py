@@ -277,7 +277,7 @@ def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], env
 
     continuing = args.handoff or args.resume or "--resume" in flags or (agent == "codex" and flags[:1] == ["resume"])
     if not args.profile and continuing:
-        args.profile = environ.get("AGENTIHOOKS_PROFILE", "")
+        args.profile = environ.get("AGENTIHOOKS_PROFILE")
     if continuing and not args.profile:
         raise ValueError("unsupported continuation: original required profile is missing; pass --profile")
     if not args.profile:

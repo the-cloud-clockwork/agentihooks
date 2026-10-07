@@ -122,6 +122,7 @@ def test_claude_render_tree(world, capsys):
     assert persona.startswith(render.HEADER)
     assert persona.endswith(f"\n\n{render.FOOTER}\n")
     assert persona.count(render.FOOTER) == 1
+    assert "\n\nNone\n" not in persona
     assert render.binding.inspect(out, "rb-role", "claude")["profile"] == "rb-role"
 
 

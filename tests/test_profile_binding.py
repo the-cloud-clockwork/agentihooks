@@ -276,9 +276,9 @@ def test_process_binding_reads_only_allowed_fields_from_real_ancestor_shape(
         "AGENTIHOOKS_RUN_MODEL": model,
         "AGENTIHOOKS_RUN_EFFORT": "medium",
     }
-    with pytest.raises(ValueError, match="no supported live harness"):
+    with pytest.raises(ValueError, match="^profile canary has no supported live harness ancestor$"):
         binding.process(tmp_path, 1)
-    with pytest.raises(ValueError, match="unsupported live process"):
+    with pytest.raises(ValueError, match="^unsupported live process binding: process filesystem unavailable$"):
         binding.process(tmp_path / "absent", 3)
 
 

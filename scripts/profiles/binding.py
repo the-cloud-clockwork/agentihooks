@@ -53,12 +53,12 @@ def process(proc: Path = Path("/proc"), start: int | None = None) -> tuple[int, 
         comm = (root / "comm").read_text().strip()
         if comm in HOMES:
             raw = (root / "environ").read_bytes().split(b"\0")
-            names = [item.split(b"=", 1)[0].decode(errors="replace") for item in raw]
             keys = {REPORT, "AGENTIHOOKS_PROFILE", "AGENTIHOOKS_RUN_MODEL", "AGENTIHOOKS_RUN_EFFORT", *HOMES.values()}
-            env = {}
+            env, names = {}, []
             for item in raw:
                 key, _, value = item.partition(b"=")
                 name = key.decode(errors="replace")
+                names.append(name)
                 if name in keys:
                     env[name] = value.decode(errors="replace")
             from scripts.select_profile import _native_options
@@ -76,9 +76,9 @@ def process(proc: Path = Path("/proc"), start: int | None = None) -> tuple[int, 
 
 def validate(canary: str) -> dict:
     pid, target, env, account = process()
-    report = Path(env.get(REPORT, ""))
     if not env.get(REPORT):
         raise ValueError("profile canary has no launch validation request")
+    report = Path(env[REPORT])
     requested = json.loads(report.read_text())
     try:
         if requested["harness"] != target or requested["profile"] != env.get("AGENTIHOOKS_PROFILE"):
@@ -152,8 +152,8 @@ def continuation(args: list[str], target: str, environ: dict[str, str] | None = 
     if harness != target:
         raise ValueError(f"unsupported quota transfer from {harness} to {target}")
     model, effort, remaining = _native_options(target, args)
-    model = model or env.get("AGENTIHOOKS_RUN_MODEL", "")
-    effort = effort or env.get("AGENTIHOOKS_RUN_EFFORT", "")
+    model = model or env.get("AGENTIHOOKS_RUN_MODEL")
+    effort = effort or env.get("AGENTIHOOKS_RUN_EFFORT")
     if not model or not effort:
         raise ValueError("unsupported quota transfer: original model and effort binding unavailable")
     from scripts.swarm import effort_range
