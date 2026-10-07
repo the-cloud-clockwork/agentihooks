@@ -280,15 +280,15 @@ class HerdrRuntime:
         if want and plugins.claude_only(profile) and want != "claude":
             kind = "master affinity" if lane == MASTER else "lane harness"
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}")
-        if saved and want and saved["harness"] != want:
+        quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
+        saved = self._quota_transfer(saved, profile, environ) if saved and quota_transfer else saved
+        if saved and want and saved["harness"] != want and not quota_transfer:
             saved = {}
         if want and not saved:
             agent, reason = self.choose(want, environ)
         elif saved:
-            if plugins.claude_only(profile) and saved["harness"] != "claude":
-                raise SpawnError("unsupported handoff: required profile cannot mount on the original harness")
             requested = saved["harness"]
-            agent, reason = self.choose(requested, environ)
+            agent, reason = self._saved_choice(saved, profile, quota_transfer, environ)
         else:
             agent, reason = self._rotation(requested, environ)
         if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts"):
