@@ -1,12 +1,14 @@
 """The prompt guard: a swarm agent's rm that a harness would stop for a yes or no is refused first, with the safe form.
 
 Claude Code asks before an rm or rmdir whose target it cannot read ahead of time, or that reaches a system, home or
-workspace directory, in every permission mode, bypass included. Codex runs swarm agents with approval_policy never
-and asks for nothing, so these rm classes are the whole set.
+workspace directory, in every permission mode, bypass included. It asks the same for a shell -c script that runs a
+command named by a variable or command output, which it reads as an rm it cannot check. Codex runs swarm agents with
+approval_policy never and asks for nothing, so these classes are the whole set.
 """
 
 import posixpath
 import re
+from itertools import dropwhile
 from pathlib import Path, PurePosixPath
 
 from scripts.gates.base import Decision
@@ -14,6 +16,9 @@ from scripts.gates.identity import program_index, simple_commands
 
 REMOVERS = frozenset({"rm", "rmdir"})
 DIRECTORY_CHANGERS = frozenset({"cd", "pushd", "popd"})
+SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+INLINE_FLAG = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
+KEYWORDS = frozenset({"!", "{", "}", "if", "then", "elif", "else", "do", "while", "until"})
 GLOB = re.compile(r"[*?[]")
 RUNTIME_VALUE = re.compile(r"[$`]|^~[^/]")
 REDIRECT = re.compile(r"^\d*[<>]")
@@ -28,6 +33,31 @@ def refusal(why):
         "with agentihooks scratch rm <dir>; otherwise name each file or directory by its absolute path, with no glob, "
         "variable or command output, and no cd before it."
     )
+
+
+def script_refusal(program):
+    return (
+        "The harness stops this shell -c script for a yes or no that nobody in a swarm answers: it runs the command "
+        f"'{program}', a variable or command output the harness reads as an rm it cannot check. Name each program in "
+        "the script literally, or run the commands without a shell -c wrapper."
+    )
+
+
+def inline_scripts(text):
+    for words in simple_commands(text):
+        index = program_index(words)
+        if index is None or PurePosixPath(words[index]).name not in SHELLS:
+            continue
+        flags = words[index + 1 :]
+        yield from (script for flag, script in zip(flags, flags[1:]) if INLINE_FLAG.fullmatch(flag))
+
+
+def variable_programs(script):
+    for words in simple_commands(script):
+        rest = list(dropwhile(KEYWORDS.__contains__, words))
+        index = program_index(rest)
+        if index is not None and rest[index].startswith(("$", "`")):
+            yield rest[index]
 
 
 def removals(text):
@@ -63,7 +93,7 @@ class PromptGuard:
         self.home = str(Path.home()) if home is None else home
 
     def matches(self, call):
-        return call.tool == "Bash" and "rm" in call.command
+        return call.tool == "Bash" and any(mark in call.command for mark in ("rm", "$", "`"))
 
     def decide(self, call, who, state):
         if not who.pinned:
@@ -78,6 +108,9 @@ class PromptGuard:
             for target in targets(args):
                 if why := self.hazard(target, call.cwd, moved):
                     return Decision.deny(refusal(why))
+        for script in inline_scripts(text):
+            for program in variable_programs(script):
+                return Decision.deny(script_refusal(program))
         return Decision()
 
     def hazard(self, target, cwd, moved):
