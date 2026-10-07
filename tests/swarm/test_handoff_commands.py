@@ -17,7 +17,7 @@ def test_confirmation_command_records_continuity_but_never_infers_binding(env, c
     cli.main(["sw", "start"])
     agent = next(a for a in store.agents("sw") if a.lane == "eng")
     row = transfers.record(store, "sw", agent, "recycle", DOC, 1)
-    transfers.attach(store, "sw", agent, 2)
+    transfers.attach(store, "sw", agent)
     assert cli.main(["sw", "--as", agent.name, "confirm-handoff", row["id"], "--next", "Read the saved proof."]) == 0
     capsys.readouterr()
     assert cli.main(["sw", "status", "--json"]) == 0

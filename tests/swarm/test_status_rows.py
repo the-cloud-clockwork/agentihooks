@@ -34,7 +34,7 @@ def test_handoff_rows_keep_the_latest_transfer_per_seat_with_the_master_first():
     rows = status.handoff_rows(
         [
             transfer("eng-1@sw", 10, successor="sw-eng-4", continuity={"state": "confirmed"}),
-            transfer("master@sw", 20, successor="sw-master-2", binding={"state": "live"}),
+            transfer("master@sw", 20, successor="sw-master-2", binding={"state": "live", "at": 25}),
             transfer("eng-1@sw", 30, reason="crash", successor="sw-eng-5"),
         ],
         [{"name": "sw-eng-5", "seat": "eng-1@sw", "state": "working"}],
@@ -46,6 +46,7 @@ def test_handoff_rows_keep_the_latest_transfer_per_seat_with_the_master_first():
             "reason": "recycle",
             "continuity": "pending",
             "binding": "live",
+            "bound_at": 25,
             "successor": "sw-master-2",
             "awaiting": "",
         },
@@ -55,6 +56,7 @@ def test_handoff_rows_keep_the_latest_transfer_per_seat_with_the_master_first():
             "reason": "crash",
             "continuity": "pending",
             "binding": "pending",
+            "bound_at": 0,
             "successor": "sw-eng-5",
             "awaiting": "",
         },
@@ -70,6 +72,7 @@ def test_a_seat_without_a_handoff_shows_its_live_occupant():
             "reason": "",
             "continuity": "",
             "binding": "live",
+            "bound_at": 0,
             "successor": "sw-eng-9",
             "awaiting": "",
         }

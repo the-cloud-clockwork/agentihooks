@@ -36,13 +36,50 @@ def test_tick_binds_a_successor_without_claiming_continuity(setup):
     assert runtime.tasks[0]["transfer"]["id"] == transfer["id"]
 
 
+@pytest.mark.parametrize("lane", ["eng", "master"])
+def test_binding_is_stamped_when_the_successor_attaches_not_at_tick_start(setup, monkeypatch, lane):
+    store, old = setup
+    store.drop_agent("sw", old.name)
+    old = replace(old, lane=lane, task="master" if lane == "master" else "t1")
+    store.put_agent("sw", old)
+    store.put_handoff("sw", old.task, DOC, seat=old.seat)
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    clock = iter(range(100, 200))
+    monkeypatch.setattr(transfers, "now_ms", lambda: next(clock))
+    tick("sw", store, FakeLedger([] if lane == "master" else [{"id": "t1"}]), FakeRuntime(), 10)
+    result = transfers.get(store, "sw", transfer["id"])
+    assert (result["at"], result["attached_at"]) == (30, 100)
+    assert result["binding"] == {"state": "live", "at": 101, "session": result["successor"]}
+    assert result["successor"]
+
+
+def test_a_failed_launch_stamps_its_absent_binding_when_it_fails(setup, monkeypatch):
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="sw-eng-2")
+    store.seats.occupy(new.seat, new.name, 3)
+    clock = iter(range(100, 200))
+    monkeypatch.setattr(transfers, "now_ms", lambda: next(clock))
+    transfers.attach(store, "sw", new)
+    transfers.failed(store, "sw", new)
+    result = transfers.get(store, "sw", transfer["id"])
+    assert result["binding"] == {"state": "absent", "at": 101, "session": "sw-eng-2", "reason": "Launch failed"}
+    retry = next(r for r in transfers.list_transfers(store, "sw") if r.get("retry_of") == transfer["id"])
+    assert retry["at"] == 101
+
+
+def test_now_ms_reads_the_wall_clock_in_milliseconds(monkeypatch):
+    monkeypatch.setattr(transfers.time, "time", lambda: 12.3456)
+    assert transfers.now_ms() == 12345
+
+
 def test_successor_confirms_reading_and_the_first_next_action(setup):
     store, old = setup
     transfer = transfers.record(store, "sw", old, "recycle", DOC, 2)
     new = replace(old, name="sw-eng-2", state="working", pane_id="pane")
     store.put_agent("sw", new)
     store.seats.occupy(new.seat, new.name, 3)
-    transfers.attach(store, "sw", new, 3)
+    transfers.attach(store, "sw", new)
     result = transfers.confirm(store, "sw", transfer["id"], new, "Check the saved proof and verify it passed.", 4)
     assert result["continuity"] == {
         "state": "confirmed",
@@ -60,7 +97,7 @@ def test_a_different_next_action_or_an_old_occupant_cannot_confirm(setup):
     new = replace(old, name="sw-eng-2", state="working")
     store.put_agent("sw", new)
     store.seats.occupy(new.seat, new.name, 3)
-    transfers.attach(store, "sw", new, 3)
+    transfers.attach(store, "sw", new)
     with pytest.raises(SwarmError, match="first Next action"):
         transfers.confirm(store, "sw", transfer["id"], new, "Build something else", 4)
     store.seats.occupy(new.seat, "sw-eng-3", 5)
