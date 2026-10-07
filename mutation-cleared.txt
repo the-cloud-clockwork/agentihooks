@@ -630,5 +630,13 @@
   "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1observe__mutmut_24:19c788d22295248b72afdded7a527a1d127caff334f57559dcc85f7a5ff35f9f": {
     "reader": "Standards",
     "reason": "A missing pane text defaults to a string with no input marker, confirmation line or escape codes, so selection_prompt and typed_input both return empty exactly as for an empty default."
+  },
+  "scripts/swarm_ledger/ledger_stats.py:scripts.swarm_ledger.ledger_stats.x_refresh__mutmut_26:ff7d5dc88ba11da2c1bfa6f5bc2ff2add34c463730098f93f86faf30f9ca4c9b": {
+    "reader": "Standards",
+    "reason": "The mutant omits the precomputed review argument; the same pure calculator receives identical document, events and time before mutation and yields identical persisted stats and review."
+  },
+  "scripts/swarm_ledger/ledger_stats.py:scripts.swarm_ledger.ledger_stats.x_refresh__mutmut_30:4f6313b8a5da9c95982aff3a3b0fd99c52ed8c8508b50aafbddabd1330a11299": {
+    "reader": "Standards",
+    "reason": "The mutant omits the precomputed review argument; the same pure calculator receives identical document, events and time before mutation and yields identical persisted stats and review."
   }
 }
