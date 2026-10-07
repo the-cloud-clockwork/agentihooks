@@ -166,6 +166,24 @@ def test_mutation_job_installs_chromium_before_mutating():
     assert names.index("Install dependencies") < install < names.index("Mutate changed Python files")
 
 
+def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
+    steps = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())["jobs"]["mutation"]["steps"]
+    names = [step.get("name") for step in steps]
+    select = names.index("Select mutation tests before browser setup")
+    install = names.index("Install the browser that page tests drive")
+    assert select < install
+    assert steps[select]["id"] == "selection"
+    assert "scripts.ci_mutation.browser" in steps[select]["run"]
+    assert steps[install]["if"] == "steps.selection.outputs.browser == 'true'"
+    assert steps[install]["id"] == "browser"
+    assert steps[install]["timeout-minutes"] == 2
+    failure = next(step for step in steps if step.get("name") == "Report browser setup failure")
+    assert failure["if"] == "failure() && steps.browser.outcome == 'failure'"
+    assert "::error::" in failure["run"]
+    assert "two minute" in failure["run"]
+    assert "exit 1" in failure["run"]
+
+
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
 def test_workflow_badges_point_at_existing_workflows(doc):
     names = re.findall(r"actions/workflows/([\w.-]+\.yml)", (_ROOT / doc).read_text())
