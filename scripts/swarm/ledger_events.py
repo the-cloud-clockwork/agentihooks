@@ -27,7 +27,12 @@ OPERATOR = "operator"
 ASK_WORDS = 12
 RED = {"FAILURE", "ERROR", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"}
 PASSED = {"SUCCESS", "SKIPPED"}
-FIELDS = "state,mergedAt,commits,statusCheckRollup"
+PULL_QUERY = (
+    "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
+    "commits(last:1){nodes{commit{committedDate statusCheckRollup{contexts(first:100){"
+    "nodes{...on CheckRun{name conclusion} ...on StatusContext{context state}} "
+    "pageInfo{hasNextPage}}}}}}}}}"
+)
 
 
 @dataclass(frozen=True)
@@ -38,6 +43,7 @@ class PullRequest:
     red: bool
     resolved: bool = False
     failed: tuple = ()
+    head: str = ""
 
 
 def iso_ms(text):
@@ -59,14 +65,30 @@ def pull_request(raw):
             for check, result in zip(checks, results)
             if result in RED
         ),
+        raw.get("headRefOid") or "",
     )
 
 
 def view(url, run=subprocess.run):
     try:
-        done = run(["gh", "pr", "view", url, "--json", FIELDS], capture_output=True, text=True, timeout=20)
-        return pull_request(json.loads(done.stdout)) if done.returncode == 0 else None
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        done = run(
+            ["gh", "api", "graphql", "-f", f"query={PULL_QUERY}", "-f", f"url={url}"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if done.returncode != 0:
+            return None
+        raw = json.loads(done.stdout)["data"]["resource"]
+        commits = [node["commit"] for node in raw["commits"]["nodes"]]
+        rollup = (commits[-1].get("statusCheckRollup") or {}) if commits else {}
+        contexts = rollup.get("contexts") or {}
+        if contexts.get("pageInfo", {}).get("hasNextPage"):
+            return None
+        raw["commits"] = commits
+        raw["statusCheckRollup"] = contexts.get("nodes") or []
+        return pull_request(raw)
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
 
 

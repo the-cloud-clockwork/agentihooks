@@ -4,7 +4,7 @@ import urllib.request
 import uuid
 from urllib.parse import quote, urlencode
 
-from . import resources, schemas
+from . import schemas
 
 
 class ResourceClient:
@@ -32,29 +32,10 @@ class ResourceClient:
             query["cursor"] = reply["next_cursor"]
 
     def snapshot(self, slug: str) -> dict:
-        state = self.request(slug, "metadata")["data"]
-        for name in resources.COLLECTIONS:
-            state[name] = self.collection(slug, name)
-        items = {f"{name}/{row['id']}": row for name in resources.THREADS for row in state.get(name, [])}
-        for path, row in items.items():
-            for thread in resources.THREADS[path.split("/")[0]]:
-                row[thread] = []
-        for row in self.collection(slug, "threads"):
-            parent, thread = row["path"].rsplit("/", 1)
-            items[parent][thread].append(row["entry"])
-        state["_meta"]["events"] = self.collection(slug, "events")
-        members = self.collection(slug, "members")
-        state["_meta"]["members"] = {
-            row["id"]: {k: v for k, v in row.items() if k not in ("id", "revision")} for row in members
-        }
+        state = self.request(slug, "export", {})["data"]
         import ledger_gate
 
         state["_meta"]["crew"] = ledger_gate.crew(state["_meta"])
-        current = self.request(slug, "metadata")["data"]
-        if current["_meta"]["rev"] != state["_meta"]["rev"]:
-            from .errors import APIError
-
-            raise APIError(409, "revision_conflict", "Ledger changed while resources were read")
         return state
 
     def mutate(self, slug: str, operations: list) -> dict:
