@@ -47,4 +47,5 @@ def notify(
         result += f" The verdict is {args.verdict.replace('-', ' ')}."
     text = f"{actor} {verb} from the {source}. {result}" + (f" {detail}" if detail else "")
     ledger.say(args.slug, text, by="swarm")
-    InboxStore(store.redis).send(by, address, text, ref=f"{CONTROL_REF}{uuid.uuid4().hex}", fyi=True)
+    if after or action not in {"stop", "close"}:
+        InboxStore(store.redis).send(by, address, text, ref=f"{CONTROL_REF}{uuid.uuid4().hex}", fyi=True)
