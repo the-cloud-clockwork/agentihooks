@@ -70,6 +70,7 @@ def _shard_files(config) -> frozenset[str]:
 
 
 def pytest_configure(config):
+    config.args.sort(key=lambda arg: (Path(arg.split("::", 1)[0]).parent.parts, arg))
     workers = getattr(config.option, "numprocesses", None)
     if not config.getoption("shard") or not workers or hasattr(config, "workerinput") or not hasattr(os, "fork"):
         return
