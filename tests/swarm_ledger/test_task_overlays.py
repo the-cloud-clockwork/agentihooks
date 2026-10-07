@@ -89,6 +89,5 @@ def test_task_cli_sends_dependencies_and_territory_as_lists(monkeypatch):
 def test_task_help_names_the_overlays_option(capsys):
     with pytest.raises(SystemExit):
         ledger.build_parser().parse_args(["task", "--help"])
-    assert "comma separated overlays this task's agent wears, at most three" in " ".join(
-        capsys.readouterr().out.split()
-    )
+    help_text = f" {' '.join(capsys.readouterr().out.split())} "
+    assert " comma separated overlays this task's agent wears, at most three " in help_text

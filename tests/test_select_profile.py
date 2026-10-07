@@ -505,7 +505,7 @@ def test_an_inherited_profile_without_overlays_exports_an_empty_list(monkeypatch
 def test_overlay_help_reads_as_written(run, expected, capsys):
     with pytest.raises(SystemExit):
         run()
-    assert expected in " ".join(capsys.readouterr().out.split())
+    assert f" {expected} " in f" {' '.join(capsys.readouterr().out.split())} "
 
 
 def test_a_launch_without_a_profile_exports_no_overlays(monkeypatch, tmp_path):
