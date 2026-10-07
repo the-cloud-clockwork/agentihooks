@@ -109,7 +109,7 @@ def tick(slug, store, ledger, runtime, now_ms):
             actions += _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms)
     _conversations(slug, store, runtime)
     _session_models(slug, store)
-    transfers.observe(store, slug, runtime.live_names(), now_ms)
+    transfers.observe(store, slug, runtime.live_names())
     return actions + _settle(slug, config, store, ledger, rows, doc) + _close_space(slug, config, store, runtime)
 
 
@@ -342,10 +342,10 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                     continue
                 task.update(fields)
                 store.seats.occupy(seat, name, now_ms)
-                task["transfer"] = transfers.attach(store, slug, record, now_ms)
+                task["transfer"] = transfers.attach(store, slug, record)
                 placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task), spawns=store.spawns(slug))
             except Exception as exc:
-                transfers.failed(store, slug, record, now_ms)
+                transfers.failed(store, slug, record)
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
                 if isinstance(exc, ProfileUnresolved):
                     actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
@@ -473,7 +473,7 @@ def _master(slug, config, store, runtime, now_ms):
     store.put_agent(slug, record)
     try:
         store.seats.occupy(record.seat, name, now_ms)
-        transfer = transfers.attach(store, slug, record, now_ms)
+        transfer = transfers.attach(store, slug, record)
         placed = runtime.spawn(
             config,
             MASTER,
@@ -486,7 +486,7 @@ def _master(slug, config, store, runtime, now_ms):
             ),
         )
     except Exception as exc:
-        transfers.failed(store, slug, record, now_ms)
+        transfers.failed(store, slug, record)
         store.drop_agent(slug, name)
         return [f"master spawn failed: {exc}"]
     store.put_agent(slug, _placed(record, placed))

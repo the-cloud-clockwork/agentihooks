@@ -2100,7 +2100,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   function renderHandoffs(rows) {
     $("handoff-count").textContent = `${rows.length} ${rows.length === 1 ? "seat" : "seats"}`;
     $("swarm-handoffs").replaceChildren(...(rows.length ? rows.map((r) => cells(idCell(seatText(r.seat)), clock(r.at), r.reason,
-      r.continuity ? label(r.continuity) : "—", r.binding ? label(r.binding) : "—",
+      r.continuity ? label(r.continuity) : "—", r.binding ? h("span", {}, label(r.binding), r.bound_at && ` ${clock(r.bound_at)}`) : "—",
       r.awaiting ? h("span", { class: "sw-ctl" }, ...["resume", "fresh"].map((choice) => h("button", { class: "sw-btn", type: "button",
         "data-agent": r.awaiting, "data-restore-choice": choice, disabled: !!pending, text: choice }))) : r.successor ? idCell(r.successor) : "—"))
       : [emptyRow(6, "No seats yet. Seats appear when agents start.")]));

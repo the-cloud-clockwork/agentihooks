@@ -118,6 +118,7 @@ def handoff_rows(transfers_list, agents):
                 "reason": row.get("reason", ""),
                 "continuity": row.get("continuity", {}).get("state", ""),
                 "binding": "awaiting decision" if awaiting else binding,
+                "bound_at": row.get("binding", {}).get("at", 0),
                 "successor": row.get("successor") or agent.get("name", ""),
                 "awaiting": awaiting,
             }
