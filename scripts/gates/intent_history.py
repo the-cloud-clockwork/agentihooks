@@ -22,7 +22,7 @@ def masked(value: object) -> object:
         return {
             redact(key, mode="strict"): (
                 "[REDACTED]"
-                if re.search(r"password|secret|api.?key|private.?key|access.?token|authorization|credential", key, re.I)
+                if re.search(r"password|secret|api.?key|private.?key|token|authorization|credential", key, re.I)
                 else masked(item)
             )
             for key, item in value.items()
@@ -30,7 +30,7 @@ def masked(value: object) -> object:
     if isinstance(value, list):
         return [masked(item) for item in value]
     if isinstance(value, str):
-        safe = redact(value, mode="strict")
+        safe = redact(re.sub(r"\bBearer\s+\S+", "Bearer [REDACTED]", value, flags=re.I), mode="strict")
         return "[REDACTED:private_key]" if "[REDACTED:private_key]" in safe else safe
     return value
 

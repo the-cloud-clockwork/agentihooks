@@ -204,3 +204,27 @@ def test_detected_private_key_removes_the_entire_value(monkeypatch):
 
     monkeypatch.setattr(intent_history, "redact", lambda text, mode: "[REDACTED:private_key]\nkey material")
     assert intent_history.masked("synthetic private key") == "[REDACTED:private_key]"
+
+
+def test_opaque_bearer_and_token_fields_are_masked_in_request_and_history(tmp_path):
+    doc = document()
+    doc["tasks"][0]["proof"] = {"refresh_token": "synthetic refresh", "token": "synthetic token"}
+    pr = pull_request()
+    pr["reviewer_findings"]["comments"][0]["body"] = "Authorization: Bearer synthetic_secret"
+    seen = []
+    intent.Check(
+        "proof",
+        "observe",
+        123,
+        None,
+        None,
+        lambda url: pr,
+        lambda state: seen.append(state) or ("pass", "ok"),
+        tmp_path,
+    ).run(doc)
+    [record] = history(tmp_path)
+    assert json.loads(record["classifier_input"])["state"] == seen[0]
+    for value in ("synthetic refresh", "synthetic token", "synthetic_secret"):
+        assert value not in record["classifier_input"]
+    assert seen[0]["proof"] == {"refresh_token": "[REDACTED]", "token": "[REDACTED]"}
+    assert seen[0]["reviewer_findings"]["comments"][0]["body"] == "Authorization: Bearer [REDACTED]"
