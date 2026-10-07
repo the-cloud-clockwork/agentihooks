@@ -565,7 +565,7 @@ def test_cli_requires_every_path_and_describes_itself(capsys):
     assert "the following arguments are required: --sources, --json, --markdown" in capsys.readouterr().err
     with pytest.raises(SystemExit):
         baseline.main(["--help"])
-    assert "Record Swarm v2 source and deployment baselines read-only." in capsys.readouterr().out
+    assert "\n\nRecord Swarm v2 source and deployment baselines read-only.\n\n" in capsys.readouterr().out
 
 
 def test_missing_previous_file_is_refused(planted, tmp_path, capsys):
