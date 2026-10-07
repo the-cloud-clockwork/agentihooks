@@ -43,6 +43,7 @@ class SwarmConfig:
     gates: dict = field(default_factory=dict)
     effort_min: str = effort_range.DEFAULT[0]
     effort_max: str = effort_range.DEFAULT[1]
+    codex_share_changed_at: int = 0
 
 
 @dataclass(frozen=True)
@@ -92,7 +93,11 @@ class RedisStore:
             raise SwarmError(refused)
         if not self.redis.hsetnx(self.key(config.slug, "config"), "slug", config.slug):
             raise SwarmError(f"swarm {config.slug} already exists")
-        config = replace(config, code=self.names.mint_code(config.slug, config.slug, config.repo))
+        config = replace(
+            config,
+            code=self.names.mint_code(config.slug, config.slug, config.repo),
+            codex_share_changed_at=int(time.time() * 1000) if config.codex_share is not None else 0,
+        )
         self.redis.hset(self.key(config.slug, "config"), mapping=_fields(config))
         self.redis.sadd(f"{PREFIX}:index", config.slug)
 
@@ -119,6 +124,7 @@ class RedisStore:
             json.loads(raw.get("gates") or "{}"),
             raw.get("effort_min") or effort_range.DEFAULT[0],
             raw.get("effort_max") or effort_range.DEFAULT[1],
+            int(raw.get("codex_share_changed_at", 0)),
         )
 
     def update(self, slug, **changes):
@@ -128,7 +134,12 @@ class RedisStore:
             raise SwarmError(f"autonomy must be one of {AUTONOMY}")
         if not 0 <= changes.get("codex_share", 0) <= 100:
             raise SwarmError("codex share is a percent from 0 to 100")
-        config = replace(self.config(slug), **changes)
+        previous = self.config(slug)
+        config = replace(previous, **changes)
+        if "codex_share" in changes and (
+            config.codex_share != previous.codex_share or not previous.codex_share_changed_at
+        ):
+            config = replace(config, codex_share_changed_at=int(time.time() * 1000))
         if {"lanes", "effort_min", "effort_max"} & set(changes):
             refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes)
             if refused:
@@ -240,13 +251,17 @@ class RedisStore:
         return agent_choice.share_picks(rows, now_ms - agent_choice.SHARE_WINDOW_MS)
 
     def count_claim(self, slug, task):
-        return self.redis.hincrby(self.key(slug, "claims"), task)
+        self.redis.hsetnx(self.key(slug, "started-lives"), task, self._started_lives(slug, task))
+        return self.redis.hincrby(self.key(slug, "started-lives"), task)
 
     def claims(self, slug, task):
-        return int(self.redis.hget(self.key(slug, "claims"), task) or 0)
+        counted = self.redis.hget(self.key(slug, "started-lives"), task)
+        if counted is not None:
+            return int(counted)
+        return self._started_lives(slug, task)
 
     def reset_claims(self, slug, task):
-        self.redis.hdel(self.key(slug, "claims"), task)
+        self.redis.hset(self.key(slug, "started-lives"), task, 0)
         self.redis.hdel(self.key(slug, "launch-failures"), task)
 
     def note_launch_failure(self, slug, task, reason):
@@ -254,6 +269,30 @@ class RedisStore:
 
     def launch_failure(self, slug, task):
         return self.redis.hget(self.key(slug, "launch-failures"), task) or ""
+
+    def record_launch(self, slug: str, agent: AgentRecord, state: str, error: str = "") -> None:
+        row = {"agent": agent.name, "task": agent.task, "at": agent.started_at, "state": state, "error": error}
+        self.redis.hset(self.key(slug, "launches"), agent.name, json.dumps(row))
+
+    def launches(self, slug: str) -> list[dict]:
+        rows = {name: json.loads(raw) for name, raw in self.redis.hgetall(self.key(slug, "launches")).items()}
+        history = [json.loads(raw) for raw in self.redis.lrange(self.key(slug, "history"), 0, -1)]
+        for agent in [*history, *(asdict(a) for a in self.agents(slug))]:
+            if agent.get("profile_decision", {}).get("validation", {}).get("state") == "validated":
+                rows.setdefault(
+                    agent["name"],
+                    {
+                        "agent": agent["name"],
+                        "task": agent["task"],
+                        "at": agent["started_at"],
+                        "state": "started",
+                        "error": "",
+                    },
+                )
+        return list(rows.values())
+
+    def _started_lives(self, slug, task):
+        return sum(row["task"] == task and row["state"] == "started" for row in self.launches(slug))
 
     def put_restored(self, slug, outcomes):
         self.redis.set(self.key(slug, "restored"), json.dumps(outcomes))

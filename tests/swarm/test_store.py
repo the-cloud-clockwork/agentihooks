@@ -1,3 +1,4 @@
+import json
 import socket
 import time
 
@@ -37,6 +38,21 @@ def test_set_updates_caps_and_state(store):
     assert (store.config("smoke").max_eng, store.config("smoke").state) == (3, "paused")
 
 
+def test_share_target_period_is_preserved_until_the_target_changes(store, monkeypatch):
+    monkeypatch.setattr(time, "time", lambda: 10)
+    store.create(config(codex_share=20))
+    assert store.config("smoke").codex_share_changed_at == 10_000
+    monkeypatch.setattr(time, "time", lambda: 20)
+    assert store.update("smoke", max_eng=2).codex_share_changed_at == 10_000
+    assert store.update("smoke", codex_share=20).codex_share_changed_at == 10_000
+    assert store.update("smoke", codex_share=0).codex_share_changed_at == 20_000
+    monkeypatch.setattr(time, "time", lambda: 30)
+    assert store.update("smoke", codex_share=20).codex_share_changed_at == 30_000
+    store.redis.hdel(store.key("smoke", "config"), "codex_share_changed_at")
+    assert store.config("smoke").codex_share_changed_at == 0
+    assert store.update("smoke", codex_share=20).codex_share_changed_at == 30_000
+
+
 def test_a_task_claim_is_exclusive_until_released(store):
     store.create(config())
     assert store.claim("smoke", "t1", "engineer@a1b2c3-0001", lease_ms=60_000)
@@ -59,6 +75,54 @@ def test_claims_count_agent_lives_per_task_until_reset(store):
     store.reset_claims("smoke", "t1")
     assert (store.claims("smoke", "t1"), store.claims("smoke", "t2")) == (0, 1)
     assert (store.launch_failure("smoke", "t1"), store.launch_failure("smoke", "t2")) == ("", "canary timeout")
+
+
+def test_legacy_claim_counts_do_not_prove_started_lives(store):
+    store.redis.hset(store.key("smoke", "claims"), "t1", 5)
+    assert store.claims("smoke", "t1") == 0
+    store.count_claim("smoke", "t1")
+    assert store.claims("smoke", "t1") == 1
+    assert store.redis.hget(store.key("smoke", "claims"), "t1") == "5"
+
+
+def test_verified_historical_starts_keep_their_life_budget(store):
+    failed = AgentRecord("failed", "eng", "t1", state="starting")
+    started = AgentRecord(
+        "started",
+        "eng",
+        "t1",
+        started_at=1,
+        profile_decision={"validation": {"state": "validated"}},
+    )
+    store.put_agent("smoke", failed)
+    store.drop_agent("smoke", failed.name)
+    store.put_agent("smoke", started)
+    assert store.claims("smoke", "t1") == 1
+    store.drop_agent("smoke", started.name)
+    assert store.claims("smoke", "t1") == 1
+    assert [(row["agent"], row["state"]) for row in store.launches("smoke")] == [("started", "started")]
+    store.count_claim("smoke", "t1")
+    store.record_launch("smoke", AgentRecord("next", "eng", "t1"), "started")
+    assert store.claims("smoke", "t1") == 2
+    store.reset_claims("smoke", "t1")
+    assert store.claims("smoke", "t1") == 0
+
+
+def test_launch_rows_merge_recorded_launches_with_verified_history(store):
+    history, validated = store.key("smoke", "history"), {"validation": {"state": "validated"}}
+    store.redis.rpush(
+        history, json.dumps({"name": "first", "task": "t1", "started_at": 1, "profile_decision": validated})
+    )
+    store.redis.rpush(history, json.dumps({"name": "legacy", "task": "t1", "started_at": 2}))
+    store.redis.rpush(
+        history, json.dumps({"name": "last", "task": "t2", "started_at": 3, "profile_decision": validated})
+    )
+    store.record_launch("smoke", AgentRecord("waiting", "eng", "t3", started_at=4), "pending")
+    assert sorted(store.launches("smoke"), key=lambda row: row["agent"]) == [
+        {"agent": "first", "task": "t1", "at": 1, "state": "started", "error": ""},
+        {"agent": "last", "task": "t2", "at": 3, "state": "started", "error": ""},
+        {"agent": "waiting", "task": "t3", "at": 4, "state": "pending", "error": ""},
+    ]
 
 
 def test_a_lapsed_lease_frees_the_claim(store):

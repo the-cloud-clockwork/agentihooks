@@ -5,6 +5,7 @@ from scripts.swarm.health.findings import Finding
 
 TICK_MS = 60_000
 WINDOW_MS = SHARE_WINDOW_MS
+MIN_PICKS = 10
 FAILURE = re.compile(r"^(?:spawn failed for ([^\s,]+).*?|master spawn failed): (.+)$")
 
 
@@ -31,10 +32,13 @@ def failed(record: dict) -> list[Finding]:
 
 
 def share_drift(record: dict) -> list[Finding]:
-    since, target = record["now"] - WINDOW_MS, record["target"]
+    if not record.get("target_changed_at"):
+        return []
+    since = max(record["now"] - WINDOW_MS, record["target_changed_at"] + 1)
+    target = record["target"]
     picks = share_picks([*record["history"], *record["agents"]], since)
     total, codex = sum(picks.values()), picks.get("codex", 0)
-    if not total or abs(codex * 100 - total * target) <= 100:
+    if total < MIN_PICKS or abs(codex * 100 - total * target) <= 100:
         return []
     actual = codex * 100 / total
     return [

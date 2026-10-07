@@ -68,3 +68,25 @@ def test_a_named_session_confirms_and_writes_as_its_new_master(taker, monkeypatc
     assert run("sw", "take-master") == 0
     assert [agent.name for agent in store.agents("sw")] == [name]
     capsys.readouterr()
+
+
+def test_take_master_records_the_seat_the_trace_exporter_reads(taker, monkeypatch, tmp_path):  # noqa: F811
+    from hooks.observability import agent_trace
+
+    launch = {"AGENTIHOOKS_AGENT_NAME": "s-261007-104655", "AGENTIHOOKS_SWARM": "sw-doctor"}
+    for key, value in launch.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "cursor")
+    monkeypatch.setattr(broadcast, "BROADCAST_FILE", str(tmp_path / "broadcast.json"))
+    monkeypatch.setattr(account_sessions, "agent_pid", lambda: 4242)
+    monkeypatch.setattr(take_master, "name_session", broadcast.name_session)
+    broadcast.register_session("seated", 4242, "/repo", "sol", name="s-261007-104655")
+    broadcast.register_session("other", 5151, "/repo", "sol", name="s-261007-104700")
+
+    assert run("sw", "take-master") == 0
+    name = broadcast.session_name(4242)
+    assert name.startswith("master@")
+    seated = agent_trace.identity_from_env("seated", launch)
+    assert (seated.agent, seated.swarm, seated.lane, seated.task) == (name, "sw", "master", "master")
+    other = agent_trace.identity_from_env("other", launch)
+    assert (other.agent, other.swarm, other.lane, other.task) == ("s-261007-104655", "sw-doctor", "", "")
