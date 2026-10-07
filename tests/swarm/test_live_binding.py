@@ -54,6 +54,7 @@ def mounted(tmp_path):
 
 def test_matching_process_facts_exclude_credential_values(mounted):
     agent, proc, home = mounted
+    (home / ".agentihooks-render.json").write_text(json.dumps({"chain": ["engineer", "brain"], "overlays": ["brain"]}))
     facts = live_binding.read(agent, 42, proc)
     assert facts == {
         "harness": "claude",
@@ -63,7 +64,8 @@ def test_matching_process_facts_exclude_credential_values(mounted):
         "effort": "high",
         "account": "team",
         "hooks": True,
-        "chain": [],
+        "chain": ["engineer", "brain"],
+        "overlays": ["brain"],
     }
     assert live_binding.compare(agent, facts) == {}
     assert "private-value" not in json.dumps(facts)

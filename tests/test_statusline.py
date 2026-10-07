@@ -69,24 +69,28 @@ def test_statusline_names_selected_run_profile(monkeypatch, capsys):
 
 
 @pytest.mark.parametrize(
-    "channels,enabled,shown",
+    "stamp,shown",
     [
-        (("brain", "amygdala"), True, "overlay:brain"),
-        (("amygdala",), True, "overlay:none"),
-        (("brain",), False, "overlay:none"),
+        ({"chain": ["engineer", "brain"], "overlays": ["brain"]}, "overlay:brain"),
+        ({"chain": ["anton", "brain", "router"], "overlays": ["brain", "router"]}, "overlay:brain,router"),
+        ({"chain": ["engineer"], "overlays": []}, "overlay:none"),
+        ({"chain": ["engineer", "brain"]}, "overlay:none"),
+        (None, "overlay:none"),
     ],
 )
-def test_statusline_names_the_brain_overlay(monkeypatch, capsys, channels, enabled, shown):
+def test_statusline_names_the_overlays_rendered_into_the_home(monkeypatch, capsys, tmp_path, stamp, shown):
     from hooks import config, statusline
 
-    monkeypatch.setattr(config, "BASE_CHANNELS", channels)
-    monkeypatch.setattr(config, "BRAIN_ENABLED", enabled)
-    monkeypatch.setattr(config, "BRAIN_CHANNEL", "brain")
-    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"session_id": "statusline-brain"})))
+    if stamp is not None:
+        (tmp_path / ".agentihooks-render.json").write_text(json.dumps(stamp))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "BASE_CHANNELS", ("brain", "amygdala"))
+    monkeypatch.setattr(config, "BRAIN_ENABLED", True)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"session_id": "statusline-overlay"})))
     statusline.main()
     plain = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
 
-    assert f"  {shown}  channels:{','.join(channels)}" in plain
+    assert f"  {shown}  channels:brain,amygdala" in plain
 
 
 MODEL_PAYLOAD = {

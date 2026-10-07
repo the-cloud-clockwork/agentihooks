@@ -316,6 +316,19 @@ def test_overlays_reads_the_declared_overlays(tmp_path, manifest, expected):
     assert profile_chain.overlays(tmp_path) == expected
 
 
+def test_rendered_overlays_read_the_home_stamp(tmp_path):
+    stamp = tmp_path / profile_chain.RENDER_STAMP
+    assert profile_chain.rendered_overlays(tmp_path) == []
+    stamp.write_text(json.dumps({"chain": ["a", "brain"], "overlays": ["brain"]}))
+    assert profile_chain.rendered_overlays(tmp_path) == ["brain"]
+    stamp.write_text(json.dumps({"chain": ["a", "brain"]}))
+    assert profile_chain.rendered_overlays(tmp_path) == []
+    stamp.write_text("{")
+    assert profile_chain.rendered_overlays(tmp_path) == []
+    stamp.write_text("[]")
+    assert profile_chain.rendered_overlays(tmp_path) == []
+
+
 def test_rendered_dirs_adds_the_overlays_the_chain_declares(tmp_path, monkeypatch):
     monkeypatch.setattr(profile_chain, "BUILT_IN_PROFILES", tmp_path / "builtin")
     monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", tmp_path / "roles")

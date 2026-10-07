@@ -270,7 +270,13 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
     facts = runtime.bindings(agents)
     for agent in agents:
         found = launch_check.misses(
-            store, slug, agent, facts.get(agent.name, {}), doc, launch_check.bundled(agent.profile)
+            store,
+            slug,
+            agent,
+            facts.get(agent.name, {}),
+            doc,
+            launch_check.bundled(agent.profile),
+            launch_check.declared(agent.profile),
         )
         if found and now_ms - agent.started_at < launch_check.DEADLINE_MS:
             continue

@@ -899,12 +899,12 @@ def test_status_text_logs_report_only_launch_misses_without_a_finding(env, capsy
     run("sw", "create", "--repo", "/repo")
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1")
     launch_check.record(
-        store, "sw", agent, {"overlay": {"expected": "package:engineer", "actual": "engineer"}}, 10, 60_000
+        store, "sw", agent, {"base": {"expected": "package:engineer", "actual": "engineer"}}, 10, 60_000
     )
     run("sw", "status")
     out = capsys.readouterr().out.splitlines()
     assert "launch  engineer@a1b2c3-0001  failed  60000ms" in out
-    assert "  overlay  report only  expected package:engineer; observed engineer" in out
+    assert "  base  report only  expected package:engineer; observed engineer" in out
     assert not any(line.startswith("finding  launch check") for line in out)
 
 
