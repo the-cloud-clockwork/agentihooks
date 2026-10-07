@@ -578,7 +578,7 @@ def test_the_probe_without_checks_is_unresolved(commits):
         (0, "invalid json"),
         (
             0,
-            '{"data":{"resource":{"state":"OPEN","headRefOid":"first","commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[{"conclusion":"SUCCESS"}],"pageInfo":{"hasNextPage":true}}}}}]}}}}',
+            '{"data":{"resource":{"state":"OPEN","headRefOid":"first","commits":{"nodes":[{"commit":{"committedDate":"2026-10-07T17:00:00Z","statusCheckRollup":{"contexts":{"nodes":[{"conclusion":"SUCCESS"}],"pageInfo":{"hasNextPage":true}}}}}]}}}}',
         ),
     ],
 )
