@@ -286,3 +286,30 @@ def test_status_text_shows_a_pane_held_at_a_prompt_as_waiting_and_the_finding_na
         assert row[8] == "waiting"
     assert f"prompt: {TRUST}" in out
     assert "finding  waiting on input  engineer-one" in out
+
+
+def test_the_spawn_prompt_names_each_running_task_that_shares_an_area():
+    from scripts.swarm import prompt
+
+    task = {
+        "id": "t3",
+        "title": "Build it",
+        "overlaps": [
+            {"task": "t1", "claimant": "engineer@a1b2c3-0001", "areas": ["hooks"]},
+            {"task": "t2", "claimant": "engineer@a1b2c3-0002", "areas": ["docs/a.md", "scripts/swarm/tick.py"]},
+        ],
+    }
+    lines = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0003", task).splitlines()
+    start = lines.index(prompt.OVERLAP_LINE)
+    assert lines[start + 1 : start + 3] == [
+        "Task t1, claimed by engineer@a1b2c3-0001, shares hooks.",
+        "Task t2, claimed by engineer@a1b2c3-0002, shares docs/a.md and scripts/swarm/tick.py.",
+    ]
+    assert "inbox" in prompt.OVERLAP_LINE and "merge dev" in prompt.OVERLAP_LINE
+
+
+def test_a_prompt_without_overlaps_says_nothing_about_shared_areas():
+    from scripts.swarm import prompt
+
+    text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0003", {"id": "t3", "title": "Build it", "overlaps": []})
+    assert prompt.OVERLAP_LINE not in text and "shares" not in text
