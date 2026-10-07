@@ -237,3 +237,51 @@ def test_missing_keys_become_a_reader_outage_finding(tmp_path):
     data = traces_read.record("s", [], [], 1000, get, home=tmp_path)
     kinds = [f.kind for f in traces.findings(data, traces.Limits())]
     assert kinds == ["trace reader unavailable"]
+
+
+def test_the_client_names_the_missing_keys_and_calls_langfuse_with_auth_params_and_timeout(monkeypatch):
+    with pytest.raises(RuntimeError) as refused:
+        traces_read.client({})("traces", {})
+    assert str(refused.value) == "LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not set"
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            calls.append("checked")
+
+        def json(self):
+            return {"data": []}
+
+    monkeypatch.setattr(traces_read.httpx, "get", lambda url, **kw: calls.append((url, kw)) or Response())
+    env = {"LANGFUSE_HOST": "https://lf/", "LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "sk"}
+    assert traces_read.client(env, timeout=3)("traces", {"page": 1}) == {"data": []}
+    assert calls == [
+        ("https://lf/api/public/traces", {"params": {"page": 1}, "auth": ("pk", "sk"), "timeout": 3}),
+        "checked",
+    ]
+
+
+def test_the_listing_keeps_every_page_and_stops_when_the_budget_is_spent(tmp_path):
+    def get(path, params):
+        if path == "traces":
+            return _page([_trace_row(f"p{params['page']}", "u")], params["page"], 9)
+        return _page([], 1, 1)
+
+    rows, coverage, _ = traces_read.history("s", get, tmp_path, traces_read.Budget(trace_pages=2))
+    assert [r["id"] for r in rows] == ["p1", "p2"]
+    budget = traces_read.Budget(history_seconds=1)
+    rows, coverage, _ = traces_read.history("s", get, tmp_path, budget, clock=_ticks(1))
+    assert [r["id"] for r in rows] == ["p1"] and coverage["listed"] is False
+
+
+def test_record_passes_its_budget_clock_and_cache_to_both_reads(tmp_path):
+    agents = [{"name": "s-eng-1", "state": "working", "task": "t1", "started_at": 5}]
+    langfuse = Langfuse([_trace_row("a", "u")])
+    budget = traces_read.Budget(active_page=3, active_seconds=1, history_seconds=100)
+    data = traces_read.record("s", [], agents, 1000, langfuse, home=tmp_path, budget=budget, clock=_ticks(2))
+    assert data["reader"]["failures"] == ["active read budget of 1 seconds spent before s-eng-1"]
+    assert (tmp_path / "s" / traces_read.CACHE_DIR / "a.json").exists()
+    langfuse.calls.clear()
+    data = traces_read.record("s", [], agents, 2000, langfuse, home=tmp_path, budget=traces_read.Budget(active_page=3))
+    assert [c[1]["limit"] for c in langfuse.calls if c[0] == "observations"] == [3, 1]
+    assert data["reader"]["historical"]["covered"] == 1

@@ -248,6 +248,155 @@ def test_measures_report_each_active_binding_and_the_coverage():
     assert found["coverage"]["active"] == {"bindings": 1, "read": 1}
 
 
+CADENCE = "judged at each Doctor scan, every 10 minutes"
+UNKNOWN = (f"agent {AGENT}", "seat unknown", "task unknown", "session unknown")
+
+
+def test_a_never_exported_finding_reads_in_full():
+    blank = _binding(seat="", task="", session_id="", traces=[], remote=None, local=None)
+    assert traces.findings(_record(blank), LIMITS) == [
+        traces.Finding(
+            "telemetry never exported",
+            f"{AGENT}.{STARTED}",
+            "working agent with no Langfuse trace after 600 seconds",
+            (*UNKNOWN, f"no trace tagged swarm:s and agent:{AGENT}"),
+            f"no trace after a 60 second grace, {CADENCE}",
+            600,
+        )
+    ]
+
+
+def test_a_stale_finding_with_nothing_requested_and_no_langfuse_event_reads_in_full():
+    quiet = _binding(
+        remote=None,
+        local=_local(generated_bytes=5000, oldest_unaccepted=NOW - 61_000, requested_at=0, exporter_alive=False),
+    )
+    [found] = [f for f in traces.findings(_record(quiet), LIMITS) if f.kind == "telemetry stale"]
+    assert found.summary == "source events generated but unaccepted for 61 seconds"
+    assert found.evidence[4:] == (
+        "oldest unaccepted source event 61 seconds old",
+        "generated 5000 bytes, accepted 1000 bytes",
+        "0 observations queued",
+        "no exporter process",
+        "no hook request recorded",
+        "Langfuse shows no accepted event",
+    )
+    assert found.threshold == f"oldest unaccepted source event older than 60 seconds, {CADENCE}"
+
+
+def test_a_backlog_summary_says_queued_and_an_unread_binding_says_so():
+    queued = _binding(read=False, local=_local(generated_bytes=5000, oldest_unaccepted=NOW - 90_000, pending=2))
+    [found] = [f for f in traces.findings(_record(queued), LIMITS) if f.kind == "exporter backlog"]
+    assert found.summary == "source events queued but unaccepted for 90 seconds"
+    assert found.evidence[-1] == "Langfuse not read this scan"
+
+
+def test_a_remote_with_no_event_time_shows_no_accepted_event():
+    empty = _binding(
+        remote={"trace": "tr-1", "fresh_ms": 0, "observations": 40},
+        local=_local(generated_bytes=5000, oldest_unaccepted=NOW - 90_000),
+    )
+    [found] = traces.findings(_record(empty), LIMITS)
+    assert found.evidence[-1] == "Langfuse shows no accepted event"
+    assert traces.measures(_record(empty))["active"][0]["langfuse_fresh_seconds"] is None
+    assert traces.measures(_record(_binding(remote=None)))["active"][0]["langfuse_fresh_seconds"] is None
+    assert traces.measures(_record(_binding()))["active"][0]["unaccepted_seconds"] == 0
+
+
+def test_a_stale_acknowledgement_reads_in_full():
+    lost = _binding(
+        remote={"trace": "tr-1", "fresh_ms": NOW - 400_000, "observations": 30},
+        local=_local(accepted_at=NOW - 61_000),
+    )
+    [found] = traces.findings(_record(lost), LIMITS)
+    assert found.summary == "accepted observations missing from Langfuse 61 seconds after acceptance"
+    assert found.threshold == f"accepted observations absent from Langfuse past 60 seconds, {CADENCE}"
+    assert found.evidence[4:] == (
+        "exporter recorded 40 accepted observations, Langfuse holds 30",
+        "last acceptance 61 seconds ago",
+        "Langfuse last accepted event 400 seconds ago",
+    )
+
+
+def test_a_misattributed_finding_reads_in_full():
+    wrong = _binding()
+    wrong["traces"][0]["task"] = "t2"
+    wrong["traces"][0]["seat"] = "eng-2@s"
+    assert traces.findings(_record(wrong), LIMITS) == [
+        traces.Finding(
+            "telemetry misattributed",
+            f"{AGENT}.{STARTED}",
+            f"telemetry of {AGENT} carries another binding",
+            (
+                f"agent {AGENT}",
+                "seat eng-1@s",
+                "task t1",
+                "session sid-1",
+                "trace tr-1 seat eng-2@s, expected eng-1@s",
+                "trace tr-1 task t2, expected t1",
+            ),
+            "every trace tagged with the agent carries its life, seat, task, harness and resolved profile",
+            2,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        _binding(traces=[], remote=None, local=None, started_at=NOW - 60_000),
+        _binding(local=_local(generated_bytes=5000, oldest_unaccepted=NOW - 60_000)),
+        _binding(
+            remote={"trace": "tr-1", "fresh_ms": NOW - 400_000, "observations": 30},
+            local=_local(accepted_at=NOW - 60_000),
+        ),
+    ],
+    ids=["grace", "stale", "acknowledgement"],
+)
+def test_exactly_at_a_threshold_nothing_is_raised(binding):
+    assert traces.findings(_record(binding), LIMITS) == []
+
+
+def test_a_reader_outage_reads_in_full_and_keeps_five_failures():
+    failures = [f"failure {n}" for n in range(7)]
+    record = _record(_binding(read=False, traces=[], remote=None), failures=failures, down_since=NOW, historical=None)
+    assert traces.reader(record, LIMITS) == [
+        traces.Finding(
+            "trace reader unavailable",
+            f"s.{NOW}",
+            "7 Langfuse reads failed or ran out of time",
+            (
+                *failures[:5],
+                "active bindings read 0 of 1",
+                "observations read for 0 of 0 traces",
+                "unread bindings are not judged on Langfuse evidence",
+            ),
+            f"any failed or unfinished Langfuse read, {CADENCE}",
+            7,
+        )
+    ]
+
+
+def test_partial_coverage_reads_in_full_and_keeps_three_unreadable_traces():
+    unreadable = [f"trace t{n} unreadable: TimeoutError" for n in range(5)]
+    record = _record(historical={"traces": 10, "covered": 4, "complete": False, "unreadable": unreadable})
+    assert traces.reader(record, LIMITS) == [
+        traces.Finding(
+            "trace coverage partial",
+            "s",
+            "observations of 6 traces not read yet",
+            (
+                "observations read for 4 of 10 traces",
+                *unreadable[:3],
+                "tool error, task cost and turn gap findings cover only the read traces",
+                "each Doctor scan reads more within its read budget",
+            ),
+            "every trace's observations read",
+            6,
+        )
+    ]
+
+
 @pytest.fixture
 def store():
     import fakeredis

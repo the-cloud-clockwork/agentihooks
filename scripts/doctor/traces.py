@@ -195,8 +195,8 @@ def _remote_fresh(binding, now_ms):
 
 
 def _lag(binding, now_ms):
-    local = binding["local"] or {}
-    if local.get("generated_bytes", 0) <= local.get("accepted_bytes", 0):
+    local = binding["local"]
+    if not local or local["generated_bytes"] <= local["accepted_bytes"]:
         return 0
     return _ago(now_ms, local["oldest_unaccepted"])
 

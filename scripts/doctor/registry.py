@@ -32,7 +32,7 @@ def _json(path: Path) -> dict:
 
 def _ms(stamp: object) -> int:
     try:
-        return int(datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp() * 1000)
+        return int(datetime.fromisoformat(str(stamp)).timestamp() * 1000)
     except ValueError:
         return 0
 
@@ -88,6 +88,14 @@ def _oldest(transcript: str, offset: int, fallback_ms: int) -> int:
     return fallback_ms
 
 
+def _fallback(stat, cursor_path: Path, cursor: dict) -> int:
+    """When no timestamped record is readable: the transcript time, else the oldest queued span, else the cursor time."""
+    if stat:
+        return int(stat.st_mtime * 1000)
+    queued = [int(spec["start_ns"]) // 1_000_000 for spec in cursor.get("pending") or [] if spec.get("start_ns")]
+    return min(queued) if queued else int(cursor_path.stat().st_mtime * 1000)
+
+
 def progress(session_id: str, harness: str) -> dict | None:
     """What the session generated against what its exporter had accepted, read from the exporter's own files."""
     from hooks.observability import agent_trace, trace_flush
@@ -103,26 +111,20 @@ def progress(session_id: str, harness: str) -> dict | None:
         stat = Path(transcript).stat() if transcript else None
     except OSError:
         stat = None
-    generated = max(stat.st_size if stat else 0, int(source.get("buffered_bytes") or 0))
-    accepted_bytes = int(source.get("accepted_bytes") or 0)
-    queued = [int(spec.get("start_ns") or 0) // 1_000_000 for spec in cursor.get("pending") or []]
-    try:
-        changed = int((stat or path.stat()).st_mtime * 1000)
-    except OSError:
-        changed = 0
-    if not stat and any(queued):
-        changed = min(start for start in queued if start)
+    generated = max(stat.st_size if stat else 0, int(source.get("buffered_bytes", 0)))
+    accepted_bytes = int(source.get("accepted_bytes", 0))
+    unaccepted = generated > accepted_bytes
     owner = trace_flush._owner(_json(trace_flush.owner_path(session_id)), "supervisor_")
     return {
         "generated_bytes": generated,
         "accepted_bytes": accepted_bytes,
-        "oldest_unaccepted": _oldest(transcript, accepted_bytes, changed) if generated > accepted_bytes else 0,
+        "oldest_unaccepted": _oldest(transcript, accepted_bytes, _fallback(stat, path, cursor)) if unaccepted else 0,
         "pending": len(cursor.get("pending") or []),
-        "overflow": int((cursor.get("overflow") or {}).get("bytes") or 0),
+        "overflow": int((cursor.get("overflow") or {}).get("bytes", 0)),
         "accepted": sum(1 for revision in (cursor.get("accepted") or {}).values() if revision != "legacy"),
         "accepted_at": _ms(cursor["accepted_at"]) if cursor.get("accepted_at") else 0,
         "exporter_alive": trace_flush.alive(owner),
-        "requested_at": int(request.get("at") or 0) // 1_000_000,
+        "requested_at": int(request["at"]) // 1_000_000 if request.get("at") else 0,
     }
 
 
@@ -141,7 +143,7 @@ def _freshness(get, trace_id: str, mark: dict, page: int) -> dict:
         params["fromStartTime"] = _iso(mark["start_ms"])
     rows = get("observations", params)["data"]
     starts = [_ms(row.get("startTime")) for row in rows]
-    ends = [_ms(row.get("endTime") or row.get("startTime")) for row in rows]
+    ends = [_ms(row.get("endTime")) for row in rows]
     return {
         "start_ms": max([mark.get("start_ms", 0), *starts]),
         "fresh_ms": max([mark.get("fresh_ms", 0), *starts, *ends]),
@@ -195,9 +197,12 @@ def read(
                 break
             except Exception as exc:  # noqa: BLE001
                 error = f"active read of {binding['agent']} failed: {type(exc).__name__}: {exc}"
+        merged = {**binding, **remote, "local": None}
+        try:
+            merged["local"] = progress(merged["session_id"], merged["harness"]) if merged["session_id"] else None
+        except (OSError, ValueError, TypeError) as exc:
+            error = error or f"exporter progress of {binding['agent']} unreadable: {type(exc).__name__}: {exc}"
         failures += [error] if error else []
-        merged = {**binding, **remote}
-        merged["local"] = progress(merged["session_id"], merged["harness"]) if merged["session_id"] else None
         found.append(merged)
     state["marks"] = {**marks, **kept} if failures else kept
     return found, failures

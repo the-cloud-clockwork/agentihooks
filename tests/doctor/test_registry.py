@@ -130,7 +130,9 @@ def test_without_a_known_transcript_the_cursor_staged_bytes_are_the_generated_pr
 def test_a_codex_session_without_a_request_reads_its_rollout(cursors, monkeypatch):
     rollout = cursors / "rollout.jsonl"
     _transcript(rollout, ["2026-10-07T08:00:00Z"])
-    monkeypatch.setattr("hooks.targets.normalizer.codex_rollout_path", lambda session: str(rollout))
+    monkeypatch.setattr(
+        "hooks.targets.normalizer.codex_rollout_path", lambda session: str(rollout) if session == "cx" else ""
+    )
     agent_trace._cursor_path("cx").write_text(json.dumps({"version": 2, "source": {"accepted_bytes": 0}}))
     found = registry.progress("cx", "codex")
     assert found["generated_bytes"] == os.path.getsize(rollout)
@@ -285,3 +287,139 @@ def test_state_round_trips_and_a_missing_or_broken_file_reads_empty(tmp_path):
     assert registry.load(path) == {"marks": {}, "down_since": 7}
     path.write_text("[1]")
     assert registry.load(path) == {}
+
+
+def test_state_saves_into_missing_parents_and_over_itself(tmp_path):
+    path = tmp_path / "a" / "b" / "state.json"
+    registry.save(path, {"marks": {}})
+    registry.save(path, {"marks": {"t": {}}})
+    assert registry.load(path) == {"marks": {"t": {}}}
+
+
+def test_times_that_do_not_parse_are_zero():
+    assert registry._ms("not a time") == 0
+    assert registry._ms(None) == 0
+    assert registry._ms("2026-10-07T08:00:00Z") == 1791360000000
+
+
+def test_an_agent_record_missing_optional_fields_binds_with_empty_values():
+    [found] = registry.bindings([{"name": "engineer@1-0003", "state": "working"}])
+    assert found == {
+        "agent": "engineer@1-0003",
+        "life": "engineer@1-0003#0",
+        "seat": "",
+        "task": "",
+        "harness": "",
+        "profile": "",
+        "started_at": 0,
+        "session_id": "",
+    }
+
+
+def test_the_oldest_unaccepted_event_skips_undecodable_and_unparsable_records(cursors):
+    transcript = _session(cursors, "sid", ["2026-10-07T08:00:00Z"], 1)
+    with transcript.open("ab") as out:
+        out.write(b'{"type": "user", "text": "\xff\xfe"}\n')
+        out.write(b'{"type": "user", "timestamp": "yesterday"}\n')
+        out.write(b'{"type": "user", "timestamp": "2026-10-07T08:00:20Z"}\n')
+    assert registry.progress("sid", "claude")["oldest_unaccepted"] == 1791360020000
+
+
+def test_the_oldest_unaccepted_event_is_read_only_inside_its_window(cursors, monkeypatch):
+    transcript = _session(cursors, "sid", ["2026-10-07T08:00:00Z", "2026-10-07T08:00:20Z"], 1)
+    os.utime(transcript, (1_791_360_100, 1_791_360_100))
+    monkeypatch.setattr(registry, "WINDOW_BYTES", 10)
+    assert registry.progress("sid", "claude")["oldest_unaccepted"] == 1_791_360_100_000
+
+
+def test_a_cursor_with_nothing_staged_has_no_generated_progress(cursors):
+    agent_trace._cursor_path("empty").write_text(json.dumps({"version": 2}))
+    found = registry.progress("empty", "claude")
+    assert found == {
+        "generated_bytes": 0,
+        "accepted_bytes": 0,
+        "oldest_unaccepted": 0,
+        "pending": 0,
+        "overflow": 0,
+        "accepted": 0,
+        "accepted_at": 0,
+        "exporter_alive": False,
+        "requested_at": 0,
+    }
+
+
+def test_sub_millisecond_times_round_down(cursors):
+    _session(cursors, "sid", ["2026-10-07T08:00:00Z"], 1)
+    request = json.loads(trace_flush.request_path("sid").read_text())
+    trace_flush.request_path("sid").write_text(json.dumps({**request, "at": (T0 + 3_000) * 1_000_000 + 500_000}))
+    assert registry.progress("sid", "claude")["requested_at"] == T0 + 3_000
+    cursor = {"version": 2, "source": {"buffered_bytes": 9}, "pending": [{"start_ns": 1_791_360_020_000_500_000}]}
+    agent_trace._cursor_path("lost").write_text(json.dumps(cursor))
+    assert registry.progress("lost", "claude")["oldest_unaccepted"] == 1_791_360_020_000
+
+
+def test_a_trace_row_missing_fields_reads_as_empty(cursors):
+    row = {"id": "tr", "metadata": {"attributes": {"agentihooks.correlation.task": "t1"}}}
+    assert registry._remote_trace(row) == {
+        "id": "tr",
+        "session_id": "",
+        "life": "",
+        "seat": "",
+        "task": "t1",
+        "harness": "",
+        "profile": "",
+    }
+
+
+def test_a_scan_with_no_new_observations_keeps_its_watermark_and_counts_a_missing_total_as_zero(cursors):
+    observations = [{"startTime": "2026-10-07T08:00:20.000Z", "endTime": "2026-10-07T08:00:25.000Z"}]
+    langfuse = Langfuse([_trace("tr", "sid")], observations)
+    state = {}
+    registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert langfuse.calls[2] == ("observations", {"traceId": "tr", "limit": 1, "page": 1})
+    langfuse.observations = []
+    langfuse.total = None
+    [found], _ = registry.read("s", [AGENT], langfuse, state, 15, 50)
+    assert state["marks"]["tr"] == {"start_ms": 1791360020000, "fresh_ms": 1791360025000}
+    assert found["remote"] == {"trace": "tr", "fresh_ms": 1791360025000, "observations": 0}
+
+
+def test_every_failed_binding_is_reported(cursors):
+    def down(path, params):
+        raise ConnectionError("refused")
+
+    second = {**AGENT, "name": "engineer@1-0002"}
+    _, failures = registry.read("s", [AGENT, second], down, {}, 15, 50)
+    assert failures == [
+        "active read of engineer@1-0001 failed: ConnectionError: refused",
+        "active read of engineer@1-0002 failed: ConnectionError: refused",
+    ]
+
+
+def test_a_budget_spent_exactly_leaves_the_binding_unread(cursors):
+    second = {**AGENT, "name": "engineer@1-0002"}
+    found, failures = registry.read("s", [AGENT, second], Langfuse([], []), {}, 15, 50, clock=_clock(0, 1, 15))
+    assert [b["read"] for b in found] == [True, False]
+
+
+def test_a_codex_binding_reads_its_rollout_through_its_harness(cursors, monkeypatch):
+    rollout = cursors / "rollout.jsonl"
+    _transcript(rollout, ["2026-10-07T08:00:00Z"])
+    monkeypatch.setattr(
+        "hooks.targets.normalizer.codex_rollout_path", lambda session: str(rollout) if session == "cx" else ""
+    )
+    agent_trace._cursor_path("cx").write_text(json.dumps({"version": 2, "source": {"accepted_bytes": 0}}))
+    codex = {**AGENT, "harness": "codex", "conversation_id": "cx"}
+    [found], _ = registry.read("s", [codex], Langfuse([], []), {}, 15, 50)
+    assert found["local"]["generated_bytes"] == os.path.getsize(rollout)
+
+
+def test_unreadable_exporter_progress_is_a_failure_line_not_a_crash(cursors):
+    agent_trace._cursor_path("bad").write_text(json.dumps({"version": 2, "source": {"accepted_bytes": "x"}}))
+    bad = {**AGENT, "conversation_id": "bad"}
+    second = {**AGENT, "name": "engineer@1-0002"}
+    found, failures = registry.read("s", [bad, second], Langfuse([], []), {}, 15, 50)
+    assert [b["local"] for b in found] == [None, None]
+    assert failures == [
+        "exporter progress of engineer@1-0001 unreadable: ValueError: invalid literal for int() with base 10: 'x'"
+    ]
