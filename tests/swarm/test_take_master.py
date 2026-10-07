@@ -229,7 +229,7 @@ def test_an_unregistered_session_without_a_name_is_refused(taker, monkeypatch, c
     monkeypatch.setattr(take_master, "name_session", lambda pid, name: 0)
     assert run("sw", "take-master") == 1
     assert capsys.readouterr().err == (
-        "agentihooks swarm: this session is not registered with agentihooks, so the tick could not see it as master\n"
+        "swarm: this session is not registered with agentihooks, so the tick could not see it as master\n"
     )
     assert _masters(store) == []
 
