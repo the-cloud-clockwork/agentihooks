@@ -5754,7 +5754,7 @@ def cmd_balance(
         claude_bin=shutil.which("claude") or "claude",
     )
     print(render_table(results, include_fable=include_fable, sessions=live, caps=caps))
-    print(f"\nsource={source} max_sessions_per_account={cap}")
+    print(f"\nsource={source} default_max_sessions_per_account={cap}")
     print(f"\n{codex_table()}")
     return 0 if any(is_routable(result) for result in results) else 1
 

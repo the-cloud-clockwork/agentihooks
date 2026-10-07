@@ -178,10 +178,10 @@ def _report(path: str, **fields: str) -> None:
 def _route(environ: Mapping[str, str], route: str, run: Callable) -> tuple[CodexAccount, str, int, int]:
     cap = max_sessions(environ)
     sessions = codex_sessions_by_account()
-    if not token_accounts(environ) and not route:
-        return CodexAccount(CODEX_DEFAULT), "open", sessions.get(CODEX_DEFAULT, 0), cap
-    pool = routing_pool(environ, run)
     caps = session_caps.stored("codex")
+    if not token_accounts(environ) and not route:
+        return CodexAccount(CODEX_DEFAULT), "open", sessions.get(CODEX_DEFAULT, 0), caps.get(CODEX_DEFAULT, cap)
+    pool = routing_pool(environ, run)
     account, placement = select(pool, quotas(pool, environ), sessions, cap, route, caps)
     return account, placement, sessions.get(account.name, 0), caps.get(account.name, cap)
 
