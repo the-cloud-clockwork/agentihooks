@@ -180,6 +180,12 @@ def test_event_presence_metadata_keeps_the_normalized_array_shape(tmp_path):
         assert connection.execute(
             "SELECT kind,value FROM fields WHERE slug=? AND path=?", ("metadata", '["_meta","events"]')
         ).fetchone() == ("array", "null")
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM fields WHERE slug=? AND parent=?", ("metadata", '["_meta","events"]')
+            ).fetchone()[0]
+            == 0
+        )
 
 
 def test_disabled_sql_trace_produces_no_callback_errors(tmp_path, monkeypatch):

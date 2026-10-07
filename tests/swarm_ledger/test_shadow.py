@@ -235,6 +235,7 @@ def test_sqlite_creation_preserves_size_and_default(files):
 def test_shadow_registry_and_lifecycle_reads_preserve_unicode_in_ascii_locale(files):
     import locale
     import sys
+
     from scripts.swarm_ledger.repository import bin_storage
 
     if sys.flags.utf8_mode:

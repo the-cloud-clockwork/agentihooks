@@ -1218,5 +1218,13 @@
   "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_read_seeds__mutmut_29:d68144cdf46719d59b025bcb089ce754a9b335d6eb271167179222060f0abfef": {
     "reader": "Standards",
     "reason": "A deletion seed delta is emitted only for a path present in the preceding flattened revision. Replay starts with that baseline and applies ordered deltas, so rows.pop always finds this path. Removing the unused absent-key default changes no supported replay output."
+  },
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_59:8749921dbe8ece6890127daf239358fa11e51185022cbef58b4858daf80b1fb1": {
+    "reader": "Standards",
+    "reason": "For supported file-authoritative callers every removed slug has neither authoritative path. Its SQLite rows are already deleted before known is read; revisiting a registry candidate finds no source path and emits no writes. Changing the candidate subtraction therefore changes neither persisted rows nor returned output."
+  },
+  "scripts/swarm_ledger/storage_migration/__init__.py:scripts.swarm_ledger.storage_migration.x_import_directory__mutmut_50:1769306d531c2d7c69d3249c1ab079e886e0c7016f0f374507f85964f7e19bf2": {
+    "reader": "Standards",
+    "reason": "import_directory imports core and load_state from the same repository.file module. Runtime identity check confirms its explicit core argument is exactly load_state default core; mutating module attributes affects that same object in both versions. Omitting the duplicate argument changes no loader behavior."
   }
 }
