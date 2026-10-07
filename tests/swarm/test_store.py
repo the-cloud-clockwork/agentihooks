@@ -1,3 +1,4 @@
+import json
 import socket
 import time
 
@@ -90,6 +91,23 @@ def test_verified_historical_starts_keep_their_life_budget(store):
     assert store.claims("smoke", "t1") == 2
     store.reset_claims("smoke", "t1")
     assert store.claims("smoke", "t1") == 0
+
+
+def test_launch_rows_merge_recorded_launches_with_verified_history(store):
+    history, validated = store.key("smoke", "history"), {"validation": {"state": "validated"}}
+    store.redis.rpush(
+        history, json.dumps({"name": "first", "task": "t1", "started_at": 1, "profile_decision": validated})
+    )
+    store.redis.rpush(history, json.dumps({"name": "legacy", "task": "t1", "started_at": 2}))
+    store.redis.rpush(
+        history, json.dumps({"name": "last", "task": "t2", "started_at": 3, "profile_decision": validated})
+    )
+    store.record_launch("smoke", AgentRecord("waiting", "eng", "t3", started_at=4), "pending")
+    assert sorted(store.launches("smoke"), key=lambda row: row["agent"]) == [
+        {"agent": "first", "task": "t1", "at": 1, "state": "started", "error": ""},
+        {"agent": "last", "task": "t2", "at": 3, "state": "started", "error": ""},
+        {"agent": "waiting", "task": "t3", "at": 4, "state": "pending", "error": ""},
+    ]
 
 
 def test_a_lapsed_lease_frees_the_claim(store):

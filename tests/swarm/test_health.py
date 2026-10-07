@@ -178,6 +178,12 @@ def test_claims_without_started_lives_raise_no_proof_loop():
     assert run({"tasks": [task("t1")], "_meta": {"events": events}}) == []
 
 
+def test_repeated_failed_launches_measure_their_count():
+    events = [{"kind": "launch failed", "target": "tasks/t1", "error": "canary timeout"} for _ in range(3)]
+    found = health.failed_launches(events, {"t1": {"id": "t1", "title": "Fix"}})
+    assert [(f.subject, f.measure) for f in found] == [("t1", 3)]
+
+
 def test_failed_launch_findings_require_repetition_and_keep_each_launch_error():
     first = {**ev("launch failed", "tasks/t1", by="swarm"), "error": "profile canary timeout"}
     second = {**ev("launch failed", "tasks/t1", by="swarm"), "error": "worktree timer"}

@@ -264,6 +264,20 @@ def test_failed_launches_do_not_consume_lives_and_preserve_each_error(store, err
     assert [row["state"] for row in store.launches("sw")].count("started") == 1
 
 
+def test_a_launch_is_pending_while_the_runtime_spawns_it(store):
+    ledger, runtime, seen = tasks(("t1", "eng")), FakeRuntime(), []
+    spawn = runtime.spawn
+
+    def watching(*args, **kwargs):
+        seen.extend(row["state"] for row in store.launches("sw"))
+        return spawn(*args, **kwargs)
+
+    runtime.spawn = watching
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert seen == ["pending"]
+    assert [row["state"] for row in store.launches("sw")] == ["started"]
+
+
 def test_no_free_session_slot_claims_nothing(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(full=True)
     tick("sw", store, ledger, runtime, now_ms=1_000)

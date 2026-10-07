@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, fields
 from scripts.swarm import naming
 from scripts.swarm_ledger import ledger_kinds
 
-NOT_TRANSITIONS = ("joined", "left")
+NOT_TRANSITIONS = ("joined", "left", "task started", "launch failed")
 HELD = ("claimed", "pr")
 MINUTE_MS = 60_000
 ENV = {
