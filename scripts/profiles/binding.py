@@ -95,7 +95,17 @@ def validate(canary: str) -> dict:
             raise ValueError("live harness profile mismatch with requested choice")
         if not env.get(HOMES[target]):
             raise ValueError(f"missing profile home: {HOMES[target]} is unset")
-        data = inspect(Path(env[HOMES[target]]), requested["profile"], target)
+        home = Path(env[HOMES[target]])
+        if not home.is_dir():
+            raise ValueError(f"missing profile home: {home}")
+        data = requested.get("validation")
+        if data:
+            actual = (pid, requested["profile"], target, str(home.resolve()))
+            recorded = (data.get("pid"), data.get("profile"), data.get("harness"), data.get("home"))
+            if data.get("state") != "validated" or recorded != actual:
+                raise ValueError("live process binding changed since validation")
+        else:
+            data = inspect(home, requested["profile"], target)
         if not data.get("canary") or data["canary"] != canary:
             raise ValueError("mounted instruction canary mismatch")
         result = {
