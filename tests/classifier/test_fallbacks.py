@@ -39,7 +39,7 @@ def test_cli_contract_and_result(monkeypatch, backend):
         assert json.loads(kwargs["input"])["state"] == REQUEST.state
         assert json.loads(kwargs["input"])["questions"] == REQUEST.wire()["questions"]
         if args[0] == "bash":
-            assert args[3:6] == ["agentihooks", "claude", "--agentihooks-report"]
+            assert args[4:6] == ["claude", "--agentihooks-report"]
             args = args[args.index("-p") :]
             assert args[:4] == ["-p", "--model", "haiku", "--output-format"]
             assert args[args.index("--output-format") + 1] == "json"

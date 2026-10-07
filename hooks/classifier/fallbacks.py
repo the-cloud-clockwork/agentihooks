@@ -1,6 +1,7 @@
 import json
 import os
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -77,7 +78,7 @@ class ClaudeCliBackend:
                 "bash",
                 "-lic",
                 f'exec "$0" "$@" < {shlex.quote(str(wire))}',
-                "agentihooks",
+                shutil.which("agentihooks") or "agentihooks",
                 "claude",
                 "--agentihooks-report",
                 str(report),

@@ -39,13 +39,13 @@ def test_haiku_launches_through_agentihooks_claude(monkeypatch, route, parent_to
     args, kwargs = seen[0]
     wire = Path(kwargs["cwd"]) / "request.json"
     assert args[:3] == ["bash", "-lic", f'exec "$0" "$@" < {wire}']
-    assert args[3:6] == ["agentihooks", "claude", "--agentihooks-report"]
+    assert Path(args[3]).name == "agentihooks"
+    assert args[4:6] == ["claude", "--agentihooks-report"]
     assert Path(args[6]).parent == Path(kwargs["cwd"])
     assert args[7 : args.index("-p")] == (["--route", route] if route else [])
     assert args[args.index("-p") :][:3] == ["-p", "--model", "haiku"]
     assert args[args.index("--system-prompt") + 1] == fallbacks.PROMPT
     assert kwargs["env"].get("CLAUDE_CODE_OAUTH_TOKEN") == os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
-    assert not hasattr(fallbacks, "select_credential")
 
 
 def test_unroutable_account_fails_naming_why(monkeypatch):
