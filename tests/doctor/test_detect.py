@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from scripts.doctor import detect
@@ -15,6 +17,19 @@ def test_a_failing_detector_is_named_and_the_others_still_report():
     found, failed = detect.collect({"spawn": broken, "health": lambda: [STALE]})
     assert found == [STALE]
     assert failed == ["the spawn detector failed: RuntimeError: journal unreadable"]
+
+
+def test_the_spawn_reader_reads_the_watched_swarm_at_the_pass_time(monkeypatch):
+    from scripts.doctor import spawn_read, spawns
+
+    seen = []
+    monkeypatch.setattr(spawn_read, "records", lambda store, slug, now_ms: seen.append((store, slug, now_ms)) or "rec")
+    monkeypatch.setattr(spawns, "findings", lambda record: [STALE] if record == "rec" else [])
+    import fakeredis
+
+    store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
+    assert detect.readers(store, None, "sw", 42, environ={})["spawn"]() == [STALE]
+    assert seen == [(store, "sw", 42)]
 
 
 def test_ci_reads_only_the_pull_requests_of_tasks_waiting_in_review():

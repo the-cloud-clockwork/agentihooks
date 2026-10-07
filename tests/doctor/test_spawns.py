@@ -62,6 +62,16 @@ def test_overflow_forced_and_old_spawns_do_not_count_toward_drift():
     assert found.evidence == ("codex 8/16 share picks in the last 6 hours, 50.0%, target 20%",)
 
 
+def test_the_window_starts_inclusive_and_a_pick_without_a_start_is_outside_it():
+    now = spawns.WINDOW_MS + 1
+    edge = _picks("e", ["claude"] * 6, 1)
+    undated = [{"name": "u", "harness": "codex", "choice": "share"}]
+    [found] = spawns.share_drift(_windowed(edge, undated) | {"now": now})
+    assert found.evidence == ("codex 0/6 share picks in the last 6 hours, 0.0%, target 20%",)
+    assert found.threshold == "more than one share pick from target"
+    assert found.summary == "Codex share 0.0% against target 20%"
+
+
 def test_discrete_share_and_empty_counts_do_not_raise():
     now = 2 * spawns.WINDOW_MS
     for harnesses in ([], ["claude"], ["codex"] + ["claude"] * 6):
