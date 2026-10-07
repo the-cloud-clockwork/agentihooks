@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:swarm-v2:heartbeat",
+  "title": "Execution heartbeat and lease renewal",
+  "allOf": [{"$ref": "urn:swarm-v2:common#/$defs/envelope"}],
+  "type": "object",
+  "required": ["authority", "renewal_sequence", "state", "observed_at"],
+  "properties": {
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execution_id", "task_id", "task_generation", "controller_epoch", "owner_identity"],
+      "properties": {
+        "execution_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "task_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "task_generation": {"$ref": "urn:swarm-v2:common#/$defs/generation"},
+        "controller_epoch": {"$ref": "urn:swarm-v2:common#/$defs/generation"},
+        "owner_identity": {"$ref": "urn:swarm-v2:common#/$defs/identifier"}
+      }
+    },
+    "renewal_sequence": {"type": "integer", "minimum": 0},
+    "state": {"enum": ["starting", "working", "waiting", "draining", "stopping"]},
+    "observed_at": {"$ref": "urn:swarm-v2:common#/$defs/timestamp"}
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version": "2.1",
+  "operation_id": "command-synthetic-0003",
+  "trace_id": "0123456789abcdef0123456789abcdef",
+  "authority": {
+    "execution_id": "exe-synthetic-0007",
+    "task_id": "implement-session-ingestion",
+    "controller_epoch": 12
+  },
+  "command_id": "command-synthetic-0003",
+  "kind": "checkpoint",
+  "acceptance": "accepted",
+  "completion": "pending",
+  "issued_at": "2026-10-08T08:06:00Z"
+}
