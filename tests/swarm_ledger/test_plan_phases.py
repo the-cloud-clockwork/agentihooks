@@ -34,6 +34,7 @@ def served(slug, ops=None):
 
 def cli(monkeypatch, *argv):
     monkeypatch.setattr(ledger, "call", served)
+    monkeypatch.setattr(ledger, "resource", lambda slug, path, collection=False: served(slug)[path])
     args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "master", *argv])
     getattr(ledger, f"cmd_{args.command.replace('-', '_')}")(args)
 

@@ -452,8 +452,17 @@ def rendered_profiles(target: str) -> list[str]:
     return []
 
 
+def _seed_linked_profiles(out: Path) -> None:
+    _i = _install_module()
+    state_file = out / "state.json"
+    state = _i.load_json(state_file) if state_file.exists() else {}
+    state["linked_profiles"] = _i._get_linked_profiles()
+    _i.save_json(state_file, state)
+
+
 def _render_scratch(args: argparse.Namespace) -> int:
     bundle = args.bundle or _bundle()
+    _seed_linked_profiles(args.out)
     env = {**os.environ, "AGENTIHOOKS_HOME": str(args.out.resolve())}
     if bundle is not None:
         env["AGENTIHOOKS_BUNDLE_PATH"] = str(bundle.resolve())

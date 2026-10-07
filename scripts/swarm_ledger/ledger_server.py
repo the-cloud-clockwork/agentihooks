@@ -533,9 +533,15 @@ def with_workspaces(slug, state):
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
+        if self.path.startswith("/api/v1/"):
+            sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.split('?', 1)[0]}\n")
+            return
         sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
 
     def send(self, code, body, ctype):
+        if self.path.startswith("/api/v1/") and code >= 400 and ctype != "application/json":
+            body = json.dumps({"error": {"code": "forbidden" if code == 403 else "request_refused", "message": body}})
+            ctype = "application/json"
         data = body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -597,13 +603,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         if self.headers.get("Origin") == FILE_ORIGIN:
             self.send_header("Access-Control-Allow-Origin", FILE_ORIGIN)
-            self.send_header("Access-Control-Allow-Methods", "GET, PUT")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token")
+            self.send_header("Access-Control-Allow-Methods", "GET, PUT, POST")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent")
             if self.headers.get("Access-Control-Request-Private-Network") == "true":
                 self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
 
     def do_GET(self):
+        if self.path.startswith("/api/v1/"):
+            from scripts.swarm_ledger import api
+
+            return api.handle(self, sys.modules[__name__])
         route, slug = self.path.split("?", 1)[0], self.slug()
         if self.refused():
             return None
@@ -773,6 +783,10 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(200, json.dumps(stored), "application/json")
 
     def do_POST(self):
+        if self.path.startswith("/api/v1/"):
+            from scripts.swarm_ledger import api
+
+            return api.handle(self, sys.modules[__name__])
         if self.refused():
             return None
         route = self.path.split("?", 1)[0]
@@ -806,6 +820,10 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(200, json.dumps({"binned": sorted(ledger_bin.entries()), **reply}), "application/json")
 
     def do_PUT(self):
+        if self.path.startswith("/api/v1/"):
+            from scripts.swarm_ledger import api
+
+            return api.handle(self, sys.modules[__name__])
         slug = self.slug()
         if self.refused():
             return None

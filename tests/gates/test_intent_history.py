@@ -145,12 +145,17 @@ def test_pull_request_findings_include_original_reviews_and_inline_comments():
 
         calls.append(args)
         payload = {"title": "Retention", "body": "", "files": [], "reviews": [review], "comments": [discussion]}
-        return CompletedProcess(args, 0, stdout=json.dumps(payload if len(calls) == 1 else [[inline]]))
+        pages = f"{json.dumps(inline)}\n{json.dumps({**inline, 'line': 9})}\n"
+        return CompletedProcess(args, 0, stdout=json.dumps(payload) if len(calls) == 1 else pages)
 
     pr = intent.pr_view("https://github.com/o/r/pull/1", run=run)
-    assert pr["reviewer_findings"] == {"reviews": [review], "comments": [discussion], "inline": [inline]}
+    assert pr["reviewer_findings"] == {
+        "reviews": [review],
+        "comments": [discussion],
+        "inline": [inline, {**inline, "line": 9}],
+    }
     assert calls[0][-1] == "title,body,files,reviews,comments"
-    assert calls[1] == ["gh", "api", "--paginate", "--slurp", "repos/o/r/pulls/1/comments"]
+    assert calls[1] == ["gh", "api", "--paginate", "--jq", ".[] | @json", "repos/o/r/pulls/1/comments"]
 
 
 @pytest.mark.parametrize("result", ["failed", "malformed"])

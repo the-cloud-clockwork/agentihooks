@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from scripts.handoff.envelope import REASONS, build
+from scripts.handoff.envelope import REASONS, build, reclaim
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
@@ -183,3 +183,98 @@ def test_an_upstream_lookup_that_fails_to_run_falls_back_to_the_local_branch(sto
 def test_a_remote_lookup_that_fails_to_run_starts_the_successor_fresh(store):
     envelope = build(store, "sw", _agent(), "recycle", [], 0, run=_run([], raises=("ls-remote",)))
     assert (envelope["remote_head"], envelope["continue_from"]) == ("unknown", "fresh")
+
+
+OLDER, NEWER = "engineer@a1b2c3-0001", "engineer@a1b2c3-0002"
+
+
+def _remote(heads, upstreams=None, unread=(), raises=()):
+    upstreams = upstreams or {}
+
+    def run(argv, **kwargs):
+        if argv[3] in raises:
+            raise OSError(argv[3])
+        if argv[:4] == ["git", "-C", "/repo", "worktree"]:
+            return _done(
+                f"worktree /repo\nbranch refs/heads/dev\n\nworktree {WORKTREE}\nbranch refs/heads/{OLDER.replace('@', '-')}\n"
+            )
+        if argv[3] == "rev-parse":
+            assert argv[2] == WORKTREE
+            return _done(
+                f"{upstreams[WORKTREE]}\n" if WORKTREE in upstreams else "", 0 if WORKTREE in upstreams else 128
+            )
+        assert argv[:6] == ["git", "-C", "/repo", "ls-remote", "--exit-code", "origin"]
+        assert kwargs == {**GIT, "timeout": 20}
+        branch = argv[-1].removeprefix("refs/heads/")
+        if branch in unread:
+            return _done(code=128)
+        return _done(f"{heads[branch]}\t{argv[-1]}\n") if branch in heads else _done(code=2)
+
+    return run
+
+
+def test_a_reclaim_continues_the_newest_branch_an_earlier_life_pushed():
+    run = _remote({"engineer-a1b2c3-0001": "a" * 40, "engineer-a1b2c3-0002": HEAD})
+    assert reclaim("/repo", [NEWER, OLDER], "", run=run) == {
+        "remote_branch": "engineer-a1b2c3-0002",
+        "remote_head": HEAD,
+        "continue_from": "origin/engineer-a1b2c3-0002",
+        "fresh_reason": "none",
+    }
+
+
+def test_a_reclaim_skips_a_life_that_never_pushed_for_an_older_one_that_did():
+    verdict = reclaim("/repo", [NEWER, OLDER], "", run=_remote({"engineer-a1b2c3-0001": HEAD}))
+    assert (verdict["continue_from"], verdict["remote_head"]) == ("origin/engineer-a1b2c3-0001", HEAD)
+
+
+def test_a_reclaim_follows_the_upstream_a_continuing_life_pushed_to():
+    run = _remote({"engineer-a1b2c3-0000": HEAD}, upstreams={WORKTREE: "origin/engineer-a1b2c3-0000"})
+    assert reclaim("/repo", [OLDER], "", run=run)["continue_from"] == "origin/engineer-a1b2c3-0000"
+
+
+def test_a_reclaim_falls_back_to_the_branch_the_ledger_recorded():
+    verdict = reclaim("/repo", [NEWER], "feature-x", run=_remote({"feature-x": HEAD}))
+    assert (verdict["remote_branch"], verdict["remote_head"]) == ("feature-x", HEAD)
+
+
+def test_a_reclaim_with_no_pushed_branch_starts_fresh_and_names_what_it_checked():
+    assert reclaim("/repo", [NEWER, OLDER], "feature-x", run=_remote({})) == {
+        "remote_branch": "none",
+        "remote_head": "none",
+        "continue_from": "fresh",
+        "fresh_reason": "no earlier life pushed a branch: checked engineer-a1b2c3-0002, engineer-a1b2c3-0001 and "
+        "feature-x on the remote",
+    }
+
+
+def test_a_reclaim_whose_remote_cannot_be_read_starts_fresh_and_says_so():
+    verdict = reclaim("/repo", [NEWER], "", run=_remote({}, unread=("engineer-a1b2c3-0002",)))
+    assert verdict["continue_from"] == "fresh"
+    assert verdict["fresh_reason"] == "the remote heads of engineer-a1b2c3-0002 could not be read"
+
+
+def test_a_reclaim_whose_git_fails_to_run_starts_fresh_without_raising():
+    verdict = reclaim("/repo", [OLDER], "", run=_remote({}, raises=("worktree", "ls-remote")))
+    assert verdict["continue_from"] == "fresh"
+    assert verdict["fresh_reason"] == "the remote heads of engineer-a1b2c3-0001 could not be read"
+
+
+def test_a_reclaim_names_two_unpushed_branches_with_and():
+    verdict = reclaim("/repo", [NEWER, OLDER], "", run=_remote({}))
+    assert verdict["fresh_reason"] == (
+        "no earlier life pushed a branch: checked engineer-a1b2c3-0002 and engineer-a1b2c3-0001 on the remote"
+    )
+
+
+def test_a_reclaim_names_one_unpushed_branch_alone():
+    verdict = reclaim("/repo", [OLDER], "", run=_remote({}))
+    assert verdict["fresh_reason"] == "no earlier life pushed a branch: checked engineer-a1b2c3-0001 on the remote"
+
+
+def test_a_reclaim_lists_every_remote_head_it_could_not_read():
+    unread = ("engineer-a1b2c3-0002", "engineer-a1b2c3-0001")
+    verdict = reclaim("/repo", [NEWER, OLDER], "", run=_remote({}, unread=unread))
+    assert verdict["fresh_reason"] == (
+        "the remote heads of engineer-a1b2c3-0002, engineer-a1b2c3-0001 could not be read"
+    )

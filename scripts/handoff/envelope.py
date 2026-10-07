@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import snapshot
 from scripts.swarm.ledger_events import RED
+from scripts.swarm.naming import plain
 from scripts.swarm.store import MASTER
 
 REASONS = ("recycle", "quota", "succession", "takeover", "reopen", "restore", "inbox", "exit", "operator")
@@ -87,6 +88,36 @@ def continuation(worktree, branch, run):
     else:
         why = f"the remote head of branch {remote} could not be read"
     return {"remote_branch": remote, "remote_head": head, "continue_from": "fresh", "fresh_reason": why}
+
+
+def reclaim(repo: str, lives: list[str], recorded: str, run=subprocess.run) -> dict:
+    """Where a claimant after retired lives cuts its worktree: the newest branch an earlier life pushed, else fresh and why.
+
+    lives are the earlier agents on the task, newest first; recorded is the branch the ledger holds for it, if any.
+    """
+    try:
+        trees = snapshot.worktrees(repo, lives, run)
+    except FAILED:
+        trees = {}
+    branches = [_remote_branch(trees[name], plain(name), run) if trees.get(name) else plain(name) for name in lives]
+    checked, unread = list(dict.fromkeys([*branches, *([recorded] if recorded else [])])), []
+    for branch in checked:
+        head = _remote_head(repo, branch, run)
+        if head == UNKNOWN:
+            unread.append(branch)
+        elif head != NONE:
+            return {
+                "remote_branch": branch,
+                "remote_head": head,
+                "continue_from": f"origin/{branch}",
+                "fresh_reason": NONE,
+            }
+    if unread:
+        why = f"the remote heads of {', '.join(unread)} could not be read"
+    else:
+        names = ", ".join(checked[:-1]) + " and " + checked[-1] if len(checked) > 1 else checked[0]
+        why = f"no earlier life pushed a branch: checked {names} on the remote"
+    return {"remote_branch": NONE, "remote_head": NONE, "continue_from": "fresh", "fresh_reason": why}
 
 
 def _remote_branch(worktree, branch, run):

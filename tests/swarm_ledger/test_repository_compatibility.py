@@ -52,7 +52,7 @@ def test_command_token_headers_follow_the_stored_page(stored, monkeypatch, tmp_p
 
     def receive(request, timeout):
         requests.append(request)
-        return io.BytesIO(b'{"ok": true}')
+        return io.BytesIO(b'{"ok": true}' if upload else b'{"data": {"ok": true}}')
 
     monkeypatch.setattr(ledger.urllib.request, "urlopen", receive)
     if upload:
@@ -60,7 +60,7 @@ def test_command_token_headers_follow_the_stored_page(stored, monkeypatch, tmp_p
         source.write_bytes(b"image")
         assert ledger.upload("compatibility", "eng", str(source), "media", {}) == {"ok": True}
     else:
-        assert ledger.request("compatibility") == {"ok": True}
+        assert ledger.resource("compatibility", "metadata") == {"ok": True}
     assert requests[0].get_header("X-ledger-token") == token
 
 
