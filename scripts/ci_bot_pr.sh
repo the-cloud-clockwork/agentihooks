@@ -26,7 +26,7 @@ printf 'pr=%s\n' "$pr" >> "$GITHUB_OUTPUT"
 if [[ "$dry_run" == true ]]; then exit 0; fi
 
 for attempt in {1..180}; do
-    snapshot=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json state,headRefOid,statusCheckRollup,mergeStateStatus,mergeCommit)
+    snapshot=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json state,headRefOid,baseRefOid,statusCheckRollup,mergeStateStatus,mergeCommit)
     state=$(jq -r .state <<< "$snapshot")
     if [[ "$state" == MERGED ]]; then
         jq -r '"merged=" + .mergeCommit.oid' <<< "$snapshot" >> "$GITHUB_OUTPUT"
@@ -34,7 +34,10 @@ for attempt in {1..180}; do
     fi
     [[ "$state" == OPEN ]]
     head=$(jq -r .headRefOid <<< "$snapshot")
-    if [[ "$(jq -r .mergeStateStatus <<< "$snapshot")" == BEHIND ]]; then
+    base=$(jq -r .baseRefOid <<< "$snapshot")
+    ahead=$(gh api "repos/$GITHUB_REPOSITORY/compare/$head...$base" --jq .ahead_by)
+    [[ "$ahead" =~ ^[0-9]+$ ]]
+    if [[ "$ahead" -gt 0 ]]; then
         number="${pr##*/}"
         gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$number/update-branch" -f expected_head_sha="$head"
     elif jq -e '

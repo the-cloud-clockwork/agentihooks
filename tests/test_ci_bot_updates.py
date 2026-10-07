@@ -58,11 +58,13 @@ def _checks():
     return [dict(__typename="CheckRun", name=name, status="COMPLETED", conclusion="SUCCESS") for name in names]
 
 
-def _snapshot(checks=None, head="tested", state="OPEN", merge_state="CLEAN"):
+def _snapshot(checks=None, head="tested", state="OPEN", merge_state="CLEAN", ahead=0):
     return dict(
         state=state,
         headRefOid=head,
+        baseRefOid="base",
         mergeStateStatus=merge_state,
+        devAhead=ahead,
         statusCheckRollup=_checks() if checks is None else checks,
         mergeCommit=dict(oid="merged"),
     )
@@ -89,8 +91,11 @@ elif args[:2] == ['pr', 'create']:
 elif args[:2] == ['pr', 'view']:
     data = json.loads(Path('snapshots.json').read_text())
     print(json.dumps(data[0]))
+    Path('snapshot.json').write_text(json.dumps(data[0]))
     if len(data) > 1:
         Path('snapshots.json').write_text(json.dumps(data[1:]))
+elif args[0] == 'api' and '/compare/' in args[1]:
+    print(json.loads(Path('snapshot.json').read_text())['devAhead'])
 elif args[:2] == ['pr', 'merge'] and os.environ.get('REJECT_MERGE') == '1':
     sys.exit(1)
 """
@@ -210,14 +215,24 @@ def test_changed_head_is_refused_by_the_pinned_merge(tmp_path):
     assert log.count("gh pr merge") == 1
 
 
-def test_bot_update_refreshes_a_branch_that_fell_behind_dev(tmp_path):
+@pytest.mark.parametrize("merge_state", ["BEHIND", "CLEAN", "UNKNOWN"])
+def test_bot_update_refreshes_a_branch_that_fell_behind_dev(tmp_path, merge_state):
     result, log = _run(
-        tmp_path, [_snapshot(merge_state="BEHIND"), _snapshot(head="updated"), _snapshot(state="MERGED")]
+        tmp_path, [_snapshot(merge_state=merge_state, ahead=1), _snapshot(head="updated"), _snapshot(state="MERGED")]
     )
     assert result.returncode == 0, result.stderr
+    assert "compare/tested...base" in log
     assert "pulls/7/update-branch -f expected_head_sha=tested" in log
     assert "--match-head-commit updated" in log
     assert "--match-head-commit tested" not in log
+
+
+@pytest.mark.parametrize("ahead", [None, "unreadable"])
+def test_bot_update_refuses_an_unreadable_dev_comparison(tmp_path, ahead):
+    result, log = _run(tmp_path, [_snapshot(ahead=ahead)])
+    assert result.returncode != 0
+    assert "gh pr merge" not in log
+    assert "update-branch" not in log
 
 
 @pytest.mark.parametrize("bump,expected", [("patch", "1.2.4"), ("minor", "1.3.0"), ("major", "2.0.0")])
