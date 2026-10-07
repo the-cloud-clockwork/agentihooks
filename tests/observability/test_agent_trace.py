@@ -171,7 +171,7 @@ def test_identity_from_env_reads_swarm_launch_variables():
 def test_a_seated_session_exports_under_its_seat_and_an_unseated_one_keeps_its_launch_identity(monkeypatch, tmp_path):
     from hooks.observability import agent_trace
 
-    monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "cursor")
+    monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "home" / "cursor")
     env = {
         "AGENTIHOOKS_AGENT_NAME": "s-261007-104655",
         "AGENTIHOOKS_SWARM": "rig-grade-swarm-doctor",
@@ -197,6 +197,12 @@ def test_a_seated_session_exports_under_its_seat_and_an_unseated_one_keeps_its_l
     )
     assert agent_trace.identity_from_env("sess-2", env) == agent_trace.Identity(
         session_id="sess-2", agent="s-261007-104655", swarm="rig-grade-swarm-doctor", account="nctcc"
+    )
+    assert agent_trace.identity_from_env("sess-3", {}) == agent_trace.Identity(session_id="sess-3")
+    assert (tmp_path / "home" / "cursor" / "sess-1.seat.json").is_file()
+    (tmp_path / "home" / "cursor" / "sess-4.seat.json").write_text('{"agent": "master@323133-0012"}')
+    assert agent_trace.identity_from_env("sess-4", {}) == agent_trace.Identity(
+        session_id="sess-4", agent="master@323133-0012"
     )
 
 
