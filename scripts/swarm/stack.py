@@ -37,6 +37,15 @@ def _pushed(branch):
         raise SwarmError(f"the worktree holds uncommitted changes; commit them and push {branch} first")
 
 
+def _worktree() -> str:
+    top = _out(["git", "rev-parse", "--show-toplevel"], "cannot locate the worktree")
+    common = _out(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], "cannot locate the repo")
+    root = _out(["bash", str(WT_SCRIPT), "root"], "cannot locate the worktree root")
+    if Path(top).resolve().parent != Path(root).resolve() / Path(common).parent.name:
+        raise SwarmError(f"park removes only a worktree wt.sh new made under {root}; {top} is not one")
+    return top
+
+
 def _issue_ready(row):
     if row.get("issue_url"):
         return
@@ -85,6 +94,7 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     rows = {t["id"]: t for t in state["tasks"]}
     row = rows.get(agent.task) or {}
     _pushed(row.get("branch"))
+    top = _worktree()
     _issue_ready(row)
     open_ = _open_dependencies(row, rows)
     found = handoff_check.problems(text, Resolver(slug, store.redis, ledger.state))
@@ -97,18 +107,12 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     fields = {"parked_on": [b["id"] for b in open_], "stacked_base": base}
     ledger.update_task(slug, agent.task, fields, by=agent.name)
     ledger.comment(slug, agent.task, _ledger_note(open_), by=agent.name)
-    return fields
+    return fields, top
 
 
-def remove_worktree() -> str:
-    try:
-        top = _out(["git", "rev-parse", "--show-toplevel"], "cannot locate the worktree")
-        _out(["bash", str(WT_SCRIPT), "done", Path(top).name, "--repo", top], f"wt.sh done could not remove {top}")
-    except SwarmError as exc:
-        raise SwarmError(
-            f"the task is parked and its seat handed off, but its worktree was not removed: {exc}; "
-            "remove it with wt.sh done"
-        ) from exc
+def remove_worktree(top: str) -> str:
+    refused = f"the task is parked and its seat handed off, but wt.sh done could not remove {top}"
+    _out(["bash", str(WT_SCRIPT), "done", Path(top).name, "--repo", top], refused)
     return top
 
 

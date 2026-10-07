@@ -19,20 +19,28 @@ ISSUE = "https://github.com/o/r/issues/7"
 NOW = 5_000
 NOTE = "The next engineer restacks it onto dev and finishes it."
 READ_FIRST = "- ledger:sw/tasks/t1 the task and its contract\n"
-TOP = "/home/me/dev/worktrees/repo/engineer-a1b2c3-0001"
+ROOT = "/home/me/dev/worktrees"
+TOP = f"{ROOT}/repo/engineer-a1b2c3-0001"
+LOCATE = [
+    ["git", "rev-parse", "--show-toplevel"],
+    ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+    ["bash", str(stack.WT_SCRIPT), "root"],
+]
 REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo", TOP]
 
 
 class Shell:
     def __init__(self):
         self.calls, self.remote, self.issues, self.fail = [], HEAD, json.dumps({"hasIssuesEnabled": True}), ()
-        self.status = ""
+        self.status, self.top = "", TOP
 
     def __call__(self, argv):
         self.calls.append(argv)
         code = 1 if tuple(argv[:3]) in self.fail else 0
         out = {
-            ("git", "rev-parse", "--show-toplevel"): TOP,
+            ("git", "rev-parse", "--show-toplevel"): self.top,
+            ("git", "rev-parse", "--path-format=absolute"): "/home/me/dev/repo/.git",
+            ("bash", str(stack.WT_SCRIPT), "root"): ROOT,
             ("git", "status", "--porcelain"): self.status,
         }.get(tuple(argv[:3])) or {
             ("git", "rev-parse"): HEAD,
@@ -124,6 +132,15 @@ def test_park_refuses_a_worktree_with_uncommitted_changes(parked, capsys):
     assert parked[3].calls[-1] == ["git", "status", "--porcelain"]
 
 
+@pytest.mark.parametrize(
+    "top", ["/elsewhere/engineer-a1b2c3-0001", f"{ROOT}/other/engineer-a1b2c3-0001", "/home/me/dev/repo"]
+)
+def test_park_refuses_a_worktree_outside_the_worktree_script_root(parked, capsys, top):
+    parked[3].top = top
+    _refused(parked, capsys, f"park removes only a worktree wt.sh new made under {ROOT}; {top} is not one")
+    assert parked[3].calls[-3:] == LOCATE
+
+
 def test_park_refuses_a_task_without_an_issue_where_the_repo_has_issues(parked, capsys):
     parked[1].rows["t1"]["issue_url"] = ""
     _refused(parked, capsys, "the repo has issues; open one and run swarm issue before parking")
@@ -140,6 +157,10 @@ def test_park_refuses_an_unreadable_answer_on_issues(parked, capsys):
     ("failing", "says"),
     [
         (("git", "rev-parse", "HEAD"), "cannot read the worktree head"),
+        (("git", "status", "--porcelain"), "cannot inspect the worktree"),
+        (("git", "rev-parse", "--show-toplevel"), "cannot locate the worktree"),
+        (("git", "rev-parse", "--path-format=absolute"), "cannot locate the repo"),
+        (("bash", str(stack.WT_SCRIPT), "root"), "cannot locate the worktree root"),
         (("gh", "repo", "view"), "cannot tell whether the repo has issues"),
         (("git", "fetch", "origin"), "cannot fetch eng-a"),
         (("git", "merge-base", "HEAD"), "eng-a shares no history"),
@@ -194,11 +215,11 @@ def test_park_writes_the_open_dependencies_and_the_stacked_base(parked, capsys):
         ["git", "ls-remote", "--heads", "origin", "eng-t1"],
         ["git", "rev-parse", "HEAD"],
         ["git", "status", "--porcelain"],
+        *LOCATE,
         ["git", "fetch", "origin", "eng-a"],
         ["git", "merge-base", "HEAD", "origin/eng-a"],
         ["git", "rev-list", "--count", BASE],
         ["gh", "issue", "comment", ISSUE, "--body", body],
-        ["git", "rev-parse", "--show-toplevel"],
         REMOVE,
     ]
     assert json.loads(capsys.readouterr().out) == {
@@ -224,20 +245,12 @@ def test_park_removes_the_worktree_only_after_the_seat_is_handed_off(parked, mon
     assert shell.calls[-1] == REMOVE
 
 
-@pytest.mark.parametrize(
-    ("failing", "says"),
-    [
-        (("git", "rev-parse", "--show-toplevel"), "cannot locate the worktree: boom"),
-        (tuple(REMOVE[:3]), f"wt.sh done could not remove {TOP}: boom"),
-    ],
-)
-def test_park_reports_a_worktree_it_could_not_remove_after_parking(parked, capsys, failing, says):
+def test_park_reports_a_worktree_it_could_not_remove_after_parking(parked, capsys):
     store, ledger, _, shell, doc = parked
-    shell.fail = (failing,)
+    shell.fail = (tuple(REMOVE[:3]),)
     assert park(doc) == 1
     assert capsys.readouterr().err == (
-        "swarm: the task is parked and its seat handed off, but its worktree was not removed: "
-        f"{says}; remove it with wt.sh done\n"
+        f"swarm: the task is parked and its seat handed off, but wt.sh done could not remove {TOP}: boom\n"
     )
     assert ledger.rows["t1"]["parked_on"] == ["a"]
     assert store.handoff("sw", "t1") == doc.read_text()

@@ -881,9 +881,9 @@ def cmd_park(store, args):
     agent = _worker(store, args)
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
-    fields = stack.park(store, args.slug, agent, text, ledger)
+    fields, top = stack.park(store, args.slug, agent, text, ledger)
     _hand_off(store, args.slug, agent, text, "exit", ledger)
-    removed = stack.remove_worktree()
+    removed = stack.remove_worktree(top)
     print(
         json.dumps(
             {
