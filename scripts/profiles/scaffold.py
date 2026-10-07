@@ -18,7 +18,7 @@ Your agentihooks profiles, overlays, skills, rules and MCP servers. Layout: the 
 
 - `agentihooks overlay new NAME --wears engineer` adds an overlay under `profiles/`.
 - `agentihooks overlay check NAME` validates it.
-- Commit each change: a rendered agent records the bundle commit it was built from.
+- Commit each change: a rendered agent records the bundle HEAD at render time, and uncommitted edits are not in it.
 - `agentihooks init` applies the bundle.
 """
 

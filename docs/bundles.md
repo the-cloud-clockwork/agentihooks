@@ -19,7 +19,7 @@ agentihooks bundle new ~/dev/my-tools
 agentihooks overlay new backtest-tuner --wears engineer
 agentihooks overlay check backtest-tuner
 
-# Commit it: a rendered agent records the bundle commit it was built from
+# Commit it: a rendered agent records the bundle HEAD at render time; uncommitted edits are not in it
 git -C ~/dev/my-tools add README.md enforcements.json .claude profiles
 git -C ~/dev/my-tools commit -m "Add backtest-tuner overlay"
 

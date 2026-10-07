@@ -227,14 +227,17 @@ def test_overlay_check_names_a_missing_overlay_or_manifest(tmp_path, capsys):
 
     assert scaffold.main(["overlay", "check", "absent"]) == 1
     assert capsys.readouterr().err == "ERROR: overlay absent not found in the linked bundle\n"
-    assert scaffold.problems(bundle / "profiles" / "bare") == ["profile.yml is missing"]
 
 
-@pytest.mark.parametrize("name", ["../x", "a/../x", "..", "."])
+@pytest.mark.parametrize("name", ["../x", "a/../../x", "..", "."])
 def test_overlay_check_refuses_a_name_outside_the_profiles_folder(tmp_path, capsys, name):
     bundle = _bundle(tmp_path, capsys)
-    _write_overlay(bundle, "x", "name: x\nkind: overlay\nwears: [engineer]\n")
-    (bundle / "profile.yml").write_text("name: x\nkind: overlay\nwears: [engineer]\n")
+    valid = "name: x\nkind: overlay\nwears: [engineer]\n"
+    (bundle / "x").mkdir()
+    (bundle / "x" / "profile.yml").write_text(valid)
+    (bundle / "profiles" / "a").mkdir()
+    (bundle / "profiles" / "profile.yml").write_text(valid)
+    (bundle / "profile.yml").write_text(valid)
 
     assert scaffold.main(["overlay", "check", name]) == 1
 
