@@ -256,7 +256,7 @@ def test_a_stop_that_passes_starts_the_count_again(rig):
     assert not rig.stop().allowed
     idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "reviewers", rig.clock[0])
     assert rig.stop().allowed
-    idle.end_wait(rig.store.redis, SLUG, ME)
+    idle.end_wait(rig.store.redis, SLUG, ME, rig.clock[0])
     again = rig.stop()
     assert not again.allowed and again.reason.endswith("(stop block 1 of 2; the next one blocks the task)")
 

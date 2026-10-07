@@ -48,7 +48,7 @@ def checks_resolution(held, github):
     return f"checks on {target}, now {'red' if current.red else 'green'}" if current.resolved else ""
 
 
-def _save_wait(redis, slug, name, previous, held, outcome):
+def _save_wait(redis, slug, name, previous, held, outcome, now_ms):
     key = idle.key(slug, "wait", name)
 
     def update(pipe):
@@ -57,6 +57,7 @@ def _save_wait(redis, slug, name, previous, held, outcome):
         pipe.multi()
         if outcome:
             pipe.delete(key)
+            pipe.set(idle.key(slug, "waited", name), now_ms, ex=idle.BEAT_TTL_S)
         else:
             pipe.set(key, json.dumps(held), keepttl=True)
         return True
@@ -99,7 +100,7 @@ def resolution(held, rows, inbox, github):
     return f"message {target}, now {item.state}" if item.state in CLOSED else ""
 
 
-def end_pass(store, slug, rows, inbox, github):
+def end_pass(store, slug, rows, inbox, github, now_ms):
     ended = []
     for agent in store.agents(slug):
         held = idle.wait(store.redis, slug, agent.name)
@@ -109,7 +110,7 @@ def end_pass(store, slug, rows, inbox, github):
         head = held["on"].get("head")
         outcome = resolution(held["on"], rows, inbox, github)
         if (outcome or held["on"].get("head") != head) and not _save_wait(
-            store.redis, slug, agent.name, previous, held, outcome
+            store.redis, slug, agent.name, previous, held, outcome, now_ms
         ):
             continue
         if not outcome:
