@@ -79,6 +79,24 @@ def test_discrete_share_and_empty_counts_do_not_raise():
         assert spawns.share_drift(_windowed(_picks("a", harnesses, now - 1))) == []
 
 
+@pytest.mark.parametrize(
+    ("codex", "total", "target", "drift"),
+    [
+        (1, 10, 20, False),
+        (3, 10, 20, False),
+        (0, 10, 20, True),
+        (4, 10, 20, True),
+        (1, 11, 20, True),
+        (1, 12, 20, True),
+        (0, 101, 1, True),
+    ],
+)
+def test_share_drift_allows_at_most_one_pick_from_a_steady_target(codex, total, target, drift):
+    now = 2 * spawns.WINDOW_MS
+    record = _windowed(_picks("a", ["codex"] * codex + ["claude"] * (total - codex), now - 1)) | {"target": target}
+    assert bool(spawns.share_drift(record)) is drift
+
+
 def test_share_drift_excludes_picks_at_or_before_the_target_change():
     now = 2 * spawns.WINDOW_MS
     old = _picks("old", ["codex"] * 4 + ["claude"] * 13, now - 100)
