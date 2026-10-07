@@ -162,3 +162,17 @@ def test_audit_reports_all_real_hashes_and_ignores_operator_and_deleted_entries(
 def test_audit_without_tasks_still_reports_real_hashes():
     doc = {"chat": [{"id": "chat", "by": "engineer", "text": "Merged a637e5ff"}]}
     assert ledger_comments.audit(doc) == [("chat", "chat", "engineer", ["commit hash 'a637e5ff'"])]
+
+
+def test_a_write_reconciles_the_ledger_once(ledger_page, monkeypatch):
+    from scripts.swarm_ledger.repository import file
+
+    calls = []
+    sync = file.sync
+    monkeypatch.setattr(file, "sync", lambda *args, **kwargs: calls.append(args) or sync(*args, **kwargs))
+    text = "Cut from the plan of task fx-8be892c4-code: more work"
+    op = {"op": "add", "id": "once", "by": "engineer", "thread": "tasks/fx-8be892c4-code/comments", "text": text}
+    status, state = ledger_page(op)
+    assert status == 200, state
+    assert state["rejected"] == []
+    assert len(calls) == 1
