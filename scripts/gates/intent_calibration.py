@@ -21,7 +21,7 @@ def recorded(answers):
 def verdicts(case, side):
     if side == "before":
         return [sample["verdict"] for sample in case["samples"]["before"]]
-    return [intent.judge(case["state"], decide=recorded(sample["answers"]))[0] for sample in case["samples"]["after"]]
+    return [intent.judge(case["state"], decide=recorded(sample["answers"]))[0] for sample in case["samples"][side]]
 
 
 def side_of(corpus, side):

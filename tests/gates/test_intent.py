@@ -280,6 +280,11 @@ class TestJudge:
             "probability 0.50",
         )
         assert intent.judge({}, decide=classifier(0.96, weakens=0.49))[0] == "pass"
+        assert intent.judge({}, decide=classifier(0.3, weakens=0.6)) == (
+            "fail",
+            "the phase can use this change at probability 0.30; the change may weaken what the phase builds, at "
+            "probability 0.60",
+        )
 
     def test_an_unusable_change_that_also_weakens_the_phase_names_both(self):
         assert intent.judge({}, decide=classifier(0.1, delivers=0.2, weakens=0.97)) == (

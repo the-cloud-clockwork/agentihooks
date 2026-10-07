@@ -67,7 +67,40 @@ def test_no_fewer_wrong_verdicts_is_not_a_calibration(corpus):
     assert (result["before"]["wrong"], result["after"]["wrong"], result["calibrated"]) == (9, 9, False)
 
 
-@pytest.mark.parametrize("argv", [[], [str(CORPUS)]])
-def test_main_prints_the_measurement_of_the_corpus(argv, corpus, capsys):
-    assert intent_calibration.main(argv) == 0
-    assert json.loads(capsys.readouterr().out) == intent_calibration.measure(corpus)
+def tiny(after_control, after_case):
+    def case(cid, control, expected, before, after):
+        return {
+            "id": cid,
+            "control": control,
+            "expected": expected,
+            "state": {},
+            "samples": {
+                "before": [{"verdict": before}],
+                "after": [{"answers": {"usable": after, "delivers": 0.9, "reachable": 0.9, "weakens": 0.0}}],
+            },
+        }
+
+    return {"cases": [case("c", True, "fail", "fail", after_control), case("p", False, "pass", "fail", after_case)]}
+
+
+def test_the_same_controls_with_fewer_wrong_verdicts_is_a_calibration():
+    assert intent_calibration.measure(tiny(0.1, 0.9)) == {
+        "cases": 2,
+        "controls": 1,
+        "before": {"samples": 2, "wrong": 1, "wrong_cases": ["p"], "controls_rejected": ["c"]},
+        "after": {"samples": 2, "wrong": 0, "wrong_cases": [], "controls_rejected": ["c"]},
+        "calibrated": True,
+    }
+
+
+def test_main_prints_the_measurement_of_the_default_corpus(corpus, capsys):
+    assert intent_calibration.main([]) == 0
+    assert capsys.readouterr().out == json.dumps(intent_calibration.measure(corpus), indent=1) + "\n"
+
+
+def test_main_reads_the_corpus_named_on_the_command_line(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "corpus.json"
+    path.write_text(json.dumps(tiny(0.1, 0.9)))
+    monkeypatch.setattr("sys.argv", ["intent_calibration", str(path)])
+    assert intent_calibration.main() == 0
+    assert capsys.readouterr().out == json.dumps(intent_calibration.measure(tiny(0.1, 0.9)), indent=1) + "\n"
