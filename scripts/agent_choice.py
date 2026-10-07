@@ -109,7 +109,6 @@ def choose_shared(
 
 
 def choice_kind(reason: str) -> str:
-    """share when the share rule decided, overflow when the preferred agent was full or out of quota, forced when requested."""
     if reason == "requested":
         return "forced"
     if reason == "priority" or reason.startswith("codex share "):
