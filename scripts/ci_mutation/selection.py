@@ -174,7 +174,7 @@ def run_selected(selection: Path) -> None:
         config = runner.Config.get()
         relative = config.source_paths
         config.source_paths = [(Path("mutants") / path).resolve() for path in relative]
-        shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, os.cpu_count() or 1)
+        shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, len(os.sched_getaffinity(0)))
         try:
             collect_parallel_stats(runner, test_runner, shards, Path.cwd())
         finally:

@@ -140,6 +140,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     (project / "hooks").mkdir()
     (project / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["hooks/"]\n')
     monkeypatch.setattr("os.cpu_count", lambda: 6)
+    monkeypatch.setattr("os.sched_getaffinity", lambda pid: set(range(6)) if pid == 0 else set())
     selection = tmp_path / "lines.json"
     selection.write_text(
         json.dumps(
@@ -196,7 +197,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         def run_tests(self, *, mutant_name, tests):
             assert isinstance(self, PytestRunner)
             test_calls.append((mutant_name, tests))
-            return 0
+            return 9
 
     runner = SimpleNamespace(
         collect_or_load_stats=None,
@@ -255,7 +256,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         assert engine_config.Config.get().source_paths == [Path("scripts/")]
         assert Path.cwd() == cwd
         assert calls == [("scripts/sample.py", "source", {2, 5})]
-        assert runner.PytestRunner().run_tests(mutant_name=None, tests=[]) == 0
+        assert runner.PytestRunner().run_tests(mutant_name=None, tests=[]) == 9
         assert runner.collect_or_load_stats(test_runner) is None
         assert collected == [True]
         assert config.source_paths == [Path("hooks/")]
@@ -266,7 +267,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
             "scripts.unselected.x_u": set(),
         }
         assert control("", []) == 0
-        assert control("fail", []) == 0
+        assert control("fail", []) == 9
         runner.PytestRunner().run_tests(mutant_name=None, tests=["tests/test_x.py::t"])
         runner.PytestRunner().run_tests(mutant_name="m", tests=["tests/test_y.py::t"])
         assert test_calls == [
@@ -375,6 +376,14 @@ def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_pat
     ]
     assert stats_shards(tmp_path, files, 1) == [files]
     assert stats_shards(tmp_path, files[:1], 8) == [["tests/test_a.py"]]
+    bridge = tmp_path / "bridge"
+    (bridge / "tests").mkdir(parents=True)
+    marks = {"w": "", "x": '"one"', "y": '"one")\n@pytest.mark.xdist_group("two"', "z": '"two"'}
+    for name, mark in marks.items():
+        text = f"import pytest\n\n@pytest.mark.xdist_group({mark})\ndef test_x(): pass\n" if mark else "pass\n"
+        (bridge / f"tests/test_{name}.py").write_text(text)
+    bridged = [f"tests/test_{name}.py" for name in marks]
+    assert stats_shards(bridge, bridged, 4) == [bridged[1:], bridged[:1]]
     (tmp_path / ".test_durations").unlink()
     assert stats_shards(tmp_path, files, 3) == [
         ["tests/test_b.py", "tests/test_d.py"],
