@@ -859,11 +859,12 @@ def test_legacy_reader_prefers_registered_assigned_harness(monkeypatch, proof_ha
     assert HerdrRuntime().bindings([agent]) == {"engineer": {"pid": 22}}
 
 
-def test_legacy_master_relaunch_uses_its_declared_profile(ticking):
+@pytest.mark.parametrize("lanes", [{"master": {"profile": "master"}}, {}])
+def test_legacy_master_relaunch_uses_its_declared_profile(ticking, lanes):
     from scripts.swarm.tick import tick
 
     store, runtime, ledger = ticking
-    store.update("sw", lanes={"master": {"profile": "master"}})
+    store.update("sw", lanes=lanes)
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "master")
     store.put_agent("sw", replace(old, model="opus", effort="high"))
@@ -876,3 +877,18 @@ def test_legacy_master_relaunch_uses_its_declared_profile(ticking):
     assert saved["profile"] == "master"
     assert saved["model"] == "opus"
     assert saved["effort"] == "high"
+
+
+def test_legacy_worker_relaunch_prefers_explicit_task_profile(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    ledger.rows["one"]["profile"] = "qa"
+    store.update("sw", lanes={"eng": {"profile": "engineer"}})
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    runtime.bindings = lambda agents: {
+        a.name: {**live_binding.assignment(a), "hooks": a.name != old.name} for a in agents
+    }
+    tick("sw", store, ledger, runtime, 200)
+    assert runtime.tasks[-1]["launch_assignment"]["profile"] == "qa"

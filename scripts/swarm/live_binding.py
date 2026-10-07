@@ -105,6 +105,17 @@ def assignment(agent: AgentRecord) -> dict:
     }
 
 
+def relaunch_assignment(agent: AgentRecord, task: dict, config) -> dict:
+    from scripts.swarm.templates import DEFAULT_PROFILES
+
+    saved = {**assignment(agent), "seat": agent.seat}
+    if not saved["profile"]:
+        saved["profile"] = (
+            task.get("profile") or config.lanes.get(agent.lane, {}).get("profile") or DEFAULT_PROFILES[agent.lane]
+        )
+    return saved
+
+
 def bound_session(agent: AgentRecord, sessions: list[Session]) -> Session | None:
     named = {s.process.pid: s for s in sessions if s.name == agent.name}
     validated = agent.profile_decision.get("validation", {}).get("pid")
