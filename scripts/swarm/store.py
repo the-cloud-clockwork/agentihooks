@@ -247,6 +247,13 @@ class RedisStore:
 
     def reset_claims(self, slug, task):
         self.redis.hdel(self.key(slug, "claims"), task)
+        self.redis.hdel(self.key(slug, "launch-failures"), task)
+
+    def note_launch_failure(self, slug, task, reason):
+        self.redis.hset(self.key(slug, "launch-failures"), task, reason)
+
+    def launch_failure(self, slug, task):
+        return self.redis.hget(self.key(slug, "launch-failures"), task) or ""
 
     def put_restored(self, slug, outcomes):
         self.redis.set(self.key(slug, "restored"), json.dumps(outcomes))

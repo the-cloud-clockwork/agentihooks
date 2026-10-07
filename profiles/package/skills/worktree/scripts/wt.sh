@@ -7,7 +7,7 @@
 # it from inside another worktree still resolves the real repo.
 #
 # Usage:
-#   wt.sh new  [name] [--repo DIR]            # worktree + branch <name> off fresh origin/<base>; prints the path
+#   wt.sh new  [name] [--repo DIR] [--from REF]  # worktree + branch <name> off fresh origin/<base> (or REF); prints the path
 #   wt.sh tmp  [name] [--repo DIR] [--from REF]  # throwaway detached worktree under <repo>/_tmp/; prints the path
 #   wt.sh ls   [--repo DIR | --all]           # branch, dirty, ahead/behind origin/<base>
 #   wt.sh done <name> [--repo DIR] [--force]  # remove a worktree + its local branch, pull origin/<base> into the primary checkout
@@ -136,11 +136,15 @@ case "${cmd}" in
     [[ -e "${DEST}" ]] && die "worktree path already exists: ${DEST}"
     preflight
     git -C "${REPO}" fetch origin "${BASE}" --quiet || die "cannot fetch origin/${BASE} in ${REPO}"
+    if [[ "${FROM_REF}" == origin/* && "${FROM_REF}" != "origin/${BASE}" ]]; then
+      git -C "${REPO}" fetch origin "${FROM_REF#origin/}" --quiet || die "cannot fetch ${FROM_REF} in ${REPO}"
+    fi
+    git -C "${REPO}" rev-parse --verify --quiet "${FROM_REF}^{commit}" >/dev/null || die "unknown ref '${FROM_REF}'"
     mkdir -p "${WT_DIR}"
     if git -C "${REPO}" show-ref --verify --quiet "refs/heads/${NAME}"; then
       git -C "${REPO}" worktree add "${DEST}" "${NAME}" >&2
     else
-      git -C "${REPO}" worktree add --no-track -b "${NAME}" "${DEST}" "origin/${BASE}" >&2
+      git -C "${REPO}" worktree add --no-track -b "${NAME}" "${DEST}" "${FROM_REF}" >&2
     fi
     lease "${DEST}" worktree
     echo "${DEST}"

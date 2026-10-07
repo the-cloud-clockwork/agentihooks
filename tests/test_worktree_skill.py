@@ -236,6 +236,59 @@ class BaseBranch(WtBase):
         self.assertTrue((Path(result.stdout.strip()) / "trunk.txt").is_file())
 
 
+class FromRef(WtBase):
+    def setUp(self):
+        super().setUp()
+        other = Path(self.tmp) / "other"
+        _git(Path(self.tmp), "clone", "--quiet", str(self.origin), str(other), env=self.gitenv)
+        _git(other, "checkout", "--quiet", "-b", "dep", env=self.gitenv)
+        (other / "dep.txt").write_text("dependency work\n")
+        _git(other, "add", "dep.txt", env=self.gitenv)
+        _git(other, "commit", "--quiet", "-m", "dep", env=self.gitenv)
+        _git(other, "push", "--quiet", "origin", "dep", env=self.gitenv)
+        self.dep_sha = self.rev(other, "HEAD")
+        self.dev_sha = self.rev(self.origin, "dev")
+
+    def rev(self, repo, ref):
+        return subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", ref], capture_output=True, text=True, env=self.gitenv
+        ).stdout.strip()
+
+    def test_new_from_a_ref_starts_at_that_ref(self):
+        result = self.run_wt("new", "stacked", "--repo", str(self.primary), "--from", "origin/dep")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        dest = Path(result.stdout.strip())
+        self.assertEqual(dest, self.worktree_root / "primary" / "stacked")
+        self.assertEqual(self.branch_of(dest), "stacked")
+        self.assertEqual(self.rev(dest, "HEAD"), self.dep_sha)
+        self.assertTrue((dest / "dep.txt").is_file())
+
+    def test_new_without_from_starts_at_origin_dev(self):
+        result = self.run_wt("new", "plain", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        dest = Path(result.stdout.strip())
+        self.assertEqual(self.rev(dest, "HEAD"), self.dev_sha)
+        self.assertFalse((dest / "dep.txt").exists())
+
+    def test_new_refuses_an_unknown_ref_and_leaves_nothing(self):
+        result = self.run_wt("new", "orphan", "--repo", str(self.primary), "--from", "origin/no-such-branch")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.worktree_root / "primary" / "orphan").exists())
+        self.assertFalse(self.branch_exists("orphan"))
+
+    def test_new_from_a_ref_still_refuses_protected_names(self):
+        result = self.run_wt("new", "dev", "--repo", str(self.primary), "--from", "origin/dep")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("protected branch name", result.stderr)
+
+    def test_done_still_judges_merged_against_origin_dev(self):
+        self.run_wt("new", "stacked-done", "--repo", str(self.primary), "--from", "origin/dep")
+        result = self.run_wt("done", "stacked-done", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.branch_exists("stacked-done"))
+        self.assertIn("commits not on origin/dev", result.stderr)
+
+
 class Lease(WtBase):
     def test_new_and_tmp_record_the_owner_through_agentihooks(self):
         log = Path(self.tmp) / "lease.log"
