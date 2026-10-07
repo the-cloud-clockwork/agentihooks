@@ -16,6 +16,10 @@ from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 authority_live = _authority_live
 
 
+_talk_marks = server.talk.Budget._marks
+_talk_init = server.talk.Budget.__init__
+
+
 @pytest.fixture
 def live(authority_live):
     from tests.swarm_ledger.test_ledger_authority import core, new_ledger
@@ -287,9 +291,31 @@ def test_operator_write_reaches_inbox_once(live, monkeypatch):
 
 
 def test_versioned_upload_validates_headers_and_binds_the_uploader(live):
-    from tests.swarm_ledger.test_ledger_authority import authority
+    from tests.swarm_ledger.test_ledger_authority import authority, core
 
+    core.sync(
+        SLUG,
+        ops=[
+            {
+                "op": "task_add",
+                "id": "upload-task",
+                "by": "swarm",
+                "task": "t1",
+                "title": "Proof",
+                "lane": "eng",
+                "artifact": True,
+            },
+            {
+                "op": "task_update",
+                "id": "upload-claim",
+                "by": "swarm",
+                "item": "tasks/t1",
+                "fields": {"state": "claimed", "claimed_by": "api-reader"},
+            },
+        ],
+    )
     headers = {
+        "X-Artifact-Request": json.dumps({"task": "t1", "title": "Proof"}),
         "X-Ledger-Agent": "api-reader",
         "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, "api-reader"),
         "Content-Type": "application/octet-stream",
@@ -863,7 +889,7 @@ def test_artifact_collection_and_lifecycle_keep_domain_state(live, tmp_path):
     )
     source = tmp_path / "proof.md"
     source.write_text("# Requested proof")
-    file = ledger.upload_artifact(SLUG, "api-reader", str(source))
+    file = ledger.upload_artifact(SLUG, "api-reader", str(source), {"task": "t1", "title": "Proof"})
     published = {
         "op": "artifact_add",
         "id": "published-artifact",
@@ -1013,7 +1039,9 @@ def test_versioned_logs_exclude_query_and_bearer(live, capsys):
     capsys.readouterr()
     original = server.time.strftime
     with patch.object(server.time, "strftime", side_effect=lambda fmt, *args: original(fmt, clock.timetuple())):
-        status, _ = request(live, "GET", "metadata?token=private-canary", **{"X-Ledger-Token": "credential-canary"})
+        status, _ = request(
+            live, "GET", "metadata?token=private-canary?tail", **{"X-Ledger-Token": "credential-canary"}
+        )
     assert status == 403
     logged = capsys.readouterr().err
     assert logged == f"09:00:00 GET /api/v1/ledgers/{SLUG}/metadata\n"
@@ -1209,3 +1237,346 @@ def test_oversized_task_state_fields_fall_back_to_ack(live, monkeypatch):
         "task_rows_omitted": True,
     }
     assert len(json.dumps(reply).encode()) <= MAX_REPLY
+
+
+def test_alert_operations_use_guarded_resources(live):
+    status, before = request(live, "GET", "alerts")
+    assert status == 200
+    assert before["data"]
+    target = before["data"][0]["id"]
+    for kind, fields in (("alert_claim", {}), ("alert_close", {"outcome": "Checked"})):
+        payload = {
+            "ops": [{"op": kind, "id": uuid.uuid4().hex, "target": target, **fields}],
+            "guards": {"alerts": before["revision"]},
+        }
+        status, result = request(live, "POST", "operations", payload)
+        assert status == 200
+        assert result["rejected"] == []
+        status, before = request(live, "GET", "alerts")
+        assert status == 200
+    row = next(row for row in before["data"] if row["id"] == target)
+    assert row["state"] == "done"
+    assert row["outcome"] == "Checked"
+
+
+def test_global_summary_items_and_missing_resources(live):
+    status, data, _ = send(live, "GET", "/api/v1/ledgers")
+    assert status == 200
+    assert SLUG in [row["slug"] for row in json.loads(data)["data"]]
+    status, data, _ = send(
+        live,
+        "POST",
+        "/api/v1/bin/actions",
+        json.dumps({"action": "delete", "slug": SLUG}).encode(),
+        **{"Origin": sorted(server.ALLOWED_ORIGINS)[0], "Content-Type": "application/json"},
+    )
+    assert status == 200
+    status, data, _ = send(live, "GET", f"/api/v1/bin/{SLUG}")
+    assert status == 200
+    assert json.loads(data)["data"]["slug"] == SLUG
+    status, data, _ = send(live, "GET", "/api/v1/ledgers")
+    assert status == 200
+    assert SLUG not in [row["slug"] for row in json.loads(data)["data"]]
+    for path, message in (
+        ("/api/v1/bin/absent", "No such summary"),
+        ("/api/v1/missing", "No such resource"),
+        ("/api/v1/bin/extra/path", "No such resource"),
+    ):
+        status, data, _ = send(live, "GET", path)
+        assert (status, json.loads(data)) == (404, {"error": {"code": "resource_missing", "message": message}})
+
+
+def test_named_swarm_export_and_missing_operations(live, monkeypatch):
+    state = {"slug": SLUG, "agents": [{"name": "engineer", "detail": "x" * 300000}], "mode": "running"}
+    monkeypatch.setattr(server, "swarm_status", lambda slug: state)
+    assert request(live, "POST", "swarm/export", {}) == (200, {"data": state})
+    assert request(live, "GET", "swarm/agents")[0] == 413
+    assert request(live, "GET", "swarm/missing") == (
+        404,
+        {"error": {"code": "resource_missing", "message": "No such swarm resource"}},
+    )
+    monkeypatch.setattr(server, "swarm_status", lambda slug: None)
+    for method, path, payload in (("POST", "swarm/export", {}), ("GET", "swarm", None)):
+        assert request(live, method, path, payload) == (
+            404,
+            {"error": {"code": "swarm_missing", "message": "No swarm for this ledger"}},
+        )
+    assert request(live, "POST", "missing-operation", {}) == (
+        404,
+        {"error": {"code": "resource_missing", "message": "No such operation resource"}},
+    )
+
+
+def test_operator_doctor_phrase_keeps_the_ledger(live, monkeypatch):
+    from unittest.mock import Mock
+
+    doctor = Mock()
+    monkeypatch.setattr(server, "doctor_phrase", doctor)
+    revision = request(live, "GET", "chat")[1]["revision"]
+    payload = {
+        "ops": [{"op": "add", "id": "doctor-stop", "thread": "chat", "text": server.DOCTOR_PHRASE}],
+        "guards": {"chat": revision},
+    }
+    status, result = request(live, "POST", "operations", payload)
+    assert status == 200
+    doctor.assert_called_once()
+    slug, state = doctor.call_args.args
+    assert slug == SLUG
+    assert state["_meta"]["rev"] == result["_meta"]["rev"]
+    assert state["chat"][-1]["text"] == server.DOCTOR_PHRASE
+
+
+def test_mutations_enforce_the_ledger_talk_budget(live, monkeypatch):
+    import fakeredis
+
+    from scripts.gates import progress, talk
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    store = RedisStore(redis)
+    store.create(SwarmConfig(SLUG, "repo", 1, 1))
+    store.update(SLUG, gates={"talk": "enforce"})
+    worker = "engineer@323133-0440"
+    marks = progress.Progress(redis, SLUG)
+    for _ in range(talk.BUDGET):
+        marks.talk(worker)
+
+    def budget(gate, slug):
+        _talk_init(gate, slug, connect=lambda: redis)
+
+    monkeypatch.setattr(talk.Budget, "_marks", _talk_marks)
+    monkeypatch.setattr(talk.Budget, "__init__", budget)
+    revision = request(live, "GET", "chat")[1]["revision"]
+    payload = {
+        "ops": [{"op": "add", "id": "budget-denied", "thread": "chat", "text": "Beyond the budget", "by": worker}],
+        "guards": {"chat": revision},
+    }
+    status, result = request(live, "POST", "operations", payload)
+    assert status == 200
+    assert result["applied"] == []
+    assert result["rejected"] == ["budget-denied"]
+    assert result["_meta"]["warnings"] == [
+        "phase p1 description has 101 words, limit 100",
+        talk.refusal(worker, talk.BUDGET, SLUG),
+    ]
+    assert request(live, "GET", "chat")[1]["revision"] == revision
+    assert marks.read(worker).talk == talk.BUDGET
+
+
+def test_uploaded_media_is_resolved_in_the_mutation_thread(live):
+    from io import BytesIO
+
+    from PIL import Image
+
+    media = BytesIO()
+    Image.new("RGB", (2, 3), "white").save(media, format="PNG")
+    status, data, _ = send(
+        live,
+        "POST",
+        f"/api/v1/ledgers/{SLUG}/uploads/media",
+        media.getvalue(),
+        **{
+            "X-Ledger-Token": live["admin"],
+            "Content-Type": "application/octet-stream",
+            "X-Artifact-Name": "proof.png",
+            "Origin": sorted(server.ALLOWED_ORIGINS)[0],
+        },
+    )
+    assert status == 200
+    descriptor = json.loads(data)
+    revision = request(live, "GET", "phases/p1/comments")[1]["revision"]
+    payload = {
+        "ops": [
+            {
+                "op": "add",
+                "id": "media-comment",
+                "thread": "phases/p1/comments",
+                "text": "Image",
+                "attachments": [{"id": descriptor["id"]}],
+            }
+        ],
+        "guards": {"phases/p1/comments": revision},
+    }
+    status, result = request(live, "POST", "operations", payload)
+    assert status == 200
+    assert result["applied"] == ["media-comment"]
+    attachments = request(live, "GET", "phases/p1/comments")[1]["data"][0]["attachments"]
+    assert [{key: row[key] for key in descriptor} for row in attachments] == [descriptor]
+    assert attachments[0]["width"] == 2
+    assert attachments[0]["height"] == 3
+
+
+def test_metadata_guard_changes_only_with_its_content(live):
+    before = request(live, "GET", "metadata")[1]
+    payload = {
+        "ops": [{"op": "title_set", "id": "title-first", "text": "Changed"}],
+        "guards": {"metadata": before["revision"]},
+    }
+    assert request(live, "POST", "operations", payload)[0] == 200
+    after = request(live, "GET", "metadata")[1]
+    assert after["revision"] != before["revision"]
+    payload = {
+        "ops": [{"op": "title_set", "id": "title-stale", "text": "Lost"}],
+        "guards": {"metadata": before["revision"]},
+    }
+    assert request(live, "POST", "operations", payload) == (
+        409,
+        {"error": {"code": "revision_conflict", "message": "Resource changed since the expected revision"}},
+    )
+    assert request(live, "GET", "metadata")[1]["data"]["title"] == "Changed"
+
+
+def test_one_resource_guard_covers_a_batch_and_its_retry(live):
+    revision = request(live, "GET", "chat")[1]["revision"]
+    payload = {
+        "ops": [
+            {"op": "add", "id": f"batch-{index}", "thread": "chat", "text": f"Batch {index}"} for index in range(2)
+        ],
+        "guards": {"chat": revision},
+    }
+    first = request(live, "POST", "operations", payload)
+    assert first[0] == 200
+    assert first[1]["applied"] == ["batch-0", "batch-1"]
+    assert first[1]["rejected"] == []
+    assert request(live, "POST", "operations", payload) == first
+    assert [row["text"] for row in request(live, "GET", "chat")[1]["data"]][-2:] == ["Batch 0", "Batch 1"]
+
+
+def test_exact_error_detail_limits():
+    from scripts.swarm_ledger.api.errors import APIError
+
+    warnings = [f"{index}:" + "w" * 1500 for index in range(22)]
+    error = APIError(403, "forbidden", "m" * 1200, {"rejected": ["request"], "_meta": {"warnings": warnings}})
+    assert error.envelope() == {
+        "error": {
+            "code": "forbidden",
+            "message": "m" * 1000,
+            "details": {"rejected": ["request"], "_meta": {"warnings": [item[:1000] for item in warnings[-20:]]}},
+        }
+    }
+    error = APIError(403, "forbidden", "Refused", {"rejected": ["request"], "optional": "x" * 300000})
+    assert error.envelope() == {
+        "error": {"code": "forbidden", "message": "Refused", "details": {"rejected": ["request"]}}
+    }
+
+
+def test_duplicate_ids_and_short_ids_keep_the_schema(live):
+    before = request(live, "GET", "metadata")[1]
+    payload = {
+        "ops": [{"op": "sync", "id": "same"}, {"op": "sync", "id": "same"}],
+        "guards": {"metadata": before["revision"]},
+    }
+    assert request(live, "POST", "operations", payload) == (
+        400,
+        {"error": {"code": "schema_invalid", "message": "Operation identifiers must be distinct"}},
+    )
+    assert request(live, "GET", "metadata")[1] == before
+    payload = {"operation_id": "a", "ops": [{"op": "sync", "id": "a"}], "guards": {"metadata": before["revision"]}}
+    status, result = request(live, "POST", "operations", payload)
+    assert status == 200
+    assert result["applied"] == ["a"]
+    for path in ("chat?limit=", "chat?cursor="):
+        assert request(live, "GET", path)[0] == 400
+
+
+def test_layout_schema_and_bin_refusals_preserve_state(live, monkeypatch):
+    origin = {"Origin": sorted(server.ALLOWED_ORIGINS)[0], "Content-Type": "application/json"}
+    initial = json.loads(send(live, "GET", "/api/v1/layout")[1])
+    for payload in (
+        {"capacity-box": {}},
+        {"capacity-box": {"height": True}},
+        {"capacity-box": {"unknown": 1}},
+        {"unknown": {"height": 1}},
+    ):
+        status, data, _ = send(live, "PUT", "/api/v1/layout", json.dumps(payload).encode(), **origin)
+        assert (status, json.loads(data)) == (
+            400,
+            {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}},
+        )
+        assert json.loads(send(live, "GET", "/api/v1/layout")[1]) == initial
+    status, data, _ = send(live, "PUT", "/api/v1/layout", b'{"capacity-box":{"height":-1}}', **origin)
+    assert (status, json.loads(data)) == (
+        400,
+        {"error": {"code": "schema_invalid", "message": "Layout sizes are out of range"}},
+    )
+    for payload in (
+        {},
+        {"action": "delete"},
+        {"slug": SLUG},
+        {"action": "invalid", "slug": SLUG},
+        {"action": "delete", "slug": SLUG, "extra": True},
+    ):
+        status, data, _ = send(live, "POST", "/api/v1/bin/actions", json.dumps(payload).encode(), **origin)
+        assert (status, json.loads(data)) == (
+            400,
+            {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}},
+        )
+    monkeypatch.setattr(server.ledger_bin, "restore", lambda slug: False)
+    for payload, code, message in (
+        ({"action": "delete", "slug": "absent"}, "ledger_missing", "No such ledger"),
+        ({"action": "restore", "slug": SLUG}, "resource_missing", "Ledger is not in the bin"),
+    ):
+        status, data, _ = send(live, "POST", "/api/v1/bin/actions", json.dumps(payload).encode(), **origin)
+        assert (status, json.loads(data)) == (404, {"error": {"code": code, "message": message}})
+    assert request(live, "GET", "metadata")[0] == 200
+
+
+def test_bin_delete_stops_its_running_swarm(live, monkeypatch):
+    from unittest.mock import Mock
+
+    control = Mock(return_value=(None, "Stop failed"))
+    monkeypatch.setattr(server, "swarm_status", lambda slug: {"mode": "running"})
+    monkeypatch.setattr(server, "swarm_control", control)
+    status, data, _ = send(
+        live,
+        "POST",
+        "/api/v1/bin/actions",
+        json.dumps({"action": "delete", "slug": SLUG}).encode(),
+        **{"Origin": sorted(server.ALLOWED_ORIGINS)[0], "Content-Type": "application/json"},
+    )
+    assert (status, json.loads(data)) == (200, {"slug": SLUG, "action": "delete", "swarm_error": "Stop failed"})
+    control.assert_called_once_with(SLUG, ["stop", "--now"])
+
+
+def test_swarm_shapes_revisions_and_stale_cursor(live, monkeypatch):
+    from scripts.swarm_ledger.api.resources import revision
+
+    state = {"slug": SLUG, "running": True, "agents": [{"name": "one"}, {"name": "two"}]}
+    monkeypatch.setattr(server, "swarm_status", lambda slug: state)
+    assert request(live, "GET", "swarm") == (
+        200,
+        {
+            "data": {"slug": SLUG, "running": True},
+            "revision": revision({"slug": SLUG, "running": True}),
+            "collections": ["agents"],
+        },
+    )
+    status, first = request(live, "GET", "swarm/agents?limit=1")
+    assert status == 200
+    assert first["revision"] == revision(state["agents"])
+    state["agents"][1]["name"] = "changed"
+    assert request(live, "GET", f"swarm/agents?cursor={first['next_cursor']}") == (
+        409,
+        {"error": {"code": "revision_conflict", "message": "Collection changed; restart pagination"}},
+    )
+
+
+def test_item_ids_and_absent_threads(live):
+    member = request(live, "GET", "members/api-reader")[1]["data"]
+    assert member["id"] == "api-reader"
+    assert request(live, "GET", "chat/seed-chat-one/missing") == (
+        404,
+        {"error": {"code": "resource_missing", "message": "No such resource"}},
+    )
+    revision = request(live, "GET", "tasks")[1]["revision"]
+    payload = {
+        "ops": [
+            {"op": "task_add", "id": "empty-comments", "by": "swarm", "task": "t1", "title": "Empty", "lane": "eng"}
+        ],
+        "guards": {"tasks": revision},
+    }
+    assert request(live, "POST", "operations", payload)[0] == 200
+    status, result = request(live, "GET", "tasks/t1/comments")
+    assert status == 200
+    assert result["data"] == []
+    assert result["next_cursor"] is None

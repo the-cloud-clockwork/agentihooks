@@ -1490,5 +1490,109 @@
   "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_22:6a85ce261f0886cdf92c8f7e20df9548386a579447cfe54d73e421c8dff9b62c": {
     "reader": "Standards /root/standards_reader",
     "reason": "The HTTPMessage Origin lookup changes only key case. Supplied and missing origins are identical before the unchanged origin guard."
+  },
+  "39527dff6e087777e1ef09b33c3d34f2c3de02278d8108cc3d40bf0e1efd7fb5": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The ERROR replacement is only inside the byte-size probe. error and ERROR are both five ASCII bytes, so the complete serialized envelope has the same size for every error body. The actual returned key remains error. Probe: resources.reply_size original and mutant wrappers identical for simple, large Unicode/escaped, and nested list bodies."
+  },
+  "0dbea00798dd14757ba6912e4459816025b0932a92bc0136818e24c66a87143d": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only the first result of str.split is observed. Removing maxsplit or raising it from one to two cannot change the substring preceding the first question mark for any path. Exhaustive probe of 127 strings over a and question mark agreed; separator order and output are unchanged."
+  },
+  "94a7b9ceb60ad060b8129d66ee091384a2e80d127c91150a53bb0948d02f67d9": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only the first result of str.split is observed. Removing maxsplit or raising it from one to two cannot change the substring preceding the first question mark for any path. Exhaustive probe of 127 strings over a and question mark agreed; separator order and output are unchanged."
+  },
+  "1c523ae47621f0f452bf06431ed0c1dec5165e2550b25710a6743efaf55e3fb0": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares header names case insensitively. Origin lower/upper lookup gives identical present and absent values to the unchanged allowlist and mutation path. Independent runtime HTTPMessage probe confirmed equal values."
+  },
+  "1d9e588a87e83d2cead02d078930b6408fec0a5d431853a06931bfb4697f2d0c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares header names case insensitively. Origin lower/upper lookup gives identical present and absent values to the unchanged allowlist and mutation path. Independent runtime HTTPMessage probe confirmed equal values."
+  },
+  "8992015cecb6d3f6d21b744b2c95b15be085e1e6bee32f8ee6a68e36de847f21": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares Content-Length field names case insensitively, so the same length, integer conversion, byte read and response follow."
+  },
+  "32f5ba45b417fd06db6d6f88a9d17ec9211ca22f6c9530c4a497ba28806c9234": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares X-Ledger-Agent field names case insensitively. The identical value reaches the unchanged authority.principal call, preserving identity, status, state and response."
+  },
+  "877ff91415756217772a905b59e33d239fd35ed7b1c9e04ed7a7d4170ad3fbf2": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "With a supplied Content-Length the changed default is unused. Without that header the original converts zero then raises ValueError; mutant int of XX0XX raises ValueError. The same except branch returns the exact same 400 schema_invalid bounded-body envelope before reading state. Independent extracted-function probe confirmed equality."
+  },
+  "814c2e6ff51e1107a2dc3d9deb83a365cb582aec9117ea5efe03a38d142ae96a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only length zero differs. Original rejects before reading; mutant reads zero bytes and core.loads empty bytes raises ValueError, leading to the identical stable envelope. All positive and negative lengths take identical branches. Independent extracted-function probe confirmed zero-length equality."
+  },
+  "88e3078bf07b8ecea71a08ebdd4a4387f2941cf0e339f9dc8ddf20d105c8399a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "MUTATION validation enforces every ops array item has type object before check_operations calls operation_schema. Removing only the second object check does not change any accepted or rejected HTTP input or envelope. Exported central schema and call order verify reachability; 205 generated object cases retained identical validity."
+  },
+  "7b4a14843596a96eda1c4d7aedb95d5bc0c18bf7aad5069f44385bad6913a63f": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "MUTATION validation enforces every ops array item has type object before check_operations calls operation_schema. Removing only the second object check does not change any accepted or rejected HTTP input or envelope. Exported central schema and call order verify reachability; 205 generated object cases retained identical validity."
+  },
+  "3cd989ad5a7342c5649b1ea2dd72ab218691cc2afb684eef094e0ec98fea1825": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "check_operations selects kind by operation.get(op) and passes that exact kind to operation_schema before validation. The op const equals the value used to choose the schema for every reachable operation, so removing it admits no additional request. Unknown kinds are rejected earlier. Independent generated validation probe agreed across 205 object cases."
+  },
+  "65c7d82eee58a3486fbff3af8207f6b4c8b25bd0f5f6d416d7905c2e45f3b9fe": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "check_operations selects kind by operation.get(op) and passes that exact kind to operation_schema before validation. The op const equals the value used to choose the schema for every reachable operation, so removing it admits no additional request. Unknown kinds are rejected earlier. Independent generated validation probe agreed across 205 object cases."
+  },
+  "3f566f5c60fd040d05005a90ca0c493447f67a08ecd40bc9987d2edb93700e21": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload validates a dictionary literal it constructs from parsed headers. The value is always an object; removing this redundant object constraint cannot affect validation or upload delegation. Independent extracted-function probe: eight redundant-schema variants identical across thirty header cases including invalid lengths, content types and boundary names."
+  },
+  "58994efb2a34ec6d77e0bb796a306c34c69b86b7c60bcb763d8f252237206035": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload validates a dictionary literal it constructs from parsed headers. The value is always an object; removing this redundant object constraint cannot affect validation or upload delegation. Independent extracted-function probe: eight redundant-schema variants identical across thirty header cases including invalid lengths, content types and boundary names."
+  },
+  "d9851e3e09c91913672bec90366a58c93e5cae22c5e90144451b8b77e2950d25": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs all three required keys length, type and name unconditionally, including when headers are missing. Their value constraints remain unchanged. Removing required cannot admit any new constructed value or change delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "718ddf4243d775165e2a8b02946f6fb9973d301881c80a430b087b7c77e87070": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs all three required keys length, type and name unconditionally, including when headers are missing. Their value constraints remain unchanged. Removing required cannot admit any new constructed value or change delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "090e7d76bba7f3b26fb9a9a40657c1106f0414499f3c178ffa1674cd1ae97f1e": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs exactly the three keys declared in properties. There is no path for an extra property in this internally constructed dictionary; relaxing additionalProperties cannot change status, validation or upload delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "aaca45883392756cdf95b53e8b1ad1523cdd016e722d9393895a7f14e5156a29": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs exactly the three keys declared in properties. There is no path for an extra property in this internally constructed dictionary; relaxing additionalProperties cannot change status, validation or upload delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "9becbb6e8b9c13758fac6492edb451f4c080b2726a13cc5b954a7eaacaf7f1a4": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs exactly the three keys declared in properties. There is no path for an extra property in this internally constructed dictionary; relaxing additionalProperties cannot change status, validation or upload delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "da526257151fd5ddd6013dadb840ddab1a801813b24fa10a1e895ba7399ac56d": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs exactly the three keys declared in properties. There is no path for an extra property in this internally constructed dictionary; relaxing additionalProperties cannot change status, validation or upload delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "8e007668a32a3c417544316e20b73e486f62a4dfca87cbe0ef31ab7045b9825e": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only HTTPMessage lookup key case changes. Field names are compared case insensitively, preserving exact values/defaults and validation and uploader binding."
+  },
+  "d3f64e082bfb7f436f21492d3998cd086c622db4164b9839875be5bd4b336e6b": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only HTTPMessage lookup key case changes. Field names are compared case insensitively, preserving exact values/defaults and validation and uploader binding."
+  },
+  "e2f8723d6b4d0316b331cb08a6aba71c61e831322c671a79b1dfece8ab661ac5": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only HTTPMessage lookup key case changes. Field names are compared case insensitively, preserving exact values/defaults and validation and uploader binding."
+  },
+  "958917f4d1d44a35e9026e2f2edba9e94c8ab82f17e40e491e649ae59834b982": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The length value is produced by int before schema validation. A failed conversion exits via the unchanged stable error, and every converted value has integer type. Removing the redundant length integer check preserves the unchanged minimum constraint, status and uploader path."
+  },
+  "9d92fc186f64c5683994ec44ea4f3186138e651c671cc437c4082ecc0c6f7b04": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The length value is produced by int before schema validation. A failed conversion exits via the unchanged stable error, and every converted value has integer type. Removing the redundant length integer check preserves the unchanged minimum constraint, status and uploader path."
   }
 }

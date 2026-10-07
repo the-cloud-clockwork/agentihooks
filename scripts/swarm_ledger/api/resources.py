@@ -78,6 +78,7 @@ COLLECTIONS = (
     "artifacts",
     "artifact_trash",
     "sources",
+    "alerts",
 )
 THREADS = {
     "tasks": ("comments",),

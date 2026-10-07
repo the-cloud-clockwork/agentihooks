@@ -90,6 +90,8 @@ FIELDS = {
     "artifact_delete": "target",
     "artifact_restore": "target",
     "artifact_purge": "by",
+    "alert_claim": "by target",
+    "alert_close": "by target outcome",
 }
 TYPES = {
     "long": {"type": "boolean"},
@@ -107,6 +109,7 @@ TYPES = {
     "contract": {"type": "object"},
     "proof": {"type": "object"},
     "file": {"type": "object"},
+    "outcome": {"type": "string", "minLength": 1, "maxLength": 2000},
     "override": {"type": "object"},
     "phases": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
     "attachments": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
@@ -171,6 +174,4 @@ def target(op: dict) -> str:
         return "artifacts"
     if kind in ("claim", "retext", "relay", "answer", "verdict"):
         return op["item"]
-    if kind == "source_add":
-        return "sources"
-    return "metadata"
+    return {"alert_claim": "alerts", "alert_close": "alerts", "source_add": "sources"}.get(kind, "metadata")
