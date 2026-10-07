@@ -444,6 +444,15 @@ def test_a_stacked_claim_on_two_dependencies_reads_exactly():
     ]
 
 
+def test_a_stacked_claim_names_one_merge_per_further_dependency():
+    deps = [{"task": f"t{n}", "branch": f"eng-{n}"} for n in (1, 2, 3)]
+    step = _step(_steps({"kind": "code", "stack_base": deps}), 2)
+    assert step.endswith(
+        f"{SERENA_LINE} Merge each other open dependency into it: git merge origin/eng-2. "
+        "Merge each other open dependency into it: git merge origin/eng-3."
+    )
+
+
 def test_a_parked_task_opens_with_exact_finish_steps():
     lines = _steps({"kind": "code", "branch": "eng-parked", "parked_on": ["t1"], "stacked_base": "abc"})
     head = "Your task was parked on branch eng-parked until its dependency finished."
