@@ -58,7 +58,7 @@ def test_a_work_folder_read_returns_the_lines_the_tick_last_published(folders, m
 
 
 def test_a_work_folder_read_refuses_an_unsafe_task_id(folders):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="bad id"):
         server.workspace_tails("s", "bad id")
 
 

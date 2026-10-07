@@ -106,6 +106,20 @@ def test_a_module_edit_changes_the_page_version(tmp_path):
         assert core.page_version() != before
 
 
+def test_the_asset_list_serves_the_palette_and_the_home_script_by_their_paths():
+    assets = core.static_assets()
+    assert assets["palette.css"] == core.PALETTE
+    assert assets["home/home.js"] == core.MODULES.parent / "home" / "home.js"
+
+
+def test_the_page_version_hashes_the_pages_then_each_name_a_nul_and_its_bytes():
+    import hashlib
+
+    pages = core.TEMPLATE.read_bytes() + core.SHELL.read_bytes() + core.HOME.read_bytes()
+    expected = hashlib.sha256(pages + b"a\0b").hexdigest()[:12]
+    assert core.page_version({"a": b"b"}) == expected
+
+
 def test_a_version_url_serves_the_bytes_its_version_was_computed_from(base, tmp_path):
     server.served_page.cache_clear()
     version = server.served_version()

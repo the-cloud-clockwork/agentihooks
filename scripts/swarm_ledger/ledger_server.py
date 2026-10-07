@@ -133,8 +133,10 @@ PAGE_POLICY = (
     "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; "
     "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 )
-STATIC_RE = re.compile(r"/static/([0-9a-f]{12})/([a-z]+/)?([a-z_]+\.(?:js|css))")
+STATIC_RE = re.compile(r"/static/([0-9a-f]{12})/((?:[a-z]+/)?[a-z_]+\.(js|css))")
 STATIC_TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8"}
+ASSET_HEADERS = {"Cache-Control": "public, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"}
+PAGE_HEADERS = {"Content-Security-Policy": PAGE_POLICY, "X-Content-Type-Options": "nosniff"}
 
 
 def home_summaries():
@@ -508,8 +510,8 @@ class Handler(BaseHTTPRequestHandler):
     def send_header(self, keyword, value):
         super().send_header(keyword, value)
         if keyword.lower() == "content-type" and value.startswith("text/html"):
-            super().send_header("Content-Security-Policy", PAGE_POLICY)
-            super().send_header("X-Content-Type-Options", "nosniff")
+            for name, policy in PAGE_HEADERS.items():
+                super().send_header(name, policy)
 
     def slug(self):
         return self.path.split("?", 1)[0].strip("/").removeprefix("api/").removesuffix(".html")
@@ -657,14 +659,13 @@ class Handler(BaseHTTPRequestHandler):
     def send_static(self, route):
         match = STATIC_RE.fullmatch(route)
         version, assets = served_page()
-        data = match and assets.get(f"{match.group(2) or ''}{match.group(3)}")
+        data = match and assets.get(match.group(2))
         if data is None or match.group(1) != version:
             return self.send(404, "no such asset", "text/plain")
         self.send_response(200)
-        self.send_header("Content-Type", STATIC_TYPES[match.group(3).rsplit(".", 1)[1]])
+        for keyword, value in {"Content-Type": STATIC_TYPES[match.group(3)], **ASSET_HEADERS}.items():
+            self.send_header(keyword, value)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
-        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(data)
 
