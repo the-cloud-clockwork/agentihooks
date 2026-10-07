@@ -249,13 +249,13 @@ def lines(findings: list, act: bool) -> list[str]:
     return out
 
 
-def _alive(pid: int) -> bool:
+def _alive(pid: int, kill: Callable[[int, int], None] = os.kill) -> bool:
     try:
-        os.kill(pid, 0)
+        kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
-        return True
+        pass
     return True
 
 

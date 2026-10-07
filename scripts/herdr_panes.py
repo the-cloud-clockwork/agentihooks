@@ -53,7 +53,7 @@ def _store(environ: dict[str, str]) -> str:
 def _write(record: PaneRecord, environ: dict[str, str]) -> PaneRecord:
     path = _path(record, environ)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(record)), encoding="utf-8")
+    path.write_bytes(json.dumps(asdict(record)).encode())
     return record
 
 
@@ -89,7 +89,7 @@ def forget(found: PaneRecord, environ: dict[str, str]) -> None:
 
 def _read(path: Path) -> PaneRecord | None:
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_bytes())
         return PaneRecord(**{f.name: raw[f.name] for f in fields(PaneRecord) if f.name in raw})
     except (OSError, ValueError, TypeError):
         return None

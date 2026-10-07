@@ -140,9 +140,9 @@ def test_a_plain_shell_tab_is_the_operators_and_is_not_recorded(monkeypatch, tmp
 
 def test_a_record_lands_in_the_configured_folder_named_for_its_terminal(tmp_path):
     env = {herdr_panes.ROOT_ENV: str(tmp_path / "a" / "b")}
-    herdr_panes.record(Placement("w1", "w1:t2", "w1:p3", "term:a/b"), "init-agent", "a", env, 1)
+    herdr_panes.record(Placement("w1", "w1:t2", "w1:p3", "term:A/b"), "init-agent", "a", env, 1)
     herdr_panes.record(Placement("w1", "w1:t2", "w1:p4"), "init-agent", "b", env, 1)
-    assert sorted(path.name for path in (tmp_path / "a" / "b").iterdir()) == ["term_a_b.json", "w1_p4.json"]
+    assert sorted(path.name for path in (tmp_path / "a" / "b").iterdir()) == ["term_A_b.json", "w1_p4.json"]
 
 
 def test_a_store_url_outside_a_swarm_is_not_kept(tmp_path):

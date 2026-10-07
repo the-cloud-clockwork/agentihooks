@@ -1,7 +1,6 @@
 import hashlib
 import json
 import os
-import subprocess
 import time
 from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
@@ -192,7 +191,7 @@ def test_a_retired_agent_with_typed_input_is_kept(env):
 
 def test_only_the_last_shell_line_is_the_input_line(env):
     herdr = FakeHerdr()
-    spot = Spot(screen="─────\n❯ old words\n─────\n$ git status\nclean\n$ ")
+    spot = Spot(screen="iamroot:~\n$ git status\nclean\n❯ old words\n$ ")
     launch(env, herdr, "w1:p2", "term_a", spot, Owner(route="routed"))
     assert actions(sweep(env, herdr))["w1:p2"][0] == herdr_gc.CLOSE
 
@@ -575,11 +574,18 @@ def test_a_missing_run_folder_has_nothing_to_remove(tmp_path):
 
 
 def test_a_launcher_process_is_alive_until_it_exits():
-    child = subprocess.Popen(["true"])
-    child.wait()
-    assert herdr_gc._alive(os.getpid())
-    assert not herdr_gc._alive(child.pid)
-    assert herdr_gc._alive(1)
+    sent = []
+
+    def gone(pid, signal):
+        raise ProcessLookupError
+
+    def foreign(pid, signal):
+        raise PermissionError
+
+    assert herdr_gc._alive(41, lambda pid, signal: sent.append((pid, signal)))
+    assert sent == [(41, 0)]
+    assert not herdr_gc._alive(41, gone)
+    assert herdr_gc._alive(41, foreign)
 
 
 def test_run_skips_the_sweep_without_a_herdr_server(env, monkeypatch):
