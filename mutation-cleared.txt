@@ -1318,5 +1318,25 @@
   "hooks/context/swarm_pin.py:hooks.context.swarm_pin.x_nested__mutmut_11:5a7dc3df22dcf856f0f307f58e0aeba24bfc3c63c09daa4a54599feb56c5510a": {
     "reader": "Standards",
     "reason": "Stopping the walk at pid 2 instead of pid 1 changes no output: pid 2 is never claude or codex and never the launcher, so the session count and the final launcher comparison are identical."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_39:f4dbfcc6bfe6005080e7d21501efb923cfab37e5310ea952aaa9870a5ad37696": {
+    "reader": "Standards",
+    "reason": "None and False are tested only for truthiness; neither reaches output."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_46:ff3f8c6951c9f5a3af3816335b2ee24249e03ee2a07d8a4d7b8c4580a83fe010": {
+    "reader": "Standards",
+    "reason": "Unlimited splitting preserves the first segment used to identify the option."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_49:fd5b19fb8b5769b93feecb39e8f69a70896e3401d05a66484161915ee3e36b84": {
+    "reader": "Standards",
+    "reason": "Increasing the split limit preserves the first segment used to identify the option."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_command_lines__mutmut_19:7d64b3a202fcf6345d1a170a665cdccf67fe8481bf0355197440c3d48720374e": {
+    "reader": "Standards",
+    "reason": "Changes only the excluded synthetic command name and inert argument prefix. Both prefixes preserve argument parsing; their literal text produces no checked command."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_command_lines__mutmut_20:c21b45a095edd28f98f18434986e293dbdd0f2806a9ed5e38d765c777a806070": {
+    "reader": "Standards",
+    "reason": "Uppercasing the excluded command name and inert prefix preserves the discovered command descendants. Nine differential parser controls returned identical output."
   }
 }

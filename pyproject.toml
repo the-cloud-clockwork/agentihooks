@@ -19,6 +19,8 @@ classifiers = [
 ]
 
 dependencies = [
+    "tree-sitter>=0.25",
+    "tree-sitter-bash>=0.25",
     # Upper bound is load-bearing: mcp 2.0.0 removes `mcp.server.fastmcp`
     # outright (replaced by `mcp.server.mcpserver.MCPServer`, a different API),
     # so an unbounded spec resolves to a version where `hooks/mcp/__init__.py`
