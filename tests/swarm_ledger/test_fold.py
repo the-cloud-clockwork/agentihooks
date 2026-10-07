@@ -16,6 +16,7 @@ SECTIONS = {
     "Follow-ups or blockers": True,
     "Chat": True,
     "Notifications": True,
+    "Alerts": True,
     "Artifacts": True,
     "Stats": True,
 }

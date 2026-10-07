@@ -201,6 +201,12 @@ details.phase-fold > summary::before { align-self: center; }
 .notif-row:first-child { border-top: 0; }
 .notif-meta { display: flex; gap: 10px; align-items: baseline; font-size: var(--fs-meta); color: var(--muted); }
 .notif-meta .link { margin-left: auto; }
+.notif-meta .alert-acts { margin-left: auto; display: flex; gap: 10px; }
+.notif-meta .alert-acts .link { margin-left: 0; }
+.alert-state { color: var(--text-2); }
+.alert-outcome { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
+.alert-outcome[hidden] { display: none; }
+.alert-outcome input { flex: 1; min-width: 0; }
 .notif-text { margin: 2px -6px 0; padding: 4px 6px; border-radius: 4px; overflow-wrap: anywhere; cursor: pointer; transition: background .15s; }
 .notif-text:hover { background: var(--hover); }
 input[type=checkbox] {
@@ -420,7 +426,7 @@ input, textarea { caret-color: var(--accent-2); }
   .status { white-space: normal; flex-shrink: 1; max-width: 100%; overflow-wrap: anywhere; }
   .header-actions { flex-shrink: 1; min-width: 0; }
   .header-actions { display: flex; flex-basis: 100%; }
-  .header-actions #home, .header-actions #bell, .header-actions #to-top, .header-actions #sync, .header-actions #chat-fab, .header-actions #art-fab { position: static; }
+  .header-actions #home, .header-actions #bell, .header-actions #alert-fab, .header-actions #to-top, .header-actions #sync, .header-actions #chat-fab, .header-actions #art-fab { position: static; }
   .tab-body { padding: var(--space-row); }
   .tabs { padding: 0 var(--space-row); }
   .tab { padding: var(--space-tight); }
@@ -646,6 +652,10 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
   <span class="sync-badge" id="bell-badge" hidden></span>
 </button>
+<button class="sync" id="alert-fab" type="button" title="Alerts" aria-label="Alerts" aria-expanded="false" aria-controls="alert-panel">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+  <span class="sync-badge" id="alert-badge" hidden></span>
+</button>
 <button class="sync fab-chat" id="chat-fab" type="button" title="Chat" aria-label="Chat" aria-expanded="false" aria-controls="chat-panel">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
   <span class="sync-badge" id="chat-badge" hidden></span>
@@ -669,6 +679,10 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 <section class="notif" id="notif" role="dialog" aria-modal="false" aria-label="Notifications" hidden><details class="sources-box fold panel-fold" id="notif-fold" open>
   <summary class="notif-head">Notifications<span class="end"><button class="link danger" id="notif-clear-all" type="button">Clear all</button><button class="link" id="notif-close" type="button">Close</button></span></summary>
   <ul class="notif-list" id="notifs"></ul>
+</details></section>
+<section class="notif" id="alert-panel" role="dialog" aria-modal="false" aria-label="Alerts" hidden><details class="sources-box fold panel-fold" id="alert-fold" open>
+  <summary class="notif-head">Alerts<span class="end"><button class="link" id="alert-close" type="button">Close</button></span></summary>
+  <ul class="notif-list" id="alerts"></ul>
 </details></section>
 <script id="ledger-data" type="application/json">__LEDGER_DATA__</script>
 <script>/*__LEDGER_TOOLTIPS__*/</script>
@@ -754,6 +768,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       closed_at: Number.isInteger(d.closed_at) ? d.closed_at : null,
       priorities: (Array.isArray(d.priorities) ? d.priorities : []).filter((p) => p && typeof p.id === "string" && typeof p.item === "string"),
       notifications: (Array.isArray(d.notifications) ? d.notifications : []).filter((n) => n && typeof n.id === "string" && typeof n.item === "string"),
+      alerts: (Array.isArray(d.alerts) ? d.alerts : []).filter((a) => a && typeof a.id === "string" && typeof a.text === "string"),
       artifacts: (Array.isArray(d.artifacts) ? d.artifacts : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
       artifact_trash: (Array.isArray(d.artifact_trash) ? d.artifact_trash : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
       phases: list("phases", ["title", "description", "done", "out_of_scope", "depends_on", "planning", "release"], ["comments"]),
@@ -806,6 +821,13 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       const { deleted_at, ...rest } = row;
       d[from] = d[from].filter((a) => a !== row);
       d[to].push(to === "artifact_trash" ? { ...rest, deleted_at: Date.now() } : rest);
+      return;
+    }
+    if (op.op === "alert_claim" || op.op === "alert_close") {
+      const row = d.alerts.find((a) => a.id === op.target);
+      if (!row || row.state === "done") return;
+      if (op.op === "alert_close") Object.assign(row, { state: "done", outcome: op.outcome, closed_by: "operator" });
+      else if (row.state === "open") Object.assign(row, { state: "claimed", claimed_by: "operator" });
       return;
     }
     if (op.op === "notification_clear") {
@@ -1449,6 +1471,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     renderSync();
     renderPriorities();
     renderNotifications();
+    renderAlerts();
     renderArtifacts();
     renderChat();
     renderChatBadge();
@@ -1632,6 +1655,48 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       h("div", { class: "notif-text", text: n.text, title: "Go to it",
         on: { click: (ev) => { if (!getSelection().toString()) jumpToNotice(ev, n.item); } } }))));
     if (!list.length) $("notifs").append(h("li", { class: "empty", text: "No notifications." }));
+  }
+
+  const ALERT_SOURCES = { size: "Size limit", sync: "Refused write" };
+  const alertDraft = { id: "", text: "" };
+
+  function alertRow(a) {
+    const outcome = h("input", { class: "line", type: "text", maxlength: "2000", placeholder: "Outcome…", "aria-label": "Outcome", value: alertDraft.id === a.id ? alertDraft.text : "",
+      on: { input: (ev) => { alertDraft.text = ev.target.value; } } });
+    const form = h("form", { class: "alert-outcome", hidden: alertDraft.id !== a.id && "",
+      on: { submit: (ev) => {
+        ev.preventDefault();
+        if (!outcome.value.trim()) return outcome.focus();
+        Object.assign(alertDraft, { id: "", text: "" });
+        queue({ op: "alert_close", id: newId("alert"), target: a.id, outcome: outcome.value.trim() });
+      } } },
+      outcome, h("button", { class: "link", type: "submit", text: "Save" }));
+    const openForm = () => { Object.assign(alertDraft, { id: a.id, text: "" }); form.hidden = false; outcome.value = ""; outcome.focus(); };
+    return h("li", { class: "notif-row", id: `alert-${a.id}` },
+      h("div", { class: "notif-meta" },
+        h("span", { text: noticeTime(a.at) }),
+        h("span", { text: ALERT_SOURCES[a.source] || a.source }),
+        h("span", { text: `For the ${a.target}` }),
+        h("span", { class: "alert-state", text: a.state === "claimed" ? `Claimed by ${a.claimed_by}` : "Open" }),
+        h("span", { class: "alert-acts" },
+          a.state === "open" && h("button", { class: "link alert-claim", type: "button", text: "Claim", on: { click: () => queue({ op: "alert_claim", id: newId("alert"), target: a.id }) } }),
+          h("button", { class: "link alert-done", type: "button", text: "Mark done", on: { click: openForm } }))),
+      h("div", { class: "notif-text", text: a.text }), form);
+  }
+
+  function renderAlerts() {
+    const list = doc.alerts.filter((a) => a.state !== "done").reverse();
+    $("alert-badge").hidden = !list.length;
+    $("alert-badge").textContent = String(list.length);
+    if (document.activeElement.matches("#alerts input")) return;
+    $("alerts").replaceChildren(...list.map(alertRow));
+    if (!list.length) $("alerts").append(h("li", { class: "empty", text: "No open alerts." }));
+  }
+
+  function showAlerts(open) {
+    $("alert-panel").hidden = !open;
+    $("alert-fab").setAttribute("aria-expanded", String(open));
+    if (open) anchorPanel($("alert-panel"), $("alert-fab"));
   }
 
   function showNotifications(open) {
@@ -2438,7 +2503,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     doc = withDefaults(server);
     for (const op of ops) applyOp(doc, op);
     applyChecks(doc);
-    banner([seedBroken && "This page's embedded copy was unreadable; showing the server's copy.", meta.seed_error, ...(meta.warnings || [])]);
+    banner([seedBroken && "This page's embedded copy was unreadable; showing the server's copy.", meta.seed_error]);
     render();
     lsWrite();
   }
@@ -2614,6 +2679,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     $("to-top").addEventListener("click", () => $("main-content").scrollTo({ top: 0, behavior: "smooth" }));
     $("bell").addEventListener("click", () => showNotifications($("notif").hidden));
     $("notif-close").addEventListener("click", () => showNotifications(false));
+    $("alert-fab").addEventListener("click", () => showAlerts($("alert-panel").hidden));
+    $("alert-close").addEventListener("click", () => showAlerts(false));
     $("art-fab").addEventListener("click", () => showArtifacts($("art-panel").hidden));
     $("art-close").addEventListener("click", () => showArtifacts(false));
     $("notif-clear-all").addEventListener("click", () => { if (confirm("Clear every notification?")) clearNotification("all"); });
@@ -2655,6 +2722,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       if (ev.key !== "Escape" || ev.defaultPrevented) return;
       if ($("outline").classList.contains("open")) showOutline(false);
       else if (!$("notif").hidden) showNotifications(false);
+      else if (!$("alert-panel").hidden) showAlerts(false);
       else if (!$("art-panel").hidden) showArtifacts(false);
       else if (!$("chat-panel").hidden) showChat(false);
     });
@@ -2710,13 +2778,13 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     render();
     wireTabs();
     const rail = $("icon-strip");
-    const railButtons = ["home", "art-fab", "bell", "to-top", "sync"].map($);
+    const railButtons = ["home", "art-fab", "bell", "alert-fab", "to-top", "sync"].map($);
     const placeRail = () => {
       for (const btn of railButtons) rail.append(btn);
     };
     placeRail();
     window.addEventListener("resize", placeRail);
-    const stripPanels = [[$("notif"), $("bell"), showNotifications], [$("art-panel"), $("art-fab"), showArtifacts]];
+    const stripPanels = [[$("notif"), $("bell"), showNotifications], [$("alert-panel"), $("alert-fab"), showAlerts], [$("art-panel"), $("art-fab"), showArtifacts]];
     const anchorOpen = () => { for (const [panel, icon] of stripPanels) if (!panel.hidden) anchorPanel(panel, icon); };
     new ResizeObserver(anchorOpen).observe(rail);
     document.addEventListener("scroll", anchorOpen, { capture: true, passive: true });

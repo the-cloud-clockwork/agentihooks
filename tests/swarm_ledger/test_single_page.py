@@ -94,13 +94,13 @@ def test_columns_scroll_independently(page):
 
 
 def test_icon_strip_keeps_home_first_and_all_counts(page):
-    ids = ["home", "art-fab", "bell", "to-top", "sync"]
+    ids = ["home", "art-fab", "bell", "alert-fab", "to-top", "sync"]
     assert page.locator("#icon-strip > *").evaluate_all("els => els.map(el => el.id)") == ids
     boxes = [page.locator(f"#{item}").bounding_box() for item in ids]
     assert all(box and box["x"] == 16 for box in boxes)
     assert all(a["y"] + a["height"] < b["y"] for a, b in zip(boxes, boxes[1:]))
     assert all(page.locator(f"#{item} svg").count() == 1 for item in ids)
-    assert all(page.locator(f"#{item}-badge").count() == 1 for item in ["art", "bell", "sync"])
+    assert all(page.locator(f"#{item}-badge").count() == 1 for item in ["art", "bell", "alert", "sync"])
 
 
 @pytest.mark.parametrize("width", [1440, 390])

@@ -13,6 +13,7 @@ COLLECTIONS = frozenset(
         "artifact_trash",
         "priorities",
         "notifications",
+        "alerts",
     )
 )
 

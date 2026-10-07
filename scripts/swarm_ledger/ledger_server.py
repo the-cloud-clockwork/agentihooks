@@ -31,6 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(1, str(Path(__file__).resolve().parents[2]))
+import ledger_alerts  # noqa: E402
 import ledger_artifacts  # noqa: E402
 import ledger_authority as authority  # noqa: E402
 import ledger_bin  # noqa: E402
@@ -482,6 +483,25 @@ def relay_to_inbox(slug, state):
         return []
 
 
+def deliver_alerts(slug, state):
+    """Alerts raised by this sync go to the master's seat or the operator through the inbox."""
+    meta = state["_meta"]
+    if not any(a.get("rev") == meta["rev"] for a in state.get("alerts", [])):
+        return []
+    try:
+        from scripts.inbox.store import connect
+        from scripts.swarm import operator_mail
+        from scripts.swarm.store import RedisStore
+
+        inbox = connect()
+        live = [a for a in RedisStore(inbox.redis).agents(slug) if a.state != "finished"]
+        master = operator_mail.master_address(slug, live)
+        return ledger_alerts.deliver(inbox, slug, state["alerts"], meta["rev"], master)
+    except Exception as exc:  # the ledger write stands whatever the inbox does
+        sys.stderr.write(f"alert delivery for {slug}: {exc}\n")
+        return []
+
+
 def doctor_phrase(slug, state):
     """The operator's chat line rig doctor stop stops the Doctor of this ledger, in the background."""
     meta = state["_meta"]
@@ -553,6 +573,7 @@ class Handler(BaseHTTPRequestHandler):
         if changes or ops:
             relay_to_inbox(slug, state)
             doctor_phrase(slug, state)
+        deliver_alerts(slug, state)
         state["_meta"] = {
             **{k: v for k, v in state["_meta"].items() if k != "seeds"},
             "page_version": core.page_version(),
