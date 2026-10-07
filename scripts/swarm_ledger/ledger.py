@@ -107,13 +107,23 @@ def credentials(slug, service=False):
 
 
 def request(slug, ops=None, service=False):
-    headers = {"Content-Type": "application/json", **credentials(slug, service)}
-    body = None if ops is None else json.dumps({"ops": ops}).encode()
-    req = urllib.request.Request(
-        f"{BASE}/api/{slug}?view=agent", data=body, headers=headers, method="GET" if ops is None else "PUT"
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read())
+    from scripts.swarm_ledger.api.client import ResourceClient
+
+    client = ResourceClient(BASE, credentials(slug, service))
+    return client.snapshot(slug) if ops is None else client.mutate(slug, ops)
+
+
+def resource(slug: str, path: str, service: bool = False, collection: bool = False) -> dict | list:
+    from scripts.swarm_ledger.api.client import ResourceClient
+
+    client = ResourceClient(BASE, credentials(slug, service))
+    return client.collection(slug, path) if collection else client.request(slug, path)["data"]
+
+
+def export(slug: str, service: bool = False) -> dict:
+    from scripts.swarm_ledger.api.client import ResourceClient
+
+    return ResourceClient(BASE, credentials(slug, service)).request(slug, "export", {})["data"]
 
 
 def call(slug, ops=None, service=False):
@@ -220,7 +230,7 @@ def upload_artifact(slug: str, name: str, path: str, request: dict) -> dict:
 
 def upload(slug: str, name: str, path: str, route: str, extra: dict) -> dict:
     req = urllib.request.Request(
-        f"{BASE}/api/{route}/{slug}",
+        f"{BASE}/api/v1/ledgers/{slug}/uploads/{route}",
         data=Path(path).read_bytes(),
         headers={
             **credentials(slug),
@@ -300,15 +310,18 @@ def cmd_plan(args):
     from scripts.swarm_ledger import ledger_phase_cli
 
     plan = json.loads(Path(args.path).read_bytes())
-    phases = ledger_phase_cli.append_phases(plan, [phase["id"] for phase in call(args.slug)["phases"]])
+    phases = ledger_phase_cli.append_phases(
+        plan, [phase["id"] for phase in resource(args.slug, "phases", collection=True)]
+    )
     send(args, "phase_append", phases=phases)
     print(json.dumps({"appended": [phase["phase"] for phase in phases], "planning": "manual", "review": "pending"}))
 
 
 def cmd_artifact_purge(args):
-    state = send(args, "artifact_purge")
-    event = next(e for e in reversed(state["_meta"]["events"]) if e["kind"] == "artifacts purged")
-    print(json.dumps({"purged": event["count"], "artifacts": len(state["artifacts"])}))
+    send(args, "artifact_purge")
+    events = resource(args.slug, "events", collection=True)
+    event = next(e for e in reversed(events) if e["kind"] == "artifacts purged")
+    print(json.dumps({"purged": event["count"], "artifacts": resource(args.slug, "counts")["artifacts"]}))
 
 
 def cmd_phase(args):
@@ -445,7 +458,7 @@ def cmd_delete(args):
 
 
 def cmd_audit(args):
-    rows = ledger_comments.audit(call(args.slug))
+    rows = ledger_comments.audit(export(args.slug))
     for where, entry, by, reasons in rows:
         print(f"{where} {entry} {by or '-'}: {'; '.join(reasons)}")
     print(f"{len(rows)} to clean")
@@ -471,7 +484,7 @@ def cmd_claim(args):
 def cmd_task(args):
     if args.action == "add":
         if args.id == "-":
-            args.id = ledger_tasks.next_id(call(args.slug).get("tasks", []))
+            args.id = ledger_tasks.next_id(resource(args.slug, "tasks", collection=True))
         title = " ".join(args.values)
         lists = {k: comma_list(v) for k, v in (("depends_on", args.depends_on), ("territory", args.territory)) if v}
         if args.gain is not None:
