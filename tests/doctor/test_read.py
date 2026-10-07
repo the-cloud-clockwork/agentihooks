@@ -95,10 +95,11 @@ def test_a_handoff_still_waiting_for_its_successor_is_read(redis, tmp_path):
     store.seats.occupy(seat, f"{SLUG}-eng-2", 10)
     store.put_handoff(SLUG, "t2", "# t2 handoff", seat=seat, envelope={"agent": f"{SLUG}-eng-2", "task": "t2"})
     [record] = read.handoffs(store, box, tmp_path, SLUG)
-    assert (record["task"], record["from"], record["to"], record["document"]) == (
+    assert (record["task"], record["from"], record["to"], record["at"], record["document"]) == (
         "t2",
         f"{SLUG}-eng-2",
         "",
+        0,
         "# t2 handoff",
     )
 
