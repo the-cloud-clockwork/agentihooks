@@ -551,6 +551,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .lbl.live, .lbl.confirmed { color: var(--positive); }
 .lbl.idle, .lbl.waiting, .lbl.pending, .lbl.awaiting-decision, .lbl.unknown { color: var(--warn); }
 .lbl.stalled, .lbl.absent { color: var(--destructive); }
+.lbl.promoted { color: var(--warn); }
+.sw-promoted { display: inline-flex; gap: 8px; }
 .lbl.on::before, .lbl.off::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: middle; }
 .lbl.master { letter-spacing: .06em; }
 .lbl.master::before { content: ""; display: inline-block; margin-right: 6px; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-right: 6px solid currentColor; }
@@ -2074,7 +2076,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     return agents.map((a) => {
       const master = a.lane === "master";
       return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
-        state: master && (a.status || "working") === "working" ? "live" : a.status || "working", age: a.started_at ? span(now - a.started_at) : "—" };
+        state: master && (a.status || "working") === "working" ? "live" : a.status || "working", promoted: !!a.promoted, age: a.started_at ? span(now - a.started_at) : "—" };
     });
   }
 
@@ -2156,7 +2158,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const agents = agentRows(sw, now);
     $("agents-count").textContent = `${agents.length} live`;
     $("swarm-agents").replaceChildren(...(agents.length ? agents.map((a) => cells(idCell(a.name), a.lane, a.profile, a.model,
-      a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—", label(a.state), a.age, agentActions(a))) : [emptyRow(8, "No agents running. Start the swarm to work the open tasks.")]));
+      a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—", a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state), a.age, agentActions(a))) : [emptyRow(8, "No agents running. Start the swarm to work the open tasks.")]));
     $("tasks-open").textContent = `${(sw.tasks || {}).open || 0} open`;
     kv("swarm-tasks", taskFigures(sw, doc));
     const quota = quotaRows(sw, now);
