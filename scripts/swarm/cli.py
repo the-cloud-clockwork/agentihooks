@@ -404,7 +404,7 @@ def cmd_set(store, args):
             )
         changes[SETTABLE[key]] = int(value)
     config = store.update(args.slug, **changes)
-    asked = any(pair.partition("=")[0] == "master-agent" for pair in args.pairs)
+    asked = any(pair.startswith("master-agent=") for pair in args.pairs)
     master = affinity.order(store, args.slug, now_ms()) if asked else affinity.pending(store, args.slug)
     if config.state == "running":
         for action in run_tick(store, args.slug):

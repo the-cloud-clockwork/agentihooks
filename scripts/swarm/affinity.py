@@ -16,7 +16,7 @@ ORDER = (
 
 
 def desired(config):
-    agent = config.lanes.get(MASTER, {}).get("agent", "")
+    agent = config.lanes.get(MASTER, {}).get("agent")
     return agent if agent in agent_choice.AGENTS else ""
 
 

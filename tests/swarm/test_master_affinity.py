@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -132,7 +133,7 @@ def test_a_finished_master_still_alive_blocks_its_replacement(store):
     store.put_agent("sw", replace(boss, state="finished"))
     runtime.stuck.add(boss.name)
     actions = tick("sw", store, tasks(), runtime, 7)
-    assert "spawned master master@a1b2c3-0002" not in actions
+    assert "the old master is still running, waiting for it to end before starting the next" in actions
     assert len(runtime.masters) == 1 and boss.name in runtime.live
     runtime.stuck.discard(boss.name)
     tick("sw", store, tasks(), runtime, 8)
@@ -196,7 +197,12 @@ def _spawn(tmp_path, monkeypatch, lanes, task, codex_share=None):
         return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     runtime = HerdrRuntime(
-        home=tmp_path, run=run_init, choose=lambda requested, environ: (requested or "claude", "requested")
+        home=tmp_path,
+        run=run_init,
+        choose=lambda requested, environ: (
+            requested or "claude",
+            "requested" if isinstance(environ, dict) else "no environment",
+        ),
     )
     config = SimpleNamespace(
         slug="sw",
@@ -231,7 +237,7 @@ def test_a_handoff_successor_launches_on_the_desired_harness_with_the_original_p
         },
     }
     argv, placed = _spawn(tmp_path, monkeypatch, {MASTER: {"agent": new}}, task)
-    assert argv[argv.index("--agent") + 1] == new and placed.harness == new
+    assert argv[argv.index("--agent") + 1] == new and placed.harness == new and placed.choice == "forced"
     assert argv[argv.index("--profile") + 1] == "master-overlay"
     assert argv[argv.index("--") + 1 :] == FRONTIER[new]
 
@@ -260,3 +266,138 @@ def test_the_ledger_server_maps_master_agent_to_the_swarm_set_pair():
 def test_a_swarm_created_from_scratch_keeps_its_affinity_through_the_config_round_trip(store):
     store.create(SwarmConfig("sx", "/repo", max_eng=0, max_ci=0, lanes={MASTER: {"agent": "codex"}}))
     assert affinity.desired(store.config("sx")) == "codex"
+
+
+def _master(store, harness="claude", state="working", lane=MASTER, name="master@a1b2c3-0001"):
+    from scripts.swarm.store import AgentRecord
+
+    store.put_agent("sw", AgentRecord(name, lane, MASTER, harness=harness, state=state, seat="master@sw"))
+
+
+@pytest.mark.parametrize(("lanes", "expected"), [({}, ""), ({MASTER: {}}, ""), ({MASTER: {"agent": "auto"}}, "")])
+def test_no_affinity_reads_as_an_empty_harness(lanes, expected):
+    assert affinity.desired(SimpleNamespace(lanes=lanes)) == expected
+
+
+def test_the_order_is_one_record_under_the_swarm_key_with_every_field(store):
+    _master(store)
+    store.update("sw", lanes={MASTER: {"agent": "codex"}})
+    found = affinity.order(store, "sw", 42)
+    (item,) = _orders(store)
+    assert found == {
+        "to": "codex",
+        "from": "claude",
+        "master": "master@a1b2c3-0001",
+        "item": item.id,
+        "at": 42,
+        "state": "ordered",
+        "reason": "",
+    }
+    assert store.redis.get("agentihooks:swarm:sw:master-affinity") is not None
+    assert "you run on claude." in item.text
+
+
+def test_an_order_to_a_master_of_unknown_harness_names_it_unknown(store):
+    _master(store, harness="")
+    store.update("sw", lanes={MASTER: {"agent": "codex"}})
+    affinity.order(store, "sw", 1)
+    (item,) = _orders(store)
+    assert "you run on an unknown harness." in item.text
+
+
+def test_without_a_live_master_the_order_returns_what_is_pending_and_sends_nothing(store):
+    store.update("sw", lanes={MASTER: {"agent": "codex"}})
+    assert affinity.order(store, "sw", 1) is None
+    _master(store, state="finished")
+    _master(store, lane="eng", name="engineer@a1b2c3-0002")
+    assert affinity.order(store, "sw", 2) is None
+    assert _orders(store) == []
+    store.redis.set("agentihooks:swarm:sw:master-affinity", '{"to": "codex", "state": "failed"}')
+    assert affinity.order(store, "sw", 3) == {"to": "codex", "state": "failed"}
+
+
+def test_withdrawn_and_handed_off_orders_close_with_their_reason(store):
+    _master(store)
+    store.update("sw", lanes={MASTER: {"agent": "codex"}})
+    first = affinity.order(store, "sw", 1)
+    store.update("sw", lanes={MASTER: {"agent": "claude"}})
+    affinity.order(store, "sw", 2)
+    inbox = InboxStore(store.redis)
+    assert inbox.get(first["item"]).reason == "cancelled: the master affinity was set back"
+    store.update("sw", lanes={MASTER: {"agent": "codex"}})
+    second = affinity.order(store, "sw", 3)
+    affinity.handed_off(store, "sw")
+    assert inbox.get(second["item"]).reason == "done: the master handed off its seat"
+
+
+@pytest.mark.parametrize(
+    ("harness", "reason"),
+    [
+        ("claude", "the successor started on claude, not codex"),
+        ("", "the successor started on an unknown harness, not codex"),
+    ],
+)
+def test_a_successor_on_the_wrong_harness_fails_the_order_with_its_reason(store, harness, reason):
+    _master(store)
+    store.update("sw", lanes={MASTER: {"agent": "codex"}})
+    affinity.order(store, "sw", 1)
+    affinity.placed(store, "sw", harness)
+    assert (affinity.pending(store, "sw")["state"], affinity.pending(store, "sw")["reason"]) == ("failed", reason)
+
+
+def test_the_report_counts_only_a_live_master(store):
+    _master(store, state="finished")
+    _master(store, harness="codex", lane="eng", name="engineer@a1b2c3-0002")
+    config = store.config("sw")
+    assert affinity.report(store, "sw", config, store.agents("sw")) == {"desired": "auto", "live": "", "order": None}
+
+
+@pytest.mark.parametrize(
+    ("report", "line"),
+    [
+        ({"desired": "auto", "live": "", "order": None}, "master affinity  desired auto  live none"),
+        (
+            {"desired": "codex", "live": "claude", "order": {"to": "codex", "state": "ordered", "reason": ""}},
+            "master affinity  desired codex  live claude  order to codex ordered",
+        ),
+        (
+            {"desired": "codex", "live": "", "order": {"to": "codex", "state": "failed", "reason": "no account"}},
+            "master affinity  desired codex  live none  order to codex failed: no account",
+        ),
+    ],
+)
+def test_the_status_line_names_desired_live_and_order(report, line):
+    assert cli._affinity_line(report) == line
+
+
+def test_swarm_set_and_status_print_the_affinity(env, capsys):
+    store, _, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "set", "max-eng-agents=1")
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["master_affinity"] == {
+        "desired": "auto",
+        "order": None,
+    }
+    store.update("sw", state="paused", lanes={MASTER: {"agent": "claude"}})
+    cli.run_tick(store, "sw", runtime=rt)
+    run("sw", "set", "master-agent=codex")
+    shown = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["master_affinity"]
+    assert shown["desired"] == "codex" and isinstance(shown["order"]["at"], int)
+    run("sw", "status")
+    assert "master affinity  desired codex  live claude  order to codex ordered" in capsys.readouterr().out
+
+
+def test_a_claude_only_profile_launches_a_claude_affinity(tmp_path, monkeypatch):
+    from scripts.profiles import plugins
+
+    monkeypatch.setattr(plugins, "claude_only", lambda profile: True)
+    argv, _ = _spawn(tmp_path, monkeypatch, {MASTER: {"agent": "claude"}}, {"id": MASTER, "peer": ""})
+    assert argv[argv.index("--agent") + 1] == "claude"
+
+
+def test_the_ledger_server_names_the_master_agent_choices():
+    from scripts.swarm_ledger import ledger_server
+
+    with pytest.raises(ValueError) as caught:
+        ledger_server.control_argv({"action": "set", "master_agent": "auto"})
+    assert str(caught.value) == "master_agent must be one of claude, codex"
