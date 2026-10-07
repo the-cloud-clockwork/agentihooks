@@ -4,6 +4,7 @@ Scaling up is immediate; scaling down happens only as agents finish, so a lowere
 Each swarm keeps at most one master: an agent the operator talks to, which works no task.
 """
 
+import json
 import os
 from dataclasses import dataclass, field, replace
 from itertools import count
@@ -17,7 +18,7 @@ from scripts.handoff import transfers
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import control_notifications, lifetime, phase_state, session_model
+from scripts.swarm import control_notifications, lifetime, live_binding, phase_state, session_model
 from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
@@ -72,6 +73,8 @@ class Runtime(Protocol):
     def has_capacity(self) -> bool: ...
     def spawn(self, config, lane: str, name: str, task: dict, spawns: dict | None = None) -> Placed: ...
     def live_names(self) -> set[str]: ...
+    def bindings(self, agents: list[AgentRecord]) -> dict: ...
+    def pane_open(self, agent: AgentRecord) -> bool: ...
     def recover(self, name: str) -> Placed: ...
     def retire(self, agent: AgentRecord, live: bool) -> bool: ...
     def status(self, agent: AgentRecord) -> str: ...
@@ -91,6 +94,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     doc = ledger.state(slug)
     rows = {t["id"]: t for t in doc["tasks"]}
     exits.sweep(InboxStore(store.redis), slug, store, lambda: {t["id"]: t for t in ledger.state(slug)["tasks"]})
+    actions += _verify(slug, store, ledger, runtime, rows, now_ms)
     actions += _reap(slug, store, ledger, runtime, rows, now_ms)
     actions += lifetime.retire_idle_master(slug, store, ledger, runtime, rows, now_ms)
     if config.state == "stopped":
@@ -147,6 +151,33 @@ def _drop(slug, store, ledger, rows, agent):
     reopen = held and _reopen(slug, ledger, rows, agent.task)
     exits.settle(InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
     return f", task {agent.task} reopened" if reopen else ""
+
+
+def _verify(slug, store, ledger, runtime, rows, now_ms):
+    agents, actions = store.agents(slug), []
+    facts = runtime.bindings(agents)
+    for agent in agents:
+        if agent.state == "awaiting-decision":
+            continue
+        task = rows.get(agent.task, {})
+        ended = agent.lane != MASTER and (task.get("done") or task.get("state") in {"done", "blocked", "handoff"})
+        if agent.state == "finished" or ended:
+            if runtime.pane_open(agent):
+                live_binding.record(store, slug, agent, {"pane": "open"}, now_ms)
+            continue
+        if agent.name not in facts:
+            continue
+        differences = live_binding.record(store, slug, agent, facts[agent.name], now_ms)
+        if not differences:
+            continue
+        fields = ", ".join(differences)
+        if not runtime.retire(agent, True):
+            actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
+            continue
+        saved = {**live_binding.assignment(agent), "seat": agent.seat}
+        store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
+        actions.append(f"retired {agent.name} after mismatched {fields}" + _drop(slug, store, ledger, rows, agent))
+    return actions
 
 
 def _reap(slug, store, ledger, runtime, rows, now_ms):
@@ -322,7 +353,9 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             handoff = store.handoff(slug, task["id"])
             if handoff:
                 task["handoff"] = handoff
-            seat = _free_seat(slug, lane, taken, store.handoff_seat(slug, task["id"]))
+            saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
+            preferred = json.loads(saved)["seat"] if saved else store.handoff_seat(slug, task["id"])
+            seat = _free_seat(slug, lane, taken, preferred)
             taken.add(seat)
             record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting", seat=seat)
             store.put_agent(slug, record)
@@ -359,6 +392,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             store.count_spawn(slug, placed.harness)
             store.count_claim(slug, task["id"])
             store.clear_handoff(slug, task["id"])
+            store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
             actions.append(f"spawned {name} for {task['id']}")
     return actions
 
@@ -408,6 +442,9 @@ def primed(store, slug, seat, task):
     memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.learned(seat)}
     envelope = store.handoff_envelope(slug, task["id"])
     task = {**task, "seat": seat, "culture": store.culture.get(slug), "handoff_envelope": envelope, **memory}
+    saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
+    if saved:
+        task["launch_assignment"] = json.loads(saved)
     return priming_trace.withhold(slug, task)
 
 
@@ -497,6 +534,7 @@ def _master(slug, config, store, runtime, now_ms):
         return [f"master spawn failed: {exc}"]
     store.put_agent(slug, _placed(record, placed))
     store.clear_handoff(slug, MASTER)
+    store.redis.hdel(store.key(slug, "launch-assignments"), MASTER)
     return [f"spawned master {name}"]
 
 

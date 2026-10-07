@@ -10,7 +10,7 @@ from pathlib import Path
 
 from scripts import agent_choice
 from scripts.profiles import binding, plugins
-from scripts.swarm import effort_range, model_pick, naming, priming_trace, profile_choice, prompt
+from scripts.swarm import effort_range, live_binding, model_pick, naming, priming_trace, profile_choice, prompt
 from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
 from scripts.swarm.tick import Placed, SpawnError
@@ -110,10 +110,10 @@ class HerdrRuntime:
 
     def spawn(self, config, lane, name, task, spawns=None):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
-        saved = _transfer(task)
+        saved = task.get("launch_assignment") or _transfer(task)
         decision = (
             profile_choice.ProfileDecision(saved["profile"], "handoff", "original seat profile")
-            if saved and not task.get("profile")
+            if saved and (task.get("launch_assignment") or not task.get("profile"))
             else profile_choice.choose(config.slug, lane, chosen, task, environ)
         )
         profile = decision.profile
@@ -278,6 +278,20 @@ class HerdrRuntime:
         from scripts.terminate_agent import sessions
 
         return {s.name for s in sessions() if s.name}
+
+    def bindings(self, agents: list[AgentRecord]) -> dict:
+        from scripts.terminate_agent import sessions
+
+        wanted = {agent.name: agent for agent in agents}
+        return {
+            session.name: live_binding.read(wanted[session.name], session.process.pid)
+            for session in sessions()
+            if session.name in wanted
+        }
+
+    def pane_open(self, agent: AgentRecord) -> bool:
+        found = self._get(pane_target(agent))
+        return found is not None and _owns(found, agent)
 
     def _terminate(self, name):
         try:
