@@ -92,7 +92,7 @@ def test_a_wait_declared_by_another_agent_or_swarm_does_not_count(redis):
 
 def test_a_worker_whose_declared_wait_ended_is_told_again(redis):
     _declare(redis)
-    idle.end_wait(redis, "rig", NAME)
+    idle.end_wait(redis, "rig", NAME, 1)
     assert TOLD in nudge.nudge(_bash("sleep 600"), environ=WORKER)
 
 
