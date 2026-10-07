@@ -62,7 +62,7 @@ def choose(slug: str, lane: str, lane_config: dict, task: dict, environ: dict) -
     elif lane != CLASSIFIED_LANE or pinned != DEFAULT_PROFILES[lane]:
         decision = ProfileDecision(pinned, "lane", f"{lane} lane")
     else:
-        decision = classify(slug, task, environ)
+        decision = classify(slug, task, environ, lane)
     if not installed(decision.profile):
         raise ProfileUnresolved(
             f"task {task.get('id')} needs profile {decision.profile}, which is not installed: install it with "
@@ -71,7 +71,7 @@ def choose(slug: str, lane: str, lane_config: dict, task: dict, environ: dict) -
     return decision
 
 
-def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
+def classify(slug: str, task: dict, environ: dict, lane: str) -> ProfileDecision:
     question = Choice(
         f'Task {task.get("id")} "{task.get("title", "")}": which responsibility owns the public behavior this task '
         "changes? Judge what a user or caller observes changing, from the description, parent intent and territory, "
@@ -86,7 +86,18 @@ def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
         ) from exc
     answer, floor = result.answers["responsibility"], float(environ.get(MIN_CONFIDENCE_VAR, MIN_CONFIDENCE))
     confidence = answer.confidence if answer.confidence is not None else 0.0
-    if answer.choice not in RESPONSIBILITIES or confidence < floor:
+    if confidence < floor:
+        return ProfileDecision(
+            DEFAULT_PROFILES[lane],
+            "lane default",
+            f"{lane} lane default: {result.source} answered {answer.choice} with confidence {confidence:.2f}, "
+            f"below the floor {floor:.2f}",
+            result.source,
+            answer.confidence,
+            result.calibrated,
+            anchors(task),
+        )
+    if answer.choice not in RESPONSIBILITIES:
         raise ProfileUnresolved(
             f"task {task.get('id')} profile is unresolved: {result.source} answered {answer.choice} with confidence "
             f"{confidence:.2f}, the floor is {floor:.2f}: {_remedy(slug, task)}"
