@@ -20,6 +20,7 @@ Codex facts this file encodes were verified against codex-cli 0.147.0 on
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -226,12 +227,10 @@ class CodexAdapter:
         legacy = doc.pop("agentihooks", None)
         sidecar = cls._managed_sidecar(home)
         if sidecar.exists():
-            try:
+            with contextlib.suppress(ValueError):
                 recorded = json.loads(sidecar.read_text())
-            except ValueError:
-                recorded = None
-            if isinstance(recorded, dict):
-                return recorded
+                if isinstance(recorded, dict):
+                    return recorded
         managed = legacy.get("managed") if isinstance(legacy, dict) else None
         return managed.unwrap() if isinstance(managed, dict) else {}
 

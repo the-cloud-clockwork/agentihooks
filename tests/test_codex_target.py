@@ -131,8 +131,19 @@ class TestConfigToml:
         adapter.write_settings({"approval_policy": "never", "tui": {"status_line": ["model"]}})
         home = codex_home()
         assert "agentihooks" not in adapter._load_toml(home / "config.toml")
-        record = json.loads((home / ".agentihooks-managed.json").read_text())
-        assert record == {"approval_policy": "never", "tui": {"status_line": ["model"]}}
+        record = {"approval_policy": "never", "tui": {"status_line": ["model"]}}
+        assert (home / ".agentihooks-managed.json").read_text() == json.dumps(record, indent=2) + "\n"
+
+    def test_unreadable_sidecar_falls_back_to_the_legacy_table(self, adapter, capsys):
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "config.toml").write_text(
+            'approval_policy = "untrusted"\n\n[agentihooks.managed]\napproval_policy = "on-request"\n'
+        )
+        (home / ".agentihooks-managed.json").write_text("{not json")
+        adapter.write_settings({"approval_policy": "never"})
+        assert adapter._load_toml(home / "config.toml")["approval_policy"] == "untrusted"
+        assert "hand-set" in capsys.readouterr().out
 
     def test_legacy_managed_table_moves_to_the_sidecar(self, adapter, capsys):
         home = codex_home()
@@ -812,6 +823,26 @@ class TestTeardown:
         assert "project_doc_max_bytes" not in text
         assert not (home / ".agentihooks-managed.json").exists()
         assert install._global_record(install._load_state(), "codex").get("managed_mcp") is None
+
+    def test_legacy_install_without_sidecar_tears_down(self, adapter):
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "config.toml").write_text(
+            'approval_policy = "never"\n\n[agentihooks.managed]\napproval_policy = "never"\n'
+        )
+        adapter.teardown()
+        assert "approval_policy" not in adapter._load_toml(home / "config.toml")
+
+    def test_unrecorded_approval_policy_stays_with_a_warning(self, adapter, capsys):
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "config.toml").write_text('approval_policy = "never"\n')
+        adapter.teardown()
+        assert adapter._load_toml(home / "config.toml")["approval_policy"] == "never"
+        assert (
+            "  [!!] no managed-key record — approval_policy/sandbox_mode left as-is; review them "
+            '(a torn-down bypass install would have set "never"/"danger-full-access").'
+        ) in capsys.readouterr().out
 
     def test_preserves_operator_content(self, adapter, tmp_path):
         import tomlkit
