@@ -42,3 +42,17 @@ def test_every_other_repository_call_passes_through_unpublished():
     _, published, repository = wrapped()
     assert repository.exists("here") and not repository.exists("gone")
     assert published == []
+
+
+def test_module_copies_of_the_server_share_one_wrapper_per_repository():
+    from scripts.swarm_ledger.events.publishing import publishing
+
+    store, seen = Store(), []
+    first = publishing(store, lambda slug, state: seen.append(("first", slug)))
+    second = publishing(store, lambda slug, state: seen.append(("second", slug)))
+    assert first is second
+    publishing(store, first.publishers[0])
+    assert len(first.publishers) == 2
+    first.get_document("s")
+    assert seen == [("first", "s"), ("second", "s")]
+    assert publishing(Store(), lambda slug, state: None) is not first

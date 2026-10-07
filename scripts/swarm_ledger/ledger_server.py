@@ -45,7 +45,7 @@ import new_ledger  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
 from scripts.swarm_ledger.events import Hub  # noqa: E402
-from scripts.swarm_ledger.events.publishing import Publishing  # noqa: E402
+from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
 from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
 
 HOST, PORT = ledger_link.address()
@@ -90,7 +90,7 @@ def publish_ledger(slug, state):
         HUB.publish(slug, "ledger", ledger_view(state))
 
 
-repository = Publishing(stored, publish_ledger)
+repository = publishing(stored, publish_ledger)
 
 
 def all_summaries():
