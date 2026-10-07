@@ -4,16 +4,30 @@ import { doc } from "./sync.js";
 import { noticeTarget } from "./notices.js";
 import { collapsible, groupOpen, markToggles, rememberGroup } from "./folds.js";
 import { selectTab } from "./layout.js";
+import { render } from "./render.js";
+import { firstPage, lazy, moreButton, wanted } from "./pages.js";
 
 let outlinePick = null;
 
 let outlineFrame = 0;
 
+export function revealTarget(id) {
+  let el = document.getElementById(id);
+  if (!el && id.startsWith("item-")) {
+    const section = document.querySelector(`section[data-outline="${id.split("-")[1]}"] > details.fold`);
+    if (section) section.open = true;
+    wanted.id = id;
+    try { render(); } finally { wanted.id = null; }
+    el = document.getElementById(id);
+  }
+  if (el) reveal(el);
+  return el;
+}
+
 export function jumpTo(ev, item) {
-  const el = document.getElementById(`item-${item.replace("/", "-")}`);
+  const el = revealTarget(`item-${item.replace("/", "-")}`);
   if (!el) return;
   ev.preventDefault();
-  reveal(el);
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   el.classList.remove("flash");
   void el.offsetWidth;
@@ -33,12 +47,21 @@ function outlineOf(doc, heads) {
   });
 }
 
+function outlineLink(e) {
+  return h("a", { href: `#${e.id}`, "data-target": e.id, title: e.title, text: e.title, class: e.state && `st-${e.state}` });
+}
+
+function outlineAgain() {
+  $("outline").dataset.sig = "";
+  renderOutline();
+}
+
 function outlineGroup(s) {
-  const link = (e) => h("a", { href: `#${e.id}`, "data-target": e.id, title: e.title, text: e.title, class: e.state && `st-${e.state}` });
-  const box = h("details", { class: "fold", id: `ol-${s.id}`, open: "" }, h("summary", {}, link(s)),
-    h("ul", { class: "ol-items" }, ...s.items.map((i) => h("li", {}, link(i)))));
+  const box = h("details", { class: "fold", id: `ol-${s.id}`, open: "" }, h("summary", {}, outlineLink(s)));
   collapsible(box);
-  return h("li", { class: "ol-sec" }, box);
+  const key = `ol-${s.id}`;
+  return h("li", { class: "ol-sec" }, lazy(box, () => h("ul", { class: "ol-items" },
+    ...firstPage(key, s.items, (i) => i.id).map((i) => h("li", {}, outlineLink(i))), moreButton(key, s.items.length, "items", outlineAgain) || "")));
 }
 
 export function outlineBoxes() {
@@ -125,11 +148,10 @@ export function wireOutline() {
   $("outline-toggle").addEventListener("click", () => showOutline(!$("outline").classList.contains("open")));
   $("outline").addEventListener("click", (ev) => {
     const a = ev.target.closest("a[data-target]");
-    const el = a && document.getElementById(a.dataset.target);
+    const el = a && revealTarget(a.dataset.target);
     if (!el) return;
     ev.preventDefault();
     outlinePick = a.dataset.target;
-    reveal(el);
     el.scrollIntoView({ behavior: "smooth", block: "start" });
     showOutline(false);
     markOutline();

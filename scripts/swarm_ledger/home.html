@@ -1,118 +1,12 @@
 <!doctype html>
+<html lang="en">
 <meta charset=utf-8>
 <meta name=viewport content='width=device-width,initial-scale=1'>
 <title>__HOME_HEADING__</title>
-<style>__HOME_PALETTE__*{box-sizing:border-box}
-html{color-scheme:dark}
-body{margin:0;min-height:100vh;color:var(--text);font:13px/1.6 ui-monospace,'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;background:var(--canvas);background-image:var(--backdrop);background-attachment:fixed}
-::selection{background:var(--selection);color:var(--text)}
-main{position:relative;z-index:1;padding:32px clamp(16px,3vw,48px) 96px}
-main.home{padding-inline:192px}
-@media (max-width:1439px){main.home{padding-inline:clamp(16px,3vw,48px)}}
-.home .panel,.bin .panel{margin-top:16px;padding:4px 8px 8px;outline:1px solid transparent;outline-offset:-1px;border-radius:12px;background:var(--surface-1);transition:outline-color .15s cubic-bezier(.4,0,.2,1),box-shadow .15s cubic-bezier(.4,0,.2,1)}
-.home .panel:hover,.bin .panel:hover{outline-color:var(--panel-edge);box-shadow:var(--panel-lift)}
-header{display:flex;align-items:center;gap:16px;padding:0 12px 12px;border-bottom:1px solid var(--signal-soft)}
-.logo-link{display:flex;flex:none;border-radius:4px}
-.logo-link:focus-visible{outline:1px solid var(--signal);outline-offset:3px}
-.logo{flex:none;width:22px;height:22px;background:var(--logo);mask:url(/logo.png) center/contain no-repeat}
-.brand{font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--text)}
-.watermark{position:fixed;top:50%;left:50%;width:50vmin;height:50vmin;transform:translate(-50%,-50%);opacity:.05;pointer-events:none;background:var(--logo);mask:url(/logo.png) center/contain no-repeat}
-h1{display:flex;align-items:center;gap:10px;margin:0;font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--text)}
-h1::before{content:'';width:2px;height:14px;background:var(--signal);}
-.total{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
-ul{list-style:none;margin:0;padding:0}
-.row{display:grid;grid-template-columns:minmax(160px,280px) 56px minmax(0,1fr) 64px 72px 112px 80px 104px;align-items:center;gap:20px;min-height:40px;padding:6px 12px;border-bottom:1px solid var(--rule);white-space:nowrap;font-variant-numeric:tabular-nums;transition:background .15s}
-.bin .row{grid-template-columns:minmax(160px,280px) 56px minmax(0,1fr) 112px 104px 104px}
-.home .row{grid-template-columns:20px minmax(160px,280px) 56px minmax(0,1fr) 64px 72px 112px 88px 104px}
-.home li.row.open{align-items:start;padding-block:12px}
-.home li.row.open .title,.home li.row.open .ov{white-space:normal;overflow:visible;overflow-wrap:anywhere}
-.fold{width:20px;height:20px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--accent-2);font:inherit;font-size:10px;cursor:pointer;transition:background .15s,transform .15s}
-.fold:hover,.fold:focus-visible{background:var(--hover);outline:none}
-.fold:focus-visible{outline:2px solid var(--ring);outline-offset:1px}
-.fold[aria-expanded=true]{transform:rotate(90deg)}
-.sort{display:inline-flex;align-items:center;gap:6px;padding:0;border:0;background:transparent;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer}
-.sort.r{justify-self:end}
-.sort i{font-style:normal;opacity:.45}
-.sort:hover,.sort:focus-visible,.sort[data-dir]{color:var(--text);outline:none}
-.sort:focus-visible{text-decoration:underline;text-underline-offset:3px}
-.sort[data-dir] i{opacity:1;color:var(--accent-2)}
-.toggle-all{margin-left:auto;font-size:11px;letter-spacing:.1em;text-transform:uppercase}
-li.row:hover,li.row:focus-within{background:var(--hover)}
-.head{min-height:0;padding-top:14px;padding-bottom:8px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
-.title{overflow:hidden;text-overflow:ellipsis;color:var(--link);font-size:14px;font-weight:700;text-decoration:none}
-.title:hover{text-decoration:underline;text-underline-offset:3px}
-.title:focus-visible{outline:2px solid var(--ring);outline-offset:3px;border-radius:2px}
-.kind{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-2);}
-.ov{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
-.num{text-align:right;color:var(--dim)}
-.num b{font-weight:700}
-.num.open b{color:var(--link);}
-.num.done b{color:var(--positive);}
-.state{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.08em;text-transform:uppercase}
-.state::before{content:'';flex:none;width:6px;height:6px;border-radius:50%;background:currentColor}
-.s-running{color:var(--positive);}
-.s-drained{color:var(--accent-2);}
-.s-paused,.s-stopping{color:var(--warn);}
-.s-closed{color:var(--signal);}
-.s-stopped,.s-none{color:var(--dim)}
-.when,.deleted{text-align:right;color:var(--dim)}
-.head .r{text-align:right}
-.left{text-align:right;color:var(--link);}
-.acts{display:flex;justify-content:flex-end;gap:4px}
-.act{flex:none;height:30px;min-width:30px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 7px;border:0;border-radius:8px;background:transparent;color:var(--muted);font:inherit;font-size:12px;cursor:pointer;transition:background .15s,box-shadow .15s,color .15s,filter .15s}
-.act svg{width:15px;height:15px}
-.act:hover,.act:focus-visible{outline:none;background:var(--hover);box-shadow:inset 0 0 0 1px var(--edge);}
-.act:focus-visible{outline:1px solid currentColor;outline-offset:2px}
-.act:disabled{opacity:.3;cursor:wait;filter:none}
-.act.del:hover,.act.del:focus-visible{color:var(--destructive)}
-.act.reopen,.act.restore{color:var(--link)}
-.empty{padding:28px 12px;color:var(--muted)}
-.fab{position:fixed;left:16px;bottom:16px;z-index:10;width:44px;height:44px;border:0;border-radius:12px;display:grid;place-content:center;color:var(--signal);background:transparent;transition:background .15s,filter .15s}
-.fab svg{width:20px;height:20px}
-.fab:hover,.fab:focus-visible{background:var(--hover);outline:none}
-.fab:focus-visible{outline:1px solid var(--signal);outline-offset:2px}
-.count{position:absolute;top:-6px;right:-4px;font-size:11px;font-weight:700;color:var(--destructive);}
-@media (max-width:760px){.row,.bin .row{grid-template-columns:minmax(0,1fr) auto auto;gap:12px}
-.home .row{grid-template-columns:20px minmax(0,1fr) auto auto}
-.head,.kind,.ov,.num,.when,.deleted{display:none}
-}</style>__HOME_WATERMARK__<main class="__HOME_VIEW__"><header><a class="logo-link" href="/" aria-label="HOME"><span class="logo" aria-hidden="true"></span></a><span class="brand">agentihooks</span><h1>__HOME_HEADING__</h1>__HOME_TOTAL__</header><div class="panel"><div class="row head">__HOME_HEAD__</div><ul>__HOME_BODY__</ul></div></main>__HOME_FAB__
-<script>async function reopenLedger(b){
-const slug=encodeURIComponent(b.dataset.slug),page=await fetch('/'+slug);if(!page.ok)return page;
-const doc=new DOMParser().parseFromString(await page.text(),'text/html');
-const token=doc.querySelector('meta[name=ledger-token]').content;
-return fetch('/api/swarm/'+slug,{method:'PUT',headers:{'Content-Type':'application/json',
-'X-Ledger-Token':token},body:JSON.stringify({action:'reopen'})});}
-document.addEventListener('click',async e=>{const b=e.target.closest('button[data-act]');if(!b)return;
-b.disabled=true;const r=b.dataset.act==='reopen'?await reopenLedger(b):
-await fetch('/api/bin',{method:'POST',headers:{'Content-Type':'application/json'},
-body:JSON.stringify({action:b.dataset.act,slug:b.dataset.slug})});if(r.ok)return location.reload();
-b.disabled=false;alert(await r.text())})</script>
-<script>(()=>{const all=document.getElementById('fold-all');if(!all)return;
-const list=document.querySelector('.home ul'),FOLD_KEY='home-fold',SORT_KEY='home-sort';
-const FIRST={kind:1,open:-1,done:-1,swarm:1,at:-1};
-const read=(k,f)=>{try{return JSON.parse(localStorage.getItem(k)||'null')||f}catch(e){return f}};
-const write=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){/* storage blocked: the choice lasts until reload */}};
-const rows=()=>[...list.querySelectorAll('li.row')];
-const isOpen=r=>r.classList.contains('open');
-function fold(r,open){r.classList.toggle('open',open);r.querySelector('.fold').setAttribute('aria-expanded',String(open))}
-function label(){all.textContent=rows().length&&rows().every(isOpen)?'Collapse all':'Expand all'}
-function remember(){const s=read(FOLD_KEY,{});for(const r of rows())s[r.dataset.slug]=isOpen(r);write(FOLD_KEY,s);label()}
-let sort=read(SORT_KEY,{});
-if(!Object.hasOwn(FIRST,sort.key)||![1,-1].includes(sort.dir))sort={key:'at',dir:-1};
-const value=(r,k)=>k==='kind'?r.dataset.kind:Number(r.dataset[k]);
-function compare(a,b){const x=value(a,sort.key),y=value(b,sort.key);
-return(x<y?-1:x>y?1:0)*sort.dir||Number(b.dataset.at)-Number(a.dataset.at)}
-function order(){list.append(...rows().sort(compare));
-for(const h of document.querySelectorAll('.sort')){const on=h.dataset.sort===sort.key;
-if(on)h.dataset.dir=sort.dir>0?'asc':'desc';else delete h.dataset.dir;
-h.querySelector('i').textContent=on?(sort.dir>0?'▲':'▼'):'↕'}}
-const saved=read(FOLD_KEY,{});for(const r of rows())fold(r,saved[r.dataset.slug]===true);
-label();order();
-document.addEventListener('click',e=>{const b=e.target.closest('.fold,#fold-all,.sort');if(!b)return;
-if(b.classList.contains('sort')){const k=b.dataset.sort;
-sort=sort.key===k?{key:k,dir:-sort.dir}:{key:k,dir:FIRST[k]};write(SORT_KEY,sort);return order()}
-if(b===all){const open=!rows().every(isOpen);for(const r of rows())fold(r,open)}
-else{const r=b.closest('li.row');fold(r,!isOpen(r))}
-remember()})})()</script>
-<script>/*__HOME_TOOLTIPS__*/</script>
-</body>
+<link rel="stylesheet" href="/static/__HOME_PAGE__/palette.css">
+<link rel="stylesheet" href="/static/__HOME_PAGE__/css/home.css">
+<link rel="stylesheet" href="/static/__HOME_PAGE__/css/tooltips.css">
+__HOME_WATERMARK__<main class="__HOME_VIEW__"><header><a class="logo-link" href="/" aria-label="HOME"><span class="logo" aria-hidden="true"></span></a><span class="brand">agentihooks</span><h1>__HOME_HEADING__</h1>__HOME_TOTAL__</header><div class="panel"><div class="row head">__HOME_HEAD__</div><ul id="rows"></ul></div></main>__HOME_FAB__
+<script src="/static/__HOME_PAGE__/tooltips.js"></script>
+<script type="module" src="/static/__HOME_PAGE__/home/home.js"></script>
+</html>

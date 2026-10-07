@@ -5,7 +5,8 @@ import subprocess
 import new_ledger
 import pytest
 
-from tests.swarm_ledger.test_design_system import SCRIPTS, palette
+from tests.swarm_ledger.ledger_page import page_source
+from tests.swarm_ledger.test_design_system import palette
 from tests.swarm_ledger.test_swarm_layout import browser, open_page, status
 from tests.swarm_ledger.test_swarm_panel import function_source
 
@@ -109,7 +110,7 @@ def test_an_open_list_is_not_rebuilt_under_the_pointer(page_script):
 
 
 def test_the_list_sits_on_an_opaque_palette_token_with_bare_labels():
-    css = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+    css = page_source()
     tokens = dict(re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", palette()))
     menu = re.search(r"\.chat-to-menu \{([^}]*)\}", css).group(1)
     background = re.search(r"background: var\((--[\w-]+)\)", menu).group(1)

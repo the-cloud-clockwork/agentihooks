@@ -4,7 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import fulfill_events, is_events, serve_modules
+from tests.swarm_ledger.ledger_page import (
+    fulfill_events,
+    is_events,
+    ledger_state,
+    page_source,
+    serve_modules,
+    shell_html,
+)
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -115,8 +122,7 @@ def status(**changes):
 class Page:
     def __init__(self, browser, payload, width, clock=False, **options):
         self.payload, self.puts = payload, []
-        html = TEMPLATE.read_text().replace("__LEDGER_DATA__", json.dumps(DOC))
-        html = html.replace("__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text())
+        html = shell_html()
         self.context = browser.new_context(viewport={"width": width, "height": 2400}, **options)
         if clock:
             self.context.clock.install(time=NOW_MS)
@@ -132,7 +138,7 @@ class Page:
     def route(self, route, html):
         request = route.request
         if is_events(request.url):
-            fulfill_events(route, swarm=self.payload)
+            fulfill_events(route, ledger_state(DOC), self.payload)
         elif "/api/swarm/" in request.url:
             if request.method == "PUT":
                 self.puts.append(json.loads(request.post_data))
@@ -170,7 +176,7 @@ def open_page(browser):
 
 
 def test_rows_run_header_alert_capacity_work_accounts_health_handoffs():
-    page = TEMPLATE.read_text()
+    page = page_source()
     box = page.split('<div id="swarm-box">', 1)[1].split('<aside id="stats-column"', 1)[0]
     positions = [box.index(f'id="{row}"') for row in ROWS]
     assert positions == sorted(positions)
@@ -551,7 +557,7 @@ def test_handoff_rows_show_each_seat_and_offer_the_restore_decision(open_page):
 
 
 def test_swarm_tab_styles_use_only_palette_tokens():
-    page = TEMPLATE.read_text()
+    page = page_source()
     rules = re.findall(r"^\s*(?:\.sw-|#swarm|\.lbl|#health-table|#agents-table|#quota-table)[^{]*\{[^}]*\}", page, re.M)
     assert len(rules) > 30
     for rule in rules:

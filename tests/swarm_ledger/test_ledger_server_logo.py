@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_
 
 from scripts.swarm_ledger import ledger_core as core  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
+from tests.swarm_ledger.ledger_page import page_source  # noqa: E402
 
 LOGO_LINK = '<a class="logo-link" href="/" aria-label="HOME"><span class="logo" aria-hidden="true"></span></a>'
 BRAND = f'<header>{LOGO_LINK}<span class="brand">agentihooks</span>'
@@ -88,7 +89,7 @@ def test_the_logo_links_home_on_a_rendered_ledger_page_and_the_bin(rows):
 
 
 def test_the_logo_link_keeps_the_logo_box_and_marks_focus_from_the_palette():
-    for css in (home_style(), core.TEMPLATE.read_text(encoding="utf-8")):
+    for css in (home_style(), page_source()):
         link = re.search(r"\.logo-link ?\{([^}]*)\}", css).group(1).replace(" ", "")
         assert "display:flex" in link and "flex:none" in link
         focus = re.search(r"\.logo-link:focus-visible ?\{([^}]*)\}", css).group(1)
@@ -103,7 +104,7 @@ def test_the_logo_is_a_palette_coloured_mask_of_the_served_png():
 
 
 def test_ledger_pages_show_the_logo_left_of_the_title_and_no_watermark():
-    template = core.TEMPLATE.read_text(encoding="utf-8")
+    template = page_source()
     masthead = f'<div class="masthead">{LOGO_LINK}<div>\n      <div class="title-row"'
     assert masthead in template
     assert "watermark" not in template

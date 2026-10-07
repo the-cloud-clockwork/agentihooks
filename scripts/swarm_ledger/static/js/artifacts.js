@@ -44,6 +44,10 @@ export function renderArtifacts() {
   const list = [...doc.artifacts].sort((a, b) => (b.at || 0) - (a.at || 0));
   $("art-badge").hidden = !list.length;
   $("art-badge").textContent = String(list.length);
+  if ($("art-panel").hidden) {
+    $("art-trash").replaceChildren();
+    return $("art-list").replaceChildren();
+  }
   $("art-list").replaceChildren(...list.map((a) => h("li", { class: "notif-row art-row" },
     h("div", { class: "notif-meta", text: artifactMeta(a) }),
     h("button", { class: "art-title", type: "button", text: a.title, on: { click: () => openArtifact(a) } }),
@@ -61,5 +65,6 @@ export function renderArtifacts() {
 export function showArtifacts(open) {
   $("art-panel").hidden = !open;
   $("art-fab").setAttribute("aria-expanded", String(open));
+  renderArtifacts();
   if (open) anchorPanel($("art-panel"), $("art-fab"));
 }

@@ -1,9 +1,8 @@
-import json
 from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import serve_modules
+from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
@@ -63,12 +62,12 @@ def open_page(browser, doc, init_script=None):
     context = browser.new_context(viewport={"width": 1600, "height": 900})
     if init_script:
         context.add_init_script(init_script)
-    html = TEMPLATE.read_text(encoding="utf-8").replace("__LEDGER_DATA__", json.dumps(doc))
+    html = shell_html()
     context.route(
         "**/*",
         lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
     )
-    serve_modules(context)
+    serve_modules(context, ledger_state(doc))
     page = context.new_page()
     page.goto(URL)
     return context, page

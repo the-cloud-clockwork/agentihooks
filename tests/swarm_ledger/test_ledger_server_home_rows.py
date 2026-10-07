@@ -1,3 +1,4 @@
+import contextlib
 import re
 import sys
 from pathlib import Path
@@ -8,8 +9,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
 
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
+from tests.swarm_ledger.ledger_page import chromium, rendered_home, served  # noqa: E402
 
-URL = "http://ledger.test/"
+URL = "/"
+NOW = 700 * 60000
 LONG = " ".join(["The overview runs on well past the width of its column."] * 12)
 LEDGERS = {
     "a": ("swarm", 3, 1, "running", 0, 300),
@@ -41,21 +44,42 @@ def summaries():
     ]
 
 
-def home_html(view="home"):
+@contextlib.contextmanager
+def listed(rows=None, states=None):
+    states = states or {slug: spec[3] for slug, spec in LEDGERS.items()}
     with (
-        patch.object(server, "ledger_summaries", return_value=summaries()),
+        patch.object(server, "ledger_summaries", return_value=rows or summaries()),
         patch.object(server, "bin_summaries", return_value=[{**summaries()[0], "deleted_at": 0, "days_left": 3}]),
-        patch.object(server, "swarm_state", side_effect=lambda slug: LEDGERS[slug][3]),
+        patch.object(server, "swarm_state", side_effect=lambda slug: states.get(slug)),
         patch.object(server.ledger_bin, "entries", return_value={}),
     ):
-        return server.index_page(view, now=700 * 60000)
+        yield
+
+
+@pytest.fixture(scope="module")
+def browser():
+    with chromium() as launched:
+        yield launched
+
+
+@pytest.fixture(scope="module")
+def home_html(browser):
+    pages = {}
+
+    def render(view="home"):
+        if view not in pages:
+            with listed():
+                pages[view] = rendered_home(server, browser, view, NOW)
+        return pages[view]
+
+    return render
 
 
 def row_attrs(page):
     return {m.group(1): m.group(0) for m in re.finditer(r'<li class="row" data-slug="(\w)"[^>]*>', page)}
 
 
-def test_home_rows_carry_the_values_their_columns_sort_by():
+def test_home_rows_carry_the_values_their_columns_sort_by(home_html):
     rows = row_attrs(home_html())
     assert set(rows) == set(LEDGERS)
     assert 'data-kind="small"' in rows["b"]
@@ -65,32 +89,38 @@ def test_home_rows_carry_the_values_their_columns_sort_by():
 
 
 @pytest.mark.parametrize(("slug", "rank"), [("a", 0), ("d", 1), ("g", 1), ("e", 2), ("f", 3), ("b", 4), ("c", 5)])
-def test_swarm_rank_runs_running_paused_drained_stopped_none_closed(slug, rank):
+def test_swarm_rank_runs_running_paused_drained_stopped_none_closed(home_html, slug, rank):
     assert f'data-swarm="{rank}"' in row_attrs(home_html())[slug]
 
 
-def test_unknown_swarm_state_ranks_with_no_swarm():
-    assert server.swarm_rank("rebooting") == server.swarm_rank(None) == 4
+def test_unknown_swarm_state_ranks_with_no_swarm(browser):
+    with listed(states={"a": "rebooting"}):
+        rows = row_attrs(rendered_home(server, browser, "home", NOW))
+    assert 'data-swarm="4"' in rows["a"]
+    assert 'data-swarm="4"' in rows["b"]
 
 
-def test_exactly_kind_open_done_swarm_and_activity_headers_sort():
+def test_exactly_kind_open_done_swarm_and_activity_headers_sort(home_html):
     page = home_html()
     assert re.findall(r'data-sort="(\w+)"', page) == ["kind", "open", "done", "swarm", "at"]
     assert page.count('class="fold"') == len(LEDGERS)
     assert 'id="fold-all"' in page
 
 
-def test_a_ledger_without_activity_sorts_as_oldest():
-    s = {**summaries()[0], "updated_at": None}
-    assert ' data-at="0">' in server.home_row(s, "running", 0)
+def test_a_ledger_without_activity_sorts_as_oldest(browser):
+    with listed(rows=[{**summaries()[0], "updated_at": None}]):
+        page = rendered_home(server, browser, "home", NOW)
+    assert ' data-at="0">' in page
 
 
-def test_the_fold_arrow_names_its_ledger_escaped():
-    s = {**summaries()[0], "title": "Beta <plan>"}
-    assert 'aria-label="Show all of Beta &lt;plan&gt;"' in server.home_row(s, None, 0)
+def test_the_fold_arrow_names_its_ledger_escaped(browser):
+    with listed(rows=[{**summaries()[1], "title": "Beta <plan><img src=x>"}]):
+        page = rendered_home(server, browser, "home", NOW)
+    assert "<img" not in page.split('<ul id="rows">', 1)[1]
+    assert re.search(r'aria-label="Show all of Beta (&lt;|<)plan(&gt;|>)(&lt;|<)img src=x(&gt;|>)"', page)
 
 
-def test_bin_has_no_fold_or_sort_controls():
+def test_bin_has_no_fold_or_sort_controls(home_html):
     page = home_html("bin")
     assert '<li class="row"><a class="title" href="/a"' in page
     assert "data-sort=" not in page
@@ -98,36 +128,31 @@ def test_bin_has_no_fold_or_sort_controls():
     assert 'id="fold-all"' not in page
 
 
-@pytest.fixture(scope="module")
-def browser():
-    sync_api = pytest.importorskip("playwright.sync_api")
-    with sync_api.sync_playwright() as pw:
-        try:
-            chromium = pw.chromium.launch()
-        except Exception as exc:
-            pytest.skip(f"no chromium: {exc}")
-        yield chromium
-        chromium.close()
-
-
 @pytest.fixture
 def context(browser):
-    context = browser.new_context(viewport={"width": 1920, "height": 1080})
-    context.set_default_timeout(5000)
-    html = home_html()
-    context.route(
-        "**/*",
-        lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
-    )
-    yield context
-    context.close()
+    with listed(), served(server) as base:
+        context = browser.new_context(viewport={"width": 1920, "height": 1080}, base_url=base)
+        context.set_default_timeout(5000)
+        context.add_init_script(f"Date.now = () => {NOW};")
+        yield context
+        context.close()
+
+
+def opened_page(context):
+    page = context.new_page()
+    page.goto(URL)
+    page.wait_for_selector("li.row")
+    return page
 
 
 @pytest.fixture
 def tab(context):
-    page = context.new_page()
-    page.goto(URL)
-    return page
+    return opened_page(context)
+
+
+def reload(tab):
+    tab.reload()
+    tab.wait_for_selector("li.row")
 
 
 def order(tab):
@@ -180,16 +205,16 @@ def test_the_row_arrow_opens_the_full_title_and_overview_and_closes_it_again(tab
 
 def test_fold_choices_and_expand_all_are_remembered_across_reloads(tab):
     tab.locator("li.row[data-slug=b] .fold").click()
-    tab.reload()
+    reload(tab)
     assert opened(tab) == "b"
     tab.locator("#fold-all").click()
     assert len(opened(tab)) == len(LEDGERS)
     assert tab.locator("#fold-all").text_content() == "Collapse all"
-    tab.reload()
+    reload(tab)
     assert len(opened(tab)) == len(LEDGERS)
     assert tab.locator("#fold-all").text_content() == "Collapse all"
     tab.locator("#fold-all").click()
-    tab.reload()
+    reload(tab)
     assert opened(tab) == ""
     assert tab.locator("#fold-all").text_content() == "Expand all"
 
@@ -225,22 +250,20 @@ def test_swarm_sort_runs_running_paused_drained_stopped_none_closed(tab):
 def test_the_sort_choice_is_remembered_across_reloads(tab):
     tab.locator(".sort[data-sort=swarm]").click()
     tab.locator(".sort[data-sort=swarm]").click()
-    tab.reload()
+    reload(tab)
     assert order(tab) == "cbfegda"
     assert arrows(tab)["swarm"] == "▼"
 
 
 def test_a_corrupt_stored_sort_falls_back_to_activity(context):
     context.add_init_script("""localStorage.setItem("home-sort", JSON.stringify({ key: "nope", dir: 7 }));""")
-    tab = context.new_page()
-    tab.goto(URL)
+    tab = opened_page(context)
     assert order(tab) == "gbdaecf"
 
 
 def test_blocked_storage_still_folds_and_sorts(context):
     context.add_init_script(BLOCKED_STORAGE)
-    tab = context.new_page()
-    tab.goto(URL)
+    tab = opened_page(context)
     assert order(tab) == "gbdaecf"
     tab.locator("#fold-all").click()
     assert len(opened(tab)) == len(LEDGERS)

@@ -3,7 +3,7 @@ import { $, store, stored } from "./dom.js";
 import { readLayout, writeLayout } from "./api.js";
 import { showArtifacts } from "./artifacts.js";
 import { anchorPanel, showAlerts, showNotifications } from "./notices.js";
-import { reveal } from "./outline.js";
+import { revealTarget } from "./outline.js";
 
 const tabScroll = {};
 
@@ -22,12 +22,11 @@ export function selectTab(id, updateHash = true) {
   if (updateHash) history.replaceState(null, "", "#" + id);
 }
 
-function openHash() {
+export function openHash() {
   const id = decodeURIComponent(location.hash.slice(1));
   if (["ledger", "swarm"].includes(id)) return selectTab(id, false);
-  const target = id && document.getElementById(id);
+  const target = id && revealTarget(id);
   if (target) {
-    reveal(target);
     requestAnimationFrame(() => target.scrollIntoView({ block: "start" }));
   } else selectTab(stored(`plan-ledger:${SLUG}:tab`, "ledger"), false);
 }

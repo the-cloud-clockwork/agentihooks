@@ -14,6 +14,7 @@ import argparse
 import errno
 import functools
 import html
+import itertools
 import json
 import os
 import re
@@ -41,7 +42,6 @@ import ledger_layout  # noqa: E402
 import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 import ledger_workspace  # noqa: E402
-import new_ledger  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
 from scripts.swarm_ledger.events import Hub  # noqa: E402
@@ -61,7 +61,6 @@ CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
 LOGO = ROOT / "media" / "agentihooks-logo.png"
 HOME_PAGE = CODE_DIR / "home.html"
-MODULE_RE = re.compile(r"/static/([0-9a-f]{12})/js/([a-z]+)\.js")
 CODE_DIRS = (
     CODE_DIR,
     *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates")),
@@ -70,7 +69,7 @@ CODE_DIRS = (
 
 
 HUB = Hub()
-TAIL_MARKS = {}
+BIN_SWEEP_EVERY = 15
 
 
 @functools.cache
@@ -120,84 +119,21 @@ ICON = (
 TRASH = ICON.format(
     '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/>'
 )
-RESTORE = ICON.format('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>')
 HOME_ICON = ICON.format('<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>')
-
-
-def ledger_row(s, cells, control, lead="", attrs=""):
-    slug, title, overview = html.escape(s["slug"]), html.escape(s["title"]), html.escape(s["overview"])
-    return (
-        f'<li class="row"{attrs}>{lead}<a class="title" href="/{slug}" title="{title}">{title}</a>'
-        f'<span class="kind">{html.escape(s["size"])}</span><span class="ov" title="{overview}">{overview}</span>'
-        f'{cells}<span class="acts">{control.format(slug=slug, title=title)}</span></li>'
-    )
-
-
-def ago(at, now):
-    minutes = (now - at) // 60000
-    for unit, size in (("d", 1440), ("h", 60), ("m", 1)):
-        if minutes >= size:
-            return f"{minutes // size}{unit} ago"
-    return "just now"
-
-
-def activity(at, now):
-    if not at:
-        return '<span class="when">unknown</span>'
-    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(at / 1000))
-    local = time.strftime("%Y-%m-%d %H:%M", time.localtime(at / 1000))
-    return f'<time class="when" datetime="{stamp}" title="{local}">{ago(at, now)}</time>'
-
-
-def home_cells(s, state, now):
-    state = "closed" if s["closed_at"] else state
-    label, css = html.escape(state or "no swarm"), html.escape(state or "none")
-    return (
-        f'<span class="num open"><b>{s["open"]}</b> open</span><span class="num done"><b>{s["done"]}</b> done</span>'
-        f'<span class="state s-{css}">{label}</span>{activity(s["updated_at"], now)}'
-    )
-
-
-SWARM_RANK = {"running": 0, "paused": 1, "stopping": 1, "drained": 2, "stopped": 3, "closed": 5}
-FOLD = '<button class="fold" type="button" aria-expanded="false" aria-label="Show all of {title}">&#9656;</button>'
-
-
-def swarm_rank(state):
-    return SWARM_RANK.get(state, 4)
-
-
-def home_row(s, state, now):
-    state = "closed" if s["closed_at"] else state
-    attrs = (
-        f' data-slug="{html.escape(s["slug"])}" data-kind="{html.escape(s["size"])}" data-open="{s["open"]}"'
-        f' data-done="{s["done"]}" data-swarm="{swarm_rank(state)}" data-at="{s["updated_at"] or 0}"'
-    )
-    control = (REOPEN if s["closed_at"] else "") + DELETE
-    return ledger_row(s, home_cells(s, state, now), control, FOLD.format(title=html.escape(s["title"])), attrs)
-
-
-def bin_cells(s):
-    deleted = time.strftime("%Y-%m-%d", time.localtime(s["deleted_at"] / 1000))
-    days = s["days_left"]
-    return f'<span class="deleted">{deleted}</span><span class="left">{days} day{"" if days == 1 else "s"} left</span>'
-
-
 HEADS = {
     "home": ("", "Ledger", "Kind:kind", "Overview", ">Open:open", ">Done:done", "Swarm:swarm", ">Activity:at", ""),
     "bin": ("Ledger", "Kind", "Overview", ">Deleted", ">Left", ""),
 }
-DELETE = (
-    '<button class="act del" type="button" data-act="delete" data-slug="{slug}" '
-    f'title="Move to the bin" aria-label="Move {{title}} to the bin">{TRASH}</button>'
+PAGE_POLICY = (
+    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; "
+    "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 )
-REOPEN = (
-    '<button class="act reopen" type="button" data-act="reopen" data-slug="{slug}" '
-    'aria-label="Reopen {title}">Reopen</button>'
-)
-RESTORE_BUTTON = (
-    '<button class="act restore" type="button" data-act="restore" data-slug="{slug}" '
-    f'title="Restore to HOME" aria-label="Restore {{title}} to HOME">{RESTORE}Restore</button>'
-)
+STATIC_RE = re.compile(r"/static/([0-9a-f]{12})/([a-z]+/)?([a-z_]+\.(?:js|css))")
+STATIC_TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8"}
+
+
+def home_summaries():
+    return [{**s, "swarm": swarm_state(s["slug"])} for s in ledger_summaries()]
 
 
 FOLD_ALL = '<button class="act toggle-all" id="fold-all" type="button">Expand all</button>'
@@ -213,58 +149,47 @@ def head_cell(label):
     return f'<button{css} type="button" data-sort="{key}">{label}<i aria-hidden="true">&#8597;</i></button>'
 
 
-def index_page(view="home", now=None):
-    now = core.now_ms() if now is None else now
+def index_page(view="home"):
+    """The HOME or BIN shell; its rows load from the v1 ledger and bin collections."""
     if view == "bin":
-        heading, empty = "BIN", "The bin is empty."
-        rows = [ledger_row(s, bin_cells(s), RESTORE_BUTTON) for s in bin_summaries(now)]
-        total = f'<span class="total">{len(rows)} ledger{"" if len(rows) == 1 else "s"}</span>'
-        watermark = ""
+        heading, total, watermark = "BIN", '<span class="total" id="total"></span>', ""
         fab = f'<a class="fab" id="home-fab" href="/" title="HOME" aria-label="HOME">{HOME_ICON}</a>'
     else:
-        heading, empty = "HOME", "No ledgers yet."
-        total, watermark = FOLD_ALL, '<div class="watermark" aria-hidden="true"></div>'
-        rows = [home_row(s, swarm_state(s["slug"]), now) for s in ledger_summaries()]
-        count = len(ledger_bin.entries())
-        badge = f'<span class="count">{count}</span>' if count else ""
-        fab = f'<a class="fab" id="bin-fab" href="/?view=bin" title="Bin" aria-label="Bin">{TRASH}{badge}</a>'
-    head = "".join(head_cell(label) for label in HEADS[view])
-    body = "".join(rows) or f'<li class="empty">{empty}</li>'
+        heading, total, watermark = "HOME", FOLD_ALL, '<div class="watermark" aria-hidden="true"></div>'
+        fab = f'<a class="fab" id="bin-fab" href="/?view=bin" title="Bin" aria-label="Bin">{TRASH}</a>'
     values = {
         "HEADING": heading,
-        "PALETTE": core.PALETTE.read_text(encoding="utf-8"),
+        "PAGE": served_version(),
         "WATERMARK": watermark,
         "VIEW": view,
         "TOTAL": total,
-        "HEAD": head,
-        "BODY": body,
+        "HEAD": "".join(head_cell(label) for label in HEADS[view]),
         "FAB": fab,
-        "TOOLTIPS": core.TOOLTIPS.read_text(encoding="utf-8"),
     }
     return re.sub(
-        r"/\*__HOME_(TOOLTIPS)__\*/|__HOME_(HEADING|PALETTE|WATERMARK|VIEW|TOTAL|HEAD|BODY|FAB)__",
-        lambda m: values[m.group(1) or m.group(2)],
-        HOME_PAGE.read_text(encoding="utf-8"),
+        r"__HOME_(HEADING|PAGE|WATERMARK|VIEW|TOTAL|HEAD|FAB)__",
+        lambda m: values[m.group(1)],
+        core.HOME.read_text(encoding="utf-8"),
     )
 
 
 def page_for(slug):
-    """The page as served: when an agent broke the seed, the JSON's document stands in for it."""
-    try:
-        embedded = core.PAGE_RE.search(repository.read_page(slug))
-        if not embedded or embedded.group(1) != core.page_version():
-            new_ledger.upgrade_page(slug)
-        state = repository.get_document(slug)
-    except (ValueError, OSError) as exc:
-        sys.stderr.write(f"sync {slug}: {exc}\n")
-        return repository.read_page(slug)
+    """The ledger shell: the page's metadata and asset links, read without writing; the records load over the API."""
     page = repository.read_page(slug)
-    if state["_meta"].get("seed_error"):
-        doc = {k: v for k, v in state.items() if k != "_meta"}
-        page = core.SEED_RE.sub(
-            lambda m: m.group(1) + core.seed_text(doc, state["_meta"]["rev"]) + m.group(3), page, count=1
-        )
-    return page
+    try:
+        title = repository.read_snapshot(slug).get("title") or slug
+    except (ValueError, OSError):
+        title = slug
+    values = {
+        "TOKEN": html.escape(core.read_token(page) or ""),
+        "PAGE": served_version(),
+        "SLUG": slug,
+        "PORT": str(PORT),
+        "TITLE": html.escape(title),
+    }
+    return re.sub(
+        r"__LEDGER_(TOKEN|PAGE|SLUG|PORT|TITLE)__", lambda m: values[m.group(1)], core.SHELL.read_text(encoding="utf-8")
+    )
 
 
 @functools.cache
@@ -548,58 +473,25 @@ def doctor_phrase(slug, state):
         subprocess.Popen([exe, "doctor", slug, "stop"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def with_workspaces(slug, state):
-    """The latest progress and proof lines of each task's work folder, read at reply time and never stored."""
-    tasks = [
-        {**t, "workspace_tail": ledger_workspace.tails(slug, t["id"])} if t.get("workspace") else t
-        for t in state.get("tasks", [])
-    ]
-    return {**state, "tasks": tasks}
-
-
-def tail_stamp(path):
-    try:
-        return path.stat().st_mtime_ns
-    except OSError:
-        return None
-
-
-def workspace_tails(slug, ledger):
-    """Each task's work folder tails, read again only when one of its files changed."""
-    marks, kept, found = TAIL_MARKS.get(slug, {}), {}, {}
-    for task in ledger.get("tasks", []):
-        if not task.get("workspace"):
-            continue
-        try:
-            folder = ledger_workspace.folder(slug, task["id"])
-        except ValueError:
-            continue
-        stamp = tuple(tail_stamp(folder / name) for _, name in ledger_workspace.TAILS)
-        kept[task["id"]] = marks.get(task["id"])
-        if kept[task["id"]] is None or kept[task["id"]][0] != stamp:
-            kept[task["id"]] = (stamp, ledger_workspace.tails(slug, task["id"]))
-        found[task["id"]] = kept[task["id"]][1]
-    TAIL_MARKS[slug] = kept
-    return found
-
-
 def stream_resources(slug):
     ledger = ledger_view(repository.get_document(slug, reconcile=False))
-    return {"ledger": ledger, "swarm": swarm_status(slug, ledger), "workspaces": workspace_tails(slug, ledger)}
+    return {"ledger": ledger, "swarm": swarm_status(slug, ledger)}
+
+
+def workspace_tails(slug, task_id):
+    """The latest progress and proof lines of one task's work folder, read when its proof fold opens."""
+    return ledger_workspace.tails(slug, task_id)
 
 
 def sample_streams():
-    """Publish swarm status and work folder tails for every ledger a stream is open on."""
+    """Publish swarm status for every ledger a stream is open on."""
     HUB.evict()
-    for slug in [slug for slug in list(TAIL_MARKS) if not HUB.has(slug)]:
-        del TAIL_MARKS[slug]
     for slug in HUB.watched():
         ledger = HUB.resource(slug, "ledger")
         if ledger is None:
             continue
         try:
             HUB.publish(slug, "swarm", swarm_status(slug, ledger))
-            HUB.publish(slug, "workspaces", workspace_tails(slug, ledger))
         except Exception as exc:  # the seed watcher that calls this must outlive any one ledger's readers
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
@@ -620,6 +512,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        if ctype.startswith("text/html"):
+            self.send_header("Content-Security-Policy", PAGE_POLICY)
+            self.send_header("X-Content-Type-Options", "nosniff")
         if self.path.startswith("/api/") and self.headers.get("Origin") == FILE_ORIGIN:
             self.send_header("Access-Control-Allow-Origin", FILE_ORIGIN)
         self.end_headers()
@@ -645,9 +540,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(403, "missing or wrong ledger token", "text/plain") or True
         return False
 
-    def agent_view(self):
-        return urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("view") == ["agent"]
-
     def reply_state(self, slug, changes=None, ops=None, refusals=None):
         refusals = refusals or {}
         try:
@@ -666,10 +558,7 @@ class Handler(BaseHTTPRequestHandler):
             "crew": ledger_gate.crew(state["_meta"]),
         }
         state["_meta"]["warnings"] = [*state["_meta"].get("warnings", []), *refusals.values()]
-        reply = {
-            **(state if self.agent_view() else with_workspaces(slug, state)),
-            "rejected": [*rejected, *refusals],
-        }
+        reply = {**state, "rejected": [*rejected, *refusals]}
         return self.send(200, json.dumps(reply, ensure_ascii=False), "application/json")
 
     def do_OPTIONS(self):
@@ -699,10 +588,8 @@ class Handler(BaseHTTPRequestHandler):
         if route.startswith("/artifacts/"):
             return self.send_media(*route.removeprefix("/artifacts/").partition("/")[::2], store=ledger_artifacts)
         if route.startswith("/static/"):
-            return self.send_module(route)
+            return self.send_static(route)
         if route == "/":
-            ledger_bin.tidy()
-            bin_closed_without_swarm()
             view = "bin" if "view=bin" in self.path.partition("?")[2].split("&") else "home"
             return self.send(200, index_page(view), "text/html; charset=utf-8")
         if route == "/api/layout":
@@ -774,12 +661,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def send_module(self, route):
-        match = MODULE_RE.fullmatch(route)
-        path = match and core.MODULES / f"{match.group(2)}.js"
-        if not path or match.group(1) != core.page_version() or not path.is_file():
-            return self.send(404, "no such module", "text/plain")
-        return self.send(200, path.read_bytes().decode(), "text/javascript; charset=utf-8")
+    def send_static(self, route):
+        match = STATIC_RE.fullmatch(route)
+        path = match and core.static_assets().get(f"{match.group(2) or ''}{match.group(3)}")
+        if not path or match.group(1) != served_version():
+            return self.send(404, "no such asset", "text/plain")
+        data = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", STATIC_TYPES[path.suffix[1:]])
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(data)
 
     def send_media(self, slug, media_id, store=ledger_media):
         try:
@@ -946,12 +840,14 @@ def reload_if_changed(started, code_dirs=CODE_DIRS, execv=os.execv):
 def watch_seeds(interval=2.0):
     seen = {}
     started = code_stamp()
-    while True:
+    for passes in itertools.count():
         reload_if_changed(started)
         try:
             ledger_bin.tidy()
         except OSError as exc:
             sys.stderr.write(f"bin purge: {exc}\n")
+        if passes % BIN_SWEEP_EVERY == 0:
+            bin_closed_without_swarm()
         for path in repository.pages():
             try:
                 mtime = path.stat().st_mtime

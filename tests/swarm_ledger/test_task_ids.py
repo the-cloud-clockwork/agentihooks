@@ -1,10 +1,9 @@
-import json
 import re
 from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import serve_modules
+from tests.swarm_ledger.ledger_page import ledger_state, serve_modules
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -36,8 +35,7 @@ def css_rule(selector):
 @pytest.fixture
 def tab(browser):
     context = browser.new_context(viewport={"width": 1440, "height": 900})
-    html = page_source().replace("__LEDGER_DATA__", json.dumps(DOC))
-    html = html.replace("__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text())
+    html = page_source()
 
     def route(request):
         if "/api/swarm/" in request.request.url:
@@ -48,7 +46,7 @@ def tab(browser):
             request.abort()
 
     context.route("**/*", route)
-    serve_modules(context)
+    serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     page.goto(URL + "#ledger")
     yield page

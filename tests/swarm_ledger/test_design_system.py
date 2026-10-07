@@ -13,6 +13,8 @@ import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger.ledger_page import page_source  # noqa: E402
+
 LITERAL = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(|(?<![-\w])(white|black)(?![-\w])")
 ROLES = ("canvas", "surface-1", "surface-2", "overlay", "text", "muted", "dim", "rule", "edge")
 HUES = ("accent", "positive", "warn", "destructive")
@@ -54,7 +56,7 @@ class Palette(unittest.TestCase):
         self.assertEqual(value("--positive"), "#4ade80")
 
     def test_the_palette_is_the_only_place_a_colour_value_appears(self):
-        template = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        template = page_source()
         self.assertIsNone(LITERAL.search(template), LITERAL.search(template))
         self.assertIsNone(LITERAL.search(home_style()))
 
@@ -85,7 +87,7 @@ class PaletteReachesEveryPage(unittest.TestCase):
 class SurfaceLadder(unittest.TestCase):
     def setUp(self):
         self.pages = {
-            "ledger": css_of((SCRIPTS / "template.html").read_text(encoding="utf-8")),
+            "ledger": css_of(page_source()),
             "home": home_style(),
         }
 
@@ -162,7 +164,7 @@ def declared(css, selector):
 
 class BluePalette(unittest.TestCase):
     def setUp(self):
-        self.ledger = css_of((SCRIPTS / "template.html").read_text(encoding="utf-8"))
+        self.ledger = css_of(page_source())
         self.home = home_style()
 
     def test_the_ramp_holds_the_approved_blue_values(self):

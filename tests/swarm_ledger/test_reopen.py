@@ -1,6 +1,6 @@
 import re
 
-from tests.swarm_ledger.ledger_page import page_source
+from tests.swarm_ledger.ledger_page import browser_home, page_source
 from tests.swarm_ledger.test_close import SLUG, apply, make_ledger
 
 
@@ -25,7 +25,7 @@ def test_page_and_home_reopen_route_to_the_same_swarm_command():
     assert server.control_argv({"action": "reopen"}) == ["reopen"]
     make_ledger()
     apply({"op": "close", "id": "c", "by": "swarm"})
-    page = server.index_page()
+    page = browser_home(server)
     assert "<h1>CLOSED</h1>" not in page
     assert f'data-act="reopen" data-slug="{SLUG}"' in page
     assert ">Reopen</button>" in page

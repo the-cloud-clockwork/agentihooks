@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import fulfill_events, is_events, serve_modules
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events, page_source, serve_modules
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -140,7 +140,7 @@ def test_the_plus_takes_a_palette_colour_and_keeps_the_state_dot(tab):
           return { plus: getComputedStyle(a, "::after").color, dot: getComputedStyle(a, "::before").color };
         }"""
     )
-    page = TEMPLATE.read_text(encoding="utf-8")
+    page = page_source()
     rule = re.search(r"\.outline a\.pending::after\s*\{([^}]*)\}", page)
     assert rule and "color: var(--pending)" in rule.group(1)
     assert re.search(r"--pending:\s*var\(--[\w-]+\);", (SCRIPTS / "palette.css").read_text(encoding="utf-8"))
