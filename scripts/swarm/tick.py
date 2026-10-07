@@ -89,7 +89,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions = _recover_master(slug, config, store, runtime, now_ms)
     doc = ledger.state(slug)
     rows = {t["id"]: t for t in doc["tasks"]}
-    exits.sweep(InboxStore(store.redis), slug, store, rows)
+    exits.sweep(InboxStore(store.redis), slug, store, lambda: {t["id"]: t for t in ledger.state(slug)["tasks"]})
     actions += _reap(slug, store, ledger, runtime, rows, now_ms)
     actions += lifetime.retire_idle_master(slug, store, ledger, runtime, rows, now_ms)
     if config.state == "stopped":
