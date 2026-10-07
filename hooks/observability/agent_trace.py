@@ -824,7 +824,7 @@ def _paging_cut(all_turns: list[list[dict]], results: dict) -> tuple[int, int] |
         message = _message_id(entry)
         if index and (message is None or message != _message_id(flat[index - 1][1])):
             cut = position
-        if _open_calls(entry, results):
+        if position[0] == len(all_turns) - 1 and _open_calls(entry, results):
             break
     return cut
 
