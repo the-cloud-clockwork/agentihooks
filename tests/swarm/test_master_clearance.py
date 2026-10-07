@@ -1,4 +1,5 @@
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -89,9 +90,7 @@ def test_an_agent_or_another_swarms_master_is_refused(swarm, monkeypatch, capsys
     before = changed(store)
     acting(monkeypatch, name, swarm_of)
     assert cli.main(["demo", *FAMILIES[family][0]]) == 1
-    assert capsys.readouterr().err == (
-        f"swarm: only the operator or the master of swarm demo uses its swarm controls, and {name} is neither\n"
-    )
+    assert capsys.readouterr().err == refused(name)
     assert changed(store) == before
     assert ledger.said == []
 
@@ -99,9 +98,15 @@ def test_an_agent_or_another_swarms_master_is_refused(swarm, monkeypatch, capsys
 @pytest.mark.parametrize("family", FAMILIES)
 def test_the_operator_keeps_every_control_without_a_master_record(swarm, monkeypatch, family):
     store, ledger = swarm
+    before = changed(store)
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     assert cli.main(["demo", *FAMILIES[family][0]]) == 0
-    assert all(by == "swarm" and not text.startswith("The master") for text, by in ledger.said)
+    assert changed(store) != before
+    assert [text for text, _ in ledger.said if text.startswith("master a1b2c3 0001")] == []
+
+
+def refused(name):
+    return f"swarm: only the operator or the master of swarm demo uses its swarm controls, and {name} is neither\n"
 
 
 def test_a_finished_master_holds_no_clearance(swarm, monkeypatch, capsys):
@@ -109,7 +114,30 @@ def test_a_finished_master_holds_no_clearance(swarm, monkeypatch, capsys):
     store.put_agent("demo", AgentRecord(MASTER, "master", "master", state="finished"))
     acting(monkeypatch, MASTER, "demo")
     assert cli.main(["demo", "pause"]) == 1
-    assert "is neither" in capsys.readouterr().err
+    assert capsys.readouterr().err == refused(MASTER)
+
+
+@pytest.mark.parametrize("argv", [["pause"], ["--as", MASTER, "pause"], ["set", "intent-gate=coach"]])
+def test_an_agent_that_drops_its_swarm_pin_is_still_refused_by_its_session_name(swarm, monkeypatch, capsys, argv):
+    store, ledger = swarm
+    before = changed(store)
+    monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: ENGINEER)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "operator")
+    assert cli.main(["demo", *argv]) == 1
+    assert capsys.readouterr().err == refused(ENGINEER)
+    assert changed(store) == before
+    assert ledger.said == []
+
+
+def test_the_master_stop_now_is_recorded_before_it_retires_the_master(swarm, monkeypatch):
+    _, ledger = swarm
+    monkeypatch.setattr(cli, "cmd_stop", lambda store, args: sys.exit(143))
+    acting(monkeypatch, MASTER, "demo")
+    with pytest.raises(SystemExit):
+        cli.main(["demo", "stop", "--now"])
+    assert ledger.said == [
+        ("master a1b2c3 0001 changed the swarm state with stop now from running to stopped.", "swarm")
+    ]
 
 
 SAMPLES = {"compact_limit": 200, "effort_min": "low", "effort_max": "max", "master_agent": "codex"}

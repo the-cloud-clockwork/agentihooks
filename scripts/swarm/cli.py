@@ -112,6 +112,14 @@ LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in
 EFFORT_KEYS = {"effort-min": "effort_min", "effort-max": "effort_max"}
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
+LIFECYCLE = {
+    "start": "running",
+    "pause": "paused",
+    "stop": "stopping",
+    "stop now": "stopped",
+    "close ledger": "closed",
+    "reopen": "running",
+}
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
@@ -420,7 +428,13 @@ def setting(config, key):
     if key in LANE_KEYS:
         lane, field = LANE_KEYS[key]
         return config.lanes.get(lane, {}).get(field, "")
-    return getattr(config, {**SETTABLE, **EFFORT_KEYS}.get(key, key), "")
+    return getattr(config, {**SETTABLE, **EFFORT_KEYS}.get(key, key))
+
+
+def lifecycle_control(args):
+    if args.command == "close":
+        return "close ledger"
+    return "stop now" if getattr(args, "now", False) else args.command
 
 
 def control_readings(store, args):
@@ -428,12 +442,29 @@ def control_readings(store, args):
 
     config = store.config(args.slug)
     if args.command == "set":
-        return {key: setting(config, key) for key in (pair.partition("=")[0] for pair in args.pairs)}
+        keys = (pair.partition("=")[0] for pair in args.pairs)
+        return {
+            key: setting(config, key)
+            for key in keys
+            if key in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, *GATE_KEYS, "autonomy")
+        }
     if args.command == "lift":
         lifted = lift.agent_lifted(args.slug, args.agent, args.gate)
         return {f"{args.gate} gate lift for {args.agent}": "lifted" if lifted else "not lifted"}
-    control = {"close": "close ledger"}.get(args.command, "stop now" if getattr(args, "now", False) else args.command)
-    return {f"the swarm state with {control}": config.state}
+    return {f"the swarm state with {lifecycle_control(args)}": config.state}
+
+
+def run_control(store, args, who, handler):
+    cleared = clearance.holder(store, args.slug, who, vars(args).get("name") or "")
+    if cleared == clearance.OPERATOR:
+        return handler(store, args)
+    before = control_readings(store, args)
+    if args.command not in ("set", "lift"):
+        after = {control: LIFECYCLE[lifecycle_control(args)] for control in before}
+        clearance.record(LedgerClient(), args.slug, cleared, before, after)
+        return handler(store, args)
+    handler(store, args)
+    clearance.record(LedgerClient(), args.slug, cleared, before, control_readings(store, args))
 
 
 def cmd_set(store, args):
@@ -1168,14 +1199,11 @@ def main(argv):
         if "slug" in args:
             args.slug = store.names.swarm_slug(args.slug)
         action = getattr(args, "command", "")
-        cleared = ""
-        if action in clearance.COMMANDS:
-            cleared = clearance.holder(store, args.slug, who, vars(args).get("name") or "")
-        readings = control_readings(store, args) if cleared not in ("", clearance.OPERATOR) else None
         before = control_notifications.master(store, args.slug) if action in control_notifications.CONTROLS else None
-        handler(store, args)
-        if readings is not None:
-            clearance.record(LedgerClient(), args.slug, cleared, readings, control_readings(store, args))
+        if action in clearance.COMMANDS:
+            run_control(store, args, who, handler)
+        else:
+            handler(store, args)
         if action in control_notifications.CONTROLS:
             control_notifications.notify(store, args, LedgerClient(), before, action)
     except (SwarmError, InboxError) as exc:
