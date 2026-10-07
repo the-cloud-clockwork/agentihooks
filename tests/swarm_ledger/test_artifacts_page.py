@@ -102,6 +102,19 @@ def test_markdown_renders_headings_tables_and_code(page):
     assert not viewer.is_visible()
 
 
+def test_inline_code_and_links_nested_in_bold_and_italic_are_formatted(page):
+    nested = b"**Verdict `early-real`** and *see `ledger say` [docs](https://example.com)*\n"
+    page.route(
+        "**/artifacts/**/" + "a" * 64 + ".md", lambda route: route.fulfill(body=nested, content_type="text/markdown")
+    )
+    body = open_artifact(page, "Handoff template proposal").locator(".art-body")
+    assert body.locator("strong").inner_text() == "Verdict early-real"
+    assert body.locator("strong code").inner_text() == "early-real"
+    assert body.locator("em code").inner_text() == "ledger say"
+    assert body.locator("em a").get_attribute("href") == "https://example.com"
+    assert "`" not in body.inner_text()
+
+
 def test_json_is_pretty_printed_and_foldable(page):
     viewer = open_artifact(page, "Proposal shape")
     body = viewer.locator(".art-body")
