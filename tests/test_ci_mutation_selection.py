@@ -486,6 +486,28 @@ def _gate_tree(tmp_path, monkeypatch):
     (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
 
 
+@pytest.mark.parametrize("source", ["hooks/__init__.py", "scripts/sample/__init__.py"])
+def test_gate_kills_initializer_mutants_through_ordinary_package_imports(tmp_path, monkeypatch, source):
+    _gate_tree(tmp_path, monkeypatch)
+    initializer = tmp_path / source
+    initializer.parent.mkdir(exist_ok=True)
+    initializer.write_text("def value(number):\n    return number + 1\n")
+    module = "hooks" if source == "hooks/__init__.py" else "scripts.sample"
+    imported = "import hooks as package" if module == "hooks" else "from scripts import sample as package"
+    (tmp_path / "tests/test_ordinary.py").write_text(
+        "import importlib\nimport sys\n\n"
+        f"{imported}\n\n"
+        "def test_package():\n"
+        f"    assert package is importlib.import_module('{module}')\n"
+        "    assert package.__name__ + '.__init__' not in sys.modules\n"
+        "    assert package.value(1) == 2\n"
+    )
+    report = run_gate(tmp_path, {source: {2}}, tmp_path / "evidence", 60)
+    assert report["not_mutated"] == []
+    assert report["failed"] is False
+    assert report["files"][0]["counts"] == {"killed": 2}
+
+
 def test_gate_runs_one_collection_per_change(tmp_path, monkeypatch):
     _gate_tree(tmp_path, monkeypatch)
     (tmp_path / "scripts/first.py").write_text("def one(value):\n    return value + 1\n")

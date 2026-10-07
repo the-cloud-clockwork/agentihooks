@@ -34,7 +34,10 @@ def discover_changes(root: Path, base: str, head: str) -> dict[str, set[int]]:
 
 
 def select_tests(root: Path, source: Path) -> list[str]:
-    module = ".".join(source.with_suffix("").parts)
+    parts = source.with_suffix("").parts
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    module = ".".join(parts)
     parent, _, name = module.rpartition(".")
     selected = []
     for path in sorted((root / "tests").rglob("test_*.py")):
