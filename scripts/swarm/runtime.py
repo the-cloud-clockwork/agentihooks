@@ -107,14 +107,9 @@ class HerdrRuntime:
             agent, reason = agent_choice.choose_shared(requested, environ, spawns, share, floor, choose=self.choose)
         if reason == agent_choice.ALL_FULL:
             raise SpawnError(reason)
+        task = {**task, "harness": agent}
         text = prompt.build(
-            config.slug,
-            config.repo,
-            lane,
-            name,
-            {**task, "harness": agent},
-            role=chosen.get("role", ""),
-            autonomy=config.autonomy,
+            config.slug, config.repo, lane, name, task, role=chosen.get("role", ""), autonomy=config.autonomy
         )
         priming_trace.write(self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile)

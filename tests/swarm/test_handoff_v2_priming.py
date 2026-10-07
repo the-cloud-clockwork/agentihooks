@@ -169,6 +169,14 @@ def test_codex_master_handoff_next_uses_the_inbox_wait():
     assert "Monitor" not in text
     assert "agentihooks msg inbox" in text
     assert "agentihooks swarm sw wait --inbox" in text
+    assert "Read agentihooks msg inbox and run agentihooks swarm sw wait --inbox and continue." in text
+    assert (
+        "When writing a handoff, make its Next action read agentihooks msg inbox and use "
+        "agentihooks swarm sw wait --inbox when no work remains."
+    ) in text
+    from scripts.profiles.codex_master import waiting
+
+    assert waiting("sw") in text
     assert "Monitor" in task["handoff"]
     assert task["transfer"]["next"] == action
 
@@ -179,3 +187,14 @@ def test_claude_master_preserves_its_handoff_next():
     action = "Rearm a Monitor on the ledger and continue."
     task = {"id": "master", "harness": "claude", "handoff": "# Handoff v2\n## Next\n" + action}
     assert action in prompt.build_master("sw", "/repo", "master", task)
+
+
+def test_codex_master_spawn_passes_its_harness_to_the_prompt(tmp_path):
+    from scripts.swarm import runtime
+    from tests.swarm.test_runtime import _spawn_seen
+
+    assert runtime.HerdrRuntime.__name__ == "HerdrRuntime"
+    _spawn_seen(tmp_path, {"master": {"agent": "codex"}}, lane="master")
+    text = (tmp_path / "sw/prompts/engineer@a1b2c3-0001.md").read_text()
+    assert "agentihooks swarm sw wait --inbox" in text
+    assert "When writing a handoff, make its Next action read agentihooks msg inbox" in text

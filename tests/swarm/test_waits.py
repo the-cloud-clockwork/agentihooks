@@ -245,8 +245,16 @@ def test_inbox_wait_returns_pending_seat_work_without_a_pane_prompt(started, cap
 
 
 @pytest.mark.parametrize("minutes", ["0", "-1", "61"])
-def test_inbox_wait_refuses_unbounded_duration(started, minutes):
+def test_inbox_wait_refuses_unbounded_duration(started, minutes, capsys, monkeypatch):
+    from scripts.inbox import receive
+
+    monkeypatch.setattr(receive, "receive", lambda *args: [])
+    capsys.readouterr()
     assert run("sw", "--as", ME, "wait", minutes, "--inbox") == 1
+    assert (
+        capsys.readouterr().err
+        == "swarm: an inbox wait takes one to sixty minutes and cannot also wait on a dependency\n"
+    )
 
 
 def test_inbox_wait_cannot_also_wait_on_checks(started):
@@ -268,7 +276,15 @@ def test_inbox_wait_timeout_and_failure_clear_the_declared_wait(started, monkeyp
     assert run("sw", "--as", ME, "wait", "2", "--inbox") == 0
     assert json.loads(capsys.readouterr().out) == {"items": [], "timed_out": True}
     assert calls[0][:2] == (ME, 120)
-    assert calls[0][2]["reason"] == "inbox work"
+    assert calls == [(ME, 120, {"until": 121_000, "reason": "inbox work", "at": 1_000})]
+    calls.clear()
+    assert run("sw", "--as", ME, "wait", "--inbox") == 0
+    capsys.readouterr()
+    assert calls == [(ME, 60, {"until": 61_000, "reason": "inbox work", "at": 1_000})]
+    calls.clear()
+    assert run("sw", "--as", ME, "wait", "60", "--inbox") == 0
+    capsys.readouterr()
+    assert calls == [(ME, 3600, {"until": 3_601_000, "reason": "inbox work", "at": 1_000})]
     assert held(store) is None
 
     def failed(*args):
