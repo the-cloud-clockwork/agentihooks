@@ -1,6 +1,6 @@
 {
   "case": "T-SV2-FND-02-A",
-  "tested_commit": "7029e5b3eeea46d8dc3702065246e23992452182",
+  "tested_commit": "b9e778460e0850f19fead7822d9af7bd33164597",
   "passed": 19,
   "failed": 0,
   "tests": [
