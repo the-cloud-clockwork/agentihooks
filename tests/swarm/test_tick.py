@@ -945,6 +945,37 @@ def test_a_full_house_waits_for_a_slot_before_starting_the_master(store):
     assert masters(store) == []
 
 
+def _other_swarm(store):
+    store.create(SwarmConfig("doc", "/repo", max_eng=2, max_ci=1))
+    ledger = tasks()
+    ledger.notify = lambda slug, text: None
+    return ledger
+
+
+def test_a_swarm_waiting_on_its_master_gets_the_next_slot_before_any_other_swarm_spawns(store):
+    doc = _other_swarm(store)
+    assert "no session slot for the master, waiting" in tick("doc", store, doc, FakeRuntime(full=True), 1)
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    actions = tick("sw", store, ledger, runtime, 2)
+
+    assert runtime.spawned == []
+    assert "holding spawns: swarm doc waits on a session slot for its master" in actions
+
+    tick("doc", store, doc, FakeRuntime(), 3)
+    tick("sw", store, ledger, runtime, 4)
+    assert runtime.spawned == [("eng", "engineer@a1b2c3-0001", "t1")]
+
+
+def test_a_stale_master_wait_stops_holding_other_swarms(store):
+    tick("doc", store, _other_swarm(store), FakeRuntime(full=True), 1)
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, 1 + 11 * 60_000)
+
+    assert runtime.spawned == [("eng", "engineer@a1b2c3-0001", "t1")]
+
+
 def test_a_stopping_swarm_keeps_its_master_until_the_last_worker_leaves(store, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()

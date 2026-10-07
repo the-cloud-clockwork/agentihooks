@@ -36,11 +36,13 @@ from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
-from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
+from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
+MASTER_WAITING = f"{PREFIX}:master-waiting"
+MASTER_WAIT_MS = 10 * 60 * 1000
 DOWN_TOLD = "master down told"
 REDELIVERED = "the master went down before closing it; kept for the next master"
 MASTER_DOWN = (
@@ -515,12 +517,21 @@ def _nested(outer, inner):
     return inner == outer or inner.startswith(outer + "/")
 
 
+def _held_for_master(slug, store, now_ms):
+    waiting = store.redis.hgetall(MASTER_WAITING)
+    others = sorted(s for s, at in waiting.items() if s != slug and now_ms - int(at) < MASTER_WAIT_MS)
+    return [f"holding spawns: swarm {s} waits on a session slot for its master" for s in others[:1]]
+
+
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents, actions = store.agents(slug), []
     taken = {a.seat for a in agents}
+    held = _held_for_master(slug, store, now_ms)
     for lane, cap in (("eng", config.max_eng), ("ci", config.max_ci), ("plan", config.max_plan)):
         busy = sum(1 for a in agents if a.lane == lane and not _ended(a, rows))
         for task in _claimable(slug, store, rows, doc, lane)[: max(cap - busy, 0)]:
+            if held:
+                return actions + held
             if not runtime.has_capacity(config):
                 return actions + ["every agent is at its session cap, waiting"]
             if blocked := _lives_spent(slug, store, ledger, rows, task):
@@ -688,6 +699,7 @@ def _recover_master(slug, config, store, runtime, now_ms):
 
 
 def _master(slug, config, store, runtime, now_ms):
+    store.redis.hdel(MASTER_WAITING, slug)
     agents = store.agents(slug)
     masters = [a for a in agents if a.lane == MASTER]
     if config.state == "stopping":
@@ -700,6 +712,7 @@ def _master(slug, config, store, runtime, now_ms):
     if any(m.name in runtime.live_names() for m in masters):
         return ["the old master is still running, waiting for it to end before starting the next"]
     if not runtime.has_capacity(config):
+        store.redis.hset(MASTER_WAITING, slug, now_ms)
         return ["no session slot for the master, waiting"]
     name = store.next_name(slug, MASTER, now_ms)
     record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, state="starting", seat=seat_address(slug, MASTER))
