@@ -367,12 +367,13 @@ def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_pat
     durations = {"tests/test_a.py::test_x": 5, "tests/test_c.py::test_x": 4, "tests/test_b.py::t": 1}
     durations |= {"tests/test_d.py::t": 1, "tests/other.py::t": 9}
     shards = stats_shards(tmp_path, files, durations, 3)
-    assert sorted(map(sorted, shards)) == [
+    assert sorted(shards) == [
         ["tests/test_a.py"],
         ["tests/test_b.py", "tests/test_d.py", "tests/test_e.py"],
         ["tests/test_c.py"],
     ]
     assert stats_shards(tmp_path, files[:1], {}, 8) == [["tests/test_a.py"]]
+    assert stats_shards(tmp_path, files, durations, 1) == [files]
 
 
 def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(tmp_path, capsys):
