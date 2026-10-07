@@ -93,3 +93,43 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     ledger.update_task(slug, agent.task, fields, by=agent.name)
     ledger.comment(slug, agent.task, _ledger_note(open_), by=agent.name)
     return fields
+
+
+def _restack_branch() -> None:
+    branch = _out(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], "restack needs a task worktree branch")
+    if branch in ("dev", "main", "master", "v1"):
+        raise SwarmError("restack needs a task worktree branch")
+    if _out(["git", "status", "--porcelain"], "cannot inspect the worktree"):
+        raise SwarmError("restack needs a clean worktree")
+
+
+def _rebase(base: str) -> None:
+    base = _out(
+        ["git", "rev-parse", "--verify", "--end-of-options", f"{base}^{{commit}}"], "cannot resolve the stacked base"
+    )
+    if shell(["git", "merge-base", "--is-ancestor", "origin/dev", "HEAD"]).returncode == 0:
+        return
+    if shell(["git", "merge-base", "--is-ancestor", base, "HEAD"]).returncode != 0:
+        raise SwarmError("the stacked base is not in this branch")
+    done = shell(["git", "rebase", "--onto", "origin/dev", base])
+    if done.returncode != 0:
+        files = _out(["git", "diff", "--name-only", "--diff-filter=U"], "cannot list conflicted files")
+        raise SwarmError(
+            f"restack failed: {done.stderr.strip()}\nConflicted files:\n{files}\n"
+            "Resolve the files, run git rebase --continue, then run swarm restack again."
+        )
+
+
+def restack(slug: str, agent, ledger) -> dict:
+    rows = {t["id"]: t for t in ledger.state(slug)["tasks"]}
+    row = rows.get(agent.task) or {}
+    if not row.get("parked_on") or not row.get("stacked_base"):
+        raise SwarmError("this task has no parked work with a stacked base")
+    if any(rows.get(dep, {}).get("state") != "done" for dep in row["parked_on"]):
+        raise SwarmError("this task still has an unfinished parked dependency")
+    _restack_branch()
+    _out(["git", "fetch", "origin"], "cannot fetch origin")
+    _rebase(row["stacked_base"])
+    fields = {"parked_on": []}
+    ledger.update_task(slug, agent.task, fields, by=agent.name)
+    return fields
