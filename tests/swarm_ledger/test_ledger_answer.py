@@ -74,6 +74,13 @@ def test_a_worker_answer_is_refused_and_the_priority_stays():
     assert question in [p["item"] for p in state["priorities"]]
 
 
+def test_an_answer_from_outside_the_crew_is_refused():
+    question = make_ledger()
+    state, rejected = core.sync(SLUG, ops=[answer(1, question, by="stranger@a1-9")])
+    assert rejected == ["an-1"]
+    assert state["questions"][0]["answers"] == []
+
+
 def test_a_replayed_answer_is_accepted_once_and_an_unknown_question_is_rejected():
     question = make_ledger()
     core.sync(SLUG, ops=[answer(1, question)])
@@ -98,8 +105,9 @@ def test_a_replayed_answer_is_accepted_once_and_an_unknown_question_is_rejected(
     ],
 )
 def test_malformed_answers_are_refused(op, message):
-    with pytest.raises(ValueError, match=message.replace("<", ".").replace(">", ".")):
+    with pytest.raises(ValueError) as refused:
         core.check_op({**answer(1, "questions/q"), **op})
+    assert str(refused.value) == message
 
 
 def test_answer_text_passes_the_plain_words_filter():
@@ -114,7 +122,7 @@ def _cli(monkeypatch, autonomy, by, item):
         return {**state, "rejected": rejected}
 
     monkeypatch.setattr(ledger, "call", call)
-    monkeypatch.setattr(ledger, "swarm_autonomy", lambda slug: autonomy)
+    monkeypatch.setattr(ledger, "swarm_autonomy", {SLUG: autonomy}.__getitem__)
     argv = ["--slug", SLUG, "--as", by, "answer", item, "Use the queue."]
     ledger.cmd_answer(ledger.build_parser().parse_args(argv))
 
@@ -162,7 +170,7 @@ class _Store:
         self.autonomy = autonomy
 
     def config(self, slug):
-        if self.autonomy is None:
+        if self.autonomy is None or slug != SLUG:
             raise SwarmError(f"no swarm {slug}")
         return type("Config", (), {"autonomy": self.autonomy})()
 
@@ -178,7 +186,11 @@ def test_swarm_autonomy_reads_the_swarm_config(monkeypatch):
 
 def test_the_master_prompt_names_answer_only_at_delegate_and_full(monkeypatch):
     monkeypatch.setattr(prompt, "summary_lines", lambda slug: [])
-    line = f"agentihooks ledger --slug demo --as {MASTER} answer questions/<id>"
+    line = (
+        f"- Answer an agent's question you can decide with agentihooks ledger --slug demo --as {MASTER} answer "
+        'questions/<id> "<answer>": it is recorded as yours and leaves the operator\'s Priorities. Raise the rest '
+        "to the operator."
+    )
     for autonomy, named in ((MANUAL, False), (ASSIST, False), (DELEGATE, True), (FULL, True)):
         text = prompt.build_master("demo", "/repo", MASTER, {}, autonomy=autonomy)
         assert (line in text) is named
