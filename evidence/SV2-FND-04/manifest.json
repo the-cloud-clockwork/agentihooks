@@ -1,0 +1,20 @@
+{
+  "package": "SV2-FND-04",
+  "tested_commit": "648dcfafe696a598a515f1f78b41ee66a5294e0a",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1427",
+  "inputs": {
+    "Swarm-v2.md": "901950210888681b37156ed3f990b4c9b6050cee78468293993b656999bd26d9",
+    "docs/swarm-v2/evidence-index.json": "84f95079b613e32f3db071e4dcd03f06b1ffa825884c869d117d88c5dd637eb9",
+    "docs/swarm-v2/evidence-index.md": "0bdf1f09420d2b165a3b53d2b610ef5df8a223c9546f1092aaaed63b7ef9998e",
+    "tests/fixtures/swarm_v2/evidence/packages.json": "58af11fcea4be6301430b49f3001652a7b1053ae5bf2e77a2da389508b675450",
+    "tests/fixtures/swarm_v2/evidence/packages-second.json": "3459c2ec91f67a70543a5728eb932cfe18c2e1c163ec7f728b6e8323e7235f42",
+    "tests/fixtures/swarm_v2/evidence/healthy-pod.png": "6b7fa434f92a8b80aab02d9bf1a12e49ffcae424e4013a1c4f68b67e3d2bbcd0",
+    "tests/test_swarm_v2_evidence.py": "23425c81280325b735a1a5f0901c6a2a05bb27a79487f4cc0ca10eeaf84ae6ff",
+    "scripts/swarm_v2/validate_plan.py": "2f02f769f92017feec23c31486e0120b13976e2b2dbb7bc0742d4a780b927b24",
+    "scripts/ci_mutation/runner.py": "94edec61c8ff50fe07e0aa8ba4505a2f11e7d50464d57ba13679f9e1b79e6797"
+  },
+  "versions": {
+    "python": "3.12.13"
+  },
+  "generated_by": "pytest tests/test_swarm_v2_evidence.py -p no:xdist -p no:randomly --junitxml=<file>, then python evidence/SV2-FND-04/generate_case_results.py <file> <commit> <pull request>"
+}
