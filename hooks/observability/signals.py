@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -14,7 +15,7 @@ PREFIX = "agentihooks.signals."
 
 
 def safe_name(session_id: str) -> str:
-    return "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id) or UNATTRIBUTED
+    return re.sub(r"[^A-Za-z0-9_-]", "_", session_id) or UNATTRIBUTED
 
 
 def _path(session_id: str) -> Path:

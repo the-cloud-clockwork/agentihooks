@@ -326,6 +326,25 @@ def test_a_non_object_signal_file_reads_empty():
     assert signals.read("s2") == {"events.queued": 2}
 
 
+def test_state_files_are_staged_beside_their_target_so_the_rename_stays_on_one_filesystem(monkeypatch):
+    from hooks import config
+
+    real, folders = signals.tempfile.mkstemp, []
+    monkeypatch.setattr(signals.tempfile, "mkstemp", lambda dir: folders.append(dir) or real(dir=dir))
+    monkeypatch.setattr(correlation, "gather", lambda s, e: _inputs(session_id=s))
+    signals.record({("s1", "events", "queued"): 1})
+    correlation.resolve("s1", ENV)
+    telemetry = config.AGENTIHOOKS_HOME / "telemetry"
+    assert folders == [telemetry / "signals", telemetry / "correlation"]
+    assert sorted(p.name for p in (telemetry / "signals").iterdir()) == ["s1.json"]
+
+
+def test_safe_names_keep_only_portable_characters():
+    assert signals.safe_name("abc-DEF_09") == "abc-DEF_09"
+    assert signals.safe_name("a/b c.é") == "a_b_c__"
+    assert signals.safe_name("") == signals.UNATTRIBUTED
+
+
 @pytest.fixture
 def worker(monkeypatch):
     monkeypatch.setattr(otel, "_initialized", True)

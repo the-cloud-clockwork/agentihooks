@@ -185,7 +185,7 @@ def resolve(session_id: str, environ: Mapping[str, str] | None = None) -> dict[s
     from hooks.observability.signals import safe_name
 
     env = os.environ if environ is None else environ
-    launch = [session_id, environment_account(env), *(env.get(key, "") for key in KEYS)]
+    launch = [session_id, environment_account(env), *(env.get(key) for key in KEYS)]
     path = config.AGENTIHOOKS_HOME / "telemetry" / "correlation" / f"{safe_name(session_id)}.json"
     try:
         cached = json.loads(path.read_text())
