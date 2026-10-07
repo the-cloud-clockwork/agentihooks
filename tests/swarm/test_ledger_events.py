@@ -222,7 +222,8 @@ def test_red_checks_with_no_push_for_twenty_minutes_go_to_its_engineer(store):
     run(store, in_pr(), now_ms=rerun.red_at + 20 * MINUTE, github=lambda url: rerun)
     assert len(texts(store, ENG_SEAT)) == 1
     pushed = ledger_events.PullRequest("OPEN", None, red.pushed_at + 30 * MINUTE, True, head="pushed")
-    run(store, in_pr(), now_ms=pushed.pushed_at + 20 * MINUTE, github=lambda url: pushed)
+    told = run(store, in_pr(), now_ms=pushed.pushed_at + 20 * MINUTE, github=lambda url: pushed)
+    assert f"told {ENG_SEAT}: https://github.com/o/r/pull/9:red:pushed" in told
     assert len(texts(store, ENG_SEAT)) == 2
 
 

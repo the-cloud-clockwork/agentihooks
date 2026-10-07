@@ -1,5 +1,7 @@
 import copy
 
+import pytest
+
 from scripts.doctor import ci
 from scripts.swarm import ledger_events
 from tests.doctor.recorded import load
@@ -74,6 +76,16 @@ def test_an_old_commit_pushed_now_is_not_reported_before_the_window_from_its_red
     planted["committed_at"] = ledger_events.iso_ms("2026-10-05T12:00:00Z")
     assert ci.red_checks(planted, _red_at(planted) + ledger_events.RED_QUIET_MS - 1) == []
     assert len(ci.red_checks(planted, _red_at(planted) + ledger_events.RED_QUIET_MS)) == 1
+
+
+@pytest.mark.parametrize(
+    ("conclusion", "found"),
+    [("failure", 1), ("timed_out", 1), ("action_required", 1), ("startup_failure", 1), ("cancelled", 0)],
+)
+def test_each_red_conclusion_counts_as_a_red_check(conclusion, found):
+    planted = load("ci")
+    planted["checks"][0]["conclusion"] = conclusion
+    assert len(ci.red_checks(planted, _red_at(planted) + ledger_events.RED_QUIET_MS)) == found
 
 
 def test_the_window_starts_at_the_earliest_red_check():
