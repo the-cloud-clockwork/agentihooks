@@ -46,6 +46,8 @@ def _audit(event, args):
 
 SUITE = Path(tempfile.mkdtemp(prefix="agentihooks-test-ledgers-"))
 os.environ["LEDGER_DIR"] = str(SUITE)
+os.environ["LEDGER_RUN_PID"] = str(os.getpid())
+os.environ.pop("LEDGER_RUN_START", None)
 os.environ["LEDGER_PORT"] = str(_spare_port())
 atexit.register(lambda pid=os.getpid(): os.getpid() == pid and shutil.rmtree(SUITE, ignore_errors=True))
 sys.addaudithook(_audit)
