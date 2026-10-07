@@ -18,7 +18,7 @@ REMOVERS = frozenset({"rm", "rmdir"})
 DIRECTORY_CHANGERS = frozenset({"cd", "pushd", "popd"})
 SHELLS = frozenset({"sh", "bash", "zsh"})
 INLINE_FLAG = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
-OPTION_VALUES = frozenset({"-o", "+o", "-O", "+O", "--rcfile", "--init-file"})
+OPTION_VALUE = re.compile(r"[-+][A-Za-z]*[oO]|--rcfile|--init-file")
 KEYWORDS = frozenset({"!", "{", "}", "if", "then", "elif", "else", "do", "while", "until"})
 GLOB = re.compile(r"[*?[]")
 RUNTIME_VALUE = re.compile(r"[$`]|^~[^/]")
@@ -56,7 +56,7 @@ def inline_scripts(text):
                 break
             if not word.startswith(("-", "+")):
                 break
-            if word in OPTION_VALUES:
+            if OPTION_VALUE.fullmatch(word):
                 next(rest)
 
 
