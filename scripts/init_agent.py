@@ -259,6 +259,7 @@ def _write_launcher(
         f"{_telemetry_exports(name, environ)}"
         f"{_swarm_exports(environ)}"
         f"{langfuse_export}"
+        f"{_binding_export(environ)}"
         f"{before}{command_text}\n"
         f"rm -f {shlex.join(cleanup)}\n"
         f"[ -e {shlex.quote(str(root))}/closing-$$ ] && {{ rm -f {shlex.quote(str(root))}/closing-$$; exit 0; }}\n"
@@ -268,6 +269,66 @@ def _write_launcher(
     )
     launcher.chmod(0o700)
     return launcher, prompt_file
+
+
+def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], environ: dict[str, str]) -> list[str]:
+    from scripts.profiles import binding
+    from scripts.select_profile import prepare
+
+    continuing = args.handoff or args.resume or "--resume" in flags or (agent == "codex" and flags[:1] == ["resume"])
+    if not args.profile and continuing:
+        args.profile = environ.get("AGENTIHOOKS_PROFILE")
+    if continuing and not args.profile:
+        raise ValueError("unsupported continuation: original required profile is missing; pass --profile")
+    if not args.profile:
+        return flags
+    if args.handoff:
+        flags = binding.continuation(flags, agent, environ)
+    profile_env, flags = prepare(args.profile, agent, "", "", flags, environ)
+    environ.update(profile_env)
+    return flags
+
+
+def _binding_request(args, agent: str, prompt: str, environ: dict[str, str], flags: list[str]) -> str:
+    from scripts.profiles import binding
+
+    if not args.profile:
+        return prompt
+    home = Path(environ[binding.HOMES[agent]])
+    binding.inspect(home, args.profile, agent)
+    report = _runtime_dir(environ) / f"profile-{os.getpid()}-{time.time_ns()}.json"
+    binding.request(report, args.profile, agent)
+    environ[binding.REPORT] = str(report)
+    environ["AGENTIHOOKS_RUN_MODEL"], environ["AGENTIHOOKS_RUN_EFFORT"] = model_effort(agent, flags, environ)
+    return f"{binding.PROMPT}\n\n{prompt}"
+
+
+def _binding_result(environ: dict[str, str], timeout: float, route: dict) -> list[str]:
+    from scripts.profiles import binding
+
+    if not environ.get(binding.REPORT):
+        return []
+    result = binding.wait(Path(environ[binding.REPORT]), timeout)
+    if route.get("account") and result["account"] != route["account"]:
+        raise ValueError("live process account differs from requested route")
+    return [
+        "profile_validation=validated",
+        f"profile_binding={json.dumps(result, separators=(',', ':'))}",
+        *(f"{key}={result[key]}" for key in ("model", "effort") if result.get(key)),
+    ]
+
+
+def _binding_export(environ: dict[str, str]) -> str:
+    names = (
+        "AGENTIHOOKS_PROFILE_REPORT",
+        "AGENTIHOOKS_HOME",
+        "AGENTIHOOKS_PROFILE",
+        "CODEX_HOME",
+        "AGENTIHOOKS_RUN_MODEL",
+        "AGENTIHOOKS_RUN_EFFORT",
+        effort_range.VARIABLE,
+    )
+    return "".join(f"export {key}={shlex.quote(environ[key])}\n" for key in names if environ.get(key))
 
 
 def _linux_command(launcher: Path, directory: Path, title: str) -> list[str] | None:
@@ -442,14 +503,15 @@ def _answer_channel_warning(pane: str, environ: dict[str, str]) -> str:
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     args = _parser().parse_args(argv)
     active_env = dict(os.environ if environ is None else environ)
+    active_env.pop("AGENTIHOOKS_PROFILE_REPORT", None)
     try:
         directory = _resolve_directory(args.dir, active_env)
         prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8") if args.prompt_file else args.prompt
         name = args.name or f"s-{time.strftime('%y%m%d-%H%M%S')}"
         claude_args = args.claude_args[1:] if args.claude_args[:1] == ["--"] else args.claude_args
         exclude = ""
-        if args.handoff and args.agent == "codex":
-            raise ValueError("--handoff moves work to another Claude account; it cannot open codex")
+        if args.handoff and (args.agent == "codex" or active_env.get("AGENTIHOOKS_TARGET") == "codex"):
+            raise ValueError("unsupported quota transfer: Codex cannot transfer to a Claude account")
         agent, reason = ("claude", "handoff") if args.handoff else agent_choice.choose(args.agent, active_env)
         if args.handoff:
             from hooks.context.account_sessions import UNROUTED, environment_account
@@ -458,12 +520,10 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             exclude = "" if current == UNROUTED else current
             if not prompt:
                 raise ValueError("--handoff needs the handoff document as --prompt-file")
-        if args.profile:
-            from scripts.select_profile import prepare
-
-            profile_env, claude_args = prepare(args.profile, agent, "", "", claude_args, active_env)
-            active_env.update(profile_env)
+        claude_args = _prepare_profile(args, agent, claude_args, active_env)
         claude_args = effort_range.launch_args(agent, claude_args, active_env)
+        if not args.dry_run:
+            prompt = _binding_request(args, agent, prompt, active_env, claude_args)
         channel = args.inbox_channel and agent == "claude"
         claude_args = [*_inbox_channel_args(), *claude_args] if channel else claude_args
         # A handoff must land on another account, so it never falls back to bare Claude.
@@ -577,17 +637,22 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         report.append(f"agent_name={herdr_host.agent_name(name) if renamed else 'unset'}")
         if channel:
             report.append(f"channel_warning={_answer_channel_warning(pane, active_env)}")
+    if args.handoff and route.get("status") != "routed":
+        print("\n".join([*report, "handoff=failed"]))
+        print(
+            "agentihooks init-agent: handoff failed; the new session was not routed to another account", file=sys.stderr
+        )
+        return 3
+    try:
+        report += _binding_result(active_env, args.route_timeout, route)
+    except (OSError, ValueError) as exc:
+        print("\n".join([*report, "profile_validation=failed"]))
+        print(f"agentihooks init-agent: {exc}", file=sys.stderr)
+        return 3
     if not args.handoff:
         print("\n".join(report))
         return 0
 
-    if route.get("status") != "routed":
-        print("\n".join([*report, "handoff=failed"]))
-        print(
-            "agentihooks init-agent: handoff failed; the new session was not routed to another account",
-            file=sys.stderr,
-        )
-        return 3
     from hooks.context.account_sessions import agent_pid
     from hooks.context.broadcast import mark_handed_off
 

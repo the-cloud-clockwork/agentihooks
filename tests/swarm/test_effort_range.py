@@ -14,6 +14,9 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 TASK = {"id": "t1", "title": "x"}
 
 
+from tests.swarm.profile_fixture import validated
+
+
 def _answer(score):
     return lambda *a, **kw: DecisionResult({"effort": Answer("score", score=score, confidence=0.95)}, "luna")
 
@@ -57,7 +60,7 @@ def test_spawn_hands_init_agent_the_swarm_effort_range(tmp_path):
 
     def launch(argv, **kwargs):
         seen["env"] = kwargs["env"]
-        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     from scripts.swarm.runtime import HerdrRuntime
 
@@ -81,8 +84,8 @@ def test_a_resumed_agent_relaunches_inside_the_range(tmp_path):
 
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
     config.lanes = {"eng": {"model": "fable", "effort": "max"}}
-    runtime.resume(config, replace(agent, model="sonnet", effort="low"), "you were restored")
-    assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "fable", "--effort", "high"]
+    runtime.resume(config, replace(agent, model="sonnet", effort="medium"), "you were restored")
+    assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "sonnet", "--effort", "medium"]
 
 
 def test_spawn_and_resume_take_the_swarm_range_not_the_default(tmp_path):
@@ -94,7 +97,7 @@ def test_spawn_and_resume_take_the_swarm_range_not_the_default(tmp_path):
 
     def launch(argv, **kwargs):
         seen.append(argv)
-        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     runtime = HerdrRuntime(home=tmp_path, run=launch, choose=lambda *_: ("claude", "open"))
     config = SimpleNamespace(
@@ -111,7 +114,7 @@ def test_spawn_and_resume_take_the_swarm_range_not_the_default(tmp_path):
     assert _passed(seen[-1]) == ["--model", "fable", "--effort", "max"]
     resuming, _, agent, resumed = _resuming(tmp_path, "c0ffee")
     resuming.resume(config, replace(agent, model="sonnet", effort="low"), "you were restored")
-    assert _passed(resumed["runs"][0]) == ["--route", "a1", "--model", "fable", "--effort", "max"]
+    assert _passed(resumed["runs"][0]) == ["--route", "a1", "--model", "sonnet", "--effort", "low"]
 
 
 @pytest.mark.parametrize(
