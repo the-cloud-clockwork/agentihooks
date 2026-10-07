@@ -781,6 +781,16 @@ def test_status_text_shows_each_agent_model_and_effort_or_unknown(env, capsys):
     assert "unknown" in lines["engineer@a1b2c3-0002"]
 
 
+def test_status_text_names_the_promoted_engineer(env, capsys):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    state = {"since": 1, "failure": "master spawn failed: boom", "promoted": "engineer@a1b2c3-0001"}
+    store.redis.set(store.key("sw", "master-outage"), json.dumps(state))
+    run("sw", "status")
+    out = capsys.readouterr().out.splitlines()
+    assert "promoted  engineer@a1b2c3-0001  restoring the master: master spawn failed: boom" in out
+
+
 def test_status_text_lists_each_phase_lifecycle_and_the_tasks_it_holds(env, capsys):
     _, ledger, _ = env
     ledger.rows["t1"]["phase"], ledger.rows["t2"]["phase"] = "p1", "p2"

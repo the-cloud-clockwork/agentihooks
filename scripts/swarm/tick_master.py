@@ -33,6 +33,8 @@ PROMOTED_NOTICE = (
     "and will report what failed and what it is doing."
 )
 HANDED_BACK_NOTICE = "A master is live again. The promoted engineer is back on its own task."
+STOPPING = "the swarm is stopping"
+STOPPED_NOTICE = "The swarm is stopping, so the promoted engineer is back on its own task."
 NOBODY_NOTICE = (
     "The master has been down {minutes} minutes, a forced launch failed and no live engineer can be promoted to "
     "restore it. Operator action is required."
@@ -71,19 +73,17 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
     launched = launch()
     actions = [FORCED.format(minutes=_shown(minutes)), *launched] if forcing else launched
     if config.state == "stopping":
-        return actions + _end(slug, store, ledger, state, "", now_ms)
+        return actions + _stop(slug, store, ledger, state, now_ms)
     if master := _bound(store, slug, runtime):
-        return actions + _end(slug, store, ledger, state, master, now_ms)
+        return actions + _hand_back(slug, store, ledger, state, master.name, now_ms)
     if not state:
         _save(store, slug, {"since": now_ms})
         return actions
     if forcing:
         state = {**state, "forced_at": now_ms}
-        if not state.get("failure") and not _starting(store, slug):
+        if not _starting(store, slug):
             state["failure"] = "; ".join(launched) or NO_LAUNCH
-    elif (
-        state.get("forced_at") and not state.get("failure") and now_ms - state["forced_at"] >= master_start.DEADLINE_MS
-    ):
+    elif _starting(store, slug) and now_ms - state.get("forced_at", now_ms) >= master_start.DEADLINE_MS:
         state["failure"] = NO_HOOK
     if state.get("failure"):
         state, promoted_actions = _promote(slug, store, ledger, runtime, state, minutes, now_ms)
@@ -114,7 +114,7 @@ def _starting(store, slug):
 
 def _bound(store, slug, runtime):
     live = runtime.live_names()
-    return next((a.name for a in _masters(store, slug) if a.state == "working" and a.name in live), "")
+    return next((a for a in _masters(store, slug) if a.state == "working" and a.name in live), None)
 
 
 def _engineer(store, slug, name):
@@ -123,16 +123,15 @@ def _engineer(store, slug, name):
 
 def _promote(slug, store, ledger, runtime, state, minutes, now_ms):
     live, actions = runtime.live_names(), []
-    holder = state.get("promoted", "")
-    if holder and holder in live and _engineer(store, slug, holder):
+    holder = state.get("promoted")
+    if holder in live and _engineer(store, slug, holder):
         return state, []
     if holder:
-        agent = _engineer(store, slug, holder)
-        if agent:
-            _note(store, agent.seat, "promotion lost", "the promoted engineer is gone", now_ms)
-        _note(store, seat_address(slug, MASTER), "promotion lost", holder, now_ms)
+        if gone := _engineer(store, slug, holder):
+            store.seats.note(gone.seat, "promotion lost", "the promoted engineer is gone", now_ms)
+        store.seats.note(seat_address(slug, MASTER), "promotion lost", holder, now_ms)
         actions.append(f"promoted {holder} is gone")
-        state = {k: v for k, v in state.items() if k not in ("promoted", "promoted_at")}
+        state = {k: v for k, v in state.items() if k != "promoted"}
     engineers = sorted(
         (
             a
@@ -148,37 +147,41 @@ def _promote(slug, store, ledger, runtime, state, minutes, now_ms):
         return state, actions + ["no live engineer to promote"]
     agent, reason = engineers[0], state["failure"]
     InboxStore(store.redis).send(SENDER, agent.name, prompt(slug, agent, reason, minutes))
-    _note(store, agent.seat, "promoted", reason, now_ms)
-    _note(store, agent.seat, "message", "the promoted prompt", now_ms)
-    _note(store, seat_address(slug, MASTER), "promoted", f"{agent.name}: {reason}", now_ms)
+    store.seats.note(agent.seat, "promoted", reason, now_ms)
+    store.seats.note(agent.seat, "message", "the promoted prompt", now_ms)
+    store.seats.note(seat_address(slug, MASTER), "promoted", f"{agent.name}: {reason}", now_ms)
     ledger.notify(slug, PROMOTED_NOTICE.format(minutes=_shown(minutes)))
-    state = {**state, "promoted": agent.name, "promoted_at": now_ms}
-    return state, actions + [
+    return {**state, "promoted": agent.name}, actions + [
         f"promoted {agent.name} to restore the master: {reason}",
         f"sent {agent.name} the promoted prompt",
     ]
 
 
-def _end(slug, store, ledger, state, master, now_ms):
-    if not state:
-        return []
+def _ending(slug, store, state):
     store.redis.delete(store.key(slug, KEY))
-    holder = state.get("promoted", "")
-    agent = _engineer(store, slug, holder) if holder else None
+    return _engineer(store, slug, state.get("promoted"))
+
+
+def _hand_back(slug, store, ledger, state, master, now_ms):
+    agent = _ending(slug, store, state)
     if not agent:
         return []
-    if master:
-        text, why, ended = HAND_BACK.format(master=master, task=agent.task), master, f"master {master} bound"
-        ledger.notify(slug, HANDED_BACK_NOTICE)
-    else:
-        text, why, ended = STOPPED.format(task=agent.task), "the swarm is stopping", "the swarm is stopping"
+    ledger.notify(slug, HANDED_BACK_NOTICE)
+    text = HAND_BACK.format(master=master, task=agent.task)
+    return _close(store, slug, agent, text, master, f"master {master} bound", now_ms)
+
+
+def _stop(slug, store, ledger, state, now_ms):
+    agent = _ending(slug, store, state)
+    if not agent:
+        return []
+    ledger.notify(slug, STOPPED_NOTICE)
+    return _close(store, slug, agent, STOPPED.format(task=agent.task), STOPPING, STOPPING, now_ms)
+
+
+def _close(store, slug, agent, text, why, ended, now_ms):
     InboxStore(store.redis).send(SENDER, agent.name, text)
-    _note(store, agent.seat, "handed back", why, now_ms)
-    _note(store, agent.seat, "message", "the hand back", now_ms)
-    _note(store, seat_address(slug, MASTER), "handed back", f"{holder}: {why}", now_ms)
-    return [f"{ended}, ended the promotion of {holder}", f"sent {holder} the hand back"]
-
-
-def _note(store, seat, event, detail, now_ms):
-    if seat:
-        store.seats.note(seat, event, detail, now_ms)
+    store.seats.note(agent.seat, "handed back", why, now_ms)
+    store.seats.note(agent.seat, "message", "the hand back", now_ms)
+    store.seats.note(seat_address(slug, MASTER), "handed back", f"{agent.name}: {why}", now_ms)
+    return [f"{ended}, ended the promotion of {agent.name}", f"sent {agent.name} the hand back"]
