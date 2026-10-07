@@ -103,7 +103,7 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
 def remove_worktree() -> str:
     try:
         top = _out(["git", "rev-parse", "--show-toplevel"], "cannot locate the worktree")
-        _out([str(WT_SCRIPT), "done", Path(top).name, "--repo", top], f"wt.sh done could not remove {top}")
+        _out(["bash", str(WT_SCRIPT), "done", Path(top).name, "--repo", top], f"wt.sh done could not remove {top}")
     except SwarmError as exc:
         raise SwarmError(
             f"the task is parked and its seat handed off, but its worktree was not removed: {exc}; "

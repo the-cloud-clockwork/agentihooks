@@ -20,7 +20,7 @@ NOW = 5_000
 NOTE = "The next engineer restacks it onto dev and finishes it."
 READ_FIRST = "- ledger:sw/tasks/t1 the task and its contract\n"
 TOP = "/home/me/dev/worktrees/repo/engineer-a1b2c3-0001"
-REMOVE = [str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo", TOP]
+REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo", TOP]
 
 
 class Shell:
