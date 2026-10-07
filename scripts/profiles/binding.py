@@ -111,7 +111,9 @@ def validate(canary: str) -> dict:
         else:
             data = inspect(home, requested["profile"], target)
         if not data.get("canary") or data["canary"] != canary:
-            raise ValueError("mounted instruction canary mismatch")
+            data = inspect(home, requested["profile"], target)
+            if not data.get("canary") or data["canary"] != canary:
+                raise ValueError("mounted instruction canary mismatch")
         result = {
             **data,
             "state": "validated",
