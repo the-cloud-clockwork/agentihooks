@@ -313,6 +313,14 @@ def test_a_head_whose_runs_all_finished_resolves_green_or_red(rollup, red):
     assert pull.red is red
 
 
+def test_a_pending_check_keeps_a_finished_head_unresolved():
+    raw = {
+        "state": "OPEN",
+        "statusCheckRollup": [{"name": "unit", "conclusion": "SUCCESS"}, {"name": "lint", "conclusion": None}],
+    }
+    assert ledger_events.pull_request(raw).resolved is False
+
+
 @pytest.mark.parametrize("conclusion", ["FAILURE", "TIMED_OUT"])
 def test_a_failed_check_waits_for_the_queued_run_before_resolving_red(conclusion):
     raw = {

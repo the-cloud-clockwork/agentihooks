@@ -95,7 +95,7 @@ def view(url, run=subprocess.run):
             return None
         raw["commits"] = commits
         raw["statusCheckRollup"] = contexts.get("nodes") or []
-        raw["checkSuites"] = suites.get("nodes") or []
+        raw["checkSuites"] = suites.get("nodes")
         return pull_request(raw)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None

@@ -8,6 +8,7 @@ from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import view as github_view
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
+from tests.swarm.test_ledger_events import APP_SUITE, QUEUED_TESTS, SKIPPED_ONLY
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -608,28 +609,24 @@ def probe(rollup, suites, suites_more=False):
     return github_view(URL, lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(raw)))
 
 
-SKIPPED = [{"name": "ledger-equivalence", "conclusion": "SKIPPED"}]
-APP_SUITE = {"status": "QUEUED", "workflowRun": None}
-
-
 def test_the_probe_keeps_a_head_with_only_skipped_checks_and_a_queued_run_unresolved():
-    pull = probe(SKIPPED, [{"status": "QUEUED", "workflowRun": {"databaseId": 1}}, APP_SUITE])
+    pull = probe(SKIPPED_ONLY, [QUEUED_TESTS, APP_SUITE])
     assert pull.resolved is False
 
 
 def test_the_probe_ignores_a_queued_suite_without_a_workflow_run():
-    pull = probe(SKIPPED + [{"name": "unit", "conclusion": "SUCCESS"}], [APP_SUITE])
+    pull = probe(SKIPPED_ONLY + [{"name": "unit", "conclusion": "SUCCESS"}], [APP_SUITE])
     assert pull.resolved is True
     assert pull.red is False
 
 
 def test_the_probe_refuses_a_partial_list_of_check_suites():
-    assert probe(SKIPPED, [APP_SUITE], suites_more=True) is None
+    assert probe(SKIPPED_ONLY, [APP_SUITE], suites_more=True) is None
 
 
 def test_a_checks_wait_stays_held_while_the_new_heads_run_is_queued(tick):
     tick.hold("checks", URL)
-    tick.pulls[URL] = probe(SKIPPED, [{"status": "QUEUED", "workflowRun": {"databaseId": 1}}])
+    tick.pulls[URL] = probe(SKIPPED_ONLY, [QUEUED_TESTS])
     assert tick.end() == []
     assert tick.end() == []
     assert tick.told() == []
