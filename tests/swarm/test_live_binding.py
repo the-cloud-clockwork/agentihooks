@@ -144,6 +144,7 @@ def test_codex_home_hooks_and_native_effort(mounted):
     (home / "config.toml").write_text("[features]\nhooks = true\n")
     wrapper = home / "agentihooks-hook.sh"
     wrapper.touch()
+    wrapper.chmod(0o700)
     hooks = {event: [{"hooks": [{"type": "command", "command": str(wrapper)}]}] for event in EVENTS}
     (home / "hooks.json").write_text(json.dumps({"hooks": hooks}))
     assert live_binding.compare(agent, live_binding.read(agent, 42, proc)) == {}
@@ -339,7 +340,13 @@ def test_runtime_reads_only_processes_named_in_assignments(mounted, monkeypatch)
         terminate_agent,
         "sessions",
         lambda: [
-            SimpleNamespace(name=agent.name, process=SimpleNamespace(pid=42)),
+            SimpleNamespace(
+                name=agent.name,
+                target="claude",
+                status="alive",
+                session_id="",
+                process=SimpleNamespace(pid=42, start_time=1),
+            ),
             SimpleNamespace(name="foreign", process=SimpleNamespace(pid=99)),
         ],
     )
@@ -369,11 +376,24 @@ def test_valid_registered_wrapper_forms(mounted, prefix):
     agent, proc, home = mounted
     wrapper = home / "agentihooks-hook.sh"
     wrapper.touch()
+    wrapper.chmod(0o700)
     data = json.loads((home / "settings.json").read_text())
     for groups in data["hooks"].values():
         groups[0]["hooks"][0]["command"] = f"{prefix}{wrapper}"
     (home / "settings.json").write_text(json.dumps(data))
     assert live_binding.read(agent, 42, proc)["hooks"] is True
+
+
+@pytest.mark.parametrize("prefix, valid", [("", False), ("exec ", False), ("bash ", True), ("sh ", True)])
+def test_wrapper_execute_permission_matches_invocation(mounted, prefix, valid):
+    agent, proc, home = mounted
+    wrapper = home / "agentihooks-hook.sh"
+    wrapper.touch()
+    wrapper.chmod(0o600)
+    data = json.loads((home / "settings.json").read_text())
+    data["hooks"]["SessionStart"][0]["hooks"][0]["command"] = f"{prefix}{wrapper}"
+    (home / "settings.json").write_text(json.dumps(data))
+    assert live_binding.read(agent, 42, proc)["hooks"] is valid
 
 
 @pytest.mark.parametrize("prefix", ["", "exec ", "cd {home} && "])
@@ -631,3 +651,153 @@ def test_multiple_mismatches_are_reported_in_order(ticking):
     }
     actions = tick("sw", store, ledger, runtime, 200)
     assert actions == [f"could not retire {old.name} after mismatched model, effort, retrying next tick"]
+
+
+def test_recovered_registration_restores_working_state(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    store.put_agent("sw", replace(old, state="retiring"))
+    tick("sw", store, ledger, runtime, 200)
+    assert next(a for a in store.agents("sw") if a.name == old.name).state == "working"
+    assert not runtime.killed
+
+
+def test_missing_process_retry_has_named_evidence_and_checks_other_agents(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    store.put_agent("sw", replace(old, state="retiring"))
+    runtime.stuck.add(old.name)
+    runtime.live.remove(old.name)
+    runtime.bindings = lambda agents: {
+        a.name: {**live_binding.assignment(a), "hooks": True} for a in agents if a.name in runtime.live
+    }
+    tick("sw", store, ledger, runtime, 200)
+    report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), old.name))
+    assert report["differences"] == {"process": {"expected": True, "actual": False}}
+    master = next(a for a in store.agents("sw") if a.lane == "master")
+    assert json.loads(store.redis.hget(store.key("sw", "live-bindings"), master.name))["at"] == 200
+    assert master.name in runtime.named
+
+
+def test_missing_unbound_agent_does_not_skip_the_live_master(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    runtime.live.remove(old.name)
+    runtime.bindings = lambda agents: {
+        a.name: {**live_binding.assignment(a), "hooks": True} for a in agents if a.name in runtime.live
+    }
+    tick("sw", store, ledger, runtime, 200)
+    master = next(a for a in store.agents("sw") if a.lane == "master")
+    assert json.loads(store.redis.hget(store.key("sw", "live-bindings"), master.name))["at"] == 200
+
+
+def test_python_lifecycle_accepts_hook_module_arguments(mounted):
+    agent, proc, home = mounted
+    data = json.loads((home / "settings.json").read_text())
+    data["hooks"]["SessionStart"][0]["hooks"][0]["command"] = "python3 -m hooks argument"
+    (home / "settings.json").write_text(json.dumps(data))
+    assert live_binding.read(agent, 42, proc)["hooks"] is True
+
+
+def test_cd_preamble_can_invoke_the_registered_wrapper(mounted):
+    agent, proc, home = mounted
+    wrapper = home / "agentihooks-hook.sh"
+    wrapper.touch()
+    wrapper.chmod(0o700)
+    data = json.loads((home / "settings.json").read_text())
+    data["hooks"]["SessionStart"][0]["hooks"][0]["command"] = f"cd {home} && {wrapper}"
+    (home / "settings.json").write_text(json.dumps(data))
+    assert live_binding.read(agent, 42, proc)["hooks"] is True
+
+
+@pytest.mark.parametrize(
+    "validated_pid, conversation, expected",
+    [
+        (22, "", 22),
+        (99, "", None),
+        (None, "current", 22),
+        (None, "", 11),
+    ],
+)
+def test_named_proof_process_cannot_shadow_assigned_session(monkeypatch, validated_pid, conversation, expected):
+    from types import SimpleNamespace
+
+    from scripts import terminate_agent
+    from scripts.swarm.runtime import HerdrRuntime
+
+    def item(pid, target, status, session_id, started):
+        return SimpleNamespace(
+            name="engineer",
+            target=target,
+            status=status,
+            session_id=session_id,
+            process=SimpleNamespace(pid=pid, start_time=started),
+        )
+
+    items = [
+        item(33, "codex", "unregistered", "proof", 1),
+        item(22, "claude", "alive", "current", 3),
+        item(11, "claude", "alive", "original", 2),
+    ]
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: items)
+    validation = {"pid": validated_pid} if validated_pid is not None else {}
+    agent = AgentRecord(
+        "engineer",
+        "eng",
+        "one",
+        harness="claude",
+        conversation_id=conversation,
+        profile_decision={"validation": validation},
+    )
+    monkeypatch.setattr(live_binding, "read", lambda agent, pid: {"pid": pid})
+    runtime = HerdrRuntime()
+    assert runtime.bindings([agent]) == {"engineer": {"pid": expected} if expected else {"process": False}}
+
+
+def test_retirement_uses_the_same_process_the_verifier_checked(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts import terminate_agent
+    from scripts.swarm.runtime import HerdrRuntime
+
+    monkeypatch.setattr(
+        terminate_agent,
+        "sessions",
+        lambda: [
+            SimpleNamespace(
+                name="engineer",
+                target="claude",
+                status="alive",
+                session_id="",
+                process=SimpleNamespace(pid=11, start_time=1),
+            ),
+            SimpleNamespace(
+                name="engineer",
+                target="codex",
+                status="unregistered",
+                session_id="",
+                process=SimpleNamespace(pid=22, start_time=2),
+            ),
+        ],
+    )
+    monkeypatch.setattr(live_binding, "read", lambda agent, pid: {"hooks": False})
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0)
+
+    agent = AgentRecord("engineer", "eng", "one", harness="claude")
+    runtime = HerdrRuntime(run=run)
+    runtime.bindings([agent])
+    assert runtime.retire(agent, True) is True
+    assert calls[0][1:] == ["terminate-agent", "11", "--force-shared"]

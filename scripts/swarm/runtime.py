@@ -104,6 +104,7 @@ class HerdrRuntime:
         self.home, self.run, self.herdr = home, run, herdr
         self.choose = choose or agent_choice.choose
         self.sleep = time.sleep
+        self._binding_pids = {}
 
     def has_capacity(self):
         return self.choose("", dict(os.environ))[1] != agent_choice.ALL_FULL
@@ -282,21 +283,29 @@ class HerdrRuntime:
     def bindings(self, agents: list[AgentRecord]) -> dict:
         from scripts.terminate_agent import sessions
 
-        wanted = {agent.name: agent for agent in agents}
-        return {
-            session.name: live_binding.read(wanted[session.name], session.process.pid)
-            for session in sessions()
-            if session.name in wanted
-        }
+        items, facts = sessions(), {}
+        self._binding_pids = {}
+        for agent in agents:
+            session = live_binding.bound_session(agent, items)
+            if session is not None:
+                facts[agent.name] = live_binding.read(agent, session.process.pid)
+                self._binding_pids[agent.name] = str(session.process.pid)
+            elif agent.profile_decision.get("validation", {}).get("pid"):
+                facts[agent.name] = {"process": False}
+                self._binding_pids[agent.name] = None
+        return facts
 
     def pane_open(self, agent: AgentRecord) -> bool:
         found = self._get(pane_target(agent))
         return found is not None and _owns(found, agent)
 
     def _terminate(self, name):
+        selector = self._binding_pids.get(name, name)
+        if selector is None:
+            return True
         try:
             proc = self.run(
-                [_bin(), "terminate-agent", name, "--force-shared"], capture_output=True, text=True, timeout=60
+                [_bin(), "terminate-agent", selector, "--force-shared"], capture_output=True, text=True, timeout=60
             )
         except subprocess.TimeoutExpired:
             return False

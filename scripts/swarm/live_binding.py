@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import shlex
 import tomllib
@@ -35,7 +36,7 @@ def lifecycle_command(command: str) -> bool:
         words = words[1:]
         return bool(words) and Path(words[0]).name == "agentihooks-hook.sh" and Path(words[0]).is_file()
     if program == "agentihooks-hook.sh":
-        return Path(words[0]).is_file()
+        return Path(words[0]).is_file() and os.access(words[0], os.X_OK)
     return bool(re.fullmatch(r"python(?:\d(?:\.\d+)*)?", program)) and words[1:3] == ["-m", "hooks"]
 
 
@@ -95,6 +96,19 @@ def assignment(agent) -> dict:
         "effort": validated.get("effort") or agent.effort,
         "account": agent.account,
     }
+
+
+def bound_session(agent, sessions):
+    named = {s.process.pid: s for s in sessions if s.name == agent.name}
+    validated = agent.profile_decision.get("validation", {}).get("pid")
+    if validated:
+        return named.get(validated)
+    if agent.conversation_id:
+        conversation = [s for s in named.values() if s.session_id == agent.conversation_id]
+        if conversation:
+            return conversation[0]
+    registered = [s for s in named.values() if s.status != "unregistered" and s.target == agent.harness]
+    return min(registered or named.values(), key=lambda s: s.process.start_time, default=None)
 
 
 def compare(agent, facts: dict) -> dict:
