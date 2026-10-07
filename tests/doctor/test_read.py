@@ -47,10 +47,14 @@ def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_th
     store.seats.occupy(seat, f"{SLUG}-eng-1", 10)
     store.put_agent(SLUG, AgentRecord(name=f"{SLUG}-eng-1", lane="eng", task="t1", idle_ticks=2))
     store.put_agent(SLUG, AgentRecord(name=f"{SLUG}-eng-5", lane="eng", task="t5", state="finished"))
-    addresses = [seat, f"{SLUG}-eng-2", f"{SLUG}-eng-5", "engineer-100001-0001-tmp-1", "operator", doctor]
+    store.names.mint_code(SLUG, SLUG, "/r")
+    named = store.names.next(SLUG, "eng")
+    store.put_agent(SLUG, AgentRecord(name=named, lane="eng", task="t6"))
+    addresses = [seat, named, f"{SLUG}-eng-2", f"{SLUG}-eng-5", "engineer-100001-0001-tmp-1", "operator", doctor]
     items = [{"address": address} for address in addresses]
     assert read.inbox_receivers(store, box, SLUG, items) == {
         seat: Receiver(live=True, quiet_ms=2 * 60_000),
+        named: Receiver(live=True),
         f"{SLUG}-eng-2": Receiver(),
         f"{SLUG}-eng-5": Receiver(),
         "engineer-100001-0001-tmp-1": Receiver(scoped=False),

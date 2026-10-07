@@ -103,6 +103,8 @@ def test_delivered_mail_to_a_live_receiver_working_it_is_not_backlog():
     row = _delivered()
     active = {row["address"]: inbox.Receiver(live=True, quiet_ms=WINDOW - 1)}
     assert inbox.past_window([row], 20 * MIN, WINDOW, active) == []
+    later = {**_delivered("eng-2@demo"), "id": "later"}
+    assert [f.subject for f in inbox.past_window([row, later], 20 * MIN, WINDOW, active)] == ["later"]
 
 
 def test_delivered_mail_is_backlog_once_its_receiver_left_or_went_quiet():
