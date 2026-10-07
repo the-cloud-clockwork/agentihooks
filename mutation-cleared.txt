@@ -1422,5 +1422,13 @@
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_78:cd9f6e0b1e6ccc95cd3af9133e951ff8706d2f066601b61119788af649c092a8": {
     "reader": "Standards reader",
     "reason": "Accepted transport principal is empty or the exact agent header; authority refusal is empty for both that accepted principal and None. The upload metadata forbids replacing the author."
+  },
+  "scripts/swarm/operator_mail.py:scripts.swarm.operator_mail.x_mentioned__mutmut_15:6bf83b38fe33dfb04dc9d384ab9883b6a914e8f3d8f76560d94c1de0b8cb8d81": {
+    "reader": "Standards",
+    "reason": "An event with neither note text nor text matches no mention for both empty and XXXX defaults, because MENTION_RE needs a leading at sign."
+  },
+  "scripts/swarm/operator_mail.py:scripts.swarm.operator_mail.x_mentioned__mutmut_18:8eee70f81fc6ec5cf28c1352fc3cda34180200fa57f32aebe46e6369cddefc9e": {
+    "reader": "Standards",
+    "reason": "With no mention, empty and XXXX both differ from swarm and match no agent name or lane, so the write goes to the master either way."
   }
 }

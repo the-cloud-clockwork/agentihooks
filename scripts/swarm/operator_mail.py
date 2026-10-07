@@ -1,5 +1,5 @@
 """Operator writes on a swarm ledger as inbox items: a task's to the agent that claimed it, a chat line to its
-addressee (every live agent for @swarm), everything else to the master's seat. An addressee that is gone falls back to the master."""
+addressee (for @swarm the master's seat, with an information only copy for every other live agent), everything else to the master's seat. An addressee that is gone falls back to the master."""
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.seen import write_ref
@@ -16,6 +16,7 @@ ANSWER_RULE = (
     "yours, send it to {master} with agentihooks msg send naming why, and say so in your reply. "
     "Never only forward it."
 )
+INFO_RULE = "For your awareness only: {master} answers this line for the swarm. Do not reply to it; close it done."
 
 
 def _live(agents):
@@ -30,8 +31,7 @@ def addresses(slug, event, doc, agents):
     target = event.get("target", "")
     found = []
     if target == "chat" or target.startswith("notes/"):
-        mention = MENTION_RE.match(event.get("note_text", event.get("text", "")))
-        to = mention.group(1) if mention else ""
+        to = mentioned(event)
         if to == EVERYONE:
             everyone = [a.seat or a.name for a in live]
             return everyone if master in everyone else [*everyone, master]
@@ -43,6 +43,16 @@ def addresses(slug, event, doc, agents):
     return [a.seat or a.name for a in found] or [master]
 
 
+def mentioned(event):
+    mention = MENTION_RE.match(event.get("note_text", event.get("text", "")))
+    return mention.group(1) if mention else ""
+
+
+def informed(event, address, master):
+    """A line to the whole swarm is the master's to answer; every other agent gets it for awareness only."""
+    return address != master and mentioned(event) == EVERYONE
+
+
 def master_address(slug, live):
     boss = next((a for a in live if a.lane == MASTER), None)
     return (boss.seat or boss.name) if boss else seat_address(slug, MASTER)
@@ -52,6 +62,8 @@ def primed(text, event, address, master):
     """An operator chat line carries the rule that its receiver answers it, so no agent only forwards it."""
     if event.get("target") != "chat":
         return text
+    if informed(event, address, master):
+        return f"{text}\n{INFO_RULE.format(master=master)}"
     rule = MASTER_RULE if address == master else ANSWER_RULE.format(master=master)
     return f"{text}\n{rule}"
 
@@ -72,7 +84,13 @@ def relay(inbox, store, slug, doc, events, line):
         text = f"On ledger {slug}: {line(event)}"
         master = master_address(slug, _live(agents))
         sent += [
-            inbox.send(OPERATOR, address, primed(text, event, address, master), ref=ref)
+            inbox.send(
+                OPERATOR,
+                address,
+                primed(text, event, address, master),
+                ref=ref,
+                fyi=informed(event, address, master),
+            )
             for address in addresses(slug, event, doc, agents)
         ]
     return sent
