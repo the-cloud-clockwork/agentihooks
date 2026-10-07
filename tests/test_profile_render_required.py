@@ -73,7 +73,7 @@ def test_render_and_init_agent_load_connector_environment_before_publication(
     assert os.environ["GW_SCOPE"] == "s-test"
 
 
-@pytest.mark.parametrize("corruption", ["manifest", "server", "both"])
+@pytest.mark.parametrize("corruption", ["manifest", "server", "both", "missing-manifest-entry", "missing-server-map"])
 def test_incomplete_cached_connector_is_repaired(world, advertised, corruption):
     import json
 
@@ -81,15 +81,21 @@ def test_incomplete_cached_connector_is_repaired(world, advertised, corruption):
 
     _declare(world, gw=_gateway(enabled_tools=READS))
     home = render.render_claude("rb-role")
-    if corruption in ("manifest", "both"):
+    if corruption in ("manifest", "both", "missing-manifest-entry"):
         manifest = home.parent / "claude.mounts.json"
         mounts = json.loads(manifest.read_text())
-        mounts["gw"] = {"mounted": False, "reason": "environment variable GW_KEY is unset"}
+        if corruption == "missing-manifest-entry":
+            del mounts["gw"]
+        else:
+            mounts["gw"] = {"mounted": False, "reason": "environment variable GW_KEY is unset"}
         manifest.write_text(json.dumps(mounts))
-    if corruption in ("server", "both"):
+    if corruption in ("server", "both", "missing-server-map"):
         native = home / ".claude.json"
         doc = json.loads(native.read_text())
-        del doc["mcpServers"]["gw"]
+        if corruption == "missing-server-map":
+            del doc["mcpServers"]
+        else:
+            del doc["mcpServers"]["gw"]
         native.write_text(json.dumps(doc))
 
     assert render.render_claude("rb-role") == home
@@ -99,6 +105,22 @@ def test_incomplete_cached_connector_is_repaired(world, advertised, corruption):
         "enabled_tools": READS,
     }
     assert render.render_claude("rb-role") is None
+
+
+def test_cache_accepts_a_native_map_with_exactly_the_required_connector(world, advertised):
+    import json
+
+    from scripts.profiles import render
+
+    _declare(world, gw=_gateway(enabled_tools=READS))
+    home = render.render_claude("rb-role")
+    native = home / ".claude.json"
+    doc = json.loads(native.read_text())
+    doc["mcpServers"] = {"gw": doc["mcpServers"]["gw"]}
+    native.write_text(json.dumps(doc))
+
+    assert render.render_claude("rb-role") is None
+    assert len(advertised) == 1
 
 
 @pytest.mark.parametrize("previous", [False, True])
