@@ -106,3 +106,51 @@ def test_invalid_plan_metadata_does_not_fail_a_completed_tick(store):
     view = commands.view(store, "sw")
     assert view["plan_shape"] == {"error": "plan has unknown dependencies: missing"}
     assert view["tasks"]["open"] == 1
+
+
+def test_worker_tool_deadlines_remain_specific_to_quota(monkeypatch):
+    monkeypatch.setattr(command_runner.shutil, "which", lambda name: "/tools/agentihooks")
+    calls = []
+
+    def tool(argv, **kwargs):
+        calls.append((argv, kwargs["timeout"]))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(command_runner.subprocess, "run", tool)
+    assert command_runner.run(["swarm", "sw", "pause"], {}) == ""
+    assert command_runner.run(["quota", "--refresh", "--json"], {}) == ""
+    assert calls == [
+        (["/tools/agentihooks", "swarm", "sw", "pause"], 60),
+        (["/tools/agentihooks", "quota", "--refresh", "--json"], 120),
+    ]
+
+
+def test_quota_and_termination_run_with_operator_identity(store, monkeypatch):
+    from scripts import agents_quota
+
+    monkeypatch.setattr(agents_quota, "refresh_page_quota", lambda probe: probe())
+    store.put_agent("sw", AgentRecord("a", "eng", "t"))
+    seen = []
+
+    def run(argv, env):
+        identity, source = env.get("AGENTIHOOKS_AGENT_NAME"), env.get("AGENTIHOOKS_CONTROL_SOURCE")
+        assert identity == "operator"
+        assert source == "page"
+        seen.append(argv)
+        return ""
+
+    monkeypatch.setattr(command_runner, "run", run)
+    assert command_runner.execute(store, "sw", {"command": "quota", "argv": []}) == ""
+    commands.submit(store, "sw", "swarm", ["terminate", "a"])
+    assert command_runner.consume(store, "sw") == ["control swarm acknowledged"]
+    assert seen == [
+        ["quota", "--refresh", "--json"],
+        ["terminate-agent", "a", "--type", "any", "--dry-run"],
+        ["terminate-agent", "a", "--type", "any"],
+    ]
+
+
+def test_hive_can_publish_an_empty_ledger(store):
+    command_runner.publish(store, "sw", {})
+    assert commands.workspaces(store, "sw") == {}
+    assert commands.view(store, "sw")["tasks"] == {"open": 0, "claimed": 0, "blocked": 0, "pr": 0, "done": 0}

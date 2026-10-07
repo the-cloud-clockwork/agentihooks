@@ -36,6 +36,7 @@ def test_terminate_checks_membership_then_queues_an_exact_name(store):
     store.put_agent("sw", AgentRecord("a", "eng", "t", 1))
     assert server.terminate_control("sw", "a")[1] == ""
     assert commands.rows(store, "sw")[0]["argv"] == ["terminate", "a"]
+    assert commands.rows(store, "sw")[0]["command"] == "swarm"
 
 
 def test_server_reads_published_workspaces_and_quota_without_home_files(store, monkeypatch):
@@ -53,3 +54,22 @@ def test_operator_doctor_stop_phrase_queues_to_the_owner(store):
         {"_meta": {"rev": 1, "events": [{"rev": 1, "by": "operator", "target": "chat", "text": server.DOCTOR_PHRASE}]}},
     )
     assert commands.rows(store, "sw")[0]["argv"] == ["stop"]
+    assert commands.rows(store, "sw")[0]["command"] == "doctor"
+
+
+def test_chat_events_without_text_do_not_stop_the_doctor(store):
+    server.doctor_phrase("sw", {"_meta": {"rev": 1, "events": [{"rev": 1, "by": "operator", "target": "chat"}]}})
+    assert commands.rows(store, "sw") == []
+
+
+def test_missing_work_tail_is_an_empty_map_and_empty_ledger_keeps_its_shape(store):
+    state = {"tasks": [{"id": "t", "workspace": "/hive/t"}]}
+    assert server.with_workspaces("sw", state)["tasks"][0]["workspace_tail"] == {}
+    assert server.with_workspaces("sw", {"_meta": {"rev": 1}}) == {"_meta": {"rev": 1}, "tasks": []}
+
+
+def test_published_work_tail_ids_can_have_uppercase_letters(store):
+    commands.publish(store, "sw", {}, {"UPPER": {"latest_progress": "step"}})
+    assert server.workspace_tails("sw", {"tasks": [{"id": "UPPER", "workspace": "/hive/UPPER"}]}) == {
+        "UPPER": {"latest_progress": "step"}
+    }
