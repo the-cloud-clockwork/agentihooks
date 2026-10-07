@@ -135,8 +135,8 @@ def test_an_agent_write_returns_the_agent_view_with_its_result(served):
     with_work_folder()
     state = ledger.call(SLUG, [{"op": "join", "id": "j1", "by": "eng"}])
     assert state["rejected"] == []
-    assert "eng" in state["_meta"]["members"]
-    assert "seeds" not in state["_meta"] and "workspace_tail" not in state["tasks"][0]
+    assert ledger.resource(SLUG, "members/eng")["id"] == "eng"
+    assert "seeds" not in state["_meta"] and "tasks" not in state
 
 
 def test_the_agent_view_is_read_from_any_position_in_the_query(served):

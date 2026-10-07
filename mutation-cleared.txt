@@ -1447,12 +1447,380 @@
     "reader": "Standards",
     "reason": "accepted_bytes is always an int, so the first comparison against None or an empty string is False either way and flush_once takes the same path."
   },
-  "scripts/herdr_gc.py:scripts.herdr_gc.xǁOwnersǁ_store__mutmut_8:d8f932aa2f50c70ae67799a34b247644795d96ed80140240ad8c99bd27e44f00": {
+  "scripts/herdr_gc.py:scripts.herdr_gc.x\u01c1Owners\u01c1_store__mutmut_8:d8f932aa2f50c70ae67799a34b247644795d96ed80140240ad8c99bd27e44f00": {
     "reader": "Standards",
     "reason": "A failed connection cached as an empty string instead of None gives the same outcomes: state still returns unknown and prompted_at still returns None through their exception handlers, and the connection is attempted once per address either way."
   },
   "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_run_selected__mutmut_6:ac87d1bd5af2a0c42f9e86dda6d9b72e13abab395e6437b580c2cfb8ed5efce0": {
     "reader": "Standards",
     "reason": "mutmut's forced fail control only checks whether the run returned zero, so returning 2 instead of 1 from the collection failure branch gives every caller the same outcome."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_layout__mutmut_5:0c083d67c3593f83d199a9f0a1bca2bee8ed08af1256a3bdca979c50a29f6d7f": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The layout HTTPMessage Origin lookup changes only key case. The operator-origin authorization decision and subsequent layout operation are identical."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_layout__mutmut_6:b4059cb3e7d3e96d43ce220c7d877c3d510a733234e0c8f95bd33c7424d066da": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The layout HTTPMessage Origin lookup changes only key case. The operator-origin authorization decision and subsequent layout operation are identical."
+  },
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1request__mutmut_5:5d3b3f0dbb96f364e928786c53708b3307c0efa8846b6f426a862971044cac5f": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Request.get_method infers GET exactly when data is None and POST otherwise. This function supplies None for missing payload and non-None encoded JSON for every present payload; method=None yields the same HTTP verb and returned JSON."
+  },
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1request__mutmut_9:6cbd362a2e80218b762227cb5787ef39c82ab983c095d993ccbf9bcae4096c5c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Omitting method uses Request.get_method inference: GET for None data, POST for encoded JSON. These are exactly the two branches of the removed explicit argument, preserving HTTP verb and returned JSON."
+  },
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1request__mutmut_14:4d38f1093d61200281fea656f0c8d568ca713fb29664181ec96cf8befb3614c2": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Adding X to quote safe characters changes nothing: ASCII X is always unreserved and never escaped, independently of safe. All other ASCII and all encoded non-ASCII characters retain the same quoting."
+  },
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1request__mutmut_18:a40580fb0eb5e9ca6e8ced66dbe94b997f73b6c8e3a916675bf45fb18dbf54c7": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "urllib.request.Request normalizes Content-Type, content-type and CONTENT-TYPE to the identical Content-type header key. Values, credentials, serialized HTTP header and response JSON remain identical."
+  },
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1request__mutmut_19:2087c0eac6f45f4b6043560a4842f3c01ddbad8409c9ae2b6defe698de7a80fe": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "urllib.request.Request normalizes Content-Type, content-type and CONTENT-TYPE to the identical Content-type header key. Values, credentials, serialized HTTP header and response JSON remain identical."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_body__mutmut_23:960957e27b2b43b54d0f04fe3f91fdd193c25b1a1c178fde1b35c521111eb596": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The HTTPMessage lookup changes only Content-Length key case; HTTPMessage compares field names case-insensitively, preserving value, length conversion, status and body."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_3:77d800181aaf3c90617daf87e15fbc84c2d56924276d859e21fe2c0020c09709": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The HTTPMessage Host lookup changes only key case. The same value reaches the unchanged allowlist predicate and produces the same status and envelope."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_4:3b7f94f360d386775e2e6cea0def19b248404ddf3dc4108b061dca0815c8e231": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The HTTPMessage Host lookup changes only key case. The same value reaches the unchanged allowlist predicate and produces the same status and envelope."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_21:a2ea0afde3a3050f0fe907fcbf48de136c0221371f78c11879087f5f778cda9e": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The HTTPMessage Origin lookup changes only key case. Supplied and missing origins are identical before the unchanged origin guard."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_22:6a85ce261f0886cdf92c8f7e20df9548386a579447cfe54d73e421c8dff9b62c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The HTTPMessage Origin lookup changes only key case. Supplied and missing origins are identical before the unchanged origin guard."
+  },
+  "39527dff6e087777e1ef09b33c3d34f2c3de02278d8108cc3d40bf0e1efd7fb5": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The ERROR replacement is only inside the byte-size probe. error and ERROR are both five ASCII bytes, so the complete serialized envelope has the same size for every error body. The actual returned key remains error. Probe: resources.reply_size original and mutant wrappers identical for simple, large Unicode/escaped, and nested list bodies."
+  },
+  "0dbea00798dd14757ba6912e4459816025b0932a92bc0136818e24c66a87143d": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only the first result of str.split is observed. Removing maxsplit or raising it from one to two cannot change the substring preceding the first question mark for any path. Exhaustive probe of 127 strings over a and question mark agreed; separator order and output are unchanged."
+  },
+  "94a7b9ceb60ad060b8129d66ee091384a2e80d127c91150a53bb0948d02f67d9": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only the first result of str.split is observed. Removing maxsplit or raising it from one to two cannot change the substring preceding the first question mark for any path. Exhaustive probe of 127 strings over a and question mark agreed; separator order and output are unchanged."
+  },
+  "1c523ae47621f0f452bf06431ed0c1dec5165e2550b25710a6743efaf55e3fb0": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares header names case insensitively. Origin lower/upper lookup gives identical present and absent values to the unchanged allowlist and mutation path. Independent runtime HTTPMessage probe confirmed equal values."
+  },
+  "1d9e588a87e83d2cead02d078930b6408fec0a5d431853a06931bfb4697f2d0c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares header names case insensitively. Origin lower/upper lookup gives identical present and absent values to the unchanged allowlist and mutation path. Independent runtime HTTPMessage probe confirmed equal values."
+  },
+  "8992015cecb6d3f6d21b744b2c95b15be085e1e6bee32f8ee6a68e36de847f21": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares Content-Length field names case insensitively, so the same length, integer conversion, byte read and response follow."
+  },
+  "32f5ba45b417fd06db6d6f88a9d17ec9211ca22f6c9530c4a497ba28806c9234": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares X-Ledger-Agent field names case insensitively. The identical value reaches the unchanged authority.principal call, preserving identity, status, state and response."
+  },
+  "877ff91415756217772a905b59e33d239fd35ed7b1c9e04ed7a7d4170ad3fbf2": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "With a supplied Content-Length the changed default is unused. Without that header the original converts zero then raises ValueError; mutant int of XX0XX raises ValueError. The same except branch returns the exact same 400 schema_invalid bounded-body envelope before reading state. Independent extracted-function probe confirmed equality."
+  },
+  "814c2e6ff51e1107a2dc3d9deb83a365cb582aec9117ea5efe03a38d142ae96a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only length zero differs. Original rejects before reading; mutant reads zero bytes and core.loads empty bytes raises ValueError, leading to the identical stable envelope. All positive and negative lengths take identical branches. Independent extracted-function probe confirmed zero-length equality."
+  },
+  "88e3078bf07b8ecea71a08ebdd4a4387f2941cf0e339f9dc8ddf20d105c8399a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "MUTATION validation enforces every ops array item has type object before check_operations calls operation_schema. Removing only the second object check does not change any accepted or rejected HTTP input or envelope. Exported central schema and call order verify reachability; 205 generated object cases retained identical validity."
+  },
+  "7b4a14843596a96eda1c4d7aedb95d5bc0c18bf7aad5069f44385bad6913a63f": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "MUTATION validation enforces every ops array item has type object before check_operations calls operation_schema. Removing only the second object check does not change any accepted or rejected HTTP input or envelope. Exported central schema and call order verify reachability; 205 generated object cases retained identical validity."
+  },
+  "3cd989ad5a7342c5649b1ea2dd72ab218691cc2afb684eef094e0ec98fea1825": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "check_operations selects kind by operation.get(op) and passes that exact kind to operation_schema before validation. The op const equals the value used to choose the schema for every reachable operation, so removing it admits no additional request. Unknown kinds are rejected earlier. Independent generated validation probe agreed across 205 object cases."
+  },
+  "65c7d82eee58a3486fbff3af8207f6b4c8b25bd0f5f6d416d7905c2e45f3b9fe": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "check_operations selects kind by operation.get(op) and passes that exact kind to operation_schema before validation. The op const equals the value used to choose the schema for every reachable operation, so removing it admits no additional request. Unknown kinds are rejected earlier. Independent generated validation probe agreed across 205 object cases."
+  },
+  "3f566f5c60fd040d05005a90ca0c493447f67a08ecd40bc9987d2edb93700e21": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload validates a dictionary literal it constructs from parsed headers. The value is always an object; removing this redundant object constraint cannot affect validation or upload delegation. Independent extracted-function probe: eight redundant-schema variants identical across thirty header cases including invalid lengths, content types and boundary names."
+  },
+  "58994efb2a34ec6d77e0bb796a306c34c69b86b7c60bcb763d8f252237206035": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload validates a dictionary literal it constructs from parsed headers. The value is always an object; removing this redundant object constraint cannot affect validation or upload delegation. Independent extracted-function probe: eight redundant-schema variants identical across thirty header cases including invalid lengths, content types and boundary names."
+  },
+  "d9851e3e09c91913672bec90366a58c93e5cae22c5e90144451b8b77e2950d25": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs all three required keys length, type and name unconditionally, including when headers are missing. Their value constraints remain unchanged. Removing required cannot admit any new constructed value or change delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "718ddf4243d775165e2a8b02946f6fb9973d301881c80a430b087b7c77e87070": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs all three required keys length, type and name unconditionally, including when headers are missing. Their value constraints remain unchanged. Removing required cannot admit any new constructed value or change delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "090e7d76bba7f3b26fb9a9a40657c1106f0414499f3c178ffa1674cd1ae97f1e": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs exactly the three keys declared in properties. There is no path for an extra property in this internally constructed dictionary; relaxing additionalProperties cannot change status, validation or upload delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "aaca45883392756cdf95b53e8b1ad1523cdd016e722d9393895a7f14e5156a29": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs exactly the three keys declared in properties. There is no path for an extra property in this internally constructed dictionary; relaxing additionalProperties cannot change status, validation or upload delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "9becbb6e8b9c13758fac6492edb451f4c080b2726a13cc5b954a7eaacaf7f1a4": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs exactly the three keys declared in properties. There is no path for an extra property in this internally constructed dictionary; relaxing additionalProperties cannot change status, validation or upload delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "da526257151fd5ddd6013dadb840ddab1a801813b24fa10a1e895ba7399ac56d": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs exactly the three keys declared in properties. There is no path for an extra property in this internally constructed dictionary; relaxing additionalProperties cannot change status, validation or upload delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "8e007668a32a3c417544316e20b73e486f62a4dfca87cbe0ef31ab7045b9825e": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only HTTPMessage lookup key case changes. Field names are compared case insensitively, preserving exact values/defaults and validation and uploader binding."
+  },
+  "d3f64e082bfb7f436f21492d3998cd086c622db4164b9839875be5bd4b336e6b": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only HTTPMessage lookup key case changes. Field names are compared case insensitively, preserving exact values/defaults and validation and uploader binding."
+  },
+  "e2f8723d6b4d0316b331cb08a6aba71c61e831322c671a79b1dfece8ab661ac5": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only HTTPMessage lookup key case changes. Field names are compared case insensitively, preserving exact values/defaults and validation and uploader binding."
+  },
+  "958917f4d1d44a35e9026e2f2edba9e94c8ab82f17e40e491e649ae59834b982": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The length value is produced by int before schema validation. A failed conversion exits via the unchanged stable error, and every converted value has integer type. Removing the redundant length integer check preserves the unchanged minimum constraint, status and uploader path."
+  },
+  "9d92fc186f64c5683994ec44ea4f3186138e651c671cc437c4082ecc0c6f7b04": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The length value is produced by int before schema validation. A failed conversion exits via the unchanged stable error, and every converted value has integer type. Removing the redundant length integer check preserves the unchanged minimum constraint, status and uploader path."
+  },
+  "e57f10f6c8d23d1a71e8304ad10dbe36e68fb4c5774af42ea5bc2437fd52a03c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The entire admin.upload source symbol was read through the parent Serena export. Its server parameter is never referenced by its body: header conversion and schemas.validate use handler and the imported schemas module; final delegate uses only handler, slug and path. Replacing that unused actual argument with None changes no branch, value, exception, mutation or reply. Both callers preserve the other arguments."
+  },
+  "351e01c673f74947d8bf03706c6e2f753799d83f90a528578190089f20f60ac7": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The schema name is always built with HTTPMessage.get of X-Artifact-Name and a string default. HTTP parser header field values and the fallback are strings, never another JSON type. Removing the redundant name string constraint leaves the maxLength check and actual downstream original header untouched. No extra reachable upload values are admitted."
+  },
+  "5318565420dda2025faa4b20c2ac2dd66502737c255ae6c4dbfdce18240a8437": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The schema name is always built with HTTPMessage.get of X-Artifact-Name and a string default. HTTP parser header field values and the fallback are strings, never another JSON type. Removing the redundant name string constraint leaves the maxLength check and actual downstream original header untouched. No extra reachable upload values are admitted."
+  },
+  "335b1acbb6d816eb21879aebd91388ecff253e42e1538e25b5a8a9ff80633e8a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares field names case insensitively. X-Artifact-Name and x-artifact-name select the identical first field value or the same empty default. Unchanged schema checks and uploader observe identical values. Previously recorded HTTPMessage lookup probe establishes the case-insensitive behavior; this candidate was independently inspected with mutmut show."
+  },
+  "d40a89f77f6f7968bbe7e787f101c1b8f8419d6973cc4262c486571fc58677ba": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only the fallback in the internal synthetic validation dictionary changes from empty to XXXX. If the header exists the fallback is unused. If absent both fallback strings satisfy the unchanged string/maxLength200 rule. Neither fallback is forwarded to the upload handler, which receives exactly the same handler, slug and path and reads the original headers. Thus status, delegation and response are unchanged for every HTTP request."
+  },
+  "scripts/swarm_ledger/api/errors.py:scripts.swarm_ledger.api.errors.x\u01c1APIError\u01c1envelope__mutmut_36:39527dff6e087777e1ef09b33c3d34f2c3de02278d8108cc3d40bf0e1efd7fb5": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The ERROR replacement is only inside the byte-size probe. error and ERROR are both five ASCII bytes, so the complete serialized envelope has the same size for every error body. The actual returned key remains error. Probe: resources.reply_size original and mutant wrappers identical for simple, large Unicode/escaped, and nested list bodies."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1log_message__mutmut_11:0dbea00798dd14757ba6912e4459816025b0932a92bc0136818e24c66a87143d": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only the first result of str.split is observed. Removing maxsplit or raising it from one to two cannot change the substring preceding the first question mark for any path. Exhaustive probe of 127 strings over a and question mark agreed; separator order and output are unchanged."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1log_message__mutmut_14:94a7b9ceb60ad060b8129d66ee091384a2e80d127c91150a53bb0948d02f67d9": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only the first result of str.split is observed. Removing maxsplit or raising it from one to two cannot change the substring preceding the first question mark for any path. Exhaustive probe of 127 strings over a and question mark agreed; separator order and output are unchanged."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_bin_action__mutmut_3:1c523ae47621f0f452bf06431ed0c1dec5165e2550b25710a6743efaf55e3fb0": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares header names case insensitively. Origin lower/upper lookup gives identical present and absent values to the unchanged allowlist and mutation path. Independent runtime HTTPMessage probe confirmed equal values."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_bin_action__mutmut_4:1d9e588a87e83d2cead02d078930b6408fec0a5d431853a06931bfb4697f2d0c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares header names case insensitively. Origin lower/upper lookup gives identical present and absent values to the unchanged allowlist and mutation path. Independent runtime HTTPMessage probe confirmed equal values."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_body__mutmut_24:8992015cecb6d3f6d21b744b2c95b15be085e1e6bee32f8ee6a68e36de847f21": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares Content-Length field names case insensitively, so the same length, integer conversion, byte read and response follow."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_102:32f5ba45b417fd06db6d6f88a9d17ec9211ca22f6c9530c4a497ba28806c9234": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares X-Ledger-Agent field names case insensitively. The identical value reaches the unchanged authority.principal call, preserving identity, status, state and response."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_body__mutmut_25:877ff91415756217772a905b59e33d239fd35ed7b1c9e04ed7a7d4170ad3fbf2": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "With a supplied Content-Length the changed default is unused. Without that header the original converts zero then raises ValueError; mutant int of XX0XX raises ValueError. The same except branch returns the exact same 400 schema_invalid bounded-body envelope before reading state. Independent extracted-function probe confirmed equality."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_body__mutmut_28:814c2e6ff51e1107a2dc3d9deb83a365cb582aec9117ea5efe03a38d142ae96a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only length zero differs. Original rejects before reading; mutant reads zero bytes and core.loads empty bytes raises ValueError, leading to the identical stable envelope. All positive and negative lengths take identical branches. Independent extracted-function probe confirmed zero-length equality."
+  },
+  "scripts/swarm_ledger/api/schemas.py:scripts.swarm_ledger.api.schemas.x_operation_schema__mutmut_14:88e3078bf07b8ecea71a08ebdd4a4387f2941cf0e339f9dc8ddf20d105c8399a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "MUTATION validation enforces every ops array item has type object before check_operations calls operation_schema. Removing only the second object check does not change any accepted or rejected HTTP input or envelope. Exported central schema and call order verify reachability; 205 generated object cases retained identical validity."
+  },
+  "scripts/swarm_ledger/api/schemas.py:scripts.swarm_ledger.api.schemas.x_operation_schema__mutmut_15:7b4a14843596a96eda1c4d7aedb95d5bc0c18bf7aad5069f44385bad6913a63f": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "MUTATION validation enforces every ops array item has type object before check_operations calls operation_schema. Removing only the second object check does not change any accepted or rejected HTTP input or envelope. Exported central schema and call order verify reachability; 205 generated object cases retained identical validity."
+  },
+  "scripts/swarm_ledger/api/schemas.py:scripts.swarm_ledger.api.schemas.x_operation_schema__mutmut_32:3cd989ad5a7342c5649b1ea2dd72ab218691cc2afb684eef094e0ec98fea1825": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "check_operations selects kind by operation.get(op) and passes that exact kind to operation_schema before validation. The op const equals the value used to choose the schema for every reachable operation, so removing it admits no additional request. Unknown kinds are rejected earlier. Independent generated validation probe agreed across 205 object cases."
+  },
+  "scripts/swarm_ledger/api/schemas.py:scripts.swarm_ledger.api.schemas.x_operation_schema__mutmut_33:65c7d82eee58a3486fbff3af8207f6b4c8b25bd0f5f6d416d7905c2e45f3b9fe": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "check_operations selects kind by operation.get(op) and passes that exact kind to operation_schema before validation. The op const equals the value used to choose the schema for every reachable operation, so removing it admits no additional request. Unknown kinds are rejected earlier. Independent generated validation probe agreed across 205 object cases."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_27:3f566f5c60fd040d05005a90ca0c493447f67a08ecd40bc9987d2edb93700e21": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload validates a dictionary literal it constructs from parsed headers. The value is always an object; removing this redundant object constraint cannot affect validation or upload delegation. Independent extracted-function probe: eight redundant-schema variants identical across thirty header cases including invalid lengths, content types and boundary names."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_28:58994efb2a34ec6d77e0bb796a306c34c69b86b7c60bcb763d8f252237206035": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload validates a dictionary literal it constructs from parsed headers. The value is always an object; removing this redundant object constraint cannot affect validation or upload delegation. Independent extracted-function probe: eight redundant-schema variants identical across thirty header cases including invalid lengths, content types and boundary names."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_58:d9851e3e09c91913672bec90366a58c93e5cae22c5e90144451b8b77e2950d25": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs all three required keys length, type and name unconditionally, including when headers are missing. Their value constraints remain unchanged. Removing required cannot admit any new constructed value or change delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_59:718ddf4243d775165e2a8b02946f6fb9973d301881c80a430b087b7c77e87070": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs all three required keys length, type and name unconditionally, including when headers are missing. Their value constraints remain unchanged. Removing required cannot admit any new constructed value or change delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_66:090e7d76bba7f3b26fb9a9a40657c1106f0414499f3c178ffa1674cd1ae97f1e": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs exactly the three keys declared in properties. There is no path for an extra property in this internally constructed dictionary; relaxing additionalProperties cannot change status, validation or upload delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_67:aaca45883392756cdf95b53e8b1ad1523cdd016e722d9393895a7f14e5156a29": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs exactly the three keys declared in properties. There is no path for an extra property in this internally constructed dictionary; relaxing additionalProperties cannot change status, validation or upload delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_68:9becbb6e8b9c13758fac6492edb451f4c080b2726a13cc5b954a7eaacaf7f1a4": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs exactly the three keys declared in properties. There is no path for an extra property in this internally constructed dictionary; relaxing additionalProperties cannot change status, validation or upload delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_69:da526257151fd5ddd6013dadb840ddab1a801813b24fa10a1e895ba7399ac56d": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs exactly the three keys declared in properties. There is no path for an extra property in this internally constructed dictionary; relaxing additionalProperties cannot change status, validation or upload delegation. Thirty-header-case extracted-function equivalence probe passed."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_8:8e007668a32a3c417544316e20b73e486f62a4dfca87cbe0ef31ab7045b9825e": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only HTTPMessage lookup key case changes. Field names are compared case insensitively, preserving exact values/defaults and validation and uploader binding."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_9:d3f64e082bfb7f436f21492d3998cd086c622db4164b9839875be5bd4b336e6b": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only HTTPMessage lookup key case changes. Field names are compared case insensitively, preserving exact values/defaults and validation and uploader binding."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_82:e2f8723d6b4d0316b331cb08a6aba71c61e831322c671a79b1dfece8ab661ac5": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only HTTPMessage lookup key case changes. Field names are compared case insensitively, preserving exact values/defaults and validation and uploader binding."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_35:958917f4d1d44a35e9026e2f2edba9e94c8ab82f17e40e491e649ae59834b982": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The length value is produced by int before schema validation. A failed conversion exits via the unchanged stable error, and every converted value has integer type. Removing the redundant length integer check preserves the unchanged minimum constraint, status and uploader path."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_36:9d92fc186f64c5683994ec44ea4f3186138e651c671cc437c4082ecc0c6f7b04": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The length value is produced by int before schema validation. A failed conversion exits via the unchanged stable error, and every converted value has integer type. Removing the redundant length integer check preserves the unchanged minimum constraint, status and uploader path."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_ledger_operation__mutmut_24:e57f10f6c8d23d1a71e8304ad10dbe36e68fb4c5774af42ea5bc2437fd52a03c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The entire admin.upload source symbol was read through the parent Serena export. Its server parameter is never referenced by its body: header conversion and schemas.validate use handler and the imported schemas module; final delegate uses only handler, slug and path. Replacing that unused actual argument with None changes no branch, value, exception, mutation or reply. Both callers preserve the other arguments."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_50:351e01c673f74947d8bf03706c6e2f753799d83f90a528578190089f20f60ac7": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The schema name is always built with HTTPMessage.get of X-Artifact-Name and a string default. HTTP parser header field values and the fallback are strings, never another JSON type. Removing the redundant name string constraint leaves the maxLength check and actual downstream original header untouched. No extra reachable upload values are admitted."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_51:5318565420dda2025faa4b20c2ac2dd66502737c255ae6c4dbfdce18240a8437": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The schema name is always built with HTTPMessage.get of X-Artifact-Name and a string default. HTTP parser header field values and the fallback are strings, never another JSON type. Removing the redundant name string constraint leaves the maxLength check and actual downstream original header untouched. No extra reachable upload values are admitted."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_81:335b1acbb6d816eb21879aebd91388ecff253e42e1538e25b5a8a9ff80633e8a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares field names case insensitively. X-Artifact-Name and x-artifact-name select the identical first field value or the same empty default. Unchanged schema checks and uploader observe identical values. Previously recorded HTTPMessage lookup probe establishes the case-insensitive behavior; this candidate was independently inspected with mutmut show."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_83:d40a89f77f6f7968bbe7e787f101c1b8f8419d6973cc4262c486571fc58677ba": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only the fallback in the internal synthetic validation dictionary changes from empty to XXXX. If the header exists the fallback is unused. If absent both fallback strings satisfy the unchanged string/maxLength200 rule. Neither fallback is forwarded to the upload handler, which receives exactly the same handler, slug and path and reads the original headers. Thus status, delegation and response are unchanged for every HTTP request."
+  },
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x\u01c1GuardedOperations\u01c1__init____mutmut_4:a5857935580f13a7f8614c7f472409a727bc2cdb5dc9022cad3d092a856b32b1": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Source evidence: the complete GuardedOperations class from parent Serena export shows checked is initialized once, read only by if not self.checked in apply, and set True at the end of check. Both False and None take that same initial branch; all later reads see identical True. No response, receipt, state, guard or domain argument includes checked. The changed internal initialization preserves every reachable transport result."
+  },
+  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_revision__mutmut_5:1c143cfd64f6fc6fc1eeb1ef9edaab180de51d0fce6e5599b8b4ef525d5abf38": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Source evidence: revision differs only in json.dumps ensure_ascii=False versus None. Both flags select the JSON encoders false branch, retaining the exact unescaped Unicode encoder. sort_keys, separators, input, UTF-8 encoding and sha256 are unchanged. Therefore canonical bytes and digest remain identical for every JSON-serializable input; failed serializations also retain their errors."
+  },
+  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_page__mutmut_50:58a2cd9fa812ad1cd0ea75c8f3a3d59dfe16b7da8261be66aaf18c8dba42fc93": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Source evidence: this data key is changed only in the local candidate dictionary used solely by reply_size before page append/break. Its uppercase form is the same number of unescaped ASCII bytes; all dictionary values and separator counts are unchanged, making the measured byte size identical for every row. The actual return dictionary is built independently with the original keys. Selection, exceptions, revisions, cursor and output bytes are identical."
+  },
+  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_page__mutmut_52:a5c7a4eccc0e8bf5890a64fb09c71917a365e334a39d8bb125f12857ae6171ec": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Source evidence: this revision key is changed only in the local candidate dictionary used solely by reply_size before page append/break. Its uppercase form is the same number of unescaped ASCII bytes; all dictionary values and separator counts are unchanged, making the measured byte size identical for every row. The actual return dictionary is built independently with the original keys. Selection, exceptions, revisions, cursor and output bytes are identical."
+  },
+  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_page__mutmut_54:7255cb06f546c83407ea05a8c69a5118ef8dff50a2b6d3cf911199cb0ccf52ef": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Source evidence: this next_cursor key is changed only in the local candidate dictionary used solely by reply_size before page append/break. Its uppercase form is the same number of unescaped ASCII bytes; all dictionary values and separator counts are unchanged, making the measured byte size identical for every row. The actual return dictionary is built independently with the original keys. Selection, exceptions, revisions, cursor and output bytes are identical."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_layout__mutmut_7:9200b3e2329c7398574af4e7f13eb7460cc4f358adaf11aad567ad6131d51de3": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage compares header field names case insensitively. Only the Origin lookup spelling changes; absent and present values, allowlist decision, layout schema validation, write delegation and response remain identical."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_layout__mutmut_8:e5fe0e10b4092fadd54ff363ba9865728d38d6fb5d461120627ee3dafd9c397d": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage compares header field names case insensitively. Only the Origin lookup spelling changes; absent and present values, allowlist decision, layout schema validation, write delegation and response remain identical."
+  },
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1snapshot__mutmut_19:097638cdbc0530c0ab5a504fa965f9056b259fc2e18d4da5488940f301164119": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Snapshot assigns every COLLECTIONS key from collection before entering the items comprehension. Actual resource constants show all five THREADS keys are in COLLECTIONS. Thus each state.get has an existing key, so its missing-key fallback is unreachable; collection failures stop before the comprehension. No snapshot, request or error changes."
+  },
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1snapshot__mutmut_21:470a9fafbd98228277aaf1cf62c4fd11c72d4a45a7b605852acd8402797051bb": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Snapshot assigns every COLLECTIONS key from collection before entering the items comprehension. Actual resource constants show all five THREADS keys are in COLLECTIONS. Thus each state.get has an existing key, so its missing-key fallback is unreachable; collection failures stop before the comprehension. No snapshot, request or error changes."
+  },
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x_apply__mutmut_3:c17282c2288e4872deccebe95114c773a3098907548257657c614efd5596a4be": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Both concrete get_document implementations branch only on the truth value of reconcile: File uses if reconcile, SQLite uses if reconcile and files is not None. False and None select exactly the same non-reconciling path in each, with the same slug, lock/storage operations, document and exceptions. This changes no caller-visible result or mutation for either supported repository."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_bin_action__mutmut_71:5c1b7315aad57f7cacd180726207b4523257d60a955accf17cb7ff00ff7e96ee": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The local error sentinel is initialized to None or empty string. Its only later use is truth testing in the final conditional dictionary expansion. Both are false; delete with active swarm overwrites error with exactly the same returned domain value in both versions. Neither original sentinel is otherwise read, logged, passed to the domain or returned, so responses, authorization and side effects are identical."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_97:657c1f3b85562b8035725b201d0f15fd82bb418e71640a691198915f90d1eb10": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The actual diff changes only the X-Ledger-Token HTTPMessage lookup key to lowercase. HTTPMessage field-name lookup is case insensitive, so every present or absent credential value reaches authority.principal unchanged; token comparison, principal, rejection, storage and response are identical."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_98:1d8c1b50cc87e8b856209adf807ff3fa2c93b0d5f61a512cd1634c4cfa0a8187": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The actual diff changes only the X-Ledger-Token HTTPMessage lookup key to uppercase. HTTPMessage field-name lookup is case insensitive, so every present or absent credential value reaches authority.principal unchanged; token comparison, principal, rejection, storage and response are identical."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_101:d59856bfa2ce2a9a3dd25510c44c26bfc5136d5026f92abe68a4387a78e32335": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The actual diff changes only the X-Ledger-Agent HTTPMessage lookup key to lowercase. HTTPMessage field-name lookup is case insensitive, so every present or absent identity value reaches authority.principal unchanged. The derived principal, role/author checks, mutations and response are identical."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_handle__mutmut_18:b6540f59ec9ff37750011b5f6b4d558de6050e074de7d4df04aa57804405ba48": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Within the OSError/ValueError handler, the response status is the independent literal 500 in status,result assignment. APIError stores its first argument only as self.status; envelope reads only code, message and details. This instance is immediately converted to its envelope and never raised or otherwise observed, so replacing its unused internal status by None leaves the external status 500, JSON bytes and side effects unchanged."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_handle__mutmut_24:f65decbd357e550643d875db6816aa9f3e63b40b8f038d803bbbf4274eb70299": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Within the OSError/ValueError handler, the response status is the independent literal 500 in status,result assignment. APIError stores its first argument only as self.status; envelope reads only code, message and details. This instance is immediately converted to its envelope and never raised or otherwise observed, so replacing its unused internal status by 501 leaves the external status 500, JSON bytes and side effects unchanged."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_handle__mutmut_37:82a72b4914de5035f38345486e2d13ae9a07c0657b2c4535e9fa9c583b12cfac": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The only changed expression is json.dumps ensure_ascii=False to ensure_ascii=None on the final wire serialization. Both select the same false branch of the JSON encoder and produce identical unescaped Unicode text for every serializable result. All other serialization options, status, content type and handler.send arguments remain unchanged; exceptions retain the same behavior."
+  },
+  "scripts/gates/intent_calibration.py:scripts.gates.intent_calibration.x_verdicts__mutmut_10:fbb1829653dd6a5afd03395028b86d6066fa174c44f8559ebed783e722acd9bf": {
+    "reader": "Standards",
+    "reason": "recorded() ignores its state argument and returns the recorded answers, so passing None instead of the case state to intent.judge gives identical output in verdicts, side_of, measure and main."
   }
 }
