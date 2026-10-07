@@ -48,8 +48,9 @@ def test_binding_is_stamped_when_the_successor_attaches_not_at_tick_start(setup,
     monkeypatch.setattr(transfers, "now_ms", lambda: next(clock))
     tick("sw", store, FakeLedger([] if lane == "master" else [{"id": "t1"}]), FakeRuntime(), 10)
     result = transfers.get(store, "sw", transfer["id"])
-    assert (result["at"], result["attached_at"], result["binding"]["at"]) == (30, 100, 101)
-    assert result["binding"]["state"] == "live"
+    assert (result["at"], result["attached_at"]) == (30, 100)
+    assert result["binding"] == {"state": "live", "at": 101, "session": result["successor"]}
+    assert result["successor"]
 
 
 def test_a_failed_launch_stamps_its_absent_binding_when_it_fails(setup, monkeypatch):
