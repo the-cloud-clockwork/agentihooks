@@ -1,6 +1,12 @@
+import sys
 from typing import Protocol, runtime_checkable
 
+from scripts.swarm_ledger import HERE
+
+sys.path.insert(0, str(HERE))
+
 from .file import FileLedgerRepository
+from .sqlite import SQLiteLedgerRepository as SQLiteLedgerRepository
 
 
 @runtime_checkable

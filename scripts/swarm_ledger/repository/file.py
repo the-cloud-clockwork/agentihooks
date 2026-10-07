@@ -9,7 +9,7 @@ import ledger_notifications
 import ledger_priorities
 import ledger_size
 
-from . import bin_storage
+from . import bin_storage, shadow
 
 
 def load_state(json_path, seed, core=core):
@@ -35,7 +35,7 @@ def sync(slug, changes=None, ops=None, gate=None, core=core):
     leaves an old `_rev` in the seed, which the next sync diffs against its own seed.
     """
     html_path, json_path = core.paths(slug)
-    with core.LOCK:
+    with core.LOCK, shadow.storage_lock(core.LEDGER_DIR):
         html = html_path.read_text(encoding="utf-8")
         try:
             seed, seed_error = core.parse_seed(html), None
@@ -75,6 +75,7 @@ def sync(slug, changes=None, ops=None, gate=None, core=core):
         core.write_if_changed(json_path, json.dumps(state, indent=2, ensure_ascii=False) + "\n")
         if seed is not None:
             core.rewrite_seed(html_path, html, doc, meta["rev"])
+        shadow.persist(core.LEDGER_DIR, slug, state)
         return state, rejected
 
 
