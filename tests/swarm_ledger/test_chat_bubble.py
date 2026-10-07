@@ -2,11 +2,13 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from tests.swarm_ledger.ledger_page import page_source
+
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 
 
 def function_source(name):
-    page = TEMPLATE.read_text(encoding="utf-8")
+    page = page_source()
     return f"function {name}(" + page.split(f"  function {name}(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
 
 
@@ -33,18 +35,18 @@ assert.equal(unreadCount([], 0), 0);
         subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
 
     def test_the_chat_lives_in_a_floating_panel(self):
-        page = TEMPLATE.read_text(encoding="utf-8")
+        page = page_source()
         side = page.split('id="swarm" role="tabpanel"', 1)[1].split("</main>", 1)[0]
         self.assertNotIn("chat-log", side)
         for marker in ('id="chat-fab"', 'id="chat-badge"', 'id="chat-panel"', 'id="chat-size"', 'id="chat-close"'):
             self.assertIn(marker, page)
 
     def test_a_hidden_badge_is_not_drawn(self):
-        page = TEMPLATE.read_text(encoding="utf-8")
+        page = page_source()
         self.assertRegex(page, r"\.sync-badge\[hidden\][^{]*\{\s*display:\s*none;")
 
     def test_notification_text_is_a_wide_clickable_target(self):
-        page = TEMPLATE.read_text(encoding="utf-8")
+        page = page_source()
         self.assertRegex(page, r"\.notif, \.chat-panel \{[^}]*width: min\(600px")
         self.assertRegex(page, r"\.notif-text:hover[^{]*\{[^}]*background")
         self.assertRegex(

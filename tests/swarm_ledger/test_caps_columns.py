@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import show
+
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 DOC = {"title": "Caps columns", "overview": "o", "phases": []}
 
@@ -23,7 +25,7 @@ def caps_boxes(browser, width):
     tab = browser.new_page(viewport={"width": width, "height": 900})
     try:
         html = TEMPLATE.read_text(encoding="utf-8").replace("__LEDGER_DATA__", json.dumps(DOC))
-        tab.set_content(html)
+        show(tab, html)
         return tab.evaluate(
             """() => {
               document.getElementById("swarm").hidden = false;

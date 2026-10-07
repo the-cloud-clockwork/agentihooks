@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import serve_modules
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -121,6 +122,7 @@ class Page:
             self.context.clock.install(time=NOW_MS)
         self.context.add_init_script(f"Date.now = () => {NOW_MS};")
         self.context.route("**/*", lambda route: self.route(route, html))
+        serve_modules(self.context)
         self.tab = self.context.new_page()
         self.errors = []
         self.tab.on("pageerror", lambda error: self.errors.append(str(error)))

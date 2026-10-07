@@ -4,6 +4,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from tests.swarm_ledger.ledger_page import page_source
 from tests.swarm_ledger.test_flat_buttons import css_rules, declarations
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
@@ -16,7 +17,7 @@ const document = { createElement: (tag) => ({ tag, attrs: {}, kids: [],
 
 
 def page():
-    return TEMPLATE.read_text(encoding="utf-8")
+    return page_source()
 
 
 def function_source(name):

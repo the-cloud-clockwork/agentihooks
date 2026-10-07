@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from tests.swarm_ledger.ledger_page import page_source
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_close  # noqa: E402
@@ -131,7 +133,7 @@ class CloseOps(unittest.TestCase):
 
 class ClosedPage(unittest.TestCase):
     def run_js(self, expr):
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        page = page_source()
         source = "function closedText(" + page.split("  function closedText(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
         script = source + f"\nprocess.stdout.write(JSON.stringify({expr}));"
         return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
@@ -143,7 +145,7 @@ class ClosedPage(unittest.TestCase):
         )
 
     def test_the_page_carries_the_banner_and_renders_it_from_closed_at(self):
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        page = page_source()
         self.assertIn('id="closed-banner"', page)
         self.assertIn("closed_at:", page.split("function withDefaults(", 1)[1].split("\n  }\n", 1)[0])
         self.assertIn("closedText(doc.closed_at)", page)

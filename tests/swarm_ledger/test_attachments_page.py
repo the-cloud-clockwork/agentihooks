@@ -1,7 +1,8 @@
 import json
 import subprocess
 
-from tests.swarm_ledger.test_outline import TEMPLATE, function_source
+from tests.swarm_ledger.ledger_page import page_source
+from tests.swarm_ledger.test_outline import function_source
 
 PNG_ID = "a" * 64 + ".png"
 ATT = {"id": PNG_ID, "type": "image/png", "size": 10, "width": 30, "height": 20}
@@ -16,7 +17,7 @@ PRELUDE = (
 
 
 def source(name):
-    page, head = TEMPLATE.read_text(encoding="utf-8"), f"  async function {name}("
+    page, head = page_source(), f"  async function {name}("
     if head not in page:
         return function_source(name)
     return f"async function {name}(" + page.split(head, 1)[1].split("\n  }\n", 1)[0] + "\n}"
@@ -74,7 +75,7 @@ def test_no_attachments_render_nothing():
 
 def test_each_file_is_uploaded_with_the_token_and_a_refusal_is_shown_on_the_tray():
     result = run(
-        ["addImages"],
+        ["uploadImage", "addImages"],
         "const calls = []; const replies = ["
         f"{{ok: true, json: async () => ({json.dumps(ATT)})}},"
         "{ok: false, text: async () => 'only PNG, JPEG, WebP or GIF images are accepted'}];"
@@ -102,7 +103,7 @@ def test_the_preview_offers_a_remove_control_per_image():
 
 
 def test_chat_and_comment_composers_take_paste_drop_and_pick_and_notes_do_not():
-    page = TEMPLATE.read_text(encoding="utf-8")
+    page = page_source()
     attach = function_source("attachable")
     for needle in ('"paste"', '"drop"', '"dragover"', 'type: "file"', "accept: ACCEPT"):
         assert needle in attach, needle

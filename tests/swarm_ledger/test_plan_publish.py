@@ -2,7 +2,6 @@ import argparse
 import json
 import re
 import subprocess
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +16,7 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_ledger import ledger_core as core
 from tests.swarm_ledger import test_plan_kind
+from tests.swarm_ledger.ledger_page import page_source
 from tests.swarm_ledger.test_plan_kind import add, update
 
 plan_ledger = test_plan_kind.plan_ledger
@@ -408,6 +408,6 @@ def test_task_cli_passes_an_explicit_plan_link(monkeypatch, capsys):
 
 
 def test_ledger_page_shows_the_plan_link_on_a_task():
-    page = (Path(ledger.__file__).parent / "template.html").read_text(encoding="utf-8")
+    page = page_source()
     assert '"pr_url", "plan_url", "done"' in page
     assert 'link(item.plan_url, "plan")' in page

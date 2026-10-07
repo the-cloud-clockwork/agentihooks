@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import re
 import sys
 import threading
 import urllib.error
@@ -12,9 +13,20 @@ from unittest.mock import patch
 
 import fakeredis
 
+SEED = re.compile(r'<script id="ledger-data" type="application/json">.*?</script>', re.S)
+VERSION = re.compile(r'"page_version": "[0-9a-f]*"')
+
 
 def files(folder):
-    return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(folder.iterdir()) if p.is_file()}
+    return {p.name: hashlib.sha256(stored(p)).hexdigest() for p in sorted(folder.iterdir()) if p.is_file()}
+
+
+def stored(path):
+    data = path.read_bytes()
+    if path.suffix != ".html":
+        return data
+    seed = SEED.search(data.decode())
+    return seed.group(0).encode() if seed else b""
 
 
 def exchange(server, body=None, route="/api/replay?view=agent", method=None):
@@ -35,7 +47,8 @@ def exchange(server, body=None, route="/api/replay?view=agent", method=None):
     except urllib.error.HTTPError as exc:
         response = exc
     with response:
-        return {"status": response.status, "type": response.headers["Content-Type"], "body": response.read().decode()}
+        body = VERSION.sub('"page_version": ""', response.read().decode())
+        return {"status": response.status, "type": response.headers["Content-Type"], "body": body}
 
 
 def record(root: Path, folder: Path) -> list:

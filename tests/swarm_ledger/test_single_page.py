@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import serve_modules
 from tests.swarm_ledger.test_caps_columns import browser
 
 __all__ = ["browser"]
@@ -35,6 +36,7 @@ def page(browser):
             else route.fulfill(body=html, content_type="text/html")
         ),
     )
+    serve_modules(context)
     tab = context.new_page()
     tab.goto(URL)
     tab.set_default_timeout(1500)
@@ -118,6 +120,7 @@ def test_chat_bubble_floats_bottom_right_and_opens_chat_with_its_unread_count(br
             else route.fulfill(body=html, content_type="text/html")
         ),
     )
+    serve_modules(context)
     tab = context.new_page()
     tab.goto(URL)
     tab.set_default_timeout(1500)
