@@ -241,8 +241,12 @@ def _read_json(path: Path) -> dict | None:
 def render_claude(name: str, force: bool = False) -> Path | None:
     _refuse_live_render_from_another_checkout(name)
     _i = _install_module()
+    _i._load_claude_runtime_env()
     bundle, dirs = _bundle(), _chain(name)
     current = _stamp(bundle, dirs)
+    declared = _mcp_servers("claude", bundle, dirs)
+    connectors.require_environment(declared)
+    required = {server for server, spec in declared.items() if spec.get("enabled_tools") is not None}
     out = rendered_root() / name / "claude"
     if (
         not force
@@ -251,11 +255,16 @@ def render_claude(name: str, force: bool = False) -> Path | None:
         and sources.path(name, "claude", rendered_root()).is_file()
         and (out / binding.FILE).is_file()
         and connectors.path(name, "claude", rendered_root()).is_file()
+        and all(
+            (_read_json(connectors.path(name, "claude", rendered_root())) or {}).get(server, {}).get("mounted")
+            for server in required
+        )
+        and required <= (_read_json(out / ".claude.json") or {}).get("mcpServers", {}).keys()
         and "hasCompletedOnboarding" in (_read_json(out / ".claude.json") or {})
     ):
         return None
     out.mkdir(parents=True, exist_ok=True)
-    servers, deny, mounts = connectors.claude(_mcp_servers("claude", bundle, dirs), str(out / ".claude.json"))
+    servers, deny, mounts = connectors.claude(declared, str(out / ".claude.json"))
     connectors.write(connectors.path(name, "claude", rendered_root()), mounts, name, "claude")
     settings = _claude_settings(bundle, dirs)
     if deny:
@@ -280,7 +289,10 @@ def render_claude(name: str, force: bool = False) -> Path | None:
     if plans.is_symlink():
         plans.unlink()
     plans.mkdir(exist_ok=True)
-    _i.save_json(out / STAMP, current)
+    if all(mounts[server]["mounted"] for server in required):
+        _i.save_json(out / STAMP, current)
+    else:
+        (out / STAMP).unlink(missing_ok=True)
     binding.write(out, name, "claude")
     return out
 
