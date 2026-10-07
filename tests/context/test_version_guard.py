@@ -272,6 +272,22 @@ def test_version_txt_bump_is_refused(tmp_path):
     _refused(_edit(_manifest(tmp_path, "2.17.0\n", "version.txt"), "2.17.0", "2.18.0"), "version.txt")
 
 
+def test_version_file_that_is_not_utf8_is_still_guarded(tmp_path):
+    target = tmp_path / "VERSION"
+    target.write_bytes(b"2.17.0 \xe9\n")
+    _refused(_rewrite(target, "2.18.0\n"), "VERSION")
+
+
+def test_setup_cfg_version_edit_is_refused(tmp_path):
+    target = _manifest(tmp_path, "[metadata]\nversion = 1.0.0\n", "setup.cfg")
+    _refused(_edit(target, "version = 1.0.0", "version = 1.1.0"), "setup.cfg")
+
+
+def test_version_text_in_an_unreadable_manifest_stays_refused(tmp_path):
+    target = _manifest(tmp_path, '[project\nversion = "1.0.0"\n')
+    _refused(_edit(target, 'version = "1.0.0"', 'version = "1.0.0"\n# note'))
+
+
 def test_version_file_whitespace_change_is_allowed(tmp_path):
     check_version_guard(_rewrite(_manifest(tmp_path, "2.17.0\n", "VERSION"), " 2.17.0"))
 
