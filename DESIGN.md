@@ -203,8 +203,6 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 
 ### Tooltips
 - **Delay (operator decision 2026-10-07, locked):** every tooltip on ledger pages, HOME and BIN opens after one second of hover, not two. `DELAY` in `tooltips.js` is 1000 ms, and a test fails on any other value.
-- **Style:** `--overlay` surface, 12px secondary text, 8px radius, at most 280px wide; hides on pointer leave, click or scroll.
-
 ### Navigation
 - **Outline:** a fixed left list of section links, muted at rest, white on hover with the hover lift, accent when current. Items lead with a red or green bullet for open or done.
 
