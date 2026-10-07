@@ -168,17 +168,19 @@ def test_send_logo_answers_the_png_with_a_day_of_caching_or_a_plain_404(tmp_path
     assert body == b"no logo"
 
 
-def test_the_server_serves_the_logo_as_the_favicon():
+def test_the_server_serves_the_logo_as_the_favicon(tmp_path):
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"\x89PNG\r\n\x1a\nlogo")
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
     try:
         req = urllib.request.Request(
             f"http://127.0.0.1:{httpd.server_address[1]}/favicon.ico", headers={"Host": f"127.0.0.1:{server.PORT}"}
         )
-        with urllib.request.urlopen(req) as resp:
+        with patch.object(server, "LOGO", logo), urllib.request.urlopen(req) as resp:
             assert resp.status == 200
             assert resp.headers["Content-Type"] == "image/png"
-            assert resp.read() == server.LOGO.read_bytes()
+            assert resp.read() == logo.read_bytes()
     finally:
         httpd.shutdown()
         httpd.server_close()
