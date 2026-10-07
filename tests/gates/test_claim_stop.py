@@ -117,6 +117,41 @@ def test_each_refusal_names_the_one_command_that_clears_it():
     )
 
 
+@pytest.mark.parametrize("kind", ["ops", "tune", "troubleshoot", "research"])
+def test_a_merged_noncode_task_passes_on_a_live_wait_and_owes_its_contract_without_one(kind):
+    task = {"id": "t1", "pr_url": URL, "kind": kind}
+    assert ruling(task, MERGED, {"until": 1, "reason": "measuring"}) == ("", "")
+    assert ruling(task, MERGED, {"until": 1, "on": {"kind": "reply", "target": "m-1"}}) == ("", "")
+    assert ruling(task, MERGED, {"until": 1, "on": {"kind": "task", "target": "t2"}}) == ("", "")
+    assert ruling(task, MERGED, None) == ("contract", "")
+    assert ruling(task, MERGED, {"until": 1, "on": {"kind": "checks", "target": URL}}) == ("contract", "")
+
+
+@pytest.mark.parametrize("kind", [None, "code", "ci"])
+def test_a_merged_code_or_ci_task_owes_done_whatever_it_waits_on(kind):
+    task = {"id": "t1", "pr_url": URL, **({"kind": kind} if kind else {})}
+    assert ruling(task, MERGED, {"until": 1, "reason": "measuring"}) == ("merged", "")
+    assert ruling(task, MERGED, None) == ("merged", "")
+
+
+@pytest.mark.parametrize(
+    "kind, proof",
+    [
+        ("ops", '--command "<command>" --output "<its output>"'),
+        ("tune", '--command "<command>" --output "<its output>"'),
+        ("troubleshoot", '--root-cause "<cause>" --evidence "<what shows it>" --fix <pr url> | --filed "<follow up>"'),
+        ("research", "--finding <link>"),
+    ],
+)
+def test_the_contract_refusal_names_the_proof_its_kind_closes_on(kind, proof):
+    task, block = {"id": "t1", "pr_url": URL, "kind": kind}, f'agentihooks swarm {SLUG} block "<why>"'
+    assert refusal("contract", SLUG, task, MERGED) == (
+        f"your pull request {URL} merged, and {kind} task t1 closes on its proof contract: close it with agentihooks "
+        f"swarm {SLUG} done {proof}. Name the wait: agentihooks swarm {SLUG} wait --on checks <pr url> | reply "
+        f"<inbox item> | task <id>, or a bare wait of at most 60 minutes; or block with {block}"
+    )
+
+
 def test_a_stop_with_no_pull_request_and_no_wait_is_blocked(rig):
     decision = rig.stop()
     assert not decision.allowed
@@ -129,6 +164,29 @@ def test_a_stop_after_the_merge_is_blocked(rig):
     rig.pulls[URL] = MERGED
     decision = rig.stop()
     assert not decision.allowed and "merged: close the task now" in decision.reason
+
+
+def test_a_tune_task_with_a_merged_fix_stops_on_its_measurement_wait_until_the_wait_ends(rig):
+    rig.task.update(state="pr", pr_url=URL, kind="tune")
+    rig.pulls[URL] = MERGED
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "after measurement", rig.clock[0])
+    assert rig.stop().allowed
+    rig.clock[0] += 60_000
+    decision = rig.stop()
+    assert not decision.allowed
+    assert decision.reason.startswith(f"your pull request {URL} merged, and tune task t1 closes on its proof contract")
+
+
+def test_a_tune_task_cannot_stop_on_the_checks_wait_of_its_merged_pull_request(rig):
+    rig.task.update(state="pr", pr_url=URL, kind="tune")
+    rig.pulls[URL] = PENDING
+    assert rig.stop().allowed
+    rig.pulls[URL] = MERGED
+    for _ in range(STREAK - 1):
+        assert not rig.stop().allowed
+    assert rig.stop().allowed
+    assert rig.ledger.rows["t1"]["state"] == "blocked"
+    assert rig.ledger.comments[0][2].endswith(f"while {PLAIN['contract']}.")
 
 
 def test_a_stop_on_pending_checks_passes_and_records_a_checked_wait(rig):

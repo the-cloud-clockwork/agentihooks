@@ -5,6 +5,7 @@ import json
 from scripts.gates import log
 from scripts.gates.base import Decision
 from scripts.swarm.naming import lane_of
+from scripts.swarm_ledger import ledger_kinds
 
 WORKERS = frozenset({"eng", "ci"})
 ACTIVE = frozenset({"claimed", "pr"})
@@ -15,6 +16,14 @@ PLAIN = {
     "red": "its checks had failed and nothing was pushed",
     "green": "its checks had passed and the pull request was not merged",
     "idle": "it held the task with no pull request and no wait",
+    "contract": "its pull request had merged and its proof contract was still open",
+}
+COMMAND = '--command "<command>" --output "<its output>"'
+CONTRACT_PROOF = {
+    "ops": COMMAND,
+    "tune": COMMAND,
+    "troubleshoot": '--root-cause "<cause>" --evidence "<what shows it>" --fix <pr url> | --filed "<follow up>"',
+    "research": "--finding <link>",
 }
 
 
@@ -24,7 +33,10 @@ def ruling(task, pull, waiting):
     if url and pull is None:
         return "", ""
     if pull is not None and pull.state == "MERGED":
-        return "merged", ""
+        if ledger_kinds.kind(task) not in CONTRACT_PROOF:
+            return "merged", ""
+        if not waiting or waiting.get("on") == {"kind": "checks", "target": url}:
+            return "contract", ""
     if pull is not None and pull.state == "OPEN":
         if pull.red:
             return "red", ""
@@ -39,19 +51,25 @@ def ruling(task, pull, waiting):
 
 def refusal(owed, slug, task, pull):
     url, block = task.get("pr_url"), f'agentihooks swarm {slug} block "<why>"'
+    name_wait = (
+        f"Name the wait: agentihooks swarm {slug} wait --on checks <pr url> | reply <inbox item> | task <id>, or a bare "
+        f"wait of at most 60 minutes; or block with {block}"
+    )
     if owed == "merged":
         return f"your pull request {url} merged: close the task now with agentihooks swarm {slug} done --pr {url}"
+    if owed == "contract":
+        kind = ledger_kinds.kind(task)
+        return (
+            f"your pull request {url} merged, and {kind} task {task['id']} closes on its proof contract: close it with "
+            f"agentihooks swarm {slug} done {CONTRACT_PROOF[kind]}. {name_wait}"
+        )
     if owed == "red":
         return (
             f"checks failed on {url}: {', '.join(pull.failed) or 'a check'}. Fix them and push, or block with {block}"
         )
     if owed == "green":
         return f"checks passed on {url}: merge it, then run agentihooks swarm {slug} done --pr {url}"
-    return (
-        f"you hold task {task['id']} with no open pull request and no wait. Name the wait: agentihooks swarm {slug} "
-        "wait --on checks <pr url> | reply <inbox item> | task <id>, or a bare wait of at most 60 minutes; or block "
-        f"with {block}"
-    )
+    return f"you hold task {task['id']} with no open pull request and no wait. {name_wait}"
 
 
 class ClaimStop:
