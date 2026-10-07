@@ -390,6 +390,22 @@ def test_a_zero_codex_share_spawns_claude_when_the_picker_chooses_codex(
     assert placed.harness == "claude"
 
 
+@pytest.mark.parametrize(("share", "capacity"), [(0, False), (30, True)])
+def test_a_free_codex_slot_counts_only_while_the_codex_share_allows_codex(tmp_path, monkeypatch, share, capacity):
+    from scripts import agent_choice
+
+    monkeypatch.setattr(agent_choice, "codex_week_left", lambda *_: 90.0)
+
+    def choose(requested, environ):
+        if environ.get("AGENTIHOOKS_AGENT_PRIORITY") == "claude":
+            return "claude", agent_choice.ALL_FULL
+        return "codex", "fallthrough: claude is at its session cap"
+
+    runtime = HerdrRuntime(home=tmp_path, choose=choose)
+    config = SimpleNamespace(codex_share=share, codex_min_week_left=5)
+    assert runtime.has_capacity(config) is capacity
+
+
 def test_a_claude_only_profile_asks_the_plain_choice_for_claude_with_the_environment(tmp_path, monkeypatch):
     from scripts.profiles import plugins
 
