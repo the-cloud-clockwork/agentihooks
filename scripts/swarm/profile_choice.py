@@ -86,7 +86,18 @@ def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
         ) from exc
     answer, floor = result.answers["responsibility"], float(environ.get(MIN_CONFIDENCE_VAR, MIN_CONFIDENCE))
     confidence = answer.confidence if answer.confidence is not None else 0.0
-    if answer.choice not in RESPONSIBILITIES or confidence < floor:
+    if confidence < floor:
+        return ProfileDecision(
+            DEFAULT_PROFILES[CLASSIFIED_LANE],
+            "lane default",
+            f"{CLASSIFIED_LANE} lane default: {result.source} answered {answer.choice} "
+            f"with confidence {confidence:.2f}, below the floor {floor:.2f}",
+            result.source,
+            answer.confidence,
+            result.calibrated,
+            anchors(task),
+        )
+    if answer.choice not in RESPONSIBILITIES:
         raise ProfileUnresolved(
             f"task {task.get('id')} profile is unresolved: {result.source} answered {answer.choice} with confidence "
             f"{confidence:.2f}, the floor is {floor:.2f}: {_remedy(slug, task)}"
