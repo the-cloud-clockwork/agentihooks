@@ -1021,3 +1021,34 @@ def test_the_command_line_refuses_missing_or_foreign_options(args):
     with pytest.raises(SystemExit) as caught:
         _run(*args)
     assert caught.value.code == 2
+
+
+def test_every_command_prints_its_result_as_indented_json_and_keeps_the_operation(tmp_path):
+    path, markdown = _registry(tmp_path), tmp_path / "index.md"
+    check = _run("check")
+    assert check.stdout == json.dumps(_check(_index()), indent=2) + "\n"
+    change = tmp_path / "change.json"
+    change.write_text(json.dumps(_change(evidence=[_pull()])))
+    recorded = _run("record", "--index", path, "--change", change, "--markdown", markdown)
+    reopened = _run("reopen", "--index", path, "--package", "SV2-FND-03", "--operation", "o2", "--markdown", markdown)
+    backup = tmp_path / "backup.json"
+    shutil.copy(path, backup)
+    restored = _run("restore", "--index", path, "--backup", backup, "--operation", "o3", "--markdown", markdown)
+    operations = vp.load_index(path)["operations"]
+    assert [o["id"] for o in operations] == ["op-1", "o2", "o3"]
+    for run, operation in zip((recorded, reopened, restored), operations):
+        assert run.stdout == json.dumps(operation["result"], indent=2) + "\n"
+
+
+def test_render_defaults_to_the_registry_markdown(tmp_path, monkeypatch):
+    markdown = tmp_path / "index.md"
+    monkeypatch.setattr(vp, "MARKDOWN", str(markdown))
+    assert _run("render").returncode == 0
+    assert markdown.read_text() == MARKDOWN.read_text()
+
+
+def test_the_usage_names_the_module_command():
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err), pytest.raises(SystemExit):
+        vp.main([])
+    assert err.getvalue().startswith("usage: python -m scripts.swarm_v2.validate_plan ")
