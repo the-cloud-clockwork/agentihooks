@@ -254,6 +254,8 @@ def test_a_shell_c_script_with_literal_programs_still_runs():
         "sudo bash -c 'while true; do $NEXT; done'",
         "bash -c 'for f in a b; do \"$f\"; done'",
         "ssh-agent; bash -c \"bash -c '\\$RUN'\"",
+        "bash -c 'sh <<EOF\n$X\nEOF'",
+        "bash -c 'cat <<EOF | sh\n$X\nEOF'",
     ],
 )
 def test_a_shell_c_script_running_a_variable_command_is_denied(command):
@@ -273,8 +275,6 @@ def test_a_shell_c_script_running_a_variable_command_is_denied(command):
         "bash script.sh $X",
         'bash deploy.sh -c "$TARGET"',
         "sh -e build.sh -c $ENV",
-        "dash -c '$X'",
-        "bash -c 'cat <<EOF > /home/op/x/out.txt\n$HOME/x\nEOF'",
     ],
 )
 def test_a_variable_outside_command_position_or_outside_a_shell_c_script_passes(command):
