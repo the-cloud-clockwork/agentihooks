@@ -1,14 +1,17 @@
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-import fakeredis
 import pytest
 
 from scripts.inbox.store import InboxStore
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     return InboxStore(fakeredis.FakeRedis(decode_responses=True))
 
 

@@ -156,7 +156,7 @@ def test_codex_master_confirms_the_adapted_next_without_changing_the_record(setu
     transfer = transfers.record(store, "sw", old, "recycle", document, 2)
     new = replace(old, name="master-new", harness="codex", state="working")
     store.seats.occupy(new.seat, new.name, 3)
-    transfers.attach(store, "sw", new, 3)
+    transfers.attach(store, "sw", new)
 
     result = transfers.confirm(store, "sw", transfer["id"], new, next_action(action, "sw"), 4)
     assert result["continuity"]["state"] == "confirmed"
@@ -178,7 +178,7 @@ def test_other_successors_keep_the_original_monitor_next(setup, lane, harness):
     transfer = transfers.record(store, "sw", old, "recycle", "# Handoff v2\n## Next\n" + action, 2)
     new = replace(old, name="successor", harness=harness, state="working")
     store.seats.occupy(new.seat, new.name, 3)
-    transfers.attach(store, "sw", new, 3)
+    transfers.attach(store, "sw", new)
     with pytest.raises(SwarmError, match="exactly"):
         transfers.confirm(store, "sw", transfer["id"], new, next_action(action, "sw"), 4)
     assert transfers.confirm(store, "sw", transfer["id"], new, action, 5)["continuity"]["state"] == "confirmed"
