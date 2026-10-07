@@ -25,6 +25,7 @@ class PageLedger:
         self.said = []
 
     def relay(self, slug, text, by):
+        assert slug == "sw"
         self.said.append((text, by))
 
 
