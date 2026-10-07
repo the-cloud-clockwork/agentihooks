@@ -80,7 +80,9 @@ def test_unsafe_or_ambiguous_remotes_remain_unknown_and_unstored(tmp_path, remot
     assert identity.project_id == "unknown"
     assert identity.remote == ""
     assert identity.project_identity_ambiguities_total == 1
-    request.node.user_properties.append(("project_identity_ambiguities_total", identity.project_identity_ambiguities_total))
+    request.node.user_properties.append(
+        ("project_identity_ambiguities_total", identity.project_identity_ambiguities_total)
+    )
     assert remote not in json.dumps(identity.attributes())
     assert (repo / ".git" / "config").read_bytes() == config
     git(repo, "remote", "set-url", "origin", "https://github.com/first/common.git")
