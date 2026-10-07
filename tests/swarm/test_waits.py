@@ -8,11 +8,13 @@ from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import view as github_view
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
+from tests.swarm.test_ledger_events import APP_SUITE, QUEUED_TESTS, SKIPPED_ONLY
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 ME = "engineer@a1b2c3-0001"
 URL = "https://github.com/o/r/pull/7"
+NO_SUITES = {"nodes": [], "pageInfo": {"hasNextPage": False}}
 
 
 @pytest.fixture
@@ -549,6 +551,7 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                                                     "pageInfo": {"hasNextPage": False},
                                                 }
                                             },
+                                            "checkSuites": {"nodes": [], "pageInfo": {"hasNextPage": False}},
                                         }
                                     }
                                 ]
@@ -574,7 +577,8 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
                 "commits(last:1){nodes{commit{committedDate statusCheckRollup{contexts(first:100){"
                 "nodes{...on CheckRun{name conclusion} ...on StatusContext{context state}} "
-                "pageInfo{hasNextPage}}}}}}}}}",
+                "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId}} "
+                "pageInfo{hasNextPage}}}}}}}}",
                 "-f",
                 f"url={URL}",
             ],
@@ -584,7 +588,8 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
 
 
 @pytest.mark.parametrize(
-    "commits", [[], [{"commit": {"committedDate": "2026-10-07T17:00:00Z", "statusCheckRollup": None}}]]
+    "commits",
+    [[], [{"commit": {"committedDate": "2026-10-07T17:00:00Z", "statusCheckRollup": None, "checkSuites": NO_SUITES}}]],
 )
 def test_the_probe_without_checks_is_unresolved(commits):
     from types import SimpleNamespace
@@ -593,6 +598,55 @@ def test_the_probe_without_checks_is_unresolved(commits):
     pull = github_view(URL, lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(raw)))
     assert pull.head == "first"
     assert pull.resolved is False
+
+
+def probe(rollup, suites, suites_more=False):
+    from types import SimpleNamespace
+
+    commit = {
+        "committedDate": "2026-10-07T17:00:00Z",
+        "statusCheckRollup": {"contexts": {"nodes": rollup, "pageInfo": {"hasNextPage": False}}},
+        "checkSuites": {"nodes": suites, "pageInfo": {"hasNextPage": suites_more}},
+    }
+    raw = {"data": {"resource": {"state": "OPEN", "headRefOid": "second", "commits": {"nodes": [{"commit": commit}]}}}}
+    return github_view(URL, lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(raw)))
+
+
+def test_the_probe_keeps_a_head_with_only_skipped_checks_and_a_queued_run_unresolved():
+    pull = probe(SKIPPED_ONLY, [QUEUED_TESTS, APP_SUITE])
+    assert pull.resolved is False
+
+
+@pytest.mark.parametrize("suites", [None, {"nodes": None, "pageInfo": {"hasNextPage": False}}, {"nodes": []}])
+def test_the_probe_refuses_unreadable_check_suites(suites):
+    from types import SimpleNamespace
+
+    commit = {
+        "committedDate": "2026-10-07T17:00:00Z",
+        "statusCheckRollup": {"contexts": {"nodes": SKIPPED_ONLY, "pageInfo": {"hasNextPage": False}}},
+        "checkSuites": suites,
+    }
+    raw = {"data": {"resource": {"state": "OPEN", "headRefOid": "second", "commits": {"nodes": [{"commit": commit}]}}}}
+    assert github_view(URL, lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(raw))) is None
+
+
+def test_the_probe_ignores_a_queued_suite_without_a_workflow_run():
+    pull = probe(SKIPPED_ONLY + [{"name": "unit", "conclusion": "SUCCESS"}], [APP_SUITE])
+    assert pull.resolved is True
+    assert pull.red is False
+
+
+def test_the_probe_refuses_a_partial_list_of_check_suites():
+    assert probe(SKIPPED_ONLY, [APP_SUITE], suites_more=True) is None
+
+
+def test_a_checks_wait_stays_held_while_the_new_heads_run_is_queued(tick):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = probe(SKIPPED_ONLY, [QUEUED_TESTS])
+    assert tick.end() == []
+    assert tick.end() == []
+    assert tick.told() == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"]["head"] == "second"
 
 
 @pytest.mark.parametrize(
@@ -606,7 +660,11 @@ def test_the_probe_without_checks_is_unresolved(commits):
         (0, "invalid json"),
         (
             0,
-            '{"data":{"resource":{"state":"OPEN","headRefOid":"first","commits":{"nodes":[{"commit":{"committedDate":"2026-10-07T17:00:00Z","statusCheckRollup":{"contexts":{"nodes":[{"conclusion":"SUCCESS"}],"pageInfo":{"hasNextPage":true}}}}}]}}}}',
+            '{"data":{"resource":{"state":"OPEN","headRefOid":"first","commits":{"nodes":[{"commit":{"committedDate":"2026-10-07T17:00:00Z","statusCheckRollup":{"contexts":{"nodes":[{"conclusion":"SUCCESS"}],"pageInfo":{"hasNextPage":true}}},"checkSuites":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}]}}}}',
+        ),
+        (
+            0,
+            '{"data":{"resource":{"state":"OPEN","headRefOid":"first","commits":{"nodes":[{"commit":{"committedDate":"2026-10-07T17:00:00Z","statusCheckRollup":{"contexts":{"nodes":[{"conclusion":"SKIPPED"}],"pageInfo":{"hasNextPage":false}}}}}]}}}}',
         ),
     ],
 )
