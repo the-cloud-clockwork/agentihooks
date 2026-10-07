@@ -11,7 +11,7 @@ def test_worker_prompt_reads_the_configured_ledger_folder(monkeypatch, tmp_path,
 
     assert f"read the ledger {tmp_path}/sw.json in full" in text
     assert "~/development-ledger/" not in text
-    assert text.index(f"{tmp_path}/sw.json") < text.index("You are a member of the ledger crew")
+    assert text.index("worker join") < text.index(f"read the ledger {tmp_path}/sw.json in full")
 
 
 @pytest.mark.parametrize("lane", ["eng", "ci", "master"])

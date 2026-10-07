@@ -265,6 +265,7 @@ class HerdrRuntime:
 
     def _launch(self, config, lane, task_id, name, argv):
         agent = argv[argv.index("--agent") + 1]
+        launched_at = int(time.time() * 1000)
         try:
             proc = self.run(
                 argv,
@@ -304,6 +305,7 @@ class HerdrRuntime:
             fields.get("placement", ""),
             validated["profile"],
             profile_decision={"validation": validated},
+            launched_at=launched_at,
         )
 
     def recover(self, name: str) -> Placed:

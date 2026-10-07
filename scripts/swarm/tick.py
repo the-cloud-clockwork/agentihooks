@@ -74,6 +74,7 @@ class Placed:
     model_confidence: float | None = None
     profile_decision: dict = field(default_factory=dict)
     choice: str = ""
+    launched_at: int = 0
 
 
 class Ledger(Protocol):
@@ -591,6 +592,7 @@ def placed_record(record, placed):
         model_confidence=placed.model_confidence,
         profile_decision=placed.profile_decision,
         choice=placed.choice,
+        started_at=placed.launched_at or record.started_at,
         state="working",
     )
 

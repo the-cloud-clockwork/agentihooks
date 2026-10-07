@@ -190,6 +190,21 @@ def test_tick_passes_a_launch_that_joined(store, monkeypatch):
     assert launch_check.report(store, "sw", "t1")["state"] == "passed"
 
 
+def test_the_join_clock_starts_at_the_launch_not_at_the_tick(store, monkeypatch):
+    ledger, runtime = checked(store, monkeypatch)
+    spawn = runtime.spawn
+
+    def late(config, lane, name, task, spawns=None):
+        return replace(spawn(config, lane, name, task, spawns), launched_at=LAUNCH + 50_000)
+
+    runtime.spawn = late
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (name,) = [n for _, n, _ in runtime.spawned]
+    joined(ledger, runtime, LAUNCH + 100_000)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + 105_000)
+    assert f"{name} passed its launch check in 50 seconds" in actions
+
+
 def test_tick_waits_until_the_deadline_before_failing(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     tick("sw", store, ledger, runtime, LAUNCH)
