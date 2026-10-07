@@ -88,10 +88,6 @@ def _conversation_id(session):
     return session.get("value") or ""
 
 
-def _complete(saved):
-    return saved if saved and all(saved.get(key) for key in ("profile", "harness", "model", "effort")) else {}
-
-
 def _transfer(task):
     saved = (task.get("handoff_envelope") or {}).get("launch")
     if not task.get("handoff") and not saved:
@@ -119,7 +115,7 @@ class HerdrRuntime:
 
     def spawn(self, config, lane, name, task, spawns=None):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
-        relaunch = _complete(task.get("launch_assignment"))
+        relaunch = live_binding.complete(task.get("launch_assignment"))
         saved = relaunch or _transfer(task)
         decision = (
             profile_choice.ProfileDecision(saved["profile"], "handoff", "original seat profile")
