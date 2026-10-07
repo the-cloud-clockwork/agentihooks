@@ -16,6 +16,16 @@ def adapter(monkeypatch, tmp_path):
     return CodexAdapter()
 
 
+def _codex_base() -> dict:
+    return install._load_native_layer(install.PROFILES_DIR / "_base" / install._NATIVE_BASE_NAME["codex"])
+
+
+def assert_unambiguous(line: list[str]) -> None:
+    context = line.index("context-used")
+    assert line[context + 1] == "context-window-size"
+    assert not {"context-usage", "used-tokens"} & set(line)
+
+
 class TestConfigToml:
     @pytest.mark.parametrize("existing", [None, "managed", "custom"])
     def test_init_withdraws_only_automatic_model_catalog(self, adapter, existing):
@@ -115,6 +125,21 @@ class TestConfigToml:
         text = (home / "config.toml").read_text()
         assert 'approval_policy = "untrusted"' in text
         assert "hand-set" in capsys.readouterr().out
+
+    def test_status_line_keeps_context_apart_from_cumulative_tokens(self, adapter):
+        old = ["model-with-reasoning", "current-dir", "context-usage", "used-tokens", "five-hour-limit"]
+        adapter.write_settings({"tui": {"status_line": old}})
+        adapter.write_settings(_codex_base())
+        assert_unambiguous(adapter._load_toml(codex_home() / "config.toml")["tui"]["status_line"])
+
+    def test_operator_status_line_survives_reinit(self, adapter):
+        adapter.write_settings(_codex_base())
+        config = codex_home() / "config.toml"
+        doc = adapter._load_toml(config)
+        doc["tui"]["status_line"] = ["model", "used-tokens"]
+        adapter._dump_toml(config, doc)
+        adapter.write_settings(_codex_base())
+        assert adapter._load_toml(config)["tui"]["status_line"] == ["model", "used-tokens"]
 
 
 class TestHooksJson:
