@@ -219,6 +219,29 @@ class TestHooksJson:
         ]
         assert len(own) == 1
 
+    def test_rerun_over_unchanged_hooks_prints_no_trust_advice(self, adapter, capsys):
+        adapter.write_settings({})
+        before = (codex_home() / "hooks.json").stat().st_mtime_ns
+        capsys.readouterr()
+        adapter.write_settings({})
+        adapter.post_install_reconcile([], "")
+        out = capsys.readouterr().out
+        assert "run /hooks" not in out
+        assert "hooks.json unchanged; existing Codex hook trust holds" in out
+        assert (codex_home() / "hooks.json").stat().st_mtime_ns == before
+
+    def test_changed_hooks_file_prints_trust_advice_once(self, adapter, capsys):
+        adapter.write_settings({})
+        path = codex_home() / "hooks.json"
+        doc = json.loads(path.read_text())
+        del doc["hooks"]["SessionStart"]
+        path.write_text(json.dumps(doc))
+        capsys.readouterr()
+        adapter.write_settings({})
+        adapter.post_install_reconcile([], "")
+        assert capsys.readouterr().out.count("run /hooks") == 1
+        assert "SessionStart" in json.loads(path.read_text())["hooks"]
+
     @pytest.mark.parametrize("ours_first", [True, False])
     def test_reinstall_keeps_own_group_first_so_codex_trust_positions_hold(self, adapter, ours_first):
         """Codex keys hook trust by `hooks.json:<event>:<group>:<hook>`; moving a group voids its approval."""
