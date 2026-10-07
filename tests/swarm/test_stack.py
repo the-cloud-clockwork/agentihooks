@@ -333,6 +333,17 @@ def test_restack_after_a_squash_merge_replays_only_task_work(stacked_repo, capsy
     assert ("t1", {"parked_on": []}, AGENT) in ledger.updates
     assert json.loads(capsys.readouterr().out.splitlines()[-1]) == {"task": "t1", "parked_on": []}
     assert store.agents("sw")[0] == agent
+    assert not (repo / _git(repo, "rev-parse", "--git-path", "agentihooks-restack.json")).exists()
+
+
+def test_restack_removes_stacked_commits_even_after_merging_dev(stacked_repo):
+    _, ledger, repo, _ = stacked_repo
+    _git(repo, "fetch", "origin")
+    _git(repo, "merge", "--no-edit", "origin/dev")
+    assert "Blocker first" in _git(repo, "log", "--format=%s", "origin/dev..HEAD")
+    assert restack() == 0
+    assert _git(repo, "log", "--format=%s", "origin/dev..HEAD") == "Task work"
+    assert ledger.rows["t1"]["parked_on"] == []
 
 
 def test_restack_conflict_lists_files_and_keeps_parked_state(stacked_repo, capsys):
@@ -349,6 +360,8 @@ def test_restack_conflict_lists_files_and_keeps_parked_state(stacked_repo, capsy
     assert ledger.rows["t1"]["parked_on"] == ["a"]
     assert ledger.rows["t1"]["stacked_base"] == base
     assert ledger.updates == []
+    saved = json.loads((repo / _git(repo, "rev-parse", "--git-path", "agentihooks-restack.json")).read_text())
+    assert saved == {"context": ["sw", "t1", "finisher", base], "onto": _git(repo, "rev-parse", "origin/dev")}
 
 
 @pytest.mark.parametrize(
@@ -422,6 +435,22 @@ def test_restack_refuses_a_base_outside_task_history(stacked_repo, capsys):
     capsys.readouterr()
     assert restack() == 1
     assert "stacked base is not in this branch" in capsys.readouterr().err
+    assert ledger.updates == []
+
+
+def test_restack_refuses_a_branch_without_parked_task_work(stacked_repo, capsys):
+    _, ledger, repo, _ = stacked_repo
+    _git(repo, "fetch", "origin")
+    _git(repo, "switch", "-c", "unrelated", "origin/dev")
+    (repo / "other.txt").write_text("other work\n")
+    _git(repo, "add", "other.txt")
+    _git(repo, "commit", "-m", "Other work")
+    before = _git(repo, "rev-parse", "HEAD")
+    capsys.readouterr()
+    assert restack() == 1
+    assert "parked branch" in capsys.readouterr().err
+    assert _git(repo, "rev-parse", "HEAD") == before
+    assert ledger.rows["t1"]["parked_on"] == ["a"]
     assert ledger.updates == []
 
 
