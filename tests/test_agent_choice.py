@@ -276,3 +276,67 @@ def test_codex_week_left_is_the_best_signed_in_account(monkeypatch):
     monkeypatch.setattr(codex_router, "routing_pool", lambda environ: pool)
     monkeypatch.setattr(codex_router, "quotas", lambda accounts, environ: {a.name: seen[a.name] for a in accounts})
     assert agent_choice.codex_week_left({}) == 60.0
+
+
+def _picker(calls, first="codex"):
+    def pick(requested, environ):
+        calls.append((requested, environ.get("AGENTIHOOKS_AGENT_PRIORITY")))
+        return (first, "priority") if len(calls) == 1 else ("claude", "claude only")
+
+    return pick
+
+
+def test_a_zero_share_turns_a_codex_priority_choice_into_claude(monkeypatch):
+    _share(monkeypatch)
+    calls = []
+    assert agent_choice.choose_shared("", {}, {}, share=0, min_week_left=5, choose=_picker(calls)) == (
+        "claude",
+        "claude only",
+    )
+    assert calls == [("", None), ("", "claude")]
+
+
+def test_a_zero_share_overrides_an_explicit_codex_lane(monkeypatch):
+    _share(monkeypatch)
+    calls = []
+    assert agent_choice.choose_shared("codex", {}, {}, share=0, min_week_left=5, choose=_picker(calls)) == (
+        "claude",
+        "claude only",
+    )
+    assert calls == [("codex", None), ("", "claude")]
+
+
+def test_a_codex_week_under_the_minimum_turns_a_codex_choice_into_claude(monkeypatch):
+    _share(monkeypatch, week_left=4.0)
+    calls = []
+    assert agent_choice.choose_shared("", {}, None, share=30, min_week_left=5, choose=_picker(calls)) == (
+        "claude",
+        "claude only",
+    )
+
+
+@pytest.mark.parametrize("week_left", [5.0, None])
+def test_a_codex_choice_stands_at_the_minimum_week_or_an_unknown_week(monkeypatch, week_left):
+    _share(monkeypatch, week_left=week_left)
+    calls = []
+    assert agent_choice.choose_shared("", {}, None, share=30, min_week_left=5, choose=_picker(calls)) == (
+        "codex",
+        "priority",
+    )
+    assert calls == [("", None)]
+
+
+def test_a_closed_codex_waits_when_claude_is_at_its_cap(monkeypatch):
+    _share(monkeypatch)
+    monkeypatch.setattr(agent_choice, "at_cap", lambda agent, environ: agent == "claude")
+    assert agent_choice.choose_shared("", {}, {}, share=0, min_week_left=5) == ("claude", agent_choice.ALL_FULL)
+
+
+def test_no_spawn_counts_skip_the_share_pick(monkeypatch):
+    _share(monkeypatch)
+    calls = []
+    assert agent_choice.choose_shared("", {}, None, share=30, min_week_left=5, choose=_picker(calls, "claude")) == (
+        "claude",
+        "priority",
+    )
+    assert calls == [("", None)]

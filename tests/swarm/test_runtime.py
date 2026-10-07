@@ -17,7 +17,14 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
     config = SimpleNamespace(
-        slug="swarm-buildout", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+        slug="swarm-buildout",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
+        lanes={},
+        autonomy="delegate",
     )
     runtime.spawn(config, "eng", "swarm-buildout-eng-4", {"id": "t4", "title": "x"})
     assert seen["env"]["AGENTIHOOKS_SWARM"] == "swarm-buildout"
@@ -43,7 +50,14 @@ def test_a_task_profile_wins_over_the_lane_profile_at_spawn(tmp_path, lanes, tas
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
     config = SimpleNamespace(
-        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes=lanes, autonomy="delegate"
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
+        lanes=lanes,
+        autonomy="delegate",
     )
     runtime.spawn(config, "eng", "sw-eng-1", {"id": "t1", "title": "x", **task})
     argv = seen["argv"]
@@ -136,7 +150,14 @@ def test_spawn_records_the_model_and_effort_init_agent_launched_with(tmp_path):
         choose=lambda *_: ("claude", "open"),
     )
     config = SimpleNamespace(
-        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
+        lanes={},
+        autonomy="delegate",
     )
     placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     assert (placed.model, placed.effort) == ("opus", "high")
@@ -150,7 +171,14 @@ def test_a_codex_spawn_records_the_model_and_effort_init_agent_launched_with(tmp
         choose=lambda *_: ("codex", "open"),
     )
     config = SimpleNamespace(
-        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
+        lanes={},
+        autonomy="delegate",
     )
     placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     assert (placed.harness, placed.model, placed.effort) == ("codex", "gpt-6.1-sol", "high")
@@ -166,7 +194,13 @@ def _spawn_env(tmp_path, monkeypatch, **config):
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
     runtime.spawn(
-        SimpleNamespace(slug="sw", repo=str(tmp_path), code="a1b2c3", lanes={}, **{"autonomy": "delegate", **config}),
+        SimpleNamespace(
+            slug="sw",
+            repo=str(tmp_path),
+            code="a1b2c3",
+            lanes={},
+            **{"autonomy": "delegate", "codex_share": None, "codex_min_week_left": 0, **config},
+        ),
         "eng",
         "engineer@a1b2c3-0001",
         {"id": "t1", "title": "x"},
@@ -195,7 +229,14 @@ def _spawn_seen(tmp_path, lanes, lane="eng"):
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=choose)
     config = SimpleNamespace(
-        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes=lanes, autonomy="delegate"
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
+        lanes=lanes,
+        autonomy="delegate",
     )
     runtime.spawn(config, lane, "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     return seen
@@ -318,6 +359,37 @@ def test_a_task_naming_a_claude_only_profile_spawns_on_claude_at_codex_share_one
     assert placed.harness == harness
 
 
+@pytest.mark.parametrize(("lane", "spawns"), [("eng", {"claude": 3}), ("ci", {}), ("plan", {}), ("master", None)])
+@pytest.mark.parametrize("lane_agent", ["auto", "codex"])
+def test_a_zero_codex_share_spawns_claude_when_the_picker_chooses_codex(
+    tmp_path, monkeypatch, lane, spawns, lane_agent
+):
+    from scripts import agent_choice
+
+    monkeypatch.setattr(agent_choice, "codex_week_left", lambda *_: 90.0)
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda requested, environ: ("codex", "priority"))
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={lane: {"agent": lane_agent}},
+        autonomy="delegate",
+        codex_share=0,
+        codex_min_week_left=5,
+    )
+    task = {**SEAT_TASKS[lane], "profile": "engineer"}
+    placed = runtime.spawn(config, lane, "engineer@a1b2c3-0001", task, spawns=spawns)
+    assert seen["argv"][seen["argv"].index("--agent") + 1] == "claude"
+    assert placed.harness == "claude"
+
+
 def test_a_claude_only_profile_asks_the_plain_choice_for_claude_with_the_environment(tmp_path, monkeypatch):
     from scripts.profiles import plugins
 
@@ -338,6 +410,8 @@ def test_a_claude_only_profile_asks_the_plain_choice_for_claude_with_the_environ
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
         lanes={"eng": {"agent": "codex"}},
         autonomy="delegate",
     )
@@ -396,7 +470,14 @@ def _resuming(tmp_path, reported, harness="claude"):
     runtime = HerdrRuntime(home=tmp_path, run=run, herdr=herdr, choose=lambda *_: ("claude", "open"))
     runtime.sleep = lambda seconds: None
     config = SimpleNamespace(
-        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
+        lanes={},
+        autonomy="delegate",
     )
     agent = AgentRecord(
         "engineer@a1b2c3-0001",
@@ -513,6 +594,8 @@ def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", e
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
         lanes=lanes if lanes is not None else {name: auto for name in ("eng", "ci", "plan", "master")},
         autonomy="delegate",
     )
@@ -615,7 +698,16 @@ def test_every_swarm_launch_runs_its_profile_with_brain_on(tmp_path, monkeypatch
     monkeypatch.setattr(model_pick, "pick", lambda *a, **kw: model_pick.ModelPick("m", "high"))
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: (harness, "open"))
     runtime._holds = lambda *a: True
-    config = SimpleNamespace(slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="full")
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
+        lanes={},
+        autonomy="full",
+    )
     if launch == "resume":
         agent = AgentRecord("agent@a1b2c3-0001", lane, "t1", harness=harness, conversation_id="c0ffee")
         runtime.resume(config, agent, "you were restored")

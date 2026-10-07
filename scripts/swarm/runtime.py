@@ -100,11 +100,8 @@ class HerdrRuntime:
         decision = profile_choice.choose(config.slug, lane, chosen, task, environ)
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
-        if spawns is None:
-            agent, reason = self.choose(requested, environ)
-        else:
-            share, floor = codex_split(config, environ)
-            agent, reason = agent_choice.choose_shared(requested, environ, spawns, share, floor, choose=self.choose)
+        share, floor = codex_split(config, environ)
+        agent, reason = agent_choice.choose_shared(requested, environ, spawns, share, floor, choose=self.choose)
         if reason == agent_choice.ALL_FULL:
             raise SpawnError(reason)
         task = {**task, "harness": agent}

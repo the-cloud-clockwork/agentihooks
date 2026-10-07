@@ -95,14 +95,29 @@ def codex_week_left(environ: dict[str, str]) -> float | None:
 
 
 def choose_shared(
-    requested: str, environ: dict[str, str], spawns: dict[str, int], share: int, min_week_left: int, choose=choose
+    requested: str,
+    environ: dict[str, str],
+    spawns: dict[str, int] | None,
+    share: int,
+    min_week_left: int,
+    choose=choose,
 ) -> tuple[str, str]:
-    """Codex while its share of the swarm's spawns is below the target and its week has room, else the priority choice."""
-    if requested:
-        return choose(requested, environ)
-    codex, total = spawns.get("codex", 0), sum(spawns.values())
-    if share > 0 and codex * 100 < share * max(total, 1) and not at_cap("codex", environ):
-        left = codex_week_left(environ)
-        if left is not None and left >= min_week_left:
-            return "codex", f"codex share {codex}/{total} below {share}%"
-    return choose("", environ)
+    """Codex while its share of the swarm's spawns is below the target and its week has room, else the priority
+    choice; a zero share or a known week under the minimum turns any Codex choice into Claude."""
+    if not requested and spawns is not None:
+        codex, total = spawns.get("codex", 0), sum(spawns.values())
+        if share > 0 and codex * 100 < share * max(total, 1) and not at_cap("codex", environ):
+            left = codex_week_left(environ)
+            if left is not None and left >= min_week_left:
+                return "codex", f"codex share {codex}/{total} below {share}%"
+    agent, reason = choose(requested, environ)
+    if agent == "codex" and not codex_open(environ, share, min_week_left):
+        return "claude", choose("", {**environ, "AGENTIHOOKS_AGENT_PRIORITY": "claude"})[1]
+    return agent, reason
+
+
+def codex_open(environ: dict[str, str], share: int, min_week_left: int) -> bool:
+    if share <= 0:
+        return False
+    left = codex_week_left(environ)
+    return left is None or left >= min_week_left
