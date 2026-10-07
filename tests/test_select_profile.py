@@ -11,6 +11,9 @@ def profile(monkeypatch, tmp_path):
     root.mkdir()
     (root / "profile.yml").write_text("model: sonnet\neffort: medium\n")
     renderer = Mock()
+    from scripts.targets._common import _install_module
+
+    monkeypatch.setattr(_install_module(), "_resolve_profile_chain", lambda name: [(name, root)])
     monkeypatch.setattr(select_profile.profiles, "_chain", lambda name: [(name, root)])
     monkeypatch.setattr(select_profile.profiles, "render", renderer)
     monkeypatch.setattr(select_profile.profiles, "rendered_root", lambda: tmp_path / "rendered")
@@ -346,3 +349,45 @@ def test_profile_render_dispatch_forwards_arguments_and_exit(monkeypatch):
     monkeypatch.setattr(select_profile.profiles, "main", main)
     assert select_profile.dispatch(["profile", "render", "engineer", "--target", "claude"]) == 7
     main.assert_called_once_with(["render", "engineer", "--target", "claude"])
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_init_agent_refuses_claude_only_profile_before_render_or_launch(profile, monkeypatch, tmp_path, capsys, resume):
+    root, renderer = profile
+    settings = root / "engineer" / ".claude" / "settings.overrides.json"
+    settings.parent.mkdir()
+    settings.write_text('{"enabledPlugins": {"frontend-design@claude-plugins-official": true}}')
+    launcher = Mock()
+    monkeypatch.setattr(init_agent, "_write_launcher", launcher)
+    flags = ["--resume", "saved-session"] if resume else []
+    result = init_agent.main(
+        ["--profile", "frontend", "--agent", "codex", "--dir", str(tmp_path), *flags],
+        {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path)},
+    )
+    assert result == 2
+    assert capsys.readouterr().err == (
+        "agentihooks init-agent: profile frontend does not support codex; supported harness: claude\n"
+    )
+    renderer.assert_not_called()
+    launcher.assert_not_called()
+
+
+@pytest.mark.parametrize("agent,enabled", [("claude", True), ("codex", False)])
+def test_init_agent_allows_supported_profile_harness_pair(profile, tmp_path, capsys, agent, enabled):
+    root, renderer = profile
+    settings = root / "engineer" / ".claude" / "settings.overrides.json"
+    settings.parent.mkdir()
+    settings.write_text('{"enabledPlugins": {"frontend-design@claude-plugins-official": ' + str(enabled).lower() + "}}")
+    assert (
+        init_agent.main(
+            ["--profile", "engineer", "--agent", agent, "--dir", str(tmp_path), "--host", "herdr", "--dry-run"],
+            {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path)},
+        )
+        == 0
+    )
+    renderer.assert_called_once_with(agent, "engineer")
+    output = capsys.readouterr()
+    assert output.err == ""
+    assert f"agent={agent}\n" in output.out
+    assert "profile=engineer\n" in output.out
+    assert "status=dry-run\n" in output.out
