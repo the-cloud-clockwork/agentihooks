@@ -308,6 +308,32 @@ def test_oversized_source_plan_still_fails_with_all_source_areas_visible(monkeyp
     assert record["reasons"] == ["the plan is sized a whole phase at confidence 0.90, above one pull request"]
 
 
+@pytest.mark.parametrize(
+    ("areas", "kept"),
+    [
+        (("mutation-cleared.txt",), True),
+        (("./mutation-cleared.txt",), True),
+        (("mutation-cleared.txt", "power/generator"), False),
+        (("scripts/mutation-cleared.txt",), False),
+        (("power/generator",), False),
+    ],
+)
+def test_a_clearance_ruling_piece_is_kept_whatever_the_classifier_says(ask, areas, kept):
+    ask(0.0, 0.9, 0.9)
+    pieces = [piece("append the rulings", *areas), piece("b"), piece("c")]
+    record = trace_plan.trace(pieces, INTENT, None)
+    assert record["pieces"][0]["kept"] is kept
+    assert record["verdict"] == "pass"
+
+
+def test_clearance_pieces_never_count_as_cut_toward_a_failed_plan(ask):
+    ask(0.0, 0.0, 0.9)
+    pieces = [piece("append the rulings", "mutation-cleared.txt"), piece("b"), piece("c")]
+    record = trace_plan.trace(pieces, INTENT, None)
+    assert record["verdict"] == "pass"
+    assert [row["kept"] for row in record["pieces"]] == [True, False, True]
+
+
 @pytest.mark.parametrize(("p_yes", "kept"), [(0.3, True), (0.29, False), (0.0, False), (1.0, True)])
 def test_a_piece_under_three_tenths_is_cut(ask, p_yes, kept):
     ask(p_yes, 0.9, 0.9)

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from hooks.context import profile_chain, quarantine
 from scripts.claude_config import claude_home, claude_json
-from scripts.profiles import binding, browser, connectors, plugins, sources
+from scripts.profiles import binding, browser, connectors, homes, plugins, sources
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
 from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_target import codex_home
@@ -258,9 +258,9 @@ def _link_commands(skills: Path, commands: Path) -> None:
         (skill / "SKILL.md").hardlink_to(command.resolve())
 
 
-def _persona(name: str, target: str, bundle: Path | None, dirs: list[tuple[str, Path]], chain: list[str]) -> str:
+def _persona(root: Path, target: str, bundle: Path | None, dirs: list[tuple[str, Path]], chain: list[str]) -> str:
     items = _features("rules", _is_doc, bundle, dirs)
-    sources.write(sources.path(name, target, rendered_root()), sources.rows(bundle, dirs, items))
+    sources.write(sources.path(root.name, target, root.parent), sources.rows(bundle, dirs, items))
     rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
     text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER))
     ending = f"\n\n{FOOTER}\n"
@@ -274,6 +274,30 @@ def _read_json(path: Path) -> dict | None:
         return None
 
 
+def profile_dir(name: str) -> Path | None:
+    return homes.current(rendered_root(), name)
+
+
+def owner(home: Path) -> str | None:
+    return homes.owner(rendered_root(), home)
+
+
+def _claude_fresh(root: Path, stamp: dict, required: set[str]) -> bool:
+    out = root / "claude"
+    mounts = connectors.path(root.name, "claude", root.parent)
+    claude_json = _read_json(out / ".claude.json") or {}
+    return (
+        _read_json(out / STAMP) == stamp
+        and not (out / "rules").exists()
+        and sources.path(root.name, "claude", root.parent).is_file()
+        and (out / binding.FILE).is_file()
+        and mounts.is_file()
+        and all((_read_json(mounts) or {}).get(server, {}).get("mounted") for server in required)
+        and required <= claude_json.get("mcpServers", {}).keys()
+        and "hasCompletedOnboarding" in claude_json
+    )
+
+
 def render_claude(name: str, force: bool = False) -> Path | None:
     _refuse_live_render_from_another_checkout(name)
     _i = _install_module()
@@ -283,25 +307,16 @@ def render_claude(name: str, force: bool = False) -> Path | None:
     declared = _mcp_servers("claude", bundle, dirs)
     connectors.require_environment(declared)
     required = {server for server, spec in declared.items() if spec.get("enabled_tools") is not None}
-    out = rendered_root() / name / "claude"
-    if (
-        not force
-        and _read_json(out / STAMP) == current
-        and not (out / "rules").exists()
-        and sources.path(name, "claude", rendered_root()).is_file()
-        and (out / binding.FILE).is_file()
-        and connectors.path(name, "claude", rendered_root()).is_file()
-        and all(
-            (_read_json(connectors.path(name, "claude", rendered_root())) or {}).get(server, {}).get("mounted")
-            for server in required
-        )
-        and required <= (_read_json(out / ".claude.json") or {}).get("mcpServers", {}).keys()
-        and "hasCompletedOnboarding" in (_read_json(out / ".claude.json") or {})
-    ):
+    prior = profile_dir(name)
+    if not force and prior is not None and _claude_fresh(prior, current, required):
         return None
-    out.mkdir(parents=True, exist_ok=True)
+    root = homes.fresh(rendered_root(), name, current)
+    out = root / "claude"
+    out.mkdir()
+    if prior is not None and (prior / "claude" / ".claude.json").is_file():
+        shutil.copy2(prior / "claude" / ".claude.json", out / ".claude.json")
     servers, deny, mounts = connectors.claude(declared, str(out / ".claude.json"))
-    connectors.write(connectors.path(name, "claude", rendered_root()), mounts, name, "claude")
+    connectors.write(connectors.path(root.name, "claude", root.parent), mounts, name, "claude")
     settings = _claude_settings(bundle, dirs)
     if deny:
         permissions = settings["permissions"]
@@ -309,27 +324,17 @@ def render_claude(name: str, force: bool = False) -> Path | None:
     _i.save_json(out / "settings.json", settings)
     for subdir, keep in FEATURES:
         _relink(out / subdir, _features(subdir, keep, bundle, dirs))
-    if (out / "rules").is_dir():
-        shutil.rmtree(out / "rules")
-    _atomic_write(out / "CLAUDE.md", _persona(name, "claude", bundle, dirs, current["chain"]))
+    _atomic_write(out / "CLAUDE.md", _persona(root, "claude", bundle, dirs, current["chain"]))
     _claude_json(out, servers)
     shared = claude_home(_global_env())
     for item in SHARED:
-        link = out / item
-        if link.is_symlink():
-            link.unlink()
-        if not link.exists():
-            link.symlink_to(shared / item)
+        (out / item).symlink_to(shared / item)
     # Claude Code refuses plan file writes that resolve through a symlink.
-    plans = out / "plans"
-    if plans.is_symlink():
-        plans.unlink()
-    plans.mkdir(exist_ok=True)
+    (out / "plans").mkdir()
     if all(mounts[server]["mounted"] for server in required):
         _i.save_json(out / STAMP, current)
-    else:
-        (out / STAMP).unlink(missing_ok=True)
     binding.write(out, name, "claude")
+    homes.promote(rendered_root(), name, root)
     return out
 
 
@@ -381,20 +386,24 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     text = config.read_text() if config.exists() else ""
     installed = tomllib.loads(text)
     current = {"render": _stamp(bundle, dirs), "operator": hashlib.sha256(text.encode()).hexdigest()}
-    out = rendered_root() / name / "codex"
-    manifest = sources.path(name, "codex", rendered_root())
+    root = profile_dir(name)
+    out = root / "codex"
     if (
         not force
         and claude_fresh
-        and manifest.is_file()
+        and sources.path(root.name, "codex", root.parent).is_file()
         and (out / binding.FILE).is_file()
-        and connectors.path(name, "codex", rendered_root()).is_file()
+        and connectors.path(root.name, "codex", root.parent).is_file()
         and _read_json(out / STAMP) == current
         and (not master or ((out / "AGENTS.md").is_file() and not (out / "AGENTS.md").is_symlink()))
     ):
         return None
-    claude = rendered_root() / name / "claude"
-    out.mkdir(exist_ok=True)
+    if out.exists():
+        root = render_claude(name, force=True).parent
+        out = root / "codex"
+    manifest = sources.path(root.name, "codex", root.parent)
+    claude = root / "claude"
+    out.mkdir()
     if master:
         agents = out / "AGENTS.md"
         if agents.is_symlink():
@@ -406,11 +415,11 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     _link_commands(out / "skills", claude / "commands")
     for item in CODEX_STATE:
         _link(out / item, operator / item)
-    _link(manifest, sources.path(name, "claude", rendered_root()))
+    _link(manifest, sources.path(root.name, "claude", root.parent))
     doc = _codex_config(installed, operator, out, _settings("codex", bundle, dirs))
     doc["project_doc_max_bytes"] = max(65536, int(len((claude / "CLAUDE.md").read_bytes()) * 1.25))
     servers, mounts = connectors.codex(_mcp_servers("codex", bundle, dirs))
-    connectors.write(connectors.path(name, "codex", rendered_root()), mounts, name, "codex")
+    connectors.write(connectors.path(root.name, "codex", root.parent), mounts, name, "codex")
     if servers:
         doc["mcp_servers"] = servers
     root = agents_skills_home()

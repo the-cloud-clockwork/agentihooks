@@ -156,12 +156,12 @@ def _install_rule_files(dst: Path, sources: list[Path], filter_fn) -> None:
 
 def refresh_rules(rules_dir: Path, claude_md: Path, local_md: Path, dry_run: bool) -> str:
     from hooks.context.rules_refresh import collect_profile_rules
-    from scripts.profiles.render import render_claude, rendered_root
+    from scripts.profiles.render import owner, render_claude
 
     if not dry_run:
-        home = rules_dir.parent
-        if home == rendered_root() / home.parent.name / "claude":
-            render_claude(home.parent.name, force=True)
+        name = owner(rules_dir.parent)
+        if name:
+            claude_md = render_claude(name, force=True) / "CLAUDE.md"
         else:
             _i = _install_module()
             layers = next(
