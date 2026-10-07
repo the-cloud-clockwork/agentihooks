@@ -114,8 +114,10 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 
 - Each swarm keeps one master, `master@<code>-<n>`: the tick starts it, respawns
   it and recycles it through a handoff. It answers unaddressed page chat, keeps the
-  ledger, writes tasks and steers caps; it never claims a task, edits code,
-  commits or merges. Its card sits first in the swarm panel.
+  ledger, writes tasks, steers caps, troubleshoots with read only diagnostics,
+  plans with the operator and configures with him through the agentihooks
+  commands and tools; it never edits code or config files in a repository,
+  commits, merges or claims a task. Its card sits first in the swarm panel.
 - The minute tick tells the master what agents do, through inbox items on the
   wake ladder: each agent follow-up, question, blocked task and done task; a
   follow-up still undecided after 15 minutes (the operator's Priorities at 30);

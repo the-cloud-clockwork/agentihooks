@@ -41,8 +41,14 @@ def test_dev_push_publishes_merged_durations_with_read_permissions():
     assert upload["with"]["include-hidden-files"] is True
 
 
+def test_a_newer_dev_push_never_cancels_a_running_dev_push_run():
+    concurrency = _workflow("test.yml")["concurrency"]
+    assert concurrency["group"] == "tests-${{ github.ref }}"
+    assert concurrency["cancel-in-progress"] == "${{ github.event_name != 'push' }}"
+
+
 @pytest.mark.parametrize("mode", ["download", "no_run", "missing", "invalid"])
-def test_pr_shards_use_last_green_dev_durations_or_the_committed_fallback(tmp_path, mode):
+def test_pr_shards_use_the_newest_dev_durations_artifact_or_the_committed_fallback(tmp_path, mode):
     steps = _workflow("test.yml")["jobs"]["unit"]["steps"]
     step = next(s for s in steps if s.get("name") == "Download latest dev durations")
     assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
@@ -92,7 +98,8 @@ else:
     )
     assert result.returncode == 0, result.stderr
     calls = [json.loads(line) for line in (tmp_path / "calls").read_text().splitlines()]
-    assert "workflows/test.yml/runs?branch=dev&event=push&status=success&per_page=1" in calls[0][1]
+    assert "actions/artifacts?name=durations-merged" in calls[0][1]
+    assert 'head_branch == "dev"' in calls[0][-1]
     if mode == "download":
         assert json.loads((tmp_path / ".test_durations").read_text()) == {
             "tests/a.py::test_a": 90.0,
