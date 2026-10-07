@@ -124,7 +124,7 @@ def run_selected(selection: Path) -> None:
     from mutmut import __main__ as runner
 
     if not os.environ.get("CI"):
-        print("Local mutation worker cap: 2 (mutation and stats)", flush=True)
+        print("Local mutation worker cap: 2 (mutation and stats)")
     changes = json.loads(selection.read_text())
     tests_by_prefix = {get_mutant_name(Path(path), ""): set(change["tests"]) for path, change in changes.items()}
     related = set()

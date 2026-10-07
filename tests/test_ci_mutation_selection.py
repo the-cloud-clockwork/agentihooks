@@ -601,4 +601,4 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
     run_selected(selection)
     assert counts == [expected]
     output = capsys.readouterr().out
-    assert ("Local mutation worker cap: 2" in output) is (not bool(ci))
+    assert output == ("" if ci else "Local mutation worker cap: 2 (mutation and stats)\n")
