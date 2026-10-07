@@ -129,8 +129,8 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     }
 
 
-def stamp(name: str, overlays: Sequence[str] = ()) -> dict:
-    return _stamp(_bundle(), _chain(name, overlays))
+def stamp(name: str) -> dict:
+    return _stamp(_bundle(), _chain(name))
 
 
 def _roots(bundle: Path | None, dirs: list[tuple[str, Path]]) -> list[Path]:

@@ -1962,7 +1962,7 @@ def test_overlays_follow_the_role_chain_and_the_always_on_overlays(world, overla
     chain = [name for name, _ in render._chain("rb-eng", ["ov-b", "ov-a"])]
 
     assert chain == ["package:engineer", "rb-eng", "brain", "ov-a", "ov-b"]
-    assert render.stamp("rb-eng", ["ov-b", "ov-a"])["overlays"] == ["brain", "ov-a", "ov-b"]
+    assert render._overlays(render._chain("rb-eng", ["ov-b", "ov-a"])) == ["brain", "ov-a", "ov-b"]
     assert render.stamp("rb-eng")["overlays"] == ["brain"]
 
 
