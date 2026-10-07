@@ -810,5 +810,29 @@
   "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_83:4dce6088b0e1f8757aad3b93828b0adcd3faaa824e76f6150771a83eaa482223": {
     "reader": "Standards",
     "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_2:84251915ce8da7a4654f079de5031bf2a1d55444faee52450b56a12dd31fb2f0": {
+    "reader": "Standards",
+    "reason": "The default multiprocessing start method under Python 3.12 on the Linux runner is fork, so the context is identical."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_33:21e3550f497e9e8af4c365889827349a35e659b149e3404fb4e573789c4d78c9": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_35:626a905a8e9fb251b9bffc4935c091324bfc7b18c9f384fb4421577b7b7f5920": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_36:63fbd9250d0a15cf134170dea6833d8ce8557c996414a90d7b81e2ec139308c6": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_48:3f02d186a31ccc34fe4080f456e18348f572e6a0aea628d9465dc625a7b43a70": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_50:04100b8a8ec7facd3667fbc51c115f8b2625690bf052de4a4faab38d9eafa8a5": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
   }
 }
