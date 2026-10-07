@@ -139,7 +139,7 @@ def test_init_agent_clamps_a_swarm_lane_launch_into_the_range(
     monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, *a: ("linux", ["/usr/bin/term", str(launcher)]))
     rc = init_agent.main(
         ["--dir", str(tmp_path), "--agent", agent, "--host", "native", "--dry-run", "--", *args],
-        {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", **environ},
+        {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", "AGENTIHOOKS_SWARM_SPAWN": "1", **environ},
     )
     assert rc == 0
     fields = dict(line.split("=", 1) for line in capsys.readouterr().out.splitlines() if "=" in line)

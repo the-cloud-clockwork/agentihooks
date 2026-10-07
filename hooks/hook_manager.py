@@ -2568,6 +2568,10 @@ def main() -> None:
         event_name = payload.get("hook_event_name", "Unknown")
         _blocked_event = event_name
 
+        from hooks.context.swarm_pin import unpin
+
+        unpin()
+
         # Route to handler
         handler = EVENT_HANDLERS.get(event_name)
 
