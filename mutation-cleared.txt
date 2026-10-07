@@ -774,5 +774,69 @@
   "scripts/inbox/addresses.py:scripts.inbox.addresses.x_settle_unresolved__mutmut_16:260f69de5c9a7e375f6eb322edbe6d4bff23b9fe6bbdfa168d273b6d6fbe82cf": {
     "reader": "Standards",
     "reason": "Omitting dict.get's default produces None for an absent name instead of an empty string. Both are removed by if n; present values and session identifiers are identical. Missing, empty, None, and present-name cases were compared with identical live sets."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_59:05210dc1151d48d72767e750fca5d5ea4934c893d62e604012d7f92ccbdb8fe6": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_61:3c9e34017a302701402ea9ef080bc8daa13271b523eba8df48948ca572044028": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_62:44dae3fe77dbc5217311bdd59de0f0f98aed99b698b59ac6ae5a2e6578ed04ca": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_74:fb71c1343f0fc7cbe6dba69d729a2d9c91d87e47071f76900058eb30432106f5": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_76:d0db50135453e8ce52e9d625d248dc22692275822e4cec40733dc09c450e6df0": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_78:f16360a19cea468dcde40c87e391c6943baf26f3144cf17e02252dcbca6e2aaa": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_80:aba9f12bd0411ab1d79645829ef97374ce4a1faa659598b0e4a815b06d350ae1": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_82:6fd9c6f85614e9c48e1272eca176806a4e0b1b440394d40f3fafcacd850f9373": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_83:4dce6088b0e1f8757aad3b93828b0adcd3faaa824e76f6150771a83eaa482223": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_2:84251915ce8da7a4654f079de5031bf2a1d55444faee52450b56a12dd31fb2f0": {
+    "reader": "Standards",
+    "reason": "The default multiprocessing start method under Python 3.12 on the Linux runner is fork, so the context is identical."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_33:21e3550f497e9e8af4c365889827349a35e659b149e3404fb4e573789c4d78c9": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_35:626a905a8e9fb251b9bffc4935c091324bfc7b18c9f384fb4421577b7b7f5920": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_36:63fbd9250d0a15cf134170dea6833d8ce8557c996414a90d7b81e2ec139308c6": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_48:3f02d186a31ccc34fe4080f456e18348f572e6a0aea628d9465dc625a7b43a70": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_50:04100b8a8ec7facd3667fbc51c115f8b2625690bf052de4a4faab38d9eafa8a5": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_53:ccefb4d0fc70a0c5f3fe47899e3173aaf642fe4ea1c3770cab38431493b11c3d": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
   }
 }

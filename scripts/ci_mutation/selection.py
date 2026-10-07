@@ -1,10 +1,18 @@
 import ast
 import json
+import multiprocessing
 import os
+import re
 import sys
+import tempfile
 from pathlib import Path
+from time import process_time
+
+from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_mutation.report import mutation_lines
+
+GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 
 
 def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str, list[str]]:
@@ -29,22 +37,109 @@ def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str
     return code, list(names)
 
 
+def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, set[str]]) -> set[str]:
+    kept = set()
+    for function, tests in stats.items():
+        allowed = tests_by_prefix.get(function.rpartition(".")[0] + ".", set())
+        stats[function] = {test for test in tests if test.partition("::")[0] in allowed}
+        kept |= stats[function]
+    return kept
+
+
+def stats_shards(root: Path, files: list[str], count: int) -> list[list[str]]:
+    durations = root / ".test_durations"
+    durations = json.loads(durations.read_text()) if durations.exists() else {}
+    seconds = dict.fromkeys(files, 0.01)
+    for nodeid, duration in durations.items():
+        if (path := nodeid.partition("::")[0]) in seconds:
+            seconds[path] += duration
+    # Files that share an xdist group never run concurrently in CI, so they share a shard here.
+    units = []
+    for path in files:
+        keys = {f"group {group}" for group in GROUP.findall((root / path).read_text())} or {path}
+        members = [path]
+        for unit in [unit for unit in units if unit[0] & keys]:
+            units.remove(unit)
+            keys |= unit[0]
+            members = unit[1] + members
+        units.append((keys, members))
+    shards = [[] for _ in range(max(1, min(count, len(units))))]
+    for _, members in sorted(units, key=lambda unit: (-sum(seconds[path] for path in unit[1]), unit[1])):
+        min(shards, key=lambda shard: sum(seconds[path] for path in shard)).extend(members)
+    # pytest drops a package conftest for files given after a file from another folder.
+    return [sorted(shard) for shard in shards]
+
+
+def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, basetemp: str) -> None:
+    os.environ["MUTANT_UNDER_TEST"] = "stats"
+    os.environ["PY_IGNORE_IMPORTMISMATCH"] = "1"
+    test_runner._pytest_add_cli_args = [*test_runner._pytest_add_cli_args, f"--basetemp={basetemp}"]
+    start = process_time()
+    status = test_runner.run_stats(tests=tests)
+    tests_by_function = {name: sorted(names) for name, names in runner.mutmut.tests_by_mangled_function_name.items()}
+    output.write_text(
+        json.dumps(
+            {
+                "status": status,
+                "cpu": process_time() - start,
+                "tests": tests_by_function,
+                "durations": runner.mutmut.duration_by_test,
+            }
+        )
+    )
+
+
+def collect_parallel_stats(runner, test_runner, shards: list[list[str]], work: Path) -> None:
+    context = multiprocessing.get_context("fork")
+    processes = []
+    for index, tests in enumerate(shards):
+        output = work / f"stats-{index}.json"
+        basetemp = tempfile.mkdtemp(prefix="mutation-stats-")
+        process = context.Process(target=collect_shard_stats, args=(runner, test_runner, tests, output, basetemp))
+        process.start()
+        processes.append((process, output))
+    results = []
+    for process, output in processes:
+        process.join()
+        results.append(json.loads(output.read_text()) if process.exitcode == 0 else {"status": process.exitcode})
+    if failed := [result["status"] for result in results if result["status"] != 0]:
+        print(f"failed to collect stats. runner returned {failed}", flush=True)
+        raise SystemExit(1)
+    for result in results:
+        for function, tests in result["tests"].items():
+            runner.mutmut.tests_by_mangled_function_name[function].update(tests)
+        runner.mutmut.duration_by_test.update(result["durations"])
+    if not any(runner.mutmut.tests_by_mangled_function_name.values()):
+        print("failed to collect stats: no selected test reaches a mutated function", flush=True)
+        raise SystemExit(1)
+    runner.mutmut.stats_time = sum(result["cpu"] for result in results)
+    runner.save_stats()
+
+
 def run_selected(selection: Path) -> None:
     from mutmut import __main__ as runner
 
     changes = json.loads(selection.read_text())
+    tests_by_prefix = {get_mutant_name(Path(path), ""): set(change["tests"]) for path, change in changes.items()}
+    related = set()
 
     def write_selected(*, out, source, filename):
-        code, names = selected_mutants(str(filename), source, set(changes[str(filename)]))
+        code, names = selected_mutants(str(filename), source, set(changes[str(filename)]["lines"]))
         bootstrap = (
             "import os as _mutmut_os\n"
             "from pathlib import Path as _mutmut_Path\n"
             f"_mutmut_root = _mutmut_Path(__file__).resolve().parents[{len(Path(filename).parts) - 1}]\n"
             "_mutmut_cwd = _mutmut_os.getcwd()\n"
             "try:\n"
-            "    _mutmut_os.chdir(_mutmut_root)\n"
             "    from mutmut.configuration import Config as _mutmut_Config\n"
-            "    _mutmut_config = _mutmut_Config.get()\n"
+            "    try:\n"
+            "        _mutmut_os.chdir(_mutmut_root)\n"
+            "        _mutmut_config = _mutmut_Config.get()\n"
+            # A test that copies the mutated tree elsewhere imports it from a folder without a mutmut config.
+            "    except FileNotFoundError:\n"
+            f"        _mutmut_root = _mutmut_Path({str((Path.cwd() / 'mutants').resolve())!r})\n"
+            "        _mutmut_os.chdir(_mutmut_root)\n"
+            "        _mutmut_config = _mutmut_Config.get()\n"
             "    if _mutmut_root.name == 'mutants':\n"
             "        _mutmut_config.source_paths = [(_mutmut_root / path).resolve() for path in _mutmut_config.source_paths]\n"
             "finally:\n"
@@ -67,8 +162,6 @@ def run_selected(selection: Path) -> None:
         out.write("".join(source_lines[:index]) + bootstrap + "".join(source_lines[index:]))
         return names
 
-    collect_stats = runner.collect_or_load_stats
-
     def collect_selected_stats(test_runner):
         for path in changes:
             data = runner.SourceFileMutationData(path=Path(path))
@@ -81,15 +174,29 @@ def run_selected(selection: Path) -> None:
         config = runner.Config.get()
         relative = config.source_paths
         config.source_paths = [(Path("mutants") / path).resolve() for path in relative]
+        shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, len(os.sched_getaffinity(0)))
         try:
-            return collect_stats(test_runner)
+            collect_parallel_stats(runner, test_runner, shards, Path.cwd())
         finally:
             config.source_paths = relative
+        related.update(keep_selected_tests(runner.mutmut.tests_by_mangled_function_name, tests_by_prefix))
+
+    run_tests = runner.PytestRunner.run_tests
+
+    def run_related_tests(self, *, mutant_name, tests):
+        if mutant_name is None and not tests and related:
+            # The stats shards already passed every selected test, which is all mutmut's clean run repeats.
+            if not os.environ.get("MUTANT_UNDER_TEST"):
+                return 0
+            tests = sorted(related, key=lambda test: runner.mutmut.duration_by_test[test])
+        return run_tests(self, mutant_name=mutant_name, tests=tests)
 
     runner.collect_or_load_stats = collect_selected_stats
+    # The forced fail control passes no tests and would otherwise rerun every selected module.
+    runner.PytestRunner.run_tests = run_related_tests
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
     runner.write_all_mutants_to_file = write_selected
-    for name in ("scripts.ci_mutation", "scripts"):
+    for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
         sys.modules.pop(name)
     runner.cli(["run", "--max-children", str(os.cpu_count())])
 
