@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from subprocess import run as _real_run
 from types import SimpleNamespace
 
 import pytest
@@ -64,6 +65,21 @@ def test_failure_without_route_refusal_keeps_cli_status(monkeypatch, report):
     monkeypatch.setattr(fallbacks.subprocess, "run", _launcher([], report=report, code=1, stdout=""))
     with pytest.raises(BackendFailure, match="^CLI status 1$"):
         fallbacks.ClaudeCliBackend().decide(REQUEST)
+
+
+def test_shell_startup_reading_stdin_leaves_the_request(monkeypatch, tmp_path):
+    (tmp_path / ".bash_profile").write_text("cat > /dev/null\n")
+    launcher = tmp_path / "agentihooks"
+    launcher.write_text(
+        '#!/bin/sh\ncat > "$(dirname "$0")/stdin.json"\necho "[agenti] account=stub"\n'
+        f"echo '{json.dumps({'structured_output': RAW})}'\n"
+    )
+    launcher.chmod(0o755)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    monkeypatch.setattr(fallbacks.subprocess, "run", _real_run)
+    assert fallbacks.ClaudeCliBackend().decide(REQUEST).source == "haiku"
+    assert json.loads((tmp_path / "stdin.json").read_text()) == REQUEST.wire()
 
 
 def test_codex_keeps_native_auth_environment(monkeypatch):
