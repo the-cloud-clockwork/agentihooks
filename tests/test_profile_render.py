@@ -645,6 +645,15 @@ def test_codex_master_updates_an_old_linked_persona(world):
     assert render.render_codex("master") == out
     assert not agents.is_symlink()
 
+def test_an_explicit_packaged_codex_master_uses_inbox_waits(world):
+    from scripts.profiles import render
+
+    out = render.render_codex("package:master")
+    persona = (out / "AGENTS.md").read_text()
+    assert "Monitor" not in persona
+    assert "agentihooks swarm <slug> wait --inbox" in persona
+    assert not (out / "AGENTS.md").is_symlink()
+
 
 def test_codex_master_keeps_mixed_instruction_responsibilities():
     from scripts.profiles import codex_master

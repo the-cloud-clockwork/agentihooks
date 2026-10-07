@@ -318,7 +318,7 @@ def render_codex(name: str, force: bool = False) -> Path | None:
 
     _i = _install_module()
     bundle, dirs = _i._get_bundle_path(), _chain(name)
-    master = any(n == "master" for n, _ in dirs)
+    master = any(n.removeprefix("package:") == "master" for n, _ in dirs)
     claude_fresh = render_claude(name, force=force) is None
     operator = _operator_codex_home()
     config = operator / "config.toml"
