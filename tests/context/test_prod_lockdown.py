@@ -88,6 +88,24 @@ def test_executed_substitution_is_still_an_operation(command):
 @pytest.mark.parametrize(
     "command",
     [
+        'gh issue comment 791 --body "${x:-$(gh pr merge 123 --base main)}"',
+        'gh issue comment 791 --body "${x:-`gh pr merge 123 --base main`}"',
+    ],
+)
+def test_parameter_expansion_keeps_executed_commands(command):
+    from hooks.hook_manager import BlockAction
+
+    with pytest.raises(BlockAction):
+        _check(command)
+
+
+def test_arithmetic_does_not_turn_a_literal_message_into_an_operation():
+    _check('echo $((1+2)); gh issue comment 791 --body "gh pr merge main"')
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "gh issue comment 791 --body '$(gh pr merge 123 --base main)'",
         "gh issue comment 791 --body '`gh pr merge 123 --base main`'",
         'gh --repo owner/repo pr merge 123 --base dev --subject "main"',
