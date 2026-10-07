@@ -273,6 +273,22 @@ def test_call_keeps_the_service_choice_when_it_retries_after_starting_the_server
     assert run.call_count == 2
 
 
+def test_call_prints_the_refusal_when_the_retry_after_starting_the_server_is_refused():
+    import io
+    import urllib.error
+
+    body = b'{"error": {"code": "schema_invalid", "message": "chat refused: clock time \'15:45 UTC\'"}}'
+    replies = [OSError("not answering"), urllib.error.HTTPError(ledger.BASE, 400, "Bad Request", {}, io.BytesIO(body))]
+
+    def request(slug, ops, service):
+        raise replies.pop(0)
+
+    with patch.object(ledger, "request", request), patch.object(ledger.subprocess, "run"):
+        with patch.object(ledger.repository, "exists", lambda slug: True), pytest.raises(SystemExit) as exit_:
+            ledger.call(SLUG, [])
+    assert str(exit_.value) == f"server refused: 400 {body.decode()}"
+
+
 def test_a_page_without_a_token_sends_an_empty_credential(live):
     core.paths("tokenless")[0].write_text("<html></html>")
     with patch.dict(os.environ, {"AGENTIHOOKS_SWARM": ""}):

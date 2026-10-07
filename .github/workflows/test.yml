@@ -117,6 +117,8 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     permissions:
       contents: read
       actions: read
@@ -125,6 +127,8 @@ jobs:
 
       - uses: actions/checkout@v4
         if: steps.lookup.outputs.skip != 'true'
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         if: steps.lookup.outputs.skip != 'true'
@@ -146,20 +150,24 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         run: python -m ruff format --check hooks/ scripts/ tests/
 
-      - name: Use the Ubuntu archive for browser dependencies
+      - name: Select artifact browser checks
+        id: artifacts
         if: steps.lookup.outputs.skip != 'true'
-        timeout-minutes: 1
-        run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before || inputs.base }}
+        run: bash .github/actions/browser-cache/select-artifacts.sh
+
+      - name: Install Playwright for artifact checks
+        if: steps.lookup.outputs.skip != 'true' && steps.artifacts.outputs.browser == 'true'
+        run: python -m pip install "playwright>=1.44.0"
 
       - name: Install the artifact viewer browser
-        if: steps.lookup.outputs.skip != 'true'
+        if: steps.lookup.outputs.skip != 'true' && steps.artifacts.outputs.browser == 'true'
         timeout-minutes: 2
-        run: |
-          python -m pip install "playwright>=1.44.0"
-          python -m playwright install --with-deps chromium
+        uses: ./.github/actions/browser-cache
 
       - name: Artifact sanity checks
-        if: steps.lookup.outputs.skip != 'true'
+        if: steps.lookup.outputs.skip != 'true' && steps.artifacts.outputs.browser == 'true'
         run: python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
 
   gate-required:
@@ -274,16 +282,11 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
         run: python -m scripts.ci_mutation.browser --base "$BASE"
 
-      - name: Use the Ubuntu archive for browser dependencies
-        if: steps.selection.outputs.browser == 'true'
-        timeout-minutes: 1
-        run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
-
       - name: Install the browser that page tests drive
         id: browser
         if: steps.selection.outputs.browser == 'true'
         timeout-minutes: 2
-        run: python -m playwright install --with-deps chromium
+        uses: ./.github/actions/browser-cache
 
       - name: Report browser setup failure
         if: failure() && steps.browser.outcome == 'failure'

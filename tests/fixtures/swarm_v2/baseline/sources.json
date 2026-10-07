@@ -1,0 +1,53 @@
+{
+  "branch": "dev",
+  "repositories": [
+    {
+      "name": "agentihooks",
+      "url": "agentihooks.git",
+      "probes": [],
+      "unknown_live": [
+        "swarm controller version on Anton"
+      ],
+      "checkout": "agentihooks.git",
+      "interfaces": [
+        "file.txt",
+        "gone.py"
+      ]
+    },
+    {
+      "name": "agentibrain-kernel",
+      "url": "agentibrain-kernel.git",
+      "probes": [
+        {
+          "name": "brain-api version",
+          "kind": "http",
+          "url": "http://unavailable.invalid/health",
+          "field": "version"
+        }
+      ],
+      "unknown_live": [],
+      "checkout": "stale-checkout.git",
+      "interfaces": [
+        "file.txt"
+      ]
+    },
+    {
+      "name": "antoncore",
+      "url": "antoncore.git",
+      "probes": [
+        {
+          "name": "read-only command stand-in",
+          "kind": "command",
+          "argv": [
+            "git",
+            "--version"
+          ],
+          "revision": true
+        }
+      ],
+      "unknown_live": [
+        "live autoscaling group desired capacity"
+      ]
+    }
+  ]
+}

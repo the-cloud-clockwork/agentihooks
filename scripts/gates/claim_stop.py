@@ -11,6 +11,7 @@ WORKERS = frozenset({"eng", "ci"})
 ACTIVE = frozenset({"claimed", "pr"})
 STREAK = 3
 CHECKS_WAIT_MS = 12 * 60 * 60_000
+KEPT = frozenset({"reply", "task"})
 PLAIN = {
     "merged": "its pull request had merged and the task stayed open",
     "red": "its checks had failed and nothing was pushed",
@@ -97,7 +98,7 @@ class ClaimStop:
         live = held if held and held["until"] > now else None
         pull = self.github()(url) if url else None
         owed, checks = ruling(task, pull, live)
-        if checks:
+        if checks and (live or {}).get("on", {}).get("kind") not in KEPT:
             on = {"kind": "checks", "target": checks}
             idle.declare_wait(store.redis, who.swarm, who.name, now + CHECKS_WAIT_MS, f"checks on {checks}", now, on=on)
         streak = Streak(store, who.swarm, who.name)
