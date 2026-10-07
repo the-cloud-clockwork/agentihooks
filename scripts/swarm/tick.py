@@ -483,6 +483,10 @@ def _claimable(slug, store, rows, doc, lane):
     return clear + overlapping
 
 
+def _launch_order(slug, store, tasks):
+    return sorted(tasks, key=lambda task: bool(store.launch_failure(slug, task["id"])))
+
+
 def _unblocked(task, rows):
     return not _parked(task, rows) and all(_stackable(rows.get(dep, {})) for dep in task.get("depends_on") or [])
 
@@ -537,7 +541,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     taken = {a.seat for a in agents}
     for lane, cap in (("eng", config.max_eng), ("ci", config.max_ci), ("plan", config.max_plan)):
         busy = sum(1 for a in agents if a.lane == lane and not _ended(a, rows))
-        for task in _claimable(slug, store, rows, doc, lane)[: max(cap - busy, 0)]:
+        for task in _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))[: max(cap - busy, 0)]:
             if not runtime.has_capacity(config):
                 return actions + ["every agent is at its session cap, waiting"]
             if blocked := _lives_spent(slug, store, ledger, rows, task):
@@ -588,7 +592,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
                 if isinstance(exc, ProfileUnresolved):
                     actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
-                return actions
+                continue
             store.count_claim(slug, task["id"])
             store.record_launch(slug, record, "started")
             store.put_agent(slug, placed_record(record, placed))
