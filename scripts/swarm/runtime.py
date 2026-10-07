@@ -192,6 +192,7 @@ class HerdrRuntime:
                     "AGENTIHOOKS_SWARM_LANE": lane,
                     "AGENTIHOOKS_SWARM_TASK": task_id,
                     "AGENTIHOOKS_SWARM_AUTONOMY": config.autonomy,
+                    "AGENTIHOOKS_SWARM_SPAWN": "1",
                     effort_range.VARIABLE: ":".join(effort_range.of(config)),
                     **({"AGENTIHOOKS_COMPACT_LIMIT": str(config.compact_limit)} if config.compact_limit else {}),
                 },
