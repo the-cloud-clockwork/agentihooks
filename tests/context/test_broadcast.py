@@ -327,6 +327,17 @@ class TestSessionRegistry:
             assert (session_name(4242), session_name(5151)) == ("sw-master-1", "")
             assert name_session(7777, "nobody") == 0
 
+    def test_a_given_name_registers_unless_the_session_already_has_one(self, broadcast_dir):
+        from hooks.context.broadcast import name_session, register_session, session_name
+
+        sessions_file = broadcast_dir / "active-sessions.json"
+        with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
+            register_session("sess-a", pid=4242, cwd="/tmp", model="opus", name="solo-1")
+            assert session_name(4242) == "solo-1"
+            name_session(4242, "sw-master-1")
+            register_session("sess-a", pid=4242, cwd="/tmp", model="opus", name="solo-1")
+            assert session_name(4242) == "sw-master-1"
+
     def test_handed_off_session_is_marked_and_reported(self, broadcast_dir):
         from hooks.context.broadcast import mark_handed_off, register_session, session_status
 
