@@ -192,7 +192,7 @@ def env(monkeypatch, store):
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     monkeypatch.setattr(cli, "HerdrRuntime", lambda: rt)
-    monkeypatch.setattr(cli.timer, "ensure", lambda binary, *rest: True)
+    monkeypatch.setattr(cli.timer, "ensure", lambda binary: True)
     monkeypatch.setattr(cli.snapshot, "worktrees", lambda repo, names, run=None: {})
     return store, ledger, rt
 

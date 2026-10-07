@@ -33,7 +33,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     monkeypatch.setattr(cli, "HerdrRuntime", lambda: rt)
-    monkeypatch.setattr(cli.timer, "ensure", lambda binary, *rest: True)
+    monkeypatch.setattr(cli.timer, "ensure", lambda binary: True)
     ledger.chat = lambda slug: [{"id": "old", "by": "operator", "at": 50, "text": "old talk"}]
     monkeypatch.setattr(cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
     ledger.pulls = {}
@@ -364,6 +364,58 @@ def test_timer_ensure_also_runs_the_inbox_waker_service(tmp_path):
     )
     enable = ["systemctl", "--user", "enable", "--now", "agentihooks-inbox-waker.service"]
     assert (enable, {"capture_output": True, "text": True, "timeout": 30}) in calls
+
+
+@pytest.fixture
+def shared_units(tmp_path, monkeypatch):
+    from scripts.targets._common import _install_module
+
+    install = _install_module()
+    installed = tmp_path / "installed-agentihooks"
+    monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", installed)
+    monkeypatch.setattr(install, "install_root", lambda: installed)
+    shared = tmp_path / "systemd" / "user"
+    monkeypatch.setattr(timer, "UNIT_DIR", shared)
+    return install, installed, shared
+
+
+def test_timer_from_a_scratch_copy_leaves_the_shared_units_alone(shared_units, tmp_path, monkeypatch, capsys):
+    install, installed, shared = shared_units
+    calls = []
+    run = lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0)  # noqa: E731
+    assert timer.ensure("/installed/bin/agentihooks", run=run)
+    before = {path.name: path.read_text() for path in shared.iterdir()}
+    calls.clear()
+
+    scratch = tmp_path / "scratch" / "agentihooks"
+    monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", scratch)
+    assert timer.ensure("/scratch/bin/agentihooks", run=run) is False
+    assert timer.ensure("/scratch/bin/agentihooks", shared, run=run) is False
+
+    assert {path.name: path.read_text() for path in shared.iterdir()} == before
+    assert 'ExecStart="/installed/bin/agentihooks" swarm tick' in before["agentihooks-swarm.service"]
+    assert calls == []
+    refusal = (
+        f"this run comes from {scratch}, not the installed agentihooks at {installed}, "
+        f"so it leaves the shared swarm timer units in {shared} alone\n"
+    )
+    assert capsys.readouterr().err == refusal * 2
+
+    proof_dir = tmp_path / "proof-units"
+    assert timer.ensure("/scratch/bin/agentihooks", proof_dir, run=run)
+    assert 'ExecStart="/scratch/bin/agentihooks" swarm tick' in (proof_dir / "agentihooks-swarm.service").read_text()
+
+
+def test_timer_from_the_installed_agentihooks_writes_the_shared_units(shared_units):
+    _, _, shared = shared_units
+    calls = []
+    assert timer.ensure(
+        "/installed/bin/agentihooks", run=lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0)
+    )
+    assert (
+        'ExecStart="/installed/bin/agentihooks" swarm waker' in (shared / "agentihooks-inbox-waker.service").read_text()
+    )
+    assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
 
 
 def test_main_runs_the_inbox_waker_and_renames_without_a_slug(monkeypatch):

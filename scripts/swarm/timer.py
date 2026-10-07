@@ -2,10 +2,9 @@
 
 import shutil
 import subprocess
+import sys
 import sysconfig
 from pathlib import Path
-
-from scripts.targets._common import _install_module
 
 UNIT = "agentihooks-swarm"
 WAKER = "agentihooks-inbox-waker"
@@ -38,7 +37,25 @@ def units(binary):
     return {f"{UNIT}.service": service, f"{UNIT}.timer": timer, f"{WAKER}.service": waker}
 
 
-def ensure(binary, unit_dir=UNIT_DIR, run=subprocess.run):
+def _foreign_run(unit_dir):
+    from scripts.targets._common import _install_module
+
+    _i = _install_module()
+    running, installed = _i.AGENTIHOOKS_ROOT.resolve(), _i.install_root().resolve()
+    if running == installed or unit_dir.resolve() != UNIT_DIR.resolve():
+        return ""
+    return (
+        f"this run comes from {running}, not the installed agentihooks at {installed}, "
+        f"so it leaves the shared swarm timer units in {unit_dir} alone"
+    )
+
+
+def ensure(binary, unit_dir=None, run=subprocess.run):
+    unit_dir = unit_dir or UNIT_DIR
+    refusal = _foreign_run(unit_dir)
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return False
     unit_dir.mkdir(parents=True, exist_ok=True)
     changed = False
     for name, text in units(binary).items():
@@ -54,6 +71,8 @@ def ensure(binary, unit_dir=UNIT_DIR, run=subprocess.run):
 
 
 def _roots():
+    from scripts.targets._common import _install_module
+
     _i = _install_module()
     return _i.AGENTIHOOKS_ROOT, _i.install_root()
 
@@ -71,11 +90,3 @@ def entry_point(scripts_dir=None, which=shutil.which):
     if found and Path(found).resolve() == script.resolve():
         return found
     return str(script)
-
-
-def ensure_installed(unit_dir=UNIT_DIR, run=subprocess.run):
-    if why := installed_refusal():
-        return f"{why}, so the shared swarm timer was left as it is"
-    if not ensure(entry_point(), unit_dir, run):
-        return "the systemd timer could not be enabled; run agentihooks swarm tick yourself"
-    return ""

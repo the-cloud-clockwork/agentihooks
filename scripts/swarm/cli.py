@@ -233,8 +233,8 @@ def _state(store, args, state):
     if state == "running":
         store.redis.delete(store.key(args.slug, "master-retired-tasks"))
     store.update(args.slug, state=state)
-    if state == "running" and (why := timer.ensure_installed()):
-        print(f"warning: {why}", file=sys.stderr)
+    if state == "running" and not timer.ensure(timer.entry_point()):
+        print("warning: the systemd timer could not be enabled; run agentihooks swarm tick yourself", file=sys.stderr)
     for action in run_tick(store, args.slug):
         print(action)
     print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state}))
@@ -357,8 +357,7 @@ def cmd_take_master(store, args):
         ledger.reopen(args.slug, record.name)
     if store.config(args.slug).state in ("stopped", "stopping"):
         store.update(args.slug, state="running")
-        if why := timer.ensure_installed():
-            print(f"warning: {why}", file=sys.stderr)
+        timer.ensure(timer.entry_point())
     config = store.config(args.slug)
     task = {
         "id": MASTER,
