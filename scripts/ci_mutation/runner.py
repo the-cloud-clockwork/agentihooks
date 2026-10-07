@@ -53,7 +53,6 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         "also_copy": ["profiles/", "docs/", ".github/"],
         "pytest_add_cli_args_test_selection": tests,
         "pytest_add_cli_args": pytest_args,
-        "debug": True,
     }
     (work / "pyproject.toml").write_text(tomlkit.dumps(project))
 

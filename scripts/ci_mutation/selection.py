@@ -197,6 +197,12 @@ def run_selected(selection: Path) -> None:
             if not os.environ.get("MUTANT_UNDER_TEST"):
                 return 0
             tests = sorted(related, key=lambda test: runner.mutmut.duration_by_test[test])
+            try:
+                return run_tests(self, mutant_name=mutant_name, tests=tests)
+            except runner.BadTestExecutionCommandsException:
+                # A selected function a test module runs at import fails its collection, and pytest then reports the
+                # node id it cannot find as a usage error; the stats shards already proved these node ids collect.
+                return 1
         return run_tests(self, mutant_name=mutant_name, tests=tests)
 
     runner.collect_or_load_stats = collect_selected_stats
