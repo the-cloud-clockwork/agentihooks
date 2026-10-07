@@ -367,6 +367,32 @@ def test_restack_conflict_lists_files_and_keeps_parked_state(stacked_repo, capsy
     assert saved == {"context": ["sw", "t1", "finisher", base], "onto": _git(repo, "rev-parse", "origin/dev")}
 
 
+def test_restack_reports_only_conflicted_files_when_other_work_changes(stacked_repo, monkeypatch, capsys):
+    _, ledger, repo, _ = stacked_repo
+    _git(repo, "switch", "dev")
+    (repo / "shared.txt").write_text("integration work\n")
+    _git(repo, "commit", "-am", "Integration work")
+    _git(repo, "push", "origin", "dev")
+    _git(repo, "switch", "finisher")
+    real_shell = stack.shell
+
+    def concurrent_change(argv):
+        done = real_shell(argv)
+        if argv[1] == "rebase" and done.returncode != 0:
+            (repo / "blocker.txt").write_text("unrelated work\n")
+        return done
+
+    monkeypatch.setattr(stack, "shell", concurrent_change)
+    capsys.readouterr()
+    assert restack() == 1
+    err = capsys.readouterr().err
+    assert err.partition("\nConflicted files:\n")[2].partition("\nResolve")[0] == "shared.txt"
+    assert "blocker.txt" in _git(repo, "diff", "--name-only", "--diff-filter=u")
+    assert (repo / "blocker.txt").read_text() == "unrelated work\n"
+    assert ledger.rows["t1"]["parked_on"] == ["a"]
+    assert ledger.updates == []
+
+
 @pytest.mark.parametrize(
     ("fields", "message"),
     [
