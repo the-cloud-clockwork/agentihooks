@@ -53,14 +53,30 @@
     },
     "envelope": {
       "type": "object",
-      "required": ["schema_version", "operation_id"],
+      "required": [
+        "schema_version",
+        "operation_id"
+      ],
       "properties": {
-        "schema_version": {"$ref": "#/$defs/schema_version"},
-        "operation_id": {"$ref": "#/$defs/identifier"},
-        "trace_id": {"$ref": "#/$defs/trace_id"},
-        "extensions": {"$ref": "#/$defs/extensions"}
+        "schema_version": {
+          "$ref": "#/$defs/schema_version"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "trace_id": {
+          "$ref": "#/$defs/trace_id"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
       },
-      "propertyNames": {"not": {"$ref": "#/$defs/authority_names"}}
+      "propertyNames": {
+        "not": {
+          "$ref": "#/$defs/authority_names"
+        }
+      },
+      "additionalProperties": true
     }
   }
 }

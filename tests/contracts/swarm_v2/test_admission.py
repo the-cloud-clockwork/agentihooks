@@ -1,3 +1,4 @@
+import ast
 import copy
 import fcntl
 import json
@@ -373,8 +374,9 @@ def test_load_reads_the_named_schema_folder(tmp_path):
 
 
 def test_the_admission_module_imports_no_other_repository_package():
-    source = Path(contracts.__file__).read_text()
-    imports = [line.split()[1] for line in source.splitlines() if line.startswith(("import ", "from "))]
+    tree = ast.parse(Path(contracts.__file__).read_text())
+    imports = [alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names]
+    imports += [node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
     assert sorted(imports) == [
         "collections",
         "fcntl",

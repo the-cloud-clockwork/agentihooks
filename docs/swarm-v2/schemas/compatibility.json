@@ -7,6 +7,7 @@
   },
   "rules": [
     "A reader accepts a record whose major equals the contract major and whose minor is at least oldest_minor; a newer minor is additive and accepted.",
+    "Every contract permits extension at the top level and inside extensions; the authority object permits none.",
     "Authority fields live only in the closed authority object; an authority name outside it, or an unknown name inside it, is refused.",
     "Every record names execution_id, task_id and task_generation in its authority, except the error envelope.",
     "A relay keeps every unknown optional field and its value on read, modify and write.",
