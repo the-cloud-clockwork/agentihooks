@@ -222,7 +222,7 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
         if agent.lane == MASTER and "process" not in differences and not live_binding.complete(saved):
             actions.append(f"kept {agent.name} after mismatched {fields}: its relaunch assignment is incomplete")
             continue
-        if not runtime.retire(agent, agent.name in facts):
+        if not runtime.retire(agent, agent.name in facts, homes=reaper.scratch_homes(slug, agent.task)):
             store.put_agent(slug, replace(agent, state="retiring"))
             actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
             continue
@@ -264,7 +264,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
         elif now_ms - agent.started_at > STARTUP_GRACE_MS:
-            runtime.retire(agent, False)
+            runtime.retire(agent, False, homes=reaper.scratch_homes(slug, agent.task))
             actions.append(f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent))
     return actions
 
@@ -325,7 +325,7 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     if idle.idle_ticks == IDLE_NUDGE_TICKS:
         runtime.nudge(idle, NUDGE.format(slug=slug))
         return [f"nudged {agent.name}"]
-    if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, True):
+    if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, True, homes=reaper.scratch_homes(slug, idle.task)):
         return [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle)]
     return []
 
@@ -626,7 +626,7 @@ def _master(slug, config, store, runtime, now_ms):
 
 
 def _retire_master(slug, store, runtime, master):
-    if not runtime.retire(master, master.name in runtime.live_names()):
+    if not runtime.retire(master, master.name in runtime.live_names(), homes=reaper.scratch_homes(slug, master.task)):
         return f"could not retire {master.name}, retrying next tick"
     store.drop_agent(slug, master.name)
     return f"retired {master.name}"

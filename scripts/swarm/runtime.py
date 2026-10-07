@@ -221,7 +221,11 @@ class HerdrRuntime:
         argv += ["--resume", agent.conversation_id, "--", *route, *model]
         placed = self._launch(config, agent.lane, agent.task, agent.name, argv)
         if not self._holds(placed.pane_id, agent.conversation_id):
-            self.retire(replace(agent, pane_id=placed.pane_id, profile_decision=placed.profile_decision), True)
+            self.retire(
+                replace(agent, pane_id=placed.pane_id, profile_decision=placed.profile_decision),
+                True,
+                homes=reaper.scratch_homes(config.slug, agent.task),
+            )
             raise SpawnError(f"herdr never showed conversation {agent.conversation_id} on pane {placed.pane_id}")
         return replace(
             placed, model_source=picked.source, profile_decision={**agent.profile_decision, **placed.profile_decision}

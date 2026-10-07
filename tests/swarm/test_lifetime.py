@@ -27,6 +27,13 @@ def idle_master(store, state):
     return agent, rt
 
 
+def test_old_idle_master_retires_with_the_master_scratch_homes(store, scratch):
+    homes = scratch(MASTER)
+    agent, rt = idle_master(store, "running")
+    tick("sw", store, FakeLedger([]), rt, 6 * HOUR + 2)
+    assert rt.homes == {agent.name: homes}
+
+
 @pytest.mark.parametrize("state", ["running", "paused", "drained", "stopped"])
 def test_old_idle_master_retires_once_with_recap_and_closed_pane(store, state):
     agent, rt = idle_master(store, state)

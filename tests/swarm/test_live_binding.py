@@ -284,11 +284,11 @@ def test_partial_retirement_failure_retains_ownership_until_pane_closes(ticking)
     }
     retire = runtime.retire
 
-    def partial(agent, live):
+    def partial(agent, live, homes=()):
         if agent.name == old.name:
             runtime.live.discard(old.name)
             return False
-        return retire(agent, live)
+        return retire(agent, live, homes)
 
     runtime.retire = partial
     tick("sw", store, ledger, runtime, STARTUP_GRACE_MS + 200)

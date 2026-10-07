@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from scripts.inbox import exits
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
+from scripts.swarm import reaper
 from scripts.swarm.store import MASTER, RedisStore
 
 if TYPE_CHECKING:
@@ -32,7 +33,7 @@ def retire_idle_master(
             continue
         if inbox.pending_items(seat) or inbox.pending_items(agent.name):
             continue
-        if not runtime.retire(agent, agent.name in runtime.live_names()):
+        if not runtime.retire(agent, agent.name in runtime.live_names(), homes=reaper.scratch_homes(slug, agent.task)):
             actions.append(f"could not retire {agent.name}, retrying next tick")
             continue
         store.memory.add_recap(

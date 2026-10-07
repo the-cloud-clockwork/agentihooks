@@ -192,6 +192,15 @@ def test_stop_now_terminates_reopens_claimed_but_not_finished_work(env, monkeypa
     assert (ledger.rows["t1"]["state"], ledger.rows["t2"]["state"]) == ("open", "done")
 
 
+def test_stop_now_retires_each_agent_with_its_task_scratch_homes(env, scratch):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    homes = {a.name: scratch(a.task) for a in store.agents("sw")}
+    assert run("sw", "stop", "--now") == 0
+    assert rt.homes == homes
+
+
 def test_a_binned_ledger_stops_its_swarm_and_the_tick_leaves_it_alone(env):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
@@ -246,7 +255,7 @@ def test_binning_releases_and_reopens_only_this_swarms_claims(env):
     ledger.tasks = lambda slug: tasks(slug) if slug == "sw" else []
     ledger.update_task = lambda slug, task_id, fields, by="swarm": slug == "sw" and update(slug, task_id, fields, by)
     states, retire = [], rt.retire
-    rt.retire = lambda agent, live: states.append(store.config("sw").state) or retire(agent, live)
+    rt.retire = lambda agent, live, homes=(): states.append(store.config("sw").state) or retire(agent, live, homes)
     ledger.bin = {"sw"}
     assert cli.run_tick(store, "sw", ledger, None, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
     assert states == ["stopping", "stopping", "stopping"]

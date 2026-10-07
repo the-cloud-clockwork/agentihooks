@@ -73,6 +73,7 @@ from scripts.swarm import (
     priming_trace,
     priority_sweep,
     prompt,
+    reaper,
     snapshot,
     take_master,
     templates,
@@ -269,7 +270,7 @@ def stop_now(store, slug, runtime, ledger):
     rows = {t["id"]: t for t in ledger.tasks(slug)}
     live, left = runtime.live_names(), []
     for agent in store.agents(slug):
-        if not runtime.retire(agent, agent.name in live):
+        if not runtime.retire(agent, agent.name in live, homes=reaper.scratch_homes(slug, agent.task)):
             left.append(agent.name)
             continue
         store.release(slug, agent.task, agent.name)
@@ -292,7 +293,7 @@ def _retire_each(store, slug, runtime, live, agents):
     for agent in agents:
         store.release(slug, agent.task, agent.name)
         store.drop_agent(slug, agent.name)
-        if not runtime.retire(agent, agent.name in live):
+        if not runtime.retire(agent, agent.name in live, homes=reaper.scratch_homes(slug, agent.task)):
             store.put_agent(slug, agent)
             left.append(agent.name)
     return left

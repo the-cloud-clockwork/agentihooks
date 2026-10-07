@@ -573,16 +573,12 @@ def test_a_working_agent_still_holds_its_lane_slot(store):
     assert [s[2] for s in runtime.spawned] == ["t1"]
 
 
-def test_the_reap_retires_with_the_task_scratch_homes(store, tmp_path, monkeypatch):
-    from scripts.swarm import reaper
-
-    (tmp_path / "repo" / "sw-t1").mkdir(parents=True)
-    monkeypatch.setattr(reaper, "SCRATCH", tmp_path)
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+def test_the_reap_retires_with_the_task_scratch_homes(store, scratch):
+    homes, (ledger, runtime) = scratch("t1"), (tasks(("t1", "eng")), FakeRuntime())
     tick("sw", store, ledger, runtime, now_ms=1_000)
     ledger.rows["t1"]["state"] = "done"
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert runtime.homes["engineer@a1b2c3-0001"] == [(tmp_path / "repo" / "sw-t1").resolve()]
+    assert runtime.homes["engineer@a1b2c3-0001"] == homes
 
 
 def test_a_retire_failing_three_ticks_is_a_health_finding(store):
@@ -634,6 +630,44 @@ def test_a_stray_that_will_not_die_is_retried_next_tick(store):
     store.drop_agent("sw", first.name, at=1_500)
     actions = tick("sw", store, ledger, runtime, now_ms=2_000)
     assert f"could not reap stray {first.name}, retrying next tick" in actions
+
+
+def test_a_lost_agent_is_retired_with_its_task_scratch_homes(store, scratch):
+    homes = scratch("t1")
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    runtime.live.discard("engineer@a1b2c3-0001")
+    tick("sw", store, ledger, runtime, now_ms=2_000 + STARTUP_GRACE_MS)
+    assert runtime.homes["engineer@a1b2c3-0001"] == homes
+
+
+def test_a_stalled_agent_is_retired_with_its_task_scratch_homes(store, scratch):
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    homes = scratch("t1")
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
+    idle_for(store, ledger, runtime, IDLE_KILL_TICKS, start=2_000)
+    assert runtime.killed == ["engineer@a1b2c3-0001"]
+    assert runtime.homes["engineer@a1b2c3-0001"] == homes
+
+
+def test_a_mismatched_agent_is_retired_with_its_task_scratch_homes(store, scratch):
+    homes = scratch("t1")
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    runtime.bindings = lambda agents: {a.name: {"process": False} for a in agents if a.lane != MASTER}
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.homes["engineer@a1b2c3-0001"] == homes
+
+
+def test_a_stopping_master_is_retired_with_the_master_scratch_homes(store, scratch):
+    homes, runtime = scratch(MASTER), FakeRuntime()
+    tick("sw", store, tasks(), runtime, now_ms=1_000)
+    store.update("sw", state="stopping")
+    tick("sw", store, tasks(), runtime, now_ms=2_000)
+    assert runtime.homes["master@a1b2c3-0001"] == homes
 
 
 def test_a_drained_swarm_wakes_up_for_new_tasks(store):
