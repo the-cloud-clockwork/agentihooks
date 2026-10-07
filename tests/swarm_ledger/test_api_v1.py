@@ -2637,3 +2637,31 @@ def test_unicode_resources_preserve_utf8_wire_encoding(live):
     assert code == 200
     assert "Málaga".encode() in data
     assert data == json.dumps(json.loads(data), ensure_ascii=False).encode()
+
+
+def test_ack_succeeds_while_members_change_between_every_read_and_write(live, capsys):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from tests.swarm_ledger.test_ledger_authority import core, ledger
+
+    read = ResourceClient.request
+    joins = iter(range(10))
+
+    def busy(self, slug, path, payload=None):
+        reply = read(self, slug, path, payload)
+        if path == "members":
+            name = f"busy-{next(joins)}"
+            core.sync(SLUG, ops=[{"op": "join", "id": name, "by": name}])
+        return reply
+
+    with (
+        patch.dict("os.environ", {"AGENTIHOOKS_AGENT_NAME": "", "AGENTIHOOKS_SWARM": ""}),
+        patch.object(ResourceClient, "request", busy),
+    ):
+        ledger.cmd_ack(SimpleNamespace(slug=SLUG, name="api-reader", rev=None))
+    acked = json.loads(capsys.readouterr().out)["acked"]
+    members = server.repository.get_document(SLUG, reconcile=False)["_meta"]["members"]
+    assert members["api-reader"]["handled_rev"] == acked
+    assert "busy-0" in members

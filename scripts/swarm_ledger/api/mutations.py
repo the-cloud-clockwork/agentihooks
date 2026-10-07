@@ -23,7 +23,7 @@ class GuardedOperations:
                 raise APIError(409, "operation_conflict", "Operation identifier was already used for different content")
             self.results = dict(known["results"])
         pending = [op for op in self.payload["ops"] if op["id"] not in self.results]
-        targets = {schemas.target(op) for op in pending if not self.changes_for(op)}
+        targets = {schemas.target(op) for op in pending if op["op"] != "ack" and not self.changes_for(op)}
         for op in pending:
             targets.update(change["path"].rsplit("/", 1)[0] for change in self.changes_for(op))
         for path in targets:
