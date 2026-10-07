@@ -1326,5 +1326,13 @@
   "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_49:fd5b19fb8b5769b93feecb39e8f69a70896e3401d05a66484161915ee3e36b84": {
     "reader": "Standards",
     "reason": "Increasing the split limit preserves the first segment used to identify the option."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_command_lines__mutmut_19:7d64b3a202fcf6345d1a170a665cdccf67fe8481bf0355197440c3d48720374e": {
+    "reader": "Standards",
+    "reason": "Changes only the excluded synthetic command name and inert argument prefix. Both prefixes preserve argument parsing; their literal text produces no checked command."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_command_lines__mutmut_20:c21b45a095edd28f98f18434986e293dbdd0f2806a9ed5e38d765c777a806070": {
+    "reader": "Standards",
+    "reason": "Uppercasing the excluded command name and inert prefix preserves the discovered command descendants. Nine differential parser controls returned identical output."
   }
 }
