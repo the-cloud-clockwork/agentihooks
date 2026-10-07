@@ -252,6 +252,12 @@ def test_park_reports_a_worktree_it_could_not_remove_after_parking(parked, capsy
     assert capsys.readouterr().err == (
         f"swarm: the task is parked and its seat handed off, but wt.sh done could not remove {TOP}: boom\n"
     )
+    calls = len(shell.calls)
+    assert park(doc) == 1
+    assert capsys.readouterr().err == (
+        f"swarm: {AGENT} already handed off its seat; remove a leftover worktree with wt.sh done\n"
+    )
+    assert len(shell.calls) == calls and len(transfers.list_transfers(store, "sw")) == 1
     assert ledger.rows["t1"]["parked_on"] == ["a"]
     assert store.handoff("sw", "t1") == doc.read_text()
 

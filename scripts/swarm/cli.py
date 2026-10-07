@@ -879,6 +879,8 @@ def _hand_off(store, slug, agent, text, reason, ledger):
 
 def cmd_park(store, args):
     agent = _worker(store, args)
+    if agent.state == "finished":
+        raise SwarmError(f"{agent.name} already handed off its seat; remove a leftover worktree with wt.sh done")
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
     fields, top = stack.park(store, args.slug, agent, text, ledger)
