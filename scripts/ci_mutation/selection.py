@@ -4,6 +4,8 @@ import os
 import sys
 from pathlib import Path
 
+from mutmut.utils.format_utils import get_mutant_name
+
 from scripts.ci_mutation.report import mutation_lines
 
 
@@ -29,13 +31,24 @@ def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str
     return code, list(names)
 
 
+def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, set[str]]) -> set[str]:
+    kept = set()
+    for function, tests in stats.items():
+        allowed = tests_by_prefix.get(function.rpartition(".")[0] + ".", set())
+        stats[function] = {test for test in tests if test.partition("::")[0] in allowed}
+        kept |= stats[function]
+    return kept
+
+
 def run_selected(selection: Path) -> None:
     from mutmut import __main__ as runner
 
     changes = json.loads(selection.read_text())
+    tests_by_prefix = {get_mutant_name(Path(path), ""): set(change["tests"]) for path, change in changes.items()}
+    related = set()
 
     def write_selected(*, out, source, filename):
-        code, names = selected_mutants(str(filename), source, set(changes[str(filename)]))
+        code, names = selected_mutants(str(filename), source, set(changes[str(filename)]["lines"]))
         bootstrap = (
             "import os as _mutmut_os\n"
             "from pathlib import Path as _mutmut_Path\n"
@@ -82,11 +95,22 @@ def run_selected(selection: Path) -> None:
         relative = config.source_paths
         config.source_paths = [(Path("mutants") / path).resolve() for path in relative]
         try:
-            return collect_stats(test_runner)
+            result = collect_stats(test_runner)
         finally:
             config.source_paths = relative
+        related.update(keep_selected_tests(runner.mutmut.tests_by_mangled_function_name, tests_by_prefix))
+        return result
+
+    run_tests = runner.PytestRunner.run_tests
+
+    def run_related_tests(self, *, mutant_name, tests):
+        if mutant_name is None and not tests and related:
+            tests = sorted(related, key=lambda test: runner.mutmut.duration_by_test[test])
+        return run_tests(self, mutant_name=mutant_name, tests=tests)
 
     runner.collect_or_load_stats = collect_selected_stats
+    # The clean and forced fail controls pass no tests and would otherwise rerun every selected module.
+    runner.PytestRunner.run_tests = run_related_tests
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
     runner.write_all_mutants_to_file = write_selected
     for name in ("scripts.ci_mutation", "scripts"):

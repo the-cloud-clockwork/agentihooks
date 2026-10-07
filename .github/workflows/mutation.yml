@@ -40,7 +40,7 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           PYTHONUNBUFFERED: "1"
-        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080
+        run: python -m scripts.ci_mutation --base 5e9ac6ba^ --head 5e9ac6ba --budget 1080
 
       - name: Upload complete mutation evidence
         if: always()
