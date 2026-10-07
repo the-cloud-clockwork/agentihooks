@@ -102,7 +102,7 @@ def test_only_ledger_serving_processes_are_candidates(argv, expected):
 
 @pytest.mark.parametrize("folder_setting", ["default", "relative", "user", "equals"])
 def test_details_resolve_the_server_folder_and_default_port(tmp_path, monkeypatch, folder_setting):
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
     cwd = tmp_path / "run"
     cwd.mkdir()
     folder = {

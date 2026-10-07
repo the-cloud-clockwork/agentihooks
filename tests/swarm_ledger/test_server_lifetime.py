@@ -51,7 +51,7 @@ def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owne
     pid = None
     try:
         deadline = time.monotonic() + 10
-        while not (tmp_path / ".server.pid").exists():
+        while not ((tmp_path / ".server.pid").exists() and (tmp_path / ".server.pid").stat().st_size):
             assert run.poll() is None
             assert time.monotonic() < deadline
             time.sleep(0.01)
