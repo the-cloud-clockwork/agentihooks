@@ -1447,7 +1447,7 @@
     "reader": "Standards",
     "reason": "accepted_bytes is always an int, so the first comparison against None or an empty string is False either way and flush_once takes the same path."
   },
-  "scripts/herdr_gc.py:scripts.herdr_gc.x\u01c1Owners\u01c1_store__mutmut_8:d8f932aa2f50c70ae67799a34b247644795d96ed80140240ad8c99bd27e44f00": {
+  "scripts/herdr_gc.py:scripts.herdr_gc.xǁOwnersǁ_store__mutmut_8:d8f932aa2f50c70ae67799a34b247644795d96ed80140240ad8c99bd27e44f00": {
     "reader": "Standards",
     "reason": "A failed connection cached as an empty string instead of None gives the same outcomes: state still returns unknown and prompted_at still returns None through their exception handlers, and the connection is attempted once per address either way."
   },
