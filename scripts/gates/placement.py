@@ -8,8 +8,11 @@ A worktree counts as its repository, matched by git common dir. A non editable i
 
 import json
 import subprocess
+from collections.abc import Callable
+from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
+from typing import ClassVar
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -109,12 +112,13 @@ def refusal(missing, paths):
     )
 
 
+@dataclass(frozen=True)
 class PlacementGate:
-    name = NAME
-    default_mode = "enforce"
-
-    def __init__(self, source=editable_source, bundle=linked_bundle, home=None):
-        self.source, self.bundle, self.home = source, bundle, home
+    name: ClassVar[str] = NAME
+    default_mode: ClassVar[str] = "enforce"
+    source: Callable = editable_source
+    bundle: Callable = linked_bundle
+    home: Path | None = None
 
     def matches(self, call):
         if call.tool.startswith(SERENA):
