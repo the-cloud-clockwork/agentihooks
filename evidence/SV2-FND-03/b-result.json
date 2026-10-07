@@ -1,0 +1,208 @@
+{
+  "case": "T-SV2-FND-03-B",
+  "tested_commit": "987e447f16527107998a4f2864aeae4e84574f69",
+  "passed": 50,
+  "failed": 0,
+  "tests": [
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_future_major_is_refused_before_any_write[launch]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_future_major_is_refused_before_any_write[heartbeat]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_future_major_is_refused_before_any_write[command]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_future_major_is_refused_before_any_write[checkpoint]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_future_major_is_refused_before_any_write[session_event]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_future_major_is_refused_before_any_write[context_pack]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_future_major_is_refused_before_any_write[receipt]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_future_major_is_refused_before_any_write[error]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_absent_execution_generation_is_refused_before_any_write[missing-authority-launch]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_absent_execution_generation_is_refused_before_any_write[missing-authority-heartbeat]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_absent_execution_generation_is_refused_before_any_write[missing-authority-command]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_absent_execution_generation_is_refused_before_any_write[missing-authority-checkpoint]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_absent_execution_generation_is_refused_before_any_write[missing-authority-session_event]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_absent_execution_generation_is_refused_before_any_write[missing-authority-context_pack]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_absent_execution_generation_is_refused_before_any_write[missing-authority-receipt]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_absent_execution_generation_is_refused_before_any_write[previous-minor-missing-authority-launch]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_absent_execution_generation_is_refused_before_any_write[previous-minor-missing-authority-heartbeat]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_absent_execution_generation_is_refused_before_any_write[previous-minor-missing-authority-command]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_absent_execution_generation_is_refused_before_any_write[previous-minor-missing-authority-checkpoint]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_absent_execution_generation_is_refused_before_any_write[previous-minor-missing-authority-session_event]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_absent_execution_generation_is_refused_before_any_write[previous-minor-missing-authority-context_pack]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_absent_execution_generation_is_refused_before_any_write[previous-minor-missing-authority-receipt]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_record_without_authority_names_every_missing_field",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_the_counter_keeps_one_entry_per_contract_and_reason",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_unreadable_or_older_major_version_is_refused[None-missing_version-schema_version must be MAJOR.MINOR]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_unreadable_or_older_major_version_is_refused[2-missing_version-schema_version must be MAJOR.MINOR]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_unreadable_or_older_major_version_is_refused[v2.1-missing_version-schema_version must be MAJOR.MINOR]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_unreadable_or_older_major_version_is_refused[2.1.0-missing_version-schema_version must be MAJOR.MINOR]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_unreadable_or_older_major_version_is_refused[2.1-missing_version-schema_version must be MAJOR.MINOR]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_unreadable_or_older_major_version_is_refused[2x1-missing_version-schema_version must be MAJOR.MINOR]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_unreadable_or_older_major_version_is_refused[\\u0662.1-missing_version-schema_version must be MAJOR.MINOR]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_unreadable_or_older_major_version_is_refused[2.\\u0661-missing_version-schema_version must be MAJOR.MINOR]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_unreadable_or_older_major_version_is_refused[2a.1-missing_version-schema_version must be MAJOR.MINOR]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_unreadable_or_older_major_version_is_refused[1.9-unsupported_major-schema major 1 is not supported; this reader accepts major 2]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_minor_below_the_oldest_supported_is_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_non_object_record_is_refused_with_an_unknown_operation",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_malformed_operation_id_is_never_echoed[None]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_malformed_operation_id_is_never_echoed[../escape]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_malformed_operation_id_is_never_echoed[]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_malformed_operation_id_is_never_echoed[7]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_malformed_operation_id_is_never_echoed[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_unknown_authority_field_is_refused_not_discarded",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_an_authority_name_outside_the_authority_object_is_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_schema_failure_names_the_path_and_keyword_but_not_the_value",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_nested_failure_joins_its_path_with_slashes",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_missing_body_field_names_only_the_missing_names",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_every_refusal_is_a_valid_error_envelope",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_display_label_grants_no_authority",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_another_execution_cannot_share_an_accepted_generation",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_consumer.py::test_a_consumer_fails_when_a_fixture_breaks_its_expectation",
+      "outcome": "passed"
+    }
+  ]
+}

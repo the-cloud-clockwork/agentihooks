@@ -160,19 +160,20 @@ def tip_shown(page):
 
 
 def hover_stop_now(page):
-    page.clock.install()
+    page.clock.install(time=0)
     page.locator("#tab-swarm").click()
+    page.clock.pause_at(60_000)
     button = page.locator('[data-swarm="stop_now"]')
     button.hover()
     return button
 
 
-def test_the_tip_appears_only_after_the_pointer_rests_two_seconds(tab):
+def test_the_tip_appears_exactly_one_second_after_the_pointer_rests(tab):
     page = tab(ledger_html())
     hover_stop_now(page)
-    page.clock.run_for(1900)
+    page.clock.run_for(999)
     assert tip_shown(page) is None
-    page.clock.run_for(150)
+    page.clock.run_for(1)
     assert tip_shown(page) == page.evaluate("""ledgerTip(document.querySelector('[data-swarm="stop_now"]'))""")
     assert page.locator('[data-swarm="stop_now"]').get_attribute("title") is None
 
@@ -181,7 +182,7 @@ def test_the_tip_appears_only_after_the_pointer_rests_two_seconds(tab):
 def test_the_tip_hides_on_pointer_leave_click_or_scroll(tab, leave):
     page = tab(ledger_html())
     button = hover_stop_now(page)
-    page.clock.run_for(2100)
+    page.clock.run_for(1000)
     assert tip_shown(page)
     if leave == "pointer":
         page.mouse.move(2, 890)
