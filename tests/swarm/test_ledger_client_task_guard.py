@@ -11,7 +11,8 @@ ROWS = [{"id": "t0", "state": "open"}, {"id": "t1", "state": "done", "claimed_by
 def sent(monkeypatch):
     ops = []
 
-    def call(slug, batch):
+    def call(slug, batch, service):
+        assert service is True
         ops.extend((slug, op) for op in batch)
         return {"rejected": [], "tasks": ROWS}
 
@@ -62,5 +63,7 @@ def test_an_update_of_a_task_the_ledger_lacks_returns_an_empty_row(sent):
 
 
 def test_an_update_answered_without_tasks_returns_an_empty_row(monkeypatch):
-    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, batch: {"rejected": []}))
+    monkeypatch.setattr(
+        ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, batch, service: {"rejected": []})
+    )
     assert ledger_client.LedgerClient().update_task("demo", "t1", {"state": "open"}) == {}

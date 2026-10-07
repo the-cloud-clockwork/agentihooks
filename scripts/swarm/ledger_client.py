@@ -20,7 +20,7 @@ def _ledger():
 class LedgerClient:
     def _call(self, slug, ops=None):
         try:
-            state = _ledger().call(slug, ops)
+            state = _ledger().call(slug, ops, service=True)
         except SystemExit as exc:
             raise SwarmError(f"ledger {slug}: {exc}") from exc
         if state.get("rejected"):

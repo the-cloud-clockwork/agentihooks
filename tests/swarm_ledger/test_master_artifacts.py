@@ -113,8 +113,9 @@ def test_master_requires_operator_request(publication, request_id):
 
 
 @pytest.mark.parametrize("by,role", [(MASTER, "member"), (WORKER, "orchestrator"), (WORKER, "member")])
-def test_master_marker_needs_joined_master_identity_and_role(publication, by, role):
+def test_master_marker_needs_joined_master_identity_and_role(publication, monkeypatch, by, role):
     slug, path, _ = publication
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", by)
     core.sync(slug, ops=[{"op": "join", "id": "role", "by": by, "role": role}])
     file = ledger.upload_artifact(slug, by, str(path))
     op = {
