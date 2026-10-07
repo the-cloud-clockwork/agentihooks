@@ -329,6 +329,14 @@ def test_relaunch_preserves_native_assignment_options(tmp_path, monkeypatch):
     assert passed[passed.index("--effort") + 1] == "medium"
 
 
+def test_relaunch_with_empty_assignment_options_chooses_afresh(tmp_path, monkeypatch):
+    from tests.swarm.test_runtime import _launched
+
+    saved = {"profile": "master", "harness": "", "model": "", "effort": "", "account": "", "seat": "master@sw"}
+    passed = _launched(tmp_path, monkeypatch, "master", {"id": "master", "title": "Master", "launch_assignment": saved})
+    assert "--route" not in passed
+
+
 def test_runtime_reads_only_processes_named_in_assignments(mounted, monkeypatch):
     from types import SimpleNamespace
 
