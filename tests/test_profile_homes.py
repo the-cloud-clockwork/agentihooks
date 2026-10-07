@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,13 +23,18 @@ def _write(path: Path, text: str) -> Path:
 
 
 def test_live_homes_reads_each_process_profile_home(tmp_path):
-    _write(tmp_path / "11" / "environ", "A=1\0CLAUDE_CONFIG_DIR=/p/claude\0")
-    _write(tmp_path / "12" / "environ", "CODEX_HOME=/p/codex\0B=2\0")
-    _write(tmp_path / "13" / "environ", "B=2\0CLAUDE_CONFIG_DIR=\0")
     _write(tmp_path / "self" / "environ", "CLAUDE_CONFIG_DIR=/p/self\0")
     (tmp_path / "14").mkdir()
+    (tmp_path / "13").mkdir()
+    (tmp_path / "13" / "environ").write_bytes(b"\xff=1\0B=2\0CLAUDE_CONFIG_DIR=\0")
+    _write(tmp_path / "11" / "environ", "A=1\0CLAUDE_CONFIG_DIR=/p/a=b\0")
+    (tmp_path / "12").mkdir()
+    (tmp_path / "12" / "environ").write_bytes(b"CODEX_HOME=/p/\xff\0B=2\0")
+    order = [tmp_path / name for name in ("self", "14", "13", "11", "12")]
 
-    assert sorted(homes.live_homes(tmp_path)) == [Path("/p/claude"), Path("/p/codex")]
+    found = homes.live_homes(SimpleNamespace(iterdir=lambda: iter(order)))
+
+    assert found == [Path("/p/a=b"), Path("/p/�")]
 
 
 def test_live_homes_resolves_each_path(tmp_path):
@@ -105,11 +111,17 @@ def test_collect_keeps_the_current_and_live_homes_and_removes_the_rest(root, mon
 
 def test_collect_waits_out_the_launch_grace(root, monkeypatch):
     monkeypatch.setattr(homes, "GRACE_SECONDS", 600)
-    old = homes.fresh(root, "eng", {})
+    legacy = _write(root / "eng" / "claude" / "settings.json", "{}").parent.parent
+    os.utime(legacy, (1, 1))
+    recent = homes.fresh(root, "eng", {})
+    expired = homes.fresh(root, "eng", {})
+    now = expired.stat().st_mtime + 600
+    os.utime(recent, (now, now))
+    monkeypatch.setattr(homes.time, "time", lambda: now)
 
     homes.promote(root, "eng", homes.fresh(root, "eng", {}))
 
-    assert old.is_dir()
+    assert recent.is_dir() and not expired.exists() and legacy.is_symlink()
 
 
 def test_a_legacy_folder_goes_once_unused_and_the_name_links_to_the_current_home(root, monkeypatch):

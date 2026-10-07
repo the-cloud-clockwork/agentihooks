@@ -152,8 +152,7 @@ def refresh_rules(rules_dir: Path, claude_md: Path, local_md: Path, dry_run: boo
     if not dry_run:
         name = owner(rules_dir.parent)
         if name:
-            fresh = render_claude(name, force=True)
-            rules_dir, claude_md = fresh / "rules", fresh / "CLAUDE.md"
+            claude_md = render_claude(name, force=True) / "CLAUDE.md"
         else:
             _i = _install_module()
             layers = next(

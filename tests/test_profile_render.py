@@ -1097,6 +1097,7 @@ def test_codex_render_follows_operator_changes(world):
 
     fresh = render.render_codex("rb-role")
     assert fresh not in (None, out)
+    assert fresh == render.profile_dir("rb-role") / "codex"
     assert tomllib.loads((fresh / "config.toml").read_text())["model"] == "gpt-op"
 
 
@@ -1803,6 +1804,8 @@ def test_a_new_render_stamp_launches_into_a_fresh_profile_home(world, monkeypatc
     second = render.render(target, "rb-role")
 
     assert second is not None and second.resolve() != first.resolve()
+    digest = hashlib.sha256(json.dumps(render.stamp("rb-role"), sort_keys=True).encode()).hexdigest()[:12]
+    assert second.name == target and second.parent.name.startswith(f"{digest}-")
     env, _ = select_profile.prepare("rb-role", target, "", "", [], {})
     assert env[render.binding.HOMES[target]] == str(second.resolve())
     assert render.render(target, "rb-role") is None
