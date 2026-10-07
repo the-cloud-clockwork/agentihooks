@@ -18,14 +18,13 @@ import sys
 from dataclasses import asdict
 
 from scripts.inbox import links
-from scripts.inbox.store import InboxError, connect
+from scripts.inbox.store import InboxError, InboxStore, connect
 from scripts.swarm_ledger import ledger_comments
 
 OPERATOR = "operator"
 
 SWARM = "swarm"
 
-NO_REPLY = "swarm notices take no reply"
 
 FYI = "--fyi"
 
@@ -55,8 +54,14 @@ def check_for_operator(address, text):
         raise InboxError(str(exc)) from exc
 
 
-def informational(words):
-    return (True, words[1:]) if words[:1] == [FYI] else (False, words)
+def informational(words: list[str]) -> tuple[bool, list[str]]:
+    text = list(words)
+    fyi = False
+    if text[:1] == [FYI]:
+        fyi, text = True, text[1:]
+    if text[-1:] == [FYI]:
+        fyi, text = True, text[:-1]
+    return fyi, text
 
 
 def cmd_send(store, me, args):
@@ -82,14 +87,14 @@ def cmd_read(store, me, args):
     print(json.dumps({**asdict(item), "history": store.history(item.id)}))
 
 
-def cmd_reply(store, me, args):
+def cmd_reply(store: InboxStore, me: str, args: argparse.Namespace) -> None:
     from scripts.inbox.addresses import check_address
 
+    fyi, words = informational(args.text)
     if store.get(args.id).sender == SWARM:
-        cmd_close(store, me, argparse.Namespace(id=args.id, kind="done", detail=[NO_REPLY]))
+        cmd_close(store, me, argparse.Namespace(id=args.id, kind="done", detail=words))
         return
     check_address(store, me, store.get(args.id).sender)
-    fyi, words = informational(args.text)
     check_for_operator(store.get(args.id).sender, " ".join(words))
     answer = store.reply(args.id, me, " ".join(words), fyi=fyi)
     print(json.dumps({"id": answer.id, "to": answer.address, "closed": args.id}))

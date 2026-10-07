@@ -76,6 +76,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import ledger_artifacts  # noqa: E402
+import ledger_authority as authority  # noqa: E402
 import ledger_comments  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
@@ -86,15 +87,23 @@ import ledger_tasks  # noqa: E402
 import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
+from scripts.gates.base import Who
 from scripts.swarm_ledger.repository import repository
 
 BASE = ledger_link.base()
 TALK_REFUSED = "talk refused"
 
 
-def request(slug, ops=None):
+def credentials(slug, service=False):
     token = core.read_token(repository.read_page(slug)) or ""
-    headers = {"Content-Type": "application/json", "X-Ledger-Token": token}
+    who = Who.from_env()
+    if service or not who.pinned:
+        return {"X-Ledger-Token": token}
+    return {"X-Ledger-Token": authority.agent_token(token, slug, who.name), "X-Ledger-Agent": who.name}
+
+
+def request(slug, ops=None, service=False):
+    headers = {"Content-Type": "application/json", **credentials(slug, service)}
     body = None if ops is None else json.dumps({"ops": ops}).encode()
     req = urllib.request.Request(
         f"{BASE}/api/{slug}?view=agent", data=body, headers=headers, method="GET" if ops is None else "PUT"
@@ -103,15 +112,15 @@ def request(slug, ops=None):
         return json.loads(resp.read())
 
 
-def call(slug, ops=None):
+def call(slug, ops=None, service=False):
     try:
-        return request(slug, ops)
+        return request(slug, ops, service)
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
     except OSError:
         subprocess.run([sys.executable, str(HERE / "ledger_server.py"), "--ensure"], check=False, capture_output=True)
     try:
-        return request(slug, ops)
+        return request(slug, ops, service)
     except (OSError, urllib.error.HTTPError) as exc:
         sys.exit(f"ledger server not answering on {BASE}: {exc}")
 
@@ -200,12 +209,11 @@ def upload_artifact(slug: str, name: str, path: str) -> dict:
 
 
 def upload(slug: str, name: str, path: str, route: str, extra: dict) -> dict:
-    token = core.read_token(repository.read_page(slug)) or ""
     req = urllib.request.Request(
         f"{BASE}/api/{route}/{slug}",
         data=Path(path).read_bytes(),
         headers={
-            "X-Ledger-Token": token,
+            **credentials(slug),
             "X-Ledger-Agent": name,
             "Content-Type": "application/octet-stream",
             **extra,

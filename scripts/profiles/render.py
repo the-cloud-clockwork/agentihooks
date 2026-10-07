@@ -318,8 +318,11 @@ def _codex_config(installed: dict, operator: Path, out: Path, settings: dict) ->
 def render_codex(name: str, force: bool = False) -> Path | None:
     import tomlkit
 
+    from scripts.profiles import codex_master
+
     _i = _install_module()
     bundle, dirs = _i._get_bundle_path(), _chain(name)
+    master = any(n.removeprefix("package:") == "master" for n, _ in dirs)
     claude_fresh = render_claude(name, force=force) is None
     operator = _operator_codex_home()
     config = operator / "config.toml"
@@ -335,11 +338,18 @@ def render_codex(name: str, force: bool = False) -> Path | None:
         and (out / binding.FILE).is_file()
         and connectors.path(name, "codex", rendered_root()).is_file()
         and _read_toml(out / "config.toml").get("agentihooks") == current
+        and (not master or ((out / "AGENTS.md").is_file() and not (out / "AGENTS.md").is_symlink()))
     ):
         return None
     claude = rendered_root() / name / "claude"
     out.mkdir(exist_ok=True)
-    _link(out / "AGENTS.md", claude / "CLAUDE.md")
+    if master:
+        agents = out / "AGENTS.md"
+        if agents.is_symlink():
+            agents.unlink()
+        _atomic_write(agents, codex_master.persona((claude / "CLAUDE.md").read_text()))
+    else:
+        _link(out / "AGENTS.md", claude / "CLAUDE.md")
     _relink(out / "skills", {p.name: p for p in sorted((claude / "skills").iterdir())})
     _link_commands(out / "skills", claude / "commands")
     for item in CODEX_STATE:

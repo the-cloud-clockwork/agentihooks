@@ -9,7 +9,7 @@ from scripts.swarm import ledger_client
 def sent(monkeypatch):
     ops = []
 
-    def call(slug, batch):
+    def call(slug, batch, service):
         ops.extend((slug, op) for op in batch)
         return {"rejected": []}
 

@@ -128,6 +128,7 @@ class HerdrRuntime:
             raise SpawnError(reason)
         if saved and agent != saved["harness"]:
             raise SpawnError("unsupported handoff: router substituted the original harness")
+        task = {**task, "harness": agent}
         text = prompt.build(
             config.slug, config.repo, lane, name, task, role=chosen.get("role", ""), autonomy=config.autonomy
         )

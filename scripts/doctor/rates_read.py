@@ -10,6 +10,7 @@ from hooks.context import injection_trace
 from scripts.doctor import read
 from scripts.doctor.rates import Pull, Records
 from scripts.gates.log import gate_log_path
+from scripts.inbox.store import InboxStore
 from scripts.swarm.health import activity
 from scripts.swarm.ledger_events import iso_ms
 from scripts.swarm.runtime import SWARM_HOME
@@ -104,4 +105,5 @@ def load(store, ledger, slug, span, run=subprocess.run, home=SWARM_HOME):
         injections=injections(span.start),
         corrections=_timed(injection_trace.corrections()),
         pulls=pulls(store.redis, slug, _done_urls(events, tasks, span), run),
+        inbox=read.inbox_items(InboxStore(store.redis), slug),
     )

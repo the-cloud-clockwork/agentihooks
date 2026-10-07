@@ -143,3 +143,57 @@ def test_a_failed_successor_keeps_its_outcome_and_a_retry_can_confirm(setup, mon
     result = transfers.confirm(store, "sw", retry["id"], successor, retry["next"], 21)
     assert result["binding"]["state"] == "live"
     assert result["continuity"]["state"] == "confirmed"
+
+
+def test_codex_master_confirms_the_adapted_next_without_changing_the_record(setup):
+    from scripts.profiles.codex_master import next_action
+
+    store, old = setup
+    old = replace(old, lane="master", task="master", seat="master@sw")
+    store.seats.occupy(old.seat, old.name, 1)
+    action = "Rearm a Monitor on the ledger."
+    document = "# Handoff v2\n## Next\n" + action + "\n## Read first\nNone\n"
+    transfer = transfers.record(store, "sw", old, "recycle", document, 2)
+    new = replace(old, name="master-new", harness="codex", state="working")
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+
+    result = transfers.confirm(store, "sw", transfer["id"], new, next_action(action, "sw"), 4)
+    assert result["continuity"]["state"] == "confirmed"
+    assert result["continuity"]["next"] == next_action(action, "sw")
+    assert result["next"] == action
+    assert result["handoff"] == document
+    with pytest.raises(SwarmError, match="exactly"):
+        transfers.confirm(store, "sw", transfer["id"], new, "some other action", 5)
+
+
+@pytest.mark.parametrize(("lane", "harness"), [("master", "claude"), ("eng", "codex")])
+def test_other_successors_keep_the_original_monitor_next(setup, lane, harness):
+    from scripts.profiles.codex_master import next_action
+
+    store, old = setup
+    old = replace(old, lane=lane, task="master" if lane == "master" else "t1", seat=f"{lane}@sw")
+    store.seats.occupy(old.seat, old.name, 1)
+    action = "Rearm a Monitor on the ledger."
+    transfer = transfers.record(store, "sw", old, "recycle", "# Handoff v2\n## Next\n" + action, 2)
+    new = replace(old, name="successor", harness=harness, state="working")
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new)
+    with pytest.raises(SwarmError, match="exactly"):
+        transfers.confirm(store, "sw", transfer["id"], new, next_action(action, "sw"), 4)
+    assert transfers.confirm(store, "sw", transfer["id"], new, action, 5)["continuity"]["state"] == "confirmed"
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_transfer_next_uses_valid_heading_whitespace(newline):
+    action = "Read the inbox."
+    assert transfers.first_next(newline.join(["## Next   ", "- " + action, "## Read first", "None"])) == action
+
+
+@pytest.mark.parametrize("text", ["", "# Handoff v2\n## Intent\nNone\n", "## Next\n\n"])
+def test_a_handoff_without_a_next_action_has_an_empty_confirmation(text):
+    assert transfers.first_next(text) == ""
+
+
+def test_next_action_keeps_leading_letters_and_removes_only_bullet_spacing():
+    assert transfers.first_next("## Next\n- Xray the saved proof.\n## Read first\nNone\n") == "Xray the saved proof."
