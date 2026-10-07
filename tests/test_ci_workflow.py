@@ -179,6 +179,8 @@ def test_mutation_job_installs_chromium_before_mutating():
     names = [s.get("name") for s in steps]
     install = _browser_install(steps)
     assert install["name"] == "Install the browser that page tests drive"
+    if "run" in install:
+        assert install["run"] == "python -m playwright install --with-deps chromium"
     assert names.index("Install dependencies") < steps.index(install) < names.index("Mutate changed Python files")
 
 
