@@ -23,6 +23,7 @@ from tests.swarm_v2_isolation import (
     confine,
     confine_environ,
     live_roots,
+    measurement,
     owned,
     remove,
     sweep,
@@ -192,7 +193,27 @@ def test_b_a_symlink_trap_to_a_live_home_aborts_and_counts(tmp_path, rejections)
     with pytest.raises(Failed, match="symlink resolves outside the fixture directory"):
         confine(ids.root, "symlink", ids.traps["symlink"])
     assert rejections() == {"escape": 1}
-    assert METRIC == "test_live_path_rejections_total"
+    assert measurement()[METRIC] == dict(REJECTIONS)
+
+
+def test_b_rejections_reach_the_test_report_as_the_package_measurement(tmp_path):
+    report = tmp_path / "report.xml"
+    selected = [
+        "tests/test_swarm_v2_isolation.py::test_b_a_symlink_trap_to_a_live_home_aborts_and_counts",
+        "tests/test_swarm_v2_isolation.py::test_a_writes_inside_the_fixture_are_allowed",
+    ]
+    flags = ["-p", "no:xdist", "-p", "no:randomly", "-p", "no:cacheprovider", f"--junitxml={report}"]
+    done = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", *flags, *selected],
+        cwd=Path(__file__).parent.parent,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    xml = report.read_text()
+    assert xml.count('name="test_live_path_rejections_total"') == 1
+    assert '<property name="test_live_path_rejections_total" value="{&quot;escape&quot;: 1}"' in xml
 
 
 @pytest.mark.parametrize("trap", ["parent", "environ"])
@@ -243,6 +264,37 @@ def test_b_a_live_program_outside_the_test_directory_aborts(tmp_path_factory, mo
     with pytest.raises(Failed, match=f"refusing a live {program}"):
         subprocess.run([str(real)], capture_output=True)
     assert rejections() == {"program": 3}
+
+
+@pytest.mark.parametrize(
+    "spawn",
+    [
+        lambda: subprocess.run(["env", "FOO=1", "kubectl", "get"], capture_output=True),
+        lambda: subprocess.run(["timeout", "5s", "nohup", "kubectl"], capture_output=True),
+        lambda: subprocess.run(["sh", "-e", "-c", "true; exec kubectl get"], capture_output=True),
+        lambda: subprocess.run(["bash", "-lc", "echo $(kubectl get)"], capture_output=True),
+        lambda: subprocess.run("echo `kubectl get`", shell=True, capture_output=True),
+        lambda: subprocess.run(["kubectl"], env={"HOME": "/nonexistent"}, capture_output=True),
+        lambda: os.system("kubectl delete pod x"),
+    ],
+    ids=["env", "timeout-nohup", "shell-flags", "substitution", "backtick", "default-path", "os-system"],
+)
+def test_b_a_wrapped_or_shell_spawned_live_program_aborts(tmp_path_factory, monkeypatch, rejections, spawn):
+    outside = tmp_path_factory.mktemp("live-bin")
+    _fake_program(outside, "kubectl", "LIVE")
+    monkeypatch.setenv("PATH", f"{outside}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(os, "defpath", str(outside))
+    with pytest.raises(Failed, match="^refusing a live kubectl outside the test directory: "):
+        spawn()
+    assert rejections() == {"program": 1}
+
+
+def test_b_a_live_program_name_as_an_argument_is_left_alone(tmp_path_factory, monkeypatch):
+    outside = tmp_path_factory.mktemp("live-bin")
+    _fake_program(outside, "kubectl", "LIVE")
+    monkeypatch.setenv("PATH", f"{outside}{os.pathsep}{os.environ['PATH']}")
+    done = subprocess.run(["sh", "-c", "echo kubectl helm"], capture_output=True, text=True)
+    assert done.stdout == "kubectl helm\n"
 
 
 def test_b_a_fake_symlinked_to_a_live_binary_aborts(tmp_path, tmp_path_factory, monkeypatch, rejections):

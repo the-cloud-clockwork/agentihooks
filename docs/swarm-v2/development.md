@@ -25,10 +25,10 @@ and `tests/installer_isolation.py`, gives every test:
 | Brain and vault | `AGENTIBRAIN_HOME` points into the temporary home; `VAULT_ROOT` is unset |
 | Kubernetes | `KUBECONFIG` points at a path inside the test directory |
 | Swarm session | every inherited `AGENTIHOOKS_*` variable is removed, so a run from an agent's shell matches CI |
-| Redis | connections to port 6379 are refused, the swarm Redis URL is a missing socket, and hook keys carry the run prefix `agentihooks-test-<run id>` |
+| Redis | connections to port 6379 are refused and the swarm Redis URL is a missing socket; keys built by the `hooks` package (`hooks._redis`, the memory store, the event relay) carry the run prefix `agentihooks-test-<run id>`. The swarm, inbox and gate stores under `scripts/` keep their production `agentihooks:*` names and are tested against a per-test fakeredis |
 | herdr | `herdr_host.binary()` and `herdr_setup.binary()` report no herdr, as in CI |
 | Live writes | any write into a live root, from any code, aborts the test |
-| Live programs | spawning a real `kubectl`, `helm`, `argocd` or `herdr`, one that resolves outside the test directory, aborts the test |
+| Live programs | spawning a real `kubectl`, `helm`, `argocd` or `herdr`, one that resolves outside the test directory, aborts the test: directly, behind `env`, `timeout`, `nohup`, `sudo`, `exec` and similar wrappers, inside a shell `-c` command or substitution, or through `os.system`. `os.spawn*` raises no audit event and is not seen |
 
 The live roots are read once, from the environment the run started with: the home names `.claude`, `.claude.json`,
 `.codex`, `.copilot`, `.agentihooks`, `.agents`, `.agentibrain`, `.kube`, `.config/herdr`, `.bashrc`, `.local/bin`
@@ -40,7 +40,7 @@ The operator's ledger folder and the shared ledger port are kept out by `tests/l
 
 ## Fakes for Kubernetes and herdr
 
-A test that needs either program writes an executable fake into its own `tmp_path` and puts that directory first on
+No default `kubectl` fake is installed: with no real binary on `PATH` (CI) the call fails as missing, and with one (a workstation) the call aborts. A test that needs either program writes an executable fake into its own `tmp_path` and puts that directory first on
 `PATH`. The guard lets a program run only when it resolves inside the test directory; a fake that is a symlink to a
 real binary resolves outside it and is refused. A test of herdr logic can instead patch `herdr_host.binary`.
 
@@ -51,7 +51,7 @@ temporary installation:
 
 - `claude_home`, `codex_home`, `brain_home`, `vault` (inside the brain home), `archive` and `kubeconfig`, all under
   `root`, with a fixture-only kube context and namespace `agentihooks-test-<run id>` whose server is unreachable;
-- `redis_url`, a socket inside `root` on database 15, and `redis_prefix`, `agentihooks-test-<run id>`;
+- `redis_url`, a socket inside `root` on database 15, and `redis_prefix`, `agentihooks-test-<run id>`; the socket path, database index and prefix are the fixture's Redis boundary, and no ACL user is created;
 - `traps`: a symlink to the real `~/.claude`, a `..` escape out of `root` and an environment value naming the real
   `~/.codex`, for rejection tests;
 - `environ()`, the variables that steer the live resolvers into the fixture.
@@ -67,7 +67,7 @@ Checks, each of which aborts the test and counts `test_live_path_rejections_tota
 | `sweep(redis, identities)` | a sweep by a run that does not own the prefix's owner marker (`redis`) |
 | `remove(identities)` | a root whose `.fixture-run` marker names another run, or a live root (`cleanup`) |
 
-Writes into live roots count under `write`, live programs under `program`.
+Writes into live roots count under `write`, live programs under `program`. The autouse fixture records each test's nonzero counts as the junit property `test_live_path_rejections_total`, which `evidence/SV2-FND-05/generate_case_results.py` sums per case.
 
 ## Recovery
 

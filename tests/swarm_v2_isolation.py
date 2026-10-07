@@ -10,10 +10,15 @@ import shutil
 import sys
 import uuid
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 METRIC = "test_live_path_rejections_total"
 MARKER = ".fixture-run"
@@ -45,23 +50,33 @@ CONFIGURED = (
 )
 LIVE_PROGRAMS = frozenset({"kubectl", "helm", "argocd", "herdr"})
 SHELLS = frozenset({"sh", "bash", "dash", "zsh"})
-SPAWN_EVENTS = frozenset({"subprocess.Popen", "os.posix_spawn", "os.exec"})
+WRAPPERS = frozenset({"env", "timeout", "nohup", "nice", "sudo", "exec", "command", "xargs", "stdbuf", "setsid"})
+DURATION = re.compile(r"\d+(\.\d+)?[smhd]?")
+SHELL_COMMAND_FLAG = re.compile(r"-[a-zA-Z]*c[a-zA-Z]*")
+SEGMENTS = re.compile(r"[;&|\n()`]+|\$\(")
+# os.spawn* raises no audit event, so a program started through it is not seen.
+SPAWN_EVENTS = frozenset({"subprocess.Popen", "os.posix_spawn", "os.exec", "os.system"})
 
 REJECTIONS: Counter = Counter()
 FIXTURE_ROOT: Path | None = None
 
 
-def refuse(dimension: str, message: str):
+def refuse(dimension: str, message: str) -> NoReturn:
     REJECTIONS[dimension] += 1
     pytest.fail(message)
 
 
-def live_roots(environ, home: Path) -> tuple[Path, ...]:
+def measurement() -> dict[str, dict[str, int]]:
+    return {METRIC: dict(REJECTIONS)}
+
+
+def live_roots(environ: Mapping[str, str], home: Path) -> tuple[Path, ...]:
     roots = [home / name for name in HOME_NAMES]
     if environ.get("XDG_CONFIG_HOME"):
         roots.append(Path(environ["XDG_CONFIG_HOME"]) / "herdr")
     for name in CONFIGURED:
-        roots += [Path(part) for part in re.split(f"[,{os.pathsep}]", environ.get(name, "")) if os.path.isabs(part)]
+        parts = re.split(f"[,{os.pathsep}]", environ.get(name, ""))
+        roots += [Path(part).expanduser() for part in parts if Path(part).expanduser().is_absolute()]
     return tuple(dict.fromkeys(root.resolve() for root in roots))
 
 
@@ -71,7 +86,7 @@ RUN_ID = uuid.uuid4().hex[:12]
 RUN_PREFIX = f"agentihooks-test-{RUN_ID}"
 
 
-def confine(root: Path, label: str, path) -> Path:
+def confine(root: Path, label: str, path: str | os.PathLike) -> Path:
     resolved = Path(path).resolve()
     if not resolved.is_relative_to(Path(root).resolve()):
         refuse("escape", f"{label} resolves outside the fixture directory {root}: {resolved}")
@@ -176,12 +191,12 @@ def owned(identities: Identities, key: str) -> str:
     return key
 
 
-def acquire(redis, identities: Identities, name: str, holder: str, ttl_ms: int) -> bool:
+def acquire(redis: "Redis", identities: Identities, name: str, holder: str, ttl_ms: int) -> bool:
     redis.set(identities.key("owner"), identities.run_id, nx=True)
     return bool(redis.set(owned(identities, identities.key("lock", name)), holder, nx=True, px=ttl_ms))
 
 
-def sweep(redis, identities: Identities) -> list[str]:
+def sweep(redis: "Redis", identities: Identities) -> list[str]:
     if redis.get(identities.key("owner")) != identities.run_id:
         refuse("redis", f"run {identities.run_id} does not own the keys under {identities.redis_prefix}")
     keys = sorted(redis.scan_iter(match=f"{identities.redis_prefix}:*"))
@@ -200,35 +215,59 @@ def remove(identities: Identities) -> None:
     shutil.rmtree(root)
 
 
-def _command_words(argv) -> list[str]:
+def _program(words: list[str]) -> str:
+    for word in words:
+        if word.startswith("-") or "=" in word or Path(word).name in WRAPPERS or DURATION.fullmatch(word):
+            continue
+        return word
+    return ""
+
+
+def _shell_command(argv: list[str]) -> str | None:
+    if Path(argv[0]).name not in SHELLS:
+        return None
+    for index, arg in enumerate(argv[1:], 1):
+        if not arg.startswith("-"):
+            return None
+        if SHELL_COMMAND_FLAG.fullmatch(arg):
+            return argv[index + 1] if index + 1 < len(argv) else None
+    return None
+
+
+def _programs(argv) -> list[str]:
     if isinstance(argv, (str, bytes, os.PathLike)):
         argv = [argv]
     argv = [os.fsdecode(arg) for arg in argv]
-    words = argv[:1]
-    if len(argv) > 2 and Path(argv[0]).name in SHELLS and argv[1].startswith("-") and "c" in argv[1]:
-        for segment in re.split(r"[;&|\n()]+", argv[2]):
-            words += [next((w for w in segment.split() if "=" not in w), "")]
-    return [word for word in words if word]
+    if not argv:
+        return []
+    programs = [_program(argv)]
+    command = _shell_command(argv)
+    if command is not None:
+        programs += [_program(segment.split()) for segment in SEGMENTS.split(command)]
+    return [program for program in programs if program]
 
 
 def _resolve(program: str, env) -> Path | None:
     if os.sep not in program:
-        search = (env if isinstance(env, dict) and "PATH" in env else os.environ).get("PATH")
-        program = shutil.which(program, path=search) or ""
+        program = shutil.which(program, path=os.pathsep.join(os.get_exec_path(env))) or ""
     return Path(program).resolve() if program and Path(program).exists() else None
 
 
 def refuse_live_program(event: str, args: tuple) -> None:
     if event not in SPAWN_EVENTS or FIXTURE_ROOT is None:
         return
-    executable, argv, env = (args[0], args[1], args[3]) if event == "subprocess.Popen" else args[:3]
-    words = _command_words(argv) + ([os.fsdecode(executable)] if executable else [])
-    for word in words:
-        if Path(word).name not in LIVE_PROGRAMS:
+    if event == "os.system":
+        executable, argv, env = None, ["sh", "-c", os.fsdecode(args[0])], None
+    elif event == "subprocess.Popen":
+        executable, argv, env = args[0], args[1], args[3]
+    else:
+        executable, argv, env = args[:3]
+    for program in _programs(argv) + ([os.fsdecode(executable)] if executable else []):
+        if Path(program).name not in LIVE_PROGRAMS:
             continue
-        resolved = _resolve(word, env)
+        resolved = _resolve(program, env)
         if resolved is not None and not resolved.is_relative_to(FIXTURE_ROOT):
-            refuse("program", f"refusing a live {Path(word).name} outside the test directory: {resolved}")
+            refuse("program", f"refusing a live {Path(program).name} outside the test directory: {resolved}")
 
 
 sys.addaudithook(refuse_live_program)
