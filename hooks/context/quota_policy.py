@@ -40,8 +40,11 @@ class Candidate:
     observed_at: float
     cap: int | None = None
 
+    def limit(self, default: int) -> int:
+        return self.cap or default
+
     def full(self, default: int) -> bool:
-        return self.sessions >= (self.cap or default)
+        return self.sessions >= self.limit(default)
 
     @property
     def routing_left(self) -> float:
@@ -251,7 +254,7 @@ def _others_text(d: Decision) -> str:
         return "no other account is configured; handoffs need at least 2 accounts"
     return "; ".join(
         f"{c.account} {_pct(c.routing_left)} left (5h {_pct(c.five_used)}, 7d {_pct(c.week_used)} used, "
-        f"{c.sessions}/{c.cap or d.max_sessions} sessions)"
+        f"{c.sessions}/{c.limit(d.max_sessions)} sessions)"
         for c in rows
     )
 
@@ -281,7 +284,7 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
             f"QUOTA HANDOFF REQUIRED — {head}\n"
             f"Policy decision (deterministic): move this task to another account now. "
             f"Router cache: {t.account} has {_pct(t.routing_left)} left (5h {_pct(t.five_used)}, "
-            f"7d {_pct(t.week_used)} used, {t.sessions}/{t.cap or d.max_sessions} sessions, observed {age}m ago); "
+            f"7d {_pct(t.week_used)} used, {t.sessions}/{t.limit(d.max_sessions)} sessions, observed {age}m ago); "
             f"the new terminal re-probes and picks the final account.\n"
             f"1. Write the handoff document to {doc}: goal, done so far (commits, PRs, evidence), "
             f"in progress, exact next steps, repo/worktree/branch, open risks, the operator's standing "
