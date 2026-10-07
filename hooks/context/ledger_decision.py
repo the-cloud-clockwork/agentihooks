@@ -29,6 +29,15 @@ PHASES_DIRECTIVE = (
     "The phases land planned manually and in review. Never start a new swarm for this plan, and do not implement "
     "it here."
 )
+OFFER_DIRECTIVE = (
+    "LEDGER DECISION: the operator accepted a plan and no ledger is bound to this session, but the plan names the "
+    "existing ledger {slug}. Offer that ledger first: ask the operator whether the plan continues {slug}. If it "
+    "does, write the plan's phases list in the init swarm shape to a file, then run `agentihooks ledger --slug "
+    "{slug} --as {name} plan phases <phases.json>`; the phases land planned manually and in review. If it does not, "
+    "start a swarm from the plan with the init-swarm skill. Do not implement the plan here. Only if the operator "
+    f"says no ledger and no swarm, run `{DECLINE}`."
+)
+TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
 SMALL_DIRECTIVE = (
     "LEDGER DECISION: the operator's rule puts this work on a small ledger ({reason}) and no ledger is bound to "
     "this session. Create it before any other tool call, even for a one line fix: the operator made this call, "
@@ -53,7 +62,7 @@ def directive(payload, environ=None):
             state["declined"] = True
         if state.get("declined"):
             return ""
-        trigger, text = _outcome(kind, payload, state, binding)
+        trigger, text = _outcome(kind, payload, state, binding, env)
         fired = state.setdefault("fired", [])
         if not trigger or trigger in fired or "plan" in fired:
             return ""
@@ -79,9 +88,9 @@ def _kind(payload):
     return "decline" if _declined(payload) else None
 
 
-def _outcome(kind, payload, state, binding=None):
+def _outcome(kind, payload, state, binding, env):
     if kind == "plan":
-        return "plan", PHASES_DIRECTIVE.format(**binding) if binding else SWARM_DIRECTIVE
+        return "plan", _plan_directive(payload, binding, env)
     if kind == "prompt":
         return "prompt", SMALL_DIRECTIVE.format(
             reason="the operator asked to troubleshoot, debug, investigate or refactor"
@@ -93,6 +102,15 @@ def _outcome(kind, payload, state, binding=None):
     if count < TASK_LIST_SIZE:
         return None, ""
     return "tasks", SMALL_DIRECTIVE.format(reason=f"the session's task list has {count} items")
+
+
+def _plan_directive(payload, binding, env):
+    if binding:
+        return PHASES_DIRECTIVE.format(**binding)
+    slug = _named_ledger(payload, env)
+    if not slug:
+        return SWARM_DIRECTIVE
+    return OFFER_DIRECTIVE.format(slug=slug, name=env.get("AGENTIHOOKS_AGENT_NAME") or "<your name>")
 
 
 def _declined(payload):
@@ -112,8 +130,32 @@ def _bound(env, session_id):
 
 
 def _session_file(env, session_id):
-    ledgers = Path(env.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
-    return ledgers / ".sessions" / f"{session_id}.json"
+    return _ledger_dir(env) / ".sessions" / f"{session_id}.json"
+
+
+def _ledger_dir(env):
+    return Path(env.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
+
+
+def _named_ledger(payload, env):
+    ledgers = _ledger_dir(env)
+    try:
+        binned = dict(json.loads((ledgers / ".bin.json").read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError):
+        binned = {}
+    for token in TOKEN_RE.findall(_plan_text(payload).lower()):
+        slug = token.rstrip("._-")
+        if slug not in binned and (ledgers / f"{slug}.json").is_file():
+            return slug
+    return ""
+
+
+def _plan_text(payload):
+    tool_input = payload.get("tool_input") or {}
+    try:
+        return Path(tool_input["planFilePath"]).read_text(encoding="utf-8")
+    except (KeyError, TypeError, OSError, ValueError):
+        return str(tool_input.get("plan") or tool_input.get("summary") or "")
 
 
 def _binding(env, session_id):
