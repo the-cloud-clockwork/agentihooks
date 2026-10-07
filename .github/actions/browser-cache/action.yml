@@ -1,0 +1,49 @@
+name: Verified Chromium cache
+description: Reuse Chromium only after its runtime dependencies pass a launch check
+runs:
+  using: composite
+  steps:
+    - name: Read the installed Playwright version
+      id: version
+      shell: bash
+      run: |
+        python - <<'PY'
+        from importlib.metadata import version
+        import os
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            output.write(f'version={version("playwright")}\n')
+        PY
+    - name: Restore Chromium
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.playwright
+        key: chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}
+    - name: Verify the cached browser and OS dependencies
+      id: launch
+      shell: bash
+      env:
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+      run: |
+        if [[ "$CACHE_HIT" == true ]] && timeout 10s bash "$GITHUB_ACTION_PATH/verify.sh"; then
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Use the Ubuntu archive for browser dependencies
+      if: steps.launch.outputs.ready != 'true'
+      shell: bash
+      run: timeout 60s sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+    - name: Install Chromium and missing OS dependencies
+      if: steps.launch.outputs.ready != 'true'
+      shell: bash
+      env:
+        PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+      run: timeout 120s python -m playwright install --with-deps chromium
+    - name: Verify the installed browser
+      if: steps.launch.outputs.ready != 'true'
+      shell: bash
+      env:
+        PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+      run: timeout 10s bash "$GITHUB_ACTION_PATH/verify.sh"
