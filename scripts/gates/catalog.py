@@ -14,5 +14,6 @@ def defaults():
 
 def current(gates):
     return {
-        name: gates.get(name) if gates.get(name) in modes.MODES else default for name, default in defaults().items()
+        name: gates.get(name) if gates.get(name) in modes.supported(name) else default
+        for name, default in defaults().items()
     }

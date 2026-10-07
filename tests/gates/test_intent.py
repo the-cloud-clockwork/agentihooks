@@ -107,9 +107,10 @@ class TestGate:
         decision = intent.IntentGate().decide(bash(command), WHO, verdicts(tmp_path))
         assert not decision.allowed
         assert decision.reason == (
-            f"intent check failed for task {TASK}: the phase can use this change at probability 0.10. Deliver the "
-            f"missing piece, then run agentihooks swarm {SLUG} pr <url> for a new check, or block with "
-            f'agentihooks swarm {SLUG} block "<why>"'
+            f"intent check failed for task {TASK}: the phase can use this change at probability 0.10. "
+            "Fix steps: Deliver the missing parent intent behavior identified in the verdict, "
+            "add evidence that the phase can use it as delivered, commit and push the fix, "
+            f"then run agentihooks swarm {SLUG} pr <url> for a new check."
         )
 
     @pytest.mark.parametrize(
@@ -346,20 +347,22 @@ class TestState:
     @pytest.mark.parametrize("body,expected", [(None, ""), ("Closes 4", "Closes 4")])
     def test_pr_view_reads_title_body_and_file_paths(self, body, expected):
         raw = {"title": "T", "body": body, "files": [{"path": "a.py", "additions": 1}, {"path": "b.py"}]}
-        ran = Ran((0, json.dumps(raw)), (0, ""))
+        ran = Ran((0, "abc123\n"), (0, json.dumps(raw)), (0, ""), (0, "abc123\n"))
         assert intent.pr_view(URL, run=ran) == {
+            "head": "abc123",
             "title": "T",
             "body": expected,
             "files": ["a.py", "b.py"],
             "reviewer_findings": {"reviews": [], "comments": [], "inline": []},
         }
-        args, kwargs = ran.calls[0]
+        args, kwargs = ran.calls[1]
         assert args == ["gh", "pr", "view", URL, "--json", "title,body,files,reviews,comments"]
         assert (kwargs["capture_output"], kwargs["text"], kwargs["timeout"]) == (True, True, intent.GH_TIMEOUT_SEC)
 
     @pytest.mark.parametrize("results", [[(1, "")], [(0, "nope")], [OSError("x")], [(0, json.dumps({"body": "b"}))]])
     def test_pr_view_returns_none_when_github_does_not_answer(self, results):
-        assert intent.pr_view(URL, run=Ran(*results)) is None
+        ran = Ran((0, "head"), *results)
+        assert intent.pr_view(URL, run=ran) is None
 
 
 class Ledger:
@@ -403,10 +406,14 @@ def run_pass(tmp_path, mode="enforce", usable=0.1, doc=DOC, view=None):
     return SimpleNamespace(actions=actions, ledger=ledger, mail=mail, viewed=viewed)
 
 
-FAIL_REASON = "the phase can use this change at probability 0.10, under 0.3"
+FAIL_REASON = (
+    "the phase can use this change at probability 0.10, under 0.3; What would meet intent: "
+    "Deliver Intent check: Refuse merge on a failed check.. The phase must be able to use it for Gates: Stop failures.."
+)
 FAIL_TEXT = (
-    f"The intent check failed: {FAIL_REASON}. Deliver the missing piece and run swarm pr again, "
-    "or block the task with these reasons."
+    f"The intent check failed: {FAIL_REASON}. Fix steps: Deliver the missing parent intent behavior identified in the verdict, "
+    "add evidence that the phase can use it as delivered, commit and push the fix, "
+    f"then run agentihooks swarm {SLUG} pr <url> for a new check."
 )
 
 

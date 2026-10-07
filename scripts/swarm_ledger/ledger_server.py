@@ -398,9 +398,13 @@ def gate_pairs(gates):
     if (
         not isinstance(gates, dict)
         or not gates
-        or not all(n in names and isinstance(m, str) and modes.normalize(m) in modes.MODES for n, m in gates.items())
+        or not all(
+            n in names and isinstance(m, str) and modes.normalize(m) in modes.supported(n) for n, m in gates.items()
+        )
     ):
-        raise ValueError(f"gates maps a gate of {', '.join(names)} to {', '.join(modes.LABELS.values())}")
+        raise ValueError(
+            f"gates maps a gate of {', '.join(names)} to {', '.join(modes.label(mode) for mode in modes.MODES)}"
+        )
     return [f"{name}-gate={mode}" for name, mode in gates.items()]
 
 
