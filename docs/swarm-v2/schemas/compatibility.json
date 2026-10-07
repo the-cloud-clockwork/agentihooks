@@ -9,10 +9,11 @@
     "A reader accepts a record whose major equals the contract major and whose minor is at least oldest_minor; a newer minor is additive and accepted.",
     "Authority fields live only in the closed authority object; an authority name outside it, or an unknown name inside it, is refused.",
     "Every record names execution_id, task_id and task_generation in its authority, except the error envelope.",
-    "A relay keeps unknown optional fields byte for byte on read, modify and write.",
+    "A relay keeps every unknown optional field and its value on read, modify and write.",
     "A consumer vendors these schema files and validates with a JSON Schema 2020-12 validator; it never imports the owner's runtime package.",
     "Schemas reference only urn:swarm-v2 identifiers inside this directory.",
-    "Rollback lowers write_minor so producers write the previous minor while readers keep accepting both."
+    "Rollback lowers write_minor so producers write the previous minor while readers keep accepting both.",
+    "Schemas fix wire layout; the field tables and examples in plan section 22 list field sets, and their authority fields travel inside the authority object."
   ],
   "contracts": {
     "launch": {

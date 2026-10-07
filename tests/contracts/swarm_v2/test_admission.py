@@ -41,7 +41,7 @@ def _refusal(reason, detail, operation_id, error="invalid_request", retry="new_r
 @pytest.mark.parametrize("family", ["current", "previous-minor", "newer-minor"])
 def test_supported_families_pass_the_check(loaded, contract, family):
     assert contracts.check(loaded, contract, _fixture(contract, family)) is None
-    assert contracts.failures(loaded) == {}
+    assert contracts.contract_validation_failures_total(loaded) == {}
 
 
 @pytest.mark.parametrize("contract", AUTHORITY_CONTRACTS)
@@ -76,7 +76,9 @@ def test_a_future_major_is_refused_before_any_write(loaded, tmp_path, contract):
     if contract != "error":
         assert contracts.admit(loaded, tmp_path / "store", contract, doc) == expected
         assert _snapshot(tmp_path / "store") == {}
-    assert contracts.failures(loaded) == {f"{contract}/unsupported_major": 2 if contract != "error" else 1}
+    assert contracts.contract_validation_failures_total(loaded) == {
+        f"{contract}/unsupported_major": 2 if contract != "error" else 1
+    }
 
 
 @pytest.mark.parametrize("contract", AUTHORITY_CONTRACTS)
@@ -90,7 +92,7 @@ def test_an_absent_execution_generation_is_refused_before_any_write(loaded, tmp_
     expected = _refusal("missing_authority", "authority lacks task_generation", "another-op")
     assert contracts.admit(loaded, tmp_path / "store", contract, doc) == expected
     assert _snapshot(tmp_path / "store") == before
-    assert contracts.failures(loaded) == {f"{contract}/missing_authority": 1}
+    assert contracts.contract_validation_failures_total(loaded) == {f"{contract}/missing_authority": 1}
 
 
 def test_a_record_without_authority_names_every_missing_field(loaded):
@@ -106,7 +108,7 @@ def test_the_counter_keeps_one_entry_per_contract_and_reason(loaded):
     contracts.check(loaded, "launch", _fixture("launch", "future-major"))
     contracts.check(loaded, "launch", _fixture("launch", "missing-authority"))
     contracts.check(loaded, "receipt", _fixture("receipt", "future-major"))
-    assert contracts.failures(loaded) == {
+    assert contracts.contract_validation_failures_total(loaded) == {
         "launch/unsupported_major": 2,
         "launch/missing_authority": 1,
         "receipt/unsupported_major": 1,
@@ -142,7 +144,7 @@ def test_a_minor_below_the_oldest_supported_is_refused(loaded):
         "unsupported_minor", "schema minor 0 is older than the oldest supported minor 1", doc["operation_id"]
     )
     assert contracts.check(narrowed, "heartbeat", _fixture("heartbeat")) is None
-    assert contracts.failures(narrowed) == {"heartbeat/unsupported_minor": 1}
+    assert contracts.contract_validation_failures_total(narrowed) == {"heartbeat/unsupported_minor": 1}
 
 
 def test_a_non_object_record_is_refused_with_an_unknown_operation(loaded):
@@ -263,7 +265,19 @@ def test_an_older_generation_cannot_overwrite_a_newer_accepted_record(loaded, tm
         retry="never",
     )
     assert _snapshot(tmp_path / "store") == before
-    assert contracts.failures(loaded) == {}
+    assert contracts.contract_validation_failures_total(loaded) == {}
+
+
+def test_a_display_label_grants_no_authority(loaded, tmp_path):
+    newer = _fixture("launch")
+    newer["authority"]["task_generation"] = 4
+    contracts.admit(loaded, tmp_path / "store", "launch", newer)
+    older = _fixture("launch")
+    older["operation_id"] = "labelled-op"
+    older["agent_name"] = "operator"
+    older["runtime_profile"] = "task_generation=9"
+    refusal = contracts.admit(loaded, tmp_path / "store", "launch", older)
+    assert (refusal["error"], refusal["operation_id"]) == ("stale_generation", "labelled-op")
 
 
 def test_the_same_generation_and_a_newer_one_are_both_accepted(loaded, tmp_path):

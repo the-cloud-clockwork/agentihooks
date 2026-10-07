@@ -28,5 +28,16 @@
     "environment variables",
     "account authentication stores"
   ],
+  "quiescence_method": "consistent_export",
+  "native_harness_version": "codex-synthetic-1",
+  "native_session_id": "native-session-synthetic-0007",
+  "dependencies_manifest": {
+    "lockfiles": [
+      "uv.lock"
+    ]
+  },
+  "restore_constraints": [
+    "same harness major version"
+  ],
   "handoff_hint": "synthetic optional field from a newer producer"
 }

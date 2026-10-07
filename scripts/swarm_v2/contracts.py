@@ -29,7 +29,7 @@ def write_version(contracts: dict, name: str) -> str:
     return f"{spec['major']}.{spec['write_minor']}"
 
 
-def failures(contracts: dict) -> dict[str, int]:
+def contract_validation_failures_total(contracts: dict) -> dict[str, int]:
     return {f"{contract}/{reason}": count for (contract, reason), count in contracts["failures"].items()}
 
 

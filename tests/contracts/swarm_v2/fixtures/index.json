@@ -5,42 +5,42 @@
       "family": "current",
       "file": "checkpoint/current.json",
       "expect": "valid",
-      "sha256": "9bdb0d1913ef6b5104a8a38b2f35583f39fc77684f4aa78f49cdf9a998eda392"
+      "sha256": "feefba867cb3a1c8465034ab5eae0100b396befdeb3c4b04278d5d247898a799"
     },
     {
       "contract": "checkpoint",
       "family": "previous-minor",
       "file": "checkpoint/previous-minor.json",
       "expect": "valid",
-      "sha256": "a09f7361de60347ec18b94138e1a9a5d33f8c494373fcb57919fd05e7245efbb"
+      "sha256": "5ea54a3c81bad55cf0840d8d54cbfc5a3461c001e574af95d26ffe0999c201f0"
     },
     {
       "contract": "checkpoint",
       "family": "future-major",
       "file": "checkpoint/future-major.json",
       "expect": "invalid",
-      "sha256": "77776ecf2d70736cc74f1c8386b607237eaafe6a15d1260f35f2c6671109d275"
+      "sha256": "829bd3b3301fdb5bc6518a5d10d83a22cee1d5c537170b61c28fead6f8e0bd0b"
     },
     {
       "contract": "checkpoint",
       "family": "missing-authority",
       "file": "checkpoint/missing-authority.json",
       "expect": "invalid",
-      "sha256": "86174115c2b1dc91d9d021e49f647ae094291d2c362117515d405ae0ecef01f5"
+      "sha256": "5ad3cd6f8dbf850cca9408af0aebf4e1d69f3a3346b790b31183a0ba087e14d6"
     },
     {
       "contract": "checkpoint",
       "family": "previous-minor-missing-authority",
       "file": "checkpoint/previous-minor-missing-authority.json",
       "expect": "invalid",
-      "sha256": "ddced523f698bd270a87aaa3756f14aa9acd1cb76daec8346317a8c7365ab1d0"
+      "sha256": "65b064c7fdbf017b5315ea65d0c8b363cae9e7ef0988e430f23cbc665ad5662a"
     },
     {
       "contract": "checkpoint",
       "family": "newer-minor",
       "file": "checkpoint/newer-minor.json",
       "expect": "valid",
-      "sha256": "04289836b2a1f4106abd3205565b65f061e3bc1835a8618b51b82ade038bc603"
+      "sha256": "6eec0d0933dfa807312855553189156a866aba95f9640c78db611debbaf9db12"
     },
     {
       "contract": "command",
@@ -285,42 +285,42 @@
       "family": "current",
       "file": "session_event/current.json",
       "expect": "valid",
-      "sha256": "7708a032c9725916839cef2e7f57772ac01f2bdafa4b75c99b63bc0c3ce3a75c"
+      "sha256": "4c893a071f4c7f4aa76e00714e6b3b352d5664aba6b4b8f6ccff20ee5ce26589"
     },
     {
       "contract": "session_event",
       "family": "previous-minor",
       "file": "session_event/previous-minor.json",
       "expect": "valid",
-      "sha256": "30cfab4aad9075fa7c4b8938e3f2e3ec521eda86757e0a4ede18944877e6867c"
+      "sha256": "918676fef6ca573977141e5532cf573367f7b664a4804943ac33c93d39c64a95"
     },
     {
       "contract": "session_event",
       "family": "future-major",
       "file": "session_event/future-major.json",
       "expect": "invalid",
-      "sha256": "3253eb3a82dcf31f9e5c30895e426c8a889aed6e58467f6fe2878ee8088e40b5"
+      "sha256": "f4658d4763099dd2a1bd3cd2ba66adfcada4179d1e9439971d81faab23d13892"
     },
     {
       "contract": "session_event",
       "family": "missing-authority",
       "file": "session_event/missing-authority.json",
       "expect": "invalid",
-      "sha256": "0f28d9be3a07be22a7325f2af5a73e3fda89bedb8715d24d026109f4ff20f6c1"
+      "sha256": "f28e9928dc76f2b5561c7b2fba3a4b6e2a06364a1012a13e985dd18181ed65f9"
     },
     {
       "contract": "session_event",
       "family": "previous-minor-missing-authority",
       "file": "session_event/previous-minor-missing-authority.json",
       "expect": "invalid",
-      "sha256": "a26eff2a45b3350ba93f3514552211152b2d78eba51a5b33d5cf77cf47ea4986"
+      "sha256": "13de38e2de256e178fe81f679f1148982cae76899842546d2abf52055ce94c6c"
     },
     {
       "contract": "session_event",
       "family": "newer-minor",
       "file": "session_event/newer-minor.json",
       "expect": "valid",
-      "sha256": "9f6d0ab8a4f6e09ee820de67e6835e33180178cf156a797432f4c885fcd31d23"
+      "sha256": "b477093458f574b5e3220945387bc6b1755a9ccd9c19ede42d07961a8b1d8c5a"
     }
   ]
 }
