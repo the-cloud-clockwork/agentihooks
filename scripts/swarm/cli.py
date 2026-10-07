@@ -8,6 +8,7 @@ agentihooks swarm <id> url                                        print the ledg
 agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
 agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
 agentihooks swarm <id> take-master [--replace]                    this session becomes the master and prints its priming
+agentihooks swarm <id> master up [--last | --new]                 from a terminal: bring back the last master's conversation or start a new one
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
 agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
@@ -65,6 +66,7 @@ from scripts.swarm import (
     done_gate,
     idle,
     ledger_events,
+    master_launch,
     naming,
     phase_planning,
     phase_state,
@@ -76,6 +78,7 @@ from scripts.swarm import (
     snapshot,
     take_master,
     templates,
+    tick_master,
     timer,
     trace_plan,
     waits,
@@ -83,7 +86,7 @@ from scripts.swarm import (
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.runtime import HerdrRuntime, _bin
+from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
 from scripts.swarm.tick import agent_status, primed, tick
@@ -180,6 +183,8 @@ def cmd_list(store, args):
 def cmd_tick(store, args):
     from scripts import operator_env
 
+    if why := timer.installed_refusal():
+        raise SwarmError(f"the tick refused to run: {why}")
     operator_env.fill(os.environ)
     for slug in store.slugs():
         try:
@@ -231,7 +236,7 @@ def _state(store, args, state):
     if state == "running":
         store.redis.delete(store.key(args.slug, "master-retired-tasks"))
     store.update(args.slug, state=state)
-    if state == "running" and not timer.ensure(_bin()):
+    if state == "running" and not timer.ensure(timer.entry_point()):
         print("warning: the systemd timer could not be enabled; run agentihooks swarm tick yourself", file=sys.stderr)
     for action in run_tick(store, args.slug):
         print(action)
@@ -355,7 +360,7 @@ def cmd_take_master(store, args):
         ledger.reopen(args.slug, record.name)
     if store.config(args.slug).state in ("stopped", "stopping"):
         store.update(args.slug, state="running")
-        timer.ensure(_bin())
+        timer.ensure(timer.entry_point())
     config = store.config(args.slug)
     task = {
         "id": MASTER,
@@ -367,6 +372,21 @@ def cmd_take_master(store, args):
     print(prompt.build_master(args.slug, config.repo, record.name, task, config.autonomy))
     injection_trace.record_rows(os.environ.get("CLAUDE_CODE_SESSION_ID", ""), priming_trace.rows(args.slug, task))
     store.clear_handoff(args.slug, MASTER)
+
+
+def cmd_master(store, args):
+    runtime = HerdrRuntime()
+    if args.slug not in store.slugs():
+        snapshot.recreate(store, args.slug, runtime.live_names())
+    launched = master_launch.up(store, args.slug, runtime, now_ms(), args.choice, input, print)
+    ledger = LedgerClient(service=True)
+    if ledger.closed(args.slug):
+        ledger.reopen(args.slug, launched.master)
+    if store.config(args.slug).state in ("stopped", "stopping"):
+        store.update(args.slug, state="paused")
+        timer.ensure(timer.entry_point())
+    ledger.join(args.slug, launched.master, "orchestrator")
+    print(json.dumps(asdict(launched)))
 
 
 def gate_mode(key, value, environ=None):
@@ -522,6 +542,8 @@ def cmd_status(store, args):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))
     print(_snapshot_line(auto_snapshot(config)))
     print(_affinity_line(affinity.report(store, args.slug, config, agents)))
+    if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
+        print(promotion)
     print("Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tModel source\tConfidence")
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
@@ -941,6 +963,10 @@ def build_parser():
     close.add_argument("--note", default="")
     close.add_argument("--now", action="store_true")
     sub.add_parser("take-master").add_argument("--replace", action="store_true")
+    master_up = sub.add_parser("master").add_subparsers(dest="action", required=True).add_parser("up")
+    pick = master_up.add_mutually_exclusive_group()
+    pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
+    pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")

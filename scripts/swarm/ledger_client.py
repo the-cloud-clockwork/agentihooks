@@ -119,6 +119,9 @@ class LedgerClient:
 
         ledger_bin.restore(slug)
 
+    def join(self, slug, name, role):
+        self._call(slug, [_op("join", name, role=role)])
+
     def bin_closed(self, slug, closed_at):
         _ledger()
         import ledger_bin

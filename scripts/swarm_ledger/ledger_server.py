@@ -824,7 +824,7 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 <= length <= MAX_BODY:
                 raise ValueError("body size out of range")
             body = core.loads(self.rfile.read(length) or b"{}")
-            state, _ = core.sync(slug)
+            state = repository.get_document(slug, reconcile=not core.paths(slug)[1].exists())
             task_ids = tuple(task["id"] for task in state.get("tasks", []))
             changes, ops = core.check_body(body, task_ids)
             ledger_media.resolve(slug, ops)

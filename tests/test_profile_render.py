@@ -159,6 +159,36 @@ def test_swarm_roles_render_only_the_task_browser(world, role, target):
     assert not settings["enabledPlugins"].get("playwright@claude-plugins-official", False)
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_a_role_overlay_keeps_the_logged_in_extension_browser(world, target):
+    from scripts.profiles import render
+
+    extension = {
+        "command": "cmd.exe",
+        "args": ["/c", "npx", "@playwright/mcp@latest", "--extension"],
+        "env": {"PLAYWRIGHT_MCP_EXTENSION_TOKEN": "${PLAYWRIGHT_EXT_TOKEN_NESTORCOLT_GMAIL}"},
+    }
+    for role in ("master", "engineer"):
+        _write(world["bundle"] / "profiles" / role / "profile.yml", f"name: {role}\nextends: [package:{role}]\n")
+    _write(
+        world["bundle"] / "profiles" / "master" / ".claude" / ".mcp.json",
+        json.dumps({"mcpServers": {"playwright-ext-nestorcolt-gmail": extension, "playwright-tcc": extension}}),
+    )
+
+    def browsers(role):
+        out = render.render(target, role)
+        if target == "claude":
+            servers = json.loads((out / ".claude.json").read_text())["mcpServers"]
+        else:
+            servers = tomllib.loads((out / "config.toml").read_text())["mcp_servers"]
+        return {k: v for k, v in servers.items() if "playwright" in k}
+
+    master = browsers("master")
+    assert sorted(master) == ["playwright-cmd", "playwright-ext-nestorcolt-gmail"]
+    assert "--extension" in master["playwright-ext-nestorcolt-gmail"]["args"]
+    assert list(browsers("engineer")) == ["playwright-cmd"]
+
+
 def test_operator_profile_keeps_its_browser(world):
     from scripts.profiles import render
 
@@ -1153,6 +1183,22 @@ def test_stamp_ignores_operator_plugins(world, target):
     assert render.render(target, "rb-role") is None
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_stamp_redoes_render_when_agentihooks_base_settings_change(world, target, tmp_path, monkeypatch):
+    from scripts.profiles import render
+
+    install = world["install"]
+    profiles = tmp_path / "agentihooks-profiles"
+    shutil.copytree(install.PROFILES_DIR / "_base", profiles / "_base")
+    monkeypatch.setattr(install, "PROFILES_DIR", profiles)
+    assert render.render(target, "rb-role") is not None
+    assert render.render(target, "rb-role") is None
+
+    base = profiles / "_base" / install._NATIVE_BASE_NAME[target]
+    base.write_text(base.read_text() + "\n")
+    assert render.render(target, "rb-role") is not None
+
+
 def test_stamp_names_the_chain_role_defaults(world, monkeypatch):
     from scripts.profiles import plugins, render
 
@@ -1207,8 +1253,15 @@ def test_stamp_names_bundle_commit_and_chain(world):
 
     head = _git(world["bundle"], "rev-parse", "HEAD").strip()
     chain = ["rb-base", "rb-kit", "rb-role"]
-    assert render.stamp("rb-role") == {"bundle_commit": head, "chain": chain, "plugins": {}, "corrections": ""}
-    assert render._stamp(None, []) == {"bundle_commit": "", "chain": [], "plugins": {}, "corrections": ""}
+    base = render._base_digest()
+    assert render.stamp("rb-role") == {
+        "bundle_commit": head,
+        "base": base,
+        "chain": chain,
+        "plugins": {},
+        "corrections": "",
+    }
+    assert render._stamp(None, []) == {"bundle_commit": "", "base": base, "chain": [], "plugins": {}, "corrections": ""}
     assert render._roots(None, [("rb-role", world["role"])]) == [world["role"]]
 
 

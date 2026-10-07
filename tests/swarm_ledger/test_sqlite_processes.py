@@ -37,6 +37,7 @@ def test_process_crash_rolls_back_sqlite(tmp_path):
 
 def test_separate_processes_serialize_file_and_shadow_writes(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setenv("LEDGER_SQLITE_SHADOW", "1")
     repo = FileLedgerRepository()
     repo.create(
         "processes",

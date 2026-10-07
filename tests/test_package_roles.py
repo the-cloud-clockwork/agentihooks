@@ -23,6 +23,7 @@ GATES = {
     "pre-edit+write+multiedit+notebookedit+mcp__serena+bash.git-build_gate.py",
     "pre-monitor+taskoutput+bashoutput+bash.gh+bash.sleep+bash.agentihooks-watch_budget.py",
     "stop-claim_stop.py",
+    "stop-push_stop.py",
 }
 
 

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import hooks.hook_manager as hm
-from hooks.context import conditions, ledger_request, operator_words, profile_chain
+from hooks.context import conditions, ledger_request, profile_chain
 from hooks.hook_manager import BlockAction
 
 pytestmark = pytest.mark.unit
@@ -249,12 +249,13 @@ class TestWriteGuard:
             )
 
     @staticmethod
-    def _task_comments(tmp_path, monkeypatch, comments):
+    def _task_comments(tmp_path, monkeypatch, comments, **task):
         monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
         monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
         monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t1")
         members = {"master@a1-1": {"role": "orchestrator"}}
-        ledger = {"tasks": [{"id": "t1", "comments": comments}], "_meta": {"members": members}}
+        tasks = [{"id": "t1", "comments": comments, **task}, {"id": "t2", "comments": []}]
+        ledger = {"tasks": tasks, "_meta": {"members": members}}
         (tmp_path / "demo.json").write_text(json.dumps(ledger))
 
     def test_an_operator_comment_on_the_agents_task_opens_it(self, tmp_path, monkeypatch):
@@ -264,17 +265,23 @@ class TestWriteGuard:
         assert conditions.write_guard("mcp__agentihooks__condition_set", {"step": "pre"}, SID) is None
         assert conditions.gate_source(SID) == {"source": "ledger", "ref": "c-7"}
 
-    def test_a_master_relay_opens_it_only_with_the_operators_typed_words(self, tmp_path, monkeypatch):
+    def test_an_approval_older_than_thirty_minutes_opens_it_for_its_task_until_the_task_closes(
+        self, tmp_path, monkeypatch
+    ):
         request = "set the no code edits conditions"
         marks = {"relayed_by": "master@a1-1", "relayed_from": "master pane", "quote": request}
-        relayed = {"id": "c-8", "by": "operator", "at": int(time.time() * 1000), "text": request, **marks}
-        self._task_comments(tmp_path, monkeypatch, [relayed])
+        relayed = {"id": "c-8", "by": "operator", "at": int((time.time() - 7200) * 1000), "text": request, **marks}
         write = ("Write", {"file_path": "/b/.claude/conditions/pre-bash-x.sh", "content": "exit 2"})
-        assert conditions.write_guard(*write, SID) == conditions.GATE_MESSAGE
-        assert not conditions.is_armed(SID)
-        operator_words.record("master@a1-1", request)
+        self._task_comments(tmp_path, monkeypatch, [relayed])
         assert conditions.write_guard(*write, SID) is None
         assert conditions.gate_source(SID) == {"source": "relay", "ref": "c-8"}
+        conditions.disarm_gate(SID)
+        monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t2")
+        assert conditions.write_guard(*write, SID) == conditions.GATE_MESSAGE
+        monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t1")
+        self._task_comments(tmp_path, monkeypatch, [relayed], state="done", done=True)
+        assert conditions.write_guard(*write, SID) == conditions.GATE_MESSAGE
+        assert not conditions.is_armed(SID)
 
     def test_a_failed_lookup_refuses(self, monkeypatch):
         def broken(asks):

@@ -553,6 +553,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .lbl.live, .lbl.confirmed { color: var(--positive); }
 .lbl.idle, .lbl.waiting, .lbl.pending, .lbl.awaiting-decision, .lbl.unknown { color: var(--warn); }
 .lbl.stalled, .lbl.absent { color: var(--destructive); }
+.lbl.promoted { color: var(--warn); }
+.sw-promoted { display: inline-flex; gap: 8px; }
 .lbl.on::before, .lbl.off::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: middle; }
 .lbl.master { letter-spacing: .06em; }
 .lbl.master::before { content: ""; display: inline-block; margin-right: 6px; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-right: 6px solid currentColor; }

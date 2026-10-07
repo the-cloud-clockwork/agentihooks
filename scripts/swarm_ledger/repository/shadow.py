@@ -1,4 +1,5 @@
 import fcntl
+import os
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -18,7 +19,13 @@ def storage_lock(directory: Path):
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+def enabled() -> bool:
+    return os.environ.get("LEDGER_SQLITE_SHADOW") == "1"
+
+
 def persist(directory: Path, slug: str, state: dict) -> None:
+    if not enabled():
+        return
     stat = (directory / f"{slug}.json").stat()
     signature = encode((stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size))
     SQLiteLedgerRepository(directory / "ledger-shadow.sqlite3").import_document(
@@ -32,6 +39,8 @@ def persist(directory: Path, slug: str, state: dict) -> None:
 
 
 def persist_lifecycle(directory: Path, removed: list | None = None) -> None:
+    if not enabled():
+        return
     SQLiteLedgerRepository(directory / "ledger-shadow.sqlite3").apply_lifecycle(
         directory, bin_storage.registries(), removed
     )

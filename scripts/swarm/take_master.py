@@ -7,7 +7,7 @@ from hooks.context.account_sessions import agent_pid
 from hooks.context.broadcast import name_session
 from scripts.handoff import transfers
 from scripts.inbox.seats import seat_address
-from scripts.swarm import launch_model, naming
+from scripts.swarm import launch_check, launch_model, naming
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 
 
@@ -69,4 +69,5 @@ def take(store, slug, name, runtime, now_ms, replace_live=False):
     )
     store.seats.occupy(record.seat, name, now_ms)
     store.put_agent(slug, record)
+    launch_check.begin(store, slug, record, now_ms, relaunch=False)
     return record, transfers.attach(store, slug, record)

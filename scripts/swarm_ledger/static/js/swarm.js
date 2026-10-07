@@ -93,7 +93,7 @@ function agentRows(sw, now) {
   return agents.map((a) => {
     const master = a.lane === "master";
     return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
-      state: master && (a.status || "working") === "working" ? "live" : a.status || "working", age: a.started_at ? span(now - a.started_at) : "—" };
+      state: master && (a.status || "working") === "working" ? "live" : a.status || "working", promoted: !!a.promoted, age: a.started_at ? span(now - a.started_at) : "—" };
   });
 }
 
@@ -171,7 +171,7 @@ export function renderSwarm(sw) {
   const agents = agentRows(sw, now);
   $("agents-count").textContent = `${agents.length} live`;
   $("swarm-agents").replaceChildren(...(agents.length ? agents.map((a) => cells(idCell(a.name), a.lane, a.profile, a.model,
-    a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—", label(a.state), a.age, agentActions(a))) : [emptyRow(8, "No agents running. Start the swarm to work the open tasks.")]));
+    a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—", a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state), a.age, agentActions(a))) : [emptyRow(8, "No agents running. Start the swarm to work the open tasks.")]));
   $("tasks-open").textContent = `${(sw.tasks || {}).open || 0} open`;
   kv("swarm-tasks", taskFigures(sw, doc));
   const quota = quotaRows(sw, now);

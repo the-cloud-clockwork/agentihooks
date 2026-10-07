@@ -16,6 +16,7 @@ from scripts.targets._common import _install_module
 
 ROLES = frozenset(("engineer", "cicd", "planner", "master", "qa"))
 NAME = "playwright-cmd"
+EXTENSION = "playwright-ext-"
 
 
 def enabled(chain: list[str]) -> bool:
@@ -31,7 +32,11 @@ def configure(servers: dict, chain: list[str]) -> dict:
     if not enabled(chain):
         return servers
     return {
-        **{name: server for name, server in servers.items() if "playwright" not in name.lower()},
+        **{
+            name: server
+            for name, server in servers.items()
+            if "playwright" not in name.lower() or name.startswith(EXTENSION)
+        },
         NAME: spec(),
     }
 

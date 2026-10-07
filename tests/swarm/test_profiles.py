@@ -94,7 +94,7 @@ def test_runtime_forwards_and_records_profile(tmp_path, lane, profile, harness):
     argv = calls[0]
     assert argv[argv.index("--profile") + 1] == profile
     assert (placed.profile, placed.model, placed.effort) == (profile, "chosen", "low")
-    record = tick._placed(store.AgentRecord("a", lane, "t"), placed)
+    record = tick.placed_record(store.AgentRecord("a", lane, "t"), placed)
     saved = store.RedisStore(fakeredis.FakeRedis(decode_responses=True))
     saved.create(config)
     saved.put_agent("sw", record)

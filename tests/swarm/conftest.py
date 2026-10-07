@@ -23,3 +23,11 @@ def isolate_classifier(monkeypatch):
     monkeypatch.setattr(intent, "decide", unavailable)
     monkeypatch.setattr(intent, "stamp_body", lambda url, doc, task, run=None: False)
     monkeypatch.setattr(intent, "pr_view", lambda url, run=None: None)
+
+
+@pytest.fixture(autouse=True)
+def unchecked_launches(request, monkeypatch):
+    from scripts.swarm import launch_check
+
+    if not getattr(request.module, "LAUNCH_CHECKED", False):
+        monkeypatch.setattr(launch_check, "begin", lambda *args, **kwargs: None)

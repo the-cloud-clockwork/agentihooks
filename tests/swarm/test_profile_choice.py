@@ -249,7 +249,7 @@ def test_runtime_records_the_decision_and_launches_its_profile(tmp_path, asked, 
     assert placed.profile_decision["profile"] == "frontend"
     assert placed.profile_decision["source"] == "classifier"
     assert placed.profile_decision["confidence"] == 0.9
-    assert tick._placed(store.AgentRecord("a", "eng", "t9"), placed).profile_decision == placed.profile_decision
+    assert tick.placed_record(store.AgentRecord("a", "eng", "t9"), placed).profile_decision == placed.profile_decision
 
 
 def test_runtime_refuses_launch_on_unresolved_profile(tmp_path, asked):
