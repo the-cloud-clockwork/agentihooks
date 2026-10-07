@@ -3,7 +3,7 @@
   "status": "awaiting dependency and CI",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1470",
   "pull_request": null,
-  "tested_commit": "adc5491688364657155a331accfc1ddccd6b25af",
+  "tested_commit": "73b36d8279c8c69f1e654d492f973d27272cf35b",
   "evidence_class": "local isolated Git fixtures; not a CI or rollout claim",
   "supported_versions": {
     "project_metadata": "2.0",
@@ -18,7 +18,7 @@
     "AGENTIHOOKS_PROJECT_ID for non Git registration"
   ],
   "states": {
-    "observed": "47 focused tests passed; 40 canonical identity tests; legacy identity and project memory tests passed",
+    "observed": "48 focused tests passed; 41 canonical identity tests; legacy identity and project memory tests passed",
     "accepted": "identity metadata satisfies schema; unsafe remotes yield unknown and empty remote; Git configuration and alias map bytes preserved",
     "committed": "implementation commit recorded in tested_commit; fixture case reports are additive",
     "externally_verified": "unverified; dependency SV2-FND-05 is still open; full CI and mutation gate run after restack and PR creation"
@@ -42,5 +42,9 @@
     "Only unambiguous HTTPS and SSH owner/repository remotes are accepted; ports and nested groups remain unknown.",
     "Alias documents are persisted by their authoritative caller; this resolver neither writes them nor grants permissions.",
     "Full CI, mutation, final PR link and rollout proof remain unverified; task must not be marked complete."
-  ]
+  ],
+  "reviews": {
+    "standards": "S1 closed at tested_commit after tilde normalization regression; no remaining findings",
+    "spec": "Implementation and scoped fix have no findings; final evidence refresh review pending"
+  }
 }
