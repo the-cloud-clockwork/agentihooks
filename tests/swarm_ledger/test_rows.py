@@ -1,4 +1,5 @@
 import copy
+import json
 
 import pytest
 
@@ -46,6 +47,22 @@ def test_storage_rows_are_normalized_and_idempotent(tmp_path):
         assert connection.execute("SELECT COUNT(*) FROM resources WHERE slug=?", ("rows",)).fetchone()[0] > 0
         assert connection.execute("SELECT COUNT(*) FROM threads WHERE slug=?", ("rows",)).fetchone()[0] > 0
         assert connection.execute("SELECT COUNT(*) FROM fields WHERE slug=?", ("rows",)).fetchone()[0] > 0
+        for table in ("fields", "resources", "threads"):
+            for (path,) in connection.execute(f"SELECT path FROM {table} WHERE slug=?", ("rows",)):
+                parts = json.loads(path)
+                if any(part in ("comments", "answers") for part in parts if isinstance(part, str)):
+                    assert table == "threads"
+                elif parts and parts[0] in (
+                    "tasks",
+                    "questions",
+                    "artifacts",
+                    "artifact_trash",
+                    "notifications",
+                    "priorities",
+                ):
+                    assert table == "resources"
+                else:
+                    assert table == "fields"
     trace = []
     repo.trace = trace.append
     repo.import_document("rows", state)
@@ -59,3 +76,12 @@ def test_missing_and_null_delta_markers_are_distinct():
     assert changes({"gone": None}, {}) == {"gone": None}
     assert changes({"same": None}, {"same": None}) == {}
     assert changes({"same": 1}, {"same": 1}) == {}
+
+
+def test_unicode_encoding_is_compact_and_nonfinite_values_are_refused():
+    from scripts.swarm_ledger.repository.rows import encode
+
+    assert encode({"name": "é", "items": [True, None]}) == '{"name":"é","items":[true,null]}'
+    for value in (float("nan"), float("inf"), -float("inf")):
+        with pytest.raises(ValueError):
+            encode(value)

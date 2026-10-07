@@ -169,3 +169,40 @@ def test_sqlite_changes_operations_and_gate_keep_file_semantics(files):
     assert rejected == []
     assert state["phases"][0]["comments"][0]["text"] == "New comment"
     assert shadow.get_document("shadow", reconcile=False) == state
+
+
+def test_lifecycle_metadata_survives_document_mutations_and_new_import(files):
+    from scripts.swarm_ledger.repository import bin_storage
+
+    files.delete("shadow", now=12)
+    files.restore("shadow", now=15)
+    files.delete("shadow", now=16)
+    state, rejected = files.apply_ops("shadow", ops=[{"op": "join", "id": "newjoin", "by": "eng"}])
+    assert rejected == []
+    repo = SQLiteLedgerRepository(core.LEDGER_DIR / "ledger-shadow.sqlite3")
+    assert repo.lifecycle("shadow") == {"deleted_at": 16, "restored_at": 15}
+    assert repo.registry("bin") == bin_storage.registries()["bin"]
+    assert repo.registry("restored") == bin_storage.registries()["restored"]
+    imported = SQLiteLedgerRepository(core.LEDGER_DIR / "lifecycle-import.sqlite3")
+    imported.apply_lifecycle(core.LEDGER_DIR, bin_storage.registries())
+    assert imported.get_document("shadow") == state
+    assert imported.lifecycle("shadow") == {"deleted_at": 16, "restored_at": 15}
+
+
+def test_changed_authoritative_file_at_same_revision_is_reimported(files):
+    state = files.get_document("shadow", reconcile=False)
+    state["extension"] = {"data": True}
+    core.atomic_write(core.paths("shadow")[1], core.json.dumps(state))
+    reconciled = files.get_document("shadow")
+    assert reconciled["_meta"]["rev"] == state["_meta"]["rev"]
+    assert SQLiteLedgerRepository(core.LEDGER_DIR / "ledger-shadow.sqlite3").get_document("shadow") == reconciled
+
+
+def test_seed_read_uses_retained_snapshot_without_file_reconciliation(files, monkeypatch):
+    repo = SQLiteLedgerRepository(core.LEDGER_DIR / "ledger-shadow.sqlite3", files)
+    state = repo.get_document("shadow", reconcile=False)
+    revision = str(state["_meta"]["rev"])
+    monkeypatch.setattr(
+        files, "get_document", lambda *args: (_ for _ in ()).throw(RuntimeError("unexpected reconcile"))
+    )
+    assert repo.get_seed("shadow", revision) == state["_meta"]["seeds"][revision]

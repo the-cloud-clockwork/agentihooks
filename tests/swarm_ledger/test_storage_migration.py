@@ -7,7 +7,6 @@ from scripts.swarm_ledger.repository import FileLedgerRepository
 from scripts.swarm_ledger.repository.file import core
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 from scripts.swarm_ledger.storage_migration import import_directory
-from scripts.swarm_ledger.storage_migration.__init__ import import_directory as import_storage
 from tests.swarm_ledger.test_sqlite import document
 
 
@@ -67,6 +66,7 @@ def test_migration_command_imports_the_requested_directory(tmp_path, monkeypatch
 
 
 def test_html_only_seed_is_imported_without_creating_a_file_snapshot(tmp_path, monkeypatch):
+    assert import_directory.__module__ != "scripts.swarm_ledger.storage_migration.__init__"
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(core, "now_ms", lambda: 123)
     files = FileLedgerRepository()
@@ -81,11 +81,11 @@ def test_html_only_seed_is_imported_without_creating_a_file_snapshot(tmp_path, m
     document, meta, _ = load_state(snapshot, seed, core)
     meta["updated_at"] = (tmp_path / "legacy.html").stat().st_mtime_ns // 1_000_000
     database = tmp_path / "import.sqlite3"
-    assert import_storage(tmp_path, database) == ["legacy"]
+    assert import_directory(tmp_path, database) == ["legacy"]
     assert SQLiteLedgerRepository(database).get_document("legacy") == {**document, "_meta": meta}
     assert not snapshot.exists()
     monkeypatch.setattr(core, "now_ms", lambda: 456)
-    assert import_storage(tmp_path, database) == ["legacy"]
+    assert import_directory(tmp_path, database) == ["legacy"]
     assert SQLiteLedgerRepository(database).get_document("legacy") == {**document, "_meta": meta}
 
 
