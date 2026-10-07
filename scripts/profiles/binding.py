@@ -42,6 +42,16 @@ def request(report: Path, profile: str, target: str) -> None:
     _report(report, {"profile": profile, "harness": target, "state": "pending"})
 
 
+def refuse(report: Path, reason: str) -> None:
+    requested = json.loads(report.read_text())
+    if requested["state"] == "pending":
+        _report(report, {**requested, "state": "failed", "reason": reason})
+
+
+def refused(report: Path) -> bool:
+    return json.loads(report.read_text())["state"] == "failed"
+
+
 def process(proc: Path = Path("/proc"), start: int | None = None) -> tuple[int, str, dict[str, str], str]:
     from hooks.context.account_sessions import account_from_names, codex_account_from_names
 

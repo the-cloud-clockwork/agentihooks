@@ -3,11 +3,12 @@ import os
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 
 import yaml
 
 from scripts import init_agent
-from scripts.profiles import plugins
+from scripts.profiles import binding, plugins
 from scripts.profiles import render as profiles
 
 
@@ -99,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
         env, command = prepare(args.name, args.agent, args.model, args.effort, arguments[split + 1 :], dict(os.environ))
     except (OSError, ValueError) as exc:
         print(f"agentihooks select-profile: {exc}", file=sys.stderr)
+        if os.environ.get(binding.REPORT):
+            binding.refuse(Path(os.environ[binding.REPORT]), f"profile selection failed: {exc}")
         return 2
     command = ["agentihooks", args.agent, *command]
     if args.dry_run:

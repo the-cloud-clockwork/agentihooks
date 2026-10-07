@@ -1,8 +1,10 @@
+import json
 from unittest.mock import Mock
 
 import pytest
 
 from scripts import init_agent, select_profile
+from scripts.profiles import binding
 
 
 @pytest.fixture
@@ -59,6 +61,27 @@ def test_copilot_refused_before_render(profile, capsys):
     assert select_profile.main(["qa", "--agent", "copilot"]) == 2
     assert capsys.readouterr().err == "agentihooks select-profile: copilot per-run profiles are not supported\n"
     profile[1].assert_not_called()
+
+
+@pytest.mark.parametrize("state", ["pending", "validated", "failed"])
+def test_a_failed_selection_fails_only_a_pending_launch_report(profile, monkeypatch, state):
+    root, _ = profile
+    report = root / "report.json"
+    requested = {"profile": "qa", "harness": "copilot", "state": state}
+    report.write_text(json.dumps(requested))
+    monkeypatch.setenv(binding.REPORT, str(report))
+    assert select_profile.main(["qa", "--agent", "copilot"]) == 2
+    if state == "pending":
+        requested.update(state="failed", reason="profile selection failed: copilot per-run profiles are not supported")
+    assert json.loads(report.read_text()) == requested
+
+
+def test_a_failed_selection_without_a_launch_report_writes_nothing(profile, monkeypatch):
+    root, _ = profile
+    monkeypatch.delenv(binding.REPORT, raising=False)
+    before = sorted(root.rglob("*"))
+    assert select_profile.main(["qa", "--agent", "copilot"]) == 2
+    assert sorted(root.rglob("*")) == before
 
 
 def test_routed_launch_preserves_environment_and_exit_code(profile, monkeypatch):
