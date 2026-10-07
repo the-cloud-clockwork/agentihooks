@@ -558,7 +558,7 @@ class Handler(BaseHTTPRequestHandler):
             "page_version": core.page_version(),
             "crew": ledger_gate.crew(state["_meta"]),
         }
-        state["_meta"]["warnings"] = [*state["_meta"]["warnings"], *refusals.values()]
+        state["_meta"]["warnings"] = [*state["_meta"].get("warnings", []), *refusals.values()]
         reply = {
             **(state if self.agent_view() else with_workspaces(slug, state)),
             "rejected": [*rejected, *refusals],
