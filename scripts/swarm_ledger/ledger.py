@@ -206,8 +206,14 @@ def upload_image(slug: str, name: str, path: str) -> dict:
     return upload(slug, name, path, "media", {})
 
 
-def upload_artifact(slug: str, name: str, path: str) -> dict:
-    return upload(slug, name, path, "artifacts", {"X-Artifact-Name": Path(path).name})
+def upload_artifact(slug: str, name: str, path: str, request: dict) -> dict:
+    return upload(
+        slug,
+        name,
+        path,
+        "artifacts",
+        {"X-Artifact-Name": Path(path).name, "X-Artifact-Request": json.dumps(request)},
+    )
 
 
 def upload(slug: str, name: str, path: str, route: str, extra: dict) -> dict:
@@ -240,9 +246,9 @@ def cmd_comment(args):
 
 
 def cmd_artifact(args):
-    file = upload_artifact(args.slug, args.name, args.path)
     task = args.task if args.task is not None else os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
     request = {"request": args.request} if args.request else {}
+    file = upload_artifact(args.slug, args.name, args.path, {"task": task, "title": args.title, **request})
     state = call(args.slug, [op("artifact_add", args, task=task, title=args.title, file=file, **request)])
     print(json.dumps({"published": not state.get("rejected")}))
     if state.get("rejected"):
@@ -258,8 +264,8 @@ def cmd_publish_plan(args):
     title = args.title or ledger_publish.title_of(Path(args.path).read_text(encoding="utf-8"), phases)
 
     def artifact(path, title):
-        file = upload_artifact(args.slug, args.name, path)
         task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
+        file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
         send(args, "artifact_add", task=task, title=title, file=file, plan=True)
         return f"{BASE}/artifacts/{args.slug}/{file['id']}"
 

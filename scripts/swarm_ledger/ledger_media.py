@@ -4,6 +4,7 @@ import hashlib
 import re
 import shutil
 import struct
+from pathlib import Path
 
 import ledger_core as core
 
@@ -67,17 +68,23 @@ def inspect(data):
     return kind, *size
 
 
+def write_file(path: Path, data: bytes) -> None:
+    with core.LOCK:
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".part")
+            tmp.write_bytes(data)
+            tmp.replace(path)
+        path.touch()
+
+
 def store(slug, data):
     if len(data) > MAX_BYTES:
         raise Refused(413, f"an image may be at most {MAX_BYTES >> 20} MB")
     kind, width, height = inspect(data)
     media_id = f"{hashlib.sha256(data).hexdigest()}.{EXTENSIONS[kind]}"
     path = folder(slug) / media_id
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".part")
-        tmp.write_bytes(data)
-        tmp.replace(path)
+    write_file(path, data)
     return {"id": media_id, "type": kind, "size": len(data), "width": width, "height": height}
 
 
@@ -125,3 +132,11 @@ def purge(slug):
     if not isinstance(slug, str) or not core.SLUG_RE.match(slug):
         raise ValueError(f"refusing to purge media for {slug!r}: not a ledger slug")
     shutil.rmtree(folder(slug), ignore_errors=True)
+
+
+def sweep(slug: str, used: set[str], now: int) -> None:
+    # Uploads and their entry writes arrive in separate requests.
+    cutoff = now / 1000 - 3600
+    for path in folder(slug).glob("*"):
+        if path.is_file() and path.name not in used and path.stat().st_mtime < cutoff:
+            path.unlink()

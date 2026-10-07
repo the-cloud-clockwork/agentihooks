@@ -1346,5 +1346,81 @@
   "scripts/doctor/registry.py:scripts.doctor.registry.x_progress__mutmut_25:c051142c11bbf905616adb05a8ddd23c3cff3b878457ae929b0cfd970ec9e98d": {
     "reader": "Standards reader for task t48",
     "reason": "None and empty string are both falsy; every later use of stat in progress and _fallback is a truthiness test, so no input distinguishes them."
+  },
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_upload_artifact__mutmut_14:dc4e6184c755aa7ccc1c4346d0d9fa24115dc4df78f9bb1fbec0b29aabce9f23": {
+    "reader": "Standards reader",
+    "reason": "HTTP header case changes preserve urllib normalized transport headers; the Standards reader executed a differential Request control."
+  },
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_upload_artifact__mutmut_15:f459f4d0f3c237de5c9e9e82c364d93599ef7c159c9c09844dbb9702704c2b55": {
+    "reader": "Standards reader",
+    "reason": "HTTP header case changes preserve urllib normalized transport headers; the Standards reader executed a differential Request control."
+  },
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_upload_artifact__mutmut_18:b631b10e4ffa10e603ae1a85c2c31c3aa623cc4ee5c9d2c3b1c96f4c653b6be6": {
+    "reader": "Standards reader",
+    "reason": "HTTP header case changes preserve urllib normalized transport headers; the Standards reader executed a differential Request control."
+  },
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_upload_artifact__mutmut_19:8e6622298204bb62cc93b81f8ae09d2cf257a1a157dc447e16959b09181ce02d": {
+    "reader": "Standards reader",
+    "reason": "HTTP header case changes preserve urllib normalized transport headers; the Standards reader executed a differential Request control."
+  },
+  "scripts/swarm_ledger/ledger_artifacts.py:scripts.swarm_ledger.ledger_artifacts.x_refusal__mutmut_3:161ada840a807cf082b579ab477244156fed6a74f0c19b2283831dddc27a502f": {
+    "reader": "Standards reader",
+    "reason": "Absent membership returns before member is used; present membership ignores the get default, so changing that default preserves output."
+  },
+  "scripts/swarm_ledger/ledger_artifacts.py:scripts.swarm_ledger.ledger_artifacts.x_refusal__mutmut_5:afd14d7555ffb7d70237993c570a23bd708cc72eef0649efe791c91cc5624ace": {
+    "reader": "Standards reader",
+    "reason": "Absent membership returns before member is used; present membership ignores the get default, so changing that default preserves output."
+  },
+  "scripts/swarm_ledger/ledger_media.py:scripts.swarm_ledger.ledger_media.x_write_file__mutmut_11:44d30690dd4e92b7bcd0f54564a562c73fc8f8c256cc24f9200d74d974f52a30": {
+    "reader": "Standards reader",
+    "reason": "The temporary suffix is consumed by atomic rename; completed storage retains identical final path, bytes and metadata."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_8:25906f4263db07b5e2623cea05e10d7df987c0d10efafe370a969e47c4a728bf": {
+    "reader": "Standards reader",
+    "reason": "HTTPMessage header lookup is case insensitive. The Standards reader executed a differential control confirming identical values for each casing."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_9:97e73d49b2cb720ead1988591dd2f653dc1fa961365066538bc1c44eba1b07c9": {
+    "reader": "Standards reader",
+    "reason": "HTTPMessage header lookup is case insensitive. The Standards reader executed a differential control confirming identical values for each casing."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_29:e70e7f5bf9f56345d4c39c66481e0d88f2caa7d8ccdf160e7baa9fb095657351": {
+    "reader": "Standards reader",
+    "reason": "The preflight validator checks op and id key presence but never their placeholder values; the authority check only special cases join. These values are never persisted."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_30:847caab8fdbd9c2089aa962180a4157a2214082778e841b353f916c8f361f063": {
+    "reader": "Standards reader",
+    "reason": "The preflight validator checks op and id key presence but never their placeholder values; the authority check only special cases join. These values are never persisted."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_35:bc7462b582136d1bb3538ef40864111e4c80b3e99be3e1d453e9fb66317c2485": {
+    "reader": "Standards reader",
+    "reason": "HTTPMessage header lookup is case insensitive. The Standards reader executed a differential control confirming identical values for each casing."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_36:95256e8725cf3ed87c8a5dc1c91b8758750d6db7d77bc4779acc70a5dacd4b5f": {
+    "reader": "Standards reader",
+    "reason": "HTTPMessage header lookup is case insensitive. The Standards reader executed a differential control confirming identical values for each casing."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_43:c03e582edf953a97c5f48ce95560c5d282d7cea35629e4601f08ef7848bb9d28": {
+    "reader": "Standards reader",
+    "reason": "The preflight validator checks op and id key presence but never their placeholder values; the authority check only special cases join. These values are never persisted."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_44:3109c25d73e15796a7b1c20264ba57be851792db752b628513ad8b8d27f622f2": {
+    "reader": "Standards reader",
+    "reason": "The preflight validator checks op and id key presence but never their placeholder values; the authority check only special cases join. These values are never persisted."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_48:9564f442f8a3ab2ea1bb3616f10214c0b3840cbc62330a8ac8c7532888488210": {
+    "reader": "Standards reader",
+    "reason": "Absent title defaults of None and empty string fail the same title validation with identical HTTP 400 reason and no storage."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_50:ffccada65e9e7e40e00a628bd97777e5c6517b79432211ab253fa0497f1d388e": {
+    "reader": "Standards reader",
+    "reason": "Absent title defaults of None and empty string fail the same title validation with identical HTTP 400 reason and no storage."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_72:791eb21bdd03f0a31e75411b1b4b7f755067cc05eb9a8eec080f12cced5a4402": {
+    "reader": "Standards reader",
+    "reason": "None and False both take the same nonreconciling document-load branch, preserving state and media."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_78:cd9f6e0b1e6ccc95cd3af9133e951ff8706d2f066601b61119788af649c092a8": {
+    "reader": "Standards reader",
+    "reason": "Accepted transport principal is empty or the exact agent header; authority refusal is empty for both that accepted principal and None. The upload metadata forbids replacing the author."
   }
 }
