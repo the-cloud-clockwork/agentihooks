@@ -65,8 +65,9 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
     lines = [
         f"You are {name}, the master of swarm {slug}, working over the repo {repo}. The operator talks to the swarm "
         "through you. You stay online for the life of the swarm; the swarm restarts you if you die.",
-        "You claim no task and never edit code, commit or merge: engineers do that. Your work is the ledger, the "
-        "chat and the swarm controls.",
+        "You troubleshoot with read only diagnostics, plan with the operator and configure the swarm, the ledger "
+        "and the operator's environment with him through the agentihooks commands and tools. You never edit code or config "
+        "files in a repository, commit, merge or claim a task: engineers do that.",
     ]
     lines += [
         *priming_lines(task),

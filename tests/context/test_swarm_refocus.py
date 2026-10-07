@@ -6,6 +6,13 @@ import hooks.context.swarm_refocus as refocus
 from hooks import hook_manager
 from hooks.targets.emitter import flush
 
+OBLIGATIONS = (
+    "Master obligations: Troubleshoot with read only diagnostics, plan with the operator, "
+    "configure the swarm, the ledger and the operator's environment with him through the agentihooks commands "
+    "and tools, handle operator inbox items, keep the ledger current and judge progress; "
+    "never edit code or config files in a repository, commit, merge or claim a task.\n"
+)
+
 LEDGER = {
     "title": "Rig grade swarm",
     "overview": "Borrow what OpenRig does that we lack.",
@@ -221,12 +228,9 @@ def test_master_block_carries_current_intent_phases_priorities_and_obligations()
         "tasks": [],
     }
     assert refocus.build_block(ledger, "master", 1500) == (
-        "=== SWARM REFOCUS: Continuity ===\n"
-        "Master obligations: Coordinate the swarm, handle operator inbox items, "
-        "keep the ledger current and judge progress; never claim tasks, edit code, commit or merge.\n"
-        "Plan: Preserve current mission\n"
-        "Active phases: Active: Restore intent; Next: Keep worker intent\n"
-        "Priorities: Compaction first; Worker control"
+        "=== SWARM REFOCUS: Continuity ===\n" + OBLIGATIONS + "Plan: Preserve current mission\n"
+        "Priorities: Compaction first; Worker control\n"
+        "Active phases: Active: Restore intent; Next: Keep worker intent"
     )
     ledger["title"] = "t" * 10000
     ledger["overview"] = "x" * 10000
@@ -234,25 +238,27 @@ def test_master_block_carries_current_intent_phases_priorities_and_obligations()
     ledger["priorities"][0]["text"] = "z" * 10000
     block = refocus.build_block(ledger, "master", 1500)
     assert len(block) == 1500
-    assert "Master obligations:" in block
-    assert f"Plan: {'x' * 299}…" in block
-    assert f"Active phases: Active: {'y' * 591}…" in block
+    assert OBLIGATIONS in block
+    assert f"Plan: {'x' * 299}…\n" in block
+    assert f"\nPriorities: {'z' * 299}…\n" in block
+    assert block.endswith(f"Active phases: Active: {'y' * 178}…")
     assert "=== SWARM REFOCUS: " + "t" * 299 + "… ===" in block
-    assert "Priorities: " + "z" * 50 in block
     ledger["title"] = "Continuity"
     ledger["overview"] = "Preserve current mission"
     ledger["phases"] = []
-    assert refocus.build_block(ledger, "master", 1500).endswith("Priorities: " + "z" * 299 + "…")
+    assert refocus.build_block(ledger, "master", 1500).endswith("Priorities: " + "z" * 299 + "…\nActive phases: ")
+
+
+def test_master_block_clips_active_phases_to_two_shares_when_the_block_fits():
+    ledger = {"title": "T", "overview": "O", "phases": [{"title": "Active", "description": "y" * 10000}]}
+    assert refocus.build_block(ledger, "master", 1500) == (
+        "=== SWARM REFOCUS: T ===\n" + OBLIGATIONS + f"Plan: O\nPriorities: \nActive phases: Active: {'y' * 591}…"
+    )
 
 
 @pytest.mark.parametrize("ledger", [{}, {"phases": [{}], "priorities": [{}]}])
 def test_master_sparse_ledger_keeps_obligations_without_invented_intent(ledger):
     phases = ": " if ledger else ""
     assert refocus.build_block(ledger, "master", 1500) == (
-        "=== SWARM REFOCUS:  ===\n"
-        "Master obligations: Coordinate the swarm, handle operator inbox items, "
-        "keep the ledger current and judge progress; never claim tasks, edit code, commit or merge.\n"
-        "Plan: \n"
-        f"Active phases: {phases}\n"
-        "Priorities: "
+        "=== SWARM REFOCUS:  ===\n" + OBLIGATIONS + f"Plan: \nPriorities: \nActive phases: {phases}"
     )

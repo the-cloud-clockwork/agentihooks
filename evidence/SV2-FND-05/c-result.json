@@ -1,0 +1,37 @@
+{
+  "case": "T-SV2-FND-05-C",
+  "tested_commit": "379ca75db1e4b1adbc7934456171f5488194915e",
+  "passed": 4,
+  "failed": 0,
+  "test_live_path_rejections_total": {
+    "cleanup": 3,
+    "redis": 2
+  },
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_c_an_interrupted_run_leaves_its_lock_and_the_next_run_takes_its_own",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_c_a_sweep_needs_the_owning_run_and_replays_without_a_second_effect",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "redis": 2
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_c_a_stale_fixture_root_is_removed_only_by_its_own_run",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "cleanup": 2
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_c_a_live_root_is_never_removed",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "cleanup": 1
+      }
+    }
+  ]
+}
