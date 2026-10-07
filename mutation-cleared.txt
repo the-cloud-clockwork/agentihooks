@@ -1338,5 +1338,9 @@
   "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_command_lines__mutmut_20:c21b45a095edd28f98f18434986e293dbdd0f2806a9ed5e38d765c777a806070": {
     "reader": "Standards",
     "reason": "Uppercasing the excluded command name and inert prefix preserves the discovered command descendants. Nine differential parser controls returned identical output."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1has_capacity__mutmut_8:0c0df51472b4d0a0db2ee7b7644138ed6275618c6f93bbc4bbc1ff050d255e39": {
+    "reader": "Standards",
+    "reason": "An empty request and None are both falsy and both differ from codex, so choose_shared and choose take the same branches and the slot check returns the same answer."
   }
 }

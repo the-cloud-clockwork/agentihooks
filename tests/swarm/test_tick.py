@@ -55,8 +55,10 @@ class FakeRuntime:
         self.tasks, self.masters, self.spawns_seen, self.harness = [], [], [], "claude"
         self.fail, self.full, self.crash, self.statuses, self.stuck = fail, full, crash, {}, set()
         self.conversation_ids, self.named, self.closed_spaces, self.typed = {}, [], [], {}
+        self.capacity_for = []
 
-    def has_capacity(self):
+    def has_capacity(self, config):
+        self.capacity_for.append(config.slug)
         return not self.full
 
     def spawn(self, config, lane, name, task, spawns=None):
@@ -227,6 +229,7 @@ def test_no_free_session_slot_claims_nothing(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(full=True)
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "open" and store.claimant("sw", "t1") is None and runtime.spawned == []
+    assert runtime.capacity_for == ["sw", "sw"]
 
 
 def test_a_dead_agent_with_an_open_pull_request_hands_the_task_back(store):
