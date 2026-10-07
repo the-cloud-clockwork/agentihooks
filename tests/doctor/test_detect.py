@@ -3,7 +3,9 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.doctor import detect
+from scripts.swarm import ledger_events
 from scripts.swarm.health.findings import Finding
+from tests.doctor.recorded import load
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -60,6 +62,21 @@ def test_ci_reads_only_the_pull_requests_of_tasks_waiting_in_review():
         {"state": "pr", "pr_url": "https://github.com/o/other/pull/12"},
     ]
     assert detect.open_pulls(tasks) == [("o/other", 12), ("o/r", 9)]
+
+
+def test_ci_reports_a_red_head_only_past_the_tick_red_window(monkeypatch):
+    record = load("ci")
+    record["checks"][0]["conclusion"] = "failure"
+    monkeypatch.setattr(detect.ci_read, "pull_request", lambda repo, number: {("o/r", 487): record}[(repo, number)])
+    ledger = SimpleNamespace(tasks=lambda slug: [{"state": "pr", "pr_url": "https://github.com/o/r/pull/487"}])
+    window = ledger_events.RED_QUIET_MS
+    import fakeredis
+
+    store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
+    early = detect.readers(store, ledger, "s", record["committed_at"] + window - 1, environ={})["ci"]()
+    late = detect.readers(store, ledger, "s", record["committed_at"] + window, environ={})["ci"]()
+    assert early == []
+    assert [f.id for f in late] == ["red-checks/487"]
 
 
 def test_the_health_detector_judges_only_what_the_current_health_pass_reports(monkeypatch):
