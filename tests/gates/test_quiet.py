@@ -136,6 +136,13 @@ def test_a_declared_wait_bare_or_checked_is_never_quiet(rig, on):
     assert rig.run() == []
 
 
+@pytest.mark.parametrize("reason", ["", "  "])
+def test_a_bare_wait_that_names_nothing_stays_quiet(rig, reason):
+    idle.declare_wait(rig.store.redis, SLUG, ME, NOW + MIN, reason, NOW - MIN)
+    assert rig.minutes() == {ME: 40}
+    assert rig.minutes(NOW + 2 * MIN) == {ME: 42}
+
+
 def test_the_quiet_clock_restarts_when_a_wait_expires(rig):
     idle.declare_wait(rig.store.redis, SLUG, ME, NOW + MIN, "deploy", NOW - MIN)
     assert rig.minutes(NOW + MIN) == {ME: 0}

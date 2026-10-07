@@ -45,7 +45,7 @@ def declared_wait(redis, slug, name, now_ms):
     from scripts.swarm import idle
 
     held = idle.wait(redis, slug, name)
-    return bool(held and held["until"] > now_ms)
+    return bool(held and held["until"] > now_ms and idle.named(held))
 
 
 def holding(agent, rows):

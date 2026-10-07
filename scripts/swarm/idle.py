@@ -56,7 +56,12 @@ def declare_wait(redis, slug, name, until, reason, at, on=None):
         raise SwarmError("a wait needs an end time in the future")
     entry = {"until": until, "reason": reason, "at": at, **({"on": on} if on else {})}
     redis.set(key(slug, "wait", name), json.dumps(entry), px=until - at)
-    redis.set(key(slug, "waited", name), until, px=until - at + BEAT_TTL_S * 1000)
+    if named(entry):
+        redis.set(key(slug, "waited", name), until, px=until - at + BEAT_TTL_S * 1000)
+
+
+def named(entry):
+    return bool(entry.get("on") or entry.get("reason", "").strip())
 
 
 def wait(redis, slug, name):
@@ -70,7 +75,8 @@ def wait(redis, slug, name):
 def waited(redis, slug, name):
     from scripts.swarm.naming import NameRegistry
 
-    raw = redis.get(key(slug, "waited", NameRegistry(redis).resolve(name)))
+    name = NameRegistry(redis).resolve(name)
+    raw = redis.get(key(slug, "waited", name))
     return int(raw) if raw else 0
 
 
