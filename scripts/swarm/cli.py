@@ -167,7 +167,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         actions += intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge).run(doc)
         actions += progress.checks_pass(store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
         rows = {t["id"]: t for t in doc["tasks"]}
-        actions += waits.end_pass(store, slug, rows, inbox, ledger_events.view)
+        actions += waits.end_pass(store, slug, rows, inbox, ledger_events.view, now_ms())
         actions += quiet.quiet_pass(store, slug, rows, now_ms())
         actions += priority_sweep.priority_pass(store, slug, doc, ledger)
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
@@ -790,7 +790,7 @@ def cmd_wait_inbox(store, args, agent):
         items = receive(InboxStore(store.redis), agent.name, minutes * 60)
         print(json.dumps({"items": [asdict(item) for item in items], "timed_out": not items}))
     finally:
-        idle.end_wait(store.redis, args.slug, agent.name)
+        idle.end_wait(store.redis, args.slug, agent.name, now_ms())
 
 
 def cmd_wait(store, args):

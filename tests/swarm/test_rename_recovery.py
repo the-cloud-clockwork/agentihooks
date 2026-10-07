@@ -91,6 +91,7 @@ def test_wait_and_heartbeat_survive_rename_and_old_session_publication(store):
     store.names.alias(old, new)
     _move_agent(store, "sw", agent, new, 3)
     assert idle.wait(store.redis, "sw", new)["until"] == 200
+    assert idle.waited(store.redis, "sw", new) == 200
     assert idle.heartbeat(store.redis, "sw", new)["at"] == 2
     idle.beat(store.redis, "sw", old, "working", 4)
     assert idle.heartbeat(store.redis, "sw", new)["at"] == 4

@@ -5,7 +5,7 @@ import urllib.request
 import uuid
 from urllib.parse import quote, urlencode
 
-from . import schemas
+from . import resources, schemas
 
 
 class ResourceClient:
@@ -25,9 +25,23 @@ class ResourceClient:
             return json.loads(response.read())
 
     def collection(self, slug: str, path: str) -> list:
-        rows, query = [], {"limit": 100}
+        rows, query, snapshot = [], {"limit": 100}, None
+        swarm = path.startswith("swarm/")
+        read = resources.swarm_read if swarm else resources.read
         while True:
-            reply = self.request(slug, f"{path}?{urlencode(query)}")
+            try:
+                reply = (
+                    self.request(slug, f"{path}?{urlencode(query)}")
+                    if snapshot is None
+                    else read(snapshot, path, query)
+                )
+            except urllib.error.HTTPError as exc:
+                replay, error = failure(exc)
+                if replay.code != 409 or error.get("code") != "revision_conflict":
+                    raise replay from None
+                snapshot = self.request(slug, "swarm/export" if swarm else "export", {})["data"]
+                rows, query = [], {"limit": 100}
+                continue
             rows.extend(reply["data"])
             if reply["next_cursor"] is None:
                 return rows
