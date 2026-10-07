@@ -169,6 +169,11 @@ def test_switch_adding_a_poetry_version_is_refused(tmp_path):
     _refused(_rewrite(_manifest(tmp_path), _TAGGED + '\n[tool.poetry]\nversion = "9.9.9"\n'))
 
 
+def test_switch_to_an_attribute_version_is_refused(tmp_path):
+    dynamic = '\n[tool.setuptools.dynamic]\nversion = {attr = "x.__version__"}\n'
+    _refused(_rewrite(_manifest(tmp_path), _TAGGED + dynamic))
+
+
 def test_mypy_python_version_change_is_allowed(tmp_path):
     target = _manifest(tmp_path, _STATIC + '\n[tool.mypy]\npython_version = "3.11"\n')
     check_version_guard(_edit(target, 'python_version = "3.11"', 'python_version = "3.12"'))

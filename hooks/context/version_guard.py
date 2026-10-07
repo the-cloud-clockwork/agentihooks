@@ -44,6 +44,7 @@ _VERSION_KEYS = (
     ("project", "version"),
     ("tool", "poetry", "version"),
     ("tool", "setuptools_scm", "fallback_version"),
+    ("tool", "setuptools", "dynamic", "version"),
     ("package", "version"),
     ("workspace", "package", "version"),
 )
