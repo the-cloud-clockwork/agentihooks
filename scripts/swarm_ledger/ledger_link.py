@@ -1,10 +1,12 @@
 """The ledger page link handed to the operator, from the ledger server's configured host and port."""
 
 import os
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 START = "agentihooks ledger serve --ensure"
+LOOPBACK = ("127.0.0.1", "localhost")
 
 
 def base() -> str:
@@ -12,15 +14,44 @@ def base() -> str:
     return f"http://{host}:{port}"
 
 
-def shared_directory(directory: Path | None = None) -> bool:
+def shared_directory(directory: Path | None = None, environ=os.environ) -> bool:
     shared = Path.home() / "development-ledger"
-    selected = directory or Path(os.environ.get("LEDGER_DIR", shared)).expanduser()
+    selected = directory or Path(environ.get("LEDGER_DIR", shared)).expanduser()
     return selected.resolve() == shared.resolve()
 
 
-def address() -> tuple[str, int]:
-    port = 8765 if shared_directory() else int(os.environ.get("LEDGER_PORT", "8765"))
-    return os.environ.get("LEDGER_HOST", "127.0.0.1"), port
+def address(environ=os.environ) -> tuple[str, int]:
+    port = 8765 if shared_directory(environ=environ) else int(environ.get("LEDGER_PORT", "8765"))
+    return environ.get("LEDGER_HOST", "127.0.0.1"), port
+
+
+def public_url(environ=os.environ) -> urllib.parse.SplitResult | None:
+    url = environ.get("SWARM_PUBLIC_URL")
+    if not url:
+        return None
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        raise ValueError(f"SWARM_PUBLIC_URL must be an http or https URL with a host, not {url!r}")
+    return parts
+
+
+def listed_hosts(environ=os.environ) -> set[str]:
+    return {name.strip() for name in environ.get("SWARM_ALLOWED_HOSTS", "").split(",")} - {""}
+
+
+def allowed_hosts(environ=os.environ) -> set[str]:
+    host, port = address(environ)
+    public = public_url(environ)
+    hosts = {f"{name}:{port}" for name in (host, *LOOPBACK)} | listed_hosts(environ)
+    return hosts | ({public.netloc} if public else set())
+
+
+def allowed_origins(environ=os.environ) -> set[str]:
+    host, port = address(environ)
+    public = public_url(environ)
+    origins = {f"http://{name}:{port}" for name in (host, *LOOPBACK)}
+    origins |= {f"{scheme}://{name}" for name in listed_hosts(environ) for scheme in ("http", "https")}
+    return origins | ({f"{public.scheme}://{public.netloc}"} if public else set())
 
 
 def page_url(slug):
