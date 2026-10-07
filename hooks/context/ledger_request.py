@@ -18,7 +18,7 @@ def _ledger(env):
 
 
 def _closed(task):
-    return bool(task.get("done") or task.get("state") == "done" or task.get("out_of_scope") or task.get("deleted"))
+    return any(task.get(mark) for mark in ("done", "out_of_scope", "deleted"))
 
 
 def _relayed(entry, ledger, asks):

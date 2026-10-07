@@ -71,9 +71,7 @@ def test_an_old_approval_on_another_task_never_opens_it(ledger):
     assert find(ledger([], other=[comment("c-0", REQUEST, age=7200)])) is None
 
 
-@pytest.mark.parametrize(
-    "closed", [{"state": "done", "done": True}, {"done": True}, {"out_of_scope": True}, {"deleted": True}]
-)
+@pytest.mark.parametrize("closed", [{"state": "done", "done": True}, {"out_of_scope": True}, {"deleted": True}])
 def test_an_approval_closes_when_its_task_is_done_or_cancelled(ledger, closed):
     operator_words.record(MASTER, REQUEST, now=NOW - 60)
     assert find(ledger([comment("c-1", REQUEST)], **closed)) is None
