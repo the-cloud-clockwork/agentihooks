@@ -98,19 +98,13 @@ from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
 
 
 def _get_version() -> str:
-    """Read agentihooks version from importlib or pyproject.toml."""
+    """Read agentihooks version from the installed package metadata."""
     try:
         from importlib.metadata import version
 
         return version("agentihooks")
     except Exception:
-        pass
-    toml = Path(__file__).resolve().parent.parent / "pyproject.toml"
-    if toml.exists():
-        for line in toml.read_text().splitlines():
-            if line.startswith("version"):
-                return line.split('"')[1]
-    return "unknown"
+        return "unknown"
 
 
 # ---------------------------------------------------------------------------
