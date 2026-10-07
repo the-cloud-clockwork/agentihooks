@@ -38,7 +38,7 @@ def _flat(text: str) -> str:
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
+def world(tmp_path, monkeypatch, _isolate_real_user_paths):
     from scripts.targets._common import _install_module
 
     install = _install_module()
