@@ -167,6 +167,36 @@ def test_files_under_the_agentihooks_home_never_configure_the_server(tmp_path):
     assert json.loads(out.splitlines()[-1]) == ["127.0.0.1", ["127.0.0.1:9100", "env.example", "localhost:9100"]]
 
 
+def page_request(host, origin=None):
+    handler = Mock(headers={"Host": host, **({"Origin": origin} if origin else {})})
+    handler.send.return_value = None
+    return handler
+
+
+@pytest.mark.parametrize("origin", [None, "null", "https://swarm.example.com"])
+def test_the_page_check_passes_a_listed_host_and_origin(monkeypatch, origin):
+    monkeypatch.setattr(server, "ALLOWED_HOSTS", {"swarm.example.com"})
+    monkeypatch.setattr(server, "ALLOWED_ORIGINS", {"https://swarm.example.com"})
+    handler = page_request("swarm.example.com", origin)
+    assert server.Handler.refused(handler) is False
+    handler.send.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("host", "origin", "message"),
+    [
+        ("evil.example", None, "host not allowed"),
+        ("swarm.example.com", "https://evil.example", "origin not allowed"),
+    ],
+)
+def test_the_page_check_refuses_an_unlisted_host_or_origin(monkeypatch, host, origin, message):
+    monkeypatch.setattr(server, "ALLOWED_HOSTS", {"swarm.example.com"})
+    monkeypatch.setattr(server, "ALLOWED_ORIGINS", {"https://swarm.example.com"})
+    handler = page_request(host, origin)
+    assert server.Handler.refused(handler) is True
+    handler.send.assert_called_once_with(403, message, "text/plain")
+
+
 @pytest.fixture
 def hosted(tmp_path):
     port = spare_port()
