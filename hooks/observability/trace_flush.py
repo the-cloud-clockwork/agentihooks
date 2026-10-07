@@ -84,9 +84,10 @@ def _read(path: Path) -> dict:
 
 def _write(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as handle:
+    descriptor, name = tempfile.mkstemp(dir=path.parent)
+    with os.fdopen(descriptor, "w") as handle:
         json.dump(data, handle)
-    Path(handle.name).replace(path)
+    Path(name).replace(path)
 
 
 def _owner(record: dict, prefix: str) -> Owner:
@@ -156,7 +157,7 @@ def attempt(session_id: str, transcript_path: str, timeout: float, trigger: str)
     env = {**_worker_env(), TRIGGER_ENV: trigger}
     command = [sys.executable, "-m", "hooks.observability.trace_flush", session_id, transcript_path]
     try:
-        return subprocess.run(command, env=env, timeout=timeout, stdin=subprocess.DEVNULL).returncode == 0
+        return subprocess.run(command, env=env, timeout=timeout).returncode == 0
     except subprocess.TimeoutExpired:
         print(f"trace_flush {session_id}: attempt timed out after {timeout}s", file=sys.stderr)
         return False
@@ -200,7 +201,7 @@ def supervise(
     with handle:
         me = {"supervisor_pid": os.getpid(), "supervisor_start": start_time(os.getpid())}
         _write(owner_path(session_id), me)
-        flushed_size, failing, seen, due = -1, False, None, clock()
+        flushed_size, failing, seen, due = None, False, None, clock()
         while True:
             record = _read(request_path(session_id))
             owner_alive = is_alive(_owner(record, "owner_"))
@@ -212,9 +213,9 @@ def supervise(
             trigger = "final" if not owner_alive else f"request:{record.get('reason', '')}" if fresh else "interval"
             transcript = _transcript(session_id, record)
             size = _size(transcript)
-            if transcript and size != flushed_size:
+            if transcript and size is not None and (failing or size != flushed_size):
                 failing = not _drain(session_id, transcript, limits, send, trigger)
-                flushed_size = -1 if failing else size
+                flushed_size = size
             due = clock() + limits.interval
             if owner_alive:
                 continue
@@ -224,11 +225,11 @@ def supervise(
             _write(owner_path(session_id), me)
 
 
-def _size(transcript: str) -> int:
+def _size(transcript: str) -> int | None:
     try:
         return Path(transcript).stat().st_size
     except OSError:
-        return -1
+        return None
 
 
 def _drain(
