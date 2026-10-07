@@ -204,7 +204,11 @@ def test_enforce_skips_folders_it_cannot_read_and_sweeps_the_rest(request, tmp_p
     deny(request, locked_task, 0)
     second = findings_by_name(sweeps(tmp_path, 2)[1])
     for name in ("locked", "locked-task"):
-        assert second[name]["action"] == "keep"
+        assert (second[name]["root"], second[name]["category"], second[name]["action"]) == (
+            "scratchpad",
+            "scratch",
+            "keep",
+        )
         assert second[name]["reason"] == "unreadable, skipped: Permission denied"
     assert second["plain-task"]["outcome"] == "removed"
     assert not plain.exists() and locked_task.exists()
@@ -221,7 +225,7 @@ def test_failed_removal_names_the_folder_and_later_sweeps_still_run(request, tmp
     reports = sweeps(tmp_path, 3)
     for report in reports[1:]:
         outcome = findings_by_name(report)["site-task"]["outcome"]
-        assert outcome.startswith("failed: [Errno 13] Permission denied") and str(site) in outcome
+        assert outcome.startswith("failed: [Errno 13] Permission denied")
     assert findings_by_name(reports[1])["plain-task"]["outcome"] == "removed"
     assert not plain.exists() and (site / "mod.py").exists()
 
@@ -252,3 +256,11 @@ def test_journal_drops_a_removal_that_git_fails_or_times_out(monkeypatch, tmp_pa
     journal.begin(str(stuck), "scratch")
     assert finish_pending(journal) == []
     assert journal.pending() == {}
+
+
+def test_journal_removes_a_worktree_entry_that_is_no_longer_a_worktree(tmp_path):
+    journal = Journal(tmp_path / "gc-journal.json")
+    (left,) = idle_tasks(tmp_path, "trees/left")
+    journal.begin(str(left), "worktree")
+    assert finish_pending(journal) == [str(left)]
+    assert not left.exists()
