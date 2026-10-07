@@ -718,3 +718,137 @@ def test_collector_acceptance_is_logical_and_updates_are_distinct(export, transc
     assert set(accepted) == initial and len(accepted) == len(initial)
     assert agent_trace._span_id("session", "tool") in updated
     assert all(session == "session" and truncated == 0 for session, ids, result, truncated in outcomes)
+
+
+def test_field_compatibility_returns_masked_text_with_actual_cap(monkeypatch):
+    monkeypatch.setattr("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 3)
+    assert agent_trace._field("abcdef") == "abc…[truncated 3 chars]"
+
+
+def test_record_and_observation_revisions_are_canonical_for_unicode():
+    import hashlib
+
+    record = {"text": "ñ", "a": 1}
+    expected = hashlib.sha256('{"a": 1, "text": "ñ"}'.encode()).hexdigest()
+    assert agent_trace._record_revisions({"key": record}) == {"key": expected}
+    assert agent_trace._record_revisions({"key": {"a": 1, "text": "ñ"}}) == {"key": expected}
+    spec = agent_trace.SpanSpec("ñ", 1, None, 2, 3, {"z": 1, "a": "ñ"})
+    reordered = agent_trace.SpanSpec("ñ", 1, None, 2, 3, {"a": "ñ", "z": 1})
+    expected_span = hashlib.sha256(
+        '{"attributes": {"a": "ñ", "z": 1}, "end_ns": 3, "name": "ñ", "parent_id": null, "span_id": 1, "start_ns": 2}'.encode()
+    ).hexdigest()
+    assert agent_trace._revision(spec) == agent_trace._revision(reordered) == expected_span
+
+
+def test_strict_scalar_and_structured_secrets_remain_masked_when_mode_off(monkeypatch):
+    from hooks.observability import transcript as source
+
+    monkeypatch.setattr("hooks.config.SECRETS_MODE", "off")
+    planted = "sk_" + "live_" + "Q7" * 18
+    assert source.mask_value(planted) == "[REDACTED:stripe_key]"
+    assert source.mask_value({"password": "controlled-literal-value"}) == {"password": "[REDACTED:generic_secret]"}
+
+
+def test_legacy_source_alias_survives_full_replay(export, transcript):
+    path, records = transcript
+    if records[0]["type"] != "session_meta":
+        pytest.skip("legacy aliases are Codex specific")
+    cursor = agent_trace._cursor_path("session")
+    cursor.parent.mkdir()
+    cursor.write_text('{"turns":1}')
+    flush(path)
+    first = set(export.observations)
+    state = agent_trace._cursor("session")
+    ids = {key: record["_source_id"] for key, record in state["records"].items()}
+    flush(path)
+    assert {key: record["_source_id"] for key, record in agent_trace._cursor("session")["records"].items()} == ids
+    assert set(export.observations) == first
+
+
+def test_pending_size_exact_boundary_and_preparation_overflow(export, transcript, monkeypatch, capsys):
+    path, _ = transcript
+    state = agent_trace._progress("session")
+    state["session_id"] = "session"
+    agent_trace._stage_source(state, str(path))
+    source_size = agent_trace._pending_bytes(state, state["records"], [])
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", source_size)
+    fresh = agent_trace._progress("session")
+    fresh["session_id"] = "session"
+    agent_trace._stage_source(fresh, str(path))
+    assert "overflow" not in fresh
+    agent_trace._prepare_pending("session", fresh, agent_trace.Identity("session"))
+    assert fresh["overflow"]["bytes"] > fresh["overflow"]["limit"] == source_size
+    assert capsys.readouterr().err == f"agent trace export overflow: {json.dumps(fresh['overflow'])}\n"
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", 8_000_000)
+    agent_trace._stage_source(fresh, str(path))
+    assert "overflow" not in fresh
+    agent_trace._prepare_pending("session", fresh, agent_trace.Identity("session"))
+    limit = agent_trace._pending_bytes(fresh, fresh["records"], fresh["pending"])
+    fresh["pending"] = []
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", limit)
+    agent_trace._prepare_pending("session", fresh, agent_trace.Identity("session"))
+    assert "overflow" not in fresh and fresh["pending"]
+
+
+def test_prepare_legacy_records_keeps_historical_acceptance(export, transcript):
+    path, records = transcript
+    state = agent_trace._progress("session")
+    state["legacy_turns"] = 1
+    agent_trace._stage_source(state, str(path))
+    state.pop("unsupported_records", None)
+    agent_trace._prepare_pending("session", state, agent_trace.Identity("session"))
+    assert state["accepted"] and set(state["accepted"].values()) == {"legacy"}
+    assert None not in state["accepted"]
+    assert state["pending"][0]["attributes"]["agentihooks.export.unsupported_records"] == 0
+
+
+@pytest.mark.parametrize("kind", ["text", "image", "tool_use", "tool_result"])
+def test_all_supported_normalized_blocks_have_zero_unsupported_count(kind):
+    assert agent_trace._unsupported_io([], [{"message": {"content": [{"type": kind}]}}]) == 0
+
+
+def test_omitted_count_ignores_unrelated_source_messages():
+    records = [{"type": "ignored", "payload": {"type": "message", "content": [{"type": "image"}, {"type": "audio"}]}}]
+    assert agent_trace._unsupported_io(records, []) == 0
+
+
+def test_http_encoded_payload_contains_the_observation(monkeypatch):
+    import requests
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+    exporter = OTLPSpanExporter(endpoint="http://localhost:1")
+    response = requests.Response()
+    response.status_code = 200
+    response._content = b"{}"
+    sent = []
+    monkeypatch.setattr(exporter, "_export", lambda payload, timeout: sent.append(payload) or response)
+    assert agent_trace._batch_accepted(exporter, [agent_trace.SpanSpec("probe", 1, None, 2, 3)], 1)
+    request = ExportTraceServiceRequest.FromString(sent[0])
+    span = request.resource_spans[0].scope_spans[0].spans[0]
+    assert span.name == "probe"
+    assert span.span_id == (1).to_bytes(8, "big")
+    assert span.trace_id == (1).to_bytes(16, "big")
+    exporter.shutdown()
+
+
+def test_unconfirmed_collector_outcome_carries_exact_truncation(export, transcript, monkeypatch):
+    path, _ = transcript
+    monkeypatch.setattr("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 1)
+    events = []
+    monkeypatch.setattr(agent_trace, "_collector_outcomes", lambda *args: events.append(args))
+    export.results = [SpanExportResult.FAILURE]
+    flush(path)
+    assert len(events) == 1
+    session, spans, outcome, truncated = events[0]
+    assert session == "session" and outcome == "unconfirmed"
+    assert truncated == agent_trace._truncated_fields(spans) > 0
+
+
+def test_empty_pending_state_remains_valid_and_has_no_accepted_data(export):
+    state = agent_trace._progress("session")
+    agent_trace._cursor_path("session").parent.mkdir()
+    agent_trace._send_pending("session", state, export)
+    assert state["accepted"] == {} and state["accepted_records"] == {}
+    assert state["source"] == {"accepted_bytes": 0} and state["turns"] == 0
+    assert not export.calls
