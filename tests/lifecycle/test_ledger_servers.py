@@ -158,6 +158,19 @@ def test_sweep_checks_every_process_after_skips_and_errors(tmp_path, monkeypatch
     stopped.assert_called_once_with(row, proc)
 
 
+def test_relative_shared_folder_still_uses_the_fixed_port(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    folder = tmp_path / "development-ledger"
+    folder.mkdir()
+    row = process(ppid=1)
+    proc = plant(tmp_path, row, folder, cwd=tmp_path)
+    (proc / "42/environ").write_bytes(b"LEDGER_DIR=development-ledger\0LEDGER_PORT=9999")
+    info = ledger_servers.details(row, proc)
+    assert info["folder"] == str(folder)
+    assert info["port"] == 8765
+    assert ledger_servers.orphan(row, info, {42: row}) == ""
+
+
 def test_sweep_defaults_to_a_report_without_signalling_or_logging(tmp_path, monkeypatch):
     folder = tmp_path / "ledger"
     folder.mkdir()

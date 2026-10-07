@@ -143,9 +143,10 @@ def test_owner_follows_client_processes_to_the_run(tmp_path, monkeypatch, comm, 
     assert server_lifetime.owner({}, tmp_path) == (7, 99)
 
 
-@pytest.mark.parametrize("pid,expected", [(7, (7, 99)), (1, None), (8, None)])
+@pytest.mark.parametrize("pid,expected", [(7, (7, 99)), (2, (2, 99)), (1, None), (8, None)])
 def test_owner_without_a_known_runner_uses_the_live_parent(tmp_path, monkeypatch, pid, expected):
     fake_process(tmp_path)
+    fake_process(tmp_path, pid=2)
     fake_process(tmp_path, pid=1)
     monkeypatch.setattr(server_lifetime.os, "getppid", lambda: pid)
     assert server_lifetime.owner({}, tmp_path) == expected
@@ -167,13 +168,22 @@ def test_only_the_shared_folder_and_port_are_exempt(tmp_path, monkeypatch, folde
 
 def test_launch_environment_preserves_settings_and_pins_the_owner(tmp_path, monkeypatch):
     monkeypatch.setattr(server_lifetime, "os", SimpleNamespace(environ={"SWARM_RELOAD": "0", "OTHER": "keep"}))
-    monkeypatch.setattr(server_lifetime, "owner", lambda env: (7, 99))
+    owner = Mock(return_value=(7, 99))
+    monkeypatch.setattr(server_lifetime, "owner", owner)
     assert server_lifetime.environment(tmp_path, 9999) == {
         "SWARM_RELOAD": "0",
         "OTHER": "keep",
         "LEDGER_RUN_PID": "7",
         "LEDGER_RUN_START": "99",
     }
+    owner.assert_called_once_with(
+        {
+            "SWARM_RELOAD": "0",
+            "OTHER": "keep",
+            "LEDGER_RUN_PID": "7",
+            "LEDGER_RUN_START": "99",
+        }
+    )
 
 
 def test_shared_launch_discards_test_owner_markers(tmp_path, monkeypatch):
@@ -196,11 +206,13 @@ def test_launch_without_an_owner_preserves_the_environment(tmp_path, monkeypatch
 def test_watch_stops_on_run_or_folder_end_and_cancels_on_server_exit(tmp_path, monkeypatch, ending):
     folder = tmp_path / "ledger"
     folder.mkdir()
-    monkeypatch.setattr(
-        server_lifetime, "environment", lambda folder, port: {"LEDGER_RUN_PID": "7", "LEDGER_RUN_START": "99"}
-    )
-    monkeypatch.setattr(server_lifetime, "owner", lambda env: (7, 99))
-    monkeypatch.setattr(server_lifetime, "ended", lambda identity: ending == "owner")
+    env = {"LEDGER_RUN_PID": "7", "LEDGER_RUN_START": "99"}
+    environment = Mock(return_value=env)
+    owner = Mock(return_value=(7, 99))
+    ended = Mock(return_value=ending == "owner")
+    monkeypatch.setattr(server_lifetime, "environment", environment)
+    monkeypatch.setattr(server_lifetime, "owner", owner)
+    monkeypatch.setattr(server_lifetime, "ended", ended)
     monkeypatch.setattr(server_lifetime, "os", SimpleNamespace(environ={}))
     thread = Mock()
     monkeypatch.setattr(server_lifetime.threading, "Thread", thread)
@@ -209,6 +221,9 @@ def test_watch_stops_on_run_or_folder_end_and_cancels_on_server_exit(tmp_path, m
     monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: cwd))
     httpd = Mock()
     stopped = server_lifetime.watch(httpd, folder, 9999)
+    environment.assert_called_once_with(folder, 9999)
+    owner.assert_called_once_with(env)
+    stopped.wait = Mock(side_effect=[ending == "stopped", AssertionError("watch ignored run end")])
     assert json.loads((folder / ".server.owner.json").read_text()) == {"pid": 7, "start": 99}
     assert server_lifetime.os.environ == {"LEDGER_RUN_PID": "7", "LEDGER_RUN_START": "99"}
     thread.return_value.start.assert_called_once_with()
@@ -222,6 +237,11 @@ def test_watch_stops_on_run_or_folder_end_and_cancels_on_server_exit(tmp_path, m
         stopped.set()
     thread.call_args.kwargs["target"]()
     assert httpd.shutdown.call_count == (0 if ending == "stopped" else 1)
+    ended.assert_called_once_with((7, 99))
+    if ending == "stopped":
+        stopped.wait.assert_called_once_with(0.25)
+    else:
+        stopped.wait.assert_not_called()
 
 
 @pytest.mark.parametrize("kind", ["shared", "unowned"])
@@ -275,6 +295,45 @@ def test_hook_pins_the_run_before_detaching_the_ensure_process(tmp_path, monkeyp
     assert start.call_args.kwargs["env"] == env
     assert start.call_args.kwargs["start_new_session"] is True
     assert start.call_args.args[0][-1] == "--ensure"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        (b"agentihooks", b"ledger", b"serve"),
+        (b"python", b"/code/ledger_hook.py"),
+        (b"python", b"/code/ledger_server.py"),
+        (b"python", b"-m", b"hooks", b"extra"),
+        (b"python", b"-m", b"scripts.install", b"extra"),
+    ],
+)
+def test_each_launcher_keeps_the_original_run_owner(tmp_path, monkeypatch, argv):
+    fake_process(tmp_path, pid=9, ppid=7, start=101, argv=argv)
+    fake_process(tmp_path, argv=(b"python", b"proof.py"))
+    monkeypatch.setattr(server_lifetime.os, "getppid", lambda: 9)
+    assert server_lifetime.owner({}, tmp_path) == (7, 99)
+
+
+def test_a_proof_argument_named_after_a_launcher_does_not_change_ownership(tmp_path, monkeypatch):
+    fake_process(tmp_path, pid=9, ppid=7, start=101, argv=(b"python", b"proof.py", b"ledger.py"))
+    fake_process(tmp_path)
+    monkeypatch.setattr(server_lifetime.os, "getppid", lambda: 9)
+    assert server_lifetime.owner({}, tmp_path) == (9, 101)
+
+
+def test_shared_launch_without_owner_markers_needs_no_cleanup(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(server_lifetime, "os", SimpleNamespace(environ={}))
+    assert server_lifetime.environment(tmp_path / "development-ledger", 8765) == {}
+
+
+def test_shared_watch_uses_the_actual_address_and_starts_no_thread(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    thread = Mock()
+    monkeypatch.setattr(server_lifetime.threading, "Thread", thread)
+    stopped = server_lifetime.watch(Mock(), tmp_path / "development-ledger", 8765)
+    assert not stopped.is_set()
+    thread.assert_not_called()
 
 
 def test_ensure_passes_its_effective_folder_and_port_to_the_lifetime_owner(tmp_path, monkeypatch):
