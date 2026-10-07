@@ -46,7 +46,7 @@ def record(store, doctor, found, now_ms, cooldown_ms):
     """Keeps every finding with its detail; returns the ones first seen or shown again after a verdict."""
     judgments = verdicts(store, doctor)
     before = {k: json.loads(v) for k, v in store.redis.hgetall(judgments.key).items()}
-    shown = judgments.visible(found, now_ms, cooldown_ms)
+    shown = judgments.visible(found, now_ms, cooldown_ms, new_evidence=True)
     if found:
         details = {f.id: json.dumps({**f.as_dict(), "id": f.id, "measure": f.measure}) for f in found}
         store.redis.hset(_details_key(store, doctor), mapping=details)
