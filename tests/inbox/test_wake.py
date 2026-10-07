@@ -292,7 +292,10 @@ def test_the_wake_says_to_answer_through_the_inbox_never_in_the_terminal():
     assert "never as text in this terminal" in wake.WAKE_TEXT
 
 
-def test_items_outside_the_swarm_are_left_alone(inbox):
+def test_items_outside_the_swarm_are_left_alone(inbox, monkeypatch):
+    monkeypatch.setattr(
+        "scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {"outside": {"name": "someone-else"}}
+    )
     item = inbox.send("someone", "someone-else", "hi")
     herdr, ledger = FakeHerdr({}), FakeLedger()
     for n in range(6):

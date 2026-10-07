@@ -120,8 +120,10 @@ def _close_space(slug, config, store, runtime):
 
 
 def _bin_closed(slug, store, ledger, doc):
-    if doc.get("closed_at") and not store.agents(slug) and ledger.bin_closed(slug, doc["closed_at"]):
-        return ["the closed ledger moved to the bin"]
+    if doc.get("closed_at") and not store.agents(slug):
+        exits.close_swarm(InboxStore(store.redis), slug)
+        if ledger.bin_closed(slug, doc["closed_at"]):
+            return ["the closed ledger moved to the bin"]
     return []
 
 

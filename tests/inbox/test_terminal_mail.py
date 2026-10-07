@@ -78,7 +78,25 @@ def test_close_settles_mail_even_when_the_master_retired_earlier(setup, close):
     assert inbox.history(other.id) == old_history
 
 
-@pytest.mark.parametrize("address", ["proof-master-1", "ce5108a4-c06b-43f1-be80-9ba9491356e5"])
+def test_a_later_tick_settles_a_closed_swarms_mail_after_retirement_finishes(setup):
+    from scripts.swarm.tick import tick
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    store, inbox, master = setup
+    item = inbox.send("operator", master.seat, "Close proof")
+    inbox.deliver(item.id, master.name)
+    store.drop_agent("proof", master.name)
+    store.update("proof", state="stopped")
+    ledger = FakeLedger([])
+    original_state = ledger.state
+    ledger.state = lambda slug: {**original_state(slug), "closed_at": 1}
+    ledger.bin_closed = lambda *args: False
+    tick("proof", store, ledger, FakeRuntime(), item.created_at + 1)
+    assert inbox.get(item.id).state == "cancelled"
+    assert "swarm closed" in inbox.get(item.id).reason
+
+
+@pytest.mark.parametrize("address", ["proof-master-1", "ce5108a4-c06b-43f1-be80-9ba9491356e5", "operator-desk"])
 def test_wake_settles_an_unresolved_recipient(setup, monkeypatch, address):
     from scripts.inbox import wake
     from tests.inbox.test_wake import FakeHerdr, FakeLedger

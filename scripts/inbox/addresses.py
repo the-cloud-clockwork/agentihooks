@@ -44,17 +44,11 @@ def resolves(inbox: InboxStore, address: str, live: set[str]) -> bool:
     return bool(seat and (not outcome or outcome["seat"]))
 
 
-def settle_unresolved(
-    inbox: InboxStore, slug: str, names: set[str], items: list, now_ms: int, window: int
-) -> list[str]:
-    import re
-
+def settle_unresolved(inbox: InboxStore, names: set[str], items: list, now_ms: int, window: int) -> list[str]:
     live, actions = None, []
     for item in items:
         address = inbox.names.resolve(item.address)
-        belongs = of_swarm(address, slug, inbox.names) or of_swarm(item.sender, slug, inbox.names)
-        session = re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", address)
-        if not (belongs or session) or now_ms - item.created_at < window:
+        if now_ms - item.created_at < window:
             continue
         if live is None:
             sessions = get_active_sessions(cleanup=True)

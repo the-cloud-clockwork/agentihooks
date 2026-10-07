@@ -66,7 +66,7 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
     master = (boss.seat or boss.name) if boss else ""
     marks = SeenMarks(inbox.redis)
     statuses, prompted = {}, set()
-    actions = addresses.settle_unresolved(inbox, slug, names, inbox.pending(), now_ms, window)
+    actions = addresses.settle_unresolved(inbox, names, inbox.pending(), now_ms, window)
     doc = None
     for item in inbox.pending():
         item = replace(item, address=inbox.names.resolve(item.address), sender=inbox.names.resolve(item.sender))
