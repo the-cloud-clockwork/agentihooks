@@ -972,6 +972,13 @@ def test_a_dependency_that_is_not_active_or_has_no_branch_still_holds_the_task(s
     assert spawned_ids(runtime) == ["t1"] and ledger.rows["t2"]["state"] == "open"
 
 
+@pytest.mark.parametrize("field", ["depends_on", "parked_on"])
+def test_a_task_naming_a_task_missing_from_the_ledger_is_held(store, field):
+    ledger, runtime = FakeLedger([{"id": "t2", field: ["gone"]}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.spawned == [] and ledger.rows["t2"]["state"] == "open"
+
+
 def test_a_parked_task_waits_for_its_blocker_and_then_takes_a_finish_claim_with_its_handoff(store):
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "depends_on": ["t1"], "parked_on": ["t1"]}])
     runtime = FakeRuntime()
