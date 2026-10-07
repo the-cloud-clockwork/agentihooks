@@ -50,6 +50,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.context import injection_trace, quarantine
+from scripts import session_caps
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, modes, progress, quiet
 from scripts.gates import log as gate_log
@@ -520,6 +521,15 @@ def cmd_set(store, args):
             }
         )
     )
+
+
+def cmd_session_cap(store, args):
+    try:
+        cap = None if args.cap == "default" else int(args.cap)
+        session_caps.set_cap(args.account, cap, harness=args.harness)
+    except ValueError as exc:
+        raise SwarmError(f"session-cap takes an account and a cap from 1 to {session_caps.MAX_CAP}, or default: {exc}")
+    print(json.dumps({"account": args.account, "harness": args.harness, "cap": "default" if cap is None else cap}))
 
 
 def cmd_templates(store, args):
@@ -1114,6 +1124,10 @@ def build_parser():
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
     sub.add_parser("set").add_argument("pairs", nargs="+")
+    session_cap = sub.add_parser("session-cap")
+    session_cap.add_argument("account")
+    session_cap.add_argument("cap")
+    session_cap.add_argument("--harness", choices=session_caps.HARNESSES, default="claude")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
     sub.add_parser("names").add_argument("--json", action="store_true")
