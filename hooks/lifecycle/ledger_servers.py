@@ -10,8 +10,9 @@ from scripts.swarm_ledger.server_lifetime import shared
 
 
 def server_process(row: Process) -> bool:
-    return "--serve" in row.argv and any(
-        Path(arg).name == "ledger_server.py" or arg == "scripts.swarm_ledger.ledger_server" for arg in row.argv
+    return "--serve" in row.argv and (
+        any(Path(arg).name == "ledger_server.py" for arg in row.argv[:2])
+        or row.argv[1:3] == ("-m", "scripts.swarm_ledger.ledger_server")
     )
 
 

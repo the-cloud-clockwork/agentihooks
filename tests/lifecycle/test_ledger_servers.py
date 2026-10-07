@@ -85,6 +85,93 @@ def test_sweep_preserves_shared_active_and_unmatched_processes(tmp_path, monkeyp
     assert not (home / "gc-ledger-servers.jsonl").exists()
 
 
+@pytest.mark.parametrize(
+    "argv,expected",
+    [
+        (("python", "-m", "scripts.swarm_ledger.ledger_server", "--serve"), True),
+        (("python", "ledger_server.py", "--ensure"), False),
+        (("python", "ledger_server.py", "--serve"), True),
+        (("python", "other.py", "--serve"), False),
+        (("python", "other.py", "ledger_server.py", "--serve"), False),
+    ],
+)
+def test_only_ledger_serving_processes_are_candidates(argv, expected):
+    row = Process(42, 7, 42, 42, 100, "S", "python", argv)
+    assert ledger_servers.server_process(row) is expected
+
+
+@pytest.mark.parametrize("folder_setting", ["default", "relative", "user", "equals"])
+def test_details_resolve_the_server_folder_and_default_port(tmp_path, monkeypatch, folder_setting):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    cwd = tmp_path / "run"
+    cwd.mkdir()
+    folder = {
+        "default": tmp_path / "development-ledger",
+        "relative": cwd / "data",
+        "user": tmp_path / "data",
+        "equals": tmp_path / "data=one",
+    }[folder_setting]
+    folder.mkdir()
+    row = process(start=400000)
+    proc = plant(tmp_path, row, folder, cwd=cwd)
+    env = {
+        "relative": b"LEDGER_DIR=data",
+        "user": b"LEDGER_DIR=~/data",
+        "equals": f"LEDGER_DIR={folder}".encode(),
+        "default": b"",
+    }[folder_setting]
+    (proc / "42/environ").write_bytes(env)
+    info = ledger_servers.details(row, proc)
+    assert info == {"pid": 42, "port": 8765, "folder": str(folder), "cwd": str(cwd), "age": 0, "owner": None}
+
+
+def test_sweep_checks_every_process_after_skips_and_errors(tmp_path, monkeypatch):
+    folder = tmp_path / "ledger"
+    folder.mkdir()
+    cwd = tmp_path / "run"
+    cwd.mkdir()
+    row = process(ppid=1)
+    proc = plant(tmp_path, row, folder, cwd=cwd)
+    other = Process(1, 0, 1, 1, 0, "S", "unrelated", ("other.py",))
+    active = process(pid=43)
+    outside = process(pid=44, ppid=1)
+    broken = process(pid=45)
+    metadata = ledger_servers.details(row, proc)
+    read = Mock(
+        side_effect=[
+            {**metadata, "pid": 43, "owner": [7, 99]},
+            {**metadata, "pid": 44, "folder": "/outside", "cwd": "/outside"},
+            OSError("unreadable"),
+            metadata,
+        ]
+    )
+    monkeypatch.setattr(ledger_servers, "details", read)
+    stopped = Mock()
+    monkeypatch.setattr(ledger_servers, "terminate", stopped)
+    parent = Process(7, 1, 7, 7, 99, "S", "pytest", ("pytest",))
+    table = {1: other, 43: active, 44: outside, 45: broken, 42: row, 7: parent}
+    result = ledger_servers.sweep_servers(table, tmp_path, scope=str(tmp_path), act=True, proc=proc)
+    assert result[0] == {"pid": 45, "action": "error", "error": "unreadable"}
+    assert result[1]["pid"] == 42
+    assert result[1]["reason"] == "starting run ended without an owner record"
+    stopped.assert_called_once_with(row, proc)
+
+
+def test_terminate_allows_a_grace_period_before_escalating(tmp_path, monkeypatch):
+    row = process()
+    monkeypatch.setattr(ledger_servers, "_process", Mock(side_effect=[row, row, None]))
+    monkeypatch.setattr(ledger_servers.time, "monotonic", Mock(side_effect=[1, 1.5]))
+    sleep = Mock()
+    monkeypatch.setattr(ledger_servers.time, "sleep", sleep)
+    kill = Mock()
+    monkeypatch.setattr(ledger_servers.os, "kill", kill)
+    ledger_servers.terminate(row, tmp_path)
+    import signal
+
+    kill.assert_called_once_with(42, signal.SIGTERM)
+    sleep.assert_called_once_with(0.02)
+
+
 def test_foreground_owner_metadata_is_used_when_environment_has_no_start_time(tmp_path):
     folder = tmp_path / "ledger"
     folder.mkdir()

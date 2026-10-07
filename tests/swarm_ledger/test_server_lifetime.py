@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -89,7 +90,6 @@ def test_process_identity_reads_start_time_and_parent_even_with_spaces_in_the_na
         "ppid": 1,
         "start": 99,
         "state": "S",
-        "comm": "a (name)",
         "argv": [b"python", b"-m", b"pytest"],
     }
 
@@ -166,7 +166,7 @@ def test_only_the_shared_folder_and_port_are_exempt(tmp_path, monkeypatch, folde
 
 
 def test_launch_environment_preserves_settings_and_pins_the_owner(tmp_path, monkeypatch):
-    monkeypatch.setattr(server_lifetime.os, "environ", {"SWARM_RELOAD": "0", "OTHER": "keep"})
+    monkeypatch.setattr(server_lifetime, "os", SimpleNamespace(environ={"SWARM_RELOAD": "0", "OTHER": "keep"}))
     monkeypatch.setattr(server_lifetime, "owner", lambda env: (7, 99))
     assert server_lifetime.environment(tmp_path, 9999) == {
         "SWARM_RELOAD": "0",
@@ -185,7 +185,7 @@ def test_shared_launch_discards_test_owner_markers(tmp_path, monkeypatch):
 
 
 def test_launch_without_an_owner_preserves_the_environment(tmp_path, monkeypatch):
-    monkeypatch.setattr(server_lifetime.os, "environ", {"OTHER": "keep"})
+    monkeypatch.setattr(server_lifetime, "os", SimpleNamespace(environ={"OTHER": "keep"}))
     monkeypatch.setattr(server_lifetime, "owner", lambda env: None)
     assert server_lifetime.environment(tmp_path, 9999) == {"OTHER": "keep"}
 
@@ -199,7 +199,7 @@ def test_watch_stops_on_run_or_folder_end_and_cancels_on_server_exit(tmp_path, m
     )
     monkeypatch.setattr(server_lifetime, "owner", lambda env: (7, 99))
     monkeypatch.setattr(server_lifetime, "ended", lambda identity: ending == "owner")
-    monkeypatch.setattr(server_lifetime.os, "environ", {})
+    monkeypatch.setattr(server_lifetime, "os", SimpleNamespace(environ={}))
     thread = Mock()
     monkeypatch.setattr(server_lifetime.threading, "Thread", thread)
     cwd = tmp_path / "cwd"

@@ -14,7 +14,6 @@ def process(pid: int, proc: Path) -> dict | None:
             "ppid": int(tail[1]),
             "start": int(tail[19]),
             "state": tail[0],
-            "comm": stat.split("(", 1)[1].rsplit(")", 1)[0],
             "argv": (root / "cmdline").read_bytes().split(b"\0"),
         }
     except (OSError, ValueError, IndexError):
