@@ -51,6 +51,9 @@ def test_tails_are_read_again_only_when_a_work_file_changes(folders, monkeypatch
 def test_tails_skip_tasks_without_a_folder_or_with_an_unsafe_id(folders):
     assert server.workspace_tails("s", LEDGER) == {"t1": {}}
     assert list(server.TAIL_MARKS["s"]) == ["t1"]
+    skipped_first = {"tasks": [LEDGER["tasks"][1], LEDGER["tasks"][2], LEDGER["tasks"][0]], "_meta": {"rev": 3}}
+    assert server.workspace_tails("s", skipped_first) == {"t1": {}}
+    assert server.workspace_tails("s", {"_meta": {"rev": 4}}) == {}
 
 
 def test_marks_follow_the_current_tasks_and_ledgers(folders):

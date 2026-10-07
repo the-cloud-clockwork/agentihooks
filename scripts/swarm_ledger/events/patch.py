@@ -51,7 +51,7 @@ def list_diff(old, new):
     if old_ids is None or new_ids is None:
         drop = overlap(old, new)
         return {"drop": drop, "add": new[len(old) - drop :], "u": []}
-    before = dict(zip(old_ids, old, strict=True))
+    before = {item["id"]: item for item in old}
     kept = len(old_ids) - overlap(old_ids, new_ids)
     if kept * 2 < len(new_ids):
         return {"ids": new_ids, "u": [item for item in new if not same(before.get(item["id"]), item)]}

@@ -6,11 +6,12 @@ from .hub import Expired
 
 HEARTBEAT_S = 5.0
 WRITE_TIMEOUT_S = 30.0
+COMPACT = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"))
 
 
 def frame(name, data, cursor=None):
     head = f"id: {cursor}\n" if cursor else ""
-    body = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    body = COMPACT.encode(data)
     return f"{head}event: {name}\ndata: {body}\n\n".encode()
 
 

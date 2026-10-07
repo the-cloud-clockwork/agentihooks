@@ -74,8 +74,8 @@ def test_parse_reads_frames_back_and_skips_comments_and_empty_blocks():
 
 
 def test_parse_keeps_values_whole_and_resets_between_frames():
-    lines = ["event: taX\n", "data: 1 \n", "id: c1:X\n", "\n", "data: 2\n", "\n"]
-    assert list(stream.parse(lines)) == [("taX", 1, "c1:X"), ("message", 2, None)]
+    lines = ["data: 0\n", "\n", "event: taX\n", "data: 1 \n", "id: c1:X \n", "\n", "data: 2\n", "\n"]
+    assert list(stream.parse(lines)) == [("message", 0, None), ("taX", 1, "c1:X "), ("message", 2, None)]
 
 
 def test_parse_drops_an_unfinished_frame():

@@ -92,6 +92,8 @@ def test_a_ledger_without_events_or_members_prints_only_the_watching_line(capsys
     watch = watch_ledger.Watch(args(name="me"), "p.json", None)
     watch.show({"_meta": {"rev": 3}})
     assert capsys.readouterr().out == "WATCHING p.json rev 3\n"
+    watch.show({"_meta": {"rev": 4, "events": [op(4, "tasks/t1")]}})
+    assert shown(capsys) == ["c-4"]
 
 
 def test_each_event_is_marked_once_for_the_watcher_and_ledger():
