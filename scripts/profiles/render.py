@@ -68,6 +68,16 @@ def _chain(name: str) -> list[tuple[str, Path]]:
     return _i._resolve_profile_chain(name)
 
 
+def _bundle() -> Path | None:
+    _i = _install_module()
+    linked = (_i._load_state().get("bundle") or {}).get("path")
+    if linked and not Path(linked).is_dir():
+        raise ValueError(
+            f"linked bundle {linked} is missing; relink it with agentihooks bundle link <path> before rendering"
+        )
+    return _i._get_bundle_path()
+
+
 def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     commit = ""
     if bundle is not None:
@@ -84,7 +94,7 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
 
 
 def stamp(name: str) -> dict:
-    return _stamp(_install_module()._get_bundle_path(), _chain(name))
+    return _stamp(_bundle(), _chain(name))
 
 
 def _roots(bundle: Path | None, dirs: list[tuple[str, Path]]) -> list[Path]:
@@ -148,7 +158,7 @@ def _with_brain(channels: str) -> str:
 
 
 def channels(name: str) -> str:
-    env = _settings("claude", _install_module()._get_bundle_path(), _chain(name))["env"]
+    env = _settings("claude", _bundle(), _chain(name))["env"]
     return _with_brain(env.get(CHANNELS, ""))
 
 
@@ -230,7 +240,7 @@ def _read_json(path: Path) -> dict | None:
 def render_claude(name: str, force: bool = False) -> Path | None:
     _refuse_live_render_from_another_checkout(name)
     _i = _install_module()
-    bundle, dirs = _i._get_bundle_path(), _chain(name)
+    bundle, dirs = _bundle(), _chain(name)
     current = _stamp(bundle, dirs)
     out = rendered_root() / name / "claude"
     if (
@@ -314,7 +324,7 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     from scripts.profiles import codex_master
 
     _i = _install_module()
-    bundle, dirs = _i._get_bundle_path(), _chain(name)
+    bundle, dirs = _bundle(), _chain(name)
     master = any(n.removeprefix("package:") == "master" for n, _ in dirs)
     claude_fresh = render_claude(name, force=force) is None
     operator = _operator_codex_home()
