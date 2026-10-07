@@ -143,7 +143,9 @@ def test_model_and_effort_require_native_flags(mounted):
     with (root / "environ").open("ab") as stream:
         stream.write(b"AGENTIHOOKS_RUN_MODEL=opus\0AGENTIHOOKS_RUN_EFFORT=high\0")
     (root / "cmdline").write_bytes(b"claude\0")
-    assert set(live_binding.compare(agent, live_binding.read(agent, 42, proc))) == {"model", "effort"}
+    facts = live_binding.read(agent, 42, proc)
+    assert (facts["model"], facts["effort"]) == ("", "")
+    assert set(live_binding.compare(agent, facts)) == {"model", "effort"}
 
 
 def test_codex_home_hooks_and_native_effort(mounted):
