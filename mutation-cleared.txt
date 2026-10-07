@@ -1342,5 +1342,9 @@
   "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1has_capacity__mutmut_8:0c0df51472b4d0a0db2ee7b7644138ed6275618c6f93bbc4bbc1ff050d255e39": {
     "reader": "Standards",
     "reason": "An empty request and None are both falsy and both differ from codex, so choose_shared and choose take the same branches and the slot check returns the same answer."
+  },
+  "scripts/doctor/registry.py:scripts.doctor.registry.x_progress__mutmut_25:c051142c11bbf905616adb05a8ddd23c3cff3b878457ae929b0cfd970ec9e98d": {
+    "reader": "Standards reader for task t48",
+    "reason": "None and empty string are both falsy; every later use of stat in progress and _fallback is a truthiness test, so no input distinguishes them."
   }
 }

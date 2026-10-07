@@ -342,7 +342,7 @@ def cmd_take_master(store, args):
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, runtime.live_names())
     name = os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
-    record = take_master.take(store, args.slug, name, runtime, now_ms(), args.replace)
+    record, transfer = take_master.take(store, args.slug, name, runtime, now_ms(), args.replace)
     ledger = LedgerClient()
     if ledger.closed(args.slug):
         ledger.reopen(args.slug, record.name)
@@ -350,7 +350,12 @@ def cmd_take_master(store, args):
         store.update(args.slug, state="running")
         timer.ensure(_bin())
     config = store.config(args.slug)
-    task = {"id": MASTER, "handoff": store.handoff(args.slug, MASTER), "peer": store.peer(args.slug)}
+    task = {
+        "id": MASTER,
+        "handoff": store.handoff(args.slug, MASTER),
+        "peer": store.peer(args.slug),
+        "transfer": transfer,
+    }
     task = primed(store, args.slug, record.seat, task)
     print(prompt.build_master(args.slug, config.repo, record.name, task, config.autonomy))
     injection_trace.record_rows(os.environ.get("CLAUDE_CODE_SESSION_ID", ""), priming_trace.rows(args.slug, task))
