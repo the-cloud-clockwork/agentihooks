@@ -10,7 +10,7 @@ from pathlib import Path
 
 from scripts import agent_choice
 from scripts.profiles import binding, plugins
-from scripts.swarm import effort_range, model_pick, naming, priming_trace, profile_choice, prompt
+from scripts.swarm import effort_range, live_binding, model_pick, naming, priming_trace, profile_choice, prompt
 from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
 from scripts.swarm.tick import Placed, SpawnError
@@ -104,6 +104,7 @@ class HerdrRuntime:
         self.home, self.run, self.herdr = home, run, herdr
         self.choose = choose or agent_choice.choose
         self.sleep = time.sleep
+        self._binding_pids = {}
 
     def has_capacity(self, config):
         environ = dict(os.environ)
@@ -114,10 +115,10 @@ class HerdrRuntime:
 
     def spawn(self, config, lane, name, task, spawns=None):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
-        saved = _transfer(task)
+        saved = task.get("launch_assignment") or _transfer(task)
         decision = (
             profile_choice.ProfileDecision(saved["profile"], "handoff", "original seat profile")
-            if saved and not task.get("profile")
+            if saved and (task.get("launch_assignment") or not task.get("profile"))
             else profile_choice.choose(config.slug, lane, chosen, task, environ)
         )
         profile = decision.profile
@@ -283,10 +284,32 @@ class HerdrRuntime:
 
         return {s.name for s in sessions() if s.name}
 
+    def bindings(self, agents: list[AgentRecord]) -> dict:
+        from scripts.terminate_agent import sessions
+
+        items, facts = sessions(), {}
+        self._binding_pids = {}
+        for agent in agents:
+            session = live_binding.bound_session(agent, items)
+            if session is not None:
+                facts[agent.name] = live_binding.read(agent, session.process.pid)
+                self._binding_pids[agent.name] = str(session.process.pid)
+            elif agent.profile_decision.get("validation", {}).get("pid"):
+                facts[agent.name] = {"process": False}
+                self._binding_pids[agent.name] = None
+        return facts
+
+    def pane_open(self, agent: AgentRecord) -> bool:
+        found = self._get(pane_target(agent))
+        return found is not None and _owns(found, agent)
+
     def _terminate(self, name):
+        selector = self._binding_pids.get(name, name)
+        if selector is None:
+            return True
         try:
             proc = self.run(
-                [_bin(), "terminate-agent", name, "--force-shared"], capture_output=True, text=True, timeout=60
+                [_bin(), "terminate-agent", selector, "--force-shared"], capture_output=True, text=True, timeout=60
             )
         except subprocess.TimeoutExpired:
             return False

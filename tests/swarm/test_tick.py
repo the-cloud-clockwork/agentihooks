@@ -89,6 +89,14 @@ class FakeRuntime:
     def live_names(self):
         return set(self.live)
 
+    def bindings(self, agents):
+        from scripts.swarm.live_binding import assignment
+
+        return {a.name: {**assignment(a), "hooks": True} for a in agents if a.name in self.live}
+
+    def pane_open(self, agent):
+        return bool(agent.pane_id) and agent.pane_id not in self.closed
+
     def retire(self, agent, live):
         if agent.name in self.stuck:
             return False
