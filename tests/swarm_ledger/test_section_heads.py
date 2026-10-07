@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import serve_modules
+
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
 ANSWER = {"id": "a1", "by": "operator", "at": 1, "text": "yes"}
@@ -66,6 +68,7 @@ def open_page(browser, doc, init_script=None):
         "**/*",
         lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
     )
+    serve_modules(context)
     page = context.new_page()
     page.goto(URL)
     return context, page

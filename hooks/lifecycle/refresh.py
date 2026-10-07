@@ -11,7 +11,9 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from hooks.lifecycle.guard import _home
@@ -55,13 +57,47 @@ def due(payload: dict, environ: dict, home: Path, pid: int) -> bool:
     return latest_affecting_change(home) > process_started_at(pid)
 
 
-def restart_commands(session_id: str, name: str, cwd: str, account: str) -> list[list[str]]:
+@dataclass(frozen=True)
+class Original:
+    session_id: str
+    name: str
+    cwd: str
+    account: str
+    pid: int
+    profile: str = ""
+    model: str = ""
+    effort: str = ""
+
+    @classmethod
+    def of(cls, session_id: str, name: str, entry: dict, pid: int, environ: dict) -> Original:
+        return cls(
+            session_id=session_id,
+            name=name,
+            cwd=entry.get("cwd") or os.getcwd(),
+            account=entry.get("account", ""),
+            pid=pid,
+            profile=environ.get("AGENTIHOOKS_PROFILE", ""),
+            model=environ.get("AGENTIHOOKS_RUN_MODEL", ""),
+            effort=environ.get("AGENTIHOOKS_RUN_EFFORT", ""),
+        )
+
+
+def restart_commands(original: Original) -> list[list[str]]:
     exe = shutil.which("agentihooks") or "agentihooks"
-    launch = [exe, "init-agent", "--agent", "claude", "--dir", cwd, "--name", name, "--prompt", NOTE, "--"]
-    if account:
-        launch += ["--route", account]
-    launch += ["--resume", session_id]
-    return [[exe, "terminate-agent", session_id, "--type", "claude"], launch]
+    launch = [exe, "init-agent", "--agent", "claude", "--dir", original.cwd, "--name", original.name]
+    launch += ["--prompt", NOTE]
+    if original.profile:
+        launch += ["--profile", original.profile]
+    launch += ["--"]
+    if original.account:
+        launch += ["--route", original.account]
+    if original.model:
+        launch += ["--model", original.model]
+    if original.effort:
+        launch += ["--effort", original.effort]
+    launch += ["--resume", original.session_id]
+    kill = [exe, "terminate-agent", str(original.pid), "--type", "claude", "--force-shared"]
+    return [kill, launch]
 
 
 def _closing_marker(pid: int, environ: dict) -> Path:
@@ -72,10 +108,21 @@ def _closing_marker(pid: int, environ: dict) -> Path:
     return _runtime_dir(environ) / f"closing-{ppid}"
 
 
-def restart(commands: list[list[str]], marker: Path) -> None:
+def live_session_ids() -> list[str]:
+    from scripts.terminate_agent import sessions
+
+    return [item.session_id for item in sessions()]
+
+
+def restart(commands: list[list[str]], marker: Path, session_id: str) -> None:
+    kill, launch = commands
     marker.touch()
-    for argv in commands:
-        subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=300, check=False)
+    done = subprocess.run(kill, stdin=subprocess.DEVNULL, capture_output=True, timeout=300, check=False)
+    if done.returncode != 0 or session_id in live_session_ids():
+        marker.unlink(missing_ok=True)
+        print(f"session-refresh: {session_id} still running, resume skipped: {done.stderr!r}", file=sys.stderr)
+        return
+    subprocess.run(launch, stdin=subprocess.DEVNULL, capture_output=True, timeout=300, check=False)
 
 
 def on_stop(payload: dict) -> bool:
@@ -95,8 +142,13 @@ def on_stop(payload: dict) -> bool:
     entry = _load_sessions().get(session_id, {})
     cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
     name = cmdline[cmdline.index(b"--name") + 1].decode() if b"--name" in cmdline else session_id[:8]
-    commands = restart_commands(session_id, name, entry.get("cwd") or os.getcwd(), entry.get("account", ""))
+    commands = restart_commands(Original.of(session_id, name, entry, pid, dict(os.environ)))
     fork_and_call(
-        restart, commands, _closing_marker(pid, dict(os.environ)), timeout_sec=600, task_name="session-refresh"
+        restart,
+        commands,
+        _closing_marker(pid, dict(os.environ)),
+        session_id,
+        timeout_sec=600,
+        task_name="session-refresh",
     )
     return True

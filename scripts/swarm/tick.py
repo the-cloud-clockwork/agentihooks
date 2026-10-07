@@ -4,6 +4,7 @@ Scaling up is immediate; scaling down happens only as agents finish, so a lowere
 Each swarm keeps at most one master: an agent the operator talks to, which works no task.
 """
 
+import json
 import os
 from dataclasses import dataclass, field, replace
 from itertools import count
@@ -16,8 +17,21 @@ from scripts.gates import log as gate_log
 from scripts.handoff import transfers
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
-from scripts.inbox.store import InboxStore
-from scripts.swarm import control_notifications, lifetime, phase_state, session_model
+from scripts.inbox.store import CLOSED, InboxStore
+from scripts.swarm import (
+    affinity,
+    control_notifications,
+    launch_check,
+    lifetime,
+    live_binding,
+    master_retire,
+    master_start,
+    phase_state,
+    reaper,
+    retire_watch,
+    session_model,
+    tick_master,
+)
 from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
@@ -27,6 +41,12 @@ from scripts.swarm_ledger import ledger_rank, ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
+DOWN_TOLD = "master down told"
+REDELIVERED = "the master went down before closing it; kept for the next master"
+MASTER_DOWN = (
+    "The master is down and is being relaunched. Your message waits for the new master, which receives it as soon "
+    "as it starts."
+)
 IDLE_NUDGE_TICKS = 3
 IDLE_KILL_TICKS = 10
 IDLE_TICKS = "idle-ticks"
@@ -57,6 +77,7 @@ class Placed:
     model_confidence: float | None = None
     profile_decision: dict = field(default_factory=dict)
     choice: str = ""
+    launched_at: int = 0
 
 
 class Ledger(Protocol):
@@ -69,11 +90,15 @@ class Ledger(Protocol):
 
 
 class Runtime(Protocol):
-    def has_capacity(self) -> bool: ...
+    def has_capacity(self, config) -> bool: ...
     def spawn(self, config, lane: str, name: str, task: dict, spawns: dict | None = None) -> Placed: ...
     def live_names(self) -> set[str]: ...
+    def reported(self, agent: AgentRecord) -> bool: ...
+    def bindings(self, agents: list[AgentRecord]) -> dict: ...
     def recover(self, name: str) -> Placed: ...
-    def retire(self, agent: AgentRecord, live: bool) -> bool: ...
+    def retire(self, agent: AgentRecord, homes: list = ...) -> bool: ...
+    def refusal(self, agent: AgentRecord) -> dict: ...
+    def reap_name(self, name: str) -> bool: ...
     def status(self, agent: AgentRecord) -> str: ...
     def observe(self, agent: AgentRecord) -> PaneObservation: ...
     def nudge(self, agent: AgentRecord, text: str) -> None: ...
@@ -91,7 +116,11 @@ def tick(slug, store, ledger, runtime, now_ms):
     doc = ledger.state(slug)
     rows = {t["id"]: t for t in doc["tasks"]}
     exits.sweep(InboxStore(store.redis), slug, store, lambda: {t["id"]: t for t in ledger.state(slug)["tasks"]})
+    actions += master_start.observe(slug, config, store, ledger, runtime, now_ms)
+    actions += _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms)
+    actions += _verify(slug, store, ledger, runtime, rows, now_ms)
     actions += _reap(slug, store, ledger, runtime, rows, now_ms)
+    actions += _strays(slug, config, store, runtime)
     actions += lifetime.retire_idle_master(slug, store, ledger, runtime, rows, now_ms)
     if config.state == "stopped":
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
@@ -105,13 +134,27 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions.append("new tasks, running again")
     actions += _orphans(slug, store, ledger, rows)
     if not sleeping:
-        actions += _master(slug, config, store, runtime, now_ms)
+        actions += _codex_hook_order()
+        actions += _master_down(slug, config, store, ledger, runtime, now_ms)
+        actions += tick_master.run(
+            slug, config, store, ledger, runtime, now_ms, lambda: _master(slug, config, store, runtime, now_ms)
+        )
         if config.state == "running":
             actions += _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms)
     _conversations(slug, store, runtime)
     _session_models(slug, store)
-    transfers.observe(store, slug, runtime.live_names())
+    starting = {a.name for a in store.agents(slug) if a.lane == MASTER and a.state == "starting"}
+    transfers.observe(store, slug, runtime.live_names() - starting)
     return actions + _settle(slug, config, store, ledger, rows, doc) + _close_space(slug, config, store, runtime)
+
+
+def _codex_hook_order():
+    from scripts.targets.codex_target import codex_home, restore_hook_order
+
+    home = codex_home()
+    moved = restore_hook_order(home)
+    path = (home / "hooks.json").resolve()
+    return [f"restored the approved Codex hook order in {path}: {', '.join(moved)}"] if moved else []
 
 
 def _close_space(slug, config, store, runtime):
@@ -134,10 +177,32 @@ def _woken(slug, config, store, ledger):
     if waiting and config.template == priming.TEMPLATE and ledger.closed(slug):
         priming.cancel_master_items(inbox, slug)
         return False
-    return any(
-        item.sender == "operator" and not (item.fyi and item.ref.startswith(control_notifications.CONTROL_REF))
-        for item in waiting
-    )
+    return any(_operator_line(item) for item in waiting)
+
+
+def _operator_line(item):
+    return item.sender == "operator" and not (item.fyi and item.ref.startswith(control_notifications.CONTROL_REF))
+
+
+def _master_down(slug, config, store, ledger, runtime, now_ms):
+    """Operator lines waiting at a master seat nobody holds: tell the chat once per line, and return any line a dead
+    master took but never closed to pending so the next master receives it."""
+    live = runtime.live_names()
+    masters = [a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"]
+    if config.state == "stopping" or any(m.name in live or now_ms - m.started_at <= STARTUP_GRACE_MS for m in masters):
+        return []
+    inbox, seat = InboxStore(store.redis), seat_address(slug, MASTER)
+    waiting = [item for item in inbox.inbox(seat) if item.state not in CLOSED and _operator_line(item)]
+    for item in waiting:
+        if item.state != "pending":
+            inbox.redirect(item.id, "swarm", seat, REDELIVERED)
+    told = [item for item in waiting if DOWN_TOLD not in (e.get("event") for e in inbox.history(item.id))]
+    for item in told:
+        inbox.note(item.id, DOWN_TOLD, "swarm", MASTER_DOWN, now_ms)
+    if not told:
+        return []
+    ledger.notify(slug, MASTER_DOWN)
+    return [f"master down, told the operator about {len(told)} waiting lines"]
 
 
 def _drop(slug, store, ledger, rows, agent):
@@ -149,15 +214,120 @@ def _drop(slug, store, ledger, rows, agent):
     return f", task {agent.task} reopened" if reopen else ""
 
 
+def _verify(slug, store, ledger, runtime, rows, now_ms):
+    judged = launch_check.judged(store, slug)
+    agents, actions = [a for a in store.agents(slug) if a.name not in judged], []
+    facts = runtime.bindings(agents)
+    for agent in agents:
+        if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
+            continue
+        task = rows.get(agent.task, {})
+        if _ended(agent, rows):
+            continue
+        if agent.name not in facts and agent.state != "retiring":
+            continue
+        filled = live_binding.fill(agent, facts.get(agent.name, {}))
+        if filled != agent:
+            store.put_agent(slug, filled)
+            agent = filled
+        differences = live_binding.record(store, slug, agent, facts.get(agent.name, {"process": False}), now_ms)
+        if not differences:
+            if agent.state == "retiring":
+                store.put_agent(slug, replace(agent, state="working"))
+            continue
+        fields = ", ".join(differences)
+        saved = live_binding.relaunch_assignment(agent, task, store.config(slug))
+        if agent.lane == MASTER and "process" not in differences and not live_binding.complete(saved):
+            actions.append(f"kept {agent.name} after mismatched {fields}: its relaunch assignment is incomplete")
+            continue
+        live = agent.name in facts and "process" not in differences
+        if held := master_retire.hold(store, slug, agent, f"mismatched {fields}", live, now_ms):
+            store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
+            actions.append(held)
+            continue
+        if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+            store.put_agent(slug, replace(agent, state="retiring"))
+            actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
+            continue
+        store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
+        actions.append(f"retired {agent.name} after mismatched {fields}" + _drop(slug, store, ledger, rows, agent))
+    return actions
+
+
+def _ended(agent, rows):
+    task = rows.get(agent.task, {})
+    ended = agent.lane != MASTER and (task.get("done") or task.get("state") in {"done", "blocked", "handoff"})
+    return agent.state == "finished" or bool(ended)
+
+
+def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
+    waiting, actions = launch_check.pending(store, slug), []
+    if not waiting:
+        return actions
+    agents = [a for a in store.agents(slug) if a.name in waiting]
+    for name in set(waiting) - {a.name for a in agents}:
+        launch_check.forget(store, slug, name)
+    facts = runtime.bindings(agents)
+    for agent in agents:
+        found = launch_check.misses(
+            store, slug, agent, facts.get(agent.name, {}), doc, launch_check.bundled(agent.profile)
+        )
+        if found and now_ms - agent.started_at < launch_check.DEADLINE_MS:
+            continue
+        if found:
+            miss = launch_check.Miss(agent, found, waiting[agent.name]["relaunch"])
+            actions.append(_failed_launch(slug, store, ledger, runtime, rows, miss, now_ms))
+            continue
+        elapsed = launch_check.joined_at(agent, doc) - agent.started_at
+        launch_check.record(store, slug, agent, found, now_ms, elapsed)
+        launch_check.forget(store, slug, agent.name)
+        launch_check.clear_relaunched(store, slug, agent.task)
+        actions.append(f"{agent.name} passed its launch check in {elapsed // 1000} seconds")
+    return actions
+
+
+def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
+    agent, found = miss.agent, miss.found
+    fields, elapsed = ", ".join(found), now_ms - agent.started_at
+    if not miss.relaunch or set(found) <= launch_check.REPORT_ONLY:
+        outcome, said = "report", f"{agent.name} failed its launch check on {fields}; reported only"
+    elif launch_check.relaunched(store, slug, agent.task):
+        outcome, said = "spent", f"{agent.name} failed its launch check on {fields}; its one relaunch is spent"
+    elif held := master_retire.hold(
+        store, slug, agent, f"its launch check failed on {fields}", agent.name in runtime.live_names(), now_ms
+    ):
+        return held
+    elif not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+        return f"could not retire {agent.name} after its launch check failed on {fields}, retrying next tick"
+    else:
+        outcome = "relaunch"
+    launch_check.record(store, slug, agent, found, now_ms, elapsed, held=outcome == "spent")
+    launch_check.forget(store, slug, agent.name)
+    enforced = {field: values for field, values in found.items() if field not in launch_check.REPORT_ONLY}
+    if agent.lane == MASTER and enforced:
+        ledger.notify(slug, launch_check.told(enforced, outcome))
+    if outcome != "relaunch":
+        return said
+    launch_check.mark_relaunched(store, slug, agent.task)
+    saved = live_binding.relaunch_assignment(agent, rows.get(agent.task, {}), store.config(slug))
+    store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
+    pending = master_start.read(store, slug)
+    if agent.lane == MASTER and pending.get("name") == agent.name:
+        master_start.save(store, slug, {**pending, "name": "", "retry": True, "at": now_ms})
+    return f"retired {agent.name} after its launch check failed on {fields}" + _drop(slug, store, ledger, rows, agent)
+
+
 def _reap(slug, store, ledger, runtime, rows, now_ms):
     live, actions = runtime.live_names(), []
     for agent in store.agents(slug):
-        if agent.state == "awaiting-decision":
+        if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
             continue
-        task = rows.get(agent.task, {})
-        ended = agent.lane != MASTER and (task.get("done") or task.get("state") in {"done", "blocked", "handoff"})
-        if agent.state == "finished" or ended:
-            if runtime.retire(agent, agent.name in live):
+        ended = _ended(agent, rows)
+        if agent.state == "retiring" and not ended:
+            continue
+        if ended:
+            master_retire.forget(store, slug, agent.name)
+            if runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
                 store.release(slug, agent.task, agent.name)
                 store.drop_agent(slug, agent.name)
                 goes_on = bool(store.handoff(slug, agent.task)) and rows.get(agent.task, {}).get("state") in ACTIVE
@@ -166,6 +336,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
                 exits.settle(InboxStore(store.redis), agent.name, agent.seat if goes_on else "", "exited")
                 actions.append(f"retired {agent.name}")
             else:
+                retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
                 actions.append(f"could not retire {agent.name}, retrying next tick")
         elif agent.name in live and agent.lane == MASTER:
             runtime.name_pane(agent)
@@ -174,8 +345,22 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
         elif now_ms - agent.started_at > STARTUP_GRACE_MS:
-            runtime.retire(agent, False)
+            runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
             actions.append(f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent))
+    return actions
+
+
+def _strays(slug, config, store, runtime):
+    """Live agent processes still carrying a name this swarm issued and retired: every holder is left over."""
+    recorded, actions = {a.name for a in store.agents(slug)}, []
+    for name in sorted(runtime.live_names() - recorded):
+        found = parse(name)
+        if not found or found.code != config.code or not store.names.entry(name).get("retired_at"):
+            continue
+        if runtime.reap_name(name):
+            actions.append(f"reaped stray {name}")
+        else:
+            actions.append(f"could not reap stray {name}, retrying next tick")
     return actions
 
 
@@ -221,7 +406,7 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     if idle.idle_ticks == IDLE_NUDGE_TICKS:
         runtime.nudge(idle, NUDGE.format(slug=slug))
         return [f"nudged {agent.name}"]
-    if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, True):
+    if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, homes=reaper.scratch_homes(slug, idle.task)):
         return [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle)]
     return []
 
@@ -309,9 +494,9 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents, actions = store.agents(slug), []
     taken = {a.seat for a in agents}
     for lane, cap in (("eng", config.max_eng), ("ci", config.max_ci), ("plan", config.max_plan)):
-        busy = sum(1 for a in agents if a.lane == lane)
+        busy = sum(1 for a in agents if a.lane == lane and not _ended(a, rows))
         for task in _claimable(slug, store, rows, doc, lane)[: max(cap - busy, 0)]:
-            if not runtime.has_capacity():
+            if not runtime.has_capacity(config):
                 return actions + ["every agent is at its session cap, waiting"]
             if blocked := _lives_spent(slug, store, ledger, rows, task):
                 actions.append(blocked)
@@ -322,7 +507,9 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             handoff = store.handoff(slug, task["id"])
             if handoff:
                 task["handoff"] = handoff
-            seat = _free_seat(slug, lane, taken, store.handoff_seat(slug, task["id"]))
+            saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
+            preferred = json.loads(saved)["seat"] if saved else store.handoff_seat(slug, task["id"])
+            seat = _free_seat(slug, lane, taken, preferred)
             taken.add(seat)
             record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting", seat=seat)
             store.put_agent(slug, record)
@@ -344,6 +531,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                     actions.append(f"task {task['id']} is {live['state']} on the ledger, not claimed")
                     continue
                 task.update(fields)
+                store.count_claim(slug, task["id"])
                 store.seats.occupy(seat, name, now_ms)
                 task["transfer"] = transfers.attach(store, slug, record)
                 placed = runtime.spawn(
@@ -351,14 +539,16 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                 )
             except Exception as exc:
                 transfers.failed(store, slug, record)
+                store.note_launch_failure(slug, task["id"], str(exc))
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
                 if isinstance(exc, ProfileUnresolved):
                     actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
                 return actions
-            store.put_agent(slug, _placed(record, placed))
+            store.put_agent(slug, placed_record(record, placed))
+            launch_check.begin(store, slug, record, now_ms)
             store.count_spawn(slug, placed.harness)
-            store.count_claim(slug, task["id"])
             store.clear_handoff(slug, task["id"])
+            store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
             actions.append(f"spawned {name} for {task['id']}")
     return actions
 
@@ -388,7 +578,8 @@ def _claim_cap(slug, store, ledger, rows, task):
     if lives < claim_cap.CAP or mode == "off":
         return ""
     last = (store.handoff_envelope(slug, task["id"]) or {}).get("reason") or "none"
-    reason = claim_cap.refusal(lives, last, slug, task["id"])
+    failure = store.launch_failure(slug, task["id"]) or "none"
+    reason = claim_cap.refusal(lives, last, failure, slug, task["id"])
     kind = "observe" if mode == "observe" else "deny"
     gate_log.append(slug, gate_log.Row.of(claim_cap.GATE.name, kind, Who(name="swarm", task=task["id"]), reason=reason))
     if kind == "observe":
@@ -408,6 +599,9 @@ def primed(store, slug, seat, task):
     memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.learned(seat)}
     envelope = store.handoff_envelope(slug, task["id"])
     task = {**task, "seat": seat, "culture": store.culture.get(slug), "handoff_envelope": envelope, **memory}
+    saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
+    if saved:
+        task["launch_assignment"] = json.loads(saved)
     return priming_trace.withhold(slug, task)
 
 
@@ -417,7 +611,7 @@ def _free_seat(slug, lane, taken, preferred):
     return next(seat for k in count(1) if (seat := seat_address(slug, f"{lane}-{k}")) not in taken)
 
 
-def _placed(record, placed):
+def placed_record(record, placed):
     return replace(
         record,
         pane_id=placed.pane_id,
@@ -431,6 +625,7 @@ def _placed(record, placed):
         model_confidence=placed.model_confidence,
         profile_decision=placed.profile_decision,
         choice=placed.choice,
+        started_at=placed.launched_at or record.started_at,
         state="working",
     )
 
@@ -454,7 +649,7 @@ def _recover_master(slug, config, store, runtime, now_ms):
         return []
     name = occupant if occupant in candidates else candidates[0]
     record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, seat=seat)
-    store.put_agent(slug, _placed(record, runtime.recover(name)))
+    store.put_agent(slug, placed_record(record, runtime.recover(name)))
     for agent in agents:
         if agent.name not in live and agent.state != "finished":
             store.drop_agent(slug, agent.name)
@@ -469,10 +664,13 @@ def _master(slug, config, store, runtime, now_ms):
     if config.state == "stopping":
         if any(a.lane != MASTER for a in agents):
             return []
-        return [_retire_master(slug, store, runtime, m) for m in masters]
-    if any(m.state != "finished" for m in masters):
+        return [_retire_master(slug, store, runtime, m, now_ms) for m in masters]
+    pending = master_start.read(store, slug)
+    if any(m.state != "finished" for m in masters) or pending.get("name") or pending.get("alerted"):
         return []
-    if not runtime.has_capacity():
+    if any(m.name in runtime.live_names() for m in masters):
+        return ["the old master is still running, waiting for it to end before starting the next"]
+    if not runtime.has_capacity(config):
         return ["no session slot for the master, waiting"]
     name = store.next_name(slug, MASTER, now_ms)
     record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, state="starting", seat=seat_address(slug, MASTER))
@@ -480,28 +678,44 @@ def _master(slug, config, store, runtime, now_ms):
     try:
         store.seats.occupy(record.seat, name, now_ms)
         transfer = transfers.attach(store, slug, record)
-        placed = runtime.spawn(
-            config,
-            MASTER,
-            name,
-            primed(
+        task = (
+            {**pending["task"], "transfer": transfer}
+            if pending
+            else primed(
                 store,
                 slug,
                 record.seat,
                 {"id": MASTER, "handoff": store.handoff(slug, MASTER), "peer": store.peer(slug), "transfer": transfer},
-            ),
+            )
         )
+        master_start.begin(store, slug, name, task, now_ms)
+        affinity.handed_off(store, slug)
+        placed = runtime.spawn(config, MASTER, name, task)
     except Exception as exc:
         transfers.failed(store, slug, record)
         store.drop_agent(slug, name)
+        affinity.failed(store, slug, str(exc))
+        failed = master_start.read(store, slug)
+        if failed.get("attempt") == 1:
+            master_start.save(store, slug, {**failed, "name": "", "retry": True})
         return [f"master spawn failed: {exc}"]
-    store.put_agent(slug, _placed(record, placed))
-    store.clear_handoff(slug, MASTER)
+    affinity.placed(store, slug, placed.harness)
+    record = placed_record(record, placed)
+    reported = runtime.reported(record)
+    store.put_agent(slug, replace(record, state="working" if reported else "starting"))
+    launch_check.begin(store, slug, record, now_ms)
+    if reported:
+        store.redis.delete(store.key(slug, "master-start"))
+        store.clear_handoff(slug, MASTER)
+    store.redis.hdel(store.key(slug, "launch-assignments"), MASTER)
     return [f"spawned master {name}"]
 
 
-def _retire_master(slug, store, runtime, master):
-    if not runtime.retire(master, master.name in runtime.live_names()):
+def _retire_master(slug, store, runtime, master, now_ms):
+    live = master.name in runtime.live_names()
+    if held := master_retire.hold(store, slug, master, "the swarm is stopping", live, now_ms):
+        return held
+    if not runtime.retire(master, homes=reaper.scratch_homes(slug, master.task)):
         return f"could not retire {master.name}, retrying next tick"
     store.drop_agent(slug, master.name)
     return f"retired {master.name}"

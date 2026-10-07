@@ -88,11 +88,7 @@ def store(slug, name, data):
         ext, data, fields = _text(name, data)
     artifact_id = f"{hashlib.sha256(data).hexdigest()}.{ext}"
     path = media.folder(slug) / artifact_id
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".part")
-        tmp.write_bytes(data)
-        tmp.replace(path)
+    media.write_file(path, data)
     return {"id": artifact_id, **fields, "size": len(data)}
 
 
@@ -162,25 +158,38 @@ def operator_asked(doc, entry_id):
     )
 
 
+def refusal(doc: dict, op: dict, members: dict) -> str:
+    from scripts.swarm.naming import lane_of
+
+    member = members.get(op["by"], {})
+    if op["by"] not in members:
+        return "join the ledger first and name a task it holds"
+    if op["task"] == "master" and member.get("role") == "orchestrator" and lane_of(op["by"]) == "master":
+        return "" if operator_asked(doc, op.get("request")) else REFUSED
+    task = next((t for t in doc["tasks"] if t["id"] == op["task"]), None)
+    if op["task"] and task is None:
+        return "join the ledger first and name a task it holds"
+    requested = op.get("plan") is True or (task and task.get("artifact") is True)
+    return "" if requested or operator_asked(doc, op.get("request")) else REFUSED
+
+
 def _add(doc, op, ctx):
     rows = doc.setdefault("artifacts", [])
     if any(row["id"] == op["id"] for row in rows):
         return True
+    reason = refusal(doc, op, ctx.meta["members"])
+    if reason:
+        if reason == REFUSED:
+            ctx.refused.append(reason)
+        return False
     from scripts.swarm.naming import lane_of
 
-    member = ctx.meta["members"].get(op["by"], {})
-    if op["task"] == "master" and member.get("role") == "orchestrator" and lane_of(op["by"]) == "master":
-        if not operator_asked(doc, op.get("request")):
-            ctx.refused.append(REFUSED)
-            return False
+    if (
+        op["task"] == "master"
+        and ctx.meta["members"][op["by"]].get("role") == "orchestrator"
+        and lane_of(op["by"]) == "master"
+    ):
         op = {**op, "task": ""}
-    task = next((t for t in doc["tasks"] if t["id"] == op["task"]), None)
-    if op["by"] not in ctx.meta["members"] or (op["task"] and task is None):
-        return False
-    requested = op.get("plan") is True or (task and task.get("artifact") is True)
-    if not requested and not operator_asked(doc, op.get("request")):
-        ctx.refused.append(REFUSED)
-        return False
     title = op["title"].strip()
     row = {"id": op["id"], "title": title, "by": op["by"], "task": op["task"], "at": ctx.at, "file": op["file"]}
     for key in ("request", "plan"):
@@ -244,8 +253,7 @@ def sweep(slug, doc, ctx):
         doc[TRASH] = [row for row in trash if row not in expired]
         ctx.dirty = True
     dropped = {row["file"]["id"] for row in expired} | set(ctx.dropped)
-    if not dropped:
-        return
     used = in_use(doc)
+    media.sweep(slug, used, ctx.at)
     for file_id in dropped - used:
         (media.folder(slug) / file_id).unlink(missing_ok=True)

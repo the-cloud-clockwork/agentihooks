@@ -159,6 +159,36 @@ def test_swarm_roles_render_only_the_task_browser(world, role, target):
     assert not settings["enabledPlugins"].get("playwright@claude-plugins-official", False)
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_a_role_overlay_keeps_the_logged_in_extension_browser(world, target):
+    from scripts.profiles import render
+
+    extension = {
+        "command": "cmd.exe",
+        "args": ["/c", "npx", "@playwright/mcp@latest", "--extension"],
+        "env": {"PLAYWRIGHT_MCP_EXTENSION_TOKEN": "${PLAYWRIGHT_EXT_TOKEN_NESTORCOLT_GMAIL}"},
+    }
+    for role in ("master", "engineer"):
+        _write(world["bundle"] / "profiles" / role / "profile.yml", f"name: {role}\nextends: [package:{role}]\n")
+    _write(
+        world["bundle"] / "profiles" / "master" / ".claude" / ".mcp.json",
+        json.dumps({"mcpServers": {"playwright-ext-nestorcolt-gmail": extension, "playwright-tcc": extension}}),
+    )
+
+    def browsers(role):
+        out = render.render(target, role)
+        if target == "claude":
+            servers = json.loads((out / ".claude.json").read_text())["mcpServers"]
+        else:
+            servers = tomllib.loads((out / "config.toml").read_text())["mcp_servers"]
+        return {k: v for k, v in servers.items() if "playwright" in k}
+
+    master = browsers("master")
+    assert sorted(master) == ["playwright-cmd", "playwright-ext-nestorcolt-gmail"]
+    assert "--extension" in master["playwright-ext-nestorcolt-gmail"]["args"]
+    assert list(browsers("engineer")) == ["playwright-cmd"]
+
+
 def test_operator_profile_keeps_its_browser(world):
     from scripts.profiles import render
 
@@ -1153,6 +1183,22 @@ def test_stamp_ignores_operator_plugins(world, target):
     assert render.render(target, "rb-role") is None
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_stamp_redoes_render_when_agentihooks_base_settings_change(world, target, tmp_path, monkeypatch):
+    from scripts.profiles import render
+
+    install = world["install"]
+    profiles = tmp_path / "agentihooks-profiles"
+    shutil.copytree(install.PROFILES_DIR / "_base", profiles / "_base")
+    monkeypatch.setattr(install, "PROFILES_DIR", profiles)
+    assert render.render(target, "rb-role") is not None
+    assert render.render(target, "rb-role") is None
+
+    base = profiles / "_base" / install._NATIVE_BASE_NAME[target]
+    base.write_text(base.read_text() + "\n")
+    assert render.render(target, "rb-role") is not None
+
+
 def test_stamp_names_the_chain_role_defaults(world, monkeypatch):
     from scripts.profiles import plugins, render
 
@@ -1202,13 +1248,70 @@ def test_init_rerenders_every_existing_profile_home(world, monkeypatch, capsys):
     assert f"{install._GREEN}[OK]{install._RESET} Re-rendered the rb-role profile home" in lines
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+@pytest.mark.parametrize("validated", [False, True])
+def test_running_profile_validates_its_launched_persona_after_other_profile_render(
+    world, monkeypatch, target, validated
+):
+    from scripts import init_agent
+    from scripts.profiles import binding, render
+
+    home = render.render(target, "rb-role")
+    launched = binding.inspect(home, "rb-role", target)
+    env = {"AGENTIHOOKS_PROFILE": "rb-role", binding.HOMES[target]: str(home), "XDG_RUNTIME_DIR": str(world["home"])}
+    init_agent._binding_request(SimpleNamespace(profile="rb-role"), target, "", env, [])
+    report = Path(env[binding.REPORT])
+    monkeypatch.setattr(binding, "process", lambda: (123, target, env, "default"))
+    if validated:
+        assert binding.validate(launched["canary"])["persona"] == launched["persona"]
+
+    _write(world["bundle"] / "profiles" / "rb-other" / "CLAUDE.md", "OTHER PERSONA UPDATED\n")
+    _commit(world["bundle"], "change other profile")
+    hooks_python = Path(sys.executable)
+    monkeypatch.setattr(world["install"], "_resolve_hooks_python", lambda: hooks_python)
+    interpreter = world["home"] / "init-python"
+    interpreter.symlink_to(sys.executable)
+    monkeypatch.setattr(binding.sys, "executable", str(interpreter))
+    render.render("claude", "rb-other")
+    assert binding.digest(home / binding.PERSONAS[target]) == launched["persona"]
+
+    world["install"]._rerender_profile_homes("claude")
+    rewritten = binding.digest(home / binding.PERSONAS[target])
+    print(f"{target}: before={launched['persona']} after={rewritten}")
+    result = binding.validate(launched["canary"])
+    assert result["persona"] == launched["persona"]
+    assert result["sources"] == launched["sources"]
+    assert result["revisions"] == launched["revisions"]
+
+    _write(world["role"] / "CLAUDE.md", "UPDATED ENGINEER PERSONA\n")
+    _commit(world["bundle"], "change launched profile")
+    render.render(target, "rb-role", force=True)
+    refreshed = binding.inspect(home, "rb-role", target)
+    assert refreshed["canary"] != launched["canary"]
+    result = binding.validate(launched["canary"])
+    assert result["persona"] == launched["persona"]
+    assert result["source_blobs"] == launched["source_blobs"]
+
+    binding.request(report, "rb-role", target)
+    with pytest.raises(ValueError, match="canary mismatch"):
+        binding.validate(launched["canary"])
+    assert binding.validate(refreshed["canary"])["persona"] == refreshed["persona"]
+
+
 def test_stamp_names_bundle_commit_and_chain(world):
     from scripts.profiles import render
 
     head = _git(world["bundle"], "rev-parse", "HEAD").strip()
     chain = ["rb-base", "rb-kit", "rb-role"]
-    assert render.stamp("rb-role") == {"bundle_commit": head, "chain": chain, "plugins": {}, "corrections": ""}
-    assert render._stamp(None, []) == {"bundle_commit": "", "chain": [], "plugins": {}, "corrections": ""}
+    base = render._base_digest()
+    assert render.stamp("rb-role") == {
+        "bundle_commit": head,
+        "base": base,
+        "chain": chain,
+        "plugins": {},
+        "corrections": "",
+    }
+    assert render._stamp(None, []) == {"bundle_commit": "", "base": base, "chain": [], "plugins": {}, "corrections": ""}
     assert render._roots(None, [("rb-role", world["role"])]) == [world["role"]]
 
 
@@ -1317,6 +1420,56 @@ def test_bundle_overlay_extending_package_role_sits_on_top(world, package_role):
     env = json.loads((out / "settings.json").read_text())["env"]
     assert (env["PACKAGE_FLAG"], env["WINNER"]) == ("1", "bundle")
     assert json.loads((out / render.STAMP).read_text())["chain"] == ["package:rb-pkg", "rb-pkg"]
+
+
+@pytest.fixture
+def brain_overlay(world, tmp_path):
+    brain = tmp_path / "kernel" / "profiles" / "rb-brain"
+    _write(brain / "profile.yml", "name: rb-brain\n")
+    _write(brain / "CLAUDE.md", "BRAIN USAGE MARKER\n")
+    _write(brain / ".claude" / ".mcp.json", json.dumps({"mcpServers": {"rb-brain-srv": {"type": "http", "url": "u"}}}))
+    _write(brain / ".claude" / "skills" / "brain-skill" / "SKILL.md", "---\nname: brain-skill\n---\n")
+    _write(brain / ".claude" / "rules" / "brain-rule.md", "BRAIN RULE MARKER\n")
+    _write(brain / ".claude" / "settings.overrides.json", json.dumps({"env": {"BRAIN_FLAG": "1"}}))
+    install = world["install"]
+    state = install._load_state()
+    state["linked_profiles"] = [{"name": "rb-brain", "path": str(brain)}]
+    install._save_state(state)
+    profiles = world["bundle"] / "profiles"
+    _write(profiles / "rb-base" / "profile.yml", "name: rb-base\nallowedOverlays: [rb-router, rb-brain]\n")
+    _write(profiles / "rb-op" / "profile.yml", "name: rb-op\nextends: [rb-base]\nallowedOverlays: [rb-brain]\n")
+    _write(profiles / "rb-op" / "CLAUDE.md", "OPERATOR PERSONA MARKER\n")
+    return brain
+
+
+@pytest.mark.parametrize("name", ["rb-role", "rb-op"])
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_render_layers_each_declared_overlay_like_a_profile(world, brain_overlay, name, target):
+    from scripts.profiles import render
+
+    render.render(target, name)
+    out = world["home"] / ".agentihooks" / "profiles" / name / "claude"
+
+    persona = (out / "CLAUDE.md").read_text()
+    assert persona.count("BRAIN USAGE MARKER") == 1 and "BRAIN RULE MARKER" in persona
+    assert "**rb-brain**" in persona and f"You are **{name}**" in persona
+    assert (out / "skills" / "brain-skill").is_symlink()
+    assert json.loads((out / "settings.json").read_text())["env"]["BRAIN_FLAG"] == "1"
+    assert "rb-brain-srv" in json.loads((out / ".claude.json").read_text())["mcpServers"]
+    chain = json.loads((out / render.STAMP).read_text())["chain"]
+    assert chain[-1] == "rb-brain" and chain.count("rb-brain") == 1 and "rb-router" not in chain
+    if target == "codex":
+        config = tomllib.loads((out.parent / "codex" / "config.toml").read_text())
+        assert "rb-brain-srv" in config["mcp_servers"]
+
+
+def test_render_skips_an_overlay_no_profile_declares(world, brain_overlay):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-other")
+
+    assert "BRAIN USAGE MARKER" not in (out / "CLAUDE.md").read_text()
+    assert json.loads((out / render.STAMP).read_text())["chain"] == ["rb-other"]
 
 
 def _scratch_bundle(world, tmp_path: Path) -> Path:

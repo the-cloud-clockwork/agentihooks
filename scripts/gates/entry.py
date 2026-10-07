@@ -15,6 +15,9 @@ from scripts.gates.build import BuildGate
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.identity import PinnedIdentity
 from scripts.gates.intent import IntentGate
+from scripts.gates.placement import PlacementGate
+from scripts.gates.prompts import PromptGuard
+from scripts.gates.push_stop import PushStop
 from scripts.gates.quiet import QuietClaim
 from scripts.gates.reruns import RerunBudget
 from scripts.gates.subagents import SubagentBudget
@@ -33,17 +36,20 @@ GATES = {
         IntentGate(),
         BuildGate(),
         ClaimStop(),
+        PushStop(),
         QuietClaim(),
     )
 }
+HOST_GATES = {gate.name: gate for gate in (PlacementGate(), PromptGuard())}
 
 
 def main(argv=None, stdin=None, environ=None, home=None):
     argv = sys.argv[1:] if argv is None else argv
     environ = os.environ if environ is None else environ
-    gate = GATES.get(argv[0]) if argv else None
+    named = {**GATES, **HOST_GATES}
+    gate = named.get(argv[0]) if argv else None
     if gate is None:
-        print(f"agentihooks gate: name one gate of: {', '.join(sorted(GATES))}", file=sys.stderr)
+        print(f"agentihooks gate: name one gate of: {', '.join(sorted(named))}", file=sys.stderr)
         return 1
     payload = json.loads((stdin or sys.stdin).read() or "{}")
     call = Call.from_payload(payload)

@@ -330,6 +330,8 @@ def on_session_start(payload: dict) -> None:
         },
     )
 
+    _request_trace_flush(payload, "start")
+
     # Emit a trace span for session start (visible in Langfuse)
     tracer = otel.get_tracer()
     if tracer:
@@ -560,6 +562,7 @@ def on_session_end(payload: dict) -> None:
             "duration_ms": metrics.get("duration_ms"),
         },
     )
+    _request_trace_flush(payload, "end")
 
     # Log transcript entries to hooks.log (for debugging)
     if session_id and transcript_path:
@@ -698,6 +701,7 @@ def on_user_prompt_submit(payload: dict) -> None:
     _swarm_heartbeat("working", payload.get("prompt", ""))
     typed = _operator_words(payload)
     _operator_mode(payload, typed)
+    _request_trace_flush(payload, "prompt")
 
     try:
         from hooks.config import QUOTA_USAGE_INJECTION_ENABLED
@@ -1059,16 +1063,6 @@ def _operator_reminder(payload: dict) -> None:
             inject_context(text, also_log=False, skip_compression=True)
     except Exception as e:
         log("operator reminder failed", {"error": str(e)})
-
-
-def _operator_quiet(payload: dict) -> str:
-    try:
-        from hooks.context import operator_mode
-
-        return operator_mode.quiet_block(payload.get("session_id"), payload.get("last_assistant_message"))
-    except Exception as e:
-        log("operator quiet check failed", {"error": str(e)})
-        return ""
 
 
 def _arm_gate_lifts(payload: dict) -> None:
@@ -1883,6 +1877,12 @@ def on_post_tool_use(payload: dict) -> None:
                 "ci_manifesto AskUserQuestion signal detection failed",
                 {"error": str(e)},
             )
+        try:
+            from scripts.gates.placement import heard as placement_heard
+
+            placement_heard(payload)
+        except Exception as e:
+            log("placement answer record failed", {"error": str(e)})
 
     # Log transcript entries to hooks.log (for debugging)
     session_id = payload.get("session_id", "")
@@ -2041,9 +2041,6 @@ def on_stop(payload: dict) -> None:
         log("conditions stop failed", {"error": str(e)})
     if _stop_block is not None:
         raise BlockAction(_stop_block)
-    _quiet_block = _operator_quiet(payload)
-    if _quiet_block:
-        raise BlockAction(_quiet_block)
 
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
@@ -2089,14 +2086,7 @@ def on_stop(payload: dict) -> None:
     except Exception as e:
         log("brain_writer_hook dispatch failed", {"error": str(e)})
 
-    try:
-        if transcript_path and otel.langfuse_exporter_config() is not None:
-            from hooks._async import fork_and_call
-            from hooks.observability.agent_trace import export_session
-
-            fork_and_call(export_session, session_id, transcript_path, timeout_sec=60, task_name="agent_trace")
-    except Exception as e:
-        log("agent_trace dispatch failed", {"error": str(e)})
+    _request_trace_flush(payload, "stop")
 
     # Emit a trace span for session end (visible in Langfuse)
     tracer = otel.get_tracer()
@@ -2416,6 +2406,16 @@ def on_pre_compact(payload: dict) -> None:
         mark_compacted(session_id)
     except Exception as e:
         log("swarm refocus compact mark failed", {"error": str(e)})
+    _request_trace_flush(payload, "compact")
+
+
+def _request_trace_flush(payload: dict, reason: str) -> None:
+    try:
+        from hooks.observability import trace_flush
+
+        trace_flush.request(payload.get("session_id", ""), payload.get("transcript_path", ""), reason)
+    except Exception as e:
+        log("trace flush request failed", {"error": str(e)})
 
 
 def on_permission_request(payload: dict) -> None:
@@ -2560,6 +2560,10 @@ def main() -> None:
         # Get event name from payload
         event_name = payload.get("hook_event_name", "Unknown")
         _blocked_event = event_name
+
+        from hooks.context.swarm_pin import unpin
+
+        unpin()
 
         # Route to handler
         handler = EVENT_HANDLERS.get(event_name)

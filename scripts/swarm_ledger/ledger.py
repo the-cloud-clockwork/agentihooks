@@ -35,6 +35,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       be phases/<id>, questions/<id>, followups/<id> or tasks/<id>. Unanswered
                                       questions, blocked tasks, merge approvals and flagged follow-ups show on their own
   priority clear ID... | --all        clear priorities once answered
+  alert list | claim ID | close ID OUTCOME
+                                      list open alerts, claim one, or close it done saying what was done
   relay ITEM TEXT --quote WORDS       post the operator's decision from this pane as his answer to questions/<id>
                                       or his comment on another item; WORDS must be in an operator prompt or
                                       AskUserQuestion answer this session recorded in the last hour
@@ -216,8 +218,14 @@ def upload_image(slug: str, name: str, path: str) -> dict:
     return upload(slug, name, path, "media", {})
 
 
-def upload_artifact(slug: str, name: str, path: str) -> dict:
-    return upload(slug, name, path, "artifacts", {"X-Artifact-Name": Path(path).name})
+def upload_artifact(slug: str, name: str, path: str, request: dict) -> dict:
+    return upload(
+        slug,
+        name,
+        path,
+        "artifacts",
+        {"X-Artifact-Name": Path(path).name, "X-Artifact-Request": json.dumps(request)},
+    )
 
 
 def upload(slug: str, name: str, path: str, route: str, extra: dict) -> dict:
@@ -250,9 +258,9 @@ def cmd_comment(args):
 
 
 def cmd_artifact(args):
-    file = upload_artifact(args.slug, args.name, args.path)
     task = args.task if args.task is not None else os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
     request = {"request": args.request} if args.request else {}
+    file = upload_artifact(args.slug, args.name, args.path, {"task": task, "title": args.title, **request})
     state = call(args.slug, [op("artifact_add", args, task=task, title=args.title, file=file, **request)])
     print(json.dumps({"published": not state.get("rejected")}))
     if state.get("rejected"):
@@ -268,8 +276,8 @@ def cmd_publish_plan(args):
     title = args.title or ledger_publish.title_of(Path(args.path).read_text(encoding="utf-8"), phases)
 
     def artifact(path, title):
-        file = upload_artifact(args.slug, args.name, path)
         task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
+        file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
         send(args, "artifact_add", task=task, title=title, file=file, plan=True)
         return f"{BASE}/artifacts/{args.slug}/{file['id']}"
 
@@ -370,6 +378,16 @@ def cmd_priority(args):
     print(json.dumps({"cleared": cleared, "rejected": rejected}))
     if rejected:
         sys.exit(1)
+
+
+def cmd_alert(args):
+    if args.action == "list":
+        print(json.dumps([a for a in call(args.slug)["alerts"] if a["state"] != "done"], indent=2))
+        return
+    if not args.id or (args.action == "close") != bool(args.outcome):
+        sys.exit('alert claim needs ID; alert close needs ID and "OUTCOME"')
+    send(args, f"alert_{args.action}", target=args.id, **({"outcome": args.outcome} if args.outcome else {}))
+    print(json.dumps({"alert": args.id, "action": args.action}))
 
 
 def cmd_relay(args):
@@ -600,6 +618,10 @@ def build_parser():
     priority.add_argument("action", choices=["add", "clear"])
     priority.add_argument("values", nargs="*")
     priority.add_argument("--all", action="store_true")
+    alert = sub.add_parser("alert")
+    alert.add_argument("action", choices=["list", "claim", "close"])
+    alert.add_argument("id", nargs="?")
+    alert.add_argument("outcome", nargs="?")
     relay = sub.add_parser("relay")
     relay.add_argument("item")
     relay.add_argument("text")

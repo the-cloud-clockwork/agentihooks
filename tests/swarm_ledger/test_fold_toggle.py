@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import serve_modules
+
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
 COMMENT = {"id": "c1", "by": "operator", "at": 1, "text": "looks right"}
@@ -42,6 +44,7 @@ def tab(browser):
         "**/*",
         lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
     )
+    serve_modules(context)
     page = context.new_page()
     page.goto(URL)
     yield page
@@ -135,6 +138,7 @@ def test_comments_stored_by_the_old_open_by_default_rule_start_collapsed(browser
         "**/*",
         lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
     )
+    serve_modules(context)
     page = context.new_page()
     try:
         page.goto(URL)
@@ -213,6 +217,7 @@ def test_page_renders_both_controls_when_storage_is_unavailable(browser):
         "**/*",
         lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
     )
+    serve_modules(context)
     page = context.new_page()
     errors = []
     page.on("pageerror", lambda exc: errors.append(str(exc)))

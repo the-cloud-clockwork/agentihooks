@@ -5,6 +5,8 @@ import sys
 import unittest
 from pathlib import Path
 
+from tests.swarm_ledger.ledger_page import page_source
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import new_ledger  # noqa: E402
@@ -29,7 +31,7 @@ HEADS = [
 
 
 def function_source(name):
-    page = TEMPLATE.read_text(encoding="utf-8")
+    page = page_source()
     return f"function {name}(" + page.split(f"  function {name}(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
 
 
@@ -74,7 +76,7 @@ class Outline(unittest.TestCase):
         )
 
     def test_every_content_section_is_tagged_for_the_outline(self):
-        page = TEMPLATE.read_text(encoding="utf-8")
+        page = page_source()
         column = page.split('<div class="col">', 1)[1].split('id="swarm" role="tabpanel"', 1)[0]
         sections = re.findall(r"<section[^>]*>", column)
         self.assertTrue(sections)
@@ -85,13 +87,13 @@ class Outline(unittest.TestCase):
             self.assertIn(f'data-outline="{list_name}"', column)
 
     def test_outline_nav_and_narrow_toggle_exist_and_render_refreshes_it(self):
-        page = TEMPLATE.read_text(encoding="utf-8")
+        page = page_source()
         self.assertIn('<nav class="outline" id="outline"', page)
         self.assertIn('id="outline-toggle"', page)
         self.assertIn("renderOutline();", function_source("render"))
 
     def test_wide_layout_offsets_the_content_and_keeps_the_button_stack_clear(self):
-        page = TEMPLATE.read_text(encoding="utf-8")
+        page = page_source()
         wide = page.split("@media (min-width: 1280px) {", 1)[1].split("\n}\n", 1)[0]
         self.assertRegex(wide, r"body \{[^}]*padding-left: var\(--outline-w\)")
         self.assertRegex(page, r"\.outline \{[^}]*width: calc\(var\(--outline-w\) - \d+px\)")
@@ -109,7 +111,7 @@ class Outline(unittest.TestCase):
             "sec-followups",
             "sec-sources",
         ]
-        page = TEMPLATE.read_text(encoding="utf-8")
+        page = page_source()
         column = page.split('<div class="col">', 1)[1].split('id="swarm" role="tabpanel"', 1)[0]
         sections = [
             {"id": sid, "list": name, "title": title}

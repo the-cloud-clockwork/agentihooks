@@ -31,6 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(1, str(Path(__file__).resolve().parents[2]))
+import ledger_alerts  # noqa: E402
 import ledger_artifacts  # noqa: E402
 import ledger_authority as authority  # noqa: E402
 import ledger_bin  # noqa: E402
@@ -58,6 +59,7 @@ CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
 LOGO = ROOT / "media" / "agentihooks-logo.png"
 HOME_PAGE = CODE_DIR / "home.html"
+MODULE_RE = re.compile(r"/static/([0-9a-f]{12})/js/([a-z]+)\.js")
 CODE_DIRS = (
     CODE_DIR,
     *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates")),
@@ -303,6 +305,7 @@ MIN_COMPACT, MAX_COMPACT = 100, 1000
 QUOTA_PROBE_TIMEOUT_S = 120
 AUTONOMY = ("manual", "assist", "delegate", "full")
 EFFORTS = ("low", "medium", "high", "max")
+MASTER_AGENTS = ("claude", "codex")
 MAX_NOTE = 500
 FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
 
@@ -350,9 +353,14 @@ def control_argv(body):
         pairs.append(f"autonomy={body['autonomy']}")
     if "gates" in body:
         pairs += gate_pairs(body["gates"])
+    if "master_agent" in body:
+        if body["master_agent"] not in MASTER_AGENTS:
+            raise ValueError(f"master_agent must be one of {', '.join(MASTER_AGENTS)}")
+        pairs.append(f"master-agent={body['master_agent']}")
     if not pairs:
         raise ValueError(
-            "set needs max_eng, max_ci, max_plan, codex_share, compact_limit, effort_min, effort_max, autonomy or gates"
+            "set needs max_eng, max_ci, max_plan, codex_share, compact_limit, effort_min, effort_max, autonomy, "
+            "master_agent or gates"
         )
     return ["set", *pairs]
 
@@ -482,6 +490,25 @@ def relay_to_inbox(slug, state):
         return []
 
 
+def deliver_alerts(slug, state):
+    """Alerts raised by this sync go to the master's seat or the operator through the inbox."""
+    meta = state["_meta"]
+    if not any(a.get("rev") == meta["rev"] for a in state.get("alerts", [])):
+        return []
+    try:
+        from scripts.inbox.store import connect
+        from scripts.swarm import operator_mail
+        from scripts.swarm.store import RedisStore
+
+        inbox = connect()
+        live = [a for a in RedisStore(inbox.redis).agents(slug) if a.state != "finished"]
+        master = operator_mail.master_address(slug, live)
+        return ledger_alerts.deliver(inbox, slug, state["alerts"], meta["rev"], master)
+    except Exception as exc:  # the ledger write stands whatever the inbox does
+        sys.stderr.write(f"alert delivery for {slug}: {exc}\n")
+        return []
+
+
 def doctor_phrase(slug, state):
     """The operator's chat line rig doctor stop stops the Doctor of this ledger, in the background."""
     meta = state["_meta"]
@@ -559,6 +586,7 @@ class Handler(BaseHTTPRequestHandler):
         if changes or ops:
             relay_to_inbox(slug, state)
             doctor_phrase(slug, state)
+        deliver_alerts(slug, state)
         state["_meta"] = {
             **{k: v for k, v in state["_meta"].items() if k != "seeds"},
             "page_version": core.page_version(),
@@ -597,6 +625,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_media(*route.removeprefix("/media/").partition("/")[::2])
         if route.startswith("/artifacts/"):
             return self.send_media(*route.removeprefix("/artifacts/").partition("/")[::2], store=ledger_artifacts)
+        if route.startswith("/static/"):
+            return self.send_module(route)
         if route == "/":
             ledger_bin.tidy()
             bin_closed_without_swarm()
@@ -671,6 +701,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def send_module(self, route):
+        match = MODULE_RE.fullmatch(route)
+        path = match and core.MODULES / f"{match.group(2)}.js"
+        if not path or match.group(1) != core.page_version() or not path.is_file():
+            return self.send(404, "no such module", "text/plain")
+        return self.send(200, path.read_bytes().decode(), "text/javascript; charset=utf-8")
+
     def send_media(self, slug, media_id, store=ledger_media):
         try:
             if not core.SLUG_RE.match(slug):
@@ -697,9 +734,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def post_artifact(self, slug):
         name = self.headers.get("X-Artifact-Name", "")
-        return self.receive(
-            slug, ledger_artifacts.MAX_BYTES, lambda data: ledger_artifacts.store(slug, name, data), agents_only=True
-        )
+
+        def store(data):
+            try:
+                request = core.loads(self.headers.get("X-Artifact-Request", "{}"))
+                if not isinstance(request, dict) or set(request) - {"task", "title", "request", "plan"}:
+                    raise ValueError("artifact upload takes task, title and optional request or plan")
+                op = {"op": "artifact_add", "by": self.headers.get("X-Ledger-Agent"), "task": "", **request}
+                ledger_artifacts.check_add(
+                    {**op, "id": "upload", "title": request.get("title", ""), "file": {"id": "0" * 64 + ".md"}}
+                )
+            except (ValueError, TypeError) as exc:
+                raise ledger_media.Refused(400, str(exc)) from exc
+            doc = repository.get_document(slug, reconcile=False)
+            reason = authority.refusal(self.principal, op) or ledger_artifacts.refusal(doc, op, doc["_meta"]["members"])
+            if reason:
+                raise ledger_media.Refused(403, reason)
+            return ledger_artifacts.store(slug, name, data)
+
+        return self.receive(slug, ledger_artifacts.MAX_BYTES, store, agents_only=True)
 
     def receive(self, slug, limit, store, agents_only=False):
         if not self.exists(slug):
@@ -789,7 +842,7 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 <= length <= MAX_BODY:
                 raise ValueError("body size out of range")
             body = core.loads(self.rfile.read(length) or b"{}")
-            state, _ = core.sync(slug)
+            state = repository.get_document(slug, reconcile=not core.paths(slug)[1].exists())
             task_ids = tuple(task["id"] for task in state.get("tasks", []))
             changes, ops = core.check_body(body, task_ids)
             ledger_media.resolve(slug, ops)

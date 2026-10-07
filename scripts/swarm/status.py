@@ -12,7 +12,7 @@ from scripts.gates import quiet as quiet_gate
 from scripts.gates.talk import WORKER_LANES
 from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
-from scripts.swarm import snapshot
+from scripts.swarm import affinity, launch_check, live_binding, retire_watch, snapshot, tick_master
 from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
@@ -61,7 +61,10 @@ def findings(store, slug, config, tasks, events):
             ),
             checks.green(tasks, checks.cached_green(store.redis, store.key(slug, "checks"))),
             talk_since_outcome(store, slug, rows),
-        ),
+        )
+        + live_binding.findings(store, slug)
+        + retire_watch.findings(store, slug)
+        + launch_check.findings(store, slug),
         now_ms(),
         limits.cooldown_minutes * 60_000,
     )
@@ -133,6 +136,7 @@ def status_report(store, slug, state):
     agents = [a.__dict__ for a in store.agents(slug)]
     handed = transfers.list_transfers(store, slug)
     active = lift.active(gate_log.recent(slug, limit=None), now_ms())
+    promotion = tick_master.read(store, slug)
     return {
         "config": {
             **config.__dict__,
@@ -143,6 +147,7 @@ def status_report(store, slug, state):
             {
                 **a.__dict__,
                 "status": agent_status(a),
+                "promoted": a.name == promotion.get("promoted"),
                 "state_since": int(store.redis.hget(store.key(slug, "state-since"), a.name) or 0),
                 "gates": active.get(a.name, []),
                 "inbox": [
@@ -157,6 +162,7 @@ def status_report(store, slug, state):
         "tasks": task_counts(tasks),
         "spawns": store.spawns(slug),
         "findings": findings(store, slug, config, tasks, events),
+        "launch_checks": launch_check.reports(store, slug),
         "auto_snapshot": auto_snapshot(config),
         "restored": store.restored(slug),
         "transfers": handed,
@@ -169,4 +175,6 @@ def status_report(store, slug, state):
         "quota": page_quota(),
         "gates": [{**row, "kind": modes.label(row["kind"])} for row in gate_log.decisions(slug)],
         "gate_modes": {name: modes.label(mode) for name, mode in catalog.current(config.gates).items()},
+        "master_affinity": affinity.report(store, slug, config, store.agents(slug)),
+        "promotion": promotion,
     }

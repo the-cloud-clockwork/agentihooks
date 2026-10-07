@@ -27,6 +27,7 @@ import re
 import shlex
 import shutil
 import sys
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -93,10 +94,45 @@ def _forward_env_references(entry: dict) -> None:
         entry.pop("env", None)
 
 
-def codex_home() -> Path:
+def codex_home(environ: Mapping[str, str] | None = None) -> Path:
     """Resolve CODEX_HOME (first entry when the env var is a comma list)."""
-    raw = os.environ.get("CODEX_HOME", "").split(",")[0].strip()
-    return Path(raw).expanduser() if raw else Path.home() / ".codex"
+    env = os.environ if environ is None else environ
+    raw = env.get("CODEX_HOME", "").split(",")[0].strip()
+    return Path(raw).expanduser() if raw else Path(env.get("HOME") or Path.home()) / ".codex"
+
+
+def _is_ours(group: object, wrapper: Path) -> bool:
+    hooks = group.get("hooks") if isinstance(group, dict) else None
+    return isinstance(hooks, list) and any(
+        isinstance(h, dict) and _command_is_wrapper(str(h.get("command")), wrapper) for h in hooks
+    )
+
+
+def restore_hook_order(home: Path) -> list[str]:
+    """Events whose agentihooks group drifted behind a foreign one; the hooks file is rewritten only when one did.
+
+    Codex keys hook trust by group position, so this restores the order `init` writes and never touches trust.
+    """
+    path = (home / "hooks.json").resolve()
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return []
+    hooks = doc.get("hooks") if isinstance(doc, dict) else None
+    if not isinstance(hooks, dict):
+        return []
+    wrapper = path.parent / "agentihooks-hook.sh"
+    moved = []
+    for event, groups in hooks.items():
+        if not isinstance(groups, list):
+            continue
+        ordered = sorted(groups, key=lambda g: not _is_ours(g, wrapper))
+        if ordered != groups:
+            hooks[event] = ordered
+            moved.append(event)
+    if moved:
+        _atomic_write(path, json.dumps(doc, indent=2))
+    return moved
 
 
 _TOOL_FILTERS = ("enabled_tools", "disabled_tools")
@@ -334,7 +370,8 @@ class CodexAdapter:
                 for g in prior
                 if not any(_command_is_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
             ]
-            merged[event] = foreign + groups
+            # Ours first: codex keys hook trust by group position and herdr appends its group.
+            merged[event] = groups + foreign
         # Reap our own entries under events we no longer wire (e.g. a stale
         # PostCompact from an earlier install) — foreign groups there survive.
         for event in [e for e in merged if e not in desired]:

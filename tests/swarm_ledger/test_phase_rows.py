@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import page_source, serve_modules
+
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "scripts" / "swarm_ledger" / "template.html"
 CASES = json.loads((ROOT / "tests" / "fixtures" / "phase_lifecycle.json").read_text())
@@ -21,7 +23,7 @@ DOC = {
 
 
 def function_source(name):
-    page = TEMPLATE.read_text(encoding="utf-8")
+    page = page_source()
     return f"function {name}(" + page.split(f"  function {name}(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
 
 
@@ -38,7 +40,7 @@ def page_answers():
 
 
 def page_constant(name):
-    page = TEMPLATE.read_text(encoding="utf-8")
+    page = page_source()
     return page.split(f"  const {name} = ", 1)[1].split(";\n", 1)[0]
 
 
@@ -66,6 +68,7 @@ def context(browser):
         "**/*",
         lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
     )
+    serve_modules(context)
     yield context
     context.close()
 
@@ -125,6 +128,7 @@ def review_page(browser):
         return route.abort()
 
     context.route("**/*", answer)
+    serve_modules(context)
     page = context.new_page()
     page.goto(URL)
     yield page, sent
@@ -185,6 +189,7 @@ def test_a_sent_back_phase_shows_the_buttons_only_once_escalated(browser, escala
         "**/*",
         lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
     )
+    serve_modules(context)
     page = context.new_page()
     page.goto(URL)
     assert page.locator("#item-phases-p1 .phase-review").count() == shown

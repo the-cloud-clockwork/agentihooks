@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli
+from scripts.swarm import cli, master_retire
 from scripts.swarm.store import MASTER, AgentRecord
 from scripts.swarm.tick import tick
 from tests.swarm.test_cli import env as env
@@ -13,6 +13,11 @@ from tests.swarm.test_tick import store as store
 
 pytestmark = pytest.mark.unit
 HOUR = 60 * 60 * 1000
+
+
+@pytest.fixture(autouse=True)
+def no_handoff_wait(monkeypatch):
+    monkeypatch.setenv(master_retire.MINUTES, "0")
 
 
 def idle_master(store, state):
@@ -25,6 +30,13 @@ def idle_master(store, state):
     rt.live.add(agent.name)
     rt.statuses[agent.name] = "idle"
     return agent, rt
+
+
+def test_old_idle_master_retires_with_the_master_scratch_homes(store, scratch):
+    homes = scratch(MASTER)
+    agent, rt = idle_master(store, "running")
+    tick("sw", store, FakeLedger([]), rt, 6 * HOUR + 2)
+    assert rt.homes == {agent.name: homes}
 
 
 @pytest.mark.parametrize("state", ["running", "paused", "drained", "stopped"])
@@ -215,7 +227,7 @@ def test_runtime_reports_failed_pane_close_so_next_tick_retries():
         raise RuntimeError("pane close failed")
 
     agent = AgentRecord("worker", "eng", "t1", pane_id="w1:p2")
-    assert not HerdrRuntime(herdr=herdr).retire(agent, False)
+    assert not HerdrRuntime(herdr=herdr).retire(agent)
     assert calls == [["pane", "close", agent.pane_id]]
 
 
@@ -242,7 +254,7 @@ def test_runtime_accepts_pane_already_closed_by_terminate_agent():
         raise RuntimeError("pane not found")
 
     agent = AgentRecord("worker", "eng", "t1", pane_id="w1:p2")
-    assert HerdrRuntime(herdr=herdr).retire(agent, False)
+    assert HerdrRuntime(herdr=herdr).retire(agent)
 
 
 def test_runtime_keeps_space_without_a_valid_agent_inventory(store):

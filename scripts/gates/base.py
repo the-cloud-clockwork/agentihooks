@@ -10,6 +10,7 @@ class Call:
     tool: str
     tool_input: dict = field(default_factory=dict)
     cwd: str = ""
+    session: str = ""
 
     @classmethod
     def from_payload(cls, payload):
@@ -17,6 +18,7 @@ class Call:
             tool=str(payload.get("tool_name") or ""),
             tool_input=payload.get("tool_input") or {},
             cwd=str(payload.get("cwd") or ""),
+            session=str(payload.get("session_id") or ""),
         )
 
     @property
@@ -34,9 +36,13 @@ class Who:
 
     @classmethod
     def from_env(cls, environ=None):
+        from hooks.context.account_sessions import agent_pid
+        from hooks.context.broadcast import session_name
+
         env = os.environ if environ is None else environ
+        name = session_name(agent_pid()) if env is os.environ else ""
         return cls(
-            name=env.get("AGENTIHOOKS_AGENT_NAME", ""),
+            name=name or env.get("AGENTIHOOKS_AGENT_NAME", ""),
             swarm=env.get("AGENTIHOOKS_SWARM", ""),
             lane=env.get("AGENTIHOOKS_SWARM_LANE", ""),
             task=env.get("AGENTIHOOKS_SWARM_TASK", ""),

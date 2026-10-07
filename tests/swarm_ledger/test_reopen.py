@@ -1,5 +1,6 @@
 import re
 
+from tests.swarm_ledger.ledger_page import page_source
 from tests.swarm_ledger.test_close import SLUG, apply, make_ledger
 
 
@@ -36,7 +37,7 @@ def test_reopen_buttons_call_the_existing_authenticated_swarm_endpoint():
 
     import ledger_server as server
 
-    page = (server.CODE_DIR / "template.html").read_text()
+    page = page_source()
     assert 'id="closed-label"' in page
     assert 'data-swarm="reopen"' in page
     assert '$("closed-label").textContent = closedText(doc.closed_at)' in page

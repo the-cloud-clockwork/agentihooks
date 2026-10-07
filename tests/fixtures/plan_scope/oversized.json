@@ -1,0 +1,20 @@
+{
+  "observed_task": "control",
+  "plan": "- Build a new billing engine with subscription renewals, refunds and tax calculation | services/billing | Ship independent billing behavior\n- Implement OAuth identity, account recovery and organization permissions | services/identity | Ship independent authentication behavior\n- Replace the dashboard with a new responsive frontend and charting system | apps/dashboard | Ship independent product interface\n- Add multi region database replication, failover and backup restoration | infrastructure/database | Ship independent deployment behavior\n",
+  "intent": {
+    "project intent": "Build a complete hosted product",
+    "phase": "Whole product implementation",
+    "phase intent": "Deliver billing, identity, frontend and resilient infrastructure",
+    "task": "Build the complete hosted product",
+    "task intent": "Implement all four independent systems in one task",
+    "task ids": [
+      "control"
+    ]
+  },
+  "territory": [
+    "services/billing",
+    "services/identity",
+    "apps/dashboard",
+    "infrastructure/database"
+  ]
+}

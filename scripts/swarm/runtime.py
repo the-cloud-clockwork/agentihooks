@@ -1,16 +1,28 @@
-"""Swarm agents as herdr panes: spawn through init-agent, find live ones by name, close through terminate-agent."""
+"""Swarm agents as herdr panes: spawn through init-agent, find live ones by name, retire by the process recorded at
+spawn."""
 
 import os
 import shutil
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import replace
 from pathlib import Path
 
 from scripts import agent_choice
 from scripts.profiles import binding, plugins
-from scripts.swarm import effort_range, model_pick, naming, priming_trace, profile_choice, prompt
+from scripts.swarm import (
+    affinity,
+    effort_range,
+    live_binding,
+    model_pick,
+    naming,
+    priming_trace,
+    profile_choice,
+    prompt,
+    reaper,
+)
 from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
 from scripts.swarm.tick import Placed, SpawnError
@@ -88,6 +100,19 @@ def _conversation_id(session):
     return session.get("value") or ""
 
 
+def _registered_conversations(found):
+    """Each named session's main conversation id by herdr pane name; a sub-agent id is no UUID and never counts."""
+    ids = {}
+    for session in found:
+        try:
+            uuid.UUID(session.session_id)
+        except ValueError:
+            continue
+        if session.name:
+            ids.setdefault(herdr_target(session.name), session.session_id)
+    return ids
+
+
 def _transfer(task):
     saved = (task.get("handoff_envelope") or {}).get("launch")
     if not task.get("handoff") and not saved:
@@ -104,25 +129,40 @@ class HerdrRuntime:
         self.home, self.run, self.herdr = home, run, herdr
         self.choose = choose or agent_choice.choose
         self.sleep = time.sleep
+        self._binding_pids = {}
+        self.refusals = {}
+        self.end, self.reap = reaper.retire, reaper.reap
 
-    def has_capacity(self):
-        return self.choose("", dict(os.environ))[1] != agent_choice.ALL_FULL
+    def has_capacity(self, config):
+        environ = dict(os.environ)
+        share, floor = codex_split(config, environ)
+        return (
+            agent_choice.choose_shared("", environ, None, share, floor, choose=self.choose)[1] != agent_choice.ALL_FULL
+        )
 
     def spawn(self, config, lane, name, task, spawns=None):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
-        saved = _transfer(task)
+        relaunch = live_binding.complete(task.get("launch_assignment"))
+        saved = relaunch or _transfer(task)
         decision = (
             profile_choice.ProfileDecision(saved["profile"], "handoff", "original seat profile")
-            if saved and not task.get("profile")
+            if saved and (relaunch or not task.get("profile"))
             else profile_choice.choose(config.slug, lane, chosen, task, environ)
         )
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
-        if saved:
+        want = affinity.desired(config) if lane == MASTER else _set(chosen.get("agent"))
+        if want and plugins.claude_only(profile) and want != "claude":
+            kind = "master affinity" if lane == MASTER else "lane harness"
+            raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}")
+        if saved and want and saved["harness"] != want:
+            saved = {}
+        if want and not saved:
+            agent, reason = self.choose(want, environ)
+        elif saved:
             if plugins.claude_only(profile) and saved["harness"] != "claude":
                 raise SpawnError("unsupported handoff: required profile cannot mount on the original harness")
             requested = saved["harness"]
-        if spawns is None:
             agent, reason = self.choose(requested, environ)
         else:
             share, floor = codex_split(config, environ)
@@ -196,7 +236,10 @@ class HerdrRuntime:
         argv += ["--resume", agent.conversation_id, "--", *route, *model]
         placed = self._launch(config, agent.lane, agent.task, agent.name, argv)
         if not self._holds(placed.pane_id, agent.conversation_id):
-            self.retire(replace(agent, pane_id=placed.pane_id), True)
+            self.retire(
+                replace(agent, pane_id=placed.pane_id, profile_decision=placed.profile_decision),
+                homes=reaper.scratch_homes(config.slug, agent.task),
+            )
             raise SpawnError(f"herdr never showed conversation {agent.conversation_id} on pane {placed.pane_id}")
         return replace(
             placed, model_source=picked.source, profile_decision={**agent.profile_decision, **placed.profile_decision}
@@ -230,6 +273,7 @@ class HerdrRuntime:
 
     def _launch(self, config, lane, task_id, name, argv):
         agent = argv[argv.index("--agent") + 1]
+        launched_at = int(time.time() * 1000)
         try:
             proc = self.run(
                 argv,
@@ -242,6 +286,7 @@ class HerdrRuntime:
                     "AGENTIHOOKS_SWARM_LANE": lane,
                     "AGENTIHOOKS_SWARM_TASK": task_id,
                     "AGENTIHOOKS_SWARM_AUTONOMY": config.autonomy,
+                    "AGENTIHOOKS_SWARM_SPAWN": "1",
                     effort_range.VARIABLE: ":".join(effort_range.of(config)),
                     **({"AGENTIHOOKS_COMPACT_LIMIT": str(config.compact_limit)} if config.compact_limit else {}),
                 },
@@ -268,6 +313,7 @@ class HerdrRuntime:
             fields.get("placement", ""),
             validated["profile"],
             profile_decision={"validation": validated},
+            launched_at=launched_at,
         )
 
     def recover(self, name: str) -> Placed:
@@ -279,24 +325,65 @@ class HerdrRuntime:
 
         return {s.name for s in sessions() if s.name}
 
+    def reported(self, agent: AgentRecord) -> bool:
+        from scripts.terminate_agent import sessions
+
+        session = live_binding.bound_session(agent, sessions())
+        return session is not None and session.status == "alive"
+
+    def bindings(self, agents: list[AgentRecord]) -> dict:
+        from scripts.terminate_agent import sessions
+
+        items, facts = sessions(), {}
+        self._binding_pids = {}
+        for agent in agents:
+            session = live_binding.bound_session(agent, items)
+            if session is not None:
+                facts[agent.name] = live_binding.read(agent, session.process.pid)
+                self._binding_pids[agent.name] = str(session.process.pid)
+            elif agent.profile_decision.get("validation", {}).get("pid"):
+                facts[agent.name] = {"process": False}
+                self._binding_pids[agent.name] = None
+        return facts
+
     def _terminate(self, name):
+        selector = self._binding_pids.get(name, name)
+        if selector is None:
+            return True
         try:
             proc = self.run(
-                [_bin(), "terminate-agent", name, "--force-shared"], capture_output=True, text=True, timeout=60
+                [_bin(), "terminate-agent", selector, "--force-shared"], capture_output=True, text=True, timeout=60
             )
         except subprocess.TimeoutExpired:
             return False
         return proc.returncode == 0
 
-    def retire(self, agent, live):
-        if live and not self._terminate(agent.name):
+    def retire(self, agent, homes=()):
+        """End the launch process recorded at spawn with its group and every process from the task's scratch homes,
+        then close the pane; the agent's name alone never selects a process."""
+        pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
+        outcome = self.end(agent.name, pid, list(homes))
+        if outcome.refusal:
+            self.refusals[agent.name] = {"process": outcome.process, "refusal": outcome.refusal}
             return False
         if agent.pane_id:
             try:
                 self.herdr(["pane", "close", agent.pane_id])
             except Exception as exc:
-                return "not found" in str(exc)
+                if "not found" not in str(exc):
+                    self.refusals[agent.name] = {"process": pid or 0, "refusal": f"pane {agent.pane_id}: {exc}"}
+                    return False
+        self.refusals.pop(agent.name, None)
         return True
+
+    def refusal(self, agent):
+        return self.refusals.get(agent.name, {"process": 0, "refusal": "unknown"})
+
+    def reap_name(self, name):
+        from scripts.terminate_agent import sessions
+
+        pids = [s.process.pid for s in sessions() if s.name == name]
+        return not self.reap(pids).refusal
 
     def close_space(self, config: SwarmConfig) -> bool:
         try:
@@ -363,12 +450,20 @@ class HerdrRuntime:
         return True
 
     def conversations(self):
-        """Each herdr pane's resumable conversation id, empty when herdr reports none; None when herdr cannot answer."""
+        """Each herdr pane's resumable conversation id, else its named session's registered main id, else empty;
+        None when herdr cannot answer."""
+        from scripts.terminate_agent import sessions
+
         try:
             listed = self.herdr(["agent", "list"]).get("agents", [])
         except Exception:
             return None
-        return {row["pane_id"]: _conversation_id(row.get("agent_session")) for row in listed if row.get("pane_id")}
+        registered = _registered_conversations(sessions())
+        return {
+            row["pane_id"]: _conversation_id(row.get("agent_session")) or registered.get(row.get("name"), "")
+            for row in listed
+            if row.get("pane_id")
+        }
 
     def nudge(self, agent, text):
         from scripts.swarm.delivery import marked

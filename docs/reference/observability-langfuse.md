@@ -29,14 +29,39 @@ stay off unless that variable comes from an AgentiHooks env file
 
 ## The agent trace exporter
 
-On every `Stop`, the hook runs `export_session`
-(`hooks/observability/agent_trace.py`) in a fresh interpreter with a 60 second
-limit. It reads the session transcript and posts spans to Langfuse.
+Each session has one background exporter (`hooks/observability/trace_flush.py`),
+started by the first SessionStart, UserPromptSubmit, PreCompact, Stop or
+SessionEnd hook that finds none alive. Those hooks only record a flush request
+and return; none of them waits on the network. The exporter holds an exclusive
+lock for its whole life, so a session never has two.
 
+- **While the agent works.** It wakes every
+  `AGENTIHOOKS_TRACE_FLUSH_INTERVAL_SEC` (15) seconds, and at once on a hook's
+  request, and exports when the transcript grew or earlier work is pending. A
+  wake makes at most `AGENTIHOOKS_TRACE_FLUSH_ATTEMPTS` (3) attempts, each a
+  child running `export_session` (`hooks/observability/agent_trace.py`) killed
+  after `AGENTIHOOKS_TRACE_FLUSH_ATTEMPT_TIMEOUT_SEC` (5) seconds. An open turn
+  is exported as it stands; a tool call without its result yet carries
+  `tool.outcome.state=missing` and is updated on a later wake.
+- **When the agent process ends** (Stop and exit, retirement, a kill mid turn)
+  the exporter drains once more with the same budget and exits. A resume of the
+  same session under a new process hands it the running exporter instead of
+  starting a second one.
+- **Freshness fields.** The root carries `agentihooks.export.trigger`
+  (`request:<hook>`, `interval` or `final`) and
+  `agentihooks.export.unwritten_events.state=unavailable`: events the harness
+  has not yet written to its transcript cannot be exported.
 - **One trace per session.** The trace id is derived from the session id, so
-  every Stop of a session lands in the same trace. A cursor in
-  `~/.agentihooks/agent_trace/<session id>.json` records how many turns were
-  exported; each Stop sends only the new turns plus the refreshed root span.
+  every export of a session lands in the same trace. A cursor in
+  `~/.agentihooks/agent_trace/<session id>.json` records what the backend
+  accepted; each export sends only new or changed observations.
+- **Long sessions.** The cursor holds at most 8 MB of unsent records and
+  observations. Records past that wait for the next export, so a session of
+  any length keeps exporting; while a backlog waits the exporter logs
+  `agent trace export overflow` and counts an `overflow` traces signal.
+  Accepted records whose
+  observations can no longer change leave the cursor, and the next read starts
+  after them.
 - **Span tree.** Root `agent` observation named after the agent
   (`AGENTIHOOKS_AGENT_NAME`, else `agent-session`); a `turn N` span per user
   prompt; a `generation` per model message with token usage; a `tool` span per
@@ -52,9 +77,9 @@ limit. It reads the session transcript and posts spans to Langfuse.
   same entries, so Codex sessions get the same trace shape.
 - **Failures.** A failed export writes
   `agent_trace export failed endpoint=… status=… reason=…` to
-  `~/.agentihooks/logs/async-hooks.log` and leaves the cursor unchanged, so the
-  next Stop retries those turns. A run past 60 seconds logs
-  `[async] agent_trace: TIMEOUT after 60s`.
+  `~/.agentihooks/logs/async-hooks.log` and leaves the work pending in the
+  cursor, so the next wake retries it. An attempt past its limit logs
+  `trace_flush <session id>: attempt timed out after 5.0s`.
 
 ## Settings
 
@@ -173,26 +198,73 @@ trace is also found by its `agent:<name>` tag.
 
 ## How the Doctor reads traces
 
-The Doctor's `trace` detector (`scripts/doctor/traces_read.py`, findings in
-`scripts/doctor/traces.py`) reads the same Langfuse public API:
+The Doctor's `trace` detector (`scripts/doctor/traces_read.py`, active bindings in
+`scripts/doctor/registry.py`, findings in `scripts/doctor/traces.py`) reads the
+same Langfuse public API with `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and
+`LANGFUSE_HOST` (default `https://langfuse.homeofanton.com`). The swarm tick runs
+it with the other detectors every `AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES` (10); it
+is the one monitor of trace freshness.
 
-- `GET /api/public/traces?tags=swarm:<slug>`, then
-  `GET /api/public/observations?traceId=<id>` for each trace, paged;
-- credentials `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`, host
-  `LANGFUSE_HOST` (default `https://langfuse.homeofanton.com`).
+### Active telemetry
 
-It joins the traces with the swarm's claimed tasks and agents and raises four
-findings: tool error rate, tokens per merged task against the other merged
-tasks, long gaps between turns, and swarm sessions with no trace. Thresholds are
-`AGENTIHOOKS_DOCTOR_TOOL_ERROR_PCT` (20), `AGENTIHOOKS_DOCTOR_TOOL_ERROR_MIN_CALLS`
-(10), `AGENTIHOOKS_DOCTOR_TASK_COST_RATIO` (2),
-`AGENTIHOOKS_DOCTOR_TURN_GAP_MINUTES` (30) and
-`AGENTIHOOKS_DOCTOR_GRACE_MINUTES` (30). The swarm tick runs it with the other
-detectors every `AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES`;
+Every working agent record of the watched swarm is an expected binding: name,
+life (`name#started_at`), seat, task, harness, profile and, when known, session.
+Each scan joins it with:
+
+- **Its exporter on this host**: the session cursor, request and owner files of
+  the trace exporter. Generated progress is the transcript size (or the bytes the
+  cursor staged); accepted progress is the cursor's accepted bytes. The oldest
+  unaccepted source event is the first timestamped transcript record past the
+  accepted offset.
+- **Langfuse**: `GET /api/public/traces?tags=swarm:<slug>&tags=agent:<name>`
+  (core and io fields, newest five) for the correlation attributes on each
+  trace; then, for the binding's own session, its newest observations since a
+  stored start time watermark (ten rows) and its observation count. Freshness is
+  the last accepted source event, never trace creation or Stop time.
+
+| Finding | Raised when |
+|---|---|
+| `telemetry never exported` | no trace for the binding's session past the grace |
+| `exporter backlog` | observations queued in the cursor, or a pending cap overflow, and the oldest unaccepted source event older than the threshold |
+| `telemetry stale` | generated progress unaccepted past the threshold while nothing is queued, even with the exporter process alive; or the exporter recorded more accepted observations than Langfuse holds past the threshold since its last acceptance |
+| `telemetry misattributed` | a trace tagged with the agent carries another life, seat, task, harness or resolved profile, or the session was accepted with no trace under the agent |
+| `trace reader unavailable` | the trace listing or any active read failed or ran out of its budget |
+| `trace coverage partial` | the historical backfill has not read every trace's observations yet |
+
+Threshold `AGENTIHOOKS_DOCTOR_ACTIVE_STALE_SECONDS` (60), grace
+`AGENTIHOOKS_DOCTOR_ACTIVE_GRACE_SECONDS` (60). A fault is raised at the first
+scan after the threshold, so the worst case is the threshold plus the interval.
+Idle agents (nothing generated beyond accepted) and finished or retired agents
+are never stale. Each finding names agent, seat, task, session and its evidence;
+its id carries the fault start (the oldest unaccepted event, the last accepted
+Langfuse event, the agent's start or the outage start), so the Doctor master gets
+it once while it lasts, it clears on recovery and a new fault raises a new one.
+An agent Langfuse could not be read for is judged only on its local exporter.
+
+The read budget is 15 seconds for active bindings, one retry per binding, and
+10 seconds per request. Watermarks and the outage start live in
+`<swarm home>/<slug>/doctor-telemetry.json`.
+
+### Historical findings
+
+The detector also raises tool error rate, tokens per merged task against the
+other merged tasks, long gaps between turns and swarm sessions with no trace.
+Thresholds are `AGENTIHOOKS_DOCTOR_TOOL_ERROR_PCT` (20),
+`AGENTIHOOKS_DOCTOR_TOOL_ERROR_MIN_CALLS` (10), `AGENTIHOOKS_DOCTOR_TASK_COST_RATIO`
+(2), `AGENTIHOOKS_DOCTOR_TURN_GAP_MINUTES` (30) and
+`AGENTIHOOKS_DOCTOR_GRACE_MINUTES` (30).
+
+It lists `GET /api/public/traces?tags=swarm:<slug>&fields=core` (at most 20 pages
+of 100) and backfills `GET /api/public/observations?traceId=<id>` (pages of 50,
+at most 20) newest first within 45 seconds per scan. Each trace's observations are
+cached in `<swarm home>/<slug>/doctor-traces/` until the trace's update time
+changes, so the backfill completes over successive scans. A trace whose own read
+fails is a coverage gap retried after every unread trace; the untraced session
+finding is skipped while the listing is incomplete.
+
 `agentihooks doctor <slug> measure <finding>` runs every detector once and prints
-that finding's number, and
-`python -m scripts.doctor.traces_read <slug>` prints the measures and findings
-for one swarm.
+that finding's number, and `python -m scripts.doctor.traces_read <slug>` prints
+the measures (active bindings, coverage) and findings for one swarm.
 
 ### The Langfuse connector
 

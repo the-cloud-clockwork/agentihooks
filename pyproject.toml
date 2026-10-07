@@ -19,6 +19,8 @@ classifiers = [
 ]
 
 dependencies = [
+    "tree-sitter>=0.25",
+    "tree-sitter-bash>=0.25",
     # Upper bound is load-bearing: mcp 2.0.0 removes `mcp.server.fastmcp`
     # outright (replaced by `mcp.server.mcpserver.MCPServer`, a different API),
     # so an unbounded spec resolves to a version where `hooks/mcp/__init__.py`
@@ -90,7 +92,7 @@ include = ["hooks*", "scripts*", "profiles*"]
 # systemd unit template for the network-transport agentihooks MCP daemon. Lives
 # under scripts/ so AGENTIHOOKS_ROOT-relative resolution works from a wheel too.
 "scripts" = ["packaging/**/*.template"]
-"scripts.swarm_ledger" = ["*.html", "*.css", "*.js"]
+"scripts.swarm_ledger" = ["*.html", "*.css", "*.js", "static/js/*.js"]
 # Ship every native config and Markdown artifact under profiles/ — personas,
 # rules, settings, and profile manifests. Recursive ** globs cover .claude/
 # and target-specific subdirectories at any depth.

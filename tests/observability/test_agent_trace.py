@@ -276,10 +276,10 @@ def test_export_sends_new_turns_once_under_the_session_trace(monkeypatch, tmp_pa
     agent_trace.export_session("sess-1", path, _identity())
 
     first, second = exporter.batches
+    assert [span.context.span_id for span in second] == [first[0].context.span_id]
     assert {s.context.trace_id for s in first} == {agent_trace.trace_id("sess-1")}
     assert sorted(s.name for s in first if s.name.startswith("turn")) == ["turn 1", "turn 2"]
-    assert [s.name for s in second] == ["swarm-buildout-eng-13"]
-    root = second[0]
+    root = next(s for s in first if s.parent is None)
     assert root.parent is None
     child = next(s for s in first if s.name == "turn 1")
     assert child.parent.span_id == root.context.span_id
@@ -356,7 +356,8 @@ def test_failed_export_logs_time_endpoint_status_and_reason(otlp, tmp_path, mode
     server, endpoint = otlp
     server.mode = mode
     agent_trace.export_session("sess-1", _transcript(tmp_path, ENTRIES), _identity())
-    assert not (tmp_path / "cursor").exists()
+    cursor = agent_trace._cursor("sess-1")
+    assert not cursor["accepted"] and cursor["pending"]
     line = re.escape(f" agent_trace export failed endpoint={endpoint} status={status} reason=")
     found = re.search(rf"^\d{{4}}-\d\d-\d\dT\d\d:\d\d:\d\dZ{line}(.+)$", capsys.readouterr().err, re.M)
     assert found and reason in found.group(1)

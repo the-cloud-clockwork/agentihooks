@@ -97,7 +97,7 @@ Table sketch: `ledgers(slug, title, overview, size, rev, created_at, updated_at,
 
 1. **Split the page script into ES modules.** Move the inline script of `template.html` into `static/js/*.js` loaded as modules; same placeholders, same API. Proof: the existing browser tests pass unchanged.
 2. **Introduce `LedgerRepository` over the current files.** `FileLedgerRepository` wraps `load_state`, `sync` and `atomic_write`; the server and CLI call it. Proof: recorded requests return byte-identical responses before and after.
-3. **Add `SqliteLedgerRepository` and an import script.** Choose the repository by environment variable. Run SQLite in shadow mode (write both, read files) and compare `get_document` and `events_since` on live ledgers before switching reads.
+3. **Add `SqliteLedgerRepository` and an import script.** Choose the repository by environment variable. Run SQLite in shadow mode (write both, read files) and compare `get_document` and `events_since` on live ledgers before switching reads. Shadow writes run only with `LEDGER_SQLITE_SHADOW=1`: on a multi-megabyte ledger each one costs about a second inside the server lock and stalls the shared server under write load, so they stay off until the cutover; `python -m scripts.swarm_ledger.storage_migration` imports and verifies on request.
 4. **Serve CSS and JS as files** with cache headers, and add a Content-Security-Policy to page responses.
 5. **Add `/api/v1` resources** beside the old `PUT /api/<slug>`, one area at a time (tasks first), with JSON schemas.
 6. **Add the event stream** and move the page and `watch_ledger` off polling.

@@ -44,6 +44,21 @@ def integration_status() -> dict[str, str]:
     return {name.strip(): rest.strip().split(" ")[0] for name, rest in rows}
 
 
+def integration_files() -> dict[str, bytes | None]:
+    exe = binary()
+    if exe is None:
+        return {}
+    done = subprocess.run([exe, "integration", "status"], capture_output=True, text=True)
+    files: dict[str, bytes | None] = {}
+    for line in done.stdout.splitlines():
+        name, _, rest = line.partition(":")
+        rest = rest.strip()
+        if rest.endswith(")") and "(" in rest:
+            path = Path(rest[rest.rindex("(") + 1 : -1])
+            files[name.strip()] = path.read_bytes() if path.is_file() else None
+    return files
+
+
 def install() -> int:
     print(f"[herdr] installing: {INSTALL_COMMAND}")
     rc = subprocess.run(["sh", "-c", INSTALL_COMMAND]).returncode
@@ -78,9 +93,10 @@ def configure() -> int:
     if exe is None:
         print("[herdr] not installed; run: agentihooks herdr install", file=sys.stderr)
         return 1
-    before = integration_status()
+    before = integration_files()
     failed = [name for name in INTEGRATIONS if subprocess.run([exe, "integration", "install", name]).returncode != 0]
-    changed = [name for name in INTEGRATIONS if before.get(name) != "current" and name not in failed]
+    installed = integration_files()
+    changed = [name for name in INTEGRATIONS if installed.get(name) != before.get(name) and name not in failed]
     if changed:
         from scripts.deps_preflight import main as deps_main
 

@@ -1,3 +1,5 @@
+import hashlib
+
 """Automatic transcript logging - logs new entries on each PostToolUse.
 
 Deliberately NOT migrated to hooks.memory.transcript_reader: this is an
@@ -8,12 +10,14 @@ codex sessions simply log nothing here.
 """
 
 import json
+import re
 from pathlib import Path
 
 from hooks.config import AGENTIHOOKS_HOME, LOG_TRANSCRIPT
 
 # Track last logged line per session to avoid duplicates
 POSITION_DIR = AGENTIHOOKS_HOME / "transcript_positions"
+_SECRET_NAME_RE = re.compile(r"(?:^|[^a-z])(?:token|secret[_-]?key|api[_-]?key|passwd)$", re.IGNORECASE)
 
 
 def get_last_position(session_id: str) -> int:
@@ -133,3 +137,77 @@ def extract_content(entry: dict) -> str | None:
             return content
 
     return None
+
+
+def record_id(record: dict) -> str:
+    native = record.get("uuid")
+    if native:
+        return str(native)
+    identity = record
+    if record.get("type") == "response_item":
+        item = record.get("payload", {})
+        native = item.get("id") or item.get("call_id")
+        if native:
+            identity = {"type": record["type"], "kind": item.get("type"), "id": native}
+    payload = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def iter_complete_records(transcript_path: str, start: int):
+    position = start
+    with open(transcript_path, "rb") as handle:
+        handle.seek(start)
+        for line in handle:
+            if not line.endswith(b"\n"):
+                return
+            position += len(line)
+            try:
+                record = json.loads(line)
+            except (ValueError, UnicodeDecodeError):
+                yield None, position
+                continue
+            yield (record if isinstance(record, dict) else None), position
+
+
+def complete_records(transcript_path: str) -> tuple[list[dict], int, int]:
+    read = list(iter_complete_records(transcript_path, 0))
+    records = [record for record, _ in read if record is not None]
+    position = read[-1][1] if read else 0
+    return records, position, len(read) - len(records)
+
+
+def mask_value(value: object) -> object:
+    from hooks.secrets import redact
+
+    if isinstance(value, str):
+        if value.lstrip().startswith(("{", "[")):
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                return redact(value, mode="strict")
+            masked = mask_value(parsed)
+            if masked != parsed:
+                return json.dumps(masked, ensure_ascii=False)
+        return redact(value, mode="strict")
+    if isinstance(value, (list, tuple)):
+        return [mask_value(item) for item in value]
+    if isinstance(value, dict):
+        return {redact(key, mode="strict"): mask_member(key, item) for key, item in value.items()}
+    return value
+
+
+def mask_member(key: str, value: object) -> object:
+    from hooks.secrets import contains_generic_secret, redact
+
+    label = "SECRET" if _SECRET_NAME_RE.search(key) else key
+    if isinstance(value, (list, tuple)):
+        return [mask_member(key, item) for item in value]
+    if isinstance(value, dict):
+        probe = f"{label}=12345678"
+        context = key if contains_generic_secret(probe) else ""
+        return {redact(name, mode="strict"): mask_member(context or name, item) for name, item in value.items()}
+    masked = mask_value(value)
+    contextual = f"{label}={json.dumps(masked, ensure_ascii=False)}"
+    if contains_generic_secret(contextual):
+        return "[REDACTED:generic_secret]"
+    return masked

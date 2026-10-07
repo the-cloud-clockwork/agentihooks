@@ -38,6 +38,16 @@ def test_the_occupancy_history_keeps_every_generation(seats):
     ]
 
 
+def test_a_note_joins_the_history_and_keeps_the_occupant(seats):
+    seats.occupy("eng-1@rig", "rig-eng-1", at=1)
+    seats.note("eng-1@rig", "promoted", "the master launch failed", 5)
+    assert seats.history("eng-1@rig") == [
+        {"generation": 1, "occupant": "rig-eng-1", "at": 1},
+        {"generation": 1, "occupant": "rig-eng-1", "at": 5, "event": "promoted", "detail": "the master launch failed"},
+    ]
+    assert seats.occupant("eng-1@rig") == Occupancy("rig-eng-1", 1)
+
+
 def test_seat_of_names_only_the_seat_a_session_still_holds(seats):
     seats.occupy("eng-1@rig", "rig-eng-1", at=1)
     assert seats.seat_of("rig-eng-1") == "eng-1@rig"

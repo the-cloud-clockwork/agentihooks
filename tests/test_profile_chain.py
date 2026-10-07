@@ -303,3 +303,33 @@ def test_enforcements_and_conditions_load_from_package_role(tmp_path, monkeypatc
     monkeypatch.setenv("AGENTIHOOKS_PROFILE", "engineer")
     layers, _probed = conditions.layer_dirs({})
     assert ("profile:engineer", role / ".claude" / "conditions") in layers
+
+
+@pytest.mark.parametrize(
+    ("manifest", "expected"),
+    [(None, []), ("", []), ("name: x\n", []), ("name: x\nallowedOverlays: [router, brain]\n", ["router", "brain"])],
+)
+def test_overlays_reads_the_declared_overlays(tmp_path, manifest, expected):
+    if manifest is not None:
+        (tmp_path / "profile.yml").write_text(manifest)
+
+    assert profile_chain.overlays(tmp_path) == expected
+
+
+def test_rendered_dirs_adds_the_overlays_the_chain_declares(tmp_path, monkeypatch):
+    monkeypatch.setattr(profile_chain, "BUILT_IN_PROFILES", tmp_path / "builtin")
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", tmp_path / "roles")
+    bundle = tmp_path / "bundle"
+    base = bundle / "profiles" / "base"
+    role = bundle / "profiles" / "role"
+    solo = bundle / "profiles" / "solo"
+    brain = tmp_path / "linked" / "brain"
+    for path in (base, role, solo, brain):
+        path.mkdir(parents=True)
+    (base / "profile.yml").write_text("allowedOverlays: [router, brain]\n")
+    (role / "profile.yml").write_text("extends: [base]\n")
+    linked = {"brain": brain}
+
+    assert profile_chain.rendered_dirs(bundle, "role", linked) == [("base", base), ("role", role), ("brain", brain)]
+    assert profile_chain.rendered_dirs(bundle, "solo", linked) == [("solo", solo)]
+    assert profile_chain.rendered_dirs(bundle, "role", {}) == [("base", base), ("role", role)]

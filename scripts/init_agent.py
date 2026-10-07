@@ -11,8 +11,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts import agent_choice, claude_trust, herdr_host
+from scripts import agent_choice, claude_trust, herdr_host, operator_env
 from scripts.swarm import effort_range
+from scripts.targets.codex_target import codex_home, restore_hook_order
 
 
 def _is_wsl(environ: dict[str, str]) -> bool:
@@ -78,6 +79,17 @@ class AgentSpec:
     channel: bool = False
 
 
+SPAWN = "AGENTIHOOKS_SWARM_SPAWN"
+SWARM_IDENTITY = (
+    "AGENTIHOOKS_SWARM",
+    "AGENTIHOOKS_SWARM_LANE",
+    "AGENTIHOOKS_SWARM_TASK",
+    "AGENTIHOOKS_SWARM_AUTONOMY",
+    "AGENTIHOOKS_SWARM_LAUNCHER",
+    effort_range.VARIABLE,
+)
+
+
 def _collector(environ: dict[str, str]) -> str:
     return environ.get("AGENTIHOOKS_OTEL_COLLECTOR", "").rstrip("/")
 
@@ -110,7 +122,14 @@ def _swarm_exports(environ: dict[str, str]) -> str:
     names = ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_LANE", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_COMPACT_LIMIT")
     exports = {name: environ[name] for name in names if environ.get(name)}
     exports["AGENTIHOOKS_LANGFUSE_ENABLED"] = "1"
-    return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items())
+    pin = "export AGENTIHOOKS_SWARM_LAUNCHER=$$\n"
+    return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items()) + pin
+
+
+def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[str, str]:
+    keeps = environ.get(SPAWN) == "1" or handoff or name == environ.get("AGENTIHOOKS_AGENT_NAME")
+    dropped = {SPAWN} if keeps else {SPAWN, *SWARM_IDENTITY}
+    return {key: value for key, value in environ.items() if key not in dropped}
 
 
 def _config_home_export(environ: dict[str, str]) -> str:
@@ -135,6 +154,7 @@ def _codex_trust_args(directory: Path, environ: dict[str, str]) -> list[str]:
 
 MODEL_DEFAULTS = {"claude": "opus", "codex": "gpt-6.1-sol"}
 EFFORT_DEFAULT = "high"
+LAUNCH_GRACE_S = 3
 
 
 def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
@@ -253,6 +273,7 @@ def _write_launcher(
         "set -u\n"
         f"cd {shlex.quote(str(directory))} || exit 1\n"
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
+        f"{operator_env.source_line(environ)}"
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
         f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(name)}\n"
         f"{_config_home_export(environ) if spec.agent == 'claude' else ''}"
@@ -260,6 +281,7 @@ def _write_launcher(
         f"{_swarm_exports(environ)}"
         f"{langfuse_export}"
         f"{_binding_export(environ)}"
+        f"sleep {LAUNCH_GRACE_S}\n"
         f"{before}{command_text}\n"
         f"rm -f {shlex.join(cleanup)}\n"
         f"[ -e {shlex.quote(str(root))}/closing-$$ ] && {{ rm -f {shlex.quote(str(root))}/closing-$$; exit 0; }}\n"
@@ -295,9 +317,8 @@ def _binding_request(args, agent: str, prompt: str, environ: dict[str, str], fla
     if not args.profile:
         return prompt
     home = Path(environ[binding.HOMES[agent]])
-    binding.inspect(home, args.profile, agent)
     report = _runtime_dir(environ) / f"profile-{os.getpid()}-{time.time_ns()}.json"
-    binding.request(report, args.profile, agent)
+    binding.request(report, args.profile, agent, home)
     environ[binding.REPORT] = str(report)
     environ["AGENTIHOOKS_RUN_MODEL"], environ["AGENTIHOOKS_RUN_EFFORT"] = model_effort(agent, flags, environ)
     return f"{binding.PROMPT}\n\n{prompt}"
@@ -510,10 +531,12 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     args = _parser().parse_args(argv)
     active_env = dict(os.environ if environ is None else environ)
     active_env.pop("AGENTIHOOKS_PROFILE_REPORT", None)
+    operator_env.fill(active_env)
     try:
         directory = _resolve_directory(args.dir, active_env)
         prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8") if args.prompt_file else args.prompt
         name = args.name or f"s-{time.strftime('%y%m%d-%H%M%S')}"
+        active_env = _launch_environ(active_env, name, args.handoff)
         claude_args = args.claude_args[1:] if args.claude_args[:1] == ["--"] else args.claude_args
         exclude = ""
         if args.handoff and (args.agent == "codex" or active_env.get("AGENTIHOOKS_TARGET") == "codex"):
@@ -587,6 +610,9 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 f"agentihooks init-agent: Claude does not trust {directory} ({why}); {claude_trust.WAIT_NOTICE}",
                 file=sys.stderr,
             )
+    if agent == "codex":
+        moved = restore_hook_order(codex_home(active_env))
+        report.append(f"codex_hooks=restored:{','.join(moved)}" if moved else "codex_hooks=unchanged")
     marker = _started_marker(launcher)
     if host == "herdr":
         try:

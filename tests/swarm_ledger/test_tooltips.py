@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import serve_modules
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -95,6 +96,7 @@ def tab(browser):
 
     def open_page(html, fragment=""):
         context.route("**/*", lambda r: route(r, html))
+        serve_modules(context)
         page = context.new_page()
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(URL + fragment)

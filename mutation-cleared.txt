@@ -1247,6 +1247,202 @@
     "reader": "Standards",
     "reason": "import_directory imports core and load_state from the same repository.file module. Runtime identity check confirms its explicit core argument is exactly load_state default core; mutating module attributes affects that same object in both versions. Omitting the duplicate argument changes no loader behavior."
   },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__save_progress__mutmut_16:7b7035313938d6143d6ef04f1e0017853c0475147ef735f4ff95832782f2f2e5": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None take the same false branch and serialize identically."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__record_revisions__mutmut_4:3240d2852a07c877863538bf65e52a60fd838997c2278ee1b9f7ee27651ef93b": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize identically, preserving revision hashes."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__revision__mutmut_22:82c190432e4f89f407e8188a9a05bfa85256b6a656b175fc44e3a6eed1583e71": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize identically, preserving observation hashes."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_23:a354b6a6efa63c8f7cfac048264fbb435343acb765671f884d54a59aba383570": {
+    "reader": "Standards reader",
+    "reason": "HTTP field names are case insensitive; requests prepared headers preserve the same Content-Type lookup."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_24:b812c17089aadba3febbd62310f765419c92eb2a0290e4ae22030d699f006db2": {
+    "reader": "Standards reader",
+    "reason": "HTTP field names are case insensitive; requests prepared headers preserve the same Content-Type lookup."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_46:68e8c965e6cdee1afeb29f4011e5ce1f48470d29b209d18f73abeca568ed595c": {
+    "reader": "Standards reader",
+    "reason": "requests Response.headers is CaseInsensitiveDict, giving identical lookups for header name casing."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_47:a82769ca2640d9cebdd24a8b32de90b7eb5c6cf73150a0b28dc266691ac20c99": {
+    "reader": "Standards reader",
+    "reason": "requests Response.headers is CaseInsensitiveDict, giving identical lookups for header name casing."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_48:a62189ccfa77b0caa74f97d33473bb09510b70755310d76aa4447d09da3fff62": {
+    "reader": "Standards reader",
+    "reason": "Both absent-header defaults exclude the protobuf substring and select the same JSON acknowledgement branch."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__json_acknowledged__mutmut_30:7c53e8b89f449e80bb7b8de6b94c8cc57ba2e19629bf6878f522c5c6dbe44d41": {
+    "reader": "Standards reader",
+    "reason": "The enclosing presence branch guarantees at least one partial-success key exists; the changed inner default is never selected for the resulting partial value."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__json_acknowledged__mutmut_32:10a46f6eb1a70d1d383832e9ca2b0bfd3cb0658095bf6e980c6773d28661f126": {
+    "reader": "Standards reader",
+    "reason": "The enclosing presence branch guarantees at least one partial-success key exists; the changed inner default is never selected for the resulting partial value."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__send_pending__mutmut_6:d58b1f2dc2688f92de5df1510dd30b34bce4df837c85e483739026a0395ae193": {
+    "reader": "Standards reader",
+    "reason": "_batches produces an empty batch only as its terminal yield with empty specs; continue and break both end without exporting."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x_export_session__mutmut_22:6940fb1023e2b2ed9584779514a61053cba95624a5d1dfbb9072d6d89015af56": {
+    "reader": "Standards reader",
+    "reason": "Both wrappers retain the same O_RDWR descriptor; the lock stream has no reads or writes and flock and close are unchanged."
+  },
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_record_id__mutmut_44:3a8b5646d8a1577bded2a7472b025da730d578e0a45d7836f79da0dd06b2d6da": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize identically, preserving source identity hashes."
+  },
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_value__mutmut_17:c454c200db8310362b7683bbf61aaf6273820e1afa22f3036fb7e18cc8cd8b48": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize the same masked embedded JSON."
+  },
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_member__mutmut_36:3f9cd2499f322646cf1a043bca8729e57e2abb3dc348fbecf4178311ce06bee4": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None produce the same contextual string before strict redaction."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_26:c5af9b4c0b57e22d330bf31c5c125997950c723a1bfb613090e48269adeaa235": {
+    "reader": "Standards reader",
+    "reason": "Deployed Langfuse v3.163.0 traces route lowercases Content-Type before protobuf matching; APPLICATION/X-PROTOBUF and application/x-protobuf select identical decoding. Primary tagged route source and deployed version proof are recorded in final-mutation-symbols.md."
+  },
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_member__mutmut_24:fcedbddd680c1d30e117ddbc4e1035fc15d421b65072ba6f99093274f0bb567c": {
+    "reader": "Standards reader",
+    "reason": "ensure_ascii False and None take the same false branch, producing identical JSON and contextual redaction input."
+  },
+  "hooks/context/swarm_pin.py:hooks.context.swarm_pin.x_nested__mutmut_11:5a7dc3df22dcf856f0f307f58e0aeba24bfc3c63c09daa4a54599feb56c5510a": {
+    "reader": "Standards",
+    "reason": "Stopping the walk at pid 2 instead of pid 1 changes no output: pid 2 is never claude or codex and never the launcher, so the session count and the final launcher comparison are identical."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_39:f4dbfcc6bfe6005080e7d21501efb923cfab37e5310ea952aaa9870a5ad37696": {
+    "reader": "Standards",
+    "reason": "None and False are tested only for truthiness; neither reaches output."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_46:ff3f8c6951c9f5a3af3816335b2ee24249e03ee2a07d8a4d7b8c4580a83fe010": {
+    "reader": "Standards",
+    "reason": "Unlimited splitting preserves the first segment used to identify the option."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_49:fd5b19fb8b5769b93feecb39e8f69a70896e3401d05a66484161915ee3e36b84": {
+    "reader": "Standards",
+    "reason": "Increasing the split limit preserves the first segment used to identify the option."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_command_lines__mutmut_19:7d64b3a202fcf6345d1a170a665cdccf67fe8481bf0355197440c3d48720374e": {
+    "reader": "Standards",
+    "reason": "Changes only the excluded synthetic command name and inert argument prefix. Both prefixes preserve argument parsing; their literal text produces no checked command."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_command_lines__mutmut_20:c21b45a095edd28f98f18434986e293dbdd0f2806a9ed5e38d765c777a806070": {
+    "reader": "Standards",
+    "reason": "Uppercasing the excluded command name and inert prefix preserves the discovered command descendants. Nine differential parser controls returned identical output."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1has_capacity__mutmut_8:0c0df51472b4d0a0db2ee7b7644138ed6275618c6f93bbc4bbc1ff050d255e39": {
+    "reader": "Standards",
+    "reason": "An empty request and None are both falsy and both differ from codex, so choose_shared and choose take the same branches and the slot check returns the same answer."
+  },
+  "scripts/doctor/registry.py:scripts.doctor.registry.x_progress__mutmut_25:c051142c11bbf905616adb05a8ddd23c3cff3b878457ae929b0cfd970ec9e98d": {
+    "reader": "Standards reader for task t48",
+    "reason": "None and empty string are both falsy; every later use of stat in progress and _fallback is a truthiness test, so no input distinguishes them."
+  },
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_upload_artifact__mutmut_14:dc4e6184c755aa7ccc1c4346d0d9fa24115dc4df78f9bb1fbec0b29aabce9f23": {
+    "reader": "Standards reader",
+    "reason": "HTTP header case changes preserve urllib normalized transport headers; the Standards reader executed a differential Request control."
+  },
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_upload_artifact__mutmut_15:f459f4d0f3c237de5c9e9e82c364d93599ef7c159c9c09844dbb9702704c2b55": {
+    "reader": "Standards reader",
+    "reason": "HTTP header case changes preserve urllib normalized transport headers; the Standards reader executed a differential Request control."
+  },
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_upload_artifact__mutmut_18:b631b10e4ffa10e603ae1a85c2c31c3aa623cc4ee5c9d2c3b1c96f4c653b6be6": {
+    "reader": "Standards reader",
+    "reason": "HTTP header case changes preserve urllib normalized transport headers; the Standards reader executed a differential Request control."
+  },
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_upload_artifact__mutmut_19:8e6622298204bb62cc93b81f8ae09d2cf257a1a157dc447e16959b09181ce02d": {
+    "reader": "Standards reader",
+    "reason": "HTTP header case changes preserve urllib normalized transport headers; the Standards reader executed a differential Request control."
+  },
+  "scripts/swarm_ledger/ledger_artifacts.py:scripts.swarm_ledger.ledger_artifacts.x_refusal__mutmut_3:161ada840a807cf082b579ab477244156fed6a74f0c19b2283831dddc27a502f": {
+    "reader": "Standards reader",
+    "reason": "Absent membership returns before member is used; present membership ignores the get default, so changing that default preserves output."
+  },
+  "scripts/swarm_ledger/ledger_artifacts.py:scripts.swarm_ledger.ledger_artifacts.x_refusal__mutmut_5:afd14d7555ffb7d70237993c570a23bd708cc72eef0649efe791c91cc5624ace": {
+    "reader": "Standards reader",
+    "reason": "Absent membership returns before member is used; present membership ignores the get default, so changing that default preserves output."
+  },
+  "scripts/swarm_ledger/ledger_media.py:scripts.swarm_ledger.ledger_media.x_write_file__mutmut_11:44d30690dd4e92b7bcd0f54564a562c73fc8f8c256cc24f9200d74d974f52a30": {
+    "reader": "Standards reader",
+    "reason": "The temporary suffix is consumed by atomic rename; completed storage retains identical final path, bytes and metadata."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_8:25906f4263db07b5e2623cea05e10d7df987c0d10efafe370a969e47c4a728bf": {
+    "reader": "Standards reader",
+    "reason": "HTTPMessage header lookup is case insensitive. The Standards reader executed a differential control confirming identical values for each casing."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_9:97e73d49b2cb720ead1988591dd2f653dc1fa961365066538bc1c44eba1b07c9": {
+    "reader": "Standards reader",
+    "reason": "HTTPMessage header lookup is case insensitive. The Standards reader executed a differential control confirming identical values for each casing."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_29:e70e7f5bf9f56345d4c39c66481e0d88f2caa7d8ccdf160e7baa9fb095657351": {
+    "reader": "Standards reader",
+    "reason": "The preflight validator checks op and id key presence but never their placeholder values; the authority check only special cases join. These values are never persisted."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_30:847caab8fdbd9c2089aa962180a4157a2214082778e841b353f916c8f361f063": {
+    "reader": "Standards reader",
+    "reason": "The preflight validator checks op and id key presence but never their placeholder values; the authority check only special cases join. These values are never persisted."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_35:bc7462b582136d1bb3538ef40864111e4c80b3e99be3e1d453e9fb66317c2485": {
+    "reader": "Standards reader",
+    "reason": "HTTPMessage header lookup is case insensitive. The Standards reader executed a differential control confirming identical values for each casing."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_36:95256e8725cf3ed87c8a5dc1c91b8758750d6db7d77bc4779acc70a5dacd4b5f": {
+    "reader": "Standards reader",
+    "reason": "HTTPMessage header lookup is case insensitive. The Standards reader executed a differential control confirming identical values for each casing."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_43:c03e582edf953a97c5f48ce95560c5d282d7cea35629e4601f08ef7848bb9d28": {
+    "reader": "Standards reader",
+    "reason": "The preflight validator checks op and id key presence but never their placeholder values; the authority check only special cases join. These values are never persisted."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_44:3109c25d73e15796a7b1c20264ba57be851792db752b628513ad8b8d27f622f2": {
+    "reader": "Standards reader",
+    "reason": "The preflight validator checks op and id key presence but never their placeholder values; the authority check only special cases join. These values are never persisted."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_48:9564f442f8a3ab2ea1bb3616f10214c0b3840cbc62330a8ac8c7532888488210": {
+    "reader": "Standards reader",
+    "reason": "Absent title defaults of None and empty string fail the same title validation with identical HTTP 400 reason and no storage."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_50:ffccada65e9e7e40e00a628bd97777e5c6517b79432211ab253fa0497f1d388e": {
+    "reader": "Standards reader",
+    "reason": "Absent title defaults of None and empty string fail the same title validation with identical HTTP 400 reason and no storage."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_72:791eb21bdd03f0a31e75411b1b4b7f755067cc05eb9a8eec080f12cced5a4402": {
+    "reader": "Standards reader",
+    "reason": "None and False both take the same nonreconciling document-load branch, preserving state and media."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_78:cd9f6e0b1e6ccc95cd3af9133e951ff8706d2f066601b61119788af649c092a8": {
+    "reader": "Standards reader",
+    "reason": "Accepted transport principal is empty or the exact agent header; authority refusal is empty for both that accepted principal and None. The upload metadata forbids replacing the author."
+  },
+  "scripts/swarm/operator_mail.py:scripts.swarm.operator_mail.x_mentioned__mutmut_15:6bf83b38fe33dfb04dc9d384ab9883b6a914e8f3d8f76560d94c1de0b8cb8d81": {
+    "reader": "Standards",
+    "reason": "An event with neither note text nor text matches no mention for both empty and XXXX defaults, because MENTION_RE needs a leading at sign."
+  },
+  "scripts/swarm/operator_mail.py:scripts.swarm.operator_mail.x_mentioned__mutmut_18:8eee70f81fc6ec5cf28c1352fc3cda34180200fa57f32aebe46e6369cddefc9e": {
+    "reader": "Standards",
+    "reason": "With no mention, empty and XXXX both differ from swarm and match no agent name or lane, so the write goes to the master either way."
+  },
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_member__mutmut_3:ddce7a071dffa01c420d794cab4e217db4ccb0ca29ec2bed4b738c5b5860fbd0": {
+    "reader": "Standards",
+    "reason": "The label feeds only contains_generic_secret, whose generic_secret regex is compiled case insensitive, so SECRET and secret match identically."
+  },
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_member__mutmut_8:b2767610ba1fd15af0ebdf8f402f7a23c29e41b6cfb90e8793a6e75ad8e11c90": {
+    "reader": "Standards",
+    "reason": "json.dumps checks ensure_ascii for truth only, so False and None produce identical output with non-ASCII characters preserved."
+  },
+  "hooks/observability/trace_flush.py:hooks.observability.trace_flush.x_flush_once__mutmut_1:80d09be3f11ee776f97113ffcd7c849ef5162a181d27c420ef1102c3a63e84a8": {
+    "reader": "Standards",
+    "reason": "accepted_bytes is always an int, so the first comparison against None or an empty string is False either way and flush_once takes the same path."
+  },
   "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_layout__mutmut_5:0c083d67c3593f83d199a9f0a1bca2bee8ed08af1256a3bdca979c50a29f6d7f": {
     "reader": "Standards /root/standards_reader",
     "reason": "The layout HTTPMessage Origin lookup changes only key case. The operator-origin authorization decision and subsequent layout operation are identical."

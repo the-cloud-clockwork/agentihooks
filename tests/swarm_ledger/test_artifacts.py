@@ -3,11 +3,12 @@ import urllib.error
 import urllib.request
 from unittest.mock import patch
 
-import ledger_artifacts as artifacts  # noqa: E402
 import pytest
 
 from scripts.swarm_ledger import ledger
-from tests.swarm_ledger.test_media import Endpoint, core, media, png, server
+from scripts.swarm_ledger import ledger_artifacts as artifacts
+from scripts.swarm_ledger import ledger_server as server
+from tests.swarm_ledger.test_media import Endpoint, core, media, png
 
 MARKDOWN = b"# Handoff template\n\n| Field | Use |\n| --- | --- |\n| Done | what landed |\n\n```\nagentihooks swarm done\n```\n\n- Keep it short\n"
 JSON_DOC = b'{"proposal": {"sections": ["Done", "Stopped at"], "version": 2}}'
@@ -18,6 +19,9 @@ SVG = (
     b'<image href="missing.png" onerror="parent.pwned=1"/>'
     b'<foreignObject><div xmlns="http://www.w3.org/1999/xhtml">x</div></foreignObject></svg>'
 )
+
+
+import os
 
 
 class TestStore:
@@ -60,8 +64,12 @@ class TestStore:
 
 
 class ArtifactEndpoint(Endpoint):
-    def publish(self, name, filename, data, token=True):
+    def publish(self, name, filename, data, token=True, request=None):
         headers = {"Host": f"127.0.0.1:{server.PORT}", "X-Ledger-Agent": name, "X-Artifact-Name": filename}
+        metadata = {"task": ""} if request is None else request
+        if isinstance(metadata, dict):
+            metadata = {"title": "Upload", **metadata}
+        headers["X-Artifact-Request"] = json.dumps(metadata)
         if token:
             headers["X-Ledger-Token"] = self.token
         req = urllib.request.Request(
@@ -72,6 +80,113 @@ class ArtifactEndpoint(Endpoint):
                 return resp.status, json.loads(resp.read())
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read().decode()
+
+    def test_an_unrequested_upload_leaves_the_media_folder_unchanged(self):
+        self.put([{"op": "join", "id": "j-refused-upload", "by": "refused-engineer"}])
+        old = media.store("via-media", png(101, 101))
+        os.utime(media.folder("via-media") / old["id"], (1, 1))
+        folder = media.folder("via-media")
+        before = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
+        code, body = self.publish("refused-engineer", "unrequested.md", b"# Unrequested upload\n")
+        after = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
+        assert after == before
+        assert code == 403
+        assert artifacts.REFUSED in body
+
+    def test_invalid_and_unknown_publication_requests_leave_no_files(self):
+        self.put([{"op": "join", "id": "j-invalid-upload", "by": "invalid-engineer"}])
+        folder = media.folder("via-media")
+        before = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
+        for request, expected in (
+            ({"task": "absent", "plan": True}, 403),
+            ({"task": "", "request": "absent"}, 403),
+            ({"task": "", "plan": False}, 400),
+            ({"task": [], "plan": True}, 400),
+            ({"task": "", "request": 1}, 400),
+            ({"task": "", "extra": True}, 400),
+            ([], 400),
+            ({"task": "", "by": "forged"}, 400),
+        ):
+            code, body = self.publish("invalid-engineer", "invalid.md", b"# Invalid upload\n", request=request)
+            assert code == expected, body
+            if isinstance(request, dict) and request.get("task") == "absent":
+                assert body == "join the ledger first and name a task it holds"
+            if request == [] or "extra" in request or "by" in request:
+                assert body == "artifact upload takes task, title and optional request or plan"
+            assert {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()} == before
+
+    def test_leaving_during_an_upload_refuses_before_storage_and_names_the_reason(self):
+        self.put([{"op": "join", "id": "j-leaving-upload", "by": "leaving-engineer"}])
+        folder = media.folder("via-media")
+        before = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
+        read = server.repository.get_document
+
+        def read_then_leave(*args, **kwargs):
+            doc = read(*args, **kwargs)
+            if "leaving-engineer" in doc["_meta"]["members"]:
+                core.sync("via-media", ops=[{"op": "leave", "id": "leave-upload", "by": "leaving-engineer"}])
+            return doc
+
+        with patch.object(server.repository, "get_document", side_effect=read_then_leave):
+            code, body = self.publish(
+                "leaving-engineer", "leave.md", b"# Departing upload\n", request={"task": "", "plan": True}
+            )
+        assert code == 403
+        assert body == "join the ledger first and name a task it holds"
+        assert {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()} == before
+
+    def test_a_missing_upload_title_or_metadata_names_the_title_and_stores_nothing(self):
+        self.put([{"op": "join", "id": "j-incomplete-upload", "by": "incomplete-engineer"}])
+        folder = media.folder("via-media")
+        before = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
+        for metadata in (None, {"task": "", "plan": True}):
+            headers = {
+                "Host": f"127.0.0.1:{server.PORT}",
+                "X-Ledger-Agent": "incomplete-engineer",
+                "X-Ledger-Token": self.token,
+                "X-Artifact-Name": "incomplete.md",
+            }
+            if metadata is not None:
+                headers["X-Artifact-Request"] = json.dumps(metadata)
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{self.port}/api/artifacts/via-media",
+                data=b"# Incomplete upload\n",
+                headers=headers,
+                method="POST",
+            )
+            with pytest.raises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(req)
+            assert error.value.code == 400
+            assert error.value.read().decode().startswith("title must be text of at most ")
+            assert {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()} == before
+
+    def test_artifact_uploads_require_an_agent_even_with_the_operator_token(self):
+        folder = media.folder("via-media")
+        before = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
+        code, _, body = self.call("POST", "/api/artifacts/via-media", b"# Anonymous upload\n")
+        assert code == 403
+        assert body == b"agent must join this ledger before uploading"
+        assert {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()} == before
+
+    def test_a_published_plan_upload_uses_the_same_request_as_its_entry(self):
+        self.put([{"op": "join", "id": "j-plan-upload", "by": "plan-engineer"}])
+        code, file = self.publish("plan-engineer", "plan.md", b"# Published plan\n", request={"plan": True})
+        assert code == 200, file
+        code, _, body = self.put(
+            [
+                {
+                    "op": "artifact_add",
+                    "id": "a-plan-upload",
+                    "by": "plan-engineer",
+                    "task": "",
+                    "title": "Plan",
+                    "file": file,
+                    "plan": True,
+                }
+            ]
+        )
+        assert code == 200
+        assert not json.loads(body)["rejected"]
 
     def test_an_agent_publishes_markdown_json_and_svg_on_a_task(self):
         self.put([{"op": "join", "id": "j-art", "by": "art-engineer"}])
@@ -91,7 +206,7 @@ class ArtifactEndpoint(Endpoint):
             ("shape.json", JSON_DOC, "Proposal shape"),
             ("diagram.svg", SVG, "Handoff flow diagram"),
         ):
-            code, file = self.publish("art-engineer", filename, data)
+            code, file = self.publish("art-engineer", filename, data, request={"task": "av1"})
             assert code == 200, file
             op = {
                 "op": "artifact_add",
@@ -129,7 +244,10 @@ class ArtifactEndpoint(Endpoint):
 
     def test_a_record_needs_a_stored_file_a_member_and_a_known_task(self):
         self.put([{"op": "join", "id": "j-rec", "by": "rec-engineer"}])
-        file = self.publish("rec-engineer", "proposal.md", MARKDOWN)[1]
+        self.put([{"op": "add", "thread": "chat", "id": "m-upload-request", "text": "Send me the plan"}])
+        file = self.publish(
+            "rec-engineer", "proposal.md", MARKDOWN, request={"task": "", "request": "m-upload-request"}
+        )[1]
         ghost = {"id": "f" * 64 + ".md"}
         base = {"op": "artifact_add", "by": "rec-engineer", "task": "", "title": "Plan"}
         assert self.put([{**base, "id": "a-ghost", "file": ghost}])[0] == 400
@@ -175,7 +293,12 @@ def test_artifact_command_uploads_the_file_and_records_it_on_the_task(tmp_path, 
         patch.object(ledger, "call", return_value={}) as call,
     ):
         ledger.cmd_artifact(args)
-    assert upload.call_args.args == ("shots", "art-engineer", str(doc))
+    assert upload.call_args.args == (
+        "shots",
+        "art-engineer",
+        str(doc),
+        {"task": "av1", "title": "Handoff template proposal"},
+    )
     op = call.call_args.args[1][0]
     assert {k: op[k] for k in ("op", "by", "task", "title", "file")} == {
         "op": "artifact_add",
@@ -197,10 +320,13 @@ def test_upload_artifact_sends_bytes_name_token_and_agent(tmp_path):
     ):
         (tmp_path / "page.html").write_text("page")
         opened.return_value.__enter__.return_value.read.return_value = b'{"id": "x"}'
-        assert ledger.upload_artifact("shots", "art-engineer", str(doc)) == {"id": "x"}
+        assert ledger.upload_artifact(
+            "shots", "art-engineer", str(doc), {"task": "av1", "title": "Proposal", "request": "wanted"}
+        ) == {"id": "x"}
     req = opened.call_args.args[0]
     assert req.full_url.endswith("/api/v1/ledgers/shots/uploads/artifacts")
     assert req.data == MARKDOWN
     assert req.get_header("X-artifact-name") == "proposal.md"
+    assert json.loads(req.get_header("X-artifact-request")) == {"task": "av1", "title": "Proposal", "request": "wanted"}
     assert req.get_header("X-ledger-agent") == "art-engineer"
     assert req.get_header("X-ledger-token") == "test-token"

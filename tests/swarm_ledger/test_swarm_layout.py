@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import serve_modules
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -121,6 +122,7 @@ class Page:
             self.context.clock.install(time=NOW_MS)
         self.context.add_init_script(f"Date.now = () => {NOW_MS};")
         self.context.route("**/*", lambda route: self.route(route, html))
+        serve_modules(self.context)
         self.tab = self.context.new_page()
         self.errors = []
         self.tab.on("pageerror", lambda error: self.errors.append(str(error)))
@@ -269,6 +271,41 @@ def test_the_effort_range_shows_in_the_caps_row_and_apply_sends_it(open_page):
     assert page.puts == [{"action": "set", "effort_min": "low", "effort_max": "max"}]
 
 
+def test_master_affinity_shows_the_live_harness_and_apply_sends_only_a_change(open_page):
+    page = open_page(status(master_affinity={"desired": "auto", "live": "claude", "order": None}), width=1920)
+    pick, apply = page.tab.locator("#cap-master_agent"), page.tab.get_by_role("button", name="Apply capacity")
+    assert pick.input_value() == "claude" and apply.is_disabled()
+    row = apply.bounding_box()
+    assert row["y"] <= pick.bounding_box()["y"] + pick.bounding_box()["height"] / 2 <= row["y"] + row["height"]
+    pick.select_option("claude")
+    assert apply.is_disabled()
+    pick.select_option("codex")
+    assert not apply.is_disabled()
+    apply.click()
+    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('done')")
+    assert page.puts == [{"action": "set", "master_agent": "codex"}]
+
+
+@pytest.mark.parametrize(
+    ("order", "text", "bad"),
+    [
+        (None, "", False),
+        ({"to": "codex", "state": "ordered", "reason": ""}, "master hands off to codex", False),
+        (
+            {"to": "codex", "state": "failed", "reason": "no codex account"},
+            "switch to codex failed: no codex account",
+            True,
+        ),
+    ],
+)
+def test_master_affinity_shows_the_pending_or_failed_order(open_page, order, text, bad):
+    page = open_page(status(master_affinity={"desired": "codex", "live": "claude", "order": order}))
+    assert page.tab.locator("#cap-master_agent").input_value() == "codex"
+    state = page.tab.locator("#affinity-state")
+    assert state.text_content() == text
+    assert ("bad" in state.get_attribute("class").split()) is bad
+
+
 @pytest.mark.parametrize(
     ("lane", "typed", "message"),
     [
@@ -301,9 +338,12 @@ def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
           };
         }"""
     )
-    assert len(boxes["row"]) == 8
-    middle = (boxes["row"][0][0] + boxes["row"][0][1]) / 2
-    assert all(top <= middle <= bottom for top, bottom in boxes["row"])
+    assert len(boxes["row"]) == 9
+    caps, (affinity, apply) = boxes["row"][:7], boxes["row"][7:]
+    middle = (caps[0][0] + caps[0][1]) / 2
+    assert all(top <= middle <= bottom for top, bottom in caps)
+    last = (affinity[0] + affinity[1]) / 2
+    assert apply[0] <= last <= apply[1]
     assert boxes["gates"] >= max(bottom for _, bottom in boxes["row"])
 
 

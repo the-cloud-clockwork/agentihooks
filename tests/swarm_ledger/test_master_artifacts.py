@@ -6,10 +6,10 @@ from http.server import ThreadingHTTPServer
 
 import ledger
 import ledger_core as core
-import ledger_server as server
 import pytest
 
 from scripts.swarm_ledger import ledger_artifacts as artifacts
+from scripts.swarm_ledger import ledger_server as server
 from tests.swarm_ledger.test_bin import make_ledger
 
 MASTER = "master@abcdef-0001"
@@ -69,7 +69,9 @@ def test_joined_master_publishes_requested_markdown_without_claims(publication, 
 @pytest.mark.parametrize("task", ["master", ""])
 def test_page_server_accepts_requested_master_artifact(publication, task):
     slug, path, _ = publication
-    file = ledger.upload_artifact(slug, MASTER, str(path))
+    file = ledger.upload_artifact(
+        slug, MASTER, str(path), {"task": "", "title": "Audit summary", "request": "requested"}
+    )
     op = {
         "op": "artifact_add",
         "id": "published",
@@ -102,7 +104,9 @@ def test_master_requires_operator_request(publication, request_id):
             {"op": "delete", "id": "deleted-request_id", "thread": "chat"},
         ],
     )
-    file = ledger.upload_artifact(slug, MASTER, str(path))
+    file = ledger.upload_artifact(
+        slug, MASTER, str(path), {"task": "", "title": "Audit summary", "request": "requested"}
+    )
     op = {"op": "artifact_add", "id": "refused", "by": MASTER, "task": "master", "title": "Audit summary", "file": file}
     if request_id is not None:
         op["request"] = request_id
@@ -117,7 +121,7 @@ def test_master_marker_needs_joined_master_identity_and_role(publication, monkey
     slug, path, _ = publication
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", by)
     core.sync(slug, ops=[{"op": "join", "id": "role", "by": by, "role": role}])
-    file = ledger.upload_artifact(slug, by, str(path))
+    file = ledger.upload_artifact(slug, by, str(path), {"task": "", "title": "Audit summary", "request": "requested"})
     op = {
         "op": "artifact_add",
         "id": "refused",
@@ -134,7 +138,9 @@ def test_master_marker_needs_joined_master_identity_and_role(publication, monkey
 
 def test_unjoined_master_cannot_publish(publication):
     slug, path, _ = publication
-    file = ledger.upload_artifact(slug, MASTER, str(path))
+    file = ledger.upload_artifact(
+        slug, MASTER, str(path), {"task": "", "title": "Audit summary", "request": "requested"}
+    )
     core.sync(slug, ops=[{"op": "leave", "id": "leave", "by": MASTER}])
     op = {
         "op": "artifact_add",
@@ -148,6 +154,63 @@ def test_unjoined_master_cannot_publish(publication):
     state = ledger.call(slug, [op])
     assert state["rejected"] == ["refused"]
     assert ledger.resource(slug, "artifacts", collection=True) == []
+
+
+@pytest.mark.parametrize("title", ["", "x" * 1000, "proof-file.md"])
+def test_invalid_publication_title_leaves_the_media_folder_unchanged(publication, title):
+    slug, path, _ = publication
+    folder = artifacts.media.folder(slug)
+    before = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
+    args = ledger.build_parser().parse_args(
+        [
+            "--slug",
+            slug,
+            "--as",
+            MASTER,
+            "artifact",
+            str(path),
+            title,
+            "--request",
+            "requested",
+        ]
+    )
+    with pytest.raises(SystemExit):
+        ledger.cmd_artifact(args)
+    assert {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()} == before
+
+
+def test_master_publication_on_a_real_task_keeps_its_task(publication):
+    slug, path, _ = publication
+    core.sync(
+        slug,
+        ops=[
+            {
+                "op": "task_add",
+                "id": "add-work",
+                "by": MASTER,
+                "task": "work",
+                "title": "Requested document",
+                "lane": "eng",
+                "artifact": True,
+            }
+        ],
+    )
+    file = ledger.upload_artifact(slug, MASTER, str(path), {"task": "work", "title": "Audit summary"})
+    state = ledger.call(
+        slug,
+        [
+            {
+                "op": "artifact_add",
+                "id": "published-work",
+                "by": MASTER,
+                "task": "work",
+                "title": "Audit summary",
+                "file": file,
+            }
+        ],
+    )
+    assert not state["rejected"]
+    assert state["artifacts"][-1]["task"] == "work"
 
 
 @pytest.mark.parametrize("harness", ["claude", "codex"])

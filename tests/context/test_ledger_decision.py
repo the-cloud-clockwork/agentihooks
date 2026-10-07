@@ -230,6 +230,86 @@ def test_an_unbound_plan_still_directs_init_swarm(isolated, capsys, monkeypatch)
     assert "plan phases" not in out
 
 
+def ledger(isolated, slug):
+    (isolated / f"{slug}.json").write_text("{}", encoding="utf-8")
+
+
+def plan_accept(text, plan_file=None):
+    payload = recorded("claude_plan_accept")
+    payload["tool_input"]["plan"] = text
+    if plan_file is not None:
+        payload["tool_input"]["planFilePath"] = str(plan_file)
+    return payload
+
+
+def test_an_unbound_plan_naming_an_existing_ledger_is_offered_it_first(isolated, capsys, monkeypatch):
+    ledger(isolated, "rig-grade-swarm")
+    ledger(isolated, "other-ledger")
+    out = run(plan_accept("# Plan\n\nContinue rig-grade-swarm, then other-ledger.\n"), capsys, "claude", monkeypatch)
+    assert MARK in out
+    assert "names the existing ledger rig-grade-swarm" in out
+    assert "ask the operator whether the plan continues rig-grade-swarm" in out
+    offer = out.index("agentihooks ledger --slug rig-grade-swarm --as <your name> plan phases <phases.json>")
+    assert offer < out.index("init-swarm")
+    assert "other-ledger" not in out
+    assert MARK not in run(plan_accept("Continue rig-grade-swarm."), capsys, "claude", monkeypatch)
+
+
+def test_the_offer_names_the_agent_and_reads_the_plan_file(isolated, tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@1")
+    ledger(isolated, "swarm-buildout")
+    plan_file = tmp_path / "plan.md"
+    plan_file.write_text("Add two phases to Swarm-Buildout.\n", encoding="utf-8")
+    out = decision.directive(plan_accept("no slug here", plan_file))
+    assert "`agentihooks ledger --slug swarm-buildout --as engineer@1 plan phases <phases.json>`" in out
+
+
+def test_a_copilot_summary_naming_a_ledger_is_offered_it(isolated, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "copilot")
+    ledger(isolated, "rig-grade-swarm")
+    payload = {
+        "session_id": "c1",
+        "hook_event_name": "PostToolUse",
+        "tool_name": "exit_plan_mode",
+        "tool_input": {"summary": "Two more phases for rig-grade-swarm"},
+    }
+    assert "names the existing ledger rig-grade-swarm" in decision.directive(payload)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "# Hello world\n\n1. Write hello.py\n",
+        "Start a fresh ledger called brand-new-ledger.",
+        "Build the demo-app on top of the old demo-ledger.",
+        "Revive the binned ledger.",
+    ],
+)
+def test_a_plan_naming_no_existing_ledger_gets_the_swarm_directive(isolated, text, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    ledger(isolated, "demo")
+    ledger(isolated, "binned")
+    (isolated / ".bin.json").write_text(json.dumps({"binned": 1}), encoding="utf-8")
+    assert decision.directive(plan_accept(text, isolated / "missing.md")) == decision.SWARM_DIRECTIVE
+
+
+def test_a_plan_without_text_names_no_ledger(isolated, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "copilot")
+    for slug in ("none", "xxxx"):
+        ledger(isolated, slug)
+    payload = {"session_id": "c1", "hook_event_name": "PostToolUse", "tool_name": "exit_plan_mode", "tool_input": {}}
+    assert decision.directive(payload) == decision.SWARM_DIRECTIVE
+
+
+@pytest.mark.parametrize("content", ["not json", "[1]"])
+def test_an_unreadable_bin_hides_no_ledger(isolated, content, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    ledger(isolated, "binned")
+    (isolated / ".bin.json").write_text(content, encoding="utf-8")
+    assert "names the existing ledger binned" in decision.directive(plan_accept("Revive the binned ledger."))
+
+
 def test_a_plan_without_a_session_id_gets_nothing(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
     assert decision.directive(recorded("claude_plan_accept", session_id="")) == ""

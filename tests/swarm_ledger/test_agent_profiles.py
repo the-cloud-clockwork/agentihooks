@@ -1,10 +1,11 @@
 import json
 import subprocess
-from pathlib import Path
+
+from tests.swarm_ledger.ledger_page import page_source
 
 
 def test_agent_rows_show_the_model_and_effort_for_claude_and_codex():
-    page = (Path(__file__).resolve().parents[2] / "scripts/swarm_ledger/template.html").read_text()
+    page = page_source()
     functions = []
     for name in ("span", "modelText", "agentRows"):
         functions.append(

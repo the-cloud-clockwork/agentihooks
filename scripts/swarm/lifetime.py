@@ -7,10 +7,13 @@ from typing import TYPE_CHECKING
 from scripts.inbox import exits
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
+from scripts.swarm import master_retire, reaper
 from scripts.swarm.store import MASTER, RedisStore
 
 if TYPE_CHECKING:
     from scripts.swarm.tick import Ledger, Runtime
+
+IDLE_LIMIT = "the swarm idle limit"
 
 
 def retire_idle_master(
@@ -26,13 +29,22 @@ def retire_idle_master(
     actions = []
     for agent in agents:
         seat = agent.seat or seat_address(slug, MASTER)
-        if now_ms - max(agent.started_at, last_event) <= limit:
+        held_for = master_retire.reason(store, slug, agent.name)
+        if held_for not in {"", IDLE_LIMIT}:
             continue
-        if runtime.status(agent) not in {"idle", "done"}:
+        if held_for != IDLE_LIMIT and (
+            now_ms - max(agent.started_at, last_event) <= limit
+            or runtime.status(agent) not in {"idle", "done"}
+            or inbox.pending_items(seat)
+            or inbox.pending_items(agent.name)
+        ):
             continue
-        if inbox.pending_items(seat) or inbox.pending_items(agent.name):
+        live = agent.name in runtime.live_names()
+        if held := master_retire.hold(store, slug, agent, IDLE_LIMIT, live, now_ms):
+            store.redis.set(store.key(slug, "master-retired-tasks"), json.dumps(list(rows)))
+            actions.append(held)
             continue
-        if not runtime.retire(agent, agent.name in runtime.live_names()):
+        if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
             actions.append(f"could not retire {agent.name}, retrying next tick")
             continue
         store.memory.add_recap(

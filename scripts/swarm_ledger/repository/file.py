@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import ledger_alerts
 import ledger_close
 import ledger_core as core
 import ledger_notifications
@@ -65,7 +66,14 @@ def sync(slug, changes=None, ops=None, gate=None, core=core):
         ledger_priorities.derive(doc, ctx)
         ledger_notifications.derive(doc, ctx)
         del doc["chat"][: -core.CHAT_KEPT]
-        found = core.warnings(doc) + ctx.refused
+        size = core.warnings(doc)
+        found = size + ctx.refused
+        ledger_alerts.derive(
+            doc,
+            ctx,
+            [*((ledger_alerts.SIZE, w) for w in size), *((ledger_alerts.SYNC, w) for w in ctx.refused)],
+            meta.get("warnings") or [],
+        )
         if ctx.events or ctx.dirty or seed_error != meta.get("seed_error") or found != meta.get("warnings") or created:
             meta.update(rev=ctx.rev, updated_at=ctx.at, seed_error=seed_error, warnings=found)
             meta["events"] = (meta["events"] + ctx.events)[-core.EVENTS_KEPT :]

@@ -63,6 +63,12 @@ def parents(path: Path) -> list[str]:
     return data.get("extends", [])
 
 
+def overlays(path: Path) -> list[str]:
+    manifest = path / "profile.yml"
+    data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
+    return data.get("allowedOverlays", [])
+
+
 def inherited(profile_dirs: list[tuple[str, Path]]) -> set[str]:
     return {parent for _, path in profile_dirs for parent in parents(path)}
 
@@ -125,3 +131,10 @@ def profile_dirs(bundle: Path | None, profile_csv: str | None, linked: dict[str,
         if found is not None:
             out.append((name, found))
     return out
+
+
+def rendered_dirs(bundle: Path | None, profile_csv: str, linked: dict[str, Path]) -> list[tuple[str, Path]]:
+    """The chain a profile home renders: the profile's dirs plus every overlay the chain declares."""
+    dirs = profile_dirs(bundle, profile_csv, linked)
+    declared = [overlay for _, path in dirs for overlay in overlays(path)]
+    return profile_dirs(bundle, ",".join([profile_csv, *declared]), linked) if declared else dirs

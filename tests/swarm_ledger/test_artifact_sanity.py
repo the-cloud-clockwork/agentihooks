@@ -169,7 +169,7 @@ class TestPage:
             in html
         )
         assert '{"title": "Artifact sanity", "artifacts": [' in html
-        assert 'const PORT = "9";' in html
+        assert '<meta name="ledger-port" content="9">' in html
         for placeholder in ("DATA", "PALETTE", "PORT"):
             assert f"__LEDGER_{placeholder}__" not in html
         assert "--canvas" in html

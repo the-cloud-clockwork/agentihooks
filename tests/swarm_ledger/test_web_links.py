@@ -1,5 +1,6 @@
 import new_ledger
 
+from tests.swarm_ledger.ledger_page import show
 from tests.swarm_ledger.test_comment_author_lines import browser as browser
 
 ISSUE = "https://github.com/the-cloud-clockwork/agentihooks/issues/613"
@@ -27,7 +28,7 @@ def test_chat_and_comments_render_web_links_safely_and_open_a_new_tab(browser):
     with browser.new_context() as context:
         context.route("https://github.com/**", lambda route: route.fulfill(body="Issue page"))
         tab = context.new_page()
-        tab.set_content(new_ledger.render(doc, "web-links", 8765))
+        show(tab, new_ledger.render(doc, "web-links", 8765))
         bodies = tab.locator(".entry-body")
         assert bodies.count() == 5
         for body in bodies.all():

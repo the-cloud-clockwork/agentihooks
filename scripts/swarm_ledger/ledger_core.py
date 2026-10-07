@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import ledger_alerts
 import ledger_answer
 import ledger_close
 import ledger_comments
@@ -43,6 +44,7 @@ PAGE_RE = re.compile(r'<meta name="ledger-page" content="([0-9a-f]+)">')
 TEMPLATE = Path(__file__).resolve().parent / "template.html"
 PALETTE = TEMPLATE.with_name("palette.css")
 TOOLTIPS = TEMPLATE.with_name("tooltips.js")
+MODULES = TEMPLATE.parent / "static" / "js"
 TOKEN_RE = re.compile(r'<meta name="ledger-token" content="([A-Za-z0-9_-]{16,})">')
 LEGACY_LINE_RE = re.compile(r"^([A-Za-z][\w.-]*)(?: [0-9:]+Z?| \([^)]*\))?: (.+)$")
 LISTS = {
@@ -107,6 +109,7 @@ EXTENSION_OPS = {
         ledger_relay,
         ledger_answer,
         ledger_verdict,
+        ledger_alerts,
     )
     for name in module.OPS
 }
@@ -295,7 +298,10 @@ def watch_path(slug, name):
 
 
 def page_version():
-    return hashlib.sha256(TEMPLATE.read_bytes() + PALETTE.read_bytes() + TOOLTIPS.read_bytes()).hexdigest()[:12]
+    digest = hashlib.sha256(TEMPLATE.read_bytes() + PALETTE.read_bytes() + TOOLTIPS.read_bytes())
+    for path in sorted(MODULES.glob("*.js")):
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
 
 
 def read_token(html):

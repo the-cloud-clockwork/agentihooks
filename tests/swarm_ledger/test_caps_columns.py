@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import show
+
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 DOC = {"title": "Caps columns", "overview": "o", "phases": []}
 
@@ -23,14 +25,14 @@ def caps_boxes(browser, width):
     tab = browser.new_page(viewport={"width": width, "height": 900})
     try:
         html = TEMPLATE.read_text(encoding="utf-8").replace("__LEDGER_DATA__", json.dumps(DOC))
-        tab.set_content(html)
+        show(tab, html)
         return tab.evaluate(
             """() => {
               document.getElementById("swarm").hidden = false;
               for (const [id, v] of [["cap-eng", "3"], ["cap-ci", "1"], ["cap-plan", "1"], ["cap-codex", "20"], ["cap-compact", "600"], ["cap-effort_min", "medium"], ["cap-effort_max", "high"]]) document.getElementById(id).value = v;
               const box = (el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; };
               return {
-                caps: [...document.querySelectorAll("#capacity-box .sw-cap")].map((cap) => [...cap.children].map(box)),
+                caps: [...document.querySelectorAll("#capacity-box .sw-cap:not(.sw-affinity)")].map((cap) => [...cap.children].map(box)),
                 strip: box(document.getElementById("capacity-box")),
               };
             }"""

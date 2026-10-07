@@ -8,6 +8,7 @@ agentihooks swarm <id> url                                        print the ledg
 agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
 agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
 agentihooks swarm <id> take-master [--replace]                    this session becomes the master and prints its priming
+agentihooks swarm <id> master up [--last | --new]                 from a terminal: bring back the last master's conversation or start a new one
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
 agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
@@ -15,6 +16,7 @@ agentihooks swarm <id> set snapshot-minutes=N                      automatic sna
 agentihooks swarm <id> set codex-share=PCT codex-min-week-left=PCT   share of auto lane spawns sent to Codex (default 30, 5)
 agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E eng-kind=K eng-role=TEXT   (ci- likewise)
 agentihooks swarm <id> set effort-min=E effort-max=E               every lane launch effort stays in this range (default medium, high)
+agentihooks swarm <id> set master-agent=claude|codex              master affinity; a change orders the live master to hand off to that harness
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
@@ -58,11 +60,14 @@ from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, 
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
+    affinity,
     control_notifications,
     delivery,
     done_gate,
     idle,
+    launch_check,
     ledger_events,
+    master_launch,
     naming,
     phase_planning,
     phase_state,
@@ -71,9 +76,11 @@ from scripts.swarm import (
     priming_trace,
     priority_sweep,
     prompt,
+    reaper,
     snapshot,
     take_master,
     templates,
+    tick_master,
     timer,
     trace_plan,
     waits,
@@ -81,7 +88,7 @@ from scripts.swarm import (
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.runtime import HerdrRuntime, _bin
+from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
 from scripts.swarm.tick import agent_status, primed, tick
@@ -176,6 +183,11 @@ def cmd_list(store, args):
 
 
 def cmd_tick(store, args):
+    from scripts import operator_env
+
+    if why := timer.installed_refusal():
+        raise SwarmError(f"the tick refused to run: {why}")
+    operator_env.fill(os.environ)
     for slug in store.slugs():
         try:
             for action in run_tick(store, slug):
@@ -226,7 +238,7 @@ def _state(store, args, state):
     if state == "running":
         store.redis.delete(store.key(args.slug, "master-retired-tasks"))
     store.update(args.slug, state=state)
-    if state == "running" and not timer.ensure(_bin()):
+    if state == "running" and not timer.ensure(timer.entry_point()):
         print("warning: the systemd timer could not be enabled; run agentihooks swarm tick yourself", file=sys.stderr)
     for action in run_tick(store, args.slug):
         print(action)
@@ -262,9 +274,9 @@ def cmd_stop(store, args):
 def stop_now(store, slug, runtime, ledger):
     store.update(slug, state="stopping")
     rows = {t["id"]: t for t in ledger.tasks(slug)}
-    live, left = runtime.live_names(), []
+    left = []
     for agent in store.agents(slug):
-        if not runtime.retire(agent, agent.name in live):
+        if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
             left.append(agent.name)
             continue
         store.release(slug, agent.task, agent.name)
@@ -282,12 +294,12 @@ def _live_master(store, slug, live):
     return next((a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished" and a.name in live), None)
 
 
-def _retire_each(store, slug, runtime, live, agents):
+def _retire_each(store, slug, runtime, agents):
     left = []
     for agent in agents:
         store.release(slug, agent.task, agent.name)
         store.drop_agent(slug, agent.name)
-        if not runtime.retire(agent, agent.name in live):
+        if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
             store.put_agent(slug, agent)
             left.append(agent.name)
     return left
@@ -308,14 +320,14 @@ def cmd_close(store, args):
     path = snapshot.take(store, args.slug, now_ms())
     store.update(args.slug, state="stopping")
     agents = store.agents(args.slug)
-    left = _retire_each(store, args.slug, runtime, live, [a for a in agents if a.lane != MASTER])
+    left = _retire_each(store, args.slug, runtime, [a for a in agents if a.lane != MASTER])
     for row in ledger.tasks(args.slug):
         if row.get("state") == "claimed":
             ledger.update_task(args.slug, row["id"], {"state": "open", "claimed_by": ""})
     ledger.mark_closed(args.slug, by)
     store.update(args.slug, state="stopping" if left else "stopped")
     print(json.dumps({"closed": args.slug, "snapshot": str(path), "still_running": left}), flush=True)
-    masters_left = _retire_each(store, args.slug, runtime, live, [a for a in agents if a.lane == MASTER])
+    masters_left = _retire_each(store, args.slug, runtime, [a for a in agents if a.lane == MASTER])
     if masters_left:
         store.update(args.slug, state="stopping")
     elif not left:
@@ -341,20 +353,42 @@ def cmd_take_master(store, args):
     runtime = HerdrRuntime()
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, runtime.live_names())
-    name = os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
-    record = take_master.take(store, args.slug, name, runtime, now_ms(), args.replace)
+    from scripts.gates import Who
+
+    name = Who.from_env().name
+    record, transfer = take_master.take(store, args.slug, name, runtime, now_ms(), args.replace)
     ledger = LedgerClient()
     if ledger.closed(args.slug):
         ledger.reopen(args.slug, record.name)
     if store.config(args.slug).state in ("stopped", "stopping"):
         store.update(args.slug, state="running")
-        timer.ensure(_bin())
+        timer.ensure(timer.entry_point())
     config = store.config(args.slug)
-    task = {"id": MASTER, "handoff": store.handoff(args.slug, MASTER), "peer": store.peer(args.slug)}
+    task = {
+        "id": MASTER,
+        "handoff": store.handoff(args.slug, MASTER),
+        "peer": store.peer(args.slug),
+        "transfer": transfer,
+    }
     task = primed(store, args.slug, record.seat, task)
     print(prompt.build_master(args.slug, config.repo, record.name, task, config.autonomy))
     injection_trace.record_rows(os.environ.get("CLAUDE_CODE_SESSION_ID", ""), priming_trace.rows(args.slug, task))
     store.clear_handoff(args.slug, MASTER)
+
+
+def cmd_master(store, args):
+    runtime = HerdrRuntime()
+    if args.slug not in store.slugs():
+        snapshot.recreate(store, args.slug, runtime.live_names())
+    launched = master_launch.up(store, args.slug, runtime, now_ms(), args.choice, input, print)
+    ledger = LedgerClient(service=True)
+    if ledger.closed(args.slug):
+        ledger.reopen(args.slug, launched.master)
+    if store.config(args.slug).state in ("stopped", "stopping"):
+        store.update(args.slug, state="paused")
+        timer.ensure(timer.entry_point())
+    ledger.join(args.slug, launched.master, "orchestrator")
+    print(json.dumps(asdict(launched)))
 
 
 def gate_mode(key, value, environ=None):
@@ -392,6 +426,8 @@ def cmd_set(store, args):
             )
         changes[SETTABLE[key]] = int(value)
     config = store.update(args.slug, **changes)
+    asked = any(pair.startswith("master-agent=") for pair in args.pairs)
+    master = affinity.order(store, args.slug, now_ms()) if asked else affinity.pending(store, args.slug)
     if config.state == "running":
         for action in run_tick(store, args.slug):
             print(action)
@@ -410,6 +446,7 @@ def cmd_set(store, args):
                 "effort_min": config.effort_min,
                 "effort_max": config.effort_max,
                 "lanes": config.lanes,
+                "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
             }
         )
     )
@@ -473,6 +510,15 @@ def _snapshot_line(auto):
     return f"snapshots  last automatic snapshot {taken}  {every}  kept {auto['kept']}"
 
 
+def _affinity_line(report):
+    line = f"master affinity  desired {report['desired']}  live {report['live'] or 'none'}"
+    order = report["order"]
+    if order is None:
+        return line
+    reason = f": {order['reason']}" if order["reason"] else ""
+    return f"{line}  order to {order['to']} {order['state']}{reason}"
+
+
 def cmd_status(store, args):
     if args.json:
         store.config(args.slug)
@@ -497,6 +543,9 @@ def cmd_status(store, args):
     for phase_id, state, held in phase_state.report(doc):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))
     print(_snapshot_line(auto_snapshot(config)))
+    print(_affinity_line(affinity.report(store, args.slug, config, agents)))
+    if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
+        print(promotion)
     print("Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tModel source\tConfidence")
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
@@ -505,6 +554,11 @@ def cmd_status(store, args):
         )
     for r in store.restored(args.slug):
         print(f"restored  {r['name']}  {r['outcome']}  {r['reason']}")
+    for launch in launch_check.reports(store, args.slug):
+        print(f"launch  {launch['agent']}  {launch['state']}  {launch['elapsed_ms']}ms")
+        for field, values in launch["misses"].items():
+            mode = "report only" if field in launch_check.REPORT_ONLY else "enforced"
+            print(f"  {field}  {mode}  expected {values['expected']}; observed {values['actual']}")
     for f in found:
         print(f"finding  {f['kind']}  {f['subject']}: {f['summary']}")
         for entry in f["evidence"]:
@@ -594,7 +648,9 @@ def cmd_send_message(store, args):
 
 
 def _me(store, args):
-    name = store.names.resolve(args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", ""))
+    from scripts.gates import Who
+
+    name = store.names.resolve(args.name or Who.from_env().name)
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
     if agent is None:
         raise SwarmError(f"{name or 'this session'} is not an agent of swarm {args.slug}")
@@ -914,6 +970,10 @@ def build_parser():
     close.add_argument("--note", default="")
     close.add_argument("--now", action="store_true")
     sub.add_parser("take-master").add_argument("--replace", action="store_true")
+    master_up = sub.add_parser("master").add_subparsers(dest="action", required=True).add_parser("up")
+    pick = master_up.add_mutually_exclusive_group()
+    pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
+    pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")

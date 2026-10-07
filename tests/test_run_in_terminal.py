@@ -31,7 +31,7 @@ def test_a_command_runs_in_a_new_herdr_tab(herdr, tmp_path, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert herdr[0] == ("open", tmp_path, "tests", "tab", "")
-    assert ("pane", "run", "w1:p3", "npm test") in herdr
+    assert ("pane", "run", "w1:p3", "sleep 3 && npm test") in herdr
     assert "host=herdr" in out and "pane_id=w1:p3" in out
 
 
@@ -50,7 +50,7 @@ def test_the_native_host_runs_the_terminal_script(monkeypatch, tmp_path, capsys)
     rc = run_in_terminal.main(["--dir", str(tmp_path), "--", "make"], {"HOME": str(tmp_path)})
     assert rc == 0
     assert ran[0][0].endswith("run-in-terminal/scripts/02_run_terminal.sh")
-    assert ran[0][1:] == [str(tmp_path), tmp_path.name, "make"]
+    assert ran[0][1:] == [str(tmp_path), tmp_path.name, "sleep 3 && make"]
     assert "host=native" in capsys.readouterr().out
 
 
@@ -89,7 +89,7 @@ def test_a_quoted_opening_prompt_reaches_herdr_as_one_argument(herdr, tmp_path):
     argv = ["agentihooks", "claude", "--name", "probe", PROMPT]
     assert run_in_terminal.main(["--dir", str(tmp_path), "--", *argv], {"HOME": str(tmp_path)}) == 0
     ran = [call for call in herdr if call[:2] == ("pane", "run")]
-    assert shlex.split(ran[0][3]) == argv
+    assert shlex.split(ran[0][3]) == ["sleep", "3", "&&", *argv]
 
 
 def test_a_quoted_opening_prompt_reaches_the_native_terminal_as_one_argument(monkeypatch, tmp_path):
@@ -100,9 +100,9 @@ def test_a_quoted_opening_prompt_reaches_the_native_terminal_as_one_argument(mon
     )
     argv = ["agentihooks", "claude", PROMPT]
     assert run_in_terminal.main(["--dir", str(tmp_path), "--", *argv], {"HOME": str(tmp_path)}) == 0
-    assert shlex.split(ran[0][3]) == argv
+    assert shlex.split(ran[0][3]) == ["sleep", "3", "&&", *argv]
 
 
 def test_a_single_command_string_stays_raw_shell(herdr, tmp_path):
     assert run_in_terminal.main(["--dir", str(tmp_path), "--", "git pull && make"], {"HOME": str(tmp_path)}) == 0
-    assert ("pane", "run", "w1:p3", "git pull && make") in herdr
+    assert ("pane", "run", "w1:p3", "sleep 3 && git pull && make") in herdr
