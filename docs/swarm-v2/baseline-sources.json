@@ -1,0 +1,117 @@
+{
+  "branch": "dev",
+  "repositories": [
+    {
+      "name": "agentihooks",
+      "url": "git@github.com:The-Cloud-Clockwork/agentihooks.git",
+      "probes": [
+        {
+          "name": "workstation agentihooks install",
+          "kind": "command",
+          "argv": [
+            "agentihooks",
+            "--version"
+          ]
+        }
+      ],
+      "unknown_live": [
+        "swarm controller on Anton (not deployed yet)",
+        "editable checkout revision serving the shared ledger server"
+      ],
+      "checkout": "~/dev/tcc-ecosystem/agentihooks",
+      "interfaces": [
+        "CLAUDE.md",
+        "scripts/swarm/store.py",
+        "scripts/swarm/runtime.py",
+        "scripts/terminate_agent.py",
+        "scripts/swarm_ledger/ledger.py",
+        "hooks/context/project_identity.py",
+        "hooks/memory/transcript_reader.py",
+        "hooks/targets/normalizer.py",
+        "scripts/swarm/snapshot.py",
+        "hooks/memory/store.py",
+        "hooks/context/project_cache.py"
+      ]
+    },
+    {
+      "name": "agentibrain-kernel",
+      "url": "git@github.com:The-Cloud-Clockwork/agentibrain-kernel.git",
+      "probes": [
+        {
+          "name": "brain-api version",
+          "kind": "http",
+          "url_env": "BRAIN_URL",
+          "path": "/health",
+          "field": "version"
+        }
+      ],
+      "unknown_live": [
+        "brain-api image digest on its compose host"
+      ],
+      "checkout": "~/dev/tcc-ecosystem/agentibrain-kernel",
+      "interfaces": [
+        "services/mcp/app/tools/arcs.py",
+        "docs/CLI.md",
+        "agentibrain/config.py",
+        "agentibrain/templates/compose/compose.yml.j2",
+        "services/brain-ops/extract.py",
+        "services/brain-ops/cluster.py",
+        "services/brain-api/app/feed.py",
+        "services/brain-ops/brain_apply.py",
+        "services/brain-ops/embed_arcs.py",
+        "services/brain-ops/brain_tick_prompt.py"
+      ]
+    },
+    {
+      "name": "antoncore",
+      "url": "git@github.com:The-Cloud-Clockwork/antoncore.git",
+      "probes": [
+        {
+          "name": "ArgoCD synced revision",
+          "kind": "command",
+          "argv": [
+            "kubectl",
+            "--context",
+            "anton-prod",
+            "--request-timeout=20s",
+            "get",
+            "applications.argoproj.io",
+            "-n",
+            "argocd",
+            "-o",
+            "jsonpath={.items[?(@.spec.source.repoURL==\"https://github.com/The-Cloud-Clockwork/antoncore.git\")].status.sync.revision}"
+          ],
+          "unique": true,
+          "revision": true
+        },
+        {
+          "name": "cluster autoscaler image",
+          "kind": "command",
+          "argv": [
+            "kubectl",
+            "--context",
+            "anton-prod",
+            "--request-timeout=20s",
+            "get",
+            "deployment",
+            "cluster-autoscaler-aws-cluster-autoscaler",
+            "-n",
+            "kube-system",
+            "-o",
+            "jsonpath={.spec.template.spec.containers[*].image}"
+          ]
+        }
+      ],
+      "unknown_live": [
+        "live autoscaling group desired capacity and instance counts (AWS read access not exercised)"
+      ],
+      "checkout": "~/dev/tcc-ecosystem/antoncore",
+      "interfaces": [
+        "stacks/terraform/modules/ec2-arc-runners/asg.tf",
+        "stacks/terraform/modules/ec2-arc-runners/variables.tf",
+        "k8s/charts/cluster-autoscaler/values.yaml",
+        "automation/packer/files/anton-k3s-join.sh"
+      ]
+    }
+  ]
+}
