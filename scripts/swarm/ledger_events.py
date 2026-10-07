@@ -26,7 +26,7 @@ SENDER = "swarm"
 OPERATOR = "operator"
 ASK_WORDS = 12
 RED = {"FAILURE", "ERROR", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"}
-WAITING = {"PENDING", "EXPECTED"}
+PASSED = {"SUCCESS", "SKIPPED"}
 FIELDS = "state,mergedAt,commits,statusCheckRollup"
 
 
@@ -52,7 +52,8 @@ def pull_request(raw):
         iso_ms(raw["mergedAt"]) if raw.get("mergedAt") else None,
         iso_ms(commits[-1]["committedDate"]) if commits else None,
         any(result in RED for result in results),
-        bool(results) and all(result and result not in WAITING for result in results),
+        any(result in RED - {"TIMED_OUT"} for result in results)
+        or (bool(results) and all(result in PASSED for result in results)),
         tuple(
             check.get("name") or check.get("context") or "a check"
             for check, result in zip(checks, results)
