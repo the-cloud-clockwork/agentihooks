@@ -35,22 +35,53 @@ jobs:
           enable-cache: false
       - name: Install dependencies
         run: uv pip install --system --excludes head/.github/test-excludes.txt -e './head[dev,all]'
-      - name: Compare recorded requests and storage bytes
+      - name: Plant a dropped checkbox update and a dropped chat recipient in copies of head
         run: |
-          python head/tests/swarm_ledger/repository_replay.py "$PWD/base" "$RUNNER_TEMP/base-ledger" base.json
-          python head/tests/swarm_ledger/repository_replay.py "$PWD/head" "$RUNNER_TEMP/head-ledger" head.json
-          cmp base.json head.json
-      - name: Plant a dropped checkbox update in extracted storage
-        run: |
+          cp -a head fault-store
+          cp -a head fault-chat
           python - <<'PY'
           from pathlib import Path
-          path = Path('head/scripts/swarm_ledger/repository/file.py')
-          source = path.read_text()
-          needle = 'core.apply_changes(doc, changes or [], ctx)'
-          assert source.count(needle) == 1
-          path.write_text(source.replace(needle, 'core.apply_changes(doc, [], ctx)'))
+          for path, needle, planted in (
+              (
+                  Path('fault-store/scripts/swarm_ledger/repository/file.py'),
+                  'core.apply_changes(doc, changes or [], ctx)',
+                  'core.apply_changes(doc, [], ctx)',
+              ),
+              (
+                  Path('fault-chat/scripts/swarm_ledger/static/js/chat.js'),
+                  'return to && !text.startsWith("@") ? `@${to} ${text}` : text;',
+                  'return text;',
+              ),
+          ):
+              source = path.read_text()
+              assert source.count(needle) == 1
+              path.write_text(source.replace(needle, planted))
           PY
-          python head/tests/swarm_ledger/repository_replay.py "$PWD/head" "$RUNNER_TEMP/fault-ledger" fault.json
+      - name: Replay base, head and the planted checkbox fault at once
+        run: |
+          replay() {
+            name=$1
+            shift
+            if ! "$@" > "$RUNNER_TEMP/$name.log" 2>&1; then
+              echo "::group::$name replay failed"
+              cat "$RUNNER_TEMP/$name.log"
+              echo "::endgroup::"
+              return 1
+            fi
+          }
+          scripts=head/tests/swarm_ledger
+          replay base python $scripts/repository_replay.py "$PWD/base" "$RUNNER_TEMP/base-ledger" base.json &
+          replay head python $scripts/repository_replay.py "$PWD/head" "$RUNNER_TEMP/head-ledger" head.json &
+          replay fault python $scripts/repository_replay.py "$PWD/fault-store" "$RUNNER_TEMP/fault-ledger" fault.json &
+          failed=0
+          for job in $(jobs -p); do
+            wait "$job" || failed=1
+          done
+          exit "$failed"
+      - name: Compare recorded requests and storage bytes
+        run: cmp base.json head.json
+      - name: Reject the planted checkbox fault
+        run: |
           if cmp -s base.json fault.json; then
             echo 'FAIL: planted checkbox fault escaped the equivalence check'
             exit 1
@@ -59,22 +90,31 @@ jobs:
       - name: Install the page replay browser
         timeout-minutes: 2
         uses: ./head/.github/actions/browser-cache
+      - name: Replay base, head and the planted chat fault pages at once
+        run: |
+          replay() {
+            name=$1
+            shift
+            if ! "$@" > "$RUNNER_TEMP/$name.log" 2>&1; then
+              echo "::group::$name replay failed"
+              cat "$RUNNER_TEMP/$name.log"
+              echo "::endgroup::"
+              return 1
+            fi
+          }
+          scripts=head/tests/swarm_ledger
+          replay base-page python -I $scripts/page_replay.py "$PWD/base" "$RUNNER_TEMP/base-page" base-page.json &
+          replay head-page python -I $scripts/page_replay.py "$PWD/head" "$RUNNER_TEMP/head-page" head-page.json &
+          replay fault-page python -I $scripts/page_replay.py "$PWD/fault-chat" "$RUNNER_TEMP/fault-page" fault-page.json &
+          failed=0
+          for job in $(jobs -p); do
+            wait "$job" || failed=1
+          done
+          exit "$failed"
       - name: Compare recorded page actions
+        run: cmp base-page.json head-page.json
+      - name: Reject the planted chat fault
         run: |
-          python -I head/tests/swarm_ledger/page_replay.py "$PWD/base" "$RUNNER_TEMP/base-page" base-page.json
-          python -I head/tests/swarm_ledger/page_replay.py "$PWD/head" "$RUNNER_TEMP/head-page" head-page.json
-          cmp base-page.json head-page.json
-      - name: Plant a dropped chat recipient in the extracted page modules
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('head/scripts/swarm_ledger/static/js/chat.js')
-          source = path.read_text()
-          needle = 'return to && !text.startsWith("@") ? `@${to} ${text}` : text;'
-          assert source.count(needle) == 1
-          path.write_text(source.replace(needle, 'return text;'))
-          PY
-          python -I head/tests/swarm_ledger/page_replay.py "$PWD/head" "$RUNNER_TEMP/fault-page" fault-page.json
           if cmp -s base-page.json fault-page.json; then
             echo 'FAIL: planted chat fault escaped the page equivalence check'
             exit 1
