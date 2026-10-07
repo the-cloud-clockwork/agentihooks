@@ -783,7 +783,10 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
             if not 0 <= length <= MAX_BODY:
                 raise ValueError("body size out of range")
-            changes, ops = core.check_body(core.loads(self.rfile.read(length) or b"{}"))
+            body = core.loads(self.rfile.read(length) or b"{}")
+            state, _ = core.sync(slug)
+            task_ids = tuple(task["id"] for task in state.get("tasks", []))
+            changes, ops = core.check_body(body, task_ids)
             ledger_media.resolve(slug, ops)
             ledger_artifacts.resolve(slug, ops)
         except ValueError as exc:

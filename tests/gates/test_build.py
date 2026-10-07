@@ -306,7 +306,20 @@ class TestMore:
         folder = ledger_workspace.folder(SLUG, task)
         folder.mkdir(parents=True)
         (folder / "plan.md").write_text(DOGHOUSE)
+        (world.repo.parent / "ledgers" / f"{SLUG}.json").write_text("{}")
         assert "commit hash" in world.decide(file_path=str(world.repo / "a.py"), task=task).reason
+
+    def test_registered_doctor_task_plan_allows_editing_kept_area(self, world):
+        task = "fx-8be892c4-code"
+        world.plan()
+        folder = ledger_workspace.folder(SLUG, task)
+        folder.mkdir(parents=True)
+        (folder / trace_plan.PLAN).write_text(DOGHOUSE)
+        (folder / trace_plan.VERDICT).write_text((world.folder / trace_plan.VERDICT).read_text())
+        ledgers = world.repo.parent / "ledgers"
+        (ledgers / f"{SLUG}.json").write_text(json.dumps({"tasks": [{"id": task}]}))
+        result = world.decide(file_path=str(world.repo / "doghouse/frame/a.py"), task=task)
+        assert result.allowed, result.reason
 
     def test_the_unchecked_count_names_the_tool_and_the_paths(self, world):
         world.plan(verdict="unchecked", kept=(True, True, True))
