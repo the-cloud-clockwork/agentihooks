@@ -246,6 +246,25 @@ def test_the_join_clock_starts_at_the_launch_not_at_the_tick(store, monkeypatch)
     assert f"{name} passed its launch check in 50 seconds" in actions
 
 
+def test_a_failed_launch_names_every_miss_and_times_from_the_launch(store, monkeypatch, scratch):
+    scratch("t1")
+    ledger, runtime = checked(store, monkeypatch)
+    runtime.profile = "anton"
+    spawn = runtime.spawn
+
+    def late(config, lane, name, task, spawns=None):
+        return replace(spawn(config, lane, name, task, spawns), launched_at=LAUNCH + 50_000)
+
+    runtime.spawn = late
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (name,) = [n for _, n, _ in runtime.spawned]
+    waiting = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert not any(name in a and "launch check" in a for a in waiting)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + 50_000 + launch_check.DEADLINE_MS)
+    assert any(a.startswith(f"retired {name} after its launch check failed on joined, profile") for a in actions)
+    assert launch_check.report(store, "sw", "t1")["elapsed_ms"] == launch_check.DEADLINE_MS
+
+
 def test_tick_waits_until_the_deadline_before_failing(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     tick("sw", store, ledger, runtime, LAUNCH)
