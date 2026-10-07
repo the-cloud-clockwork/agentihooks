@@ -220,7 +220,8 @@ def test_pinned_task_profile_wins_over_a_low_confidence_answer(asked):
 
 def test_confidence_at_floor_is_accepted(asked):
     asked("engineer", confidence=0.6)
-    assert profile_choice.choose("sw", "eng", {}, TASK, {}).profile == "engineer"
+    decision = profile_choice.choose("sw", "eng", {}, TASK, {})
+    assert (decision.profile, decision.source) == ("engineer", "classifier")
 
 
 def test_unavailable_classifier_never_falls_back_to_engineer(monkeypatch):
