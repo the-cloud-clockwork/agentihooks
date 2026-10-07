@@ -21,6 +21,9 @@ SVG = (
 )
 
 
+import os
+
+
 class TestStore:
     def test_markdown_json_and_svg_are_stored_once_by_content_hash(self):
         core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
@@ -63,9 +66,9 @@ class TestStore:
 class ArtifactEndpoint(Endpoint):
     def publish(self, name, filename, data, token=True, request=None):
         headers = {"Host": f"127.0.0.1:{server.PORT}", "X-Ledger-Agent": name, "X-Artifact-Name": filename}
-        metadata = (
-            {"task": "", "title": "Upload", **(request or {})} if isinstance(request, (dict, type(None))) else request
-        )
+        metadata = {"task": ""} if request is None else request
+        if isinstance(metadata, dict):
+            metadata = {"title": "Upload", **metadata}
         headers["X-Artifact-Request"] = json.dumps(metadata)
         if token:
             headers["X-Ledger-Token"] = self.token
@@ -80,6 +83,8 @@ class ArtifactEndpoint(Endpoint):
 
     def test_an_unrequested_upload_leaves_the_media_folder_unchanged(self):
         self.put([{"op": "join", "id": "j-refused-upload", "by": "refused-engineer"}])
+        old = media.store("via-media", png(101, 101))
+        os.utime(media.folder("via-media") / old["id"], (1, 1))
         folder = media.folder("via-media")
         before = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
         code, body = self.publish("refused-engineer", "unrequested.md", b"# Unrequested upload\n")
@@ -106,11 +111,66 @@ class ArtifactEndpoint(Endpoint):
             assert code == expected, body
             if isinstance(request, dict) and request.get("task") == "absent":
                 assert body == "join the ledger first and name a task it holds"
+            if request == [] or "extra" in request or "by" in request:
+                assert body == "artifact upload takes task, title and optional request or plan"
             assert {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()} == before
+
+    def test_leaving_during_an_upload_refuses_before_storage_and_names_the_reason(self):
+        self.put([{"op": "join", "id": "j-leaving-upload", "by": "leaving-engineer"}])
+        folder = media.folder("via-media")
+        before = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
+        read = server.repository.get_document
+
+        def read_then_leave(*args, **kwargs):
+            doc = read(*args, **kwargs)
+            if "leaving-engineer" in doc["_meta"]["members"]:
+                core.sync("via-media", ops=[{"op": "leave", "id": "leave-upload", "by": "leaving-engineer"}])
+            return doc
+
+        with patch.object(server.repository, "get_document", side_effect=read_then_leave):
+            code, body = self.publish(
+                "leaving-engineer", "leave.md", b"# Departing upload\n", request={"task": "", "plan": True}
+            )
+        assert code == 403
+        assert body == "join the ledger first and name a task it holds"
+        assert {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()} == before
+
+    def test_a_missing_upload_title_or_metadata_names_the_title_and_stores_nothing(self):
+        self.put([{"op": "join", "id": "j-incomplete-upload", "by": "incomplete-engineer"}])
+        folder = media.folder("via-media")
+        before = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
+        for metadata in (None, {"task": "", "plan": True}):
+            headers = {
+                "Host": f"127.0.0.1:{server.PORT}",
+                "X-Ledger-Agent": "incomplete-engineer",
+                "X-Ledger-Token": self.token,
+                "X-Artifact-Name": "incomplete.md",
+            }
+            if metadata is not None:
+                headers["X-Artifact-Request"] = json.dumps(metadata)
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{self.port}/api/artifacts/via-media",
+                data=b"# Incomplete upload\n",
+                headers=headers,
+                method="POST",
+            )
+            with pytest.raises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(req)
+            assert error.value.code == 400
+            assert error.value.read().decode().startswith("title must be text of at most ")
+            assert {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()} == before
+
+    def test_artifact_uploads_require_an_agent_even_with_the_operator_token(self):
+        folder = media.folder("via-media")
+        before = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
+        code, _, body = self.call("POST", "/api/artifacts/via-media", b"# Anonymous upload\n")
+        assert code == 403
+        assert body == b"agent must join this ledger before uploading"
+        assert {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()} == before
 
     def test_a_published_plan_upload_uses_the_same_request_as_its_entry(self):
         self.put([{"op": "join", "id": "j-plan-upload", "by": "plan-engineer"}])
-        code, file = self.publish("plan-engineer", "plan.md", b"# Published plan\n", request={"task": "", "plan": True})
+        code, file = self.publish("plan-engineer", "plan.md", b"# Published plan\n", request={"plan": True})
         assert code == 200, file
         code, _, body = self.put(
             [
