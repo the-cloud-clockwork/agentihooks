@@ -230,6 +230,37 @@ def test_a_finished_or_awaiting_engineer_is_never_promoted(state):
     assert actions == ["master down 5 minutes, forced a master launch", BROKEN, "no live engineer to promote"]
 
 
+def direct(*agents):
+    swarm = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    swarm.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0))
+    runtime = FakeRuntime()
+    for agent in agents:
+        swarm.put_agent("sw", agent)
+        runtime.live.add(agent.name)
+    tick_master._save(swarm, "sw", {"since": 1})
+    return swarm, runtime
+
+
+def test_a_master_starting_before_any_forced_launch_is_not_a_failure():
+    swarm, runtime = direct(AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="starting", seat=MASTER_SEAT))
+    actions = tick_master.run("sw", swarm.config("sw"), swarm, tasks(), runtime, DOWN, lambda: [])
+    assert actions == []
+    assert tick_master.read(swarm, "sw") == {"since": 1}
+
+
+def test_a_finished_master_record_counts_as_no_master():
+    engineer = AgentRecord(ENGINEER, "eng", "t1", state="working", seat="eng-1@sw")
+    finished = AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="finished", seat=MASTER_SEAT)
+    swarm, runtime = direct(engineer, finished)
+    actions = tick_master.run("sw", swarm.config("sw"), swarm, tasks(), runtime, 1 + DOWN, lambda: [BROKEN])
+    assert actions == [
+        "master down 5 minutes, forced a master launch",
+        BROKEN,
+        f"promoted {ENGINEER} to restore the master: {BROKEN}",
+        f"sent {ENGINEER} the promoted prompt",
+    ]
+
+
 def test_every_launch_action_names_the_failure(store):  # noqa: F811
     runtime, ledger = outage(store)
     tick_master.run("sw", store.config("sw"), store, ledger, runtime, 1 + DOWN, lambda: ["first", "second"])
