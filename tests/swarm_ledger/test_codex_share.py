@@ -27,7 +27,9 @@ def test_codex_and_eng_steps_wait_for_one_apply(tab):
     tab.locator('[data-swarm="eng_up"]').click()
     assert sent == []
     tab.locator('[data-swarm="apply"]').click()
-    tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('Apply capacity: done')")
+    tab.wait_for_function(
+        "document.querySelector('#swarm-note').textContent.includes('Apply capacity: pending, waiting for the hive tick')"
+    )
     assert sent == [{"action": "set", "max_eng": 4, "codex_share": 35}]
 
 
@@ -59,5 +61,5 @@ def test_codex_step_bounds(tab, share, action, disabled, expected):
     tab.locator(f'[data-swarm="{action}"]').click()
     assert tab.locator("#cap-codex").input_value() == str(expected)
     tab.locator('[data-swarm="apply"]').click()
-    tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('done')")
+    tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('pending')")
     assert sent == [{"action": "set", "codex_share": expected}]

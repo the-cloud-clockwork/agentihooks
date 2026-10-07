@@ -16,7 +16,7 @@ from scripts.swarm import affinity, launch_check, live_binding, overlays, retire
 from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
-from scripts.swarm.store import ASSIST, codex_split
+from scripts.swarm.store import ASSIST, SwarmError, codex_split
 from scripts.swarm.tick import agent_status
 from scripts.swarm_ledger import plan_shape
 
@@ -141,6 +141,13 @@ def handoff_rows(transfers_list, agents):
     return rows
 
 
+def shape_report(tasks: list[dict], max_eng: int) -> dict:
+    try:
+        return plan_shape.report(tasks, max_eng)
+    except SwarmError as exc:
+        return {"error": str(exc)}
+
+
 def status_report(store, slug, state):
     config = store.config(slug)
     tasks = state.get("tasks", [])
@@ -180,7 +187,7 @@ def status_report(store, slug, state):
         "transfers": handed,
         "handoffs": handoff_rows(handed, agents),
         "peer": store.peer(slug),
-        "plan_shape": plan_shape.report(tasks, config.max_eng),
+        "plan_shape": shape_report(tasks, config.max_eng),
         "compact_limit": compact_limit(config),
         "done_today": done_today(tasks, events, local_midnight_ms()),
         "doctor": doctor_report(store, slug),

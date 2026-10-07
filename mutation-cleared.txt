@@ -1875,6 +1875,14 @@
     "reader": "Standards reader",
     "reason": "headers is read only by headers or credentials(args.slug) at the top of the next try and reassigned there before reaching stream; None and empty string are both falsy, so both fetch fresh credentials and nothing else reads headers. Exact CI artifact mutant from run 37679023255."
   },
+  "scripts/swarm/commands.py:scripts.swarm.commands.x_submit__mutmut_8:8c71458fa9f1d9c5197acc7108b9cc639cd21f9d7fcfcf10ef532cf29569d18a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Legal submit inputs are command:str and argv:list[str]. Production producers are terminate_control and swarm_control with control_argv or fixed doctor/quota argv. JSON encodes nested arrays and strings, never object members, so the key separator is unused. Colons within argument strings remain contents; encoded payload and digest are identical for every legal input. Evidence: CI run 37692175970, mutant-map, production caller search and parent symbol dumps. Adversarial Standards ruling."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_doctor_phrase__mutmut_9:790c064abbdf0cf00090b29d8b0741d3dfde0df5a5bec6a63c4fb9af83be78f9": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "For event dictionaries, present text values follow identical code. Missing text normalizes to empty string versus xxxx; both differ from the fixed DOCTOR_PHRASE rig doctor stop, so neither queues a command. The fallback is not otherwise exposed or persisted. No alternate implementation or consumer found. Evidence: CI run 37692175970, mutant-map and parent symbol dumps. Adversarial Standards ruling."
+  },
   "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_30:e9e73925e70dabdb004ae0af81c513cd65016c79072920da9bd1bbd2f26cfffb": {
     "reader": "Standards",
     "reason": "ProfileDecision.bundle_revision is read only by the next line, which replaces a falsy value with overlays.revision(); None and the empty string are both falsy, so both take the same branch and store the same revision, and nothing reads the field before that line. Exact CI artifact mutant from run 37699550281."

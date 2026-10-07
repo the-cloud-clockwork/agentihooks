@@ -134,14 +134,50 @@ def test_a_proof_ledger_runs_on_a_scratch_folder_and_a_spare_port(monkeypatch, t
     assert "http://127.0.0.1:8883/" in out[1]
 
 
-@pytest.mark.parametrize("port", ["8765", ""])
-def test_a_scratch_folder_on_the_shared_port_is_refused(monkeypatch, tmp_path, port):
+@pytest.mark.parametrize("port", ["8765", None])
+def test_a_data_folder_on_the_default_port_creates_its_ledger(monkeypatch, tmp_path, capsys, port):
     as_lane(monkeypatch, "eng")
-    monkeypatch.setenv("LEDGER_PORT", port)
+    if port is None:
+        monkeypatch.delenv("LEDGER_PORT", raising=False)
+    else:
+        monkeypatch.setenv("LEDGER_PORT", port)
+    new(monkeypatch, tmp_path, tmp_path / "data", 3)
+    out = capsys.readouterr().out.splitlines()
+    assert json.loads(out[0])["created"] is True
+    assert "http://127.0.0.1:8765/" in out[1]
+
+
+@pytest.mark.parametrize("lane", ["eng", "ci", "plan"])
+def test_the_home_folder_on_another_port_keeps_the_shared_folder_rule(monkeypatch, tmp_path, lane):
+    as_lane(monkeypatch, lane)
+    monkeypatch.setenv("LEDGER_PORT", "8883")
     with pytest.raises(SystemExit) as refused:
-        new(monkeypatch, tmp_path, tmp_path / "scratch", 3)
-    assert str(refused.value) == ledger_creator.PORT
-    assert not (tmp_path / "scratch").exists()
+        new(monkeypatch, tmp_path, shared(), 3)
+    assert str(refused.value) == ledger_creator.CALLER
+    assert not shared().exists() or list(shared().iterdir()) == []
+
+
+def test_the_master_in_the_home_folder_on_another_port_gets_the_pinned_port(monkeypatch, tmp_path, capsys):
+    as_lane(monkeypatch, "master")
+    monkeypatch.setenv("LEDGER_PORT", "8883")
+    new(monkeypatch, tmp_path, shared(), 3)
+    out = capsys.readouterr().out.splitlines()
+    assert json.loads(out[0])["created"] is True
+    assert "http://127.0.0.1:8765/" in out[1]
+
+
+@pytest.mark.parametrize("pinned", [True, False])
+def test_the_creator_reads_the_server_folder_rule(monkeypatch, pinned):
+    seen = []
+
+    def shared_directory(environ):
+        seen.append(environ)
+        return pinned
+
+    monkeypatch.setattr("scripts.swarm_ledger.ledger_link.shared_directory", shared_directory)
+    environ = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_SWARM_LANE": "eng", "LEDGER_DIR": "/data", "LEDGER_PORT": "8765"}
+    assert ledger_creator.creator_refusal(environ) == (ledger_creator.CALLER if pinned else "")
+    assert seen == [environ]
 
 
 @pytest.mark.parametrize("redis", [None, "", DEFAULT_URL])
@@ -159,8 +195,9 @@ def test_a_proof_swarm_needs_its_own_redis(tmp_path, redis):
         ({"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_SWARM_LANE": "master"}, ""),
         (
             {"LEDGER_DIR": "/scratch", "LEDGER_PORT": "8765", "AGENTIHOOKS_SWARM_REDIS_URL": "redis://x:1/0"},
-            ledger_creator.PORT,
+            "",
         ),
+        ({"LEDGER_DIR": "/scratch", "LEDGER_PORT": "8765"}, ledger_creator.REDIS),
         ({"LEDGER_DIR": "/scratch", "LEDGER_PORT": "8883", "AGENTIHOOKS_SWARM_REDIS_URL": "redis://x:1/0"}, ""),
     ],
 )
