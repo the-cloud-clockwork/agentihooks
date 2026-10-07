@@ -4,11 +4,21 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
+
+from tests.swarm_ledger.ledger_page import chromium, rendered_home  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def browser():
+    with chromium() as launched:
+        yield launched
 
 LEDGERS = {"alpha-2026-01-01": ("Alpha plan", "Alpha overview"), "beta-2026-01-02": ("Beta <plan>", "Beta overview")}
 
@@ -36,7 +46,8 @@ class Home(unittest.TestCase):
         self.assertEqual(found["alpha-2026-01-01"]["overview"], "Alpha overview")
 
     def test_index_lists_name_overview_and_link_escaped(self):
-        page = server.index_page()
+        with chromium() as browser:
+            page = rendered_home(server, browser, "home")
         for slug, (title, overview) in LEDGERS.items():
             self.assertIn(f'href="/{slug}"', page)
             self.assertIn(overview, page)
@@ -44,20 +55,20 @@ class Home(unittest.TestCase):
         self.assertNotIn("Beta <plan>", page)
 
     def test_ledger_page_has_home_link_above_the_bell(self):
-        template = (SCRIPTS / "template.html").read_text(encoding="utf-8")
-        home, bell = template.index('id="home"'), template.index('id="bell"')
+        shell = core.SHELL.read_text(encoding="utf-8")
+        home, bell = shell.index('id="home"'), shell.index('id="bell"')
         self.assertLess(home, bell)
-        self.assertIn(".fab-home", template)
+        self.assertIn("fab-home", shell)
 
     def test_home_and_bin_render_from_the_home_html_source(self):
-        source = server.HOME_PAGE.read_text(encoding="utf-8")
+        source = core.HOME.read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as tmp:
             edited = Path(tmp) / "home.html"
-            edited.write_text(source.replace("</style>", "</style><p id=edited>__HOME_HEADING__</p>"), encoding="utf-8")
-            with mock.patch.object(server, "HOME_PAGE", edited):
-                self.assertIn("<p id=edited>HOME</p>", server.index_page("home"))
-                self.assertIn("<p id=edited>BIN</p>", server.index_page("bin"))
-        self.assertTrue(source.rstrip().endswith("</body>"))
+            edited.write_text(source.replace("</title>", "</title><p id=edited>__HOME_HEADING__</p>"), encoding="utf-8")
+            with mock.patch.object(core, "HOME", edited), chromium() as browser:
+                self.assertIn("<p id=edited>HOME</p>", rendered_home(server, browser, "home"))
+                self.assertIn("<p id=edited>BIN</p>", rendered_home(server, browser, "bin"))
+        self.assertTrue(source.rstrip().endswith("</html>"))
 
 
 if __name__ == "__main__":

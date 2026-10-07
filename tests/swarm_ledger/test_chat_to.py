@@ -2,10 +2,9 @@ import json
 import re
 import subprocess
 
-import new_ledger
 import pytest
 
-from tests.swarm_ledger.ledger_page import page_source
+from tests.swarm_ledger.ledger_page import page_source, shell_html
 from tests.swarm_ledger.test_design_system import palette
 from tests.swarm_ledger.test_swarm_layout import browser, open_page, status
 from tests.swarm_ledger.test_swarm_panel import function_source
@@ -15,8 +14,7 @@ __all__ = ["browser", "open_page"]
 
 @pytest.fixture(scope="module")
 def page():
-    content = {"title": "To", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
-    return new_ledger.render(new_ledger.build_doc(content), "chatto", 8765)
+    return shell_html("To")
 
 
 @pytest.fixture

@@ -1,16 +1,12 @@
 import json
 import re
-import sys
 from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import fulfill_events, is_events, page_source, serve_modules
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events, loaded, page_source, serve_modules, shell_html
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
-sys.path.insert(0, str(SCRIPTS))
-import new_ledger  # noqa: E402
-
 TEMPLATE = SCRIPTS / "template.html"
 URL = "http://ledger.test/swarm-buildout"
 API = "http://ledger.test/api/swarm-buildout"
