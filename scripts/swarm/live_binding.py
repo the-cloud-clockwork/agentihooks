@@ -77,13 +77,15 @@ def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
     from hooks.context import profile_chain
     from scripts.profiles import binding
     from scripts.select_profile import _native_options
-    from scripts.swarm import launch_check
+    from scripts.swarm import launch_check, launch_model
 
     try:
         found, harness, env, account = binding.process(proc, pid)
         argv = (proc / str(found) / "cmdline").read_bytes().decode(errors="replace").split("\0")
         model, effort, _ = _native_options(harness, argv[1:])
         home = env.get(binding.HOMES[harness])
+        config = launch_model.configured(harness, Path(home)) if home else {}
+        model, effort = model or config.get("model", ""), effort or config.get("effort", "")
         return {
             "harness": harness,
             "home": str(Path(home).resolve()) if home else "",
