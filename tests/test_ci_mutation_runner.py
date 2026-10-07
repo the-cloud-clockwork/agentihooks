@@ -90,11 +90,11 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
     (root / "hooks" / "old.pyc").write_bytes(b"old")
     work = tmp_path / "nested" / "work"
     work.mkdir(parents=True)
-    prepare_workspace(root, work, "hooks/sample.py", ["tests/test_sample.py"])
+    prepare_workspace(root, work, ["hooks/sample.py", "scripts/other.py"], ["tests/test_sample.py"])
     config = tomllib.loads((work / "pyproject.toml").read_text())
     assert config["tool"]["pytest"]["ini_options"] == {"asyncio_mode": "auto"}
     assert config["tool"]["mutmut"]["source_paths"] == ["hooks/", "scripts/"]
-    assert config["tool"]["mutmut"]["only_mutate"] == ["hooks/sample.py"]
+    assert config["tool"]["mutmut"]["only_mutate"] == ["hooks/sample.py", "scripts/other.py"]
     assert config["tool"]["mutmut"]["pytest_add_cli_args_test_selection"] == ["tests/test_sample.py"]
     assert config["tool"]["mutmut"]["also_copy"] == ["profiles/", "docs/", ".github/"]
     assert config["tool"]["mutmut"]["pytest_add_cli_args"] == [
@@ -107,6 +107,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "-p",
         "scripts.ci_mutation.identity",
         "--mutated-path=hooks/sample.py",
+        "--mutated-path=scripts/other.py",
     ]
     for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github"):
         assert (work / name / "asset.txt").read_text() == name
@@ -124,7 +125,7 @@ def test_workspace_mutating_the_identity_plugin_does_not_load_its_mutated_copy(t
     (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
     work = tmp_path / "work"
     work.mkdir()
-    prepare_workspace(root, work, "scripts/ci_mutation/identity.py", ["tests/test_ci_mutation_identity.py"])
+    prepare_workspace(root, work, ["scripts/ci_mutation/identity.py"], ["tests/test_ci_mutation_identity.py"])
     args = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]["pytest_add_cli_args"]
     assert args == ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
 
@@ -142,12 +143,15 @@ def test_workspace_mutating_the_identity_plugin_does_not_load_its_mutated_copy(t
 def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monkeypatch, statuses, reason):
     import json
 
-    from scripts.ci_mutation.runner import mutate_file
+    from scripts.ci_mutation.runner import mutate_files
 
     commands = []
+    selected = {"hooks/sample.py": ({2}, ["tests/test_sample.py"]), "scripts/other.py": ({4, 3}, ["tests/test_o.py"])}
 
-    def prepare(root, work, path, tests):
-        assert (root, work, path, tests) == (tmp_path, tmp_path / "work", "hooks/sample.py", ["tests/test_sample.py"])
+    def prepare(root, work, paths, tests):
+        assert (root, work) == (tmp_path, tmp_path / "work")
+        assert paths == ["hooks/sample.py", "scripts/other.py"]
+        assert tests == ["tests/test_o.py", "tests/test_sample.py"]
         work.mkdir()
 
     def process(command, cwd, timeout, log):
@@ -156,34 +160,38 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
         assert timeout == 10
         assert log == cwd / ("run.log" if len(commands) == 1 else "report.log")
         if len(commands) == 2:
-            (cwd / "results.json").write_text(json.dumps([{"status": "killed"}]))
+            (cwd / "results.json").write_text(json.dumps({"hooks/sample.py": [{"status": "killed"}]}))
         return statuses[len(commands) - 1]
 
     monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", prepare)
     monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
     monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: 10)
-    rows, error = mutate_file(tmp_path, "hooks/sample.py", tmp_path / "work", ["tests/test_sample.py"], 20, {2})
+    rows, error = mutate_files(tmp_path, tmp_path / "work", selected, 20)
     expected = reason
     if reason.startswith("mutmut failed"):
         expected += f"; see {tmp_path / 'work/run.log'}"
     if reason.startswith("report failed"):
         expected += f"; see {tmp_path / 'work/report.log'}"
     assert error == expected
-    assert rows == ([{"status": "killed"}] if reason == "" else [])
+    assert rows == ({"hooks/sample.py": [{"status": "killed"}]} if reason == "" else {})
     assert commands[0] == [
         sys.executable,
         "-m",
         "scripts.ci_mutation.selection",
         str(tmp_path / "work/changed-lines.json"),
     ]
-    assert json.loads((tmp_path / "work/changed-lines.json").read_text()) == {"hooks/sample.py": [2]}
+    assert json.loads((tmp_path / "work/changed-lines.json").read_text()) == {
+        "hooks/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]},
+        "scripts/other.py": {"lines": [3, 4], "tests": ["tests/test_o.py"]},
+    }
     if len(commands) == 2:
         assert commands[1] == [
             sys.executable,
             "-m",
             "scripts.ci_mutation.report",
-            "hooks/sample.py",
             str(tmp_path / "work/results.json"),
+            "hooks/sample.py",
+            "scripts/other.py",
         ]
 
 
@@ -199,17 +207,16 @@ def test_gate_persists_full_mutation_evidence_and_respects_reader_clearance(
     (tmp_path / "tests/test_sample.py").write_text("pass\n")
     row = {"name": "hooks.sample.x_f__mutmut_1", "status": "survived", "lines": [2], "fingerprint": "abc"}
 
-    def mutate(root, path, work, tests, deadline, lines):
+    def mutate(root, work, selected, deadline):
         assert root == tmp_path
-        assert path == "hooks/sample.py"
         assert work.parent == tmp_path / "output"
         assert work.name.startswith("0-")
         assert work.is_dir()
-        assert tests == ["tests/test_sample.py"]
+        assert selected == {"hooks/sample.py": ({changed}, ["tests/test_sample.py"])}
         assert deadline > 0
-        return [row], ""
+        return {"hooks/sample.py": [row]}, ""
 
-    monkeypatch.setattr("scripts.ci_mutation.runner.mutate_file", mutate)
+    monkeypatch.setattr("scripts.ci_mutation.runner.mutate_files", mutate)
     if clearance:
         (tmp_path / "mutation-cleared.txt").write_text(
             json.dumps(

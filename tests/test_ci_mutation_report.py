@@ -76,6 +76,10 @@ def test_report_reads_real_mutmut_metadata_and_maps_original_lines(tmp_path, mon
         "estimated_durations_by_key": {},
     }
     (tmp_path / "mutants/hooks/sample.py.meta").write_text(json.dumps(meta))
+    (tmp_path / "hooks/sample_extra.py").write_text("def value():\n    return 7\n")
+    (tmp_path / "mutants/hooks/sample_extra.py").write_text("def x_value__mutmut_orig():\n    return 7\n")
+    extra = {**meta, "exit_code_by_key": {"hooks.sample_extra.x_value__mutmut_1": 0}}
+    (tmp_path / "mutants/hooks/sample_extra.py.meta").write_text(json.dumps(extra))
     monkeypatch.chdir(tmp_path)
     rows = collect_results(Path("hooks/sample.py"))
     assert len(rows) == 2

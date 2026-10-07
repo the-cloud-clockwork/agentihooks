@@ -33,12 +33,11 @@ class ShortNameAlias(importlib.abc.MetaPathFinder, importlib.abc.Loader):
 
 
 def pytest_addoption(parser) -> None:
-    parser.addoption("--mutated-path", default=None)
+    parser.addoption("--mutated-path", action="append", default=None)
 
 
 def pytest_load_initial_conftests(early_config, parser, args) -> None:
-    path = early_config.known_args_namespace.mutated_path
-    if path:
+    for path in early_config.known_args_namespace.mutated_path or []:
         finder = ShortNameAlias(early_config.rootpath, path)
         sys.meta_path.insert(0, finder)
-        early_config.add_cleanup(lambda: sys.meta_path.remove(finder))
+        early_config.add_cleanup(lambda finder=finder: sys.meta_path.remove(finder))

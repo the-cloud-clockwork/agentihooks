@@ -48,9 +48,11 @@ def collect_results(path: Path) -> list[dict]:
         read_mutants_module,
         read_original_function,
     )
+    from mutmut.utils.format_utils import get_mutant_name
 
     text = subprocess.check_output([sys.executable, "-m", "mutmut", "results", "--all", "true"], text=True)
-    results = parse_results(text)
+    prefix = get_mutant_name(path, "")
+    results = [(key, status) for key, status in parse_results(text) if key.rpartition(".")[0] + "." == prefix]
     module = read_mutants_module(path)
     source = path.read_text()
     rows = []
@@ -97,4 +99,5 @@ def evaluate(path: str, rows: list[dict], changed: set[int], cleared: dict) -> d
 
 
 if __name__ == "__main__":
-    Path(sys.argv[2]).write_text(json.dumps(collect_results(Path(sys.argv[1])), indent=2) + "\n")
+    rows = {path: collect_results(Path(path)) for path in sys.argv[2:]}
+    Path(sys.argv[1]).write_text(json.dumps(rows, indent=2) + "\n")
