@@ -762,5 +762,17 @@
   "scripts/gates/intent_history.py:scripts.gates.intent_history.x_masked__mutmut_34:9c51a3907bd4aee652398441fa5330acc1ce49f6bd5c8bb3e6e36b095a603e19": {
     "reader": "Standards",
     "reason": "Uppercasing Bearer in the regex under re.I changes no matches or replacement outputs. Standards independently verified all Unicode code points and case variants."
+  },
+  "scripts/inbox/addresses.py:scripts.inbox.addresses.x_settle_unresolved__mutmut_6:3f6c79fa333f7b5e2d7bb17a56f8ba534cb5c9702c13ab9d8cbc4ebdf1a8797d": {
+    "reader": "Standards",
+    "reason": "The sole production caller passes InboxStore.pending(), sorted ascending by (created_at, sequence, id). Once an item is younger than the fixed window, every subsequent item is younger and performs no withdrawal or action append. Break and continue therefore process the same eligible items. Sorted creation-time sequences through length six were exhaustively compared with identical results."
+  },
+  "scripts/inbox/addresses.py:scripts.inbox.addresses.x_settle_unresolved__mutmut_14:39843caea8de3ffa50c93e4f6e088ec5a6454ebcd5c5e8d54bf92e794e6b27a3": {
+    "reader": "Standards",
+    "reason": "An absent name yields an empty string originally and None in the mutant. Both are removed by the comprehension's if n filter; present values and session identifiers are identical. Missing, empty, None, and present-name cases were compared with identical live sets."
+  },
+  "scripts/inbox/addresses.py:scripts.inbox.addresses.x_settle_unresolved__mutmut_16:260f69de5c9a7e375f6eb322edbe6d4bff23b9fe6bbdfa168d273b6d6fbe82cf": {
+    "reader": "Standards",
+    "reason": "Omitting dict.get's default produces None for an absent name instead of an empty string. Both are removed by if n; present values and session identifiers are identical. Missing, empty, None, and present-name cases were compared with identical live sets."
   }
 }

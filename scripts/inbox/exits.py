@@ -36,6 +36,20 @@ def settle(inbox, name, seat, exit_text):
             inbox.send(BY, notice_address(inbox, item.sender), _told(item, name, exit_text), fyi=True)
 
 
+def close_swarm(inbox: "InboxStore", slug: str) -> None:
+    from scripts.inbox.seats import of_swarm
+    from scripts.inbox.store import CLOSED
+
+    prefix = inbox.key("address", "")
+    for key in inbox.redis.scan_iter(match=prefix + "*"):
+        address = key[len(prefix) :]
+        if not of_swarm(address, slug, inbox.names):
+            continue
+        for item in inbox.inbox(address):
+            if item.state not in CLOSED:
+                inbox.withdraw(item.id, BY, f"cancelled: swarm closed; {address} has no further work", address)
+
+
 def notice_address(inbox: "InboxStore", sender: str) -> str:
     from scripts.inbox.seats import is_seat, master_of
     from scripts.swarm.store import RedisStore

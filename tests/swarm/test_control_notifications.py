@@ -42,7 +42,7 @@ def test_stop_now_notice_does_not_restart_the_swarm_on_the_next_tick(controls, m
     assert cli.main(["tick"]) == 0
     assert store.config("demo").state == "stopped"
     assert store.agents("demo") == []
-    assert len(InboxStore(store.redis).pending_items(master.seat)) == 1
+    assert InboxStore(store.redis).pending_items(master.seat) == []
 
 
 def test_external_pause_tells_the_master_once_with_the_resulting_state(controls):
