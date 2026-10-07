@@ -155,11 +155,13 @@ class TestCommand:
         self.lift(saved(), gate="talk")
         assert lift.agent_lifted(SLUG, ME, "talk")
 
-    def test_an_agent_cannot_lift_a_gate(self, monkeypatch):
+    def test_an_agent_cannot_lift_a_gate(self, monkeypatch, capsys):
+        monkeypatch.setattr(cli, "connect", saved)
         monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", ME)
-        refusal = "only the operator lifts a gate, from the ledger page or by typing it in the agent's pane"
-        with pytest.raises(SwarmError, match=f"^{refusal}$"):
-            self.lift(saved())
+        assert cli.main([SLUG, "lift", ME, "watch"]) == 1
+        assert capsys.readouterr().err == (
+            f"swarm: only the operator or the master of swarm {SLUG} uses its swarm controls, and {ME} is neither\n"
+        )
         assert rows() == []
 
     @pytest.mark.parametrize(

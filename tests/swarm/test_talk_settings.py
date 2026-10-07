@@ -32,14 +32,17 @@ def test_an_agent_cannot_set_a_gate_mode(env, monkeypatch, capsys):  # noqa: F81
     run("sw", "create", "--repo", "/repo")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@a1b2c3-0001")
     assert run("sw", "set", "talk-gate=off") == 1
-    assert "only the operator sets talk-gate" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        "swarm: only the operator or the master of swarm sw uses its swarm controls, "
+        "and master@a1b2c3-0001 is neither\n"
+    )
     assert store.config("sw").gates == {}
 
 
 def test_an_unknown_gate_mode_is_refused():
     with pytest.raises(SwarmError, match=r"talk-gate takes deny, log only, skip"):
-        cli.gate_mode("talk-gate", "loud", {})
-    assert cli.gate_mode("talk-gate", "off", {"AGENTIHOOKS_AGENT_NAME": "operator"}) == {"talk": "off"}
+        cli.gate_mode("talk-gate", "loud")
+    assert cli.gate_mode("talk-gate", "off") == {"talk": "off"}
 
 
 def test_a_config_saved_before_gates_existed_reads_no_gates(env):  # noqa: F811

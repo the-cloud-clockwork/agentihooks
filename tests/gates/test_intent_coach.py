@@ -202,8 +202,8 @@ def test_coach_mode_cannot_be_set_for_another_gate():
 
     assert modes.configured(entry.GATES["watch"], {"watch": "coach"}) == "enforce"
     with pytest.raises(SwarmError):
-        gate_mode("watch-gate", "coach", {"AGENTIHOOKS_AGENT_NAME": "operator"})
-    assert gate_mode("intent-gate", "coach", {"AGENTIHOOKS_AGENT_NAME": "operator"}) == {"intent": "coach"}
+        gate_mode("watch-gate", "coach")
+    assert gate_mode("intent-gate", "coach") == {"intent": "coach"}
 
 
 def test_coach_mode_is_accepted_by_the_control_endpoint():
@@ -342,5 +342,5 @@ def test_environment_and_catalog_accept_intent_coach():
     assert modes.mode(intent.IntentGate(), {"AGENTIHOOKS_GATE_INTENT": "coach"}) == "coach"
     assert catalog.current({"intent": "coach"})["intent"] == "coach"
     with pytest.raises(SwarmError) as caught:
-        gate_mode("intent-gate", "bad", {"AGENTIHOOKS_AGENT_NAME": "operator"})
+        gate_mode("intent-gate", "bad")
     assert str(caught.value) == "intent-gate takes deny, log only, skip, coach"
