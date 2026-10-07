@@ -22,4 +22,4 @@ def test_a_swarm_whose_ledger_is_gone_is_reported_once_then_left_quiet():
     first = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert first == ["ledger sw does not exist; agentihooks swarm remove sw clears this swarm"]
     assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == []
-    assert rt.spawned == [] and store.config("sw").slug == "sw"
+    assert rt.spawned == [] and store.redis.get(store.key("sw", "ledger-gone")) == "1"
