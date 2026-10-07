@@ -249,6 +249,13 @@ def test_master_block_carries_current_intent_phases_priorities_and_obligations()
     assert refocus.build_block(ledger, "master", 1500).endswith("Priorities: " + "z" * 299 + "…\nActive phases: ")
 
 
+def test_master_block_clips_active_phases_to_two_shares_when_the_block_fits():
+    ledger = {"title": "T", "overview": "O", "phases": [{"title": "Active", "description": "y" * 10000}]}
+    assert refocus.build_block(ledger, "master", 1500) == (
+        "=== SWARM REFOCUS: T ===\n" + OBLIGATIONS + f"Plan: O\nPriorities: \nActive phases: Active: {'y' * 591}…"
+    )
+
+
 @pytest.mark.parametrize("ledger", [{}, {"phases": [{}], "priorities": [{}]}])
 def test_master_sparse_ledger_keeps_obligations_without_invented_intent(ledger):
     phases = ": " if ledger else ""
