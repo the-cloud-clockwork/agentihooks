@@ -19,6 +19,9 @@ agentihooks bundle new ~/dev/my-tools
 agentihooks overlay new backtest-tuner --wears engineer
 agentihooks overlay check backtest-tuner
 
+# Commit it: a swarm renders overlays from the bundle at a pinned commit
+git -C ~/dev/my-tools add -A && git -C ~/dev/my-tools commit -m "Add backtest-tuner overlay"
+
 # Link your bundle and install (one command)
 agentihooks init --bundle ~/dev/my-tools
 
@@ -51,7 +54,7 @@ my-tools/                                   <- the bundle directory
 └── profiles/
     ├── infra-ops/                           # Custom profile
     │   ├── CLAUDE.md                        # System prompt (at profile ROOT)
-    │   ├── profile.yml                      # name, description, otel config, allowedOverlays, claude launch config
+    │   ├── profile.yml                      # name, description, otel config, allowedOverlays, claude launch config; an overlay sets kind: overlay and wears: [base roles]
     │   ├── enforcements.json                # Profile enforcements
     │   └── .claude/
     │       ├── settings.overrides.json      # Per-profile settings overrides

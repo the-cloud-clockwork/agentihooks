@@ -18,6 +18,7 @@ Your agentihooks profiles, overlays, skills, rules and MCP servers. Layout: the 
 
 - `agentihooks overlay new NAME --wears engineer` adds an overlay under `profiles/`.
 - `agentihooks overlay check NAME` validates it.
+- Commit it: a swarm renders overlays from the bundle at a pinned commit.
 - `agentihooks init` applies the bundle.
 """
 
@@ -42,15 +43,18 @@ def _fail(message: str) -> int:
 
 
 def bundle_new(target: Path) -> int:
-    if target.exists() and (not target.is_dir() or any(target.iterdir())):
+    if target.exists() and not target.is_dir():
+        return _fail(f"{target} is a file; pick a new folder for the bundle")
+    if target.exists() and any(target.iterdir()):
         return _fail(f"{target} is not empty; pick a new folder for the bundle")
+    target.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(target)], check=True)
     _write_json(target / "enforcements.json", {"enforcements": []})
     _write_json(target / ".claude" / ".mcp.json", {"mcpServers": {}})
     for folder in BUNDLE_FOLDERS:
         _keep(target / ".claude" / folder)
     _keep(target / "profiles")
     (target / "README.md").write_text(BUNDLE_README)
-    subprocess.run(["git", "init", "-q", str(target)], check=True)
     install._bundle_link(target)
     return 0
 
@@ -65,6 +69,8 @@ def _role_problems(roles: object) -> list[str]:
 
 
 def _name_problems(name: str) -> list[str]:
+    if name in ("", ".", "..") or Path(name).name != name:
+        return [f"overlay name {name} must be a plain folder name"]
     if KEY_SEPARATOR in name:
         return [f"overlay name {name} cannot hold {KEY_SEPARATOR}"]
     if name in base_roles():
@@ -123,7 +129,7 @@ def overlay_new(name: str, wears: str) -> int:
     _write_json(folder / ".claude" / ".mcp.json", {"mcpServers": {}})
     for sub in OVERLAY_FOLDERS:
         _keep(folder / ".claude" / sub)
-    print(f"[OK] Overlay {name} at {folder}, worn by {', '.join(roles)}")
+    print(f"[OK] Overlay {name} at {folder}, worn by {', '.join(roles)}; commit it before a swarm wears it")
     return 0
 
 

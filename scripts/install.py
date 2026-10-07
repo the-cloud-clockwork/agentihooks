@@ -6562,7 +6562,7 @@ def main() -> None:
     bundle_p = sub.add_parser("bundle", help="Manage the linked bundle (new, link, unlink, list, pull)")
     bundle_p.add_argument(
         "action",
-        choices=["link", "unlink", "list", "pull"],
+        choices=["new", "link", "unlink", "list", "pull"],
         help="new <path> | link <path> | unlink | list | pull",
     )
     bundle_p.add_argument("bundle_path", nargs="?", default=None, help="Bundle directory path (for link)")

@@ -14,8 +14,11 @@ def _no_bundle_env(monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_BUNDLE_PATH", raising=False)
 
 
+ROLES = ", ".join(scaffold.base_roles())
+
+
 def _bundle(tmp_path, capsys):
-    target = tmp_path / "my-bundle"
+    target = (tmp_path / "my-bundle").resolve()
     assert scaffold.main(["bundle", "new", str(target)]) == 0
     capsys.readouterr()
     return target
@@ -49,14 +52,40 @@ def test_bundle_new_runs_git_init_and_links_the_bundle(tmp_path):
 
 
 def test_bundle_new_refuses_a_folder_that_holds_files(tmp_path, capsys):
-    target = tmp_path / "taken"
+    target = (tmp_path / "taken").resolve()
     target.mkdir()
     (target / "keep.txt").write_text("mine")
 
     assert scaffold.main(["bundle", "new", str(target)]) == 1
 
-    assert "not empty" in capsys.readouterr().err
+    assert capsys.readouterr().err == f"ERROR: {target} is not empty; pick a new folder for the bundle\n"
     assert sorted(p.name for p in target.iterdir()) == ["keep.txt"]
+    assert not install.STATE_JSON.exists()
+
+
+def test_bundle_new_refuses_a_file(tmp_path, capsys):
+    target = (tmp_path / "taken").resolve()
+    target.write_text("mine")
+
+    assert scaffold.main(["bundle", "new", str(target)]) == 1
+
+    assert capsys.readouterr().err == f"ERROR: {target} is a file; pick a new folder for the bundle\n"
+    assert target.read_text() == "mine"
+    assert not install.STATE_JSON.exists()
+
+
+def test_bundle_new_runs_git_init_before_writing_so_a_failed_init_can_be_retried(tmp_path, monkeypatch):
+    target = tmp_path / "my-bundle"
+
+    def refuse(*args, **kwargs):
+        raise subprocess.CalledProcessError(1, args[0])
+
+    monkeypatch.setattr(scaffold.subprocess, "run", refuse)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        scaffold.main(["bundle", "new", str(target)])
+
+    assert list(target.iterdir()) == []
     assert not install.STATE_JSON.exists()
 
 
@@ -75,6 +104,9 @@ def test_overlay_new_writes_a_skeleton_into_the_linked_bundle(tmp_path, capsys):
     assert scaffold.main(["overlay", "new", "backtest-tuner", "--wears", "engineer,qa"]) == 0
 
     overlay = bundle / "profiles" / "backtest-tuner"
+    assert capsys.readouterr().out == (
+        f"[OK] Overlay backtest-tuner at {overlay}, worn by engineer, qa; commit it before a swarm wears it\n"
+    )
     manifest = yaml.safe_load((overlay / "profile.yml").read_text())
     assert manifest == {
         "name": "backtest-tuner",
@@ -93,26 +125,38 @@ def test_overlay_new_writes_a_skeleton_into_the_linked_bundle(tmp_path, capsys):
 def test_overlay_new_without_a_linked_bundle_names_the_fix(capsys):
     assert scaffold.main(["overlay", "new", "tuner", "--wears", "engineer"]) == 1
 
-    assert "agentihooks bundle new" in capsys.readouterr().err
+    assert capsys.readouterr().err == "ERROR: no bundle linked; run agentihooks bundle new DIR first\n"
 
 
 @pytest.mark.parametrize(
     ("name", "wears", "problem"),
     [
-        ("tuner", "pilot", "pilot is not a base role"),
-        ("tuner", "", "wears no base role"),
-        ("a+b", "engineer", "cannot hold +"),
-        ("engineer", "engineer", "engineer is a base role"),
-        ("default", "engineer", "default is a built in profile"),
+        ("tuner", "pilot", f"pilot is not a base role; pick from {ROLES}"),
+        (
+            "tuner",
+            "engineer,pilot,ghost",
+            f"pilot is not a base role; pick from {ROLES}; ghost is not a base role; pick from {ROLES}",
+        ),
+        ("tuner", " , ", "wears no base role"),
+        ("a+b", "engineer", "overlay name a+b cannot hold +"),
+        ("engineer", "engineer", "engineer is a base role; an overlay needs its own name"),
+        ("default", "engineer", "default is a built in profile and would shadow the overlay"),
+        ("../x", "engineer", "overlay name ../x must be a plain folder name"),
+        ("a/b", "engineer", "overlay name a/b must be a plain folder name"),
+        ("..", "engineer", "overlay name .. must be a plain folder name"),
+        (".", "engineer", "overlay name . must be a plain folder name"),
+        ("", "engineer", "overlay name  must be a plain folder name"),
     ],
 )
 def test_overlay_new_refuses_a_bad_name_or_role(tmp_path, capsys, name, wears, problem):
     bundle = _bundle(tmp_path, capsys)
+    before = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*") if ".git" not in p.parts)
 
     assert scaffold.main(["overlay", "new", name, "--wears", wears]) == 1
 
-    assert problem in capsys.readouterr().err
-    assert not (bundle / "profiles" / name).exists()
+    assert capsys.readouterr().err == f"ERROR: {problem}\n"
+    assert sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*") if ".git" not in p.parts) == before
+    assert (bundle / "profiles").is_dir()
 
 
 def test_overlay_new_refuses_an_overlay_that_exists(tmp_path, capsys):
@@ -123,7 +167,8 @@ def test_overlay_new_refuses_an_overlay_that_exists(tmp_path, capsys):
 
     assert scaffold.main(["overlay", "new", "tuner", "--wears", "qa"]) == 1
 
-    assert "already exists" in capsys.readouterr().err
+    folder = bundle / "profiles" / "tuner"
+    assert capsys.readouterr().err == f"ERROR: overlay tuner already exists at {folder}\n"
     assert (bundle / "profiles" / "tuner" / "CLAUDE.md").read_text() == "mine"
 
 
@@ -142,7 +187,7 @@ def _write_overlay(bundle, name, manifest):
         ("name: tuner\nkind: overlay\nwears: []\n", ["wears no base role"]),
         (
             "name: tuner\nkind: overlay\nwears: [engineer, pilot]\n",
-            ["pilot is not a base role; pick from cicd, engineer, master, planner, qa"],
+            [f"pilot is not a base role; pick from {ROLES}"],
         ),
         (
             "name: tuner\nkind: overlay\nwears: [engineer]\nextends: [anton-base]\n",
@@ -164,8 +209,7 @@ def test_overlay_check_lists_every_problem(tmp_path, capsys, manifest, problems)
     assert scaffold.main(["overlay", "check", "tuner"]) == 1
 
     assert scaffold.problems(bundle / "profiles" / "tuner") == problems
-    err = capsys.readouterr().err
-    assert all(problem in err for problem in problems)
+    assert capsys.readouterr().err == "ERROR: overlay tuner: " + "; ".join(problems) + "\n"
 
 
 def test_overlay_check_passes_a_valid_overlay(tmp_path, capsys):
@@ -174,7 +218,7 @@ def test_overlay_check_passes_a_valid_overlay(tmp_path, capsys):
 
     assert scaffold.problems(folder) == []
     assert scaffold.main(["overlay", "check", "tuner"]) == 0
-    assert "tuner" in capsys.readouterr().out
+    assert capsys.readouterr().out == "[OK] Overlay tuner is valid\n"
 
 
 def test_overlay_check_names_a_missing_overlay_or_manifest(tmp_path, capsys):
@@ -182,7 +226,7 @@ def test_overlay_check_names_a_missing_overlay_or_manifest(tmp_path, capsys):
     (bundle / "profiles" / "bare").mkdir()
 
     assert scaffold.main(["overlay", "check", "absent"]) == 1
-    assert "absent not found" in capsys.readouterr().err
+    assert capsys.readouterr().err == "ERROR: overlay absent not found in the linked bundle\n"
     assert scaffold.problems(bundle / "profiles" / "bare") == ["profile.yml is missing"]
 
 
@@ -201,3 +245,14 @@ def test_install_routes_the_scaffold_commands(monkeypatch):
         assert stop.value.code == 0
 
     assert seen == [["bundle", "new", "x"], ["overlay", "check", "y"]]
+
+
+def test_install_refuses_an_unknown_bundle_action(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["agentihooks", "bundle", "frobnicate"])
+
+    with pytest.raises(SystemExit) as stop:
+        install.main()
+
+    assert stop.value.code == 2
+    err = " ".join(capsys.readouterr().err.split()).replace("'", "")
+    assert "invalid choice: frobnicate (choose from new, link, unlink, list, pull)" in err
