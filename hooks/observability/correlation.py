@@ -189,7 +189,7 @@ def resolve(session_id: str, environ: Mapping[str, str] | None = None) -> dict[s
         session_id,
         environment_account(env),
         *(env.get(key) for key in KEYS),
-        _report(env.get("AGENTIHOOKS_PROFILE_REPORT", "")),
+        _report(env["AGENTIHOOKS_PROFILE_REPORT"]) if env.get("AGENTIHOOKS_PROFILE_REPORT") else None,
     ]
     path = config.AGENTIHOOKS_HOME / "telemetry" / "correlation" / f"{safe_name(session_id)}.json"
     try:
