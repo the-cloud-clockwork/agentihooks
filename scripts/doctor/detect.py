@@ -34,7 +34,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME):
         ),
         "inbox": lambda: inbox.findings(read.inbox_items(mail, slug), now_ms, wake.window_ms(env)),
         "handoff": lambda: handoffs.findings(read.handoffs(store, mail, home, slug)),
-        "spawn": lambda: spawns.findings(spawn_read.records(store, slug)),
+        "spawn": lambda: spawns.findings(spawn_read.records(store, slug, now_ms)),
         "startup": lambda: spawns.silent_starts(
             [asdict(a) for a in store.agents(slug)], activity.first_events(slug), now_ms
         ),

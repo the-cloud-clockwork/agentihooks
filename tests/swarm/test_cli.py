@@ -416,6 +416,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path):
         profile="cicd",
         model_source="lane-default",
         profile_decision={**decision, "validation": placed.profile_decision["validation"]},
+        choice="share",
     )
     assert placed.profile_decision["validation"]["state"] == "validated"
     assert seen[0][1:4] == ["init-agent", "--host", "herdr"]

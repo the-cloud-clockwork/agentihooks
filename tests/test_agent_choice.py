@@ -258,6 +258,21 @@ def test_an_explicit_lane_harness_wins_over_the_share(monkeypatch):
     assert agent_choice.choose_shared("codex", {}, {"codex": 9}, share=30, min_week_left=5) == ("codex", "requested")
 
 
+@pytest.mark.parametrize(
+    ("reason", "kind"),
+    [
+        ("codex share 2/10 below 30%", "share"),
+        ("priority", "share"),
+        ("fallthrough: claude is at its session cap", "overflow"),
+        ("fallthrough: claude has no quota", "overflow"),
+        ("requested", "forced"),
+        ("no agent has quota", "other"),
+    ],
+)
+def test_each_router_reason_names_its_choice_kind(reason, kind):
+    assert agent_choice.choice_kind(reason) == kind
+
+
 def test_codex_week_left_is_the_best_signed_in_account(monkeypatch):
     from scripts import codex_router
     from scripts.claude_quota_balancer import QuotaWindow

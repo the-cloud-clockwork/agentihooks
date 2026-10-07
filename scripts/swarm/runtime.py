@@ -168,6 +168,7 @@ class HerdrRuntime:
             model_source=picked.source,
             model_confidence=picked.confidence,
             profile_decision={**decision.record(), **placed.profile_decision},
+            choice=agent_choice.choice_kind(reason),
         )
 
     def resume(self, config, agent, text):
