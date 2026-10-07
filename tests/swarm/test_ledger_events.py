@@ -227,6 +227,19 @@ def test_red_checks_with_no_push_for_twenty_minutes_go_to_its_engineer(store):
     assert len(texts(store, ENG_SEAT)) == 2
 
 
+def test_a_red_notice_adds_to_the_notices_of_earlier_pull_requests(store):
+    red, closed = answer("open_red"), answer("closed_unmerged")
+    urls = {"https://github.com/o/r/pull/8": closed, "https://github.com/o/r/pull/9": red}
+    tasks = [
+        {"id": f"t{n}", "title": "Build", "state": "pr", "claimed_by": "sw-eng-1", "pr_url": url}
+        for n, url in enumerate(urls)
+    ]
+    run(store, recorded())
+    told = run(store, recorded(tasks=tasks), now_ms=red.red_at + 20 * MINUTE, github=urls.get)
+    assert f"told {ENG_SEAT}: https://github.com/o/r/pull/8:closed" in told
+    assert f"told {ENG_SEAT}: https://github.com/o/r/pull/9:red:" in told
+
+
 def test_an_old_commit_pushed_now_is_not_red_before_twenty_minutes_from_its_push_and_red(store):
     raw = json.loads((ANSWERS / "open_red.json").read_text())
     raw["commits"][0]["committedDate"] = "2026-10-04T23:40:12Z"
