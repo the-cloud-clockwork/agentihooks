@@ -184,7 +184,8 @@ def test_recorded_answers_parse():
     assert merged.merged_at == ledger_events.iso_ms("2026-10-05T17:34:59Z")
     assert (closed.state, closed.merged_at) == ("CLOSED", None)
     assert (red.state, red.red) == ("OPEN", True)
-    assert red.pushed_at == ledger_events.iso_ms("2026-10-05T01:40:12Z")
+    assert red.pushed_at == ledger_events.iso_ms("2026-10-05T01:40:19Z")
+    assert red.red_at == ledger_events.iso_ms("2026-10-05T01:40:36Z")
 
 
 def test_a_task_left_in_pr_after_its_merge_goes_to_its_engineer_then_the_master(store):
@@ -211,14 +212,49 @@ def test_a_pull_request_closed_unmerged_goes_to_its_engineer_once(store):
 def test_red_checks_with_no_push_for_twenty_minutes_go_to_its_engineer(store):
     red = answer("open_red")
     run(store, recorded())
-    run(store, in_pr(), now_ms=red.pushed_at + 19 * MINUTE, github=lambda url: red)
+    run(store, in_pr(), now_ms=red.red_at + 19 * MINUTE, github=lambda url: red)
     assert texts(store, ENG_SEAT) == []
-    run(store, in_pr(), now_ms=red.pushed_at + 20 * MINUTE, github=lambda url: red)
-    run(store, in_pr(), now_ms=red.pushed_at + 21 * MINUTE, github=lambda url: red)
+    run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE, github=lambda url: red)
+    run(store, in_pr(), now_ms=red.red_at + 21 * MINUTE, github=lambda url: red)
     assert len(texts(store, ENG_SEAT)) == 1 and "red" in texts(store, ENG_SEAT)[0]
     pushed = ledger_events.PullRequest("OPEN", None, red.pushed_at + 30 * MINUTE, True)
     run(store, in_pr(), now_ms=pushed.pushed_at + 20 * MINUTE, github=lambda url: pushed)
     assert len(texts(store, ENG_SEAT)) == 2
+
+
+def test_an_old_commit_pushed_now_is_not_red_before_twenty_minutes_from_its_push_and_red(store):
+    raw = json.loads((ANSWERS / "open_red.json").read_text())
+    raw["commits"][0]["committedDate"] = "2026-10-04T23:40:12Z"
+    red = ledger_events.pull_request(raw)
+    run(store, recorded())
+    run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE - 1, github=lambda url: red)
+    assert texts(store, ENG_SEAT) == []
+    run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE, github=lambda url: red)
+    assert len(texts(store, ENG_SEAT)) == 1
+
+
+def test_the_red_window_starts_at_the_later_of_the_push_and_the_red_result():
+    window = ledger_events.RED_QUIET_MS
+    assert ledger_events.red_window(100, 500, 500 + window - 1) is None
+    assert ledger_events.red_window(100, 500, 500 + window) == 500
+    assert ledger_events.red_window(900, 500, 900 + window - 1) is None
+    assert ledger_events.red_window(900, 500, 900 + window) == 900
+    assert ledger_events.red_window(900, None, 900 + window) == 900
+    assert ledger_events.red_window(None, 500, 500 + window) == 500
+    assert ledger_events.red_window(None, None, 10**15) is None
+
+
+def test_the_push_is_the_earliest_workflow_run_and_the_red_result_the_earliest_red_check():
+    raw = json.loads((ANSWERS / "open_red.json").read_text())
+    raw["checkSuites"].append(
+        {"status": "COMPLETED", "workflowRun": {"databaseId": 1, "createdAt": "2026-10-05T01:50:00Z"}}
+    )
+    raw["statusCheckRollup"].append({"context": "ci/external", "state": "ERROR", "createdAt": "2026-10-05T01:40:21Z"})
+    found = ledger_events.pull_request(raw)
+    assert found.pushed_at == ledger_events.iso_ms("2026-10-05T01:40:19Z")
+    assert found.red_at == ledger_events.iso_ms("2026-10-05T01:40:21Z")
+    raw["checkSuites"] = [{"status": "QUEUED", "workflowRun": None}]
+    assert ledger_events.pull_request(raw).pushed_at == ledger_events.iso_ms("2026-10-05T01:40:12Z")
 
 
 def test_green_or_unreadable_pull_requests_make_no_item(store):
