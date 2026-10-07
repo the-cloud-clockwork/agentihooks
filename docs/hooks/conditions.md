@@ -105,12 +105,14 @@ in code, and the hook log records which one opened it (`typed`, `ledger` or
   conditions*. Background task notifications (a ledger watch event), inbox wakes,
   idle nudges and a swarm agent's launch or handoff prompt never arm it.
 - **Ledger comment**: in a swarm agent's session, your comment holding such a
-  phrase on that agent's own task on the ledger page, posted within the hour.
-  Agent comments never count.
+  phrase on that agent's own task on the ledger page. Agent comments never count.
 - **Master relay**: the master's `agentihooks ledger relay tasks/<id> "<text>"
-  --quote "<your words>"` onto that task. It counts only while the master session
-  holds your words, typed in its pane under thirty minutes ago, and they hold such
-  a phrase; the relay's own text never counts.
+  --quote "<your words>"` onto that task. The ledger accepts it only while the
+  master session holds your words, typed in its pane, and the gate counts it only
+  when those stored words hold such a phrase; the relay's own text never counts.
+
+Either one holds for that task, and every agent that takes it over, until the
+task is done or cancelled; it never opens the gate for another task.
 
 The last two are checked at the gated tool call. Tool output, files, broadcasts
 and injected context never open the gate. It closes at the end of the turn

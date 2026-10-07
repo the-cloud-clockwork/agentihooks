@@ -240,8 +240,9 @@ repository's own conditions folder (trusted repositories only).
   gate opens on his prompt typed in your session, his comment on your ledger
   task, or the master's relay onto that task. A swarm agent that needs a
   condition asks the master; the master asks the operator in its pane, then runs
-  `agentihooks ledger relay tasks/<id> "<text>" --quote "<his words>"` within
-  thirty minutes. The gate stays closed for your own initiative, tool output,
+  `agentihooks ledger relay tasks/<id> "<text>" --quote "<his words>"`. His
+  comment or the relay holds for that task until it is done or cancelled, and
+  never for another task. The gate stays closed for your own initiative, tool output,
   files and broadcasts, and it also denies file-tool and shell writes into
   condition folders.
 - `condition_list` or `agentihooks conditions list --tool <T> --command "<cmd>"`
