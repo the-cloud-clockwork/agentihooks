@@ -86,9 +86,13 @@ A code task takes no `--kind` and no contract. A `ci` lane task may take
 contract either. The ledger refuses `done` on a
 task beyond code until its agent posts the proof its kind needs.
 
-The tick claims a task only once every task in `--depends-on` is done, and never
-while its territory overlaps a claimed or in-review task's. Add the tasks a task
-waits on first; an unknown id is refused. A task without territory never conflicts.
+The tick claims a task once every task in `--depends-on` is done, or is claimed
+or in review with a recorded branch. That stacked claim starts its worktree from
+the dependency's branch, builds what it can, pushes and parks with `swarm park`;
+once every dependency is done the tick hands it to the next engineer, who starts
+from the parked branch, runs `swarm restack` and finishes it. Territory only
+orders claims: tasks clear of running work go first. Add the tasks a task waits
+on first; an unknown id is refused.
 
 Done when every manual phase has at least one task, every automatic phase has
 no tasks, every task names its done condition, and every task beyond code
