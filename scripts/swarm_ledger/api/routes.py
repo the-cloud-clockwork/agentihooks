@@ -40,10 +40,21 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
         raise APIError(403, "forbidden", "Missing or wrong ledger credential")
     if handler.command == "GET":
         query = pagination(handler.path)
+        if path == "events" and handler.headers.get("Accept") == "text/event-stream":
+            return events(handler, server, slug)
         if path == "swarm" or path.startswith("swarm/"):
             return resources.swarm_read(server.swarm_status(slug), path, query)
         return resources.read(server.repository.get_document(slug), path, query)
     return ledger_operation(handler, server, slug, path, principal)
+
+
+def events(handler: object, server: ModuleType, slug: str) -> None:
+    from scripts.swarm_ledger.events import Expired, stream
+
+    try:
+        return stream.serve(handler, server.HUB, slug, lambda: server.stream_resources(slug))
+    except Expired:
+        raise APIError(410, "cursor_expired", "Cursor no longer retained; reconnect without it to reload") from None
 
 
 def global_resource(handler: object, server: ModuleType, parts: list) -> dict:

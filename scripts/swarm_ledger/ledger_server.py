@@ -44,7 +44,9 @@ import ledger_workspace  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.events import Hub  # noqa: E402
+from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
+from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
 
 HOST, PORT = ledger_link.address()
 BASE = f"http://{HOST}:{PORT}"
@@ -65,6 +67,30 @@ CODE_DIRS = (
     *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates")),
     ROOT / "hooks",
 )
+
+
+HUB = Hub()
+TAIL_MARKS = {}
+
+
+@functools.cache
+def served_version():
+    """The page version of this process: code_stamp re-execs the server when a page asset changes."""
+    return core.page_version()
+
+
+def ledger_view(state):
+    meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
+    meta.update(page_version=served_version(), crew=ledger_gate.crew(state["_meta"]))
+    return json.loads(json.dumps({**state, "_meta": meta}))
+
+
+def publish_ledger(slug, state):
+    if HUB.has(slug):
+        HUB.publish(slug, "ledger", ledger_view(state))
+
+
+repository = publishing(stored, publish_ledger)
 
 
 def all_summaries():
@@ -248,12 +274,12 @@ def swarm_store():
     return connect()
 
 
-def swarm_status(slug):
+def swarm_status(slug, state=None):
     from scripts.swarm.status import status_report
     from scripts.swarm.store import SwarmError
 
     try:
-        state = repository.read_snapshot(slug)
+        state = repository.read_snapshot(slug) if state is None else state
         return status_report(swarm_store(), slug, state)
     except SwarmError:
         return None
@@ -533,6 +559,53 @@ def with_workspaces(slug, state):
         for t in state.get("tasks", [])
     ]
     return {**state, "tasks": tasks}
+
+
+def tail_stamp(path):
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def workspace_tails(slug, ledger):
+    """Each task's work folder tails, read again only when one of its files changed."""
+    marks, kept, found = TAIL_MARKS.get(slug, {}), {}, {}
+    for task in ledger.get("tasks", []):
+        if not task.get("workspace"):
+            continue
+        try:
+            folder = ledger_workspace.folder(slug, task["id"])
+        except ValueError:
+            continue
+        stamp = tuple(tail_stamp(folder / name) for _, name in ledger_workspace.TAILS)
+        kept[task["id"]] = marks.get(task["id"])
+        if kept[task["id"]] is None or kept[task["id"]][0] != stamp:
+            kept[task["id"]] = (stamp, ledger_workspace.tails(slug, task["id"]))
+        found[task["id"]] = kept[task["id"]][1]
+    TAIL_MARKS[slug] = kept
+    return found
+
+
+def stream_resources(slug):
+    ledger = ledger_view(repository.get_document(slug, reconcile=False))
+    return {"ledger": ledger, "swarm": swarm_status(slug, ledger), "workspaces": workspace_tails(slug, ledger)}
+
+
+def sample_streams():
+    """Publish swarm status and work folder tails for every ledger a stream is open on."""
+    HUB.evict()
+    for slug in [slug for slug in list(TAIL_MARKS) if not HUB.has(slug)]:
+        del TAIL_MARKS[slug]
+    for slug in HUB.watched():
+        ledger = HUB.resource(slug, "ledger")
+        if ledger is None:
+            continue
+        try:
+            HUB.publish(slug, "swarm", swarm_status(slug, ledger))
+            HUB.publish(slug, "workspaces", workspace_tails(slug, ledger))
+        except Exception as exc:  # the seed watcher that calls this must outlive any one ledger's readers
+            sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -862,7 +935,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def code_stamp(code_dirs=CODE_DIRS):
     return max(
-        (p.stat().st_mtime_ns for d in code_dirs for p in d.rglob("*") if p.suffix in (".py", ".html")), default=0
+        (p.stat().st_mtime_ns for d in code_dirs for p in d.rglob("*") if p.suffix in (".py", ".html", ".js", ".css")),
+        default=0,
     )
 
 
@@ -890,6 +964,7 @@ def watch_seeds(interval=2.0):
                     repository.get_document(path.stem)
             except Exception as exc:  # the loop must outlive any one bad ledger
                 sys.stderr.write(f"skip {path.name}: {exc}\n")
+        sample_streams()
         time.sleep(interval)
 
 

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import serve_modules
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events, serve_modules
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -79,7 +79,9 @@ def home_html(view):
 
 def route(r, html):
     url = r.request.url
-    if "/api/swarm/" in url:
+    if is_events(url):
+        fulfill_events(r, swarm=STATUS)
+    elif "/api/swarm/" in url:
         r.fulfill(json=STATUS)
     elif "/api/" in url:
         r.fulfill(json={})

@@ -1866,5 +1866,13 @@
   "scripts/gates/intent.py:scripts.gates.intent.x\u01c1IntentGate\u01c1decide__mutmut_44:d1deaec017faaa9dc241182a9d153f5db4b4de22a8d3a8fbba3f7b890f5007d7": {
     "reader": "Standards reader",
     "reason": "Missing coach_rounds compares either zero or one against two, both false. Present values and the separate displayed round fallback remain unchanged. Independently cleared against CI run 37680501547."
+  },
+  "scripts/swarm_ledger/watch_ledger.py:scripts.swarm_ledger.watch_ledger.x_request__mutmut_15:4c51434e1cf1ea236155bb856c0224f31fab4c18b599023e82ad9d2edd2cb4be": {
+    "reader": "Standards reader",
+    "reason": "urllib.parse.quote never escapes ASCII letters, digits or underscore dot dash tilde, so adding X to the safe set changes no output; quote with safe empty and safe XXXX agree on every byte value 0 to 255 and sampled non ASCII input. Exact CI artifact mutant from run 37679023255."
+  },
+  "scripts/swarm_ledger/watch_ledger.py:scripts.swarm_ledger.watch_ledger.x_main__mutmut_31:2906636fbc3ae6cca316060ed198a0323d682fc297646a8d190ae2c5ee50ad02": {
+    "reader": "Standards reader",
+    "reason": "headers is read only by headers or credentials(args.slug) at the top of the next try and reassigned there before reaching stream; None and empty string are both falsy, so both fetch fresh credentials and nothing else reads headers. Exact CI artifact mutant from run 37679023255."
   }
 }
