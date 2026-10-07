@@ -24,6 +24,8 @@ function onStreamEvent(name, data) {
   } else if (name === "workspaces") {
     latest.workspaces = applyPatch(latest.workspaces, data.patch);
     receiveTails(latest.workspaces);
+  } else if (name === "heartbeat") {
+    resume();
   }
 }
 

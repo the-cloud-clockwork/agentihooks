@@ -125,9 +125,9 @@ def run_watch(monkeypatch, capsys, take, *flags):
     calls = []
     real_stream = watch_ledger.stream
 
-    def recorded(slug, cursor=None):
+    def recorded(slug, cursor=None, headers=None):
         calls.append(cursor)
-        return real_stream(slug, cursor)
+        return real_stream(slug, cursor, headers)
 
     monkeypatch.setattr(watch_ledger, "stream", recorded)
     monkeypatch.setattr(watch_ledger.Watch, "take", take)
@@ -197,8 +197,8 @@ def test_the_beat_file_is_touched_by_every_heartbeat(live, monkeypatch, capsys):
     monkeypatch.setattr(watch_ledger, "alive", record)
     real_stream = watch_ledger.stream
 
-    def short(slug, cursor=None):
-        for n, frame in enumerate(real_stream(slug, cursor)):
+    def short(slug, cursor=None, headers=None):
+        for n, frame in enumerate(real_stream(slug, cursor, headers)):
             yield frame
             if n == 3:
                 return
@@ -217,3 +217,100 @@ def test_a_missing_ledger_exits_before_connecting(monkeypatch):
     monkeypatch.setattr(watch_ledger, "stream", lambda *a: pytest.fail("connected"))
     with pytest.raises(SystemExit, match="no ledger JSON"):
         watch_ledger.main()
+
+
+def test_the_watcher_reads_the_ledger_file_only_to_check_it_exists(monkeypatch, capsys):
+    make_ledger()
+    reads = []
+    real_read = Path.read_text
+
+    def read_text(path, *a, **kw):
+        reads.append(path.name)
+        return real_read(path, *a, **kw)
+
+    snapshot = json.loads(core.paths(SLUG)[1].read_text())
+    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(watch_ledger, "credentials", lambda slug: {"X-Ledger-Token": "t"})
+    frames = [("snapshot", {"ledger": snapshot}, "c0")] + [("heartbeat", {}, None)] * 5
+    monkeypatch.setattr(watch_ledger, "stream", lambda slug, cursor=None, headers=None: iter(frames))
+    monkeypatch.setattr(watch_ledger.time, "sleep", lambda seconds: (_ for _ in ()).throw(SystemExit))
+    monkeypatch.setattr(sys, "argv", ["watch_ledger.py", SLUG])
+    with pytest.raises(SystemExit):
+        watch_ledger.main()
+    assert f"{SLUG}.json" not in reads
+
+
+def test_the_watcher_connects_with_header_credentials_and_no_token_in_the_url(monkeypatch):
+    seen = []
+
+    class Answer:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def __iter__(self):
+            return iter([b"event: heartbeat\n", b"data: {}\n", b"\n"])
+
+    def urlopen(request, timeout):
+        seen.append((request.full_url, dict(request.header_items()), timeout))
+        return Answer()
+
+    monkeypatch.setattr(watch_ledger.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda: "http://127.0.0.1:9")
+    frames = list(watch_ledger.stream("a b", "cur", {"X-Ledger-Token": "secret"}))
+    assert frames == [("heartbeat", {}, None)]
+    url, headers, timeout = seen[0]
+    assert url == "http://127.0.0.1:9/api/v1/ledgers/a%20b/events"
+    assert headers == {"X-ledger-token": "secret", "Accept": "text/event-stream", "Last-event-id": "cur"}
+    assert timeout == 3 * stream.HEARTBEAT_S
+
+
+def test_a_failing_stream_warns_once_per_distinct_error(monkeypatch, capsys):
+    make_ledger()
+    errors = iter([OSError("refused"), OSError("refused"), ValueError("bad frame"), OSError("refused")])
+    sleeps = []
+
+    def failing(slug, cursor=None, headers=None):
+        raise next(errors)
+        yield
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 4:
+            raise SystemExit
+
+    monkeypatch.setattr(watch_ledger, "credentials", lambda slug: {})
+    monkeypatch.setattr(watch_ledger, "stream", failing)
+    monkeypatch.setattr(watch_ledger.time, "sleep", sleep)
+    monkeypatch.setattr(sys, "argv", ["watch_ledger.py", SLUG, "--interval", "0.5"])
+    with pytest.raises(SystemExit):
+        watch_ledger.main()
+    assert capsys.readouterr().out.splitlines() == [
+        "WARNING ledger stream: refused",
+        "WARNING ledger stream: bad frame",
+        "WARNING ledger stream: refused",
+    ]
+    assert sleeps == [0.5] * 4
+
+
+def test_a_patch_that_cannot_apply_reconnects_without_a_cursor(monkeypatch, capsys):
+    make_ledger()
+    calls = []
+
+    def broken(slug, cursor=None, headers=None):
+        calls.append(cursor)
+        yield "ledger", {"patch": {"o": {}}, "rev": 9}, "c1"
+
+    def sleep(seconds):
+        if len(calls) == 2:
+            raise SystemExit
+
+    monkeypatch.setattr(watch_ledger, "credentials", lambda slug: {})
+    monkeypatch.setattr(watch_ledger, "stream", broken)
+    monkeypatch.setattr(watch_ledger.time, "sleep", sleep)
+    monkeypatch.setattr(sys, "argv", ["watch_ledger.py", SLUG])
+    with pytest.raises(SystemExit):
+        watch_ledger.main()
+    assert calls == [None, None]

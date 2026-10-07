@@ -91,6 +91,61 @@ def test_concurrent_publishes_leave_an_ordered_log_that_replays_to_the_newest():
     assert value == ledger(39)
 
 
+def test_a_publish_racing_another_rebuilds_its_patch_against_the_newer_copy(monkeypatch):
+    hub = Hub(boot="b")
+    opened(hub)
+    real_diff = events_hub.patch.diff
+    raced = []
+
+    def diff(old, new):
+        if not raced:
+            raced.append(1)
+            hub.publish(SLUG, "ledger", ledger(2, title="first"))
+        return real_diff(old, new)
+
+    monkeypatch.setattr(events_hub.patch, "diff", diff)
+    assert hub.publish(SLUG, "ledger", ledger(3, title="second"))
+    log = hub.channels[SLUG].log
+    assert [data["rev"] for _, _, _, data in log] == [2, 3]
+    value = ledger(1)
+    for _, _, _, data in log:
+        value = apply(value, data["patch"])
+    assert value == ledger(3, title="second")
+
+
+def test_a_publish_racing_a_newer_revision_drops_the_older_one(monkeypatch):
+    hub = Hub(boot="b")
+    opened(hub)
+    real_diff = events_hub.patch.diff
+    raced = []
+
+    def diff(old, new):
+        if not raced:
+            raced.append(1)
+            hub.publish(SLUG, "ledger", ledger(5))
+        return real_diff(old, new)
+
+    monkeypatch.setattr(events_hub.patch, "diff", diff)
+    assert not hub.publish(SLUG, "ledger", ledger(4))
+    assert hub.resource(SLUG, "ledger") == ledger(5)
+    assert [data["rev"] for _, _, _, data in hub.channels[SLUG].log] == [5]
+
+
+def test_a_publish_whose_channel_was_evicted_mid_diff_stops(monkeypatch):
+    hub = Hub(boot="b")
+    opened(hub)
+    hub.close(SLUG)
+    real_diff = events_hub.patch.diff
+
+    def diff(old, new):
+        hub.evict(now=time.monotonic() + events_hub.IDLE_EVICT_S)
+        return real_diff(old, new)
+
+    monkeypatch.setattr(events_hub.patch, "diff", diff)
+    assert not hub.publish(SLUG, "ledger", ledger(2))
+    assert not hub.has(SLUG)
+
+
 def test_a_reconnect_replays_exactly_the_events_after_its_cursor():
     hub = Hub(boot="b")
     opened(hub)

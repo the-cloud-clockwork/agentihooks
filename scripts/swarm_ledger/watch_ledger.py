@@ -43,11 +43,15 @@ from scripts.swarm_ledger.events import stream as events_stream  # noqa: E402
 STREAM_TIMEOUT_S = 3 * events_stream.HEARTBEAT_S
 
 
-def stream(slug, cursor=None):
-    """Yield (event, data, cursor) from the ledger server's event stream; Expired when the cursor is gone."""
+def credentials(slug):
     import ledger
 
-    headers = {**ledger.credentials(slug), "Accept": "text/event-stream"}
+    return ledger.credentials(slug)
+
+
+def stream(slug, cursor=None, headers=None):
+    """Yield (event, data, cursor) from the ledger server's event stream; Expired when the cursor is gone."""
+    headers = {**(credentials(slug) if headers is None else headers), "Accept": "text/event-stream"}
     if cursor:
         headers["Last-Event-ID"] = cursor
     url = f"{ledger_link.base()}/api/v1/ledgers/{urllib.parse.quote(slug, safe='')}/events"
@@ -148,21 +152,24 @@ def main():
     if beat:
         atexit.register(beat.unlink, missing_ok=True)
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    cursor = None
+    headers = credentials(args.slug)
+    cursor, failure = None, None
     while True:
         alive(beat)
         try:
-            for name, data, event_id in stream(args.slug, cursor):
+            for name, data, event_id in stream(args.slug, cursor, headers):
                 alive(beat)
                 watch.take(name, data)
-                cursor = event_id or cursor
+                cursor, failure = event_id or cursor, None
         except Expired:
             cursor = None
             continue
         except (KeyError, TypeError):
             cursor = None
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as exc:
+            if str(exc) != failure:
+                failure = str(exc)
+                print(f"WARNING ledger stream: {failure}", flush=True)
         time.sleep(args.interval)
 
 

@@ -6,8 +6,19 @@ by id ({"ids"}).
 """
 
 
+def same(a, b):
+    """JSON equality: unlike ==, true is not 1 and 1.0 is not 1."""
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, dict):
+        return a.keys() == b.keys() and all(same(value, b[key]) for key, value in a.items())
+    if isinstance(a, list):
+        return len(a) == len(b) and all(map(same, a, b))
+    return a == b
+
+
 def diff(old, new):
-    if old == new:
+    if same(old, new):
         return None
     if isinstance(old, dict) and isinstance(new, dict):
         keys = {key: {"d": 1} for key in old if key not in new}
@@ -30,7 +41,7 @@ def overlap(old, new):
     """The fewest leading items of old to drop so the rest of old starts new; all of old at worst."""
     for drop in range(len(old)):
         kept = len(old) - drop
-        if kept <= len(new) and old[drop] == new[0] and old[drop:] == new[:kept]:
+        if kept <= len(new) and same(old[drop], new[0]) and same(old[drop:], new[:kept]):
             return drop
     return len(old)
 
@@ -43,8 +54,12 @@ def list_diff(old, new):
     before = dict(zip(old_ids, old, strict=True))
     kept = len(old_ids) - overlap(old_ids, new_ids)
     if kept * 2 < len(new_ids):
-        return {"ids": new_ids, "u": [item for item in new if before.get(item["id"]) != item]}
-    return {"drop": len(old_ids) - kept, "add": new[kept:], "u": [i for i in new[:kept] if before[i["id"]] != i]}
+        return {"ids": new_ids, "u": [item for item in new if not same(before.get(item["id"]), item)]}
+    return {
+        "drop": len(old_ids) - kept,
+        "add": new[kept:],
+        "u": [i for i in new[:kept] if not same(before[i["id"]], i)],
+    }
 
 
 def apply(value, patch):

@@ -104,7 +104,9 @@ def test_the_ledger_watch_skips_a_write_already_shown_and_marks_what_it_prints(i
         raise SystemExit
 
     monkeypatch.setattr(watch_ledger.time, "sleep", stop)
-    monkeypatch.setattr(watch_ledger, "stream", lambda slug, cursor=None: iter([("snapshot", {"ledger": state}, "c0")]))
+    monkeypatch.setattr(
+        watch_ledger, "stream", lambda slug, cursor=None, headers=None: iter([("snapshot", {"ledger": state}, "c0")])
+    )
     monkeypatch.setattr(sys, "argv", ["watch_ledger.py", SLUG, "--as", "boss", "--since-rev", str(start)])
     with pytest.raises(SystemExit):
         watch_ledger.main()

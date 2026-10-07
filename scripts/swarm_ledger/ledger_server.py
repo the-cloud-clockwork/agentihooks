@@ -73,9 +73,15 @@ HUB = Hub()
 TAIL_MARKS = {}
 
 
+@functools.cache
+def served_version():
+    """The page version of this process: code_stamp re-execs the server when a page asset changes."""
+    return core.page_version()
+
+
 def ledger_view(state):
     meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
-    meta.update(page_version=core.page_version(), crew=ledger_gate.crew(state["_meta"]))
+    meta.update(page_version=served_version(), crew=ledger_gate.crew(state["_meta"]))
     return json.loads(json.dumps({**state, "_meta": meta}))
 
 
@@ -560,16 +566,20 @@ def tail_stamp(path):
 
 def workspace_tails(slug, ledger):
     """Each task's work folder tails, read again only when one of its files changed."""
-    marks = TAIL_MARKS.setdefault(slug, {})
-    found = {}
+    marks, kept, found = TAIL_MARKS.get(slug, {}), {}, {}
     for task in ledger.get("tasks", []):
         if not task.get("workspace"):
             continue
-        folder = ledger_workspace.folder(slug, task["id"])
+        try:
+            folder = ledger_workspace.folder(slug, task["id"])
+        except ValueError:
+            continue
         stamp = tuple(tail_stamp(folder / name) for _, name in ledger_workspace.TAILS)
-        if task["id"] not in marks or marks[task["id"]][0] != stamp:
-            marks[task["id"]] = (stamp, ledger_workspace.tails(slug, task["id"]))
-        found[task["id"]] = marks[task["id"]][1]
+        kept[task["id"]] = marks.get(task["id"])
+        if kept[task["id"]] is None or kept[task["id"]][0] != stamp:
+            kept[task["id"]] = (stamp, ledger_workspace.tails(slug, task["id"]))
+        found[task["id"]] = kept[task["id"]][1]
+    TAIL_MARKS[slug] = kept
     return found
 
 
@@ -581,15 +591,17 @@ def stream_resources(slug):
 def sample_streams():
     """Publish swarm status and work folder tails for every ledger a stream is open on."""
     HUB.evict()
+    for slug in [slug for slug in TAIL_MARKS if not HUB.has(slug)]:
+        del TAIL_MARKS[slug]
     for slug in HUB.watched():
         ledger = HUB.resource(slug, "ledger")
         if ledger is None:
             continue
-        HUB.publish(slug, "swarm", swarm_status(slug, ledger))
         try:
+            HUB.publish(slug, "swarm", swarm_status(slug, ledger))
             HUB.publish(slug, "workspaces", workspace_tails(slug, ledger))
-        except ValueError as exc:
-            sys.stderr.write(f"work folder tails {slug}: {exc}\n")
+        except Exception as exc:  # the seed watcher that calls this must outlive any one ledger's readers
+            sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
 
 class Handler(BaseHTTPRequestHandler):

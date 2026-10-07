@@ -49,7 +49,7 @@ def ledger(monkeypatch):
     return start
 
 
-def file_snapshot(slug, cursor=None):
+def file_snapshot(slug, cursor=None, headers=None):
     yield "snapshot", {"ledger": json.loads(core.paths(slug)[1].read_text())}, "c0"
 
 

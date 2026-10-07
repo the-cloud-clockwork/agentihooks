@@ -28,7 +28,7 @@ SLUG = "pageevents-2026-01-01"
 def test_the_page_applies_every_patch_the_server_builds_to_the_same_value(browser):
     page = browser.new_page()
     source = (MODULES / "patch.js").read_text(encoding="utf-8").replace("export function", "function")
-    cases = [[old, new, patch.diff(old, new)] for old, new in CASES if old != new]
+    cases = [[old, new, patch.diff(old, new)] for old, new in CASES if not patch.same(old, new)]
     results = page.evaluate(
         "([source, cases]) => { const applyPatch = new Function(source + '; return applyPatch;')();"
         " return cases.map(([old, , change]) => applyPatch(old, change)); }",

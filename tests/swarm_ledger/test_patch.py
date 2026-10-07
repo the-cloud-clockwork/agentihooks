@@ -26,6 +26,9 @@ CASES = [
     ([{"id": 1}], [{"id": 2}]),
     ([{"rev": 1}, {"rev": 2}], [{"rev": 2}, {"rev": 3}]),
     ({"x": [1]}, {"x": {"y": 1}}),
+    ({"_meta": {"rev": 1}, "done": 1}, {"_meta": {"rev": 2}, "done": True}),
+    ([{"id": "a", "done": 0}], [{"id": "a", "done": False}]),
+    ([1, 2], [1.0, 2]),
 ]
 
 
@@ -34,7 +37,7 @@ def test_applying_the_diff_of_two_values_rebuilds_the_new_value(old, new):
     before = copy.deepcopy(old)
     change = patch.diff(old, new)
     assert old == before
-    if old == new:
+    if json.dumps(old) == json.dumps(new):
         assert change is None
     else:
         assert patch.apply(old, json.loads(json.dumps(change))) == new
@@ -151,3 +154,37 @@ def test_apply_an_upsert_without_changes_keeps_the_kept_items():
         {"id": "c"},
     ]
     assert patch.apply([1, 2, 3], {"drop": 2, "add": [4], "u": []}) == [3, 4]
+
+
+@pytest.mark.parametrize(
+    "a,b,equal",
+    [
+        (1, 1, True),
+        (1, True, False),
+        (0, False, False),
+        (1, 1.0, False),
+        ("a", "a", True),
+        (None, None, True),
+        ({"a": [1, {"b": True}]}, {"a": [1, {"b": True}]}, True),
+        ({"a": [1, {"b": True}]}, {"a": [1, {"b": 1}]}, False),
+        ({"a": 1}, {"a": 1, "b": 2}, False),
+        ({"a": 1}, {"b": 1}, False),
+        ([1, 2], [1, 2, 3], False),
+        ([1, 2], [2, 1], False),
+        ([], {}, False),
+    ],
+)
+def test_same_is_json_equality_that_tells_booleans_from_numbers(a, b, equal):
+    assert patch.same(a, b) is equal
+    assert patch.same(b, a) is equal
+
+
+def test_a_boolean_that_replaces_an_equal_number_is_patched():
+    assert patch.diff({"done": 1}, {"done": True}) == {"o": {"done": {"v": True}}}
+    assert patch.diff([{"id": "a", "n": 0}], [{"id": "a", "n": False}]) == {
+        "drop": 0,
+        "add": [],
+        "u": [{"id": "a", "n": False}],
+    }
+    assert patch.overlap([1, True], [True, 2]) == 1
+    assert patch.overlap([1, 1], [True]) == 2

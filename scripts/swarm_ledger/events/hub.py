@@ -102,25 +102,31 @@ class Hub:
                 channel.idle_since = time.monotonic()
 
     def publish(self, slug, name, value):
-        with self.changed:
-            channel = self.channels.get(slug)
-            if channel is None:
-                return False
-            if name not in channel.resources:
-                channel.resources[name] = value
-                return False
-            old = channel.resources[name]
-            if name == "ledger" and revision(value) < revision(old):
-                return False
+        """Record value as the latest copy of a resource; the patch is built outside the lock and kept only if
+        no other publish replaced the copy it was built against."""
+        while True:
+            with self.changed:
+                channel = self.channels.get(slug)
+                if channel is None:
+                    return False
+                if name not in channel.resources:
+                    channel.resources[name] = value
+                    return False
+                old = channel.resources[name]
+                if name == "ledger" and revision(value) < revision(old):
+                    return False
             change = patch.diff(old, value)
-            if change is None:
-                return False
-            channel.resources[name] = value
-            channel.seq += 1
-            data = {"patch": change, "rev": revision(value)} if name == "ledger" else {"patch": change}
-            channel.log.append((channel.seq, self.cursor(slug, channel, channel.seq), name, data))
-            self.changed.notify_all()
-            return True
+            with self.changed:
+                if self.channels.get(slug) is not channel or channel.resources.get(name) is not old:
+                    continue
+                if change is None:
+                    return False
+                channel.resources[name] = value
+                channel.seq += 1
+                data = {"patch": change, "rev": revision(value)} if name == "ledger" else {"patch": change}
+                channel.log.append((channel.seq, self.cursor(slug, channel, channel.seq), name, data))
+                self.changed.notify_all()
+                return True
 
     def wait(self, slug, seq, timeout):
         """The events after seq, waiting up to timeout for one; Expired once they fell out of retention."""
