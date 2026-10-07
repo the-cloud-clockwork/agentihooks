@@ -16,6 +16,8 @@ MARKDOWN = "docs/swarm-v2/evidence-index.md"
 CLASSES = ("transcript_durability", "scope_isolation", "execution_safety", "knowledge_integrity")
 CLAIMS = ("open", "complete")
 CHANGE_KEYS = ("operation", "base_revision", "package", "evidence")
+INDEX_KEYS = ("revision", "requirements", "packages", "operations")
+RESULT_SUFFIXES = (".json", ".log", ".txt", ".xml")
 CASES = (("A", "positive case result"), ("B", "negative case result"), ("C", "recovery proof"))
 PROVES = ("live_canary", "test")
 NEEDS_COMMIT = frozenset({"test", "pull_request", "live_canary", "migration"})
@@ -76,8 +78,11 @@ def gates(plan: dict) -> dict[str, list[str]]:
 
 def load_index(path: Path | str) -> dict:
     data = json.loads(Path(path).read_text())
-    if data.get("schema") != SCHEMA:
+    if not isinstance(data, dict) or data.get("schema") != SCHEMA:
         raise EvidenceError(f"{path} is not a {SCHEMA} document")
+    lacking = [key for key in INDEX_KEYS if key not in data]
+    if lacking:
+        raise EvidenceError(f"{path} lacks {', '.join(lacking)}")
     return data
 
 
@@ -99,13 +104,14 @@ def _ref_error(item: dict, root: Path) -> str:
 def _result_ref(ref: str, root: Path) -> bool:
     if RUN_RE.fullmatch(ref):
         return True
-    if URL_RE.fullmatch(ref):
+    if URL_RE.fullmatch(ref) or PurePosixPath(ref).suffix not in RESULT_SUFFIXES:
         return False
+    data = (root / ref).read_bytes()
     try:
-        (root / ref).read_bytes().decode()
+        data.decode()
     except UnicodeDecodeError:
         return False
-    return True
+    return b"\x00" not in data
 
 
 def _item_errors(item: dict, root: Path) -> list[str]:
@@ -264,11 +270,13 @@ def _raise_first(errors: list[str]) -> None:
 
 
 def _recorded(index: dict) -> dict[str, dict]:
-    return {e.get("id"): e for entry in index["packages"].values() for e in entry["evidence"]}
+    return {e["id"]: e for entry in index["packages"].values() for e in entry["evidence"] if _identified(e)}
 
 
 def _record(path: Path | str, change: dict, plan: dict, root: Path | str) -> dict:
     index = load_index(path)
+    if not isinstance(change, dict):
+        raise EvidenceError("change must be a JSON object")
     lacking = [key for key in CHANGE_KEYS if key not in change]
     if lacking:
         raise EvidenceError(f"change lacks {', '.join(lacking)}")
@@ -380,7 +388,7 @@ def _failed(index: dict) -> list[str]:
         f"- {pid}: " + ", ".join(p for p in (e["id"], e.get("case") and f"case {e['case']}", e["ref"]) if p)
         for pid, entry in index["packages"].items()
         for e in entry["evidence"]
-        if e.get("outcome") == "failed"
+        if _identified(e) and e.get("outcome") == "failed"
     ]
 
 

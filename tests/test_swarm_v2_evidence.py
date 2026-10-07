@@ -642,7 +642,49 @@ def test_writes_leave_no_temporary_file(tmp_path):
     assert [p.name for p in tmp_path.glob("evidence-index*")] == ["evidence-index.json"]
 
 
-# Review round one
+def test_a_backup_missing_recorded_operations_is_refused(tmp_path):
+    path = _registry(tmp_path)
+    fork = tmp_path / "fork.json"
+    shutil.copy(path, fork)
+    vp.record(path, _change("op-a", evidence=[_pull()]), PLAN, ROOT)
+    vp.record(fork, _change("op-b", evidence=[_test("A")]), PLAN, ROOT)
+    vp.record(fork, _change("op-c", 2, evidence=[_test("B")]), PLAN, ROOT)
+    _refused(
+        path,
+        lambda: vp.restore(path, fork, "restore-1", PLAN, ROOT),
+        "backup at revision 3 lacks operations the registry has recorded",
+    )
+
+
+def _waits_for_the_lock(tmp_path, call, args):
+    results = []
+    with (tmp_path / ".evidence-index.json.lock").open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        writer = threading.Thread(target=lambda: results.append(call(*args)))
+        writer.start()
+        writer.join(timeout=0.3)
+        assert writer.is_alive()
+        assert vp.load_index(tmp_path / "evidence-index.json")["revision"] == 1
+    writer.join(timeout=10)
+    assert [r["revision"] for r in results] == [2]
+
+
+def test_a_record_waits_for_the_registry_lock_held_by_another_writer(tmp_path):
+    path = _registry(tmp_path)
+    _waits_for_the_lock(tmp_path, vp.record, (path, _change(), PLAN, ROOT))
+
+
+def test_a_restore_waits_for_the_registry_lock_held_by_another_writer(tmp_path):
+    path = _registry(tmp_path)
+    _waits_for_the_lock(tmp_path, vp.restore, (path, path, "op-1", PLAN, ROOT))
+
+
+def test_a_reopen_waits_for_the_registry_lock_held_by_another_writer(tmp_path):
+    path = _registry(tmp_path)
+    _waits_for_the_lock(tmp_path, vp.reopen, (path, "SV2-FND-03", "op-1"))
+
+
+# T-SV2-FND-04-B, plan and input boundaries
 
 
 def _plan(packages, invariants=()):
@@ -743,48 +785,6 @@ def test_a_record_refuses_evidence_without_a_string_id_without_writing(tmp_path,
     )
 
 
-def test_a_backup_missing_recorded_operations_is_refused(tmp_path):
-    path = _registry(tmp_path)
-    fork = tmp_path / "fork.json"
-    shutil.copy(path, fork)
-    vp.record(path, _change("op-a", evidence=[_pull()]), PLAN, ROOT)
-    vp.record(fork, _change("op-b", evidence=[_test("A")]), PLAN, ROOT)
-    vp.record(fork, _change("op-c", 2, evidence=[_test("B")]), PLAN, ROOT)
-    _refused(
-        path,
-        lambda: vp.restore(path, fork, "restore-1", PLAN, ROOT),
-        "backup at revision 3 lacks operations the registry has recorded",
-    )
-
-
-def _waits_for_the_lock(tmp_path, call, args):
-    results = []
-    with (tmp_path / ".evidence-index.json.lock").open("w") as held:
-        fcntl.flock(held, fcntl.LOCK_EX)
-        writer = threading.Thread(target=lambda: results.append(call(*args)))
-        writer.start()
-        writer.join(timeout=0.3)
-        assert writer.is_alive()
-        assert vp.load_index(tmp_path / "evidence-index.json")["revision"] == 1
-    writer.join(timeout=10)
-    assert [r["revision"] for r in results] == [2]
-
-
-def test_a_record_waits_for_the_registry_lock_held_by_another_writer(tmp_path):
-    path = _registry(tmp_path)
-    _waits_for_the_lock(tmp_path, vp.record, (path, _change(), PLAN, ROOT))
-
-
-def test_a_restore_waits_for_the_registry_lock_held_by_another_writer(tmp_path):
-    path = _registry(tmp_path)
-    _waits_for_the_lock(tmp_path, vp.restore, (path, path, "op-1", PLAN, ROOT))
-
-
-def test_a_reopen_waits_for_the_registry_lock_held_by_another_writer(tmp_path):
-    path = _registry(tmp_path)
-    _waits_for_the_lock(tmp_path, vp.reopen, (path, "SV2-FND-03", "op-1"))
-
-
 def test_a_missing_registry_file_is_a_refusal_not_a_traceback(tmp_path):
     result = _run("check", "--index", tmp_path / "none.json")
     assert result.returncode == 2
@@ -842,3 +842,52 @@ def test_a_proof_must_be_an_actions_run_or_a_text_result_file(tmp_path, kind):
         f"SV2-FND-04/case-b: {message}",
         f"SV2-FND-04/case-c: {message}",
     ]
+
+
+@pytest.mark.parametrize(
+    ("name", "content"), [("README.md", b"# notes\n"), ("pod.svg", b"<svg></svg>\n"), ("nul.log", b"\x00\x00")]
+)
+def test_a_proof_file_must_be_a_text_result_type(tmp_path, name, content):
+    (tmp_path / name).write_bytes(content)
+    item = {**_test("A"), "ref": name, "sha256": hashlib.sha256(content).hexdigest()}
+    index = {**_index(), "packages": {"SV2-FND-04": _complete(item)}}
+    assert vp.check(index, PLAN, tmp_path)["errors"] == [
+        "SV2-FND-04/case-a: a test or live canary result must be a GitHub Actions run or a text file in the repository"
+    ]
+
+
+@pytest.mark.parametrize(("name", "content"), [("result.txt", b"ok\n"), ("junit.xml", b"<testsuite/>\n")])
+def test_text_and_junit_result_files_are_accepted(tmp_path, name, content):
+    (tmp_path / name).write_bytes(content)
+    item = {**_test("A"), "ref": name, "sha256": hashlib.sha256(content).hexdigest()}
+    index = {**_index(), "packages": {"SV2-FND-04": _complete(item)}}
+    assert vp.check(index, PLAN, tmp_path)["errors"] == []
+
+
+def test_a_change_that_is_not_an_object_is_refused(tmp_path):
+    path = _registry(tmp_path)
+    _refused(path, lambda: vp.record(path, 5, PLAN, ROOT), "change must be a JSON object")
+
+
+@pytest.mark.parametrize(
+    ("document", "message"),
+    [
+        ([1], "is not a swarm-v2-evidence-index/1 document"),
+        ({"schema": vp.SCHEMA, "revision": 1}, "lacks requirements, packages, operations"),
+    ],
+)
+def test_a_malformed_registry_is_refused_by_name(tmp_path, document, message):
+    path = tmp_path / "evidence-index.json"
+    path.write_text(json.dumps(document))
+    with pytest.raises(vp.EvidenceError) as caught:
+        vp.load_index(path)
+    assert str(caught.value) == f"{path} {message}"
+
+
+def test_a_registry_holding_a_non_object_evidence_item_is_refused_on_record(tmp_path):
+    index = _index()
+    index["packages"]["SV2-FND-03"]["evidence"].append("junk")
+    path = tmp_path / "evidence-index.json"
+    path.write_text(json.dumps(index))
+    _refused(path, lambda: vp.record(path, _change(evidence=[_pull()]), PLAN, ROOT), "SV2-FND-03: evidence needs an id")
+    assert "## Failed experiments\n\nNone." in vp.render(index, PLAN, _check(index))
