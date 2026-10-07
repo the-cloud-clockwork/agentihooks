@@ -3,6 +3,7 @@ import re
 from scripts.swarm.health.findings import Finding
 
 TICK_MS = 60_000
+WINDOW_MS = 6 * 3_600_000
 FAILURE = re.compile(r"^(?:spawn failed for ([^\s,]+).*?|master spawn failed): (.+)$")
 
 
@@ -29,8 +30,10 @@ def failed(record: dict) -> list[Finding]:
 
 
 def share_drift(record: dict) -> list[Finding]:
-    counts, target = record["spawns"], record["target"]
-    total, codex = sum(counts.values()), counts.get("codex", 0)
+    since, target = record["now"] - WINDOW_MS, record["target"]
+    rows = {row["name"]: row for row in [*record["history"], *record["agents"]]}.values()
+    picks = [row["harness"] for row in rows if row.get("choice") == "share" and row.get("started_at", 0) >= since]
+    total, codex = len(picks), picks.count("codex")
     if not total or abs(codex * 100 - total * target) <= 100:
         return []
     actual = codex * 100 / total
@@ -39,8 +42,10 @@ def share_drift(record: dict) -> list[Finding]:
             "codex share drift",
             record["slug"],
             f"Codex share {actual:.1f}% against target {target}%",
-            (f"codex {codex}/{total} spawns, {actual:.1f}%, target {target}%",),
-            "more than one spawn from target",
+            (
+                f"codex {codex}/{total} share picks in the last {WINDOW_MS // 3_600_000} hours, {actual:.1f}%, target {target}%",
+            ),
+            "more than one share pick from target",
             round(abs(actual - target)),
         )
     ]

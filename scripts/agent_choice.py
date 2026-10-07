@@ -106,3 +106,14 @@ def choose_shared(
         if left is not None and left >= min_week_left:
             return "codex", f"codex share {codex}/{total} below {share}%"
     return choose("", environ)
+
+
+def choice_kind(reason: str) -> str:
+    """share when the share rule decided, overflow when the preferred agent was full or out of quota, forced when requested."""
+    if reason == "requested":
+        return "forced"
+    if reason == "priority" or reason.startswith("codex share "):
+        return "share"
+    if reason.startswith("fallthrough:"):
+        return "overflow"
+    return "other"

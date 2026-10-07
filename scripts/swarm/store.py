@@ -66,6 +66,7 @@ class AgentRecord:
     profile_decision: dict = field(default_factory=dict)
     input_prompt: str = ""
     input_ticks: int = 0
+    choice: str = ""
 
 
 class RedisStore:

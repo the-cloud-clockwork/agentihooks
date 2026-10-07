@@ -23,22 +23,49 @@ def test_recorded_spawns_and_planted_failed_spawn():
     assert record["actions"] == []
 
 
+def _picks(prefix, harnesses, at, choice="share"):
+    return [{"name": f"{prefix}{i}", "harness": h, "started_at": at, "choice": choice} for i, h in enumerate(harnesses)]
+
+
+def _windowed(agents, history=()):
+    return {
+        "slug": "sw",
+        "target": 20,
+        "now": 2 * spawns.WINDOW_MS,
+        "spawns": {"codex": 77, "claude": 250},
+        "agents": list(agents),
+        "history": list(history),
+    }
+
+
 def test_recorded_share_and_planted_drift():
     record = load("spawns")
+    record.update(now=max(a["started_at"] for a in record["agents"]), history=[])
     assert spawns.share_drift(record) == []
-    planted = copy.deepcopy(record)
-    planted["spawns"] = {"codex": 0, "claude": 10}
+    now = 2 * spawns.WINDOW_MS
+    planted = _windowed(_picks("a", ["claude"] * 10, now - 1))
     [found] = spawns.share_drift(planted)
-    assert found.id == f"codex-share-drift/{record['slug']}"
-    assert found.measure == 30
-    assert "codex 0/10 spawns, 0.0%, target 30%" in found.evidence
+    assert found.id == "codex-share-drift/sw"
+    assert found.measure == 20
+    assert "codex 0/10 share picks in the last 6 hours, 0.0%, target 20%" in found.evidence
+
+
+def test_overflow_forced_and_old_spawns_do_not_count_toward_drift():
+    now = 2 * spawns.WINDOW_MS
+    on_target = _picks("a", ["claude"] * 8 + ["codex"] * 2, now - 1)
+    overflow = _picks("o", ["codex"] * 6, now - 1, choice="overflow")
+    forced = _picks("f", ["claude"] * 6, now - 1, choice="forced")
+    old = _picks("h", ["codex"] * 6, now - spawns.WINDOW_MS - 1)
+    unrecorded = [{"name": "u", "harness": "codex", "started_at": now - 1}]
+    assert spawns.share_drift(_windowed([*on_target, *forced, *unrecorded], [*overflow, *old])) == []
+    [found] = spawns.share_drift(_windowed(on_target, _picks("h", ["codex"] * 6, now - 1)))
+    assert found.evidence == ("codex 8/16 share picks in the last 6 hours, 50.0%, target 20%",)
 
 
 def test_discrete_share_and_empty_counts_do_not_raise():
-    record = load("spawns")
-    for counts in ({}, {"codex": 0, "claude": 1}, {"codex": 3, "claude": 7}):
-        record["spawns"] = counts
-        assert spawns.share_drift(record) == []
+    now = 2 * spawns.WINDOW_MS
+    for harnesses in ([], ["claude"], ["codex"] + ["claude"] * 6):
+        assert spawns.share_drift(_windowed(_picks("a", harnesses, now - 1))) == []
 
 
 def test_recorded_placements_and_planted_overflow():
@@ -62,7 +89,7 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
     from scripts.swarm.tick import tick
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, state="running")
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, state="running", codex_share=0)
     store.create(config)
     launched = []
 
@@ -78,7 +105,9 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
             "",
         )
 
-    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *args: ("codex", "fixture"))
+    runtime = HerdrRuntime(
+        home=tmp_path, run=run, choose=lambda *args: ("codex", "fallthrough: claude is at its session cap")
+    )
     runtime.live_names = lambda: set()
     runtime.conversations = lambda: {}
     runtime.has_capacity = lambda: True
@@ -111,6 +140,7 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
     agents = store.agents("sw")
     assert len(agents) == 2, actions
     assert all(a.placement == "overflow" for a in agents)
+    assert [a.choice for a in agents if a.lane == "eng"] == ["overflow"]
 
 
 def test_recorded_restores_and_planted_fresh_fallback():

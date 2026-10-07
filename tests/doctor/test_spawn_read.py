@@ -36,7 +36,14 @@ def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):
             "",
         )
 
-    record = spawn_read.records(store, slug, run=journal)
+    ended = AgentRecord("ended", "eng", "dt1", harness="claude", choice="share")
+    store.put_agent(slug, ended)
+    store.drop_agent(slug, "ended", at=9)
+    store.put_agent(slug, agent)
+    before = store.export(slug)
+    record = spawn_read.records(store, slug, 5, run=journal)
+    assert record["now"] == 5
+    assert [(row["name"], row["choice"], row["ended_at"]) for row in record["history"]] == [("ended", "share", 9)]
     assert record["target"] == 30
     assert record["agents"] == [asdict(agent)]
     assert record["spawns"] == {"codex": 3, "claude": 5}
