@@ -641,7 +641,7 @@ def test_exit_notice_for_an_exited_sender_goes_to_the_master_seat(env):
     run("sw", "start")
     inbox = InboxStore(store.redis)
     for notice in inbox.pending_items("master@sw"):
-        inbox.close(notice.id, "master@a1b2c3-0001", "done")
+        inbox.close(notice.id, "master@a1b2c3-0001", "done", "handled the notice")
     item = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "contract confirmed")
     assert run("sw", "--as", "ci@a1b2c3-0001", "done", "--pr", "https://github.com/o/r/pull/8") == 0
     assert run("sw", "--as", "engineer@a1b2c3-0001", "done", "--pr", "https://github.com/o/r/pull/9") == 0

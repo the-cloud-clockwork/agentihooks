@@ -4,10 +4,11 @@ Every gate measures its failure before and after it ships with the same function
 """
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from statistics import mean
 
+from scripts.doctor import inbox
 from scripts.swarm import naming
 from scripts.swarm.health import activity as health_activity
 from scripts.swarm_ledger import ledger_kinds
@@ -51,6 +52,7 @@ class Records:
     injections: list
     corrections: list
     pulls: dict
+    inbox: list = field(default_factory=list)
 
 
 def ratio(part, whole):
@@ -236,6 +238,16 @@ def premature(records, window):
     }
 
 
+def inbox_no_outcome(records: Records, window: Window) -> dict:
+    items = [item for item in records.inbox if window.holds(item["created_at"])]
+    bare_done = inbox.no_outcome([item for item in items if item["state"] == "done"])
+    return {
+        "items sent": len(items),
+        "closed done with no outcome": len(bare_done),
+        "per hour": ratio(len(bare_done), (window.end - window.start) / HOUR_MS),
+    }
+
+
 FAILURES = {
     "ceremony": ceremony,
     "scope inflation": scope_inflation,
@@ -246,6 +258,7 @@ FAILURES = {
     "idle with claim": idle,
     "stale claim": stale,
     "premature completion": premature,
+    "inbox no outcome": inbox_no_outcome,
 }
 
 

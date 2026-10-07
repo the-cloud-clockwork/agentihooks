@@ -48,7 +48,7 @@ def test_send_adds_the_item_to_the_addressee_pending_set(store):
     [
         lambda s, i: s.deliver(i, "bob"),
         lambda s, i: s.read(i, "bob"),
-        lambda s, i: s.close(i, "bob", "done"),
+        lambda s, i: s.close(i, "bob", "done", "handled the request"),
         lambda s, i: s.close(i, "alice", "cancel"),
         lambda s, i: s.close(i, "bob", "blocked", "a review"),
         lambda s, i: s.close(i, "bob", "handoff", "carol"),
@@ -66,7 +66,7 @@ def test_each_leaving_transition_removes_the_item_from_the_pending_set(store, le
 def test_delivery_reads_only_the_pending_set_with_a_thousand_closed_items(redis, monkeypatch):
     seed = InboxStore(redis)
     for n in range(1000):
-        seed.close(seed.send("alice", "bob", f"old {n}").id, "bob", "done")
+        seed.close(seed.send("alice", "bob", f"old {n}").id, "bob", "done", "handled the request")
     item = seed.send("alice", "bob", "new work")
     counting = CountingRedis(redis)
     store = InboxStore(counting)
@@ -85,7 +85,7 @@ def test_delivery_reads_only_the_pending_set_with_a_thousand_closed_items(redis,
 def test_the_wake_pass_listing_reads_only_pending_sets(redis):
     seed = InboxStore(redis)
     for n in range(1000):
-        seed.close(seed.send("alice", "bob", f"old {n}").id, "bob", "done")
+        seed.close(seed.send("alice", "bob", f"old {n}").id, "bob", "done", "handled the request")
     item = seed.send("alice", "carol", "new work")
     counting = CountingRedis(redis)
     store = InboxStore(counting)
@@ -102,7 +102,7 @@ def test_back_fill_rebuilds_the_pending_set_from_existing_items(store, monkeypat
     monkeypatch.setattr(inbox_store, "now_ms", lambda: 1000)
     first = store.send("alice", "bob", "one")
     second = store.send("carol", "bob", "two")
-    store.close(store.send("alice", "bob", "old").id, "bob", "done")
+    store.close(store.send("alice", "bob", "old").id, "bob", "done", "handled the request")
     store.deliver(store.send("alice", "bob", "seen").id, "bob")
     store.redis.delete(store.key("pending", "bob"), store.key("indexed"))
 
@@ -188,7 +188,7 @@ def test_a_failed_transition_leaves_the_item_and_the_pending_set_consistent(stor
 
     monkeypatch.setattr(store.redis, "pipeline", failing)
     with pytest.raises(redis_lib.exceptions.ConnectionError):
-        store.close(item.id, "bob", "done")
+        store.close(item.id, "bob", "done", "handled the request")
     monkeypatch.undo()
 
     assert store.get(item.id).state == "pending"
@@ -235,14 +235,14 @@ def test_emptying_a_pending_list_removes_its_address_from_the_waiting_set(store)
     second = store.send("alice", "bob", "two")
     store.deliver(first.id, "bob")
     assert waiting(store) == {"bob"}
-    store.close(second.id, "bob", "done")
+    store.close(second.id, "bob", "done", "handled the request")
     assert waiting(store) == set()
 
 
 def test_the_wake_pass_reads_only_the_waiting_set_with_many_idle_addresses(redis):
     seed = InboxStore(redis)
     for n in range(300):
-        seed.close(seed.send("alice", f"idle-{n}", "old").id, f"idle-{n}", "done")
+        seed.close(seed.send("alice", f"idle-{n}", "old").id, f"idle-{n}", "done", "handled the request")
     item = seed.send("alice", "carol", "new work")
     counting = CountingRedis(redis)
     store = InboxStore(counting)
@@ -256,7 +256,7 @@ def test_the_wake_pass_reads_only_the_waiting_set_with_many_idle_addresses(redis
 
 def test_back_fill_rebuilds_the_waiting_set_once(store):
     first = store.send("alice", "bob", "one")
-    store.close(store.send("alice", "carol", "old").id, "carol", "done")
+    store.close(store.send("alice", "carol", "old").id, "carol", "done", "handled the request")
     second = store.send("alice", "dave", "two")
     store.redis.delete(store.key("waiting"), store.key("waiting", "built"), store.key("indexed"))
     store.redis.delete(store.key("pending", "bob"), store.key("pending", "dave"))

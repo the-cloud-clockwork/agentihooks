@@ -30,7 +30,7 @@ def test_inbox_items_of_the_swarm_carry_their_history(redis):
     kept = box.send("operator", f"eng-1@{SLUG}", "look at this")
     reply = box.send(f"{SLUG}-eng-3", "operator", "done it")
     box.send("operator", "other-eng-1", "not ours")
-    box.close(kept.id, f"eng-1@{SLUG}", "done")
+    box.close(kept.id, f"eng-1@{SLUG}", "done", "reviewed the request")
     rows = {row["id"]: row for row in read.inbox_items(box, SLUG)}
     assert set(rows) == {kept.id, reply.id}
     assert rows[kept.id]["state"] == "done"

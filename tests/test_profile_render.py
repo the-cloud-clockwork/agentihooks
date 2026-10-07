@@ -608,6 +608,132 @@ def test_codex_render_links_into_the_claude_profile(world):
     assert os.readlink(sources) == str(render.sources.path("rb-role", "claude", render.rendered_root()))
 
 
+def test_codex_master_replaces_monitor_instructions_without_changing_claude(world):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / "master" / "profile.yml", "name: master\nextends: [package:master]\n")
+    _write(
+        world["bundle"] / ".claude" / "rules" / "waiting.md",
+        "# Process Watching\n\n- Start a `Monitor` on long running work.\n"
+        "- `Monitor` watches processes; `CronCreate` schedules work.\n\n"
+        "# Preserve\n\nDo not mutate the master pane or expose credentials.\n",
+    )
+    _commit(world["bundle"], "master")
+
+    out = render.render_codex("master")
+    persona = (out / "AGENTS.md").read_text()
+    claude = (render.rendered_root() / "master" / "claude" / "CLAUDE.md").read_text()
+    assert "Monitor" not in persona
+    assert "agentihooks msg inbox" in persona
+    assert "agentihooks swarm <slug> wait --inbox" in persona
+    assert "Do not mutate the master pane or expose credentials." in persona
+    assert "Start a `Monitor`" in claude
+    assert not (out / "AGENTS.md").is_symlink()
+    assert render.render_codex("master") is None
+
+
+def test_codex_master_updates_an_old_linked_persona(world):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / "master" / "profile.yml", "name: master\nextends: [package:master]\n")
+    _commit(world["bundle"], "master")
+    out = render.render_codex("master")
+    agents = out / "AGENTS.md"
+    agents.unlink()
+    agents.symlink_to(render.rendered_root() / "master" / "claude" / "CLAUDE.md")
+
+    assert render.render_codex("master") == out
+    assert not agents.is_symlink()
+
+
+def test_an_explicit_packaged_codex_master_uses_inbox_waits(world):
+    from scripts.profiles import render
+
+    out = render.render_codex("package:master")
+    persona = (out / "AGENTS.md").read_text()
+    assert "Monitor" not in persona
+    assert "agentihooks swarm <slug> wait --inbox" in persona
+    assert not (out / "AGENTS.md").is_symlink()
+
+
+def test_codex_master_keeps_mixed_instruction_responsibilities():
+    from scripts.profiles import codex_master
+
+    text = (
+        "- Start a `Monitor` immediately; it is read-only; keep working.\n"
+        "| Working a ledger | join, handle OPERATOR lines, ack, then use a `Monitor`. |\n"
+        "- Push triggers CI, deployment and rollout; start a `Monitor`.\n"
+        "Monitor its checks, fix failures, and merge immediately.\n"
+    )
+    result = codex_master.persona(text)
+    assert (
+        result
+        == (
+            "- Start a `agentihooks swarm <slug> wait --inbox` immediately; it is read-only; keep working.\n"
+            "| Working a ledger | join, handle OPERATOR lines, ack, then use a `agentihooks swarm <slug> wait --inbox`. |\n"
+            "- Push triggers CI, deployment and rollout; start a `agentihooks swarm <slug> wait --inbox`.\n"
+            "Watch its checks, fix failures, and merge immediately.\n"
+        )
+        + "\n"
+        + codex_master.waiting("<slug>")
+        + "\n"
+    )
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("heading", ["## Next", "## Next   "])
+def test_codex_master_adapts_valid_handoff_headings_without_changing_other_sections(newline, heading):
+    from scripts.profiles import codex_master
+
+    action = "Rearm a Monitor on the ledger and inspect the pending tasks."
+    document = newline.join(
+        ["# Handoff v2", "## Intent", "Keep promises.", heading, action, "## Read first", "None", ""]
+    )
+    task = {"handoff": document, "transfer": {"next": action, "id": "transfer", "handoff": "saved"}}
+    adapted = codex_master.handoff(task, "sw")
+    expected = "Read agentihooks msg inbox and run agentihooks swarm sw wait --inbox and inspect the pending tasks."
+    assert adapted == {
+        "handoff": document.replace(action, expected),
+        "transfer": {"next": expected, "id": "transfer", "handoff": "saved"},
+    }
+    assert task["handoff"] == document
+
+
+def test_codex_master_preserves_a_handoff_without_a_next_section():
+    from scripts.profiles import codex_master
+
+    task = {"handoff": "# Handoff v2\n## Intent\nKeep promises.\n"}
+    assert codex_master.handoff(task, "sw") == task
+    assert codex_master.handoff({}, "sw") == {}
+    assert codex_master.next_action("Inspect the checks.", "sw") == "Inspect the checks."
+
+
+def test_codex_master_handoff_ignores_fenced_headings_and_preserves_the_preamble():
+    from scripts.profiles import codex_master
+
+    action = "Rearm a Monitor on the ledger."
+    prefix = (
+        "# Handoff v2\nA previous Monitor was running.\n## Intent\n"
+        "  ```text\n## Next\nRearm a Monitor on the example ledger.\n  ```\n"
+    )
+    task = {"handoff": prefix + "## Next\n" + action + "\n## Read first\nNone\n"}
+    assert codex_master.handoff(task, "sw")["handoff"] == (
+        prefix + "## Next\nRead agentihooks msg inbox and run agentihooks swarm sw wait --inbox.\n## Read first\nNone\n"
+    )
+
+
+def test_codex_master_waiting_instruction_names_the_foreground_return_contract():
+    from scripts.profiles import codex_master
+
+    assert codex_master.waiting("sw") == (
+        "Read agentihooks msg inbox and handle every open item. "
+        "When no work remains, run agentihooks swarm sw wait --inbox in a foreground tool call. "
+        "It returns pending inbox work or times out after one minute; read the inbox and wait again. "
+        "Keep the tool call active while waiting so new work resumes this turn without pane input. "
+        "Use swarm wait --on checks, reply or task for a specific dependency."
+    )
+
+
 def test_codex_render_offers_each_command_as_a_hardlinked_skill(world):
     from scripts.profiles import render
 

@@ -749,6 +749,7 @@ def register_session(
     model: str,
     account: str = "",
     supersede: bool = True,
+    name: str = "",
 ) -> None:
     from hooks.context.project_identity import resolve_project
     from hooks.context.project_sessions import record_session
@@ -777,7 +778,8 @@ def register_session(
         # age to reflect the true session start, not the last event).
         existing = sessions.get(session_id)
         started_at = existing.get("started_at", now) if existing else now
-        named = {"name": existing["name"]} if existing and existing.get("name") else {}
+        name = (existing or {}).get("name") or name
+        named = {"name": name} if name else {}
         sessions[session_id] = {
             **named,
             "started_at": started_at,

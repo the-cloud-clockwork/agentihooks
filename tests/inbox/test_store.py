@@ -67,7 +67,7 @@ def test_handoff_and_blocked_need_their_detail(store, kind):
 @pytest.mark.parametrize(
     "kind, detail, state, reason",
     [
-        ("done", "", "done", "done"),
+        ("done", "handled the request", "done", "done: handled the request"),
         ("handoff", "carol", "handed_off", "handed off to carol"),
         ("blocked", "the release", "blocked", "blocked on the release"),
         ("cancel", "", "cancelled", "cancelled"),
@@ -83,7 +83,7 @@ def test_close_records_where_the_work_went(store, kind, detail, state, reason):
 def test_the_sender_may_cancel_but_a_stranger_may_not_close(store):
     item = store.send("alice", "bob", "hi")
     with pytest.raises(InboxError):
-        store.close(item.id, "mallory", "done")
+        store.close(item.id, "mallory", "done", "handled the request")
     assert store.close(item.id, "alice", "cancel").state == "cancelled"
 
 
@@ -104,7 +104,7 @@ def test_another_swarms_master_may_not_close_an_item_of_this_swarm(store):
 
 def test_a_closed_item_stays_closed(store):
     item = store.send("alice", "bob", "hi")
-    store.close(item.id, "bob", "done")
+    store.close(item.id, "bob", "done", "handled the request")
     with pytest.raises(InboxError):
         store.close(item.id, "bob", "cancel")
     with pytest.raises(InboxError):
