@@ -21,6 +21,12 @@ WORDS = {
     "overlay": "its role overlay on the package base role",
     "name": "its name",
 }
+REPORT_ONLY = frozenset({"overlay"})
+OUTCOMES = {
+    "relaunch": "It is being retired and relaunched once.",
+    "spent": "Its one automatic relaunch is spent; operator action is required.",
+    "report": "This is reported only; the master keeps running.",
+}
 
 
 def begin(store: RedisStore, slug: str, agent: AgentRecord, at: int, relaunch: bool = True) -> None:
@@ -104,7 +110,9 @@ def misses(store: RedisStore, slug: str, agent: AgentRecord, facts: dict, doc: d
     }
 
 
-def record(store: RedisStore, slug: str, agent: AgentRecord, found: dict, at: int, elapsed_ms: int) -> dict:
+def record(
+    store: RedisStore, slug: str, agent: AgentRecord, found: dict, at: int, elapsed_ms: int, held: bool = False
+) -> dict:
     report = {
         "agent": agent.name,
         "task": agent.task,
@@ -112,6 +120,7 @@ def record(store: RedisStore, slug: str, agent: AgentRecord, found: dict, at: in
         "elapsed_ms": elapsed_ms,
         "state": "failed" if found else "passed",
         "misses": found,
+        "held": held,
     }
     store.redis.hset(store.key(slug, "launch-check-reports"), agent.task, json.dumps(report))
     return report
@@ -124,7 +133,7 @@ def report(store: RedisStore, slug: str, task: str) -> dict:
 
 def judged(store: RedisStore, slug: str) -> set[str]:
     reports = (json.loads(raw) for raw in store.redis.hgetall(store.key(slug, "launch-check-reports")).values())
-    return set(pending(store, slug)) | {found["agent"] for found in reports if found["state"] == "failed"}
+    return set(pending(store, slug)) | {found["agent"] for found in reports if found.get("held")}
 
 
 def relaunched(store: RedisStore, slug: str, task: str) -> bool:
@@ -139,14 +148,9 @@ def mark_relaunched(store: RedisStore, slug: str, task: str, spent: bool) -> Non
         store.redis.hdel(key, task)
 
 
-def told(found: dict, relaunching: bool) -> str:
+def told(found: dict, outcome: str) -> str:
     fields = ", ".join(WORDS[field] for field in found)
-    then = (
-        "It is being retired and relaunched once."
-        if relaunching
-        else "Its one automatic relaunch is spent; operator action is required."
-    )
-    return f"The master failed its launch check within a minute on {fields}. {then}"
+    return f"The master failed its launch check within a minute on {fields}. {OUTCOMES[outcome]}"
 
 
 def findings(store: RedisStore, slug: str) -> list[Finding]:

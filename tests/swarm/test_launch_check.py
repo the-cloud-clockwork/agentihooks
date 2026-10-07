@@ -234,6 +234,36 @@ def test_master_failure_is_posted_to_the_operator_chat_and_relaunched(store, mon
     assert len(runtime.masters) == 2
 
 
+def test_an_overlay_only_miss_is_reported_without_a_relaunch(store, monkeypatch):
+    ledger, runtime = checked(store, monkeypatch)
+    monkeypatch.setattr(launch_check, "bundled", lambda profile: True)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    first = runtime.spawned[0][1]
+    joined(ledger, runtime, LAUNCH + 1)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert f"{first} failed its launch check on overlay; reported only" in actions
+    assert first not in runtime.killed
+    assert len(runtime.spawned) == 1
+    assert f"launch-check/{first}/overlay" in [f.id for f in launch_check.findings(store, "sw")]
+    assert first not in launch_check.judged(store, "sw")
+    assert any("role overlay" in note and "reported only" in note for note in ledger.notes)
+
+
+def test_a_take_master_launch_that_fails_is_reported_and_kept(store, monkeypatch):
+    ledger, runtime = checked(store, monkeypatch)
+    store.update("sw", max_eng=0)
+    agent = AgentRecord(
+        f"master@{store.ensure_code('sw').code}-0009", MASTER, MASTER, seat="master@sw", started_at=LAUNCH
+    )
+    store.put_agent("sw", agent)
+    runtime.live.add(agent.name)
+    launch_check.begin(store, "sw", agent, LAUNCH, relaunch=False)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert f"{agent.name} failed its launch check on joined; reported only" in actions
+    assert agent.name not in runtime.killed
+    assert any("joining the ledger" in note for note in ledger.notes)
+
+
 def test_take_master_begins_a_check_that_never_relaunches(store):
     agent = AgentRecord(f"master@{store.ensure_code('sw').code}-0001", MASTER, MASTER, seat="master@sw")
     launch_check.begin(store, "sw", agent, LAUNCH, relaunch=False)

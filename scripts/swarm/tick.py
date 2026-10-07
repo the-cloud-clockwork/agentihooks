@@ -240,34 +240,40 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
         launch_check.forget(store, slug, name)
     facts = runtime.bindings(agents) if agents else {}
     for agent in agents:
-        entry = waiting[agent.name]
         found = launch_check.misses(
             store, slug, agent, facts.get(agent.name, {"process": False}), doc, launch_check.bundled(agent.profile)
         )
         if found and now_ms - agent.started_at < launch_check.DEADLINE_MS:
             continue
-        elapsed = launch_check.joined_at(agent, doc) - agent.started_at if not found else now_ms - agent.started_at
-        launch_check.record(store, slug, agent, found, now_ms, elapsed)
-        if not found:
-            launch_check.forget(store, slug, agent.name)
-            launch_check.mark_relaunched(store, slug, agent.task, False)
-            actions.append(f"{agent.name} passed its launch check in {max(elapsed, 0) // 1000} seconds")
+        if found:
+            actions.append(
+                _failed_launch(slug, store, ledger, runtime, rows, agent, waiting[agent.name], found, now_ms)
+            )
             continue
-        actions.append(_failed_launch(slug, store, ledger, runtime, rows, agent, entry, found, now_ms))
+        elapsed = launch_check.joined_at(agent, doc) - agent.started_at
+        launch_check.record(store, slug, agent, found, now_ms, elapsed)
+        launch_check.forget(store, slug, agent.name)
+        launch_check.mark_relaunched(store, slug, agent.task, False)
+        actions.append(f"{agent.name} passed its launch check in {max(elapsed, 0) // 1000} seconds")
     return actions
 
 
 def _failed_launch(slug, store, ledger, runtime, rows, agent, entry, found, now_ms):
-    fields = ", ".join(found)
-    relaunch = entry["relaunch"] and not launch_check.relaunched(store, slug, agent.task)
-    if agent.lane == MASTER:
-        ledger.notify(slug, launch_check.told(found, relaunch))
-    if not relaunch:
-        launch_check.forget(store, slug, agent.name)
-        return f"{agent.name} failed its launch check on {fields}; its one relaunch is spent"
-    if not runtime.retire(agent, agent.name in runtime.live_names()):
+    fields, elapsed = ", ".join(found), now_ms - agent.started_at
+    if not entry["relaunch"] or set(found) <= launch_check.REPORT_ONLY:
+        outcome, said = "report", f"{agent.name} failed its launch check on {fields}; reported only"
+    elif launch_check.relaunched(store, slug, agent.task):
+        outcome, said = "spent", f"{agent.name} failed its launch check on {fields}; its one relaunch is spent"
+    elif not runtime.retire(agent, agent.name in runtime.live_names()):
         return f"could not retire {agent.name} after its launch check failed on {fields}, retrying next tick"
+    else:
+        outcome = "relaunch"
+    launch_check.record(store, slug, agent, found, now_ms, elapsed, held=outcome == "spent")
     launch_check.forget(store, slug, agent.name)
+    if agent.lane == MASTER:
+        ledger.notify(slug, launch_check.told(found, outcome))
+    if outcome != "relaunch":
+        return said
     launch_check.mark_relaunched(store, slug, agent.task, True)
     saved = live_binding.relaunch_assignment(agent, rows.get(agent.task, {}), store.config(slug))
     store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
