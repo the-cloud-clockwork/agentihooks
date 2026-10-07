@@ -1516,7 +1516,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const leftText = gap ? `unknown · ${gap}${left === null ? "" : ` · prior ${span(left * 60000)}`}` : left === null ? "not set" : span(left * 60000);
     const last = (meta.events || []).reduce((m, e) => Math.max(m, e.at || 0), 0);
     const pct = total ? Math.round(100 * done / total) : 0;
-    const row = (label, value, extra) => h("div", { class: "stat" }, h("dt", { text: label }), h("dd", {}, value, extra));
+    const row = (label, value, extra) => h("div", { class: "stat" }, h("dt", { text: label }), h("dd", { style: "min-width:0;margin-left:12px" }, value, extra));
     $("stats").replaceChildren(
       row("Started", started ? when(started) : "—"),
       row("Elapsed", elapsed === null ? "—" : span(elapsed)),
