@@ -76,3 +76,16 @@ def test_copied_package_build_accepts_tag_derived_metadata(tmp_path, monkeypatch
     wheel = _tagged_wheel(tmp_path / "build")
 
     assert wheel.name == f"agentihooks-{WHEEL_VERSION}-py3-none-any.whl"
+
+
+def test_version_is_unknown_without_package_metadata(monkeypatch):
+    import importlib.metadata
+
+    from scripts import install
+
+    def missing(name):
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", missing)
+
+    assert install._get_version() == "unknown"
