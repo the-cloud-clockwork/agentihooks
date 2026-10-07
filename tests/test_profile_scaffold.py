@@ -230,6 +230,18 @@ def test_overlay_check_names_a_missing_overlay_or_manifest(tmp_path, capsys):
     assert scaffold.problems(bundle / "profiles" / "bare") == ["profile.yml is missing"]
 
 
+@pytest.mark.parametrize("name", ["../x", "a/../x", "..", "."])
+def test_overlay_check_refuses_a_name_outside_the_profiles_folder(tmp_path, capsys, name):
+    bundle = _bundle(tmp_path, capsys)
+    _write_overlay(bundle, "x", "name: x\nkind: overlay\nwears: [engineer]\n")
+    (bundle / "profile.yml").write_text("name: x\nkind: overlay\nwears: [engineer]\n")
+
+    assert scaffold.main(["overlay", "check", name]) == 1
+
+    assert capsys.readouterr().err == f"ERROR: overlay {name} not found in the linked bundle\n"
+    assert scaffold.problems(bundle / "profiles" / "bare") == ["profile.yml is missing"]
+
+
 def test_base_roles_are_the_package_roles():
     assert scaffold.base_roles() == ["cicd", "engineer", "master", "planner", "qa"]
 
@@ -254,5 +266,8 @@ def test_install_refuses_an_unknown_bundle_action(monkeypatch, capsys):
         install.main()
 
     assert stop.value.code == 2
-    err = " ".join(capsys.readouterr().err.split()).replace("'", "")
-    assert "invalid choice: frobnicate (choose from new, link, unlink, list, pull)" in err
+    last = " ".join(capsys.readouterr().err.strip().splitlines()[-1].split()).replace("'", "")
+    assert last == (
+        "agentihooks bundle: error: argument action: invalid choice: frobnicate"
+        " (choose from new, link, unlink, list, pull)"
+    )

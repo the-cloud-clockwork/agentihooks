@@ -18,7 +18,7 @@ Your agentihooks profiles, overlays, skills, rules and MCP servers. Layout: the 
 
 - `agentihooks overlay new NAME --wears engineer` adds an overlay under `profiles/`.
 - `agentihooks overlay check NAME` validates it.
-- Commit it: a swarm renders overlays from the bundle at a pinned commit.
+- Commit each change: a rendered agent records the bundle commit it was built from.
 - `agentihooks init` applies the bundle.
 """
 
@@ -68,8 +68,12 @@ def _role_problems(roles: object) -> list[str]:
     return [f"{role} is not a base role; pick from {', '.join(known)}" for role in roles if role not in known]
 
 
+def _plain(name: str) -> bool:
+    return name not in ("", ".", "..") and Path(name).name == name
+
+
 def _name_problems(name: str) -> list[str]:
-    if name in ("", ".", "..") or Path(name).name != name:
+    if not _plain(name):
         return [f"overlay name {name} must be a plain folder name"]
     if KEY_SEPARATOR in name:
         return [f"overlay name {name} cannot hold {KEY_SEPARATOR}"]
@@ -135,7 +139,7 @@ def overlay_new(name: str, wears: str) -> int:
 
 def overlay_check(name: str) -> int:
     profiles = _overlays_dir()
-    folder = profiles / name if profiles else None
+    folder = profiles / name if profiles and _plain(name) else None
     if folder is None or not folder.is_dir():
         return _fail(f"overlay {name} not found in the linked bundle")
     found = problems(folder)

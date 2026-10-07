@@ -19,8 +19,9 @@ agentihooks bundle new ~/dev/my-tools
 agentihooks overlay new backtest-tuner --wears engineer
 agentihooks overlay check backtest-tuner
 
-# Commit it: a swarm renders overlays from the bundle at a pinned commit
-git -C ~/dev/my-tools add -A && git -C ~/dev/my-tools commit -m "Add backtest-tuner overlay"
+# Commit it: a rendered agent records the bundle commit it was built from
+git -C ~/dev/my-tools add README.md enforcements.json .claude profiles
+git -C ~/dev/my-tools commit -m "Add backtest-tuner overlay"
 
 # Link your bundle and install (one command)
 agentihooks init --bundle ~/dev/my-tools
