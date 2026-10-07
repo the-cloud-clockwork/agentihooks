@@ -160,6 +160,22 @@ def test_load_reads_every_source_and_fetches_only_pull_requests_of_tasks_done_in
     assert records.pulls == {URL.format(1): rates_read.pull(RAW)}
 
 
+def test_repeated_rates_measurements_reuse_cached_verified_master_merge(home, tmp_path):
+    from scripts.doctor import rates
+
+    store = RedisStore(fake_redis())
+    events = [{"at": 150 * MIN, "kind": "task done", "target": "tasks/t1", "by": "master@323133-0001"}]
+    tasks = [{"id": "t1", "kind": "code", "pr_url": URL.format(1)}]
+    run = Run(RAW)
+    ledger = Ledger({"tasks": tasks, "_meta": {"events": events}})
+    window = Window(100 * MIN, 200 * MIN)
+    first = rates_read.load(store, ledger, "sw", window, run, tmp_path)
+    second = rates_read.load(store, ledger, "sw", window, run, tmp_path)
+    assert rates.ceremony(first, window)["outcomes"] == 1
+    assert rates.ceremony(second, window) == rates.ceremony(first, window)
+    assert len(run.calls) == 1
+
+
 def test_lines_skip_a_torn_line_and_keep_the_rest(tmp_path):
     path = tmp_path / "log.jsonl"
     path.write_text('{"a": 1}\n{torn\n{"b": 2}\n')

@@ -59,18 +59,94 @@ def test_ceremony_counts_worker_talk_in_the_window_per_outcome():
         ev(130, "task done", "tasks/t1", by="swarm"),
         ev(131, "task claimed", "tasks/t2", by="swarm"),
     ]
-    assert rates.ceremony(recs(events=events), WIN) == {"talk writes": 5, "outcomes": 2, "talk per outcome": 2.5}
+    tasks = {"t1": {"kind": "ops", "proof": {"command": "check", "output": "verified"}}}
+    assert rates.ceremony(recs(events=events, tasks=tasks), WIN) == {
+        "talk writes": 5,
+        "outcomes": 1,
+        "talk per outcome": 5.0,
+    }
 
 
 def test_planted_fault_one_more_worker_comment_raises_the_ceremony_rate():
     events = [ev(110, "comment added", "phases/p1"), ev(120, "task done", "tasks/t1", by="swarm")]
-    before = rates.ceremony(recs(events=events), WIN)["talk per outcome"]
-    after = rates.ceremony(recs(events=[*events, ev(121, "comment added", "phases/p1")]), WIN)["talk per outcome"]
+    tasks = {"t1": {"kind": "ops", "proof": {"command": "check", "output": "verified"}}}
+    before = rates.ceremony(recs(events=events, tasks=tasks), WIN)["talk per outcome"]
+    after = rates.ceremony(recs(events=[*events, ev(121, "comment added", "phases/p1")], tasks=tasks), WIN)[
+        "talk per outcome"
+    ]
     assert (before, after) == (1.0, 2.0)
 
 
 def merged(n, at, files=(), lines=10, state="MERGED"):
     return Pull(state, at * MIN if state == "MERGED" else None, lines, tuple(files))
+
+
+def outcome_records():
+    tasks = {
+        "hn1": {
+            "kind": "code",
+            "pr_url": "",
+            "state": "done",
+            "comments": [{"by": MASTER, "text": "Task closed as not possible."}],
+        },
+        "code": {"kind": "code", "pr_url": URL.format(1)},
+        "ci": {"kind": "ci", "pr_url": URL.format(2)},
+        "ops": {"kind": "ops", "proof": {"command": "check", "output": "verified"}},
+        "tune": {"kind": "tune", "proof": {"command": "measure", "output": "before 3 after 2"}},
+        "fixed": {
+            "kind": "troubleshoot",
+            "proof": {"root_cause": "existing fix", "evidence": "verified control", "fix": "already merged"},
+        },
+        "research": {"kind": "research", "proof": {"finding": "https://github.com/o/r/issues/3"}},
+        "plan": {"kind": "plan", "proof": {"slice": "child"}},
+        "closed": {"kind": "code", "pr_url": URL.format(3)},
+        "unread": {"kind": "ci", "pr_url": URL.format(4)},
+        "missing": {"kind": "ops"},
+        "invalid": {"kind": "research", "proof": {"finding": "no link"}},
+        "unknown": {"kind": "unknown"},
+        "excluded": {"kind": "ops", "out_of_scope": True, "proof": {"command": "check", "output": "verified"}},
+    }
+    events = [ev(110, "comment added", "phases/p1"), ev(120, "task pr", "tasks/code", by=MASTER)]
+    events += [ev(130, "task done", f"tasks/{tid}", by=MASTER) for tid in tasks]
+    events += [
+        ev(140, "task done", "tasks/code", by=MASTER),
+        ev(150, "task done", "tasks/gone", by=MASTER),
+        ev(150, "task done", "phases/p1", by=MASTER),
+    ]
+    pulls = {
+        URL.format(1): merged(1, 125),
+        URL.format(2): merged(2, 125),
+        URL.format(3): merged(3, 125, state="CLOSED"),
+    }
+    return recs(events=events, tasks=tasks, pulls=pulls)
+
+
+def test_ceremony_counts_only_contract_supported_completions():
+    assert rates.ceremony(outcome_records(), WIN) == {
+        "talk writes": 1,
+        "outcomes": 7,
+        "talk per outcome": 0.14,
+    }
+
+
+def test_impossible_naming_closure_does_not_change_verified_outcomes():
+    records = outcome_records()
+    without = recs(
+        events=[e for e in records.events if e["target"] != "tasks/hn1"], tasks=records.tasks, pulls=records.pulls
+    )
+    assert rates.ceremony(records, WIN) == rates.ceremony(without, WIN)
+
+
+def test_master_reconciled_merged_code_and_ci_tasks_count():
+    records = outcome_records()
+    events = [e for e in records.events if e["target"] in ("tasks/code", "tasks/ci")]
+    assert rates.ceremony(recs(events=events, tasks=records.tasks, pulls=records.pulls), WIN)["outcomes"] == 2
+
+
+def test_valid_noncode_proofs_and_existing_verified_fix_count_without_new_code():
+    records = outcome_records()
+    tasks = {tid: records.tasks[tid] for tid in ("ops", "tune", "fixed", "research", "plan")}
+    assert rates.ceremony(recs(events=records.events, tasks=tasks), WIN)["outcomes"] == 5
 
 
 def test_scope_inflation_reads_merged_pull_requests_of_tasks_done_in_the_window():
