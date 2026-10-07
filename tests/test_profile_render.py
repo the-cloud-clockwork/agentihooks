@@ -688,6 +688,26 @@ def test_codex_render_keeps_hooks_on_and_layer_servers_out(world):
     assert "layer-srv" not in doc["mcp_servers"]
 
 
+def test_codex_render_status_line_keeps_context_apart_from_cumulative_tokens(world):
+    from scripts.profiles import render
+
+    line = tomllib.loads((render.render_codex("rb-role") / "config.toml").read_text())["tui"]["status_line"]
+
+    context = line.index("context-used")
+    assert line[context + 1] == "context-window-size"
+    assert not {"context-usage", "used-tokens"} & set(line)
+
+
+def test_codex_render_keeps_a_profile_status_line(world):
+    from scripts.profiles import render
+
+    _write(world["role"] / ".codex" / "config.overrides.toml", '[tui]\nstatus_line = ["model", "used-tokens"]\n')
+
+    doc = tomllib.loads((render.render_codex("rb-role") / "config.toml").read_text())
+
+    assert doc["tui"]["status_line"] == ["model", "used-tokens"]
+
+
 READS = ["lf-swarm_traces_by_tag", "lf-swarm_session_timeline", "lf-swarm_error_latency_summary"]
 GW_HEADERS = {"Authorization": "Bearer ${GW_KEY}", "x-mcp-servers": "lf", "X-Scope": "${GW_SCOPE}"}
 
