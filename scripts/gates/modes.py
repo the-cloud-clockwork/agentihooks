@@ -1,6 +1,6 @@
 """Each gate's mode: enforce denies, observe logs the would-be deny, off skips the gate.
 
-Inside a swarm the mode is the swarm config's gates entry, set only by the operator; AGENTIHOOKS_GATE_<NAME> picks it
+Inside a swarm the mode is the swarm config's gates entry, set only by the operator or the master; AGENTIHOOKS_GATE_<NAME> picks it
 only outside a swarm.
 """
 

@@ -470,7 +470,12 @@ def swarm_control(slug, argv, command="swarm"):
     try:
         if command == "swarm" and argv[0] == "terminate":
             return terminate_control(slug, argv[1])
-        env = {**os.environ, "AGENTIHOOKS_AGENT_NAME": "operator", "AGENTIHOOKS_CONTROL_SOURCE": "page"}
+        env = {
+            **os.environ,
+            "AGENTIHOOKS_AGENT_NAME": "operator",
+            "AGENTIHOOKS_SWARM": "",
+            "AGENTIHOOKS_CONTROL_SOURCE": "page",
+        }
         done = subprocess.run([exe, command, slug, *argv], capture_output=True, text=True, timeout=60, env=env)
     except (OSError, subprocess.SubprocessError) as exc:
         return None, str(exc)
