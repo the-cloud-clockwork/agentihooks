@@ -158,7 +158,7 @@ def test_core_loaded_under_another_name_keeps_its_clock(stored, monkeypatch):
     import importlib.util
     import sys
 
-    spec = importlib.util.spec_from_file_location("ledger_core_clock_proof", core.__file__)
+    spec = importlib.util.spec_from_file_location(core.__name__, core.__file__)
     alias = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, alias)
     spec.loader.exec_module(alias)
