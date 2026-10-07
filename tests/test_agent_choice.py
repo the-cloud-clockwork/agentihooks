@@ -8,6 +8,11 @@ def _no_herdr(monkeypatch):
     monkeypatch.setattr(herdr_host, "binary", lambda: None)
 
 
+@pytest.fixture(autouse=True)
+def _no_stored_caps(monkeypatch):
+    monkeypatch.setattr("scripts.session_caps.stored", lambda harness="claude": {})
+
+
 def _quota(monkeypatch, **left):
     monkeypatch.setattr(agent_choice, "has_quota", lambda agent, environ: left.get(agent))
     monkeypatch.setattr(agent_choice, "at_cap", lambda agent, environ: False)

@@ -5,10 +5,11 @@ import shutil
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 
 from scripts.claude_quota_balancer import _duration, _percent, _span
+from scripts.session_caps import SessionCaps
 
 PAGE_TTL_S = 60
 REFRESH_MIN_S = 60
@@ -77,14 +78,14 @@ def codex_rows(accounts: list, quotas: dict, sessions: dict[str, int], now: floa
     return rows
 
 
-def render(rows: list[QuotaRow], now: int) -> str:
+def render(rows: list[QuotaRow], now: int, caps: Mapping[str, SessionCaps] | None = None) -> str:
     headers = ["AGENT", "ACCOUNT", "STATE", "SESSIONS", "5H LEFT", "5H RESET", "7D LEFT", "7D RESET", "SOURCE"]
     table = [
         [
             row.agent,
             row.account,
             row.state,
-            str(row.sessions),
+            f"{row.sessions}/{caps[row.agent].of(row.account)}" if caps and row.agent in caps else str(row.sessions),
             _percent(row.five_hour_left),
             _duration(row.five_hour_resets_at, now),
             _percent(row.seven_day_left),
@@ -124,8 +125,11 @@ def _codex(now: float) -> list[QuotaRow]:
 
 
 def codex_table() -> str:
+    from hooks.context.account_sessions import max_sessions
+    from scripts import session_caps
+
     now = time.time()
-    return render(_codex(now), int(now))
+    return render(_codex(now), int(now), {"codex": session_caps.caps(max_sessions(), "codex")})
 
 
 def _page_quota(now: float) -> dict:
@@ -147,10 +151,15 @@ def _page_quota(now: float) -> dict:
 
 
 def page_quota(now: float | None = None) -> dict:
+    from scripts import session_caps
+
     now = time.time() if now is None else now
     if not _page_cache or now - _page_cache["at"] >= PAGE_TTL_S:
         _page_cache.update(at=now, quota=_page_quota(now))
-    return _page_cache["quota"]
+    quota = _page_cache["quota"]
+    caps = {harness: session_caps.stored(harness) for harness in session_caps.HARNESSES}
+    rows = [{**row, "cap": caps[row["agent"]].get(row["account"], quota["cap"])} for row in quota["rows"]]
+    return {**quota, "rows": rows}
 
 
 def refresh_page_quota(probe: Callable[[], str], now: float | None = None) -> str:
