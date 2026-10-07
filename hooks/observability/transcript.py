@@ -151,24 +151,30 @@ def record_id(record: dict) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def complete_records(transcript_path: str) -> tuple[list[dict], int, int]:
-    records = []
-    position = 0
-    unsupported = 0
+def iter_complete_records(transcript_path: str, start: int = 0):
+    position = start
     with open(transcript_path, "rb") as handle:
+        handle.seek(start)
         for line in handle:
             if not line.endswith(b"\n"):
-                break
+                return
             position += len(line)
             try:
                 record = json.loads(line)
             except (ValueError, UnicodeDecodeError):
-                unsupported += 1
-                continue
-            if isinstance(record, dict):
-                records.append(record)
-            else:
-                unsupported += 1
+                record = None
+            yield (record if isinstance(record, dict) else None), position
+
+
+def complete_records(transcript_path: str) -> tuple[list[dict], int, int]:
+    records = []
+    position = 0
+    unsupported = 0
+    for record, position in iter_complete_records(transcript_path):
+        if record is None:
+            unsupported += 1
+        else:
+            records.append(record)
     return records, position, unsupported
 
 

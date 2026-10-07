@@ -55,6 +55,13 @@ lock for its whole life, so a session never has two.
   every export of a session lands in the same trace. A cursor in
   `~/.agentihooks/agent_trace/<session id>.json` records what the backend
   accepted; each export sends only new or changed observations.
+- **Long sessions.** The cursor holds at most 8 MB of unsent records and
+  observations. Records past that wait for the next export, so a session of
+  any length keeps exporting; while a backlog waits the exporter logs
+  `agent trace export overflow` and counts an `overflow` traces signal.
+  Accepted records whose
+  observations can no longer change leave the cursor, and the next read starts
+  after them.
 - **Span tree.** Root `agent` observation named after the agent
   (`AGENTIHOOKS_AGENT_NAME`, else `agent-session`); a `turn N` span per user
   prompt; a `generation` per model message with token usage; a `tool` span per
