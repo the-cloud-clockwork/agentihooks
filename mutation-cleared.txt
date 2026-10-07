@@ -650,5 +650,89 @@
   "scripts/swarm_ledger/ledger_stats.py:scripts.swarm_ledger.ledger_stats.x_refresh__mutmut_30:4f6313b8a5da9c95982aff3a3b0fd99c52ed8c8508b50aafbddabd1330a11299": {
     "reader": "Standards",
     "reason": "The mutant omits the precomputed review argument; the same pure calculator receives identical document, events and time before mutation and yields identical persisted stats and review."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁreceive__mutmut_3:47b0a5f5739a912849451da407cb6339e358d2d3c322d33c37aa97a1e532db78": {
+    "reader": "Standards",
+    "reason": "FileLedgerRepository.get_document branches on reconcile truthiness; False and None select the identical locked persisted-document read."
+  },
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_main__mutmut_10:141e8079219216f05e310be8020efb48c38cdbfc5c7db7568cad3dcdf789adc2": {
+    "reader": "Standards",
+    "reason": "Creator dispatch and _join never read or persist the join operation id; changing its key or generated token length changes no response, document, metadata or event."
+  },
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_main__mutmut_11:45e71abe645c3adf5bbc771a9c767090752823106700727c6db4eeed61d57877": {
+    "reader": "Standards",
+    "reason": "Creator dispatch and _join never read or persist the join operation id; changing its key or generated token length changes no response, document, metadata or event."
+  },
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_main__mutmut_12:dabdb105b59c54f0c137df81a6baf5bd61eb5f7b03cacf610cd9380f4f693263": {
+    "reader": "Standards",
+    "reason": "Creator dispatch and _join never read or persist the join operation id; changing its key or generated token length changes no response, document, metadata or event."
+  },
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_main__mutmut_13:239026c7edb715cc2f63a028fbb8fb856b4dd08c1e17c1033c7333b6c65cb05d": {
+    "reader": "Standards",
+    "reason": "Creator dispatch and _join never read or persist the join operation id; changing its key or generated token length changes no response, document, metadata or event."
+  },
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_main__mutmut_16:3b11aaed1c9ebada54cebccde8ca413ed3a486d6f0b64609a1f2290ce2494653": {
+    "reader": "Standards",
+    "reason": "Creation supplies a new empty members dictionary; _join defaults the missing role to member and records the same joined event."
+  },
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_main__mutmut_17:3b5563eddcc9c946680e42b0d49b3afc9e6707565a41787601877c92fe53c545": {
+    "reader": "Standards",
+    "reason": "Creation supplies a new empty members dictionary; _join defaults the missing role to member and records the same joined event."
+  },
+  "scripts/swarm_ledger/repository/bin_storage.py:scripts.swarm_ledger.repository.bin_storage.x_auto_bin__mutmut_18:a48917aaad3de6ad3c2783e6223fc519af6d63dad91b5e592baa35976bc2a10b": {
+    "reader": "Standards",
+    "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
+  },
+  "scripts/swarm_ledger/repository/bin_storage.py:scripts.swarm_ledger.repository.bin_storage.x_entries__mutmut_5:e6414016083fdb72bc8bf766f58c2b5274b1f6a541afa8943a6b12767e8199b0": {
+    "reader": "Standards",
+    "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
+  },
+  "scripts/swarm_ledger/repository/bin_storage.py:scripts.swarm_ledger.repository.bin_storage.x_restored__mutmut_5:3835d347db0b8b3b275fecc90ef3f48f3e1a112071a4c09131b1fa282b396530": {
+    "reader": "Standards",
+    "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
+  },
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x_all_summaries__mutmut_20:e6bd1f8b245e3537dbaf8853caee90aa6a07dc75e59c51fa0ac79a94c544b5d4": {
+    "reader": "Standards",
+    "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
+  },
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x_create__mutmut_1:e2236597935bad491db76399b7b4a415229dc5de390929d5db58b97366ef2bcb": {
+    "reader": "Standards",
+    "reason": "The only production caller of the extracted helper is FileLedgerRepository.create, which passes size explicitly; changing the helper default affects no supported call."
+  },
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x_create__mutmut_2:9f4e29b12157b4da76ffd0491a434333c11fd7d80a81d866415dcb25561c38bb": {
+    "reader": "Standards",
+    "reason": "The only production caller of the extracted helper is FileLedgerRepository.create, which passes size explicitly; changing the helper default affects no supported call."
+  },
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x_load_state__mutmut_5:3af66f319f048c9ccdb1910b88e757997838fe308ac859ace667c52457ce32ed": {
+    "reader": "Standards",
+    "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
+  },
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x_sync__mutmut_16:ea13b015d37249b9de50f793455880274946fb7c0eba8cd364714ac8058a69cd": {
+    "reader": "Standards",
+    "reason": "The default core has identical pure loads/normalize behavior. For missing JSON, earliest ignores initial updated_at and fresh sync overwrites it with caller Context.at; existing JSON does not use the loader clock."
+  },
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x_sync__mutmut_173:e0658b5ed95f240af894036168399f1069af8f3f0311bfb3bb634dea40092275": {
+    "reader": "Standards",
+    "reason": "Python JSONEncoder selects escaping by ensure_ascii truthiness; False and None produce the same Unicode storage bytes."
+  },
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x_sync__mutmut_6:6fdbb55b8d849fed2d1f8f41738e8b45fdd390c3ed77b44731cf9925a1b110cc": {
+    "reader": "Standards",
+    "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
+  },
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁevents_since__mutmut_6:a4b51e8d9e868bfc09267f83c4b792fd822fe5b2eeded8ef384aae0a32019f92": {
+    "reader": "Standards",
+    "reason": "These calls always load existing JSON with seed None. The default and supplied canonical core expose identical pure loads/normalize code and constants; locks and paths remain bound to self.domain."
+  },
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁget_document__mutmut_12:5564d2623e14c85100e77a910247efd21328caebb4f372d48c565eb6827086a2": {
+    "reader": "Standards",
+    "reason": "These calls always load existing JSON with seed None. The default and supplied canonical core expose identical pure loads/normalize code and constants; locks and paths remain bound to self.domain."
+  },
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁread_page__mutmut_5:74518b453d780af5cd921081ceb0b72eb7683386c0ae327941c00863fdf4bc1d": {
+    "reader": "Standards",
+    "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
+  },
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁread_snapshot__mutmut_6:4cf49a8e028eef0200c330b480f3e0598383a25882b4167acf0cf88fcc4f6f48": {
+    "reader": "Standards",
+    "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
   }
 }

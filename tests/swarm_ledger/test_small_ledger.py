@@ -9,10 +9,12 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
-import ledger_bin  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
-import new_ledger  # noqa: E402
+
+from scripts.swarm_ledger import ledger_bin, new_ledger  # noqa: E402
+from scripts.swarm_ledger.repository import bin_storage
+from scripts.swarm_ledger.repository import file as storage
 
 DAY_MS = 24 * 60 * 60 * 1000
 T0 = 1_800_000_000_000
@@ -46,7 +48,7 @@ def create(slug, *argv, env=None):
 
 
 def state(slug):
-    return json.loads(core.paths(slug)[1].read_text(encoding="utf-8"))
+    return storage.FileLedgerRepository().read_snapshot(slug)
 
 
 def finish(slug):
@@ -126,23 +128,23 @@ class Lifecycle(unittest.TestCase):
         with at(T0):
             create("life-done", "--as", "w")
             finish("life-done")
-        self.assertIn("life-done", ledger_bin.auto_bin(now=T0 + 1000))
+        self.assertIn("life-done", bin_storage.auto_bin(now=T0 + 1000))
         self.assertEqual(ledger_bin.entries()["life-done"], T0 + 1000)
         self.assertNotIn("life-done", {s["slug"] for s in server.ledger_summaries()})
 
     def test_a_small_ledger_with_open_items_stays_until_seven_idle_days_pass(self):
         with at(T0):
             create("life-idle", "--as", "w")
-        self.assertNotIn("life-idle", ledger_bin.auto_bin(now=T0 + 7 * DAY_MS))
-        self.assertIn("life-idle", ledger_bin.auto_bin(now=T0 + 7 * DAY_MS + 1))
+        self.assertNotIn("life-idle", bin_storage.auto_bin(now=T0 + 7 * DAY_MS))
+        self.assertIn("life-idle", bin_storage.auto_bin(now=T0 + 7 * DAY_MS + 1))
 
     def test_any_change_restarts_the_idle_clock(self):
         with at(T0):
             create("life-touched", "--as", "w")
         with at(T0 + 5 * DAY_MS):
             core.sync("life-touched", ops=[{"op": "add", "thread": "chat", "id": "c1", "text": "still here"}])
-        self.assertNotIn("life-touched", ledger_bin.auto_bin(now=T0 + 8 * DAY_MS))
-        self.assertIn("life-touched", ledger_bin.auto_bin(now=T0 + 12 * DAY_MS + 1))
+        self.assertNotIn("life-touched", bin_storage.auto_bin(now=T0 + 8 * DAY_MS))
+        self.assertIn("life-touched", bin_storage.auto_bin(now=T0 + 12 * DAY_MS + 1))
 
     def test_swarm_and_unsized_ledgers_never_auto_bin(self):
         with at(T0):
@@ -151,7 +153,7 @@ class Lifecycle(unittest.TestCase):
             html_path = core.paths("life-legacy")[0]
             html_path.write_text(new_ledger.render(new_ledger.build_doc(CONTENT, size=None), "life-legacy", 8765))
             core.sync("life-legacy")
-        binned = ledger_bin.auto_bin(now=T0 + 400 * DAY_MS)
+        binned = bin_storage.auto_bin(now=T0 + 400 * DAY_MS)
         self.assertNotIn("life-swarm", binned)
         self.assertNotIn("life-legacy", binned)
 
@@ -176,32 +178,32 @@ class Restore(unittest.TestCase):
         with at(T0):
             create("back-done", "--as", "w")
             finish("back-done")
-        ledger_bin.auto_bin(now=T0 + 1000)
+        bin_storage.auto_bin(now=T0 + 1000)
         self.assertTrue(ledger_bin.restore("back-done", now=T0 + DAY_MS))
-        self.assertNotIn("back-done", ledger_bin.auto_bin(now=T0 + 2 * DAY_MS))
+        self.assertNotIn("back-done", bin_storage.auto_bin(now=T0 + 2 * DAY_MS))
         self.assertIn("back-done", {s["slug"] for s in server.ledger_summaries()})
-        self.assertNotIn("back-done", ledger_bin.auto_bin(now=T0 + 8 * DAY_MS))
-        self.assertIn("back-done", ledger_bin.auto_bin(now=T0 + 8 * DAY_MS + 1))
+        self.assertNotIn("back-done", bin_storage.auto_bin(now=T0 + 8 * DAY_MS))
+        self.assertIn("back-done", bin_storage.auto_bin(now=T0 + 8 * DAY_MS + 1))
 
     def test_a_restored_idle_ledger_gets_a_fresh_idle_limit_and_stays_usable(self):
         with at(T0):
             create("back-idle", "--as", "w")
-        ledger_bin.auto_bin(now=T0 + 8 * DAY_MS)
+        bin_storage.auto_bin(now=T0 + 8 * DAY_MS)
         self.assertIn("back-idle", ledger_bin.entries())
         self.assertTrue(ledger_bin.restore("back-idle", now=T0 + 9 * DAY_MS))
-        self.assertNotIn("back-idle", ledger_bin.auto_bin(now=T0 + 10 * DAY_MS))
+        self.assertNotIn("back-idle", bin_storage.auto_bin(now=T0 + 10 * DAY_MS))
         with at(T0 + 11 * DAY_MS):
             _, rejected = core.sync("back-idle", ops=[{"op": "add", "thread": "chat", "id": "c1", "text": "back"}])
         self.assertEqual(rejected, [])
-        self.assertNotIn("back-idle", ledger_bin.auto_bin(now=T0 + 18 * DAY_MS))
-        self.assertIn("back-idle", ledger_bin.auto_bin(now=T0 + 18 * DAY_MS + 1))
+        self.assertNotIn("back-idle", bin_storage.auto_bin(now=T0 + 18 * DAY_MS))
+        self.assertIn("back-idle", bin_storage.auto_bin(now=T0 + 18 * DAY_MS + 1))
 
     def test_a_change_after_restore_lets_a_finished_ledger_bin_again(self):
         with at(T0):
             create("back-again", "--as", "w")
             finish("back-again")
-        ledger_bin.auto_bin(now=T0 + 1000)
+        bin_storage.auto_bin(now=T0 + 1000)
         ledger_bin.restore("back-again", now=T0 + DAY_MS)
         with at(T0 + 2 * DAY_MS):
             core.sync("back-again", ops=[{"op": "add", "thread": "chat", "id": "c1", "text": "all good"}])
-        self.assertIn("back-again", ledger_bin.auto_bin(now=T0 + 2 * DAY_MS + 1000))
+        self.assertIn("back-again", bin_storage.auto_bin(now=T0 + 2 * DAY_MS + 1000))

@@ -248,7 +248,7 @@ def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
         seen_changes.append(changes)
         return {"_meta": {"members": {}}, "tasks": []}, []
 
-    monkeypatch.setattr(ledger_server.core, "sync", sync)
+    monkeypatch.setattr(ledger_server.repository, "apply_ops", sync)
     monkeypatch.setattr(ledger_server, "relay_to_inbox", lambda slug, state: [])
     monkeypatch.setattr(ledger_server, "doctor_phrase", lambda slug, state: None)
     handler = ledger_server.Handler.__new__(ledger_server.Handler)

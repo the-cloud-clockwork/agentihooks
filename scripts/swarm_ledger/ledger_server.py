@@ -33,17 +33,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(1, str(Path(__file__).resolve().parents[2]))
 import ledger_artifacts  # noqa: E402
 import ledger_bin  # noqa: E402
-import ledger_close  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate  # noqa: E402
 import ledger_layout  # noqa: E402
 import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
-import ledger_size  # noqa: E402
 import ledger_workspace  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
+from scripts.swarm_ledger.repository import repository
 
 HOST, PORT = ledger_link.address()
 BASE = f"http://{HOST}:{PORT}"
@@ -66,32 +65,7 @@ CODE_DIRS = (
 
 
 def all_summaries():
-    found = []
-    for path in sorted(core.LEDGER_DIR.glob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True):
-        json_path = core.paths(path.stem)[1]
-        try:
-            seed = core.parse_seed(path.read_text(encoding="utf-8"))
-        except (ValueError, OSError):
-            seed = None
-        try:
-            doc, meta, _ = core.load_state(json_path, seed)
-        except (ValueError, OSError):
-            continue
-        items = [i for i in doc.get("tasks") or doc.get("phases") or [] if not i.get("out_of_scope")]
-        done = sum(1 for i in items if i.get("done") is True)
-        found.append(
-            {
-                "slug": path.stem,
-                "title": doc.get("title") or path.stem,
-                "overview": ledger_close.intro(doc.get("overview") or ""),
-                "closed_at": doc.get("closed_at"),
-                "size": ledger_size.size_of(doc),
-                "open": len(items) - done,
-                "done": done,
-                "updated_at": meta.get("updated_at"),
-            }
-        )
-    return found
+    return repository.list_summaries()
 
 
 def ledger_summaries():
@@ -247,16 +221,15 @@ def index_page(view="home", now=None):
 
 def page_for(slug):
     """The page as served: when an agent broke the seed, the JSON's document stands in for it."""
-    html_path = core.paths(slug)[0]
     try:
-        embedded = core.PAGE_RE.search(html_path.read_text(encoding="utf-8"))
+        embedded = core.PAGE_RE.search(repository.read_page(slug))
         if not embedded or embedded.group(1) != core.page_version():
             new_ledger.upgrade_page(slug)
-        state, _ = core.sync(slug)
+        state = repository.get_document(slug)
     except (ValueError, OSError) as exc:
         sys.stderr.write(f"sync {slug}: {exc}\n")
-        return html_path.read_text(encoding="utf-8")
-    page = html_path.read_text(encoding="utf-8")
+        return repository.read_page(slug)
+    page = repository.read_page(slug)
     if state["_meta"].get("seed_error"):
         doc = {k: v for k, v in state.items() if k != "_meta"}
         page = core.SEED_RE.sub(
@@ -277,7 +250,7 @@ def swarm_status(slug):
     from scripts.swarm.store import SwarmError
 
     try:
-        state = core.loads(core.paths(slug)[1].read_text(encoding="utf-8"))
+        state = repository.read_snapshot(slug)
         return status_report(swarm_store(), slug, state)
     except SwarmError:
         return None
@@ -549,13 +522,13 @@ class Handler(BaseHTTPRequestHandler):
         return self.path.split("?", 1)[0].strip("/").removeprefix("api/").removesuffix(".html")
 
     def exists(self, slug):
-        return core.SLUG_RE.match(slug) and core.paths(slug)[0].exists()
+        return core.SLUG_RE.match(slug) and repository.exists(slug)
 
     def refused(self, slug=None):
         if self.headers.get("Host") not in ALLOWED_HOSTS:
             return self.send(403, "host not allowed", "text/plain") or True
         if slug is not None:
-            token = core.read_token(core.paths(slug)[0].read_text(encoding="utf-8"))
+            token = core.read_token(repository.read_page(slug))
             if not token or self.headers.get("X-Ledger-Token") != token:
                 return self.send(403, "missing or wrong ledger token", "text/plain") or True
         return False
@@ -565,7 +538,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def reply_state(self, slug, changes=None, ops=None):
         try:
-            state, rejected = core.sync(slug, changes=changes, ops=ops, gate=talk.Budget(slug) if ops else None)
+            state, rejected = repository.apply_ops(
+                slug, changes=changes, ops=ops, gate=talk.Budget(slug) if ops else None
+            )
         except (ValueError, OSError) as exc:
             return self.send(500, f"ledger unreadable: {exc}", "text/plain")
         if changes or ops:
@@ -713,10 +688,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.refused(slug):
             return None
         if agent or agents_only:
-            with core.LOCK:
-                _, meta, _ = core.load_state(core.paths(slug)[1], None)
-                if agent not in meta.get("members", {}):
-                    return self.send(403, "agent must join this ledger before uploading", "text/plain")
+            meta = repository.get_document(slug, reconcile=False)["_meta"]
+            if agent not in meta.get("members", {}):
+                return self.send(403, "agent must join this ledger before uploading", "text/plain")
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
@@ -816,12 +790,12 @@ def watch_seeds(interval=2.0):
             ledger_bin.tidy()
         except OSError as exc:
             sys.stderr.write(f"bin purge: {exc}\n")
-        for path in core.LEDGER_DIR.glob("*.html"):
+        for path in repository.pages():
             try:
                 mtime = path.stat().st_mtime
                 if seen.get(path) != mtime:
                     seen[path] = mtime
-                    core.sync(path.stem)
+                    repository.get_document(path.stem)
             except Exception as exc:  # the loop must outlive any one bad ledger
                 sys.stderr.write(f"skip {path.name}: {exc}\n")
         time.sleep(interval)

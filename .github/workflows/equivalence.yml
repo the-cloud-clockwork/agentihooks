@@ -1,0 +1,64 @@
+name: Ledger equivalence
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - scripts/swarm_ledger/**
+      - tests/swarm_ledger/**
+      - .github/workflows/equivalence.yml
+
+permissions:
+  contents: read
+
+jobs:
+  ledger-equivalence:
+    if: contains(github.event.pull_request.body, '<!-- ledger-equivalence -->')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: head
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/checkout@v4
+        with:
+          path: base
+          ref: ${{ github.event.pull_request.base.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          enable-cache: false
+      - name: Install dependencies
+        run: uv pip install --system --excludes head/.github/test-excludes.txt -e './head[dev,all]'
+      - name: Compare recorded requests and storage bytes
+        run: |
+          python head/tests/swarm_ledger/repository_replay.py "$PWD/base" "$RUNNER_TEMP/base-ledger" base.json
+          python head/tests/swarm_ledger/repository_replay.py "$PWD/head" "$RUNNER_TEMP/head-ledger" head.json
+          cmp base.json head.json
+      - name: Plant a dropped checkbox update in extracted storage
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('head/scripts/swarm_ledger/repository/file.py')
+          source = path.read_text()
+          needle = 'core.apply_changes(doc, changes or [], ctx)'
+          assert source.count(needle) == 1
+          path.write_text(source.replace(needle, 'core.apply_changes(doc, [], ctx)'))
+          PY
+          python head/tests/swarm_ledger/repository_replay.py "$PWD/head" "$RUNNER_TEMP/fault-ledger" fault.json
+          if cmp -s base.json fault.json; then
+            echo 'FAIL: planted checkbox fault escaped the equivalence check'
+            exit 1
+          fi
+          echo 'PASS: identical base and head; planted checkbox fault rejected'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ledger-equivalence
+          path: |
+            base.json
+            head.json
+            fault.json

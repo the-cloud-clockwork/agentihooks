@@ -7,6 +7,8 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
+from scripts.swarm_ledger.repository import file as storage
+
 SLUG = "demo-2026-01-01"
 
 
@@ -24,7 +26,7 @@ def make_ledger():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(new_ledger.render(doc, SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
-    core.sync(SLUG)
+    storage.sync(SLUG)
 
 
 def chat(state):
@@ -37,19 +39,19 @@ class ChatOps(unittest.TestCase):
 
     def test_clear_empties_chat_and_logs_one_event(self):
         for n in range(3):
-            core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": f"m-{n}", "text": "hi"}])
-        state, rejected = core.sync(SLUG, ops=[{"op": "clear", "thread": "chat", "id": "c-1"}])
+            storage.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": f"m-{n}", "text": "hi"}])
+        state, rejected = storage.sync(SLUG, ops=[{"op": "clear", "thread": "chat", "id": "c-1"}])
         self.assertEqual(rejected, [])
         self.assertEqual(chat(state), [])
         self.assertEqual([e["kind"] for e in state["_meta"]["events"]].count("chat cleared"), 1)
 
     def test_clear_on_empty_chat_logs_nothing(self):
-        before = core.sync(SLUG)[0]["_meta"]["rev"]
-        state, _ = core.sync(SLUG, ops=[{"op": "clear", "thread": "chat", "id": "c-2"}])
+        before = storage.sync(SLUG)[0]["_meta"]["rev"]
+        state, _ = storage.sync(SLUG, ops=[{"op": "clear", "thread": "chat", "id": "c-2"}])
         self.assertEqual(state["_meta"]["rev"], before)
 
     def test_clear_is_refused_outside_chat(self):
-        _, rejected = core.sync(SLUG, ops=[{"op": "clear", "thread": "notes", "id": "c-3"}])
+        _, rejected = storage.sync(SLUG, ops=[{"op": "clear", "thread": "notes", "id": "c-3"}])
         self.assertEqual(rejected, ["c-3"])
 
     def test_check_body_accepts_clear_without_text(self):
@@ -69,7 +71,7 @@ class Start(unittest.TestCase):
 
     def test_sync_persists_created_at(self):
         make_ledger()
-        meta = core.sync(SLUG)[0]["_meta"]
+        meta = storage.sync(SLUG)[0]["_meta"]
         self.assertGreater(meta["created_at"], 0)
         self.assertNotIn("started_at", meta)
 

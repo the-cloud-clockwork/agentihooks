@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import tempfile
 import threading
 import time
@@ -675,19 +676,9 @@ def check_body(body, task_ids=()):
 
 
 def load_state(json_path, seed):
-    if json_path.exists():
-        state = loads(json_path.read_text(encoding="utf-8"))
-        if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or "seeds" not in state["_meta"]:
-            raise ValueError(f"{json_path} has no ledger _meta")
-        meta = state.pop("_meta")
-        meta.setdefault("events", [])
-        return normalize(state), meta, False
-    if seed is None:
-        raise ValueError(f"{json_path} is missing and the HTML seed is unreadable")
-    doc = {k: v for k, v in seed.items() if k not in ("_rev", "notifications")}
-    doc["phases"] = [{k: v for k, v in phase.items() if k != "review"} for phase in doc["phases"]]
-    meta = {"rev": 0, "stamps": {}, "events": [], "seeds": {"0": doc}, "seed_error": None, "updated_at": now_ms()}
-    return doc, meta, True
+    from scripts.swarm_ledger.repository.file import load_state as read_state
+
+    return read_state(json_path, seed, sys.modules[__name__])
 
 
 def rewrite_seed(html_path, html, doc, rev):
@@ -701,50 +692,6 @@ def gated(gate, doc, op, ctx):
 
 
 def sync(slug, changes=None, ops=None, gate=None):
-    """Fold agent seed edits and operator changes/ops into the JSON, then rewrite the seed.
+    from scripts.swarm_ledger.repository import FileLedgerRepository
 
-    Returns (state, rejected). The JSON is written before the HTML so a crash in between
-    leaves an old `_rev` in the seed, which the next sync diffs against its own seed.
-    """
-    html_path, json_path = paths(slug)
-    with LOCK:
-        html = html_path.read_text(encoding="utf-8")
-        try:
-            seed, seed_error = parse_seed(html), None
-        except ValueError as exc:
-            seed, seed_error = None, f"HTML seed unreadable, agent edits ignored until fixed: {exc}"
-        doc, meta, created = load_state(json_path, seed)
-        ctx = Context(meta, now_ms())
-        meta.setdefault("members", {})
-        meta["created_at"] = earliest(meta, ctx.at)
-        seed_rev = None if seed is None else seed.get("_rev", meta["rev"])
-        base = None if seed is None else meta["seeds"].get(str(seed_rev))
-        if base is not None:
-            reconcile_fields(doc, normalize(base), seed, ctx)
-            reconcile_threads(doc, normalize(base), seed, ctx)
-        elif seed is not None:
-            ctx.refused.append(
-                f"the page copy at revision {seed_rev} is too old to merge, its agent edits were ignored"
-            )
-        rejected = apply_changes(doc, changes or [], ctx)
-        ordered_ops = sorted(ops or [], key=lambda op: op["op"] == "stats_sync")
-        rejected += [op["id"] for op in ordered_ops if not gated(gate, doc, op, ctx)]
-        import ledger_artifacts
-        import ledger_media
-
-        ledger_artifacts.sweep(slug, doc, ctx)
-        ledger_media.attach_paths(slug, doc, ctx.events)
-        ledger_priorities.derive(doc, ctx)
-        ledger_notifications.derive(doc, ctx)
-        del doc["chat"][:-CHAT_KEPT]
-        found = warnings(doc) + ctx.refused
-        if ctx.events or ctx.dirty or seed_error != meta.get("seed_error") or found != meta.get("warnings") or created:
-            meta.update(rev=ctx.rev, updated_at=ctx.at, seed_error=seed_error, warnings=found)
-            meta["events"] = (meta["events"] + ctx.events)[-EVENTS_KEPT:]
-        meta["seeds"][str(meta["rev"])] = doc
-        meta["seeds"] = {k: v for k, v in meta["seeds"].items() if int(k) > meta["rev"] - SEEDS_KEPT}
-        state = {**doc, "_meta": meta}
-        write_if_changed(json_path, json.dumps(state, indent=2, ensure_ascii=False) + "\n")
-        if seed is not None:
-            rewrite_seed(html_path, html, doc, meta["rev"])
-        return state, rejected
+    return FileLedgerRepository(sys.modules[__name__]).apply_ops(slug, changes=changes, ops=ops, gate=gate)
