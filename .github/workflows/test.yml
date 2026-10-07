@@ -50,6 +50,8 @@ jobs:
 
       - uses: actions/checkout@v4
         if: steps.lookup.outputs.skip != 'true'
+        with:
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         if: steps.lookup.outputs.skip != 'true'
@@ -99,6 +101,31 @@ jobs:
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
       # are allowed to delete — never ran in CI at all.
+      - name: Download latest dev durations
+        if: steps.lookup.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          folder="$RUNNER_TEMP/dev-durations"
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&status=success&per_page=1" --jq '.workflow_runs[0].id // empty') || run=
+          if [[ -n "$run" ]] && gh run download "$run" --repo "$GITHUB_REPOSITORY" --name durations-merged --dir "$folder" &&
+             python - "$folder/.test_durations" <<'PYTHON'
+          import json
+          import math
+          import sys
+          from pathlib import Path
+          data = json.loads(Path(sys.argv[1]).read_text())
+          assert isinstance(data, dict) and data
+          assert all(isinstance(k, str) and isinstance(v, (int, float)) and math.isfinite(v) and v >= 0 for k, v in data.items())
+          print(f"Downloaded {len(data)} duration records")
+          PYTHON
+          then
+            cp "$folder/.test_durations" .test_durations
+            echo "Using durations from green dev run $run"
+          else
+            echo "Using committed durations"
+          fi
+
       - name: Run tests
         if: steps.lookup.outputs.skip != 'true'
         env:
@@ -184,7 +211,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       actions: read
     steps:
       - uses: actions/checkout@v4
@@ -200,27 +227,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TREE: ${{ github.event.head_commit.tree_id }}
         run: |
-          git fetch origin dev
-          if [[ "$(git rev-parse origin/dev)" != "$GITHUB_SHA" ]]; then
-            echo "dev moved; the newer run will refresh durations"
-            exit 0
-          fi
           source_run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tests-passed-$TREE" \
-            --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)] | first.workflow_run.id // empty')
+            --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)][0].workflow_run.id // empty')
           python -m tests.refresh_durations --ci-run "${source_run:-$GITHUB_RUN_ID}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .test_durations
-          if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Refresh stored test durations"
-          if ! git push origin HEAD:dev; then
-            git fetch origin dev
-            if [[ "$(git rev-parse origin/dev)" != "$GITHUB_SHA" ]]; then
-              echo "dev moved; the newer run will refresh durations"
-              exit 0
-            fi
-            exit 1
-          fi
+          test -s .test_durations
+
+      - name: Publish merged durations
+        uses: actions/upload-artifact@v4
+        with:
+          name: durations-merged
+          path: .test_durations
+          include-hidden-files: true
+          retention-days: 14
+          overwrite: true
 
   record-pass:
     needs: [unit, lint]
