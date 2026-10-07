@@ -45,11 +45,21 @@ def test_late_seat_mail_wakes_the_waiting_master(store, monkeypatch):
 
 
 def test_timeout_returns_no_mail_and_closes_subscription(store, monkeypatch):
-    from scripts.inbox.receive import receive
+    from scripts.inbox import receive
 
     subscription = store.redis.pubsub()
     monkeypatch.setattr(store.redis, "pubsub", lambda: subscription)
-    assert receive(store, "master", 0.01) == []
+    times = iter([10, 10.5, 11])
+    monkeypatch.setattr(receive, "monotonic", lambda: next(times))
+    blocked = []
+
+    def get_message(timeout):
+        assert timeout == 0.5
+        blocked.append(timeout)
+
+    monkeypatch.setattr(subscription, "get_message", get_message)
+    assert receive.receive(store, "master", 1) == []
+    assert blocked == [0.5]
     assert subscription.connection is None
 
 
