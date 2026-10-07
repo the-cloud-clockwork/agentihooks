@@ -142,8 +142,9 @@ class FileLedgerRepository:
         return sync(slug, changes=changes, ops=ops, gate=gate, core=self.domain)
 
     def events_since(self, slug: str, revision: int) -> list:
-        with core.LOCK:
-            return [e for e in self.get_document(slug, reconcile=False)["_meta"]["events"] if e["rev"] > revision]
+        with self.domain.LOCK:
+            _, meta, _ = load_state(self.domain.paths(slug)[1], None, self.domain)
+            return [e for e in meta["events"] if e["rev"] > revision]
 
     def list_summaries(self) -> list:
         return all_summaries()
