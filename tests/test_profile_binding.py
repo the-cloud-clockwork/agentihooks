@@ -161,8 +161,6 @@ def test_launch_success_requires_live_binding_canary(tmp_path, monkeypatch, caps
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
 def test_a_pane_side_selection_failure_is_reported_before_any_timeout(tmp_path, monkeypatch, capsys, target):
-    import time
-
     from scripts import init_agent, select_profile
 
     home = tmp_path / "engineer" / target
@@ -181,18 +179,20 @@ def test_a_pane_side_selection_failure_is_reported_before_any_timeout(tmp_path, 
     def refuse(*args):
         raise ValueError("profile engineer render failed in the pane")
 
+    def waited(seconds):
+        raise AssertionError(f"waited {seconds}s after the pane refused the selection")
+
     def launch(launcher, directory, name, args, agent, environ):
         init_agent._started_marker(launcher).touch()
         monkeypatch.setattr(select_profile, "prepare", refuse)
         monkeypatch.setenv(binding.REPORT, environ[binding.REPORT])
         assert select_profile.main(["engineer", "--agent", target]) == 2
+        monkeypatch.setattr(init_agent.time, "sleep", waited)
         return []
 
     monkeypatch.setattr(init_agent, "_start_herdr", launch)
     args = ["--host", "herdr", "--agent", target, "--profile", "engineer", "--dir", str(tmp_path)]
-    started = time.monotonic()
     result = init_agent.main([*args, "--route-timeout", "30"], {"XDG_RUNTIME_DIR": str(tmp_path / "runtime")})
-    elapsed = time.monotonic() - started
     output = capsys.readouterr()
     from scripts.swarm.runtime import parse_fields
 
@@ -203,7 +203,6 @@ def test_a_pane_side_selection_failure_is_reported_before_any_timeout(tmp_path, 
         "agentihooks select-profile: profile engineer render failed in the pane\n"
         "agentihooks init-agent: profile selection failed: profile engineer render failed in the pane\n"
     )
-    assert elapsed < 10
 
 
 def test_swarm_refuses_a_started_process_without_validation(tmp_path):
