@@ -234,13 +234,34 @@ def test_flag_last_that_cannot_resume_exits_non_zero_without_switching(up, monke
     assert asked == [] and rt.masters == [] and masters(store) == []
 
 
-def test_the_last_master_is_the_newest_one_not_running(up, monkeypatch):
+def test_the_last_master_is_the_newest_one(up):
+    store, _, _ = up
+    gone_master(store, conversation="conv-old")
+    newer = gone_master(store, conversation="conv-new", ended=ENDED + 1)
+    assert master_launch.last_master(store, "sw").name == newer
+
+
+def test_a_last_master_still_running_is_named_and_a_new_one_offered(up, monkeypatch, capsys):
     store, _, rt = up
-    older = gone_master(store, conversation="conv-old")
+    gone_master(store, conversation="conv-old")
     newer = gone_master(store, conversation="conv-new", ended=ENDED + 1)
     rt.live.add(newer)
-    assert master_launch.last_master(store, "sw", {newer}).name == older
-    assert master_launch.last_master(store, "sw", set()).name == newer
+    asked = answers(monkeypatch, "1", "y")
+    assert run("sw", "master", "up") == 0
+    out = capsys.readouterr().out
+    assert f"Last master: {newer} on claude" in out
+    assert "The last master cannot be resumed: it is still running" in out
+    assert asked[-1] == master_launch.OFFER and rt.resumed == [] and len(rt.masters) == 1
+
+
+def test_flag_last_with_the_last_master_still_running_exits_non_zero(up, monkeypatch, capsys):
+    store, _, rt = up
+    name = gone_master(store)
+    rt.live.add(name)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--last") == 1
+    assert "the last master cannot be resumed: it is still running" in capsys.readouterr().err
+    assert rt.resumed == [] and rt.masters == []
 
 
 def test_a_dead_master_still_in_the_registry_is_the_last_master(up):
@@ -250,7 +271,7 @@ def test_a_dead_master_still_in_the_registry_is_the_last_master(up):
         "master@a1b2c3-0009", MASTER, MASTER, harness="claude", conversation_id="c9", started_at=ENDED + 5
     )
     store.put_agent("sw", record)
-    assert master_launch.last_master(store, "sw", set()).name == "master@a1b2c3-0009"
+    assert master_launch.last_master(store, "sw").name == "master@a1b2c3-0009"
 
 
 def test_a_live_master_present_does_not_stop_a_new_master_and_both_stay_seated(up, monkeypatch):

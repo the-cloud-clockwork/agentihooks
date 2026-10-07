@@ -44,12 +44,12 @@ class Previous:
     ran_at: int
 
 
-def last_master(store, slug, live):
-    """The newest master of the swarm that is not running now, from the agent registry or the swarm history."""
-    return getattr(_previous(store, slug, live), "agent", None)
+def last_master(store, slug):
+    """The newest master of the swarm, from the agent registry or the swarm history."""
+    return getattr(_previous(store, slug), "agent", None)
 
 
-def _previous(store, slug, live):
+def _previous(store, slug):
     current = [Previous(a, a.started_at) for a in store.agents(slug) if a.lane == MASTER]
     names = {p.agent.name for p in current}
     history = [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)]
@@ -58,8 +58,7 @@ def _previous(store, slug, live):
         for row in history
         if row.get("lane") == MASTER and row["name"] not in names
     ]
-    found = [p for p in current + ended if p.agent.name not in live]
-    return max(found, key=lambda p: p.ran_at, default=None)
+    return max(current + ended, key=lambda p: p.ran_at, default=None)
 
 
 def describe(previous):
@@ -87,9 +86,11 @@ def _profile(config):
     return config.lanes.get(MASTER, {}).get("profile") or DEFAULT_PROFILES[MASTER]
 
 
-def _why(previous, config):
+def _why(previous, config, live):
     if previous is None:
         return NONE_RECORDED
+    if previous.agent.name in live:
+        return "it is still running"
     if not previous.agent.harness:
         return "its harness is not recorded"
     return blocker(previous.agent, config.repo)
@@ -178,7 +179,8 @@ def _new(store, slug, runtime, at):
 
 def up(store, slug, runtime, at, choice, ask, say):
     """Launch the chosen master; ask last or new when no choice is given. Never refuses because a master is live."""
-    previous = _previous(store, slug, runtime.live_names())
+    live = runtime.live_names()
+    previous = _previous(store, slug)
     asked = not choice
     if asked:
         say(describe(previous))
@@ -186,7 +188,7 @@ def up(store, slug, runtime, at, choice, ask, say):
         choice = _choose(ask)
     if choice == NEW:
         return _new(store, slug, runtime, at)
-    why = _why(previous, store.config(slug))
+    why = _why(previous, store.config(slug), live)
     if not why:
         try:
             return _resume(store, slug, runtime, at, previous)
