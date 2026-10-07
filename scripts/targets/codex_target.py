@@ -384,7 +384,11 @@ class CodexAdapter:
                 merged[event] = foreign
             else:
                 del merged[event]
-        _atomic_write(hooks_path, json.dumps({"hooks": merged}, indent=2))
+        text = json.dumps({"hooks": merged}, indent=2)
+        if existing and hooks_path.read_text() == text:
+            _i._cprint(f"[OK] {hooks_path} unchanged; existing Codex hook trust holds")
+            return
+        _atomic_write(hooks_path, text)
         _i._cprint(f"[OK] Wrote {hooks_path} ({len(CODEX_HOOK_EVENTS)} events)")
         _i._cprint(
             "  [!!] Codex trusts hooks by content hash: run /hooks inside codex once to "
@@ -636,11 +640,7 @@ class CodexAdapter:
         self._reap_prompts()
 
     def post_install_reconcile(self, profile_chain: list[str], persisted_profile: str) -> None:
-        _i = _install_module()
-        _i._cprint(
-            "  [--] Codex install complete. First run: open codex and run /hooks to trust "
-            "the agentihooks hooks (they are silently skipped until trusted)."
-        )
+        return None
 
     # ------------------------------------------------------------------
     # doctor
