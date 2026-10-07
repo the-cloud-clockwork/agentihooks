@@ -1450,5 +1450,9 @@
   "scripts/herdr_gc.py:scripts.herdr_gc.xǁOwnersǁ_store__mutmut_8:d8f932aa2f50c70ae67799a34b247644795d96ed80140240ad8c99bd27e44f00": {
     "reader": "Standards",
     "reason": "A failed connection cached as an empty string instead of None gives the same outcomes: state still returns unknown and prompted_at still returns None through their exception handlers, and the connection is attempted once per address either way."
+  },
+  "scripts/swarm/stack.py:scripts.swarm.stack.x__restack_base__mutmut_13:14cda51a2caf4cc4c81831736d54310a4b6a693ca5a80db277471627fe5715f9": {
+    "reader": "Standards",
+    "reason": "The parked stacked base is the producer generated merge base commit SHA. Git rev-parse --verify resolves SHA^{commit} identically with --end-of-options and --END-OF-OPTIONS: both exit zero with the same resolved SHA and empty stderr. All later operations receive that same SHA; the ruling excludes option-like metadata."
   }
 }

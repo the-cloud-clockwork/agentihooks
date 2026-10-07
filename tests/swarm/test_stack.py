@@ -355,7 +355,10 @@ def test_restack_conflict_lists_files_and_keeps_parked_state(stacked_repo, capsy
     _git(repo, "switch", "finisher")
     capsys.readouterr()
     assert restack() == 1
-    assert "shared.txt" in capsys.readouterr().err
+    assert (
+        "\nConflicted files:\nshared.txt\nResolve the files, run git rebase --continue, then run swarm restack again.\n"
+        in capsys.readouterr().err
+    )
     assert _git(repo, "diff", "--name-only", "--diff-filter=U") == "shared.txt"
     assert ledger.rows["t1"]["parked_on"] == ["a"]
     assert ledger.rows["t1"]["stacked_base"] == base
@@ -403,7 +406,7 @@ def test_restack_refuses_protected_branches(stacked_repo, capsys, branch):
     before = _git(repo, "rev-parse", "HEAD")
     capsys.readouterr()
     assert restack() == 1
-    assert "task worktree branch" in capsys.readouterr().err
+    assert capsys.readouterr().err.startswith("swarm: restack needs a task worktree branch")
     assert _git(repo, "rev-parse", "HEAD") == before
     assert ledger.updates == []
 
@@ -415,7 +418,7 @@ def test_restack_refuses_uncommitted_work(stacked_repo, capsys, tracked):
     file.write_text("keep my work\n")
     capsys.readouterr()
     assert restack() == 1
-    assert "clean worktree" in capsys.readouterr().err
+    assert capsys.readouterr().err == "swarm: restack needs a clean worktree\n"
     assert file.read_text() == "keep my work\n"
     assert ledger.updates == []
 
@@ -425,7 +428,7 @@ def test_restack_refuses_detached_head(stacked_repo, capsys):
     _git(repo, "switch", "--detach")
     capsys.readouterr()
     assert restack() == 1
-    assert "task worktree branch" in capsys.readouterr().err
+    assert capsys.readouterr().err.startswith("swarm: restack needs a task worktree branch")
     assert ledger.updates == []
 
 
@@ -500,4 +503,86 @@ def test_restack_fetch_failure_preserves_parked_work(stacked_repo, capsys):
     capsys.readouterr()
     assert restack() == 1
     assert "cannot fetch origin" in capsys.readouterr().err
+    assert ledger.updates == []
+
+
+@pytest.mark.parametrize(
+    ("command", "message"),
+    [
+        (["git", "symbolic-ref"], "restack needs a task worktree branch"),
+        (["git", "status"], "cannot inspect the worktree"),
+        (["git", "fetch"], "cannot fetch origin"),
+        (["git", "rev-parse", "--verify"], "cannot resolve the stacked base"),
+        (["git", "rev-parse", "--git-path"], "cannot locate restack state"),
+        (["git", "rev-parse", "origin/dev"], "cannot resolve origin/dev"),
+    ],
+)
+def test_restack_reports_failed_git_commands(stacked_repo, monkeypatch, capsys, command, message):
+    _, ledger, repo, _ = stacked_repo
+    real_shell = stack.shell
+
+    def failed(argv):
+        if argv[: len(command)] == command:
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="git failure\n")
+        return real_shell(argv)
+
+    monkeypatch.setattr(stack, "shell", failed)
+    capsys.readouterr()
+    before = _git(repo, "rev-parse", "HEAD")
+    assert restack() == 1
+    assert capsys.readouterr().err == f"swarm: {message}: git failure\n"
+    assert _git(repo, "rev-parse", "HEAD") == before
+    assert ledger.updates == []
+
+
+def test_restack_reports_failure_to_list_conflicts(stacked_repo, monkeypatch, capsys):
+    _, ledger, _, _ = stacked_repo
+    real_shell = stack.shell
+
+    def failed(argv):
+        if argv[1] in ("rebase", "diff"):
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="git failure\n")
+        return real_shell(argv)
+
+    monkeypatch.setattr(stack, "shell", failed)
+    capsys.readouterr()
+    assert restack() == 1
+    assert capsys.readouterr().err == "swarm: cannot list conflicted files: git failure\n"
+    assert ledger.updates == []
+
+
+@pytest.mark.parametrize("valid_context", [True, False])
+def test_restack_refuses_a_checkpoint_without_both_identity_and_target_history(stacked_repo, capsys, valid_context):
+    _, ledger, repo, base = stacked_repo
+    _git(repo, "fetch", "origin")
+    _git(repo, "switch", "-c", "unrelated", "origin/dev")
+    path = repo / _git(repo, "rev-parse", "--git-path", "agentihooks-restack.json")
+    context = ["sw", "t1", "unrelated", base] if valid_context else ["wrong"]
+    onto = base if valid_context else _git(repo, "rev-parse", "origin/dev")
+    path.write_text(json.dumps({"context": context, "onto": onto}))
+    capsys.readouterr()
+    before = _git(repo, "rev-parse", "HEAD")
+    assert restack() == 1
+    assert capsys.readouterr().err == (
+        "swarm: the stacked base is not in this branch; use a worktree cut from the parked branch\n"
+    )
+    assert _git(repo, "rev-parse", "HEAD") == before
+    assert ledger.rows["t1"]["parked_on"] == ["a"]
+    assert ledger.updates == []
+
+
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        ({"parked_on": []}, "this task has no parked work with a stacked base"),
+        ({"stacked_base": ""}, "this task has no parked work with a stacked base"),
+        ({"parked_on": ["missing"]}, "this task still has an unfinished parked dependency"),
+    ],
+)
+def test_restack_metadata_refusals_name_the_missing_requirement(stacked_repo, capsys, fields, message):
+    _, ledger, _, _ = stacked_repo
+    ledger.rows["t1"].update(fields)
+    capsys.readouterr()
+    assert restack() == 1
+    assert capsys.readouterr().err == f"swarm: {message}\n"
     assert ledger.updates == []
