@@ -336,14 +336,15 @@ def test_a_failed_check_waits_for_the_queued_run_before_resolving_red(conclusion
     assert ledger_events.pull_request(raw).resolved is (conclusion == "FAILURE")
 
 
-@pytest.mark.parametrize("suites", [[], [FINISHED_RUN, APP_SUITE]])
-def test_a_gated_head_with_only_skipped_checks_keeps_waiting_for_its_gate(suites):
-    raw = {"state": "OPEN", "gated": True, "statusCheckRollup": SKIPPED_ONLY, "checkSuites": suites}
+@pytest.mark.parametrize("suites", [[], [QUEUED_TESTS], [FINISHED_RUN, APP_SUITE]])
+@pytest.mark.parametrize("gated", [True, False])
+def test_a_head_with_only_skipped_checks_keeps_waiting(suites, gated):
+    raw = {"state": "OPEN", "gated": gated, "statusCheckRollup": SKIPPED_ONLY, "checkSuites": suites}
     pull = ledger_events.pull_request(raw)
     assert pull.resolved is False
     assert pull.red is False
-    raw["gated"] = False
-    assert ledger_events.pull_request(raw).resolved is True
+    raw["statusCheckRollup"] = SKIPPED_ONLY + [{"name": GATE, "conclusion": "SUCCESS"}]
+    assert ledger_events.pull_request(raw).resolved is (suites != [QUEUED_TESTS])
 
 
 @pytest.mark.parametrize("gate", [None, "PENDING", "SKIPPED", "CANCELLED", "TIMED_OUT"])

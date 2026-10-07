@@ -31,7 +31,7 @@ FINAL_RED = RED - {"TIMED_OUT"}
 PASSED = {"SUCCESS", "SKIPPED"}
 PENDING = {None, "", "PENDING", "EXPECTED"}
 GATE = "Gate — Required"
-GATE_JOB = re.compile(rf"^\s*name:\s*(['\"]?){re.escape(GATE)}\1\s*$", re.MULTILINE)
+GATE_JOB = re.compile(rf"^\s+name:\s*(['\"]?){re.escape(GATE)}\1\s*$", re.MULTILINE)
 PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
     "commits(last:1){nodes{commit{committedDate "
@@ -83,7 +83,7 @@ def _resolved(gated, checks, results, running):
     if not running and any(result in FINAL_RED for result in results):
         return True
     if not gated:
-        return not running and bool(results) and all(result in PASSED for result in results)
+        return not running and "SUCCESS" in results and all(result in PASSED for result in results)
     gate = [result for check, result in zip(checks, results) if (check.get("name") or check.get("context")) == GATE]
     if any(result in FINAL_RED for result in gate):
         return True

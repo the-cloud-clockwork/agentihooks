@@ -694,10 +694,11 @@ def test_the_probe_reads_a_declared_gate_from_the_head_workflows(text):
         workflows("jobs:\n  gate:\n    # name: Gate — Required\n"),
         workflows("jobs:\n  gate:\n    name: 'Gate — Required\"\n"),
         {"object": {"entries": [{"name": "x.yml", "object": None}]}},
+        workflows("name: Gate — Required\njobs:\n  unit:\n    runs-on: ubuntu-latest\n"),
     ],
 )
 def test_the_probe_without_a_declared_gate_resolves_on_every_check(tree):
-    pull = gated_probe(SKIPPED_ONLY, [], tree)
+    pull = gated_probe(SKIPPED_ONLY + [{"name": "unit", "conclusion": "SUCCESS"}], [], tree)
     assert pull.resolved is True
     assert pull.red is False
 
