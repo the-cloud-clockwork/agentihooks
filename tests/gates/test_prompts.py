@@ -192,7 +192,7 @@ def test_removals_yield_each_rm_with_whether_a_cd_came_first():
         (["b"], True),
         (["--", "c"], True),
     ]
-    assert list(removals("-x")) == []
+    assert list(removals("-x; rm a")) == [(["a"], False)]
 
 
 def test_targets_skip_options_and_redirects():
@@ -209,4 +209,6 @@ def test_an_unpinned_session_is_never_judged():
 
 def test_with_no_working_directory_only_the_dot_paths_stand_for_the_workspace():
     assert not decide("rm -rf ./", cwd="").allowed
+    assert not decide("rm -rf ..", cwd="").allowed
+    assert not decide("rm -rf /usr", cwd="").allowed
     assert decide("rm -f a.txt", cwd="").allowed

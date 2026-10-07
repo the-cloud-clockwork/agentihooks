@@ -35,22 +35,22 @@ def removals(text):
     moved = False
     for words in simple_commands(text):
         index = program_index(words)
-        name = "" if index is None else PurePosixPath(words[index]).name
+        if index is None:
+            continue
+        name = PurePosixPath(words[index]).name
         if name in REMOVERS:
             yield words[index + 1 :], moved
         moved = moved or name in DIRECTORY_CHANGERS
 
 
 def targets(args):
-    found, options, skip = [], True, False
-    for word in args:
-        if skip:
-            skip = False
-        elif REDIRECT.match(word):
-            skip = bool(REDIRECT_OPERATOR.match(word))
-        elif options and word == "--":
-            options = False
-        elif not (options and word.startswith("-")):
+    found, words, options = [], iter(args), True
+    for word in words:
+        if REDIRECT_OPERATOR.match(word):
+            next(words, None)
+        elif REDIRECT.match(word) or (options and word.startswith("-")):
+            options = options and word != "--"
+        else:
             found.append(word)
     return found
 
