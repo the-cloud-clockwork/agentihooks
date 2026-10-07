@@ -39,10 +39,10 @@ def ruling(task, pull, waiting):
         if not waiting or waiting.get("on") == {"kind": "checks", "target": url}:
             return "contract", ""
     if pull is not None and pull.state == "OPEN":
-        if pull.red:
-            return "red", ""
         if not pull.resolved:
             return "", url
+        if pull.red:
+            return "red", ""
     if waiting:
         return "", ""
     if pull is not None and pull.state == "OPEN":

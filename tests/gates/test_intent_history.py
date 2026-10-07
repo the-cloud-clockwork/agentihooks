@@ -143,6 +143,8 @@ def test_pull_request_findings_include_original_reviews_and_inline_comments():
     def run(args, **kwargs):
         from subprocess import CompletedProcess
 
+        if args[-1] == ".head.sha":
+            return CompletedProcess(args, 0, stdout="head")
         calls.append(args)
         payload = {"title": "Retention", "body": "", "files": [], "reviews": [review], "comments": [discussion]}
         pages = f"{json.dumps(inline)}\n{json.dumps({**inline, 'line': 9})}\n"
@@ -165,6 +167,8 @@ def test_unavailable_review_findings_leave_the_check_pending(tmp_path, result):
     calls = []
 
     def run(args, **kwargs):
+        if args[-1] == ".head.sha":
+            return CompletedProcess(args, 0, stdout="head")
         calls.append(args)
         if len(calls) == 1:
             return CompletedProcess(args, 0, stdout=json.dumps({"title": "Retention", "body": "", "files": []}))

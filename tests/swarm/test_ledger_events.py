@@ -266,3 +266,70 @@ def test_a_pull_request_names_its_failed_checks():
         ],
     }
     assert ledger_events.pull_request(raw).failed == ("ci/status", "a check")
+
+
+SKIPPED_ONLY = [{"name": "ledger-equivalence", "conclusion": "SKIPPED"}]
+QUEUED_TESTS = {"status": "QUEUED", "workflowRun": {"databaseId": 1}}
+FINISHED_RUN = {"status": "COMPLETED", "workflowRun": {"databaseId": 2}}
+APP_SUITE = {"status": "QUEUED", "workflowRun": None}
+
+
+@pytest.mark.parametrize("status", ["QUEUED", "IN_PROGRESS", "WAITING", "PENDING", "REQUESTED"])
+def test_a_head_with_only_skipped_checks_and_an_unfinished_run_stays_unresolved(status):
+    raw = {
+        "state": "OPEN",
+        "statusCheckRollup": SKIPPED_ONLY,
+        "checkSuites": [FINISHED_RUN, {"status": status, "workflowRun": {"databaseId": 1}}],
+    }
+    pull = ledger_events.pull_request(raw)
+    assert pull.resolved is False
+    assert pull.red is False
+
+
+@pytest.mark.parametrize(
+    "rollup",
+    [
+        SKIPPED_ONLY,
+        [{"name": "lint", "conclusion": "SUCCESS"}],
+        [{"name": "unit", "conclusion": "SUCCESS"}, {"name": "lint", "conclusion": None}],
+    ],
+)
+def test_passing_checks_do_not_resolve_while_a_run_on_the_head_is_queued(rollup):
+    raw = {"state": "OPEN", "statusCheckRollup": rollup, "checkSuites": [QUEUED_TESTS]}
+    assert ledger_events.pull_request(raw).resolved is False
+
+
+@pytest.mark.parametrize(
+    ("rollup", "red"),
+    [
+        (SKIPPED_ONLY + [{"name": "unit", "conclusion": "SUCCESS"}], False),
+        (SKIPPED_ONLY + [{"name": "unit", "conclusion": "FAILURE"}], True),
+    ],
+)
+def test_a_head_whose_runs_all_finished_resolves_green_or_red(rollup, red):
+    raw = {"state": "OPEN", "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN, APP_SUITE]}
+    pull = ledger_events.pull_request(raw)
+    assert pull.resolved is True
+    assert pull.red is red
+
+
+def test_a_pending_check_keeps_a_finished_head_unresolved():
+    raw = {
+        "state": "OPEN",
+        "statusCheckRollup": [{"name": "unit", "conclusion": "SUCCESS"}, {"name": "lint", "conclusion": None}],
+    }
+    assert ledger_events.pull_request(raw).resolved is False
+
+
+@pytest.mark.parametrize("conclusion", ["FAILURE", "TIMED_OUT"])
+def test_a_failed_check_waits_for_the_queued_run_before_resolving_red(conclusion):
+    raw = {
+        "state": "OPEN",
+        "statusCheckRollup": [{"name": "unit", "conclusion": conclusion}],
+        "checkSuites": [QUEUED_TESTS],
+    }
+    pull = ledger_events.pull_request(raw)
+    assert pull.resolved is False
+    assert pull.red is True
+    raw["checkSuites"] = [FINISHED_RUN]
+    assert ledger_events.pull_request(raw).resolved is (conclusion == "FAILURE")

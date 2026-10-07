@@ -59,7 +59,7 @@ def main(argv=None, stdin=None, environ=None, home=None):
     mode = modes.mode(gate, environ, modes.swarm_gates(who.swarm, environ))
     if mode == "off":
         return 0
-    decision = _decide(gate, call, who, home)
+    decision = _decide(gate, call, who, home, mode)
     if decision.allowed:
         return 0
     if lift.lifted(who.swarm, payload.get("session_id"), gate.name, home) or lift.agent_lifted(
@@ -75,9 +75,12 @@ def main(argv=None, stdin=None, environ=None, home=None):
     return 2
 
 
-def _decide(gate, call, who, home):
+def _decide(gate, call, who, home, mode="enforce"):
     try:
-        return gate.decide(call, who, Verdicts(who.swarm, gate.name, home))
+        state = Verdicts(who.swarm, gate.name, home)
+        if isinstance(gate, IntentGate):
+            return gate.decide(call, who, state, mode)
+        return gate.decide(call, who, state)
     except Exception as exc:  # a crashed gate lets the call through, counted in the gate log
         _record(who, log.Row.of(gate.name, "fail-open", who, call.tool, f"{type(exc).__name__}: {exc}"), home)
         return Decision()

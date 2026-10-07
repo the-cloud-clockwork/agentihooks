@@ -53,7 +53,7 @@ def test_swarm_pr_with_the_intent_gate_off_arms_nothing(started, capsys, monkeyp
     assert Verdicts("sw", "intent").read("t1") is None
 
 
-@pytest.mark.parametrize("mode", ["enforce", "observe", "off"])
+@pytest.mark.parametrize("mode", ["enforce", "observe", "off", "coach"])
 def test_the_operator_sets_the_intent_gate_mode(env, monkeypatch, mode):  # noqa: F811
     store, _, _ = env
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
