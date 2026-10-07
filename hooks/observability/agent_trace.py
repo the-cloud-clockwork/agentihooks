@@ -62,14 +62,36 @@ def identity_from_env(session_id: str, environ: Mapping[str, str] | None = None)
 
     env = os.environ if environ is None else environ
     account = environment_account(env)
+    launch = {
+        "agent": env.get("AGENTIHOOKS_AGENT_NAME", ""),
+        "swarm": env.get("AGENTIHOOKS_SWARM", ""),
+        "lane": env.get("AGENTIHOOKS_SWARM_LANE", ""),
+        "task": env.get("AGENTIHOOKS_SWARM_TASK", ""),
+    }
     return Identity(
         session_id=session_id,
-        agent=env.get("AGENTIHOOKS_AGENT_NAME", ""),
-        swarm=env.get("AGENTIHOOKS_SWARM", ""),
-        lane=env.get("AGENTIHOOKS_SWARM_LANE", ""),
-        task=env.get("AGENTIHOOKS_SWARM_TASK", ""),
+        **(_seat(session_id) or launch),
         account="" if account == UNROUTED else account,
     )
+
+
+def _seat_path(session_id: str) -> Path:
+    return _cursor_path(session_id).with_suffix(".seat.json")
+
+
+def record_seat(session_id: str, agent: str, swarm: str, lane: str, task: str) -> None:
+    path = _seat_path(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"agent": agent, "swarm": swarm, "lane": lane, "task": task}))
+
+
+def _seat(session_id: str) -> dict:
+    try:
+        seat = json.loads(_seat_path(session_id).read_text())
+    except (OSError, ValueError):
+        return {}
+    fields = ("agent", "swarm", "lane", "task")
+    return {key: str(seat.get(key, "")) for key in fields} if isinstance(seat, dict) else {}
 
 
 def _digest(*parts: str) -> bytes:
