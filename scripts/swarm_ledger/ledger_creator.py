@@ -1,20 +1,16 @@
 """Who may create a ledger or a swarm.
 
 In the shared ledger folder only a master seat or the operator creates one, and only for at least three tasks unless
-the operator asked. Anywhere else is a proof: a scratch ledger folder on a spare port, and for a swarm its own Redis.
+the operator asked. Any other folder takes any port, as the server allows; a swarm there needs its own Redis.
 """
 
-from pathlib import Path
-
 MIN_TASKS = 3
-SHARED_PORT = "8765"
 CREATORS = ("master", "operator")
 QUOTE_WORDS = 3
 CALLER = (
     "only a master or the operator creates a ledger or a swarm in the shared ledger folder; run a proof on a "
-    "scratch ledger folder (LEDGER_DIR) with a spare port (LEDGER_PORT)"
+    "scratch ledger folder (LEDGER_DIR)"
 )
-PORT = "a ledger in a scratch folder needs a spare port: set LEDGER_PORT to a free port other than 8765"
 REDIS = "a swarm on a scratch ledger folder needs its own Redis: set AGENTIHOOKS_SWARM_REDIS_URL to a proof Redis"
 FLOOR = (
     "a ledger or swarm in the shared ledger folder needs at least {need} tasks and this one has {have}; pass "
@@ -42,14 +38,12 @@ def operator_asked(environ, quote) -> bool:
 def shared(environ) -> bool:
     from scripts.swarm_ledger.ledger_link import shared_directory
 
-    return shared_directory(Path(environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser())
+    return shared_directory(environ=environ)
 
 
 def creator_refusal(environ) -> str:
     """Why this session may not create a ledger here; an empty string when it may."""
-    if shared(environ):
-        return "" if caller(environ) in CREATORS else CALLER
-    return PORT if (environ.get("LEDGER_PORT") or SHARED_PORT) == SHARED_PORT else ""
+    return CALLER if shared(environ) and caller(environ) not in CREATORS else ""
 
 
 def swarm_refusal(environ) -> str:
