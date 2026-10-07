@@ -1645,6 +1645,46 @@ def test_scratch_render_defaults_to_the_linked_bundle_and_passes_force(world, tm
     assert not (render.rendered_root() / "rb-role").exists()
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_scratch_render_keeps_the_linked_overlays_of_the_live_render(world, brain_overlay, tmp_path, target):
+    from scripts.profiles import render
+
+    install = world["install"]
+    render.render(target, "rb-role")
+    live = json.loads((render.rendered_root() / "rb-role" / "claude" / render.STAMP).read_text())
+    state = install.STATE_JSON.read_bytes()
+    before = _tree_hashes(install.AGENTIHOOKS_STATE_DIR, tmp_path / "none")
+    out = tmp_path / "scratch-home"
+
+    assert render.main(["render", "rb-role", "--target", target, "--out", str(out)]) == 0
+
+    scratch = json.loads((out / "profiles" / "rb-role" / "claude" / render.STAMP).read_text())
+    assert live["overlays"] == scratch["overlays"] == ["rb-brain"]
+    assert scratch["chain"] == live["chain"]
+    assert install.STATE_JSON.read_bytes() == state
+    assert _tree_hashes(install.AGENTIHOOKS_STATE_DIR, tmp_path / "none") == before
+    assert json.loads((out / "state.json").read_text())["linked_profiles"] == [
+        {"name": "rb-brain", "path": str(brain_overlay)}
+    ]
+
+
+def test_scratch_render_replaces_a_reused_homes_linked_record_and_keeps_its_state(world, brain_overlay, tmp_path):
+    from scripts.profiles import render
+
+    out = tmp_path / "scratch-home"
+    stale = {"herdr": {"pane": "p1"}, "linked_profiles": [{"name": "rb-gone", "path": "/nowhere"}]}
+    _write(out / "state.json", json.dumps(stale))
+
+    assert render.main(["render", "rb-role", "--out", str(out)]) == 0
+
+    assert json.loads((out / "state.json").read_text()) == {
+        "herdr": {"pane": "p1"},
+        "linked_profiles": [{"name": "rb-brain", "path": str(brain_overlay)}],
+    }
+    stamp = json.loads((out / "profiles" / "rb-role" / "claude" / render.STAMP).read_text())
+    assert stamp["overlays"] == ["rb-brain"]
+
+
 def test_scratch_render_refuses_a_bundle_without_a_home(world, tmp_path, capsys):
     from scripts.profiles import render
 
