@@ -49,6 +49,8 @@ def refuse_unsafe_installer_write(event: str, args: tuple) -> None:
         return
     for operand, dir_fd in _mutation_paths(event, args):
         path = _descriptor_path(operand) if isinstance(operand, int) else Path(os.fsdecode(operand))
+        if isinstance(operand, int) and not path.is_absolute():
+            continue
         if not path.is_absolute() and dir_fd not in {-1, None}:
             path = _descriptor_path(dir_fd) / path
         if event in {"os.remove", "os.rmdir", "os.rename", "os.link", "os.symlink"}:
