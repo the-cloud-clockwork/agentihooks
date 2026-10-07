@@ -260,23 +260,26 @@ def _never_exported(binding, record, limits):
 
 
 def _misattributed(binding):
-    wrong = [
-        f"trace {t['id']} {name} {t[name]}, expected {binding[name]}"
+    mismatched = [
+        (t, name)
         for t in binding["traces"]
         for name in BOUND_FIELDS
         if t.get(name) and binding.get(name) and t[name] != binding[name]
     ]
+    wrong = [f"trace {t['id']} {name} {t[name]}, expected {binding[name]}" for t, name in mismatched]
+    faults = {f"{name}={t[name]}" for t, name in mismatched}
     local = binding["local"] or {}
     if binding["read"] and not binding["remote"] and local.get("accepted"):
         wrong.append(
             f"session {binding['session_id']} accepted {local['accepted']} observations, "
             f"none under agent:{binding['agent']}"
         )
+        faults.add("unattributed")
     if not wrong:
         return None
     return Finding(
         "telemetry misattributed",
-        f"{binding['agent']}.{binding['started_at']}",
+        f"{binding['agent']}.{binding['started_at']}.{'+'.join(sorted(faults))}",
         f"telemetry of {binding['agent']} carries another binding",
         (*_who(binding), *wrong),
         "every trace tagged with the agent carries its life, seat, task, harness and resolved profile",

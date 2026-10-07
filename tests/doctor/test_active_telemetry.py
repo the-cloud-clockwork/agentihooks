@@ -161,9 +161,29 @@ def test_a_trace_carrying_another_binding_is_misattributed(field, value):
     wrong["traces"][0][field] = value
     [found] = traces.findings(_record(wrong), LIMITS)
     assert found.kind == "telemetry misattributed"
-    assert found.id == f"telemetry-misattributed/{AGENT}.{STARTED}"
+    assert found.id == f"telemetry-misattributed/{AGENT}.{STARTED}.{field}={value}"
     expected = _binding()["traces"][0][field] if field != "profile" else "engineer"
     assert f"trace tr-1 {field} {value}, expected {expected}" in found.evidence
+
+
+def test_a_new_misattribution_in_the_same_life_is_a_new_finding():
+    profile = _binding()
+    profile["traces"][0]["profile"] = "frontend"
+    harness = _binding()
+    harness["traces"][0]["harness"] = "codex"
+    [first] = traces.findings(_record(profile), LIMITS)
+    [again] = traces.findings(_record(harness), LIMITS)
+    assert first.id.startswith(f"telemetry-misattributed/{AGENT}.{STARTED}")
+    assert again.id.startswith(f"telemetry-misattributed/{AGENT}.{STARTED}")
+    assert again.id != first.id
+
+
+def test_a_lasting_misattribution_keeps_its_finding_while_the_session_grows():
+    early = _binding(traces=[], remote=None)
+    later = _binding(traces=[], remote=None, local=_local(accepted=90))
+    [first] = traces.findings(_record(early), LIMITS)
+    [again] = traces.findings(_record(later), LIMITS)
+    assert again.id == first.id == f"telemetry-misattributed/{AGENT}.{STARTED}.unattributed"
 
 
 def test_a_missing_remote_field_is_not_a_mismatch():
@@ -322,7 +342,7 @@ def test_a_misattributed_finding_reads_in_full():
     assert traces.findings(_record(wrong), LIMITS) == [
         traces.Finding(
             "telemetry misattributed",
-            f"{AGENT}.{STARTED}",
+            f"{AGENT}.{STARTED}.seat=eng-2@s+task=t2",
             f"telemetry of {AGENT} carries another binding",
             (
                 f"agent {AGENT}",
