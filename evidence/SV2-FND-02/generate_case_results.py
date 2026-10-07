@@ -41,6 +41,12 @@ CASES = {
             "test_documents_with",
             "test_an_inventory_with",
             "test_cli_reports",
+            "test_cli_requires",
+            "test_cli_rejects",
+            "test_check_and_render",
+            "test_names_that_differ",
+            "test_the_dispatcher_refusal",
+            "test_an_accepted_verdict",
         ),
     ),
     "c": (

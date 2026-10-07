@@ -326,13 +326,16 @@ def test_check_lists_repeated_names_in_order():
     ]
 
 
-def test_cli_check_fails_on_a_broken_record(tmp_path):
+def test_cli_check_fails_on_a_broken_record(tmp_path, capsys):
     path = _record(tmp_path)
     data = architecture.load_record(path)
     data["components"].append(_proposal(name="Second dispatcher", kind="dispatcher"))
+    data["components"].append(_proposal(name="Operator interface"))
     path.write_text(json.dumps(data))
-    proc = _run("check", "--record", path)
-    assert (proc.returncode, proc.stdout) == (1, "expected one coding-task authority, found 2\n")
+    assert architecture.main(["check", "--record", str(path)]) == 1
+    assert capsys.readouterr().out == (
+        "Operator interface is recorded more than once\nexpected one coding-task authority, found 2\n"
+    )
 
 
 def test_an_operator_change_in_the_record_admits_that_dispatcher_only(tmp_path):
@@ -425,16 +428,13 @@ def test_an_inventory_with_repeated_proposal_ids_is_refused(tmp_path):
     assert str(error.value) == "proposal ids must be unique"
 
 
-def test_cli_reports_a_refusal_without_a_traceback(tmp_path):
+def test_cli_reports_a_refusal_without_a_traceback(tmp_path, capsys):
     path = _record(tmp_path)
     architecture.apply_inventory(path, _inventory())
     before = path.read_bytes()
-    proc = _run(
-        "record", "--record", path, "--inventory", FIXTURES / "inventory-second.json", "--markdown", tmp_path / "d.md"
-    )
-    assert proc.returncode == 2
-    assert proc.stdout == ""
-    assert proc.stderr == "error: inventory is based on revision 1; the record is at revision 2\n"
+    argv = ["record", "--record", str(path), "--inventory", str(FIXTURES / "inventory-second.json")]
+    assert architecture.main([*argv, "--markdown", str(tmp_path / "d.md")]) == 2
+    assert capsys.readouterr() == ("", "error: inventory is based on revision 1; the record is at revision 2\n")
     assert path.read_bytes() == before
     assert not (tmp_path / "d.md").exists()
 
@@ -621,6 +621,25 @@ def test_an_undeclared_proposal_never_makes_a_declared_one_conflict():
     assert result["unresolved"] == []
 
 
+def test_names_that_differ_only_in_case_conflict():
+    inventory = _single(_proposal(id="a", name="Shared catalog"), _proposal(id="b", name="SHARED CATALOG"))
+    result = architecture.review(architecture.load_record(RECORD), inventory)
+    assert [u["id"] for u in result["unresolved"]] == ["a", "b"]
+
+
+def test_the_dispatcher_refusal_names_every_recorded_authority():
+    record = architecture.load_record(RECORD)
+    record["components"].append(_proposal(name="Legacy dispatcher", kind="dispatcher"))
+    reason = architecture.review(record, _single(_proposal(kind="dispatcher")))["rejected"][0]["reason"]
+    assert (
+        reason == "inserts another coding-task queue beside Swarm reconciliation controller, Legacy dispatcher (AD-05)"
+    )
+
+
+def test_an_accepted_verdict_carries_no_reason():
+    assert architecture._verdict(architecture.load_record(RECORD), _proposal(), set()) == ("accepted", "")
+
+
 def test_the_declaration_refusal_names_every_required_field():
     assert architecture.DECLARE == (
         "a proposal must declare carries as one of changed_content, coding_tasks, none, transcripts,"
@@ -674,14 +693,52 @@ def test_cli_rollback_writes_the_record_and_its_markdown(tmp_path, capsys):
     assert markdown.read_text() == architecture.render(architecture.load_record(path))
 
 
-def test_cli_render_writes_markdown_only(tmp_path):
+def test_cli_render_writes_markdown_only(tmp_path, monkeypatch, capsys):
     path = _record(tmp_path)
     before = path.read_bytes()
-    markdown = tmp_path / "decisions.md"
-    proc = _run("render", "--record", path, "--markdown", markdown)
-    assert (proc.returncode, proc.stdout) == (0, "")
+    (tmp_path / "docs" / "swarm-v2").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    assert architecture.main(["render", "--record", str(path)]) == 0
+    assert capsys.readouterr().out == ""
+    markdown = tmp_path / "docs" / "swarm-v2" / "decisions.md"
     assert markdown.read_text() == architecture.render(architecture.load_record(path))
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("argv", "missing"),
+    [
+        (["review"], "--inventory"),
+        (["record"], "--inventory"),
+        (["rollback", "--operation", "r"], "--to"),
+        (["rollback", "--to", "1"], "--operation"),
+        ([], "command"),
+    ],
+)
+def test_cli_requires_its_arguments(argv, missing, capsys):
+    with pytest.raises(SystemExit) as stop:
+        architecture.main(argv)
+    assert stop.value.code == 2
+    err = capsys.readouterr().err
+    assert err.startswith("usage: python -m scripts.swarm_v2.architecture ")
+    assert f"error: the following arguments are required: {missing}" in err
+
+
+def test_cli_rejects_a_non_integer_rollback_target(capsys):
+    with pytest.raises(SystemExit):
+        architecture.main(["rollback", "--to", "one", "--operation", "r"])
+    assert "argument --to: invalid int value: 'one'" in capsys.readouterr().err
+
+
+def test_check_and_render_take_no_inventory(capsys):
+    for command in ("check", "render"):
+        with pytest.raises(SystemExit):
+            architecture.main([command, "--inventory", "x"])
+        assert "unrecognized arguments: --inventory x" in capsys.readouterr().err
+    for command in ("review", "check"):
+        with pytest.raises(SystemExit):
+            architecture.main([command, "--markdown", "x", "--inventory", "y"])
+        assert "unrecognized arguments: --markdown x" in capsys.readouterr().err
 
 
 def test_main_defaults_point_at_the_committed_record(monkeypatch, capsys):
