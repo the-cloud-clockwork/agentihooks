@@ -136,7 +136,19 @@ def test_the_master_stop_now_is_recorded_before_it_retires_the_master(swarm, mon
     with pytest.raises(SystemExit):
         cli.main(["demo", "stop", "--now"])
     assert ledger.said == [
-        ("master a1b2c3 0001 changed the swarm state with stop now from running to stopped.", "swarm")
+        ("master a1b2c3 0001 changed the swarm state with stop now from running to stopping.", "swarm")
+    ]
+
+
+@pytest.mark.parametrize("argv,control", [(["stop", "--now"], "stop now"), (["close", "--now"], "close ledger")])
+def test_a_master_stop_that_outlives_its_retirement_records_the_settled_state(swarm, monkeypatch, argv, control):
+    store, ledger = swarm
+    acting(monkeypatch, MASTER, "demo")
+    assert cli.main(["demo", *argv]) == 0
+    assert store.config("demo").state == "stopped"
+    assert ledger.said[:2] == [
+        (f"master a1b2c3 0001 changed the swarm state with {control} from running to stopping.", "swarm"),
+        (f"master a1b2c3 0001 changed the swarm state with {control} from stopping to stopped.", "swarm"),
     ]
 
 

@@ -112,7 +112,7 @@ LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in
 EFFORT_KEYS = {"effort-min": "effort_min", "effort-max": "effort_max"}
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
-RETIRES_MASTER = {"stop now": "stopped", "close ledger": "stopped"}
+RETIRES_MASTER = frozenset({"stop now", "close ledger"})
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
@@ -452,12 +452,14 @@ def run_control(store, args, who, handler):
     if cleared == clearance.OPERATOR:
         return handler(store, args)
     before = control_readings(store, args)
-    if (target := RETIRES_MASTER.get(lifecycle_control(args))) is not None:
-        after = dict.fromkeys(before, target)
-        clearance.record(LedgerClient(), args.slug, cleared, before, after)
-        return handler(store, args)
+    if lifecycle_control(args) in RETIRES_MASTER:
+        stopping = dict.fromkeys(before, "stopping")
+        clearance.record(LedgerClient(), args.slug, cleared, before, stopping)
+        before = stopping
     handler(store, args)
-    clearance.record(LedgerClient(), args.slug, cleared, before, control_readings(store, args))
+    after = control_readings(store, args)
+    if after != before or lifecycle_control(args) not in RETIRES_MASTER:
+        clearance.record(LedgerClient(), args.slug, cleared, before, after)
 
 
 def cmd_set(store, args):
