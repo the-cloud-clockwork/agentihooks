@@ -131,3 +131,10 @@ def profile_dirs(bundle: Path | None, profile_csv: str | None, linked: dict[str,
         if found is not None:
             out.append((name, found))
     return out
+
+
+def rendered_dirs(bundle: Path | None, profile_csv: str, linked: dict[str, Path]) -> list[tuple[str, Path]]:
+    """The chain a profile home renders: the profile's dirs plus every overlay the chain declares."""
+    dirs = profile_dirs(bundle, profile_csv, linked)
+    declared = [overlay for _, path in dirs for overlay in overlays(path)]
+    return profile_dirs(bundle, ",".join([profile_csv, *declared]), linked) if declared else dirs

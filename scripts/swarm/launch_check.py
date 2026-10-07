@@ -139,6 +139,10 @@ def report(store: RedisStore, slug: str, task: str) -> dict:
     return json.loads(raw) if raw else {}
 
 
+def reports(store: RedisStore, slug: str) -> list[dict]:
+    return [json.loads(raw) for raw in store.redis.hgetall(store.key(slug, "launch-check-reports")).values()]
+
+
 def judged(store: RedisStore, slug: str) -> set[str]:
     reports = (json.loads(raw) for raw in store.redis.hgetall(store.key(slug, "launch-check-reports")).values())
     return set(pending(store, slug)) | {found["agent"] for found in reports if found.get("held")}
@@ -166,6 +170,8 @@ def findings(store: RedisStore, slug: str) -> list[Finding]:
     for raw in store.redis.hgetall(store.key(slug, "launch-check-reports")).values():
         found = json.loads(raw)
         for field, values in found["misses"].items():
+            if field in REPORT_ONLY:
+                continue
             result.append(
                 Finding(
                     "launch check",

@@ -65,6 +65,7 @@ from scripts.swarm import (
     delivery,
     done_gate,
     idle,
+    launch_check,
     ledger_events,
     master_launch,
     naming,
@@ -553,6 +554,11 @@ def cmd_status(store, args):
         )
     for r in store.restored(args.slug):
         print(f"restored  {r['name']}  {r['outcome']}  {r['reason']}")
+    for launch in launch_check.reports(store, args.slug):
+        print(f"launch  {launch['agent']}  {launch['state']}  {launch['elapsed_ms']}ms")
+        for field, values in launch["misses"].items():
+            mode = "report only" if field in launch_check.REPORT_ONLY else "enforced"
+            print(f"  {field}  {mode}  expected {values['expected']}; observed {values['actual']}")
     for f in found:
         print(f"finding  {f['kind']}  {f['subject']}: {f['summary']}")
         for entry in f["evidence"]:

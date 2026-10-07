@@ -463,6 +463,29 @@ class TestThreeSourceMerge:
         assert brain["source"] == "profile"
         assert brain["cadence"] == 10
 
+    def test_overlay_declared_by_the_chain_loads_its_enforcements(self, bundle_dir, tmp_path):
+        from hooks.context.enforcement import load_all_enforcements
+
+        (bundle_dir / "profiles" / "testprofile" / "profile.yml").write_text(
+            "name: testprofile\nallowedOverlays: [router, brain]\n"
+        )
+        role = bundle_dir / "profiles" / "testrole"
+        role.mkdir()
+        (role / "profile.yml").write_text("name: testrole\nextends: [testprofile]\n")
+        linked = tmp_path / "brain"
+        linked.mkdir()
+        (linked / "enforcements.json").write_text(
+            json.dumps({"enforcements": [{"id": "brain-usage", "message": "use brain tools", "cadence": 10}]})
+        )
+        with (
+            patch("hooks.context.enforcement._get_bundle_path", return_value=bundle_dir),
+            patch("hooks.context.enforcement._get_active_profile", return_value="testrole"),
+            patch("hooks.context.enforcement._get_linked_profiles", return_value={"brain": linked}),
+        ):
+            entries = load_all_enforcements()
+
+        assert {(e["id"], e["source"]) for e in entries} >= {("p-1", "profile"), ("brain-usage", "profile")}
+
 
 class TestLocalEnforcement:
     def test_session_start_includes_global_and_project_local(self, local_repo):
