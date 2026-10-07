@@ -152,11 +152,11 @@ def main():
     if beat:
         atexit.register(beat.unlink, missing_ok=True)
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    headers = credentials(args.slug)
-    cursor, failure = None, None
+    headers, cursor, failure = None, None, None
     while True:
         alive(beat)
         try:
+            headers = headers or credentials(args.slug)
             for name, data, event_id in stream(args.slug, cursor, headers):
                 alive(beat)
                 watch.take(name, data)
@@ -167,6 +167,7 @@ def main():
         except (KeyError, TypeError):
             cursor = None
         except (OSError, ValueError) as exc:
+            headers = None
             if str(exc) != failure:
                 failure = str(exc)
                 print(f"WARNING ledger stream: {failure}", flush=True)

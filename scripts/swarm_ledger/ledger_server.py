@@ -591,8 +591,8 @@ def stream_resources(slug):
 def sample_streams():
     """Publish swarm status and work folder tails for every ledger a stream is open on."""
     HUB.evict()
-    for slug in [slug for slug in TAIL_MARKS if not HUB.has(slug)]:
-        del TAIL_MARKS[slug]
+    for slug in [slug for slug in list(TAIL_MARKS) if not HUB.has(slug)]:
+        TAIL_MARKS.pop(slug, None)
     for slug in HUB.watched():
         ledger = HUB.resource(slug, "ledger")
         if ledger is None:

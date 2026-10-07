@@ -295,6 +295,36 @@ def test_a_failing_stream_warns_once_per_distinct_error(monkeypatch, capsys):
     assert sleeps == [0.5] * 4
 
 
+def test_the_credential_is_read_again_after_a_failure_and_reused_otherwise(monkeypatch, capsys):
+    make_ledger()
+    reads, used = [], []
+    outcomes = iter(["ok", OSError("forbidden"), "ok", "stop"])
+
+    def credentials(slug):
+        reads.append(slug)
+        if len(reads) == 1:
+            raise OSError("page unreadable")
+        return {"X-Ledger-Token": f"t{len(reads)}"}
+
+    def flaky(slug, cursor=None, headers=None):
+        used.append(headers["X-Ledger-Token"])
+        outcome = next(outcomes)
+        if isinstance(outcome, Exception):
+            raise outcome
+        if outcome == "stop":
+            raise SystemExit
+        yield "heartbeat", {}, None
+
+    monkeypatch.setattr(watch_ledger, "credentials", credentials)
+    monkeypatch.setattr(watch_ledger, "stream", flaky)
+    monkeypatch.setattr(watch_ledger.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(sys, "argv", ["watch_ledger.py", SLUG])
+    with pytest.raises(SystemExit):
+        watch_ledger.main()
+    assert used == ["t2", "t2", "t3", "t3"]
+    assert len(reads) == 3
+
+
 def test_a_patch_that_cannot_apply_reconnects_without_a_cursor(monkeypatch, capsys):
     make_ledger()
     calls = []
