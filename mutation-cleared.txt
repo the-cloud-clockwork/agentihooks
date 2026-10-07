@@ -1,4 +1,16 @@
 {
+  "hooks/observability/token_monitor.py:hooks.observability.token_monitor.x_record_lifecycle_context__mutmut_17:475406d3dc221f9ae78405c3632364f0217f831a0f5ce30c84a8abaa3e059547": {
+    "reader": "Standards",
+    "reason": "An absent session returns no context for both empty and None defaults. Native absent-session controls emit and persist no metrics in the original and mutant; the status return is discarded."
+  },
+  "hooks/observability/token_monitor.py:hooks.observability.token_monitor.x_record_lifecycle_context__mutmut_19:fe0762cc957e9fc2f73761b6a7da98c91cf6a137168340346b05bcef2033d002": {
+    "reader": "Standards",
+    "reason": "Omitting the dictionary default returns None only for an absent session. Native absent-session controls emit and persist no metrics in the original and mutant; the status return is discarded."
+  },
+  "hooks/observability/token_monitor.py:hooks.observability.token_monitor.x_record_lifecycle_context__mutmut_22:c7f4af87e3d96deb9de1f35ba0a9955c505444a8be1a9f8fe3ba59c2f7e7bae0": {
+    "reader": "Standards",
+    "reason": "Even with a valid matching XXXX rollout, the original payload lacks a session and update_context_metrics emits and persists no metrics. Original and mutant controls produce identical output; the computed status is discarded."
+  },
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_13:eda446540d9ed0c4b259edff4160e8726c85cf8d1828349d86401b102412ae2f": {
     "reader": "Standards",
     "reason": "core.sync returns normalized state with the tasks key present; changing this unused dictionary default changes no output. Independent empty and populated task list comparisons agree."
