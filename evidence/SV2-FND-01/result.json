@@ -42,5 +42,14 @@
     "brain-api /health exposes no version field, so the deployed brain version stays unverified.",
     "agentihooks has no Anton deployment yet; its only deployed value is the workstation install version.",
     "AWS autoscaling group live capacity was not read; it is listed as an unknown live value."
-  ]
+  ],
+  "commands": {
+    "live_first": "python -m scripts.swarm_v2.baseline --sources docs/swarm-v2/baseline-sources.json --previous docs/swarm-v2/plan-snapshot.json --json docs/swarm-v2/baseline.json --markdown docs/swarm-v2/baseline.md",
+    "live_rerun": "python -m scripts.swarm_v2.baseline --sources docs/swarm-v2/baseline-sources.json --previous docs/swarm-v2/baseline.json --json docs/swarm-v2/baseline.json --markdown docs/swarm-v2/baseline.md",
+    "live_negative": "same collector with every kubectl --context anton-prod replaced by the absent context swarm-v2-unavailable-context, written outside the source tree",
+    "live_negative_output": "| antoncore | dev `0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c` | ArgoCD synced revision: unverified (exit 1: error: context \"swarm-v2-unavailable-context\" does not exist); cluster autoscaler image: unverified (exit 1: error: context \"swarm-v2-unavailable-context\" does not exist) | ... |; baseline_unverified_items: 3",
+    "rollback_rehearsal": "wt.sh tmp --from engineer-323133-0498; git revert --no-edit 26f080400bd9a7d261c0b86834cdbf57cb69f300",
+    "rollback_rehearsal_output": "docs/swarm-v2/baseline.json | 199 ---; docs/swarm-v2/baseline.md | 51 ---; 2 files changed, 250 deletions; collector and evidence retained"
+  },
+  "plan_snapshot": "docs/swarm-v2/plan-snapshot.json holds the three heads Swarm-v2.md section 0.3 records; observed_at is date only because the plan records no time. It is read by live_first as --previous, which produced the three drift entries."
 }
