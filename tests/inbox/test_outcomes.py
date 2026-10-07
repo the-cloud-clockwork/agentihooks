@@ -16,7 +16,7 @@ def test_work_done_requires_an_outcome_without_changing_item_or_history(detail):
     inbox = store()
     item = inbox.send("sender", "receiver", "Fix checks")
     history = inbox.history(item.id)
-    with pytest.raises(InboxError, match="done needs.*where the work went"):
+    with pytest.raises(InboxError, match="^done needs an outcome naming where the work went$"):
         inbox.close(item.id, "receiver", "done", detail)
     assert inbox.get(item.id) == item
     assert inbox.history(item.id) == history

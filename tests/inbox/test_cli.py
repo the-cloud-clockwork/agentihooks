@@ -200,6 +200,20 @@ def test_information_flag_inside_quoted_text_remains_text(store):
     assert (sent.text, sent.fyi) == ("Please explain --fyi", False)
 
 
+def test_information_parser_returns_false_for_work_text():
+    assert cli.informational(["Fix", "checks"]) == (False, ["Fix", "checks"])
+
+
+def test_trailing_information_flag_preserves_all_unquoted_words_on_send_and_reply(store):
+    assert run("send", "bob", "Confirmed", "merged", "--fyi") == 0
+    [sent] = store.inbox("bob")
+    assert (sent.text, sent.fyi) == ("Confirmed merged", True)
+    question = store.send("bob", "alice", "Ready?")
+    assert run("reply", question.id, "Confirmed", "merged", "--fyi") == 0
+    answer = store.inbox("bob")[-1]
+    assert (answer.text, answer.fyi) == ("Confirmed merged", True)
+
+
 def test_multi_agent_chat_rooms_are_retired_without_dangling_references():
     import subprocess
     from pathlib import Path
