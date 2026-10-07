@@ -639,6 +639,7 @@ def cmd_done(store, args):
         raise SwarmError(refused)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
+    waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
     print(json.dumps({"task": agent.task, "state": "done", "next": "stop now; the swarm closes this session"}))
 
@@ -652,6 +653,7 @@ def cmd_block(store, args):
 def block_agent(store, slug, agent, note, ledger):
     ledger.update_task(slug, agent.task, {"state": "blocked"}, by=agent.name)
     ledger.comment(slug, agent.task, note, by=agent.name)
+    waits.settle_notices(InboxStore(store.redis), agent, "a block")
     _retire(store, slug, agent, "blocked its task and exited")
 
 
@@ -705,6 +707,7 @@ def cmd_wait(store, args):
     at = now_ms()
     until = at + (args.minutes or waits.CHECKED_MINUTES) * 60_000
     idle.declare_wait(store.redis, args.slug, agent.name, until, args.reason, at, on=held)
+    waits.settle_notices(InboxStore(store.redis), agent, "a new wait")
     print(
         json.dumps(
             {
@@ -719,6 +722,7 @@ def cmd_wait(store, args):
 def cmd_progress(store, args):
     agent = _worker(store, args)
     line = quiet.report(store, LedgerClient(), args.slug, agent, quiet.Status(args.doing, args.ends_when), now_ms())
+    waits.settle_notices(InboxStore(store.redis), agent, "progress")
     print(json.dumps({"agent": agent.name, "task": agent.task, "progress": line}))
 
 

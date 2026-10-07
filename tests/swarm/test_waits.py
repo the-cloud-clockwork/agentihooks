@@ -299,3 +299,43 @@ def test_inbox_wait_timeout_and_failure_clear_the_declared_wait(started, monkeyp
     monkeypatch.setattr(receive, "receive", failed)
     assert run("sw", "--as", ME, "wait", "--inbox") == 1
     assert held(store) is None
+
+
+@pytest.mark.parametrize(
+    "command, action",
+    [
+        (("done", "--pr", URL), "done"),
+        (("block", "needs a token"), "a block"),
+        (("wait", "--on", "checks", URL), "a new wait"),
+        (("progress", "--doing", "fixing", "--ends-when", "green"), "progress"),
+    ],
+)
+def test_acting_on_the_task_closes_its_wait_ended_notice_with_the_action(started, command, action):
+    from tests.swarm.test_delivery import FakeHerdr
+    from tests.swarm.test_tick import FakeRuntime
+
+    store, ledger = started
+    inbox = InboxStore(store.redis)
+    [agent] = [a for a in store.agents("sw") if a.name == ME]
+    address = agent.seat or agent.name
+    earlier = inbox.send("master@sw", address, "an unrelated question")
+    assert run("sw", "--as", ME, "wait", "--on", "task", "t2") == 0
+    ledger.rows["t2"].update(state="done")
+    cli.run_tick(store, "sw", ledger, FakeRuntime(), FakeHerdr({}))
+    [notice] = [item for item in inbox.inbox(address) if item.text.startswith("Your wait on")]
+    inbox.deliver(notice.id, ME)
+    quoted = inbox.send("master@sw", address, "You were told: Pick task t1 back up: then?")
+    assert run("sw", "--as", ME, *command) == 0
+    closed = inbox.get(notice.id)
+    assert (closed.state, closed.reason) == ("done", f"done: {ME} recorded {action} on task t1")
+    assert [inbox.get(item.id).state for item in (earlier, quoted)] == ["pending", "pending"]
+
+
+def test_a_wait_ended_notice_for_another_task_stays_open(tick):
+    tick.hold("task", "t2")
+    tick.end({})
+    [notice] = tick.inbox.inbox("eng-1@sw")
+    tick.store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t11", seat="eng-1@sw"))
+    [agent] = tick.store.agents("sw")
+    waits.settle_notices(tick.inbox, agent, "progress")
+    assert tick.inbox.get(notice.id).state == "pending"

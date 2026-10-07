@@ -49,19 +49,27 @@ def test_canary_requires_real_harness_home_and_mounted_instruction(tmp_path, mon
         binding.validate(mounted["canary"])
 
 
-def test_quota_transfer_from_codex_reports_unsupported_before_launch(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    ("source", "target", "message"),
+    [
+        ("claude", "codex", "Claude cannot transfer to a Codex account"),
+        ("codex", "claude", "Codex cannot transfer to a Claude account"),
+        ("codex", "codex", "Codex cannot transfer to a Codex account"),
+        ("codex", "", "Codex cannot transfer to a Claude account"),
+        ("", "codex", "Claude cannot transfer to a Codex account"),
+        (None, "codex", "Claude cannot transfer to a Codex account"),
+    ],
+)
+def test_quota_transfer_reports_actual_direction_before_launch(tmp_path, monkeypatch, capsys, source, target, message):
     from scripts import init_agent
 
     monkeypatch.setattr(init_agent, "_write_launcher", lambda *a: pytest.fail("unsupported transfer launched"))
     result = init_agent.main(
-        ["--handoff", "--dir", str(tmp_path), "--prompt", "continue"],
-        {"AGENTIHOOKS_TARGET": "codex"},
+        ["--handoff", *(["--agent", target] if target else []), "--dir", str(tmp_path), "--prompt", "continue"],
+        {"AGENTIHOOKS_TARGET": source} if source is not None else {},
     )
     assert result == 2
-    assert (
-        capsys.readouterr().err
-        == "agentihooks init-agent: unsupported quota transfer: Codex cannot transfer to a Claude account\n"
-    )
+    assert capsys.readouterr().err == f"agentihooks init-agent: unsupported quota transfer: {message}\n"
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])

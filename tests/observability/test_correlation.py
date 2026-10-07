@@ -265,6 +265,93 @@ def test_resolve_caches_per_session_until_the_ttl(monkeypatch):
     assert calls == ["sess/1", "sess-2", "sess/1"]
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_validation_refreshes_traces_and_gauges_before_cache_expiry(monkeypatch, tmp_path, target):
+    from scripts.profiles import binding
+
+    monkeypatch.setattr(correlation.time, "time", lambda: 1000.0)
+    report = tmp_path / "profile-report.json"
+    binding.request(report, "engineer", target)
+    monkeypatch.setenv("AGENTIHOOKS_PROFILE", "engineer")
+    monkeypatch.setenv(binding.REPORT, str(report))
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", target)
+    before = correlation.resolve("sess-1")
+    assert before[f"{P}profile.validation"] == "pending"
+    assert before[f"{P}profile.resolved.state"] == correlation.MISSING
+
+    validated = {"profile": "engineer", "sources": "abc123", "revisions": {"/x/agentihooks": "f00d"}}
+    env = {"AGENTIHOOKS_PROFILE": "engineer", binding.REPORT: str(report), binding.HOMES[target]: str(tmp_path)}
+    monkeypatch.setattr(binding, "process", lambda: (123, target, env, "default"))
+    monkeypatch.setattr(binding, "inspect", lambda *args: {**validated, "canary": "mounted-canary"})
+    binding.validate("mounted-canary")
+
+    gauge = _Gauge()
+    monkeypatch.setattr(otel, "_meter", type("M", (), {"create_gauge": lambda self, name: gauge})())
+    monkeypatch.setattr(otel, "_gauges", {})
+    otel._dispatch_op(("gauge", "agentihooks.tokens.fill_pct", 25.0, {"session.id": "sess-1"}))
+    after = gauge.points[0][1]
+    assert after[f"{P}profile.validation"] == "validated"
+    assert after[f"{P}profile.resolved"] == "engineer"
+    assert after[f"{P}revision.sources"] == "abc123"
+    assert after[f"{P}revision"] == "agentihooks@f00d"
+
+    monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "cursor")
+    exporter = _Exporter()
+    monkeypatch.setattr(otel, "langfuse_exporter", lambda: exporter)
+    monkeypatch.setattr(otel, "emit_event", lambda *args: None)
+    monkeypatch.setattr(otel, "flush", lambda: None)
+    agent_trace.export_session("sess-1", _transcript(tmp_path, ENTRIES), _identity())
+    root = next(span for span in exporter.batches[0] if span.parent is None).attributes
+    assert {key: value for key, value in root.items() if key.startswith(P)} == {
+        key: value for key, value in after.items() if key.startswith(P)
+    }
+
+
+@pytest.mark.parametrize("change", ["revision", "failed", "pending", "deleted", "malformed"])
+def test_changed_report_replaces_validated_evidence_without_expiring_cache(monkeypatch, tmp_path, change):
+    monkeypatch.setattr(correlation.time, "time", lambda: 1000.0)
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps(REPORT))
+    env = {"AGENTIHOOKS_PROFILE": "engineer", "AGENTIHOOKS_PROFILE_REPORT": str(report)}
+    first = correlation.resolve("validated-session", env)
+    assert first[f"{P}profile.resolved"] == "engineer"
+    unrelated = correlation.resolve("unrelated-session", {})
+    if change == "deleted":
+        report.unlink()
+    elif change == "malformed":
+        report.write_text("not json")
+    elif change == "revision":
+        report.write_text(
+            json.dumps(
+                {
+                    **REPORT,
+                    "validation": {
+                        "profile": "engineer",
+                        "sources": "new-source",
+                        "revisions": {"/x/agentihooks": "new-revision"},
+                    },
+                }
+            )
+        )
+    else:
+        report.write_text(json.dumps({"state": change}))
+
+    after = correlation.resolve("validated-session", env)
+    if change == "revision":
+        assert after[f"{P}profile.validation"] == "validated"
+        assert after[f"{P}revision.sources"] == "new-source"
+        assert after[f"{P}revision"] == "agentihooks@new-revision"
+    else:
+        if change in ("failed", "pending"):
+            assert after[f"{P}profile.validation"] == change
+        else:
+            assert after[f"{P}profile.validation.state"] == correlation.MISSING
+        for field in ("profile.resolved", "revision.sources", "revision"):
+            assert after[f"{P}{field}.state"] == correlation.MISSING
+            assert f"{P}{field}" not in after
+    assert correlation.resolve("unrelated-session", {}) == unrelated
+
+
 @pytest.mark.parametrize("key", [*correlation.KEYS, "AH_CC_TOKEN_other"])
 def test_a_changed_launch_environment_recomputes_the_envelope(monkeypatch, key):
     calls = []

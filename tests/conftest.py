@@ -290,8 +290,8 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
         ("agents_skills_home", agents_skills_home()),
         ("copilot managed env file", CopilotAdapter._bypass_env_file()),
     ):
-        assert real_home not in value.parents and value != real_home, (
-            f"{label}() still resolves under the real home ({value}) — refusing to run"
+        assert not any(value.resolve().is_relative_to(root) for root in installer_isolation.PROTECTED_PATHS), (
+            f"{label}() still resolves to a live install path ({value}) — refusing to run"
         )
     yield
 
