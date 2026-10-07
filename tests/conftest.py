@@ -213,6 +213,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
         "hooks.context.broadcast.BROADCAST_DELIVERY_STATE_FILE", str(fake_state_dir / "broadcast_delivery_state.json")
     )
     monkeypatch.setattr("hooks.context.quota_policy.AGENTIHOOKS_HOME", fake_state_dir)
+    monkeypatch.setattr("hooks.observability.agent_trace.CURSOR_DIR", fake_state_dir / "agent_trace")
     monkeypatch.setattr("hooks.context.brain_adapter._HASH_CACHE_FILE", fake_state_dir / "brain_feed_hash")
     monkeypatch.setattr("hooks.context.profile_chain.state_path", lambda: fake_state_dir / "state.json")
     monkeypatch.setattr("hooks.context.conditions._cache_path", lambda *a: fake_state_dir / "cache" / "conditions.json")

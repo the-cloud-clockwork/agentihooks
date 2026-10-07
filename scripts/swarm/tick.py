@@ -537,7 +537,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                     actions.append(f"task {task['id']} is {live['state']} on the ledger, not claimed")
                     continue
                 task.update(fields)
-                store.count_claim(slug, task["id"])
+                store.record_launch(slug, record, "pending")
                 store.seats.occupy(seat, name, now_ms)
                 task["transfer"] = transfers.attach(store, slug, record)
                 placed = runtime.spawn(
@@ -546,10 +546,13 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             except Exception as exc:
                 transfers.failed(store, slug, record)
                 store.note_launch_failure(slug, task["id"], str(exc))
+                store.record_launch(slug, record, "failed", str(exc))
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
                 if isinstance(exc, ProfileUnresolved):
                     actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
                 return actions
+            store.count_claim(slug, task["id"])
+            store.record_launch(slug, record, "started")
             store.put_agent(slug, placed_record(record, placed))
             launch_check.begin(store, slug, record, now_ms)
             store.count_spawn(slug, placed.harness)

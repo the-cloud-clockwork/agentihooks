@@ -248,6 +248,36 @@ def test_a_failed_spawn_of_any_kind_reopens_the_task(store, runtime):
     assert ledger.rows["t1"]["state"] == "open" and store.claimant("sw", "t1") is None and workers(store) == []
 
 
+@pytest.mark.parametrize("error", [SpawnError("profile canary timeout"), OSError("worktree timer")])
+def test_failed_launches_do_not_consume_lives_and_preserve_each_error(store, error):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime(crash=error)
+    for at in range(1_000, 6_000, 1_000):
+        tick("sw", store, ledger, runtime, now_ms=at)
+    assert store.claims("sw", "t1") == 0
+    launches = store.launches("sw")
+    assert len(launches) == 5
+    assert {(row["task"], row["state"], row["error"]) for row in launches} == {("t1", "failed", str(error))}
+    runtime.crash = None
+    tick("sw", store, ledger, runtime, now_ms=6_000)
+    assert len(runtime.spawned) == 1
+    assert store.claims("sw", "t1") == 1
+    assert [row["state"] for row in store.launches("sw")].count("started") == 1
+
+
+def test_a_launch_is_pending_while_the_runtime_spawns_it(store):
+    ledger, runtime, seen = tasks(("t1", "eng")), FakeRuntime(), []
+    spawn = runtime.spawn
+
+    def watching(*args, **kwargs):
+        seen.extend(row["state"] for row in store.launches("sw"))
+        return spawn(*args, **kwargs)
+
+    runtime.spawn = watching
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert seen == ["pending"]
+    assert [row["state"] for row in store.launches("sw")] == ["started"]
+
+
 def test_no_free_session_slot_claims_nothing(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(full=True)
     tick("sw", store, ledger, runtime, now_ms=1_000)

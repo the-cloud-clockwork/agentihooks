@@ -168,6 +168,44 @@ def test_identity_from_env_reads_swarm_launch_variables():
     assert agent_trace.identity_from_env("sess-1", env) == _identity()
 
 
+def test_a_seated_session_exports_under_its_seat_and_an_unseated_one_keeps_its_launch_identity(monkeypatch, tmp_path):
+    from hooks.observability import agent_trace
+
+    monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "home" / "cursor")
+    env = {
+        "AGENTIHOOKS_AGENT_NAME": "s-261007-104655",
+        "AGENTIHOOKS_SWARM": "rig-grade-swarm-doctor",
+        "AH_CC_TOKEN_nctcc": "set",
+    }
+    agent_trace.record_seat("sess-1", "master@323133-0012", "rig-grade-swarm", "master", "master")
+
+    seated = agent_trace.identity_from_env("sess-1", env)
+    assert seated == agent_trace.Identity(
+        session_id="sess-1",
+        agent="master@323133-0012",
+        swarm="rig-grade-swarm",
+        lane="master",
+        task="master",
+        account="nctcc",
+    )
+    assert seated.tags() == (
+        "swarm:rig-grade-swarm",
+        "agent:master@323133-0012",
+        "lane:master",
+        "task:master",
+        "account:nctcc",
+    )
+    assert agent_trace.identity_from_env("sess-2", env) == agent_trace.Identity(
+        session_id="sess-2", agent="s-261007-104655", swarm="rig-grade-swarm-doctor", account="nctcc"
+    )
+    assert agent_trace.identity_from_env("sess-3", {}) == agent_trace.Identity(session_id="sess-3")
+    assert (tmp_path / "home" / "cursor" / "sess-1.seat.json").is_file()
+    (tmp_path / "home" / "cursor" / "sess-4.seat.json").write_text('{"agent": "master@323133-0012"}')
+    assert agent_trace.identity_from_env("sess-4", {}) == agent_trace.Identity(
+        session_id="sess-4", agent="master@323133-0012"
+    )
+
+
 def _config(**overrides):
     values = {
         "OTEL_LANGFUSE_ENABLED": True,
@@ -283,6 +321,31 @@ def test_export_sends_new_turns_once_under_the_session_trace(monkeypatch, tmp_pa
     assert root.parent is None
     child = next(s for s in first if s.name == "turn 1")
     assert child.parent.span_id == root.context.span_id
+
+
+def test_the_export_after_seating_resends_the_root_under_the_seat(monkeypatch, tmp_path):
+    from hooks.observability import agent_trace, otel
+
+    monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "cursor")
+    exporter = _Exporter()
+    monkeypatch.setattr(otel, "langfuse_exporter", lambda: exporter)
+    for key, value in {"AGENTIHOOKS_AGENT_NAME": "s-261007-104655", "AGENTIHOOKS_SWARM": "sw-doctor"}.items():
+        monkeypatch.setenv(key, value)
+    path = _transcript(tmp_path, ENTRIES)
+
+    agent_trace.export_session("sess-1", path)
+    agent_trace.record_seat("sess-1", "master@a1b2c3-0002", "sw", "master", "master")
+    agent_trace.export_session("sess-1", path)
+
+    launch, seated = ([s for s in batch if s.parent is None] for batch in exporter.batches)
+    assert launch[0].attributes["langfuse.trace.name"] == "s-261007-104655"
+    assert [s.attributes["langfuse.trace.name"] for s in seated] == ["master@a1b2c3-0002"]
+    assert seated[0].attributes["langfuse.trace.tags"][:4] == [
+        "swarm:sw",
+        "agent:master@a1b2c3-0002",
+        "lane:master",
+        "task:master",
+    ]
 
 
 def test_failed_export_keeps_the_cursor(monkeypatch, tmp_path):
