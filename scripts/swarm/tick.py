@@ -5,7 +5,7 @@ Each swarm keeps at most one master: an agent the operator talks to, which works
 """
 
 import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from itertools import count
 from typing import Protocol
 
@@ -21,6 +21,7 @@ from scripts.swarm import control_notifications, lifetime, phase_state, session_
 from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
+from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 
@@ -54,6 +55,7 @@ class Placed:
     profile: str = ""
     model_source: str = ""
     model_confidence: float | None = None
+    profile_decision: dict = field(default_factory=dict)
 
 
 class Ledger(Protocol):
@@ -345,6 +347,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             except Exception as exc:
                 transfers.failed(store, slug, record, now_ms)
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
+                if isinstance(exc, ProfileUnresolved):
+                    actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
                 return actions
             store.put_agent(slug, _placed(record, placed))
             store.count_spawn(slug, placed.harness)
@@ -352,6 +356,15 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             store.clear_handoff(slug, task["id"])
             actions.append(f"spawned {name} for {task['id']}")
     return actions
+
+
+def _unresolved(slug, ledger, rows, task_id, reason):
+    live = ledger.update_task(slug, task_id, {"state": "blocked"}, if_state=("open",))
+    rows[task_id].update(live)
+    if live["state"] != "blocked":
+        return f"task {task_id} is {live['state']} on the ledger, its profile stays unresolved"
+    ledger.comment(slug, task_id, reason, by="swarm")
+    return f"blocked {task_id}: {reason}"
 
 
 def _lives_spent(slug, store, ledger, rows, task):
@@ -411,6 +424,7 @@ def _placed(record, placed):
         profile=placed.profile,
         model_source=placed.model_source,
         model_confidence=placed.model_confidence,
+        profile_decision=placed.profile_decision,
         state="working",
     )
 

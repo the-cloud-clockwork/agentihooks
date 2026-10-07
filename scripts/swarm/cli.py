@@ -171,7 +171,7 @@ def cmd_list(store, args):
     for slug in store.slugs():
         c = store.config(slug)
         print(
-            f"{slug}\t{c.state}\teng {c.max_eng}\tci {c.max_ci}\tplan {c.max_plan}\tagents {len(store.agents(slug))}\t{c.repo}"
+            f"{naming.swarm_name(c.code) or '-'}\t{slug}\t{c.state}\teng {c.max_eng}\tci {c.max_ci}\tplan {c.max_plan}\tagents {len(store.agents(slug))}\t{c.repo}"
         )
 
 
@@ -483,7 +483,7 @@ def cmd_status(store, args):
     counts = task_counts(tasks)
     found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
-        f"{config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}  {_share(store, config)}"
+        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}  {_share(store, config)}"
     )
     print(
         "gate modes  "
@@ -520,11 +520,18 @@ def cmd_names(store, args):
     if args.json:
         print(
             json.dumps(
-                {"code": config.code, "space": naming.space(config.repo, config.code, config.slug), "names": rows}
+                {
+                    "name": naming.swarm_name(config.code),
+                    "code": config.code,
+                    "space": naming.space(config.repo, config.code, config.slug),
+                    "names": rows,
+                }
             )
         )
         return
-    print(f"code {config.code}\tspace {naming.space(config.repo, config.code, config.slug)}")
+    print(
+        f"name {naming.swarm_name(config.code)}\tcode {config.code}\tspace {naming.space(config.repo, config.code, config.slug)}"
+    )
     for row in rows:
         retired = row["retired_at"] or "-"
         print(
@@ -539,6 +546,7 @@ def cmd_rename(store, args):
     slugs = [args.slug] if getattr(args, "slug", "") else store.slugs()
     ledger, runtime, failed = LedgerClient(), HerdrRuntime(), []
     for slug in slugs:
+        store.ensure_code(slug)
         if not store.agents(slug):
             continue
         try:
@@ -959,6 +967,8 @@ def main(argv):
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         store = connect()
+        if "slug" in args:
+            args.slug = store.names.swarm_slug(args.slug)
         action = getattr(args, "command", "")
         before = control_notifications.master(store, args.slug) if action in control_notifications.CONTROLS else None
         handler(store, args)

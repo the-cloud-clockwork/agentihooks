@@ -2039,7 +2039,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const state = sw ? sw.config.state : "unavailable";
     $("swarm-state").className = `sw-state ${state}`;
     $("swarm-state").textContent = state;
-    $("swarm-name").textContent = (sw && sw.config.slug) || SLUG;
+    $("swarm-name").textContent = (sw && (sw.config.name || sw.config.slug)) || SLUG;
     $("swarm-tick").textContent = !sw ? "" : sw.last_tick ? `tick ${age(Date.now() - sw.last_tick)} ago` : "tick not recorded";
     $("tab-swarm").replaceChildren(...["Swarm ", h("span", { class: $("swarm-state").className, text: state }),
       sw && (openFindings(sw).length || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null].filter(Boolean));

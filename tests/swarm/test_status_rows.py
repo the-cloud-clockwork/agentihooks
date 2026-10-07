@@ -192,3 +192,12 @@ def test_status_report_carries_the_page_rows_without_handoff_text(store, monkeyp
     assert report["doctor"]["state"] == "not running"
     assert report["handoffs"][0]["seat"] == "eng-1@sw"
     assert "long text" not in json.dumps(report["handoffs"])
+
+
+def test_status_config_names_the_swarm_at_its_code_beside_the_codex_target(store, monkeypatch):
+    store.create(SwarmConfig("sw", "/repo", 1, 1))
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_SHARE", "10")
+    monkeypatch.setattr(status, "page_quota", lambda: {})
+    config = status.status_report(store, "sw", {"tasks": []})["config"]
+    code = store.config("sw").code
+    assert (config["slug"], config["code"], config["name"], config["codex_share"]) == ("sw", code, f"swarm@{code}", 10)

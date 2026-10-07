@@ -63,6 +63,7 @@ class AgentRecord:
     profile: str = ""
     model_source: str = ""
     model_confidence: float | None = None
+    profile_decision: dict = field(default_factory=dict)
     input_prompt: str = ""
     input_ticks: int = 0
 
