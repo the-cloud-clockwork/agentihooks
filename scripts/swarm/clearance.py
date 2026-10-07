@@ -8,9 +8,9 @@ OPERATOR = "operator"
 COMMANDS = frozenset({"start", "pause", "stop", "close", "reopen", "set", "lift"})
 
 
-def holder(store, slug, who, named="", environ=None):
+def holder(store, slug, who, environ=None):
     env = os.environ if environ is None else environ
-    name = store.names.resolve(who.name or named)
+    name = store.names.resolve(who.name)
     here = not who.swarm or store.names.swarm_slug(who.swarm) == slug
     if here and any(a.lane == MASTER and a.state != "finished" and a.name == name for a in store.agents(slug)):
         return name
