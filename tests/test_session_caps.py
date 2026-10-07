@@ -1,6 +1,5 @@
 import json
 
-import fakeredis
 import pytest
 
 from scripts import agent_choice, agents_quota, codex_router, session_caps
@@ -14,6 +13,8 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 @pytest.fixture
 def client(monkeypatch):
+    import fakeredis
+
     found = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(session_caps, "_client", lambda: found)
     return found
