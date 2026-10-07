@@ -125,7 +125,7 @@ def test_release_computes_the_requested_version_from_tags(tmp_path, bump, expect
 
 def test_release_tags_without_committing_and_dry_run_never_pushes():
     job = _workflow("release.yml")["jobs"]["release"]
-    assert job["permissions"] == {"contents": "write"}
+    assert job["permissions"] == {"contents": "write", "actions": "write"}
     assert job["env"]["GH_TOKEN"] == "${{ github.token }}"
     tag = next(s for s in job["steps"] if s.get("name") == "Tag the release")
     assert 'git tag "v$NEXT" "$GITHUB_SHA"' in tag["run"]
