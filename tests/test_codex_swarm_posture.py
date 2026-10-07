@@ -2,6 +2,7 @@ import tomllib
 
 import pytest
 
+from scripts import install as scripts_install
 from tests.test_profile_render import world as render_world
 
 world = render_world
@@ -102,7 +103,7 @@ def test_refresh_rules_names_a_missing_linked_bundle_instead_of_a_traceback(worl
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
 
     with pytest.raises(SystemExit) as caught:
-        install._cmd_refresh_rules(Namespace(profile="engineer", clear=False, dry_run=False))
+        scripts_install._cmd_refresh_rules(Namespace(profile="engineer", clear=False, dry_run=False))
 
     assert caught.value.code == 1
     assert capsys.readouterr().out.endswith(
