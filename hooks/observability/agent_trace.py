@@ -231,20 +231,20 @@ def _outcome(result: dict) -> dict:
     return {"tool.outcome": "error" if result.get("is_error") else "success"}
 
 
-def _tool_output(entry: dict, result: dict) -> tuple[str, int]:
+def _persisted_result(entry: dict, result: dict) -> tuple[dict, int]:
     """Claude keeps only a preview of a large tool output in the transcript and writes the whole of it to a side file."""
-    text = _text(result.get("content"))
     persisted = entry.get("toolUseResult")
     if not isinstance(persisted, dict) or not persisted.get("persistedOutputPath"):
-        return text, 0
+        return result, 0
     side = Path(str(persisted["persistedOutputPath"]))
     if side.parent.name == "tool-results":
         try:
-            return side.read_bytes().decode(errors="replace"), 0
+            return {**result, "content": side.read_bytes().decode(errors="replace")}, 0
         except OSError:
             pass
     size = persisted.get("persistedOutputSize")
-    return text, (max(0, size - len(text)) if isinstance(size, int) and not isinstance(size, bool) else 0)
+    text = _text(result.get("content"))
+    return result, (max(0, size - len(text)) if isinstance(size, int) and not isinstance(size, bool) else 0)
 
 
 def _turn_spans(
@@ -300,7 +300,7 @@ def _turn_spans(
             if entry.get("type") != "assistant" or not isinstance(block, dict) or block.get("type") != "tool_use":
                 continue
             done, result = results.get(block.get("id"), (entry, {}))
-            output, omitted = _tool_output(done, result)
+            result, omitted = _persisted_result(done, result)
             attributes = {
                 "langfuse.observation.type": "tool",
                 "gen_ai.operation.name": "execute_tool",
@@ -308,7 +308,7 @@ def _turn_spans(
                 "gen_ai.tool.call.id": block.get("id", ""),
                 "error": bool(result.get("is_error")),
                 **_outcome(result),
-                **_io(json.dumps(block.get("input", {}), ensure_ascii=False), output),
+                **_io(json.dumps(block.get("input", {}), ensure_ascii=False), _text(result.get("content"))),
             }
             if omitted:
                 attributes["agentihooks.truncation.langfuse.observation.output.chars"] = omitted
