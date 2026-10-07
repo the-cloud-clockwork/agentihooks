@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 from typing import Callable
 
 from hooks.classifier import ClassifierError, YesNo, decide
-from scripts.gates import log
+from scripts.gates import intent_history, log
 from scripts.gates.base import Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.verdicts import Verdicts
@@ -108,12 +108,29 @@ def stamp(slug, task_id, url, doc, mode, now_ms, home=None):
 
 
 def pr_view(url, run=subprocess.run):
+    found = PULL.search(url)
+    if not found:
+        return None
+    owner, repo, number = found.groups()
     try:
-        done = _gh(["gh", "pr", "view", url, "--json", "title,body,files"], run)
+        done = _gh(["gh", "pr", "view", url, "--json", "title,body,files,reviews,comments"], run)
         raw = json.loads(done.stdout) if done.returncode == 0 else None
         if raw is None:
             return None
-        return {"title": raw["title"], "body": raw["body"] or "", "files": [f["path"] for f in raw["files"]]}
+        title, body, files = raw["title"], raw["body"] or "", [f["path"] for f in raw["files"]]
+        comments = _gh(["gh", "api", "--paginate", "--slurp", f"repos/{owner}/{repo}/pulls/{number}/comments"], run)
+        if comments.returncode:
+            return None
+        return {
+            "title": title,
+            "body": body,
+            "files": files,
+            "reviewer_findings": {
+                "reviews": raw.get("reviews", []),
+                "comments": raw.get("comments", []),
+                "inline": [comment for page in json.loads(comments.stdout) for comment in page],
+            },
+        }
     except (OSError, subprocess.SubprocessError, ValueError, KeyError):
         return None
 
@@ -138,6 +155,7 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
         "changed_files": pr["files"],
         "proof": task.get("proof") or {},
         "proof_notes": _proof_notes(task, proof_chars),
+        "reviewer_findings": pr.get("reviewer_findings", {}),
     }
 
 
@@ -177,7 +195,22 @@ class Check:
             pr = self.view(task["pr_url"])
             if pr is None:
                 continue
-            verdict, reason = self.ask(state_of(doc, task, pr))
+            state = intent_history.prepare(state_of(doc, task, pr))
+            classifier_input = intent_history.request(state, QUESTIONS)
+            verdict, reason = self.ask(state)
+            intent_history.append(
+                self.slug,
+                {
+                    "task": task["id"],
+                    "agent": task.get("claimed_by", ""),
+                    "at": self.now_ms,
+                    "purpose": PURPOSE,
+                    "verdict": verdict,
+                    "reason": reason,
+                    "classifier_input": classifier_input,
+                },
+                self.home,
+            )
             verdicts.write(task["id"], verdict, reason, self.now_ms)
             actions.append(f"task {task['id']} intent check {verdict}")
             who = Who(name=task.get("claimed_by", ""), task=task["id"])
