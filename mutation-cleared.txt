@@ -1830,5 +1830,9 @@
   "scripts/swarm/waits.py:scripts.swarm.waits.x__save_wait__mutmut_29:9c3c7405fbbdc9efe92ec0681d5dc4294e278b42ae0ce7a090ce6d9c978c900c": {
     "reader": "Standards /root/standards_reader",
     "reason": "Standards reader cleared: the sole caller uses boolean negation only. A queued set or delete returns True or a truthy one-element execution list; a refused comparison returns False or an empty list. Redis writes, TTL and notices match. Isolated fakeredis probe verified set, delete and mismatch for True, None, omitted and False in CI run 37655884757."
+  },
+  "scripts/gates/intent_calibration.py:scripts.gates.intent_calibration.x_verdicts__mutmut_10:fbb1829653dd6a5afd03395028b86d6066fa174c44f8559ebed783e722acd9bf": {
+    "reader": "Standards",
+    "reason": "recorded() ignores its state argument and returns the recorded answers, so passing None instead of the case state to intent.judge gives identical output in verdicts, side_of, measure and main."
   }
 }
