@@ -39,8 +39,9 @@ def launch_of(pid):
         report = json.loads(Path(env[binding.REPORT]).read_text())
     except (OSError, ValueError, KeyError):
         return account, {}
-    validation = report.get("validation", {})
-    return account, validation if report["state"] == "validated" and validation.get("pid") == found else {}
+    if report["state"] != "validated" or report["validation"]["pid"] != found:
+        return account, {}
+    return account, report["validation"]
 
 
 def _master_name(name, code):
@@ -79,7 +80,7 @@ def take(store, slug, name, runtime, now_ms, replace_live=False):
         name,
         MASTER,
         MASTER,
-        harness=validated.get("harness") or harness,
+        harness=harness,
         profile=validated.get("profile") or os.environ.get("AGENTIHOOKS_PROFILE", ""),
         started_at=now_ms,
         model=validated.get("model") or model,
