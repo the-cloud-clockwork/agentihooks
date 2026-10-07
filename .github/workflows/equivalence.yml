@@ -57,18 +57,22 @@ jobs:
               assert source.count(needle) == 1
               path.write_text(source.replace(needle, planted))
           PY
-      - name: Install the page replay browser
-        timeout-minutes: 2
-        uses: ./head/.github/actions/browser-cache
-      - name: Replay base, head and both planted faults at once
+      - name: Replay base, head and the planted checkbox fault at once
         run: |
+          replay() {
+            name=$1
+            shift
+            if ! "$@" > "$RUNNER_TEMP/$name.log" 2>&1; then
+              echo "::group::$name replay failed"
+              cat "$RUNNER_TEMP/$name.log"
+              echo "::endgroup::"
+              return 1
+            fi
+          }
           replay=head/tests/swarm_ledger
-          python $replay/repository_replay.py "$PWD/base" "$RUNNER_TEMP/base-ledger" base.json &
-          python $replay/repository_replay.py "$PWD/head" "$RUNNER_TEMP/head-ledger" head.json &
-          python $replay/repository_replay.py "$PWD/fault-store" "$RUNNER_TEMP/fault-ledger" fault.json &
-          python -I $replay/page_replay.py "$PWD/base" "$RUNNER_TEMP/base-page" base-page.json &
-          python -I $replay/page_replay.py "$PWD/head" "$RUNNER_TEMP/head-page" head-page.json &
-          python -I $replay/page_replay.py "$PWD/fault-chat" "$RUNNER_TEMP/fault-page" fault-page.json &
+          replay base python $replay/repository_replay.py "$PWD/base" "$RUNNER_TEMP/base-ledger" base.json &
+          replay head python $replay/repository_replay.py "$PWD/head" "$RUNNER_TEMP/head-ledger" head.json &
+          replay fault python $replay/repository_replay.py "$PWD/fault-store" "$RUNNER_TEMP/fault-ledger" fault.json &
           failed=0
           for job in $(jobs -p); do
             wait "$job" || failed=1
@@ -83,6 +87,30 @@ jobs:
             exit 1
           fi
           echo 'PASS: identical base and head; planted checkbox fault rejected'
+      - name: Install the page replay browser
+        timeout-minutes: 2
+        uses: ./head/.github/actions/browser-cache
+      - name: Replay base, head and the planted chat fault pages at once
+        run: |
+          replay() {
+            name=$1
+            shift
+            if ! "$@" > "$RUNNER_TEMP/$name.log" 2>&1; then
+              echo "::group::$name replay failed"
+              cat "$RUNNER_TEMP/$name.log"
+              echo "::endgroup::"
+              return 1
+            fi
+          }
+          replay=head/tests/swarm_ledger
+          replay base-page python -I $replay/page_replay.py "$PWD/base" "$RUNNER_TEMP/base-page" base-page.json &
+          replay head-page python -I $replay/page_replay.py "$PWD/head" "$RUNNER_TEMP/head-page" head-page.json &
+          replay fault-page python -I $replay/page_replay.py "$PWD/fault-chat" "$RUNNER_TEMP/fault-page" fault-page.json &
+          failed=0
+          for job in $(jobs -p); do
+            wait "$job" || failed=1
+          done
+          exit "$failed"
       - name: Compare recorded page actions
         run: cmp base-page.json head-page.json
       - name: Reject the planted chat fault

@@ -259,12 +259,15 @@ def test_equivalence_runs_every_replay_at_once_after_one_browser_setup():
     steps = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"]["ledger-equivalence"][
         "steps"
     ]
-    replays = [step for step in steps if "_replay.py" in step.get("run", "")]
-    assert len(replays) == 1
-    run = replays[0]["run"]
-    assert run.count("repository_replay.py") == 3 and run.count("page_replay.py") == 3
-    assert run.count(" &\n") == 6 and "wait" in run
-    assert steps.index(_browser_install(steps)) < steps.index(replays[0])
+    store, pages = [step for step in steps if "_replay.py" in step.get("run", "")]
+    assert store["run"].count("repository_replay.py") == 3 and "page_replay.py" not in store["run"]
+    assert pages["run"].count("page_replay.py") == 3 and "repository_replay.py" not in pages["run"]
+    for step in (store, pages):
+        run = step["run"]
+        assert run.count(" &\n") == 3
+        assert "|| failed=1" in run and 'exit "$failed"' in run
+        assert 'cat "$RUNNER_TEMP/$name.log"' in run
+    assert steps.index(store) < steps.index(_browser_install(steps)) < steps.index(pages)
     assert all("Path('head/" not in step.get("run", "") for step in steps)
 
 
