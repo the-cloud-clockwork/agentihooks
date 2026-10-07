@@ -40,6 +40,11 @@ def ledger_path(slug: str) -> Path:
 
 
 def build_master(slug, repo, name, task, autonomy=DELEGATE):
+    from scripts.profiles import codex_master
+
+    codex = task.get("harness") == "codex"
+    if codex:
+        task = codex_master.handoff(task, slug)
     me = f"agentihooks swarm {slug} --as {name}"
     led = f"agentihooks ledger --slug {slug} --as {name}"
     summary = summary_lines(slug)
@@ -67,6 +72,15 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "once.",
         "",
         "Your standing duties:",
+        *([codex_master.waiting(slug)] if codex else []),
+        *(
+            [
+                "When writing a handoff, make its Next action read agentihooks msg inbox and use "
+                f"agentihooks swarm {slug} wait --inbox when no work remains."
+            ]
+            if codex
+            else []
+        ),
         "- Answer every operator chat message. Messages from the page reach this session as inbox messages from "
         'operator: answer each with agentihooks msg reply <id> "<text>", which shows the answer on the page and '
         f'closes the message. Post your own updates with {me} say --to operator "<text>". Answer what the operator '
