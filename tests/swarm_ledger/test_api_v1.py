@@ -1019,7 +1019,12 @@ def test_central_mutation_schema_boundaries_leave_state_unchanged(live):
         live, "POST", "operations", {"ops": [{"op": "title_set", "id": "empty-title", "text": ""}], "guards": {}}
     ) == (
         400,
-        {"error": {"code": "schema_invalid", "message": "Operation does not match its domain schema"}},
+        {
+            "error": {
+                "code": "schema_invalid",
+                "message": "Operation does not match its domain schema: title_set needs a title of 1 to 200 characters",
+            }
+        },
     )
     assert request(live, "GET", "metadata") == before
 
@@ -2065,8 +2070,37 @@ def test_known_hash_shaped_task_ids_keep_the_comment_exemption(live):
     }
     assert request(live, "POST", "operations", payload) == (
         400,
-        {"error": {"code": "schema_invalid", "message": "Operation does not match its domain schema"}},
+        {
+            "error": {
+                "code": "schema_invalid",
+                "message": "Operation does not match its domain schema: chat refused, write plain words for the "
+                "operator (what was done, or why it was skipped): commit hash 'feedfac3'",
+            }
+        },
     )
+    assert request(live, "GET", "chat")[1]["revision"] == revision
+
+
+def test_refused_comment_reason_reaches_the_api_reply_and_the_cli(live):
+    from unittest.mock import patch
+
+    reason = (
+        "Operation does not match its domain schema: chat refused, write plain words for the operator "
+        "(what was done, or why it was skipped): file name or path 'foo.py'"
+    )
+    expected = {"error": {"code": "schema_invalid", "message": reason}}
+    revision = request(live, "GET", "chat")[1]["revision"]
+    comment = {"op": "add", "id": "path-comment", "thread": "chat", "by": "api-reader", "text": "see scripts/foo.py"}
+    assert request(live, "POST", "operations", {"ops": [dict(comment)], "guards": {"chat": revision}}) == (
+        400,
+        expected,
+    )
+    with patch.dict("os.environ", {"AGENTIHOOKS_AGENT_NAME": "", "AGENTIHOOKS_SWARM": ""}):
+        with pytest.raises(SystemExit) as refused:
+            ledger.call(SLUG, [{**comment, "id": "cli-path-comment"}])
+    prefix = "server refused: 400 "
+    assert refused.value.code[: len(prefix)] == prefix
+    assert json.loads(refused.value.code[len(prefix) :]) == expected
     assert request(live, "GET", "chat")[1]["revision"] == revision
 
 

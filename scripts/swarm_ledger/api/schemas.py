@@ -143,8 +143,8 @@ def check_operations(payload: dict, core: ModuleType, task_ids: tuple) -> list:
         validate(operation_schema(kind), operation)
     try:
         core.check_body({"ops": operations}, task_ids)
-    except ValueError:
-        raise APIError(400, "schema_invalid", "Operation does not match its domain schema") from None
+    except ValueError as exc:
+        raise APIError(400, "schema_invalid", f"Operation does not match its domain schema: {exc}") from None
     if len({op["id"] for op in operations}) != len(operations):
         raise APIError(400, "schema_invalid", "Operation identifiers must be distinct")
     if payload.get("changes"):
