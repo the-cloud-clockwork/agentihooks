@@ -1,0 +1,333 @@
+import argparse
+import hashlib
+import json
+import sys
+from collections import Counter
+from pathlib import Path
+
+SCHEMA = "swarm-v2-architecture/1"
+INVENTORY_SCHEMA = "swarm-v2-design-inventory/1"
+ROLES = ("code_owner", "state_owner", "deployment_owner")
+KINDS = frozenset({"dispatcher", "backlog", "service", "worker_component"})
+CODING_TASKS = "coding_tasks"
+OPERATOR = "operator"
+CARRIES = ("changed_content", CODING_TASKS, "none", "transcripts")
+DECLARE = (
+    f"a proposal must declare carries as one of {', '.join(CARRIES)}, launches_agents as true or false,"
+    " and a non-empty authoritative_state"
+)
+RECORD = "docs/swarm-v2/architecture.json"
+MARKDOWN = "docs/swarm-v2/decisions.md"
+
+
+class ArchitectureError(ValueError):
+    pass
+
+
+def _load(path: Path | str, schema: str) -> dict:
+    data = json.loads(Path(path).read_text())
+    if data.get("schema") != schema:
+        raise ArchitectureError(f"{path} is not a {schema} document")
+    return data
+
+
+def load_record(path: Path | str) -> dict:
+    return _load(path, SCHEMA)
+
+
+def load_inventory(path: Path | str) -> dict:
+    data = _load(path, INVENTORY_SCHEMA)
+    ids = [p["id"] for p in data["proposals"]]
+    if len(set(ids)) != len(ids):
+        raise ArchitectureError("proposal ids must be unique")
+    return data
+
+
+def missing_owner(record: dict, component: dict) -> str | None:
+    return next((role for role in ROLES if component.get(role) not in record["owners"]), None)
+
+
+def dispatches(component: dict) -> bool:
+    return (
+        component.get("kind") == "dispatcher"
+        or component.get("carries") == CODING_TASKS
+        or component.get("launches_agents") is True
+    )
+
+
+def approved(record: dict, proposal: dict) -> bool:
+    return any(
+        c["proposal"] == proposal["id"] and c["sha256"] == digest(proposal) and c["approved_by"] == OPERATOR
+        for c in record["operator_changes"]
+    )
+
+
+def authorities(record: dict) -> list[str]:
+    changed = {c["proposal"] for c in record["operator_changes"]}
+    return [c["name"] for c in record["components"] if dispatches(c) and c.get("proposal") not in changed]
+
+
+def _declared(proposal: dict) -> bool:
+    state = proposal.get("authoritative_state")
+    return (
+        proposal.get("carries") in CARRIES
+        and isinstance(proposal.get("launches_agents"), bool)
+        and isinstance(state, str)
+        and bool(state.strip())
+    )
+
+
+def _excluded(record: dict, component: dict) -> bool:
+    excluded = {name.casefold() for name in record["worker_excluded"]}
+    return component.get("kind") == "worker_component" and component["name"].casefold() in excluded
+
+
+def _conflict(record: dict, proposal: dict, repeated: set[str]) -> str:
+    if proposal["id"] in repeated:
+        return f"conflicting proposals for {proposal['name']}"
+    name, state = proposal["name"].casefold(), proposal["authoritative_state"].casefold()
+    for c in record["components"]:
+        if c["name"].casefold() == name:
+            return f"{c['name']} is already recorded; changing it needs an operator architecture change"
+        if c["authoritative_state"].casefold() == state:
+            return (
+                f"{c['name']} already owns this authoritative state; sharing it needs an operator architecture change"
+            )
+    return ""
+
+
+def _verdict(record: dict, proposal: dict, repeated: set[str]) -> tuple[str, str]:
+    kind = proposal.get("kind")
+    role = missing_owner(record, proposal)
+    if kind not in KINDS:
+        return "rejected", f"unknown kind {kind!r}"
+    if not _declared(proposal):
+        return "rejected", DECLARE
+    if role:
+        return "rejected", f"{role} must name exactly one owner from the record"
+    if _excluded(record, proposal):
+        return "rejected", f"the worker image excludes {proposal['name']} (AD-06)"
+    if dispatches(proposal) and not approved(record, proposal):
+        return "rejected", f"inserts another coding-task queue beside {', '.join(authorities(record))} (AD-05)"
+    if kind == "backlog" and not (proposal.get("bounded") is True and proposal["carries"] in record["backlog_carries"]):
+        return "rejected", f"a backlog must be bounded and carry one of {', '.join(record['backlog_carries'])} (AD-05)"
+    if kind == "worker_component" and proposal["name"].casefold() not in {
+        n.casefold() for n in record["worker_permitted"]
+    }:
+        return "unresolved", f"{proposal['name']} is not a permitted worker image component (AD-06)"
+    conflict = _conflict(record, proposal, repeated)
+    return ("unresolved", conflict) if conflict else ("accepted", "")
+
+
+def _repeated(proposals: list[dict]) -> set[str]:
+    declared = [p for p in proposals if _declared(p)]
+    names = Counter(p["name"].casefold() for p in declared)
+    states = Counter(p["authoritative_state"].casefold() for p in declared)
+    return {
+        p["id"] for p in declared if names[p["name"].casefold()] > 1 or states[p["authoritative_state"].casefold()] > 1
+    }
+
+
+def review(record: dict, inventory: dict) -> dict:
+    repeated = _repeated(inventory["proposals"])
+    result = {
+        "operation": inventory["operation"],
+        "revision": record["revision"],
+        "accepted": [],
+        "rejected": [],
+        "unresolved": [],
+    }
+    for proposal in inventory["proposals"]:
+        outcome, reason = _verdict(record, proposal, repeated)
+        if outcome == "accepted":
+            result["accepted"].append(proposal["id"])
+        else:
+            result[outcome].append({"id": proposal["id"], "name": proposal["name"], "reason": reason})
+    unowned = [c["name"] for c in [*record["components"], *inventory["proposals"]] if missing_owner(record, c)]
+    return {**result, "unowned": unowned, "measurements": {"architecture_unowned_components": len(unowned)}}
+
+
+def check(record: dict) -> list[str]:
+    components = record["components"]
+    errors = [
+        f"{c['name']}: {missing_owner(record, c)} must name exactly one owner from the record"
+        for c in components
+        if missing_owner(record, c)
+    ]
+    names = [c["name"] for c in components]
+    errors += [f"{n} is recorded more than once" for n in dict.fromkeys(n for n in names if names.count(n) > 1)]
+    errors += [f"{c['name']} is excluded from the worker image" for c in components if _excluded(record, c)]
+    count = len(authorities(record))
+    if count != 1:
+        errors.append(f"expected one coding-task authority, found {count}")
+    return errors
+
+
+def digest(document: dict) -> str:
+    return hashlib.sha256(json.dumps(document, sort_keys=True).encode()).hexdigest()
+
+
+def _write(path: Path | str, record: dict) -> None:
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(json.dumps(record, indent=2) + "\n")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _replayed(record: dict, operation: str, sha256: str) -> dict | None:
+    done = next((o for o in record["operations"] if o["id"] == operation), None)
+    if done and done["sha256"] != sha256:
+        raise ArchitectureError(f"operation {operation} was already recorded with different content")
+    return done
+
+
+def _commit(path: Path | str, record: dict, operation: str, sha256: str, result: dict) -> dict:
+    revision = record["revision"] + 1
+    components = list(record["components"])
+    record["operations"].append(
+        {"id": operation, "revision": revision, "sha256": sha256, "result": result, "components": components}
+    )
+    record["revision"] = revision
+    _write(path, record)
+    return result
+
+
+def apply_inventory(path: Path | str, inventory: dict) -> dict:
+    record = load_record(path)
+    operation, sha256 = inventory["operation"], digest(inventory)
+    done = _replayed(record, operation, sha256)
+    if done:
+        return done["result"]
+    if inventory["base_revision"] != record["revision"]:
+        raise ArchitectureError(
+            f"inventory is based on revision {inventory['base_revision']}; the record is at revision {record['revision']}"
+        )
+    result = review(record, inventory)
+    revision = record["revision"] + 1
+    proposals = {p["id"]: p for p in inventory["proposals"]}
+    for pid in result["accepted"]:
+        fields = {k: v for k, v in proposals[pid].items() if k != "id"}
+        record["components"].append({**fields, "proposal": pid, "added_in": revision})
+    for outcome in ("rejected", "unresolved"):
+        record[outcome] += [{**item, "operation": operation, "revision": revision} for item in result[outcome]]
+    return _commit(path, record, operation, sha256, result)
+
+
+def _accepted_at(record: dict, revision: int) -> list[dict]:
+    if revision == 1:
+        return [c for c in record["components"] if "proposal" not in c]
+    return list(next(o["components"] for o in record["operations"] if o["revision"] == revision))
+
+
+def rollback(path: Path | str, to_revision: int, operation: str) -> dict:
+    record = load_record(path)
+    sha256 = digest({"rollback_to": to_revision})
+    done = _replayed(record, operation, sha256)
+    if done:
+        return done["result"]
+    if not 1 <= to_revision < record["revision"]:
+        raise ArchitectureError(f"rollback target {to_revision} is not an earlier revision of {record['revision']}")
+    revision = record["revision"] + 1
+    current = record["components"]
+    restored = _accepted_at(record, to_revision)
+    removed = [c for c in current if c not in restored]
+    record["components"] = restored
+    record["rejected"] += [
+        {
+            "id": c["proposal"],
+            "name": c["name"],
+            "reason": f"rolled back to revision {to_revision}",
+            "operation": operation,
+            "revision": revision,
+        }
+        for c in removed
+    ]
+    result = {
+        "operation": operation,
+        "revision": record["revision"],
+        "rolled_back": [c["name"] for c in removed],
+        "restored": [c["name"] for c in restored if c not in current],
+    }
+    return _commit(path, record, operation, sha256, result)
+
+
+def render(record: dict) -> str:
+    lines = [
+        "# Swarm v2 architecture decisions",
+        "",
+        f"Package SV2-FND-02, record revision {record['revision']}. Generated from `{RECORD}` by"
+        " `python -m scripts.swarm_v2.architecture render`; edit the record, never this file.",
+        "",
+        "## Components",
+        "",
+        "| Component | Kind | Code owner | State owner | Deployment owner | Authoritative state |",
+        "|---|---|---|---|---|---|",
+    ]
+    lines += [
+        f"| {c['name']} | {c['kind']} | {c['code_owner']} | {c['state_owner']} | {c['deployment_owner']} |"
+        f" {c['authoritative_state']} |"
+        for c in record["components"]
+    ]
+    for d in record["decisions"]:
+        lines += ["", f"## {d['id']}: {d['title']}", "", f"Status: {d['status']}.", "", d["decision"], ""]
+        lines += [f"Why: {d['rationale']}", "", "Rejected alternatives:", ""]
+        lines += [f"- {a['alternative']}: {a['reason']}" for a in d["rejected_alternatives"]]
+    for title, key in (
+        ("Permitted worker image components", "worker_permitted"),
+        ("Worker image exclusions", "worker_excluded"),
+    ):
+        lines += ["", f"## {title}", "", *[f"- {name}" for name in record[key]]]
+    lines.append("")
+    changes = [
+        f"{c['proposal']} by {c['approved_by']} at revision {c['revision']} ({c['reason']})"
+        for c in record["operator_changes"]
+    ]
+    lines.append(f"Operator architecture changes: {', '.join(changes) or 'none'}.")
+    for title, key in (("Unresolved decisions", "unresolved"), ("Rejected proposals", "rejected")):
+        entries = [f"- {e['name']} (`{e['id']}`, revision {e['revision']}): {e['reason']}" for e in record[key]]
+        lines += ["", f"## {title}", "", *(entries or ["None."])]
+    return "\n".join(lines) + "\n"
+
+
+def _run(args) -> int:
+    if args.command == "check":
+        errors = check(load_record(args.record))
+        print("\n".join(errors) or "ok")
+        return 1 if errors else 0
+    if args.command == "review":
+        print(json.dumps(review(load_record(args.record), load_inventory(args.inventory)), indent=2))
+        return 0
+    if args.command == "record":
+        print(json.dumps(apply_inventory(args.record, load_inventory(args.inventory)), indent=2))
+    elif args.command == "rollback":
+        print(json.dumps(rollback(args.record, args.to, args.operation), indent=2))
+    Path(args.markdown).write_text(render(load_record(args.record)))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m scripts.swarm_v2.architecture")
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("review", "record", "rollback", "render", "check"):
+        command = commands.add_parser(name)
+        command.add_argument("--record", default=RECORD)
+        if name in ("review", "record"):
+            command.add_argument("--inventory", required=True)
+        if name in ("record", "rollback", "render"):
+            command.add_argument("--markdown", default=MARKDOWN)
+        if name == "rollback":
+            command.add_argument("--to", type=int, required=True)
+            command.add_argument("--operation", required=True)
+    args = parser.parse_args(argv)
+    try:
+        return _run(args)
+    except ArchitectureError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
