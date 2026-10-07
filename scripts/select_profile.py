@@ -7,6 +7,7 @@ import sys
 import yaml
 
 from scripts import init_agent
+from scripts.profiles import plugins
 from scripts.profiles import render as profiles
 
 
@@ -15,6 +16,8 @@ def prepare(
 ) -> tuple[dict[str, str], list[str]]:
     if agent not in ("claude", "codex"):
         raise ValueError(f"{agent} per-run profiles are not supported")
+    if agent == "codex" and plugins.claude_only(name):
+        raise ValueError(f"profile {name} does not support codex; supported harness: claude")
     defaults = _defaults(name)
     prefix = f"AGENTIHOOKS_{agent.upper()}"
     active = dict(environ)
