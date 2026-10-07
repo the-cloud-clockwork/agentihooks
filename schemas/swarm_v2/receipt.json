@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:swarm-v2:receipt",
+  "title": "Consultation receipt",
+  "allOf": [{"$ref": "urn:swarm-v2:common#/$defs/envelope"}],
+  "type": "object",
+  "required": ["authority", "receipt_id", "operation_class", "policy_version", "context_digest", "evidence_revision", "result_state", "delivered_at", "expires_at", "override_ref"],
+  "properties": {
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execution_id", "task_id", "task_generation", "brain_id", "project_id", "principal_id"],
+      "properties": {
+        "execution_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "task_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "task_generation": {"$ref": "urn:swarm-v2:common#/$defs/generation"},
+        "brain_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "project_id": {"$ref": "urn:swarm-v2:common#/$defs/project_id"},
+        "principal_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"}
+      }
+    },
+    "receipt_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+    "operation_class": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+    "policy_version": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+    "context_digest": {"$ref": "urn:swarm-v2:common#/$defs/digest"},
+    "evidence_revision": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+    "result_state": {"enum": ["retrieved", "empty", "unavailable", "rejected"]},
+    "delivered_at": {"anyOf": [{"$ref": "urn:swarm-v2:common#/$defs/timestamp"}, {"type": "null"}]},
+    "expires_at": {"$ref": "urn:swarm-v2:common#/$defs/timestamp"},
+    "override_ref": {"anyOf": [{"$ref": "urn:swarm-v2:common#/$defs/identifier"}, {"type": "null"}]}
+  }
+}

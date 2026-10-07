@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:swarm-v2:launch",
+  "title": "Execution launch registration",
+  "allOf": [{"$ref": "urn:swarm-v2:common#/$defs/envelope"}],
+  "type": "object",
+  "required": ["authority", "agent_name", "runtime_backend", "harness", "image_digest", "launch_spec_digest", "credential_ref", "created_at"],
+  "properties": {
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execution_id", "task_id", "task_generation", "controller_epoch", "swarm_id", "seat_id", "grant_ref", "project_id"],
+      "properties": {
+        "execution_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "task_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "task_generation": {"$ref": "urn:swarm-v2:common#/$defs/generation"},
+        "controller_epoch": {"$ref": "urn:swarm-v2:common#/$defs/generation"},
+        "swarm_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "seat_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "grant_ref": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "project_id": {"$ref": "urn:swarm-v2:common#/$defs/project_id"}
+      }
+    },
+    "agent_name": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+    "runtime_backend": {"enum": ["local", "kubernetes"]},
+    "runtime_profile": {"type": "string"},
+    "harness": {"enum": ["claude", "codex", "copilot"]},
+    "image_digest": {"$ref": "urn:swarm-v2:common#/$defs/digest"},
+    "launch_spec_digest": {"$ref": "urn:swarm-v2:common#/$defs/digest"},
+    "credential_ref": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+    "created_at": {"$ref": "urn:swarm-v2:common#/$defs/timestamp"}
+  }
+}

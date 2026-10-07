@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:swarm-v2:checkpoint",
+  "title": "Checkpoint manifest",
+  "allOf": [{"$ref": "urn:swarm-v2:common#/$defs/envelope"}],
+  "type": "object",
+  "required": ["authority", "checkpoint_id", "checkpoint_sequence", "status", "created_at", "committed_at", "native_resume_capability", "base_commit", "head_commit", "branch_name", "transcript_durable_cursor", "artifact_hashes", "exclusions"],
+  "properties": {
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execution_id", "task_id", "task_generation", "project_id"],
+      "properties": {
+        "execution_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "task_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "task_generation": {"$ref": "urn:swarm-v2:common#/$defs/generation"},
+        "project_id": {"$ref": "urn:swarm-v2:common#/$defs/project_id"}
+      }
+    },
+    "checkpoint_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+    "checkpoint_sequence": {"type": "integer", "minimum": 0},
+    "status": {"enum": ["preparing", "uploading", "complete", "rejected"]},
+    "created_at": {"$ref": "urn:swarm-v2:common#/$defs/timestamp"},
+    "committed_at": {"anyOf": [{"$ref": "urn:swarm-v2:common#/$defs/timestamp"}, {"type": "null"}]},
+    "native_resume_capability": {"enum": ["qualified", "unsupported", "unverified"]},
+    "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "head_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "branch_name": {"type": "string", "minLength": 1, "maxLength": 255},
+    "transcript_durable_cursor": {"type": "object"},
+    "artifact_hashes": {"type": "object", "additionalProperties": {"$ref": "urn:swarm-v2:common#/$defs/digest"}},
+    "exclusions": {"type": "array", "items": {"type": "string"}}
+  }
+}

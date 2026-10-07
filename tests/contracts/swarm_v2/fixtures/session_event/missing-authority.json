@@ -1,0 +1,27 @@
+{
+  "schema_version": "2.1",
+  "operation_id": "event-synthetic-0120",
+  "trace_id": "0123456789abcdef0123456789abcdef",
+  "authority": {
+    "execution_id": "exe-synthetic-0007",
+    "task_id": "implement-session-ingestion",
+    "brain_id": "swarm",
+    "project_id": "github.com/the-cloud-clockwork/agentihooks"
+  },
+  "event_id": "event-synthetic-0120",
+  "session_uid": "session-synthetic-0007",
+  "source_generation": "generation-synthetic-01",
+  "sequence": 120,
+  "kind": "tool_result",
+  "timestamp": "2026-10-08T08:01:00Z",
+  "payload": {
+    "text": "Synthetic tool output."
+  },
+  "original_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "normalized_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+  "trust_class": "tool_observation",
+  "redaction": {
+    "status": "clean",
+    "policy_version": "redaction-01"
+  }
+}

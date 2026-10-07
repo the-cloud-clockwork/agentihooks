@@ -1191,7 +1191,7 @@ Baseline references: [SRC-AH-GUIDE] [SRC-BRAIN-89] [SRC-ANTON-CA]
 - Implementation status: planned; not executed by publication of this document.
 - Dependencies: [SV2-FND-02](#sv2-fnd-02).
 - Integration gate: `G0`, subject to all earlier applicable acceptance gates.
-- Owned path candidates: `schemas/swarm_v2/ (new); tests/contracts/swarm_v2/ (new)`.
+- Owned path candidates: `schemas/swarm_v2/ (new); tests/contracts/swarm_v2/ (new); scripts/swarm_v2/contracts.py (new, the in-repo admission check)`.
 - Required fixture: Current, previous-minor, future-major, and missing-authority fixture families.
 - Intended change: Define authority, compatibility, and error envelopes before producers and consumers diverge.
 

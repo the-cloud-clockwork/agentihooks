@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:swarm-v2:error",
+  "title": "Error envelope",
+  "allOf": [{"$ref": "urn:swarm-v2:common#/$defs/envelope"}],
+  "type": "object",
+  "required": ["error", "retry", "detail"],
+  "properties": {
+    "error": {
+      "enum": [
+        "invalid_request",
+        "unauthenticated",
+        "forbidden_scope",
+        "stale_generation",
+        "revision_conflict",
+        "dependency_unavailable",
+        "capacity_unsatisfiable",
+        "quota_wait",
+        "checkpoint_incomplete",
+        "native_resume_unavailable",
+        "evidence_deleted",
+        "partial_result"
+      ]
+    },
+    "reason": {"type": "string", "pattern": "^[a-z_]{1,64}$"},
+    "retry": {"enum": ["same_request", "new_request", "never"]},
+    "detail": {"type": "string", "maxLength": 500}
+  }
+}
