@@ -53,6 +53,14 @@ def test_haiku_launches_through_agentihooks_claude(monkeypatch, tmp_path, route,
     assert kwargs["env"].get("CLAUDE_CODE_OAUTH_TOKEN") == os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
 
 
+def test_launcher_off_path_is_left_to_the_shell(monkeypatch, tmp_path):
+    monkeypatch.setenv("PATH", str(tmp_path))
+    seen = []
+    monkeypatch.setattr(fallbacks.subprocess, "run", _launcher(seen))
+    fallbacks.ClaudeCliBackend().decide(REQUEST)
+    assert seen[0][0][3] == "agentihooks"
+
+
 def test_unroutable_account_fails_naming_why(monkeypatch, tmp_path):
     seen = []
     written = tmp_path / "route"
