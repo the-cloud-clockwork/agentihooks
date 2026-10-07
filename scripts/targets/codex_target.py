@@ -325,8 +325,7 @@ class CodexAdapter:
                 existing = {}
 
         # Preserve foreign matchers/hooks per event; replace only entries that
-        # point at our wrapper (identified by path). Ours go first: codex keys
-        # hook trust by group position, and tools such as herdr append theirs.
+        # point at our wrapper (identified by path).
         merged = existing.get("hooks", {}) if isinstance(existing.get("hooks"), dict) else {}
         for event, groups in desired.items():
             prior = merged.get(event, [])
@@ -335,6 +334,7 @@ class CodexAdapter:
                 for g in prior
                 if not any(_command_is_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
             ]
+            # Ours first: codex keys hook trust by group position and herdr appends its group.
             merged[event] = groups + foreign
         # Reap our own entries under events we no longer wire (e.g. a stale
         # PostCompact from an earlier install) — foreign groups there survive.
