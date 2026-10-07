@@ -113,7 +113,7 @@ class HerdrRuntime:
         saved = _transfer(task)
         decision = (
             profile_choice.ProfileDecision(saved["profile"], "handoff", "original seat profile")
-            if saved
+            if saved and not task.get("profile")
             else profile_choice.choose(config.slug, lane, chosen, task, environ)
         )
         profile = decision.profile

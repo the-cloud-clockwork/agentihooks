@@ -93,6 +93,15 @@ def test_handoff_of_a_default_lane_profile_is_never_reclassified(launching, monk
     )
 
 
+def test_an_explicit_task_profile_prevails_over_the_saved_seat_profile(launching):
+    engine, config, task, saved, calls = launching
+    saved.update(profile="engineer", harness="claude")
+    task["profile"] = "qa"
+    result = engine.spawn(config, "eng", "worker", task)
+    assert calls[-1][calls[-1].index("--profile") + 1] == "qa"
+    assert (result.profile, result.profile_decision["source"]) == ("qa", "task")
+
+
 def test_handoff_refuses_to_clamp_saved_effort(launching):
     engine, config, task, saved, calls = launching
     config.effort_min = config.effort_max = "high"
