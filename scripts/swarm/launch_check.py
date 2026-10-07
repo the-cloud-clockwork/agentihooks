@@ -4,6 +4,7 @@ profile, hooks, model and effort, sits on its package base role and carries a pa
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,10 +66,10 @@ def bundled(profile: str) -> bool:
     return bool(bundle and profile and (bundle / "profiles" / profile).is_dir())
 
 
-def declared(profile: str) -> list[str]:
+def declared(profile: str, overlays: Sequence[str] = ()) -> list[str]:
     from scripts.profiles import render
 
-    return render.declared(profile)
+    return list(dict.fromkeys([*render.declared(profile), *overlays]))
 
 
 def joined_at(agent: AgentRecord, doc: dict) -> int | None:

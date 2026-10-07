@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,6 +24,7 @@ SHARED = ("projects", "sessions", "todos", "plugins", ".credentials.json")
 CODEX_STATE = ("auth.json", "sessions", "history.jsonl", "session_index.jsonl", "hooks.json")
 CODEX_INHERITED = ("model", "model_reasoning_effort", "service_tier", "notify", "projects")
 STAMP = ".agentihooks-render.json"
+KEY_SEPARATOR = "+"
 CHANNELS, BRAIN = "AGENTIHOOKS_BASE_CHANNELS", "brain"
 HEADER = "<!-- agentihooks rendered profile -->"
 FOOTER = "<!-- end agentihooks rendered profile -->"
@@ -67,12 +69,13 @@ def declared(name: str) -> list[str]:
     return [o for o in dict.fromkeys(found) if _i._resolve_profile_dir(o) is not None]
 
 
-def _chain(name: str) -> list[tuple[str, Path]]:
+def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
     _i = _install_module()
     if _i._resolve_profile_dir(name) is None:
         raise ValueError(f"Profile '{name}' not found")
-    overlays = declared(name)
-    return _i._resolve_profile_chain(",".join([name, *overlays]))
+    always = [name, *declared(name)]
+    worn = profile_chain.worn(_i._resolve_profile_chain(",".join(always)), list(overlays), _i._resolve_profile_dir)
+    return _i._resolve_profile_chain(",".join([*always, *worn]))
 
 
 def _bundle() -> Path | None:
@@ -96,7 +99,7 @@ def _base_digest() -> str:
 
 def _overlays(dirs: list[tuple[str, Path]]) -> list[str]:
     declared_names = {o for _, path in dirs for o in profile_chain.overlays(path)}
-    return [n for n, _ in dirs if n in declared_names]
+    return [n for n, path in dirs if n in declared_names or profile_chain.wears(path)]
 
 
 def _profiles_digest(dirs: list[tuple[str, Path]]) -> str:
@@ -274,8 +277,20 @@ def _read_json(path: Path) -> dict | None:
         return None
 
 
-def profile_dir(name: str) -> Path | None:
-    return homes.current(rendered_root(), name)
+def home_key(name: str, overlays: Sequence[str] = ()) -> str:
+    names = [name, *sorted(set(overlays))]
+    if any(KEY_SEPARATOR in part for part in names):
+        raise ValueError(f"a profile or overlay name cannot hold {KEY_SEPARATOR}: {', '.join(names)}")
+    return KEY_SEPARATOR.join(names)
+
+
+def split_key(key: str) -> tuple[str, list[str]]:
+    name, *overlays = key.split(KEY_SEPARATOR)
+    return name, overlays
+
+
+def profile_dir(name: str, overlays: Sequence[str] = ()) -> Path | None:
+    return homes.current(rendered_root(), home_key(name, overlays))
 
 
 def owner(home: Path) -> str | None:
@@ -298,19 +313,20 @@ def _claude_fresh(root: Path, stamp: dict, required: set[str]) -> bool:
     )
 
 
-def render_claude(name: str, force: bool = False) -> Path | None:
+def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) -> Path | None:
     _refuse_live_render_from_another_checkout(name)
     _i = _install_module()
     _i._load_claude_runtime_env()
-    bundle, dirs = _bundle(), _chain(name)
+    bundle, dirs = _bundle(), _chain(name, overlays)
+    key = home_key(name, overlays)
     current = _stamp(bundle, dirs)
     declared = _mcp_servers("claude", bundle, dirs)
     connectors.require_environment(declared)
     required = {server for server, spec in declared.items() if spec.get("enabled_tools") is not None}
-    prior = profile_dir(name)
+    prior = profile_dir(name, overlays)
     if not force and prior is not None and _claude_fresh(prior, current, required):
         return None
-    root = homes.fresh(rendered_root(), name, current)
+    root = homes.fresh(rendered_root(), key, current)
     out = root / "claude"
     out.mkdir()
     if prior is not None and (prior / "claude" / ".claude.json").is_file():
@@ -334,7 +350,7 @@ def render_claude(name: str, force: bool = False) -> Path | None:
     if all(mounts[server]["mounted"] for server in required):
         _i.save_json(out / STAMP, current)
     binding.write(out, name, "claude")
-    homes.promote(rendered_root(), name, root)
+    homes.promote(rendered_root(), key, root)
     return out
 
 
@@ -372,21 +388,21 @@ def _codex_config(installed: dict, operator: Path, out: Path, settings: dict) ->
     return doc
 
 
-def render_codex(name: str, force: bool = False) -> Path | None:
+def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -> Path | None:
     import tomlkit
 
     from scripts.profiles import codex_master
 
     _i = _install_module()
-    bundle, dirs = _bundle(), _chain(name)
+    bundle, dirs = _bundle(), _chain(name, overlays)
     master = any(n.removeprefix("package:") == "master" for n, _ in dirs)
-    claude_fresh = render_claude(name, force=force) is None
+    claude_fresh = render_claude(name, force=force, overlays=overlays) is None
     operator = _operator_codex_home()
     config = operator / "config.toml"
     text = config.read_text() if config.exists() else ""
     installed = tomllib.loads(text)
     current = {"render": _stamp(bundle, dirs), "operator": hashlib.sha256(text.encode()).hexdigest()}
-    root = profile_dir(name)
+    root = profile_dir(name, overlays)
     out = root / "codex"
     if (
         not force
@@ -399,7 +415,7 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     ):
         return None
     if out.exists():
-        root = render_claude(name, force=True).parent
+        root = render_claude(name, force=True, overlays=overlays).parent
         out = root / "codex"
     manifest = sources.path(root.name, "codex", root.parent)
     claude = root / "claude"
@@ -435,11 +451,11 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     return out
 
 
-def render(target: str, name: str, force: bool = False) -> Path | None:
+def render(target: str, name: str, force: bool = False, overlays: Sequence[str] = ()) -> Path | None:
     renderers = {"claude": render_claude, "codex": render_codex}
     if target not in renderers:
         raise ValueError(f"{target} per-run profiles are not supported")
-    return renderers[target](name, force=force)
+    return renderers[target](name, force=force, overlays=overlays)
 
 
 def rendered_profiles(target: str) -> list[str]:
@@ -469,6 +485,7 @@ def _render_scratch(args: argparse.Namespace) -> int:
     argv = [sys.executable, "-m", "scripts.profiles.render", "render", args.name, "--target", args.target]
     # The child resolves the agentihooks home, bundle and corrections store at import, so only a fresh process sees them.
     cwd = Path(__file__).resolve().parents[2]
+    argv += [f"--overlay={overlay}" for overlay in args.overlay]
     return subprocess.run([*argv, *(["--force"] if args.force else [])], env=env, cwd=cwd).returncode
 
 
@@ -479,6 +496,7 @@ def main(argv: list[str] | None = None) -> int:
     render_cmd.add_argument("name")
     render_cmd.add_argument("--target", choices=("claude", "codex", "copilot"), default="claude")
     render_cmd.add_argument("--force", action="store_true")
+    render_cmd.add_argument("--overlay", action="append", default=[], help="Wear this overlay; repeat for up to three")
     render_cmd.add_argument("--out", type=Path, help="Render into this scratch agentihooks home, not the live one")
     render_cmd.add_argument("--bundle", type=Path, help="Bundle for --out (default: the linked bundle)")
     from scripts.profiles import measure
@@ -508,7 +526,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.out is not None:
             return _render_scratch(args)
-        out = render(args.target, args.name, force=args.force)
+        out = render(args.target, args.name, force=args.force, overlays=args.overlay)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
