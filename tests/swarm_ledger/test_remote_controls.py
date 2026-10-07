@@ -1,4 +1,3 @@
-import fakeredis
 import pytest
 
 from scripts.swarm import commands
@@ -10,6 +9,8 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 @pytest.fixture
 def store(monkeypatch):
+    import fakeredis
+
     saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     saved.create(SwarmConfig("sw", ".", 0, 0, state="paused"))
     monkeypatch.setattr(server, "swarm_store", lambda: saved)

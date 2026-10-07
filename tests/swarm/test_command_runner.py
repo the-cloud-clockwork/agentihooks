@@ -1,7 +1,6 @@
 import subprocess
 from unittest.mock import Mock
 
-import fakeredis
 import pytest
 
 from scripts.swarm import cli, command_runner, commands
@@ -14,6 +13,8 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     saved.create(SwarmConfig("sw", ".", 0, 0, state="paused"))
     return saved
@@ -97,3 +98,11 @@ def test_tool_failure_is_acknowledged_without_retrying(store, monkeypatch):
     assert commands.rows(store, "sw")[0]["error"] == "Command '['agentihooks']' timed out after 60 seconds"
     assert command_runner.consume(store, "sw") == []
     assert failed.call_count == 1
+
+
+def test_invalid_plan_metadata_does_not_fail_a_completed_tick(store):
+    ledger = FakeLedger([{"id": "t", "depends_on": ["missing"]}])
+    cli.run_tick(store, "sw", ledger, FakeRuntime(), FakeHerdr({}))
+    view = commands.view(store, "sw")
+    assert view["plan_shape"] == {"error": "plan has unknown dependencies: missing"}
+    assert view["tasks"]["open"] == 1

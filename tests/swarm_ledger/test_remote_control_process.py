@@ -8,9 +8,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-import fakeredis
 import pytest
-import redis
 
 from scripts.swarm import cli, command_runner, commands
 from scripts.swarm.store import RedisStore, SwarmConfig
@@ -46,6 +44,9 @@ server.serve_forever()
 
 @pytest.fixture
 def remote_server(tmp_path, monkeypatch):
+    import fakeredis
+    import redis
+
     backend = fakeredis.TcpFakeServer(("127.0.0.1", 0), server_type="redis")
     thread = threading.Thread(target=backend.serve_forever, daemon=True)
     thread.start()

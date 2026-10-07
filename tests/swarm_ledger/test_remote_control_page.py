@@ -1,27 +1,26 @@
 import argparse
 
 import pytest
-from playwright.sync_api import sync_playwright
 
 from scripts.swarm import cli, command_runner
 from tests.inbox.test_wake import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
+from tests.swarm_ledger.test_caps_columns import browser
 from tests.swarm_ledger.test_remote_control_process import remote_server
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
-__all__ = ["remote_server"]
+__all__ = ["browser", "remote_server"]
 
 
-def test_page_keeps_pending_and_acknowledged_control_states(remote_server, monkeypatch, tmp_path):
+def test_page_keeps_pending_and_acknowledged_control_states(remote_server, monkeypatch, tmp_path, browser):
     saved, request, url = remote_server
     ledger = FakeLedger([])
     command_runner.publish(saved, "sw", ledger.state("sw"))
     monkeypatch.setattr(
         command_runner, "run", lambda argv, env: cli.cmd_pause(saved, argparse.Namespace(slug="sw")) or ""
     )
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True, args=["--no-sandbox"])
-        page = browser.new_page(viewport={"width": 1920, "height": 1080})
+    with browser.new_context(viewport={"width": 1920, "height": 1080}) as context:
+        page = context.new_page()
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(url + "/sw#swarm")
@@ -37,4 +36,3 @@ def test_page_keeps_pending_and_acknowledged_control_states(remote_server, monke
         page.wait_for_function("document.querySelector('#swarm-note').textContent === 'Pause: acknowledged'")
         page.screenshot(path=str(tmp_path / "acknowledged.png"))
         assert errors == []
-        browser.close()

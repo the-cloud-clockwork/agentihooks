@@ -1,6 +1,5 @@
 import json
 
-import fakeredis
 import pytest
 
 from scripts.swarm import commands
@@ -11,6 +10,8 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     result = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     result.create(SwarmConfig("sw", ".", 0, 0, state="paused"))
     return result
