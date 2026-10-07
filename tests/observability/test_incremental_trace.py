@@ -854,6 +854,190 @@ def test_empty_pending_state_remains_valid_and_has_no_accepted_data(export):
     state = agent_trace._progress("session")
     agent_trace._cursor_path("session").parent.mkdir()
     agent_trace._send_pending("session", state, export)
-    assert state["accepted"] == {} and state["accepted_records"] == {}
-    assert state["source"] == {"accepted_bytes": 0} and state["turns"] == 0
+    assert state["accepted"] == {} and not state.get("accepted_records")
+    assert state["source"] == {} and not state.get("turns")
     assert not export.calls
+
+
+@pytest.mark.parametrize("key", ["password", "MY_API_KEY", "x password", "db password"])
+@pytest.mark.parametrize(
+    "value", ["controlled-literal-value", 12345678, ["controlled-literal-value"], {"value": 12345678}]
+)
+def test_contextual_masking_preserves_secret_field_structure(key, value, monkeypatch):
+    from hooks.observability import transcript as source
+
+    monkeypatch.setattr("hooks.config.SECRETS_MODE", "off")
+    masked = source.mask_value({key: value})
+    assert key in masked
+    assert "controlled-literal-value" not in json.dumps(masked)
+    assert "12345678" not in json.dumps(masked)
+    if isinstance(value, list):
+        assert masked[key] == ["[REDACTED:generic_secret]"]
+    elif isinstance(value, dict):
+        assert masked[key] == {"value": "[REDACTED:generic_secret]"}
+    else:
+        assert masked[key] == "[REDACTED:generic_secret]"
+
+
+def test_contextual_masking_preserves_unrelated_types():
+    from hooks.observability import transcript as source
+
+    original = {
+        "count": 12345678,
+        "items": [True, None, {"name": "literal …[truncated 123 chars]"}],
+        "password": "$ENV_REFERENCE",
+    }
+    assert source.mask_value(original) == original
+
+
+def test_numeric_secret_is_masked_in_durable_tool_input(export, transcript):
+    path, records = transcript
+    if records[0]["type"] == "session_meta":
+        records[-2]["payload"]["arguments"] = json.dumps({"password": 12345678})
+    else:
+        records[-2]["message"]["content"][0]["input"] = {"password": 12345678}
+    path.write_text("".join(json.dumps(r) + "\n" for r in records[:-1]))
+    export.results = [SpanExportResult.FAILURE]
+    flush(path)
+    cursor = agent_trace._cursor_path("session").read_text()
+    assert "12345678" not in cursor
+    assert "[REDACTED:generic_secret]" in cursor
+
+
+def test_codex_native_call_identity_survives_rewritten_source():
+    from hooks.observability import transcript as source
+
+    first = {
+        "type": "response_item",
+        "timestamp": "before",
+        "payload": {"type": "function_call", "call_id": "call", "arguments": '{"cmd":"before"}'},
+    }
+    replay = {
+        "type": "response_item",
+        "timestamp": "after",
+        "payload": {"type": "function_call", "call_id": "call", "arguments": '{"cmd":"after"}'},
+    }
+    result = {
+        "type": "response_item",
+        "payload": {"type": "function_call_output", "call_id": "call", "output": "result"},
+    }
+    assert source.record_id(first) == source.record_id(replay)
+    assert source.record_id(first) != source.record_id(result)
+
+
+def test_repeated_tool_identity_keeps_one_logical_acceptance(export, transcript, monkeypatch):
+    path, records = transcript
+    outcomes = []
+    monkeypatch.setattr(
+        agent_trace,
+        "_collector_outcomes",
+        lambda session, spans, result, count: outcomes.append((result, [s.span_id for s in spans])),
+    )
+    duplicate = json.loads(json.dumps(records[-2]))
+    if duplicate["type"] == "assistant":
+        duplicate["uuid"] = "replayed-wrapper"
+    else:
+        duplicate["timestamp"] = "2026-10-07T10:00:01Z"
+    with path.open("a") as handle:
+        handle.write(json.dumps(duplicate) + "\n")
+    flush(path)
+    accepted = [span_id for result, ids in outcomes if result == "accepted" for span_id in ids]
+    assert len(accepted) == len(set(accepted)) == len(export.observations)
+
+
+def test_source_overflow_uses_exact_limit_and_event(export, transcript, monkeypatch):
+    path, _ = transcript
+    state = agent_trace._progress("session")
+    state["session_id"] = "session"
+    calls = []
+    monkeypatch.setattr(
+        agent_trace, "_report_progress", lambda progress, result: calls.append((dict(progress["overflow"]), result))
+    )
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", 1)
+    agent_trace._stage_source(state, str(path))
+    assert calls == [(state["overflow"], "overflow")]
+    assert state["overflow"]["limit"] == 1 and state["overflow"]["bytes"] > 1
+    assert state["records"] == {} and state["source"] == {}
+
+
+def test_preparation_overflow_reports_combined_pending_payload(export, transcript, monkeypatch):
+    path, _ = transcript
+    state = agent_trace._progress("session")
+    state["session_id"] = "session"
+    agent_trace._stage_source(state, str(path))
+    source_size = agent_trace._pending_bytes(state, state["records"], [])
+    calls = []
+    monkeypatch.setattr(
+        agent_trace, "_report_progress", lambda progress, result: calls.append((dict(progress["overflow"]), result))
+    )
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", source_size + 1)
+    agent_trace._prepare_pending("session", state, agent_trace.Identity("session"))
+    assert state["pending"] == []
+    assert calls == [(state["overflow"], "overflow")]
+    assert state["overflow"]["limit"] == source_size + 1
+
+
+@pytest.mark.parametrize("session,path", [("", "unused"), ("session", "")])
+def test_missing_source_identity_exports_no_progress(export, session, path):
+    agent_trace.export_session(session, path)
+    assert not export.calls and not agent_trace.CURSOR_DIR.exists()
+
+
+def test_native_generation_record_keys_preserve_kind_and_identifier():
+    from hooks.observability import transcript as source
+
+    record = {"type": "response_item", "payload": {"type": "message", "id": "generation", "content": ["before"]}}
+    update = {"payload": {"type": "message", "id": "generation", "content": ["after"]}, "type": "response_item"}
+    distinct = {"type": "response_item", "payload": {"type": "message", "id": "other", "content": ["before"]}}
+    assert source.record_id(record) == source.record_id(update)
+    assert source.record_id(record) != source.record_id(distinct)
+
+
+def test_mask_embedded_json_and_preserve_plain_or_invalid_text():
+    from hooks.observability import transcript as source
+
+    assert source.mask_value('{"password":12345678}') == '{"password": "[REDACTED:generic_secret]"}'
+    assert (
+        source.mask_value(' [{"password":"controlled-literal-value"}]') == '[{"password": "[REDACTED:generic_secret]"}]'
+    )
+    assert source.mask_value('  {"literal": 12345678}  ') == '  {"literal": 12345678}  '
+    assert source.mask_value("[invalid plain text") == "[invalid plain text"
+    assert source.mask_value({"ordinary": {"password": 12345678}}) == {
+        "ordinary": {"password": "[REDACTED:generic_secret]"}
+    }
+
+
+def test_transport_uses_declared_endpoint_headers_and_timeout(monkeypatch):
+    import requests
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+    settings = {"endpoint": "http://localhost:1", "headers": {"X-Context": "existing"}}
+    response = requests.Response()
+    response.status_code = 200
+    response._content = b"{}"
+    calls = []
+    monkeypatch.setattr(otel, "langfuse_exporter_config", lambda: settings)
+
+    def post(endpoint, data, headers, timeout):
+        calls.append((endpoint, data, headers, timeout))
+        return response
+
+    monkeypatch.setattr(requests, "post", post)
+    exporter = OTLPSpanExporter(endpoint=settings["endpoint"])
+    assert agent_trace._batch_accepted(exporter, [agent_trace.SpanSpec("probe", 1, None, 2, 3)], 1)
+    endpoint, data, headers, timeout = calls[0]
+    assert endpoint == settings["endpoint"] and isinstance(data, bytes) and data
+    assert requests.structures.CaseInsensitiveDict(headers)["Content-Type"].lower() == "application/x-protobuf"
+    assert headers["X-Context"] == "existing" and timeout == otel.LANGFUSE_EXPORT_TIMEOUT_SEC
+    exporter.shutdown()
+
+
+def test_complete_metadata_waits_for_an_accepted_observation(export, tmp_path):
+    path = tmp_path / "metadata.jsonl"
+    path.write_text(json.dumps({"type": "session_meta", "payload": {"id": "session"}}) + "\n")
+    flush(path)
+    state = agent_trace._cursor("session")
+    assert not export.calls and not state["accepted"]
+    assert state["source"]["accepted_bytes"] == 0
+    assert not state.get("accepted_records")
+    assert state["records"]

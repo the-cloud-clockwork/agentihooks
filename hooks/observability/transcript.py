@@ -141,7 +141,13 @@ def record_id(record: dict) -> str:
     native = record.get("uuid")
     if native:
         return str(native)
-    payload = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    identity = record
+    if record.get("type") == "response_item":
+        item = record.get("payload", {})
+        native = item.get("id") or item.get("call_id")
+        if native:
+            identity = {"type": record["type"], "kind": item.get("type"), "id": native}
+    payload = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
@@ -170,6 +176,14 @@ def mask_value(value: object) -> object:
     from hooks.secrets import redact
 
     if isinstance(value, str):
+        if value.lstrip().startswith(("{", "[")):
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                return redact(value, mode="strict")
+            masked = mask_value(parsed)
+            if masked != parsed:
+                return json.dumps(masked, ensure_ascii=False)
         return redact(value, mode="strict")
     if isinstance(value, (list, tuple)):
         return [mask_value(item) for item in value]
@@ -181,8 +195,16 @@ def mask_value(value: object) -> object:
 def mask_member(key: str, value: object) -> object:
     from hooks.secrets import redact
 
-    if isinstance(value, str):
-        contextual = redact(f"{key}={json.dumps(value, ensure_ascii=False)}", mode="strict")
-        if contextual.startswith("[REDACTED:generic_secret]"):
-            return "[REDACTED:generic_secret]"
-    return mask_value(value)
+    if isinstance(value, (list, tuple)):
+        return [mask_member(key, item) for item in value]
+    if isinstance(value, dict):
+        probe = f"{key}=12345678"
+        redacted = redact(probe, mode="strict")
+        context = key if redacted != probe and "[REDACTED:generic_secret]" in redacted else ""
+        return {redact(name, mode="strict"): mask_member(context or name, item) for name, item in value.items()}
+    masked = mask_value(value)
+    contextual = f"{key}={json.dumps(masked, ensure_ascii=False)}"
+    redacted = redact(contextual, mode="strict")
+    if redacted != contextual and "[REDACTED:generic_secret]" in redacted:
+        return "[REDACTED:generic_secret]"
+    return masked

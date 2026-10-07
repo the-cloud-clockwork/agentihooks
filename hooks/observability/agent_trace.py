@@ -579,6 +579,7 @@ def _prepare_pending(session_id: str, state: dict, identity: Identity) -> None:
 
     entries = _normalize(list(state["records"].values()))
     spans = session_spans(entries, identity, session_cost(session_id), root=_root_attributes(session_id))
+    spans = list({spec.span_id: spec for spec in spans}.values())
     unsupported = _unsupported_io(list(state["records"].values()), entries)
     if spans:
         spans[0].attributes.update(
@@ -673,7 +674,7 @@ def _send_pending(session_id: str, state: dict, exporter) -> None:
         updated = [spec for spec in batch if spec not in new]
         if updated:
             _collector_outcomes(session_id, updated, "updated", _truncated_fields(updated))
-    if not state["pending"]:
+    if not state["pending"] and state["accepted"]:
         state.setdefault("accepted_records", {}).update(state.get("pending_records", {}))
         accepted_source = state.get("pending_source", {})
         state["source"]["accepted_bytes"] = accepted_source.get("buffered_bytes", 0)
