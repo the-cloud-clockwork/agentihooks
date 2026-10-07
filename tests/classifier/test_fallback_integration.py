@@ -27,8 +27,8 @@ def _lines():
 
 
 def _child(args, **kwargs):
-    if args[0] == "claude":
-        return SimpleNamespace(returncode=0, stdout=json.dumps({"structured_output": RAW}))
+    if args[0] == "bash":
+        return SimpleNamespace(returncode=0, stdout="[agenti] account=a\n" + json.dumps({"structured_output": RAW}))
     Path(args[args.index("--output-last-message") + 1]).write_text(json.dumps(RAW))
     return SimpleNamespace(returncode=0, stdout="")
 
@@ -101,7 +101,7 @@ def test_missing_preferred_cli_tries_other(monkeypatch):
 
     monkeypatch.setattr(fallbacks.subprocess, "run", run)
     assert decide("typo", QUESTIONS, purpose="missing", harness="codex").source == "haiku"
-    assert seen == ["codex", "claude"]
+    assert seen == ["codex", "bash"]
     assert _lines()[0]["failures"] == [{"model": "gpt-6-luna", "reason": "CLI missing"}]
 
 
