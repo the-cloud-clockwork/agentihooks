@@ -136,14 +136,15 @@ def main(argv: list[str]) -> int:
         root = str(Path(__file__).resolve().parents[1])
         print(install_timer(sys.executable, root) if args.install_timer else remove_timer())
         return 0
+    herdr = herdr_gc.run(dict(os.environ), int(time.time() * 1000), args.enforce)
+    if not args.json:
+        for line in herdr:
+            print(f"herdr: {line}")
     report = sweep(scope=str(Path(args.path).resolve()) if args.path else "", act=args.enforce)
-    report["herdr"] = herdr_gc.run(dict(os.environ), int(time.time() * 1000), args.enforce)
     if args.json:
-        print(json.dumps(report, indent=2))
+        print(json.dumps({**report, "herdr": herdr}, indent=2))
         return 0
     _print_report(report)
-    for line in report["herdr"]:
-        print(f"herdr: {line}")
     return 0
 
 

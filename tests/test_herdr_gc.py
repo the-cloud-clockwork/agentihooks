@@ -480,7 +480,6 @@ def test_the_herdr_adapter_speaks_the_herdr_cli(monkeypatch):
         {
             ("pane", "list"): {"panes": [pane]},
             ("pane", "process-info"): {"process_info": SHELL},
-            ("pane", "read"): {"text": PROMPT},
             ("tab", "list"): {"tabs": [{"tab_id": "w1:t1"}]},
             ("workspace", "list"): {"workspaces": [{"workspace_id": "w1"}]},
         }
@@ -490,7 +489,6 @@ def test_the_herdr_adapter_speaks_the_herdr_cli(monkeypatch):
     herdr = herdr_gc.Herdr(environ)
     assert herdr.list_panes() == {"w1:p2": pane}
     assert herdr.process_info("w1:p2") == SHELL
-    assert herdr.screen("w1:p2") == PROMPT
     assert herdr.tabs() == [{"tab_id": "w1:t1"}]
     assert herdr.workspaces() == [{"workspace_id": "w1"}]
     herdr.close_pane("w1:p2")
@@ -499,7 +497,6 @@ def test_the_herdr_adapter_speaks_the_herdr_cli(monkeypatch):
     assert [args for args, _ in cli.calls] == [
         ["pane", "list"],
         ["pane", "process-info", "--pane", "w1:p2"],
-        ["pane", "read", "w1:p2", "--source", "visible", "--format", "text"],
         ["tab", "list"],
         ["workspace", "list"],
         ["pane", "close", "w1:p2"],
@@ -512,8 +509,39 @@ def test_the_herdr_adapter_speaks_the_herdr_cli(monkeypatch):
 def test_the_herdr_adapter_reads_empty_replies_as_nothing(monkeypatch):
     monkeypatch.setattr(herdr_gc.herdr_host, "_cli", FakeCli({}))
     herdr = herdr_gc.Herdr({})
-    assert (herdr.list_panes(), herdr.process_info("p"), herdr.screen("p")) == ({}, {}, "")
+    assert (herdr.list_panes(), herdr.process_info("p")) == ({}, {})
     assert (herdr.tabs(), herdr.workspaces()) == ([], [])
+
+
+def test_the_herdr_adapter_reads_the_screen_as_raw_text(monkeypatch):
+    ran = []
+    environ = {"HERDR_SOCKET_PATH": "/s"}
+    monkeypatch.setattr(herdr_gc.herdr_host, "binary", lambda: "/bin/herdr")
+    monkeypatch.setattr(
+        herdr_gc.subprocess,
+        "run",
+        lambda argv, **kwargs: ran.append((argv, kwargs)) or herdr_gc.subprocess.CompletedProcess(argv, 0, PROMPT, ""),
+    )
+    assert herdr_gc.Herdr(environ).screen("w1:p2") == PROMPT
+    [(argv, kwargs)] = ran
+    assert argv == ["/bin/herdr", "pane", "read", "w1:p2", "--source", "visible", "--format", "text"]
+    assert kwargs["env"] is environ and kwargs["timeout"] == 30
+
+
+@pytest.mark.parametrize(
+    "binary, reply, error",
+    [
+        ("/bin/herdr", (1, "", "no such pane\n"), "herdr pane read: no such pane"),
+        (None, None, "herdr is not installed"),
+    ],
+)
+def test_a_screen_herdr_cannot_read_is_an_error(monkeypatch, binary, reply, error):
+    monkeypatch.setattr(herdr_gc.herdr_host, "binary", lambda: binary)
+    monkeypatch.setattr(
+        herdr_gc.subprocess, "run", lambda argv, **kwargs: herdr_gc.subprocess.CompletedProcess(argv, *reply)
+    )
+    with pytest.raises(herdr_gc.HerdrError, match=f"^{error}$"):
+        herdr_gc.Herdr({}).screen("w1:p2")
 
 
 @pytest.mark.parametrize(
@@ -665,6 +693,19 @@ def test_gc_json_carries_the_herdr_lines(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert out == json.dumps({"skipped": "lifecycle off", "herdr": ["act=False"]}, indent=2) + "\n"
+
+
+def test_gc_sweeps_herdr_before_a_lifecycle_failure(monkeypatch, capsys):
+    from scripts import gc_cli
+
+    def broken(scope, act):
+        raise PermissionError("a folder gc cannot read")
+
+    monkeypatch.setattr(gc_cli, "sweep", broken)
+    monkeypatch.setattr(herdr_gc, "run", lambda environ, now_ms, act: ["closed pane w1:p2 of a: why"])
+    with pytest.raises(PermissionError):
+        gc_cli.main(["gc", "--enforce"])
+    assert capsys.readouterr().out == "herdr: closed pane w1:p2 of a: why\n"
 
 
 def test_every_tick_closes_and_journals_with_reasons(monkeypatch, capsys):

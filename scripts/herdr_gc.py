@@ -66,7 +66,14 @@ class Herdr:
         return self._call("pane", "process-info", "--pane", pane_id).get("process_info", {})
 
     def screen(self, pane_id: str) -> str:
-        return self._call("pane", "read", pane_id, "--source", "visible", "--format", "text").get("text", "")
+        exe = herdr_host.binary()
+        if exe is None:
+            raise HerdrError("herdr is not installed")
+        argv = [exe, "pane", "read", pane_id, "--source", "visible", "--format", "text"]
+        done = subprocess.run(argv, capture_output=True, text=True, env=self.environ, timeout=30)
+        if done.returncode:
+            raise HerdrError(f"herdr pane read: {done.stderr.strip()}")
+        return done.stdout
 
     def close_pane(self, pane_id: str) -> None:
         self._call("pane", "close", pane_id)
