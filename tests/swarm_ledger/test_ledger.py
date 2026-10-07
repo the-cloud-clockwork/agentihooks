@@ -171,3 +171,20 @@ def test_a_refusal_leaves_out_the_ledger_size_warnings():
     with pytest.raises(SystemExit) as stop:
         ledger.refused({"rejected": ["x"], "_meta": {"warnings": [*size, REASON]}})
     assert stop.value.code == REASON
+
+
+@pytest.mark.parametrize(
+    ("value", "form"),
+    [
+        ('proof={"evidence":"E","output":"O"}', "proof.evidence=E proof.output=O"),
+        ('contract={"must":"M"}', "contract.must=M contract.check=C"),
+    ],
+)
+def test_task_set_refuses_a_whole_object_naming_the_dotted_form(cli, value, form):
+    name = value.partition("=")[0]
+    allowed = ledger.OBJECT_FORMS[name][0]
+    sent = []
+    with pytest.raises(SystemExit) as stop:
+        sent = cli(["task", "set", "t1", value], applied)
+    assert sent == []
+    assert f"one {name}.KEY=VALUE pair per key among {allowed}, e.g. {form}, not {name}=VALUE" in str(stop.value.code)
