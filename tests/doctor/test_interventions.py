@@ -89,21 +89,59 @@ def test_a_failed_command_is_reported_and_not_logged(store):
     assert ctx.ledger.said == []
 
 
-def test_the_ledger_server_restarts_only_when_its_code_changed(store, tmp_path):
-    code, pidfile = tmp_path / "code", tmp_path / ".server.pid"
-    code.mkdir()
-    (code / "ledger_server.py").write_text("x")
+def server_tree(tmp_path):
+    files = {
+        "scripts/__init__.py": "",
+        "scripts/swarm/__init__.py": "",
+        "scripts/swarm/operator_mail.py": "import json\n",
+        "scripts/swarm/unused.py": "",
+        "scripts/swarm_ledger/ledger_core.py": "from . import ledger_gate\n",
+        "scripts/swarm_ledger/ledger_gate.py": "",
+        "scripts/swarm_ledger/ledger_server.py": (
+            "import os\nimport ledger_core\n\n\ndef relay():\n    from scripts.swarm import operator_mail\n"
+        ),
+    }
+    for name, text in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+        os.utime(tmp_path / name, (100, 100))
+    pidfile = tmp_path / ".server.pid"
     pidfile.write_text("1")
-    os.utime(code / "ledger_server.py", (100, 100))
     os.utime(pidfile, (200, 200))
+    return tmp_path / "scripts" / "swarm_ledger", pidfile
+
+
+def test_the_ledger_server_restarts_only_when_its_code_changed(store, tmp_path):
+    code, pidfile = server_tree(tmp_path)
     ctx = context(store, code=code, pidfile=pidfile)
     with pytest.raises(SwarmError, match="current code"):
         interventions.apply(ctx, "restart-ledger-server", args())
     assert ctx.run.calls == []
     os.utime(code / "ledger_server.py", (300, 300))
-    interventions.apply(ctx, "restart-ledger-server", args())
+    line = interventions.apply(ctx, "restart-ledger-server", args())
     assert [call[-1] for call in ctx.run.calls] == ["--stop", "--ensure"]
-    assert logged_on_both(ctx)
+    assert "scripts/swarm_ledger/ledger_server.py" in line and logged_on_both(ctx)
+
+
+@pytest.mark.parametrize(
+    "changed", ["scripts/swarm/operator_mail.py", "scripts/swarm_ledger/ledger_gate.py", "scripts/swarm/__init__.py"]
+)
+def test_a_change_to_any_module_the_server_imports_allows_the_restart_and_names_it(store, tmp_path, changed):
+    code, pidfile = server_tree(tmp_path)
+    os.utime(tmp_path / changed, (300, 300))
+    ctx = context(store, code=code, pidfile=pidfile)
+    line = interventions.apply(ctx, "restart-ledger-server", args())
+    assert [call[-1] for call in ctx.run.calls] == ["--stop", "--ensure"]
+    assert changed in line and logged_on_both(ctx)
+
+
+def test_a_change_to_a_module_the_server_never_imports_still_refuses(store, tmp_path):
+    code, pidfile = server_tree(tmp_path)
+    os.utime(tmp_path / "scripts/swarm/unused.py", (300, 300))
+    ctx = context(store, code=code, pidfile=pidfile)
+    with pytest.raises(SwarmError, match="current code"):
+        interventions.apply(ctx, "restart-ledger-server", args())
+    assert ctx.run.calls == [] and ctx.ledger.said == []
 
 
 def test_refresh_rules_runs_the_rules_refresh(store):

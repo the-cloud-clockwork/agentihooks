@@ -1,5 +1,6 @@
 """The only ways the Doctor touches the swarm it watches; each is logged on both ledgers. Anything else is refused."""
 
+import ast
 import os
 import subprocess
 import sys
@@ -52,19 +53,64 @@ def pull_dev(ctx, args):
     return "The Doctor pulled dev into the main checkout of the watched swarm."
 
 
-def _code_changed(ctx):
-    if not ctx.pidfile.exists():
-        return True
-    newest = max(p.stat().st_mtime for p in ctx.code.rglob("*") if p.is_file() and "__pycache__" not in p.parts)
-    return newest > ctx.pidfile.stat().st_mtime
+def _module_files(root, dotted):
+    files, base = [], root
+    for part in dotted.split("."):
+        if (base / part / "__init__.py").is_file():
+            base = base / part
+            files.append(base / "__init__.py")
+        elif (base / f"{part}.py").is_file():
+            return [*files, base / f"{part}.py"]
+        else:
+            break
+    return files
+
+
+def _imported(node, path, roots):
+    if isinstance(node, ast.Import):
+        wanted = [(roots, alias.name) for alias in node.names]
+    elif isinstance(node, ast.ImportFrom):
+        bases = (path.parents[node.level - 1],) if node.level else roots
+        prefix = f"{node.module}." if node.module else ""
+        wanted = [(bases, prefix + alias.name) for alias in node.names]
+    else:
+        return []
+    return [found for bases, dotted in wanted for root in bases for found in _module_files(root, dotted)]
+
+
+def _server_modules(code):
+    roots = (code, code.parents[1])
+    seen, todo = set(), [code / "ledger_server.py"]
+    while todo:
+        path = todo.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            todo += _imported(node, path, roots)
+    return seen
+
+
+def _changed_since_start(ctx):
+    pages = {p for p in ctx.code.rglob("*") if p.is_file() and "__pycache__" not in p.parts}
+    started = ctx.pidfile.stat().st_mtime
+    changed = (p for p in pages | _server_modules(ctx.code) if p.stat().st_mtime > started)
+    return sorted(str(p.relative_to(ctx.code.parents[1])) for p in changed)
 
 
 def restart_ledger_server(ctx, args):
-    if not _code_changed(ctx):
-        raise SwarmError("the ledger server already runs its current code; the Doctor restarts it only after a change")
+    if ctx.pidfile.exists():
+        changed = _changed_since_start(ctx)
+        if not changed:
+            raise SwarmError(
+                "the ledger server already runs its current code; the Doctor restarts it only after a change"
+            )
+        why = f"{', '.join(changed)} changed since it started"
+    else:
+        why = "no running server recorded its start"
     for flag in ("--stop", "--ensure"):
         _call(ctx, [sys.executable, str(ctx.code / "ledger_server.py"), flag])
-    return "The Doctor restarted the ledger server on its new code."
+    return f"The Doctor restarted the ledger server on its new code: {why}."
 
 
 def refresh_rules(ctx, args):
