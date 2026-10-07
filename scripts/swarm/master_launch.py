@@ -105,14 +105,14 @@ def _resume(store, slug, runtime, at, previous):
     placed = runtime.resume(config, agent, text)
     store.seats.occupy(seat, agent.name, at)
     record = replace(
-        agent,
-        pane_id=placed.pane_id,
+        _placed(agent, placed),
+        harness=placed.harness or agent.harness,
         account=placed.account or agent.account,
+        profile=placed.profile or agent.profile,
         model=placed.model or agent.model,
         effort=placed.effort or agent.effort,
         started_at=at,
         idle_ticks=0,
-        state="working",
     )
     store.put_agent(slug, record)
     return Launched(record.name, record.pane_id, seat, LAST)

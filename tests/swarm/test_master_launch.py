@@ -23,7 +23,14 @@ class ResumingRuntime(FakeRuntime):
             raise SpawnError(self.resume_fail)
         self.resumed.append((agent.name, agent.harness, agent.conversation_id, agent.profile, text))
         self.live.add(agent.name)
-        return Placed(pane_id="w2:m9", harness=agent.harness, account=agent.account, model="opus", effort="high")
+        return Placed(
+            pane_id="w2:m9",
+            harness=agent.harness,
+            account=agent.account,
+            model="opus",
+            effort="high",
+            profile_decision={"validation": {"pid": 99}},
+        )
 
 
 @pytest.fixture
@@ -110,7 +117,9 @@ def test_no_answer_on_standard_input_names_the_flags(up, monkeypatch, capsys):
 
 def test_choice_last_reopens_the_last_masters_own_conversation_in_the_master_seat(up, monkeypatch, capsys):
     store, ledger, rt = up
-    name = gone_master(store, harness="codex", conversation="conv-7", account="acct-2")
+    name = gone_master(
+        store, harness="codex", conversation="conv-7", account="acct-2", profile_decision={"validation": {"pid": 1}}
+    )
     answers(monkeypatch, "1")
     assert run("sw", "master", "up") == 0
     [(resumed, harness, conversation, profile, text)] = rt.resumed
@@ -118,7 +127,8 @@ def test_choice_last_reopens_the_last_masters_own_conversation_in_the_master_sea
     assert "master up" in text and "re-read the ledger" in text
     [record] = masters(store)
     assert (record.name, record.state, record.pane_id, record.seat) == (name, "working", "w2:m9", "master@sw")
-    assert record.conversation_id == "conv-7" and record.account == "acct-2"
+    assert record.conversation_id == "conv-7" and record.account == "acct-2" and record.harness == "codex"
+    assert record.profile == "master" and record.profile_decision == {"validation": {"pid": 99}}
     assert store.seats.occupant("master@sw").occupant == name
     assert ledger.joined == [("sw", name, "orchestrator")]
     assert printed(capsys) == {"master": name, "pane": "w2:m9", "seat": "master@sw", "choice": "last"}
