@@ -14,6 +14,7 @@ from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
+LAUNCH_CHECKED = True
 ENDED = 1_791_374_400_000
 
 
