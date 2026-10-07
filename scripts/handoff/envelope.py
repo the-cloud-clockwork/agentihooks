@@ -107,7 +107,7 @@ def _remote_head(worktree, remote, run):
         return UNKNOWN
     if done.returncode != 0:
         return UNKNOWN
-    heads = [line.split("\t") for line in done.stdout.splitlines()]
+    heads = [line.split("\t", 1) for line in done.stdout.splitlines() if "\t" in line]
     return next((sha for sha, name in heads if name == ref), NONE)
 
 

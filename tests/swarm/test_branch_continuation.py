@@ -72,10 +72,27 @@ class TestHandoffOnAPushedBranch(WtBase):
         handed = envelope(store, "sw", agent, "recycle", [{"id": "t1", "phase": "p1"}], 0)
         self.assertEqual((handed["remote_head"], handed["continue_from"]), (head, "origin/engineer-a1b2c3-0001"))
 
-        rendered = prompt.build("sw", str(self.primary), "eng", SUCCESSOR, _task(handed))
-        name, ref = re.search(r"wt\.sh new (\S+) --from (\S+)", rendered).groups()
-        cut = self.run_wt("new", name, "--from", ref)
+        theirs = self._successor(SUCCESSOR, handed)
+        self.assertEqual(self._head(theirs), head)
+
+        subprocess.run(
+            ["git", "-C", theirs, "commit", "-q", "--allow-empty", "-m", "more"], check=True, env=self.gitenv
+        )
+        push = re.search(r"git push -u origin (\S+) so", prompt.build("sw", "/r", "eng", SUCCESSOR, _task(handed)))
+        subprocess.run(["git", "-C", theirs, "push", "-qu", "origin", push.group(1)], check=True, env=self.gitenv)
+        again = envelope(store, "sw", AgentRecord(SUCCESSOR, "eng", "t1", seat="eng-1@sw"), "recycle", [], 0)
+        self.assertEqual((again["remote_branch"], again["remote_head"]), ("engineer-a1b2c3-0001", self._head(theirs)))
+        third = self._successor("engineer@a1b2c3-0003", again)
+        self.assertEqual(self._head(third), self._head(theirs))
+
+    def _successor(self, name, handed):
+        rendered = prompt.build("sw", str(self.primary), "eng", name, _task(handed))
+        plain, ref = re.search(r"wt\.sh new (\S+) --from (\S+)", rendered).groups()
+        cut = self.run_wt("new", plain, "--from", ref)
         self.assertEqual(cut.returncode, 0, cut.stderr)
-        theirs = cut.stdout.strip().splitlines()[-1]
-        successor = subprocess.run(["git", "-C", theirs, "rev-parse", "HEAD"], capture_output=True, text=True)
-        self.assertEqual(successor.stdout.strip(), head)
+        return cut.stdout.strip().splitlines()[-1]
+
+    def _head(self, worktree):
+        return subprocess.run(
+            ["git", "-C", worktree, "rev-parse", "HEAD"], capture_output=True, text=True
+        ).stdout.strip()
