@@ -90,25 +90,23 @@ def continuation(worktree, branch, run):
 
 
 def _remote_branch(worktree, branch, run):
-    argv = ["git", "-C", worktree, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]
+    argv = ["git", "-C", worktree, "rev-parse", "--abbrev-ref", "@{upstream}"]
     try:
-        done = run(argv, capture_output=True, text=True, timeout=10)
+        upstream = run(argv, capture_output=True, text=True, timeout=10).stdout.strip()
     except FAILED:
         return branch
-    upstream = done.stdout.strip() if done.returncode == 0 else ""
     return upstream.removeprefix("origin/") if upstream.startswith("origin/") else branch
 
 
 def _remote_head(worktree, remote, run):
-    ref = f"refs/heads/{remote}"
+    argv = ["git", "-C", worktree, "ls-remote", "--exit-code", "origin", f"refs/heads/{remote}"]
     try:
-        done = run(["git", "-C", worktree, "ls-remote", "origin", ref], capture_output=True, text=True, timeout=20)
+        done = run(argv, capture_output=True, text=True, timeout=20)
     except FAILED:
         return UNKNOWN
-    if done.returncode != 0:
-        return UNKNOWN
-    heads = [line.split("\t", 1) for line in done.stdout.splitlines() if "\t" in line]
-    return next((sha for sha, name in heads if name == ref), NONE)
+    if done.returncode == 2:
+        return NONE
+    return done.stdout.split()[0] if done.returncode == 0 else UNKNOWN
 
 
 def _pull_request(row, run):

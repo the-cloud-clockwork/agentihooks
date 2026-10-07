@@ -185,7 +185,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
     lines += workspace_lines(task)
     if task.get("pr_url"):
         lines.append(f"An earlier agent already opened {task['pr_url']}: continue it instead of starting over.")
-    lines += continuation_lines(task, name)
+    lines += continuation_lines(task)
     lines += priming_lines(task)
     if lane == "ci":
         lines.append(
@@ -303,22 +303,22 @@ def handoff_lines(task):
 
 
 def _continue_from(task):
-    ref = (task.get("handoff_envelope") or {}).get("continue_from", "")
-    return ref if ref.startswith("origin/") else ""
+    ref = (task.get("handoff_envelope") or {}).get("continue_from")
+    return ref if ref and ref.startswith("origin/") else ""
 
 
-def continuation_lines(task, name):
+def continuation_lines(task):
     envelope = task.get("handoff_envelope") or {}
     ref = _continue_from(task)
     if ref:
         branch = ref.removeprefix("origin/")
         return [
-            f"Your predecessor's branch {branch} is on the remote at {envelope.get('remote_head')}: continue it. The "
+            f"Your predecessor's branch {branch} is on the remote at {envelope['remote_head']}: continue it. The "
             f"worktree step below cuts your worktree from it; push with git push -u origin HEAD:{branch} so its "
             "commits and its pull request carry on."
         ]
     if envelope.get("continue_from") == "fresh":
-        return [f"Start your worktree fresh from dev: {envelope.get('fresh_reason')}."]
+        return [f"Start your worktree fresh from dev: {envelope['fresh_reason']}."]
     return []
 
 

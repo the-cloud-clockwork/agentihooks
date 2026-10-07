@@ -52,6 +52,31 @@ def test_a_first_life_has_no_branch_to_continue():
     assert "--from" not in prompt.build("sw", "/repo", "eng", SUCCESSOR, _task())
 
 
+@pytest.mark.parametrize("envelope", [None, {"reason": "quota"}])
+def test_no_continuation_line_without_a_branch_verdict(envelope):
+    rendered = prompt.build("sw", "/repo", "eng", SUCCESSOR, _task(envelope))
+    assert "--from" not in rendered and "Start your worktree" not in rendered and "continue it" not in rendered
+
+
+def test_the_continuation_line_names_the_branch_its_head_and_the_push():
+    assert prompt.continuation_lines(_task(CONTINUED)) == [
+        "Your predecessor's branch engineer-a1b2c3-0001 is on the remote at 4f2a9c0: continue it. The worktree "
+        "step below cuts your worktree from it; push with git push -u origin HEAD:engineer-a1b2c3-0001 so its "
+        "commits and its pull request carry on."
+    ]
+
+
+def test_the_fresh_line_carries_the_recorded_reason():
+    assert prompt.continuation_lines(_task(FRESH)) == [
+        "Start your worktree fresh from dev: branch engineer-a1b2c3-0001 is not on the remote."
+    ]
+
+
+def test_the_prompt_places_the_continuation_line_before_the_seat_history():
+    rendered = prompt.build("sw", "/repo", "eng", SUCCESSOR, _task(CONTINUED))
+    assert rendered.index("continue it. The worktree") < rendered.index("carries what earlier occupants left")
+
+
 class TestHandoffOnAPushedBranch(WtBase):
     def test_the_successor_worktree_head_equals_the_predecessor_head(self):
         import fakeredis
