@@ -504,8 +504,6 @@ def test_run_checks_follow_ups_against_its_own_task(ask, tmp_path):
 
 @pytest.mark.parametrize("task_id", ["fx-8be892c4", "fx-8be892c4-code", "fx-8be892c4-cause"])
 def test_run_accepts_registered_doctor_task_and_files_cut_piece(ask, tmp_path, task_id):
-    from scripts.swarm_ledger import ledger_core
-
     folder = tmp_path / "task"
     write_plan(folder)
     ask(0.9, 0.8, 0.1)
@@ -518,10 +516,7 @@ def test_run_accepts_registered_doctor_task_and_files_cut_piece(ask, tmp_path, t
 
     class CheckedLedger(Ledger):
         def followup(self, slug, text):
-            ledger_core.check_body(
-                {"ops": [{"op": "add_item", "id": "f1", "list": "followups", "by": who.name, "text": text}]},
-                task_ids=[task["id"] for task in doc["tasks"]],
-            )
+            trace_plan.ledger_comments.check(text, "item", task_ids=[task["id"] for task in doc["tasks"]])
             super().followup(slug, text)
 
     ledger = CheckedLedger()

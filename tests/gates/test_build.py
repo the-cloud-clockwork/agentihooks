@@ -306,6 +306,7 @@ class TestMore:
         folder = ledger_workspace.folder(SLUG, task)
         folder.mkdir(parents=True)
         (folder / "plan.md").write_text(DOGHOUSE)
+        (world.repo.parent / "ledgers" / f"{SLUG}.json").write_text("{}")
         assert "commit hash" in world.decide(file_path=str(world.repo / "a.py"), task=task).reason
 
     def test_registered_doctor_task_plan_allows_editing_kept_area(self, world):

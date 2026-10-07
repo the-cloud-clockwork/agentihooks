@@ -69,7 +69,7 @@ def task_ids(ledger_dir: Path, slug: str) -> tuple[str, ...]:
         doc = json.loads((ledger_dir / f"{slug}.json").read_text())
     except (OSError, ValueError):
         return ()
-    return tuple(task["id"] for task in doc.get("tasks", []) if isinstance(task, dict) and "id" in task)
+    return tuple(task["id"] for task in doc.get("tasks", []))
 
 
 def _git_commits(command, cwd):
