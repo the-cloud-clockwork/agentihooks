@@ -1,7 +1,12 @@
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *args: object, **kwargs: object) -> None:
+        return None
 
 
 class SonarProxy(BaseHTTPRequestHandler):
@@ -27,8 +32,12 @@ class SonarProxy(BaseHTTPRequestHandler):
             method=self.command,
         )
         try:
-            response = urlopen(request, timeout=30)
+            response = build_opener(NoRedirect()).open(request, timeout=30)
         except HTTPError as error:
+            if 300 <= error.code < 400:
+                error.close()
+                self.send_error(502, "Upstream redirects are refused")
+                return
             response = error
         with response:
             payload = response.read()

@@ -181,3 +181,56 @@ def test_proxy_forwards_headers_uploads_and_backend_status(monkeypatch, method, 
             for thread in threads:
                 thread.join(timeout=5)
                 assert not thread.is_alive()
+
+
+def test_proxy_rejects_redirect_without_forwarding_credentials(monkeypatch):
+    spec = importlib.util.spec_from_file_location("sonar_proxy", ROOT / ".github/coverage/proxy.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    received = []
+
+    class Sink(BaseHTTPRequestHandler):
+        def do_GET(self):
+            received.append(dict(self.headers))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    class Redirect(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{sink.server_port}/")
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    with (
+        ThreadingHTTPServer(("127.0.0.1", 0), Sink) as sink,
+        ThreadingHTTPServer(("127.0.0.1", 0), Redirect) as backend,
+        ThreadingHTTPServer(("127.0.0.1", 0), module.SonarProxy) as proxy,
+    ):
+        monkeypatch.setenv("SONAR_HOST_URL", f"http://127.0.0.1:{backend.server_port}")
+        monkeypatch.setenv("CF_ACCESS_CLIENT_ID", "fixture")
+        monkeypatch.setenv("CF_ACCESS_CLIENT_SECRET", "fixture")
+        servers = (sink, backend, proxy)
+        threads = [threading.Thread(target=server.serve_forever) for server in servers]
+        for thread in threads:
+            thread.start()
+        try:
+            request = Request(f"http://127.0.0.1:{proxy.server_port}/", headers={"Authorization": "fixture"})
+            try:
+                response = urlopen(request, timeout=5)
+            except HTTPError as error:
+                response = error
+            with response:
+                assert response.status == 502
+            assert received == []
+        finally:
+            for server in servers:
+                server.shutdown()
+            for thread in threads:
+                thread.join(timeout=5)
+                assert not thread.is_alive()
