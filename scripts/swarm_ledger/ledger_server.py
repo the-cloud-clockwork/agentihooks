@@ -6,7 +6,9 @@ Usage:
   ledger_server.py --serve    run in the foreground
   ledger_server.py --stop     stop the detached server
 
-Env: LEDGER_DIR (default ~/development-ledger), LEDGER_HOST (127.0.0.1), LEDGER_PORT (8765).
+Env: LEDGER_DIR (default ~/development-ledger), LEDGER_HOST (127.0.0.1), LEDGER_PORT (8765),
+SWARM_PUBLIC_URL and SWARM_ALLOWED_HOSTS (comma list) beside loopback, SWARM_RELOAD=1 for code reload
+(--ensure sets it unless given).
 Idempotent: --ensure on a running server only prints the URL.
 """
 
@@ -55,8 +57,8 @@ LOGFILE = core.LEDGER_DIR / ".server.log"
 SERVER_WAIT = 5.0
 FILE_ORIGIN = "null"
 MAX_BODY = 1 << 20
-ALLOWED_HOSTS = {f"{HOST}:{PORT}", f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
-ALLOWED_ORIGINS = {f"http://{host}" for host in ALLOWED_HOSTS}
+ALLOWED_HOSTS = ledger_link.allowed_hosts()
+ALLOWED_ORIGINS = ledger_link.allowed_origins()
 CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
 LOGO = ROOT / "media" / "agentihooks-logo.png"
@@ -638,6 +640,8 @@ class Handler(BaseHTTPRequestHandler):
     def refused(self, slug=None):
         if self.headers.get("Host") not in ALLOWED_HOSTS:
             return self.send(403, "host not allowed", "text/plain") or True
+        if self.headers.get("Origin") not in (None, FILE_ORIGIN, *ALLOWED_ORIGINS):
+            return self.send(403, "origin not allowed", "text/plain") or True
         if slug is not None:
             self.principal = authority.principal(
                 core.read_token(repository.read_page(slug)),
@@ -947,11 +951,17 @@ def reload_if_changed(started, code_dirs=CODE_DIRS, execv=os.execv):
     return True
 
 
+def reloading(environ=os.environ) -> bool:
+    return environ.get("SWARM_RELOAD") == "1"
+
+
 def watch_seeds(interval=2.0):
     seen = {}
     started = code_stamp()
+    reload = reloading()
     while True:
-        reload_if_changed(started)
+        if reload:
+            reload_if_changed(started)
         try:
             ledger_bin.tidy()
         except OSError as exc:
@@ -976,13 +986,7 @@ def serving_dir(timeout: float = 1):
         return None
 
 
-def check_address() -> None:
-    if PORT == 8765 and not ledger_link.shared_directory(core.LEDGER_DIR):
-        sys.exit("port 8765 is reserved for the shared ledger folder; proof folders require a spare LEDGER_PORT")
-
-
 def serve():
-    check_address()
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     threading.Thread(target=watch_seeds, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
@@ -1019,7 +1023,6 @@ def server_process_alive() -> bool:
 
 
 def ensure():
-    check_address()
     deadline = time.monotonic() + SERVER_WAIT
     started = False
     running = serving_dir()
@@ -1037,6 +1040,7 @@ def ensure():
                     stderr=log,
                     stdin=subprocess.DEVNULL,
                     start_new_session=True,
+                    env={**os.environ, "SWARM_RELOAD": os.environ.get("SWARM_RELOAD", "1")},
                 )
             started = True
         time.sleep(min(0.1, remaining))
