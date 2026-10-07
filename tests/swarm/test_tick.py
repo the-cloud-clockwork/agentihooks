@@ -164,8 +164,8 @@ def test_scale_up_is_immediate_and_capped_per_lane(store):
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert runtime.spawned == [
         ("eng", "engineer@a1b2c3-0001", "t1"),
-        ("eng", "engineer@a1b2c3-0002", "t2"),
         ("ci", "ci@a1b2c3-0001", "t4"),
+        ("eng", "engineer@a1b2c3-0002", "t2"),
     ]
     assert [ledger.rows[t]["claimed_by"] for t in ("t1", "t2", "t3", "t4")] == [
         "engineer@a1b2c3-0001",
@@ -280,7 +280,7 @@ class FailingFor(FakeRuntime):
 def test_a_failing_launch_does_not_stop_the_spawns_behind_it(store):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "ci")), FailingFor("t1")
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert [task for _, _, task in runtime.spawned] == ["t2", "t3"]
+    assert [task for _, _, task in runtime.spawned] == ["t3", "t2"]
     assert ledger.rows["t1"]["state"] == "open"
 
 
@@ -311,6 +311,33 @@ def test_no_free_session_slot_claims_nothing(store):
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "open" and store.claimant("sw", "t1") is None and runtime.spawned == []
     assert runtime.capacity_for == ["sw", "sw"]
+
+
+class SessionsLeft(FakeRuntime):
+    def __init__(self, sessions):
+        super().__init__()
+        self.sessions = sessions
+
+    def has_capacity(self, config):
+        super().has_capacity(config)
+        return len(self.spawned) < self.sessions
+
+
+def test_with_one_free_session_the_lane_without_a_live_agent_spawns_first(store):
+    ledger, runtime = tasks(("t1", "eng")), SessionsLeft(1)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows.update(tasks(("t2", "eng"), ("t3", "ci")).rows)
+    runtime.sessions = 2
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t3"]
+    assert ledger.rows["t2"]["state"] == "open" and store.claimant("sw", "t2") is None
+
+
+def test_every_lane_takes_a_session_before_any_lane_takes_a_second(store):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "ci")), SessionsLeft(2)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.spawned == [("eng", "engineer@a1b2c3-0001", "t1"), ("ci", "ci@a1b2c3-0001", "t3")]
+    assert ledger.rows["t2"]["state"] == "open"
 
 
 def test_a_dead_agent_with_an_open_pull_request_hands_the_task_back(store):
@@ -1159,12 +1186,12 @@ def test_a_broad_territory_never_stops_a_claim(store):
     )
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert spawned_ids(runtime) == ["t1", "t2", "t3"]
+    assert spawned_ids(runtime) == ["t1", "t3", "t2"]
     first, second = runtime.spawned[0][1], runtime.spawned[1][1]
-    assert runtime.tasks[1]["overlaps"] == [{"task": "t1", "claimant": first, "areas": ["scripts/swarm/tick.py"]}]
+    assert runtime.tasks[1]["overlaps"] == [{"task": "t1", "claimant": first, "areas": ["scripts"]}]
     assert runtime.tasks[2]["overlaps"] == [
-        {"task": "t1", "claimant": first, "areas": ["scripts"]},
-        {"task": "t2", "claimant": second, "areas": ["scripts/swarm/tick.py"]},
+        {"task": "t1", "claimant": first, "areas": ["scripts/swarm/tick.py"]},
+        {"task": "t3", "claimant": second, "areas": ["scripts/swarm/tick.py"]},
     ]
 
 
@@ -1194,7 +1221,7 @@ def test_a_task_without_territory_is_claimed_alongside_anything(store):
     )
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert spawned_ids(runtime) == ["t1", "t2", "t3"]
+    assert spawned_ids(runtime) == ["t1", "t3", "t2"]
 
 
 def test_an_urgent_ready_task_is_claimed_ahead_of_an_older_normal_one(store):

@@ -548,71 +548,78 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents, actions = store.agents(slug), []
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
+    for lane, task in _spawn_order(slug, config, store, agents, rows, doc):
+        if held:
+            return actions + held
+        if not runtime.has_capacity(config):
+            return actions + ["every agent is at its session cap, waiting"]
+        if blocked := _lives_spent(slug, store, ledger, rows, task):
+            actions.append(blocked)
+            continue
+        name = store.next_name(slug, lane, now_ms)
+        if not store.claim(slug, task["id"], name, LEASE_MS):
+            continue
+        handoff = store.handoff(slug, task["id"])
+        if handoff:
+            task["handoff"] = handoff
+        task["stack_base"] = _stack_base(task, rows)
+        task["overlaps"] = _sharing(task, rows)
+        saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
+        preferred = json.loads(saved)["seat"] if saved else store.handoff_seat(slug, task["id"])
+        seat = _free_seat(slug, lane, taken, preferred)
+        taken.add(seat)
+        record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting", seat=seat)
+        store.put_agent(slug, record)
+        try:
+            state = "pr" if task.get("pr_url") else "claimed"
+            fields = {
+                "state": state,
+                "claimed_by": name,
+                "workspace": str(ledger_workspace.scaffold(slug, task, doc)),
+            }
+            kind = config.lanes.get(lane, {}).get("kind", "")
+            if kind not in ("", "auto") and not task.get("kind"):
+                fields["kind"] = kind
+            live = ledger.update_task(slug, task["id"], fields, if_state=("open",))
+            task.update(live)
+            if live["claimed_by"] != name:
+                store.release(slug, task["id"], name)
+                store.drop_agent(slug, name)
+                actions.append(f"task {task['id']} is {live['state']} on the ledger, not claimed")
+                continue
+            task.update(fields)
+            store.record_launch(slug, record, "pending")
+            store.seats.occupy(seat, name, now_ms)
+            task["transfer"] = transfers.attach(store, slug, record)
+            placed = runtime.spawn(
+                config, lane, name, primed(store, slug, seat, task), spawns=store.share_picks(slug, now_ms)
+            )
+        except Exception as exc:
+            transfers.failed(store, slug, record)
+            store.note_launch_failure(slug, task["id"], str(exc))
+            store.record_launch(slug, record, "failed", str(exc))
+            actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
+            if isinstance(exc, ProfileUnresolved):
+                actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
+            continue
+        store.count_claim(slug, task["id"])
+        store.record_launch(slug, record, "started")
+        store.put_agent(slug, placed_record(record, placed))
+        launch_check.begin(store, slug, record, now_ms)
+        store.count_spawn(slug, placed.harness)
+        store.clear_handoff(slug, task["id"])
+        store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
+        actions.append(f"spawned {name} for {task['id']}")
+    return actions
+
+
+def _spawn_order(slug, config, store, agents, rows, doc):
+    queue = []
     for lane, cap in (("eng", config.max_eng), ("ci", config.max_ci), ("plan", config.max_plan)):
         busy = sum(1 for a in agents if a.lane == lane and not _ended(a, rows))
-        for task in _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))[: max(cap - busy, 0)]:
-            if held:
-                return actions + held
-            if not runtime.has_capacity(config):
-                return actions + ["every agent is at its session cap, waiting"]
-            if blocked := _lives_spent(slug, store, ledger, rows, task):
-                actions.append(blocked)
-                continue
-            name = store.next_name(slug, lane, now_ms)
-            if not store.claim(slug, task["id"], name, LEASE_MS):
-                continue
-            handoff = store.handoff(slug, task["id"])
-            if handoff:
-                task["handoff"] = handoff
-            task["stack_base"] = _stack_base(task, rows)
-            task["overlaps"] = _sharing(task, rows)
-            saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
-            preferred = json.loads(saved)["seat"] if saved else store.handoff_seat(slug, task["id"])
-            seat = _free_seat(slug, lane, taken, preferred)
-            taken.add(seat)
-            record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting", seat=seat)
-            store.put_agent(slug, record)
-            try:
-                state = "pr" if task.get("pr_url") else "claimed"
-                fields = {
-                    "state": state,
-                    "claimed_by": name,
-                    "workspace": str(ledger_workspace.scaffold(slug, task, doc)),
-                }
-                kind = config.lanes.get(lane, {}).get("kind", "")
-                if kind not in ("", "auto") and not task.get("kind"):
-                    fields["kind"] = kind
-                live = ledger.update_task(slug, task["id"], fields, if_state=("open",))
-                task.update(live)
-                if live["claimed_by"] != name:
-                    store.release(slug, task["id"], name)
-                    store.drop_agent(slug, name)
-                    actions.append(f"task {task['id']} is {live['state']} on the ledger, not claimed")
-                    continue
-                task.update(fields)
-                store.record_launch(slug, record, "pending")
-                store.seats.occupy(seat, name, now_ms)
-                task["transfer"] = transfers.attach(store, slug, record)
-                placed = runtime.spawn(
-                    config, lane, name, primed(store, slug, seat, task), spawns=store.share_picks(slug, now_ms)
-                )
-            except Exception as exc:
-                transfers.failed(store, slug, record)
-                store.note_launch_failure(slug, task["id"], str(exc))
-                store.record_launch(slug, record, "failed", str(exc))
-                actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
-                if isinstance(exc, ProfileUnresolved):
-                    actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
-                continue
-            store.count_claim(slug, task["id"])
-            store.record_launch(slug, record, "started")
-            store.put_agent(slug, placed_record(record, placed))
-            launch_check.begin(store, slug, record, now_ms)
-            store.count_spawn(slug, placed.harness)
-            store.clear_handoff(slug, task["id"])
-            store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
-            actions.append(f"spawned {name} for {task['id']}")
-    return actions
+        ready = _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))[: max(cap - busy, 0)]
+        queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
+    return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])]
 
 
 def _unresolved(slug, ledger, rows, task_id, reason):
