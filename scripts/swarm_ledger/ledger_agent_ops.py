@@ -19,7 +19,7 @@ GATE_RE = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
 MAX_TEXT = 20000
 
 
-def check(op):
+def check(op, task_ids=()):
     by = op.get("by")
     if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
         raise ValueError("agent ops need `by`, an agent name other than operator")
@@ -49,7 +49,7 @@ def check(op):
     if kind == "retext" and (not TEXT_ITEM_RE.match(str(op.get("item"))) or not _text(op.get("text"))):
         raise ValueError("retext needs item questions/<id> or followups/<id> and text")
     if kind in ("add_item", "retext"):
-        ledger_comments.check(op["text"], "item")
+        ledger_comments.check(op["text"], "item", task_ids=task_ids)
     if kind == "gate_bypass" and not isinstance(op.get("unhandled"), int):
         raise ValueError("gate_bypass needs an integer unhandled")
     if kind == "gate_lift" and not GATE_RE.match(str(op.get("gate"))):
@@ -57,7 +57,7 @@ def check(op):
     if "status" in op:
         if not _text(op["status"]):
             raise ValueError(f"status must be text up to {MAX_TEXT} characters")
-        ledger_comments.check(op["status"], "comment")
+        ledger_comments.check(op["status"], "comment", task_ids=task_ids)
 
 
 def _text(value):

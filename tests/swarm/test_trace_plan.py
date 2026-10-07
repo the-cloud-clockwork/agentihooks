@@ -161,10 +161,11 @@ def test_intent_reads_project_phase_and_task():
         "phase intent": "Build it.",
         "task": "Doghouse",
         "task intent": "A house for the dog.",
+        "task ids": ["t0", "t1"],
     }
     blank = dict.fromkeys(("project intent", "phase", "phase intent", "task", "task intent"), "")
-    assert trace_plan.intent({}, "t1") == blank
-    assert trace_plan.intent(doc, "t9") == {**blank, "project intent": "Keep the dog warm."}
+    assert trace_plan.intent({}, "t1") == {**blank, "task ids": []}
+    assert trace_plan.intent(doc, "t9") == {**blank, "project intent": "Keep the dog warm.", "task ids": ["t0", "t1"]}
 
 
 # trace
@@ -499,6 +500,34 @@ def test_run_checks_follow_ups_against_its_own_task(ask, tmp_path):
     with pytest.raises(ValueError, match="^plan line 1: the ledger would refuse its follow up"):
         trace_plan.run(folder, INTENT, Ledger(), who, "observe", home=tmp_path / "home")
     assert fake.calls == []
+
+
+@pytest.mark.parametrize("task_id", ["fx-8be892c4", "fx-8be892c4-code", "fx-8be892c4-cause"])
+def test_run_accepts_registered_doctor_task_and_files_cut_piece(ask, tmp_path, task_id):
+    from scripts.swarm_ledger import ledger_core
+
+    folder = tmp_path / "task"
+    write_plan(folder)
+    ask(0.9, 0.8, 0.1)
+    doc = {
+        "overview": "Keep the dog warm.",
+        "tasks": [{"id": task_id, "title": "Doghouse", "description": "Build the doghouse."}],
+    }
+    state = trace_plan.intent(doc, task_id)
+    who = Who(name="engineer@1-1", swarm="sw", task=task_id)
+
+    class CheckedLedger(Ledger):
+        def followup(self, slug, text):
+            ledger_core.check_body(
+                {"ops": [{"op": "add_item", "id": "f1", "list": "followups", "by": who.name, "text": text}]},
+                task_ids=[task["id"] for task in doc["tasks"]],
+            )
+            super().followup(slug, text)
+
+    ledger = CheckedLedger()
+    record, block = trace_plan.run(folder, state, ledger, who, "observe", home=tmp_path / "home")
+    assert record["verdict"] == "pass" and not block
+    assert ledger.followups == [f"Cut from the plan of task {task_id}: a diesel generator"]
 
 
 def test_run_reads_a_broken_verdict_file_as_no_verdict(ask, tmp_path):

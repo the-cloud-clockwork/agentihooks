@@ -64,6 +64,14 @@ def task_territory(ledger_dir, slug, task):
     return list(row.get("territory") or [])
 
 
+def task_ids(ledger_dir: Path, slug: str) -> tuple[str, ...]:
+    try:
+        doc = json.loads((ledger_dir / f"{slug}.json").read_text())
+    except (OSError, ValueError):
+        return ()
+    return tuple(task["id"] for task in doc.get("tasks", []) if isinstance(task, dict) and "id" in task)
+
+
 def _git_commits(command, cwd):
     """(directory, all tracked changes) for each git commit in command, following cd and git -C."""
     where = Path(cwd)
@@ -105,11 +113,11 @@ def _patch_targets(call, key):
     return [target.strip() for target in found] or [call.tool_input.get(key)]
 
 
-def plan_areas(folder, who):
+def plan_areas(folder, who, registered=()):
     """(pass, the kept pieces' areas), (unchecked, []) or (fail, the refusal)."""
     trace = f"agentihooks swarm {who.swarm} trace-plan"
     try:
-        pieces = trace_plan.parse((folder / trace_plan.PLAN).read_text(), who.task)
+        pieces = trace_plan.parse((folder / trace_plan.PLAN).read_text(), who.task, registered)
     except OSError:
         return (
             trace_plan.FAIL,
@@ -176,7 +184,8 @@ class BuildGate:
         paths = self.touched(call, folder)
         if not paths:
             return Decision()
-        status, value = plan_areas(folder, who)
+        ledger_dir = Path(self.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
+        status, value = plan_areas(folder, who, task_ids(ledger_dir, who.swarm))
         if status == trace_plan.UNCHECKED:
             reason = f"unchecked plan, edit allowed: {', '.join(paths[:SHOWN])}"
             log.append(state.slug, log.Row.of(self.name, "count", who, call.tool, reason), state.home)
@@ -185,7 +194,6 @@ class BuildGate:
             return Decision.deny(value)
         outside = [path for path in paths if not within(path, value)]
         if outside:
-            ledger_dir = Path(self.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
             territory = task_territory(ledger_dir, who.swarm, who.task)
             value = value + territory
             outside = [path for path in outside if not within(path, territory)]

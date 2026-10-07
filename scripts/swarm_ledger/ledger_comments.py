@@ -42,11 +42,12 @@ def web_links():
     return re.compile(r"""\bhttps?://[^\s<>"']+""", re.I)
 
 
-def problems(text, kind, long=False):
+def problems(text, kind, long=False, task_ids=()):
     found = []
     prose = web_links().sub(" ", text)
+    hash_prose = re.sub(r"[\w-]+", lambda match: " " if match.group() in task_ids else match.group(), prose)
     for name, pattern in RULES:
-        match = pattern.search(prose)
+        match = pattern.search(hash_prose if name == "commit hash" else prose)
         if match:
             found.append(f"{name} '{match.group(0).strip()}'")
     for name, mark, most in PUNCTUATION:
@@ -58,8 +59,8 @@ def problems(text, kind, long=False):
     return found
 
 
-def check(text, kind, long=False):
-    found = problems(text, kind, long)
+def check(text, kind, long=False, task_ids=()):
+    found = problems(text, kind, long, task_ids)
     if found:
         raise ValueError(
             f"{kind} refused, write plain words for the operator (what was done, or why it was "

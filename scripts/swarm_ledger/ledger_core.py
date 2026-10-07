@@ -608,7 +608,7 @@ def apply_op(doc, op, ctx):
     return True
 
 
-def check_op(op):
+def check_op(op, task_ids=()):
     if not isinstance(op, dict) or op.get("op") not in (
         "add",
         "edit",
@@ -635,7 +635,7 @@ def check_op(op):
     if op["op"] in AGENT_OPS:
         import ledger_agent_ops
 
-        return ledger_agent_ops.check(op)
+        return ledger_agent_ops.check(op, task_ids)
     if not isinstance(op.get("thread"), str) or not op["thread"]:
         raise ValueError("each op needs a string thread")
     if op["op"] in ("add", "edit") and (not isinstance(op.get("text"), str) or len(op["text"]) > MAX_TEXT):
@@ -655,10 +655,10 @@ def check_op(op):
         if not talks or not AUTHOR_RE.match(str(op["by"])) or op["by"] == "operator":
             raise ValueError("by is allowed only on agent chat and comment entries, as an agent name")
         if op["op"] in ("add", "edit"):
-            ledger_comments.check(op["text"], kind_of(op["thread"]), op.get("long") is True)
+            ledger_comments.check(op["text"], kind_of(op["thread"]), op.get("long") is True, task_ids)
 
 
-def check_body(body):
+def check_body(body, task_ids=()):
     """Raise ValueError unless body is {"changes": [...], "ops": [...]} with well-formed members."""
     if not isinstance(body, dict):
         raise ValueError("body must be an object")
@@ -669,7 +669,7 @@ def check_body(body):
         if not isinstance(change, dict) or not isinstance(change.get("path"), str):
             raise ValueError("each change needs a string path")
     for op in ops:
-        check_op(op)
+        check_op(op, task_ids)
     return changes, ops
 
 
