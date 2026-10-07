@@ -443,3 +443,70 @@ def test_intervene_messages_the_watched_master_and_logs_on_both_ledgers(env, mon
     assert "The inbox fix is merged." in texts
     for slug in (WATCHED, DOCTOR):
         assert any("sent a message to the watched swarm's master" in c["text"] for c in state(slug)["chat"])
+
+
+@pytest.mark.parametrize("bounded,count", [(False, 2), (True, 2), (True, 0)])
+def test_failed_spawn_measure_uses_only_the_spawn_reader(env, monkeypatch, capsys, bounded, count):
+    store, _, _ = env
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    since, until = "2026-10-07T09:58:24Z", "2026-10-07T12:58:24Z"
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791388800000)
+
+    def unrelated(*args, **kwargs):
+        pytest.fail("failed spawn measure called unrelated detectors")
+
+    def record(actual_store, slug, now, **kwargs):
+        assert actual_store is store
+        assert slug == WATCHED
+        assert now == 1791388800000
+        assert kwargs == ({"since": "@1791367104.000", "until": "@1791377904.000"} if bounded else {})
+        return {
+            "slug": slug,
+            "actions": [f"{slug}: spawn failed for mu1, task mu1 reopened: timeout"] * count,
+        }
+
+    monkeypatch.setattr(doctor.detect, "readers", unrelated)
+    monkeypatch.setattr(doctor.detect.spawn_read, "records", record)
+    flags = ["--since", since, "--until", until] if bounded else []
+    assert doctor.main([WATCHED, "measure", "failed-spawn/mu1", *flags]) == 0
+    assert capsys.readouterr().out == f"failed-spawn/mu1 {count}\n"
+
+
+@pytest.mark.parametrize(
+    "finding,flags,error",
+    [
+        ("failed-spawn/mu1", ["--since", "2026-10-07T09:00Z"], "must be supplied together"),
+        ("failed-spawn/mu1", ["--until", "2026-10-07T12:00Z"], "must be supplied together"),
+        ("failed-spawn/mu1", ["--since", "bad", "--until", "2026-10-07T12:00Z"], "--since takes an ISO time"),
+        ("failed-spawn/mu1", ["--since", "2026-10-07T09:00Z", "--until", "bad"], "--until takes an ISO time"),
+        (
+            "failed-spawn/mu1",
+            ["--since", "2026-10-07T12:00Z", "--until", "2026-10-07T12:00Z"],
+            "--since must precede --until",
+        ),
+        (
+            "failed-spawn/mu1",
+            ["--since", "2026-10-07T13:00Z", "--until", "2026-10-07T12:00Z"],
+            "--since must precede --until",
+        ),
+        (
+            "failed-spawn/mu1",
+            ["--since", "2026-10-07T12:00Z", "--until", "2030-01-01T00:00Z"],
+            "--until must not be in the future",
+        ),
+        (
+            "health/f1",
+            ["--since", "2026-10-07T09:00Z", "--until", "2026-10-07T12:00Z"],
+            "only supported for failed-spawn",
+        ),
+    ],
+)
+def test_failed_spawn_measure_refuses_invalid_bounds(env, monkeypatch, capsys, finding, flags, error):
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791388800000)
+    assert doctor.main([WATCHED, "measure", finding, *flags]) == 1
+    output = capsys.readouterr()
+    assert error in output.err
+    assert output.out == ""
