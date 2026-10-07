@@ -39,14 +39,19 @@ def _declare(redis, slug="rig", name=NAME):
         _bash('until [ "$(gh run view 1 --json status --jq .status)" = completed ]; do sleep 10; done'),
         _bash("while pgrep -f count.py\ndo\n  echo waiting\ndone"),
         _bash("sleep 3600 && python count.py", run_in_background=True),
-        {"tool_name": "Monitor", "tool_input": {"command": "tail -f run.log"}},
-        {"tool_name": "Monitor"},
+        _bash('N=1800\n  sleep "$N"'),
+        _bash("{ sleep $((60*5)); }"),
+        _bash("gh run watch 37671144724"),
+        _bash("gh pr checks 1367 --watch --interval 30"),
+        {"tool_name": "Monitor", "tool_input": {"command": "until gh pr checks 1; do sleep 30; done"}},
     ],
 )
 def test_a_worker_with_no_declared_wait_is_told_to_declare_it(redis, payload):
     told = nudge.nudge(payload, environ=WORKER)
     assert TOLD in told
     assert "You hold task t7" in told
+    assert "agentihooks swarm rig wait --on checks <pr url> | reply <inbox item> | task <id>" in told
+    assert 'agentihooks swarm rig progress --doing "<what>" --ends-when "<what>" at least every 30 minutes' in told
 
 
 @pytest.mark.parametrize(
@@ -54,6 +59,12 @@ def test_a_worker_with_no_declared_wait_is_told_to_declare_it(redis, payload):
     [
         _bash("ls -la"),
         _bash("git commit -m 'Retry until the server answers'"),
+        _bash('git commit -m "retry until green; do not force"'),
+        _bash('gh pr comment 1 --body "wait until CI is green; do not merge"'),
+        _bash("gh pr checks 1367"),
+        _bash("python -c 'import time; time.sleep(1)'"),
+        {"tool_name": "Monitor", "tool_input": {"command": "tail -f run.log"}},
+        {"tool_name": "Monitor"},
         _bash('agentihooks swarm rig wait 30 --reason "the after window, until 21 32"'),
         {"tool_name": "Bash", "tool_input": {}},
         {"tool_name": "Bash"},
