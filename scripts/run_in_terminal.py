@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from scripts import herdr_host
-from scripts.init_agent import _select_host
+from scripts.init_agent import LAUNCH_GRACE_S, _select_host
 
 NATIVE_SCRIPT = (
     Path(__file__).resolve().parents[1] / "profiles/package/skills/run-in-terminal/scripts/02_run_terminal.sh"
@@ -40,16 +40,17 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     command = parts[0] if len(parts) == 1 else shlex.join(parts)
     host, explicit = _select_host(args.host, env)
     report = [f"directory={directory}", f"title={title}", f"command={command or 'shell'}"]
+    delayed = f"sleep {LAUNCH_GRACE_S} && {command}" if command else ""
     if host == "herdr":
         try:
-            print("\n".join(["host=herdr", *report, *_in_herdr(directory, title, command, args.workspace, env)]))
+            print("\n".join(["host=herdr", *report, *_in_herdr(directory, title, delayed, args.workspace, env)]))
             return 0
         except (herdr_host.HerdrError, OSError, subprocess.TimeoutExpired) as exc:
             if explicit:
                 print(f"agentihooks run-in-terminal: {exc}", file=sys.stderr)
                 return 2
             report.append(f"herdr_error={exc}")
-    done = subprocess.run([str(NATIVE_SCRIPT), str(directory), title, *([command] if command else [])])
+    done = subprocess.run([str(NATIVE_SCRIPT), str(directory), title, *([delayed] if delayed else [])])
     print("\n".join(["host=native", *report]))
     return done.returncode
 

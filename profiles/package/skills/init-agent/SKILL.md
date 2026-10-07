@@ -107,7 +107,8 @@ handed off.
 
 ## 4. Complete
 
-The command waits until the new terminal has started the launcher and the new
+The launcher waits three seconds after its pane or terminal opens before it
+starts the agent. The command waits until the new terminal has started the launcher and the new
 session has reported its route, then prints `key=value` lines: `status=started`,
 `route_status` (`routed`, `bare`, `failed` or `pending`), and `account` when
 routed. In herdr it also prints `workspace_id`, `tab_id`, `pane_id` and

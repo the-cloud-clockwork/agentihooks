@@ -176,6 +176,9 @@ def cmd_list(store, args):
 
 
 def cmd_tick(store, args):
+    from scripts import operator_env
+
+    operator_env.fill(os.environ)
     for slug in store.slugs():
         try:
             for action in run_tick(store, slug):

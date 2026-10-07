@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts import agent_choice, claude_trust, herdr_host
+from scripts import agent_choice, claude_trust, herdr_host, operator_env
 from scripts.swarm import effort_range
 
 
@@ -153,6 +153,7 @@ def _codex_trust_args(directory: Path, environ: dict[str, str]) -> list[str]:
 
 MODEL_DEFAULTS = {"claude": "opus", "codex": "gpt-6.1-sol"}
 EFFORT_DEFAULT = "high"
+LAUNCH_GRACE_S = 3
 
 
 def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
@@ -271,6 +272,7 @@ def _write_launcher(
         "set -u\n"
         f"cd {shlex.quote(str(directory))} || exit 1\n"
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
+        f"{operator_env.source_line(environ)}"
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
         f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(name)}\n"
         f"{_config_home_export(environ) if spec.agent == 'claude' else ''}"
@@ -278,6 +280,7 @@ def _write_launcher(
         f"{_swarm_exports(environ)}"
         f"{langfuse_export}"
         f"{_binding_export(environ)}"
+        f"sleep {LAUNCH_GRACE_S}\n"
         f"{before}{command_text}\n"
         f"rm -f {shlex.join(cleanup)}\n"
         f"[ -e {shlex.quote(str(root))}/closing-$$ ] && {{ rm -f {shlex.quote(str(root))}/closing-$$; exit 0; }}\n"
@@ -528,6 +531,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     args = _parser().parse_args(argv)
     active_env = dict(os.environ if environ is None else environ)
     active_env.pop("AGENTIHOOKS_PROFILE_REPORT", None)
+    operator_env.fill(active_env)
     try:
         directory = _resolve_directory(args.dir, active_env)
         prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8") if args.prompt_file else args.prompt
