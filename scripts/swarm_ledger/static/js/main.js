@@ -1,6 +1,6 @@
-import { POLL_MS, QUOTA_REFRESH_MS } from "./config.js";
+import { QUOTA_REFRESH_MS } from "./config.js";
 import { $ } from "./dom.js";
-import { flush, loadSeed, poll, renderSync, sendSync } from "./sync.js";
+import { flush, loadSeed, renderSync, sendSync } from "./sync.js";
 import { showArtifacts } from "./artifacts.js";
 import { editTitle, render, renderStats, saveTitle } from "./render.js";
 import { clearNotification, clearPriority, showAlerts, showNotifications } from "./notices.js";
@@ -8,8 +8,8 @@ import { foldSections, markOutline, outlineBoxes, reveal, sectionBoxes, showOutl
 import { collapsible, commentBoxes, groupOpen, markToggles, rememberGroup, rememberUnanimous, setAllComments } from "./folds.js";
 import { startLayout, wireRail, wireTabs } from "./layout.js";
 import { showChat, wireChat, wireChatInput } from "./chat.js";
-import { pollSwarm } from "./swarm.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
+import { connectEvents } from "./events.js";
 
 function start() {
   loadSeed();
@@ -73,10 +73,7 @@ function start() {
   wireTabs();
   wireRail();
   $("main-content").addEventListener("scroll", markOutline, { passive: true });
-  poll();
-  pollSwarm();
-  setInterval(poll, POLL_MS);
-  setInterval(pollSwarm, POLL_MS);
+  connectEvents();
   setInterval(refreshQuota, QUOTA_REFRESH_MS);
   setInterval(renderStats, 30000);
   setInterval(renderSync, 1000);

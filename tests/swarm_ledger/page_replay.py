@@ -96,6 +96,11 @@ class FakeApi:
             return route.fulfill(json={**self.state(), "rejected": []})
         if path == f"/api/swarm/{SLUG}":
             return route.fulfill(json=INPUTS["swarm"])
+        if path == f"/api/v1/ledgers/{SLUG}/events":
+            body = (
+                f"id: c0\nevent: snapshot\ndata: {json.dumps({'ledger': self.state(), 'swarm': INPUTS['swarm']})}\n\n"
+            )
+            return route.fulfill(body=body, content_type="text/event-stream")
         if path == "/api/layout":
             return route.fulfill(json={} if request.method == "GET" else {"ok": True})
         if path == f"/api/media/{SLUG}":

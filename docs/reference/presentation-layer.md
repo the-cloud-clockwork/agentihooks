@@ -25,8 +25,8 @@ The ledger pages, HOME and BIN form the presentation layer of agentihooks. Since
 | Page rendering | `new_ledger.render` and `ledger_server.index_page` fill `__LEDGER_*__` / `__HOME_*__` placeholders in `template.html` / `home.html` with `re.sub`. `palette.css` and `tooltips.js` are inlined into every page. |
 | Page code | `template.html` is about 2,700 lines with one inline script of about 180 functions: rendering, API calls, polling, layout and swarm control in one scope. |
 | Operator write | The page sends `PUT /api/<slug>` with `{changes, ops}` and an `X-Ledger-Token`. The server replies with the whole document. |
-| Agent write | The `agentihooks ledger` CLI sends the same `PUT` through the server. `watch_ledger` re-reads the JSON file from disk every 3 s. |
-| Live refresh | Polling: the page fetches the whole document every 2 s and the swarm panel every 2 s, per open tab. There is no server push. |
+| Agent write | The `agentihooks ledger` CLI sends the same `PUT` through the server. `watch_ledger` follows the event stream: one snapshot, then patches. |
+| Live refresh | Server push: each tab holds one `GET /api/v1/ledgers/{slug}/events` stream (fetch streaming, token in a header). It receives one snapshot, then patches of the ledger, the swarm status and the work folder tails as they change, and a heartbeat every 5 s. The server samples swarm status and work folder tails once per ledger while a stream is open. Quota refresh keeps its own five minute cadence. |
 | State | The JSON file per ledger is the record (with `_meta`: rev, path stamps, a bounded event log, recent seeds). A copy lives in the HTML seed. Swarm, inbox and health live in Redis. `localStorage` keeps only per-viewer folds, layout and caches. |
 | Concurrency | One process, one global lock around read, reconcile, apply and write; atomic rename on write; optimistic merge by `_rev` against a window of past seeds. |
 
@@ -35,7 +35,7 @@ The ledger pages, HOME and BIN form the presentation layer of agentihooks. Since
 | Severity | Finding |
 |---|---|
 | P0 | Every op rewrites the whole document. One checkbox or chat line re-reads and re-writes megabytes of JSON and HTML under the global lock. |
-| P0 | Whole-document polling. Each tab pulls the full document every 2 s and each watching agent re-reads the file every 3 s, so cost grows with ledger size, not with change. |
+| Resolved | Whole-document polling, replaced by the event stream: idle tabs and watchers transfer only heartbeats, and a change sends a patch of the changed items. |
 | P1 | One monolithic inline script with no module boundaries; behaviour cannot be tested in isolation from the page. |
 | P1 | HTML built by placeholder substitution in Python, with escaping done by hand at each call site. |
 | P1 | No API version and no schema: routes are string matches and bodies are validated by hand. |
@@ -52,7 +52,7 @@ Not yet measured: writes per minute in a busy swarm, and lock wait under concurr
  browser (static HTML + CSS + ES modules, no build)
    │  GET /app/*.html  /static/*.css  /static/js/*.js     (cacheable files)
    │  fetch /api/v1/...                                   (JSON resources)
-   │  EventSource /api/v1/ledgers/{slug}/events           (server push)
+   │  fetch stream /api/v1/ledgers/{slug}/events          (server push)
    ▼
  ledger server  (Python stdlib HTTP, one process)
    ├─ API layer: routes → handlers → validation (JSON schema per resource)
@@ -68,7 +68,7 @@ Not yet measured: writes per minute in a busy swarm, and lock wait under concurr
 
 - Pages are plain HTML files with no Python templating: `ledger.html`, `home.html`, `bin.html`. Each page fetches its data from the API after load.
 - `palette.css` plus one stylesheet per page, served as files. Colours stay in `palette.css`.
-- JavaScript as native ES modules loaded with `<script type="module">`: `api.js` (fetch and errors), `events.js` (EventSource), `store.js` (in-page state), and one module per area (`tasks.js`, `phases.js`, `chat.js`, `swarm.js`, `outline.js`, `layout.js`). Repeated markup uses `<template>` elements.
+- JavaScript as native ES modules loaded with `<script type="module">`: `api.js` (fetch and errors), `events.js` (event stream over fetch), `store.js` (in-page state), and one module per area (`tasks.js`, `phases.js`, `chat.js`, `swarm.js`, `outline.js`, `layout.js`). Repeated markup uses `<template>` elements.
 - Impeccable live mode works on static HTML files with no build step, so this layout is its best case.
 
 ### API
@@ -76,7 +76,7 @@ Not yet measured: writes per minute in a busy swarm, and lock wait under concurr
 - Versioned under `/api/v1`, one resource per path: `ledgers`, `ledgers/{slug}`, `…/phases/{id}`, `…/tasks/{id}`, `…/tasks/{id}/comments`, `…/questions`, `…/followups`, `…/notes`, `…/chat`, `…/artifacts`, `…/swarm` (control), `…/swarm/health`, `quota`, `bin`.
 - `GET` returns one resource or a page of a collection; `POST`/`PATCH` change one thing and return it. No whole-document replies.
 - A JSON schema per request body, checked in one place.
-- `GET /api/v1/ledgers/{slug}/events?since=<rev>` is a server-sent event stream fed by the existing rev and event log. It replaces both pollers and the file re-read in `watch_ledger`.
+- `GET /api/v1/ledgers/{slug}/events` with `Accept: text/event-stream` is a server-sent event stream; without that header the same route stays the paginated events collection. Each event carries an opaque cursor as its id; a reconnect sends `Last-Event-ID` and gets the retained events after it (256 per ledger). A cursor from another server start, another ledger or past retention answers 410 `cursor_expired`, and the client reconnects without it to get a fresh snapshot. It replaces both pollers and the file re-read in `watch_ledger`.
 - The CLI moves to the same endpoints, so agents and the page share one contract.
 
 ### Database
@@ -100,6 +100,6 @@ Table sketch: `ledgers(slug, title, overview, size, rev, created_at, updated_at,
 3. **Add `SqliteLedgerRepository` and an import script.** Choose the repository by environment variable. Run SQLite in shadow mode (write both, read files) and compare `get_document` and `events_since` on live ledgers before switching reads. Shadow writes run only with `LEDGER_SQLITE_SHADOW=1`: on a multi-megabyte ledger each one costs about a second inside the server lock and stalls the shared server under write load, so they stay off until the cutover; `python -m scripts.swarm_ledger.storage_migration` imports and verifies on request.
 4. **Serve CSS and JS as files** with cache headers, and add a Content-Security-Policy to page responses.
 5. **Add `/api/v1` resources** beside the old `PUT /api/<slug>`, one area at a time (tasks first), with JSON schemas.
-6. **Add the event stream** and move the page and `watch_ledger` off polling.
+6. **Add the event stream** and move the page and `watch_ledger` off polling. Done 2026-10-07.
 7. **Make the pages static HTML** that load data from `/api/v1`; retire placeholder rendering and the HTML seed.
 8. **Retire the old endpoints and the per-ledger JSON files** once nothing reads them.

@@ -85,7 +85,7 @@ class Watch(unittest.TestCase):
 
     def test_watcher_removes_its_beat_file_on_sigterm(self):
         beat = core.watch_path(SLUG, "watcher")
-        env = {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR)}
+        env = {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR), "LEDGER_PORT": "9"}
         proc = subprocess.Popen(
             [sys.executable, str(SCRIPTS / "watch_ledger.py"), SLUG, "--as", "watcher", "--interval", "0.1"],
             env=env,
