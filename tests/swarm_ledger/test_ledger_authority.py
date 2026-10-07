@@ -105,7 +105,7 @@ def test_pinned_worker_transport_cannot_create_a_task_as_master(crew):
         forged = operation("task_add", by=MASTER, task="t1", title="Forged author", lane="eng", phase="p1")
         reply = ledger.request(SLUG, [forged])
     assert forged["id"] in reply["rejected"]
-    assert "t1" not in tasks(reply)
+    assert "t1" not in tasks(ledger.request(SLUG))
     assert reply["_meta"]["warnings"] == [
         "phase p1 description has 101 words, limit 100",
         f"{WORKER} cannot write as {MASTER}",
@@ -118,7 +118,7 @@ def test_pinned_worker_cannot_write_as_another_worker_or_the_operator(crew):
     with pinned():
         reply = ledger.request(SLUG, [other, unsigned])
     assert set(reply["rejected"]) >= {other["id"], unsigned["id"]}
-    texts = [entry["text"] for entry in reply["chat"]]
+    texts = [entry["text"] for entry in ledger.resource(SLUG, "chat", collection=True)]
     assert "Other worker" not in texts
     assert "Operator words" not in texts
     assert "only the operator writes without an author" in reply["_meta"]["warnings"]
@@ -129,13 +129,13 @@ def test_a_worker_cannot_raise_its_own_role_but_a_master_can_join_as_orchestrato
         raised = operation("join", by=WORKER, role="orchestrator")
         reply = ledger.request(SLUG, [raised])
     assert raised["id"] in reply["rejected"]
-    assert reply["_meta"]["members"][WORKER]["role"] == "member"
+    assert ledger.request(SLUG)["_meta"]["members"][WORKER]["role"] == "member"
     assert f"{WORKER} cannot join as orchestrator" in reply["_meta"]["warnings"]
     with pinned(MASTER):
         joined = operation("join", by=MASTER, role="orchestrator")
         reply = ledger.request(SLUG, [joined])
     assert joined["id"] not in reply["rejected"]
-    assert reply["_meta"]["members"][MASTER]["role"] == "orchestrator"
+    assert ledger.request(SLUG)["_meta"]["members"][MASTER]["role"] == "orchestrator"
 
 
 def test_a_bound_master_still_adds_tasks(crew):
@@ -143,7 +143,7 @@ def test_a_bound_master_still_adds_tasks(crew):
         added = operation("task_add", by=MASTER, task="t9", title="Master task", lane="eng", phase="p1")
         reply = ledger.request(SLUG, [added])
     assert added["id"] not in reply["rejected"]
-    assert "t9" in tasks(reply)
+    assert "t9" in tasks(ledger.request(SLUG))
 
 
 def test_an_alias_of_the_bound_name_writes_as_that_agent(crew):
@@ -162,7 +162,7 @@ def test_the_operator_credential_keeps_full_administration(crew):
     )
     assert status == 200
     assert reply["rejected"] == []
-    assert reply["_meta"]["members"][OTHER]["role"] == "orchestrator"
+    assert ledger.request(SLUG)["_meta"]["members"][OTHER]["role"] == "orchestrator"
     assert admin_put(crew, operation("join", by=OTHER, role="member"))[0] == 200
     body = json.dumps({"changes": [{"path": "phases/p1/done", "value": True}]})
     headers = {"Content-Type": "application/json", "X-Ledger-Token": crew["admin"]}
@@ -238,7 +238,8 @@ def test_an_upload_is_bound_to_the_credential_name(crew):
         with pytest.raises(SystemExit) as refused:
             ledger.upload_image(SLUG, MASTER, str(upload))
         assert ledger.upload_image(SLUG, WORKER, str(upload))["type"] == "image/png"
-    assert str(refused.value) == "server refused the file: 403 missing or wrong ledger token"
+    error = json.loads(str(refused.value).split("403 ", 1)[1])
+    assert error["error"]["code"] == "forbidden"
 
 
 def test_the_principal_resolves_from_the_credential():

@@ -317,13 +317,17 @@ def handoff_lines(task):
     return lines
 
 
+def _verdict(task):
+    return task.get("handoff_envelope") or task.get("reclaim") or {}
+
+
 def _continue_from(task):
-    ref = (task.get("handoff_envelope") or {}).get("continue_from")
+    ref = _verdict(task).get("continue_from")
     return ref if ref and ref.startswith("origin/") else ""
 
 
 def continuation_lines(task):
-    envelope = task.get("handoff_envelope") or {}
+    envelope = _verdict(task)
     ref = _continue_from(task)
     if task.get("parked_on"):
         return []
