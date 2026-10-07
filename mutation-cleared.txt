@@ -1874,5 +1874,17 @@
   "scripts/swarm_ledger/watch_ledger.py:scripts.swarm_ledger.watch_ledger.x_main__mutmut_31:2906636fbc3ae6cca316060ed198a0323d682fc297646a8d190ae2c5ee50ad02": {
     "reader": "Standards reader",
     "reason": "headers is read only by headers or credentials(args.slug) at the top of the next try and reassigned there before reaching stream; None and empty string are both falsy, so both fetch fresh credentials and nothing else reads headers. Exact CI artifact mutant from run 37679023255."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_30:e9e73925e70dabdb004ae0af81c513cd65016c79072920da9bd1bbd2f26cfffb": {
+    "reader": "Standards",
+    "reason": "ProfileDecision.bundle_revision is read only by the next line, which replaces a falsy value with overlays.revision(); None and the empty string are both falsy, so both take the same branch and store the same revision, and nothing reads the field before that line. Exact CI artifact mutant from run 37699550281."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_32:c2697e43a7a6e4085d4ac57d4ea6db1a961dd7f727f136d5e0517414c0dc64b5": {
+    "reader": "Standards",
+    "reason": "ProfileDecision.bundle_revision is read only by the next line, which replaces a falsy value with overlays.revision(); None and the empty string are both falsy, so both take the same branch and store the same revision, and nothing reads the field before that line. Exact CI artifact mutant from run 37699550281."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_56:409a637151996c215b8cdad4ef75d9e362591c631aad7cd4c8c892d6fdbefa29": {
+    "reader": "Standards",
+    "reason": "The argument reaches only overlays.chosen through role_overlays or {} in profile_choice.choose, which normalizes None to an empty map before any read, so chosen sees the same defaults. Exact CI artifact mutant from run 37699550281."
   }
 }
