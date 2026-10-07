@@ -8,6 +8,7 @@ import pytest
 from hooks.classifier import YesNo, fallbacks
 from hooks.classifier.errors import BackendFailure
 from hooks.classifier.result import DecisionRequest
+from scripts.install import _write_route_report
 
 REQUEST = DecisionRequest("typo", {"simple": YesNo("Small?", true="yes", false="no")})
 RAW = {"answers": {"simple": {"noul": 1}}}
@@ -48,10 +49,11 @@ def test_haiku_launches_through_agentihooks_claude(monkeypatch, route, parent_to
     assert kwargs["env"].get("CLAUDE_CODE_OAUTH_TOKEN") == os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
 
 
-def test_unroutable_account_fails_naming_why(monkeypatch):
+def test_unroutable_account_fails_naming_why(monkeypatch, tmp_path):
     seen = []
-    report = "status=failed\nerror=no non-empty AH_CC_TOKEN_* variables found\n"
-    monkeypatch.setattr(fallbacks.subprocess, "run", _launcher(seen, report=report, code=3, stdout=""))
+    written = tmp_path / "route"
+    _write_route_report(str(written), status="failed", error="no non-empty AH_CC_TOKEN_* variables found")
+    monkeypatch.setattr(fallbacks.subprocess, "run", _launcher(seen, report=written.read_text(), code=3, stdout=""))
     with pytest.raises(BackendFailure, match=r"^no Claude account: no non-empty AH_CC_TOKEN_\* variables found$"):
         fallbacks.ClaudeCliBackend().decide(REQUEST)
     assert len(seen) == 1
