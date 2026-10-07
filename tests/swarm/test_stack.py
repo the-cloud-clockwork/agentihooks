@@ -158,6 +158,11 @@ def test_park_refuses_a_malformed_document(parked, capsys):
     _refused(parked, capsys, handoff_check.refusal(found))
 
 
+def test_park_refuses_a_missing_document(parked, capsys, tmp_path):
+    missing = tmp_path / "gone.md"
+    _refused((*parked[:4], missing), capsys, f"cannot read the handoff document {missing}: No such file or directory")
+
+
 @pytest.mark.parametrize("address", ["recap:eng-1@sw", "workspace:t1/progress"])
 def test_park_resolves_read_first_addresses_against_this_swarm(parked, capsys, address):
     doc = parked[4]
