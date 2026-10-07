@@ -201,3 +201,38 @@ def test_codex_context_growth_and_compaction(monkeypatch, event):
     gauge.assert_any_call("agentihooks.tokens.fill_pct", 5.0, {"session.id": "growth"})
     gauge.assert_any_call("agentihooks.tokens.burn_rate", 0.0, {"session.id": "growth"})
     assert persist.call_args.args[1]["used"] == 10000
+
+
+@pytest.mark.parametrize("window,used", [(200000, 50000), (1, 0)])
+def test_lifecycle_reads_the_current_session_rollout(monkeypatch, tmp_path, window, used):
+    import json
+
+    from hooks import config
+    from hooks.observability.token_monitor import record_lifecycle_context
+
+    monkeypatch.setattr(config, "TOKEN_MONITOR_ENABLED", True)
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    day = tmp_path / "sessions" / "2026" / "10" / "07"
+    day.mkdir(parents=True)
+    rollout = day / "rollout-current-session.jsonl"
+    rollout.write_text(
+        json.dumps(
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {"last_token_usage": {"total_tokens": used}, "model_context_window": window},
+                },
+            }
+        )
+        + "\n"
+    )
+    with (
+        patch("hooks.observability.token_monitor.get_redis", return_value=None),
+        patch("hooks.observability.otel.record_gauge") as gauge,
+    ):
+        record_lifecycle_context({"session_id": "current-session", "hook_event_name": "PostToolUse"})
+    gauge.assert_called_once_with(
+        "agentihooks.tokens.fill_pct", 25.0 if used else 0.0, {"session.id": "current-session"}
+    )
