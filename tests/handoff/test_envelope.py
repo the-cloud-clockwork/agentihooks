@@ -49,7 +49,18 @@ def store():
 
 
 def _agent():
-    return AgentRecord("engineer@a1b2c3-0001", "eng", "t1", seat="eng-1@sw", conversation_id="conv-7")
+    return AgentRecord(
+        "engineer@a1b2c3-0001",
+        "eng",
+        "t1",
+        seat="eng-1@sw",
+        conversation_id="conv-7",
+        profile="engineer",
+        harness="codex",
+        model="gpt-6.1-sol",
+        effort="medium",
+        account="primary",
+    )
 
 
 def test_the_envelope_carries_every_fact_the_runtime_holds(store):
@@ -77,6 +88,16 @@ def test_the_envelope_carries_every_fact_the_runtime_holds(store):
         "inbox": [{"id": open_item.id, "from": "ci@a1b2c3-0001", "state": "pending"}],
         "claims": ["t1"],
         "conversation_id": "conv-7",
+        "launch": {
+            "profile": "engineer",
+            "harness": "codex",
+            "model": "gpt-6.1-sol",
+            "effort": "medium",
+            "account": "primary",
+            "model_source": "",
+            "model_confidence": None,
+            "profile_decision": {},
+        },
     }
 
 

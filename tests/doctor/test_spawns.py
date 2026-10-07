@@ -8,6 +8,9 @@ from tests.doctor.recorded import load
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
+from tests.swarm.profile_fixture import validated
+
+
 def test_recorded_spawns_and_planted_failed_spawn():
     record = load("spawns")
     assert spawns.failed(record) == []
@@ -68,7 +71,10 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
         return subprocess.CompletedProcess(
             argv,
             0,
-            "status=started\nroute_status=routed\nagent=codex\naccount=default\nplacement=overflow\npane_id=1\n",
+            validated(
+                argv,
+                "status=started\nroute_status=routed\nagent=codex\naccount=default\nplacement=overflow\npane_id=1\n",
+            ),
             "",
         )
 

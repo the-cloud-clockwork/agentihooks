@@ -9,11 +9,10 @@ from dataclasses import replace
 from pathlib import Path
 
 from scripts import agent_choice
-from scripts.profiles import plugins
+from scripts.profiles import binding, plugins
 from scripts.swarm import effort_range, model_pick, naming, priming_trace, profile_choice, prompt
 from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
-from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import Placed, SpawnError
 
 SWARM_HOME = Path.home() / ".agentihooks" / "swarm"
@@ -86,6 +85,17 @@ def _conversation_id(session):
     return session.get("value") or ""
 
 
+def _transfer(task):
+    saved = (task.get("handoff_envelope") or {}).get("launch")
+    if not task.get("handoff") and not saved:
+        return {}
+    if not saved or not all(saved.get(key) for key in ("profile", "harness", "model", "effort")):
+        raise SpawnError("unsupported handoff: original profile and run options are missing")
+    if saved["harness"] not in ("claude", "codex"):
+        raise SpawnError(f"unsupported handoff harness: {saved['harness']}")
+    return saved
+
+
 class HerdrRuntime:
     def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call):
         self.home, self.run, self.herdr = home, run, herdr
@@ -97,9 +107,15 @@ class HerdrRuntime:
 
     def spawn(self, config, lane, name, task, spawns=None):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
+        saved = _transfer(task)
+        chosen = {**chosen, "profile": saved["profile"]} if saved else chosen
         decision = profile_choice.choose(config.slug, lane, chosen, task, environ)
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
+        if saved:
+            if plugins.claude_only(profile) and saved["harness"] != "claude":
+                raise SpawnError("unsupported handoff: required profile cannot mount on the original harness")
+            requested = saved["harness"]
         if spawns is None:
             agent, reason = self.choose(requested, environ)
         else:
@@ -107,41 +123,58 @@ class HerdrRuntime:
             agent, reason = agent_choice.choose_shared(requested, environ, spawns, share, floor, choose=self.choose)
         if reason == agent_choice.ALL_FULL:
             raise SpawnError(reason)
+        if saved and agent != saved["harness"]:
+            raise SpawnError("unsupported handoff: router substituted the original harness")
         text = prompt.build(
             config.slug, config.repo, lane, name, task, role=chosen.get("role", ""), autonomy=config.autonomy
         )
         priming_trace.write(self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile)
-        if lane in PICKED_LANES:
+        if saved:
+            picked = model_pick.ModelPick(
+                saved["model"],
+                saved["effort"],
+                source=saved.get("model_source", "handoff"),
+                confidence=saved.get("model_confidence"),
+            )
+        elif lane in PICKED_LANES:
             picked = model_pick.pick(agent, chosen, task, environ)
         else:
             picked = _lane_default(lane, agent, chosen)
         mode = PLAN_MODE if (lane, agent) == ("plan", "claude") else []
+        route = ["--route", saved["account"]] if saved.get("account") else []
         placed = self._launch(
             config,
             lane,
             task["id"],
             name,
-            [*argv, "--", *_model_args(agent, picked.__dict__, environ, effort_range.of(config)), *mode],
+            [*argv, "--", *route, *_model_args(agent, picked.__dict__, environ, effort_range.of(config)), *mode],
         )
         return replace(
             placed,
             model_source=picked.source,
             model_confidence=picked.confidence,
-            profile_decision=decision.record(),
+            profile_decision={**decision.record(), **placed.profile_decision},
         )
 
     def resume(self, config, agent, text):
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
+        if not agent.profile:
+            raise SpawnError("unsupported resume: original profile is missing")
         argv = self._argv(
             config,
             agent.name,
             agent.harness,
             text,
             f"{agent.name}-restored.md",
-            agent.profile or DEFAULT_PROFILES[agent.lane],
+            agent.profile,
         )
-        picked = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}))
+        defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}))
+        picked = model_pick.ModelPick(
+            agent.model or defaults.model,
+            agent.effort or defaults.effort,
+            source=agent.model_source or ("recorded" if agent.model else defaults.source),
+        )
         route = ["--route", agent.account] if agent.account else []
         model = _model_args(agent.harness, picked.__dict__, dict(os.environ), effort_range.of(config))
         argv += ["--resume", agent.conversation_id, "--", *route, *model]
@@ -149,7 +182,9 @@ class HerdrRuntime:
         if not self._holds(placed.pane_id, agent.conversation_id):
             self.retire(replace(agent, pane_id=placed.pane_id), True)
             raise SpawnError(f"herdr never showed conversation {agent.conversation_id} on pane {placed.pane_id}")
-        return replace(placed, model_source=picked.source)
+        return replace(
+            placed, model_source=picked.source, profile_decision={**agent.profile_decision, **placed.profile_decision}
+        )
 
     def _holds(self, pane_id, conversation_id):
         for _ in range(RESUME_CHECKS):
@@ -203,6 +238,11 @@ class HerdrRuntime:
             self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
             raise SpawnError(tail[-1] if tail else f"init-agent exit {proc.returncode}")
+        try:
+            validated = binding.fields(fields, argv[argv.index("--profile") + 1], agent)
+        except ValueError as exc:
+            self._terminate(name)
+            raise SpawnError(str(exc)) from exc
         return Placed(
             fields.get("pane_id", ""),
             fields.get("agent", agent),
@@ -210,7 +250,8 @@ class HerdrRuntime:
             fields.get("model", ""),
             fields.get("effort", ""),
             fields.get("placement", ""),
-            fields.get("profile", ""),
+            validated["profile"],
+            profile_decision={"validation": validated},
         )
 
     def recover(self, name: str) -> Placed:

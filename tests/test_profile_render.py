@@ -603,7 +603,11 @@ def test_codex_render_links_into_the_claude_profile(world):
     linked = {p.name: os.readlink(p) for p in (out / "skills").iterdir() if p.is_symlink()}
     assert linked == {p.name: str(p) for p in (claude / "skills").iterdir()}
     assert {"bundle-skill", "role-skill"} <= set(linked)
-    assert sorted(p.name for p in out.iterdir() if not p.is_symlink()) == ["config.toml", "skills"]
+    assert sorted(p.name for p in out.iterdir() if not p.is_symlink()) == [
+        ".profile-binding.json",
+        "config.toml",
+        "skills",
+    ]
     sources = render.sources.path("rb-role", "codex", render.rendered_root())
     assert os.readlink(sources) == str(render.sources.path("rb-role", "claude", render.rendered_root()))
 
@@ -1112,7 +1116,7 @@ def test_cli_usage(world, capsys):
     )
     with pytest.raises(SystemExit):
         render.main([])
-    assert capsys.readouterr().err.startswith("usage: agentihooks profile [-h] {render,measure}")
+    assert capsys.readouterr().err.startswith("usage: agentihooks profile [-h] {render,measure,validate}")
     with pytest.raises(SystemExit):
         render.main(["--help"])
     assert re.search(

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from hooks.context import quarantine
 from scripts.claude_config import claude_home, claude_json
-from scripts.profiles import browser, connectors, plugins, sources
+from scripts.profiles import binding, browser, connectors, plugins, sources
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
 from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_target import codex_home
@@ -215,7 +215,9 @@ def _persona(name: str, target: str, bundle: Path | None, dirs: list[tuple[str, 
     items = _features("rules", _is_doc, bundle, dirs)
     sources.write(sources.path(name, target, rendered_root()), sources.rows(bundle, dirs, items))
     rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
-    return quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER))
+    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER))
+    ending = f"\n\n{FOOTER}\n"
+    return binding.persona(text.removesuffix(ending)) + ending
 
 
 def _read_json(path: Path) -> dict | None:
@@ -236,6 +238,7 @@ def render_claude(name: str, force: bool = False) -> Path | None:
         and _read_json(out / STAMP) == current
         and not (out / "rules").exists()
         and sources.path(name, "claude", rendered_root()).is_file()
+        and (out / binding.FILE).is_file()
         and connectors.path(name, "claude", rendered_root()).is_file()
         and "hasCompletedOnboarding" in (_read_json(out / ".claude.json") or {})
     ):
@@ -267,6 +270,7 @@ def render_claude(name: str, force: bool = False) -> Path | None:
         plans.unlink()
     plans.mkdir(exist_ok=True)
     _i.save_json(out / STAMP, current)
+    binding.write(out, name, "claude")
     return out
 
 
@@ -328,6 +332,7 @@ def render_codex(name: str, force: bool = False) -> Path | None:
         not force
         and claude_fresh
         and manifest.is_file()
+        and (out / binding.FILE).is_file()
         and connectors.path(name, "codex", rendered_root()).is_file()
         and _read_toml(out / "config.toml").get("agentihooks") == current
     ):
@@ -352,6 +357,7 @@ def render_codex(name: str, force: bool = False) -> Path | None:
         doc["skills"] = {"config": [{"path": str(p / "SKILL.md"), "enabled": False} for p in hidden_skills]}
     doc["agentihooks"] = current
     _atomic_write(out / "config.toml", tomlkit.dumps(doc))
+    binding.write(out, name, "codex")
     legacy = operator / f"{name}.config.toml"
     if _codex_stamp(legacy):
         legacy.unlink()
@@ -398,7 +404,11 @@ def main(argv: list[str] | None = None) -> int:
     from scripts.profiles import measure
 
     measure.add_arguments(commands.add_parser("measure", help="Print a profile's first turn input tokens"))
+    validate = commands.add_parser("validate", help="Validate the mounted profile through its live harness")
+    validate.add_argument("--canary", required=True)
     args = parser.parse_args(argv)
+    if args.command == "validate":
+        return binding.main(args.canary)
     if args.command == "measure":
         return measure.main(args)
     if args.bundle is not None and args.out is None:

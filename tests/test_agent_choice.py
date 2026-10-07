@@ -98,7 +98,7 @@ def test_a_handoff_stays_on_claude(monkeypatch, tmp_path, capsys):
         {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")},
     )
     assert rc == 2
-    assert "--handoff moves work to another Claude account" in capsys.readouterr().err
+    assert "unsupported quota transfer" in capsys.readouterr().err
 
 
 def test_an_explicit_codex_agent_is_used_even_when_claude_has_quota(monkeypatch):

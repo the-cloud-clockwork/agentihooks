@@ -30,6 +30,9 @@ TASK = {
 }
 
 
+from tests.swarm.profile_fixture import validated
+
+
 def answered(choice, confidence=0.9, source="pplx-decider-v1-27b", calibrated=True):
     return DecisionResult(
         {"responsibility": Answer("choice", choice=choice, confidence=confidence)}, source, calibrated=calibrated
@@ -237,7 +240,7 @@ def test_runtime_records_the_decision_and_launches_its_profile(tmp_path, asked, 
     def launch(argv, **kwargs):
         calls.append(argv)
         out = "status=started\nroute_status=direct\npane_id=w:p1\nagent=claude\nprofile=frontend\nmodel=m\neffort=low\n"
-        return SimpleNamespace(returncode=0, stdout=out, stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, out), stderr="")
 
     config = store.SwarmConfig("sw", str(tmp_path), 1, 0, code="a1b2c3")
     rt = runtime.HerdrRuntime(home=tmp_path, run=launch, choose=lambda *_: ("claude", "open"))

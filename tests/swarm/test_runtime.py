@@ -5,6 +5,7 @@ import pytest
 
 from scripts.swarm.runtime import PLAN_MODE, HerdrRuntime
 from scripts.swarm.store import AgentRecord
+from tests.swarm.profile_fixture import validated
 
 
 def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
@@ -13,7 +14,7 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
 
     def run(argv, **kwargs):
         seen["env"] = kwargs.get("env")
-        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
     config = SimpleNamespace(
@@ -39,7 +40,7 @@ def test_a_task_profile_wins_over_the_lane_profile_at_spawn(tmp_path, lanes, tas
 
     def run(argv, **kwargs):
         seen["argv"] = argv
-        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
     config = SimpleNamespace(
@@ -132,7 +133,7 @@ def test_spawn_records_the_model_and_effort_init_agent_launched_with(tmp_path):
     out = "status=started\nroute_status=routed\npane_id=w1:p2\naccount=a\nmodel=opus\neffort=high\n"
     runtime = HerdrRuntime(
         home=tmp_path,
-        run=lambda argv, **kw: SimpleNamespace(returncode=0, stdout=out, stderr=""),
+        run=lambda argv, **kw: SimpleNamespace(returncode=0, stdout=validated(argv, out), stderr=""),
         choose=lambda *_: ("claude", "open"),
     )
     config = SimpleNamespace(
@@ -146,7 +147,7 @@ def test_a_codex_spawn_records_the_model_and_effort_init_agent_launched_with(tmp
     out = "status=started\nroute_status=routed\npane_id=w1:p2\nagent=codex\nmodel=gpt-6.1-sol\neffort=high\n"
     runtime = HerdrRuntime(
         home=tmp_path,
-        run=lambda argv, **kw: SimpleNamespace(returncode=0, stdout=out, stderr=""),
+        run=lambda argv, **kw: SimpleNamespace(returncode=0, stdout=validated(argv, out), stderr=""),
         choose=lambda *_: ("codex", "open"),
     )
     config = SimpleNamespace(
@@ -162,7 +163,7 @@ def _spawn_env(tmp_path, monkeypatch, **config):
 
     def run(argv, **kwargs):
         seen["env"] = kwargs.get("env")
-        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
     runtime.spawn(
@@ -187,7 +188,7 @@ def _spawn_seen(tmp_path, lanes, lane="eng"):
 
     def run(argv, **kwargs):
         seen["argv"] = argv
-        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     def choose(requested, environ):
         seen["requested"] = requested
@@ -260,7 +261,7 @@ def test_an_auto_work_lane_spawn_asks_for_the_codex_share_with_the_swarm_setting
 
     def run(argv, **kwargs):
         seen["argv"] = argv
-        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     monkeypatch.setattr(agent_choice, "choose_shared", shared)
     monkeypatch.delenv("AGENTIHOOKS_SWARM_CODEX_SHARE", raising=False)
@@ -299,7 +300,7 @@ def test_a_task_naming_a_claude_only_profile_spawns_on_claude_at_codex_share_one
 
     def run(argv, **kwargs):
         seen["argv"] = argv
-        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda requested, environ: (requested or "claude", "x"))
     config = SimpleNamespace(
@@ -330,7 +331,7 @@ def test_a_claude_only_profile_asks_the_plain_choice_for_claude_with_the_environ
         return requested, "requested"
 
     def run(argv, **kwargs):
-        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=choose)
     config = SimpleNamespace(
@@ -387,7 +388,7 @@ def _resuming(tmp_path, reported, harness="claude"):
         seen["runs"].append(argv)
         seen.setdefault("env", kwargs.get("env"))
         out = "status=started\nroute_status=routed\npane_id=w2:p9\naccount=a1\nmodel=opus\neffort=high\n"
-        return SimpleNamespace(returncode=0, stdout=out, stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, out), stderr="")
 
     def herdr(args):
         seen["herdr"].append(args)
@@ -406,6 +407,7 @@ def _resuming(tmp_path, reported, harness="claude"):
         account="a1",
         model="opus",
         effort="high",
+        profile="engineer",
         conversation_id="c0ffee",
     )
     return runtime, config, agent, seen
@@ -426,7 +428,7 @@ def test_resume_relaunches_the_same_harness_name_task_and_account_into_its_conve
     assert (placed.pane_id, placed.harness, placed.account) == ("w2:p9", "codex", "a1")
 
 
-@pytest.mark.parametrize(("recorded", "profile"), [("frontend", "frontend"), ("", "engineer")])
+@pytest.mark.parametrize(("recorded", "profile"), [("frontend", "frontend"), ("engineer", "engineer")])
 def test_resume_relaunches_on_the_profile_the_agent_was_spawned_with(tmp_path, recorded, profile):
     from dataclasses import replace
 
@@ -471,16 +473,14 @@ def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_
         ("eng", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"'], "lane-default"),
     ],
 )
-def test_resume_relaunches_on_the_lane_defaults_never_the_recorded_model(
-    tmp_path, monkeypatch, lane, harness, launch, source
-):
+def test_resume_uses_defaults_when_no_resolved_model_was_recorded(tmp_path, monkeypatch, lane, harness, launch, source):
     from dataclasses import replace
 
     for key in ("CLAUDE_MODEL", "CLAUDE_EFFORT", "CODEX_MODEL", "CODEX_EFFORT"):
         monkeypatch.delenv(f"AGENTIHOOKS_{key}", raising=False)
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness=harness)
     config.lanes = {"master": {"model": "sonnet", "effort": "low"}}
-    placed = runtime.resume(config, replace(agent, lane=lane, model="sonnet", effort="low"), "you were restored")
+    placed = runtime.resume(config, replace(agent, lane=lane, model="", effort=""), "you were restored")
     assert _passed(seen["runs"][0]) == ["--route", "a1", *launch]
     assert placed.model_source == source
 
@@ -490,8 +490,17 @@ def test_resume_relaunches_on_the_model_and_effort_its_lane_names(tmp_path):
 
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
     config.lanes = {"eng": {"model": "fable", "effort": "medium"}}
-    runtime.resume(config, replace(agent, model="sonnet", effort="low"), "you were restored")
+    runtime.resume(config, replace(agent, model="", effort=""), "you were restored")
     assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "fable", "--effort", "medium"]
+
+
+def test_resume_preserves_the_recorded_resolved_model_and_effort(tmp_path):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    config.lanes = {"eng": {"model": "opus", "effort": "high"}}
+    runtime.resume(config, replace(agent, model="sonnet", effort="medium"), "continue")
+    assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "sonnet", "--effort", "medium"]
 
 
 def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", env=None):
@@ -504,7 +513,7 @@ def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", e
 
     def run(argv, **kwargs):
         seen["argv"] = argv
-        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: (harness, "open"))
     auto = {"agent": "auto", "model": "auto", "effort": "auto"}
@@ -516,6 +525,20 @@ def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", e
         lanes=lanes if lanes is not None else {name: auto for name in ("eng", "ci", "plan", "master")},
         autonomy="delegate",
     )
+    if task.get("handoff") and not task.get("handoff_envelope"):
+        from scripts.swarm.templates import DEFAULT_PROFILES
+
+        task = {
+            **task,
+            "handoff_envelope": {
+                "launch": {
+                    "profile": DEFAULT_PROFILES[lane],
+                    "harness": harness,
+                    "model": "opus" if harness == "claude" else "gpt-6.1-sol",
+                    "effort": "high",
+                }
+            },
+        }
     runtime.spawn(config, lane, "agent@a1b2c3-0001", task)
     passed = _passed(seen["argv"])
     return passed[:-2] if passed[-2:] == PLAN_MODE else passed
@@ -532,7 +555,24 @@ SEAT_TASKS = {
 @pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
 @pytest.mark.parametrize("handoff", [None, "# Handoff\n<!-- handoff complete -->"])
 def test_every_seat_launch_carries_opus_and_high_effort_for_claude(tmp_path, monkeypatch, lane, handoff):
-    task = {**SEAT_TASKS[lane], **({"handoff": handoff} if handoff else {})}
+    from scripts.swarm.templates import DEFAULT_PROFILES
+
+    transfer = (
+        {
+            "handoff": handoff,
+            "handoff_envelope": {
+                "launch": {
+                    "profile": DEFAULT_PROFILES[lane],
+                    "harness": "claude",
+                    "model": "opus",
+                    "effort": "high",
+                }
+            },
+        }
+        if handoff
+        else {}
+    )
+    task = {**SEAT_TASKS[lane], **transfer}
     assert _launched(tmp_path, monkeypatch, lane, task) == ["--model", "opus", "--effort", "high"]
 
 
@@ -610,17 +650,33 @@ def test_every_swarm_launch_runs_its_profile_with_brain_on(tmp_path, monkeypatch
 
     def run(argv, **kwargs):
         seen["argv"] = argv
-        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     monkeypatch.setattr(model_pick, "pick", lambda *a, **kw: model_pick.ModelPick("m", "high"))
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: (harness, "open"))
     runtime._holds = lambda *a: True
     config = SimpleNamespace(slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="full")
     if launch == "resume":
-        agent = AgentRecord("agent@a1b2c3-0001", lane, "t1", harness=harness, conversation_id="c0ffee")
+        agent = AgentRecord(
+            "agent@a1b2c3-0001", lane, "t1", harness=harness, profile=DEFAULT_PROFILES[lane], conversation_id="c0ffee"
+        )
         runtime.resume(config, agent, "you were restored")
     else:
-        handoff = {"handoff": "# Handoff\n<!-- handoff complete -->"} if launch == "successor" else {}
+        handoff = (
+            {
+                "handoff": "# Handoff\n<!-- handoff complete -->",
+                "handoff_envelope": {
+                    "launch": {
+                        "profile": DEFAULT_PROFILES[lane],
+                        "harness": harness,
+                        "model": "opus" if harness == "claude" else "gpt-6.1-sol",
+                        "effort": "high",
+                    }
+                },
+            }
+            if launch == "successor"
+            else {}
+        )
         runtime.spawn(config, lane, "agent@a1b2c3-0001", {**SEAT_TASKS[lane], **handoff})
     argv = seen["argv"]
     profile = argv[argv.index("--profile") + 1]
