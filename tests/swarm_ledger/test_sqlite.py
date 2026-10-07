@@ -32,7 +32,7 @@ def document():
             "rev": 1,
             "stamps": {"tasks/first/proof": {"rev": 1}},
             "events": [{"rev": 1, "id": "op", "unknown": {"x": True}}],
-            "seeds": {"0": {**seed, "title": "Old"}, "1": copy.deepcopy(seed)},
+            "seeds": {"0": copy.deepcopy({**seed, "title": "Old"}), "1": copy.deepcopy(seed)},
             "members": {"eng": {"handled_rev": 0}},
             "unknown": [3, 4],
         },
@@ -155,3 +155,63 @@ def test_nested_database_and_verification_failures(tmp_path, monkeypatch):
             repo.import_document("ledger", state, registries={"bin": {"ledger": 12}})
         assert str(error.value) == "SQLite shadow registry differs for bin"
     assert repo.registry("bin") == {}
+
+
+def test_registry_names_and_unknown_values_survive_import(tmp_path):
+    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+    repo.import_registry("bin", {"ledger": 12, "unknown": {"text": "é"}})
+    assert repo.registry("bin") == {"ledger": 12, "unknown": {"text": "é"}}
+    assert repo.registry("missing") == {}
+
+
+def test_json_only_authority_is_retained_during_lifecycle_reconciliation(tmp_path):
+    state = document()
+    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+    repo.import_document("orphan", state)
+    (tmp_path / "orphan.json").write_text(json.dumps(state), encoding="utf-8")
+    repo.apply_lifecycle(tmp_path, {"bin": {}, "restored": {}})
+    assert repo.get_document("orphan") == state
+
+
+def test_event_presence_metadata_keeps_the_normalized_array_shape(tmp_path):
+    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+    repo.import_document("metadata", document())
+    with repo.connect() as connection:
+        assert connection.execute(
+            "SELECT kind,value FROM fields WHERE slug=? AND path=?", ("metadata", '["_meta","events"]')
+        ).fetchone() == ("array", "null")
+
+
+def test_disabled_sql_trace_produces_no_callback_errors(tmp_path, monkeypatch):
+    import sqlite3
+    import sys
+
+    errors = []
+    monkeypatch.setattr(sys, "unraisablehook", errors.append)
+    sqlite3.enable_callback_tracebacks(True)
+    try:
+        repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+        repo.import_document("trace", document())
+    finally:
+        sqlite3.enable_callback_tracebacks(False)
+    assert errors == []
+
+
+def test_initial_lifecycle_import_reads_unicode_in_ascii_locale(tmp_path):
+    import locale
+    import sys
+
+    if sys.flags.utf8_mode:
+        pytest.skip("UTF8 mode overrides the locale encoding")
+    state = document()
+    (tmp_path / "unicode.html").write_text("page", encoding="utf-8")
+    (tmp_path / "unicode.json").write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+    before = locale.setlocale(locale.LC_CTYPE)
+    locale.setlocale(locale.LC_CTYPE, "C")
+    try:
+        repo.apply_lifecycle(tmp_path, {"bin": {"unicode": 12}, "restored": {}})
+        assert repo.get_document("unicode") == state
+        assert repo.lifecycle("unicode") == {"deleted_at": 12, "restored_at": None}
+    finally:
+        locale.setlocale(locale.LC_CTYPE, before)

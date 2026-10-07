@@ -16,6 +16,11 @@ def test_retained_seeds_replay_after_checkpoint_advances(tmp_path):
         }
         repo.import_document("seeds", state)
         assert repo.get_document("seeds") == state
+        trace = []
+        repo.trace = trace.append
+        repo.import_document("seeds", state)
+        assert not [sql for sql in trace if sql.startswith(("INSERT", "UPDATE", "DELETE"))]
+        repo.trace = None
         for key, expected in state["_meta"]["seeds"].items():
             assert repo.get_seed("seeds", key) == expected
     with repo.connect() as connection:

@@ -85,3 +85,32 @@ def test_unicode_encoding_is_compact_and_nonfinite_values_are_refused():
     for value in (float("nan"), float("inf"), -float("inf")):
         with pytest.raises(ValueError):
             encode(value)
+
+
+def test_normalized_row_identity_kind_and_order_are_stable():
+    value = {"tasks": [{"id": "one"}, {"id": "two"}, {"id": "one"}, {"name": "anonymous"}]}
+    rows = flatten(value)
+    assert rows["[]"] == ("fields", None, "null", 0, "object", "null")
+    roots = {path: (row[2], row[3], row[4], row[5]) for path, row in rows.items() if row[1] == '["tasks"]'}
+    assert roots == {
+        '["tasks",["id","one",0]]': ("0", 0, "object", "null"),
+        '["tasks",["id","two",0]]': ("1", 1, "object", "null"),
+        '["tasks",["id","one",1]]': ("2", 2, "object", "null"),
+        '["tasks",["index",3,0]]': ("3", 3, "object", "null"),
+    }
+    assert assemble(rows) == value
+
+
+def test_row_updates_do_not_delete_or_rewrite_other_records(tmp_path):
+    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+    state = document()
+    repo.import_document("rows", state)
+    state["tasks"][0]["proof"]["output"] = "changed"
+    trace = []
+    repo.trace = trace.append
+    repo.import_document("rows", state)
+    writes = [sql for sql in trace if sql.startswith(("INSERT", "UPDATE", "DELETE"))]
+    assert len(writes) == 1
+    assert not writes[0].startswith("DELETE")
+    repo.import_document("rows", state)
+    assert len([sql for sql in trace if sql.startswith(("INSERT", "UPDATE", "DELETE"))]) == 1

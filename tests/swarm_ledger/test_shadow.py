@@ -206,3 +206,46 @@ def test_seed_read_uses_retained_snapshot_without_file_reconciliation(files, mon
         files, "get_document", lambda *args: (_ for _ in ()).throw(RuntimeError("unexpected reconcile"))
     )
     assert repo.get_seed("shadow", revision) == state["_meta"]["seeds"][revision]
+
+
+def test_changed_bin_metadata_is_verified_during_document_reconciliation(files):
+    index = {"future": {"text": "é"}}
+    core.atomic_write(core.LEDGER_DIR / ".bin.json", core.json.dumps(index, ensure_ascii=False))
+    files.get_document("shadow")
+    assert SQLiteLedgerRepository(core.LEDGER_DIR / "ledger-shadow.sqlite3").registry("bin") == index
+
+
+def test_default_document_read_reconciles_authoritative_changes(files):
+    state = files.get_document("shadow", reconcile=False)
+    state["extension"] = {"read": True}
+    core.atomic_write(core.paths("shadow")[1], core.json.dumps(state))
+    repo = SQLiteLedgerRepository(core.LEDGER_DIR / "ledger-shadow.sqlite3", files)
+    assert repo.get_document("shadow")["extension"] == {"read": True}
+
+
+def test_sqlite_creation_preserves_size_and_default(files):
+    repo = SQLiteLedgerRepository(core.LEDGER_DIR / "ledger-shadow.sqlite3", files)
+    content = {"title": "Size", "overview": "o", "sources": [], "phases": [{"title": "One", "description": "d"}]}
+    assert repo.create("default-size", content)
+    assert repo.get_document("default-size")["size"] == "small"
+    assert repo.create("full-size", content, size="swarm")
+    assert repo.get_document("full-size")["size"] == "swarm"
+
+
+def test_shadow_registry_and_lifecycle_reads_preserve_unicode_in_ascii_locale(files):
+    import locale
+    import sys
+    from scripts.swarm_ledger.repository import bin_storage
+
+    if sys.flags.utf8_mode:
+        pytest.skip("UTF8 mode overrides the locale encoding")
+    index = {"future": {"text": "é"}}
+    core.atomic_write(core.LEDGER_DIR / ".bin.json", core.json.dumps(index, ensure_ascii=False))
+    before = locale.setlocale(locale.LC_CTYPE)
+    locale.setlocale(locale.LC_CTYPE, "C")
+    try:
+        assert bin_storage.registries()["bin"] == index
+        files.get_document("shadow")
+        assert SQLiteLedgerRepository(core.LEDGER_DIR / "ledger-shadow.sqlite3").registry("bin") == index
+    finally:
+        locale.setlocale(locale.LC_CTYPE, before)

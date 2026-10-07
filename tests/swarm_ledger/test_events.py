@@ -38,3 +38,21 @@ def test_three_identical_events_remain_distinct_records(tmp_path):
     repo.import_document("events", state)
     assert repo.get_document("events") == state
     assert repo.events_since("events", 1) == state["_meta"]["events"]
+
+
+def test_event_rows_keep_canonical_identity_after_restart(tmp_path):
+    state = document()
+    state["_meta"]["events"] = [{"rev": 2, "id": "duplicate"}] * 3
+    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+    repo.import_document("events", state)
+    with repo.connect() as connection:
+        assert connection.execute("SELECT key,position FROM events ORDER BY position").fetchall() == [
+            ("8210d9e742857ecd0ea706c81cffbbbd1c175f705b43292a8403ccc5118c094f:0", 0),
+            ("8210d9e742857ecd0ea706c81cffbbbd1c175f705b43292a8403ccc5118c094f:1", 1),
+            ("8210d9e742857ecd0ea706c81cffbbbd1c175f705b43292a8403ccc5118c094f:2", 2),
+        ]
+    restarted = SQLiteLedgerRepository(repo.path)
+    trace = []
+    restarted.trace = trace.append
+    restarted.import_document("events", state)
+    assert not [sql for sql in trace if sql.startswith(("INSERT", "UPDATE", "DELETE"))]

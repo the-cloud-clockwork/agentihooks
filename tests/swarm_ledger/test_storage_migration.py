@@ -31,6 +31,8 @@ def test_directory_import_resumes_and_preserves_bin_registry(tmp_path, monkeypat
         with pytest.raises(RuntimeError, match="interrupted"):
             import_directory(tmp_path, db)
     assert SQLiteLedgerRepository(db).get_document("one") == FileLedgerRepository().get_document("one", reconcile=False)
+    assert SQLiteLedgerRepository(db).registry("bin") == {"two": 12, "extension": {"unknown": True}}
+    assert SQLiteLedgerRepository(db).registry("restored") == {"one": 9}
     assert import_directory(tmp_path, db) == ["one", "two"]
     assert import_directory(tmp_path, db) == ["one", "two"]
     repo = SQLiteLedgerRepository(db)
@@ -101,4 +103,60 @@ def test_migration_command_defaults_and_help(tmp_path, monkeypatch, capsys):
     with pytest.raises(SystemExit) as error:
         main()
     assert error.value.code == 0
-    assert "Import and verify authoritative ledgers in SQLite shadow storage" in capsys.readouterr().out
+    assert capsys.readouterr().out.splitlines()[2] == "Import and verify authoritative ledgers in SQLite shadow storage"
+
+
+def test_unicode_sources_import_in_ascii_locale(tmp_path, monkeypatch):
+    import locale
+    import sys
+
+    if sys.flags.utf8_mode:
+        pytest.skip("UTF8 mode overrides the locale encoding")
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    files = FileLedgerRepository()
+    files.create(
+        "unicode", {"title": "é", "overview": "o", "sources": [], "phases": [{"title": "One", "description": "d"}]}
+    )
+    (tmp_path / "unicode.json").unlink()
+    index = {"future": {"text": "é"}}
+    (tmp_path / ".bin.json").write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+    before = locale.setlocale(locale.LC_CTYPE)
+    locale.setlocale(locale.LC_CTYPE, "C")
+    try:
+        database = tmp_path / "unicode.sqlite3"
+        assert import_directory(tmp_path, database) == ["unicode"]
+        repo = SQLiteLedgerRepository(database)
+        assert repo.get_document("unicode")["title"] == "é"
+        assert repo.registry("bin") == index
+    finally:
+        locale.setlocale(locale.LC_CTYPE, before)
+
+
+def test_repeated_import_writes_no_rows_or_duplicate_registries(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    files = FileLedgerRepository()
+    files.create(
+        "repeat", {"title": "Repeat", "overview": "o", "sources": [], "phases": [{"title": "One", "description": "d"}]}
+    )
+    (tmp_path / ".bin.json").write_text('{"repeat":12}', encoding="utf-8")
+    (tmp_path / ".bin-restored.json").write_text('{"repeat":9}', encoding="utf-8")
+    database = tmp_path / "import.sqlite3"
+    assert import_directory(tmp_path, database) == ["repeat"]
+    trace = []
+    original = SQLiteLedgerRepository.connect
+    from contextlib import contextmanager
+
+    @contextmanager
+    def traced(self):
+        self.trace = trace.append
+        with original(self) as connection:
+            yield connection
+
+    monkeypatch.setattr(SQLiteLedgerRepository, "connect", traced)
+    assert import_directory(tmp_path, database) == ["repeat"]
+    assert not [sql for sql in trace if sql.startswith(("INSERT", "UPDATE", "DELETE"))]
+    with SQLiteLedgerRepository(database).connect() as connection:
+        assert connection.execute("SELECT slug,path,value FROM registry ORDER BY slug,path").fetchall() == [
+            ("bin", "repeat", "12"),
+            ("restored", "repeat", "9"),
+        ]
