@@ -692,12 +692,33 @@ def test_the_probe_reads_a_declared_gate_from_the_head_workflows(text):
         workflows("name: Docs\n", None),
         workflows("jobs:\n  gate:\n    name: Gate — Required later\n"),
         workflows("jobs:\n  gate:\n    # name: Gate — Required\n"),
+        workflows("jobs:\n  gate:\n    name: 'Gate — Required\"\n"),
+        {"object": {"entries": [{"name": "x.yml", "object": None}]}},
     ],
 )
 def test_the_probe_without_a_declared_gate_resolves_on_every_check(tree):
     pull = gated_probe(SKIPPED_ONLY, [], tree)
     assert pull.resolved is True
     assert pull.red is False
+
+
+def test_the_probe_reads_the_gate_from_the_last_commit():
+    from types import SimpleNamespace
+
+    def commit(tree):
+        return {
+            "commit": {
+                "committedDate": "2026-10-07T17:00:00Z",
+                "statusCheckRollup": {"contexts": {"nodes": SKIPPED_ONLY, "pageInfo": {"hasNextPage": False}}},
+                "checkSuites": NO_SUITES,
+                "file": tree,
+            }
+        }
+
+    nodes = [commit(None), commit(workflows(GATE_WORKFLOW))]
+    raw = {"data": {"resource": {"state": "OPEN", "headRefOid": "second", "commits": {"nodes": nodes}}}}
+    pull = github_view(URL, lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(raw)))
+    assert pull.resolved is False
 
 
 @pytest.mark.parametrize(
