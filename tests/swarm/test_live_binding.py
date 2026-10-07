@@ -205,7 +205,6 @@ def ticking():
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
     runtime = FakeRuntime()
     runtime.bindings = lambda agents: {a.name: {**live_binding.assignment(a), "hooks": True} for a in agents}
-    runtime.pane_open = lambda agent: agent.pane_id not in runtime.closed
     ledger = FakeLedger([{"id": "one"}])
     return store, runtime, ledger
 
@@ -303,7 +302,7 @@ def test_partial_retirement_failure_retains_ownership_until_pane_closes(ticking)
     assert ledger.rows["one"]["claimed_by"] != old.name
 
 
-def test_finished_pane_is_closed_and_reported(ticking):
+def test_finished_pane_is_closed_without_a_pane_finding(ticking):
     from scripts.swarm.tick import tick
 
     store, runtime, ledger = ticking
@@ -314,7 +313,7 @@ def test_finished_pane_is_closed_and_reported(ticking):
     tick("sw", store, ledger, runtime, 200)
     assert old.pane_id in runtime.closed
     assert old not in store.agents("sw")
-    assert any(f.subject == f"{old.name}/pane" for f in live_binding.findings(store, "sw"))
+    assert live_binding.findings(store, "sw") == []
 
 
 def test_relaunch_preserves_native_assignment_options(tmp_path, monkeypatch):
@@ -516,32 +515,8 @@ def test_relaunch_never_reclassifies_the_assigned_profile(tmp_path, monkeypatch)
     )
 
 
-@pytest.mark.parametrize(
-    "found, expected",
-    [
-        ({"pane_id": "pane", "name": "engineer"}, True),
-        ({"pane_id": "foreign", "name": "foreign"}, False),
-        (None, False),
-    ],
-)
-def test_finished_pane_lookup_checks_owned_pane(found, expected):
-    from scripts.swarm.runtime import HerdrRuntime
-
-    calls = []
-
-    def herdr(argv):
-        calls.append(argv)
-        if found is None:
-            raise RuntimeError("not found")
-        return {"agent": found}
-
-    agent = AgentRecord("engineer", "eng", "one", pane_id="pane")
-    assert HerdrRuntime(herdr=herdr).pane_open(agent) is expected
-    assert calls == [["agent", "get", "pane"]]
-
-
 @pytest.mark.parametrize("fields", [{"state": "done"}, {"state": "blocked"}, {"state": "handoff"}, {"done": True}])
-def test_ended_task_pane_is_reported_without_relaunch_assignment(ticking, fields):
+def test_ended_task_closes_its_pane_on_the_same_tick_without_a_pane_finding(ticking, fields):
     from scripts.swarm.tick import tick
 
     store, runtime, ledger = ticking
@@ -549,17 +524,13 @@ def test_ended_task_pane_is_reported_without_relaunch_assignment(ticking, fields
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     ledger.rows["one"].update(fields)
     tick("sw", store, ledger, runtime, 200)
-    report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), old.name))
-    assert report == {
-        "agent": old.name,
-        "at": 200,
-        "state": "mismatched",
-        "differences": {"pane": {"expected": "closed", "actual": "open"}},
-    }
+    assert old.pane_id in runtime.closed
+    assert store.redis.hget(store.key("sw", "live-bindings"), old.name) is None
+    assert live_binding.findings(store, "sw") == []
     assert runtime.tasks[-1].get("launch_assignment") is None
 
 
-def test_finished_agent_on_open_task_closes_its_pane(ticking):
+def test_finished_agent_on_open_task_closes_its_pane_without_a_pane_finding(ticking):
     from scripts.swarm.tick import tick
 
     store, runtime, ledger = ticking
@@ -568,8 +539,7 @@ def test_finished_agent_on_open_task_closes_its_pane(ticking):
     store.put_agent("sw", replace(old, state="finished"))
     tick("sw", store, ledger, runtime, 200)
     assert old.pane_id in runtime.closed
-    report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), old.name))
-    assert report["differences"] == {"pane": {"expected": "closed", "actual": "open"}}
+    assert store.redis.hget(store.key("sw", "live-bindings"), old.name) is None
 
 
 def test_pending_relaunch_assignment_is_cleared_after_worker_launch(ticking):
@@ -798,18 +768,15 @@ def test_retirement_uses_the_same_process_the_verifier_checked(monkeypatch):
         ],
     )
     monkeypatch.setattr(live_binding, "read", lambda agent, pid: {"hooks": False})
-    calls = []
+    from scripts.swarm.reaper import Outcome
 
-    def run(argv, **kwargs):
-        assert kwargs == {"capture_output": True, "text": True, "timeout": 60}
-        calls.append(argv)
-        return SimpleNamespace(returncode=0)
-
+    ended = []
     agent = AgentRecord("engineer", "eng", "one", harness="claude")
-    runtime = HerdrRuntime(run=run)
+    runtime = HerdrRuntime(run=lambda argv, **kwargs: pytest.fail("retire never runs terminate-agent"))
+    runtime.end = lambda name, pid, homes: ended.append((name, pid, homes)) or Outcome((pid,))
     runtime.bindings([agent])
     assert runtime.retire(agent, True) is True
-    assert calls[0][1:] == ["terminate-agent", "11", "--force-shared"]
+    assert ended == [("engineer", 11, [])]
 
 
 def test_missing_validated_process_closes_without_terminating_foreign_session(monkeypatch):

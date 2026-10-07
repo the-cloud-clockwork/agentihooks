@@ -225,6 +225,7 @@ class RedisStore:
             self.redis.rpush(self.key(slug, "history"), json.dumps({**row, "ended_at": ended, "reason": reason}))
         self.redis.hdel(self.key(slug, "agents"), name)
         self.redis.hdel(self.key(slug, "state-since"), name)
+        self.redis.hdel(self.key(slug, "retire-failures"), name)
         self.names.retire(name, ended)
 
     def count_spawn(self, slug, harness):

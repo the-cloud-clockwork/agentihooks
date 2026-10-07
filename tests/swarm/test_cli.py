@@ -480,27 +480,62 @@ def test_runtime_treats_a_failed_route_as_a_failed_spawn_and_cleans_up(tmp_path)
     assert seen == ["init-agent", "terminate-agent"]
 
 
-def test_runtime_retire_reports_a_failed_terminate_and_closes_leftover_panes(tmp_path):
+def test_runtime_retire_reports_a_refused_end_and_closes_no_pane(tmp_path):
+    from scripts.swarm.reaper import Outcome
+
     closed = []
-    rt = runtime.HerdrRuntime(
-        home=tmp_path,
-        run=lambda argv, **kw: subprocess.CompletedProcess(argv, 2, stdout="", stderr="ambiguous"),
-        herdr=lambda args: closed.append(args) or {},
-    )
+    rt = runtime.HerdrRuntime(home=tmp_path, herdr=lambda args: closed.append(args) or {})
+    rt.end = lambda name, pid, homes: Outcome((), 4242, "survived SIGKILL: 4242")
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w3:p1")
     assert rt.retire(agent, live=True) is False and closed == []
+    assert rt.refusal(agent) == {"process": 4242, "refusal": "survived SIGKILL: 4242"}
+    rt.end = lambda name, pid, homes: Outcome()
     assert rt.retire(agent, live=False) is True and closed == [["pane", "close", "w3:p1"]]
+    assert rt.refusal(agent) == {"process": 0, "refusal": "unknown"}
 
 
-def test_runtime_retire_forces_past_the_agents_own_subagents(tmp_path):
-    seen = []
+def test_runtime_retire_ends_the_recorded_launch_process_never_the_name(tmp_path):
+    from scripts.swarm.reaper import Outcome
+
+    ended = []
     rt = runtime.HerdrRuntime(
-        home=tmp_path,
-        run=lambda argv, **kw: seen.append(argv) or subprocess.CompletedProcess(argv, 0),
-        herdr=lambda a: {},
+        home=tmp_path, run=lambda argv, **kw: pytest.fail("retire never runs terminate-agent"), herdr=lambda a: {}
     )
-    assert rt.retire(AgentRecord("engineer@a1b2c3-0001", "eng", "t1"), live=True)
-    assert seen[0][1:] == ["terminate-agent", "engineer@a1b2c3-0001", "--force-shared"]
+    rt.end = lambda name, pid, homes: ended.append((name, pid, homes)) or Outcome((pid,))
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", profile_decision={"validation": {"pid": 321}})
+    assert rt.retire(agent, live=True, homes=[tmp_path])
+    assert ended == [("engineer@a1b2c3-0001", 321, [tmp_path])]
+
+
+def test_runtime_reports_a_pane_that_will_not_close(tmp_path):
+    from scripts.swarm.reaper import Outcome
+
+    def herdr(args):
+        raise RuntimeError("herdr socket gone")
+
+    rt = runtime.HerdrRuntime(home=tmp_path, herdr=herdr)
+    rt.end = lambda name, pid, homes: Outcome()
+    agent = AgentRecord(
+        "engineer@a1b2c3-0001", "eng", "t1", pane_id="w3:p1", profile_decision={"validation": {"pid": 9}}
+    )
+    assert rt.retire(agent, live=True) is False
+    assert rt.refusal(agent) == {"process": 9, "refusal": "pane w3:p1: herdr socket gone"}
+
+
+def test_runtime_reaps_every_session_holding_a_stray_name(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts import terminate_agent
+    from scripts.swarm.reaper import Outcome
+
+    held = [SimpleNamespace(name=n, process=SimpleNamespace(pid=p)) for n, p in (("x@a", 5), ("y@b", 6), ("x@a", 7))]
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: held)
+    reaped = []
+    rt = runtime.HerdrRuntime(home=tmp_path)
+    rt.reap = lambda pids: reaped.append(pids) or Outcome(tuple(pids))
+    assert rt.reap_name("x@a") is True and reaped == [[5, 7]]
+    rt.reap = lambda pids: Outcome((), 5, "survived SIGKILL: 5")
+    assert rt.reap_name("x@a") is False
 
 
 HANDOFF = """# Handoff v2
