@@ -2040,6 +2040,42 @@ def test_each_overlay_set_renders_its_own_home(world, overlays):
     assert render.render("codex", "rb-eng", overlays=["ov-a"]) is None
 
 
+def test_codex_renders_a_new_overlay_set_into_its_own_home(world, overlays):
+    from scripts.profiles import render
+
+    codex = render.render_codex("rb-eng", overlays=["ov-c"])
+
+    assert codex.parent == render.profile_dir("rb-eng", ["ov-c"])
+    assert render.profile_dir("rb-eng") is None
+    assert json.loads((codex.parent / "claude" / render.STAMP).read_text())["overlays"] == ["ov-c"]
+
+
+def test_codex_force_rerenders_the_claude_home_of_its_overlay_set(world, overlays):
+    from scripts.profiles import render
+
+    claude = render.render_claude("rb-eng", overlays=["ov-a"])
+
+    codex = render.render_codex("rb-eng", force=True, overlays=["ov-a"])
+
+    assert codex.parent != claude.parent
+    assert codex.parent == render.profile_dir("rb-eng", ["ov-a"])
+
+
+def test_a_stale_codex_overlay_home_rerenders_in_its_overlay_home(world, overlays):
+    from scripts.profiles import render
+
+    first = render.render_codex("rb-eng", overlays=["ov-a"])
+    config = world["home"] / ".codex" / "config.toml"
+    config.write_text(config.read_text() + 'model = "changed"\n')
+
+    codex = render.render_codex("rb-eng", overlays=["ov-a"])
+
+    assert codex.parent != first.parent
+    assert codex.parent == render.profile_dir("rb-eng", ["ov-a"])
+    assert render.profile_dir("rb-eng") is None
+    assert json.loads((codex / render.STAMP).read_text())["render"]["overlays"] == ["ov-a"]
+
+
 def test_init_and_rule_refresh_rerender_an_overlay_home_with_its_overlays(world, overlays, monkeypatch, capsys):
     from scripts.profiles import render
     from scripts.targets.claude_target import refresh_rules
@@ -2075,3 +2111,6 @@ def test_cli_renders_the_overlays_named(world, overlays, capsys):
     assert json.loads((out / render.STAMP).read_text())["overlays"] == ["ov-a", "ov-b"]
     assert render.main(["render", "rb-eng", "--overlay", "ov-plan"]) == 1
     assert capsys.readouterr().err == "ERROR: overlay ov-plan does not wear the engineer role\n"
+    with pytest.raises(SystemExit):
+        render.main(["render", "--help"])
+    assert re.search(r"--overlay OVERLAY\s+Wear this overlay; repeat for up to three", capsys.readouterr().out)
