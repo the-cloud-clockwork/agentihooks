@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:swarm-v2:context_pack",
+  "title": "Bounded task context pack",
+  "allOf": [{"$ref": "urn:swarm-v2:common#/$defs/envelope"}],
+  "type": "object",
+  "required": ["authority", "context_id", "context_revision", "policy_version", "retrieved_at", "expires_at", "items", "omitted", "warnings", "receipt"],
+  "properties": {
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execution_id", "task_id", "task_generation", "brain_id", "project_id"],
+      "properties": {
+        "execution_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "task_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "task_generation": {"$ref": "urn:swarm-v2:common#/$defs/generation"},
+        "brain_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "project_id": {"$ref": "urn:swarm-v2:common#/$defs/project_id"}
+      }
+    },
+    "context_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+    "context_revision": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+    "policy_version": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+    "retrieved_at": {"$ref": "urn:swarm-v2:common#/$defs/timestamp"},
+    "expires_at": {"$ref": "urn:swarm-v2:common#/$defs/timestamp"},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["knowledge_id", "kind", "reason", "body", "evidence_refs", "status"],
+        "properties": {
+          "knowledge_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+          "kind": {"enum": ["arc", "lesson", "decision", "signal", "reference", "synthesis"]},
+          "reason": {"type": "string"},
+          "body": {"type": "string"},
+          "evidence_refs": {"type": "array", "items": {"type": "string"}},
+          "relationship_path": {"type": "array", "items": {"type": "string"}},
+          "status": {"type": "string"}
+        }
+      }
+    },
+    "omitted": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+    "warnings": {"type": "array", "items": {"type": "string"}},
+    "receipt": {"type": "string", "minLength": 1}
+  }
+}

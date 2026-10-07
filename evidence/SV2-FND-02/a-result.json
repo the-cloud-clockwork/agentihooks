@@ -1,0 +1,84 @@
+{
+  "case": "T-SV2-FND-02-A",
+  "tested_commit": "b9e778460e0850f19fead7822d9af7bd33164597",
+  "passed": 19,
+  "failed": 0,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_committed_record_gives_every_component_one_owner_per_role",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_committed_decisions_markdown_matches_the_record",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_fixture_review_rejects_the_dispatcher_and_accepts_the_embedding_backlog",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_recording_the_fixture_adds_only_the_backlog_and_keeps_the_rejection",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_second_independent_fixture_is_judged_without_state_from_the_first",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_render_lists_components_decisions_and_open_items",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_render_names_operator_changes_and_unresolved_entries",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_review_prints_the_fixture_verdicts",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_record_writes_the_record_and_its_markdown",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_check_passes_on_the_committed_record",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_accepts_owned_proposals_inside_the_architecture[fields0]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_accepts_owned_proposals_inside_the_architecture[fields1]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_accepts_owned_proposals_inside_the_architecture[fields2]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_accepts_owned_proposals_inside_the_architecture[fields3]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_accepts_owned_proposals_inside_the_architecture[fields4]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_accepts_owned_proposals_inside_the_architecture[fields5]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_accepts_owned_proposals_inside_the_architecture[fields6]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_accepts_owned_proposals_inside_the_architecture[fields7]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_main_defaults_point_at_the_committed_record",
+      "outcome": "passed"
+    }
+  ]
+}

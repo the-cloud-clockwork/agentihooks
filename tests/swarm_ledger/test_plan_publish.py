@@ -336,7 +336,10 @@ def test_publish_plan_exits_when_the_ledger_refuses(plan_ledger, tmp_path, monke
     monkeypatch.setattr(ledger.ledger_publish, "publish", lambda *a: (PLAN, "issue"))
     with pytest.raises(SystemExit) as raised:
         cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "nope")
-    assert re.fullmatch(r"rejected: \['phase_update-[0-9a-f]{10}', 'c-[0-9a-f]{10}'\]", raised.value.code)
+    assert raised.value.code == "; ".join(
+        ledger.unexplained(sent)
+        for sent in ({"op": "phase_update", "item": "phases/nope"}, {"op": "add", "thread": "phases/nope/comments"})
+    )
     assert capsys.readouterr().out == ""
 
 

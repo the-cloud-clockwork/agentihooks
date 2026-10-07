@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:swarm-v2:common",
+  "title": "Swarm v2 shared definitions",
+  "$defs": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^2\\.(0|[1-9][0-9]*)$"
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^(github\\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+|local:[A-Za-z0-9._-]+|unknown)$"
+    },
+    "trace_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "extensions": {
+      "type": "object"
+    },
+    "authority_names": {
+      "enum": [
+        "execution_id",
+        "task_id",
+        "task_generation",
+        "controller_epoch",
+        "swarm_id",
+        "seat_id",
+        "grant_ref",
+        "owner_identity",
+        "brain_id",
+        "project_id",
+        "principal_id",
+        "credential_generation",
+        "scope"
+      ]
+    },
+    "envelope": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "operation_id"
+      ],
+      "properties": {
+        "schema_version": {
+          "$ref": "#/$defs/schema_version"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "trace_id": {
+          "$ref": "#/$defs/trace_id"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      },
+      "propertyNames": {
+        "not": {
+          "$ref": "#/$defs/authority_names"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

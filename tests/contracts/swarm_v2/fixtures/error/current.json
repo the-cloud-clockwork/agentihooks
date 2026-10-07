@@ -1,0 +1,9 @@
+{
+  "schema_version": "2.1",
+  "operation_id": "operation-synthetic-0009",
+  "trace_id": "0123456789abcdef0123456789abcdef",
+  "error": "stale_generation",
+  "reason": "older_generation",
+  "retry": "never",
+  "detail": "task generation is older than the accepted generation"
+}

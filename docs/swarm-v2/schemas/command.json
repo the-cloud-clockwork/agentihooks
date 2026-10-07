@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:swarm-v2:command",
+  "title": "Bounded runtime command and its acknowledgement",
+  "allOf": [{"$ref": "urn:swarm-v2:common#/$defs/envelope"}],
+  "type": "object",
+  "required": ["authority", "command_id", "kind", "acceptance", "completion", "issued_at"],
+  "properties": {
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execution_id", "task_id", "task_generation", "controller_epoch"],
+      "properties": {
+        "execution_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "task_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "task_generation": {"$ref": "urn:swarm-v2:common#/$defs/generation"},
+        "controller_epoch": {"$ref": "urn:swarm-v2:common#/$defs/generation"}
+      }
+    },
+    "command_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+    "kind": {"enum": ["message", "interrupt", "checkpoint", "drain", "terminate"]},
+    "acceptance": {"enum": ["pending", "accepted", "rejected"]},
+    "completion": {"enum": ["pending", "succeeded", "failed"]},
+    "issued_at": {"$ref": "urn:swarm-v2:common#/$defs/timestamp"},
+    "body": {"type": "string", "maxLength": 8000}
+  }
+}

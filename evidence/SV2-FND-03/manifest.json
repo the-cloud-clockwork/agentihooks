@@ -1,0 +1,19 @@
+{
+  "package": "SV2-FND-03",
+  "tested_commit": "987e447f16527107998a4f2864aeae4e84574f69",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1413",
+  "inputs": {
+    "docs/swarm-v2/schemas/compatibility.json": "caa838bde3bba82b7fb2d540b01782c2376ebb2b043d52a788cffc52bbe40f04",
+    "docs/swarm-v2/schemas/common.json": "2978da677d2440192a73c776793f56a99657d7113ab6b1f72f8b6c64077d4565",
+    "tests/contracts/swarm_v2/fixtures/index.json": "2a041f199a412f332e5da33375995ad5df8d39186035d42f94efb41159680102",
+    "tests/contracts/swarm_v2/consumer.py": "3bef858036345bab1a1ccf02ceab716f6dfb6cd3ddf045affd4e8320123c2e30",
+    "tests/contracts/swarm_v2/build_fixtures.py": "1917aafd53e5cc991b4f88c3bfba4ee35e9b6cb33cf2211dfc7e4076704fb97a",
+    "tests/contracts/swarm_v2/test_consumer.py": "9c1daceb2787b24ce5a7d486f93fa6df3d7dba919cde7dfa01b1e4859fd6fdcf",
+    "tests/contracts/swarm_v2/test_admission.py": "19465dc12f6c35e9d38a3fb41e65a06db9b3903b1436fd288b661d2b05eba9b1",
+    "scripts/swarm_v2/contracts.py": "056758cf9db948379b5777cd77aba632b1bd7d8f5a95f809352f2f75ea661442"
+  },
+  "versions": {
+    "python": "3.12.13"
+  },
+  "generated_by": "pytest tests/contracts/swarm_v2 -p no:xdist -p no:randomly --junitxml=<file>, then python evidence/SV2-FND-03/generate_case_results.py <file> <commit> <pull request>"
+}

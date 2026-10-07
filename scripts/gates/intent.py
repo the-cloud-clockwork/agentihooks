@@ -17,7 +17,7 @@ from scripts.gates.verdicts import Verdicts
 
 NAME = "intent"
 PURPOSE = "intent-check"
-MODES = ("enforce", "observe", "off")
+MODES = ("enforce", "observe", "off", "coach")
 DEFAULT_MODE = "observe"
 PENDING, PASS, FAIL, UNCHECKED = "pending", "pass", "fail", "unchecked"
 RUNNING = "intent check running"
@@ -114,11 +114,34 @@ def stamp(slug, task_id, url, doc, mode, now_ms, home=None):
     return {"verdict": PENDING, "body": body}
 
 
+def _pr_field(url, field, run):
+    found = PULL.search(url)
+    if not found:
+        return None
+    owner, repo, number = found.groups()
+    try:
+        result = _gh(["gh", "api", f"repos/{owner}/{repo}/pulls/{number}", "--jq", f".{field}"], run)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def pr_merged(url: str, run=subprocess.run) -> bool:
+    return _pr_field(url, "merged", run) == "true"
+
+
+def pr_head(url: str, run=subprocess.run) -> str | None:
+    return _pr_field(url, "head.sha", run)
+
+
 def pr_view(url, run=subprocess.run):
     found = PULL.search(url)
     if not found:
         return None
     owner, repo, number = found.groups()
+    before = pr_head(url, run)
+    if not before:
+        return None
     try:
         done = _gh(["gh", "pr", "view", url, "--json", "title,body,files,reviews,comments"], run)
         raw = json.loads(done.stdout) if done.returncode == 0 else None
@@ -129,7 +152,11 @@ def pr_view(url, run=subprocess.run):
         comments = _gh(["gh", "api", "--paginate", "--jq", ".[] | @json", path], run)
         if comments.returncode:
             return None
+        head = pr_head(url, run)
+        if not head or head != before:
+            return None
         return {
+            "head": head,
             "title": title,
             "body": body,
             "files": files,
@@ -167,6 +194,21 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
     }
 
 
+def remediation(state: dict, answers: dict) -> str:
+    if not state.get("task_text"):
+        return ""
+    task = f"{state['task']}: {state['task_text']}"
+    phase = f"{state['phase']}: {state['phase_intent']}"
+    steps = [f"Deliver {task}. The phase must be able to use it for {phase}."]
+    if answers["delivers"].noul < REASON_LINE:
+        steps.append(f"Implement the missing acceptance behavior described by {task}.")
+    if answers["reachable"].noul < REASON_LINE:
+        steps.append(f"Wire the production entrypoint for {state['task']} and prove an invocation delivers {phase}.")
+    if answers["weakens"].noul >= WEAKEN_LINE:
+        steps.append(f"Preserve {phase} while implementing {task}.")
+    return "What would meet intent: " + " ".join(steps)
+
+
 def judge(state, decide=decide):
     try:
         answers = decide(state, QUESTIONS, purpose=PURPOSE).answers
@@ -179,7 +221,18 @@ def judge(state, decide=decide):
     reasons = [text for key, text in REASONS.items() if answers[key].noul < REASON_LINE]
     if weakens >= WEAKEN_LINE:
         reasons.append(f"the change may weaken what the phase builds, at probability {weakens:.2f}")
+    guidance = remediation(state, answers)
+    if guidance:
+        reasons.append(guidance)
     return FAIL, "; ".join([f"{lead}, under {FAIL_LINE}" if usable < FAIL_LINE else lead, *reasons])
+
+
+def fix_steps(slug: str) -> str:
+    return (
+        "Fix steps: Deliver the missing parent intent behavior identified in the verdict, "
+        "add evidence that the phase can use it as delivered, commit and push the fix, "
+        f"then run agentihooks swarm {slug} pr <url> for a new check."
+    )
 
 
 @dataclass(frozen=True)
@@ -198,48 +251,78 @@ class Check:
             return []
         verdicts, actions = Verdicts(self.slug, NAME, self.home), []
         for task in doc["tasks"]:
-            if task.get("state") != "pr" or not task.get("pr_url"):
+            states = ("pr", "claimed") if self.mode == "coach" else ("pr",)
+            if task.get("state") not in states or not task.get("pr_url"):
                 continue
             record = verdicts.read(task["id"]) or verdicts.write(task["id"], PENDING, RUNNING, self.now_ms)
-            if record["verdict"] != PENDING:
+            if self.mode != "coach" and record["verdict"] != PENDING:
                 continue
             pr = self.view(task["pr_url"])
-            if pr is None:
-                continue
-            state = intent_history.prepare(state_of(doc, task, pr))
-            classifier_input = intent_history.request(state, QUESTIONS)
-            verdict, reason = self.ask(state)
-            intent_history.append(
-                self.slug,
-                {
-                    "task": task["id"],
-                    "agent": task.get("claimed_by", ""),
-                    "at": self.now_ms,
-                    "purpose": PURPOSE,
-                    "verdict": verdict,
-                    "reason": reason,
-                    "classifier_input": classifier_input,
-                },
-                self.home,
-            )
-            verdicts.write(task["id"], verdict, reason, self.now_ms)
-            actions.append(f"task {task['id']} intent check {verdict}")
-            who = Who(name=task.get("claimed_by", ""), task=task["id"])
-            if verdict == UNCHECKED:
-                log.append(self.slug, log.Row.of(NAME, "count", who, reason=reason), self.home)
-            elif verdict == FAIL:
-                actions += self._failed(task, who, reason)
+            if pr is not None:
+                actions += self._check(doc, task, pr, verdicts)
         return actions
 
-    def _failed(self, task, who, reason):
+    def _check(self, doc, task, pr, verdicts):
+        coaching = Verdicts(self.slug, "intent-coach", self.home)
+        previous = coaching.read(task["id"]) if self.mode == "coach" else None
+        head = pr.get("head")
+        if self.mode == "coach" and not head:
+            return []
+        if previous and previous["head"] == head:
+            verdicts.write(
+                task["id"],
+                previous["verdict"],
+                previous["reason"],
+                previous["at"],
+                coach_rounds=previous["coach_rounds"],
+                head=head,
+                url=task["pr_url"],
+            )
+            return []
+        rounds = min(previous["coach_rounds"] + (previous["verdict"] == FAIL), 2) if previous else 0
+        state = intent_history.prepare(state_of(doc, task, pr))
+        verdict, reason = self.ask(state)
+        intent_history.append(
+            self.slug,
+            {
+                "task": task["id"],
+                "agent": task.get("claimed_by", ""),
+                "at": self.now_ms,
+                "purpose": PURPOSE,
+                "verdict": verdict,
+                "reason": reason,
+                "classifier_input": intent_history.request(state, QUESTIONS),
+            },
+            self.home,
+        )
+        fields = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
+        verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
+        if self.mode == "coach":
+            coaching.write(task["id"], verdict, reason, self.now_ms, **fields)
+        who = Who(name=task.get("claimed_by", ""), task=task["id"])
+        actions = [f"task {task['id']} intent check {verdict}"]
+        if verdict == UNCHECKED:
+            log.append(self.slug, log.Row.of(NAME, "count", who, reason=reason), self.home)
+        elif verdict == FAIL:
+            actions += self._failed(task, who, reason, rounds)
+        elif self.mode == "coach" and task.get("state") == "claimed":
+            self.ledger.update_task(self.slug, task["id"], {"state": "pr"})
+        return actions
+
+    def _failed(self, task, who, reason, rounds=0):
         kind = "deny" if self.mode == "enforce" else "observe"
         log.append(self.slug, log.Row.of(NAME, kind, who, reason=reason), self.home)
-        if self.mode != "enforce":
+        if self.mode == "coach" and rounds >= 2:
+            text = f"Intent remains unmet after two fix rounds: {reason}. The master must review this shortfall."
+            self.ledger.comment(self.slug, task["id"], text, by="swarm")
+            if task.get("state") == "claimed":
+                self.ledger.update_task(self.slug, task["id"], {"state": "pr"})
             return []
-        text = (
-            f"The intent check failed: {reason}. Deliver the missing piece and run swarm pr again, "
-            "or block the task with these reasons."
-        )
+        if self.mode not in ("enforce", "coach"):
+            return []
+        text = f"The intent check failed: {reason}. {fix_steps(self.slug)}"
+        if self.mode == "coach":
+            text += f" Run fix round {rounds + 1} of 2; after two unsuccessful fix rounds merge with the shortfall recorded."
         self.ledger.update_task(self.slug, task["id"], {"state": "claimed"})
         self.ledger.comment(self.slug, task["id"], text, by="swarm")
         key, ref = f"intent-fail:{task['id']}:{self.now_ms}", f"tasks/{task['id']}"
@@ -266,17 +349,26 @@ class IntentGate:
     def matches(self, call):
         return call.tool == "Bash" and ("merge" in call.command or "done" in call.command)
 
-    def decide(self, call, who, state):
+    def decide(self, call, who, state, mode="enforce"):
         if not (who.pinned and who.task) or not any(map(_gated, simple_commands(call.command))):
             return Decision()
         record = state.read(who.task)
         verdict = record and record["verdict"]
+        if mode == "coach" and record and record.get("head"):
+            head = pr_head(record["url"])
+            if head and head != record["head"]:
+                state.write(who.task, PENDING, RUNNING, int(self.clock() * 1000))
+                return Decision.deny("Intent must be checked on the new head. Wait for the tick to rerun the check.")
         if verdict == FAIL:
-            return Decision.deny(
-                f"intent check failed for task {who.task}: {record['reason']}. Deliver the missing piece, then run "
-                f"agentihooks swarm {who.swarm} pr <url> for a new check, or block with "
-                f'agentihooks swarm {who.swarm} block "<why>"'
-            )
+            if mode == "coach" and record.get("coach_rounds", 0) >= 2:
+                outcome = "merged" if pr_merged(record["url"]) else "merge permitted"
+                reason = f"{outcome} with intent unmet after two fix rounds: {record['reason']}"
+                log.append(state.slug, log.Row.of(NAME, "count", who, call.tool, reason), state.home)
+                return Decision()
+            text = f"intent check failed for task {who.task}: {record['reason']}. {fix_steps(who.swarm)}"
+            if mode == "coach":
+                text += f" Run fix round {record.get('coach_rounds', 0) + 1} of 2."
+            return Decision.deny(text)
         if verdict != PENDING:
             return Decision()
         waited = int(self.clock() * 1000) - record["at"]

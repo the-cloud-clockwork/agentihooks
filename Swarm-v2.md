@@ -1141,7 +1141,7 @@ Baseline references: [SRC-AH-GUIDE] [SRC-BRAIN-89] [SRC-ANTON-CA]
 - Implementation status: planned; not executed by publication of this document.
 - Dependencies: [SV2-FND-01](#sv2-fnd-01).
 - Integration gate: `G0`, subject to all earlier applicable acceptance gates.
-- Owned path candidates: `docs/swarm-v2/decisions.md (new); Swarm-v2.md`.
+- Owned path candidates: `docs/swarm-v2/decisions.md (new); docs/swarm-v2/architecture.json (new); scripts/swarm_v2/architecture.py (new); tests/test_swarm_v2_architecture.py (new); tests/fixtures/swarm_v2/architecture/ (new); evidence/SV2-FND-02/ (new); Swarm-v2.md`.
 - Required fixture: A design inventory containing one duplicate task dispatcher and one legitimate embedding backlog.
 - Intended change: Prevent the implementation from recreating overlapping schedulers or embedding the entire brain stack in workers.
 
@@ -1158,7 +1158,7 @@ Baseline references: [SRC-AH-GUIDE] [SRC-BRAIN-89] [SRC-ANTON-CA]
 - Output contract: Every target component has one code owner, one state owner, and one deployment owner.
 - Rejection contract: A proposal that inserts another coding-task queue is rejected unless the operator explicitly changes the architecture.
 - Recovery contract: Conflicting design proposals are recorded as unresolved decisions while unrelated implementation continues.
-- Mutation scope: Documentation, fixtures, and compatibility metadata only; no live infrastructure mutation.
+- Mutation scope: Documentation, fixtures, compatibility metadata, and the offline review command that reads and writes only the architecture record; no live infrastructure mutation.
 - Compatibility obligation: compare the affected public behavior with the preceding accepted protocol or explicitly local compatibility path.
 - Authority obligation: derive actor and scope from the fixture grant or operator role; never infer permission from a display label.
 - State obligation: distinguish observed, accepted, committed, and externally verified outcomes in the implementation report.
@@ -1191,7 +1191,7 @@ Baseline references: [SRC-AH-GUIDE] [SRC-BRAIN-89] [SRC-ANTON-CA]
 - Implementation status: planned; not executed by publication of this document.
 - Dependencies: [SV2-FND-02](#sv2-fnd-02).
 - Integration gate: `G0`, subject to all earlier applicable acceptance gates.
-- Owned path candidates: `schemas/swarm_v2/ (new); tests/contracts/swarm_v2/ (new)`.
+- Owned path candidates: `docs/swarm-v2/schemas/ (new; under docs so the mutation workspace copies it); tests/contracts/swarm_v2/ (new); scripts/swarm_v2/contracts.py (new, the in-repo admission check)`.
 - Required fixture: Current, previous-minor, future-major, and missing-authority fixture families.
 - Intended change: Define authority, compatibility, and error envelopes before producers and consumers diverge.
 
@@ -1350,7 +1350,7 @@ Baseline references: [SRC-AH-IDENTITY] [SRC-AH-READER]
 - Implementation status: planned; not executed by publication of this document.
 - Dependencies: [SV2-FND-05](#sv2-fnd-05).
 - Integration gate: `G1`, subject to all earlier applicable acceptance gates.
-- Owned path candidates: `hooks/context/project_identity.py; schemas/swarm_v2/project.json (new)`.
+- Owned path candidates: `hooks/context/project_identity.py; docs/swarm-v2/schemas/project.json (new)`.
 - Required fixture: Two owners with repository name common, one worktree, one nested directory, and one renamed remote.
 - Intended change: Extend the existing resolver without regressing checkout and worktree equivalence.
 
@@ -1400,7 +1400,7 @@ Baseline references: [SRC-AH-IDENTITY] [SRC-AH-READER]
 - Implementation status: planned; not executed by publication of this document.
 - Dependencies: [SV2-IDN-01](#sv2-idn-01).
 - Integration gate: `G1`, subject to all earlier applicable acceptance gates.
-- Owned path candidates: `scripts/swarm/store.py; schemas/swarm_v2/execution.json (new)`.
+- Owned path candidates: `scripts/swarm/store.py; docs/swarm-v2/schemas/execution.json (new)`.
 - Required fixture: One seat with three sequential attempts and two Pods sharing a human display label.
 - Intended change: Keep seat continuity while giving every replacement process an immutable execution incarnation.
 
@@ -1450,7 +1450,7 @@ Baseline references: [SRC-AH-IDENTITY] [SRC-AH-READER]
 - Implementation status: planned; not executed by publication of this document.
 - Dependencies: [SV2-IDN-02](#sv2-idn-02).
 - Integration gate: `G1`, subject to all earlier applicable acceptance gates.
-- Owned path candidates: `hooks/context/project_sessions.py; hooks/targets/normalizer.py; schemas/swarm_v2/session-event.json (new)`.
+- Owned path candidates: `hooks/context/project_sessions.py; hooks/targets/normalizer.py; docs/swarm-v2/schemas/session-event.json (new)`.
 - Required fixture: A transcript with two task changes, one worktree switch, and an explicitly shared warning.
 - Intended change: Preserve what a session was doing at each point rather than attributing all history to its latest working directory.
 
@@ -1500,7 +1500,7 @@ Baseline references: [SRC-AH-IDENTITY] [SRC-AH-READER]
 - Implementation status: planned; not executed by publication of this document.
 - Dependencies: [SV2-IDN-03](#sv2-idn-03).
 - Integration gate: `G1`, subject to all earlier applicable acceptance gates.
-- Owned path candidates: `scripts/swarm_v2/auth_context.py (new); schemas/swarm_v2/launch-grant.json (new)`.
+- Owned path candidates: `scripts/swarm_v2/auth_context.py (new); docs/swarm-v2/schemas/launch-grant.json (new)`.
 - Required fixture: Valid grant, expired grant, wrong audience, mismatched generation, and altered project body.
 - Intended change: Prevent an agent from impersonating another project, task, account, or brain through request parameters.
 
@@ -2177,7 +2177,7 @@ Baseline references: [SRC-AH-LEDGER] [SRC-AH-STORE]
 - Implementation status: planned; not executed by publication of this document.
 - Dependencies: [SV2-LDG-01](#sv2-ldg-01).
 - Integration gate: `G3`, subject to all earlier applicable acceptance gates.
-- Owned path candidates: `scripts/swarm_v2/api/executions.py (new); schemas/swarm_v2/heartbeat.json (new)`.
+- Owned path candidates: `scripts/swarm_v2/api/executions.py (new); docs/swarm-v2/schemas/heartbeat.json (new)`.
 - Required fixture: Bound worker credential, out-of-order sequence, stale generation, and forged URL subject.
 - Intended change: Expose the minimum remote lifecycle surface needed by the runtime adapter.
 
@@ -2645,7 +2645,7 @@ Baseline references: [SRC-K8S-LIFECYCLE] [SRC-K8S-RESOURCES]
 - Implementation status: planned; not executed by publication of this document.
 - Dependencies: [SV2-CTL-05](#sv2-ctl-05), [SV2-IMG-05](#sv2-img-05), [SV2-LDG-05](#sv2-ldg-05).
 - Integration gate: `G3`, subject to all earlier applicable acceptance gates.
-- Owned path candidates: `scripts/swarm_v2/kubernetes/spec.py (new); schemas/swarm_v2/pod-policy.json (new)`.
+- Owned path candidates: `scripts/swarm_v2/kubernetes/spec.py (new); docs/swarm-v2/schemas/pod-policy.json (new)`.
 - Required fixture: Malicious task payload containing YAML fragments and an otherwise valid general resource profile.
 - Intended change: Translate an admitted launch into a bounded one-main-agent Pod.
 
@@ -3940,7 +3940,7 @@ Baseline references: [SRC-AH-SNAPSHOT] [SRC-K8S-LIFECYCLE]
 - Implementation status: planned; not executed by publication of this document.
 - Dependencies: [SV2-FSY-05](#sv2-fsy-05), [SV2-CTL-05](#sv2-ctl-05).
 - Integration gate: `G8`, subject to all earlier applicable acceptance gates.
-- Owned path candidates: `schemas/swarm_v2/checkpoint.json (new); scripts/swarm_v2/checkpoints/model.py (new)`.
+- Owned path candidates: `docs/swarm-v2/schemas/checkpoint.json (new); scripts/swarm_v2/checkpoints/model.py (new)`.
 - Required fixture: Complete native-resume bundle, context-only bundle, and path-only legacy snapshot.
 - Intended change: Replace path-only recovery assumptions with a portable verified artifact contract.
 
@@ -4098,7 +4098,7 @@ Baseline references: [SRC-AH-SNAPSHOT] [SRC-K8S-LIFECYCLE]
 
 1. Upload objects under immutable checkpoint IDs.
 2. Verify object hashes before committing the manifest.
-3. Compare-and-update the latest pointer under task generation.
+3. Compare-and-update the latest pointer under task generation, refusing a `checkpoint_sequence` at or below the pointer's within the same attempt (field published by SV2-FND-03).
 4. Run periodic capture with bounded overhead and a separate emergency drain budget.
 
 ##### Boundary and interface obligations
@@ -4767,7 +4767,7 @@ Baseline references: [SRC-AH-READER] [SRC-PGVECTOR]
 - Implementation status: planned; not executed by publication of this document.
 - Dependencies: [SV2-IDX-01](#sv2-idx-01).
 - Integration gate: `G4`, subject to all earlier applicable acceptance gates.
-- Owned path candidates: `hooks/memory/chunking.py (new); schemas/swarm_v2/chunk.json (new)`.
+- Owned path candidates: `hooks/memory/chunking.py (new); docs/swarm-v2/schemas/chunk.json (new)`.
 - Required fixture: Long tool result, multi-tool turn, appended session, and chunker-version transition.
 - Intended change: Build search units that preserve supporting context without renumbering the past whenever a session grows.
 
@@ -7307,7 +7307,7 @@ Baseline references: [SRC-AH-GUIDE] [SRC-K8S-LIFECYCLE]
 - Implementation status: planned; not executed by publication of this document.
 - Dependencies: [SV2-KUB-05](#sv2-kub-05), [SV2-CKP-05](#sv2-ckp-05), [SV2-IDX-05](#sv2-idx-05), [SV2-GAT-05](#sv2-gat-05), [SV2-MUL-05](#sv2-mul-05).
 - Integration gate: `G12`, subject to all earlier applicable acceptance gates.
-- Owned path candidates: `tests/contracts/swarm_v2/ (new); schemas/swarm_v2/`.
+- Owned path candidates: `tests/contracts/swarm_v2/ (new); docs/swarm-v2/schemas/`.
 - Required fixture: Complete schema matrix with valid, invalid, extension, and version-conflict examples.
 - Intended change: Ensure independently released producers and consumers agree on authority and data shapes.
 
@@ -8602,7 +8602,7 @@ Baseline references: [SRC-AH-GUIDE] [SRC-BRAIN-89]
 - Implementation status: planned; not executed by publication of this document.
 - Dependencies: [SV2-VAL-05](#sv2-val-05), [SV2-GIT-05](#sv2-git-05), [SV2-RET-05](#sv2-ret-05), [SV2-OPS-05](#sv2-ops-05), [SV2-PRF-05](#sv2-prf-05), [SV2-MIG-05](#sv2-mig-05), [SV2-CAP-05](#sv2-cap-05), [SV2-ACC-05](#sv2-acc-05), [SV2-ING-05](#sv2-ing-05), [SV2-UX-05](#sv2-ux-05).
 - Integration gate: `G12`, subject to all earlier applicable acceptance gates.
-- Owned path candidates: `docs/swarm-v2/compatibility.md (new); schemas/swarm_v2/compatibility.json (new)`.
+- Owned path candidates: `docs/swarm-v2/compatibility.md (new); docs/swarm-v2/schemas/compatibility.json (new)`.
 - Required fixture: One accepted tuple, one unsupported brain schema, and one changed image digest under the same tag.
 - Intended change: Tie controller, image, hook, brain, and deployment versions into accepted tuples.
 
@@ -17938,6 +17938,7 @@ Unknown optional fields must survive a read-modify-write cycle when the consumer
 An unknown field must not silently become authorization context.
 An unknown required capability causes a typed incompatibility response before a worker starts.
 Each record carries a globally unique record identity within its owning storage domain.
+The published wire schemas in `docs/swarm-v2/schemas/` carry every authority field inside a closed `authority` object; the field tables and examples in this appendix list field sets, not wire layout.
 Timestamp fields use UTC with an explicit zone.
 Lease decisions use server time; clients cannot extend authority by supplying a future timestamp.
 A display timestamp is not an ordering or concurrency-control primitive.

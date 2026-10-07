@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:swarm-v2:session_event",
+  "title": "Normalized session event",
+  "allOf": [
+    {
+      "$ref": "urn:swarm-v2:common#/$defs/envelope"
+    }
+  ],
+  "type": "object",
+  "required": [
+    "authority",
+    "event_id",
+    "session_uid",
+    "source_generation",
+    "sequence",
+    "kind",
+    "payload",
+    "original_hash",
+    "normalized_hash",
+    "trust_class",
+    "redaction"
+  ],
+  "properties": {
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_id",
+        "task_id",
+        "task_generation",
+        "brain_id"
+      ],
+      "properties": {
+        "execution_id": {
+          "$ref": "urn:swarm-v2:common#/$defs/identifier"
+        },
+        "task_id": {
+          "$ref": "urn:swarm-v2:common#/$defs/identifier"
+        },
+        "task_generation": {
+          "$ref": "urn:swarm-v2:common#/$defs/generation"
+        },
+        "brain_id": {
+          "$ref": "urn:swarm-v2:common#/$defs/identifier"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "$ref": "urn:swarm-v2:common#/$defs/project_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "event_id": {
+      "$ref": "urn:swarm-v2:common#/$defs/identifier"
+    },
+    "session_uid": {
+      "$ref": "urn:swarm-v2:common#/$defs/identifier"
+    },
+    "source_generation": {
+      "$ref": "urn:swarm-v2:common#/$defs/identifier"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "kind": {
+      "enum": [
+        "human",
+        "assistant",
+        "tool_call",
+        "tool_result",
+        "metadata",
+        "usage",
+        "control"
+      ]
+    },
+    "timestamp": {
+      "anyOf": [
+        {
+          "$ref": "urn:swarm-v2:common#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "payload": {
+      "type": "object"
+    },
+    "original_hash": {
+      "anyOf": [
+        {
+          "$ref": "urn:swarm-v2:common#/$defs/digest"
+        },
+        {
+          "const": "unavailable"
+        }
+      ]
+    },
+    "normalized_hash": {
+      "$ref": "urn:swarm-v2:common#/$defs/digest"
+    },
+    "trust_class": {
+      "enum": [
+        "human_instruction",
+        "agent_assertion",
+        "tool_observation",
+        "injected_memory",
+        "derived_summary"
+      ]
+    },
+    "redaction": {
+      "type": "object",
+      "required": [
+        "status",
+        "policy_version"
+      ]
+    },
+    "native_event_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "byte_start": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "byte_end": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "line_start": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "line_end": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "parent_event_id": {
+      "anyOf": [
+        {
+          "$ref": "urn:swarm-v2:common#/$defs/identifier"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tool_call_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

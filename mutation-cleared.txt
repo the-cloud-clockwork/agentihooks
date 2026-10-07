@@ -1847,6 +1847,26 @@
     "reader": "Standards reader",
     "reason": "Nonempty import modules are unchanged. None or empty modules substitute either an empty string or XXXX, and neither root equals playwright; all remaining traversal is unchanged. Standards confirmed exact CI artifact mutant from run 37668310093."
   },
+  "scripts/gates/entry.py:scripts.gates.entry.x__decide__mutmut_1:bf3132f5a73942baea80b1b072e1d277527bc2ac535ddd6b40b2445288bbeada": {
+    "reader": "Standards reader",
+    "reason": "Production main supplies an explicit mode, so the changed optional default has no effect. Independently cleared against CI run 37680501547."
+  },
+  "scripts/gates/entry.py:scripts.gates.entry.x__decide__mutmut_2:3f8777c56f6f3d9aab8c24fae1de3a19ae2d2996d677d171c372e3dc7f0f9585": {
+    "reader": "Standards reader",
+    "reason": "Production main supplies an explicit mode, so the changed optional default has no effect. Independently cleared against CI run 37680501547."
+  },
+  "scripts/gates/intent.py:scripts.gates.intent.x\u01c1IntentGate\u01c1decide__mutmut_1:caa9906b3ceb8264d1b86eb14e69b5e47660418ce19b5da62a80c332e2a377df": {
+    "reader": "Standards reader",
+    "reason": "Every mode condition compares with coach. Original and mutated defaults remain outside coach and give identical decisions, logs and feedback, including omitted mode calls. Independently cleared against CI run 37680501547."
+  },
+  "scripts/gates/intent.py:scripts.gates.intent.x\u01c1IntentGate\u01c1decide__mutmut_2:de61f79bc9a4e40591f55b06c621a45937be30b8797618b0353f646ea4c3c943": {
+    "reader": "Standards reader",
+    "reason": "Every mode condition compares with coach. Original and mutated defaults remain outside coach and give identical decisions, logs and feedback, including omitted mode calls. Independently cleared against CI run 37680501547."
+  },
+  "scripts/gates/intent.py:scripts.gates.intent.x\u01c1IntentGate\u01c1decide__mutmut_44:d1deaec017faaa9dc241182a9d153f5db4b4de22a8d3a8fbba3f7b890f5007d7": {
+    "reader": "Standards reader",
+    "reason": "Missing coach_rounds compares either zero or one against two, both false. Present values and the separate displayed round fallback remain unchanged. Independently cleared against CI run 37680501547."
+  },
   "scripts/swarm_ledger/watch_ledger.py:scripts.swarm_ledger.watch_ledger.x_request__mutmut_15:4c51434e1cf1ea236155bb856c0224f31fab4c18b599023e82ad9d2edd2cb4be": {
     "reader": "Standards reader",
     "reason": "urllib.parse.quote never escapes ASCII letters, digits or underscore dot dash tilde, so adding X to the safe set changes no output; quote with safe empty and safe XXXX agree on every byte value 0 to 255 and sampled non ASCII input. Exact CI artifact mutant from run 37679023255."

@@ -1,0 +1,21 @@
+{
+  "schema_version": "2.1",
+  "operation_id": "receipt-synthetic-0001",
+  "trace_id": "0123456789abcdef0123456789abcdef",
+  "authority": {
+    "execution_id": "exe-synthetic-0007",
+    "task_id": "implement-session-ingestion",
+    "brain_id": "swarm",
+    "project_id": "github.com/the-cloud-clockwork/agentihooks",
+    "principal_id": "worker-synthetic-0007"
+  },
+  "receipt_id": "receipt-synthetic-0001",
+  "operation_class": "code-change",
+  "policy_version": "consultation-policy-01",
+  "context_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+  "evidence_revision": "knowledge-revision-0048",
+  "result_state": "retrieved",
+  "delivered_at": "2026-10-08T08:02:05Z",
+  "expires_at": "2026-10-08T08:12:00Z",
+  "override_ref": null
+}

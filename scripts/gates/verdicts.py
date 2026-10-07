@@ -14,8 +14,13 @@ class Verdicts:
     def path(self, subject):
         return gates_dir(self.slug, self.home) / safe_name(self.gate) / safe_name(subject)
 
-    def write(self, subject, verdict, reason, now_ms=None):
-        record = {"verdict": verdict, "reason": reason, "at": int(time.time() * 1000) if now_ms is None else now_ms}
+    def write(self, subject, verdict, reason, now_ms=None, **fields):
+        record = {
+            "verdict": verdict,
+            "reason": reason,
+            "at": int(time.time() * 1000) if now_ms is None else now_ms,
+            **fields,
+        }
         path = self.path(subject)
         path.parent.mkdir(parents=True, exist_ok=True)
         staged = path.with_name(f".{path.name}.{os.getpid()}")
