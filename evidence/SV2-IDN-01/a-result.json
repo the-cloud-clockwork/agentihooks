@@ -1,14 +1,14 @@
 {
   "case": "T-SV2-IDN-01-A",
-  "tested_commit": "e0c34648c335e8e103b9949f5237c4739bb53816",
+  "tested_commit": "f08d6d95055c3060e8144522b987aac442881f57",
   "evidence_class": "local isolated Git fixtures; not live rollout or CI proof",
   "passed": 15,
   "tests": [
     "test_canonical_checkout_worktree_nested_and_owner_isolation[0]",
     "test_canonical_checkout_worktree_nested_and_owner_isolation[1]",
     "test_swarm_does_not_confuse_equal_repository_basenames",
-    "test_explicit_non_git_registration_is_stable[plain]",
-    "test_explicit_non_git_registration_is_stable[scratchpad/common/task]",
+    "test_explicit_non_git_registration_is_stable[plain-plain]",
+    "test_explicit_non_git_registration_is_stable[scratchpad/common/task-common]",
     "test_git_remote_cannot_be_overridden_by_local_registration",
     "test_normalized_forge_host_and_case[https://GitLab.example/Owner/Repo.git-gitlab.example/Owner/Repo]",
     "test_normalized_forge_host_and_case[ssh://gitlab.example/Owner/Repo.git-gitlab.example/Owner/Repo]",

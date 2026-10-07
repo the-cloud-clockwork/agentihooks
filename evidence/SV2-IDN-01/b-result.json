@@ -1,8 +1,8 @@
 {
   "case": "T-SV2-IDN-01-B",
-  "tested_commit": "e0c34648c335e8e103b9949f5237c4739bb53816",
+  "tested_commit": "f08d6d95055c3060e8144522b987aac442881f57",
   "evidence_class": "local isolated Git fixtures; not live rollout or CI proof",
-  "passed": 23,
+  "passed": 29,
   "tests": [
     "test_unsafe_or_ambiguous_remotes_remain_unknown_and_unstored[https://user:fixture-password@github.com/first/common.git]",
     "test_unsafe_or_ambiguous_remotes_remain_unknown_and_unstored[ssh://user:fixture-password@github.com/first/common.git]",
@@ -15,6 +15,9 @@
     "test_unsafe_or_ambiguous_remotes_remain_unknown_and_unstored[https://github.com/group/subgroup/common]",
     "test_unsafe_or_ambiguous_remotes_remain_unknown_and_unstored[https://github.com/../common]",
     "test_unsafe_or_ambiguous_remotes_remain_unknown_and_unstored[https://github.com/first/.git]",
+    "test_unsafe_or_ambiguous_remotes_remain_unknown_and_unstored[https://github.com/./common]",
+    "test_unsafe_or_ambiguous_remotes_remain_unknown_and_unstored[https://github.com/first/.]",
+    "test_unsafe_or_ambiguous_remotes_remain_unknown_and_unstored[https://github.com/first/..]",
     "test_invalid_non_git_registration_is_refused[common]",
     "test_invalid_non_git_registration_is_refused[local:]",
     "test_invalid_non_git_registration_is_refused[local:../common]",
@@ -25,8 +28,11 @@
     "test_invalid_alias_maps_are_refused_without_mutation[aliases3]",
     "test_invalid_alias_maps_are_refused_without_mutation[aliases4]",
     "test_invalid_alias_maps_are_refused_without_mutation[aliases5]",
+    "test_invalid_alias_maps_are_refused_without_mutation[aliases6]",
+    "test_invalid_alias_maps_are_refused_without_mutation[aliases7]",
+    "test_invalid_alias_maps_are_refused_without_mutation[aliases8]",
     "test_registration_cannot_replace_swarm_git_identity",
     "test_alias_map_checks_all_types_before_following_chains"
   ],
-  "project_identity_ambiguities_total": 11
+  "project_identity_ambiguities_total": 14
 }
