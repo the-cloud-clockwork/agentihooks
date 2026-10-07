@@ -173,7 +173,7 @@ def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
     install = names.index("Install the browser that page tests drive")
     assert select < install
     assert steps[select]["id"] == "selection"
-    assert "scripts.ci_mutation.browser" in steps[select]["run"]
+    assert steps[select]["run"].startswith("python -m scripts.ci_mutation." + "browser ")
     assert steps[install]["if"] == "steps.selection.outputs.browser == 'true'"
     assert steps[install]["id"] == "browser"
     assert steps[install]["timeout-minutes"] == 2
