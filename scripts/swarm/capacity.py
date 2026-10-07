@@ -24,11 +24,14 @@ def _window(window: balancer.QuotaWindow, now: float) -> balancer.QuotaWindow:
 
 def accounts(environ: dict, now: float) -> list[Account]:
     credentials = balancer.discover_credentials(environ)
+    fresh = []
     if credentials:
-        balancer.collect_results(credentials, environ=environ, now=now)
+        fresh, _ = balancer.collect_results(credentials, environ=environ, now=now)
+    observed = {result.account: result for _, result in balancer.cached_observations(environ=environ)}
+    observed.update({result.account: result for result in fresh})
     counts = account_sessions.sessions_by_account()
     results = []
-    for _, result in balancer.cached_observations(environ=environ):
+    for result in observed.values():
         five, week = _window(result.five_hour, now), _window(result.seven_day, now)
         state, _ = balancer._state(result.provider_status, five, week)
         results.append(
@@ -39,8 +42,14 @@ def accounts(environ: dict, now: float) -> list[Account]:
         Account("claude", name, "UNKNOWN", count, None, None) for name, count in counts.items() if name not in known
     ]
     pool = [account for account in codex_router.routing_pool(environ) if account.signed_in]
-    quotas = codex_router.quotas(pool, environ)
     counts = account_sessions.codex_sessions_by_account()
+    known = {account.name for account in pool}
+    pool += [
+        codex_router.CodexAccount(name, f"AH_CX_TOKEN_{name}")
+        for name in counts
+        if name not in known and name != "default"
+    ]
+    quotas = codex_router.quotas(pool, environ)
     for account in pool:
         quota = quotas.get(account.name)
         five = _window(quota.five_hour, now) if quota else balancer.QuotaWindow()
@@ -72,26 +81,43 @@ def _harnesses(config, lane: str) -> tuple[str, ...]:
     return ("claude",) if config.codex_share == 0 else ("claude", "codex")
 
 
-def calculate(config, observations: list[Account], agents: list, cap: int, week_floor: float) -> dict:
-    configured = dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan), strict=True))
-    effective = {lane: min(configured[lane], sum(a.lane == lane for a in agents)) for lane in LANES}
-    placeable = {
-        h: sum(free_seats(row, cap, week_floor) for row in observations if row.harness == h)
-        for h in ("claude", "codex")
-    }
-    remaining = dict(placeable)
+def _allocate(config, effective: dict, limits: dict, remaining: dict) -> dict:
+    allocation = {lane: {"claude": 0, "codex": 0} for lane in LANES}
     while True:
         ready = [
             lane
             for lane in LANES
-            if effective[lane] < configured[lane] and any(remaining[h] for h in _harnesses(config, lane))
+            if effective[lane] < limits[lane] and any(remaining[h] for h in _harnesses(config, lane))
         ]
         if not ready:
-            break
+            return allocation
         lane = min(ready, key=lambda name: effective[name])
-        harness = next(h for h in _harnesses(config, lane) if remaining[h])
+        reserved = {
+            h: sum(limits[name] - effective[name] for name in LANES if _harnesses(config, name) == (h,))
+            for h in remaining
+        }
+        eligible = [h for h in _harnesses(config, lane) if remaining[h]]
+        harness = max(eligible, key=lambda h: remaining[h] - reserved[h])
         remaining[harness] -= 1
+        allocation[lane][harness] += 1
         effective[lane] += 1
+
+
+def calculate(
+    config, observations: list[Account], agents: list, cap: int, week_floor: float, demand: dict | None = None
+) -> dict:
+    configured = dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan), strict=True))
+    busy = {lane: sum(a.lane == lane and a.state != "finished" for a in agents) for lane in LANES}
+    effective = {lane: min(configured[lane], busy[lane]) for lane in LANES}
+    limits = {
+        lane: min(configured[lane], busy[lane] + demand[lane]) if demand is not None else configured[lane]
+        for lane in LANES
+    }
+    placeable = {
+        h: sum(free_seats(row, cap, week_floor) for row in observations if row.harness == h)
+        for h in ("claude", "codex")
+    }
+    allocation = _allocate(config, effective, limits, dict(placeable))
     restricted = sorted({row.state.lower().replace("_", " ") for row in observations if row.state != "NORMAL"})
     reason = "accounts have quota" if not restricted else "accounts are " + ", ".join(restricted)
     reason += f"; Claude has {placeable['claude']} free seats and Codex has {placeable['codex']} free seats"
@@ -101,6 +127,7 @@ def calculate(config, observations: list[Account], agents: list, cap: int, week_
         "placeable": placeable,
         "reason": reason,
         "accounts": [row.__dict__ for row in observations],
+        "allocation": allocation,
     }
 
 
@@ -120,15 +147,19 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     reader = getattr(runtime, "quota_capacity", None)
     if reader is None:
         return []
-    decision = reader(config, store.agents(slug), now_ms / 1000)
+    from scripts.swarm.tick import _claimable, _ended
+
+    doc = ledger.state(slug)
+    rows = {task["id"]: task for task in doc["tasks"]}
+    demand = {lane: len(_claimable(slug, store, rows, doc, lane)) for lane in LANES}
+    agents = [agent for agent in store.agents(slug) if not _ended(agent, rows)]
+    decision = reader(config, agents, now_ms / 1000, demand)
     previous = read(store, slug)
     changed = any(previous.get(key) != decision[key] for key in ("configured", "effective", "reason"))
     decision["at"] = now_ms if changed else previous["at"]
-    store.redis.set(store.key(slug, "quota-capacity"), json.dumps(decision))
-    if not changed:
-        return []
     text = status_line(decision)
-    rows = ledger.state(slug)["tasks"]
-    if rows:
-        ledger.comment(slug, rows[0]["id"], text, by=f"quota capacity {now_ms}")
-    return [text]
+    if changed and rows:
+        task = next((row for row in rows.values() if not row.get("done")), next(iter(rows.values())))
+        ledger.comment(slug, task["id"], text, by=f"quota capacity {now_ms}")
+    store.redis.set(store.key(slug, "quota-capacity"), json.dumps(decision))
+    return [text] if changed else []

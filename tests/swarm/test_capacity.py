@@ -86,12 +86,14 @@ def test_reduced_caps_do_not_retire_work_and_changes_are_recorded_once(monkeypat
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=0, state="running")
     store.create(config)
-    ledger = FakeLedger([{"id": "e"}, {"id": "c", "lane": "ci"}])
+    ledger = FakeLedger([{"id": "e"}, {"id": "e2"}, {"id": "c", "lane": "ci"}])
     ledger.comments = []
     ledger.comment = lambda slug, item, text, by: ledger.comments.append((slug, item, text, by))
     runtime = FakeRuntime()
-    monkeypatch.setattr(capacity, "accounts", lambda env, now: [account()])
-    runtime.quota_capacity = lambda cfg, agents, now: capacity.calculate(cfg, capacity.accounts({}, now), agents, 3, 5)
+    monkeypatch.setattr(capacity, "accounts", lambda env, now: [account(sessions=1)])
+    runtime.quota_capacity = lambda cfg, agents, now, demand: capacity.calculate(
+        cfg, capacity.accounts({}, now), agents, 3, 5, demand
+    )
     tick("sw", store, ledger, runtime, 1000)
     agents = store.agents("sw")
     assert len(runtime.spawned) == 2
@@ -161,10 +163,95 @@ def test_each_tick_refreshes_the_balance_source_for_all_available_accounts(monke
     monkeypatch.setattr(
         balancer,
         "collect_results",
-        lambda credentials, **kwargs: seen.append(([r.account for r in credentials], kwargs)),
+        lambda credentials, **kwargs: (seen.append(([r.account for r in credentials], kwargs)) or [], "live"),
     )
     monkeypatch.setattr(balancer, "cached_observations", lambda **kwargs: [])
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
     monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda _: [])
     capacity.accounts(environ, 123)
     assert seen == [(["a", "b"], {"environ": environ, "now": 123})]
+
+
+def test_idle_lanes_never_reserve_the_only_seat():
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=1, max_plan=0)
+    result = capacity.calculate(config, [account(sessions=2)], [], 3, 5, demand={"eng": 0, "ci": 1, "plan": 0})
+    assert result["effective"] == {"eng": 0, "ci": 1, "plan": 0}
+
+
+def test_automatic_lanes_preserve_seats_required_by_fixed_lanes():
+    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=2, max_plan=0, lanes={"ci": {"agent": "claude"}})
+    result = capacity.calculate(config, [account(sessions=1), account("cx", sessions=1, harness="codex")], [], 3, 5)
+    assert result["effective"] == {"eng": 2, "ci": 2, "plan": 0}
+    assert result["allocation"] == {
+        "eng": {"claude": 0, "codex": 2},
+        "ci": {"claude": 2, "codex": 0},
+        "plan": {"claude": 0, "codex": 0},
+    }
+
+
+def test_failed_capacity_comment_is_retried_without_losing_the_decision():
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    store.create(config)
+    ledger = FakeLedger([{"id": "e"}])
+    runtime = FakeRuntime()
+    runtime.quota_capacity = lambda cfg, agents, now, demand: capacity.calculate(cfg, [account()], agents, 3, 5, demand)
+    ledger.comment = lambda *args, **kw: (_ for _ in ()).throw(RuntimeError("ledger unavailable"))
+    with pytest.raises(RuntimeError, match="ledger unavailable"):
+        capacity.apply("sw", config, store, ledger, runtime, 1000)
+    assert capacity.read(store, "sw") == {}
+    comments = []
+    ledger.comment = lambda *args, **kw: comments.append((args, kw))
+    assert len(capacity.apply("sw", config, store, ledger, runtime, 2000)) == 1
+    assert len(comments) == 1
+
+
+def test_codex_accounts_with_live_sessions_keep_their_own_quotas(monkeypatch):
+    from scripts.codex_quota import CodexQuota
+
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"a": 1, "b": 2})
+    monkeypatch.setattr(
+        capacity.codex_router, "routing_pool", lambda _: [capacity.codex_router.CodexAccount("a", "AH_CX_TOKEN_a")]
+    )
+
+    def quotas(pool, environ):
+        assert [row.name for row in pool] == ["a", "b"]
+        return {
+            name: CodexQuota(100, "pro", balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=20))
+            for name in ("a", "b")
+        }
+
+    monkeypatch.setattr(capacity.codex_router, "quotas", quotas)
+    seen = capacity.accounts({}, 100)
+    assert [(row.name, row.sessions, row.week_left) for row in seen] == [("a", 1, 80), ("b", 2, 80)]
+
+
+def test_runtime_honors_reserved_harness_seats(tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    runtime = HerdrRuntime(home=tmp_path)
+    runtime._quota_accounts = [account(), account("cx", harness="codex")]
+    runtime._quota_cap, runtime._quota_floor, runtime._quota_share = 3, 5, 30
+    runtime._quota_allocations = {"eng": {"claude": 0, "codex": 1}, "ci": {"claude": 1, "codex": 0}}
+    assert runtime._quota_choice("claude", "priority", False, "eng") == (
+        "codex",
+        "fallthrough: claude has no placeable quota seats",
+    )
+    assert runtime._quota_choice("claude", "requested", True, "ci") == ("claude", "requested")
+
+
+def test_failed_fresh_probe_does_not_leave_a_stale_healthy_account_placeable(monkeypatch):
+    healthy = balancer.ProbeResult(
+        "a", "allowed", "NORMAL", 90, balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=10)
+    )
+    failed = balancer.ProbeResult("a", "rejected", "BLOCKED", 0, balancer.QuotaWindow(), balancer.QuotaWindow())
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kw: ([failed], "live"))
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, healthy)])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda _: [])
+    seen = capacity.accounts({"AH_CC_TOKEN_a": "fake-a"}, 200)
+    assert seen[0].state == "BLOCKED"
+    assert capacity.free_seats(seen[0], 3, 5) == 0
