@@ -428,6 +428,8 @@ def test_brain_joins_the_profile_channels_once(world, named_brain):
     settings["env"] = {"AGENTIHOOKS_BASE_CHANNELS": "amygdala, ops"}
     overrides.write_text(json.dumps(settings))
     assert render.channels("rb-role") == "amygdala,ops,brain"
+    out = render.render_claude("rb-role")
+    assert json.loads((out / "settings.json").read_text())["env"]["AGENTIHOOKS_BASE_CHANNELS"] == "amygdala,ops,brain"
 
     settings["env"] = {"AGENTIHOOKS_BASE_CHANNELS": "brain,amygdala"}
     overrides.write_text(json.dumps(settings))
