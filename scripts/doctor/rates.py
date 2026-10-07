@@ -91,9 +91,19 @@ def _merged(pull):
     return pull is not None and pull.state == MERGED
 
 
+def _outcome(records, task_id):
+    task = records.tasks[task_id]
+    kind = ledger_kinds.kind(task)
+    if task.get("out_of_scope") or kind not in ledger_kinds.KINDS:
+        return False
+    if kind in ("code", "ci"):
+        return _merged(_pull(records, task_id))
+    return not ledger_kinds.unmet(task)
+
+
 def ceremony(records, window):
     talk = [e for e in _in(records, window, *TALK, "added") if _talk(e) and _worker(e["by"])]
-    outcomes = len(_in(records, window, *OUTCOMES))
+    outcomes = sum(_outcome(records, tid) for tid in _done(records, window))
     return {"talk writes": len(talk), "outcomes": outcomes, "talk per outcome": ratio(len(talk), outcomes)}
 
 
