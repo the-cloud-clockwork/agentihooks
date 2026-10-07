@@ -500,6 +500,7 @@ input, textarea { caret-color: var(--accent-2); }
   #swarm-box .sw-pair.sized { grid-template-rows: minmax(0, 1fr); }
   #swarm-box .sw-block.sized, #swarm-box .sw-pair.sized > .sw-block { display: flex; flex-direction: column; min-height: 0; }
   #swarm-box .sized .sw-blockhead, #swarm-box .sized .sw-end { flex: none; }
+  #swarm-box .sized .sw-fold { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: auto; }
   #swarm-box .sized .sw-scroll, #swarm-box .sized .sw-kv { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
 }
 .sw-grip { position: relative; z-index: 1; touch-action: none; outline: none; }
@@ -549,6 +550,12 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 #health-table .hl-pick { field-sizing: content; }
 #health-table .hl-note { field-sizing: content; min-width: 8ch; max-width: 32ch; }
 #health-table .hl-note::placeholder { color: var(--muted); }
+.sw-fold > summary.sw-blockhead { display: flex; justify-content: flex-start; gap: 10px; }
+.sw-fold > summary .sw-count { margin-left: auto; }
+.sw-ovl-row { display: grid; grid-template-columns: 10ch minmax(0, 1fr); gap: var(--space-row); align-items: center; padding: 4px 0; border-top: 1px solid var(--rule); }
+.sw-ovl-row .sw-cap-name { margin: 0; }
+.sw-ovl-row .sw-mode { min-height: 28px; padding: 4px 8px; font-size: var(--fs-meta); }
+.sw-ovl-none { font-size: var(--fs-meta); color: var(--muted); }
 .sw-kv { margin: 0; }
 .sw-kv .kv { display: grid; grid-template-columns: 14ch minmax(0, 1fr); gap: var(--space-row); align-items: baseline; padding: 6px 0; border-top: 1px solid var(--rule); }
 .sw-kv dt { color: var(--muted); }
@@ -637,9 +644,9 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 <button class="sw-btn sw-apply" type="button" data-swarm="apply" aria-label="Apply capacity">apply</button></div>
 <span class="sw-label" id="gates-label" hidden>Gates</span><div class="sw-gates" id="swarm-gates" aria-labelledby="gates-label"></div><details class="fold sw-command-log" id="command-log" hidden><summary>Commands <span class="count" id="command-count"></span></summary><div id="command-rows"></div></details></div>
 <div class="sw-grip sw-grip-y" data-grip="height" data-row="capacity-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Capacity height" tabindex="0"></div>
-<div class="sw-row sw-pair" id="swarm-row-work"><div class="sw-block" id="agents-box"><div class="sw-blockhead"><h3>Agents</h3><span class="sw-count" id="agents-count"></span></div><div class="sw-scroll"><table class="sw-table" id="agents-table"><thead><tr><th>agent</th><th>lane</th><th>profile</th><th>model</th><th>task</th><th>state</th><th class="r">age</th><th><span class="sr-only">actions</span></th></tr></thead><tbody id="swarm-agents"></tbody></table></div></div>
-<div class="sw-grip sw-grip-x" data-grip="split" data-row="swarm-row-work" role="separator" aria-orientation="vertical" aria-label="Move the Agents and Tasks split" aria-valuemin="15" aria-valuemax="85" tabindex="0"></div><div class="sw-block" id="swarm-tasks-box"><div class="sw-blockhead"><h3>Tasks</h3><span class="sw-count" id="tasks-open"></span></div><dl class="sw-kv" id="swarm-tasks"></dl></div></div>
-<div class="sw-grip sw-grip-y" data-grip="height" data-row="swarm-row-work" role="separator" aria-orientation="horizontal" aria-label="Resize the Agents and Tasks height" tabindex="0"></div>
+<div class="sw-row sw-pair" id="swarm-row-work"><div class="sw-block" id="agents-box"><div class="sw-blockhead"><h3>Agents</h3><span class="sw-count" id="agents-count"></span></div><div class="sw-scroll"><table class="sw-table" id="agents-table"><thead><tr><th>agent</th><th>lane</th><th>profile</th><th>overlays</th><th>model</th><th>task</th><th>state</th><th class="r">age</th><th><span class="sr-only">actions</span></th></tr></thead><tbody id="swarm-agents"></tbody></table></div></div>
+<div class="sw-grip sw-grip-x" data-grip="split" data-row="swarm-row-work" role="separator" aria-orientation="vertical" aria-label="Move the Agents and Overlays split" aria-valuemin="15" aria-valuemax="85" tabindex="0"></div><div class="sw-block" id="overlays-box"><details class="fold sw-fold" id="overlays-fold" open><summary class="sw-blockhead"><h3>Overlays</h3><span class="sw-count" id="overlays-count"></span></summary><div class="sw-overlays" id="swarm-overlays"></div><div class="sw-ctl sw-end"><button class="sw-btn" type="button" id="overlays-apply" aria-label="Apply overlays" disabled>apply</button></div></details></div></div>
+<div class="sw-grip sw-grip-y" data-grip="height" data-row="swarm-row-work" role="separator" aria-orientation="horizontal" aria-label="Resize the Agents and Overlays height" tabindex="0"></div>
 <div class="sw-row sw-pair" id="swarm-row-accounts"><div class="sw-block" id="quota-box"><div class="sw-blockhead"><span class="sw-title"><h3>Quota</h3><button class="sw-btn sw-icon" id="quota-refresh" type="button" aria-label="Refresh quota" title="Probe every account now"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg></button></span><span class="sw-count" id="quota-count"></span></div><div class="sw-scroll"><table class="sw-table" id="quota-table"><thead><tr><th>account</th><th>harness</th><th class="r">5h left</th><th class="r">5h reset</th><th class="r">7d left</th><th class="r">7d reset</th><th class="r">sessions</th><th><span class="sr-only">routing</span></th></tr></thead><tbody id="swarm-quota"></tbody></table></div></div>
 <div class="sw-grip sw-grip-x" data-grip="split" data-row="swarm-row-accounts" role="separator" aria-orientation="vertical" aria-label="Move the Quota and Doctor split" aria-valuemin="15" aria-valuemax="85" tabindex="0"></div><div class="sw-block" id="doctor-box"><div class="sw-blockhead"><h3>Doctor</h3><span class="sw-count" id="doctor-state"></span></div><dl class="sw-kv" id="swarm-doctor"></dl><div class="sw-ctl sw-end"><button class="sw-btn" type="button" data-swarm="doctor_start">start doctor</button><button class="sw-btn danger" type="button" data-swarm="doctor_stop">stop doctor</button></div></div></div>
 <div class="sw-grip sw-grip-y" data-grip="height" data-row="swarm-row-accounts" role="separator" aria-orientation="horizontal" aria-label="Resize the Quota and Doctor height" tabindex="0"></div>

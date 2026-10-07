@@ -383,7 +383,7 @@ class SwarmPanel(unittest.TestCase):
             "swarm-ctl",
             "swarm-modes",
             "swarm-agents",
-            "swarm-tasks",
+            "swarm-overlays",
             "swarm-quota",
             "swarm-doctor",
             "health",
