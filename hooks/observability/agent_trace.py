@@ -893,7 +893,6 @@ def _page_accepted(session_id: str, state: dict) -> None:
     state["records"] = {keys[index]: values[index] for index in kept}
     for name in ("accepted_records", "pending_records"):
         state[name] = {key: value for key, value in state[name].items() if key in state["records"]}
-    state.pop("legacy_turns", None)
     state["paged"] = target
 
 

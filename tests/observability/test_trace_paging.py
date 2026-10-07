@@ -56,7 +56,8 @@ def _claude(turns: int, calls: int) -> list[dict]:
                 {"type": "user", "uuid": f"r{name}", "timestamp": _stamp(clock), "message": {"content": [result]}}
             )
         clock += 1
-        message = {"id": f"m{turn}-end", "model": "model-0", "content": [{"type": "text", "text": f"done {turn}"}]}
+        content = [{"type": "thinking", "thinking": "hidden"}, {"type": "text", "text": f"done {turn}"}]
+        message = {"id": f"m{turn}-end", "model": "model-0", "content": content}
         records.append({"type": "assistant", "uuid": f"e{turn}", "timestamp": _stamp(clock), "message": message})
     return records
 
@@ -69,6 +70,9 @@ def _codex(turns: int, calls: int) -> list[dict]:
         records.append({"type": "turn_context", "timestamp": _stamp(clock), "payload": {"model": f"model-{turn % 2}"}})
         user = {"type": "message", "role": "user", "content": [{"type": "input_text", "text": f"ask {turn}"}]}
         records.append({"type": "response_item", "timestamp": _stamp(clock), "payload": user})
+        records.append(
+            {"type": "response_item", "timestamp": _stamp(clock), "payload": {"type": "reasoning", "id": f"z{turn}"}}
+        )
         for call in range(calls):
             name = f"{turn}-{call}"
             clock += 1
@@ -117,7 +121,7 @@ SESSIONS = {
 
 
 def _line(record) -> str:
-    return (record if isinstance(record, str) else json.dumps(record)) + "\n"
+    return (record if isinstance(record, str) else json.dumps({**record, "note": "é"}, ensure_ascii=False)) + "\n"
 
 
 def _observed(receiver: Receiver) -> dict:
@@ -186,8 +190,10 @@ def test_export_continues_past_the_pending_cap_without_lost_or_doubled_observati
     assert state["source"]["records"] == len(records) - 2 and state["unsupported_records"] == 2
     assert max(cursor_sizes) < 4 * CAP
     assert len(state["records"]) < len(records) / 4
+    assert state["paged"]["boundary"] not in state["records"]
     root = next(span for span in capped.observations.values() if span.parent is None)
     assert root.attributes["agentihooks.export.truncated_fields"] > 0
+    assert root.attributes["agentihooks.export.unsupported_io"] > 0
     assert _scans(path) == 0
 
 
@@ -224,7 +230,7 @@ def test_rewritten_full_source_replays_no_paged_history(tmp_path, monkeypatch, q
     before = _observed(receiver)
     calls = receiver.calls
     path.rename(path.with_suffix(".old"))
-    path.write_text("".join(json.dumps(record) + "\n" for record in records))
+    path.write_text("".join(_line(record) for record in records))
     agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
     assert receiver.calls == calls
     assert _observed(receiver) == before
