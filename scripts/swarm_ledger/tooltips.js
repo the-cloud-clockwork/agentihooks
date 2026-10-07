@@ -1,5 +1,5 @@
 (() => {
-  const DELAY = 2000;
+  const DELAY = 1000;
   const CONTROLS = 'button, [role="tab"], [role="button"], [role="switch"], a.sync, a.fab, [data-gate-name]';
   const TIPS = [
     ["#title-edit", "Rename this ledger. The new title shows here and on HOME."],
