@@ -1240,3 +1240,23 @@ def test_codex_native_result_keeps_other_block_types_for_reporting():
         codex_transcript._content({"type": "function_call_output", "call_id": "call", "output": blocks})[0]["content"]
         == blocks
     )
+
+
+def test_legacy_source_without_header_keeps_original_position(export, tmp_path):
+    from hooks.observability.transcript import record_id
+
+    record = {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"text": "probe"}]}}
+    path = tmp_path / "source.jsonl"
+    path.write_text(json.dumps(record) + "\n")
+    state = agent_trace._progress("session")
+    state["legacy_turns"] = 1
+    agent_trace._stage_source(state, str(path))
+    assert state["records"][record_id(record)]["_source_id"] == "0"
+
+
+def test_codex_empty_native_result_keeps_declared_field_types():
+    from hooks.observability import codex_transcript
+
+    assert codex_transcript._content({"type": "function_call_output"}) == [
+        {"type": "tool_result", "tool_use_id": "", "content": ""}
+    ]
