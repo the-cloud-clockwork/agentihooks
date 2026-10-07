@@ -66,11 +66,26 @@ class TestEditableDetection:
             {"url": "file:///src/agentihooks", "dir_info": {}},
             {"url": "file:///src/agentihooks", "dir_info": {"editable": False}},
             {"url": "https://files.example/agentihooks.whl", "archive_info": {}},
+            {"dir_info": {"editable": True}},
             None,
         ],
     )
     def test_non_editable_install_has_no_source(self, direct_url):
         assert editable_source(FakeDist(direct_url)) is None
+
+    def test_the_installed_agentihooks_distribution_is_read(self, monkeypatch):
+        asked = []
+        dist = FakeDist({"url": "file:///src/agentihooks", "dir_info": {"editable": True}})
+        monkeypatch.setattr(placement.metadata, "distribution", lambda name: asked.append(name) or dist)
+        assert editable_source() == Path("/src/agentihooks")
+        assert asked == ["agentihooks"]
+
+    def test_a_missing_distribution_has_no_source(self, monkeypatch):
+        def missing(name):
+            raise placement.metadata.PackageNotFoundError(name)
+
+        monkeypatch.setattr(placement.metadata, "distribution", missing)
+        assert editable_source() is None
 
     def test_non_editable_install_keeps_todays_behaviour(self, tmp_path):
         pkg = _repo(tmp_path / "pkg")
@@ -130,6 +145,73 @@ class TestGate:
         gate, root = world
         assert not answer(gate.home, "something else")
         assert placement.answered(SID, gate.home) == set()
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"tool_name": "Write", "session_id": SID, "tool_response": {"answers": {"q": PACKAGE}}},
+            {"tool_name": "AskUserQuestion", "tool_response": {"answers": {"q": PACKAGE}}},
+            {"tool_name": "AskUserQuestion", "session_id": SID, "tool_response": PACKAGE},
+        ],
+    )
+    def test_only_a_session_question_answer_is_heard(self, tmp_path, payload):
+        assert placement.heard(payload, tmp_path) is False
+        assert placement.answered(SID, tmp_path) == set()
+
+    def test_answers_accumulate_across_questions_and_values(self, tmp_path):
+        home = tmp_path / "deep" / "answers"
+        assert answer(home, PACKAGE)
+        payload = {
+            "tool_name": "AskUserQuestion",
+            "session_id": SID,
+            "tool_response": {"answers": {"first": "neither", "second": BUNDLE.upper()}},
+        }
+        assert placement.heard(payload, home) is True
+        assert placement.answered(SID, home) == {PACKAGE, BUNDLE}
+
+    def test_writes_outside_any_repository_pass(self, world):
+        gate, root = world
+        assert gate.decide(write(root / "loose" / "profiles" / "p.md"), Who(), None).allowed
+
+    def test_the_refusal_names_each_destination_and_the_first_paths(self):
+        reason = placement.refusal([PACKAGE, BUNDLE], ["a", "b", "c", "d"])
+        assert reason.startswith(
+            "placement: agentihooks is installed editable and this write lands in the agentihooks package and the "
+            "bundle profile extension (a, b, c). Before it, ask the operator one AskUserQuestion,"
+        )
+        assert reason.endswith("Then write only into the destination the operator chose.")
+
+
+class TestHomes:
+    def test_answers_live_under_the_agentihooks_home(self, tmp_path, monkeypatch):
+        import hooks.config
+
+        monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+        assert placement.answers_home() == tmp_path / "placement"
+
+    def test_the_linked_bundle_comes_from_the_install_state(self, tmp_path, monkeypatch):
+        from hooks.context import profile_chain
+
+        bundle = tmp_path / "bundle"
+        bundle.mkdir()
+        monkeypatch.setattr(profile_chain, "read_state", lambda: {"bundle": {"path": str(bundle)}})
+        assert placement.linked_bundle() == bundle
+
+    def test_the_post_tool_use_handler_records_the_answer(self, tmp_path, monkeypatch):
+        import hooks.config
+        from hooks import hook_manager
+
+        monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+        monkeypatch.setattr(hook_manager, "_swarm_heartbeat", lambda *args: None)
+        hook_manager.on_post_tool_use(
+            {
+                "session_id": SID,
+                "cwd": "/",
+                "tool_name": "AskUserQuestion",
+                "tool_response": {"answers": {placement.QUESTION: PACKAGE}},
+            }
+        )
+        assert placement.answered(SID) == {PACKAGE}
 
     def test_serena_edit_resolves_against_the_session_cwd(self, world):
         gate, root = world

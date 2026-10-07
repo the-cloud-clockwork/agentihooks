@@ -35,8 +35,9 @@ def editable_source(dist=None):
         url = json.loads(raw) if raw else {}
     except (metadata.PackageNotFoundError, OSError, ValueError):
         return None
-    if url.get("dir_info", {}).get("editable") and str(url.get("url", "")).startswith("file:"):
-        return Path(url2pathname(urlparse(url["url"]).path))
+    location = urlparse(str(url.get("url")))
+    if url.get("dir_info", {}).get("editable") and location.scheme == "file":
+        return Path(url2pathname(location.path))
     return None
 
 
@@ -69,8 +70,8 @@ def heard(payload, home=None):
     response = payload.get("tool_response")
     if payload.get("tool_name") != "AskUserQuestion" or not (session and isinstance(response, dict)):
         return False
-    words = " ".join(str(v) for v in (response.get("answers") or {}).values()).lower()
-    chosen = {kind for kind in (PACKAGE, BUNDLE) if kind in words}
+    said = [str(value).lower() for value in (response.get("answers") or {}).values()]
+    chosen = {kind for kind in (PACKAGE, BUNDLE) for words in said if kind in words}
     if not chosen:
         return False
     path = _answers_path(session, home)
@@ -81,17 +82,14 @@ def heard(payload, home=None):
 
 def _repo(path):
     """(top level, git common dir) of the repository holding path, or None outside one."""
-    where = next((p for p in (path, *path.parents) if p.is_dir()), None)
-    if where is None:
-        return None
+    where = next(p for p in (path, *path.parents) if p.is_dir())
     out = subprocess.run(
         ["git", "-C", str(where), "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"],
         capture_output=True,
         text=True,
-        timeout=3,
     )
     lines = out.stdout.splitlines()
-    if out.returncode or len(lines) != 2:
+    if len(lines) != 2:
         return None
     return Path(lines[0]), Path(lines[1]).resolve()
 
