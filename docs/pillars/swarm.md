@@ -68,6 +68,21 @@ The master recycles like any agent: at `AGENTIHOOKS_COMPACT_LIMIT` it writes a h
 so one master is always online. `issue`, `pr`, `done` and `block` refuse the master. The swarm panel on the
 ledger page shows the master as the first card.
 
+### Master outage and promotion
+
+When a swarm has had no live master (none whose hook reported) for `AGENTIHOOKS_MASTER_DOWN_MINUTES` (default 5),
+the tick forces a master launch through its own master launch path, even after the startup retry gave up, and
+forces another every window while the outage lasts. When the forced launch fails, or its master reports no hook
+within two minutes, the tick promotes the oldest live engineer. The promoted engineer gets a generated inbox prompt
+naming what failed; it stays on its task and seat but does not act as master: it answers no chat as master, writes
+no tasks and does not steer the swarm. Its only purpose, in order: bring the master back as soon as possible, fix
+the outage causes in code through its own pull requests, never as follow ups, and throughout tell the swarm and
+the operator what failed and what it is doing. If it dies, the next live engineer is promoted. When a real master
+binds, or the swarm stops, the tick ends the promotion and tells the engineer to return to its task. Every
+promotion, prompt and hand back is a tick journal line and an event on the seat history of the master seat and the
+engineer's seat. `swarm status` prints a `promoted` line, `status --json` carries `promotion` and a `promoted` flag
+per agent, and the ledger page marks the agent row promoted.
+
 ## Commands
 
 The swarm id is a lowercase slug of letters, digits and dashes, starting with a letter, at most 48 long.
@@ -216,7 +231,7 @@ between ticks. `start` installs and enables it. Each tick, per swarm:
 1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
 2. Free the tasks of agents whose pane is gone, or that stayed idle for 10 ticks. An idle agent is nudged at 3.
 3. Reopen claimed tasks that have no agent.
-4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left.
+4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left. After the down window, force a launch and promote an engineer when it fails (see [Master outage and promotion](#master-outage-and-promotion)).
 5. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room
    under its session cap. Claimable tasks are taken highest [queue rank](#queue-rank) first.
 6. Mark the swarm `stopped` when no agent is left, or `drained` when only the master is and nothing remains to do.

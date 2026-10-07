@@ -27,6 +27,7 @@ from scripts.swarm import (
     master_start,
     phase_state,
     session_model,
+    tick_master,
 )
 from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
@@ -129,7 +130,9 @@ def tick(slug, store, ledger, runtime, now_ms):
     if not sleeping:
         actions += _codex_hook_order()
         actions += _master_down(slug, config, store, ledger, runtime, now_ms)
-        actions += _master(slug, config, store, runtime, now_ms)
+        actions += tick_master.run(
+            slug, config, store, ledger, runtime, now_ms, lambda: _master(slug, config, store, runtime, now_ms)
+        )
         if config.state == "running":
             actions += _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms)
     _conversations(slug, store, runtime)
