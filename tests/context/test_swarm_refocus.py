@@ -222,8 +222,10 @@ def test_master_block_carries_current_intent_phases_priorities_and_obligations()
     }
     assert refocus.build_block(ledger, "master", 1500) == (
         "=== SWARM REFOCUS: Continuity ===\n"
-        "Master obligations: Coordinate the swarm, handle operator inbox items, "
-        "keep the ledger current and judge progress; never claim tasks, edit code, commit or merge.\n"
+        "Master obligations: Troubleshoot with read only diagnostics, plan with the operator, "
+        "configure the swarm, the ledger and the operator's environment through agentihooks commands and tools, "
+        "handle operator inbox items, keep the ledger current and judge progress; "
+        "never edit code or config files in a repository, commit, merge or claim a task.\n"
         "Plan: Preserve current mission\n"
         "Active phases: Active: Restore intent; Next: Keep worker intent\n"
         "Priorities: Compaction first; Worker control"
@@ -236,9 +238,9 @@ def test_master_block_carries_current_intent_phases_priorities_and_obligations()
     assert len(block) == 1500
     assert "Master obligations:" in block
     assert f"Plan: {'x' * 299}…" in block
-    assert f"Active phases: Active: {'y' * 591}…" in block
+    assert block.endswith(f"Active phases: Active: {'y' * 504}…")
     assert "=== SWARM REFOCUS: " + "t" * 299 + "… ===" in block
-    assert "Priorities: " + "z" * 50 in block
+    assert "Priorities:" not in block
     ledger["title"] = "Continuity"
     ledger["overview"] = "Preserve current mission"
     ledger["phases"] = []
@@ -250,8 +252,10 @@ def test_master_sparse_ledger_keeps_obligations_without_invented_intent(ledger):
     phases = ": " if ledger else ""
     assert refocus.build_block(ledger, "master", 1500) == (
         "=== SWARM REFOCUS:  ===\n"
-        "Master obligations: Coordinate the swarm, handle operator inbox items, "
-        "keep the ledger current and judge progress; never claim tasks, edit code, commit or merge.\n"
+        "Master obligations: Troubleshoot with read only diagnostics, plan with the operator, "
+        "configure the swarm, the ledger and the operator's environment through agentihooks commands and tools, "
+        "handle operator inbox items, keep the ledger current and judge progress; "
+        "never edit code or config files in a repository, commit, merge or claim a task.\n"
         "Plan: \n"
         f"Active phases: {phases}\n"
         "Priorities: "

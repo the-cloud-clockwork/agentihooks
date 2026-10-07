@@ -39,8 +39,10 @@ def _master_block(ledger: dict, cap: int) -> str:
     priorities = "; ".join(item.get("text", "") for item in ledger.get("priorities", []))
     return _clip(
         f"=== SWARM REFOCUS: {_clip(ledger.get('title', ''), share)} ===\n"
-        "Master obligations: Coordinate the swarm, handle operator inbox items, "
-        "keep the ledger current and judge progress; never claim tasks, edit code, commit or merge.\n"
+        "Master obligations: Troubleshoot with read only diagnostics, plan with the operator, "
+        "configure the swarm, the ledger and the operator's environment through agentihooks commands and tools, "
+        "handle operator inbox items, keep the ledger current and judge progress; "
+        "never edit code or config files in a repository, commit, merge or claim a task.\n"
         f"Plan: {_clip(ledger.get('overview', ''), share)}\n"
         f"Active phases: {_clip(phases, share * 2)}\n"
         f"Priorities: {_clip(priorities, share)}",

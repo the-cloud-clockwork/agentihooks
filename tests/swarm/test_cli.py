@@ -1188,7 +1188,8 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         "caps go to four",
     ):
         assert needle in text, needle
-    assert "never edit code, commit or merge" in text
+    assert "never edit code or config files in a repository, commit, merge or claim a task" in text
+    assert "troubleshoot with read only diagnostics, plan with the operator" in text
     assert "wt.sh new" not in text and "done --pr" not in text
 
 
