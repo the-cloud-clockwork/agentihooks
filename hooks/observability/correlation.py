@@ -179,13 +179,18 @@ def gather(session_id: str, environ: Mapping[str, str]) -> Inputs:
 
 
 def resolve(session_id: str, environ: Mapping[str, str] | None = None) -> dict[str, object]:
-    """Envelope attributes, cached per session for CACHE_TTL_SEC while the launch environment is unchanged."""
+    """Cache envelope attributes while the launch environment and profile validation report are unchanged."""
     from hooks import config
     from hooks.context.account_sessions import environment_account
     from hooks.observability.signals import safe_name
 
     env = os.environ if environ is None else environ
-    launch = [session_id, environment_account(env), *(env.get(key) for key in KEYS)]
+    launch = [
+        session_id,
+        environment_account(env),
+        *(env.get(key) for key in KEYS),
+        _report(env["AGENTIHOOKS_PROFILE_REPORT"]) if env.get("AGENTIHOOKS_PROFILE_REPORT") else None,
+    ]
     path = config.AGENTIHOOKS_HOME / "telemetry" / "correlation" / f"{safe_name(session_id)}.json"
     try:
         cached = json.loads(path.read_text())
