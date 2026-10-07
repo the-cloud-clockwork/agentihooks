@@ -10,8 +10,8 @@ Evidence: source search at base commit 4d6e11b6, followed by symbol reads and th
 | new_ledger.create, upgrade_page, main | HTML page and JSON document | Repository create, get_document, apply_ops and page adapter |
 | ledger_bin.entries, restored, auto_bin, purge_expired, delete, restore, bin_closed | Bin indexes, JSON documents, HTML enumeration | File implementation owns persistence; pure eligibility and retention decisions remain unchanged |
 | ledger_hook.read_json via main | JSON document | Later migration; read-only hook fallback |
-| ledger_hook.post_bypass | HTML token | Later migration; stop gate audit write |
-| chat_ledger.main | HTML token | Later migration; page chat command authentication |
+| ledger_hook.post_bypass | HTML token | Versioned operations route through ledger.request |
+| chat_ledger.main | HTML token | Versioned operations route through ledger.request |
 | watch_ledger.read via main | JSON document event stream | Later migration to events_since |
 | swarm_refocus._read_json via build | JSON document | Later migration; startup and compaction context |
 | ledger_request._ledger | JSON document | Later migration; task and intent lookup |
