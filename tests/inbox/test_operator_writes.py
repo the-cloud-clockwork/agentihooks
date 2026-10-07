@@ -116,11 +116,12 @@ def test_a_check_on_a_task_goes_to_its_agent(swarm):
 
 def test_a_chat_line_goes_to_its_addressee_and_an_unaddressed_one_to_the_master(swarm):
     _, inbox = swarm
-    relay(
+    sent = relay(
         swarm,
         write(5, "chat", kind="message added", text="@sw-ci-1 the slow job"),
         write(6, "chat", kind="message added", text="how far along"),
     )
+    assert len(sent) == 2
     [(_, text, _)] = pending(inbox, CI.seat)
     assert text.startswith(
         f"On ledger {SLUG}: " + line(write(5, "chat", kind="message added", text="@sw-ci-1 the slow job"))

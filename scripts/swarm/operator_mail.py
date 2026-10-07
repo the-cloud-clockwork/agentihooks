@@ -18,8 +18,12 @@ ANSWER_RULE = (
 )
 
 
+def _live(agents):
+    return [a for a in agents if a.state != "finished"]
+
+
 def addresses(slug, event, doc, agents):
-    live = [a for a in agents if a.state != "finished"]
+    live = _live(agents)
     master = master_address(slug, live)
     if event.get("kind") == SYNC_ORDER:
         return [a.seat or a.name for a in live]
@@ -66,7 +70,7 @@ def relay(inbox, store, slug, doc, events, line):
         if not inbox.redis.set(inbox.key("ledger-sent", ref), 1, nx=True, ex=SENT_TTL_S):
             continue
         text = f"On ledger {slug}: {line(event)}"
-        master = master_address(slug, [a for a in agents if a.state != "finished"])
+        master = master_address(slug, _live(agents))
         sent += [
             inbox.send(OPERATOR, address, primed(text, event, address, master), ref=ref)
             for address in addresses(slug, event, doc, agents)

@@ -27,7 +27,8 @@ from scripts.swarm_ledger import ledger_rank, ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
-DOWN_TTL_S = 24 * 3600
+DOWN_TOLD = "master down told"
+REDELIVERED = "the master went down before closing it; kept for the next master"
 MASTER_DOWN = (
     "The master is down and is being relaunched. Your message waits for the new master, which receives it as soon "
     "as it starts."
@@ -158,12 +159,10 @@ def _master_down(slug, config, store, ledger, runtime, now_ms):
     waiting = [item for item in inbox.inbox(seat) if item.state not in CLOSED and _operator_line(item)]
     for item in waiting:
         if item.state != "pending":
-            inbox.redirect(
-                item.id, "swarm", seat, "the master went down before closing it; kept for the next master", seat
-            )
-    told = [
-        item for item in waiting if store.redis.set(store.key(slug, "master-down", item.id), 1, nx=True, ex=DOWN_TTL_S)
-    ]
+            inbox.redirect(item.id, "swarm", seat, REDELIVERED)
+    told = [item for item in waiting if DOWN_TOLD not in (e.get("event") for e in inbox.history(item.id))]
+    for item in told:
+        inbox.note(item.id, DOWN_TOLD, "swarm", MASTER_DOWN, now_ms)
     if not told:
         return []
     ledger.notify(slug, MASTER_DOWN)
