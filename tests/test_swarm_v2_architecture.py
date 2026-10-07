@@ -165,19 +165,29 @@ def test_render_names_operator_changes_and_unresolved_entries():
     assert "\n## Unresolved decisions\n\n- X (`x`, revision 3): why\n\n## Rejected proposals\n\nNone.\n" in text
 
 
-def test_cli_review_prints_the_fixture_verdicts():
-    proc = _run("review", "--record", RECORD, "--inventory", FIXTURES / "inventory.json")
-    assert proc.returncode == 0, proc.stderr
-    assert json.loads(proc.stdout)["accepted"] == ["embedding-backlog"]
+def test_cli_review_prints_the_fixture_verdicts(capsys):
+    assert architecture.main(["review", "--record", str(RECORD), "--inventory", str(FIXTURES / "inventory.json")]) == 0
+    expected = architecture.review(architecture.load_record(RECORD), _inventory())
+    assert capsys.readouterr().out == json.dumps(expected, indent=2) + "\n"
 
 
-def test_cli_record_writes_the_record_and_its_markdown(tmp_path):
+def test_cli_record_writes_the_record_and_its_markdown(tmp_path, capsys):
     path = _record(tmp_path)
     markdown = tmp_path / "decisions.md"
-    proc = _run("record", "--record", path, "--inventory", FIXTURES / "inventory.json", "--markdown", markdown)
-    assert proc.returncode == 0, proc.stderr
-    assert json.loads(proc.stdout)["rejected"][0]["id"] == "duplicate-dispatcher"
-    assert markdown.read_text() == architecture.render(architecture.load_record(path))
+    argv = [
+        "record",
+        "--record",
+        str(path),
+        "--inventory",
+        str(FIXTURES / "inventory.json"),
+        "--markdown",
+        str(markdown),
+    ]
+    assert architecture.main(argv) == 0
+    stored = architecture.load_record(path)
+    assert capsys.readouterr().out == json.dumps(stored["operations"][0]["result"], indent=2) + "\n"
+    assert stored["rejected"][0]["id"] == "duplicate-dispatcher"
+    assert markdown.read_text() == architecture.render(stored)
 
 
 def test_cli_check_passes_on_the_committed_record():
@@ -265,6 +275,15 @@ def test_check_reports_every_broken_rule():
     ]
     record["components"] = [c for c in record["components"] if not architecture.dispatches(c)]
     assert architecture.check(record)[-1] == "expected one coding-task authority, found 0"
+
+
+def test_check_lists_repeated_names_in_order():
+    record = architecture.load_record(RECORD)
+    record["components"] += [_proposal(name="Personal brain"), _proposal(name="Cluster infrastructure")]
+    assert architecture.check(record) == [
+        "Cluster infrastructure is recorded more than once",
+        "Personal brain is recorded more than once",
+    ]
 
 
 def test_cli_check_fails_on_a_broken_record(tmp_path):
@@ -409,13 +428,16 @@ def test_an_interrupted_write_keeps_the_previous_record(tmp_path, monkeypatch):
     tmp_path.mkdir()
     path = _record(tmp_path)
     before = path.read_bytes()
+    replaced = []
 
-    def fail(*_):
+    def fail(self, target):
+        replaced.append((self.name, target))
         raise OSError("disk gone")
 
-    monkeypatch.setattr(architecture.os, "replace", fail)
+    monkeypatch.setattr(Path, "replace", fail)
     with pytest.raises(OSError, match="disk gone"):
         architecture.apply_inventory(path, _inventory())
+    assert replaced == [("architecture.json.tmp", path)]
     assert path.read_bytes() == before
     assert sorted(p.name for p in tmp_path.iterdir()) == ["architecture.json"]
     monkeypatch.undo()
@@ -492,13 +514,14 @@ def test_rollback_replay_and_refusals(tmp_path):
         architecture.rollback(path, 2, "r")
 
 
-def test_cli_rollback_writes_the_record_and_its_markdown(tmp_path):
+def test_cli_rollback_writes_the_record_and_its_markdown(tmp_path, capsys):
     path = _record(tmp_path)
     architecture.apply_inventory(path, _inventory())
     markdown = tmp_path / "decisions.md"
-    proc = _run("rollback", "--record", path, "--to", 1, "--operation", "r", "--markdown", markdown)
-    assert proc.returncode == 0, proc.stderr
-    assert json.loads(proc.stdout)["rolled_back"] == ["Brain arc embedding backlog"]
+    argv = ["rollback", "--record", str(path), "--to", "1", "--operation", "r", "--markdown", str(markdown)]
+    assert architecture.main(argv) == 0
+    expected = {"operation": "r", "revision": 2, "rolled_back": ["Brain arc embedding backlog"]}
+    assert capsys.readouterr().out == json.dumps(expected, indent=2) + "\n"
     assert markdown.read_text() == architecture.render(architecture.load_record(path))
 
 

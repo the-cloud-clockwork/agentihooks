@@ -1,9 +1,7 @@
 import argparse
 import hashlib
 import json
-import os
 import sys
-import tempfile
 from pathlib import Path
 
 SCHEMA = "swarm-v2-architecture/1"
@@ -19,18 +17,18 @@ class ArchitectureError(ValueError):
     pass
 
 
-def _load(path, schema: str) -> dict:
+def _load(path: Path | str, schema: str) -> dict:
     data = json.loads(Path(path).read_text())
     if data.get("schema") != schema:
         raise ArchitectureError(f"{path} is not a {schema} document")
     return data
 
 
-def load_record(path) -> dict:
+def load_record(path: Path | str) -> dict:
     return _load(path, SCHEMA)
 
 
-def load_inventory(path) -> dict:
+def load_inventory(path: Path | str) -> dict:
     data = _load(path, INVENTORY_SCHEMA)
     ids = [p["id"] for p in data["proposals"]]
     if len(set(ids)) != len(ids):
@@ -121,16 +119,14 @@ def digest(document: dict) -> str:
     return hashlib.sha256(json.dumps(document, sort_keys=True).encode()).hexdigest()
 
 
-def _write(path, record: dict) -> None:
+def _write(path: Path | str, record: dict) -> None:
     path = Path(path)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    tmp = path.with_name(path.name + ".tmp")
     try:
-        with os.fdopen(fd, "w") as handle:
-            handle.write(json.dumps(record, indent=2) + "\n")
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+        tmp.write_text(json.dumps(record, indent=2) + "\n")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _replayed(record: dict, operation: str, sha256: str) -> dict | None:
@@ -140,7 +136,7 @@ def _replayed(record: dict, operation: str, sha256: str) -> dict | None:
     return done
 
 
-def _commit(path, record: dict, operation: str, sha256: str, result: dict) -> dict:
+def _commit(path: Path | str, record: dict, operation: str, sha256: str, result: dict) -> dict:
     revision = record["revision"] + 1
     record["operations"].append({"id": operation, "revision": revision, "sha256": sha256, "result": result})
     record["revision"] = revision
@@ -148,7 +144,7 @@ def _commit(path, record: dict, operation: str, sha256: str, result: dict) -> di
     return result
 
 
-def apply_inventory(path, inventory: dict) -> dict:
+def apply_inventory(path: Path | str, inventory: dict) -> dict:
     record = load_record(path)
     operation, sha256 = inventory["operation"], digest(inventory)
     done = _replayed(record, operation, sha256)
@@ -169,7 +165,7 @@ def apply_inventory(path, inventory: dict) -> dict:
     return _commit(path, record, operation, sha256, result)
 
 
-def rollback(path, to_revision: int, operation: str) -> dict:
+def rollback(path: Path | str, to_revision: int, operation: str) -> dict:
     record = load_record(path)
     sha256 = digest({"rollback_to": to_revision})
     done = _replayed(record, operation, sha256)
