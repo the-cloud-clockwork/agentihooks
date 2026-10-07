@@ -222,7 +222,8 @@ def test_tick_reclaims_each_mismatched_agent_on_its_task(ticking, field):
 
     store, runtime, ledger = ticking
     tick("sw", store, ledger, runtime, 100)
-    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    old = replace(next(a for a in store.agents("sw") if a.lane == "eng"), profile="engineer")
+    store.put_agent("sw", old)
     runtime.bindings = lambda agents: {
         a.name: {
             **live_binding.assignment(a),
@@ -845,17 +846,17 @@ def test_legacy_reader_prefers_registered_assigned_harness(monkeypatch, proof_ha
     "lanes, expected",
     [({"master": {"profile": "master"}}, "master"), ({}, "master"), ({"master": {"profile": "qa"}}, "qa")],
 )
-def test_legacy_master_relaunch_uses_its_declared_profile(ticking, lanes, expected):
+def test_legacy_master_relaunch_uses_its_declared_profile(ticking, monkeypatch, lanes, expected):
     from scripts.swarm.tick import tick
 
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
     store, runtime, ledger = ticking
     store.update("sw", lanes=lanes)
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "master")
     store.put_agent("sw", replace(old, model="opus", effort="high"))
     runtime.bindings = lambda agents: {
-        a.name: {**live_binding.assignment(a), "hooks": True, **({"profile": "master"} if a.name == old.name else {})}
-        for a in agents
+        a.name: {**live_binding.assignment(a), "hooks": a.name != old.name, "profile": "master"} for a in agents
     }
     tick("sw", store, ledger, runtime, 200)
     saved = runtime.masters[-1][1]["launch_assignment"]

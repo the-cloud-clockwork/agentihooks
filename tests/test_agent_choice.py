@@ -311,14 +311,18 @@ def test_a_zero_share_turns_a_codex_priority_choice_into_claude(monkeypatch):
     assert calls == [("", None), ("", "claude")]
 
 
-def test_a_zero_share_overrides_an_explicit_codex_lane(monkeypatch):
-    _share(monkeypatch)
+@pytest.mark.parametrize("pin", ["claude", "codex"])
+@pytest.mark.parametrize("share,week", [(0, 100), (100, 1)])
+def test_an_explicit_lane_harness_wins_over_share_and_week(monkeypatch, pin, share, week):
+    _share(monkeypatch, week_left=week)
     calls = []
-    assert agent_choice.choose_shared("codex", {}, {}, share=0, min_week_left=5, choose=_picker(calls)) == (
-        "claude",
-        "claude only",
-    )
-    assert calls == [("codex", None), ("", "claude")]
+
+    def pick(requested, environ):
+        calls.append(requested)
+        return requested, "requested"
+
+    assert agent_choice.choose_shared(pin, {}, {}, share=share, min_week_left=5, choose=pick) == (pin, "requested")
+    assert calls == [pin]
 
 
 def test_a_codex_week_under_the_minimum_turns_a_codex_choice_into_claude(monkeypatch):

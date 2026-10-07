@@ -24,6 +24,7 @@ from scripts.swarm import (
     launch_check,
     lifetime,
     live_binding,
+    master_retire,
     master_start,
     phase_state,
     reaper,
@@ -239,6 +240,11 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
         if agent.lane == MASTER and "process" not in differences and not live_binding.complete(saved):
             actions.append(f"kept {agent.name} after mismatched {fields}: its relaunch assignment is incomplete")
             continue
+        live = agent.name in facts and "process" not in differences
+        if held := master_retire.hold(store, slug, agent, f"mismatched {fields}", live, now_ms):
+            store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
+            actions.append(held)
+            continue
         if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
             store.put_agent(slug, replace(agent, state="retiring"))
             actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
@@ -287,6 +293,10 @@ def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
         outcome, said = "report", f"{agent.name} failed its launch check on {fields}; reported only"
     elif launch_check.relaunched(store, slug, agent.task):
         outcome, said = "spent", f"{agent.name} failed its launch check on {fields}; its one relaunch is spent"
+    elif held := master_retire.hold(
+        store, slug, agent, f"its launch check failed on {fields}", agent.name in runtime.live_names(), now_ms
+    ):
+        return held
     elif not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
         return f"could not retire {agent.name} after its launch check failed on {fields}, retrying next tick"
     else:
@@ -315,6 +325,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
         if agent.state == "retiring" and not ended:
             continue
         if ended:
+            master_retire.forget(store, slug, agent.name)
             if runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
                 store.release(slug, agent.task, agent.name)
                 store.drop_agent(slug, agent.name)
@@ -652,7 +663,7 @@ def _master(slug, config, store, runtime, now_ms):
     if config.state == "stopping":
         if any(a.lane != MASTER for a in agents):
             return []
-        return [_retire_master(slug, store, runtime, m) for m in masters]
+        return [_retire_master(slug, store, runtime, m, now_ms) for m in masters]
     pending = master_start.read(store, slug)
     if any(m.state != "finished" for m in masters) or pending.get("name") or pending.get("alerted"):
         return []
@@ -699,7 +710,10 @@ def _master(slug, config, store, runtime, now_ms):
     return [f"spawned master {name}"]
 
 
-def _retire_master(slug, store, runtime, master):
+def _retire_master(slug, store, runtime, master, now_ms):
+    live = master.name in runtime.live_names()
+    if held := master_retire.hold(store, slug, master, "the swarm is stopping", live, now_ms):
+        return held
     if not runtime.retire(master, homes=reaper.scratch_homes(slug, master.task)):
         return f"could not retire {master.name}, retrying next tick"
     store.drop_agent(slug, master.name)

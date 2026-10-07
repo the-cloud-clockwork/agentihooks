@@ -1248,6 +1248,56 @@ def test_init_rerenders_every_existing_profile_home(world, monkeypatch, capsys):
     assert f"{install._GREEN}[OK]{install._RESET} Re-rendered the rb-role profile home" in lines
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+@pytest.mark.parametrize("validated", [False, True])
+def test_running_profile_validates_its_launched_persona_after_other_profile_render(
+    world, monkeypatch, target, validated
+):
+    from scripts import init_agent
+    from scripts.profiles import binding, render
+
+    home = render.render(target, "rb-role")
+    launched = binding.inspect(home, "rb-role", target)
+    env = {"AGENTIHOOKS_PROFILE": "rb-role", binding.HOMES[target]: str(home), "XDG_RUNTIME_DIR": str(world["home"])}
+    init_agent._binding_request(SimpleNamespace(profile="rb-role"), target, "", env, [])
+    report = Path(env[binding.REPORT])
+    monkeypatch.setattr(binding, "process", lambda: (123, target, env, "default"))
+    if validated:
+        assert binding.validate(launched["canary"])["persona"] == launched["persona"]
+
+    _write(world["bundle"] / "profiles" / "rb-other" / "CLAUDE.md", "OTHER PERSONA UPDATED\n")
+    _commit(world["bundle"], "change other profile")
+    hooks_python = Path(sys.executable)
+    monkeypatch.setattr(world["install"], "_resolve_hooks_python", lambda: hooks_python)
+    interpreter = world["home"] / "init-python"
+    interpreter.symlink_to(sys.executable)
+    monkeypatch.setattr(binding.sys, "executable", str(interpreter))
+    render.render("claude", "rb-other")
+    assert binding.digest(home / binding.PERSONAS[target]) == launched["persona"]
+
+    world["install"]._rerender_profile_homes("claude")
+    rewritten = binding.digest(home / binding.PERSONAS[target])
+    print(f"{target}: before={launched['persona']} after={rewritten}")
+    result = binding.validate(launched["canary"])
+    assert result["persona"] == launched["persona"]
+    assert result["sources"] == launched["sources"]
+    assert result["revisions"] == launched["revisions"]
+
+    _write(world["role"] / "CLAUDE.md", "UPDATED ENGINEER PERSONA\n")
+    _commit(world["bundle"], "change launched profile")
+    render.render(target, "rb-role", force=True)
+    refreshed = binding.inspect(home, "rb-role", target)
+    assert refreshed["canary"] != launched["canary"]
+    result = binding.validate(launched["canary"])
+    assert result["persona"] == launched["persona"]
+    assert result["source_blobs"] == launched["source_blobs"]
+
+    binding.request(report, "rb-role", target)
+    with pytest.raises(ValueError, match="canary mismatch"):
+        binding.validate(launched["canary"])
+    assert binding.validate(refreshed["canary"])["persona"] == refreshed["persona"]
+
+
 def test_stamp_names_bundle_commit_and_chain(world):
     from scripts.profiles import render
 

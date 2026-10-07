@@ -317,9 +317,8 @@ def _binding_request(args, agent: str, prompt: str, environ: dict[str, str], fla
     if not args.profile:
         return prompt
     home = Path(environ[binding.HOMES[agent]])
-    binding.inspect(home, args.profile, agent)
     report = _runtime_dir(environ) / f"profile-{os.getpid()}-{time.time_ns()}.json"
-    binding.request(report, args.profile, agent)
+    binding.request(report, args.profile, agent, home)
     environ[binding.REPORT] = str(report)
     environ["AGENTIHOOKS_RUN_MODEL"], environ["AGENTIHOOKS_RUN_EFFORT"] = model_effort(agent, flags, environ)
     return f"{binding.PROMPT}\n\n{prompt}"
