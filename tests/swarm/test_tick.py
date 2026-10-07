@@ -1019,7 +1019,7 @@ def test_a_stalled_agents_open_messages_move_to_its_seat_for_the_next_engineer(s
     inbox = InboxStore(store.redis)
     open_item = inbox.send("master@a1b2c3-0001", "engineer@a1b2c3-0001", "your pull request has a red check")
     closed = inbox.send("master@a1b2c3-0001", "engineer@a1b2c3-0001", "old news")
-    inbox.close(closed.id, "engineer@a1b2c3-0001", "done")
+    inbox.close(closed.id, "engineer@a1b2c3-0001", "done", "handled the request")
     runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     idle_for(store, ledger, runtime, IDLE_KILL_TICKS, start=2_000)
     assert runtime.killed == ["engineer@a1b2c3-0001"]

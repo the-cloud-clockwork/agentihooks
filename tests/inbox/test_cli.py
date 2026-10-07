@@ -145,14 +145,30 @@ def test_reply_answers_the_sender_and_closes_the_item(store, monkeypatch, capsys
     assert store.get(item.id).state == "done"
 
 
-def test_a_reply_to_a_swarm_notice_closes_it_and_says_notices_take_no_reply(store, capsys):
+def test_a_reply_to_a_swarm_notice_closes_it_without_sending_a_reply(store, capsys):
     notice = store.send("swarm", "alice", "checks passed on your pull request")
     assert run("reply", notice.id, "thanks") == 0
     out = capsys.readouterr()
-    assert json.loads(out.out) == {"id": notice.id, "state": "done", "reason": "done: swarm notices take no reply"}
+    assert json.loads(out.out) == {"id": notice.id, "state": "done", "reason": "done: thanks"}
     assert out.err == ""
     assert store.get(notice.id).state == "done"
     assert store.inbox("swarm") == []
+
+
+@pytest.mark.parametrize("words", [["Fixed checks and pushed"], ["Fixed checks and pushed", "--fyi"]])
+def test_reply_to_tick_preserves_the_supplied_outcome(store, words):
+    notice = store.send("swarm", "alice", "Fix red checks and push")
+    assert run("reply", notice.id, *words) == 0
+    assert store.get(notice.id).reason == "done: Fixed checks and pushed"
+    assert store.inbox("swarm") == []
+
+
+def test_empty_reply_to_tick_refuses_done_without_mutation(store):
+    notice = store.send("swarm", "alice", "Fix red checks and push")
+    history = store.history(notice.id)
+    assert run("reply", notice.id, "  ") == 1
+    assert store.get(notice.id) == notice
+    assert store.history(notice.id) == history
 
 
 def test_send_and_reply_with_fyi_mark_the_item_as_needing_no_work(store, capsys):
@@ -165,6 +181,23 @@ def test_send_and_reply_with_fyi_mark_the_item_as_needing_no_work(store, capsys)
     answer, plain = store.inbox("bob")[1:]
     assert (answer.text, answer.fyi) == ("yes", True)
     assert (plain.text, plain.fyi) == ("review my branch", False)
+
+
+@pytest.mark.parametrize("words", [["--fyi", "Confirmed"], ["Confirmed", "--fyi"], ["--fyi", "Confirmed", "--fyi"]])
+def test_information_flag_at_either_end_is_parsed_on_send_and_reply(store, words):
+    assert run("send", "bob", *words) == 0
+    [sent] = store.inbox("bob")
+    assert (sent.text, sent.fyi) == ("Confirmed", True)
+    question = store.send("bob", "alice", "Ready?")
+    assert run("reply", question.id, *words) == 0
+    answer = store.inbox("bob")[-1]
+    assert (answer.text, answer.fyi) == ("Confirmed", True)
+
+
+def test_information_flag_inside_quoted_text_remains_text(store):
+    assert run("send", "bob", "Please explain --fyi") == 0
+    [sent] = store.inbox("bob")
+    assert (sent.text, sent.fyi) == ("Please explain --fyi", False)
 
 
 def test_multi_agent_chat_rooms_are_retired_without_dangling_references():
