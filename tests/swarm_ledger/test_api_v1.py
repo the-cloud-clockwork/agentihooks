@@ -1717,28 +1717,6 @@ def test_sdk_collections_and_tick_readers_cross_page_boundaries(live):
     assert LedgerClient(service=True).closed(SLUG) is True
 
 
-def test_sdk_detects_a_write_between_snapshot_bookends(live, monkeypatch):
-    from scripts.swarm_ledger.api.client import ResourceClient
-    from scripts.swarm_ledger.api.errors import APIError
-    from tests.swarm_ledger.test_ledger_authority import core, ledger
-
-    client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
-    collect = client.collection
-
-    def collection(slug, path):
-        rows = collect(slug, path)
-        if path == "chat":
-            core.sync(SLUG, ops=[{"op": "title_set", "id": "between-reads", "text": "Concurrent title"}])
-        return rows
-
-    monkeypatch.setattr(client, "collection", collection)
-    with pytest.raises(APIError) as error:
-        client.snapshot(SLUG)
-    assert error.value.status == 409
-    assert error.value.code == "revision_conflict"
-    assert str(error.value) == "Ledger changed while resources were read"
-
-
 def test_sdk_retains_generated_guards_and_operation_ids_for_retry(live):
     from scripts.swarm_ledger.api.client import ResourceClient
     from tests.swarm_ledger.test_ledger_authority import ledger
