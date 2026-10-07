@@ -35,6 +35,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       be phases/<id>, questions/<id>, followups/<id> or tasks/<id>. Unanswered
                                       questions, blocked tasks, merge approvals and flagged follow-ups show on their own
   priority clear ID... | --all        clear priorities once answered
+  alert list | claim ID | close ID OUTCOME
+                                      list open alerts, claim one, or close it done saying what was done
   relay ITEM TEXT --quote WORDS       post the operator's decision from this pane as his answer to questions/<id>
                                       or his comment on another item; WORDS must be in an operator prompt or
                                       AskUserQuestion answer this session recorded in the last hour
@@ -365,6 +367,16 @@ def cmd_priority(args):
         sys.exit(1)
 
 
+def cmd_alert(args):
+    if args.action == "list":
+        print(json.dumps([a for a in call(args.slug)["alerts"] if a["state"] != "done"], indent=2))
+        return
+    if not args.id or (args.action == "close") != bool(args.outcome):
+        sys.exit('alert claim needs ID; alert close needs ID and "OUTCOME"')
+    send(args, f"alert_{args.action}", target=args.id, **({"outcome": args.outcome} if args.outcome else {}))
+    print(json.dumps({"alert": args.id, "action": args.action}))
+
+
 def cmd_relay(args):
     import ledger_relay
 
@@ -593,6 +605,10 @@ def build_parser():
     priority.add_argument("action", choices=["add", "clear"])
     priority.add_argument("values", nargs="*")
     priority.add_argument("--all", action="store_true")
+    alert = sub.add_parser("alert")
+    alert.add_argument("action", choices=["list", "claim", "close"])
+    alert.add_argument("id", nargs="?")
+    alert.add_argument("outcome", nargs="?")
     relay = sub.add_parser("relay")
     relay.add_argument("item")
     relay.add_argument("text")

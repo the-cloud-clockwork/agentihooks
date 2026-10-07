@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import ledger_alerts
 import ledger_answer
 import ledger_close
 import ledger_comments
@@ -107,6 +108,7 @@ EXTENSION_OPS = {
         ledger_relay,
         ledger_answer,
         ledger_verdict,
+        ledger_alerts,
     )
     for name in module.OPS
 }
