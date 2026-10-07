@@ -211,7 +211,7 @@ def test_status_keeps_report_only_launch_misses_outside_findings(store, monkeypa
 
     store.create(SwarmConfig("sw", "/repo", 1, 1))
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1")
-    found = {"overlay": {"expected": "package:engineer", "actual": "engineer"}}
+    found = {"base": {"expected": "package:engineer", "actual": "engineer"}}
     saved = launch_check.record(store, "sw", agent, found, 10, 60_000)
     monkeypatch.setattr(status, "page_quota", lambda: {})
     report = status.status_report(store, "sw", {"tasks": []})

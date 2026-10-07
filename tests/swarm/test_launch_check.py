@@ -3,6 +3,7 @@ from dataclasses import replace
 
 import pytest
 
+from hooks.context import profile_chain
 from scripts.swarm import launch_check, master_start
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
@@ -28,7 +29,9 @@ def launched(store, tmp_path):
     code = store.ensure_code("sw").code
     home = tmp_path / "engineer" / "claude"
     home.mkdir(parents=True)
-    (home / ".agentihooks-render.json").write_text(json.dumps({"chain": ["base", "package:engineer", "engineer"]}))
+    (home / ".agentihooks-render.json").write_text(
+        json.dumps({"chain": ["base", "package:engineer", "engineer", "brain"], "overlays": ["brain"]})
+    )
     agent = AgentRecord(
         f"engineer@{code}-0001",
         "eng",
@@ -52,13 +55,14 @@ def launched(store, tmp_path):
         "account": "",
         "hooks": True,
         "chain": launch_check.chain(home),
+        "overlays": profile_chain.rendered_overlays(home),
     }
     doc = {"_meta": {"members": {agent.name: {"joined_at": LAUNCH + 20_000}}}}
     return agent, facts, doc
 
 
-def misses(store, agent, facts, doc, bundled=True):
-    return launch_check.misses(store, "sw", agent, facts, doc, bundled)
+def misses(store, agent, facts, doc, bundled=True, declared=()):
+    return launch_check.misses(store, "sw", agent, facts, doc, bundled, list(declared))
 
 
 def test_a_clean_launch_passes(store, launched):
@@ -99,16 +103,22 @@ def test_missing_hooks_or_wrong_model_or_effort_is_named_settings(store, launche
 
 def test_no_live_process_misses_profile_and_settings(store, launched):
     agent, _, doc = launched
-    assert list(misses(store, agent, {"process": False}, doc)) == ["profile", "settings", "overlay"]
+    assert list(misses(store, agent, {"process": False}, doc)) == ["profile", "settings", "base"]
+    assert list(misses(store, agent, {"process": False}, doc, declared=["brain"])) == [
+        "profile",
+        "settings",
+        "base",
+        "overlay",
+    ]
 
 
 @pytest.mark.parametrize(
     "chain",
     [[], ["base", "engineer"], ["package:engineer", "engineer", "extra"], ["package:engineer"]],
 )
-def test_overlay_not_on_its_package_base_role_is_named(store, launched, chain):
+def test_role_not_on_its_package_base_role_is_named_base(store, launched, chain):
     agent, facts, doc = launched
-    assert list(misses(store, agent, {**facts, "chain": chain}, doc)) == ["overlay"]
+    assert list(misses(store, agent, {**facts, "chain": chain, "overlays": []}, doc)) == ["base"]
 
 
 def test_package_role_without_a_bundle_overlay_passes(store, launched):
@@ -131,6 +141,29 @@ def test_chain_reads_the_rendered_stamp(tmp_path):
     assert launch_check.chain(tmp_path) == ["a", "b"]
     (tmp_path / ".agentihooks-render.json").write_text("{")
     assert launch_check.chain(tmp_path) == []
+
+
+def test_a_launch_with_every_declared_overlay_passes(store, launched):
+    agent, facts, doc = launched
+    assert misses(store, agent, facts, doc, declared=["brain"]) == {}
+
+
+@pytest.mark.parametrize(
+    "rendered,declared",
+    [([], ["brain"]), (["router"], ["brain", "router"]), (None, ["brain"])],
+)
+def test_a_launch_missing_a_declared_overlay_fails_the_check(store, launched, rendered, declared):
+    agent, facts, doc = launched
+    chain = ["base", "package:engineer", "engineer", *(rendered or [])]
+    found = misses(store, agent, {**facts, "chain": chain, "overlays": rendered}, doc, declared=declared)
+    assert found == {"overlay": {"expected": declared, "actual": rendered or []}}
+
+
+def test_declared_reads_the_overlays_render_would_layer(monkeypatch):
+    from scripts.profiles import render
+
+    monkeypatch.setattr(render, "declared", lambda profile: [f"{profile}-overlay"])
+    assert launch_check.declared("engineer") == ["engineer-overlay"]
 
 
 class JoiningLedger(FakeLedger):
@@ -162,6 +195,7 @@ def checked(store, monkeypatch, profile="engineer", task_profile="engineer"):
     from hooks.context import profile_chain
 
     monkeypatch.setattr(profile_chain, "read_state", lambda: {})
+    monkeypatch.setattr(launch_check, "declared", lambda profile: [])
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
     ledger, runtime = JoiningLedger([{"id": "t1", "profile": task_profile}]), CheckedRuntime()
     original = runtime.spawn
@@ -278,10 +312,10 @@ def test_master_notification_names_only_enforced_misses(store, monkeypatch, tmp_
         "It is being retired and relaunched once."
     ]
     assert [f.id for f in launch_check.findings(store, "sw")] == [f"launch-check/{first}/joined"]
-    assert list(launch_check.report(store, "sw", "master")["misses"]) == ["joined", "overlay"]
+    assert list(launch_check.report(store, "sw", "master")["misses"]) == ["joined", "base"]
 
 
-def test_an_overlay_only_miss_is_reported_without_a_relaunch(store, monkeypatch, tmp_path):
+def test_a_base_only_miss_is_reported_without_a_relaunch(store, monkeypatch, tmp_path):
     from hooks.context import profile_chain
 
     ledger, runtime = checked(store, monkeypatch)
@@ -291,13 +325,26 @@ def test_an_overlay_only_miss_is_reported_without_a_relaunch(store, monkeypatch,
     first = runtime.spawned[0][1]
     joined(ledger, runtime, LAUNCH + 1)
     actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
-    assert f"{first} failed its launch check on overlay; reported only" in actions
+    assert f"{first} failed its launch check on base; reported only" in actions
     assert first not in runtime.killed
     assert len(runtime.spawned) == 1
     assert launch_check.findings(store, "sw") == []
-    assert list(launch_check.report(store, "sw", "t1")["misses"]) == ["overlay"]
+    assert list(launch_check.report(store, "sw", "t1")["misses"]) == ["base"]
     assert first not in launch_check.judged(store, "sw")
     assert ledger.notes == []
+
+
+def test_tick_retires_and_relaunches_a_launch_missing_a_declared_overlay(store, monkeypatch, scratch):
+    scratch("t1")
+    ledger, runtime = checked(store, monkeypatch)
+    monkeypatch.setattr(launch_check, "declared", lambda profile: ["brain"])
+    tick("sw", store, ledger, runtime, LAUNCH)
+    first = runtime.spawned[0][1]
+    joined(ledger, runtime, LAUNCH + 1)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert any(a.startswith(f"retired {first} after its launch check failed on overlay") for a in actions)
+    assert first in runtime.killed
+    assert launch_check.report(store, "sw", "t1")["misses"]["overlay"] == {"expected": ["brain"], "actual": []}
 
 
 def test_a_take_master_launch_that_fails_is_reported_and_kept(store, monkeypatch):
@@ -373,13 +420,13 @@ def test_missing_facts_miss_profile_and_settings_with_nothing_observed(store, la
     assert found["settings"]["actual"] == {"hooks": None, "model": None, "effort": None}
 
 
-def test_overlay_miss_names_the_expected_chain(store, launched):
+def test_base_miss_names_the_expected_chain(store, launched):
     agent, facts, doc = launched
-    assert misses(store, agent, {**facts, "chain": ["base", "engineer"]}, doc)["overlay"] == {
+    assert misses(store, agent, {**facts, "chain": ["base", "engineer", "brain"]}, doc)["base"] == {
         "expected": "package:<role>, engineer",
         "actual": ["base", "engineer"],
     }
-    assert misses(store, agent, {**facts, "chain": []}, doc, bundled=False)["overlay"] == {
+    assert misses(store, agent, {**facts, "chain": []}, doc, bundled=False)["base"] == {
         "expected": "engineer",
         "actual": [],
     }
@@ -443,10 +490,11 @@ def test_relaunch_mark_is_set_and_cleared_per_task(store):
 
 
 def test_told_names_every_field_and_the_outcome():
-    found = {"joined": {}, "overlay": {}}
+    found = {"joined": {}, "base": {}, "overlay": {}}
     assert launch_check.told(found, "spent") == (
         "The master failed its launch check within a minute on joining the ledger and holding its seat, "
-        "its role overlay on the package base role. Its one automatic relaunch is spent; operator action is required."
+        "its role on the package base role, every overlay its profile declares. "
+        "Its one automatic relaunch is spent; operator action is required."
     )
     assert launch_check.told({"name": {}}, "relaunch").endswith("on its name. It is being retired and relaunched once.")
     assert launch_check.told({"settings": {}}, "report").endswith(

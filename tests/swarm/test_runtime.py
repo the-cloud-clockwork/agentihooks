@@ -902,7 +902,9 @@ def test_a_swarm_config_model_launches_as_named_with_the_classifier_live(tmp_pat
 @pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
 @pytest.mark.parametrize("harness", ["claude", "codex"])
 @pytest.mark.parametrize("launch", ["spawn", "successor", "resume"])
-def test_every_swarm_launch_runs_its_profile_with_brain_on(tmp_path, monkeypatch, lane, harness, launch):
+def test_every_swarm_launch_subscribes_the_brain_overlay_its_profile_renders(
+    tmp_path, monkeypatch, lane, harness, launch
+):
     from scripts import select_profile
     from scripts.swarm import model_pick
     from scripts.swarm.templates import DEFAULT_PROFILES
@@ -951,9 +953,11 @@ def test_every_swarm_launch_runs_its_profile_with_brain_on(tmp_path, monkeypatch
     argv = seen["argv"]
     profile = argv[argv.index("--profile") + 1]
     assert profile == DEFAULT_PROFILES[lane]
-    root = tmp_path / profile
+    root, brain = tmp_path / profile, tmp_path / "brain"
     root.mkdir()
-    monkeypatch.setattr(select_profile.profiles, "_chain", lambda name: [(name, root)])
+    brain.mkdir()
+    (root / "profile.yml").write_text("allowedOverlays: [brain]\n")
+    monkeypatch.setattr(select_profile.profiles, "_chain", lambda name: [(name, root), ("brain", brain)])
     monkeypatch.setattr(select_profile.profiles, "render", lambda *a: None)
     env, _ = select_profile.prepare(profile, argv[argv.index("--agent") + 1], "", "", [], {})
     assert "brain" in env["AGENTIHOOKS_BASE_CHANNELS"].split(",")
