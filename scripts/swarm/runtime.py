@@ -151,7 +151,7 @@ class HerdrRuntime:
             agent_choice.choose_shared("", environ, None, share, floor, choose=self.choose)[1] != agent_choice.ALL_FULL
         )
 
-    def quota_capacity(self, config, agents, now):
+    def quota_capacity(self, config, agents, now, demand=None):
         from hooks.context import account_sessions
         from scripts.swarm import capacity
 
@@ -159,13 +159,16 @@ class HerdrRuntime:
         self._quota_accounts = capacity.accounts(environ, now)
         self._quota_cap = account_sessions.max_sessions(environ)
         self._quota_share, self._quota_floor = codex_split(config, environ)
-        return capacity.calculate(
+        decision = capacity.calculate(
             replace(config, codex_share=self._quota_share),
             self._quota_accounts,
             agents,
             self._quota_cap,
             self._quota_floor,
+            demand,
         )
+        self._quota_allocations = decision["allocation"]
+        return decision
 
     def _quota_eligible(self, harness):
         from scripts.swarm.capacity import free_seats
@@ -176,14 +179,16 @@ class HerdrRuntime:
             if row.harness == harness and free_seats(row, self._quota_cap, self._quota_floor)
         ]
 
-    def _quota_choice(self, agent, reason, fixed):
-        if not hasattr(self, "_quota_accounts") or self._quota_eligible(agent):
+    def _quota_choice(self, agent, reason, fixed, lane):
+        if not hasattr(self, "_quota_accounts"):
+            return agent, reason
+        allocation = getattr(self, "_quota_allocations", {}).get(lane)
+        eligible = [h for h in agent_choice.AGENTS if self._quota_eligible(h) and (allocation is None or allocation[h])]
+        if agent in eligible:
             return agent, reason
         if not fixed:
-            for harness in agent_choice.AGENTS:
-                if harness == "codex" and self._quota_share == 0:
-                    continue
-                if self._quota_eligible(harness):
+            for harness in eligible:
+                if harness != "codex" or self._quota_share:
                     return harness, f"fallthrough: {agent} has no placeable quota seats"
         raise SpawnError(f"no {agent} account has placeable quota seats")
 
@@ -242,7 +247,7 @@ class HerdrRuntime:
             agent, reason = agent_choice.choose_shared(requested, environ, spawns, share, floor, choose=self.choose)
         if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts"):
             raise SpawnError(reason)
-        agent, reason = self._quota_choice(agent, reason, bool(requested or saved or want))
+        agent, reason = self._quota_choice(agent, reason, bool(requested or saved or want), lane)
         if saved and agent != saved["harness"]:
             raise SpawnError("unsupported handoff: router substituted the original harness")
         task = {**task, "harness": agent}
@@ -285,6 +290,8 @@ class HerdrRuntime:
             predecessor=_predecessor(task),
         )
         if account is not None:
+            if lane in getattr(self, "_quota_allocations", {}):
+                self._quota_allocations[lane][agent] -= 1
             self._quota_accounts = [
                 replace(row, sessions=row.sessions + 1) if row == account else row for row in self._quota_accounts
             ]
