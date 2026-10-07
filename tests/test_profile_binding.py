@@ -49,6 +49,31 @@ def test_canary_requires_real_harness_home_and_mounted_instruction(tmp_path, mon
         binding.validate(mounted["canary"])
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+@pytest.mark.parametrize(
+    "field,value", [("pid", 456), ("profile", "qa"), ("harness", "other"), ("home", "/other"), ("state", "pending")]
+)
+def test_revalidation_refuses_a_different_live_binding(tmp_path, monkeypatch, target, field, value):
+    home = tmp_path / "engineer" / target
+    home.mkdir(parents=True)
+    (home / binding.PERSONAS[target]).write_text(binding.persona("Engineer instructions.\n"))
+    (home.parent / f"{target}.sources.json").write_text("[]")
+    binding.write(home, "engineer", target)
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", target)
+    env = {"AGENTIHOOKS_PROFILE": "engineer", binding.HOMES[target]: str(home), binding.REPORT: str(report)}
+    monkeypatch.setattr(binding, "process", lambda: (123, target, env, "default"))
+    canary = binding.inspect(home, "engineer", target)["canary"]
+    binding.validate(canary)
+    requested = json.loads(report.read_text())
+    requested["validation"][field] = value
+    report.write_text(json.dumps(requested))
+
+    with pytest.raises(ValueError, match="^live process binding changed since validation$"):
+        binding.validate(canary)
+    assert json.loads(report.read_text())["state"] == "failed"
+
+
 @pytest.mark.parametrize(
     ("source", "target", "message"),
     [
