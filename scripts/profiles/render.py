@@ -24,6 +24,7 @@ SHARED = ("projects", "sessions", "todos", "plugins", ".credentials.json")
 CODEX_STATE = ("auth.json", "sessions", "history.jsonl", "session_index.jsonl", "hooks.json")
 CODEX_INHERITED = ("model", "model_reasoning_effort", "service_tier", "notify", "projects")
 STAMP = ".agentihooks-render.json"
+KEY_SEPARATOR = "+"
 CHANNELS, BRAIN = "AGENTIHOOKS_BASE_CHANNELS", "brain"
 HEADER = "<!-- agentihooks rendered profile -->"
 FOOTER = "<!-- end agentihooks rendered profile -->"
@@ -277,11 +278,14 @@ def _read_json(path: Path) -> dict | None:
 
 
 def home_key(name: str, overlays: Sequence[str] = ()) -> str:
-    return "+".join([name, *sorted(set(overlays))])
+    names = [name, *sorted(set(overlays))]
+    if any(KEY_SEPARATOR in part for part in names):
+        raise ValueError(f"a profile or overlay name cannot hold {KEY_SEPARATOR}: {', '.join(names)}")
+    return KEY_SEPARATOR.join(names)
 
 
 def split_key(key: str) -> tuple[str, list[str]]:
-    name, *overlays = key.split("+")
+    name, *overlays = key.split(KEY_SEPARATOR)
     return name, overlays
 
 

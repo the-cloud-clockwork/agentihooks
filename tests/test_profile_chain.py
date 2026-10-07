@@ -400,9 +400,9 @@ def test_role_is_the_package_base_role_of_the_chain(overlay_profiles, tmp_path):
     assert profile_chain.role([]) is None
 
 
-def test_worn_keeps_the_chosen_order_once_each(overlay_profiles):
+def test_worn_lists_each_chosen_overlay_once_in_sorted_order(overlay_profiles):
     chain, resolve = overlay_profiles
-    assert profile_chain.worn(chain, ["c", "a", "c", "b"], resolve) == ["c", "a", "b"]
+    assert profile_chain.worn(chain, ["c", "a", "c", "b"], resolve) == ["a", "b", "c"]
     assert profile_chain.worn(chain, [], resolve) == []
     assert profile_chain.worn([], [], resolve) == []
 

@@ -82,7 +82,7 @@ def role(profile_dirs: list[tuple[str, Path]]) -> str | None:
 
 
 def worn(profile_dirs: list[tuple[str, Path]], chosen: list[str], resolve: Callable[[str], Path | None]) -> list[str]:
-    """The chosen overlays once each in order, refusing more than the cap or one that does not wear the chain's role."""
+    """The chosen overlays once each in sorted order, refusing more than the cap or one not wearing the chain's role."""
     names = list(dict.fromkeys(chosen))
     if len(names) > OVERLAY_CAP:
         raise ValueError(f"an agent wears at most {OVERLAY_CAP} overlays; {len(names)} were chosen: {', '.join(names)}")
@@ -94,7 +94,7 @@ def worn(profile_dirs: list[tuple[str, Path]], chosen: list[str], resolve: Calla
         if base not in wears(path):
             refusal = f"does not wear the {base} role" if base else "needs a chain with a package base role"
             raise ValueError(f"overlay {name} {refusal}")
-    return names
+    return sorted(names)
 
 
 def rendered_overlays(home: Path) -> list[str]:
