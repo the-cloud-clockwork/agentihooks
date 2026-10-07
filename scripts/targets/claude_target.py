@@ -237,7 +237,8 @@ class ClaudeAdapter:
         # run — a transiently-missing profile source would otherwise shrink the
         # managed set and falsely delete that profile's servers.
         intended_chain = [p.strip() for p in persisted_profile.split(",") if p.strip()]
-        if len(profile_chain) == len(intended_chain):
+        missing = [name for name in intended_chain if name not in profile_chain]
+        if not missing:
             current_managed = set(_i._collect_all_managed_mcp_servers().keys())
             removed_mcp = _i._reconcile_managed_mcp_ledger(current_managed)
             if removed_mcp:
@@ -247,8 +248,8 @@ class ClaudeAdapter:
                 )
         else:
             _i._cprint(
-                "  [--] Skipping MCP ledger reconcile — not every profile in the chain "
-                "resolved this run (transient source loss); ledger left unchanged."
+                f"  [--] Skipping MCP ledger reconcile — profile(s) {', '.join(missing)} did not "
+                "resolve this run (transient source loss); ledger left unchanged."
             )
 
         _i._snapshot_claude_json()
