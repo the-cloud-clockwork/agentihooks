@@ -17,8 +17,8 @@ from scripts.gates import log as gate_log
 from scripts.handoff import transfers
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
-from scripts.swarm import control_notifications, lifetime, live_binding, operator_mail, phase_state, session_model
-from scripts.swarm import idle as idle_state
+from scripts.inbox.store import CLOSED, InboxStore
+from scripts.swarm import control_notifications, lifetime, live_binding, phase_state, session_model
 from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
