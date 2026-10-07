@@ -84,3 +84,17 @@ def test_failed_subscription_is_closed(store, monkeypatch):
     with pytest.raises(RuntimeError, match="store unavailable"):
         receive(store, "master", 1)
     assert closed == [True]
+
+
+@pytest.mark.parametrize("remaining", [0, -1])
+def test_an_expired_wait_returns_an_empty_list_without_blocking(store, monkeypatch, remaining):
+    from scripts.inbox import receive
+
+    times = iter([0, 1 - remaining])
+    monkeypatch.setattr(receive, "monotonic", lambda: next(times))
+    subscription = store.redis.pubsub()
+    monkeypatch.setattr(store.redis, "pubsub", lambda: subscription)
+    blocked = []
+    monkeypatch.setattr(subscription, "get_message", lambda **kw: blocked.append(kw))
+    assert receive.receive(store, "master", 1) == []
+    assert blocked == []

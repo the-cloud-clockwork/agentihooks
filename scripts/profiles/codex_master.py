@@ -12,36 +12,32 @@ def waiting(slug: str) -> str:
 
 
 def next_action(text: str, slug: str) -> str:
-    return waiting(slug) if re.search(r"\bMonitors?\b", text) else text
+    text = re.sub(
+        r"\b[Rr]e[- ]?arm (?:your |a |an |the )?`?Monitors?`?(?: on (?:the )?ledger)?",
+        f"Read agentihooks msg inbox and run agentihooks swarm {slug} wait --inbox",
+        text,
+    )
+    return re.sub(r"`?\bMonitors?\b`?", f"`agentihooks swarm {slug} wait --inbox`", text)
 
 
 def persona(text: str) -> str:
-    lines = []
-    for line in text.splitlines(keepends=True):
-        if "Monitor its checks" in line:
-            line = line.replace("Monitor its checks", "Watch its checks")
-        elif re.search(r"\bMonitors?\b", line):
-            if line.startswith("|"):
-                cells = line.split("|")
-                cells[2] = f" {waiting('<slug>')} "
-                line = "|".join(cells)
-            elif line.startswith("#"):
-                line = re.sub(r"\bMonitor\b", "Process wait", line)
-            else:
-                prefix = "- " if line.startswith("- ") else ""
-                line = prefix + waiting("<slug>") + "\n"
-        lines.append(line)
-    return "".join(lines) + "\n" + waiting("<slug>") + "\n"
+    text = text.replace("Monitor its checks", "Watch its checks")
+    return next_action(text, "<slug>") + "\n" + waiting("<slug>") + "\n"
 
 
 def handoff(task: dict, slug: str) -> dict:
     result = dict(task)
-    text = task.get("handoff", "")
-    before, heading, rest = text.partition("## Next\n")
-    section, after, tail = rest.partition("\n## ")
-    if heading:
-        section = "\n".join(next_action(line, slug) for line in section.splitlines())
-        result["handoff"] = before + heading + section + after + tail
+    lines, active, fenced = [], False, False
+    for line in task.get("handoff", "").splitlines(keepends=True):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        if not fenced and line.startswith("## "):
+            active = line[3:].strip() == "Next"
+        elif active:
+            line = next_action(line, slug)
+        lines.append(line)
+    if "handoff" in task:
+        result["handoff"] = "".join(lines)
     if transfer := task.get("transfer"):
         result["transfer"] = {**transfer, "next": next_action(transfer["next"], slug)}
     return result

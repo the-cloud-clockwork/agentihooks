@@ -6,8 +6,9 @@ from scripts.swarm.store import SwarmError
 
 
 def first_next(text: str) -> str:
-    section = text.replace("\r\n", "\n").partition("## Next\n")[2].partition("\n## ")[0]
-    return next((line.strip().lstrip("- ") for line in section.splitlines() if line.strip()), "")
+    from scripts.handoff.check import section
+
+    return next((line.strip().lstrip("- ") for line in section(text, "Next").splitlines() if line.strip()), "")
 
 
 def record(store, slug: str, agent, reason: str, text: str, at: int) -> dict:

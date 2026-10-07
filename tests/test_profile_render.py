@@ -646,6 +646,64 @@ def test_codex_master_updates_an_old_linked_persona(world):
     assert not agents.is_symlink()
 
 
+def test_codex_master_keeps_mixed_instruction_responsibilities():
+    from scripts.profiles import codex_master
+
+    text = (
+        "- Start a `Monitor` immediately; it is read-only; keep working.\n"
+        "| Working a ledger | join, handle OPERATOR lines, ack, then use a `Monitor`. |\n"
+        "- Push triggers CI, deployment and rollout; start a `Monitor`.\n"
+        "Monitor its checks, fix failures, and merge immediately.\n"
+    )
+    result = codex_master.persona(text)
+    assert result.startswith(
+        "- Start a `agentihooks swarm <slug> wait --inbox` immediately; it is read-only; keep working.\n"
+        "| Working a ledger | join, handle OPERATOR lines, ack, then use a `agentihooks swarm <slug> wait --inbox`. |\n"
+        "- Push triggers CI, deployment and rollout; start a `agentihooks swarm <slug> wait --inbox`.\n"
+        "Watch its checks, fix failures, and merge immediately.\n"
+    )
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("heading", ["## Next", "## Next   "])
+def test_codex_master_adapts_valid_handoff_headings_without_changing_other_sections(newline, heading):
+    from scripts.profiles import codex_master
+
+    action = "Rearm a Monitor on the ledger and inspect the pending tasks."
+    document = newline.join(
+        ["# Handoff v2", "## Intent", "Keep promises.", heading, action, "## Read first", "None", ""]
+    )
+    task = {"handoff": document, "transfer": {"next": action, "id": "transfer", "handoff": "saved"}}
+    adapted = codex_master.handoff(task, "sw")
+    expected = "Read agentihooks msg inbox and run agentihooks swarm sw wait --inbox and inspect the pending tasks."
+    assert adapted == {
+        "handoff": document.replace(action, expected),
+        "transfer": {"next": expected, "id": "transfer", "handoff": "saved"},
+    }
+    assert task["handoff"] == document
+
+
+def test_codex_master_preserves_a_handoff_without_a_next_section():
+    from scripts.profiles import codex_master
+
+    task = {"handoff": "# Handoff v2\n## Intent\nKeep promises.\n"}
+    assert codex_master.handoff(task, "sw") == task
+    assert codex_master.handoff({}, "sw") == {}
+    assert codex_master.next_action("Inspect the checks.", "sw") == "Inspect the checks."
+
+
+def test_codex_master_waiting_instruction_names_the_foreground_return_contract():
+    from scripts.profiles import codex_master
+
+    assert codex_master.waiting("sw") == (
+        "Read agentihooks msg inbox and handle every open item. "
+        "When no work remains, run agentihooks swarm sw wait --inbox in a foreground tool call. "
+        "It returns pending inbox work or times out after one minute; read the inbox and wait again. "
+        "Keep the tool call active while waiting so new work resumes this turn without pane input. "
+        "Use swarm wait --on checks, reply or task for a specific dependency."
+    )
+
+
 def test_codex_render_offers_each_command_as_a_hardlinked_skill(world):
     from scripts.profiles import render
 
