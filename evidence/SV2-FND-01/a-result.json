@@ -1,0 +1,88 @@
+{
+  "case": "T-SV2-FND-01-A",
+  "tested_commit": "6902fddb23ce8b2daa7787e5f32f4e1b23cd6385",
+  "passed": 20,
+  "failed": 0,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_report_separates_source_deployed_and_unknown_for_every_repo",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_second_independent_fixture_gives_the_same_shape",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_command_output_is_stripped_and_sanitized",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_unique_revision_probe_compares_with_source[abc abc-abc-True]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_unique_revision_probe_compares_with_source[def abc-abc def-False]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_http_probe[/ok-verified-1.2-None]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_http_probe[/bare-unverified-None-endpoint answered without version]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_http_probe[/list-unverified-None-endpoint answered without version]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_http_probe[/html-unverified-None-answer is not JSON]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_repo_url_forms[git@github.com:o/r.git-git@github.com:o/r.git]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_repo_url_forms[https://github.com/o/r.git-https://github.com/o/r.git]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_repo_url_forms[/abs/r.git-/abs/r.git]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_repo_url_forms[rel.git-/base/rel.git]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_repo_url_forms[-]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_repo_url_expands_home",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_interfaces_are_present_missing_or_unverified",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_markdown_renders_every_state_exactly",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_markdown_for_an_empty_report",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_markdown_from_planted_fixture",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_utc_now_format",
+      "outcome": "passed"
+    }
+  ]
+}

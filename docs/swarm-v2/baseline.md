@@ -1,13 +1,14 @@
 # Swarm v2 implementation baseline
 
-Package SV2-FND-01. Observed at 2026-10-07T19:28:16Z.
+Package SV2-FND-01. Observed at 2026-10-07T19:37:44Z.
 Source is the branch head. Deployed values come from read-only probes.
 An unverified value is unknown: it never means empty, absent or zero.
+baseline_drift_items counts drift found by this run; the Drift section keeps every earlier entry.
 Regenerate with `python -m scripts.swarm_v2.baseline --sources docs/swarm-v2/baseline-sources.json --previous docs/swarm-v2/baseline.json --json docs/swarm-v2/baseline.json --markdown docs/swarm-v2/baseline.md`.
 
 | Repository | Source | Deployed | Unknown live values |
 |---|---|---|---|
-| agentihooks | dev `d074deceeeb0ed58a16eccd15acf2165982385bb` | workstation agentihooks install: verified `agentihooks 2.17.0` | swarm controller on Anton (not deployed yet), editable checkout revision serving the shared ledger server |
+| agentihooks | dev `2bfd09c2f23dbb54c59baaba1cb0c1948fb1f55d` | workstation agentihooks install: verified `agentihooks 2.17.0` | swarm controller on Anton (not deployed yet), editable checkout revision serving the shared ledger server |
 | agentibrain-kernel | dev `e58e687e8c9edc6acab8115e7eb15db302b704dc` | brain-api version: unverified (endpoint answered without version) | brain-api image digest on its compose host, brain-api version |
 | antoncore | dev `0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c` | ArgoCD synced revision: verified `0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c`, matches source; cluster autoscaler image: verified `registry.k8s.io/autoscaling/cluster-autoscaler:v1.33.0` | live autoscaling group desired capacity and instance counts (AWS read access not exercised) |
 
@@ -44,8 +45,9 @@ Regenerate with `python -m scripts.swarm_v2.baseline --sources docs/swarm-v2/bas
 - 2026-10-07T19:28:08Z agentihooks: `e440d3fb7bdd0491c8896ca528440041a43c36c4` to `d074deceeeb0ed58a16eccd15acf2165982385bb`
 - 2026-10-07T19:28:08Z agentibrain-kernel: `80174260fee601659b94b029b9a5a58ee8e1ef04` to `e58e687e8c9edc6acab8115e7eb15db302b704dc`
 - 2026-10-07T19:28:08Z antoncore: `94b2a670daf11eeed02b853b08b3b29c451a6b13` to `0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c`
+- 2026-10-07T19:37:44Z agentihooks: `d074deceeeb0ed58a16eccd15acf2165982385bb` to `2bfd09c2f23dbb54c59baaba1cb0c1948fb1f55d`
 
 ## Measurements
 
 - baseline_unverified_items: 1
-- baseline_drift_items: 0
+- baseline_drift_items: 1

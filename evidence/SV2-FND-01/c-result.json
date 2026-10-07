@@ -1,0 +1,32 @@
+{
+  "case": "T-SV2-FND-01-C",
+  "tested_commit": "6902fddb23ce8b2daa7787e5f32f4e1b23cd6385",
+  "passed": 6,
+  "failed": 0,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_rerun_after_one_repo_advances_adds_drift_without_moving_branches",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_unresolved_rerun_keeps_previous_commit_out_of_drift",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_interrupted_write_recovers_on_rerun",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_older_previous_cannot_overwrite_newer_output[False]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_older_previous_cannot_overwrite_newer_output[True]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_cli_writes_json_and_markdown_and_reads_previous",
+      "outcome": "passed"
+    }
+  ]
+}

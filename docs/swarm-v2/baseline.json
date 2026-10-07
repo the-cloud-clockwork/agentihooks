@@ -1,13 +1,13 @@
 {
   "schema": "swarm-v2-baseline/1",
-  "observed_at": "2026-10-07T19:28:16Z",
+  "observed_at": "2026-10-07T19:37:44Z",
   "repositories": [
     {
       "repo": "agentihooks",
       "source": {
         "branch": "dev",
         "status": "resolved",
-        "commit": "d074deceeeb0ed58a16eccd15acf2165982385bb"
+        "commit": "2bfd09c2f23dbb54c59baaba1cb0c1948fb1f55d"
       },
       "interfaces": [
         {
@@ -190,10 +190,16 @@
       "from": "94b2a670daf11eeed02b853b08b3b29c451a6b13",
       "to": "0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c",
       "observed_at": "2026-10-07T19:28:08Z"
+    },
+    {
+      "repo": "agentihooks",
+      "from": "d074deceeeb0ed58a16eccd15acf2165982385bb",
+      "to": "2bfd09c2f23dbb54c59baaba1cb0c1948fb1f55d",
+      "observed_at": "2026-10-07T19:37:44Z"
     }
   ],
   "measurements": {
     "baseline_unverified_items": 1,
-    "baseline_drift_items": 0
+    "baseline_drift_items": 1
   }
 }
