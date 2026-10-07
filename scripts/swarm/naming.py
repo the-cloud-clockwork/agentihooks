@@ -13,8 +13,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from redis.exceptions import RedisError
-
 PREFIX = "agentihooks:names"
 TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner"}
 LANES = {kind: lane for lane, kind in TYPES.items()}
@@ -222,6 +220,8 @@ class NameRegistry:
         return ":".join((PREFIX, *parts))
 
     def resolve(self, name, reader=None):
+        from redis.exceptions import RedisError
+
         try:
             return (reader if reader is not None else self.redis).get(self.key("alias", name)) or name
         except RedisError as exc:
@@ -287,6 +287,8 @@ class NameRegistry:
 
     def swarm_slug(self, ref):
         """The ledger slug a swarm name `swarm@<code>` stands for while that swarm holds the code; ref otherwise."""
+        from redis.exceptions import RedisError
+
         try:
             code = swarm_code(ref)
             slug = self.swarm(code).get("swarm")
