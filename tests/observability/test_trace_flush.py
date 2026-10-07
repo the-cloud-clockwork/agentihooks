@@ -1,3 +1,4 @@
+import fcntl
 import http.server
 import json
 import os
@@ -515,7 +516,10 @@ def test_spawn_detaches_the_exporter(monkeypatch):
     calls = []
     monkeypatch.setattr("hooks._async.fork_and_call", lambda fn, *a, **k: calls.append((fn, a, k)))
     trace_flush._spawn("s")
-    assert calls == [(trace_flush.run, ("s",), {"timeout_sec": 7 * 24 * 3600, "task_name": "trace_flush"})]
+    assert calls == [
+        (trace_flush.run, ("s",), {"timeout_sec": 7 * 24 * 3600, "task_name": "trace_flush"}),
+        (trace_flush.recover, (), {"timeout_sec": 60, "task_name": "trace_recovery"}),
+    ]
 
 
 def test_run_clears_the_alarm_lowers_priority_and_logs_the_outcome(monkeypatch, capsys):
@@ -541,6 +545,189 @@ def test_flush_once_reports_pending_work(monkeypatch, home):
     pending = []
     assert trace_flush.flush_once("s", "/t") == 0
     assert calls == [("s", "/t"), ("s", "/t")]
+
+
+def test_stopped_codex_cursor_replays_all_pages_once(home, monkeypatch):
+    from tests.observability.test_trace_paging import Receiver, _codex, _line
+
+    transcript = home / "rollout.jsonl"
+    transcript.write_text("".join(_line(record) for record in _codex(6, 2)))
+    receiver = Receiver()
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", 6000)
+    monkeypatch.setattr(otel, "langfuse_exporter", lambda: receiver)
+    monkeypatch.setattr(agent_trace, "_root_attributes", lambda session: {})
+    monkeypatch.setattr(agent_trace, "_collector_outcomes", lambda *args: None)
+    monkeypatch.setattr("hooks.context.context_usage.session_cost", lambda session: None)
+    trace_flush._write(
+        agent_trace._cursor_path("session"),
+        {
+            "version": 2,
+            "records": {},
+            "accepted": {},
+            "pending": [],
+            "source": {},
+            "overflow": {"bytes": transcript.stat().st_size, "limit": 6000},
+        },
+    )
+
+    assert trace_flush.flush_once("session", str(transcript)) == 0
+    state = agent_trace._cursor("session")
+    assert state["source"]["accepted_bytes"] == transcript.stat().st_size
+    tools = [span for span in receiver.observations.values() if span.attributes["langfuse.observation.type"] == "tool"]
+    assert len(tools) == 12
+    before = dict(receiver.observations)
+    calls = receiver.calls
+    assert trace_flush.flush_once("session", str(transcript)) == 0
+    assert trace_flush.flush_once("session", str(transcript)) == 0
+    assert receiver.calls == calls
+    assert receiver.observations == before
+
+
+def test_new_exporter_recovers_stopped_codex_gaps_and_skips_completed_sessions(home, enabled, monkeypatch):
+    from tests.observability.test_trace_paging import Receiver, _codex, _line
+
+    transcript = home / "rollout.jsonl"
+    transcript.write_text("".join(_line(record) for record in _codex(6, 2)))
+    receiver = Receiver()
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", 6000)
+    monkeypatch.setattr(otel, "langfuse_exporter", lambda: receiver)
+    monkeypatch.setattr(agent_trace, "_root_attributes", lambda session: {})
+    monkeypatch.setattr(agent_trace, "_collector_outcomes", lambda *args: None)
+    monkeypatch.setattr("hooks.context.context_usage.session_cost", lambda session: None)
+    record = {"target": "codex", "transcript": str(transcript), "owner_pid": 0}
+    trace_flush._write(trace_flush.request_path("session"), record)
+    trace_flush._write(
+        agent_trace._cursor_path("session"),
+        {
+            "version": 2,
+            "records": {},
+            "accepted": {},
+            "pending": [],
+            "source": {},
+            "overflow": {"bytes": transcript.stat().st_size, "limit": 6000},
+        },
+    )
+    calls = []
+    monkeypatch.setattr("hooks._async.fork_and_call", lambda fn, *args, **kwargs: calls.append((fn, args)))
+    trace_flush._spawn("new-session")
+    assert (trace_flush.recover, ()) in calls
+
+    def send(session, path, timeout, trigger):
+        assert trigger == "recovery"
+        return trace_flush.flush_once(session, path) == 0
+
+    assert trace_flush.recover(send=send) == 1
+    assert agent_trace._cursor("session")["source"]["accepted_bytes"] == transcript.stat().st_size
+    before = receiver.calls
+    monkeypatch.setattr(trace_flush.time, "time", lambda: 10**20)
+    assert trace_flush.recover(send=send) == 0
+    assert trace_flush.recover(send=send) == 0
+    assert receiver.calls == before
+
+
+def _gap(session, transcript, accepted=0, **cursor):
+    trace_flush._write(
+        trace_flush.request_path(session), {"target": "codex", "transcript": str(transcript), "owner_pid": 0}
+    )
+    trace_flush._write(agent_trace._cursor_path(session), {"source": {"accepted_bytes": accepted}, **cursor})
+
+
+@pytest.mark.parametrize(
+    ("record", "cursor", "supervised", "found"),
+    [
+        ({"target": "claude"}, {"source": {"accepted_bytes": 0}}, False, False),
+        ({"owner_pid": os.getpid(), "owner_start": trace_flush.start_time(os.getpid())}, {"source": {}}, False, False),
+        ({}, {"source": {}}, True, False),
+        ({}, None, False, False),
+        ({"transcript": "/missing/rollout.jsonl"}, {"source": {}}, False, False),
+        ({}, {"source": {"accepted_bytes": 10}}, False, False),
+        ({}, {"pending": [{}], "source": {"accepted_bytes": 10}}, False, True),
+        ({}, {"source": {"accepted_bytes": 9}}, False, True),
+        ({}, {"pending": []}, False, True),
+    ],
+)
+def test_replay_source_picks_stopped_codex_sessions_behind_their_rollout(
+    home, monkeypatch, record, cursor, supervised, found
+):
+    transcript = home / "rollout.jsonl"
+    transcript.write_text("0123456789")
+    monkeypatch.setattr(
+        "hooks.targets.normalizer.codex_rollout_path", lambda session: str(transcript) if session == "s" else ""
+    )
+    if cursor is not None:
+        trace_flush._write(agent_trace._cursor_path("s"), cursor)
+    if supervised:
+        me = {"supervisor_pid": os.getpid(), "supervisor_start": trace_flush.start_time(os.getpid())}
+        trace_flush._write(trace_flush.owner_path("s"), me)
+    assert trace_flush._replay_source("s", {"target": "codex", **record}) == (str(transcript) if found else "")
+
+
+def test_replay_source_counts_a_missing_cursor_offset_as_zero(home):
+    transcript = home / "rollout.jsonl"
+    transcript.write_text("0")
+    trace_flush._write(agent_trace._cursor_path("s"), {"source": {}})
+    assert trace_flush._replay_source("s", {"target": "codex", "transcript": str(transcript)}) == str(transcript)
+
+
+def test_flush_once_stops_when_a_page_makes_no_progress(monkeypatch):
+    calls = []
+    monkeypatch.setattr(agent_trace, "export_session", lambda *args: calls.append(args))
+    stuck = {"overflow": {"bytes": 9}, "source": {"accepted_bytes": 0}}
+    monkeypatch.setattr(agent_trace, "_cursor", lambda session: stuck if len(calls) < 4 else {})
+    assert trace_flush.flush_once("s", "/t") == 1
+    assert calls == [("s", "/t"), ("s", "/t")]
+
+
+def test_recover_skips_while_another_scan_holds_the_lock(home):
+    _gap("A", home / "missing")
+    with (agent_trace.CURSOR_DIR / "recovery.lock").open("w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        assert trace_flush.recover(send=lambda *args: pytest.fail("sent while locked")) == 0
+    assert not (agent_trace.CURSOR_DIR / "recovery.scan.json").exists()
+
+
+def test_recover_creates_a_missing_cursor_directory(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "missing" / "agent_trace")
+    assert trace_flush.recover() == 0
+    assert (tmp_path / "missing" / "agent_trace" / "recovery.lock").exists()
+
+
+def test_recover_rotates_bounded_scans_and_retries_a_failed_replay(home, monkeypatch):
+    transcript = home / "rollout.jsonl"
+    transcript.write_text("0123456789")
+    for session in ("A", "M", "Y", "Z"):
+        _gap(session, transcript)
+    _gap("B", transcript, accepted=10)
+    sent, failed = [], []
+
+    def send(session, path, timeout, trigger):
+        assert (path, trigger) == (str(transcript), "recovery")
+        sent.append(session)
+        if session == "Y" and not failed:
+            failed.append(session)
+            return False
+        trace_flush._write(agent_trace._cursor_path(session), {"source": {"accepted_bytes": 10}})
+        return True
+
+    now = [60.0]
+    monkeypatch.setattr(trace_flush.time, "time", lambda: now[0])
+    stamp = agent_trace.CURSOR_DIR / "recovery.scan.json"
+    limits = trace_flush.Budget(attempts=1)
+
+    assert trace_flush.recover(limits, send) == 3
+    assert sent == ["A", "M", "Y"]
+    assert json.loads(stamp.read_text()) == {"at": 60.0, "after": "Y.request.json"}
+    now[0] = 119.0
+    assert trace_flush.recover(limits, send) == 0
+    assert sent == ["A", "M", "Y"]
+    now[0] = 120.0
+    assert trace_flush.recover(limits, send) == 2
+    assert sent == ["A", "M", "Y", "Z", "Y"]
+    assert json.loads(stamp.read_text()) == {"at": 120.0, "after": "Y.request.json"}
+    now[0] = 180.0
+    assert trace_flush.recover(limits, send) == 0
+    assert sent == ["A", "M", "Y", "Z", "Y"]
+    assert json.loads(stamp.read_text()) == {"at": 180.0, "after": "Y.request.json"}
 
 
 def test_size_of_a_missing_transcript(tmp_path):
