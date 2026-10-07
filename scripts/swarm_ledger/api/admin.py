@@ -5,7 +5,7 @@ from .errors import APIError
 
 
 def layout(handler: object, server: ModuleType, payload: dict | None) -> dict:
-    if payload is None:
+    if handler.command == "GET":
         data = server.ledger_layout.read()
     else:
         if handler.headers.get("Origin") not in server.ALLOWED_ORIGINS:

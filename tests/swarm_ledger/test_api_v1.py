@@ -351,7 +351,10 @@ def test_versioned_administration_keeps_origin_and_role_checks(live):
         "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, "api-reader"),
     }
     with patch.object(server, "swarm_control") as control:
-        assert request(live, "POST", "swarm/actions", {"action": "start"}, **headers)[0] == 403
+        assert request(live, "POST", "swarm/actions", {"action": "start"}, **headers) == (
+            403,
+            {"error": {"code": "forbidden", "message": "Swarm controls need the operator"}},
+        )
         control.assert_not_called()
         status, error = request(live, "POST", "swarm/actions", {"action": "start", "surprise": True})
         assert status == 400
@@ -374,9 +377,23 @@ def test_operator_checkbox_changes_have_schema_and_guard(live):
         == 400
     )
     assert request(live, "GET", path)[1]["revision"] == revision
-    assert request(live, "POST", "operations", payload)[0] == 200
+    first = request(live, "POST", "operations", payload)
+    assert first[0] == 200
+    assert first[1]["applied"] == ["checkbox-change"]
+    assert first[1]["rejected"] == []
     assert request(live, "GET", path)[1]["data"]["done"] is True
-    assert request(live, "POST", "operations", payload)[0] == 200
+    assert request(live, "POST", "operations", payload) == first
+    refused = {
+        "id": "checkbox-refused",
+        "ops": [],
+        "changes": [{"path": f"{path}/done", "base": False, "value": False}],
+        "guards": {path: request(live, "GET", path)[1]["revision"]},
+    }
+    status, result = request(live, "POST", "operations", refused)
+    assert status == 200
+    assert result["applied"] == []
+    assert result["rejected"] == ["checkbox-refused"]
+    assert request(live, "GET", path)[1]["data"]["done"] is True
 
 
 def test_each_domain_schema_rejects_unknown_fields_without_mutation(live):
@@ -394,7 +411,7 @@ def test_each_domain_schema_rejects_unknown_fields_without_mutation(live):
             },
         )
         assert status == 400
-        assert reply["error"]["code"] == "schema_invalid"
+        assert reply == {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}}
     assert request(live, "GET", "metadata") == before
 
 
@@ -502,20 +519,30 @@ def test_large_task_update_returns_a_bounded_acknowledgment(live):
     client.mutate(
         SLUG, [{"op": "task_add", "id": "big-task", "by": "swarm", "task": "t1", "title": "Proof", "lane": "eng"}]
     )
-    reply = client.mutate(
+    client.mutate(
         SLUG,
         [
-            {
-                "op": "task_update",
-                "id": "big-proof",
-                "by": "swarm",
-                "item": "tasks/t1",
-                "fields": {"proof": {"output": "x" * MAX_REPLY}},
-            }
+            {"op": "set", "id": "visible-scope", "by": "swarm", "path": "tasks/t1/out_of_scope", "value": True},
+            {"op": "set", "id": "in-scope", "by": "swarm", "path": "tasks/t1/out_of_scope", "value": False},
         ],
+    )
+    identity = {
+        "id": "t1",
+        "state": "claimed",
+        "claimed_by": "api-reader",
+        "issue_url": "https://github.com/example/repo/issues/1",
+        "pr_url": "https://github.com/example/repo/pull/1",
+        "done": False,
+        "out_of_scope": False,
+    }
+    fields = {key: value for key, value in identity.items() if key not in ("id", "done", "out_of_scope")}
+    fields["proof"] = {"output": "x" * MAX_REPLY}
+    reply = client.mutate(
+        SLUG, [{"op": "task_update", "id": "big-proof", "by": "swarm", "item": "tasks/t1", "fields": fields}]
     )
     assert len(json.dumps(reply, ensure_ascii=False).encode()) <= MAX_REPLY
     assert reply["applied"] == ["big-proof"]
+    assert reply["tasks"] == [identity]
     exported = client.request(SLUG, "export", {})["data"]
     assert len(exported["tasks"][0]["proof"]["output"]) == MAX_REPLY
 
@@ -674,6 +701,7 @@ def test_layout_write_and_bin_lifecycle_are_versioned(live):
     )
     assert status == 200
     assert json.loads(data)["data"] == {"capacity-box": {"height": 300}}
+    assert json.loads(send(live, "GET", "/api/v1/layout")[1]) == json.loads(data)
     for action in ("delete", "restore"):
         status, data, _ = send(
             live,
@@ -711,6 +739,12 @@ def test_put_operations_and_options_keep_the_versioned_transport(live):
         assert response.getheader("Access-Control-Allow-Methods") == "GET, PUT, POST"
         assert response.getheader("Access-Control-Allow-Headers") == "Content-Type, X-Ledger-Token, X-Ledger-Agent"
         assert response.getheader("Access-Control-Allow-Private-Network") == "true"
+        assert [row for row in response.getheaders() if row[0].lower().startswith("access-control")] == [
+            ("Access-Control-Allow-Origin", "null"),
+            ("Access-Control-Allow-Methods", "GET, PUT, POST"),
+            ("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent"),
+            ("Access-Control-Allow-Private-Network", "true"),
+        ]
         assert response.read() == b""
     finally:
         conn.close()
@@ -1623,3 +1657,274 @@ def test_transport_preserves_status_json_and_legacy_errors(path, code, ctype, or
         expected.append(("Access-Control-Allow-Origin", server.FILE_ORIGIN))
     assert [call.args for call in handler.send_header.call_args_list] == expected
     handler.end_headers.assert_called_once_with()
+
+
+@pytest.mark.parametrize("payload", [None, True, [], 5, "layout"])
+def test_layout_body_must_be_an_object(live, payload):
+    before = send(live, "GET", "/api/v1/layout")[1]
+    status, data, _ = send(
+        live,
+        "PUT",
+        "/api/v1/layout",
+        json.dumps(payload).encode(),
+        **{"Origin": sorted(server.ALLOWED_ORIGINS)[0], "Content-Type": "application/json"},
+    )
+    assert (status, json.loads(data)) == (
+        400,
+        {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}},
+    )
+    assert send(live, "GET", "/api/v1/layout")[1] == before
+
+
+def test_sdk_collections_and_tick_readers_cross_page_boundaries(live):
+    from scripts.swarm.ledger_client import LedgerClient
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from tests.swarm_ledger.test_ledger_authority import core, ledger
+
+    core.sync(
+        SLUG,
+        ops=[{"op": "add", "id": f"page-{index}", "thread": "chat", "text": f"Page {index}"} for index in range(105)],
+    )
+    client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    rows = client.collection(SLUG, "chat")
+    assert len(rows) == 107
+    assert [row["text"] for row in rows][-105:] == [f"Page {index}" for index in range(105)]
+    assert LedgerClient(service=True).chat(SLUG) == rows
+    core.sync(SLUG, ops=[{"op": "close", "id": "closed-proof", "by": "operator"}])
+    assert LedgerClient(service=True).closed(SLUG) is True
+
+
+def test_sdk_detects_a_write_between_snapshot_bookends(live, monkeypatch):
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from scripts.swarm_ledger.api.errors import APIError
+    from tests.swarm_ledger.test_ledger_authority import core, ledger
+
+    client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    collect = client.collection
+
+    def collection(slug, path):
+        rows = collect(slug, path)
+        if path == "chat":
+            core.sync(SLUG, ops=[{"op": "title_set", "id": "between-reads", "text": "Concurrent title"}])
+        return rows
+
+    monkeypatch.setattr(client, "collection", collection)
+    with pytest.raises(APIError) as error:
+        client.snapshot(SLUG)
+    assert error.value.status == 409
+    assert error.value.code == "revision_conflict"
+    assert str(error.value) == "Ledger changed while resources were read"
+
+
+def test_sdk_retains_generated_guards_and_operation_ids_for_retry(live):
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    before = request(live, "GET", "chat")[1]["revision"]
+    operations = [{"op": "add", "id": "sdk-retry", "thread": "chat", "text": "Once"}]
+    first = client.mutate(SLUG, operations)
+    assert operations[0]["expected_revision"] == before
+    assert operations[0]["operation_id"]
+    saved = dict(operations[0])
+    assert client.mutate(SLUG, operations) == first
+    assert operations[0] == saved
+    assert [row["id"] for row in client.collection(SLUG, "chat")].count("sdk-retry") == 1
+
+
+def test_pinned_worker_sdk_preserves_forbidden_details(live):
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from tests.swarm_ledger.test_ledger_authority import authority, ledger
+
+    headers = {
+        "X-Ledger-Agent": "api-reader",
+        "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, "api-reader"),
+    }
+    client = ResourceClient(ledger.BASE, headers)
+    before = request(live, "GET", "chat")[1]
+    operation = {
+        "op": "add",
+        "id": "sdk-forbidden",
+        "by": "other",
+        "thread": "chat",
+        "text": "Refused",
+        "expected_revision": before["revision"],
+        "operation_id": "sdk-forbidden-request",
+    }
+    result = client.mutate(SLUG, [operation])
+    payload = {
+        "operation_id": operation["operation_id"],
+        "ops": [{key: value for key, value in operation.items() if key not in ("expected_revision", "operation_id")}],
+        "guards": {"chat": before["revision"]},
+    }
+    status, error = request(live, "POST", "operations", payload, **headers)
+    assert status == 403
+    assert result == error["error"]["details"]
+    assert result["rejected"] == ["sdk-forbidden"]
+    assert result["_meta"]["warnings"][-1] == "api-reader cannot write as other"
+    assert request(live, "GET", "chat")[1] == before
+
+
+def test_export_validates_its_body_and_hides_receipts(live, monkeypatch):
+    from unittest.mock import Mock
+
+    revision = request(live, "GET", "metadata")[1]["revision"]
+    payload = {"id": "ordinary", "ops": [{"op": "sync", "id": "ordinary"}], "guards": {"metadata": revision}}
+    status, result = request(live, "POST", "operations", payload)
+    assert status == 200
+    assert result["applied"] == ["ordinary"]
+    for path in ("export", "swarm/export"):
+        for body in (None, [], 7, {"extra": True}):
+            status, data, _ = send(
+                live,
+                "POST",
+                f"/api/v1/ledgers/{SLUG}/{path}",
+                json.dumps(body).encode(),
+                **{"X-Ledger-Token": live["admin"], "Content-Type": "application/json"},
+            )
+            assert (status, json.loads(data)) == (
+                400,
+                {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}},
+            )
+    exported = request(live, "POST", "export", {})[1]["data"]
+    assert "seeds" not in exported["_meta"]
+    assert "api_operations" not in exported["_meta"]
+    read = Mock(return_value={"slug": SLUG})
+    monkeypatch.setattr(server, "swarm_status", read)
+    assert request(live, "POST", "swarm/export", {}) == (200, {"data": {"slug": SLUG}})
+    read.assert_called_once_with(SLUG)
+
+
+def test_raw_upload_headers_reject_invalid_lengths_and_names(live):
+    import http.client
+
+    cases = [
+        (None, "proof.png", "Request does not match the resource schema"),
+        ("invalid", "proof.png", "Upload length must be an integer"),
+        ("0", "proof.png", "Request does not match the resource schema"),
+        ("1", "a" * 201, "Request does not match the resource schema"),
+    ]
+    for length, name, message in cases:
+        connection = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=5)
+        try:
+            connection.putrequest("POST", f"/api/v1/ledgers/{SLUG}/uploads/media")
+            connection.putheader("X-Ledger-Token", live["admin"])
+            connection.putheader("Origin", sorted(server.ALLOWED_ORIGINS)[0])
+            connection.putheader("Content-Type", "application/octet-stream")
+            connection.putheader("X-Artifact-Name", name)
+            if length is not None:
+                connection.putheader("Content-Length", length)
+            connection.endheaders(b"x" if length == "1" else None)
+            response = connection.getresponse()
+            assert (response.status, json.loads(response.read())) == (
+                400,
+                {"error": {"code": "schema_invalid", "message": message}},
+            )
+        finally:
+            connection.close()
+
+
+def test_item_projection_counts_and_collection_revisions(live):
+    from tests.swarm_ledger.test_ledger_authority import core
+
+    core.sync(
+        SLUG,
+        ops=[
+            {
+                "op": "add",
+                "id": "projection-comment",
+                "thread": "phases/p1/comments",
+                "by": "operator",
+                "text": "Comment",
+            },
+            {"op": "add_item", "id": "projection-question", "by": "operator", "list": "questions", "text": "Question"},
+            {
+                "op": "add",
+                "id": "projection-answer",
+                "by": "operator",
+                "thread": "questions/projection-question/answers",
+                "text": "Answer",
+            },
+        ],
+    )
+    phase = request(live, "GET", "phases/p1")[1]
+    question = request(live, "GET", "questions/projection-question")[1]
+    assert phase["data"]["comments_count"] == 1
+    assert "comments" not in phase["data"]
+    assert question["data"]["answers_count"] == 1
+    assert question["data"]["comments_count"] == 0
+    assert "answers" not in question["data"]
+    assert "comments" not in question["data"]
+    row = request(live, "GET", "questions")[1]["data"][0]
+    assert row["revision"] == question["revision"]
+    assert {key: value for key, value in row.items() if key != "revision"} == question["data"]
+
+
+def test_success_acknowledgment_preserves_bounded_warnings(live, monkeypatch):
+    warnings = [f"{index}:" + "w" * 1500 for index in range(22)]
+    state = {"tasks": [], "_meta": {"rev": 55, "warnings": warnings}}
+    monkeypatch.setattr(server.repository, "apply_ops", lambda slug, **kwargs: (state, []))
+    payload = {"ops": [{"op": "sync", "id": "warning-proof"}], "guards": {"metadata": "0" * 64}}
+    assert request(live, "POST", "operations", payload) == (
+        200,
+        {
+            "applied": ["warning-proof"],
+            "rejected": [],
+            "_meta": {"rev": 55, "warnings": [warning[:1000] for warning in warnings[:20]]},
+        },
+    )
+
+
+def test_latest_thousand_operation_receipts_remain_retry_safe(live):
+    from scripts.swarm_ledger.api.resources import revision
+
+    def operation(index):
+        return {"op": "sync", "id": f"receipt-{index}"}
+
+    receipts = {
+        str(index): {
+            "digest": revision({"ops": [operation(index)], "changes": []}),
+            "results": {f"receipt-{index}": True},
+        }
+        for index in range(1000)
+    }
+
+    class SeedReceipts:
+        def apply(self, doc, op, ctx, apply_op):
+            ctx.meta["api_operations"] = receipts
+            ctx.dirty = True
+            return apply_op(doc, op, ctx)
+
+    server.repository.apply_ops(SLUG, ops=[{"op": "sync", "id": "seed-receipts"}], gate=SeedReceipts())
+    guard = request(live, "GET", "metadata")[1]["revision"]
+    payload = {"operation_id": "latest", "ops": [operation("latest")], "guards": {"metadata": guard}}
+    assert request(live, "POST", "operations", payload)[0] == 200
+    saved = server.repository.get_document(SLUG, reconcile=False)["_meta"]["api_operations"]
+    assert len(saved) == 1000
+    assert "0" not in saved
+    assert "1" in saved
+    assert "latest" in saved
+    for index, status in ((1, 200), (0, 409)):
+        retry = {"operation_id": str(index), "ops": [operation(index)], "guards": {"metadata": "0" * 64}}
+        assert request(live, "POST", "operations", retry)[0] == status
+
+
+def test_error_details_keep_empty_defaults_and_exact_byte_limit():
+    from scripts.swarm_ledger.api.errors import APIError
+    from scripts.swarm_ledger.api.resources import MAX_REPLY
+
+    assert APIError(403, "forbidden", "Refused", {"_meta": {}}).envelope() == {
+        "error": {"code": "forbidden", "message": "Refused", "details": {"_meta": {"warnings": []}}}
+    }
+    assert APIError(403, "forbidden", "Refused", {"padding": "x" * MAX_REPLY}).envelope() == {
+        "error": {"code": "forbidden", "message": "Refused", "details": {"rejected": []}}
+    }
+    base = APIError(403, "forbidden", "Refused", {"rejected": ["a"], "padding": ""}).envelope()
+    overhead = len(json.dumps(base, ensure_ascii=False).encode())
+    for delta in (-4, 0):
+        details = {"rejected": ["a"], "padding": "x" * (MAX_REPLY - overhead + delta)}
+        envelope = APIError(403, "forbidden", "Refused", details).envelope()
+        assert envelope["error"]["details"] == details
+        assert len(json.dumps(envelope, ensure_ascii=False).encode()) == MAX_REPLY + delta
+    details = {"rejected": ["a"], "padding": "x" * (MAX_REPLY - overhead + 1)}
+    assert APIError(403, "forbidden", "Refused", details).envelope()["error"]["details"] == {"rejected": ["a"]}

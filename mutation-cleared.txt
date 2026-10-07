@@ -1594,5 +1594,25 @@
   "9d92fc186f64c5683994ec44ea4f3186138e651c671cc437c4082ecc0c6f7b04": {
     "reader": "Standards /root/standards_reader",
     "reason": "The length value is produced by int before schema validation. A failed conversion exits via the unchanged stable error, and every converted value has integer type. Removing the redundant length integer check preserves the unchanged minimum constraint, status and uploader path."
+  },
+  "e57f10f6c8d23d1a71e8304ad10dbe36e68fb4c5774af42ea5bc2437fd52a03c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The entire admin.upload source symbol was read through the parent Serena export. Its server parameter is never referenced by its body: header conversion and schemas.validate use handler and the imported schemas module; final delegate uses only handler, slug and path. Replacing that unused actual argument with None changes no branch, value, exception, mutation or reply. Both callers preserve the other arguments."
+  },
+  "351e01c673f74947d8bf03706c6e2f753799d83f90a528578190089f20f60ac7": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The schema name is always built with HTTPMessage.get of X-Artifact-Name and a string default. HTTP parser header field values and the fallback are strings, never another JSON type. Removing the redundant name string constraint leaves the maxLength check and actual downstream original header untouched. No extra reachable upload values are admitted."
+  },
+  "5318565420dda2025faa4b20c2ac2dd66502737c255ae6c4dbfdce18240a8437": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The schema name is always built with HTTPMessage.get of X-Artifact-Name and a string default. HTTP parser header field values and the fallback are strings, never another JSON type. Removing the redundant name string constraint leaves the maxLength check and actual downstream original header untouched. No extra reachable upload values are admitted."
+  },
+  "335b1acbb6d816eb21879aebd91388ecff253e42e1538e25b5a8a9ff80633e8a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares field names case insensitively. X-Artifact-Name and x-artifact-name select the identical first field value or the same empty default. Unchanged schema checks and uploader observe identical values. Previously recorded HTTPMessage lookup probe establishes the case-insensitive behavior; this candidate was independently inspected with mutmut show."
+  },
+  "d40a89f77f6f7968bbe7e787f101c1b8f8419d6973cc4262c486571fc58677ba": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only the fallback in the internal synthetic validation dictionary changes from empty to XXXX. If the header exists the fallback is unused. If absent both fallback strings satisfy the unchanged string/maxLength200 rule. Neither fallback is forwarded to the upload handler, which receives exactly the same handler, slug and path and reads the original headers. Thus status, delegation and response are unchanged for every HTTP request."
   }
 }
