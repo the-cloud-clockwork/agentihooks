@@ -13,6 +13,17 @@ ROLES = Path(__file__).resolve().parents[1] / "profiles" / "package" / "roles"
 ALL_ROLES = ("master", "engineer", "cicd", "planner", "qa")
 GUARDED = ("master", "planner", "qa")
 GUARDS = {"pre-edit+write+notebookedit-no_code_edits.py", "pre-mcp__serena-no_serena_writes.py"}
+GATED = ("engineer", "cicd", "qa")
+GATES = {
+    "pre-agent+task+sendmessage-subagent_budget.py",
+    "pre-any-quiet_claim.sh",
+    "pre-bash.agentihooks+bash.bash+bash.sh+bash.zsh+bash.eval-identity_pin.py",
+    "pre-bash.gh+bash.agentihooks-intent_gate.py",
+    "pre-bash.gh-rerun_budget.py",
+    "pre-edit+write+multiedit+notebookedit+mcp__serena+bash.git-build_gate.py",
+    "pre-monitor+taskoutput+bashoutput+bash.gh+bash.sleep+bash.agentihooks-watch_budget.py",
+    "stop-claim_stop.py",
+}
 
 
 @pytest.mark.parametrize("role", ALL_ROLES)
@@ -40,8 +51,9 @@ def test_guard_conditions_load_for_master_planner_and_qa_only(world, monkeypatch
     layers, _ = conditions.layer_dirs({})
     entries, invalid = conditions.scan_layers(layers)
 
-    loaded = {e["file"] for e in entries if e["source"] == f"profile:{role}"}
-    assert loaded == (GUARDS if role in GUARDED else set())
+    loaded = [e["file"] for e in entries if e["source"] == f"profile:{role}"]
+    expected = (GUARDS if role in GUARDED else set()) | (GATES if role in GATED else set())
+    assert sorted(loaded) == sorted(expected)
     assert invalid == []
 
 
