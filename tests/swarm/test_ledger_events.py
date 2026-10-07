@@ -11,6 +11,7 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 MINUTE = 60_000
 ANSWERS = Path(__file__).resolve().parents[1] / "fixtures" / "github_pr"
+GATE = "Gate — Required"
 MASTER_SEAT, ENG_SEAT = "master@sw", "eng-1@sw"
 
 
@@ -333,3 +334,66 @@ def test_a_failed_check_waits_for_the_queued_run_before_resolving_red(conclusion
     assert pull.red is True
     raw["checkSuites"] = [FINISHED_RUN]
     assert ledger_events.pull_request(raw).resolved is (conclusion == "FAILURE")
+
+
+@pytest.mark.parametrize("suites", [[], [QUEUED_TESTS], [FINISHED_RUN, APP_SUITE]])
+@pytest.mark.parametrize("gated", [True, False])
+def test_a_head_with_only_skipped_checks_keeps_waiting(suites, gated):
+    raw = {"state": "OPEN", "gated": gated, "statusCheckRollup": SKIPPED_ONLY, "checkSuites": suites}
+    pull = ledger_events.pull_request(raw)
+    assert pull.resolved is False
+    assert pull.red is False
+    raw["statusCheckRollup"] = SKIPPED_ONLY + [{"name": GATE, "conclusion": "SUCCESS"}]
+    assert ledger_events.pull_request(raw).resolved is (suites != [QUEUED_TESTS])
+
+
+@pytest.mark.parametrize("gate", [None, "PENDING", "SKIPPED", "CANCELLED", "TIMED_OUT"])
+def test_a_gate_that_has_not_passed_or_failed_keeps_the_head_unresolved(gate):
+    rollup = SKIPPED_ONLY + [{"name": "unit", "conclusion": "SUCCESS"}, {"name": GATE, "conclusion": gate}]
+    raw = {"state": "OPEN", "gated": True, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}
+    assert ledger_events.pull_request(raw).resolved is False
+
+
+def test_a_passed_gate_resolves_green_once_nothing_is_pending():
+    rollup = SKIPPED_ONLY + [{"name": GATE, "conclusion": "SUCCESS"}]
+    raw = {"state": "OPEN", "gated": True, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN, APP_SUITE]}
+    pull = ledger_events.pull_request(raw)
+    assert pull.resolved is True
+    assert pull.red is False
+    raw["checkSuites"] = [QUEUED_TESTS]
+    assert ledger_events.pull_request(raw).resolved is False
+    raw["checkSuites"] = [FINISHED_RUN]
+    raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": None}]
+    assert ledger_events.pull_request(raw).resolved is False
+    for state in ("PENDING", "EXPECTED", ""):
+        raw["statusCheckRollup"] = rollup + [{"context": "sonar", "state": state}]
+        assert ledger_events.pull_request(raw).resolved is False
+    raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": "CANCELLED"}]
+    assert ledger_events.pull_request(raw).resolved is True
+
+
+@pytest.mark.parametrize("suites", [[FINISHED_RUN], [QUEUED_TESTS]])
+@pytest.mark.parametrize("conclusion", ["FAILURE", "ERROR", "STARTUP_FAILURE", "ACTION_REQUIRED"])
+def test_a_failed_gate_resolves_red(suites, conclusion):
+    rollup = SKIPPED_ONLY + [{"name": GATE, "conclusion": conclusion}]
+    raw = {"state": "OPEN", "gated": True, "statusCheckRollup": rollup, "checkSuites": suites}
+    pull = ledger_events.pull_request(raw)
+    assert pull.resolved is True
+    assert pull.red is True
+    assert pull.failed == (GATE,)
+
+
+def test_a_failed_check_beside_a_pending_gate_resolves_red_once_runs_finish():
+    rollup = [{"name": "unit", "conclusion": "FAILURE"}, {"name": GATE, "conclusion": None}]
+    raw = {"state": "OPEN", "gated": True, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}
+    assert ledger_events.pull_request(raw).resolved is True
+    raw["checkSuites"] = [QUEUED_TESTS]
+    assert ledger_events.pull_request(raw).resolved is False
+
+
+def test_a_gate_check_counts_only_by_its_exact_name():
+    rollup = [{"name": "Gate — Required later", "conclusion": "SUCCESS"}]
+    raw = {"state": "OPEN", "gated": True, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}
+    assert ledger_events.pull_request(raw).resolved is False
+    raw["statusCheckRollup"] = rollup + [{"context": GATE, "state": "SUCCESS"}]
+    assert ledger_events.pull_request(raw).resolved is True

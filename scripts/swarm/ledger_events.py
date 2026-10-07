@@ -6,6 +6,7 @@ of the same ledger sends nothing; the wake ladder then carries every item to a r
 """
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
@@ -26,10 +27,16 @@ SENDER = "swarm"
 OPERATOR = "operator"
 ASK_WORDS = 12
 RED = {"FAILURE", "ERROR", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"}
+FINAL_RED = RED - {"TIMED_OUT"}
 PASSED = {"SUCCESS", "SKIPPED"}
+PENDING = {None, "", "PENDING", "EXPECTED"}
+GATE = "Gate — Required"
+GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
-    "commits(last:1){nodes{commit{committedDate statusCheckRollup{contexts(first:100){"
+    "commits(last:1){nodes{commit{committedDate "
+    'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
+    "statusCheckRollup{contexts(first:100){"
     "nodes{...on CheckRun{name conclusion} ...on StatusContext{context state}} "
     "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId}} "
     "pageInfo{hasNextPage}}}}}}}}"
@@ -62,11 +69,7 @@ def pull_request(raw):
         iso_ms(raw["mergedAt"]) if raw.get("mergedAt") else None,
         iso_ms(commits[-1]["committedDate"]) if commits else None,
         any(result in RED for result in results),
-        not running
-        and (
-            any(result in RED - {"TIMED_OUT"} for result in results)
-            or (bool(results) and all(result in PASSED for result in results))
-        ),
+        _resolved(raw.get("gated"), checks, results, running),
         tuple(
             check.get("name") or check.get("context") or "a check"
             for check, result in zip(checks, results)
@@ -74,6 +77,23 @@ def pull_request(raw):
         ),
         raw.get("headRefOid") or "",
     )
+
+
+def _resolved(gated, checks, results, running):
+    if not running and any(result in FINAL_RED for result in results):
+        return True
+    if not gated:
+        return not running and "SUCCESS" in results and all(result in PASSED for result in results)
+    gate = [result for check, result in zip(checks, results) if (check.get("name") or check.get("context")) == GATE]
+    if any(result in FINAL_RED for result in gate):
+        return True
+    return "SUCCESS" in gate and not running and not any(result in PENDING for result in results)
+
+
+def declares_gate(tree):
+    entries = ((tree or {}).get("object") or {}).get("entries") or []
+    texts = [(entry.get("object") or {}).get("text") for entry in entries]
+    return any(GATE_JOB.search(text) for text in texts if text)
 
 
 def view(url, run=subprocess.run):
@@ -96,6 +116,7 @@ def view(url, run=subprocess.run):
         raw["commits"] = commits
         raw["statusCheckRollup"] = contexts.get("nodes") or []
         raw["checkSuites"] = list(suites["nodes"])
+        raw["gated"] = bool(commits) and declares_gate(commits[-1].get("file"))
         return pull_request(raw)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
