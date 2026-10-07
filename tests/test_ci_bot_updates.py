@@ -41,6 +41,12 @@ def test_dev_push_publishes_merged_durations_with_read_permissions():
     assert upload["with"]["include-hidden-files"] is True
 
 
+def test_a_newer_dev_push_never_cancels_the_run_that_publishes_durations():
+    concurrency = _workflow("test.yml")["concurrency"]
+    assert concurrency["group"] == "tests-${{ github.ref }}"
+    assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
+
+
 @pytest.mark.parametrize("mode", ["download", "no_run", "missing", "invalid"])
 def test_pr_shards_use_last_green_dev_durations_or_the_committed_fallback(tmp_path, mode):
     steps = _workflow("test.yml")["jobs"]["unit"]["steps"]
