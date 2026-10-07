@@ -1767,14 +1767,6 @@
     "reader": "Standards /root/standards_reader",
     "reason": "Source evidence: this next_cursor key is changed only in the local candidate dictionary used solely by reply_size before page append/break. Its uppercase form is the same number of unescaped ASCII bytes; all dictionary values and separator counts are unchanged, making the measured byte size identical for every row. The actual return dictionary is built independently with the original keys. Selection, exceptions, revisions, cursor and output bytes are identical."
   },
-  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_value__mutmut_33:a9a0ec36f0a5ce5d0faac1d1c19fdaf269eb7ae672e4f68bafd1f3c45e86f835": {
-    "reader": "Standards /root/standards_reader",
-    "reason": "Concrete HTTP producer evidence: dispatch handles resource GET with repository.get_document using its default reconcile=True, and FileLedgerRepository.get_document then returns sync state. sync unconditionally executes meta.setdefault(members,{}) before operations and constructing returned state. The only mutation-time resource_revision consumer substitutes that same ctx.meta after the member default is applied. Therefore every reachable members read or revision has an explicit members key: get fallback None versus empty dictionary is never selected. Existing present values, successful replies and original invalid-value failures are unchanged."
-  },
-  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_value__mutmut_35:6c06a57246b80c6392a30cfe5e945e4888037ac8957da835f447f2523cb775f7": {
-    "reader": "Standards /root/standards_reader",
-    "reason": "Concrete HTTP producer evidence: dispatch handles resource GET with repository.get_document using its default reconcile=True, and FileLedgerRepository.get_document then returns sync state. sync unconditionally executes meta.setdefault(members,{}) before operations and constructing returned state. The only mutation-time resource_revision consumer substitutes that same ctx.meta after the member default is applied. Therefore every reachable members read or revision has an explicit members key: get fallback None versus empty dictionary is never selected. Existing present values, successful replies and original invalid-value failures are unchanged."
-  },
   "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_layout__mutmut_7:9200b3e2329c7398574af4e7f13eb7460cc4f358adaf11aad567ad6131d51de3": {
     "reader": "Standards /root/standards_reader",
     "reason": "HTTPMessage compares header field names case insensitively. Only the Origin lookup spelling changes; absent and present values, allowlist decision, layout schema validation, write delegation and response remain identical."

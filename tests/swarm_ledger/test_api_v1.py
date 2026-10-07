@@ -2361,3 +2361,84 @@ def test_relay_requires_its_literal_item_revision(live):
     assert reply["applied"] == []
     assert reply["rejected"] == ["relay-guard"]
     assert request(live, "GET", "phases/p1")[1] == before
+
+
+@pytest.mark.parametrize(
+    "path", ["tasks", "sources", "events", "members", "threads", "questions/q1/answers", "questions/q1/comments"]
+)
+def test_repository_optional_collections_have_empty_http_resources(live, monkeypatch, path):
+    from scripts.swarm_ledger.api.resources import revision
+
+    document = {"_meta": {}, "questions": [{"id": "q1"}]}
+    monkeypatch.setattr(server.repository, "get_document", lambda slug, reconcile=True: document)
+    assert request(live, "GET", path) == (
+        200,
+        {"data": [], "revision": revision([]), "next_cursor": None},
+    )
+
+
+def test_optional_repository_fields_preserve_forbidden_details(live, monkeypatch):
+    from tests.swarm_ledger.test_ledger_authority import authority
+
+    document = {"_meta": {}}
+    reads = []
+
+    def read(slug, reconcile=True):
+        assert slug == SLUG
+        reads.append(reconcile)
+        return document
+
+    monkeypatch.setattr(server.repository, "get_document", read)
+    headers = {
+        "X-Ledger-Agent": "api-reader",
+        "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, "api-reader"),
+    }
+    payload = {"ops": [{"op": "join", "id": "default-refusal", "by": "other"}], "guards": {}}
+    assert request(live, "POST", "operations", payload, **headers) == (
+        403,
+        {
+            "error": {
+                "code": "forbidden",
+                "message": "Caller cannot perform this operation as its author",
+                "details": {
+                    "rejected": ["default-refusal"],
+                    "_meta": {"warnings": ["api-reader cannot write as other"]},
+                },
+            }
+        },
+    )
+    assert reads == [False]
+    assert document == {"_meta": {}}
+
+
+def test_optional_repository_fields_preserve_success_acknowledgment(live, monkeypatch):
+    from unittest.mock import Mock
+
+    monkeypatch.setattr(server.repository, "get_document", lambda slug, reconcile=True: {"_meta": {}})
+    apply = Mock(return_value=({"_meta": {"rev": 3}}, []))
+    monkeypatch.setattr(server.repository, "apply_ops", apply)
+    monkeypatch.setattr(server, "relay_to_inbox", Mock())
+    monkeypatch.setattr(server, "doctor_phrase", Mock())
+    payload = {"ops": [{"op": "sync", "id": "default-success"}], "guards": {}}
+    assert request(live, "POST", "operations", payload) == (
+        200,
+        {"applied": ["default-success"], "rejected": [], "_meta": {"rev": 3, "warnings": []}},
+    )
+    assert apply.call_args.args == (SLUG,)
+    assert apply.call_args.kwargs["ops"] == payload["ops"]
+
+
+@pytest.mark.parametrize("offset,extra,last", [(7, 0, False), (8, 1, False), (8, 0, True)])
+def test_page_byte_budget_preserves_digit_transitions_and_last_page(offset, extra, last):
+    from scripts.swarm_ledger.api.resources import MAX_REPLY, page, reply_size
+
+    rev = "a" * 64
+    cursor = None if last else f"{rev}:{offset + 2}"
+    envelope = {"data": ["", ""], "revision": rev, "next_cursor": cursor}
+    text = "x" * (MAX_REPLY - reply_size(envelope) + extra)
+    rows = [""] * offset + ["", text] + ([] if last else [""])
+    result = page(rows, rev, {"limit": 2, "cursor": f"{rev}:{offset}"})
+    selected = [""] if extra else ["", text]
+    next_cursor = f"{rev}:{offset + len(selected)}" if offset + len(selected) < len(rows) else None
+    assert result == {"data": selected, "revision": rev, "next_cursor": next_cursor}
+    assert reply_size(result) <= MAX_REPLY
