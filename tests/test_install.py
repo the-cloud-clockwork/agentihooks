@@ -13,6 +13,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import install  # noqa: I001
 
 
+@pytest.fixture(autouse=True)
+def _no_stored_caps(monkeypatch):
+    monkeypatch.setattr("scripts.session_caps.stored", lambda harness="claude": {})
+
+
 class TestClaudeRouting:
     def test_cmd_claude_exports_winner_for_process_tree(self, monkeypatch):
         from scripts import claude_quota_balancer as balancer
