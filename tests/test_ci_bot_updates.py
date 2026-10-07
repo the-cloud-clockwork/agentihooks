@@ -16,8 +16,9 @@ def _workflow(name):
 
 
 def test_ci_creates_no_commits_or_bot_pull_requests():
-    for name in ["test.yml", "release.yml"]:
-        workflow = _workflow(name)
+    folder = _ROOT / ".github/workflows"
+    for path in sorted([*folder.glob("*.yml"), *folder.glob("*.yaml")]):
+        workflow = _workflow(path.name)
         for job in workflow["jobs"].values():
             for step in job["steps"]:
                 command = step.get("run", "")
