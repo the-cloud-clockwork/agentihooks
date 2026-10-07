@@ -574,7 +574,7 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
                 "commits(last:1){nodes{commit{committedDate statusCheckRollup{contexts(first:100){"
                 "nodes{...on CheckRun{name conclusion} ...on StatusContext{context state}} "
-                "pageInfo{hasNextPage}}} checkSuites(first:50){nodes{status workflowRun{databaseId}} "
+                "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId}} "
                 "pageInfo{hasNextPage}}}}}}}}",
                 "-f",
                 f"url={URL}",

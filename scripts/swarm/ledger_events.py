@@ -31,7 +31,7 @@ PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
     "commits(last:1){nodes{commit{committedDate statusCheckRollup{contexts(first:100){"
     "nodes{...on CheckRun{name conclusion} ...on StatusContext{context state}} "
-    "pageInfo{hasNextPage}}} checkSuites(first:50){nodes{status workflowRun{databaseId}} "
+    "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId}} "
     "pageInfo{hasNextPage}}}}}}}}"
 )
 
@@ -62,8 +62,11 @@ def pull_request(raw):
         iso_ms(raw["mergedAt"]) if raw.get("mergedAt") else None,
         iso_ms(commits[-1]["committedDate"]) if commits else None,
         any(result in RED for result in results),
-        any(result in RED - {"TIMED_OUT"} for result in results)
-        or (bool(results) and not running and all(result in PASSED for result in results)),
+        not running
+        and (
+            any(result in RED - {"TIMED_OUT"} for result in results)
+            or (bool(results) and all(result in PASSED for result in results))
+        ),
         tuple(
             check.get("name") or check.get("context") or "a check"
             for check, result in zip(checks, results)

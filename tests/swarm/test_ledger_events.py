@@ -313,12 +313,15 @@ def test_a_head_whose_runs_all_finished_resolves_green_or_red(rollup, red):
     assert pull.red is red
 
 
-def test_a_failed_check_still_resolves_red_while_another_run_is_queued():
+@pytest.mark.parametrize("conclusion", ["FAILURE", "TIMED_OUT"])
+def test_a_failed_check_waits_for_the_queued_run_before_resolving_red(conclusion):
     raw = {
         "state": "OPEN",
-        "statusCheckRollup": [{"name": "unit", "conclusion": "FAILURE"}],
+        "statusCheckRollup": [{"name": "unit", "conclusion": conclusion}],
         "checkSuites": [QUEUED_TESTS],
     }
     pull = ledger_events.pull_request(raw)
-    assert pull.resolved is True
+    assert pull.resolved is False
     assert pull.red is True
+    raw["checkSuites"] = [FINISHED_RUN]
+    assert ledger_events.pull_request(raw).resolved is (conclusion == "FAILURE")
