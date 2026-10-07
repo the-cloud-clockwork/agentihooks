@@ -32,9 +32,6 @@ def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs():
             output = json.dumps(
                 {"id": number, "name": "unit (3.11, 1)", "status": "completed", "conclusion": "success"}
             )
-        elif endpoint.endswith(f"/commits/{fixture['pr']['head']['sha']}"):
-            assert argv[3:] == ["--jq", ".commit.committer.date"]
-            output = "2026-10-05T14:19:48Z\n"
         elif endpoint.endswith("/logs"):
             number = int(endpoint.split("/jobs/")[1].split("/")[0])
             outcome = "FAILED" if number == 1 else "PASSED"
@@ -45,7 +42,7 @@ def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs():
 
     record = ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=gh)
     assert len(record["checks"]) == 10
-    assert record["committed_at"] == fixture["committed_at"]
+    assert "committed_at" not in record
     assert [r["id"] for r in record["runs"]] == [37323835080]
     assert [a["attempt"] for a in record["attempts"]] == [1, 2]
     assert len(ci.flaky_tests(record)) == 1
