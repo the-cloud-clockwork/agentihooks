@@ -10,7 +10,16 @@ from pathlib import Path
 
 from scripts import agent_choice
 from scripts.profiles import binding, plugins
-from scripts.swarm import effort_range, live_binding, model_pick, naming, priming_trace, profile_choice, prompt
+from scripts.swarm import (
+    affinity,
+    effort_range,
+    live_binding,
+    model_pick,
+    naming,
+    priming_trace,
+    profile_choice,
+    prompt,
+)
 from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
 from scripts.swarm.tick import Placed, SpawnError
@@ -123,7 +132,14 @@ class HerdrRuntime:
         )
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
-        if saved:
+        want = affinity.desired(config) if lane == MASTER else ""
+        if want and plugins.claude_only(profile) and want != "claude":
+            raise SpawnError(f"master affinity {want} cannot mount the claude only profile {profile}")
+        if saved and want and saved["harness"] != want:
+            saved = {}
+        if want and not saved:
+            agent, reason = self.choose(want, environ)
+        elif saved:
             if plugins.claude_only(profile) and saved["harness"] != "claude":
                 raise SpawnError("unsupported handoff: required profile cannot mount on the original harness")
             requested = saved["harness"]

@@ -469,6 +469,10 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-num:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 .sw-num[aria-invalid="true"] { color: var(--destructive); }
 .sw-unit { font-size: var(--fs-meta); color: var(--muted); }
+.sw-select { text-align: left; cursor: pointer; }
+.sw-select option { background: var(--panel); color: var(--text); }
+.sw-affinity-state:empty { display: none; }
+.sw-affinity-state.bad { color: var(--destructive); }
 .sw-btn.sw-step { min-width: 24px; min-height: 28px; padding: 0; background: transparent; font-size: var(--fs-item); }
 .sw-pair { display: grid; grid-template-columns: minmax(0, 1fr) 0 minmax(0, 1fr); padding: 0; }
 .sw-pair > .sw-block { min-width: 0; padding: var(--space-row); }
@@ -612,6 +616,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 <div class="sw-cap"><span class="sw-cap-name">compact limit</span><label class="sw-field"><input class="sw-num" id="cap-compact" type="text" inputmode="numeric" autocomplete="off" data-cap="compact_limit" aria-label="Compact limit"><span class="sw-unit">k</span></label><button class="sw-btn sw-step" type="button" data-swarm="compact_down" aria-label="Lower compact limit">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="compact_up" aria-label="Raise compact limit">+</button></div>
 <div class="sw-cap"><span class="sw-cap-name">effort min</span><label class="sw-field"><input class="sw-num" id="cap-effort_min" type="text" autocomplete="off" data-cap="effort_min" aria-label="Effort floor"></label><button class="sw-btn sw-step" type="button" data-swarm="effort_min_down" aria-label="Lower effort floor">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="effort_min_up" aria-label="Raise effort floor">+</button></div>
 <div class="sw-cap"><span class="sw-cap-name">effort max</span><label class="sw-field"><input class="sw-num" id="cap-effort_max" type="text" autocomplete="off" data-cap="effort_max" aria-label="Effort ceiling"></label><button class="sw-btn sw-step" type="button" data-swarm="effort_max_down" aria-label="Lower effort ceiling">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="effort_max_up" aria-label="Raise effort ceiling">+</button></div>
+<div class="sw-cap sw-affinity"><span class="sw-cap-name">master affinity</span><label class="sw-field"><select class="sw-num sw-select" id="cap-master_agent" data-cap="master_agent" aria-label="Master affinity"><option value="claude">Claude</option><option value="codex">Codex</option></select></label><span class="sw-unit sw-affinity-state" id="affinity-state" role="status"></span></div>
 <button class="sw-btn sw-apply" type="button" data-swarm="apply" aria-label="Apply capacity">apply</button></div>
 <span class="sw-label" id="gates-label" hidden>Gates</span><div class="sw-gates" id="swarm-gates" aria-labelledby="gates-label"></div></div>
 <div class="sw-grip sw-grip-y" data-grip="height" data-row="capacity-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Capacity height" tabindex="0"></div>
@@ -1704,6 +1709,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   const STEPS = { eng: ["max_eng", 1, 0, 50], ci: ["max_ci", 1, 0, 50], plan: ["max_plan", 1, 0, 50], codex: ["codex_share", 5, 0, 100, "codex share"], compact: ["compact_limit", 50, 100, 1000, "compact limit"] };
   const EFFORTS = ["low", "medium", "high", "max"];
   const EFFORT_CAPS = { effort_min: "effort floor", effort_max: "effort ceiling" };
+  const MASTER_AGENTS = ["claude", "codex"];
   const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
   const VERDICTS = ["false-positive", "early-real", "established", "insufficient-evidence", "resolved"];
   const VERDICT_TEXT = { "false-positive": "FP", "early-real": "early real", established: "established", "insufficient-evidence": "insufficient", resolved: "resolved" };
@@ -1739,8 +1745,20 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     return !!(sw && sw.doctor && sw.doctor.slug);
   }
 
+  function affinityValue(sw) {
+    const found = sw.master_affinity || {};
+    return [found.desired, found.live].find((agent) => MASTER_AGENTS.includes(agent)) || MASTER_AGENTS[0];
+  }
+
+  function affinityNote(sw) {
+    const order = sw && sw.master_affinity && sw.master_affinity.order;
+    if (!order) return { text: "", cls: "" };
+    if (order.state === "failed") return { text: `switch to ${order.to} failed: ${order.reason}`, cls: "bad" };
+    return { text: `master hands off to ${order.to}`, cls: "" };
+  }
+
   function capValues(sw) {
-    return { ...sw.config, compact_limit: sw.compact_limit };
+    return { ...sw.config, compact_limit: sw.compact_limit, master_agent: affinityValue(sw) };
   }
 
   function capStep(values, lane, up) {
@@ -1767,6 +1785,10 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       const value = String(draft[key]).trim();
       if (!EFFORTS.includes(value)) bad.push(`${name} must be one of ${EFFORTS.join(", ")}`);
       else if (value !== values[key]) body[key] = value;
+    }
+    if ("master_agent" in draft) {
+      if (!MASTER_AGENTS.includes(draft.master_agent)) bad.push("master affinity must be Claude or Codex");
+      else if (draft.master_agent !== values.master_agent) body.master_agent = draft.master_agent;
     }
     const [floor, ceiling] = [range.effort_min, range.effort_max].map((v) => EFFORTS.indexOf(String(v).trim()));
     if (floor >= 0 && ceiling >= 0 && floor > ceiling) bad.push("effort floor must not be above the effort ceiling");
@@ -1823,11 +1845,14 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       btn.disabled = !swarm || !!pending;
     }
     for (const btn of $("swarm-gates").querySelectorAll("button[data-gate]")) btn.disabled = !swarm || !!pending;
-    for (const input of $("capacity-box").querySelectorAll("input[data-cap]")) {
+    for (const input of $("capacity-box").querySelectorAll("[data-cap]")) {
       if (swarm && !(input.dataset.cap in capDraft)) input.value = capValues(swarm)[input.dataset.cap] ?? "";
       input.setAttribute("aria-invalid", String(input.dataset.cap in capDraft && !!capChanges({}, { [input.dataset.cap]: capDraft[input.dataset.cap] }).bad.length));
       input.disabled = !swarm || pending === "apply";
     }
+    const note = affinityNote(swarm);
+    $("affinity-state").textContent = note.text;
+    $("affinity-state").className = `sw-unit sw-affinity-state ${note.cls}`;
   }
 
   function renderGates(sw) {
@@ -1932,7 +1957,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   }
 
   $("capacity-box").addEventListener("input", (event) => {
-    const input = event.target.closest("input[data-cap]");
+    const input = event.target.closest("[data-cap]");
     if (!input) return;
     capDraft[input.dataset.cap] = input.value;
     renderControls();

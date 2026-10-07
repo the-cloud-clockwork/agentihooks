@@ -30,7 +30,7 @@ def caps_boxes(browser, width):
               for (const [id, v] of [["cap-eng", "3"], ["cap-ci", "1"], ["cap-plan", "1"], ["cap-codex", "20"], ["cap-compact", "600"], ["cap-effort_min", "medium"], ["cap-effort_max", "high"]]) document.getElementById(id).value = v;
               const box = (el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; };
               return {
-                caps: [...document.querySelectorAll("#capacity-box .sw-cap")].map((cap) => [...cap.children].map(box)),
+                caps: [...document.querySelectorAll("#capacity-box .sw-cap:not(.sw-affinity)")].map((cap) => [...cap.children].map(box)),
                 strip: box(document.getElementById("capacity-box")),
               };
             }"""

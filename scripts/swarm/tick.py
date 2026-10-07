@@ -18,7 +18,7 @@ from scripts.handoff import transfers
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import control_notifications, lifetime, live_binding, phase_state, session_model
+from scripts.swarm import affinity, control_notifications, lifetime, live_binding, phase_state, session_model
 from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
@@ -543,6 +543,8 @@ def _master(slug, config, store, runtime, now_ms):
         return [_retire_master(slug, store, runtime, m) for m in masters]
     if any(m.state != "finished" for m in masters):
         return []
+    if any(m.name in runtime.live_names() for m in masters):
+        return ["the old master is still running, waiting for it to end before starting the next"]
     if not runtime.has_capacity(config):
         return ["no session slot for the master, waiting"]
     name = store.next_name(slug, MASTER, now_ms)
@@ -565,7 +567,9 @@ def _master(slug, config, store, runtime, now_ms):
     except Exception as exc:
         transfers.failed(store, slug, record)
         store.drop_agent(slug, name)
+        affinity.failed(store, slug, str(exc))
         return [f"master spawn failed: {exc}"]
+    affinity.placed(store, slug, placed.harness)
     store.put_agent(slug, _placed(record, placed))
     store.clear_handoff(slug, MASTER)
     store.redis.hdel(store.key(slug, "launch-assignments"), MASTER)
