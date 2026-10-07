@@ -145,6 +145,7 @@ def _configured(monkeypatch, numprocesses, **extra):
     monkeypatch.setattr(NodeManager, "setup_nodes", NodeManager.setup_nodes)
     monkeypatch.setattr(conftest, "warm_imports", lambda modules, workers: calls.append((modules, workers)) or [7])
     config = SimpleNamespace(
+        args=[],
         option=SimpleNamespace(numprocesses=numprocesses),
         getoption=lambda name: "2/4",
         stash=pytest.Stash(),
