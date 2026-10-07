@@ -10,6 +10,10 @@ LEDGER_DIR = Path(__file__).resolve().parents[1] / "swarm_ledger"
 SERVICE_AUTHORS = ("swarm", None)
 
 
+class LedgerGone(SwarmError):
+    pass
+
+
 def _ledger():
     if str(LEDGER_DIR) not in sys.path:
         sys.path.insert(0, str(LEDGER_DIR))
@@ -24,8 +28,11 @@ class LedgerClient:
 
     def _call(self, slug, ops=None):
         service = self.service or all(op.get("by") in SERVICE_AUTHORS for op in ops or ())
+        ledger = _ledger()
         try:
-            state = _ledger().call(slug, ops, service=service)
+            state = ledger.call(slug, ops, service=service)
+        except ledger.Missing as exc:
+            raise LedgerGone(str(exc)) from exc
         except SystemExit as exc:
             raise SwarmError(f"ledger {slug}: {exc}") from exc
         if state.get("rejected"):
