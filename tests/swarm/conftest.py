@@ -39,3 +39,11 @@ def scratch(tmp_path, monkeypatch):
         return [path.resolve()]
 
     return home
+
+
+@pytest.fixture(autouse=True)
+def unchecked_launches(request, monkeypatch):
+    from scripts.swarm import launch_check
+
+    if not getattr(request.module, "LAUNCH_CHECKED", False):
+        monkeypatch.setattr(launch_check, "begin", lambda *args, **kwargs: None)

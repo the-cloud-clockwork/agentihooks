@@ -21,6 +21,7 @@ from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
     control_notifications,
+    launch_check,
     lifetime,
     live_binding,
     master_start,
@@ -113,6 +114,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     rows = {t["id"]: t for t in doc["tasks"]}
     exits.sweep(InboxStore(store.redis), slug, store, lambda: {t["id"]: t for t in ledger.state(slug)["tasks"]})
     actions += master_start.observe(slug, config, store, ledger, runtime, now_ms)
+    actions += _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms)
     actions += _verify(slug, store, ledger, runtime, rows, now_ms)
     actions += _reap(slug, store, ledger, runtime, rows, now_ms)
     actions += _strays(slug, config, store, runtime)
@@ -129,6 +131,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions.append("new tasks, running again")
     actions += _orphans(slug, store, ledger, rows)
     if not sleeping:
+        actions += _codex_hook_order()
         actions += _master_down(slug, config, store, ledger, runtime, now_ms)
         actions += _master(slug, config, store, runtime, now_ms)
         if config.state == "running":
@@ -138,6 +141,15 @@ def tick(slug, store, ledger, runtime, now_ms):
     starting = {a.name for a in store.agents(slug) if a.lane == MASTER and a.state == "starting"}
     transfers.observe(store, slug, runtime.live_names() - starting)
     return actions + _settle(slug, config, store, ledger, rows, doc) + _close_space(slug, config, store, runtime)
+
+
+def _codex_hook_order():
+    from scripts.targets.codex_target import codex_home, restore_hook_order
+
+    home = codex_home()
+    moved = restore_hook_order(home)
+    path = (home / "hooks.json").resolve()
+    return [f"restored the approved Codex hook order in {path}: {', '.join(moved)}"] if moved else []
 
 
 def _close_space(slug, config, store, runtime):
@@ -198,7 +210,8 @@ def _drop(slug, store, ledger, rows, agent):
 
 
 def _verify(slug, store, ledger, runtime, rows, now_ms):
-    agents, actions = store.agents(slug), []
+    judged = launch_check.judged(store, slug)
+    agents, actions = [a for a in store.agents(slug) if a.name not in judged], []
     facts = runtime.bindings(agents)
     for agent in agents:
         if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
@@ -235,6 +248,58 @@ def _ended(agent, rows):
     task = rows.get(agent.task, {})
     ended = agent.lane != MASTER and (task.get("done") or task.get("state") in {"done", "blocked", "handoff"})
     return agent.state == "finished" or bool(ended)
+
+
+def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
+    waiting, actions = launch_check.pending(store, slug), []
+    if not waiting:
+        return actions
+    agents = [a for a in store.agents(slug) if a.name in waiting]
+    for name in set(waiting) - {a.name for a in agents}:
+        launch_check.forget(store, slug, name)
+    facts = runtime.bindings(agents)
+    for agent in agents:
+        found = launch_check.misses(
+            store, slug, agent, facts.get(agent.name, {}), doc, launch_check.bundled(agent.profile)
+        )
+        if found and now_ms - agent.started_at < launch_check.DEADLINE_MS:
+            continue
+        if found:
+            miss = launch_check.Miss(agent, found, waiting[agent.name]["relaunch"])
+            actions.append(_failed_launch(slug, store, ledger, runtime, rows, miss, now_ms))
+            continue
+        elapsed = launch_check.joined_at(agent, doc) - agent.started_at
+        launch_check.record(store, slug, agent, found, now_ms, elapsed)
+        launch_check.forget(store, slug, agent.name)
+        launch_check.clear_relaunched(store, slug, agent.task)
+        actions.append(f"{agent.name} passed its launch check in {elapsed // 1000} seconds")
+    return actions
+
+
+def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
+    agent, found = miss.agent, miss.found
+    fields, elapsed = ", ".join(found), now_ms - agent.started_at
+    if not miss.relaunch or set(found) <= launch_check.REPORT_ONLY:
+        outcome, said = "report", f"{agent.name} failed its launch check on {fields}; reported only"
+    elif launch_check.relaunched(store, slug, agent.task):
+        outcome, said = "spent", f"{agent.name} failed its launch check on {fields}; its one relaunch is spent"
+    elif not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+        return f"could not retire {agent.name} after its launch check failed on {fields}, retrying next tick"
+    else:
+        outcome = "relaunch"
+    launch_check.record(store, slug, agent, found, now_ms, elapsed, held=outcome == "spent")
+    launch_check.forget(store, slug, agent.name)
+    if agent.lane == MASTER:
+        ledger.notify(slug, launch_check.told(found, outcome))
+    if outcome != "relaunch":
+        return said
+    launch_check.mark_relaunched(store, slug, agent.task)
+    saved = live_binding.relaunch_assignment(agent, rows.get(agent.task, {}), store.config(slug))
+    store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
+    pending = master_start.read(store, slug)
+    if agent.lane == MASTER and pending.get("name") == agent.name:
+        master_start.save(store, slug, {**pending, "name": "", "retry": True, "at": now_ms})
+    return f"retired {agent.name} after its launch check failed on {fields}" + _drop(slug, store, ledger, rows, agent)
 
 
 def _reap(slug, store, ledger, runtime, rows, now_ms):
@@ -464,6 +529,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                     actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
                 return actions
             store.put_agent(slug, _placed(record, placed))
+            launch_check.begin(store, slug, record, now_ms)
             store.count_spawn(slug, placed.harness)
             store.clear_handoff(slug, task["id"])
             store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
@@ -620,6 +686,7 @@ def _master(slug, config, store, runtime, now_ms):
     record = _placed(record, placed)
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))
+    launch_check.begin(store, slug, record, now_ms)
     if reported:
         store.redis.delete(store.key(slug, "master-start"))
         store.clear_handoff(slug, MASTER)

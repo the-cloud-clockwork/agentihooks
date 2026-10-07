@@ -63,6 +63,7 @@ def test_matching_process_facts_exclude_credential_values(mounted):
         "effort": "high",
         "account": "team",
         "hooks": True,
+        "chain": [],
     }
     assert live_binding.compare(agent, facts) == {}
     assert "private-value" not in json.dumps(facts)
@@ -102,6 +103,12 @@ def test_removed_hooks_are_read_again(mounted):
     assert live_binding.read(agent, 42, proc)["hooks"] is True
     (home / "settings.json").unlink()
     assert live_binding.read(agent, 42, proc)["hooks"] is False
+
+
+def test_the_rendered_profile_chain_is_read_from_the_home(mounted):
+    agent, proc, home = mounted
+    (home / ".agentihooks-render.json").write_text(json.dumps({"chain": ["package:engineer", "engineer"]}))
+    assert live_binding.read(agent, 42, proc)["chain"] == ["package:engineer", "engineer"]
 
 
 def test_original_launch_model_remains_expected_after_telemetry_switch(mounted):
