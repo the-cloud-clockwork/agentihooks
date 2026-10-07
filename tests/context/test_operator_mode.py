@@ -291,14 +291,79 @@ def test_a_typed_prompt_uncaps_only_its_reply_turn(monkeypatch, capsys):
     assert [operator_mode.reminder("s1", SWARM) for _ in range(2)] == ["", expected]
 
 
-def test_the_typed_turn_notice_is_exact_and_operator_off_keeps_its_mode_notice(monkeypatch):
+def test_the_typed_turn_notice_is_exact_and_operator_off_gives_only_the_away_notice(monkeypatch):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
     expected = "Operator present for this turn: reply without a word limit."
     assert operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100) == expected
     assert operator_mode.notice({"session_id": "s1", "prompt": "operator off"}, True, now=101) == (
-        "Operator off: the operator is not present in this pane.\n" + expected
+        "Operator off: the operator is not present in this pane.\n" + REMINDER
     )
+    assert [operator_mode.reminder("s1", SWARM, now=102) for _ in range(2)] == ["", REMINDER]
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=102) == ASK.format(
+        slug="demo", name="master@a1-1"
+    )
+
+
+def test_operator_off_after_on_is_away_at_once_with_reminders_and_no_questions(monkeypatch):
+    for key, value in SWARM.items():
+        monkeypatch.setenv(key, value)
+    assert operator_mode.notice({"session_id": "s1", "prompt": "operator on"}, True, now=100) == operator_mode.ON_NOTICE
+    assert operator_mode.notice({"session_id": "s1", "prompt": "operator off"}, True, now=101) == (
+        operator_mode.OFF_NOTICE + "\n" + REMINDER
+    )
+    assert [operator_mode.reminder("s1", SWARM, now=102) for _ in range(2)] == ["", REMINDER]
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=102) != ""
+
+
+def test_operator_off_in_an_unbound_session_tells_only_its_mode(ledgers):
+    assert operator_mode.notice({"session_id": "s1", "prompt": "operator off"}, True, now=100) == (
+        operator_mode.OFF_NOTICE
+    )
+
+
+def test_a_typed_turn_never_outlives_the_presence_deadline(monkeypatch):
+    for key, value in SWARM.items():
+        monkeypatch.setenv(key, value)
+    operator_mode.notice({"session_id": "s1", "prompt": "operator on"}, True, now=1000)
+    assert operator_mode.notice({"session_id": "s1", "prompt": "rebase it"}, True, now=1100) == ""
+    assert operator_mode.present("s1", SWARM, now=1100 + WINDOW - 1)
+    assert [operator_mode.reminder("s1", SWARM, now=1100 + WINDOW - 1) for _ in range(2)] == ["", ""]
+    assert not operator_mode.present("s1", SWARM, now=1100 + WINDOW)
+    assert [operator_mode.reminder("s1", SWARM, now=1100 + WINDOW) for _ in range(2)] == ["", REMINDER]
+
+
+def test_a_typed_turn_while_away_lifts_the_limit_only_inside_the_window(monkeypatch):
+    for key, value in SWARM.items():
+        monkeypatch.setenv(key, value)
+    typed_notice = "Operator present for this turn: reply without a word limit."
+    assert operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100) == typed_notice
+    assert [operator_mode.reminder("s1", SWARM, now=100 + WINDOW - 1) for _ in range(2)] == ["", ""]
+    assert [operator_mode.reminder("s1", SWARM, now=100 + WINDOW) for _ in range(2)] == ["", REMINDER]
+
+
+CHANNEL = '<channel source="inbox" item_id="ITEM" sender="SENDER" sent_at_ms="MILLIS">Automated notice</channel>'
+
+
+def test_an_inbox_channel_prompt_is_not_the_operators():
+    assert not is_operator_prompt(CHANNEL, "demo")
+    assert not is_operator_prompt("\n  " + CHANNEL, "demo")
+    assert not is_operator_prompt('<channel source="other">operator on</channel>', "demo")
+    assert is_operator_prompt("the channel source is the inbox", "demo")
+
+
+def test_a_channel_prompt_neither_lifts_the_limit_nor_renews_the_window(monkeypatch, capsys):
+    run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
+    out = run_prompt(monkeypatch, capsys, "s1", CHANNEL)
+    assert "Operator present for this turn" not in out
+    assert REMINDER in out
+    run_prompt(monkeypatch, capsys, "s1", "operator on")
+    at = operator_mode._load("s1")["at"]
+    run_prompt(monkeypatch, capsys, "s1", CHANNEL)
+    assert operator_mode._load("s1")["at"] == at
+    assert operator_mode.present("s1", SWARM)
+    assert operator_mode.present("s1", SWARM, now=at + WINDOW - 1)
+    assert not operator_mode.present("s1", SWARM, now=at + WINDOW)
 
 
 def test_prompt_and_tool_reminders_respect_the_supplied_presence_clock(monkeypatch):
@@ -333,11 +398,10 @@ def test_the_reminder_stays_silent_while_on_unbound_or_without_a_session(ledgers
 
 def test_the_reminder_count_survives_a_typed_turn():
     assert operator_mode.reminder("s1", SWARM, now=100) == ""
-    operator_mode.observe("s1", "operator on", True, now=101)
-    operator_mode.observe("s1", "operator off", True, now=102)
-    assert operator_mode.reminder("s1", SWARM, now=103) == ""
-    operator_mode.observe("s1", delivery.marked("continue"), False, now=104)
-    assert operator_mode.reminder("s1", SWARM, now=105) == REMINDER
+    operator_mode.observe("s1", "Explain the result", True, now=101)
+    assert operator_mode.reminder("s1", SWARM, now=102) == ""
+    operator_mode.observe("s1", delivery.marked("continue"), False, now=103)
+    assert operator_mode.reminder("s1", SWARM, now=104) == REMINDER
 
 
 def test_the_pre_tool_hook_injects_the_reminder_uncompressed_and_unlogged(monkeypatch):

@@ -18,6 +18,7 @@ REMINDER = "Operator not present: replies stay within {words} words."
 SWITCH = re.compile(r"operator (on|off)\b")
 ON_NOTICE = "Operator on: the operator is present in this pane until thirty minutes after his last typed message."
 OFF_NOTICE = "Operator off: the operator is not present in this pane."
+TURN_NOTICE = "Operator present for this turn: reply without a word limit."
 QUESTION_TOOL = "AskUserQuestion"
 ASK_REFUSAL = (
     "The operator is not present in this pane, so the question tool is off. Put the question on the ledger with "
@@ -56,6 +57,10 @@ def switch(prompt):
     return found.group(1) if found else ""
 
 
+def _turn(state, now):
+    return state.get("turn_at") is not None and now - state["turn_at"] < WINDOW_SEC
+
+
 def observe(session_id, prompt, typed, now=None):
     if not session_id:
         return ""
@@ -64,7 +69,7 @@ def observe(session_id, prompt, typed, now=None):
     state = _load(session_id)
     if word or (typed and _on(state, now)):
         state.update(on=word != "off", at=now)
-    _save(session_id, {**state, "turn_present": bool(typed)})
+    _save(session_id, {**state, "turn_at": now if typed and word != "off" else None})
     return word
 
 
@@ -72,10 +77,10 @@ def notice(payload, typed, now=None):
     session_id = payload.get("session_id")
     word = observe(session_id, payload.get("prompt"), typed, now)
     text = {"on": ON_NOTICE, "off": OFF_NOTICE}.get(word, "")
-    if session_id and typed and not present(session_id, now=now):
-        return "\n".join(filter(None, (text, "Operator present for this turn: reply without a word limit.")))
+    if session_id and typed and word != "off" and not present(session_id, now=now):
+        return TURN_NOTICE
     if _away(session_id, None, now):
-        return _reminder_text(None)
+        return "\n".join(filter(None, (text, _reminder_text(None))))
     return text
 
 
@@ -106,7 +111,8 @@ def question_block(tool_name, session_id, environ=None, now=None):
 
 
 def _away(session_id, environ, now):
-    return bool(session_id) and not present(session_id, environ, now) and not _load(session_id).get("turn_present")
+    now = time.time() if now is None else now
+    return bool(session_id) and not present(session_id, environ, now) and not _turn(_load(session_id), now)
 
 
 def _reminder_text(environ):

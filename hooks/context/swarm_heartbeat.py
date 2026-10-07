@@ -6,6 +6,7 @@ import time
 from scripts.swarm import idle, session_model
 
 NOTIFICATION = "<task-notification>"
+CHANNEL = "<channel source="
 
 
 def beat(state, environ=None, redis=None, now_ms=None):
@@ -22,13 +23,17 @@ def beat(state, environ=None, redis=None, now_ms=None):
 
 
 def is_operator_prompt(prompt, slug):
-    """False for the prompts the swarm itself types into a pane: marked deliveries, inbox wakes, idle nudges, task notifications."""
+    """False for the prompts the swarm itself puts into a pane: marked deliveries, inbox wakes, idle nudges, task notifications, channel items."""
     from scripts.inbox.wake import WAKE_TEXT
     from scripts.swarm.delivery import MARK
     from scripts.swarm.tick import NUDGE
 
     text = prompt.strip()
-    return bool(text) and text not in (WAKE_TEXT, NUDGE.format(slug=slug)) and not text.startswith((NOTIFICATION, MARK))
+    return (
+        bool(text)
+        and text not in (WAKE_TEXT, NUDGE.format(slug=slug))
+        and not text.startswith((NOTIFICATION, CHANNEL, MARK))
+    )
 
 
 def heard(prompt, environ=None, redis=None, now_ms=None):
