@@ -314,3 +314,16 @@ def test_overlays_reads_the_declared_overlays(tmp_path, manifest, expected):
         (tmp_path / "profile.yml").write_text(manifest)
 
     assert profile_chain.overlays(tmp_path) == expected
+
+
+def test_rendered_overlays_read_the_home_stamp(tmp_path):
+    stamp = tmp_path / profile_chain.RENDER_STAMP
+    assert profile_chain.rendered_overlays(tmp_path) == []
+    stamp.write_text(json.dumps({"chain": ["a", "brain"], "overlays": ["brain"]}))
+    assert profile_chain.rendered_overlays(tmp_path) == ["brain"]
+    stamp.write_text(json.dumps({"chain": ["a", "brain"]}))
+    assert profile_chain.rendered_overlays(tmp_path) == []
+    stamp.write_text("{")
+    assert profile_chain.rendered_overlays(tmp_path) == []
+    stamp.write_text("[]")
+    assert profile_chain.rendered_overlays(tmp_path) == []

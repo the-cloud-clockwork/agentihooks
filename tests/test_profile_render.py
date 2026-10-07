@@ -397,16 +397,30 @@ def test_the_package_prefix_names_the_same_role(world, tmp_path, monkeypatch):
     assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
 
 
-def test_claude_render_subscribes_every_profile_to_brain(world):
+def test_claude_render_keeps_a_home_without_brain_off_the_brain_channel(world):
     from scripts.profiles import render
 
     out = render.render_claude("rb-role")
 
-    assert json.loads((out / "settings.json").read_text())["env"]["AGENTIHOOKS_BASE_CHANNELS"] == "brain"
-    assert render.channels("rb-role") == "brain"
+    assert "AGENTIHOOKS_BASE_CHANNELS" not in json.loads((out / "settings.json").read_text())["env"]
+    assert render.channels("rb-role") == ""
+    assert json.loads((out / render.STAMP).read_text())["overlays"] == []
 
 
-def test_brain_joins_the_profile_channels_once(world):
+@pytest.fixture
+def named_brain(world, tmp_path):
+    brain = tmp_path / "kernel" / "profiles" / "brain"
+    _write(brain / "profile.yml", "name: brain\n")
+    install = world["install"]
+    state = install._load_state()
+    state["linked_profiles"] = [{"name": "brain", "path": str(brain)}]
+    install._save_state(state)
+    profile = world["role"] / "profile.yml"
+    profile.write_text(profile.read_text() + "allowedOverlays: [brain]\n")
+    return brain
+
+
+def test_brain_joins_the_profile_channels_once(world, named_brain):
     from scripts.profiles import render
 
     overrides = world["role"] / ".claude" / "settings.overrides.json"
@@ -420,6 +434,7 @@ def test_brain_joins_the_profile_channels_once(world):
     out = render.render_claude("rb-role", force=True)
     assert json.loads((out / "settings.json").read_text())["env"]["AGENTIHOOKS_BASE_CHANNELS"] == "brain,amygdala"
     assert render.channels("rb-role") == "brain,amygdala"
+    assert json.loads((out / render.STAMP).read_text())["overlays"] == ["brain"]
 
 
 def test_channels_read_the_bundle_layer(world):
@@ -428,7 +443,7 @@ def test_channels_read_the_bundle_layer(world):
     overrides = {"env": {"AGENTIHOOKS_BASE_CHANNELS": "amygdala"}}
     (world["bundle"] / ".claude" / "settings.overrides.json").write_text(json.dumps(overrides))
 
-    assert render.channels("rb-role") == "amygdala,brain"
+    assert render.channels("rb-role") == "amygdala"
 
 
 def test_claude_render_excludes_default_home_instructions(world):
@@ -1308,10 +1323,18 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "bundle_commit": head,
         "base": base,
         "chain": chain,
+        "overlays": [],
         "plugins": {},
         "corrections": "",
     }
-    assert render._stamp(None, []) == {"bundle_commit": "", "base": base, "chain": [], "plugins": {}, "corrections": ""}
+    assert render._stamp(None, []) == {
+        "bundle_commit": "",
+        "base": base,
+        "chain": [],
+        "overlays": [],
+        "plugins": {},
+        "corrections": "",
+    }
     assert render._roots(None, [("rb-role", world["role"])]) == [world["role"]]
 
 
@@ -1458,9 +1481,17 @@ def test_render_layers_each_declared_overlay_like_a_profile(world, brain_overlay
     assert "rb-brain-srv" in json.loads((out / ".claude.json").read_text())["mcpServers"]
     chain = json.loads((out / render.STAMP).read_text())["chain"]
     assert chain[-1] == "rb-brain" and chain.count("rb-brain") == 1 and "rb-router" not in chain
+    assert json.loads((out / render.STAMP).read_text())["overlays"] == ["rb-brain"]
     if target == "codex":
         config = tomllib.loads((out.parent / "codex" / "config.toml").read_text())
         assert "rb-brain-srv" in config["mcp_servers"]
+
+
+@pytest.mark.parametrize("name,declared", [("rb-role", ["rb-brain"]), ("rb-op", ["rb-brain"]), ("rb-other", [])])
+def test_declared_names_each_resolvable_overlay_once(world, brain_overlay, name, declared):
+    from scripts.profiles import render
+
+    assert render.declared(name) == declared
 
 
 def test_render_skips_an_overlay_no_profile_declares(world, brain_overlay):
@@ -1470,6 +1501,7 @@ def test_render_skips_an_overlay_no_profile_declares(world, brain_overlay):
 
     assert "BRAIN USAGE MARKER" not in (out / "CLAUDE.md").read_text()
     assert json.loads((out / render.STAMP).read_text())["chain"] == ["rb-other"]
+    assert json.loads((out / render.STAMP).read_text())["overlays"] == []
 
 
 def _scratch_bundle(world, tmp_path: Path) -> Path:
