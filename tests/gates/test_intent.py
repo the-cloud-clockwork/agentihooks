@@ -305,6 +305,7 @@ class TestState:
             "changed_files": ["scripts/gates/intent.py"],
             "proof": {"command": "pytest"},
             "proof_notes": "tail of proof",
+            "reviewer_findings": {},
         }
 
     def test_a_task_without_a_workspace_has_no_proof_notes(self):
@@ -320,10 +321,15 @@ class TestState:
     @pytest.mark.parametrize("body,expected", [(None, ""), ("Closes 4", "Closes 4")])
     def test_pr_view_reads_title_body_and_file_paths(self, body, expected):
         raw = {"title": "T", "body": body, "files": [{"path": "a.py", "additions": 1}, {"path": "b.py"}]}
-        ran = Ran((0, json.dumps(raw)))
-        assert intent.pr_view(URL, run=ran) == {"title": "T", "body": expected, "files": ["a.py", "b.py"]}
+        ran = Ran((0, json.dumps(raw)), (0, "[]"))
+        assert intent.pr_view(URL, run=ran) == {
+            "title": "T",
+            "body": expected,
+            "files": ["a.py", "b.py"],
+            "reviewer_findings": {"reviews": [], "comments": [], "inline": []},
+        }
         args, kwargs = ran.calls[0]
-        assert args == ["gh", "pr", "view", URL, "--json", "title,body,files"]
+        assert args == ["gh", "pr", "view", URL, "--json", "title,body,files,reviews,comments"]
         assert (kwargs["capture_output"], kwargs["text"], kwargs["timeout"]) == (True, True, intent.GH_TIMEOUT_SEC)
 
     @pytest.mark.parametrize("results", [[(1, "")], [(0, "nope")], [OSError("x")], [(0, json.dumps({"body": "b"}))]])
