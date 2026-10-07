@@ -225,6 +225,8 @@ def test_unknown_names_each_empty_field_the_live_process_holds():
     assert live_binding.unknown(replace(held, profile=""), live) == ["profile"]
     assert live_binding.compare(replace(held, profile=""), {**live, "account": "team", "hooks": True}) == {}
     assert live_binding.compare(bare, {**live, "hooks": True}) == {}
+    moved = {**live, "home": "/elsewhere", "hooks": True}
+    assert list(live_binding.compare(validated, moved)) == ["home"]
     assert live_binding.compare(bare, {**live, "hooks": False}) == {"hooks": {"expected": True, "actual": False}}
 
 
