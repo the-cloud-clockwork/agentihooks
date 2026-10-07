@@ -31,7 +31,7 @@ FINAL_RED = RED - {"TIMED_OUT"}
 PASSED = {"SUCCESS", "SKIPPED"}
 PENDING = {None, "", "PENDING", "EXPECTED"}
 GATE = "Gate — Required"
-GATE_JOB = re.compile(rf"^\s+name:\s*(['\"]?){re.escape(GATE)}\1\s*$", re.MULTILINE)
+GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
     "commits(last:1){nodes{commit{committedDate "

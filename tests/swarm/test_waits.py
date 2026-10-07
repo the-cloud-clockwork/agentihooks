@@ -677,6 +677,7 @@ def gated_probe(rollup, suites, tree):
         GATE_WORKFLOW,
         "jobs:\n  gate:\n    name: 'Gate — Required'\n",
         'jobs:\n  gate:\n    name: "Gate — Required"  \n',
+        "jobs:\n  gate:\n\tname:\tGate — Required\t\n\n",
     ],
 )
 def test_the_probe_reads_a_declared_gate_from_the_head_workflows(text):
@@ -695,6 +696,8 @@ def test_the_probe_reads_a_declared_gate_from_the_head_workflows(text):
         workflows("jobs:\n  gate:\n    name: 'Gate — Required\"\n"),
         {"object": {"entries": [{"name": "x.yml", "object": None}]}},
         workflows("name: Gate — Required\njobs:\n  unit:\n    runs-on: ubuntu-latest\n"),
+        workflows("on: push\n\nname: Gate — Required\n"),
+        workflows("jobs:\n  gate:\n    name:\n      Gate — Required\n"),
     ],
 )
 def test_the_probe_without_a_declared_gate_resolves_on_every_check(tree):
