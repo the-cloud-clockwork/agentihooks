@@ -416,7 +416,8 @@ def test_each_domain_schema_rejects_unknown_fields_without_mutation(live):
             },
         )
         assert status == 400
-        assert reply == {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}}
+        message = f"Operation {kind} does not match its schema at field unexpected"
+        assert reply == {"error": {"code": "schema_invalid", "message": message}}
     assert request(live, "GET", "metadata") == before
 
 
@@ -1005,6 +1006,10 @@ def test_central_mutation_schema_boundaries_leave_state_unchanged(live):
         expected = "Request does not match the resource schema"
         if index == 0:
             expected = "At least one operation is required"
+        if index in (5, 6, 7, 8):
+            expected = "Operation sync does not match its schema at field id"
+        if index == 9:
+            expected = "Operation join does not match its schema at field by"
         if index in (10, 11):
             expected = "Checkbox changes need a distinct operation identifier"
         assert request(live, "POST", "operations", payload) == (
@@ -1019,7 +1024,12 @@ def test_central_mutation_schema_boundaries_leave_state_unchanged(live):
         live, "POST", "operations", {"ops": [{"op": "title_set", "id": "empty-title", "text": ""}], "guards": {}}
     ) == (
         400,
-        {"error": {"code": "schema_invalid", "message": "Operation does not match its domain schema"}},
+        {
+            "error": {
+                "code": "schema_invalid",
+                "message": "Operation does not match its domain schema: title_set needs a title of 1 to 200 characters",
+            }
+        },
     )
     assert request(live, "GET", "metadata") == before
 
@@ -1052,12 +1062,13 @@ def test_operation_string_and_identifier_limits_are_central(live):
         {"operation_id": "", "ops": [{"op": "sync", "id": "sync"}], "guards": {}},
         {"operation_id": "x" * 201, "ops": [{"op": "sync", "id": "sync"}], "guards": {}},
     ]
-    for payload in payloads:
+    for index, payload in enumerate(payloads):
+        message = "Request does not match the resource schema"
+        if index == 0:
+            message = "Operation title_set does not match its schema at field text"
         assert request(live, "POST", "operations", payload) == (
             400,
-            {
-                "error": {"code": "schema_invalid", "message": "Request does not match the resource schema"},
-            },
+            {"error": {"code": "schema_invalid", "message": message}},
         )
 
 
@@ -2065,7 +2076,13 @@ def test_known_hash_shaped_task_ids_keep_the_comment_exemption(live):
     }
     assert request(live, "POST", "operations", payload) == (
         400,
-        {"error": {"code": "schema_invalid", "message": "Operation does not match its domain schema"}},
+        {
+            "error": {
+                "code": "schema_invalid",
+                "message": "Operation does not match its domain schema: chat refused, write plain words for the "
+                "operator (what was done, or why it was skipped): commit hash 'feedfac3'",
+            }
+        },
     )
     assert request(live, "GET", "chat")[1]["revision"] == revision
 
