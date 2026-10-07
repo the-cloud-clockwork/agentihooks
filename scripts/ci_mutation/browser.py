@@ -64,7 +64,7 @@ def main() -> int:
     changes = discover_changes(root, args.base, "HEAD")
     tests = sorted({test for path in changes for test in select_tests(root, Path(path))})
     browser = str(needs_browser(root, tests)).lower()
-    print(f"Selected mutation tests: {len(tests)}\nBrowser required: {browser}", flush=True)
+    print(f"Selected mutation tests: {len(tests)}\nBrowser required: {browser}")
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a") as stream:
             stream.write(f"browser={browser}\n")
