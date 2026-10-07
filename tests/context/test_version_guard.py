@@ -436,6 +436,18 @@ def test_codex_patch_moving_the_manifest_away_is_refused(tmp_path):
     _refused(_codex_patch(target, f"*** Move to: {tmp_path / 'old.toml'}", "@@", ' name = "x"'))
 
 
+def _indented_patch(target, *lines):
+    body = "\n".join(("  *** Begin Patch", f"  *** Update File: {target}", *lines, "  *** End Patch"))
+    with patch.dict(os.environ, {"AGENTIHOOKS_TARGET": "codex"}):
+        return normalize_payload({"tool_name": "apply_patch", "tool_input": {"command": body}, "cwd": ""})
+
+
+def test_codex_patch_with_indented_headers_is_judged(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    check_version_guard(_indented_patch(target, *_SWITCH))
+    _refused(_indented_patch(target, "@@", '-version = "2.17.0"', '+version = "2.18.0"'))
+
+
 def test_codex_patch_deleting_the_manifest_is_refused(tmp_path):
     _refused(_codex_patch(_manifest(tmp_path), action="Delete"))
 

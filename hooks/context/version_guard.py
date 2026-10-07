@@ -7,8 +7,7 @@ Raises BlockAction when Edit or Write targets a project manifest file
 and the content contains a version field change. A Codex patch arrives as an
 Edit carrying the patch body and is judged per file section by the text it
 would leave; a section that cannot be applied falls back to the text check.
-pyproject.toml, Cargo.toml
-and package.json are judged by their parsed version keys and VERSION files by
+pyproject.toml, Cargo.toml and package.json are judged by their parsed version keys and VERSION files by
 their content. The one allowed change is
 switching pyproject.toml from a static version to a setuptools-scm tag derived
 one that adds no version literal.
@@ -71,8 +70,8 @@ _TAG_SWITCH_HINT = (
 def check_version_guard(payload: dict) -> None:
     """Block version field modifications in project manifest files.
 
-    Raises BlockAction if the tool is Edit/Write targeting a version file
-    and the content contains a version field pattern.
+    Raises BlockAction if the tool is Edit/Write, or a Codex patch section,
+    targeting a version file and the content contains a version field pattern.
     """
     tool_name = payload.get("tool_name", "")
     tool_input = payload.get("tool_input", {})
@@ -86,12 +85,12 @@ def check_version_guard(payload: dict) -> None:
 
 def _patch_body(tool_input: dict) -> str:
     new = tool_input.get("new_string", "")
-    return new if "old_string" not in tool_input and new.startswith(_PATCH_START) else ""
+    return new if "old_string" not in tool_input and new.lstrip().startswith(_PATCH_START) else ""
 
 
 def _file_inputs(tool_input: dict) -> list[dict]:
     patch = _patch_body(tool_input)
-    headers = (_PATCH_FILE.match(line) for line in patch.splitlines())
+    headers = (_PATCH_FILE.match(line.strip()) for line in patch.splitlines())
     return [{**tool_input, "file_path": header.group(2).strip()} for header in headers if header] or [tool_input]
 
 
@@ -157,9 +156,9 @@ def _edited_text(tool_name: str, tool_input: dict, before: str) -> str:
 def _patch_section(patch: str, file_path: str) -> tuple[str, list[str]] | None:
     action, lines, collecting = "", [], False
     for line in patch.splitlines():
-        header = _PATCH_FILE.match(line)
+        header = _PATCH_FILE.match(line.strip())
         if header is None:
-            if collecting and line != _PATCH_END:
+            if collecting and line.strip() != _PATCH_END:
                 lines.append(line)
             continue
         kind, path = header.group(1), header.group(2).strip()
