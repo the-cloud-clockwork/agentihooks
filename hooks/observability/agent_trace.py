@@ -178,11 +178,16 @@ def _assistant_text(entries: list[dict]) -> str:
     return "\n\n".join(t for t in texts if t)
 
 
-def _generations(turn: list[dict]) -> dict[str, tuple[int, dict]]:
+def _turn_output(turn: list[dict], carry: Mapping | None) -> str:
+    earlier = carry["text"] if carry else ""
+    return "\n\n".join(text for text in (earlier, _assistant_text(turn)) if text)
+
+
+def _generations(turn: list[dict], previous: int | None = None) -> dict[str, tuple[int, dict]]:
     """message id -> (start ns, last entry carrying it); start is the entry before its first block."""
     found: dict[str, tuple[int, dict]] = {}
-    previous = _ns(turn[0])
-    for entry in turn:
+    previous = _ns(turn[0]) if previous is None else previous
+    for entry in turn[1:]:
         message = entry.get("message")
         if entry.get("type") == "assistant" and isinstance(message, dict) and message.get("id"):
             start = found[message["id"]][0] if message["id"] in found else previous
@@ -198,9 +203,16 @@ def _outcome(result: dict) -> dict:
 
 
 def _turn_spans(
-    session_id: str, number: int, turn: list[dict], root: int, results: dict | None = None
+    session_id: str,
+    number: int,
+    turn: list[dict],
+    root: int,
+    results: dict | None = None,
+    carry: Mapping | None = None,
 ) -> list[SpanSpec]:
+    carry = carry or {}
     turn_id = _span_id(session_id, turn[0].get("uuid", str(number)))
+    output = _turn_output(turn, carry)
     spans = [
         SpanSpec(
             f"turn {number}",
@@ -211,11 +223,11 @@ def _turn_spans(
             {
                 "langfuse.observation.type": "span",
                 "agent.turn": number,
-                **_io(_prompt_text(turn), _assistant_text(turn)),
+                **_io(_prompt_text(turn), output),
             },
         )
     ]
-    for message_id, (start, entry) in _generations(turn).items():
+    for message_id, (start, entry) in _generations(turn, carry.get("previous_ns")).items():
         message = entry["message"]
         model = message.get("model", "")
         same_message = [e for e in turn if isinstance(e.get("message"), dict) and e["message"].get("id") == message_id]
@@ -263,14 +275,19 @@ def session_spans(
     cost: float | None = None,
     first_turn: int = 0,
     root: Mapping[str, object] | None = None,
+    paged: Mapping | None = None,
 ) -> list[SpanSpec]:
     all_turns = turns(entries)
     if not all_turns:
         return []
+    paged = paged or {}
     session_id = identity.session_id
     root_id = _span_id(session_id, "root")
-    totals = {"gen_ai.usage.input_tokens": 0, "gen_ai.usage.output_tokens": 0}
-    model = ""
+    totals = {
+        "gen_ai.usage.input_tokens": paged.get("input_tokens", 0),
+        "gen_ai.usage.output_tokens": paged.get("output_tokens", 0),
+    }
+    model = paged.get("model", "")
     for turn in all_turns:
         for _, entry in _generations(turn).values():
             usage = _usage_attributes(entry["message"].get("usage") or {})
@@ -278,6 +295,7 @@ def session_spans(
                 totals[key] += usage[key]
             model = entry["message"].get("model") or model
     name = identity.agent or "agent-session"
+    offset = paged.get("turns", 0)
     attributes = {
         "langfuse.observation.type": "agent",
         "langfuse.trace.name": name,
@@ -288,30 +306,36 @@ def session_spans(
         "gen_ai.agent.name": name,
         "gen_ai.conversation.id": session_id,
         "gen_ai.request.model": model,
-        "agent.turns": len(all_turns),
+        "agent.turns": offset + len(all_turns),
         **totals,
     }
     if cost is not None:
         attributes["gen_ai.usage.cost"] = float(cost)
     attributes.update(root or {})
     trace_io = {
-        "langfuse.trace.input": _prompt_text(all_turns[0]),
-        "langfuse.trace.output": _assistant_text(all_turns[-1]),
+        "langfuse.trace.input": paged.get("input", _prompt_text(all_turns[0])),
+        "langfuse.trace.output": _turn_output(all_turns[-1], paged.get("open") if len(all_turns) == 1 else None),
     }
     attributes.update(_fields(trace_io))
-    spans = [SpanSpec(name, root_id, None, _ns(all_turns[0][0]), _ns(all_turns[-1][-1]), attributes)]
-    results = {
+    start = paged.get("start_ns") or _ns(all_turns[0][0])
+    spans = [SpanSpec(name, root_id, None, start, _ns(all_turns[-1][-1]), attributes)]
+    results = _results(entries)
+    for number, turn in enumerate(all_turns[first_turn:], start=offset + first_turn + 1):
+        carry = paged.get("open") if number == offset + 1 else None
+        spans.extend(_turn_spans(session_id, number, turn, root_id, results, carry))
+    shared = {"langfuse.session.id": session_id, "langfuse.user.id": identity.user_id()}
+    for span in spans:
+        span.attributes.update({key: value for key, value in shared.items() if value})
+    return spans
+
+
+def _results(entries: list[dict]) -> dict:
+    return {
         block.get("tool_use_id"): (entry, block)
         for entry in entries
         for block in _blocks(entry)
         if isinstance(block, dict) and block.get("type") == "tool_result"
     }
-    for number, turn in enumerate(all_turns[first_turn:], start=first_turn + 1):
-        spans.extend(_turn_spans(session_id, number, turn, root_id, results))
-    shared = {"langfuse.session.id": session_id, "langfuse.user.id": identity.user_id()}
-    for span in spans:
-        span.attributes.update({key: value for key, value in shared.items() if value})
-    return spans
 
 
 def read_entries(transcript_path: str) -> list[dict]:
@@ -500,31 +524,44 @@ def _record_revisions(records: dict) -> dict:
     }
 
 
-def _pending_bytes(state: dict, records: dict, pending: list) -> int:
+def _waiting(state: dict, records: dict) -> dict:
     revisions = _record_revisions(records)
     accepted = state.get("accepted_records", {})
-    waiting = {key: record for key, record in records.items() if accepted.get(key) != revisions[key]}
-    return len(json.dumps({"records": waiting, "pending": pending}, ensure_ascii=False).encode())
+    return {key: record for key, record in records.items() if accepted.get(key) != revisions[key]}
+
+
+def _pending_bytes(state: dict, records: dict, pending: list) -> int:
+    return len(json.dumps({"records": _waiting(state, records), "pending": pending}, ensure_ascii=False).encode())
 
 
 def _stage_source(state: dict, transcript_path: str) -> None:
-    from hooks.observability.transcript import complete_records, mask_value, record_id
+    from hooks.observability.transcript import iter_complete_records, mask_value, record_id
 
-    records, position, unsupported = complete_records(transcript_path)
     merged = dict(state["records"])
     legacy = "legacy_turns" in state and not merged
-    for index, record in enumerate(records):
+    point = _resume_point(state, transcript_path)
+    position, count, unsupported = point["offset"], point["records"], point["unsupported"]
+    size = _pending_bytes(state, merged, state["pending"])
+    waiting = bool(_waiting(state, merged))
+    empty = not state["pending"]
+    state.pop("overflow", None)
+    for record, end in iter_complete_records(transcript_path, position):
+        if record is None:
+            unsupported, position = unsupported + 1, end
+            continue
         key = record_id(record)
         masked = mask_value(record)
-        source_id = str(index) if legacy and record.get("type") == "response_item" else key
+        source_id = str(count) if legacy and record.get("type") == "response_item" else key
         masked["_source_id"] = merged.get(key, {}).get("_source_id", source_id)
-        merged[key] = masked
-    size = _pending_bytes(state, merged, state["pending"])
-    if size > PENDING_MAX_BYTES:
-        state["overflow"] = {"bytes": size, "limit": PENDING_MAX_BYTES}
-        _report_progress(state, "overflow")
-        return
-    state.pop("overflow", None)
+        if merged.get(key) != masked:
+            weight = len(json.dumps({key: masked}, ensure_ascii=False).encode()) - (0 if waiting else 2)
+            if size + weight > PENDING_MAX_BYTES and not empty:
+                state["overflow"] = {"bytes": size + weight, "limit": PENDING_MAX_BYTES}
+                _report_progress(state, "overflow")
+                break
+            size, empty, waiting = size + weight, False, True
+            merged[key] = masked
+        position, count = end, count + 1
     state["records"] = merged
     state["unsupported_records"] = unsupported
     stat = Path(transcript_path).stat()
@@ -532,9 +569,61 @@ def _stage_source(state: dict, transcript_path: str) -> None:
         "device": stat.st_dev,
         "inode": stat.st_ino,
         "buffered_bytes": position,
-        "records": len(records),
+        "records": count,
         "accepted_bytes": state["source"].get("accepted_bytes", 0),
     }
+
+
+def _resume_point(state: dict, transcript_path: str) -> dict:
+    """Where reading resumes: just past the last paged record when this source still holds it."""
+    start = {"offset": 0, "records": 0, "unsupported": 0}
+    paged = state.get("paged") or {}
+    if not paged.get("boundary"):
+        return start
+    stat = Path(transcript_path).stat()
+    point = paged.get("source") or {}
+    if (point.get("device"), point.get("inode")) != (stat.st_dev, stat.st_ino) or not _still_at(transcript_path, point):
+        point = {"device": stat.st_dev, "inode": stat.st_ino, **start}
+    if point.get("boundary") != paged["boundary"]:
+        point = _scan_to(transcript_path, point, paged["boundary"])
+    paged["source"] = point
+    return point
+
+
+def _still_at(transcript_path: str, point: dict) -> bool:
+    from hooks.observability.transcript import record_id
+
+    if not point.get("offset"):
+        return True
+    with open(transcript_path, "rb") as handle:
+        handle.seek(point["line"])
+        line = handle.read(point["offset"] - point["line"])
+    try:
+        return line.endswith(b"\n") and record_id(json.loads(line)) == point["boundary"]
+    except (ValueError, UnicodeDecodeError, AttributeError):
+        return False
+
+
+def _scan_to(transcript_path: str, point: dict, boundary: str) -> dict:
+    from hooks.observability.transcript import iter_complete_records, record_id
+
+    line, records, unsupported = point["offset"], point["records"], point["unsupported"]
+    for record, end in iter_complete_records(transcript_path, point["offset"]):
+        if record is None:
+            unsupported += 1
+        else:
+            records += 1
+            if record_id(record) == boundary:
+                return {
+                    **point,
+                    "line": line,
+                    "offset": end,
+                    "records": records,
+                    "unsupported": unsupported,
+                    "boundary": boundary,
+                }
+        line = end
+    return {**point, "boundary": boundary}
 
 
 def _revision(spec: SpanSpec) -> str:
@@ -581,15 +670,16 @@ def _prepare_pending(session_id: str, state: dict, identity: Identity) -> None:
     from hooks.context.context_usage import session_cost
     from hooks.observability.transcript import mask_value
 
+    paged = state.get("paged") or {}
     entries = _normalize(list(state["records"].values()))
-    spans = session_spans(entries, identity, session_cost(session_id), root=_root_attributes(session_id))
+    spans = session_spans(entries, identity, session_cost(session_id), root=_root_attributes(session_id), paged=paged)
     spans = list({spec.span_id: spec for spec in spans}.values())
-    unsupported = _unsupported_io(list(state["records"].values()), entries)
+    unsupported = _unsupported_io(list(state["records"].values()), entries) + paged.get("unsupported", 0)
     if spans:
         spans[0].attributes.update(
             {
-                "agentihooks.export.spans": len(spans),
-                "agentihooks.export.truncated_fields": _truncated_fields(spans),
+                "agentihooks.export.spans": len(spans) + paged.get("spans", 0),
+                "agentihooks.export.truncated_fields": _truncated_fields(spans) + paged.get("truncated", 0),
                 "agentihooks.export.unsupported_io": unsupported,
                 "agentihooks.export.unsupported_records": state.get("unsupported_records", 0),
                 "agentihooks.export.replay_contract": "legacy-observations",
@@ -607,13 +697,8 @@ def _prepare_pending(session_id: str, state: dict, identity: Identity) -> None:
         key = f"{spec.span_id:016x}"
         if state["accepted"].get(key) != _revision(spec):
             pending.append(asdict(spec))
-    size = _pending_bytes(state, state["records"], pending)
-    if size > PENDING_MAX_BYTES:
-        state["overflow"] = {"bytes": size, "limit": PENDING_MAX_BYTES}
-        _report_progress(state, "overflow")
-        return
     state["pending"] = pending
-    state["buffered_turns"] = len(turns(entries))
+    state["buffered_turns"] = len(turns(entries)) + paged.get("turns", 0)
     state["pending_source"] = dict(state["source"])
     state["pending_records"] = _record_revisions(state["records"])
 
@@ -701,7 +786,114 @@ def _send_pending(session_id: str, state: dict, exporter) -> None:
         accepted_source = state.get("pending_source", {})
         state["source"]["accepted_bytes"] = accepted_source.get("buffered_bytes", 0)
         state["turns"] = state.get("buffered_turns", 0)
+        _page_accepted(session_id, state)
         _save_progress(session_id, state)
+
+
+def _message_id(entry: dict) -> object:
+    message = entry.get("message")
+    return message.get("id") if isinstance(message, dict) else None
+
+
+def _open_calls(entry: dict, results: dict) -> bool:
+    return entry.get("type") == "assistant" and any(
+        isinstance(block, dict) and block.get("type") == "tool_use" and block.get("id") not in results
+        for block in _blocks(entry)
+    )
+
+
+def _paging_cut(all_turns: list[list[dict]], results: dict) -> tuple[int, int] | None:
+    """(turn, entry) of the first entry kept: everything before it is closed and may be paged out."""
+    flat = [
+        ((turn_index, entry_index), entry)
+        for turn_index, turn in enumerate(all_turns)
+        for entry_index, entry in enumerate(turn)
+    ]
+    cut = None
+    for index, (position, entry) in enumerate(flat):
+        message = _message_id(entry)
+        if index and (message is None or message != _message_id(flat[index - 1][1])):
+            cut = position
+        if _open_calls(entry, results):
+            break
+    return cut
+
+
+def _aggregate(session_id: str, records: list[dict], paged: Mapping) -> dict:
+    entries = _normalize(records)
+    spans = session_spans(entries, Identity(session_id), paged=paged)
+    root = spans[0]
+    return {
+        "turns": root.attributes["agent.turns"],
+        "spans": {spec.span_id for spec in spans[1:]},
+        "truncated": _truncated_fields(spans[1:]) + paged.get("truncated", 0),
+        "unsupported": _unsupported_io(records, entries) + paged.get("unsupported", 0),
+        "input_tokens": root.attributes["gen_ai.usage.input_tokens"],
+        "output_tokens": root.attributes["gen_ai.usage.output_tokens"],
+        "model": root.attributes["gen_ai.request.model"],
+        "start_ns": root.start_ns,
+    }
+
+
+def _kept_records(values: list[dict], all_turns: list[list[dict]], cut: tuple[int, int]) -> list[int] | None:
+    positions: dict = {}
+    for index, record in enumerate(values):
+        positions.setdefault(record.get("uuid"), index)
+        positions.setdefault(f"codex-{record.get('_source_id')}", index)
+    turn, entry = cut
+    first = positions.get(all_turns[turn][entry].get("uuid"))
+    prompt = positions.get(all_turns[turn][0].get("uuid"))
+    if first is None or prompt is None:
+        return None
+    kept = set(range(first, len(values)))
+    if entry:
+        kept.add(prompt)
+    contexts = [index for index in range(first) if values[index].get("type") == "turn_context"]
+    kept.update(contexts[-1:])
+    return sorted(kept)
+
+
+def _page_accepted(session_id: str, state: dict) -> None:
+    """Drop accepted records whose observations can no longer change, carrying what the root still needs."""
+    records = state["records"]
+    if _waiting(state, records):
+        return
+    keys, values = list(records), list(records.values())
+    entries = _normalize(values)
+    all_turns = turns(entries)
+    cut = _paging_cut(all_turns, _results(entries))
+    kept = None if cut is None else _kept_records(values, all_turns, cut)
+    if kept is None:
+        return
+    dropped = [index for index in range(len(values)) if index not in kept]
+    if not dropped:
+        return
+    paged = state.get("paged") or {}
+    turn, entry = cut
+    carry = {}
+    if entry:
+        text = _turn_output(all_turns[turn][1:entry], paged.get("open") if turn == 0 else None)
+        carry["open"] = {"text": text, "previous_ns": _ns(all_turns[turn][entry - 1])}
+    full = _aggregate(session_id, values, paged)
+    rest = _aggregate(session_id, [values[index] for index in kept], carry)
+    target = {
+        key: full[key] - rest[key] for key in ("turns", "truncated", "unsupported", "input_tokens", "output_tokens")
+    }
+    target.update(
+        carry,
+        spans=paged.get("spans", 0) + len(full["spans"] - rest["spans"]),
+        model=full["model"],
+        input=paged.get("input", _prompt_text(all_turns[0])),
+        start_ns=full["start_ns"],
+        boundary=keys[dropped[-1]],
+        source=paged.get("source"),
+    )
+    for span_id in full["spans"] - rest["spans"]:
+        del state["accepted"][f"{span_id:016x}"]
+    state["records"] = {keys[index]: values[index] for index in kept}
+    for name in ("accepted_records", "pending_records"):
+        state[name] = {key: value for key, value in state[name].items() if key in state["records"]}
+    state["paged"] = target
 
 
 def export_session(session_id: str, transcript_path: str, identity: Identity | None = None) -> None:
