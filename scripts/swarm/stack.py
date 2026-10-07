@@ -111,12 +111,11 @@ def _restack_base(row, context):
         "cannot resolve the stacked base",
     )
     path = Path(_out(["git", "rev-parse", "--git-path", "agentihooks-restack.json"], "cannot locate restack state"))
-    if shell(["git", "merge-base", "--is-ancestor", base, "HEAD"]).returncode == 0:
-        if (
-            not row.get("branch")
-            or shell(["git", "merge-base", "--is-ancestor", f"origin/{row['branch']}", "HEAD"]).returncode != 0
-        ):
-            raise SwarmError("this worktree was not cut from the parked branch")
+    if (
+        shell(["git", "merge-base", "--is-ancestor", base, "HEAD"]).returncode == 0
+        and row.get("branch")
+        and shell(["git", "merge-base", "--is-ancestor", f"origin/{row['branch']}", "HEAD"]).returncode == 0
+    ):
         onto = _out(["git", "rev-parse", "origin/dev"], "cannot resolve origin/dev")
         path.write_text(json.dumps({"context": context, "onto": onto}))
         return base, path

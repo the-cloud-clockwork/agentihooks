@@ -472,6 +472,28 @@ def test_restack_can_finish_after_the_engineer_resolves_a_conflict(stacked_repo,
     assert ledger.rows["t1"]["parked_on"] == []
 
 
+@pytest.mark.parametrize("keep_history", [True, False])
+def test_restack_recovers_a_conflict_when_dev_keeps_the_stacked_base(stacked_repo, keep_history):
+    _, ledger, repo, _ = stacked_repo
+    _git(repo, "switch", "dev")
+    _git(repo, "merge", "--no-edit", "blocker")
+    (repo / "shared.txt").write_text("integration work\n")
+    _git(repo, "commit", "-am", "Integration work")
+    _git(repo, "push", "origin", "dev")
+    _git(repo, "switch", "finisher")
+    assert restack() == 1
+    if keep_history:
+        (repo / "shared.txt").write_text("resolved task work\n")
+        _git(repo, "add", "shared.txt")
+        _git(repo, "-c", "core.editor=true", "rebase", "--continue")
+    else:
+        _git(repo, "rebase", "--skip")
+    assert restack() == 0
+    assert ledger.rows["t1"]["parked_on"] == []
+    assert _git(repo, "merge-base", "origin/dev", "HEAD") == _git(repo, "rev-parse", "origin/dev")
+    assert not (repo / _git(repo, "rev-parse", "--git-path", "agentihooks-restack.json")).exists()
+
+
 def test_restack_fetch_failure_preserves_parked_work(stacked_repo, capsys):
     _, ledger, repo, _ = stacked_repo
     _git(repo, "remote", "set-url", "origin", str(repo / "missing"))
