@@ -26,10 +26,10 @@ export function lastPage(key, items, idOf) {
   return items.slice(Math.max(0, items.length - limit(key)));
 }
 
-export function moreButton(key, total, noun, again, tag = "li") {
+export function moreButton(key, total, label, again, tag = "li") {
   const left = total - limit(key);
   if (left <= 0) return null;
-  return h(tag, { class: "page-more" }, h("button", { class: "link", type: "button", text: `Show ${Math.min(left, PAGE_SIZE)} more ${noun} · ${left} left`,
+  return h(tag, { class: "page-more" }, h("button", { class: "link", type: "button", text: `Show ${Math.min(left, PAGE_SIZE)} ${label} · ${left} left`,
     on: { click: () => { shown[key] = limit(key) + PAGE_SIZE; again(); } } }));
 }
 

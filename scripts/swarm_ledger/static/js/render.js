@@ -183,7 +183,7 @@ function sectionOpen(id) {
 function listInto(id, items, make, idOf = (i) => `item-${id}-${i.id}`) {
   const el = $(id);
   if (!sectionOpen(id)) return;
-  el.replaceChildren(...firstPage(id, items, idOf).map(make), moreButton(id, items.length, id, render) || "");
+  el.replaceChildren(...firstPage(id, items, idOf).map(make), moreButton(id, items.length, `more ${id}`, render) || "");
   if (!items.length) el.append(h("li", { class: "empty", text: "None." }));
 }
 
@@ -240,13 +240,13 @@ function groupedWork(name, items, row) {
   const done = items.filter((i) => !i.deleted && (i.done || i.state === "done"));
   const rank = { pr: 0, claimed: 1, open: 2, blocked: 3 };
   live.sort((a, b) => (rank[a.state || "open"] ?? 4) - (rank[b.state || "open"] ?? 4) || taskRanks().indexOf(taskRank(a)) - taskRanks().indexOf(taskRank(b)));
-  $(name).replaceChildren(...firstPage(name, live, idOf).map(row), moreButton(name, live.length, NOUNS[name], render) || "");
+  $(name).replaceChildren(...firstPage(name, live, idOf).map(row), moreButton(name, live.length, `more ${NOUNS[name]}`, render) || "");
   if (!done.length) return;
   const box = h("details", { class: "fold", id: name + "-done" }, h("summary", { text: `${done.length} done` }));
   collapsible(box);
   if (done.some((i) => idOf(i) === wanted.id)) box.open = true;
   const key = `${name}-done`;
-  lazy(box, () => h("ol", {}, ...firstPage(key, done, idOf).map(row), moreButton(key, done.length, `done ${NOUNS[name]}`, render) || ""));
+  lazy(box, () => h("ol", {}, ...firstPage(key, done, idOf).map(row), moreButton(key, done.length, `more done ${NOUNS[name]}`, render) || ""));
   $(name).append(h("li", {}, box));
 }
 

@@ -41,7 +41,7 @@ export function renderPriorities() {
         h("div", { class: "prio-text", text: p.text })),
       verdictButton(p.item, "approved", "approve", "Approve"),
       h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearPriority(p.id) } }));
-  }), moreButton("priorities", list.length, "priorities", renderPriorities) || "");
+  }), moreButton("priorities", list.length, "more priorities", renderPriorities) || "");
   if (!list.length) $("priorities").append(h("li", { class: "empty", text: "Nothing waits on you." }));
 }
 
