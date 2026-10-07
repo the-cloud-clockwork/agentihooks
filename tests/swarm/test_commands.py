@@ -84,18 +84,20 @@ def test_command_identity_digest_and_receipt_clock_survive_delivery(store, monke
     import re
     from types import SimpleNamespace
 
-    stamps = iter([1_234_567_890, 2_345_678_999, 3_456_789_012])
+    stamps = iter([1_234_000_000, 2_345_000_000, 3_456_789_012])
     monkeypatch.setattr(commands, "time", SimpleNamespace(time_ns=lambda: next(stamps)))
     sent = commands.submit(store, "sw", "swarm", ["pause"])
     assert re.fullmatch("[0-9a-f]{32}", sent["id"])
     assert sent["digest"] == "ca2f036c50ae145f0ec02ce2f10db171751bbb45d00bdba84a8b3a4c19552c69"
     assert sent["created_at"] == 1234
+    assert isinstance(sent["created_at"], int)
 
     def execute(row):
         held = commands.rows(store, "sw")[0]
         assert held["state"] == "accepted"
         assert held["owner"] == "home"
         assert held["accepted_at"] == 2345
+        assert isinstance(held["accepted_at"], int)
         assert held["digest"] == sent["digest"]
         return ""
 
