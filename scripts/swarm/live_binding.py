@@ -4,8 +4,6 @@ import shlex
 import tomllib
 from pathlib import Path
 
-from scripts.profiles import binding
-from scripts.select_profile import _native_options
 from scripts.swarm.health.findings import Finding
 
 EVENTS = (
@@ -24,20 +22,21 @@ EVENTS = (
 
 def lifecycle_command(command: str) -> bool:
     words = shlex.split(command)
+    if words[:1] == ["cd"]:
+        if len(words) < 4 or words[2] != "&&" or not Path(words[1]).is_dir():
+            return False
+        words = words[3:]
+    if words[:1] == ["exec"]:
+        words = words[1:]
     if not words:
         return False
     program = Path(words[0]).name
+    if program in {"bash", "sh"}:
+        words = words[1:]
+        return bool(words) and Path(words[0]).name == "agentihooks-hook.sh" and Path(words[0]).is_file()
     if program == "agentihooks-hook.sh":
-        return True
-    if program in {"bash", "sh"} and len(words) > 1 and Path(words[1]).name == "agentihooks-hook.sh":
-        return True
-    for index in range(1, len(words) - 1):
-        if words[index : index + 2] == ["-m", "hooks"] and re.fullmatch(
-            r"python(?:\d(?:\.\d+)*)?", Path(words[index - 1]).name
-        ):
-            if index == 1 or words[index - 2] in {"&&", ";", "exec"}:
-                return True
-    return False
+        return Path(words[0]).is_file()
+    return bool(re.fullmatch(r"python(?:\d(?:\.\d+)*)?", program)) and words[1:3] == ["-m", "hooks"]
 
 
 def hooks(home: Path, harness: str) -> bool:
@@ -53,7 +52,7 @@ def hooks(home: Path, harness: str) -> bool:
         registered = data.get("hooks", {})
         return all(
             any(
-                lifecycle_command(hook.get("command", ""))
+                hook.get("type") == "command" and lifecycle_command(hook.get("command", ""))
                 for group in registered.get(event, [])
                 for hook in group.get("hooks", [])
             )
@@ -64,6 +63,9 @@ def hooks(home: Path, harness: str) -> bool:
 
 
 def read(agent, pid: int, proc: Path = Path("/proc")) -> dict:
+    from scripts.profiles import binding
+    from scripts.select_profile import _native_options
+
     try:
         found, harness, env, account = binding.process(proc, pid)
         argv = (proc / str(found) / "cmdline").read_bytes().decode(errors="replace").split("\0")

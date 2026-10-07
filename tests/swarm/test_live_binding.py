@@ -6,6 +6,8 @@ import pytest
 from scripts.swarm import live_binding
 from scripts.swarm.store import AgentRecord
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 EVENTS = (
     "SessionStart",
     "SessionEnd",
@@ -138,8 +140,11 @@ def test_codex_home_hooks_and_native_effort(mounted):
     (root / "comm").write_text("codex")
     (root / "environ").write_bytes(f"CODEX_HOME={home}\0AGENTIHOOKS_PROFILE=engineer\0".encode())
     (root / "cmdline").write_bytes(b'codex\0-m\0gpt-6.1-sol\0-c\0model_reasoning_effort="high"\0')
+    (home / "settings.json").unlink()
     (home / "config.toml").write_text("[features]\nhooks = true\n")
-    hooks = {event: [{"hooks": [{"command": "/operator/.codex/agentihooks-hook.sh"}]}] for event in EVENTS}
+    wrapper = home / "agentihooks-hook.sh"
+    wrapper.touch()
+    hooks = {event: [{"hooks": [{"type": "command", "command": str(wrapper)}]}] for event in EVENTS}
     (home / "hooks.json").write_text(json.dumps({"hooks": hooks}))
     assert live_binding.compare(agent, live_binding.read(agent, 42, proc)) == {}
     (home / "config.toml").write_text("[features]\nhooks = false\n")
@@ -166,6 +171,24 @@ def test_non_lifecycle_commands_do_not_count_as_hooks(mounted, command):
     data = json.loads((home / "settings.json").read_text())
     for groups in data["hooks"].values():
         groups[0]["hooks"][0]["command"] = command
+    (home / "settings.json").write_text(json.dumps(data))
+    assert live_binding.read(agent, 42, proc)["hooks"] is False
+
+
+@pytest.mark.parametrize("command", ["false && python3 -m hooks", "/missing/agentihooks-hook.sh"])
+def test_unexecutable_lifecycle_registration_is_refused(mounted, command):
+    agent, proc, home = mounted
+    data = json.loads((home / "settings.json").read_text())
+    for groups in data["hooks"].values():
+        groups[0]["hooks"][0]["command"] = command
+    (home / "settings.json").write_text(json.dumps(data))
+    assert live_binding.read(agent, 42, proc)["hooks"] is False
+
+
+def test_prompt_hook_cannot_replace_command_hook(mounted):
+    agent, proc, home = mounted
+    data = json.loads((home / "settings.json").read_text())
+    data["hooks"]["SessionStart"][0]["hooks"][0]["type"] = "prompt"
     (home / "settings.json").write_text(json.dumps(data))
     assert live_binding.read(agent, 42, proc)["hooks"] is False
 
@@ -243,11 +266,40 @@ def test_failed_retirement_keeps_claim_and_retries(ticking):
         a.name: {**live_binding.assignment(a), "hooks": a.name != old.name} for a in agents
     }
     tick("sw", store, ledger, runtime, 200)
-    assert old in store.agents("sw")
+    assert any(a.name == old.name and a.state == "retiring" for a in store.agents("sw"))
     assert ledger.rows["one"]["claimed_by"] == old.name
     runtime.stuck.clear()
     tick("sw", store, ledger, runtime, 300)
     assert old not in store.agents("sw")
+
+
+def test_partial_retirement_failure_retains_ownership_until_pane_closes(ticking):
+    from scripts.swarm.tick import STARTUP_GRACE_MS, tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    runtime.bindings = lambda agents: {
+        a.name: {**live_binding.assignment(a), "hooks": a.name != old.name} for a in agents if a.name in runtime.live
+    }
+    retire = runtime.retire
+
+    def partial(agent, live):
+        if agent.name == old.name:
+            runtime.live.discard(old.name)
+            return False
+        return retire(agent, live)
+
+    runtime.retire = partial
+    tick("sw", store, ledger, runtime, STARTUP_GRACE_MS + 200)
+    assert any(a.name == old.name for a in store.agents("sw"))
+    assert ledger.rows["one"]["claimed_by"] == old.name
+    assert old.pane_id not in runtime.closed
+    runtime.retire = retire
+    tick("sw", store, ledger, runtime, STARTUP_GRACE_MS + 300)
+    assert all(a.name != old.name for a in store.agents("sw"))
+    assert old.pane_id in runtime.closed
+    assert ledger.rows["one"]["claimed_by"] != old.name
 
 
 def test_finished_pane_is_closed_and_reported(ticking):
@@ -310,3 +362,272 @@ def test_reports_are_visible_in_swarm_health(ticking):
     live_binding.record(store, "sw", agent, {**live_binding.assignment(agent), "hooks": False}, 10)
     found = findings(store, "sw", store.config("sw"), ledger.tasks("sw"), [])
     assert any(f["id"] == "live-binding/engineer/hooks" for f in found)
+
+
+@pytest.mark.parametrize("prefix", ["", "bash ", "sh ", "exec "])
+def test_valid_registered_wrapper_forms(mounted, prefix):
+    agent, proc, home = mounted
+    wrapper = home / "agentihooks-hook.sh"
+    wrapper.touch()
+    data = json.loads((home / "settings.json").read_text())
+    for groups in data["hooks"].values():
+        groups[0]["hooks"][0]["command"] = f"{prefix}{wrapper}"
+    (home / "settings.json").write_text(json.dumps(data))
+    assert live_binding.read(agent, 42, proc)["hooks"] is True
+
+
+@pytest.mark.parametrize("prefix", ["", "exec ", "cd {home} && "])
+def test_valid_python_lifecycle_forms(mounted, prefix):
+    agent, proc, home = mounted
+    data = json.loads((home / "settings.json").read_text())
+    for groups in data["hooks"].values():
+        groups[0]["hooks"][0]["command"] = prefix.replace("{home}", str(home)) + "python3 -m hooks"
+    (home / "settings.json").write_text(json.dumps(data))
+    assert live_binding.read(agent, 42, proc)["hooks"] is True
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "",
+        "bash",
+        "sh",
+        "exec",
+        "cd",
+        "cd /missing && python3 -m hooks",
+        "cd / python3 -m hooks",
+        "python3 -m",
+        "python3 -m other",
+        "python3.12 -m hooks.mcp",
+    ],
+)
+def test_invalid_registered_command_forms(mounted, command):
+    agent, proc, home = mounted
+    data = json.loads((home / "settings.json").read_text())
+    data["hooks"]["SessionStart"][0]["hooks"][0]["command"] = command
+    (home / "settings.json").write_text(json.dumps(data))
+    assert live_binding.read(agent, 42, proc)["hooks"] is False
+
+
+def test_disable_all_hooks_overrides_valid_registration(mounted):
+    agent, proc, home = mounted
+    data = json.loads((home / "settings.json").read_text())
+    data["disableAllHooks"] = True
+    (home / "settings.json").write_text(json.dumps(data))
+    assert live_binding.read(agent, 42, proc)["hooks"] is False
+
+
+def test_absent_live_environment_fields_are_named(mounted):
+    agent, proc, _ = mounted
+    (proc / "42" / "environ").write_bytes(b"AH_CC_TOKEN_team=private-value\0")
+    facts = live_binding.read(agent, 42, proc)
+    assert facts["home"] == ""
+    assert facts["profile"] == ""
+    assert facts["hooks"] is False
+    assert live_binding.compare(agent, facts)["home"]["actual"] == ""
+
+
+def test_invalid_utf8_in_unrelated_process_argument_does_not_hide_launch_facts(mounted):
+    agent, proc, _ = mounted
+    with (proc / "42" / "cmdline").open("ab") as stream:
+        stream.write(b"--unused=\xff\0")
+    assert live_binding.compare(agent, live_binding.read(agent, 42, proc)) == {}
+
+
+def test_legacy_assignment_uses_the_profile_home_and_saved_fields(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    agent = AgentRecord(
+        "old", "eng", "one", harness="codex", profile="engineer", model="gpt-6.1-sol", effort="high", account="default"
+    )
+    assert live_binding.assignment(agent) == {
+        "home": str(tmp_path / ".agentihooks" / "profiles" / "engineer" / "codex"),
+        "harness": "codex",
+        "profile": "engineer",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "account": "default",
+    }
+
+
+def test_mismatch_report_and_health_evidence_are_complete(ticking):
+    store, _, _ = ticking
+    agent = AgentRecord("engineer", "eng", "one", harness="claude", profile="engineer")
+    differences = live_binding.record(store, "sw", agent, {"pane": "open"}, 123)
+    assert differences == {"pane": {"expected": "closed", "actual": "open"}}
+    assert json.loads(store.redis.hget(store.key("sw", "live-bindings"), "engineer")) == {
+        "agent": "engineer",
+        "at": 123,
+        "state": "mismatched",
+        "differences": differences,
+    }
+    found = live_binding.findings(store, "sw")
+    assert len(found) == 1
+    assert found[0].as_dict() == {
+        "kind": "live binding",
+        "subject": "engineer/pane",
+        "summary": "engineer differs in pane",
+        "evidence": ["expected closed; observed open"],
+        "threshold": "assigned launch must match",
+    }
+    assert found[0].measure == 1
+
+
+def test_relaunch_never_reclassifies_the_assigned_profile(tmp_path, monkeypatch):
+    from scripts.swarm import profile_choice
+    from tests.swarm.test_runtime import _launched
+
+    def refuse(*args):
+        pytest.fail("the saved assignment must not be classified")
+
+    monkeypatch.setattr(profile_choice, "choose", refuse)
+    saved = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "account": "team"}
+    _launched(
+        tmp_path, monkeypatch, "eng", {"id": "one", "title": "Verify", "profile": "qa", "launch_assignment": saved}
+    )
+
+
+@pytest.mark.parametrize(
+    "found, expected",
+    [
+        ({"pane_id": "pane", "name": "engineer"}, True),
+        ({"pane_id": "foreign", "name": "foreign"}, False),
+        (None, False),
+    ],
+)
+def test_finished_pane_lookup_checks_owned_pane(found, expected):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    calls = []
+
+    def herdr(argv):
+        calls.append(argv)
+        if found is None:
+            raise RuntimeError("not found")
+        return {"agent": found}
+
+    agent = AgentRecord("engineer", "eng", "one", pane_id="pane")
+    assert HerdrRuntime(herdr=herdr).pane_open(agent) is expected
+    assert calls == [["agent", "get", "pane"]]
+
+
+@pytest.mark.parametrize("fields", [{"state": "done"}, {"state": "blocked"}, {"state": "handoff"}, {"done": True}])
+def test_ended_task_pane_is_reported_without_relaunch_assignment(ticking, fields):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    ledger.rows["one"].update(fields)
+    tick("sw", store, ledger, runtime, 200)
+    report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), old.name))
+    assert report == {
+        "agent": old.name,
+        "at": 200,
+        "state": "mismatched",
+        "differences": {"pane": {"expected": "closed", "actual": "open"}},
+    }
+    assert runtime.tasks[-1].get("launch_assignment") is None
+
+
+def test_finished_agent_on_open_task_closes_its_pane(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    store.put_agent("sw", replace(old, state="finished"))
+    tick("sw", store, ledger, runtime, 200)
+    assert old.pane_id in runtime.closed
+    report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), old.name))
+    assert report["differences"] == {"pane": {"expected": "closed", "actual": "open"}}
+
+
+def test_pending_relaunch_assignment_is_cleared_after_worker_launch(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    saved = {
+        "profile": "engineer",
+        "harness": "claude",
+        "model": "opus",
+        "effort": "high",
+        "account": "team",
+        "seat": "eng-2@sw",
+    }
+    store.redis.hset(store.key("sw", "launch-assignments"), "one", json.dumps(saved))
+    tick("sw", store, ledger, runtime, 100)
+    assert next(a for a in store.agents("sw") if a.lane == "eng").seat == "eng-2@sw"
+    assert runtime.tasks[-1]["launch_assignment"] == saved
+    assert store.redis.hget(store.key("sw", "launch-assignments"), "one") is None
+
+
+def test_pending_master_relaunch_assignment_is_cleared_after_launch(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    saved = {"profile": "master", "harness": "claude", "model": "opus", "effort": "high", "account": "team"}
+    store.redis.hset(store.key("sw", "launch-assignments"), "master", json.dumps(saved))
+    tick("sw", store, ledger, runtime, 100)
+    assert runtime.masters[-1][1]["launch_assignment"] == saved
+    assert store.redis.hget(store.key("sw", "launch-assignments"), "master") is None
+
+
+def test_awaiting_decision_agent_is_skipped_without_skipping_its_peer(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    store.put_agent("sw", replace(old, state="awaiting-decision"))
+    runtime.bindings = lambda agents: {a.name: {"process": False} for a in agents}
+    tick("sw", store, ledger, runtime, 200)
+    assert any(a.name == old.name for a in store.agents("sw"))
+    assert old.name not in runtime.killed
+    assert any(name.startswith("master") for name in runtime.killed)
+
+
+def test_one_finished_or_missing_process_does_not_skip_later_agents(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    ledger.rows["one"].update(state="done", done=True)
+    actions = tick("sw", store, ledger, runtime, 200)
+    assert old.pane_id in runtime.closed
+    master = next(a for a in store.agents("sw") if a.lane == "master")
+    assert json.loads(store.redis.hget(store.key("sw", "live-bindings"), master.name))["at"] == 200
+    assert all(action is not None for action in actions)
+
+
+def test_closed_finished_pane_does_not_create_an_open_pane_finding(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    ledger.rows["one"].update(state="done", done=True)
+    runtime.closed.append(old.pane_id)
+    tick("sw", store, ledger, runtime, 200)
+    assert not any(f.subject == f"{old.name}/pane" for f in live_binding.findings(store, "sw"))
+
+
+def test_multiple_mismatches_are_reported_in_order(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    runtime.stuck.add(old.name)
+    runtime.bindings = lambda agents: {
+        a.name: {
+            **live_binding.assignment(a),
+            "hooks": True,
+            **({"model": "wrong", "effort": "wrong"} if a.name == old.name else {}),
+        }
+        for a in agents
+    }
+    actions = tick("sw", store, ledger, runtime, 200)
+    assert actions == [f"could not retire {old.name} after mismatched model, effort, retrying next tick"]

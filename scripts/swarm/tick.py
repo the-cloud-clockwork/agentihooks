@@ -165,13 +165,16 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
             if runtime.pane_open(agent):
                 live_binding.record(store, slug, agent, {"pane": "open"}, now_ms)
             continue
-        if agent.name not in facts:
+        if agent.name not in facts and agent.state != "retiring":
             continue
-        differences = live_binding.record(store, slug, agent, facts[agent.name], now_ms)
+        differences = live_binding.record(store, slug, agent, facts.get(agent.name, {"process": False}), now_ms)
         if not differences:
+            if agent.state == "retiring":
+                store.put_agent(slug, replace(agent, state="working"))
             continue
         fields = ", ".join(differences)
-        if not runtime.retire(agent, True):
+        if not runtime.retire(agent, agent.name in facts):
+            store.put_agent(slug, replace(agent, state="retiring"))
             actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
             continue
         saved = {**live_binding.assignment(agent), "seat": agent.seat}
@@ -187,6 +190,8 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             continue
         task = rows.get(agent.task, {})
         ended = agent.lane != MASTER and (task.get("done") or task.get("state") in {"done", "blocked", "handoff"})
+        if agent.state == "retiring" and not ended:
+            continue
         if agent.state == "finished" or ended:
             if runtime.retire(agent, agent.name in live):
                 store.release(slug, agent.task, agent.name)
