@@ -62,8 +62,10 @@ class TestStore:
 class ArtifactEndpoint(Endpoint):
     def publish(self, name, filename, data, token=True, request=None):
         headers = {"Host": f"127.0.0.1:{server.PORT}", "X-Ledger-Agent": name, "X-Artifact-Name": filename}
-        if request is not None:
-            headers["X-Artifact-Request"] = json.dumps(request)
+        metadata = (
+            {"task": "", "title": "Upload", **(request or {})} if isinstance(request, (dict, type(None))) else request
+        )
+        headers["X-Artifact-Request"] = json.dumps(metadata)
         if token:
             headers["X-Ledger-Token"] = self.token
         req = urllib.request.Request(
@@ -228,7 +230,12 @@ def test_artifact_command_uploads_the_file_and_records_it_on_the_task(tmp_path, 
         patch.object(ledger, "call", return_value={}) as call,
     ):
         ledger.cmd_artifact(args)
-    assert upload.call_args.args == ("shots", "art-engineer", str(doc), {"task": "av1"})
+    assert upload.call_args.args == (
+        "shots",
+        "art-engineer",
+        str(doc),
+        {"task": "av1", "title": "Handoff template proposal"},
+    )
     op = call.call_args.args[1][0]
     assert {k: op[k] for k in ("op", "by", "task", "title", "file")} == {
         "op": "artifact_add",
@@ -250,13 +257,13 @@ def test_upload_artifact_sends_bytes_name_token_and_agent(tmp_path):
     ):
         (tmp_path / "page.html").write_text("page")
         opened.return_value.__enter__.return_value.read.return_value = b'{"id": "x"}'
-        assert ledger.upload_artifact("shots", "art-engineer", str(doc), {"task": "av1", "request": "wanted"}) == {
-            "id": "x"
-        }
+        assert ledger.upload_artifact(
+            "shots", "art-engineer", str(doc), {"task": "av1", "title": "Proposal", "request": "wanted"}
+        ) == {"id": "x"}
     req = opened.call_args.args[0]
     assert req.full_url.endswith("/api/artifacts/shots")
     assert req.data == MARKDOWN
     assert req.get_header("X-artifact-name") == "proposal.md"
-    assert json.loads(req.get_header("X-artifact-request")) == {"task": "av1", "request": "wanted"}
+    assert json.loads(req.get_header("X-artifact-request")) == {"task": "av1", "title": "Proposal", "request": "wanted"}
     assert req.get_header("X-ledger-agent") == "art-engineer"
     assert req.get_header("X-ledger-token") == "test-token"

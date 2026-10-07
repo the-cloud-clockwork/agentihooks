@@ -248,7 +248,7 @@ def cmd_comment(args):
 def cmd_artifact(args):
     task = args.task if args.task is not None else os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
     request = {"request": args.request} if args.request else {}
-    file = upload_artifact(args.slug, args.name, args.path, {"task": task, **request})
+    file = upload_artifact(args.slug, args.name, args.path, {"task": task, "title": args.title, **request})
     state = call(args.slug, [op("artifact_add", args, task=task, title=args.title, file=file, **request)])
     print(json.dumps({"published": not state.get("rejected")}))
     if state.get("rejected"):
@@ -265,7 +265,7 @@ def cmd_publish_plan(args):
 
     def artifact(path, title):
         task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
-        file = upload_artifact(args.slug, args.name, path, {"task": task, "plan": True})
+        file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
         send(args, "artifact_add", task=task, title=title, file=file, plan=True)
         return f"{BASE}/artifacts/{args.slug}/{file['id']}"
 

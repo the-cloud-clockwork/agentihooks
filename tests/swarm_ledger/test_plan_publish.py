@@ -276,7 +276,7 @@ def test_publish_plan_without_issues_stores_a_plan_artifact_for_the_planner_task
     monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "plan")
     cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1", "--title", "Slice plan")
     url = f"{ledger.BASE}/artifacts/{plan_ledger}/{file['id']}"
-    assert uploads == [(plan_ledger, "planner", str(plan), {"task": "plan", "plan": True})]
+    assert uploads == [(plan_ledger, "planner", str(plan), {"task": "plan", "title": "Slice plan", "plan": True})]
     state = core.sync(plan_ledger)[0]
     [row] = state["artifacts"]
     assert (row["title"], row["plan"], row["task"], row["file"]["id"]) == ("Slice plan", True, "plan", file["id"])

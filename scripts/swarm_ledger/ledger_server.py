@@ -691,10 +691,12 @@ class Handler(BaseHTTPRequestHandler):
         def store(data):
             try:
                 request = core.loads(self.headers.get("X-Artifact-Request", "{}"))
-                if not isinstance(request, dict) or set(request) - {"task", "request", "plan"}:
-                    raise ValueError("artifact upload takes task and optional request or plan")
+                if not isinstance(request, dict) or set(request) - {"task", "title", "request", "plan"}:
+                    raise ValueError("artifact upload takes task, title and optional request or plan")
                 op = {"op": "artifact_add", "by": self.headers.get("X-Ledger-Agent"), "task": "", **request}
-                ledger_artifacts.check_add({**op, "id": "upload", "title": "Upload", "file": {"id": "0" * 64 + ".md"}})
+                ledger_artifacts.check_add(
+                    {**op, "id": "upload", "title": request.get("title", ""), "file": {"id": "0" * 64 + ".md"}}
+                )
             except (ValueError, TypeError) as exc:
                 raise ledger_media.Refused(400, str(exc)) from exc
             doc = repository.get_document(slug, reconcile=False)
