@@ -174,6 +174,15 @@ def mask_value(value: object) -> object:
     if isinstance(value, (list, tuple)):
         return [mask_value(item) for item in value]
     if isinstance(value, dict):
-        masked = {redact(key, mode="strict"): mask_value(item) for key, item in value.items()}
-        return json.loads(redact(json.dumps(masked, ensure_ascii=False), mode="strict"))
+        return {redact(key, mode="strict"): mask_member(key, item) for key, item in value.items()}
     return value
+
+
+def mask_member(key: str, value: object) -> object:
+    from hooks.secrets import redact
+
+    if isinstance(value, str):
+        contextual = redact(f"{key}={json.dumps(value, ensure_ascii=False)}", mode="strict")
+        if contextual.startswith("[REDACTED:generic_secret]"):
+            return "[REDACTED:generic_secret]"
+    return mask_value(value)

@@ -628,10 +628,19 @@ def _batch_accepted(exporter, batch: list[SpanSpec], trace: int) -> bool:
     readable = [_readable(spec, trace) for spec in batch]
     if not isinstance(exporter, OTLPSpanExporter):
         return exporter.export(readable) is SpanExportResult.SUCCESS
+    import requests
     from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
     from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceResponse
 
-    response = exporter._export(encode_spans(readable).SerializeToString(), exporter._timeout)
+    from hooks.observability import otel
+
+    settings = otel.langfuse_exporter_config()
+    response = requests.post(
+        settings["endpoint"],
+        data=encode_spans(readable).SerializeToString(),
+        headers={"Content-Type": "application/x-protobuf", **settings["headers"]},
+        timeout=otel.LANGFUSE_EXPORT_TIMEOUT_SEC,
+    )
     if response.status_code != 200:
         _log_failure(response.status_code, response.reason)
         return False

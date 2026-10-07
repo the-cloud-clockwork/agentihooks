@@ -272,14 +272,17 @@ def test_http_acknowledgement_checks_rejected_spans(body, content_type, accepted
     response._content = body
     response.headers["Content-Type"] = content_type
     sent = []
-    monkeypatch.setattr(exporter, "_export", lambda payload, timeout: sent.append((payload, timeout)) or response)
+    monkeypatch.setattr(otel, "langfuse_exporter_config", lambda: {"endpoint": "http://localhost:1", "headers": {}})
+    monkeypatch.setattr(
+        requests, "post", lambda endpoint, data, headers, timeout: sent.append((data, timeout)) or response
+    )
     spec = agent_trace.SpanSpec("probe", 1, None, 1, 2, {"value": 3})
     if accepted is None:
         with pytest.raises(ValueError):
             agent_trace._batch_accepted(exporter, [spec], 1)
     else:
         assert agent_trace._batch_accepted(exporter, [spec], 1) is accepted
-    assert len(sent) == 1 and sent[0][1] == exporter._timeout
+    assert len(sent) == 1 and sent[0][1] == otel.LANGFUSE_EXPORT_TIMEOUT_SEC
     exporter.shutdown()
 
 
@@ -295,7 +298,8 @@ def test_protobuf_partial_acknowledgement_keeps_records_retryable(monkeypatch):
     response.status_code = 200
     response._content = acknowledgement.SerializeToString()
     response.headers["Content-Type"] = "application/x-protobuf"
-    monkeypatch.setattr(exporter, "_export", lambda *args: response)
+    monkeypatch.setattr(otel, "langfuse_exporter_config", lambda: {"endpoint": "http://localhost:1", "headers": {}})
+    monkeypatch.setattr(requests, "post", lambda *args, **kwargs: response)
     assert agent_trace._batch_accepted(exporter, [agent_trace.SpanSpec("probe", 1, None, 1, 2)], 1) is False
     exporter.shutdown()
 
@@ -822,7 +826,8 @@ def test_http_encoded_payload_contains_the_observation(monkeypatch):
     response.status_code = 200
     response._content = b"{}"
     sent = []
-    monkeypatch.setattr(exporter, "_export", lambda payload, timeout: sent.append(payload) or response)
+    monkeypatch.setattr(otel, "langfuse_exporter_config", lambda: {"endpoint": "http://localhost:1", "headers": {}})
+    monkeypatch.setattr(requests, "post", lambda endpoint, data, headers, timeout: sent.append(data) or response)
     assert agent_trace._batch_accepted(exporter, [agent_trace.SpanSpec("probe", 1, None, 2, 3)], 1)
     request = ExportTraceServiceRequest.FromString(sent[0])
     span = request.resource_spans[0].scope_spans[0].spans[0]
