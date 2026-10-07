@@ -199,6 +199,38 @@ def test_a_stop_on_pending_checks_passes_and_records_a_checked_wait(rig):
     assert held["reason"] == f"checks on {URL}"
 
 
+@pytest.mark.parametrize("on", [{"kind": "reply", "target": "a1b2c3"}, {"kind": "task", "target": "t9"}])
+def test_a_stop_on_pending_checks_keeps_a_live_reply_or_task_wait_and_its_reason(rig, on):
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL] = PENDING
+    until = rig.clock[0] + 60_000
+    idle.declare_wait(rig.store.redis, SLUG, ME, until, "the reviewer's answer", rig.clock[0] - 1, on=on)
+    rig.clock[0] += 1_000
+    assert rig.stop().allowed
+    held = idle.wait(rig.store.redis, SLUG, ME)
+    assert (held["on"], held["reason"], held["until"]) == (on, "the reviewer's answer", until)
+
+
+def test_a_stop_on_pending_checks_replaces_an_expired_reply_wait_with_the_checks_wait(rig):
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL] = PENDING
+    on = {"kind": "reply", "target": "a1b2c3"}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "the reviewer's answer", rig.clock[0], on=on)
+    rig.clock[0] += 60_000
+    assert rig.stop().allowed
+    held = idle.wait(rig.store.redis, SLUG, ME)
+    assert held["on"] == {"kind": "checks", "target": URL}
+    assert held["reason"] == f"checks on {URL}"
+
+
+def test_a_stop_on_pending_checks_turns_a_live_bare_wait_into_the_checks_wait(rig):
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL] = PENDING
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "reviewers", rig.clock[0])
+    assert rig.stop().allowed
+    assert idle.wait(rig.store.redis, SLUG, ME)["on"] == {"kind": "checks", "target": URL}
+
+
 def test_a_live_wait_lets_the_stop_through_and_an_expired_one_does_not(rig):
     idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "reviewers", rig.clock[0])
     assert rig.stop().allowed
@@ -256,7 +288,7 @@ def test_a_stop_that_passes_starts_the_count_again(rig):
     assert not rig.stop().allowed
     idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "reviewers", rig.clock[0])
     assert rig.stop().allowed
-    idle.end_wait(rig.store.redis, SLUG, ME)
+    idle.end_wait(rig.store.redis, SLUG, ME, rig.clock[0])
     again = rig.stop()
     assert not again.allowed and again.reason.endswith("(stop block 1 of 2; the next one blocks the task)")
 
