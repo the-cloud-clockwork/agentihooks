@@ -70,6 +70,8 @@ def test_spawn_hands_init_agent_the_swarm_effort_range(tmp_path):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
         effort_min="low",
@@ -105,6 +107,8 @@ def test_spawn_and_resume_take_the_swarm_range_not_the_default(tmp_path):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
         lanes={"eng": {"model": "fable", "effort": "max"}},
         autonomy="delegate",
         effort_min="low",
@@ -139,7 +143,7 @@ def test_init_agent_clamps_a_swarm_lane_launch_into_the_range(
     monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, *a: ("linux", ["/usr/bin/term", str(launcher)]))
     rc = init_agent.main(
         ["--dir", str(tmp_path), "--agent", agent, "--host", "native", "--dry-run", "--", *args],
-        {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", **environ},
+        {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", "AGENTIHOOKS_SWARM_SPAWN": "1", **environ},
     )
     assert rc == 0
     fields = dict(line.split("=", 1) for line in capsys.readouterr().out.splitlines() if "=" in line)

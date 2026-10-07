@@ -11,6 +11,8 @@ main.home{padding-inline:192px}
 @media (max-width:1439px){main.home{padding-inline:clamp(16px,3vw,48px)}}
 .home .panel{margin-top:16px;padding:4px 8px 8px;border:1px solid var(--rule);border-radius:12px;background:var(--veil)}
 header{display:flex;align-items:center;gap:16px;padding:0 12px 12px;border-bottom:1px solid var(--signal-soft)}
+.logo-link{display:flex;flex:none;border-radius:4px}
+.logo-link:focus-visible{outline:1px solid var(--signal);outline-offset:3px}
 .logo{flex:none;width:22px;height:22px;background:var(--logo);mask:url(/logo.png) center/contain no-repeat}
 .brand{font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--text)}
 .watermark{position:fixed;top:50%;left:50%;width:50vmin;height:50vmin;transform:translate(-50%,-50%);opacity:.05;pointer-events:none;background:var(--logo);mask:url(/logo.png) center/contain no-repeat}
@@ -72,7 +74,7 @@ li.row:hover,li.row:focus-within{background:var(--hover)}
 @media (max-width:760px){.row,.bin .row{grid-template-columns:minmax(0,1fr) auto auto;gap:12px}
 .home .row{grid-template-columns:20px minmax(0,1fr) auto auto}
 .head,.kind,.ov,.num,.when,.deleted{display:none}
-}</style>__HOME_WATERMARK__<main class="__HOME_VIEW__"><header><span class="logo" aria-hidden="true"></span><span class="brand">agentihooks</span><h1>__HOME_HEADING__</h1>__HOME_TOTAL__</header><div class="panel"><div class="row head">__HOME_HEAD__</div><ul>__HOME_BODY__</ul></div></main>__HOME_FAB__
+}</style>__HOME_WATERMARK__<main class="__HOME_VIEW__"><header><a class="logo-link" href="/" aria-label="HOME"><span class="logo" aria-hidden="true"></span></a><span class="brand">agentihooks</span><h1>__HOME_HEADING__</h1>__HOME_TOTAL__</header><div class="panel"><div class="row head">__HOME_HEAD__</div><ul>__HOME_BODY__</ul></div></main>__HOME_FAB__
 <script>async function reopenLedger(b){
 const slug=encodeURIComponent(b.dataset.slug),page=await fetch('/'+slug);if(!page.ok)return page;
 const doc=new DOMParser().parseFromString(await page.text(),'text/html');
