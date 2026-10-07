@@ -12,7 +12,6 @@ import socket
 import subprocess
 import sys
 import time
-import urllib.request
 import uuid
 from pathlib import Path
 
@@ -234,19 +233,11 @@ def stop_reasons(session, state):
 
 
 def post_bypass(session, unhandled):
-    import ledger_core as core
-    import ledger_link
-
     try:
-        token = core.read_token(core.paths(session["slug"])[0].read_text(encoding="utf-8")) or ""
+        import ledger
+
         op = {"op": "gate_bypass", "id": f"gb-{uuid.uuid4().hex[:8]}", "by": session["name"], "unhandled": unhandled}
-        req = urllib.request.Request(
-            f"{ledger_link.base()}/api/{session['slug']}",
-            data=json.dumps({"ops": [op]}).encode(),
-            method="PUT",
-            headers={"Content-Type": "application/json", "X-Ledger-Token": token},
-        )
-        urllib.request.urlopen(req, timeout=3).read()
+        ledger.request(session["slug"], [op], service=True)
     except Exception as exc:  # the stop must go through whatever the server does
         log(f"bypass not recorded: {exc}")
 
