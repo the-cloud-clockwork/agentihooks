@@ -1,5 +1,6 @@
 import gzip
 import os
+import subprocess
 
 import pytest
 
@@ -168,3 +169,98 @@ def test_scratch_rm_skips_empty_git_marker_and_still_refuses_real_worktree(repo,
     with pytest.raises(ActionError, match="holds uncommitted or unpushed work"):
         remove_scratch(nested.parent, roots, snap(), 1)
     assert nested.exists()
+
+
+unreadable_needs_a_user = pytest.mark.skipif(os.geteuid() == 0, reason="root reads every folder")
+
+
+def deny(request, path, mode):
+    os.chmod(path, mode)
+    request.addfinalizer(lambda: os.chmod(path, 0o755))
+
+
+def idle_tasks(tmp_path, *names):
+    tasks = [tmp_path / "scratch" / name for name in names]
+    for task in tasks:
+        task.mkdir(parents=True)
+    for task in tasks:
+        age(task, 30 * 24 * HOUR)
+    return tasks
+
+
+def sweeps(tmp_path, count):
+    roots, home = scratch_root(tmp_path), tmp_path / "state"
+    return [sweep(roots, snap(uptime=10_000 + 4 * HOUR * n), home, act=True, fresh=snap) for n in range(count)]
+
+
+def findings_by_name(report):
+    return {os.path.basename(item["path"]): item for item in report["findings"]}
+
+
+@unreadable_needs_a_user
+def test_enforce_skips_folders_it_cannot_read_and_sweeps_the_rest(request, tmp_path):
+    locked_group, locked_task, plain = idle_tasks(tmp_path, "locked/task", "repo/locked-task", "repo/plain-task")
+    deny(request, locked_group.parent, 0)
+    deny(request, locked_task, 0)
+    second = findings_by_name(sweeps(tmp_path, 2)[1])
+    for name in ("locked", "locked-task"):
+        assert (second[name]["root"], second[name]["category"], second[name]["action"]) == (
+            "scratchpad",
+            "scratch",
+            "keep",
+        )
+        assert second[name]["reason"] == "unreadable, skipped: Permission denied"
+    assert second["plain-task"]["outcome"] == "removed"
+    assert not plain.exists() and locked_task.exists()
+
+
+@unreadable_needs_a_user
+def test_failed_removal_names_the_folder_and_later_sweeps_still_run(request, tmp_path):
+    site_task, plain = idle_tasks(tmp_path, "repo/site-task", "repo/plain-task")
+    site = site_task / "venv" / "site"
+    site.mkdir(parents=True)
+    (site / "mod.py").write_text("x\n")
+    age(site_task, 30 * 24 * HOUR)
+    deny(request, site, 0o555)
+    reports = sweeps(tmp_path, 3)
+    for report in reports[1:]:
+        outcome = findings_by_name(report)["site-task"]["outcome"]
+        assert outcome.startswith("failed: [Errno 13] Permission denied")
+    assert findings_by_name(reports[1])["plain-task"]["outcome"] == "removed"
+    assert not plain.exists() and (site / "mod.py").exists()
+
+
+@unreadable_needs_a_user
+def test_journal_drops_a_removal_it_cannot_finish_and_finishes_the_rest(request, tmp_path):
+    journal = Journal(tmp_path / "gc-journal.json")
+    stuck, plain = idle_tasks(tmp_path, "repo/stuck", "repo/plain")
+    (stuck / "site").mkdir()
+    (stuck / "site" / "mod.py").write_text("x\n")
+    deny(request, stuck / "site", 0o555)
+    journal.begin(str(stuck), "scratch")
+    journal.begin(str(plain), "scratch")
+    assert finish_pending(journal) == [str(plain)]
+    assert journal.pending() == {}
+    assert stuck.exists() and not plain.exists()
+
+
+@pytest.mark.parametrize("error", [ActionError("git worktree"), subprocess.TimeoutExpired("git", 300)])
+def test_journal_drops_a_removal_that_git_fails_or_times_out(monkeypatch, tmp_path, error):
+    journal = Journal(tmp_path / "gc-journal.json")
+    (stuck,) = idle_tasks(tmp_path, "repo/stuck")
+
+    def fail(path):
+        raise error
+
+    monkeypatch.setattr(act, "remove_path", fail)
+    journal.begin(str(stuck), "scratch")
+    assert finish_pending(journal) == []
+    assert journal.pending() == {}
+
+
+def test_journal_removes_a_worktree_entry_that_is_no_longer_a_worktree(tmp_path):
+    journal = Journal(tmp_path / "gc-journal.json")
+    (left,) = idle_tasks(tmp_path, "trees/left")
+    journal.begin(str(left), "worktree")
+    assert finish_pending(journal) == [str(left)]
+    assert not left.exists()
