@@ -23,7 +23,9 @@ def imported_paths(root: Path, path: Path, nodes: list[ast.AST]) -> list[Path]:
     for module in modules:
         target = root.joinpath(*module.split("."))
         paths.extend(
-            candidate for candidate in (target.with_suffix(".py"), target / "__init__.py") if candidate.is_file()
+            candidate
+            for candidate in (target.with_suffix(".py"), target / "__init__.py")
+            if candidate.is_relative_to(root / "tests") and candidate.is_file()
         )
     return paths
 

@@ -103,3 +103,14 @@ def test_browser_detection_skips_plain_tests_and_handles_import_cycles(tmp_path)
     (tmp_path / "tests/test_plain.py").write_text("from tests import helper\n")
     (tmp_path / "tests/helper.py").write_text("import tests.test_plain\n")
     assert needs_browser(tmp_path, ["tests/test_plain.py"]) is False
+
+
+def test_browser_detection_does_not_follow_unrelated_application_imports(tmp_path):
+    from scripts.ci_mutation.browser import needs_browser
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests/test_plain.py").write_text("from scripts import app\n")
+    (tmp_path / "tests/conftest.py").write_text("from scripts import app\n")
+    (tmp_path / "scripts/app.py").write_text("def render():\n    import playwright.sync_api\n")
+    assert needs_browser(tmp_path, ["tests/test_plain.py"]) is False
