@@ -58,7 +58,10 @@ def owner(event, members, tasks=()):
 def owes(event, members, name, tasks=()):
     from scripts.swarm.naming import resolve_name
 
-    name = resolve_name(name)
+    return owed_to(event, members, resolve_name(name), tasks)
+
+
+def owed_to(event, members, name, tasks=()):
     who = owner(event, members, tasks)
     return event.get("kind") == "sync requested" or who == name or who is None
 
@@ -76,7 +79,7 @@ def unhandled_for(meta, name, tasks=()):
     for event in meta.get("events", []):
         if event.get("rev", 0) <= since or event.get("by") != "operator" or event.get("kind") in IGNORED_KINDS:
             continue
-        if owes(event, members, name, tasks):
+        if owed_to(event, members, name, tasks):
             mine.append(event)
     return mine
 
