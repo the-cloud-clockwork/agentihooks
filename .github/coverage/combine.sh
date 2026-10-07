@@ -10,7 +10,11 @@ if [[ "$source_run" != --downloaded ]]; then
             --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)] | first.workflow_run.id // empty')
         source_run="${passed_run:-$source_run}"
     fi
-    gh run download "$source_run" --repo "$GITHUB_REPOSITORY" --pattern 'coverage-3.12-*' --dir .coverage-shards
+    names=()
+    for ((shard=1; shard<=shards; shard++)); do
+        names+=(--name "coverage-3.12-$shard")
+    done
+    gh run download "$source_run" --repo "$GITHUB_REPOSITORY" "${names[@]}" --dir .coverage-shards
 fi
 
 reports=()
