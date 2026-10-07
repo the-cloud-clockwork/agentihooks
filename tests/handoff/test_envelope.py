@@ -258,3 +258,23 @@ def test_a_reclaim_whose_git_fails_to_run_starts_fresh_without_raising():
     verdict = reclaim("/repo", [OLDER], "", run=_remote({}, raises=("worktree", "ls-remote")))
     assert verdict["continue_from"] == "fresh"
     assert verdict["fresh_reason"] == "the remote heads of engineer-a1b2c3-0001 could not be read"
+
+
+def test_a_reclaim_names_two_unpushed_branches_with_and():
+    verdict = reclaim("/repo", [NEWER, OLDER], "", run=_remote({}))
+    assert verdict["fresh_reason"] == (
+        "no earlier life pushed a branch: checked engineer-a1b2c3-0002 and engineer-a1b2c3-0001 on the remote"
+    )
+
+
+def test_a_reclaim_names_one_unpushed_branch_alone():
+    verdict = reclaim("/repo", [OLDER], "", run=_remote({}))
+    assert verdict["fresh_reason"] == "no earlier life pushed a branch: checked engineer-a1b2c3-0001 on the remote"
+
+
+def test_a_reclaim_lists_every_remote_head_it_could_not_read():
+    unread = ("engineer-a1b2c3-0002", "engineer-a1b2c3-0001")
+    verdict = reclaim("/repo", [NEWER, OLDER], "", run=_remote({}, unread=unread))
+    assert verdict["fresh_reason"] == (
+        "the remote heads of engineer-a1b2c3-0002, engineer-a1b2c3-0001 could not be read"
+    )
