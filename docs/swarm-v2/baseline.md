@@ -1,6 +1,6 @@
 # Swarm v2 implementation baseline
 
-Package SV2-FND-01. Observed at 2026-10-07T19:59:39Z.
+Package SV2-FND-01. Observed at 2026-10-07T20:00:30Z.
 Source is the branch head. Deployed values come from read-only probes.
 An unverified value is unknown: it never means empty, absent or zero.
 baseline_drift_items counts drift found by this run; the Drift section keeps every earlier entry.
@@ -10,7 +10,7 @@ Regenerate with `python -m scripts.swarm_v2.baseline --sources docs/swarm-v2/bas
 |---|---|---|---|
 | agentihooks | dev `f6d48929a0d43347feca07d9510ca91e14b49dbe` | workstation agentihooks install: verified `agentihooks 2.17.0` | swarm controller on Anton (not deployed yet), editable checkout revision serving the shared ledger server |
 | agentibrain-kernel | dev `e58e687e8c9edc6acab8115e7eb15db302b704dc` | brain-api version: unverified (endpoint answered without version) | brain-api image digest on its compose host, brain-api version |
-| antoncore | dev `0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c` | ArgoCD synced revision: unverified (exit 1: E1007 22:00:07.087008 2326560 <redacted-host>] "Unexpected error when reading response body" err="net/http: request canceled (Client.Timeout or context cancellation while reading body)" error: unexpec); cluster autoscaler image: verified `registry.k8s.io/autoscaling/cluster-autoscaler:v1.33.0` | live autoscaling group desired capacity and instance counts (AWS read access not exercised), ArgoCD synced revision |
+| antoncore | dev `0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c` | ArgoCD synced revision: verified `0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c`, matches source; cluster autoscaler image: verified `registry.k8s.io/autoscaling/cluster-autoscaler:v1.33.0` | live autoscaling group desired capacity and instance counts (AWS read access not exercised) |
 
 ## Source-proven interfaces
 
@@ -50,5 +50,5 @@ Regenerate with `python -m scripts.swarm_v2.baseline --sources docs/swarm-v2/bas
 
 ## Measurements
 
-- baseline_unverified_items: 2
-- baseline_drift_items: 1
+- baseline_unverified_items: 1
+- baseline_drift_items: 0
