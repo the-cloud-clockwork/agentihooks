@@ -174,3 +174,21 @@ def update_context_metrics(payload: dict) -> str:
     except Exception as e:
         log("token_monitor: update_context_metrics failed", {"error": str(e)})
         return "ctx: ?"
+
+
+def record_lifecycle_context(payload: dict) -> None:
+    from hooks.config import TOKEN_MONITOR_ENABLED
+    from hooks.targets import is_codex
+
+    if not TOKEN_MONITOR_ENABLED or not is_codex():
+        return
+    if payload.get("hook_event_name") not in ("PostToolUse", "Stop"):
+        return
+    from scripts.codex_context import codex_context
+
+    context = codex_context(payload.get("session_id", ""))
+    if context is None or context.window <= 0:
+        return
+    update_context_metrics(
+        {**payload, "context_window": {"used": context.used, "remaining": context.window - context.used}}
+    )

@@ -117,3 +117,83 @@ class TestTokenMonitor:
             warn, level = should_warn_context(65.0, "")
         assert warn is True
         assert level == "warning"
+
+
+def test_native_statusline_emits_context_gauge(monkeypatch, capsys):
+    import io
+    import json
+
+    from hooks import config, statusline
+
+    monkeypatch.setattr(config, "TOKEN_MONITOR_ENABLED", True)
+    payload = {
+        "session_id": "native-claude",
+        "context_window": {"context_window_size": 200000, "used_percentage": 25},
+    }
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+    with (
+        patch("hooks.observability.token_monitor.get_redis", return_value=None),
+        patch("hooks.observability.otel.record_gauge") as gauge,
+        patch("hooks.observability.otel.flush") as flush,
+    ):
+        statusline.main()
+    gauge.assert_any_call("agentihooks.tokens.fill_pct", 25.0, {"session.id": "native-claude"})
+    flush.assert_called_once()
+    assert "25%" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+@pytest.mark.parametrize("enabled,window", [(False, 200000), (True, 0), (True, None)])
+def test_native_context_without_measurement_emits_no_gauge(monkeypatch, target, enabled, window):
+    import io
+    import json
+
+    from hooks import config, statusline
+    from hooks.observability.token_monitor import record_lifecycle_context
+    from scripts.codex_context import CodexContext
+
+    monkeypatch.setattr(config, "TOKEN_MONITOR_ENABLED", enabled)
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", target)
+    payload = {"session_id": "empty", "hook_event_name": "PostToolUse"}
+    if window is not None:
+        payload["context_window"] = {"context_window_size": window, "used_percentage": 25}
+    context = CodexContext(50000, window) if window is not None else None
+    with (
+        patch("scripts.codex_context.codex_context", return_value=context),
+        patch("hooks.observability.otel.record_gauge") as gauge,
+        patch("hooks.observability.otel.flush"),
+    ):
+        if target == "claude":
+            monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+            statusline.main()
+        else:
+            record_lifecycle_context(payload)
+    gauge.assert_not_called()
+
+
+@pytest.mark.parametrize("event", ["PostToolUse", "Stop"])
+def test_codex_context_growth_and_compaction(monkeypatch, event):
+    from hooks import config
+    from hooks.observability.token_monitor import record_lifecycle_context
+    from scripts.codex_context import CodexContext
+
+    monkeypatch.setattr(config, "TOKEN_MONITOR_ENABLED", True)
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    previous = 40000
+    with (
+        patch(
+            "scripts.codex_context.codex_context",
+            side_effect=[CodexContext(50000, 200000), CodexContext(10000, 200000)],
+        ),
+        patch("hooks.observability.token_monitor._get_previous_used", side_effect=[previous, 50000]),
+        patch("hooks.observability.token_monitor.persist_token_metrics") as persist,
+        patch("hooks.observability.otel.record_gauge") as gauge,
+    ):
+        payload = {"session_id": "growth", "hook_event_name": event}
+        record_lifecycle_context(payload)
+        record_lifecycle_context(payload)
+    gauge.assert_any_call("agentihooks.tokens.fill_pct", 25.0, {"session.id": "growth"})
+    gauge.assert_any_call("agentihooks.tokens.burn_rate", 10000, {"session.id": "growth"})
+    gauge.assert_any_call("agentihooks.tokens.fill_pct", 5.0, {"session.id": "growth"})
+    gauge.assert_any_call("agentihooks.tokens.burn_rate", 0.0, {"session.id": "growth"})
+    assert persist.call_args.args[1]["used"] == 10000
