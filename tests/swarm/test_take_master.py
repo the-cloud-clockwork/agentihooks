@@ -149,6 +149,18 @@ def test_a_session_without_a_readable_canary_state_records_its_routed_account(ta
     assert (master.profile, master.account, master.profile_decision) == ("engineer", "team", {})
 
 
+@pytest.mark.parametrize(
+    "report", [{"profile": "master"}, {"state": "validated"}, {"state": "validated", "validation": {}}]
+)
+def test_a_malformed_canary_state_is_not_recorded(taker, tmp_path, monkeypatch, report):
+    store, _, _, _ = taker
+    _mounted_session(tmp_path, monkeypatch)
+    (tmp_path / "profile-report.json").write_text(json.dumps(report))
+    assert run("sw", "take-master") == 0
+    master = _master(store)
+    assert (master.profile, master.account, master.profile_decision) == ("engineer", "team", {})
+
+
 def test_a_session_with_no_live_process_records_no_account(taker):
     store, _, _, _ = taker
     assert run("sw", "take-master") == 0

@@ -37,11 +37,10 @@ def launch_of(pid):
         return "", {}
     try:
         report = json.loads(Path(env[binding.REPORT]).read_text())
+        validated = report["state"] == "validated" and report["validation"]["pid"] == found
     except (OSError, ValueError, KeyError):
         return account, {}
-    if report["state"] != "validated" or report["validation"]["pid"] != found:
-        return account, {}
-    return account, report["validation"]
+    return account, report["validation"] if validated else {}
 
 
 def _master_name(name, code):
