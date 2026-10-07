@@ -31,21 +31,24 @@ means, in order:
 
 1. **Release notes** — a `CHANGELOG.md` entry for the new version, PR'd into `dev`.
 2. **Release** — `gh workflow run release.yml --ref dev -f bump=patch|minor|major`
-   bumps `pyproject.toml` on `dev`, tags `vX.Y.Z` and creates the GitHub release
-   with generated notes. `publish_pypi` stays off.
-3. **PR to `main`** — `gh pr create --base main --head dev`, after step 2 so `main`
-   declares the new version.
+   computes the next version from the latest stable git tag, tags the existing
+   `dev` commit and creates the GitHub release with generated notes. It creates
+   no commit. Package metadata derives its version from the tag through
+   setuptools-scm. `publish_pypi` stays off. Add `-f dry_run=true` to tag and
+   verify a build only inside the CI checkout, without pushing or releasing.
+3. **PR to `main`** — `gh pr create --base main --head dev`, after step 2.
 4. **Merge the PR** — `gh pr merge --rebase` (`--squash` only when GitHub cannot
    rebase; then merge `origin/main` back into `dev` at once and check that
    `git rev-parse HEAD^{tree}` is unchanged, or the next PR replays every file as a
    phantom conflict).
 5. **Publish to PyPI from `main`** — `gh workflow run publish-pypi.yml --ref main`,
-   then verify `https://pypi.org/pypi/agentihooks/X.Y.Z/json` answers 200 and a
+   builds the latest stable tag after checking its tree matches `main`, then
+   verify `https://pypi.org/pypi/agentihooks/X.Y.Z/json` answers 200 and a
    clean install reports the version.
 
 The phrase "release dance" is itself the operator's PR and release signal, so
 steps 3 and 4 pass the `main` gate. `git fetch` updates `origin/dev`, not your
-local branch: the release commit lands on `dev` from CI, so pull before any merge.
+local branch. Pull before any merge; the release workflow never changes `dev`.
 
 ## The Four Pillars
 

@@ -26,6 +26,18 @@ jobs:
     environment: pypi
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select the released tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            tag=$(git tag --list 'v*' --sort=-version:refname | python3 -c 'import re, sys; print(next(t.strip() for t in sys.stdin if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+\n?", t)))')
+            test "$(git rev-parse HEAD^{tree})" = "$(git rev-parse "$tag^{tree}")"
+            git checkout --detach "$tag"
+          else
+            [[ "$GITHUB_REF" == refs/tags/v* ]]
+          fi
 
       - uses: actions/setup-python@v5
         with:
