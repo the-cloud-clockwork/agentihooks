@@ -166,6 +166,63 @@ def test_mutation_job_installs_chromium_before_mutating():
     assert names.index("Install dependencies") < install < names.index("Mutate changed Python files")
 
 
+def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
+    steps = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())["jobs"]["mutation"]["steps"]
+    names = [step.get("name") for step in steps]
+    select = names.index("Select mutation tests before browser setup")
+    install = names.index("Install the browser that page tests drive")
+    assert select < install
+    assert steps[select]["id"] == "selection"
+    assert steps[select]["run"].startswith("python -m scripts.ci_mutation." + "browser ")
+    assert steps[install]["if"] == "steps.selection.outputs.browser == 'true'"
+    assert steps[install]["id"] == "browser"
+    assert steps[install]["timeout-minutes"] == 2
+    job = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())["jobs"]["mutation"]
+    assert job["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
+    failure = next(step for step in steps if step.get("name") == "Report browser setup failure")
+    assert failure["if"] == "failure() && steps.browser.outcome == 'failure'"
+    assert "::error::" in failure["run"]
+    assert "two minute" in failure["run"]
+    assert "exit 1" in failure["run"]
+
+
+def test_mutation_browser_dependencies_use_the_responsive_mirror():
+    steps = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())["jobs"]["mutation"]["steps"]
+    names = [step.get("name") for step in steps]
+    mirror = names.index("Use the Ubuntu archive for browser dependencies")
+    assert mirror < names.index("Install the browser that page tests drive")
+    assert steps[mirror]["if"] == "steps.selection.outputs.browser == 'true'"
+    assert steps[mirror]["run"] == r"sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt"
+    assert steps[mirror]["timeout-minutes"] == 1
+
+
+def test_lint_and_equivalence_browser_installs_have_the_same_timeout():
+    lint = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    equivalence = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"][
+        "ledger-equivalence"
+    ]["steps"]
+    for steps in (lint, equivalence):
+        install = next(step for step in steps if "playwright install --with-deps chromium" in step.get("run", ""))
+        assert install["timeout-minutes"] == 2
+
+
+def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
+    lint = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    equivalence = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"][
+        "ledger-equivalence"
+    ]["steps"]
+    for steps in (lint, equivalence):
+        mirror = next(step for step in steps if step.get("name") == "Use the Ubuntu archive for browser dependencies")
+        install = next(step for step in steps if "playwright install --with-deps chromium" in step.get("run", ""))
+        assert steps.index(mirror) < steps.index(install)
+        assert mirror["run"] == r"sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt"
+        assert mirror["timeout-minutes"] == 1
+    assert (
+        next(step for step in lint if step.get("name") == "Use the Ubuntu archive for browser dependencies")["if"]
+        == "steps.lookup.outputs.skip != 'true'"
+    )
+
+
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
 def test_workflow_badges_point_at_existing_workflows(doc):
     names = re.findall(r"actions/workflows/([\w.-]+\.yml)", (_ROOT / doc).read_text())
