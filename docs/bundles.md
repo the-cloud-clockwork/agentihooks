@@ -12,6 +12,13 @@ A bundle is a single external directory containing all your personal agentihooks
 ## Quick Start
 
 ```bash
+# No bundle yet: lay out an empty one, git init it and link it
+agentihooks bundle new ~/dev/my-tools
+
+# Add an overlay profile worn on a base role, then validate it
+agentihooks overlay new backtest-tuner --wears engineer
+agentihooks overlay check backtest-tuner
+
 # Link your bundle and install (one command)
 agentihooks init --bundle ~/dev/my-tools
 

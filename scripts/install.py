@@ -6476,6 +6476,10 @@ def main() -> None:
         from scripts.terminate_agent import main as terminate_agent_main
 
         raise SystemExit(terminate_agent_main(_argv[1:]))
+    if _argv[:2] == ["bundle", "new"] or _argv[:1] == ["overlay"]:
+        from scripts.profiles.scaffold import main as scaffold_main
+
+        raise SystemExit(scaffold_main(_argv))
     if _argv and _argv[0] in ("gc", "lease", "scratch", "name"):
         from scripts.gc_cli import main as gc_main
 
@@ -6561,11 +6565,11 @@ def main() -> None:
         help="Skip bundle auto-discovery hint when state has no bundle linked.",
     )
 
-    bundle_p = sub.add_parser("bundle", help="Manage the linked bundle (link, unlink, list, pull)")
+    bundle_p = sub.add_parser("bundle", help="Manage the linked bundle (new, link, unlink, list, pull)")
     bundle_p.add_argument(
         "action",
         choices=["link", "unlink", "list", "pull"],
-        help="link <path> | unlink | list | pull",
+        help="new <path> | link <path> | unlink | list | pull",
     )
     bundle_p.add_argument("bundle_path", nargs="?", default=None, help="Bundle directory path (for link)")
     bundle_p.add_argument("--rebase", action="store_true", help="Use --rebase when pulling")
@@ -6627,6 +6631,7 @@ def main() -> None:
         help="Render a profile into its own home: render NAME --target claude|codex [--force] [--out DIR [--bundle DIR]]",
     )
     sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")
+    sub.add_parser("overlay", help="Overlay profiles in the linked bundle: new NAME --wears ROLES | check NAME")
 
     balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
     balance_p.add_argument("--dry-run", action="store_true", help="Report routing state without launching Claude")
