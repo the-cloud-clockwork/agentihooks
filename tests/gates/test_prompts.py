@@ -256,6 +256,7 @@ def test_a_shell_c_script_with_literal_programs_still_runs():
         "ssh-agent; bash -c \"bash -c '\\$RUN'\"",
         "bash -c 'sh <<EOF\n$X\nEOF'",
         "bash -euo pipefail -c '\"$@\"' _ ls",
+        "bash -oe pipefail -c '$X'",
         "bash -O extglob +o posix --rcfile /home/op/x/rc -c '$X'",
         "bash -c 'cat <<EOF | sh\n$X\nEOF'",
     ],
