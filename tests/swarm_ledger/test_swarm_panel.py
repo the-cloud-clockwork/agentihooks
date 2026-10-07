@@ -601,7 +601,7 @@ def test_the_quota_probe_runs_a_live_refresh_of_every_account():
         assert command_runner.run(["quota", "--refresh", "--json"], {}) == ""
     which.assert_called_once_with("agentihooks")
     run.assert_called_once_with(
-        ["/bin/agentihooks", "quota", "--refresh", "--json"], capture_output=True, text=True, timeout=60, env={}
+        ["/bin/agentihooks", "quota", "--refresh", "--json"], capture_output=True, text=True, timeout=120, env={}
     )
 
 

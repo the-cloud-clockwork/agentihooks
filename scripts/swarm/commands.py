@@ -41,7 +41,12 @@ def submit(store: RedisStore, slug: str, command: str, argv: list[str]) -> dict:
 
 def rows(store: RedisStore, slug: str) -> list[dict]:
     found = store.redis.hgetall(store.key(slug, "commands"))
-    return [json.loads(found[key]) for key in store.redis.lrange(store.key(slug, "command-order"), -20, -1)]
+    order = store.redis.lrange(store.key(slug, "command-order"), 0, -1)
+    return [
+        row
+        for index, key in enumerate(order)
+        if (row := json.loads(found[key]))["state"] in {"pending", "accepted", "failed"} or index >= len(order) - 20
+    ]
 
 
 def consume(store: RedisStore, slug: str, owner: str, execute: Callable[[dict], str]) -> list[str]:

@@ -11,6 +11,11 @@ const EFFORT_CAPS = { effort_min: "effort floor", effort_max: "effort ceiling" }
 const MASTER_AGENTS = ["claude", "codex"];
 
 let noteTimer = 0;
+let noteError = false;
+
+export function clearNoteError() {
+  noteError = false;
+}
 
 function swarmControls(state) {
   return { start: state === "running", pause: state !== "running", stop: !["running", "paused", "drained"].includes(state), stop_now: state === "stopped" };
@@ -89,12 +94,13 @@ function opNote(phase, action, error) {
   if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
   if (phase === "queued") return { cls: "pending", text: `${name}: pending, waiting for the hive tick` };
   if (phase === "accepted") return { cls: "pending", text: `${name}: accepted by the hive tick` };
-  if (phase === "done") return { cls: "ok", text: `${name}: acknowledged` };
+  if (phase === "done" || phase === "acknowledged") return { cls: "ok", text: `${name}: acknowledged` };
   return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
 }
 
 export function showNote(phase, action, error) {
   const note = opNote(phase, action, error);
+  noteError = phase === "error";
   clearTimeout(noteTimer);
   $("swarm-note").className = `sw-note ${note.cls}`;
   $("swarm-note").textContent = note.text;
@@ -123,15 +129,33 @@ export function renderControls() {
     input.setAttribute("aria-invalid", String(input.dataset.cap in capDraft && !!capChanges({}, { [input.dataset.cap]: capDraft[input.dataset.cap] }).bad.length));
     input.disabled = !swarm || pending === "apply";
   }
+  renderCommands((swarm && swarm.commands) || []);
   const command = swarm && (swarm.commands || []).at(-1);
-  if (!pending && command) {
-    const phase = { pending: "queued", accepted: "accepted", acknowledged: "done", failed: "error" }[command.state];
-    const action = command.command === "quota" ? "quota_refresh" : command.command === "doctor" ? `doctor_${command.argv[0]}` : command.argv[0];
+  if (!pending && !noteError && command) {
+    const phase = { pending: "queued", accepted: "accepted", acknowledged: "acknowledged", failed: "error" }[command.state];
+    const action = commandAction(command);
     showNote(phase, action, command.error);
   }
   const note = affinityNote(swarm);
   $("affinity-state").textContent = note.text;
   $("affinity-state").className = `sw-unit sw-affinity-state ${note.cls}`;
+}
+
+function commandAction(command) {
+  if (command.command === "quota") return "quota_refresh";
+  if (command.command === "doctor") return `doctor_${command.argv[0]}`;
+  const action = command.argv[0] === "--as" ? command.argv[2] : command.argv[0];
+  return action === "stop" && command.argv.includes("--now") ? "stop_now" : action;
+}
+
+function renderCommands(commands) {
+  $("command-log").hidden = !commands.length;
+  const counts = ["pending", "accepted", "failed"].map((state) => [state, commands.filter((command) => command.state === state).length]);
+  $("command-count").textContent = counts.filter(([, count]) => count).map(([state, count]) => `${count} ${state}`).join(" · ");
+  $("command-rows").replaceChildren(...[...commands].reverse().map((command) => h("p", { class: "sw-command" },
+    h("span", { text: opNote("pending", commandAction(command)).text.split(":")[0] }),
+    h("span", { text: command.state }),
+    command.error && h("span", { text: command.error }))));
 }
 
 export function renderGates(sw) {
@@ -148,6 +172,7 @@ export function renderGates(sw) {
 export async function refreshQuota() {
   const btn = $("quota-refresh");
   if (!swarm || btn.classList.contains("sending")) return;
+  showNote("pending", "quota_refresh");
   btn.classList.add("sending");
   btn.setAttribute("aria-busy", "true");
   try {

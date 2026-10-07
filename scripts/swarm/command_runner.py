@@ -13,7 +13,8 @@ def run(argv: list[str], env: dict) -> str:
     if not exe:
         return "agentihooks is not on PATH"
     try:
-        done = subprocess.run([exe, *argv], capture_output=True, text=True, timeout=60, env=env)
+        timeout = 120 if argv[0] == "quota" else 60
+        done = subprocess.run([exe, *argv], capture_output=True, text=True, timeout=timeout, env=env)
     except (OSError, subprocess.SubprocessError) as exc:
         return str(exc)
     return "" if done.returncode == 0 else (done.stderr or done.stdout).strip() or "swarm command failed"

@@ -29,6 +29,7 @@ def test_page_keeps_pending_and_acknowledged_control_states(remote_server, monke
         page.wait_for_function(
             "document.querySelector('#swarm-note').textContent === 'Pause: pending, waiting for the hive tick'"
         )
+        page.locator("#command-log summary").click()
         page.screenshot(path=str(tmp_path / "pending.png"))
         assert request("GET")["commands"][0]["state"] == "pending"
         cli.run_tick(saved, "sw", ledger, FakeRuntime(), FakeHerdr({}))

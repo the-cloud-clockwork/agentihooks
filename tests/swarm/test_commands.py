@@ -48,3 +48,32 @@ def test_published_view_carries_telemetry_without_local_readers(store):
     commands.submit(store, "sw", "swarm", ["pause"])
     assert commands.view(store, "sw")["commands"][0]["state"] == "pending"
     assert json.loads(store.redis.get(store.key("sw", "published")))["workspaces"]["t"]["latest_proof"] == "green"
+
+
+def test_failed_controls_remain_visible_after_twenty_new_acknowledgements(store):
+    commands.bind(store, "sw", "home")
+    failed = commands.submit(store, "sw", "swarm", ["pause"])
+    commands.consume(store, "sw", "home", lambda row: "pause refused")
+    for _ in range(24):
+        commands.submit(store, "sw", "swarm", ["start"])
+        commands.consume(store, "sw", "home", lambda row: "")
+    found = commands.rows(store, "sw")
+    assert len(found) == 21
+    assert found[0]["id"] == failed["id"]
+    assert found[0]["state"] == "failed"
+    assert all(row["state"] == "acknowledged" for row in found[1:])
+
+
+def test_an_execution_exception_retains_acceptance_without_replaying(store):
+    commands.bind(store, "sw", "home")
+    sent = commands.submit(store, "sw", "swarm", ["pause"])
+
+    def crash(row):
+        raise RuntimeError("hive interrupted")
+
+    with pytest.raises(RuntimeError, match="hive interrupted"):
+        commands.consume(store, "sw", "home", crash)
+    assert commands.rows(store, "sw")[0]["id"] == sent["id"]
+    assert commands.rows(store, "sw")[0]["state"] == "accepted"
+    assert commands.consume(store, "sw", "home", lambda row: pytest.fail("effect replayed")) == []
+    assert commands.rows(store, "sw")[0]["state"] == "accepted"
