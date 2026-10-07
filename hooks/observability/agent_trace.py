@@ -123,22 +123,33 @@ def _usage_attributes(usage: dict) -> dict:
 
 
 def _field(text: str) -> str:
+    return _field_info(text)[0]
+
+
+def _field_info(text: str) -> tuple[str, int]:
     from hooks import config
     from hooks.secrets import redact
 
     text = redact(text, mode="strict")
     cap = config.LANGFUSE_FIELD_MAX_CHARS
-    return text if len(text) <= cap else f"{text[:cap]}…[truncated {len(text) - cap} chars]"
+    removed = max(0, len(text) - cap)
+    return (f"{text[:cap]}…[truncated {removed} chars]" if removed else text), removed
+
+
+def _fields(fields: dict[str, str]) -> dict:
+    result = {}
+    for key, text in fields.items():
+        if not text:
+            continue
+        value, removed = _field_info(text)
+        result[key] = value
+        if removed:
+            result[f"agentihooks.truncation.{key}.chars"] = removed
+    return result
 
 
 def _io(input_text: str = "", output_text: str = "") -> dict:
-    fields = {"langfuse.observation.input": input_text, "langfuse.observation.output": output_text}
-    result = {key: _field(value) for key, value in fields.items() if value}
-    for key, value in list(result.items()):
-        match = _TRUNCATED.search(value)
-        if match:
-            result[f"agentihooks.truncation.{key}.chars"] = int(match.group(1))
-    return result
+    return _fields({"langfuse.observation.input": input_text, "langfuse.observation.output": output_text})
 
 
 def _text(content: object) -> str:
@@ -286,7 +297,7 @@ def session_spans(
         "langfuse.trace.input": _prompt_text(all_turns[0]),
         "langfuse.trace.output": _assistant_text(all_turns[-1]),
     }
-    attributes.update({key: _field(value) for key, value in trace_io.items() if value})
+    attributes.update(_fields(trace_io))
     spans = [SpanSpec(name, root_id, None, _ns(all_turns[0][0]), _ns(all_turns[-1][-1]), attributes)]
     results = {
         block.get("tool_use_id"): (entry, block)
@@ -341,9 +352,7 @@ _TRUNCATED = re.compile(r"…\[truncated (\d+) chars\]\Z")
 
 
 def _truncated_fields(spans: list[SpanSpec]) -> int:
-    return sum(
-        1 for spec in spans for value in spec.attributes.values() if isinstance(value, str) and _TRUNCATED.search(value)
-    )
+    return sum(1 for spec in spans for key in spec.attributes if key.startswith("agentihooks.truncation."))
 
 
 def _root_attributes(session_id: str) -> dict:
@@ -481,6 +490,20 @@ def _progress(session_id: str) -> dict:
     }
 
 
+def _record_revisions(records: dict) -> dict:
+    return {
+        key: hashlib.sha256(json.dumps(record, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        for key, record in records.items()
+    }
+
+
+def _pending_bytes(state: dict, records: dict, pending: list) -> int:
+    revisions = _record_revisions(records)
+    accepted = state.get("accepted_records", {})
+    waiting = {key: record for key, record in records.items() if accepted.get(key) != revisions[key]}
+    return len(json.dumps({"records": waiting, "pending": pending}, ensure_ascii=False).encode())
+
+
 def _stage_source(state: dict, transcript_path: str) -> None:
     from hooks.observability.transcript import complete_records, mask_value, record_id
 
@@ -490,10 +513,10 @@ def _stage_source(state: dict, transcript_path: str) -> None:
     for index, record in enumerate(records):
         key = record_id(record)
         masked = mask_value(record)
-        source_id = str(index) if legacy and record.get("type") != "user" and record.get("type") != "assistant" else key
+        source_id = str(index) if legacy and record.get("type") == "response_item" else key
         masked["_source_id"] = merged.get(key, {}).get("_source_id", source_id)
         merged[key] = masked
-    size = len(json.dumps(merged, ensure_ascii=False).encode())
+    size = _pending_bytes(state, merged, state["pending"])
     if size > PENDING_MAX_BYTES:
         state["overflow"] = {"bytes": size, "limit": PENDING_MAX_BYTES}
         _report_progress(state, "overflow")
@@ -513,10 +536,15 @@ def _stage_source(state: dict, transcript_path: str) -> None:
 
 def _revision(spec: SpanSpec) -> str:
     data = asdict(spec)
+    volatile = {
+        "agentihooks.export.generated_at",
+        "agentihooks.export.last_accepted_at",
+        "agentihooks.export.last_accepted_at.state",
+    }
     data["attributes"] = {
         key: value
         for key, value in spec.attributes.items()
-        if not key.startswith(("agentihooks.export.", "agentihooks.signals."))
+        if key not in volatile and not key.startswith("agentihooks.signals.traces.")
     }
     return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -571,14 +599,10 @@ def _prepare_pending(session_id: str, state: dict, identity: Identity) -> None:
     for spec in spans:
         spec.name = mask_value(spec.name)
         spec.attributes = mask_value(spec.attributes)
-        for field_name, value in list(spec.attributes.items()):
-            match = _TRUNCATED.search(value) if isinstance(value, str) else None
-            if match:
-                spec.attributes[f"agentihooks.truncation.{field_name}.chars"] = int(match.group(1))
         key = f"{spec.span_id:016x}"
         if state["accepted"].get(key) != _revision(spec):
             pending.append(asdict(spec))
-    size = len(json.dumps({"records": state["records"], "pending": pending}, ensure_ascii=False).encode())
+    size = _pending_bytes(state, state["records"], pending)
     if size > PENDING_MAX_BYTES:
         state["overflow"] = {"bytes": size, "limit": PENDING_MAX_BYTES}
         _report_progress(state, "overflow")
@@ -586,6 +610,7 @@ def _prepare_pending(session_id: str, state: dict, identity: Identity) -> None:
     state["pending"] = pending
     state["buffered_turns"] = len(turns(entries))
     state["pending_source"] = dict(state["source"])
+    state["pending_records"] = _record_revisions(state["records"])
 
 
 def _report_progress(state: dict, result: str) -> None:
@@ -639,7 +664,8 @@ def _send_pending(session_id: str, state: dict, exporter) -> None:
         updated = [spec for spec in batch if spec not in new]
         if updated:
             _collector_outcomes(session_id, updated, "updated", _truncated_fields(updated))
-    if not state.get("overflow"):
+    if not state["pending"]:
+        state.setdefault("accepted_records", {}).update(state.get("pending_records", {}))
         accepted_source = state.get("pending_source", {})
         state["source"]["accepted_bytes"] = accepted_source.get("buffered_bytes", 0)
         state["turns"] = state.get("buffered_turns", 0)

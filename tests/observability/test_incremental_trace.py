@@ -418,3 +418,303 @@ def test_legacy_cursor_migrates_codex_identity(export, transcript):
         export.observations[agent_trace._span_id("session", "tool")].attributes["langfuse.observation.output"]
         == "late result"
     )
+
+
+def test_new_unsupported_input_updates_accepted_root(export, transcript):
+    path, records = transcript
+    flush(path)
+    if records[0]["type"] == "session_meta":
+        unsupported = {"type": "response_item", "timestamp": records[0]["timestamp"], "payload": {"type": "reasoning"}}
+    else:
+        unsupported = {
+            "type": "assistant",
+            "uuid": "new-unsupported",
+            "timestamp": records[0]["timestamp"],
+            "message": {"content": [{"type": "audio", "data": "unsupported"}]},
+        }
+    with path.open("a") as handle:
+        handle.write(json.dumps(unsupported) + "\ninvalid complete record\n")
+    flush(path)
+    root = next(span for span in export.observations.values() if span.parent is None)
+    assert root.attributes["agentihooks.export.unsupported_io"] == 1
+    assert root.attributes["agentihooks.export.unsupported_records"] == 1
+    assert len(export.calls) == 2
+
+
+def test_growing_source_during_retry_respects_combined_budget(export, transcript, monkeypatch):
+    path, records = transcript
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", 5000)
+    export.results = [SpanExportResult.FAILURE, SpanExportResult.FAILURE]
+    flush(path)
+    before = agent_trace._cursor("session")
+    assert before["pending"]
+    extra = {"type": "ignored", "uuid": "oversized", "content": "x" * 4000}
+    with path.open("a") as handle:
+        handle.write(json.dumps(extra) + "\n")
+    flush(path)
+    state = agent_trace._cursor("session")
+    assert state["overflow"]["bytes"] > 5000
+    assert state["records"] == before["records"]
+    size = len(json.dumps({"records": state["records"], "pending": state["pending"]}, ensure_ascii=False).encode())
+    assert size <= 5000
+
+
+def test_literal_truncation_marker_is_supported_output(export, transcript):
+    path, records = transcript
+    literal = "literal …[truncated 123 chars]"
+    records[-1] = json.loads(json.dumps(records[-1]).replace("late result", literal))
+    with path.open("a") as handle:
+        handle.write(json.dumps(records[-1]) + "\n")
+    flush(path)
+    tool = export.observations[agent_trace._span_id("session", "tool")]
+    assert tool.attributes["langfuse.observation.output"] == literal
+    assert "agentihooks.truncation.langfuse.observation.output.chars" not in tool.attributes
+
+
+def test_signal_only_change_updates_root_without_export_feedback(export, transcript, monkeypatch):
+    path, _ = transcript
+    counter = {"agentihooks.signals.logs.accepted": 1, "agentihooks.signals.traces.updated": 0}
+    monkeypatch.setattr(agent_trace, "_root_attributes", lambda session: dict(counter))
+    flush(path)
+    counter["agentihooks.signals.logs.accepted"] = 2
+    flush(path)
+    root = next(span for span in export.observations.values() if span.parent is None)
+    assert root.attributes["agentihooks.signals.logs.accepted"] == 2
+    assert len(export.calls) == 2
+    counter["agentihooks.signals.traces.updated"] = 1
+    flush(path)
+    assert len(export.calls) == 2
+
+
+def test_accepted_history_does_not_exhaust_pending_budget(export, transcript, monkeypatch):
+    path, records = transcript
+    monkeypatch.setattr("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 5)
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", 5000)
+    for index in range(8):
+        if records[0]["type"] == "session_meta":
+            record = {
+                "type": "response_item",
+                "timestamp": f"2026-10-07T10:00:{index:02d}Z",
+                "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "x" * 600}]},
+            }
+        else:
+            record = {
+                "type": "user",
+                "uuid": f"prompt-{index}",
+                "timestamp": f"2026-10-07T10:00:{index:02d}Z",
+                "message": {"content": "x" * 600},
+            }
+        path.write_text(json.dumps(record) + "\n")
+        flush(path)
+        state = agent_trace._cursor("session")
+        assert "overflow" not in state and not state["pending"]
+        assert state["turns"] == index + 1
+    assert len(json.dumps(state["records"])) > 5000
+    assert agent_trace._pending_bytes(state, state["records"], state["pending"]) == len(
+        '{"records": {}, "pending": []}'
+    )
+
+
+def test_progress_schema_and_native_source_positions(export, transcript):
+    from hooks.observability import transcript as source
+
+    path, records = transcript
+    assert agent_trace._progress("session") == {
+        "version": 2,
+        "records": {},
+        "accepted": {},
+        "pending": [],
+        "source": {},
+    }
+    export.results = [SpanExportResult.FAILURE]
+    flush(path)
+    state = agent_trace._cursor("session")
+    stat = path.stat()
+    assert state["session_id"] == "session"
+    assert state["source"] == {
+        "device": stat.st_dev,
+        "inode": stat.st_ino,
+        "buffered_bytes": stat.st_size,
+        "records": len(records) - 1,
+        "accepted_bytes": 0,
+    }
+    for key, record in state["records"].items():
+        assert record["_source_id"] == key == source.record_id({k: v for k, v in record.items() if k != "_source_id"})
+    flush(path)
+    assert agent_trace._cursor("session")["source"]["accepted_bytes"] == stat.st_size
+    with path.open("a") as handle:
+        handle.write(json.dumps(records[-1]) + "\n")
+    export.results = [SpanExportResult.FAILURE]
+    flush(path)
+    assert agent_trace._cursor("session")["source"]["accepted_bytes"] == stat.st_size
+
+
+def test_empty_legacy_progress_keeps_explicit_schema(export):
+    path = agent_trace._cursor_path("session")
+    path.parent.mkdir()
+    path.write_text("{}")
+    assert agent_trace._progress("session") == {
+        "version": 2,
+        "records": {},
+        "accepted": {},
+        "pending": [],
+        "source": {},
+        "legacy_turns": 0,
+    }
+    path.write_text('{"turns":2}')
+    assert agent_trace._progress("session")["legacy_turns"] == 2
+    path.write_text('{"version":99}')
+    with pytest.raises(ValueError, match="^unsupported exporter progress version$"):
+        agent_trace._progress("session")
+
+
+def test_source_identity_is_canonical_and_native_uuid_wins():
+    import hashlib
+
+    from hooks.observability import transcript as source
+
+    assert (
+        source.record_id({"uuid": "native", "text": "before"})
+        == source.record_id({"uuid": "native", "text": "after"})
+        == "native"
+    )
+    record = {"text": "ñ", "a": 1}
+    expected = hashlib.sha256('{"a":1,"text":"ñ"}'.encode()).hexdigest()
+    assert source.record_id(record) == source.record_id({"a": 1, "text": "ñ"}) == expected
+
+
+@pytest.mark.parametrize("kind", ["session_meta", "turn_context", "response_item"])
+def test_codex_source_detection_without_other_record_types(kind, monkeypatch):
+    from hooks.observability import codex_transcript
+
+    seen = []
+    monkeypatch.setattr(codex_transcript, "normalize_entries", lambda entries: seen.extend(entries) or ["normalized"])
+    entries = [{"type": kind}]
+    assert agent_trace._normalize(entries) == ["normalized"]
+    assert seen == entries
+
+
+def test_codex_normalized_ids_use_native_generation_and_durable_source():
+    from hooks.observability import codex_transcript
+
+    record = {
+        "type": "response_item",
+        "_source_id": "durable",
+        "payload": {"type": "message", "role": "assistant", "id": "native", "content": [{"text": "probe"}]},
+    }
+    assert codex_transcript.normalize_entries([record]) == [
+        {
+            "type": "assistant",
+            "uuid": "codex-durable",
+            "timestamp": "",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "probe"}],
+                "id": "native",
+                "model": "",
+            },
+        }
+    ]
+
+
+def test_mask_value_is_strict_even_when_operator_mode_is_off(monkeypatch):
+    from hooks.observability import transcript as source
+
+    monkeypatch.setattr("hooks.config.SECRETS_MODE", "off")
+    planted = "sk_" + "live_" + "Q7" * 18
+    masked = source.mask_value({planted: planted, "nested": '{"token":"' + planted + '"}', "text": "ñ"})
+    assert planted not in json.dumps(masked)
+    assert "[REDACTED:stripe_key]" in json.dumps(masked)
+    assert masked["text"] == "ñ"
+
+
+def test_overflow_reports_exact_signal_and_size(monkeypatch, capsys):
+    from hooks.observability import signals
+
+    calls = []
+    monkeypatch.setattr(signals, "record", lambda values: calls.append(values))
+    state = {"session_id": "session", "overflow": {"bytes": 10, "limit": 5}}
+    agent_trace._report_progress(state, "overflow")
+    assert calls == [{("session", "traces", "overflow"): 1}]
+    assert capsys.readouterr().err == 'agent trace export overflow: {"bytes": 10, "limit": 5}\n'
+    agent_trace._report_progress({}, "overflow")
+    assert calls[-1] == {("", "traces", "overflow"): 1}
+    assert capsys.readouterr().err == "agent trace export overflow: {}\n"
+
+
+def test_atomic_progress_uses_same_filesystem_and_syncs(export, monkeypatch):
+    import tempfile
+
+    cursor = agent_trace._cursor_path("session")
+    cursor.parent.mkdir()
+    create = tempfile.NamedTemporaryFile
+    sync = agent_trace.os.fsync
+    created = []
+    synced = []
+
+    def temporary(**kwargs):
+        created.append(kwargs)
+        return create(**kwargs)
+
+    def fsync(fd):
+        synced.append(fd)
+        return sync(fd)
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", temporary)
+    monkeypatch.setattr(agent_trace.os, "fsync", fsync)
+    agent_trace._save_progress("session", {"text": "ñ"})
+    assert created == [{"mode": "w", "dir": cursor.parent, "delete": False}]
+    assert len(synced) == 2
+    assert cursor.read_text() == '{"text": "ñ"}'
+    assert list(cursor.parent.iterdir()) == [cursor]
+
+
+def test_nested_cursor_parent_and_lock_are_created_private(export, transcript, monkeypatch):
+    path, _ = transcript
+    nested = agent_trace.CURSOR_DIR / "nested" / "deep"
+    monkeypatch.setattr(agent_trace, "CURSOR_DIR", nested)
+    flush(path)
+    lock = agent_trace._cursor_path("session").with_suffix(".lock")
+    assert lock.exists() and lock.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize(
+    "kind", ["message", "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output"]
+)
+def test_supported_codex_io_is_not_counted_unsupported(kind):
+    assert agent_trace._unsupported_io([{"type": "response_item", "payload": {"type": kind}}], []) == 0
+
+
+def test_omitted_codex_and_invalid_claude_blocks_are_counted_exactly():
+    records = [
+        {
+            "type": "response_item",
+            "payload": {"type": "message", "content": [{"type": "image"}, {"text": "supported"}]},
+        },
+        {"type": "response_item"},
+        {"type": "ignored", "payload": {"type": "message", "content": [{"type": "image"}]}},
+    ]
+    entries = [{"message": {"content": [None, {"type": "thinking"}, {"type": "text", "text": "supported"}]}}]
+    assert agent_trace._unsupported_io(records, entries) == 4
+
+
+def test_collector_acceptance_is_logical_and_updates_are_distinct(export, transcript, monkeypatch):
+    path, records = transcript
+    outcomes = []
+    monkeypatch.setattr(
+        agent_trace,
+        "_collector_outcomes",
+        lambda session, spans, result, truncated: outcomes.append(
+            (session, [s.span_id for s in spans], result, truncated)
+        ),
+    )
+    flush(path)
+    initial = set(export.observations)
+    with path.open("a") as handle:
+        handle.write(json.dumps(records[-1]) + "\n")
+    flush(path)
+    accepted = [i for session, ids, result, truncated in outcomes if result == "accepted" for i in ids]
+    updated = [i for session, ids, result, truncated in outcomes if result == "updated" for i in ids]
+    assert set(accepted) == initial and len(accepted) == len(initial)
+    assert agent_trace._span_id("session", "tool") in updated
+    assert all(session == "session" and truncated == 0 for session, ids, result, truncated in outcomes)
