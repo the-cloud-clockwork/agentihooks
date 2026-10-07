@@ -200,7 +200,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, lint]
+    needs: [unit, lint, sonar]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
