@@ -204,6 +204,17 @@ class RedisStore:
             self.key(slug, "handoff-envelope", task),
         )
 
+    def put_reclaim(self, slug: str, name: str, verdict: dict) -> None:
+        self.redis.hset(self.key(slug, "reclaims"), name, json.dumps(verdict))
+
+    def reclaims(self, slug: str) -> dict[str, dict]:
+        return {name: json.loads(raw) for name, raw in self.redis.hgetall(self.key(slug, "reclaims")).items()}
+
+    def earlier_lives(self, slug: str, task: str) -> list[str]:
+        rows = [json.loads(raw) for raw in self.redis.lrange(self.key(slug, "history"), 0, -1)]
+        mine = [row for row in rows if row.get("task") == task and row.get("lane") != MASTER]
+        return [row["name"] for row in sorted(mine, key=lambda row: row.get("ended_at") or 0, reverse=True)]
+
     def ensure_code(self, slug):
         config = self.config(slug)
         if config.code:

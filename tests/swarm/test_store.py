@@ -134,6 +134,28 @@ def test_launch_rows_merge_recorded_launches_with_verified_history(store):
     ]
 
 
+def test_earlier_lives_are_the_tasks_worker_lives_newest_first(store):
+    history = store.key("smoke", "history")
+    for row in (
+        {"name": "first", "task": "t1", "lane": "eng", "ended_at": 5},
+        {"name": "unended", "task": "t1", "lane": "eng"},
+        {"name": "early", "task": "t1", "lane": "eng", "ended_at": 1},
+        {"name": "master", "task": "t1", "lane": "master", "ended_at": 9},
+        {"name": "other", "task": "t2", "lane": "eng", "ended_at": 7},
+        {"name": "last", "task": "t1", "lane": "eng", "ended_at": 8},
+    ):
+        store.redis.rpush(history, json.dumps(row))
+    assert store.earlier_lives("smoke", "t1") == ["last", "first", "early", "unended"]
+    assert store.earlier_lives("smoke", "t3") == []
+
+
+def test_a_reclaim_verdict_is_kept_per_claimant(store):
+    store.put_reclaim("smoke", "eng-2", {"continue_from": "fresh"})
+    store.put_reclaim("smoke", "eng-3", {"continue_from": "origin/b"})
+    assert store.reclaims("smoke") == {"eng-2": {"continue_from": "fresh"}, "eng-3": {"continue_from": "origin/b"}}
+    assert store.reclaims("other") == {}
+
+
 def test_a_lapsed_lease_frees_the_claim(store):
     store.create(config())
     store.claim("smoke", "t1", "engineer@a1b2c3-0001", lease_ms=60_000)

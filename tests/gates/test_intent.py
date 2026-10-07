@@ -321,7 +321,7 @@ class TestState:
     @pytest.mark.parametrize("body,expected", [(None, ""), ("Closes 4", "Closes 4")])
     def test_pr_view_reads_title_body_and_file_paths(self, body, expected):
         raw = {"title": "T", "body": body, "files": [{"path": "a.py", "additions": 1}, {"path": "b.py"}]}
-        ran = Ran((0, json.dumps(raw)), (0, "[]"))
+        ran = Ran((0, json.dumps(raw)), (0, ""))
         assert intent.pr_view(URL, run=ran) == {
             "title": "T",
             "body": expected,

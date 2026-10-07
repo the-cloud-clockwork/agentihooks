@@ -105,7 +105,7 @@ def test_upload_helper_sends_bytes_token_and_joined_agent(tmp_path):
         opened.return_value.__enter__.return_value.read.return_value = json.dumps(attachment).encode()
         assert ledger.upload_image("shots", "image-engineer", str(image)) == attachment
     req = opened.call_args.args[0]
-    assert req.full_url.endswith("/api/media/shots")
+    assert req.full_url.endswith("/api/v1/ledgers/shots/uploads/media")
     assert req.data == image.read_bytes()
     assert req.get_header("X-ledger-agent") == "image-engineer"
     assert req.get_header("X-ledger-token") == "test-token"
