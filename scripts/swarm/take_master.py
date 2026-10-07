@@ -1,5 +1,6 @@
 """Seat the session that runs take-master as its swarm's master, retiring a live master only when told to."""
 
+import os
 from pathlib import Path
 
 from hooks.context.account_sessions import agent_pid
@@ -60,6 +61,7 @@ def take(store, slug, name, runtime, now_ms, replace_live=False):
         MASTER,
         MASTER,
         harness=harness,
+        profile=os.environ.get("AGENTIHOOKS_PROFILE", ""),
         started_at=now_ms,
         model=model,
         effort=effort,
