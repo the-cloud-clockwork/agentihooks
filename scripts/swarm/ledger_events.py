@@ -80,8 +80,6 @@ def view(url, run=subprocess.run):
         if done.returncode != 0:
             return None
         raw = json.loads(done.stdout)["data"]["resource"]
-        if raw is None:
-            return None
         commits = [node["commit"] for node in raw["commits"]["nodes"]]
         rollup = (commits[-1].get("statusCheckRollup") or {}) if commits else {}
         contexts = rollup.get("contexts") or {}
@@ -90,7 +88,7 @@ def view(url, run=subprocess.run):
         raw["commits"] = commits
         raw["statusCheckRollup"] = contexts.get("nodes") or []
         return pull_request(raw)
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
 
 

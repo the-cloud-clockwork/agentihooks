@@ -573,6 +573,8 @@ def test_the_probe_without_checks_is_unresolved(commits):
         (1, ""),
         (0, "{}"),
         (0, '{"data":{"resource":null}}'),
+        (0, '{"data":{"resource":{"commits":null}}}'),
+        (0, '{"data":{"resource":{"commits":{"nodes":null}}}}'),
         (0, "invalid json"),
         (
             0,
