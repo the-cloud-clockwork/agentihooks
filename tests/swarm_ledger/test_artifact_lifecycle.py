@@ -10,9 +10,12 @@ from scripts.swarm import prompt
 from scripts.swarm_ledger import ledger, ledger_gate, ledger_tasks
 from scripts.swarm_ledger import ledger_artifacts as artifacts
 from scripts.swarm_ledger import ledger_core as core
+from scripts.swarm_ledger.repository.file import FileLedgerRepository
 from tests.swarm_ledger.test_artifacts import MARKDOWN
 from tests.swarm_ledger.test_bin import DAY_MS, make_ledger
 from tests.swarm_ledger.test_media import png
+
+storage = FileLedgerRepository(core)
 
 AGENT = "life-engineer"
 RULE = "proofs go on the task proof and the pull request"
@@ -30,19 +33,19 @@ def package_modules(ledger_dir, monkeypatch):
 def slug(request):
     name = f"life-{request.node.name.replace('_', '-')[:40].lower()}"
     make_ledger(name)
-    core.sync(name, ops=[{"op": "join", "id": "j", "by": AGENT}])
+    storage.apply_ops(name, ops=[{"op": "join", "id": "j", "by": AGENT}])
     return name
 
 
 def add_task(slug, task_id, **extra):
     op = {"op": "task_add", "id": f"t-{task_id}", "by": AGENT, "task": task_id, "title": "Work", "lane": "eng"}
-    return core.sync(slug, ops=[{**op, **extra}])
+    return storage.apply_ops(slug, ops=[{**op, **extra}])
 
 
 def publish(slug, op_id, task="", data=MARKDOWN, **extra):
     file = artifacts.store(slug, f"{op_id}.md", data)
     op = {"op": "artifact_add", "id": op_id, "by": AGENT, "task": task, "title": "Plan", "file": file, **extra}
-    return core.sync(slug, ops=[op])
+    return storage.apply_ops(slug, ops=[op])
 
 
 class TestRequestGate:
@@ -60,24 +63,24 @@ class TestRequestGate:
     def test_a_task_set_to_artifact_later_accepts_a_publish(self, slug):
         add_task(slug, "w3")
         update = {"op": "task_update", "id": "u", "by": AGENT, "item": "tasks/w3", "fields": {"artifact": True}}
-        state, _ = core.sync(slug, ops=[update])
+        state, _ = storage.apply_ops(slug, ops=[update])
         assert next(t for t in state["tasks"] if t["id"] == "w3")["artifact"] is True
         assert publish(slug, "a-later", task="w3")[1] == []
 
     def test_an_operator_message_naming_the_request_accepts_a_publish(self, slug):
-        core.sync(slug, ops=[{"op": "add", "thread": "chat", "id": "m-asks", "text": "Draw me the logo"}])
+        storage.apply_ops(slug, ops=[{"op": "add", "thread": "chat", "id": "m-asks", "text": "Draw me the logo"}])
         state, rejected = publish(slug, "a-logo", request="m-asks")
         assert rejected == [] and state["artifacts"][0]["request"] == "m-asks"
 
     def test_an_operator_comment_on_an_item_counts_as_a_request(self, slug):
         add_task(slug, "w4")
         comment = {"op": "add", "thread": "tasks/w4/comments", "id": "c-asks", "text": "Send me the plan"}
-        core.sync(slug, ops=[comment])
+        storage.apply_ops(slug, ops=[comment])
         assert publish(slug, "a-plan", task="w4", request="c-asks")[1] == []
 
     def test_an_agent_message_or_an_unknown_id_is_no_request(self, slug):
         agent_line = {"op": "add", "thread": "chat", "id": "m-self", "text": "I made a plan", "by": AGENT}
-        core.sync(slug, ops=[agent_line])
+        storage.apply_ops(slug, ops=[agent_line])
         assert publish(slug, "a-self", request="m-self")[1] == ["a-self"]
         assert publish(slug, "a-ghost", request="m-none")[1] == ["a-ghost"]
 
@@ -191,7 +194,7 @@ class TestInstructions:
 
 
 def delete(slug, row_id, op="artifact_delete"):
-    return core.sync(slug, ops=[{"op": op, "id": f"{op}-{row_id}", "target": row_id}])
+    return storage.apply_ops(slug, ops=[{"op": op, "id": f"{op}-{row_id}", "target": row_id}])
 
 
 class TestTrash:
@@ -229,10 +232,10 @@ class TestTrash:
         with patch.object(core, "now_ms", return_value=1_000):
             delete(slug, "a-old")
         with patch.object(core, "now_ms", return_value=1_000 + 29 * DAY_MS):
-            state, _ = core.sync(slug)
+            state, _ = storage.apply_ops(slug)
         assert [r["id"] for r in state["artifact_trash"]] == ["a-old"]
         with patch.object(core, "now_ms", return_value=1_001 + 30 * DAY_MS):
-            state, _ = core.sync(slug)
+            state, _ = storage.apply_ops(slug)
         assert state["artifact_trash"] == []
         with pytest.raises(ValueError):
             artifacts.path_of(slug, file_id)
@@ -246,7 +249,7 @@ class TestTrash:
         with patch.object(core, "now_ms", return_value=1_000):
             delete(slug, "a-one")
         with patch.object(core, "now_ms", return_value=2_000 + 30 * DAY_MS):
-            core.sync(slug)
+            storage.apply_ops(slug)
         assert artifacts.path_of(slug, file_id).is_file()
 
 
@@ -259,10 +262,10 @@ class TestPurge:
         delete(slug, "a-0")
         attached = media.store(slug, png(7, 7))
         image = {"op": "add", "thread": "chat", "id": "m-pic", "text": "look", "attachments": [attached]}
-        core.sync(slug, ops=[image])
+        storage.apply_ops(slug, ops=[image])
         shared = {"op": "artifact_add", "id": "a-pic", "by": AGENT, "task": "w10", "title": "Pic", "file": attached}
-        core.sync(slug, ops=[shared])
-        state, rejected = core.sync(slug, ops=[{"op": "artifact_purge", "id": "p", "by": AGENT}])
+        storage.apply_ops(slug, ops=[shared])
+        state, rejected = storage.apply_ops(slug, ops=[{"op": "artifact_purge", "id": "p", "by": AGENT}])
         assert rejected == [] and state["artifacts"] == [] and state["artifact_trash"] == []
         for row in files:
             with pytest.raises(ValueError):
@@ -272,7 +275,7 @@ class TestPurge:
         assert (event["kind"], event["by"], event["count"]) == ("artifacts purged", AGENT, 4)
 
     def test_purge_needs_a_member(self, slug):
-        assert core.sync(slug, ops=[{"op": "artifact_purge", "id": "p2", "by": "stranger"}])[1] == ["p2"]
+        assert storage.apply_ops(slug, ops=[{"op": "artifact_purge", "id": "p2", "by": "stranger"}])[1] == ["p2"]
         with pytest.raises(ValueError):
             core.check_op({"op": "artifact_purge", "id": "p3"})
 
@@ -309,21 +312,21 @@ class TestDetails:
             "text": "Plan",
         }
         assert publish(slug, "a-full", task="d1")[1] == []
-        assert [a["id"] for a in core.sync(slug)[0]["artifacts"]] == ["a-full"]
+        assert [a["id"] for a in storage.apply_ops(slug)[0]["artifacts"]] == ["a-full"]
 
     def test_a_stranger_or_an_unknown_task_is_refused_even_with_a_request(self, slug):
-        core.sync(slug, ops=[{"op": "add", "thread": "chat", "id": "m-want", "text": "Draw me a logo"}])
+        storage.apply_ops(slug, ops=[{"op": "add", "thread": "chat", "id": "m-want", "text": "Draw me a logo"}])
         file = artifacts.store(slug, "x.md", MARKDOWN)
         base = {"op": "artifact_add", "title": "Logo", "file": file, "request": "m-want"}
         stranger = {**base, "id": "a-who", "by": "stranger", "task": ""}
         ghost = {**base, "id": "a-ghost", "by": AGENT, "task": "nope"}
-        state, rejected = core.sync(slug, ops=[stranger, ghost])
+        state, rejected = storage.apply_ops(slug, ops=[stranger, ghost])
         assert rejected == ["a-who", "a-ghost"] and state["artifacts"] == []
         assert artifacts.REFUSED not in state["_meta"]["warnings"]
 
     def test_a_deleted_operator_message_is_no_request(self, slug):
-        core.sync(slug, ops=[{"op": "add", "thread": "chat", "id": "m-gone", "text": "Draw me a logo"}])
-        core.sync(slug, ops=[{"op": "delete", "thread": "chat", "id": "m-gone"}])
+        storage.apply_ops(slug, ops=[{"op": "add", "thread": "chat", "id": "m-gone", "text": "Draw me a logo"}])
+        storage.apply_ops(slug, ops=[{"op": "delete", "thread": "chat", "id": "m-gone"}])
         assert publish(slug, "a-late", request="m-gone")[1] == ["a-late"]
 
     def test_delete_and_restore_are_recorded_and_repeat_safely(self, slug):
@@ -352,19 +355,19 @@ class TestDetails:
         with patch.object(core, "now_ms", return_value=1_000):
             delete(slug, "a-day")
         with patch.object(core, "now_ms", return_value=1_000 + 30 * DAY_MS):
-            state, _ = core.sync(slug)
+            state, _ = storage.apply_ops(slug)
         assert [r["id"] for r in state["artifact_trash"]] == ["a-day"]
         rev = state["_meta"]["rev"]
         with patch.object(core, "now_ms", return_value=1_001 + 30 * DAY_MS):
-            state, _ = core.sync(slug)
+            state, _ = storage.apply_ops(slug)
         assert state["artifact_trash"] == [] and state["_meta"]["rev"] == rev + 1
 
     def test_purge_records_itself_and_survives_a_file_already_gone(self, slug):
         add_task(slug, "d4", artifact=True)
         state, _ = publish(slug, "a-lost", task="d4", data=b"# Lost\n")
         artifacts.path_of(slug, state["artifacts"][0]["file"]["id"]).unlink()
-        core.sync(slug, ops=[{"op": "add", "thread": "chat", "id": "m-plain", "text": "No picture here"}])
-        state, rejected = core.sync(slug, ops=[{"op": "artifact_purge", "id": "p-lost", "by": AGENT}])
+        storage.apply_ops(slug, ops=[{"op": "add", "thread": "chat", "id": "m-plain", "text": "No picture here"}])
+        state, rejected = storage.apply_ops(slug, ops=[{"op": "artifact_purge", "id": "p-lost", "by": AGENT}])
         event = state["_meta"]["events"][-1]
         assert rejected == [] and (event["target"], event["id"], event["count"]) == ("artifacts", "p-lost", 1)
 
@@ -373,7 +376,7 @@ class TestDetails:
         state = json.loads(json_path.read_text())
         del state["artifact_trash"]
         json_path.write_text(json.dumps(state))
-        assert core.sync(slug)[0]["artifact_trash"] == []
+        assert storage.apply_ops(slug)[0]["artifact_trash"] == []
 
     def test_operation_shapes_name_what_they_take(self):
         good = {
@@ -407,7 +410,7 @@ class TestDetails:
     def test_task_add_keeps_gain_contract_workspace_and_artifact(self, slug):
         contract = {"must": "logo drawn", "check": "look", "judge": "operator"}
         add_task(slug, "d5", gain=2, contract=contract, workspace="/work", artifact=True)
-        task = next(t for t in core.sync(slug)[0]["tasks"] if t["id"] == "d5")
+        task = next(t for t in storage.apply_ops(slug)[0]["tasks"] if t["id"] == "d5")
         assert (task["gain"], task["contract"], task["workspace"], task["artifact"]) == (2, contract, "/work", True)
 
     def test_the_publish_goes_to_the_named_ledger(self, tmp_path):

@@ -36,6 +36,8 @@ import ledger_core as core  # noqa: E402
 import ledger_link  # noqa: E402
 import ledger_size  # noqa: E402
 
+from scripts.swarm_ledger.repository import repository
+
 TEMPLATE = core.TEMPLATE
 LIMITS = {"overview": 200, "phase description": 100}
 
@@ -185,10 +187,10 @@ def render(doc, slug, port):
 
 def upgrade_page(slug):
     html_path, _ = core.paths(slug)
-    token = core.read_token(html_path.read_text(encoding="utf-8"))
+    token = core.read_token(repository.read_page(slug))
     if not token:
         sys.exit(f"{html_path} has no ledger token")
-    state, _ = core.sync(slug)
+    state = repository.get_document(slug)
     doc = {k: v for k, v in state.items() if k != "_meta"}
     values = {
         "TITLE": html.escape(doc["title"]),
@@ -205,7 +207,7 @@ def upgrade_page(slug):
         lambda m: values[m.group(1) or m.group(2)],
         TEMPLATE.read_text(encoding="utf-8"),
     )
-    core.atomic_write(html_path, page)
+    repository.write_page(slug, page)
     return state
 
 
@@ -215,20 +217,7 @@ def upgrade(slug):
 
 
 def create(slug, content, size="small"):
-    html_path, json_path = core.paths(slug)
-    if html_path.exists():
-        return False
-    if json_path.exists():
-        sys.exit(f"{json_path} exists without its HTML; move it aside before creating a new ledger")
-    errors = check(content)
-    if errors:
-        sys.exit("content rejected:\n  " + "\n  ".join(errors))
-    core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    doc = build_doc(content, size)
-    core.validate(doc)
-    core.atomic_write(html_path, render(doc, slug, ledger_link.address()[1]))
-    core.sync(slug)
-    return True
+    return repository.create(slug, content, size)
 
 
 def main():
@@ -248,7 +237,7 @@ def main():
 
     slug = built_slug(args)
     html_path, json_path = core.paths(slug)
-    if html_path.exists():
+    if repository.exists(slug):
         print(json.dumps({"slug": slug, "html": str(html_path), "json": str(json_path), "created": False}))
         print(ledger_link.page_line(slug))
         return
@@ -267,7 +256,9 @@ def main():
     create(slug, content, args.size)
     out = {"slug": slug, "html": str(html_path), "json": str(json_path), "created": True, "size": args.size}
     if small:
-        core.sync(slug, ops=[{"op": "join", "id": f"join-{secrets.token_hex(5)}", "by": args.name, "role": "member"}])
+        repository.apply_ops(
+            slug, ops=[{"op": "join", "id": f"join-{secrets.token_hex(5)}", "by": args.name, "role": "member"}]
+        )
         out["joined"] = args.name
     print(json.dumps(out))
     print(ledger_link.page_line(slug))

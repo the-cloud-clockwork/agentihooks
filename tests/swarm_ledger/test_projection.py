@@ -13,6 +13,10 @@ import ledger  # noqa: E402
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
+from scripts.swarm_ledger.repository.file import FileLedgerRepository
+
+storage = FileLedgerRepository(core)
+
 SLUG = "time_left_minutes-2026-01-01"
 
 
@@ -30,7 +34,7 @@ class TimeLeft(unittest.TestCase):
         core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
         html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
         json_path.unlink(missing_ok=True)
-        core.sync(SLUG)
+        storage.apply_ops(SLUG)
 
     def test_cli_persists_an_attributed_estimate_and_status_returns_it(self):
         args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "boss", "time-left", "3h 20m"])
@@ -38,7 +42,7 @@ class TimeLeft(unittest.TestCase):
         def call(slug, ops=None):
             if ops:
                 core.check_body({"ops": ops})
-            state, rejected = core.sync(slug, ops=ops)
+            state, rejected = storage.apply_ops(slug, ops=ops)
             return {**state, "rejected": rejected}
 
         with patch.object(ledger, "call", side_effect=call), contextlib.redirect_stdout(io.StringIO()) as output:
@@ -48,7 +52,7 @@ class TimeLeft(unittest.TestCase):
             output.truncate()
             ledger.cmd_status(args)
             self.assertEqual(json.loads(output.getvalue())["time_left_minutes"], 200)
-        state = core.sync(SLUG)[0]
+        state = storage.apply_ops(SLUG)[0]
         self.assertEqual(state["time_left_minutes"], 200)
         event = state["_meta"]["events"][-1]
         self.assertEqual(
@@ -65,7 +69,7 @@ class TimeLeft(unittest.TestCase):
         seed = core.parse_seed(html)
         seed["time_left_minutes"] = 35
         core.rewrite_seed(html_path, html, seed, seed["_rev"])
-        self.assertEqual(core.sync(SLUG)[0]["time_left_minutes"], 35)
+        self.assertEqual(storage.apply_ops(SLUG)[0]["time_left_minutes"], 35)
         self.assertEqual(new_ledger.upgrade_page(SLUG)["time_left_minutes"], 35)
         with self.assertRaises(ValueError):
             core.validate({"time_left_minutes": "State at 12:23Z. No ETA."})
@@ -73,11 +77,13 @@ class TimeLeft(unittest.TestCase):
     def test_stale_seed_keeps_the_newer_estimate_when_it_did_not_edit_it(self):
         html_path, _ = core.paths(SLUG)
         stale = html_path.read_text(encoding="utf-8")
-        core.sync(SLUG, ops=[{"op": "set", "id": "estimate", "by": "boss", "path": "time_left_minutes", "value": 20}])
+        storage.apply_ops(
+            SLUG, ops=[{"op": "set", "id": "estimate", "by": "boss", "path": "time_left_minutes", "value": 20}]
+        )
         seed = core.parse_seed(stale)
         seed["overview"] = "Updated overview"
         core.rewrite_seed(html_path, html_path.read_text(encoding="utf-8"), seed, seed["_rev"])
-        state = core.sync(SLUG)[0]
+        state = storage.apply_ops(SLUG)[0]
         self.assertEqual(state["time_left_minutes"], 20)
         self.assertEqual(state["overview"], "Updated overview")
 
@@ -110,7 +116,7 @@ class TimeLeft(unittest.TestCase):
     def test_saved_projection_is_removed_without_becoming_a_duration(self):
         html_path, json_path = core.paths(SLUG)
         for old in (85, "85%", "State at 12:23Z. No ETA."):
-            state = core.sync(SLUG)[0]
+            state = storage.apply_ops(SLUG)[0]
             state["projection"] = old
             json_path.write_text(json.dumps(state), encoding="utf-8")
             seed = core.parse_seed(html_path.read_text(encoding="utf-8"))

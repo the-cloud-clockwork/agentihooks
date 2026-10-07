@@ -86,12 +86,14 @@ import ledger_tasks  # noqa: E402
 import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
+from scripts.swarm_ledger.repository import repository
+
 BASE = ledger_link.base()
 TALK_REFUSED = "talk refused"
 
 
 def request(slug, ops=None):
-    token = core.read_token(core.paths(slug)[0].read_text(encoding="utf-8")) or ""
+    token = core.read_token(repository.read_page(slug)) or ""
     headers = {"Content-Type": "application/json", "X-Ledger-Token": token}
     body = None if ops is None else json.dumps({"ops": ops}).encode()
     req = urllib.request.Request(
@@ -198,7 +200,7 @@ def upload_artifact(slug: str, name: str, path: str) -> dict:
 
 
 def upload(slug: str, name: str, path: str, route: str, extra: dict) -> dict:
-    token = core.read_token(core.paths(slug)[0].read_text(encoding="utf-8")) or ""
+    token = core.read_token(repository.read_page(slug)) or ""
     req = urllib.request.Request(
         f"{BASE}/api/{route}/{slug}",
         data=Path(path).read_bytes(),

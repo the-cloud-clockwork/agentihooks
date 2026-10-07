@@ -12,6 +12,9 @@ import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm.store import SwarmError  # noqa: E402
+from scripts.swarm_ledger.repository.file import FileLedgerRepository
+
+storage = FileLedgerRepository(core)
 
 MINUTE = 60 * 1000
 SWARM_STATE = server.swarm_state
@@ -54,7 +57,7 @@ def updated_at():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     make(SLUG, "Rows plan", "A long overview " * 20)
     ops = [task_op(n) for n in (1, 2, 3, 4)] + [update(3, {"state": "done"}), update(4, {"out_of_scope": True})]
-    state, rejected = core.sync(SLUG, ops=ops)
+    state, rejected = storage.apply_ops(SLUG, ops=ops)
     assert rejected == []
     return state["_meta"]["updated_at"]
 
@@ -71,7 +74,7 @@ def row(page, slug):
 
 
 def summary(slug):
-    return {s["slug"]: s for s in server.all_summaries()}[slug]
+    return {s["slug"]: s for s in storage.list_summaries()}[slug]
 
 
 def test_home_spans_the_full_window_width():
@@ -99,7 +102,7 @@ def test_counts_skip_out_of_scope_tasks_and_activity_is_the_last_change(updated_
 
 def test_a_ledger_without_tasks_counts_its_phases():
     make("phases-only", size="small", phases=[{"title": "a"}, {"title": "b"}])
-    core.sync("phases-only", changes=[{"path": "phases/p1/done", "value": True}])
+    storage.apply_ops("phases-only", changes=[{"path": "phases/p1/done", "value": True}])
     found = summary("phases-only")
     assert (found["open"], found["done"], found["size"]) == (1, 1, "small")
 
@@ -112,7 +115,7 @@ def test_a_ledger_without_a_swarm_says_so_in_its_row(updated_at):
 
 def test_a_closed_ledger_shows_closed_and_a_reopen_button(updated_at):
     make("closed-row")
-    core.sync("closed-row", ops=[{"op": "close", "id": "c1", "by": "swarm"}])
+    storage.apply_ops("closed-row", ops=[{"op": "close", "id": "c1", "by": "swarm"}])
     found = row(server.index_page(), "closed-row")
     assert '<span class="state s-closed">closed</span>' in found
     assert '<span class="acts"><button class="act reopen"' in found
@@ -244,8 +247,8 @@ class Swarms:
 
 def closed(slug):
     make(slug)
-    core.sync(slug, ops=[{"op": "close", "id": "c1", "by": "swarm"}])
-    return core.sync(slug)[0]["closed_at"]
+    storage.apply_ops(slug, ops=[{"op": "close", "id": "c1", "by": "swarm"}])
+    return storage.apply_ops(slug)[0]["closed_at"]
 
 
 def test_a_closed_ledger_without_a_swarm_goes_to_the_bin():

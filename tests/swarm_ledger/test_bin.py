@@ -10,10 +10,12 @@ from unittest.mock import patch
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
-import ledger_bin  # noqa: E402
 import ledger_core as core  # noqa: E402
-import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
+
+from scripts.swarm_ledger import ledger_bin  # noqa: E402
+from scripts.swarm_ledger import ledger_server as server  # noqa: E402
+from scripts.swarm_ledger.repository import bin_storage
 
 DAY_MS = 24 * 60 * 60 * 1000
 
@@ -55,7 +57,7 @@ class BinState(unittest.TestCase):
     def test_item_past_thirty_days_is_purged_for_good(self):
         html_path, json_path = make_ledger("old-one")
         ledger_bin.delete("old-one", now=0)
-        purged = ledger_bin.purge_expired(now=30 * DAY_MS + 1)
+        purged = bin_storage.purge_expired(now=30 * DAY_MS + 1)
         self.assertEqual(purged, ["old-one"])
         self.assertFalse(html_path.exists())
         self.assertFalse(json_path.exists())
@@ -64,7 +66,7 @@ class BinState(unittest.TestCase):
     def test_item_under_thirty_days_is_kept(self):
         html_path, json_path = make_ledger("young-one")
         ledger_bin.delete("young-one", now=0)
-        self.assertEqual(ledger_bin.purge_expired(now=29 * DAY_MS), [])
+        self.assertEqual(bin_storage.purge_expired(now=29 * DAY_MS), [])
         self.assertTrue(html_path.exists())
         self.assertTrue(json_path.exists())
         self.assertIn("young-one", ledger_bin.entries())

@@ -131,6 +131,38 @@ def test_send_back_validation(fields, message):
     assert str(refused.value) == message
 
 
+OVERRIDE = {"reason": "Accepted as is", "problems": ["Task t1 names no territory."]}
+
+
+@pytest.mark.parametrize(
+    "state, override, message",
+    [
+        ("sent_back", OVERRIDE, "only an approval carries an override"),
+        ("pending", OVERRIDE, "only an approval carries an override"),
+        ("approved", "Accepted", "an override needs a reason and the problems it overrode"),
+        ("approved", {"problems": ["x"]}, "an override needs a reason and the problems it overrode"),
+        ("approved", {**OVERRIDE, "reason": " "}, "an override needs a reason and the problems it overrode"),
+        ("approved", {**OVERRIDE, "problems": []}, "an override needs a reason and the problems it overrode"),
+        ("approved", {**OVERRIDE, "problems": [1]}, "an override needs a reason and the problems it overrode"),
+        ("approved", {**OVERRIDE, "problems": "x"}, "an override needs a reason and the problems it overrode"),
+        ("approved", {**OVERRIDE, "by": "me"}, "an override needs a reason and the problems it overrode"),
+    ],
+)
+def test_override_validation(state, override, message):
+    with pytest.raises(ValueError) as refused:
+        ledger_phases.check(review(state, note="n", override=override))
+    assert str(refused.value) == message
+
+
+def test_an_override_lands_on_the_approval_record_only():
+    planned()
+    state, rejected = sync(review("approved", override=OVERRIDE))
+    assert rejected == []
+    assert state["phases"][0]["review"]["override"] == OVERRIDE
+    state, rejected = sync(review("sent_back", n=1, note="Again"))
+    assert rejected == [] and "override" not in state["phases"][0]["review"]
+
+
 def test_round_cap_is_three():
     assert ledger_phases.ROUND_CAP == 3
 
