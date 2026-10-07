@@ -846,7 +846,7 @@ def _kept_records(values: list[dict], all_turns: list[list[dict]], cut: tuple[in
     turn, entry = cut
     first = positions.get(all_turns[turn][entry].get("uuid"))
     prompt = positions.get(all_turns[turn][0].get("uuid"))
-    if not first or prompt is None:
+    if first is None or prompt is None:
         return None
     kept = set(range(first, len(values)))
     if entry:
