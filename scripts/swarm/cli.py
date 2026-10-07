@@ -375,13 +375,13 @@ def cmd_master(store, args):
     runtime = HerdrRuntime()
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, runtime.live_names())
+    launched = master_launch.up(store, args.slug, runtime, now_ms(), args.choice, input, print)
     ledger = LedgerClient()
     if ledger.closed(args.slug):
-        ledger.reopen(args.slug, "operator")
+        ledger.reopen(args.slug, launched.master)
     if store.config(args.slug).state in ("stopped", "stopping"):
         store.update(args.slug, state="paused")
         timer.ensure(_bin())
-    launched = master_launch.up(store, args.slug, runtime, now_ms(), args.choice, input, print)
     ledger.join(args.slug, launched.master, "orchestrator")
     print(json.dumps(asdict(launched)))
 

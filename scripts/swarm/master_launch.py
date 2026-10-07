@@ -6,12 +6,12 @@ from datetime import datetime, timezone
 
 from scripts.handoff import transfers
 from scripts.inbox.seats import seat_address
-from scripts.swarm import affinity, effort_range, live_binding, model_pick
+from scripts.swarm import affinity, effort_range, live_binding, master_start, model_pick
 from scripts.swarm.resume import blocker
 from scripts.swarm.snapshot import ledger_path
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 from scripts.swarm.templates import DEFAULT_PROFILES
-from scripts.swarm.tick import _placed, primed
+from scripts.swarm.tick import placed_record, primed
 
 LAST, NEW = "last", "new"
 ANSWERS = {"1": LAST, LAST: LAST, "2": NEW, NEW: NEW}
@@ -105,7 +105,7 @@ def _resume(store, slug, runtime, at, previous):
     placed = runtime.resume(config, agent, text)
     store.seats.occupy(seat, agent.name, at)
     record = replace(
-        _placed(agent, placed),
+        placed_record(agent, placed),
         harness=placed.harness or agent.harness,
         account=placed.account or agent.account,
         profile=placed.profile or agent.profile,
@@ -146,23 +146,32 @@ def _new(store, slug, runtime, at):
     config = store.ensure_code(slug)
     name = store.next_name(slug, MASTER, at)
     record = AgentRecord(name, MASTER, MASTER, started_at=at, state="starting", seat=seat_address(slug, MASTER))
+    pending = master_start.read(store, slug)
     store.put_agent(slug, record)
     try:
         store.seats.occupy(record.seat, name, at)
         transfer = transfers.attach(store, slug, record)
         task = {"id": MASTER, "handoff": store.handoff(slug, MASTER), "peer": store.peer(slug), "transfer": transfer}
         task = _filled(primed(store, slug, record.seat, task), config)
+        master_start.begin(store, slug, name, task, at)
         affinity.handed_off(store, slug)
         placed = runtime.spawn(config, MASTER, name, task)
     except Exception as exc:
         transfers.failed(store, slug, record)
         store.drop_agent(slug, name)
         affinity.failed(store, slug, str(exc))
+        if pending:
+            master_start.save(store, slug, pending)
+        else:
+            store.redis.delete(store.key(slug, "master-start"))
         raise SwarmError(f"the new master could not start: {exc}") from exc
     affinity.placed(store, slug, placed.harness)
-    record = replace(_placed(record, placed), state="working")
-    store.put_agent(slug, record)
-    store.clear_handoff(slug, MASTER)
+    record = placed_record(record, placed)
+    reported = runtime.reported(record)
+    store.put_agent(slug, replace(record, state="working" if reported else "starting"))
+    if reported:
+        store.redis.delete(store.key(slug, "master-start"))
+        store.clear_handoff(slug, MASTER)
     store.redis.hdel(store.key(slug, "launch-assignments"), MASTER)
     return Launched(name, record.pane_id, record.seat, NEW)
 

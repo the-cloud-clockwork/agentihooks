@@ -440,7 +440,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                 if isinstance(exc, ProfileUnresolved):
                     actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
                 return actions
-            store.put_agent(slug, _placed(record, placed))
+            store.put_agent(slug, placed_record(record, placed))
             store.count_spawn(slug, placed.harness)
             store.count_claim(slug, task["id"])
             store.clear_handoff(slug, task["id"])
@@ -506,7 +506,7 @@ def _free_seat(slug, lane, taken, preferred):
     return next(seat for k in count(1) if (seat := seat_address(slug, f"{lane}-{k}")) not in taken)
 
 
-def _placed(record, placed):
+def placed_record(record, placed):
     return replace(
         record,
         pane_id=placed.pane_id,
@@ -543,7 +543,7 @@ def _recover_master(slug, config, store, runtime, now_ms):
         return []
     name = occupant if occupant in candidates else candidates[0]
     record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, seat=seat)
-    store.put_agent(slug, _placed(record, runtime.recover(name)))
+    store.put_agent(slug, placed_record(record, runtime.recover(name)))
     for agent in agents:
         if agent.name not in live and agent.state != "finished":
             store.drop_agent(slug, agent.name)
@@ -594,7 +594,7 @@ def _master(slug, config, store, runtime, now_ms):
             master_start.save(store, slug, {**failed, "name": "", "retry": True})
         return [f"master spawn failed: {exc}"]
     affinity.placed(store, slug, placed.harness)
-    record = _placed(record, placed)
+    record = placed_record(record, placed)
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))
     if reported:

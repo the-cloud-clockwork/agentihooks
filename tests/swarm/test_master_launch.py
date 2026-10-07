@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from scripts.swarm import master_launch, runtime
+from scripts.swarm import master_launch, master_start, runtime
 from scripts.swarm.store import MASTER, AgentRecord
 from scripts.swarm.tick import Placed, SpawnError
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -326,3 +326,61 @@ def test_a_stopped_swarm_is_paused_so_the_tick_keeps_the_master(up, monkeypatch)
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 0
     assert store.config("sw").state == "paused"
+
+
+def test_a_new_master_that_has_not_reported_stays_starting_under_the_ticks_watch(up, monkeypatch):
+    store, _, rt = up
+    store.put_handoff("sw", MASTER, "# Handoff v2\n## Next\nGo on.\n")
+    monkeypatch.setattr(rt, "reported", lambda agent: False)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 0
+    [record] = masters(store)
+    assert record.state == "starting"
+    assert master_start.read(store, "sw")["name"] == record.name
+    assert "Go on." in store.handoff("sw", MASTER)
+
+
+def test_a_new_master_that_reported_leaves_no_pending_start(up, monkeypatch):
+    store, _, _ = up
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 0
+    assert master_start.read(store, "sw") == {}
+
+
+def test_a_failed_launch_keeps_the_ticks_pending_start(up, monkeypatch):
+    store, _, rt = up
+    earlier = {"name": "", "task": {"id": MASTER}, "attempt": 1, "retry": True, "at": 3}
+    master_start.save(store, "sw", earlier)
+    rt.fail = True
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 1
+    assert master_start.read(store, "sw") == earlier
+
+
+def test_a_failed_launch_leaves_no_pending_start_of_its_own(up, monkeypatch):
+    store, _, rt = up
+    rt.fail = True
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 1
+    assert master_start.read(store, "sw") == {}
+
+
+def test_no_master_started_leaves_a_stopped_swarm_and_closed_ledger_untouched(up, monkeypatch):
+    store, ledger, _ = up
+    store.update("sw", state="stopped")
+    ledger.closed = lambda slug: True
+    ledger.reopened = []
+    ledger.reopen = lambda slug, by: ledger.reopened.append(by)
+    answers(monkeypatch, "1", "n")
+    assert run("sw", "master", "up") == 1
+    assert store.config("sw").state == "stopped" and ledger.reopened == []
+
+
+def test_a_closed_ledger_is_reopened_by_the_master_that_came_up(up, monkeypatch, capsys):
+    store, ledger, _ = up
+    ledger.closed = lambda slug: True
+    ledger.reopened = []
+    ledger.reopen = lambda slug, by: ledger.reopened.append(by)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 0
+    assert ledger.reopened == [printed(capsys)["master"]]
