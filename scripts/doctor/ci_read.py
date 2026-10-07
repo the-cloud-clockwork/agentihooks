@@ -3,6 +3,8 @@ import re
 import subprocess
 from collections.abc import Callable
 
+from scripts.swarm.ledger_events import iso_ms
+
 TEST = re.compile(
     r"(?:(PASSED|FAILED|SKIPPED) (tests/\S+::.+?)|(tests/\S+::.+?) (PASSED|FAILED|SKIPPED))(?:\s+\[\s*\d+%\])?\s*$"
 )
@@ -61,4 +63,11 @@ def pull_request(repo: str, number: int, run: Callable = subprocess.run) -> dict
     runs = [
         r for r in _pages(f"{root}/actions/runs?head_sha={sha}&per_page=100", "workflow_runs", run) if _belongs(r, pr)
     ]
-    return {"pr": pr, "checks": checks, "runs": runs, "attempts": _attempts(repo, runs, run)}
+    committed = _gh(["api", f"{root}/commits/{sha}", "--jq", ".commit.committer.date"], run).strip()
+    return {
+        "pr": pr,
+        "committed_at": iso_ms(committed),
+        "checks": checks,
+        "runs": runs,
+        "attempts": _attempts(repo, runs, run),
+    }
