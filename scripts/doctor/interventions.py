@@ -86,7 +86,7 @@ def _server_modules(code):
         if path in seen:
             continue
         seen.add(path)
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        for node in ast.walk(ast.parse(path.read_bytes())):
             todo += _imported(node, path, roots)
     return seen
 
