@@ -1101,7 +1101,7 @@ def _wait_nudge_blocks(payload: dict) -> list[str]:
     try:
         from hooks.context.swarm_wait_nudge import nudge
 
-        context = nudge(payload.get("tool_name", ""), payload.get("tool_input") or {})
+        context = nudge(payload)
     except Exception as e:
         log("swarm wait nudge failed", {"error": str(e)})
         return []
