@@ -98,7 +98,8 @@ else:
     )
     assert result.returncode == 0, result.stderr
     calls = [json.loads(line) for line in (tmp_path / "calls").read_text().splitlines()]
-    assert "workflows/test.yml/runs?branch=dev&event=push&status=success&per_page=1" in calls[0][1]
+    assert "actions/artifacts?name=durations-merged" in calls[0][1]
+    assert 'head_branch == "dev"' in calls[0][-1]
     if mode == "download":
         assert json.loads((tmp_path / ".test_durations").read_text()) == {
             "tests/a.py::test_a": 90.0,

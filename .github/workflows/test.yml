@@ -108,7 +108,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           folder="$RUNNER_TEMP/dev-durations"
-          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&status=success&per_page=1" --jq '.workflow_runs[0].id // empty') || run=
+          # refresh-durations uploads only after unit and lint pass, so a later Sonar failure on that run does not void it.
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=durations-merged&per_page=20" --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == "dev")][0].workflow_run.id // empty') || run=
           if [[ -n "$run" ]] && gh run download "$run" --repo "$GITHUB_REPOSITORY" --name durations-merged --dir "$folder" &&
              python - "$folder/.test_durations" <<'PYTHON'
           import json
