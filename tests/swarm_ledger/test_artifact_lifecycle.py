@@ -148,10 +148,10 @@ class TestCommands:
     def test_a_refused_publish_exits_with_the_rule(self, tmp_path):
         doc = tmp_path / "proof.md"
         doc.write_bytes(MARKDOWN)
-        refused = {"rejected": ["x"], "_meta": {"warnings": ["overview has 300 words", artifacts.REFUSED]}}
+        refused = {"rejected": ["x"], "_meta": {"warnings": ["overview has 300 words, limit 200", artifacts.REFUSED]}}
         with pytest.raises(SystemExit) as exc:
             self.run(["artifact", str(doc), "Proof", "--task", ""], refused)
-        assert exc.value.code == f"rejected: {artifacts.REFUSED}"
+        assert exc.value.code == artifacts.REFUSED
         with pytest.raises(SystemExit) as exc:
             self.run(["artifact", str(doc), "Proof", "--task", ""], {"rejected": ["x"]})
         assert exc.value.code == "rejected: join the ledger first and name a task it holds"
