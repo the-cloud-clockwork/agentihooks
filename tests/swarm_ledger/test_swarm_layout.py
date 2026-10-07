@@ -573,9 +573,9 @@ def test_every_button_is_flat_at_rest(open_page):
 def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(open_page):
     page = open_page()
     assert page.table("swarm-quota") == [
-        ["tccgma", "claude", "92%", "53m", "78%", "4d15h", "2/6", ""],
-        ["luna", "claude", "64%", "2h05m", "51%", "6d00h", "1/4", "MASTER"],
-        ["default", "codex", "—", "—", "61%", "3d10h", "0/—", ""],
+        ["tccgma", "claude", "—", "92%", "53m", "78%", "4d15h", "78%", "2/6", ""],
+        ["luna", "claude", "—", "64%", "2h05m", "51%", "6d00h", "51%", "1/4", "MASTER"],
+        ["default", "codex", "—", "—", "—", "61%", "3d10h", "—", "0/—", ""],
     ]
     assert page.text("#quota-count").lower() == "3 accounts · probed 2m ago"
 

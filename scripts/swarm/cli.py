@@ -624,9 +624,10 @@ def cmd_status(store, args):
     print(plan_shape.report(tasks, config.max_eng)["summary"])
     for phase_id, state, held in phase_state.report(doc):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))
-    from scripts.swarm import capacity
+    from scripts.swarm import capacity, quota_view
 
-    print(capacity.status_line(capacity.read(store, args.slug)))
+    for line in quota_view.lines(capacity.read(store, args.slug), now_ms()):
+        print(line)
     print(_snapshot_line(auto_snapshot(config)))
     print(_affinity_line(affinity.report(store, args.slug, config, agents)))
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):

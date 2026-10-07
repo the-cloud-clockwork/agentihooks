@@ -26,6 +26,7 @@ ENV = {
     "master_watch_min": "AGENTIHOOKS_HEALTH_MASTER_WATCH_MIN",
     "master_watch_ratio": "AGENTIHOOKS_HEALTH_MASTER_WATCH_RATIO",
     "cooldown_minutes": "AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES",
+    "drain_minutes": "AGENTIHOOKS_HEALTH_DRAIN_MINUTES",
 }
 
 
@@ -43,6 +44,7 @@ class Limits:
     master_watch_min: int = 60
     master_watch_ratio: int = 15
     cooldown_minutes: int = 60
+    drain_minutes: int = 10
 
 
 @dataclass(frozen=True)
