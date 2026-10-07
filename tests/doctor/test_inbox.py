@@ -90,3 +90,40 @@ def test_an_informational_item_closed_bare_is_not_raised_and_a_work_item_still_i
     work.update(state="done", reason="done")
     fyi = {**copy.deepcopy(work), "id": "fyi1", "fyi": True}
     assert [f.id for f in inbox.no_outcome([work, fyi])] == [f"inbox-no-outcome/{work['id']}"]
+
+
+def _delivered(address="eng-1@demo"):
+    row = copy.deepcopy(recorded()["items"][0])
+    row.update(created_at=MIN, updated_at=MIN, state="delivered", address=address)
+    row["history"] = [{"state": "pending", "at": MIN}, {"state": "delivered", "at": MIN}]
+    return row
+
+
+def test_delivered_mail_to_a_live_receiver_working_it_is_not_backlog():
+    row = _delivered()
+    active = {row["address"]: inbox.Receiver(live=True, quiet_ms=WINDOW - 1)}
+    assert inbox.past_window([row], 20 * MIN, WINDOW, active) == []
+
+
+def test_delivered_mail_is_backlog_once_its_receiver_left_or_went_quiet():
+    row = _delivered()
+    quiet = {row["address"]: inbox.Receiver(live=True, quiet_ms=WINDOW)}
+    left = {row["address"]: inbox.Receiver(live=False)}
+    assert [f.subject for f in inbox.past_window([row], 20 * MIN, WINDOW, quiet)] == [row["id"]]
+    assert [f.subject for f in inbox.past_window([row], 20 * MIN, WINDOW, left)] == [row["id"]]
+    assert [f.subject for f in inbox.past_window([row], 20 * MIN, WINDOW)] == [row["id"]]
+
+
+def test_unread_mail_keeps_the_window_while_its_receiver_is_live():
+    row = _delivered()
+    row.update(state="pending")
+    row["history"] = row["history"][:1]
+    active = {row["address"]: inbox.Receiver(live=True)}
+    assert [f.subject for f in inbox.past_window([row], 20 * MIN, WINDOW, active)] == [row["id"]]
+
+
+def test_mail_to_a_session_outside_the_swarm_is_left_out():
+    row = _delivered("engineer-100001-0001-tmp-1")
+    outside = {row["address"]: inbox.Receiver(scoped=False)}
+    assert inbox.past_window([row], 20 * MIN, WINDOW, outside) == []
+    assert inbox.findings([row], 20 * MIN, WINDOW, outside) == []

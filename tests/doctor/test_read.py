@@ -37,6 +37,28 @@ def test_inbox_items_of_the_swarm_carry_their_history(redis):
     assert [e["state"] for e in rows[kept.id]["history"]] == ["pending", "done"]
 
 
+def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_the_swarm(redis):
+    from scripts.doctor.inbox import Receiver
+    from scripts.doctor.priming import doctor_slug
+    from scripts.swarm.store import AgentRecord
+
+    store, box = RedisStore(redis), InboxStore(redis)
+    seat, doctor = f"eng-1@{SLUG}", f"master@{doctor_slug(SLUG)}"
+    store.seats.occupy(seat, f"{SLUG}-eng-1", 10)
+    store.put_agent(SLUG, AgentRecord(name=f"{SLUG}-eng-1", lane="eng", task="t1", idle_ticks=2))
+    store.put_agent(SLUG, AgentRecord(name=f"{SLUG}-eng-5", lane="eng", task="t5", state="finished"))
+    addresses = [seat, f"{SLUG}-eng-2", f"{SLUG}-eng-5", "engineer-100001-0001-tmp-1", "operator", doctor]
+    items = [{"address": address} for address in addresses]
+    assert read.inbox_receivers(store, box, SLUG, items) == {
+        seat: Receiver(live=True, quiet_ms=2 * 60_000),
+        f"{SLUG}-eng-2": Receiver(),
+        f"{SLUG}-eng-5": Receiver(),
+        "engineer-100001-0001-tmp-1": Receiver(scoped=False),
+        "operator": Receiver(),
+        doctor: Receiver(),
+    }
+
+
 def prompt(name, seat, task, handoff):
     lines = [f"You are {name}, an engineer in swarm {SLUG}.", f"Your one task for this session is {task}: a title"]
     lines.append(f"Your seat {seat} carries what earlier occupants left. Read it in this order:")
