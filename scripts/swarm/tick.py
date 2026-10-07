@@ -56,6 +56,7 @@ class Placed:
     model_source: str = ""
     model_confidence: float | None = None
     profile_decision: dict = field(default_factory=dict)
+    choice: str = ""
 
 
 class Ledger(Protocol):
@@ -427,6 +428,7 @@ def _placed(record, placed):
         model_source=placed.model_source,
         model_confidence=placed.model_confidence,
         profile_decision=placed.profile_decision,
+        choice=placed.choice,
         state="working",
     )
 

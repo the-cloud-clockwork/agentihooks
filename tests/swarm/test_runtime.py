@@ -284,6 +284,32 @@ def test_an_auto_work_lane_spawn_asks_for_the_codex_share_with_the_swarm_setting
 
 
 @pytest.mark.parametrize(
+    ("reason", "choice"),
+    [("fallthrough: claude is at its session cap", "overflow"), ("codex share 0/2 below 30%", "share")],
+)
+def test_a_spawn_carries_the_router_choice_kind(tmp_path, monkeypatch, reason, choice):
+    from scripts import agent_choice
+
+    def run(argv, **kwargs):
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    monkeypatch.setattr(agent_choice, "choose_shared", lambda *args, **kwargs: ("codex", reason))
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "priority"))
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"eng": {"agent": "auto"}},
+        autonomy="delegate",
+        codex_share=20,
+        codex_min_week_left=5,
+    )
+    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"}, spawns={})
+    assert placed.choice == choice
+
+
+@pytest.mark.parametrize(
     ("profile", "lane_agent", "harness"),
     [("frontend", "auto", "claude"), ("frontend", "codex", "claude"), ("engineer", "auto", "codex")],
 )
