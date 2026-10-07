@@ -2321,10 +2321,11 @@ _AGENTIENV_CHECK = (
 )
 
 _AGENTIENV_MULTILINE = (
-    '  local _n _m=""\n'
-    '  for _n in $(compgen -e); do [[ "${!_n}" == *$\'\\n\'* ]] && _m="$_m $_n"; done\n'
+    '  local _n _m="" _r=" ${AGENTIHOOKS_MULTILINE_REPORTED:-} "\n'
+    '  for _n in $(compgen -e); do [[ "${!_n}" == *$\'\\n\'* && "$_r" != *" $_n "* ]] && _m="$_m $_n"; done\n'
     '  [[ -n "$_m" ]] && echo "[agentienv] WARNING: these values span several lines, and line based tools'
     ' such as env print their later lines as if they were names:$_m" >&2\n'
+    '  [[ -n "$_m" ]] && export AGENTIHOOKS_MULTILINE_REPORTED="${AGENTIHOOKS_MULTILINE_REPORTED:-}$_m"\n'
 )
 
 
