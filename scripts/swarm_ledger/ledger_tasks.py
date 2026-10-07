@@ -30,9 +30,14 @@ UPDATABLE = (
     "profile",
     "plan_url",
     "rank",
+    "branch",
+    "stacked_base",
+    "parked_on",
 )
 BOOL_FIELDS = ("artifact",)
-LIST_FIELDS = ("depends_on", "territory")
+LIST_FIELDS = ("depends_on", "territory", "parked_on")
+BRANCH_RE = re.compile(r"^\S*$")
+COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
 OBJECT_FIELDS = ("contract", "proof")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
@@ -92,11 +97,22 @@ def check(op):
     if not isinstance(guard, list) or not all(state in STATES for state in guard):
         raise ValueError(f"if_state must be a list of states from {STATES}")
     check_lists(fields)
+    check_stack(fields)
     check_bools(fields)
     check_profile(fields)
     check_urls(fields)
     check_rank(fields)
     ledger_kinds.check(fields)
+
+
+def check_stack(fields):
+    if "branch" in fields and not (isinstance(fields["branch"], str) and BRANCH_RE.match(fields["branch"])):
+        raise ValueError("branch must be a git branch name, or empty to clear it")
+    base = fields.get("stacked_base", "")
+    if not (isinstance(base, str) and COMMIT_RE.match(base)):
+        raise ValueError("stacked_base must be a lowercase commit hash of 7 to 64 characters, or empty to clear it")
+    if not all(ID_RE.match(task_id) for task_id in fields.get("parked_on", [])):
+        raise ValueError("parked_on must list task ids")
 
 
 def check_rank(fields):
@@ -137,6 +153,7 @@ def check_task(task):
     if task.get("state", "open") not in STATES:
         raise ValueError(f"tasks/{task.get('id')}/state must be one of {STATES}")
     check_lists(task)
+    check_stack(task)
     check_urls(task)
     check_profile(task)
     check_rank(task)
@@ -247,7 +264,7 @@ def _update(doc, op, ctx):
     task_id = op["item"].split("/")[1]
     task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
     others = [t for t in doc["tasks"] if t["id"] != task_id]
-    if task is None or not _known(others, op["fields"].get("depends_on", [])):
+    if task is None or not _known(others, op["fields"].get("depends_on", []) + op["fields"].get("parked_on", [])):
         return False
     if op.get("if_state") and task.get("state", "open") not in op["if_state"]:
         return True

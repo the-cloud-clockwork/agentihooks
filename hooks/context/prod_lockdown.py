@@ -296,7 +296,7 @@ def check_prod_lockdown(payload: dict) -> None:
         if full_bypass or hotfix_unlock:
             return
         if category == "release" and release_unlock:
-            return
+            continue
         hint = (
             "Add a release-gate phrase (e.g. 'merge to main', 'ship it', 'release to prod') or --emergency-prod."
             if category == "release"

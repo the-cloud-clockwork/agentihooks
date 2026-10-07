@@ -825,6 +825,10 @@ def session_name(pid: int) -> str:
     )
 
 
+def live_session_ids(pid: int) -> list[str]:
+    return [sid for sid, info in _load_sessions().items() if info.get("pid") == pid and info.get("status") == "alive"]
+
+
 def mark_handed_off(pid: int, target_account: str) -> list[str]:
     """Flip every live session of ``pid`` to status=handed_off; returns their ids."""
     marked = []

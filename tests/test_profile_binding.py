@@ -74,6 +74,36 @@ def test_revalidation_refuses_a_different_live_binding(tmp_path, monkeypatch, ta
     assert json.loads(report.read_text())["state"] == "failed"
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+@pytest.mark.parametrize("validated", [False, True])
+def test_running_session_validates_the_canary_a_later_render_delivered(tmp_path, monkeypatch, target, validated):
+    home = tmp_path / "engineer" / target
+    home.mkdir(parents=True)
+    persona = home / binding.PERSONAS[target]
+    persona.write_text(binding.persona("Engineer instructions.\n"))
+    (home.parent / f"{target}.sources.json").write_text("[]")
+    binding.write(home, "engineer", target)
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", target, home)
+    env = {"AGENTIHOOKS_PROFILE": "engineer", binding.HOMES[target]: str(home), binding.REPORT: str(report)}
+    monkeypatch.setattr(binding, "process", lambda: (123, target, env, "default"))
+    launched = binding.inspect(home, "engineer", target)
+    if validated:
+        binding.validate(launched["canary"])
+
+    persona.write_text(binding.persona("Engineer instructions after the overlay change.\n"))
+    binding.write(home, "engineer", target)
+    rendered = binding.inspect(home, "engineer", target)
+    assert rendered["canary"] != launched["canary"]
+
+    result = binding.validate(rendered["canary"])
+    assert result["persona"] == rendered["persona"]
+    assert result["pid"] == 123
+    assert json.loads(report.read_text())["validation"] == result
+    with pytest.raises(ValueError, match="^mounted instruction canary mismatch$"):
+        binding.validate("0" * 24)
+
+
 @pytest.mark.parametrize(
     ("source", "target", "message"),
     [
