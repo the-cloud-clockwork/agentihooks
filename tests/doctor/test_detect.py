@@ -3,7 +3,9 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.doctor import detect
+from scripts.swarm import ledger_events
 from scripts.swarm.health.findings import Finding
+from tests.doctor.recorded import load
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -63,13 +65,11 @@ def test_ci_reads_only_the_pull_requests_of_tasks_waiting_in_review():
 
 
 def test_ci_reports_a_red_head_only_past_the_tick_red_window(monkeypatch):
-    from tests.doctor.recorded import load
-
     record = load("ci")
     record["checks"][0]["conclusion"] = "failure"
     monkeypatch.setattr(detect.ci_read, "pull_request", lambda repo, number: record)
     ledger = SimpleNamespace(tasks=lambda slug: [{"state": "pr", "pr_url": "https://github.com/o/r/pull/487"}])
-    window = detect.ci.ledger_events.RED_QUIET_MS
+    window = ledger_events.RED_QUIET_MS
     import fakeredis
 
     store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
