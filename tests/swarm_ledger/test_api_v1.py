@@ -2082,26 +2082,30 @@ def test_known_hash_shaped_task_ids_keep_the_comment_exemption(live):
 
 
 def test_refused_comment_reason_reaches_the_api_reply_and_the_cli(live):
+    from types import SimpleNamespace
     from unittest.mock import patch
 
     reason = (
-        "Operation does not match its domain schema: chat refused, write plain words for the operator "
+        "Operation does not match its domain schema: comment refused, write plain words for the operator "
         "(what was done, or why it was skipped): file name or path 'foo.py'"
     )
     expected = {"error": {"code": "schema_invalid", "message": reason}}
-    revision = request(live, "GET", "chat")[1]["revision"]
-    comment = {"op": "add", "id": "path-comment", "thread": "chat", "by": "api-reader", "text": "see scripts/foo.py"}
-    assert request(live, "POST", "operations", {"ops": [dict(comment)], "guards": {"chat": revision}}) == (
+    thread = "phases/p1/comments"
+    before = request(live, "GET", thread)
+    comment = {"op": "add", "id": "path-comment", "thread": thread, "by": "api-reader", "text": "see scripts/foo.py"}
+    assert request(live, "POST", "operations", {"ops": [comment], "guards": {thread: before[1]["revision"]}}) == (
         400,
         expected,
     )
     with patch.dict("os.environ", {"AGENTIHOOKS_AGENT_NAME": "", "AGENTIHOOKS_SWARM": ""}):
         with pytest.raises(SystemExit) as refused:
-            ledger.call(SLUG, [{**comment, "id": "cli-path-comment"}])
+            ledger.cmd_comment(
+                SimpleNamespace(slug=SLUG, item="phases/p1", text="see scripts/foo.py", name="api-reader")
+            )
     prefix = "server refused: 400 "
     assert refused.value.code[: len(prefix)] == prefix
     assert json.loads(refused.value.code[len(prefix) :]) == expected
-    assert request(live, "GET", "chat")[1]["revision"] == revision
+    assert request(live, "GET", thread) == before
 
 
 def test_stored_checkbox_receipt_keeps_the_canonical_digest(live):
