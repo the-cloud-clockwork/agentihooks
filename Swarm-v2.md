@@ -4098,7 +4098,7 @@ Baseline references: [SRC-AH-SNAPSHOT] [SRC-K8S-LIFECYCLE]
 
 1. Upload objects under immutable checkpoint IDs.
 2. Verify object hashes before committing the manifest.
-3. Compare-and-update the latest pointer under task generation.
+3. Compare-and-update the latest pointer under task generation, refusing a `checkpoint_sequence` at or below the pointer's within the same attempt (field published by SV2-FND-03).
 4. Run periodic capture with bounded overhead and a separate emergency drain budget.
 
 ##### Boundary and interface obligations
