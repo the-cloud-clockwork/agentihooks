@@ -21,6 +21,7 @@ KEYS = (
     "AGENTIHOOKS_PROFILE",
     "AGENTIHOOKS_PROFILE_REPORT",
     "AGENTIHOOKS_TARGET",
+    "AGENTIHOOKS_PREDECESSOR_SESSION",
 )
 
 SOURCES = {
@@ -48,6 +49,8 @@ SOURCES = {
     "account": "routed token variable name",
     "revision": "launch profile report validation.revisions",
     "revision.sources": "launch profile report validation.sources",
+    "predecessor.session.id": "env AGENTIHOOKS_PREDECESSOR_SESSION, set by a transfer launch",
+    "predecessor.trace.id": "agent_trace.trace_id(predecessor session id)",
 }
 
 
@@ -93,6 +96,7 @@ def envelope(inputs: Inputs) -> dict[str, tuple[str, object]]:
     account = environment_account(env)
     has_agent, has_report = inputs.agent is not None, inputs.report is not None
     session = inputs.session_id
+    predecessor = env.get("AGENTIHOOKS_PREDECESSOR_SESSION")
     return {
         "ledger": _value(env.get("AGENTIHOOKS_SWARM"), swarm),
         "task": _value(env.get("AGENTIHOOKS_SWARM_TASK"), swarm),
@@ -118,6 +122,8 @@ def envelope(inputs: Inputs) -> dict[str, tuple[str, object]]:
         "account": _value("" if account == UNROUTED else account),
         "revision": _value(_revision(validated.get("revisions")), has_report),
         "revision.sources": _value(validated.get("sources"), has_report),
+        "predecessor.session.id": _value(predecessor),
+        "predecessor.trace.id": _value(format(trace_id(predecessor), "032x") if predecessor else None),
     }
 
 
