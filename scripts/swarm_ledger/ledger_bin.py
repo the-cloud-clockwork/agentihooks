@@ -3,12 +3,9 @@
 A small ledger moves itself here once every item in it is done or after 7 days with no change.
 """
 
-import json
 import threading
 
 import ledger_core as core
-import ledger_media
-import ledger_size
 
 KEEP_DAYS = 30
 IDLE_DAYS = 7
@@ -25,23 +22,21 @@ def restored_path():
 
 
 def restored():
-    try:
-        found = json.loads(restored_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return {k: v for k, v in found.items() if isinstance(v, int)} if isinstance(found, dict) else {}
+    from scripts.swarm_ledger.repository import bin_storage
+
+    return bin_storage.restored()
 
 
 def entries():
-    try:
-        found = json.loads(bin_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return {k: v for k, v in found.items() if isinstance(v, int)} if isinstance(found, dict) else {}
+    from scripts.swarm_ledger.repository import bin_storage
+
+    return bin_storage.entries()
 
 
 def _save(found):
-    core.atomic_write(bin_path(), json.dumps(found, indent=1, sort_keys=True))
+    from scripts.swarm_ledger.repository import bin_storage
+
+    return bin_storage._save(found)
 
 
 def days_left(deleted_at, now):
@@ -49,47 +44,27 @@ def days_left(deleted_at, now):
 
 
 def delete(slug, now=None):
-    with LOCK:
-        found = entries()
-        found.setdefault(slug, core.now_ms() if now is None else now)
-        _save(found)
+    from scripts.swarm_ledger.repository import repository
+
+    return repository.delete(slug, now)
 
 
 def restore(slug, now=None):
-    with LOCK:
-        found = entries()
-        if found.pop(slug, None) is None:
-            return False
-        _save(found)
-        marks = restored()
-        marks[slug] = core.now_ms() if now is None else now
-        core.atomic_write(restored_path(), json.dumps(marks, indent=1, sort_keys=True))
-        return True
+    from scripts.swarm_ledger.repository import repository
+
+    return repository.restore(slug, now)
 
 
 def bin_closed(slug, closed_at, now=None):
-    with LOCK:
-        found, marks = entries(), restored()
-        if slug in found or (slug in marks and marks[slug] >= closed_at):
-            return False
-        found[slug] = core.now_ms() if now is None else now
-        _save(found)
-        return True
+    from scripts.swarm_ledger.repository import bin_storage
+
+    return bin_storage.bin_closed(slug, closed_at, now)
 
 
 def purge_expired(now=None):
-    now = core.now_ms() if now is None else now
-    with LOCK:
-        found = entries()
-        expired = sorted(slug for slug, at in found.items() if now - at > KEEP_DAYS * DAY_MS)
-        for slug in expired:
-            for path in core.paths(slug):
-                path.unlink(missing_ok=True)
-            ledger_media.purge(slug)
-            del found[slug]
-        if expired:
-            _save(found)
-    return expired
+    from scripts.swarm_ledger.repository import bin_storage
+
+    return bin_storage.purge_expired(now)
 
 
 def _answered(question):
@@ -115,24 +90,9 @@ def due(state, now, restored_at=None):
 
 
 def auto_bin(now=None):
-    now = core.now_ms() if now is None else now
-    binned = []
-    with LOCK, core.LOCK:
-        found, marks = entries(), restored()
-        for html_path in sorted(core.LEDGER_DIR.glob("*.html")):
-            slug, json_path = html_path.stem, core.paths(html_path.stem)[1]
-            if slug in found:
-                continue
-            try:
-                state = json.loads(json_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if isinstance(state, dict) and ledger_size.size_of(state) == "small" and due(state, now, marks.get(slug)):
-                found[slug] = now
-                binned.append(slug)
-        if binned:
-            _save(found)
-    return binned
+    from scripts.swarm_ledger.repository import bin_storage
+
+    return bin_storage.auto_bin(now)
 
 
 def tidy(now=None):
