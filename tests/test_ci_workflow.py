@@ -186,6 +186,16 @@ def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
     assert "exit 1" in failure["run"]
 
 
+def test_mutation_browser_dependencies_use_the_responsive_mirror():
+    steps = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())["jobs"]["mutation"]["steps"]
+    names = [step.get("name") for step in steps]
+    mirror = names.index("Use the Ubuntu archive for browser dependencies")
+    assert mirror < names.index("Install the browser that page tests drive")
+    assert steps[mirror]["if"] == "steps.selection.outputs.browser == 'true'"
+    assert steps[mirror]["run"] == r"sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt"
+    assert steps[mirror]["timeout-minutes"] == 1
+
+
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
 def test_workflow_badges_point_at_existing_workflows(doc):
     names = re.findall(r"actions/workflows/([\w.-]+\.yml)", (_ROOT / doc).read_text())

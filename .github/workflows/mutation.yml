@@ -47,6 +47,11 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
         run: python -m scripts.ci_mutation.browser --base "$BASE"
 
+      - name: Use the Ubuntu archive for browser dependencies
+        if: steps.selection.outputs.browser == 'true'
+        timeout-minutes: 1
+        run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+
       - name: Install the browser that page tests drive
         id: browser
         if: steps.selection.outputs.browser == 'true'
