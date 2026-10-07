@@ -209,18 +209,19 @@ def test_acknowledged_source_does_not_jump_over_late_pending_result(export, tran
     assert tool.attributes["langfuse.observation.output"] == "late result"
 
 
-def test_overflow_keeps_source_retryable(export, transcript, monkeypatch, capsys):
-    path, _ = transcript
+def test_overflow_admits_one_record_per_flush_until_the_source_is_exported(export, transcript, monkeypatch, capsys):
+    path, records = transcript
     monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", 1)
     flush(path)
     state = agent_trace._cursor("session")
     assert state["overflow"]["bytes"] > state["overflow"]["limit"] == 1
-    assert not state["accepted"] and not state["records"]
-    assert state["source"].get("accepted_bytes", 0) == 0
+    assert len(state["records"]) == 1
     assert "overflow" in capsys.readouterr().err
-    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", 8_000_000)
-    flush(path)
-    assert agent_trace._cursor("session")["accepted"]
+    for _ in range(len(records)):
+        flush(path)
+    state = agent_trace._cursor("session")
+    assert "overflow" not in state and not state["pending"] and state["accepted"]
+    assert state["source"]["accepted_bytes"] == path.stat().st_size
 
 
 def test_unknown_progress_version_is_preserved(export, transcript, capsys):
@@ -513,7 +514,7 @@ def test_accepted_history_does_not_exhaust_pending_budget(export, transcript, mo
         state = agent_trace._cursor("session")
         assert "overflow" not in state and not state["pending"]
         assert state["turns"] == index + 1
-    assert len(json.dumps(state["records"])) > 5000
+        assert len(state["records"]) == 1 and state.get("paged", {}).get("turns", 0) == index
     assert agent_trace._pending_bytes(state, state["records"], state["pending"]) == len(
         '{"records": {}, "pending": []}'
     )
@@ -769,7 +770,7 @@ def test_legacy_source_alias_survives_full_replay(export, transcript):
     assert set(export.observations) == first
 
 
-def test_pending_size_exact_boundary_and_preparation_overflow(export, transcript, monkeypatch, capsys):
+def test_pending_size_exact_boundary_and_preparation_never_refuses(export, transcript, monkeypatch, capsys):
     path, _ = transcript
     state = agent_trace._progress("session")
     state["session_id"] = "session"
@@ -779,19 +780,17 @@ def test_pending_size_exact_boundary_and_preparation_overflow(export, transcript
     fresh = agent_trace._progress("session")
     fresh["session_id"] = "session"
     agent_trace._stage_source(fresh, str(path))
-    assert "overflow" not in fresh
-    agent_trace._prepare_pending("session", fresh, agent_trace.Identity("session"))
-    assert fresh["overflow"]["bytes"] > fresh["overflow"]["limit"] == source_size
-    assert capsys.readouterr().err == f"agent trace export overflow: {json.dumps(fresh['overflow'])}\n"
-    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", 8_000_000)
-    agent_trace._stage_source(fresh, str(path))
-    assert "overflow" not in fresh
-    agent_trace._prepare_pending("session", fresh, agent_trace.Identity("session"))
-    limit = agent_trace._pending_bytes(fresh, fresh["records"], fresh["pending"])
-    fresh["pending"] = []
-    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", limit)
+    assert "overflow" not in fresh and fresh["records"] == state["records"]
     agent_trace._prepare_pending("session", fresh, agent_trace.Identity("session"))
     assert "overflow" not in fresh and fresh["pending"]
+    assert capsys.readouterr().err == ""
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", source_size - 1)
+    short = agent_trace._progress("session")
+    short["session_id"] = "session"
+    agent_trace._stage_source(short, str(path))
+    assert short["overflow"] == {"bytes": source_size, "limit": source_size - 1}
+    assert list(short["records"]) == list(state["records"])[:-1]
+    assert capsys.readouterr().err == f"agent trace export overflow: {json.dumps(short['overflow'])}\n"
 
 
 def test_prepare_legacy_records_keeps_historical_acceptance(export, transcript):
@@ -957,24 +956,23 @@ def test_source_overflow_uses_exact_limit_and_event(export, transcript, monkeypa
     agent_trace._stage_source(state, str(path))
     assert calls == [(state["overflow"], "overflow")]
     assert state["overflow"]["limit"] == 1 and state["overflow"]["bytes"] > 1
-    assert state["records"] == {} and state["source"] == {}
+    first_line = len(path.read_bytes().split(b"\n")[0]) + 1
+    assert len(state["records"]) == 1
+    assert state["source"]["buffered_bytes"] == first_line and state["source"]["records"] == 1
 
 
-def test_preparation_overflow_reports_combined_pending_payload(export, transcript, monkeypatch):
+def test_preparation_builds_pending_past_the_cap_without_reporting(export, transcript, monkeypatch):
     path, _ = transcript
     state = agent_trace._progress("session")
     state["session_id"] = "session"
     agent_trace._stage_source(state, str(path))
     source_size = agent_trace._pending_bytes(state, state["records"], [])
     calls = []
-    monkeypatch.setattr(
-        agent_trace, "_report_progress", lambda progress, result: calls.append((dict(progress["overflow"]), result))
-    )
+    monkeypatch.setattr(agent_trace, "_report_progress", lambda progress, result: calls.append(result))
     monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", source_size + 1)
     agent_trace._prepare_pending("session", state, agent_trace.Identity("session"))
-    assert state["pending"] == []
-    assert calls == [(state["overflow"], "overflow")]
-    assert state["overflow"]["limit"] == source_size + 1
+    assert agent_trace._pending_bytes(state, state["records"], state["pending"]) > source_size + 1
+    assert state["pending"] and calls == [] and "overflow" not in state
 
 
 @pytest.mark.parametrize("session,path", [("", "unused"), ("session", "")])
@@ -1097,7 +1095,7 @@ def test_session_spans_ignore_unsupported_non_mapping_blocks():
     assert [s.attributes["langfuse.observation.type"] for s in spans] == ["agent", "span", "generation"]
 
 
-def test_legacy_overflow_keeps_previous_acceptance_and_reports_only_overflow(export, transcript, monkeypatch, capsys):
+def test_legacy_cursor_under_a_tight_cap_exports_and_keeps_its_turns(export, transcript, monkeypatch, capsys):
     path, _ = transcript
     cursor = agent_trace._cursor_path("session")
     cursor.parent.mkdir()
@@ -1107,11 +1105,11 @@ def test_legacy_overflow_keeps_previous_acceptance_and_reports_only_overflow(exp
     monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", agent_trace._pending_bytes(state, state["records"], []) + 1)
     flush(path)
     result = agent_trace._cursor("session")
-    assert result["overflow"] and result["accepted"] and not result["pending"]
-    assert result["accepted_records"] == {} and result["source"]["accepted_bytes"] == 0
-    assert result["turns"] == 0
+    assert "overflow" not in result and result["accepted"] and not result["pending"]
+    assert result["accepted_records"] and result["source"]["accepted_bytes"] == path.stat().st_size
+    assert result["turns"] == 1
     assert "agent_trace export failed" not in capsys.readouterr().err
-    assert not export.calls
+    assert export.calls
 
 
 def test_invalid_json_text_uses_strict_redaction_with_operator_mode_off(monkeypatch):
@@ -1207,19 +1205,6 @@ def test_native_record_identity_uses_versioned_canonical_field_names():
     expected = hashlib.sha256('{"id":"native","kind":"function_call","type":"response_item"}'.encode()).hexdigest()
     assert source.record_id(record) == expected
     assert source.record_id({"type": "response_item"}) == hashlib.sha256(b'{"type":"response_item"}').hexdigest()
-
-
-def test_preparation_reports_the_exact_pending_byte_count(export, transcript, monkeypatch):
-    path, _ = transcript
-    state = agent_trace._progress("session")
-    agent_trace._stage_source(state, str(path))
-    agent_trace._prepare_pending("session", state, agent_trace.Identity("session"))
-    expected = len(json.dumps({"records": state["records"], "pending": state["pending"]}, ensure_ascii=False).encode())
-    staged = agent_trace._progress("session")
-    agent_trace._stage_source(staged, str(path))
-    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", expected - 1)
-    agent_trace._prepare_pending("session", staged, agent_trace.Identity("session"))
-    assert staged["overflow"] == {"bytes": expected, "limit": expected - 1}
 
 
 @pytest.mark.parametrize("kind", ["function_call_output", "custom_tool_call_output"])
