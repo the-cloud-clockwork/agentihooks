@@ -52,3 +52,9 @@ def test_unhandled_for_routes_owned_events_only_to_their_owner(monkeypatch):
     assert [e["rev"] for e in ledger_gate.unhandled_for(meta, "eng", tasks)] == [1, 3]
     assert [e["rev"] for e in ledger_gate.unhandled_for(meta, "boss", tasks)] == [2, 3]
     assert ledger_gate.unhandled_for(meta, "stranger", tasks) == []
+
+
+def test_a_ledger_without_events_owes_nothing(monkeypatch):
+    monkeypatch.setattr(naming, "resolve_name", lambda name: name)
+    assert ledger_gate.unhandled_for({"members": {"eng": {}}}, "eng") == []
+    assert ledger_gate.crew({"members": {"eng": {}}})[0]["unhandled"] == 0
