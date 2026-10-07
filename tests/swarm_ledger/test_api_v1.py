@@ -1580,3 +1580,46 @@ def test_item_ids_and_absent_threads(live):
     assert status == 200
     assert result["data"] == []
     assert result["next_cursor"] is None
+
+
+@pytest.mark.parametrize(
+    "path,code,ctype,origin",
+    [
+        ("/api/v1/proof", 400, "text/plain", None),
+        ("/api/v1/proof", 403, "text/plain", None),
+        ("/api/v1/proof", 404, "text/plain", server.FILE_ORIGIN),
+        ("/api/v1/proof", 399, "text/plain", None),
+        ("/api/v1/proof", 400, "application/json", None),
+        ("/api/proof", 403, "text/plain", server.FILE_ORIGIN),
+    ],
+)
+def test_transport_preserves_status_json_and_legacy_errors(path, code, ctype, origin):
+    from io import BytesIO
+    from unittest.mock import Mock
+
+    handler = server.Handler.__new__(server.Handler)
+    handler.path = path
+    handler.headers = {"Origin": origin}
+    handler.wfile = BytesIO()
+    handler.send_response = Mock()
+    handler.send_header = Mock()
+    handler.end_headers = Mock()
+    handler.send(code, "Refused é", ctype)
+    data = handler.wfile.getvalue()
+    handler.send_response.assert_called_once_with(code)
+    converted = path.startswith("/api/v1/") and code >= 400 and ctype != "application/json"
+    if converted:
+        assert json.loads(data) == {
+            "error": {"code": "forbidden" if code == 403 else "request_refused", "message": "Refused é"}
+        }
+    else:
+        assert data == "Refused é".encode()
+    expected = [
+        ("Content-Type", "application/json" if converted else ctype),
+        ("Content-Length", str(len(data))),
+        ("Cache-Control", "no-store"),
+    ]
+    if origin == server.FILE_ORIGIN:
+        expected.append(("Access-Control-Allow-Origin", server.FILE_ORIGIN))
+    assert [call.args for call in handler.send_header.call_args_list] == expected
+    handler.end_headers.assert_called_once_with()

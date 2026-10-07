@@ -210,6 +210,7 @@ def test_master_publication_on_a_real_task_keeps_its_task(publication):
         ],
     )
     assert not state["rejected"]
+    state["artifacts"] = ledger.resource(slug, "artifacts")["data"]
     assert state["artifacts"][-1]["task"] == "work"
 
 
