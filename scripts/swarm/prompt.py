@@ -13,6 +13,10 @@ from scripts.swarm.store import ASSIST, DELEGATE, FULL, MANUAL, MASTER
 from scripts.swarm_ledger import ledger_close, ledger_kinds
 
 CLOSES = "The swarm then closes this session; stop working."
+OVERLAP_LINE = (
+    "Running tasks share areas with yours. Coordinate with each claimant through the inbox "
+    '(agentihooks msg send <claimant> "<text>") and merge dev into your branch before your own merge:'
+)
 PUBLISHED = "It opens a GitHub issue where the repo has issues, else a ledger artifact"
 THROUGH_CODE = (
     "Reach that state through code: any change to what runs goes through a worktree (wt.sh new {name}), a pull "
@@ -183,6 +187,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         lines.append(task["description"])
     lines += contract_lines(task.get("contract") or {})
     lines += workspace_lines(task)
+    lines += overlap_lines(task)
     if task.get("pr_url"):
         lines.append(f"An earlier agent already opened {task['pr_url']}: continue it instead of starting over.")
     lines += continuation_lines(task)
@@ -363,6 +368,15 @@ def workspace_lines(task):
         f"Your work folder is {task['workspace']}. Read steering.md there first. Append a line to progress.md each "
         "time a step lands and to proof.md for each piece of evidence (a test run, a check link, a command and its "
         "output), so a successor can continue from the folder alone."
+    ]
+
+
+def overlap_lines(task):
+    overlaps = task.get("overlaps") or []
+    if not overlaps:
+        return []
+    return [OVERLAP_LINE] + [
+        f"Task {o['task']}, claimed by {o['claimant']}, shares {' and '.join(o['areas'])}." for o in overlaps
     ]
 
 
