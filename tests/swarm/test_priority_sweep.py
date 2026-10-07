@@ -372,7 +372,7 @@ def test_run_tick_runs_the_priority_pass(env, monkeypatch):
     monkeypatch.setattr(swarm_cli, "connect", lambda: store)
     monkeypatch.setattr(swarm_cli, "LedgerClient", FileLedger)
     monkeypatch.setattr(swarm_cli, "HerdrRuntime", FakeRuntime)
-    monkeypatch.setattr(swarm_cli.timer, "ensure", lambda binary: True)
+    monkeypatch.setattr(swarm_cli.timer, "ensure", lambda binary, *rest: True)
     assert swarm_cli.main([SLUG, "create", "--repo", "/repo", "--max-eng-agents", "0"]) == 0
     path = item("followups")
     raise_priority(env, path)

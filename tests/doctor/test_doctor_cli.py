@@ -52,7 +52,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(swarm_cli, "connect", lambda: store)
     monkeypatch.setattr(swarm_cli, "LedgerClient", FileLedger)
     monkeypatch.setattr(swarm_cli, "HerdrRuntime", lambda: rt)
-    monkeypatch.setattr(swarm_cli.timer, "ensure", lambda binary: True)
+    monkeypatch.setattr(swarm_cli.timer, "ensure", lambda binary, *rest: True)
     monkeypatch.setattr(swarm_cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
     monkeypatch.setattr(doctor, "linked_bundle", lambda: tmp_path / "bundle")
     monkeypatch.setattr(doctor.detect, "readers", lambda *args, **kwargs: {})

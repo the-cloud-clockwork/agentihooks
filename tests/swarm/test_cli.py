@@ -33,7 +33,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     monkeypatch.setattr(cli, "HerdrRuntime", lambda: rt)
-    monkeypatch.setattr(cli.timer, "ensure", lambda binary: True)
+    monkeypatch.setattr(cli.timer, "ensure", lambda binary, *rest: True)
     ledger.chat = lambda slug: [{"id": "old", "by": "operator", "at": 50, "text": "old talk"}]
     monkeypatch.setattr(cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
     ledger.pulls = {}
