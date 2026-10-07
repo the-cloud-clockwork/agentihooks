@@ -133,6 +133,8 @@ def test_spawn_records_and_stores_classifier_choice(tmp_path, monkeypatch):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
         lanes={"eng": {"model": "auto", "effort": "auto"}},
         autonomy="delegate",
     )
@@ -243,7 +245,14 @@ def test_spawn_timeout_names_and_retires_the_failed_agent(tmp_path):
     retired = []
     runtime._terminate = retired.append
     config = SimpleNamespace(
-        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
+        lanes={},
+        autonomy="delegate",
     )
     with pytest.raises(SpawnError, match="init-agent timed out for engineer@a1b2c3-0001"):
         runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t", "title": "x"})

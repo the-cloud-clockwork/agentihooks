@@ -105,8 +105,12 @@ class HerdrRuntime:
         self.choose = choose or agent_choice.choose
         self.sleep = time.sleep
 
-    def has_capacity(self):
-        return self.choose("", dict(os.environ))[1] != agent_choice.ALL_FULL
+    def has_capacity(self, config):
+        environ = dict(os.environ)
+        share, floor = codex_split(config, environ)
+        return (
+            agent_choice.choose_shared("", environ, None, share, floor, choose=self.choose)[1] != agent_choice.ALL_FULL
+        )
 
     def spawn(self, config, lane, name, task, spawns=None):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
@@ -122,7 +126,6 @@ class HerdrRuntime:
             if plugins.claude_only(profile) and saved["harness"] != "claude":
                 raise SpawnError("unsupported handoff: required profile cannot mount on the original harness")
             requested = saved["harness"]
-        if spawns is None:
             agent, reason = self.choose(requested, environ)
         else:
             share, floor = codex_split(config, environ)

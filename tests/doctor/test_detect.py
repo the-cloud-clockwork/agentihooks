@@ -71,8 +71,9 @@ def test_the_health_detector_judges_only_what_the_current_health_pass_reports(mo
     assert seen[-1] == (store, "bare", "config of bare", [], [])
 
 
-def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch):
-    from scripts.doctor import traces_read
+def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch, tmp_path):
+    from hooks.observability import agent_trace
+    from scripts.doctor import registry, traces_read
     from scripts.swarm.store import AgentRecord
 
     asked = []
@@ -85,6 +86,21 @@ def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch):
     store.agents = lambda slug: [AgentRecord("s-master-1", "master", "master", conversation_id="c1", started_at=1)]
     ledger = type("Ledger", (), {"tasks": lambda self, slug: []})()
     monkeypatch.setattr(traces_read, "client", lambda env: get)
+    monkeypatch.setattr(traces_read, "SWARM_HOME", tmp_path)
+    monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "agent_trace")
     found = detect.readers(store, ledger, "s", 10**12, environ={})["trace"]()
-    assert asked == [("traces", {"tags": "swarm:s", "page": 1, "limit": 100})]
-    assert [f.id for f in found] == ["untraced-session/s-master-1"]
+    assert asked == [
+        (
+            "traces",
+            {
+                "tags": ["swarm:s", "agent:s-master-1"],
+                "fields": "core,io",
+                "orderBy": "timestamp.desc",
+                "limit": registry.TRACES_LIMIT,
+                "page": 1,
+            },
+        ),
+        ("traces", {"tags": "swarm:s", "fields": "core", "page": 1, "limit": 100}),
+    ]
+    assert [f.id for f in found] == ["untraced-session/s-master-1", "telemetry-never-exported/s-master-1.1"]
+    assert (tmp_path / "s" / traces_read.STATE_FILE).exists()
