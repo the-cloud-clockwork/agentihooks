@@ -21,6 +21,7 @@ SYSTEM = "anthropic"
 _EXPORTER_LOGGER = "opentelemetry"
 BATCH_CHARS = 2_000_000
 PENDING_MAX_BYTES = 8_000_000
+TRIGGER_ENV = "AGENTIHOOKS_TRACE_FLUSH_TRIGGER"
 
 
 @dataclass(frozen=True)
@@ -362,6 +363,8 @@ def _root_attributes(session_id: str) -> dict:
     freshness = {
         "agentihooks.export.generated_at": datetime.now(timezone.utc).isoformat(),
         "agentihooks.export.queued.state": correlation.UNSUPPORTED,
+        "agentihooks.export.trigger": os.environ.get(TRIGGER_ENV, "direct"),
+        "agentihooks.export.unwritten_events.state": "unavailable",
     }
     if accepted:
         freshness["agentihooks.export.last_accepted_at"] = accepted
@@ -540,6 +543,7 @@ def _revision(spec: SpanSpec) -> str:
         "agentihooks.export.generated_at",
         "agentihooks.export.last_accepted_at",
         "agentihooks.export.last_accepted_at.state",
+        "agentihooks.export.trigger",
     }
     data["attributes"] = {
         key: value
