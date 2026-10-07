@@ -38,6 +38,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   relay ITEM TEXT --quote WORDS       post the operator's decision from this pane as his answer to questions/<id>
                                       or his comment on another item; WORDS must be in an operator prompt or
                                       AskUserQuestion answer this session recorded in the last hour
+  answer ITEM TEXT                    the master answers questions/<id> as itself at delegate or full autonomy,
+                                      which clears it from Priorities; members cannot answer
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
   task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N] [--profile NAME]
@@ -368,6 +370,25 @@ def cmd_relay(args):
     print(json.dumps({"relayed": True, "item": args.item}))
 
 
+def swarm_autonomy(slug):
+    from scripts.swarm.store import SwarmError, connect
+
+    try:
+        return connect().config(slug).autonomy
+    except SwarmError:
+        return ""
+
+
+def cmd_answer(args):
+    import ledger_answer
+
+    refused = ledger_answer.refusal(swarm_autonomy(args.slug))
+    if refused:
+        sys.exit(refused)
+    send(args, "answer", item=args.item, text=args.text)
+    print(json.dumps({"answered": True, "item": args.item}))
+
+
 def cmd_scope(args):
     send(args, "set", **with_status(args, path=f"{args.item}/out_of_scope", value=args.state == "out"))
     print(json.dumps({"item": args.item, "scope": args.state}))
@@ -570,6 +591,9 @@ def build_parser():
     relay.add_argument("item")
     relay.add_argument("text")
     relay.add_argument("--quote", required=True)
+    answer = sub.add_parser("answer")
+    answer.add_argument("item")
+    answer.add_argument("text")
     sub.add_parser("time-left").add_argument("minutes", type=_duration)
     sub.add_parser("claim").add_argument("item")
     task = sub.add_parser("task")

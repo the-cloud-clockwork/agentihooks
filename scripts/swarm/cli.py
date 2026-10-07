@@ -315,8 +315,11 @@ def cmd_close(store, args):
     ledger.mark_closed(args.slug, by)
     store.update(args.slug, state="stopping" if left else "stopped")
     print(json.dumps({"closed": args.slug, "snapshot": str(path), "still_running": left}), flush=True)
-    if _retire_each(store, args.slug, runtime, live, [a for a in agents if a.lane == MASTER]):
+    masters_left = _retire_each(store, args.slug, runtime, live, [a for a in agents if a.lane == MASTER])
+    if masters_left:
         store.update(args.slug, state="stopping")
+    elif not left:
+        exits.close_swarm(InboxStore(store.redis), args.slug)
 
 
 def cmd_reopen(store, args):

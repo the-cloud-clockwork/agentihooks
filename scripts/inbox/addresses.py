@@ -28,3 +28,32 @@ def check_address(inbox: InboxStore, sender: str, address: str) -> None:
     else:
         valid.update(live)
     raise InboxError(f"unknown inbox address {address}; valid addresses: {', '.join(sorted(valid))}")
+
+
+def resolves(inbox: InboxStore, address: str, live: set[str]) -> bool:
+    address = inbox.names.resolve(address)
+    if address == "operator" or address in live:
+        return True
+    if is_seat(address):
+        return bool(inbox.seats.occupant(address).generation)
+    entry = inbox.names.entry(address)
+    if entry and not entry.get("retired_at"):
+        return True
+    seat = inbox.seats.known_seat(address)
+    outcome = inbox.seats.exit_of(address)
+    return bool(seat and (not outcome or outcome["seat"]))
+
+
+def settle_unresolved(inbox: InboxStore, names: set[str], items: list, now_ms: int, window: int) -> list[str]:
+    live, actions = None, []
+    for item in items:
+        address = inbox.names.resolve(item.address)
+        if now_ms - item.created_at < window:
+            continue
+        if live is None:
+            sessions = get_active_sessions(cleanup=True)
+            live = names | {n for sid, row in sessions.items() for n in (sid, row.get("name", "")) if n}
+        if not resolves(inbox, address, live):
+            if inbox.withdraw(item.id, "swarm", f"cancelled: recipient no longer resolves: {address}", item.address):
+                actions.append(f"closed message {item.id}: recipient no longer resolves")
+    return actions
