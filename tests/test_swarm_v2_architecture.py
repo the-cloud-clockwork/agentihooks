@@ -156,7 +156,9 @@ def test_render_lists_components_decisions_and_open_items(tmp_path):
     )
     assert "\n## AD-05: One coding-task authority; backlogs never dispatch work\n\nStatus: accepted.\n" in text
     assert "\n- A second work-stealing queue for coding tasks: Two claim authorities break generation fencing" in text
-    assert "\n## Worker image exclusions\n\n- brain database\n- brain tick stack\n" in text
+    assert "\n## Permitted worker image components\n\n- process supervisor\n- headless herdr server\n" in text
+    assert "- developer toolchain\n\n## Worker image exclusions\n\n- brain database\n- brain tick stack\n" in text
+    assert "- transcript database\n\nOperator architecture changes: none.\n" in text
     assert "\nOperator architecture changes: none.\n" in text
     assert "\n## Unresolved decisions\n\nNone.\n" in text
     assert text.endswith(
@@ -167,12 +169,15 @@ def test_render_lists_components_decisions_and_open_items(tmp_path):
 def test_render_names_operator_changes_and_unresolved_entries():
     record = architecture.load_record(RECORD)
     record["operator_changes"] = [
-        {"proposal": "a", "sha256": "1", "reason": "first"},
-        {"proposal": "b", "sha256": "2", "reason": "second"},
+        {"proposal": "a", "sha256": "1", "approved_by": "operator", "revision": 1, "reason": "first"},
+        {"proposal": "b", "sha256": "2", "approved_by": "operator", "revision": 4, "reason": "second"},
     ]
     record["unresolved"] = [{"id": "x", "name": "X", "reason": "why", "revision": 3}]
     text = architecture.render(record)
-    assert "\nOperator architecture changes: a (first), b (second).\n" in text
+    assert (
+        "\nOperator architecture changes: a by operator at revision 1 (first), b by operator at revision 4 (second).\n"
+        in text
+    )
     assert "\n## Unresolved decisions\n\n- X (`x`, revision 3): why\n\n## Rejected proposals\n\nNone.\n" in text
 
 
@@ -254,7 +259,8 @@ def test_review_rejects_proposals_outside_the_frozen_architecture(fields, reason
     [
         {},
         {"launches_agents": False},
-        {"kind": "worker_component", "name": "Worker session exporter"},
+        {"kind": "worker_component", "name": "Session Exporter"},
+        {"kind": "worker_component", "name": "developer toolchain"},
         {"kind": "service", "name": "brain database"},
         {"carries": "transcripts"},
         {"kind": "backlog", "carries": "transcripts", "bounded": True},
@@ -264,6 +270,17 @@ def test_review_rejects_proposals_outside_the_frozen_architecture(fields, reason
 def test_review_accepts_owned_proposals_inside_the_architecture(fields):
     result = architecture.review(architecture.load_record(RECORD), _single(_proposal(**fields)))
     assert (result["accepted"], result["rejected"], result["unresolved"]) == (["p"], [], [])
+
+
+@pytest.mark.parametrize("name", ["Brain tick stack (worker sidecar)", "Embedding model server", "Transcript DB"])
+def test_an_unlisted_worker_component_is_unresolved(name):
+    result = architecture.review(
+        architecture.load_record(RECORD), _single(_proposal(kind="worker_component", name=name))
+    )
+    assert (result["accepted"], result["rejected"]) == ([], [])
+    assert result["unresolved"] == [
+        {"id": "p", "name": name, "reason": f"{name} is not a permitted worker image component (AD-06)"}
+    ]
 
 
 def test_unowned_proposals_are_counted():
@@ -323,7 +340,13 @@ def test_an_operator_change_in_the_record_admits_that_dispatcher_only(tmp_path):
     data = architecture.load_record(path)
     inventory = _inventory()
     dispatcher = inventory["proposals"][0]
-    change = {"proposal": "duplicate-dispatcher", "sha256": architecture.digest(dispatcher), "reason": "operator"}
+    change = {
+        "proposal": "duplicate-dispatcher",
+        "sha256": architecture.digest(dispatcher),
+        "approved_by": "operator",
+        "revision": 1,
+        "reason": "operator",
+    }
     data["operator_changes"] = [change]
     path.write_text(json.dumps(data))
     inventory["proposals"].append(_proposal(id="other", name="Other dispatcher", kind="dispatcher"))
@@ -338,9 +361,16 @@ def test_an_operator_change_in_the_record_admits_that_dispatcher_only(tmp_path):
 def test_an_operator_change_covers_only_the_exact_approved_content():
     record = architecture.load_record(RECORD)
     dispatcher = _inventory()["proposals"][0]
-    record["operator_changes"] = [
-        {"proposal": dispatcher["id"], "sha256": architecture.digest(dispatcher), "reason": "x"}
-    ]
+    change = {
+        "proposal": dispatcher["id"],
+        "sha256": architecture.digest(dispatcher),
+        "approved_by": "operator",
+        "revision": 1,
+        "reason": "x",
+    }
+    record["operator_changes"] = [{**change, "approved_by": "engineer@1"}]
+    assert architecture.approved(record, dispatcher) is False
+    record["operator_changes"] = [change]
     assert architecture.approved(record, dispatcher) is True
     for change in ({"name": "Unrelated second dispatcher"}, {"deployment_owner": "personal installation"}):
         swapped = {**dispatcher, **change}

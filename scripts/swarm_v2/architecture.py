@@ -10,6 +10,7 @@ INVENTORY_SCHEMA = "swarm-v2-design-inventory/1"
 ROLES = ("code_owner", "state_owner", "deployment_owner")
 KINDS = frozenset({"dispatcher", "backlog", "service", "worker_component"})
 CODING_TASKS = "coding_tasks"
+OPERATOR = "operator"
 CARRIES = ("changed_content", CODING_TASKS, "none", "transcripts")
 DECLARE = (
     f"a proposal must declare carries as one of {', '.join(CARRIES)}, launches_agents as true or false,"
@@ -55,9 +56,10 @@ def dispatches(component: dict) -> bool:
 
 
 def approved(record: dict, proposal: dict) -> bool:
-    return {"proposal": proposal["id"], "sha256": digest(proposal)} in [
-        {"proposal": c["proposal"], "sha256": c["sha256"]} for c in record["operator_changes"]
-    ]
+    return any(
+        c["proposal"] == proposal["id"] and c["sha256"] == digest(proposal) and c["approved_by"] == OPERATOR
+        for c in record["operator_changes"]
+    )
 
 
 def authorities(record: dict) -> list[str]:
@@ -109,6 +111,10 @@ def _verdict(record: dict, proposal: dict, repeated: set[str]) -> tuple[str, str
         return "rejected", f"inserts another coding-task queue beside {', '.join(authorities(record))} (AD-05)"
     if kind == "backlog" and not (proposal.get("bounded") is True and proposal["carries"] in record["backlog_carries"]):
         return "rejected", f"a backlog must be bounded and carry one of {', '.join(record['backlog_carries'])} (AD-05)"
+    if kind == "worker_component" and proposal["name"].casefold() not in {
+        n.casefold() for n in record["worker_permitted"]
+    }:
+        return "unresolved", f"{proposal['name']} is not a permitted worker image component (AD-06)"
     conflict = _conflict(record, proposal, repeated)
     return ("unresolved", conflict) if conflict else ("accepted", "")
 
@@ -269,8 +275,16 @@ def render(record: dict) -> str:
         lines += ["", f"## {d['id']}: {d['title']}", "", f"Status: {d['status']}.", "", d["decision"], ""]
         lines += [f"Why: {d['rationale']}", "", "Rejected alternatives:", ""]
         lines += [f"- {a['alternative']}: {a['reason']}" for a in d["rejected_alternatives"]]
-    lines += ["", "## Worker image exclusions", "", *[f"- {name}" for name in record["worker_excluded"]], ""]
-    changes = [f"{c['proposal']} ({c['reason']})" for c in record["operator_changes"]]
+    for title, key in (
+        ("Permitted worker image components", "worker_permitted"),
+        ("Worker image exclusions", "worker_excluded"),
+    ):
+        lines += ["", f"## {title}", "", *[f"- {name}" for name in record[key]]]
+    lines.append("")
+    changes = [
+        f"{c['proposal']} by {c['approved_by']} at revision {c['revision']} ({c['reason']})"
+        for c in record["operator_changes"]
+    ]
     lines.append(f"Operator architecture changes: {', '.join(changes) or 'none'}.")
     for title, key in (("Unresolved decisions", "unresolved"), ("Rejected proposals", "rejected")):
         entries = [f"- {e['name']} (`{e['id']}`, revision {e['revision']}): {e['reason']}" for e in record[key]]

@@ -24,6 +24,7 @@ CASES = {
         "T-SV2-FND-02-B",
         (
             "test_review_rejects",
+            "test_an_unlisted",
             "test_unowned_proposals",
             "test_an_unowned_recorded",
             "test_check_reports",

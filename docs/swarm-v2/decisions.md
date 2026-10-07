@@ -67,13 +67,13 @@ Why: The session service may run as a process supplied by the agentihooks packag
 
 Rejected alternatives:
 
-- A complete database stack inside every worker image: Workers carry no durable store; the archive uses the verified Postgres and pgvector infrastructure (plan section 1.2).
+- A complete database stack inside every worker image: Workers carry no durable store; the archive uses the existing Postgres and pgvector infrastructure where its capacity and isolation have been verified (plan section 1.2).
 
 ## AD-05: One coding-task authority; backlogs never dispatch work
 
 Status: accepted.
 
-The swarm reconciliation controller and its ledger are the only authority that claims and dispatches coding tasks. Bounded backlogs are permitted for transcripts and changed content; a backlog never launches an agent. Any other component that carries coding tasks or launches agents is rejected unless operator_changes names that proposal id with the digest of its exact content and a reason; a field on the proposal never approves it.
+The swarm reconciliation controller and its ledger are the only authority that claims and dispatches coding tasks. Bounded backlogs are permitted for transcripts and changed content; a backlog never launches an agent. Any other component that carries coding tasks or launches agents is rejected unless operator_changes names that proposal id with the digest of its exact content, approved_by operator, the record revision it was approved at and a reason; a field on the proposal never approves it. Classification is by declaration: every proposal declares what it carries, whether it launches agents and the authoritative state it owns, and the Spec reader checks the declaration against that state.
 
 Why: Retain one swarm task model and one authority for task claims (plan section 1.2).
 
@@ -87,9 +87,9 @@ Rejected alternatives:
 
 Status: accepted.
 
-The worker image excludes the brain database, the brain tick stack, the brain model server and any transcript database. Workers reach the selected brain and the session archive over authenticated HTTP.
+The worker image holds only the permitted components: process supervisor, headless herdr server, session exporter, agentihooks, Claude CLI, Codex CLI and the developer toolchain. It excludes the brain database, the brain tick stack, the brain model server and any transcript database. Any other proposed worker component is an unresolved decision until the operator adds it to worker_permitted. Workers reach the selected brain and the session archive over authenticated HTTP.
 
-Why: One shared swarm brain runs on durable Anton infrastructure; no brain stack per worker or per coding task (plan sections 6.1 and 12.1).
+Why: One shared swarm brain runs on durable Anton infrastructure; no brain stack per worker or per coding task (plan sections 6.1 and 12.1). Section 6.1 lists what the image installs and section 4.1 names the supervisor, the headless herdr server, the session exporter and the main agent.
 
 Rejected alternatives:
 
@@ -119,6 +119,16 @@ Rejected alternatives:
 
 - Redis as the only durable transcript archive: Redis previews are truncated and not a durable archive (INV-M01, plan section 1.2).
 - A graph database in the initial release: A relational edge table and bounded traversal cover the proposed graph contract (plan section 1.2).
+
+## Permitted worker image components
+
+- process supervisor
+- headless herdr server
+- session exporter
+- agentihooks
+- Claude CLI
+- Codex CLI
+- developer toolchain
 
 ## Worker image exclusions
 

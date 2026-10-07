@@ -17,7 +17,7 @@
     },
     {
       "id": "session-exporter",
-      "name": "Worker session exporter",
+      "name": "Session exporter",
       "kind": "worker_component",
       "carries": "transcripts",
       "launches_agents": false,
