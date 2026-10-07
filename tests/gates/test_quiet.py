@@ -129,13 +129,25 @@ def test_an_agent_skipped_first_never_stops_the_next_from_being_measured(rig):
     assert gate.quiet_minutes(rig.store.redis, SLUG, [planner, me], rig.rows, NOW) == {ME: 40}
 
 
-def test_a_checked_wait_is_never_quiet_and_a_bare_or_ended_one_is(rig):
-    redis = rig.store.redis
-    idle.declare_wait(redis, SLUG, ME, NOW + MIN, "t2 first", NOW - MIN, on={"kind": "task", "target": "t2"})
+@pytest.mark.parametrize("on", [None, {"kind": "task", "target": "t2"}])
+def test_a_declared_wait_bare_or_checked_is_never_quiet(rig, on):
+    idle.declare_wait(rig.store.redis, SLUG, ME, NOW + MIN, "deploy", NOW - MIN, on=on)
     assert rig.minutes() == {}
-    assert rig.minutes(NOW + MIN) == {ME: 41}
-    idle.declare_wait(redis, SLUG, ME, NOW + MIN, "thinking", NOW - MIN)
-    assert rig.minutes() == {ME: 40}
+    assert rig.run() == []
+
+
+def test_the_quiet_clock_restarts_when_a_wait_expires(rig):
+    idle.declare_wait(rig.store.redis, SLUG, ME, NOW + MIN, "deploy", NOW - MIN)
+    assert rig.minutes(NOW + MIN) == {ME: 0}
+    assert rig.minutes(NOW + 31 * MIN) == {ME: 30}
+
+
+def test_the_quiet_clock_restarts_when_a_wait_ends_early(rig):
+    redis = rig.store.redis
+    idle.declare_wait(redis, SLUG, ME, NOW + 60 * MIN, "t2 first", NOW - MIN, on={"kind": "task", "target": "t2"})
+    idle.end_wait(redis, SLUG, ME, NOW + 5 * MIN)
+    assert rig.minutes(NOW + 5 * MIN) == {ME: 0}
+    assert rig.minutes(NOW + 35 * MIN) == {ME: 30}
 
 
 @pytest.mark.parametrize(

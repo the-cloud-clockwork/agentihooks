@@ -134,7 +134,7 @@ def tick():
         idle.declare_wait(store.redis, "sw", ME, 10_000_000, "", 1, on=held)
 
     def end(rows=None):
-        return waits.end_pass(store, "sw", rows or {}, inbox, pulls.get)
+        return waits.end_pass(store, "sw", rows or {}, inbox, pulls.get, 5_000)
 
     def told():
         return [item.text for item in inbox.inbox("eng-1@sw")]
@@ -158,6 +158,7 @@ def test_the_tick_ends_a_checks_wait_once_and_tells_the_agent(tick, pull, outcom
     tick.pulls[URL] = pull
     assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
     assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert idle.waited(tick.store.redis, "sw", ME) == 5_000
     assert tick.told() == [
         f"Your wait on {outcome} has ended. Pick task t1 back up: agentihooks swarm sw done, block, "
         "or wait on the next thing."
@@ -370,6 +371,7 @@ def test_inbox_wait_timeout_and_failure_clear_the_declared_wait(started, monkeyp
     capsys.readouterr()
     assert calls == [(ME, 3600, {"until": 3_601_000, "reason": "inbox work", "at": 1_000})]
     assert held(store) is None
+    assert idle.waited(store.redis, "sw", ME) == 1_000
 
     def failed(*args):
         raise InboxError("store unavailable")
@@ -488,7 +490,7 @@ def test_a_push_or_missing_checks_during_resolution_keeps_the_wait(tick, confirm
         else None
     )
     replies = iter([current, latest])
-    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies)) == []
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000) == []
     assert tick.told() == []
     assert idle.wait(tick.store.redis, "sw", ME)["on"]["head"] == (
         "second" if confirmation and confirmation[0] == "second" else "first"
@@ -628,7 +630,7 @@ def test_checks_resolution_uses_the_confirmed_current_head_result(tick):
             SimpleNamespace(state="OPEN", head="first", resolved=True, red=True),
         ]
     )
-    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies)) == [
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000) == [
         f"ended the wait of {ME}: checks on {URL}, now red"
     ]
 
@@ -647,7 +649,7 @@ def test_the_tick_preserves_a_wait_redeclared_during_its_probe(tick, head, resol
         )
         return SimpleNamespace(state="OPEN", head=head, resolved=resolved, red=False)
 
-    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, github) == []
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, github, 5_000) == []
     assert idle.wait(tick.store.redis, "sw", ME) == {
         "until": 20_000_000,
         "reason": "new wait",
@@ -684,7 +686,7 @@ def test_a_replaced_wait_does_not_stop_resolution_for_the_next_agent(tick):
         )
         return SimpleNamespace(state="OPEN", head="second", resolved=True, red=False)
 
-    assert waits.end_pass(tick.store, "sw", {"t3": {"state": "done"}}, tick.inbox, github) == [
+    assert waits.end_pass(tick.store, "sw", {"t3": {"state": "done"}}, tick.inbox, github, 5_000) == [
         f"ended the wait of {following}: task t3, now done"
     ]
     assert idle.wait(tick.store.redis, "sw", ME)["on"]["head"] == "third"
