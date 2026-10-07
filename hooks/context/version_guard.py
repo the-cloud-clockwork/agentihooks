@@ -4,10 +4,13 @@ Version bumping should be handled by CI/CD workflows (release.yml),
 not by the AI editing pyproject.toml, package.json, Cargo.toml, etc.
 
 Raises BlockAction when Edit or Write targets a project manifest file
-and the content contains a version field change.
+and the content contains a version field change. The one allowed change is
+switching pyproject.toml from a static version to a setuptools-scm tag derived
+one that adds no version literal.
 """
 
 import re
+import tomllib
 from pathlib import Path
 
 from hooks.hook_manager import BlockAction
@@ -29,6 +32,8 @@ _VERSION_PATTERNS = [
     re.compile(r'"version"\s*:\s*"', re.IGNORECASE),
 ]
 
+_VERSION_LITERAL = re.compile(r'[\w.-]*version\s*[=:]\s*["\']?[\w.+-]*', re.IGNORECASE)
+
 
 def check_version_guard(payload: dict) -> None:
     """Block version field modifications in project manifest files.
@@ -47,12 +52,16 @@ def check_version_guard(payload: dict) -> None:
         return
 
     # Creating a manifest declares the first version; only changes to an existing one are bumps.
-    if not (Path(payload.get("cwd") or ".") / file_path).exists():
+    target = Path(payload.get("cwd") or ".") / file_path
+    if not target.exists():
         return
 
     # Check if the target file is a version-managed manifest
     filename = file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
     if filename not in _VERSION_FILES:
+        return
+
+    if filename == "pyproject.toml" and _switches_to_tag_version(target, tool_name, tool_input):
         return
 
     # Check if the change touches a version field
@@ -77,3 +86,31 @@ def check_version_guard(payload: dict) -> None:
                 "Version bumping is handled by the release workflow (gh workflow run release.yml -f bump=patch|minor|major). "
                 "Do not edit version fields manually."
             )
+
+
+def _edited_text(tool_name: str, tool_input: dict, before: str) -> str:
+    if tool_name == "Write":
+        return tool_input.get("content", "")
+    count = -1 if tool_input.get("replace_all") else 1
+    return before.replace(tool_input.get("old_string", ""), tool_input.get("new_string", ""), count)
+
+
+def _version_literals(text: str) -> set[str]:
+    return set(_VERSION_LITERAL.findall(text))
+
+
+def _switches_to_tag_version(target: Path, tool_name: str, tool_input: dict) -> bool:
+    before = target.read_text()
+    after = _edited_text(tool_name, tool_input, before)
+    try:
+        old, new = tomllib.loads(before), tomllib.loads(after)
+    except tomllib.TOMLDecodeError:
+        return False
+    project = new.get("project", {})
+    return (
+        isinstance(old.get("project", {}).get("version"), str)
+        and "version" not in project
+        and "version" in project.get("dynamic", [])
+        and "setuptools_scm" in new.get("tool", {})
+        and _version_literals(after) <= _version_literals(before)
+    )
