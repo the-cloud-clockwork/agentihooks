@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from scripts import claude_quota_balancer as balancer
@@ -7,6 +9,11 @@ from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
+@pytest.fixture(autouse=True)
+def isolated_accounts(monkeypatch):
+    monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {})
 
 
 def _store():
@@ -284,3 +291,355 @@ def test_profile_and_saved_handoff_harnesses_are_reserved_before_automatic_work(
     assert runtime._quota_choice("claude", "required", True, "eng") == ("claude", "required")
     assert runtime._quota_choice("claude", "priority", False, "ci")[0] == "codex"
     assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0}
+
+
+def test_unobserved_live_account_stays_visible_and_unplaceable(monkeypatch):
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"unknown": 2})
+    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    assert capacity.accounts({}, 100) == [capacity.Account("claude", "unknown", "UNKNOWN", 2, None, None)]
+
+
+@pytest.mark.parametrize(("five", "week"), [(None, 50), (50, None)])
+def test_partial_observations_never_place_a_session(five, week):
+    assert capacity.free_seats(capacity.Account("claude", "a", "NORMAL", 0, five, week), 3, 5) == 0
+
+
+def test_odd_reduced_cap_and_exact_codex_week_floor():
+    assert capacity.free_seats(account(state="REDUCE", left=30), 3, 5) == 1
+    assert capacity.free_seats(account(harness="codex", state="NORMAL", left=5), 3, 5) == 3
+
+
+def test_zero_share_keeps_automatic_lanes_on_claude():
+    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0, codex_share=0)
+    decision = capacity.calculate(config, [account(state="DRAIN", left=4), account("cx", harness="codex")], [], 3, 5)
+    assert decision["effective"] == {"eng": 0, "ci": 0, "plan": 0}
+    assert decision["reason"] == "accounts are drain; Claude has 0 free seats and Codex has 3 free seats"
+
+
+def test_finished_agents_do_not_reserve_capacity_and_reason_lists_all_restrictions():
+    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=0)
+    dead = [AgentRecord("finished", "eng", "e", state="finished")]
+    seen = [account("z", state="DRAIN_SOON", left=15), account("a", state="REDUCE", left=30), account("b")]
+    decision = capacity.calculate(config, seen, dead, 3, 5)
+    assert decision == {
+        "configured": {"eng": 2, "ci": 1, "plan": 0},
+        "effective": {"eng": 2, "ci": 1, "plan": 0},
+        "placeable": {"claude": 4, "codex": 0},
+        "reason": "accounts are drain soon, reduce; Claude has 4 free seats and Codex has 0 free seats",
+        "placements": {
+            "eng": [{"index": 0, "harness": "claude"}, {"index": 1, "harness": "claude"}],
+            "ci": [{"index": 0, "harness": "claude"}],
+            "plan": [],
+        },
+        "accounts": [row.__dict__ for row in seen],
+        "allocation": {
+            "eng": {"claude": 2, "codex": 0},
+            "ci": {"claude": 1, "codex": 0},
+            "plan": {"claude": 0, "codex": 0},
+        },
+    }
+
+
+def test_runtime_capacity_uses_the_current_environment_and_saves_the_allocation(tmp_path, monkeypatch):
+    from scripts.swarm import runtime as module
+
+    seen = [account(), account("cx", harness="codex")]
+    monkeypatch.setenv("AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT", "4")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_SHARE", "0")
+
+    def observations(env, now):
+        assert env["AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT"] == "4"
+        assert now == 123
+        return seen
+
+    monkeypatch.setattr(capacity, "accounts", observations)
+    rt = module.HerdrRuntime(home=tmp_path, choose=lambda *args: ("claude", module.agent_choice.ALL_FULL))
+    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=0, codex_min_week_left=5)
+    decision = rt.quota_capacity(
+        config, [], 123, {"eng": 1, "ci": 0, "plan": 0}, {"eng": [("claude",)], "ci": [], "plan": []}
+    )
+    assert decision["effective"] == {"eng": 1, "ci": 0, "plan": 0}
+    assert rt._quota_accounts == seen
+    assert (rt._quota_cap, rt._quota_share, rt._quota_floor) == (4, 0, 5)
+    assert rt._quota_allocations == {
+        "eng": {"claude": 1, "codex": 0},
+        "ci": {"claude": 0, "codex": 0},
+        "plan": {"claude": 0, "codex": 0},
+    }
+    assert rt.has_capacity(config)
+    rt._quota_accounts = [account(state="DRAIN", left=4)]
+    assert not rt.has_capacity(config)
+
+
+def test_status_command_prints_the_capacity_reason(monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from scripts.swarm import cli
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
+    ledger = FakeLedger([])
+    monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
+    store.redis.set(
+        store.key("sw", "quota-capacity"), '{"effective":{"eng":0,"ci":0,"plan":0},"reason":"accounts are drain"}'
+    )
+    cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+    assert "quota capacity eng 0 ci 0 plan 0 because accounts are drain\n" in capsys.readouterr().out
+
+
+def test_codex_quota_reset_and_signed_out_accounts(monkeypatch):
+    from scripts.codex_quota import CodexQuota
+
+    environ = {"marker": "test"}
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    pool = [
+        capacity.codex_router.CodexAccount("a", "AH_CX_TOKEN_a"),
+        capacity.codex_router.CodexAccount("b", "AH_CX_TOKEN_b", signed_in=False),
+    ]
+
+    def routing(env):
+        assert env == environ
+        return pool
+
+    def quotas(accounts, env):
+        assert env == environ and accounts == [pool[0]]
+        return {
+            "a": CodexQuota(
+                100, "pro", balancer.QuotaWindow(used=95, resets_at=200), balancer.QuotaWindow(used=80, resets_at=200)
+            )
+        }
+
+    monkeypatch.setattr(capacity.codex_router, "routing_pool", routing)
+    monkeypatch.setattr(capacity.codex_router, "quotas", quotas)
+    assert capacity.accounts(environ, 199) == [capacity.Account("codex", "a", "DRAIN", 0, 5, 20)]
+    assert capacity.accounts(environ, 200) == [capacity.Account("codex", "a", "NORMAL", 0, 100, 100)]
+
+
+def test_unplaceable_first_task_does_not_block_other_ready_work(monkeypatch, tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm.tick import _spawn_order
+
+    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0)
+    runtime = HerdrRuntime(home=tmp_path)
+    monkeypatch.setattr("scripts.swarm.runtime.plugins.claude_only", lambda profile: profile == "frontend")
+    ready = {
+        "eng": [{"id": "fixed", "profile": "frontend"}, {"id": "auto", "profile": "engineer"}],
+        "ci": [],
+        "plan": [],
+    }
+    requirements = runtime.quota_requirements(config, ready)
+    monkeypatch.setattr(
+        capacity, "accounts", lambda env, now: [account(state="DRAIN", left=3), account("cx", harness="codex")]
+    )
+    decision = runtime.quota_capacity(config, [], 100, {"eng": 2, "ci": 0, "plan": 0}, requirements)
+    assert decision["effective"] == {"eng": 1, "ci": 0, "plan": 0}
+    assert decision["placements"] == {"eng": [{"index": 1, "harness": "codex"}], "ci": [], "plan": []}
+    assert decision["tasks"] == {"auto": "codex"}
+    store = _store()
+    store.create(config)
+    ledger = FakeLedger(ready["eng"])
+    from json import dumps
+
+    store.redis.set(store.key("sw", "quota-capacity"), dumps(decision))
+    rows = ledger.rows
+    assert [(lane, task["id"]) for lane, task in _spawn_order("sw", config, store, [], rows, ledger.state("sw"))] == [
+        ("eng", "auto")
+    ]
+
+
+def test_runtime_preserves_flexible_first_then_fixed_task_reservations(monkeypatch, tmp_path):
+    from scripts.swarm import runtime as module
+
+    runtime = module.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
+    monkeypatch.setattr(module.plugins, "claude_only", lambda profile: profile == "frontend")
+    monkeypatch.setattr(
+        module.profile_choice,
+        "choose",
+        lambda slug, lane, chosen, task, env: module.profile_choice.ProfileDecision(
+            task["profile"], "task", "explicit"
+        ),
+    )
+    config = SwarmConfig("sw", str(tmp_path), max_eng=2, max_ci=0, max_plan=0, code="a1b2c3")
+    ready = {
+        "eng": [
+            {"id": "auto", "title": "Auto", "profile": "engineer"},
+            {"id": "fixed", "title": "Fixed", "profile": "frontend"},
+        ],
+        "ci": [],
+        "plan": [],
+    }
+    requirements = runtime.quota_requirements(config, ready)
+    monkeypatch.setattr(
+        capacity, "accounts", lambda env, now: [account(sessions=2), account("cx", sessions=2, harness="codex")]
+    )
+    runtime.quota_capacity(config, [], 100, {"eng": 2, "ci": 0, "plan": 0}, requirements)
+    seen = []
+
+    def launch(cfg, lane, task, name, argv, **kwargs):
+        harness = argv[argv.index("--agent") + 1]
+        seen.append((task, harness, argv[argv.index("--route") + 1]))
+        return module.Placed("pane", harness, seen[-1][2])
+
+    monkeypatch.setattr(runtime, "_launch", launch)
+    for index, task in enumerate(ready["eng"], 1):
+        runtime.spawn(config, "eng", f"engineer@a1b2c3-{index:04}", task)
+    assert seen == [("auto", "codex", "cx"), ("fixed", "claude", "a")]
+    assert runtime._quota_allocations["eng"] == {"claude": 0, "codex": 0}
+
+
+def _runtime_probe(tmp_path, monkeypatch, observations, reason="priority"):
+    from scripts.swarm import runtime as module
+
+    runtime = module.HerdrRuntime(home=tmp_path, choose=lambda requested, env: (requested or "claude", reason))
+    runtime._quota_accounts = observations
+    runtime._quota_cap, runtime._quota_floor, runtime._quota_share = 3, 5, 30
+    monkeypatch.setattr(module.plugins, "claude_only", lambda profile: profile == "frontend")
+    monkeypatch.setattr(
+        module.profile_choice,
+        "choose",
+        lambda slug, lane, chosen, task, env: module.profile_choice.ProfileDecision(
+            task.get("profile", "planner"), "task", "explicit"
+        ),
+    )
+    seen = []
+
+    def launch(cfg, lane, task, name, argv, **kwargs):
+        harness = argv[argv.index("--agent") + 1]
+        route = argv[argv.index("--route") + 1]
+        seen.append((task, harness, route))
+        return module.Placed("pane", harness, route)
+
+    monkeypatch.setattr(runtime, "_launch", launch)
+    config = SwarmConfig("sw", str(tmp_path), max_eng=0, max_ci=0, max_plan=2, code="a1b2c3")
+    return runtime, config, seen
+
+
+def test_saved_healthy_account_wins_over_another_accounts_higher_quota(tmp_path, monkeypatch):
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account("a", left=40), account("b")])
+    saved = {"profile": "planner", "harness": "claude", "model": "fable", "effort": "high", "account": "a"}
+    task = {"id": "p", "title": "Continue", "handoff_envelope": {"launch": saved}}
+    runtime.spawn(config, "plan", "planner@a1b2c3-0001", task)
+    assert seen == [("p", "claude", "a")]
+    assert runtime._quota_accounts == [account("a", sessions=1, left=40), account("b")]
+
+
+def test_new_launch_uses_the_best_tightest_quota_and_consumes_its_slot(tmp_path, monkeypatch):
+    observed = [account("a", left=80), capacity.Account("claude", "b", "NORMAL", 0, 90, 40)]
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, observed)
+    runtime._quota_allocations = {"plan": {"claude": 2, "codex": 0}}
+    runtime.spawn(config, "plan", "planner@a1b2c3-0001", {"id": "p", "title": "Plan"})
+    assert seen == [("p", "claude", "a")]
+    assert runtime._quota_accounts == [account("a", sessions=1, left=80), observed[1]]
+    assert runtime._quota_allocations == {"plan": {"claude": 1, "codex": 0}}
+
+
+def test_failed_launch_does_not_consume_account_or_reserved_slots(tmp_path, monkeypatch):
+    from scripts.swarm.tick import SpawnError
+
+    observed = [account()]
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, observed)
+    runtime._quota_allocations = {"plan": {"claude": 1, "codex": 0}}
+
+    def fail(*args, **kwargs):
+        raise SpawnError("launch failed")
+
+    monkeypatch.setattr(runtime, "_launch", fail)
+    with pytest.raises(SpawnError, match="^launch failed$"):
+        runtime.spawn(config, "plan", "planner@a1b2c3-0001", {"id": "p", "title": "Plan"})
+    assert runtime._quota_accounts == observed
+    assert runtime._quota_allocations == {"plan": {"claude": 1, "codex": 0}}
+
+
+@pytest.mark.parametrize("fixed", ["profile", "lane", "saved"])
+def test_a_fixed_claude_task_never_falls_through_to_codex(tmp_path, monkeypatch, fixed):
+    from scripts.swarm.tick import SpawnError
+
+    runtime, config, seen = _runtime_probe(
+        tmp_path, monkeypatch, [account(state="DRAIN", left=4), account("cx", harness="codex")]
+    )
+    task = {"id": "p", "title": "Plan"}
+    if fixed == "profile":
+        task["profile"] = "frontend"
+    elif fixed == "lane":
+        config = replace(config, lanes={"plan": {"agent": "claude"}})
+    else:
+        task["handoff_envelope"] = {
+            "launch": {"profile": "planner", "harness": "claude", "model": "fable", "effort": "high"}
+        }
+    with pytest.raises(SpawnError, match="^no claude account has placeable quota seats$"):
+        runtime.spawn(config, "plan", "planner@a1b2c3-0001", task)
+    assert seen == []
+
+
+def test_verified_account_seats_override_an_old_harness_cap_choice(tmp_path, monkeypatch):
+    from scripts import agent_choice
+
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account()], reason=agent_choice.ALL_FULL)
+    runtime.spawn(config, "plan", "planner@a1b2c3-0001", {"id": "p", "title": "Plan"})
+    assert seen == [("p", "claude", "a")]
+
+
+def test_zero_share_refuses_automatic_codex_but_keeps_automatic_claude(tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm.tick import SpawnError
+
+    runtime = HerdrRuntime(home=tmp_path)
+    runtime._quota_cap, runtime._quota_floor, runtime._quota_share = 3, 5, 0
+    runtime._quota_accounts = [account(state="DRAIN", left=4), account("cx", harness="codex")]
+    with pytest.raises(SpawnError, match="^no claude account has placeable quota seats$"):
+        runtime._quota_choice("claude", "priority", False, "eng")
+    runtime._quota_accounts = [account(), account("cx", harness="codex", state="DRAIN", left=4)]
+    assert runtime._quota_choice("codex", "priority", False, "eng") == (
+        "claude",
+        "fallthrough: codex has no placeable quota seats",
+    )
+
+
+def test_capacity_evidence_has_the_swarm_task_actor_and_stable_time():
+    store = _store()
+    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=0)
+    store.create(config)
+    ledger = FakeLedger([{"id": "old", "done": True, "state": "done"}, {"id": "e"}])
+    comments = []
+
+    def state(slug):
+        assert slug == "sw"
+        return {"tasks": list(ledger.rows.values())}
+
+    ledger.state = state
+    ledger.comment = lambda *args, **kwargs: comments.append((args, kwargs))
+    runtime = FakeRuntime()
+
+    def quota(cfg, agents, now, demand, requirements):
+        assert cfg == config and agents == [] and now in (1, 2)
+        assert demand == {"eng": 1, "ci": 0, "plan": 0} and requirements is None
+        return capacity.calculate(cfg, [account()], agents, 3, 5, demand)
+
+    runtime.quota_capacity = quota
+    expected = "quota capacity eng 1 ci 0 plan 0 because accounts have quota; Claude has 3 free seats and Codex has 0 free seats"
+    assert capacity.apply("sw", config, store, ledger, runtime, 1000) == [expected]
+    assert comments == [(("sw", "e", expected), {"by": "quota capacity 1000"})]
+    assert capacity.read(store, "sw")["at"] == 1000
+    assert capacity.read(store, "sw")["tasks"] == {"e": "claude"}
+    assert capacity.apply("sw", config, store, ledger, runtime, 2000) == []
+    assert capacity.read(store, "sw")["at"] == 1000
+    assert len(comments) == 1
+    assert capacity.status_line({}) == "quota capacity has not been observed"
+
+
+def test_capacity_can_comment_after_every_task_has_closed():
+    store = _store()
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    store.create(config)
+    ledger = FakeLedger([{"id": "done", "done": True, "state": "done"}])
+    comments = []
+    ledger.comment = lambda *args, **kwargs: comments.append((args, kwargs))
+    runtime = FakeRuntime()
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
+        cfg, [], agents, 3, 5, demand
+    )
+    text = "quota capacity eng 0 ci 0 plan 0 because accounts have quota; Claude has 0 free seats and Codex has 0 free seats"
+    assert capacity.apply("sw", config, store, ledger, runtime, 1000) == [text]
+    assert comments == [(("sw", "done", text), {"by": "quota capacity 1000"})]

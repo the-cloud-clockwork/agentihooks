@@ -1882,5 +1882,33 @@
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_doctor_phrase__mutmut_9:790c064abbdf0cf00090b29d8b0741d3dfde0df5a5bec6a63c4fb9af83be78f9": {
     "reader": "Standards /root/standards_reader",
     "reason": "For event dictionaries, present text values follow identical code. Missing text normalizes to empty string versus xxxx; both differ from the fixed DOCTOR_PHRASE rig doctor stop, so neither queues a command. The fallback is not otherwise exposed or persisted. No alternate implementation or consumer found. Evidence: CI run 37692175970, mutant-map and parent symbol dumps. Adversarial Standards ruling."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x__window__mutmut_3:dae84d6f3f8525418fcac482316b97a4ef5c5d2ddcd4336ca721c929663bc5cf": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Omitting resets_at=None uses the QuotaWindow dataclass default None and constructs the identical value."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_accounts__mutmut_103:23899dbd5b8f530a34afc0a824ca96a9533e4861b1a67d7b7e48c358a561c10c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The state classifier distinguishes only exact rejected; None remains non rejected and produces identical states for every quota window."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_accounts__mutmut_109:a3fa476201fff5043582bb5de4c39ab43dc5f07b28eedd6d7188e64f1410943b": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The state classifier distinguishes only exact rejected; XXallowedXX remains non rejected and produces identical states for every quota window."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_accounts__mutmut_110:3d65ee86fcad972c5d25893d4e8b5f4198160db1fb9f7018ae59126bae4119f9": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The state classifier distinguishes only exact rejected; ALLOWED remains non rejected and produces identical states for every quota window."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_calculate__mutmut_5:57ddee1979bb019ac79d4562ecd678ebb0447aa65b84bea86bef652609b75203": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "LANES and the constructed configuration cap tuple always contain three entries, so zip strict None changes no result."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_calculate__mutmut_8:63bc9c9b45649aba3565389a3db8c3ce1e46d2ea3ebd1f7547e327d94e3e17e8": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "LANES and the constructed configuration cap tuple always contain three entries, so omitted zip strict changes no result."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_calculate__mutmut_9:de00a8135f745f635b9a46d410b8743bba5fc715e27370258901009d09e3dbc0": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "LANES and the constructed configuration cap tuple always contain three entries, so zip strict False changes no result."
   }
 }

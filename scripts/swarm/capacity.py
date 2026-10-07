@@ -81,43 +81,47 @@ def _harnesses(config, lane: str) -> tuple[str, ...]:
     return ("claude",) if config.codex_share == 0 else ("claude", "codex")
 
 
-def _allowed(config, lane: str, allocation: dict, requirements: dict | None) -> tuple:
-    index = sum(allocation[lane].values())
-    return requirements[lane][index] if requirements is not None else _harnesses(config, lane)
+def _ready_indices(effective: dict, limits: dict, remaining: dict, options: dict, cursors: dict) -> dict:
+    ready = {}
+    for lane in LANES:
+        if effective[lane] >= limits[lane]:
+            continue
+        index = next(
+            (i for i in range(cursors[lane], len(options[lane])) if any(remaining[h] for h in options[lane][i])), None
+        )
+        if index is not None:
+            ready[lane] = index
+    return ready
 
 
-def _reserved(config, remaining: dict, effective: dict, allocation: dict, requirements: dict | None) -> dict:
+def _reserved(limits: dict, effective: dict, options: dict, cursors: dict) -> dict:
     result = {"claude": 0, "codex": 0}
     for lane in LANES:
-        count = remaining[lane] - effective[lane]
-        index = sum(allocation[lane].values())
-        future = (
-            requirements[lane][index : index + count]
-            if requirements is not None
-            else [_harnesses(config, lane)] * count
-        )
+        future = options[lane][cursors[lane] : cursors[lane] + limits[lane] - effective[lane]]
         for harness in result:
-            result[harness] += sum(options == (harness,) for options in future)
+            result[harness] += sum(choice == (harness,) for choice in future)
     return result
 
 
-def _allocate(config, effective: dict, limits: dict, remaining: dict, requirements: dict | None) -> dict:
+def _allocate(config, effective: dict, limits: dict, remaining: dict, requirements: dict | None) -> tuple:
     allocation = {lane: {"claude": 0, "codex": 0} for lane in LANES}
+    placements = {lane: [] for lane in LANES}
+    options = requirements or {lane: [_harnesses(config, lane)] * limits[lane] for lane in LANES}
+    cursors = dict.fromkeys(LANES, 0)
     while True:
-        ready = [
-            lane
-            for lane in LANES
-            if effective[lane] < limits[lane]
-            and any(remaining[h] for h in _allowed(config, lane, allocation, requirements))
-        ]
+        ready = _ready_indices(effective, limits, remaining, options, cursors)
         if not ready:
-            return allocation
+            return allocation, placements
         lane = min(ready, key=lambda name: effective[name])
-        reserved = _reserved(config, limits, effective, allocation, requirements)
-        eligible = [h for h in _allowed(config, lane, allocation, requirements) if remaining[h]]
+        index = ready[lane]
+        cursors[lane] = index
+        reserved = _reserved(limits, effective, options, cursors)
+        eligible = [h for h in options[lane][index] if remaining[h]]
         harness = max(eligible, key=lambda h: remaining[h] - reserved[h])
         remaining[harness] -= 1
         allocation[lane][harness] += 1
+        placements[lane].append({"index": index, "harness": harness})
+        cursors[lane] += 1
         effective[lane] += 1
 
 
@@ -141,7 +145,7 @@ def calculate(
         h: sum(free_seats(row, cap, week_floor) for row in observations if row.harness == h)
         for h in ("claude", "codex")
     }
-    allocation = _allocate(config, effective, limits, dict(placeable), requirements)
+    allocation, placements = _allocate(config, effective, limits, dict(placeable), requirements)
     restricted = sorted({row.state.lower().replace("_", " ") for row in observations if row.state != "NORMAL"})
     reason = "accounts have quota" if not restricted else "accounts are " + ", ".join(restricted)
     reason += f"; Claude has {placeable['claude']} free seats and Codex has {placeable['codex']} free seats"
@@ -152,6 +156,7 @@ def calculate(
         "reason": reason,
         "accounts": [row.__dict__ for row in observations],
         "allocation": allocation,
+        "placements": placements,
     }
 
 
@@ -192,6 +197,11 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
         requirements = runtime.quota_requirements(config, prepared)
     agents = [agent for agent in store.agents(slug) if not _ended(agent, rows)]
     decision = reader(config, agents, now_ms / 1000, demand, requirements)
+    decision["tasks"] = {
+        ready[lane][slot["index"]]["id"]: slot["harness"]
+        for lane, slots in decision["placements"].items()
+        for slot in slots
+    }
     previous = read(store, slug)
     changed = any(previous.get(key) != decision[key] for key in ("configured", "effective", "reason"))
     decision["at"] = now_ms if changed else previous["at"]

@@ -169,11 +169,19 @@ class HerdrRuntime:
             requirements,
         )
         self._quota_allocations = decision["allocation"]
+        if hasattr(self, "_quota_ready_ids"):
+            self._quota_tasks = {
+                self._quota_ready_ids[lane][slot["index"]]: slot["harness"]
+                for lane, slots in decision["placements"].items()
+                for slot in slots
+            }
+            decision["tasks"] = dict(self._quota_tasks)
         return decision
 
     def quota_requirements(self, config, ready):
         from scripts.swarm.capacity import _harnesses
 
+        self._quota_ready_ids = {lane: [task["id"] for task in tasks] for lane, tasks in ready.items()}
         requirements = {}
         for lane, tasks in ready.items():
             options = []
@@ -249,6 +257,9 @@ class HerdrRuntime:
             agent, reason = agent_choice.choose_shared(requested, environ, spawns, share, floor, choose=self.choose)
         if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts"):
             raise SpawnError(reason)
+        planned = getattr(self, "_quota_tasks", {}).get(task["id"])
+        if planned and not (requested or saved or want):
+            agent, reason = planned, "fallthrough: quota reservation"
         agent, reason = self._quota_choice(agent, reason, bool(requested or saved or want), lane)
         if saved and agent != saved["harness"]:
             raise SpawnError("unsupported handoff: router substituted the original harness")
