@@ -212,6 +212,12 @@ def _turn_output(turn: list[dict], carry: Mapping | None) -> str:
     return "\n\n".join(text for text in (earlier, _assistant_text(turn)) if text)
 
 
+def _generation_text(turn: list[dict], message_id: str, carry: Mapping) -> str:
+    earlier = carry.get("generation_text", "") if carry.get("generation") == message_id else ""
+    entries = [e for e in turn if isinstance(e.get("message"), dict) and e["message"].get("id") == message_id]
+    return "\n\n".join(text for text in (earlier, _assistant_text(entries)) if text)
+
+
 def _generations(turn: list[dict], previous: int | None = None) -> dict[str, tuple[int, dict]]:
     """message id -> (start ns, last entry carrying it); start is the entry before its first block."""
     found: dict[str, tuple[int, dict]] = {}
@@ -275,7 +281,6 @@ def _turn_spans(
     for message_id, (start, entry) in _generations(turn, carry.get("previous_ns")).items():
         message = entry["message"]
         model = message.get("model", "")
-        same_message = [e for e in turn if isinstance(e.get("message"), dict) and e["message"].get("id") == message_id]
         attributes = {
             "langfuse.observation.type": "generation",
             "gen_ai.operation.name": "chat",
@@ -284,7 +289,7 @@ def _turn_spans(
             "gen_ai.response.model": model,
             "gen_ai.response.id": message_id,
             **_usage_attributes(message.get("usage") or {}),
-            **_io(output_text=_assistant_text(same_message)),
+            **_io(output_text=_generation_text(turn, message_id, carry)),
         }
         spans.append(
             SpanSpec(model or "generation", _span_id(session_id, message_id), turn_id, start, _ns(entry), attributes)
@@ -861,13 +866,9 @@ def _paging_cut(all_turns: list[list[dict]], results: dict) -> tuple[int, int] |
         for entry_index, entry in enumerate(turn)
     ]
     cut = None
-    generation = None
     for index, (position, entry) in enumerate(flat):
-        message = _message_id(entry)
-        if index and (_is_prompt(entry) or (message is not None and message != generation)):
+        if index and (_is_prompt(entry) or _message_id(entry) is not None):
             cut = position
-        if message is not None or _is_prompt(entry):
-            generation = message
         if position[0] == len(all_turns) - 1 and _open_calls(entry, results):
             break
     return cut
@@ -926,8 +927,15 @@ def _page_accepted(session_id: str, state: dict) -> None:
     turn, entry = cut
     carry = {}
     if entry:
-        text = _turn_output(all_turns[turn][1:entry], paged.get("open") if turn == 0 else None)
-        carry["open"] = {"text": text, "previous_ns": _ns(all_turns[turn][entry - 1])}
+        earlier = (paged.get("open") if turn == 0 else None) or {}
+        generation = _message_id(all_turns[turn][entry])
+        start = _generations(all_turns[turn], earlier.get("previous_ns"))[generation][0]
+        carry["open"] = {
+            "text": _turn_output(all_turns[turn][1:entry], earlier),
+            "previous_ns": start,
+            "generation": generation,
+            "generation_text": _generation_text(all_turns[turn][1:entry], generation, earlier),
+        }
     full = _aggregate(session_id, values, paged)
     rest = _aggregate(session_id, [values[index] for index in kept], carry)
     target = {

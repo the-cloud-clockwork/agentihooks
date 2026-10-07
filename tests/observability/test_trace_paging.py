@@ -174,6 +174,23 @@ def quiet(monkeypatch):
     monkeypatch.setattr("hooks.context.context_usage.session_cost", lambda session: None)
 
 
+def test_one_long_streamed_generation_keeps_paging_bounded(tmp_path, monkeypatch, quiet):
+    monkeypatch.setattr("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 500)
+    records = _claude(1, 80)
+    for record in records:
+        if record["type"] == "assistant" and not record["uuid"].startswith("e"):
+            record["message"]["id"] = "streamed-generation"
+    reference, _, _ = _run(tmp_path, monkeypatch, "reference", 10**9, records, len(records))
+    paged, sizes, path = _run(tmp_path, monkeypatch, "paged", 16000, records, 3)
+    state = agent_trace._cursor("session")
+    assert max(sizes) < 4 * 16000
+    assert _observed(paged) == _observed(reference)
+    assert len(state["accepted"]) + state["paged"]["spans"] == len(paged.observations)
+    assert state["source"]["accepted_bytes"] == path.stat().st_size
+    generation_id = agent_trace._span_id("session", "streamed-generation")
+    assert paged.observations[generation_id].start_time == reference.observations[generation_id].start_time
+
+
 def test_repeated_streamed_generations_page_without_lost_or_doubled_observations(tmp_path, monkeypatch, quiet):
     monkeypatch.setattr("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 500)
     records = _claude(40, 3)
