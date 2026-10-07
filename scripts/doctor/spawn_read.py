@@ -12,12 +12,29 @@ if TYPE_CHECKING:
 
 
 def records(
-    store: RedisStore, slug: str, now_ms: int, since: str = "1 hour ago", run: Callable = subprocess.run
+    store: RedisStore,
+    slug: str,
+    now_ms: int,
+    since: str = "1 hour ago",
+    run: Callable = subprocess.run,
+    *,
+    until: str | None = None,
 ) -> dict:
     from scripts.swarm.store import codex_split
 
     journal = run(
-        ["journalctl", "--user", "-u", "agentihooks-swarm.service", "--since", since, "-o", "cat", "--no-pager"],
+        [
+            "journalctl",
+            "--user",
+            "-u",
+            "agentihooks-swarm.service",
+            "--since",
+            since,
+            *(["--until", until] if until is not None else []),
+            "-o",
+            "cat",
+            "--no-pager",
+        ],
         capture_output=True,
         text=True,
         check=True,

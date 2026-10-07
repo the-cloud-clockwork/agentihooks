@@ -1442,5 +1442,9 @@
   "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_member__mutmut_8:b2767610ba1fd15af0ebdf8f402f7a23c29e41b6cfb90e8793a6e75ad8e11c90": {
     "reader": "Standards",
     "reason": "json.dumps checks ensure_ascii for truth only, so False and None produce identical output with non-ASCII characters preserved."
+  },
+  "hooks/observability/trace_flush.py:hooks.observability.trace_flush.x_flush_once__mutmut_1:80d09be3f11ee776f97113ffcd7c849ef5162a181d27c420ef1102c3a63e84a8": {
+    "reader": "Standards",
+    "reason": "accepted_bytes is always an int, so the first comparison against None or an empty string is False either way and flush_once takes the same path."
   }
 }
