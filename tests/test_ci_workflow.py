@@ -158,8 +158,14 @@ def test_lint_runs_the_artifact_sanity_checks_in_a_real_browser():
     assert {p.suffix for p in (_ROOT / "tests/fixtures/artifacts").iterdir()} == {".md", ".json", ".svg"}
 
 
+def _mutation_workflow():
+    separate = _ROOT / ".github/workflows/mutation.yml"
+    path = separate if separate.is_file() else _ROOT / ".github/workflows/test.yml"
+    return yaml.safe_load(path.read_text())
+
+
 def test_mutation_job_installs_chromium_before_mutating():
-    steps = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())["jobs"]["mutation"]["steps"]
+    steps = _mutation_workflow()["jobs"]["mutation"]["steps"]
     names = [s.get("name") for s in steps]
     install = names.index("Install the browser that page tests drive")
     assert steps[install]["run"] == "python -m playwright install --with-deps chromium"
@@ -167,7 +173,7 @@ def test_mutation_job_installs_chromium_before_mutating():
 
 
 def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
-    steps = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())["jobs"]["mutation"]["steps"]
+    steps = _mutation_workflow()["jobs"]["mutation"]["steps"]
     names = [step.get("name") for step in steps]
     select = names.index("Select mutation tests before browser setup")
     install = names.index("Install the browser that page tests drive")
@@ -177,7 +183,7 @@ def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
     assert steps[install]["if"] == "steps.selection.outputs.browser == 'true'"
     assert steps[install]["id"] == "browser"
     assert steps[install]["timeout-minutes"] == 2
-    job = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())["jobs"]["mutation"]
+    job = _mutation_workflow()["jobs"]["mutation"]
     assert job["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
     failure = next(step for step in steps if step.get("name") == "Report browser setup failure")
     assert failure["if"] == "failure() && steps.browser.outcome == 'failure'"
@@ -187,7 +193,7 @@ def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
 
 
 def test_mutation_browser_dependencies_use_the_responsive_mirror():
-    steps = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())["jobs"]["mutation"]["steps"]
+    steps = _mutation_workflow()["jobs"]["mutation"]["steps"]
     names = [step.get("name") for step in steps]
     mirror = names.index("Use the Ubuntu archive for browser dependencies")
     assert mirror < names.index("Install the browser that page tests drive")
@@ -536,7 +542,7 @@ def test_ci_refresh_can_use_the_exact_run_that_passed_the_dev_tree(tmp_path, mon
 
 
 def test_mutation_job_runs_independently_and_keeps_its_evidence():
-    spec = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())
+    spec = _mutation_workflow()
     job = spec["jobs"]["mutation"]
     assert "needs" not in job
     assert job["timeout-minutes"] == 20
