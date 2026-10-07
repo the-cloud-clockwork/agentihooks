@@ -105,6 +105,12 @@ def test_removed_hooks_are_read_again(mounted):
     assert live_binding.read(agent, 42, proc)["hooks"] is False
 
 
+def test_the_rendered_profile_chain_is_read_from_the_home(mounted):
+    agent, proc, home = mounted
+    (home / ".agentihooks-render.json").write_text(json.dumps({"chain": ["package:engineer", "engineer"]}))
+    assert live_binding.read(agent, 42, proc)["chain"] == ["package:engineer", "engineer"]
+
+
 def test_original_launch_model_remains_expected_after_telemetry_switch(mounted):
     agent, proc, _ = mounted
     switched = replace(agent, model="sonnet", effort="low")

@@ -254,7 +254,7 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
         elapsed = launch_check.joined_at(agent, doc) - agent.started_at
         launch_check.record(store, slug, agent, found, now_ms, elapsed)
         launch_check.forget(store, slug, agent.name)
-        launch_check.mark_relaunched(store, slug, agent.task, False)
+        launch_check.clear_relaunched(store, slug, agent.task)
         actions.append(f"{agent.name} passed its launch check in {elapsed // 1000} seconds")
     return actions
 
@@ -276,7 +276,7 @@ def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
         ledger.notify(slug, launch_check.told(found, outcome))
     if outcome != "relaunch":
         return said
-    launch_check.mark_relaunched(store, slug, agent.task, True)
+    launch_check.mark_relaunched(store, slug, agent.task)
     saved = live_binding.relaunch_assignment(agent, rows.get(agent.task, {}), store.config(slug))
     store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
     pending = master_start.read(store, slug)

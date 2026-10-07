@@ -66,7 +66,7 @@ def joined_at(agent: AgentRecord, doc: dict) -> int | None:
     return doc.get("_meta", {}).get("members", {}).get(agent.name, {}).get("joined_at")
 
 
-def _joined(store, slug, agent, doc, started_at):
+def _joined(store, agent, doc, started_at):
     joined = joined_at(agent, doc)
     seated = bool(agent.seat) and store.seats.seat_of(agent.name) == agent.seat
     if joined is not None and joined - started_at <= DEADLINE_MS and seated:
@@ -106,12 +106,12 @@ def _name(store, slug, agent):
     code = store.config(slug).code
     if parsed and parsed.lane == agent.lane and parsed.code == code:
         return {}
-    return {"name": {"expected": f"{naming.TYPES.get(agent.lane, agent.lane)}@{code}-<number>", "actual": agent.name}}
+    return {"name": {"expected": f"{naming.TYPES[agent.lane]}@{code}-<number>", "actual": agent.name}}
 
 
 def misses(store: RedisStore, slug: str, agent: AgentRecord, facts: dict, doc: dict, on_bundle: bool) -> dict:
     return {
-        **_joined(store, slug, agent, doc, agent.started_at),
+        **_joined(store, agent, doc, agent.started_at),
         **_process(agent, facts),
         **_overlay(agent, facts, on_bundle),
         **_name(store, slug, agent),
@@ -148,12 +148,12 @@ def relaunched(store: RedisStore, slug: str, task: str) -> bool:
     return bool(store.redis.sismember(store.key(slug, "launch-check-relaunched"), task))
 
 
-def mark_relaunched(store: RedisStore, slug: str, task: str, spent: bool) -> None:
-    key = store.key(slug, "launch-check-relaunched")
-    if spent:
-        store.redis.sadd(key, task)
-    else:
-        store.redis.srem(key, task)
+def mark_relaunched(store: RedisStore, slug: str, task: str) -> None:
+    store.redis.sadd(store.key(slug, "launch-check-relaunched"), task)
+
+
+def clear_relaunched(store: RedisStore, slug: str, task: str) -> None:
+    store.redis.srem(store.key(slug, "launch-check-relaunched"), task)
 
 
 def told(found: dict, outcome: str) -> str:

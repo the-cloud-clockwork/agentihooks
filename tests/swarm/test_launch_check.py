@@ -158,15 +158,16 @@ class CheckedRuntime(FakeRuntime):
         return facts
 
 
-def checked(store, monkeypatch):
-    monkeypatch.setattr(launch_check, "bundled", lambda profile: False)
-    ledger, runtime = JoiningLedger([{"id": "t1", "profile": "engineer"}]), CheckedRuntime()
-    runtime.spawn_profile = "engineer"
+def checked(store, monkeypatch, profile="engineer", task_profile="engineer"):
+    from hooks.context import profile_chain
+
+    monkeypatch.setattr(profile_chain, "read_state", lambda: {})
+    ledger, runtime = JoiningLedger([{"id": "t1", "profile": task_profile}]), CheckedRuntime()
     original = runtime.spawn
 
     def spawn(config, lane, name, task, spawns=None):
         placed = original(config, lane, name, task, spawns)
-        return replace(placed, profile="engineer")
+        return replace(placed, profile=profile)
 
     runtime.spawn = spawn
     return ledger, runtime
@@ -194,7 +195,12 @@ def test_tick_waits_until_the_deadline_before_failing(store, monkeypatch):
     tick("sw", store, ledger, runtime, LAUNCH)
     actions = tick("sw", store, ledger, runtime, LAUNCH + 30_000)
     assert not any("launch check" in a for a in actions)
-    assert list(launch_check.pending(store, "sw"))
+    (name,) = [n for _, n, _ in runtime.spawned]
+    master = runtime.masters[0][0]
+    assert launch_check.pending(store, "sw") == {
+        name: {"task": "t1", "at": LAUNCH, "relaunch": True},
+        master: {"task": MASTER, "at": LAUNCH, "relaunch": True},
+    }
 
 
 def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch):
@@ -206,6 +212,9 @@ def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch):
     actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
     assert any(a.startswith(f"retired {first} after its launch check failed on profile") for a in actions)
     assert first in runtime.killed
+    failed = launch_check.report(store, "sw", "t1")
+    assert (failed["at"], failed["elapsed_ms"], failed["held"]) == (LAUNCH + 60_000, 60_000, False)
+    assert runtime.tasks[1]["launch_assignment"]["profile"] == "engineer"
     (finding,) = launch_check.findings(store, "sw")
     assert finding.id == f"launch-check/{first}/profile"
     second = runtime.spawned[1][1]
@@ -234,9 +243,12 @@ def test_master_failure_is_posted_to_the_operator_chat_and_relaunched(store, mon
     assert len(runtime.masters) == 2
 
 
-def test_an_overlay_only_miss_is_reported_without_a_relaunch(store, monkeypatch):
+def test_an_overlay_only_miss_is_reported_without_a_relaunch(store, monkeypatch, tmp_path):
+    from hooks.context import profile_chain
+
     ledger, runtime = checked(store, monkeypatch)
-    monkeypatch.setattr(launch_check, "bundled", lambda profile: True)
+    (tmp_path / "profiles" / "engineer").mkdir(parents=True)
+    monkeypatch.setattr(profile_chain, "read_state", lambda: {"bundle": {"path": str(tmp_path)}})
     tick("sw", store, ledger, runtime, LAUNCH)
     first = runtime.spawned[0][1]
     joined(ledger, runtime, LAUNCH + 1)
@@ -383,10 +395,10 @@ def test_record_report_and_judged(store, launched):
 
 
 def test_relaunch_mark_is_set_and_cleared_per_task(store):
-    launch_check.mark_relaunched(store, "sw", "t1", True)
+    launch_check.mark_relaunched(store, "sw", "t1")
     assert launch_check.relaunched(store, "sw", "t1") is True
     assert launch_check.relaunched(store, "sw", "t2") is False
-    launch_check.mark_relaunched(store, "sw", "t1", False)
+    launch_check.clear_relaunched(store, "sw", "t1")
     assert launch_check.relaunched(store, "sw", "t1") is False
 
 
@@ -444,7 +456,7 @@ def test_a_waiting_launch_does_not_stop_the_next_from_being_judged(store, monkey
 
 def test_a_pass_after_a_relaunch_clears_the_mark_and_reports_its_timing(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
-    launch_check.mark_relaunched(store, "sw", "t1", True)
+    launch_check.mark_relaunched(store, "sw", "t1")
     tick("sw", store, ledger, runtime, LAUNCH)
     joined(ledger, runtime, LAUNCH + 9_000)
     tick("sw", store, ledger, runtime, LAUNCH + 20_000)
@@ -466,3 +478,23 @@ def test_a_relaunch_saves_the_assignment_and_retries_a_starting_master(store, mo
     assert master_start.read(store, "sw")["attempt"] == 2
     assert runtime.masters[1][1]["id"] == MASTER
     assert launch_check.relaunched(store, "sw", MASTER) is True
+
+
+def test_a_relaunch_without_a_recorded_profile_takes_the_task_profile(store, monkeypatch):
+    ledger, runtime = checked(store, monkeypatch, profile="", task_profile="frontend")
+    tick("sw", store, ledger, runtime, LAUNCH)
+    tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert runtime.tasks[1]["launch_assignment"]["profile"] == "frontend"
+
+
+def test_a_master_relaunch_without_a_session_slot_keeps_its_retry_window(store, monkeypatch):
+    ledger, runtime = checked(store, monkeypatch)
+    store.update("sw", max_eng=0)
+    runtime.reported = lambda agent: False
+    tick("sw", store, ledger, runtime, LAUNCH)
+    runtime.full = True
+    tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    pending = master_start.read(store, "sw")
+    assert (pending["name"], pending["retry"], pending["at"]) == ("", True, LAUNCH + launch_check.DEADLINE_MS)
+    tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS + 90_000)
+    assert not any("either launch" in note for note in ledger.notes)
