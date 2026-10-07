@@ -63,6 +63,14 @@ def _resolved(headers: dict) -> tuple[dict, str]:
     return out, ""
 
 
+def require_environment(servers: dict) -> None:
+    for name, spec in servers.items():
+        if spec.get("enabled_tools") is not None:
+            _, reason = _resolved(spec.get("headers") or {})
+            if reason:
+                raise ValueError(f"MCP '{name}' cannot mount: {reason}")
+
+
 def _claude_filter(spec: dict) -> tuple[list[str], list[str], str]:
     """(tools to deny, allowlisted tools the server does not advertise, why it cannot mount)."""
     allow, disabled = spec.get("enabled_tools"), list(spec.get("disabled_tools") or [])

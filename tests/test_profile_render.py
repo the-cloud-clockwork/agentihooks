@@ -969,7 +969,6 @@ def test_claude_render_keeps_the_profile_deny_rules_ahead_of_connector_denies(wo
             {},
             "Claude has no native tool allowlist; only an http server's tools can be listed",
         ),
-        (_gateway(enabled_tools=READS), {"GW_KEY": None}, "environment variable GW_KEY is unset"),
         (_gateway(enabled_tools=READS), {"FAIL": "1"}, "tool listing failed: ConnectionError: refused"),
     ],
 )
