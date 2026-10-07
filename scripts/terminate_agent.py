@@ -85,7 +85,7 @@ def sessions(proc: Path = Path("/proc"), registry: dict[str, dict] | None = None
             Session(
                 session_id=session_id,
                 target=target,
-                name=_name(process, proc, table) or str(info.get("name") or ""),
+                name=str(info.get("name") or "") or _name(process, proc, table),
                 process=process,
                 cwd=cwd,
                 status=str(info.get("status", "alive")),

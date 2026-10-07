@@ -267,3 +267,14 @@ def test_sessions_name_a_registered_session_from_its_record(monkeypatch):
     monkeypatch.setattr("scripts.terminate_agent.agent_environ", lambda pid, keys, proc=None: ("",))
     registry = {"uuid-9": {"status": "alive", "pid": 300, "cwd": "/repo", "name": "sw-master-1"}}
     assert [s.name for s in sessions(registry=registry)] == ["sw-master-1"]
+
+
+@pytest.mark.parametrize("argv", [("claude", "--name", "old-master"), ("codex",)])
+def test_a_renamed_session_lists_under_its_registered_name(monkeypatch, argv):
+    from scripts.terminate_agent import sessions
+
+    table = {300: process(300, comm=argv[0], argv=argv)}
+    monkeypatch.setattr("scripts.terminate_agent.processes", lambda proc: table)
+    monkeypatch.setattr("scripts.terminate_agent.agent_environ", lambda pid, keys, proc: ("old-master",))
+    registry = {"uuid-9": {"status": "alive", "pid": 300, "cwd": "/repo", "name": "master@a1b2c3-0001"}}
+    assert [s.name for s in sessions(registry=registry)] == ["master@a1b2c3-0001"]
