@@ -123,6 +123,9 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
 
     monkeypatch.setenv("HOME", str(fake_home))
     monkeypatch.setenv("LIFECYCLE_GC_ENABLED", "false")
+    # Every swarm tick sweeps the launch run folder and the herdr server.
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "_run"))
+    monkeypatch.setenv("HERDR_SOCKET_PATH", str(tmp_path / "_run" / "herdr.sock"))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
     # CODEX_HOME is read BEFORE Path.home() by targets.codex_target.codex_home,
     # so patching Path.home does not cover it. Unset today on the developer's

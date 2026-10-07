@@ -694,3 +694,8 @@ def test_a_failing_sweep_never_breaks_the_tick(monkeypatch, capsys):
     cli.cmd_tick(SimpleNamespace(slugs=lambda: []), None)
     captured = capsys.readouterr()
     assert captured.err == "herdr: RuntimeError: boom\n" and captured.out == ""
+
+
+def test_the_suite_never_sweeps_the_real_launch_folder_or_herdr(tmp_path):
+    assert herdr_panes.run_folder(dict(os.environ)).is_relative_to(tmp_path)
+    assert os.environ["HERDR_SOCKET_PATH"].startswith(str(tmp_path))
