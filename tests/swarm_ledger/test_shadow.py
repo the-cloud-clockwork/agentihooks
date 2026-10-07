@@ -10,6 +10,7 @@ from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 @pytest.fixture
 def files(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setenv("LEDGER_SQLITE_SHADOW", "1")
     repo = FileLedgerRepository()
     repo.create(
         "shadow", {"title": "Shadow", "overview": "o", "sources": [], "phases": [{"title": "One", "description": "d"}]}
