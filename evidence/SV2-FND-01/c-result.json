@@ -1,7 +1,7 @@
 {
   "case": "T-SV2-FND-01-C",
-  "tested_commit": "6902fddb23ce8b2daa7787e5f32f4e1b23cd6385",
-  "passed": 6,
+  "tested_commit": "e7cae6fcb9fe377eafc15e83c9309de4f2a7a2c4",
+  "passed": 8,
   "failed": 0,
   "tests": [
     {
@@ -22,6 +22,14 @@
     },
     {
       "test": "tests/test_swarm_v2_baseline.py::test_older_previous_cannot_overwrite_newer_output[True]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_missing_previous_file_is_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_failed_write_leaves_no_temporary_file",
       "outcome": "passed"
     },
     {

@@ -1,48 +1,105 @@
 {
   "package": "SV2-FND-01",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1372",
-  "collector_commit": "6902fddb23ce8b2daa7787e5f32f4e1b23cd6385",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1377",
+  "tested_commit": "e7cae6fcb9fe377eafc15e83c9309de4f2a7a2c4",
+  "baseline_commit": "4c368972b73672faa1b7b1357f67afaa6481b163",
   "evidence_class": "live read-only observation; no infrastructure mutation",
-  "observed_at": "2026-10-07T19:37:44Z",
+  "observed_at": "2026-10-07T20:00:30Z",
   "measurements": {
     "baseline_unverified_items": 1,
-    "baseline_drift_items": 1
+    "baseline_drift_items": 0
   },
-  "unverified_deployed_values": [
-    "agentibrain-kernel: brain-api version"
-  ],
+  "drift_entries_total": 5,
   "source_heads": {
-    "agentihooks": "2bfd09c2f23dbb54c59baaba1cb0c1948fb1f55d",
+    "agentihooks": "f6d48929a0d43347feca07d9510ca91e14b49dbe",
     "agentibrain-kernel": "e58e687e8c9edc6acab8115e7eb15db302b704dc",
     "antoncore": "0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c"
   },
+  "deployed": {
+    "agentihooks": [
+      {
+        "name": "workstation agentihooks install",
+        "status": "verified",
+        "value": "agentihooks 2.17.0"
+      }
+    ],
+    "agentibrain-kernel": [
+      {
+        "name": "brain-api version",
+        "status": "unverified",
+        "value": null,
+        "reason": "endpoint answered without version"
+      }
+    ],
+    "antoncore": [
+      {
+        "name": "ArgoCD synced revision",
+        "status": "verified",
+        "value": "0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c",
+        "matches_source": true
+      },
+      {
+        "name": "cluster autoscaler image",
+        "status": "verified",
+        "value": "registry.k8s.io/autoscaling/cluster-autoscaler:v1.33.0"
+      }
+    ]
+  },
   "interfaces_present": 25,
   "interfaces_missing": 0,
-  "live_negative": "Same sources with an absent kubectl context: both antoncore cluster probes unverified with the kubectl error, baseline_unverified_items 3; no empty or zero value recorded.",
-  "limitations": [
-    "brain-api /health exposes no version field, so the deployed brain version stays unverified.",
-    "agentihooks has no Anton deployment yet; its only deployed value is the workstation install version.",
-    "AWS autoscaling group live capacity was not read; it is listed as an unknown live value."
-  ],
-  "commands": {
-    "live_first": "python -m scripts.swarm_v2.baseline --sources docs/swarm-v2/baseline-sources.json --previous docs/swarm-v2/plan-snapshot.json --json docs/swarm-v2/baseline.json --markdown docs/swarm-v2/baseline.md",
-    "live_rerun": "python -m scripts.swarm_v2.baseline --sources docs/swarm-v2/baseline-sources.json --previous docs/swarm-v2/baseline.json --json docs/swarm-v2/baseline.json --markdown docs/swarm-v2/baseline.md",
-    "live_negative": "same collector with every kubectl --context anton-prod replaced by the absent context swarm-v2-unavailable-context, written outside the source tree",
-    "live_negative_output": "| antoncore | dev `0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c` | ArgoCD synced revision: unverified (exit 1: error: context \"swarm-v2-unavailable-context\" does not exist); cluster autoscaler image: unverified (exit 1: error: context \"swarm-v2-unavailable-context\" does not exist) | ... |; baseline_unverified_items: 3",
-    "rollback_rehearsal": "wt.sh tmp --from engineer-323133-0498; git revert --no-edit 26f080400bd9a7d261c0b86834cdbf57cb69f300",
-    "rollback_rehearsal_output": "docs/swarm-v2/baseline.json | 199 ---; docs/swarm-v2/baseline.md | 51 ---; 2 files changed, 250 deletions; collector and evidence retained",
-    "live_rerun_output": "observed_at 2026-10-07T19:37:44Z, one new drift entry for agentihooks, baseline_unverified_items 1",
-    "ownership_guard_live": "baseline with --previous docs/swarm-v2/plan-snapshot.json against the newer docs/swarm-v2/baseline.json",
-    "ownership_guard_live_output": "error: docs/swarm-v2/baseline.json holds a newer baseline than --previous; pass it as --previous (exit 2, file unchanged)"
-  },
-  "plan_snapshot": "docs/swarm-v2/plan-snapshot.json holds the three heads Swarm-v2.md section 0.3 records; observed_at is date only because the plan records no time. It is read by live_first as --previous, which produced the three drift entries.",
-  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1377",
-  "drift_entries_total": 4,
   "test_results": {
     "a": "evidence/SV2-FND-01/a-result.json",
     "b": "evidence/SV2-FND-01/b-result.json",
     "c": "evidence/SV2-FND-01/c-result.json",
     "manifest": "evidence/SV2-FND-01/manifest.json",
-    "summary": "74 passed at 6902fddb (A 20, B 48, C 6); CI runs on the pull request are the judge"
-  }
+    "pytest_output": "111 passed in 6.41s",
+    "judge": "CI Tests and Mutation runs on the pull request head"
+  },
+  "commands": {
+    "live_first_historical": "python -m scripts.swarm_v2.baseline --sources docs/swarm-v2/baseline-sources.json --previous docs/swarm-v2/plan-snapshot.json --json docs/swarm-v2/baseline.json --markdown docs/swarm-v2/baseline.md (seeded the first report before baseline.json existed; the ownership guard now refuses it while a newer baseline.json exists, so reproduce with live_rerun)",
+    "live_rerun": "python -m scripts.swarm_v2.baseline --sources docs/swarm-v2/baseline-sources.json --previous docs/swarm-v2/baseline.json --json docs/swarm-v2/baseline.json --markdown docs/swarm-v2/baseline.md",
+    "live_rerun_transient": "The first rerun at 2026-10-07T19:59:39Z (commit 772c6d4b) recorded ArgoCD synced revision as unverified after a kubectl response body read timeout; the next rerun (commit 4c368972) verified it. Both are kept in history.",
+    "live_negative": "sed 's/\"anton-prod\"/\"swarm-v2-unavailable-context\"/g' docs/swarm-v2/baseline-sources.json > sources-unavailable-cluster.json; python -m scripts.swarm_v2.baseline --sources sources-unavailable-cluster.json --json negative-final.json --markdown negative-final.md (outside the source tree)",
+    "live_negative_output": [
+      "| antoncore | dev `0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c` | ArgoCD synced revision: unverified (exit 1: error: context \"swarm-v2-unavailable-context\" does not exist); cluster autoscaler image: unverified (exit 1: error: context \"swarm-v2-unavailable-context\" does not exist) | live autoscaling group desired capacity and instance counts (AWS read access not exercised), ArgoCD synced revision, cluster autoscaler image |",
+      "- baseline_unverified_items: 3",
+      "- baseline_drift_items: 0"
+    ],
+    "ownership_guard_live": "the same negative command against an existing newer negative-baseline.json",
+    "ownership_guard_live_output": "error: negative-baseline.json holds a newer baseline; pass it as --previous (exit 2, file unchanged)",
+    "rollback_rehearsal": "wt.sh tmp --from engineer-323133-0498; git revert --no-edit 4c368972b73672faa1b7b1357f67afaa6481b163",
+    "rollback_rehearsal_output": [
+      "$ git revert --no-edit 4c368972b73672faa1b7b1357f67afaa6481b163",
+      "[detached HEAD af4f9d32] Revert \"Rerecord the SV2-FND-01 baseline after a transient ArgoCD read timeout\"",
+      " Date: Wed Oct 7 22:00:50 2026 +0200",
+      " 2 files changed, 12 insertions(+), 11 deletions(-)",
+      "exit=0",
+      "$ git diff --stat HEAD~1 HEAD",
+      " docs/swarm-v2/baseline.json | 15 ++++++++-------",
+      " docs/swarm-v2/baseline.md   |  8 ++++----",
+      " 2 files changed, 12 insertions(+), 11 deletions(-)",
+      "$ git diff --name-status HEAD~1 HEAD",
+      "M\tdocs/swarm-v2/baseline.json",
+      "M\tdocs/swarm-v2/baseline.md",
+      "$ ls evidence/SV2-FND-01 scripts/swarm_v2",
+      "evidence/SV2-FND-01:",
+      "a-result.json",
+      "b-result.json",
+      "c-result.json",
+      "manifest.json",
+      "result.json",
+      "",
+      "scripts/swarm_v2:",
+      "__init__.py",
+      "baseline.py"
+    ]
+  },
+  "plan_snapshot": "docs/swarm-v2/plan-snapshot.json holds the three heads Swarm-v2.md section 0.3 records; observed_at is date only because the plan records no time.",
+  "limitations": [
+    "brain-api /health exposes no version field, so the deployed brain version stays unverified.",
+    "agentihooks has no Anton deployment yet; its only deployed value is the workstation install version.",
+    "AWS autoscaling group live capacity was not read; it is listed as an unknown live value.",
+    "The fixture's unavailable endpoint relies on the reserved .invalid domain failing name resolution (RFC 6761)."
+  ]
 }

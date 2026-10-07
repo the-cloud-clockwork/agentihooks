@@ -1,11 +1,11 @@
 {
   "package": "SV2-FND-01",
-  "tested_commit": "6902fddb23ce8b2daa7787e5f32f4e1b23cd6385",
+  "tested_commit": "e7cae6fcb9fe377eafc15e83c9309de4f2a7a2c4",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1377",
   "inputs": {
-    "tests/fixtures/swarm_v2/baseline/sources.json": "eb2fe862e242b8b5f868f27d110ea7fc689084d875073b9c6d4dc073773466ee",
-    "tests/test_swarm_v2_baseline.py": "b976aaaf7435851a67dd42567f40951b2cd168a5da0836148da53db6edb7feea",
-    "scripts/swarm_v2/baseline.py": "6251b6e1a1423f7f2b69aadeef06de3e8a30020ce951b2d9affbb7d1403c7d5c",
+    "tests/fixtures/swarm_v2/baseline/sources.json": "9d9d727830dc2b81ab8ae4f077bd698faee56cd63e97b7423eb95a57301ad746",
+    "tests/test_swarm_v2_baseline.py": "834e15939544133c349dc75b68d2332cd8a3cc9005188d82a3575956dac3079c",
+    "scripts/swarm_v2/baseline.py": "c039a4fc0c84a199e0d9669ea173132d0641552bda8b000f60f0bf3efd6aaa51",
     "docs/swarm-v2/baseline-sources.json": "483a8c3c031ce85c954dfd84cbde0b350b8c09b666cd5093ce8e756833ad3018",
     "docs/swarm-v2/plan-snapshot.json": "9b1166f05ca3f01885bcef8affdcf85f0b5f62b385c7b07601b37e7556742866"
   },
@@ -14,5 +14,5 @@
     "git": "git version 2.34.1",
     "kubectl": "Client Version: v1.35.2"
   },
-  "generated_by": "pytest tests/test_swarm_v2_baseline.py -p no:xdist -p no:randomly --junitxml=junit.xml, then this converter"
+  "generated_by": "pytest tests/test_swarm_v2_baseline.py -p no:xdist -p no:randomly --junitxml=<file>, then python evidence/SV2-FND-01/generate_case_results.py <file> <commit> <pull request>"
 }

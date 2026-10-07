@@ -1,7 +1,7 @@
 {
   "case": "T-SV2-FND-01-A",
-  "tested_commit": "6902fddb23ce8b2daa7787e5f32f4e1b23cd6385",
-  "passed": 20,
+  "tested_commit": "e7cae6fcb9fe377eafc15e83c9309de4f2a7a2c4",
+  "passed": 27,
   "failed": 0,
   "tests": [
     {
@@ -41,6 +41,14 @@
       "outcome": "passed"
     },
     {
+      "test": "tests/test_swarm_v2_baseline.py::test_http_probe[/empty-unverified-None-empty answer]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_http_probe[/err-unverified-None-http 500]",
+      "outcome": "passed"
+    },
+    {
       "test": "tests/test_swarm_v2_baseline.py::test_repo_url_forms[git@github.com:o/r.git-git@github.com:o/r.git]",
       "outcome": "passed"
     },
@@ -62,6 +70,26 @@
     },
     {
       "test": "tests/test_swarm_v2_baseline.py::test_repo_url_expands_home",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_subprocess_calls_capture_text_with_bounded_timeouts",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_http_probe_uses_bounded_timeout",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_unverified_count_weighs_each_item_once",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_minimal_repository_entry_loads_with_empty_defaults",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_cli_requires_every_path_and_describes_itself",
       "outcome": "passed"
     },
     {

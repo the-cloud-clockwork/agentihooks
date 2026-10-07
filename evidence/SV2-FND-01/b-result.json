@@ -1,7 +1,7 @@
 {
   "case": "T-SV2-FND-01-B",
-  "tested_commit": "6902fddb23ce8b2daa7787e5f32f4e1b23cd6385",
-  "passed": 48,
+  "tested_commit": "e7cae6fcb9fe377eafc15e83c9309de4f2a7a2c4",
+  "passed": 76,
   "failed": 0,
   "tests": [
     {
@@ -77,6 +77,54 @@
       "outcome": "passed"
     },
     {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_allows_only_reads[argv10-True]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_allows_only_reads[argv11-False]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_allows_only_reads[argv12-False]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_allows_only_reads[argv13-False]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_allows_only_reads[argv14-False]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_allows_only_reads[argv15-False]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_allows_only_reads[argv16-False]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_allows_only_reads[argv17-True]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_allows_only_reads[argv18-False]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_allows_only_reads[argv19-True]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_allows_only_reads[argv20-False]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_allows_only_reads[argv21-False]",
+      "outcome": "passed"
+    },
+    {
       "test": "tests/test_swarm_v2_baseline.py::test_load_sources_refuses_a_writing_probe",
       "outcome": "passed"
     },
@@ -145,6 +193,26 @@
       "outcome": "passed"
     },
     {
+      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_ssh_and_ipv6_addresses[git@anton:repo.git ok-<redacted-url> ok]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_ssh_and_ipv6_addresses[dial tcp anton.internal:6443 refused-dial tcp <redacted-host> refused]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_ssh_and_ipv6_addresses[registry localhost:5000 up-registry <redacted-host> up]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_ssh_and_ipv6_addresses[cluster-autoscaler:v1.33.0 exit 1: error-cluster-autoscaler:v1.33.0 exit 1: error]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_ssh_and_ipv6_addresses[digest sha256:1234567 ok-digest sha256:1234567 ok]",
+      "outcome": "passed"
+    },
+    {
       "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_colon_credentials[token]",
       "outcome": "passed"
     },
@@ -165,11 +233,19 @@
       "outcome": "passed"
     },
     {
+      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_bare_tokens[ghr_]",
+      "outcome": "passed"
+    },
+    {
       "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_bare_tokens[ghs_]",
       "outcome": "passed"
     },
     {
       "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_bare_tokens[github_pat_]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_bare_tokens[glpat-]",
       "outcome": "passed"
     },
     {
@@ -181,11 +257,47 @@
       "outcome": "passed"
     },
     {
+      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_aws_access_key_ids",
+      "outcome": "passed"
+    },
+    {
       "test": "tests/test_swarm_v2_baseline.py::test_missing_git_binary",
       "outcome": "passed"
     },
     {
       "test": "tests/test_swarm_v2_baseline.py::test_git_that_does_not_answer_leaves_interfaces_unverified",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_ref_line_with_extra_tab_is_not_the_branch",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_refuses_secret_reads[argv0]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_refuses_secret_reads[argv1]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_refuses_secret_reads[argv2]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_refuses_secret_reads[argv3]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_refuses_secret_reads[argv4]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_read_only_refuses_secret_reads[argv5]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_ssh_auth_failures",
       "outcome": "passed"
     },
     {
