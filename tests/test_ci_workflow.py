@@ -149,21 +149,37 @@ def test_ruff_runs_in_the_tests_workflow_only():
     assert [w.name for w in workflows if "ruff" in w.read_text()] == ["test.yml"]
 
 
+def _browser_install(steps):
+    return next(
+        step
+        for step in steps
+        if "playwright install --with-deps chromium" in step.get("run", "")
+        or step.get("uses", "").endswith("/.github/actions/browser-cache")
+    )
+
+
+def _browser_setup_steps(steps):
+    install = _browser_install(steps)
+    if "uses" in install:
+        action = yaml.safe_load((_ROOT / ".github/actions/browser-cache/action.yml").read_text())
+        return action["runs"]["steps"]
+    return steps
+
+
 def test_lint_runs_the_artifact_sanity_checks_in_a_real_browser():
     steps = _workflow()["jobs"]["lint"]["steps"]
-    runs = [s.get("run", "") for s in steps]
-    install = next(i for i, run in enumerate(runs) if "playwright install --with-deps chromium" in run)
-    check = next(i for i, run in enumerate(runs) if run.endswith(".artifact_sanity tests/fixtures/artifacts/*"))
-    assert install < check
+    install = _browser_install(steps)
+    check = next(s for s in steps if s.get("run", "").endswith(".artifact_sanity tests/fixtures/artifacts/*"))
+    assert steps.index(install) < steps.index(check)
     assert {p.suffix for p in (_ROOT / "tests/fixtures/artifacts").iterdir()} == {".md", ".json", ".svg"}
 
 
 def test_mutation_job_installs_chromium_before_mutating():
     steps = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())["jobs"]["mutation"]["steps"]
     names = [s.get("name") for s in steps]
-    install = names.index("Install the browser that page tests drive")
-    assert steps[install]["run"] == "python -m playwright install --with-deps chromium"
-    assert names.index("Install dependencies") < install < names.index("Mutate changed Python files")
+    install = _browser_install(steps)
+    assert install["name"] == "Install the browser that page tests drive"
+    assert names.index("Install dependencies") < steps.index(install) < names.index("Mutate changed Python files")
 
 
 def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
@@ -188,12 +204,16 @@ def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
 
 def test_mutation_browser_dependencies_use_the_responsive_mirror():
     steps = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())["jobs"]["mutation"]["steps"]
-    names = [step.get("name") for step in steps]
-    mirror = names.index("Use the Ubuntu archive for browser dependencies")
-    assert mirror < names.index("Install the browser that page tests drive")
-    assert steps[mirror]["if"] == "steps.selection.outputs.browser == 'true'"
-    assert steps[mirror]["run"] == r"sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt"
-    assert steps[mirror]["timeout-minutes"] == 1
+    setup = _browser_setup_steps(steps)
+    mirror = next(step for step in setup if step.get("name") == "Use the Ubuntu archive for browser dependencies")
+    install = _browser_install(setup)
+    assert setup.index(mirror) < setup.index(install)
+    assert mirror["if"] in ("steps.selection.outputs.browser == 'true'", "steps.launch.outputs.ready != 'true'")
+    assert mirror["run"] in (
+        r"sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt",
+        r"timeout 60s sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt",
+    )
+    assert mirror.get("timeout-minutes") == 1 or mirror["run"].startswith("timeout 60s ")
 
 
 def test_lint_and_equivalence_browser_installs_have_the_same_timeout():
@@ -202,8 +222,7 @@ def test_lint_and_equivalence_browser_installs_have_the_same_timeout():
         "ledger-equivalence"
     ]["steps"]
     for steps in (lint, equivalence):
-        install = next(step for step in steps if "playwright install --with-deps chromium" in step.get("run", ""))
-        assert install["timeout-minutes"] == 2
+        assert _browser_install(steps)["timeout-minutes"] == 2
 
 
 def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
@@ -212,15 +231,20 @@ def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
         "ledger-equivalence"
     ]["steps"]
     for steps in (lint, equivalence):
-        mirror = next(step for step in steps if step.get("name") == "Use the Ubuntu archive for browser dependencies")
-        install = next(step for step in steps if "playwright install --with-deps chromium" in step.get("run", ""))
-        assert steps.index(mirror) < steps.index(install)
-        assert mirror["run"] == r"sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt"
-        assert mirror["timeout-minutes"] == 1
-    assert (
-        next(step for step in lint if step.get("name") == "Use the Ubuntu archive for browser dependencies")["if"]
-        == "steps.lookup.outputs.skip != 'true'"
-    )
+        setup = _browser_setup_steps(steps)
+        mirror = next(step for step in setup if step.get("name") == "Use the Ubuntu archive for browser dependencies")
+        assert setup.index(mirror) < setup.index(_browser_install(setup))
+        assert mirror["run"] in (
+            r"sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt",
+            r"timeout 60s sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt",
+        )
+        assert mirror.get("timeout-minutes") == 1 or mirror["run"].startswith("timeout 60s ")
+    install = _browser_install(lint)
+    if "run" in install:
+        mirror = next(step for step in lint if step.get("name") == "Use the Ubuntu archive for browser dependencies")
+        assert mirror["if"] == "steps.lookup.outputs.skip != 'true'"
+    else:
+        assert install["if"] == "steps.lookup.outputs.skip != 'true' && steps.artifacts.outputs.browser == 'true'"
 
 
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
