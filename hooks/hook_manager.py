@@ -1097,6 +1097,17 @@ def _inject_refocus(session_id: str, event: str) -> None:
         inject_context(context, also_log=False, skip_compression=True)
 
 
+def _wait_nudge_blocks(payload: dict) -> list[str]:
+    try:
+        from hooks.context.swarm_wait_nudge import nudge
+
+        context = nudge(payload.get("tool_name", ""), payload.get("tool_input") or {})
+    except Exception as e:
+        log("swarm wait nudge failed", {"error": str(e)})
+        return []
+    return [context] if context else []
+
+
 def on_pre_tool_use(payload: dict) -> None:
     """Handle PreToolUse event."""
     from hooks.config import SECRETS_MODE
@@ -1593,6 +1604,7 @@ def on_pre_tool_use(payload: dict) -> None:
 
     _pretool_blocks.extend(_inbox_blocks(session_id, payload.get("cwd", "")) if _can_inject_pretool else [])
     _pretool_blocks.extend(_refocus_blocks(session_id, "tool") if _can_inject_pretool else [])
+    _pretool_blocks.extend(_wait_nudge_blocks(payload) if _can_inject_pretool else [])
 
     if ENFORCEMENT_INJECTION_ENABLED:
         try:
