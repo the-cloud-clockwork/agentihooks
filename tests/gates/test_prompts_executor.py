@@ -74,3 +74,9 @@ def test_a_named_file_passes(hook):
     result = hook("rm -f {cwd}/x/notes.txt")
     assert result.returncode == 0, result.stderr
     assert "agentihooks scratch rm" not in result.stderr
+
+
+def test_a_subagent_script_running_a_variable_command_is_denied(hook):
+    result = hook("bash -e -c 'replay() {{ shift; if ! \"$@\" > /dev/null; then echo failed; fi; }}; replay bad false'")
+    assert result.returncode == 2
+    assert "shell -c script" in result.stderr

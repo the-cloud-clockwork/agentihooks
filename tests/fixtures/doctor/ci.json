@@ -8,7 +8,6 @@
     "html_url": "https://github.com/the-cloud-clockwork/agentihooks/pull/487",
     "number": 487
   },
-  "committed_at": 1791209988000,
   "runs": [
     {
       "conclusion": "success",
@@ -20,7 +19,8 @@
       "name": "Tests",
       "pull_requests": [],
       "run_attempt": 1,
-      "status": "completed"
+      "status": "completed",
+      "created_at": "2026-10-05T14:19:57Z"
     }
   ],
   "checks": [
@@ -30,7 +30,8 @@
       "html_url": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37323835080/job/111811941215",
       "id": 111811941215,
       "name": "record-pass",
-      "status": "completed"
+      "status": "completed",
+      "completed_at": "2026-10-05T14:25:38Z"
     },
     {
       "conclusion": "success",
@@ -38,7 +39,8 @@
       "html_url": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37323835080/job/111811735903",
       "id": 111811735903,
       "name": "unit (3.11, 3)",
-      "status": "completed"
+      "status": "completed",
+      "completed_at": "2026-10-05T14:25:29Z"
     },
     {
       "conclusion": "success",
@@ -46,7 +48,8 @@
       "html_url": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37323835080/job/111811735890",
       "id": 111811735890,
       "name": "unit (3.12, 4)",
-      "status": "completed"
+      "status": "completed",
+      "completed_at": "2026-10-05T14:25:30Z"
     },
     {
       "conclusion": "success",
@@ -54,7 +57,8 @@
       "html_url": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37323835080/job/111811735861",
       "id": 111811735861,
       "name": "unit (3.12, 1)",
-      "status": "completed"
+      "status": "completed",
+      "completed_at": "2026-10-05T14:25:17Z"
     },
     {
       "conclusion": "success",
@@ -62,7 +66,8 @@
       "html_url": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37323835080/job/111811735809",
       "id": 111811735809,
       "name": "unit (3.12, 2)",
-      "status": "completed"
+      "status": "completed",
+      "completed_at": "2026-10-05T14:25:28Z"
     },
     {
       "conclusion": "success",
@@ -70,7 +75,8 @@
       "html_url": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37323835080/job/111811735788",
       "id": 111811735788,
       "name": "unit (3.11, 2)",
-      "status": "completed"
+      "status": "completed",
+      "completed_at": "2026-10-05T14:25:30Z"
     },
     {
       "conclusion": "success",
@@ -78,7 +84,8 @@
       "html_url": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37323835080/job/111811735728",
       "id": 111811735728,
       "name": "unit (3.12, 3)",
-      "status": "completed"
+      "status": "completed",
+      "completed_at": "2026-10-05T14:25:22Z"
     },
     {
       "conclusion": "success",
@@ -86,7 +93,8 @@
       "html_url": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37323835080/job/111811735716",
       "id": 111811735716,
       "name": "unit (3.11, 4)",
-      "status": "completed"
+      "status": "completed",
+      "completed_at": "2026-10-05T14:25:26Z"
     },
     {
       "conclusion": "success",
@@ -94,7 +102,8 @@
       "html_url": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37323835080/job/111811735690",
       "id": 111811735690,
       "name": "unit (3.11, 1)",
-      "status": "completed"
+      "status": "completed",
+      "completed_at": "2026-10-05T14:25:18Z"
     },
     {
       "conclusion": "success",
@@ -102,7 +111,8 @@
       "html_url": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37323835080/job/111811735359",
       "id": 111811735359,
       "name": "lint",
-      "status": "completed"
+      "status": "completed",
+      "completed_at": "2026-10-05T14:25:13Z"
     }
   ],
   "attempts": [

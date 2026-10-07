@@ -1,9 +1,13 @@
 """Tests for hooks.context.version_guard."""
 
+import os
+from unittest.mock import patch
+
 import pytest
 
 from hooks.context.version_guard import check_version_guard
 from hooks.hook_manager import BlockAction
+from hooks.targets.normalizer import normalize_payload
 
 
 def _write(path, cwd=""):
@@ -339,3 +343,167 @@ def test_switch_changing_another_version_key_is_refused(tmp_path):
 def test_unrelated_key_ending_in_version_is_not_a_version_key(tmp_path):
     target = _manifest(tmp_path, _STATIC + '\n[tool.ruff]\ntarget-version = "py311"\n')
     check_version_guard(_edit(target, 'target-version = "py311"', 'target-version = "py312"'))
+
+
+def _codex_patch(target, *lines, action="Update", tail=()):
+    body = "\n".join(("*** Begin Patch", f"*** {action} File: {target}", *lines, *tail, "*** End Patch"))
+    with patch.dict(os.environ, {"AGENTIHOOKS_TARGET": "codex"}):
+        return normalize_payload({"tool_name": "apply_patch", "tool_input": {"command": body}, "cwd": ""})
+
+
+_SWITCH = ("@@", '-version = "2.17.0"', '+dynamic = ["version"]')
+
+
+def test_codex_patch_switching_to_tag_derived_version_is_allowed(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    check_version_guard(_codex_patch(target, *_SWITCH))
+
+
+def test_codex_patch_adding_the_tag_source_with_the_switch_is_allowed(tmp_path):
+    target = _manifest(tmp_path)
+    check_version_guard(_codex_patch(target, "@@", ' name = "x"', *_SWITCH[1:], "@@", "+", "+[tool.setuptools_scm]"))
+
+
+def test_codex_patch_switch_without_tag_source_is_refused(tmp_path):
+    _refused(_codex_patch(_manifest(tmp_path), *_SWITCH))
+
+
+def test_codex_patch_version_bump_is_refused(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    _refused(_codex_patch(target, "@@", '-version = "2.17.0"', '+version = "2.18.0"'))
+
+
+def test_codex_patch_with_version_context_and_unrelated_change_is_allowed(tmp_path):
+    target = _manifest(tmp_path)
+    check_version_guard(
+        _codex_patch(target, "@@", ' version = "2.17.0"', '-description = "old"', '+description = "new"')
+    )
+
+
+def test_codex_patch_hunks_apply_in_order(tmp_path):
+    text = '[tool.poetry]\nkey = "v"\n\n' + _STATIC + '\n[tool.setuptools_scm]\n\n[tool.other]\nkey = "v"\n'
+    target = _manifest(tmp_path, text)
+    check_version_guard(_codex_patch(target, *_SWITCH, "@@", '-key = "v"', '+version = "1.0"'))
+
+
+def test_codex_patch_that_does_not_match_the_file_is_refused(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    _refused(_codex_patch(target, "@@", '-version = "9.9.9"', '+dynamic = ["version"]'))
+
+
+def test_codex_patch_judges_only_the_manifest_section(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    other = ("*** Update File: README.md", "@@", '-version = "2.17.0"', '+version = "3.0.0"')
+    check_version_guard(_codex_patch(target, *_SWITCH, tail=other))
+
+
+def test_codex_patch_bumping_the_manifest_after_another_file_is_refused(tmp_path):
+    readme = tmp_path / "README.md"
+    readme.write_text("hello\n")
+    target = _manifest(tmp_path)
+    bump = (f"*** Update File: {target}", "@@", '-version = "2.17.0"', '+version = "2.18.0"')
+    _refused(_codex_patch(readme, "@@", "-hello", "+hi", tail=bump))
+
+
+def test_codex_patch_with_two_sections_for_the_manifest_is_refused(tmp_path):
+    target = _manifest(tmp_path)
+    bump = (f"*** Update File: {target}", "@@", '-version = "2.17.0"', '+version = "2.18.0"')
+    _refused(_codex_patch(target, "@@", '-description = "old"', '+description = "new"', tail=bump))
+
+
+def test_codex_patch_anchor_selects_the_table_it_names(tmp_path):
+    bump = ('-version = "2.17.0"', '+version = "2.18.0"')
+    before = _manifest(tmp_path, '[tool.other]\nversion = "2.17.0"\n\n' + _STATIC)
+    _refused(_codex_patch(before, "@@ [project]", *bump))
+    after = _manifest(tmp_path, _STATIC + '\n[tool.other]\nversion = "2.17.0"\n')
+    check_version_guard(_codex_patch(after, "@@ [tool.other]", *bump))
+
+
+def test_codex_patch_with_a_missing_anchor_is_refused(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    _refused(_codex_patch(target, "@@ [tool.absent]", *_SWITCH[1:]))
+
+
+def test_codex_patch_moving_a_file_over_the_manifest_is_refused(tmp_path):
+    notes = tmp_path / "notes.txt"
+    notes.write_text("a\n")
+    target = _manifest(tmp_path)
+    _refused(_codex_patch(notes, f"*** Move to: {target}", "@@", "-a", "+b"))
+
+
+def test_codex_patch_moving_the_manifest_away_is_refused(tmp_path):
+    target = _manifest(tmp_path)
+    _refused(_codex_patch(target, f"*** Move to: {tmp_path / 'old.toml'}", "@@", ' name = "x"'))
+
+
+def _indented_patch(target, *lines):
+    body = "\n".join(("  *** Begin Patch", f"  *** Update File: {target}", *lines, "  *** End Patch"))
+    with patch.dict(os.environ, {"AGENTIHOOKS_TARGET": "codex"}):
+        return normalize_payload({"tool_name": "apply_patch", "tool_input": {"command": body}, "cwd": ""})
+
+
+def test_codex_patch_with_indented_headers_is_judged(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    check_version_guard(_indented_patch(target, *_SWITCH))
+    _refused(_indented_patch(target, "@@", '-version = "2.17.0"', '+version = "2.18.0"'))
+
+
+def test_claude_edit_whose_text_looks_like_a_patch_is_not_read_as_one(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    body = "\n".join(("*** Begin Patch", f"*** Update File: {target}", *_SWITCH, "*** End Patch"))
+    _refused(_edit(target, 'version = "2.17.0"', body))
+
+
+def test_codex_patch_without_a_hunk_header_is_applied(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    check_version_guard(_codex_patch(target, *_SWITCH[1:]))
+
+
+def test_codex_patch_blank_context_line_is_matched(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    check_version_guard(_codex_patch(target, *_SWITCH, ' description = "old"', "", " [tool.setuptools_scm]"))
+
+
+def test_codex_patch_context_selects_the_occurrence(tmp_path):
+    target = _manifest(tmp_path, '[tool.other]\nversion = "2.17.0"\n\n' + _STATIC)
+    bump = ('-version = "2.17.0"', '+version = "2.18.0"')
+    check_version_guard(_codex_patch(target, "@@", *bump))
+    _refused(_codex_patch(target, "@@", ' name = "x"', *bump))
+
+
+def test_codex_patch_hunk_applies_after_the_text_an_earlier_hunk_wrote(tmp_path):
+    target = _manifest(tmp_path, _STATIC + '\n[tool.other]\nkey = "v"\n')
+    patch = _codex_patch(target, "@@", '-description = "old"', '+key = "v"', "@@", '-key = "v"', '+version = "9.0"')
+    check_version_guard(patch)
+
+
+def test_codex_patch_anchor_before_the_cursor_is_refused(tmp_path):
+    target = _manifest(tmp_path, _STATIC + '\n[tool.setuptools_scm]\n\n[tool.other]\nkey = "v"\n')
+    _refused(_codex_patch(target, "@@ [tool.other]", '-key = "v"', '+key = "w"', "@@ [project]", *_SWITCH[1:]))
+
+
+def test_codex_patch_deleting_a_manifest_without_a_package_version_is_allowed(tmp_path):
+    target = _manifest(tmp_path, '[tool.ruff]\ntarget-version = "py311"\n')
+    check_version_guard(_codex_patch(target, action="Delete"))
+
+
+def test_codex_patch_adding_a_manifest_without_its_version_is_refused(tmp_path):
+    target = _manifest(tmp_path)
+    _refused(_codex_patch(target, "+[project]", '+name = "x"', action="Add"))
+
+
+def test_codex_patch_deleting_the_manifest_is_refused(tmp_path):
+    _refused(_codex_patch(_manifest(tmp_path), action="Delete"))
+
+
+def test_codex_patch_adding_over_the_manifest_is_judged_by_its_lines(tmp_path):
+    target = _manifest(tmp_path)
+    check_version_guard(_codex_patch(target, *(f"+{line}" for line in _TAGGED.splitlines()), action="Add"))
+    bumped = _STATIC.replace("2.17.0", "2.18.0")
+    _refused(_codex_patch(target, *(f"+{line}" for line in bumped.splitlines()), action="Add"))
+
+
+def test_codex_patch_bumping_a_version_file_is_refused(tmp_path):
+    target = _manifest(tmp_path, "1.0.0\n", "VERSION")
+    _refused(_codex_patch(target, "@@", "-1.0.0", "+1.1.0"), "VERSION")
+    check_version_guard(_codex_patch(target, "@@", " 1.0.0", "+"))
