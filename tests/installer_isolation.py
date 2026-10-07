@@ -3,7 +3,7 @@ import os
 import sys
 from pathlib import Path
 
-import pytest
+from tests import swarm_v2_isolation
 
 WRITE_ROOT = None
 PROTECTED_PATHS = ()
@@ -59,7 +59,7 @@ def refuse_unsafe_installer_write(event: str, args: tuple) -> None:
             path = path.resolve()
         protected = any(path.is_relative_to(root) for root in PROTECTED_PATHS)
         if not path.is_relative_to(WRITE_ROOT) and (protected or _installer_on_stack()):
-            pytest.fail(f"refusing installer write outside the test directory: {path}")
+            swarm_v2_isolation.refuse("write", f"refusing installer write outside the test directory: {path}")
 
 
 sys.addaudithook(refuse_unsafe_installer_write)

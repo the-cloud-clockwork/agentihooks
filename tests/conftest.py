@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests import installer_isolation, ledger_guard
+from tests import installer_isolation, ledger_guard, swarm_v2_isolation
 from tests.shards import (
     assign_files,
     discover_test_files,
@@ -127,6 +127,14 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     # Every swarm tick sweeps the launch run folder and the herdr server.
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "_run"))
     monkeypatch.setenv("HERDR_SOCKET_PATH", str(tmp_path / "_run" / "herdr.sock"))
+    monkeypatch.delenv("HERDR_CONFIG_PATH", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+    monkeypatch.setenv("KUBECONFIG", str(tmp_path / "_kube" / "config"))
+    monkeypatch.delenv("VAULT_ROOT", raising=False)
+    monkeypatch.setattr(swarm_v2_isolation, "FIXTURE_ROOT", tmp_path.resolve())
+    # CI has no herdr; a test that needs one installs a fake.
+    monkeypatch.setattr("scripts.herdr_host.binary", lambda: None)
+    monkeypatch.setattr("scripts.herdr_setup.binary", lambda: None)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
     # CODEX_HOME is read BEFORE Path.home() by targets.codex_target.codex_home,
     # so patching Path.home does not cover it. Unset today on the developer's
@@ -150,8 +158,9 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     # no-directives branch DELETES, the operator's real ~/.agentihooks/copilot.env.
     # That has already happened once.
     monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
-    # A suite run from a swarm agent's shell inherits its swarm, which pins every --as to that agent.
-    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    # A suite run from a swarm agent's shell inherits its swarm, seat, task and routed account.
+    for _inherited in [name for name in os.environ if name.startswith("AGENTIHOOKS_")]:
+        monkeypatch.delenv(_inherited)
     # AGENTIBRAIN_HOME — and its Path.home()-derived default — is where the brain
     # keeps its own .env. hooks.config adopts BRAIN_URL / KB_ROUTER_TOKEN from that
     # file, and it does so at IMPORT, which happens at collection before any fixture
@@ -172,6 +181,13 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     monkeypatch.delenv("REDIS_URL", raising=False)
     monkeypatch.setattr("hooks._redis._redis_client", None)
     monkeypatch.setattr("hooks._redis._redis_checked", False)
+    monkeypatch.setenv("REDIS_KEY_PREFIX", swarm_v2_isolation.RUN_PREFIX)
+    for _prefixed in (
+        "hooks._redis._KEY_PREFIX",
+        "hooks.memory.store._KEY_PREFIX",
+        "hooks.observability.event_relay.STREAM_KEY_PREFIX",
+    ):
+        monkeypatch.setattr(_prefixed, swarm_v2_isolation.RUN_PREFIX)
     # The workbench shell and ~/.agentihooks/*.env carry the live collector and
     # Langfuse settings; only real sessions may report to them.
     for _telemetry in (
@@ -258,24 +274,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
                 f"{module.__name__}.{name} escapes the test directory — refusing to run"
             )
     monkeypatch.setattr(installer_isolation, "WRITE_ROOT", tmp_path.resolve())
-    monkeypatch.setattr(
-        installer_isolation,
-        "PROTECTED_PATHS",
-        tuple(
-            (real_home / name).resolve()
-            for name in (
-                ".claude",
-                ".claude.json",
-                ".codex",
-                ".copilot",
-                ".agentihooks",
-                ".agents",
-                ".bashrc",
-                ".local/bin",
-                ".config/systemd/user",
-            )
-        ),
-    )
+    monkeypatch.setattr(installer_isolation, "PROTECTED_PATHS", swarm_v2_isolation.LIVE_ROOTS)
     monkeypatch.setattr("scripts.deps_preflight.manifest_path", lambda: None)
     # Same reasoning for the env-var bundle: `_managed_roots()` takes it verbatim,
     # so a developer with it exported would run a different suite than CI.
@@ -289,8 +288,10 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     from targets.codex_target import codex_home
     from targets.copilot_target import CopilotAdapter, copilot_home
 
+    from hooks.config import _agentibrain_home
     from hooks.context.codex_context_pin import catalog_path
     from scripts.claude_config import claude_home, claude_json
+    from scripts.herdr_setup import config_path as herdr_config_path
 
     for label, value in (
         ("claude_home", claude_home()),
@@ -300,10 +301,14 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
         ("copilot_home", copilot_home()),
         ("agents_skills_home", agents_skills_home()),
         ("copilot managed env file", CopilotAdapter._bypass_env_file()),
+        ("brain home", _agentibrain_home()),
+        ("herdr config", herdr_config_path()),
+        ("kubeconfig", Path(os.environ["KUBECONFIG"])),
     ):
         assert not any(value.resolve().is_relative_to(root) for root in installer_isolation.PROTECTED_PATHS), (
             f"{label}() still resolves to a live install path ({value}) — refusing to run"
         )
+        swarm_v2_isolation.confine(tmp_path, label, value)
     yield
 
 
