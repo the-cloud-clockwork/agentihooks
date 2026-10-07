@@ -1,0 +1,89 @@
+{
+  "SV2-FND-01": {
+    "claim": "complete",
+    "evidence": [
+      {
+        "id": "SV2-FND-01/pull-request",
+        "kind": "pull_request",
+        "ref": "https://github.com/the-cloud-clockwork/agentihooks/pull/1377",
+        "commit": "e7cae6fcb9fe377eafc15e83c9309de4f2a7a2c4"
+      },
+      {
+        "id": "SV2-FND-01/case-a",
+        "kind": "test",
+        "case": "A",
+        "ref": "evidence/SV2-FND-01/a-result.json",
+        "sha256": "d88c7dd73c1ebd803940ac8fcaa441f462da59a7b346fd6b84da9d1fcb1419ba",
+        "commit": "e7cae6fcb9fe377eafc15e83c9309de4f2a7a2c4",
+        "outcome": "passed"
+      },
+      {
+        "id": "SV2-FND-01/case-b",
+        "kind": "test",
+        "case": "B",
+        "ref": "evidence/SV2-FND-01/b-result.json",
+        "sha256": "15fbfebd5ba2520d85a12ac8ba18cef894dc88ed8c37d3f97647b6f0f9489f09",
+        "commit": "e7cae6fcb9fe377eafc15e83c9309de4f2a7a2c4",
+        "outcome": "passed"
+      },
+      {
+        "id": "SV2-FND-01/case-c",
+        "kind": "test",
+        "case": "C",
+        "ref": "evidence/SV2-FND-01/c-result.json",
+        "sha256": "84da6f59e25f6b3c70a08610977d9346648e7bfceeea814ac213d34b6b096e78",
+        "commit": "e7cae6fcb9fe377eafc15e83c9309de4f2a7a2c4",
+        "outcome": "passed"
+      }
+    ]
+  },
+  "SV2-FND-02": {
+    "claim": "complete",
+    "evidence": [
+      {
+        "id": "SV2-FND-02/pull-request",
+        "kind": "pull_request",
+        "ref": "https://github.com/the-cloud-clockwork/agentihooks/pull/1397",
+        "commit": "b9e778460e0850f19fead7822d9af7bd33164597"
+      },
+      {
+        "id": "SV2-FND-02/case-a",
+        "kind": "test",
+        "case": "A",
+        "ref": "evidence/SV2-FND-02/a-result.json",
+        "sha256": "38b739f7004237ded0c372562673c2674c3898548d55b6ccdf9c59025e149371",
+        "commit": "b9e778460e0850f19fead7822d9af7bd33164597",
+        "outcome": "passed"
+      },
+      {
+        "id": "SV2-FND-02/case-b",
+        "kind": "test",
+        "case": "B",
+        "ref": "evidence/SV2-FND-02/b-result.json",
+        "sha256": "72c451b8730ba394a25a5030c510d801a6af46a9be6e6007d45219e05afd744d",
+        "commit": "b9e778460e0850f19fead7822d9af7bd33164597",
+        "outcome": "passed"
+      },
+      {
+        "id": "SV2-FND-02/case-c",
+        "kind": "test",
+        "case": "C",
+        "ref": "evidence/SV2-FND-02/c-result.json",
+        "sha256": "64452bb484129e887473d6e3396aaea724e7f120d2b13816c0372596e2d9a454",
+        "commit": "b9e778460e0850f19fead7822d9af7bd33164597",
+        "outcome": "passed"
+      }
+    ]
+  },
+  "SV2-MUL-03": {
+    "claim": "complete",
+    "evidence": [
+      {
+        "id": "SV2-MUL-03/deployment-screenshot",
+        "kind": "screenshot",
+        "ref": "tests/fixtures/swarm_v2/evidence/healthy-pod.png",
+        "sha256": "6b7fa434f92a8b80aab02d9bf1a12e49ffcae424e4013a1c4f68b67e3d2bbcd0"
+      }
+    ]
+  }
+}
