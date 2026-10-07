@@ -103,7 +103,8 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         env:
           PYTHONUNBUFFERED: "1"
-        run: python -m pytest tests/ -v -n auto --dist loadgroup --shard ${{ matrix.shard }}/4 --tb=short --store-durations --durations-path durations.json -p no:anyio -p no:pytest_cov -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
+          PYTEST_ADDOPTS: ${{ matrix.python-version == '3.12' && '--cov=hooks --cov=scripts --cov-report= --cov-config=.github/coverage/coverage.ini' || '-p no:pytest_cov' }}
+        run: python -m pytest tests/ -v -n auto --dist loadgroup --shard ${{ matrix.shard }}/4 --tb=short --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
@@ -114,6 +115,33 @@ jobs:
           path: durations.json
           retention-days: 14
           overwrite: true
+
+      - name: Upload coverage
+        if: steps.lookup.outputs.skip != 'true' && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
+          path: .coverage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+  sonar:
+    needs: [unit]
+    permissions:
+      contents: read
+      actions: read
+    uses: The-Cloud-Clockwork/.github/.github/workflows/sonar-reusable.yml@main
+    with:
+      python_version: "3.12"
+      install_command: python -m pip install "coverage>=7.4"
+      test_command: GH_TOKEN="${{ github.token }}" bash .github/coverage/combine.sh "$GITHUB_RUN_ID" 4
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
 
   lint:
     runs-on: ubuntu-latest
