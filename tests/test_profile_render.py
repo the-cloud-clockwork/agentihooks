@@ -1275,9 +1275,11 @@ def test_a_running_agent_stays_valid_after_a_package_rule_rerenders_its_home(wor
     launched = binding.validate(binding.inspect(home, "rb-role", target)["canary"])
 
     _write(package / "rules" / "fresh-rule.md", "FRESH PACKAGE RULE MARKER\n")
-    assert render.render(target, "rb-role") == home
-    fresh = binding.inspect(home, "rb-role", target)
+    rerendered = render.render(target, "rb-role")
+    assert rerendered not in (None, home)
+    fresh = binding.inspect(rerendered, "rb-role", target)
     assert fresh["canary"] != launched["canary"]
+    assert binding.inspect(home, "rb-role", target)["canary"] == launched["canary"]
 
     assert binding.validate(launched["canary"])["persona"] == launched["persona"]
 
@@ -1794,7 +1796,7 @@ def test_a_new_render_stamp_launches_into_a_fresh_profile_home(world, monkeypatc
     from scripts import select_profile
     from scripts.profiles import render
 
-    monkeypatch.setattr(render, "_live_homes", lambda: [])
+    monkeypatch.setattr(render.homes, "live_homes", lambda: [])
     first = render.render(target, "rb-role")
     _commit(world["bundle"], "stamp changes")
 
@@ -1811,7 +1813,7 @@ def test_a_home_live_sessions_run_on_is_never_rewritten(world, monkeypatch, targ
     from scripts.profiles import render
 
     first = render.render(target, "rb-role")
-    monkeypatch.setattr(render, "_live_homes", lambda: [first.resolve()])
+    monkeypatch.setattr(render.homes, "live_homes", lambda: [first.resolve()])
     before = _home_files(first)
 
     _commit(world["bundle"], "stamp changes")
@@ -1829,11 +1831,11 @@ def test_a_home_live_sessions_run_on_is_never_rewritten(world, monkeypatch, targ
 def test_old_homes_go_once_no_live_session_uses_them(world, monkeypatch):
     from scripts.profiles import render
 
-    monkeypatch.setattr(render, "GRACE_SECONDS", 0)
+    monkeypatch.setattr(render.homes, "GRACE_SECONDS", 0)
     legacy = render.rendered_root() / "rb-role"
     _write(legacy / "claude" / "settings.json", "{}")
     live = [(legacy / "claude").resolve()]
-    monkeypatch.setattr(render, "_live_homes", lambda: live)
+    monkeypatch.setattr(render.homes, "live_homes", lambda: live)
     first = render.render_claude("rb-role")
     live.append(first.resolve())
     _commit(world["bundle"], "two")
@@ -1853,20 +1855,8 @@ def test_old_homes_go_once_no_live_session_uses_them(world, monkeypatch):
 def test_a_superseded_home_waits_out_the_launch_grace(world, monkeypatch):
     from scripts.profiles import render
 
-    monkeypatch.setattr(render, "_live_homes", lambda: [])
+    monkeypatch.setattr(render.homes, "live_homes", lambda: [])
     first = render.render_claude("rb-role")
     render.render_claude("rb-role", force=True)
 
     assert first.is_dir()
-
-
-def test_live_homes_reads_each_process_profile_home(tmp_path):
-    from scripts.profiles import render
-
-    _write(tmp_path / "11" / "environ", "A=1\0CLAUDE_CONFIG_DIR=/p/claude\0")
-    _write(tmp_path / "12" / "environ", "CODEX_HOME=/p/codex\0B=2\0")
-    _write(tmp_path / "13" / "environ", "B=2\0")
-    (tmp_path / "self").mkdir()
-    (tmp_path / "14").mkdir()
-
-    assert sorted(render._live_homes(tmp_path)) == [Path("/p/claude"), Path("/p/codex")]

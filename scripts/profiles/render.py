@@ -8,15 +8,13 @@ import pwd
 import shutil
 import subprocess
 import sys
-import tempfile
-import time
 import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.context import profile_chain, quarantine
 from scripts.claude_config import claude_home, claude_json
-from scripts.profiles import binding, browser, connectors, plugins, sources
+from scripts.profiles import binding, browser, connectors, homes, plugins, sources
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
 from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_target import codex_home
@@ -30,9 +28,6 @@ HEADER = "<!-- agentihooks rendered profile -->"
 FOOTER = "<!-- end agentihooks rendered profile -->"
 SEED_KEYS = ("hasCompletedOnboarding", "lastOnboardingVersion", "hasTrustDialogAccepted", "oauthAccount", "userID")
 PROJECT_SEED_KEYS = ("hasTrustDialogAccepted", "hasClaudeMdExternalIncludesApproved")
-HOMES, CURRENT = ".homes", "current"
-GRACE_SECONDS = 600
-PROC = Path("/proc")
 
 
 def _is_doc(path: Path) -> bool:
@@ -48,22 +43,6 @@ def rendered_root() -> Path:
 
 def live_root() -> Path:
     return Path(pwd.getpwuid(os.getuid()).pw_dir) / ".agentihooks" / "profiles"
-
-
-def _live_homes(proc: Path = PROC) -> list[Path]:
-    found = []
-    for entry in proc.iterdir():
-        if not entry.name.isdigit():
-            continue
-        try:
-            raw = (entry / "environ").read_bytes()
-        except OSError:
-            continue
-        for item in raw.split(b"\0"):
-            key, _, value = item.partition(b"=")
-            if key.decode(errors="replace") in binding.HOMES.values() and value:
-                found.append(Path(value.decode(errors="replace")).resolve())
-    return found
 
 
 def _refuse_live_render_from_another_checkout(name: str) -> None:
@@ -295,60 +274,12 @@ def _read_json(path: Path) -> dict | None:
         return None
 
 
-def _homes(name: str) -> Path:
-    return rendered_root() / HOMES / name
-
-
 def profile_dir(name: str) -> Path | None:
-    pointer = _homes(name) / CURRENT
-    if pointer.is_dir():
-        return pointer.resolve()
-    legacy = rendered_root() / name
-    return legacy if legacy.is_dir() and not legacy.is_symlink() else None
+    return homes.current(rendered_root(), name)
 
 
 def owner(home: Path) -> str | None:
-    try:
-        parts = home.resolve().relative_to(rendered_root().resolve()).parts
-    except ValueError:
-        return None
-    if len(parts) == 2:
-        return parts[0]
-    return parts[1] if len(parts) == 4 and parts[0] == HOMES else None
-
-
-def _fresh_dir(name: str, stamp: dict) -> Path:
-    homes = _homes(name)
-    homes.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256(json.dumps(stamp, sort_keys=True).encode()).hexdigest()[:12]
-    return Path(tempfile.mkdtemp(prefix=f"{digest}-", dir=homes))
-
-
-def _promote(name: str, root: Path) -> None:
-    pointer = _homes(name) / CURRENT
-    staged = pointer.with_name(f".{CURRENT}-{os.getpid()}")
-    staged.unlink(missing_ok=True)
-    staged.symlink_to(root.name)
-    staged.replace(pointer)
-    _collect(name)
-    named = rendered_root() / name
-    if not named.exists() and not named.is_symlink():
-        named.symlink_to(Path(HOMES) / name / CURRENT)
-
-
-def _collect(name: str) -> None:
-    current = (_homes(name) / CURRENT).resolve()
-    old = [p for p in _homes(name).iterdir() if p.is_dir() and not p.is_symlink() and p.resolve() != current]
-    legacy = rendered_root() / name
-    if legacy.is_dir() and not legacy.is_symlink():
-        old.append(legacy)
-    live = _live_homes()
-    for root in old:
-        # A launch reads its home before its harness process exists to hold it.
-        if time.time() - root.stat().st_mtime < GRACE_SECONDS:
-            continue
-        if not any(home.is_relative_to(root.resolve()) for home in live):
-            shutil.rmtree(root)
+    return homes.owner(rendered_root(), home)
 
 
 def _claude_fresh(root: Path, stamp: dict, required: set[str]) -> bool:
@@ -379,7 +310,7 @@ def render_claude(name: str, force: bool = False) -> Path | None:
     prior = profile_dir(name)
     if not force and prior is not None and _claude_fresh(prior, current, required):
         return None
-    root = _fresh_dir(name, current)
+    root = homes.fresh(rendered_root(), name, current)
     out = root / "claude"
     out.mkdir()
     if prior is not None and (prior / "claude" / ".claude.json").is_file():
@@ -403,7 +334,7 @@ def render_claude(name: str, force: bool = False) -> Path | None:
     if all(mounts[server]["mounted"] for server in required):
         _i.save_json(out / STAMP, current)
     binding.write(out, name, "claude")
-    _promote(name, root)
+    homes.promote(rendered_root(), name, root)
     return out
 
 
