@@ -53,8 +53,12 @@ def test_claims_count_agent_lives_per_task_until_reset(store):
     assert store.claims("smoke", "t1") == 0
     assert [store.count_claim("smoke", "t1") for _ in range(3)] == [1, 2, 3]
     store.count_claim("smoke", "t2")
+    store.note_launch_failure("smoke", "t1", "herdr down")
+    store.note_launch_failure("smoke", "t2", "canary timeout")
+    assert (store.launch_failure("smoke", "t1"), store.launch_failure("smoke", "t3")) == ("herdr down", "")
     store.reset_claims("smoke", "t1")
     assert (store.claims("smoke", "t1"), store.claims("smoke", "t2")) == (0, 1)
+    assert (store.launch_failure("smoke", "t1"), store.launch_failure("smoke", "t2")) == ("", "canary timeout")
 
 
 def test_a_lapsed_lease_frees_the_claim(store):
