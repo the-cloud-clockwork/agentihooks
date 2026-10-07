@@ -324,7 +324,7 @@ def test_upload_artifact_sends_bytes_name_token_and_agent(tmp_path):
             "shots", "art-engineer", str(doc), {"task": "av1", "title": "Proposal", "request": "wanted"}
         ) == {"id": "x"}
     req = opened.call_args.args[0]
-    assert req.full_url.endswith("/api/artifacts/shots")
+    assert req.full_url.endswith("/api/v1/ledgers/shots/uploads/artifacts")
     assert req.data == MARKDOWN
     assert req.get_header("X-artifact-name") == "proposal.md"
     assert json.loads(req.get_header("X-artifact-request")) == {"task": "av1", "title": "Proposal", "request": "wanted"}

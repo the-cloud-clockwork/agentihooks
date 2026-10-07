@@ -127,6 +127,7 @@ def served(slug, ops=None):
 
 def cli(monkeypatch, *argv):
     monkeypatch.setattr(ledger, "call", served)
+    monkeypatch.setattr(ledger, "resource", lambda slug, path, collection=False: served(slug)[path])
     ledger.cmd_task(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "master@abcdef-0001", "task", *argv]))
 
 
@@ -172,6 +173,7 @@ def test_the_refusal_names_a_task_without_a_state_as_open():
 def test_task_add_with_a_dash_mints_t1_on_a_ledger_without_tasks(monkeypatch, capsys):
     sent = []
     monkeypatch.setattr(ledger, "call", lambda slug, ops=None: sent.append(ops) or {})
+    monkeypatch.setattr(ledger, "resource", lambda slug, path, collection=False: sent.append(None) or [])
     ledger.cmd_task(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "swarm", "task", "add", "-", "first"]))
     assert [op["task"] for op in sent[1]] == ["t1"]
 
