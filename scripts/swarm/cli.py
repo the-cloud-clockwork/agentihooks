@@ -383,7 +383,7 @@ def cmd_master(store, args):
         ledger.reopen(args.slug, launched.master)
     if store.config(args.slug).state in ("stopped", "stopping"):
         store.update(args.slug, state="paused")
-        timer.ensure(_bin())
+        timer.ensure(timer.entry_point())
     ledger.join(args.slug, launched.master, "orchestrator")
     print(json.dumps(asdict(launched)))
 
