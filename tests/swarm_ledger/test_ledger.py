@@ -18,16 +18,23 @@ WRITES = [
     ["publish-plan", "PLAN", "--phase", "p1"],
     ["plan", "phases", "PLAN"],
     ["phase", "p1", "done"],
+    ["phase", "p1", "open"],
+    ["phase", "set", "p1", "planning=auto"],
     ["followup", "add", "Tests pass"],
     ["followup", "done", "f1"],
+    ["followup", "open", "f1"],
     ["followup", "flag", "f1"],
+    ["followup", "unflag", "f1"],
     ["question", "add", "Which port?"],
     ["scope", "tasks/t1", "out"],
+    ["scope", "tasks/t1", "in"],
     ["edit", "chat", "m1", "Tests pass"],
     ["delete", "chat", "m1"],
     ["priority", "add", "tasks/t1", "Merge it?"],
     ["priority", "clear", "p1"],
+    ["priority", "clear", "--all"],
     ["alert", "claim", "a1"],
+    ["alert", "close", "a1", "Fixed"],
     ["relay", "questions/q1", "Yes", "--quote", "yes"],
     ["answer", "questions/q1", "Yes"],
     ["time-left", "30m"],
@@ -95,10 +102,32 @@ def test_every_write_command_prints_an_applied_write_and_exits_zero(cli, capsys,
     json.loads(out.splitlines()[-1])
 
 
-def test_a_refusal_without_a_reason_names_the_refused_operations(cli):
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["delete", "chat", "m1"], "delete on chat"),
+        (["followup", "done", "f9"], "set on followups/f9/done"),
+        (["priority", "clear", "p1"], "priority_clear on p1"),
+        (["claim", "tasks/t9"], "claim on tasks/t9"),
+        (["leave"], "leave on the ledger"),
+    ],
+)
+def test_a_refusal_without_a_reason_names_each_refused_operation(cli, argv, message):
     with pytest.raises(SystemExit) as stop:
-        cli(["delete", "chat", "m1"], lambda ids: {"rejected": ids, "_meta": {"warnings": []}})
-    assert "rejected" in str(stop.value.code)
+        cli(argv, lambda ids: {"rejected": ids, "_meta": {"warnings": []}})
+    assert stop.value.code == f"{message} refused: it names an entry that does not exist or that you may not change"
+
+
+def test_a_refusal_of_unsent_operations_names_their_ids():
+    with pytest.raises(SystemExit) as stop:
+        ledger.refused({"rejected": ["x"]}, [{"op": "add", "id": "y", "thread": "chat"}])
+    assert stop.value.code == "rejected: ['x']"
+
+
+def test_a_refused_artifact_without_a_reason_says_to_join_and_name_a_task(cli):
+    with pytest.raises(SystemExit) as stop:
+        cli(["artifact", "PLAN", "Plan"], lambda ids: {"rejected": ids})
+    assert stop.value.code == "rejected: join the ledger first and name a task it holds"
 
 
 def test_a_refusal_leaves_out_the_ledger_size_warnings():

@@ -152,7 +152,7 @@ def test_cli_refuses_a_worker(monkeypatch):
     question = make_ledger()
     with pytest.raises(SystemExit) as refused:
         _cli(monkeypatch, FULL, WORKER, question)
-    assert str(refused.value.code).startswith("rejected: ['")
+    assert refused.value.code == ledger.unexplained({"op": "answer", "item": question})
     state, _ = core.sync(SLUG)
     assert state["questions"][0]["answers"] == []
 

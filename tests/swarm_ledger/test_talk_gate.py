@@ -400,11 +400,15 @@ def test_the_cli_passes_accepted_writes(state):
     assert ledger.refused(state) is None
 
 
-def test_posted_prints_a_landed_write(capsys):
+def test_posted_prints_whether_the_write_landed(capsys):
     from scripts.swarm_ledger import ledger
 
-    ledger.posted({"rejected": []})
+    ledger.posted({"rejected": []}, [])
     assert json.loads(capsys.readouterr().out) == {"posted": True}
+    with pytest.raises(SystemExit) as stop:
+        ledger.posted(refused_state("stale page"), [])
+    assert stop.value.code == "stale page"
+    assert json.loads(capsys.readouterr().out) == {"posted": False}
 
 
 def test_say_stops_on_a_talk_refusal(monkeypatch):

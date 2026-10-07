@@ -149,20 +149,28 @@ def op(kind, args, /, **fields):
     return {"op": kind, "id": f"{kind}-{uuid.uuid4().hex[:10]}", "by": args.name, **fields}
 
 
-def refused(state, fallback=""):
+def refused(state, ops=(), fallback=""):
     if rejected := state.get("rejected"):
-        reasons = [w for w in state.get("_meta", {}).get("warnings", []) if not core.size_warning(w)]
+        reasons = [w for w in state.get("_meta", {}).get("warnings", []) if not core.size_warning(w)] or [
+            unexplained(o) for o in ops if o["id"] in rejected
+        ]
         sys.exit("; ".join(reasons) or fallback or f"rejected: {rejected}")
 
 
-def posted(state):
-    refused(state)
-    print(json.dumps({"posted": True}))
+def unexplained(sent):
+    where = next((sent[key] for key in ("item", "target", "path", "thread", "list") if sent.get(key)), "the ledger")
+    return f"{sent['op']} on {where} refused: it names an entry that does not exist or that you may not change"
+
+
+def posted(state, ops):
+    print(json.dumps({"posted": not state.get("rejected")}))
+    refused(state, ops)
 
 
 def send(args, kind, /, **fields):
-    state = call(args.slug, [op(kind, args, **fields)])
-    refused(state)
+    ops = [op(kind, args, **fields)]
+    state = call(args.slug, ops)
+    refused(state, ops)
     return state
 
 
@@ -211,8 +219,7 @@ def cmd_say(args):
     op = {"op": "add", "thread": "chat", "id": f"m-{uuid.uuid4().hex[:10]}", "text": text, "by": args.name}
     if args.long:
         op["long"] = True
-    state = call(args.slug, [op])
-    posted(state)
+    posted(call(args.slug, [op]), [op])
 
 
 def upload_image(slug: str, name: str, path: str) -> dict:
@@ -254,8 +261,7 @@ def cmd_comment(args):
     entry = {"op": "add", "thread": thread, "id": f"c-{uuid.uuid4().hex[:10]}", "text": args.text, "by": args.name}
     if attachments:
         entry["attachments"] = attachments
-    state = call(args.slug, [entry])
-    posted(state)
+    posted(call(args.slug, [entry]), [entry])
 
 
 def cmd_artifact(args):
@@ -263,8 +269,8 @@ def cmd_artifact(args):
     request = {"request": args.request} if args.request else {}
     file = upload_artifact(args.slug, args.name, args.path, {"task": task, "title": args.title, **request})
     state = call(args.slug, [op("artifact_add", args, task=task, title=args.title, file=file, **request)])
-    refused(state, "rejected: join the ledger first and name a task it holds")
-    print(json.dumps({"published": True}))
+    print(json.dumps({"published": not state.get("rejected")}))
+    refused(state, fallback="rejected: join the ledger first and name a task it holds")
 
 
 def cmd_publish_plan(args):
@@ -298,7 +304,7 @@ def cmd_publish_plan(args):
                 "by": args.name,
             }
         )
-    refused(call(args.slug, ops))
+    refused(call(args.slug, ops), ops)
     print(json.dumps({"plan_url": url, "published_to": where, "phases": phases}))
 
 
@@ -372,7 +378,7 @@ def cmd_priority(args):
     rejected = state.get("rejected", [])
     cleared = [o["target"] for o in ops if o["id"] not in rejected]
     print(json.dumps({"cleared": cleared, "rejected": rejected}))
-    refused(state)
+    refused(state, ops)
 
 
 def cmd_alert(args):
@@ -408,9 +414,9 @@ def swarm_autonomy(slug):
 def cmd_answer(args):
     import ledger_answer
 
-    refused = ledger_answer.refusal(swarm_autonomy(args.slug))
-    if refused:
-        sys.exit(refused)
+    reason = ledger_answer.refusal(swarm_autonomy(args.slug))
+    if reason:
+        sys.exit(reason)
     send(args, "answer", item=args.item, text=args.text)
     print(json.dumps({"answered": True, "item": args.item}))
 
@@ -430,11 +436,8 @@ def thread_of(target):
 
 
 def cmd_edit(args):
-    state = call(
-        args.slug,
-        [{"op": "edit", "thread": thread_of(args.target), "id": args.entry, "text": args.text, "by": args.name}],
-    )
-    refused(state, f"rejected: {state.get('rejected')} (not yours, the operator's, or missing)")
+    ops = [{"op": "edit", "thread": thread_of(args.target), "id": args.entry, "text": args.text, "by": args.name}]
+    refused(call(args.slug, ops), ops)
     print(json.dumps({"edited": args.entry}))
 
 
@@ -449,7 +452,7 @@ def cmd_delete(args):
             }
         )
     )
-    refused(state)
+    refused(state, ops)
 
 
 def cmd_audit(args):
