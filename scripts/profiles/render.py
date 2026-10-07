@@ -468,9 +468,18 @@ def main(argv: list[str] | None = None) -> int:
     measure.add_arguments(commands.add_parser("measure", help="Print a profile's first turn input tokens"))
     validate = commands.add_parser("validate", help="Validate the mounted profile through its live harness")
     validate.add_argument("--canary", required=True)
+    show = commands.add_parser("binding", help="Print a profile home's binding record, never an environment value")
+    show.add_argument("--home", type=Path, help="Profile home to read (default: this session's)")
     args = parser.parse_args(argv)
     if args.command == "validate":
         return binding.main(args.canary)
+    if args.command == "binding":
+        try:
+            print(json.dumps(binding.record(args.home)))
+        except (OSError, ValueError, KeyError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        return 0
     if args.command == "measure":
         return measure.main(args)
     if args.bundle is not None and args.out is None:

@@ -112,21 +112,33 @@ def test_unset_home_and_wrong_harness_cannot_claim_validation(mounted, monkeypat
     home, report, env, *_ = mounted
     env.pop("CLAUDE_CONFIG_DIR")
     assert binding.main("8feea91e5da2548a6d9c82e0") == 2
-    assert capsys.readouterr().err == "profile validation failed: missing profile home: CLAUDE_CONFIG_DIR is unset\n"
+    assert (
+        capsys.readouterr().err
+        == "profile validation failed: missing profile home: CLAUDE_CONFIG_DIR is unset; read the binding record with agentihooks profile binding\n"
+    )
     assert json.loads(report.read_text())["state"] == "failed"
     monkeypatch.setattr(binding, "process", lambda: (123, "codex", env, "account-one"))
     assert binding.main("8feea91e5da2548a6d9c82e0") == 2
-    assert capsys.readouterr().err == "profile validation failed: live harness profile mismatch with requested choice\n"
+    assert (
+        capsys.readouterr().err
+        == "profile validation failed: live harness profile mismatch with requested choice; read the binding record with agentihooks profile binding\n"
+    )
 
 
 def test_missing_launch_request_and_wrong_canary_report_failure(mounted, capsys):
     _, report, env, *_ = mounted
     assert binding.main("wrong") == 2
-    assert capsys.readouterr().err == "profile validation failed: mounted instruction canary mismatch\n"
+    assert (
+        capsys.readouterr().err
+        == "profile validation failed: mounted instruction canary mismatch; read the binding record with agentihooks profile binding\n"
+    )
     assert json.loads(report.read_text())["reason"] == "mounted instruction canary mismatch"
     env.pop(binding.REPORT)
     assert binding.main("wrong") == 2
-    assert capsys.readouterr().err == "profile validation failed: profile canary has no launch validation request\n"
+    assert (
+        capsys.readouterr().err
+        == "profile validation failed: profile canary has no launch validation request; read the binding record with agentihooks profile binding\n"
+    )
 
 
 def test_wait_observes_failure_and_times_out_on_pending_request(mounted):
