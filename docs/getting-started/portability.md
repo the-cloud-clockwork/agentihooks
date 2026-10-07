@@ -146,7 +146,13 @@ agentienv
 The `agentienv()` function:
 1. Sources `~/.agentihooks/.env`
 2. Sources all `*.env` files alphabetically from the same directory
-3. Reports how many files were loaded
+3. Sources `~/.env`
+4. Reports how many files were loaded
+
+Processes that never ran this shell read the same list: the swarm tick (a systemd
+user service) and `agentihooks init-agent` load these files before rendering a
+profile, keeping names the caller already holds, and every agent launcher sources
+them before its own exports.
 
 The trailing `agentienv` call means vars are loaded automatically in every new shell -- no manual invocation needed unless you add new env files mid-session.
 

@@ -754,7 +754,8 @@ def test_a_codex_launcher_leaves_the_claude_config_home_alone(tmp_path):
     text = _launcher_text(tmp_path, {"CLAUDE_CONFIG_DIR": str(tmp_path / "profile")}, "codex")
     assert "CLAUDE_CONFIG_DIR" not in text
     lines = text.splitlines()
-    after_name = lines[lines.index("export AGENTIHOOKS_AGENT_NAME=swarm-buildout-eng-4") + 1]
+    assert lines[lines.index("export AGENTIHOOKS_AGENT_NAME=swarm-buildout-eng-4") + 1] == "sleep 3"
+    after_name = lines[lines.index("export AGENTIHOOKS_AGENT_NAME=swarm-buildout-eng-4") + 2]
     assert after_name.startswith("/") and " codex " in after_name
 
 
