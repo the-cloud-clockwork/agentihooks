@@ -168,6 +168,38 @@ def test_identity_from_env_reads_swarm_launch_variables():
     assert agent_trace.identity_from_env("sess-1", env) == _identity()
 
 
+def test_a_seated_session_exports_under_its_seat_and_an_unseated_one_keeps_its_launch_identity(monkeypatch, tmp_path):
+    from hooks.observability import agent_trace
+
+    monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "cursor")
+    env = {
+        "AGENTIHOOKS_AGENT_NAME": "s-261007-104655",
+        "AGENTIHOOKS_SWARM": "rig-grade-swarm-doctor",
+        "AH_CC_TOKEN_nctcc": "set",
+    }
+    agent_trace.record_seat("sess-1", "master@323133-0012", "rig-grade-swarm", "master", "master")
+
+    seated = agent_trace.identity_from_env("sess-1", env)
+    assert seated == agent_trace.Identity(
+        session_id="sess-1",
+        agent="master@323133-0012",
+        swarm="rig-grade-swarm",
+        lane="master",
+        task="master",
+        account="nctcc",
+    )
+    assert seated.tags() == (
+        "swarm:rig-grade-swarm",
+        "agent:master@323133-0012",
+        "lane:master",
+        "task:master",
+        "account:nctcc",
+    )
+    assert agent_trace.identity_from_env("sess-2", env) == agent_trace.Identity(
+        session_id="sess-2", agent="s-261007-104655", swarm="rig-grade-swarm-doctor", account="nctcc"
+    )
+
+
 def _config(**overrides):
     values = {
         "OTEL_LANGFUSE_ENABLED": True,
