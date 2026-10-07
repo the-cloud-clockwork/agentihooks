@@ -16,6 +16,7 @@ import ledger_hook  # noqa: E402
 
 from scripts.swarm.ledger_client import LedgerClient  # noqa: E402
 from scripts.swarm_ledger import chat_ledger as chat_ledger_module  # noqa: E402, F401
+from scripts.swarm_ledger import ledger as ledger_module  # noqa: E402
 from scripts.swarm_ledger import ledger_hook as ledger_hook_module  # noqa: E402, F401
 from scripts.swarm_ledger.api import client as api_client  # noqa: E402
 
@@ -191,9 +192,10 @@ CONFLICT = b'{"error": {"code": "revision_conflict", "message": "Resource change
 class Scripted(api_client.ResourceClient):
     def __init__(self, *replies):
         super().__init__("http://ledger.test", {"X-Ledger-Token": "t"})
-        self.replies, self.calls = list(replies), []
+        self.replies, self.calls, self.slugs = list(replies), [], set()
 
     def request(self, slug, path, payload=None):
+        self.slugs.add(slug)
         self.calls.append((path, json.loads(json.dumps(payload))))
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
@@ -207,7 +209,10 @@ def chat_add(**extra):
 
 def test_a_fetched_guard_is_refreshed_once_after_a_revision_conflict():
     client = Scripted({"revision": "r1"}, http_error(409, CONFLICT), {"revision": "r2"}, {"applied": ["m-1"]})
-    assert client.mutate(SLUG, chat_add(operation_id="op-1")) == {"applied": ["m-1"]}
+    operations = chat_add(operation_id="op-1")
+    assert client.mutate(SLUG, operations) == {"applied": ["m-1"]}
+    assert operations == chat_add(operation_id="op-1", expected_revision="r2")
+    assert client.slugs == {SLUG}
     posts = [payload for path, payload in client.calls if path == "operations"]
     assert [path for path, _ in client.calls] == ["chat", "operations", "chat", "operations"]
     assert [post["guards"] for post in posts] == [{"chat": "r1"}, {"chat": "r2"}]
@@ -252,13 +257,19 @@ def test_an_authorship_refusal_returns_its_details():
 
 @pytest.mark.parametrize(
     "code, body",
-    [(403, b'{"error": {"code": "forbidden", "message": "no token"}}'), (403, b"not json"), (500, b"[]")],
+    [
+        (403, b'{"error": {"code": "forbidden", "message": "no token"}}'),
+        (403, b"not json"),
+        (500, b"[]"),
+        (409, b'{"error": "text"}'),
+    ],
 )
 def test_a_refusal_without_details_keeps_its_body(code, body):
     client = Scripted({"revision": "r1"}, http_error(code, body))
     with pytest.raises(urllib.error.HTTPError) as error:
         client.mutate(SLUG, chat_add())
     assert (error.value.code, error.value.read()) == (code, body)
+    assert (error.value.url, error.value.msg, error.value.hdrs) == ("http://ledger.test", "Refused", {})
 
 
 def test_the_client_timeout_reaches_the_transport(monkeypatch):
@@ -279,16 +290,16 @@ def test_the_request_layer_passes_its_timeout_to_the_client(monkeypatch):
 
     class Client:
         def __init__(self, base, credentials, timeout):
-            built.append((base, timeout))
+            built.append((base, credentials, timeout))
 
         def mutate(self, slug, ops):
             return {"applied": []}
 
     monkeypatch.setattr(api_client, "ResourceClient", Client)
-    monkeypatch.setattr(cli_ledger, "credentials", lambda slug, service: {})
-    cli_ledger.request(SLUG, chat_add())
-    cli_ledger.request(SLUG, chat_add(), timeout=3)
-    assert built == [(cli_ledger.BASE, 10), (cli_ledger.BASE, 3)]
+    monkeypatch.setattr(ledger_module, "credentials", lambda slug, service: {"service": service})
+    ledger_module.request(SLUG, chat_add())
+    ledger_module.request(SLUG, chat_add(), service=True, timeout=3)
+    assert built == [(ledger_module.BASE, {"service": False}, 10), (ledger_module.BASE, {"service": True}, 3)]
 
 
 def test_stop_gate_bypass_never_raises_on_any_failure(monkeypatch):

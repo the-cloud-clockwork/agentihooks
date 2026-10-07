@@ -78,4 +78,5 @@ def failure(exc: urllib.error.HTTPError) -> tuple[urllib.error.HTTPError, dict]:
         error = json.loads(body)["error"]
     except (ValueError, KeyError, TypeError):
         error = {}
-    return urllib.error.HTTPError(exc.url, exc.code, exc.msg, exc.hdrs, io.BytesIO(body)), error
+    replay = urllib.error.HTTPError(exc.url, exc.code, exc.msg, exc.hdrs, io.BytesIO(body))
+    return replay, error if isinstance(error, dict) else {}
