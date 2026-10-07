@@ -73,7 +73,7 @@ def relay_to_page(inbox, slug, agents, ledger):
         sender = inbox.names.resolve(item.sender)
         if item.state != "pending" or sender not in names:
             continue
-        if not post(inbox, item, lambda: ledger.say(slug, item.text, by=sender)):
+        if not post(inbox, item, lambda: ledger.relay(slug, item.text, sender)):
             continue
         inbox.close(item.id, OPERATOR, "done", "shown on the ledger page")
         shown += 1
