@@ -1,5 +1,6 @@
 import ast
 import json
+import multiprocessing
 import os
 import re
 import sys
@@ -45,36 +46,33 @@ def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, s
     return kept
 
 
-def stats_shards(root: Path, files: list[str], durations: dict[str, float], count: int) -> list[list[str]]:
-    owner = {}
-
-    def find(key):
-        while owner.setdefault(key, key) != key:
-            key = owner[key]
-        return key
-
-    # Files that share an xdist group never run concurrently in CI, so they share a shard here.
-    for path in files:
-        for group in GROUP.findall((root / path).read_text()):
-            owner[find(path)] = find(f"group {group}")
+def stats_shards(root: Path, files: list[str], count: int) -> list[list[str]]:
+    durations = root / ".test_durations"
+    durations = json.loads(durations.read_text()) if durations.exists() else {}
     seconds = dict.fromkeys(files, 0.01)
     for nodeid, duration in durations.items():
         if (path := nodeid.partition("::")[0]) in seconds:
             seconds[path] += duration
-    units = {}
+    # Files that share an xdist group never run concurrently in CI, so they share a shard here.
+    units = []
     for path in files:
-        units.setdefault(find(path), []).append(path)
+        keys = {f"group {group}" for group in GROUP.findall((root / path).read_text())} or {path}
+        members = [path]
+        for unit in [unit for unit in units if unit[0] & keys]:
+            units.remove(unit)
+            keys |= unit[0]
+            members = unit[1] + members
+        units.append((keys, members))
     shards = [[] for _ in range(max(1, min(count, len(units))))]
-    loads = [0.0] * len(shards)
-    for unit in sorted(units.values(), key=lambda unit: (-sum(seconds[path] for path in unit), unit)):
-        lightest = loads.index(min(loads))
-        loads[lightest] += sum(seconds[path] for path in unit)
-        shards[lightest].extend(unit)
+    for _, members in sorted(units, key=lambda unit: (-sum(seconds[path] for path in unit[1]), unit[1])):
+        min(shards, key=lambda shard: sum(seconds[path] for path in shard)).extend(members)
     # pytest drops a package conftest for files given after a file from another folder.
     return [sorted(shard) for shard in shards]
 
 
 def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, basetemp: str) -> None:
+    os.environ["MUTANT_UNDER_TEST"] = "stats"
+    os.environ["PY_IGNORE_IMPORTMISMATCH"] = "1"
     test_runner._pytest_add_cli_args = [*test_runner._pytest_add_cli_args, f"--basetemp={basetemp}"]
     start = process_time()
     status = test_runner.run_stats(tests=tests)
@@ -92,25 +90,18 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
 
 
 def collect_parallel_stats(runner, test_runner, shards: list[list[str]], work: Path) -> None:
-    os.environ["MUTANT_UNDER_TEST"] = "stats"
-    os.environ["PY_IGNORE_IMPORTMISMATCH"] = "1"
-    outputs = {}
+    context = multiprocessing.get_context("fork")
+    processes = []
     for index, tests in enumerate(shards):
         output = work / f"stats-{index}.json"
-        output.unlink(missing_ok=True)
         basetemp = tempfile.mkdtemp(prefix="mutation-stats-")
-        pid = os.fork()
-        if pid == 0:
-            try:
-                collect_shard_stats(runner, test_runner, tests, output, basetemp)
-            finally:
-                sys.stdout.flush()
-                sys.stderr.flush()
-                os._exit(0)
-        outputs[pid] = output
-    for pid in outputs:
-        os.waitpid(pid, 0)
-    results = [json.loads(output.read_text()) if output.exists() else {"status": None} for output in outputs.values()]
+        process = context.Process(target=collect_shard_stats, args=(runner, test_runner, tests, output, basetemp))
+        process.start()
+        processes.append((process, output))
+    results = []
+    for process, output in processes:
+        process.join()
+        results.append(json.loads(output.read_text()) if process.exitcode == 0 else {"status": process.exitcode})
     if failed := [result["status"] for result in results if result["status"] != 0]:
         print(f"failed to collect stats. runner returned {failed}", flush=True)
         raise SystemExit(1)
@@ -183,9 +174,7 @@ def run_selected(selection: Path) -> None:
         config = runner.Config.get()
         relative = config.source_paths
         config.source_paths = [(Path("mutants") / path).resolve() for path in relative]
-        durations = Path(".test_durations")
-        durations = json.loads(durations.read_text()) if durations.exists() else {}
-        shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, durations, os.cpu_count() or 1)
+        shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, os.cpu_count() or 1)
         try:
             collect_parallel_stats(runner, test_runner, shards, Path.cwd())
         finally:

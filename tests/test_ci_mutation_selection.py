@@ -163,7 +163,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     config = SimpleNamespace(source_paths=[Path("hooks/")], pytest_add_cli_args_test_selection=["tests/test_sample.py"])
     collected = []
 
-    def shard(root, files, durations, count):
+    def shard(root, files, count):
         assert (root, files, count) == (Path.cwd(), ["tests/test_sample.py"], 6)
         return [files]
 
@@ -357,23 +357,62 @@ def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_pat
     from scripts.ci_mutation.selection import stats_shards
 
     (tmp_path / "tests").mkdir()
-    files = ["tests/test_a.py", "tests/test_b.py", "tests/test_c.py", "tests/test_d.py", "tests/test_e.py"]
+    files = [f"tests/test_{name}.py" for name in "abcdef"]
     for path in files:
         (tmp_path / path).write_text("def test_x():\n    pass\n")
     (tmp_path / "tests/test_b.py").write_text('import pytest\n\npytestmark = pytest.mark.xdist_group("redis")\n')
     (tmp_path / "tests/test_d.py").write_text(
         "import pytest\n\n@pytest.mark.xdist_group(name='redis')\ndef test_x(): pass\n"
     )
-    durations = {"tests/test_a.py::test_x": 5, "tests/test_c.py::test_x": 4, "tests/test_b.py::t": 1}
-    durations |= {"tests/test_d.py::t": 1, "tests/other.py::t": 9}
-    shards = stats_shards(tmp_path, files, durations, 3)
-    assert sorted(shards) == [
+    (tmp_path / "tests/test_f.py").write_text('import pytest\n\npytestmark = pytest.mark.xdist_group("mcp")\n')
+    durations = {"tests/test_a.py::TestK::test_x": 5, "tests/test_c.py::t1": 2, "tests/test_c.py::t2": 2}
+    durations |= {"tests/test_b.py::t": 1, "tests/test_d.py::t": 1, "tests/test_f.py::t": 1.5, "tests/other.py::t": 9}
+    (tmp_path / ".test_durations").write_text(json.dumps(durations))
+    assert stats_shards(tmp_path, files, 3) == [
         ["tests/test_a.py"],
-        ["tests/test_b.py", "tests/test_d.py", "tests/test_e.py"],
         ["tests/test_c.py"],
+        ["tests/test_b.py", "tests/test_d.py", "tests/test_e.py", "tests/test_f.py"],
     ]
-    assert stats_shards(tmp_path, files[:1], {}, 8) == [["tests/test_a.py"]]
-    assert stats_shards(tmp_path, files, durations, 1) == [files]
+    assert stats_shards(tmp_path, files, 1) == [files]
+    assert stats_shards(tmp_path, files[:1], 8) == [["tests/test_a.py"]]
+    (tmp_path / ".test_durations").unlink()
+    assert stats_shards(tmp_path, files, 3) == [
+        ["tests/test_b.py", "tests/test_d.py"],
+        ["tests/test_a.py", "tests/test_e.py"],
+        ["tests/test_c.py", "tests/test_f.py"],
+    ]
+
+
+def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everything(tmp_path, monkeypatch):
+    from time import process_time
+
+    from scripts.ci_mutation.selection import collect_shard_stats
+
+    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
+    monkeypatch.setenv("PY_IGNORE_IMPORTMISMATCH", "0")
+    engine = SimpleNamespace(tests_by_mangled_function_name={"m.x_f": {"b::t", "a::t"}}, duration_by_test={"a::t": 2.5})
+    calls = []
+
+    class Runner:
+        _pytest_add_cli_args = ["-q"]
+
+        def run_stats(self, *, tests):
+            calls.append(
+                (
+                    tests,
+                    self._pytest_add_cli_args,
+                    os.environ["MUTANT_UNDER_TEST"],
+                    os.environ["PY_IGNORE_IMPORTMISMATCH"],
+                )
+            )
+            return 4
+
+    output = tmp_path / "out.json"
+    collect_shard_stats(SimpleNamespace(mutmut=engine), Runner(), ["tests/test_a.py"], output, "/scratch/base")
+    assert calls == [(["tests/test_a.py"], ["-q", "--basetemp=/scratch/base"], "stats", "1")]
+    result = json.loads(output.read_text())
+    assert 0 <= result.pop("cpu") <= process_time()
+    assert result == {"status": 4, "tests": {"m.x_f": ["a::t", "b::t"]}, "durations": {"a::t": 2.5}}
 
 
 def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(tmp_path, capsys):
@@ -382,6 +421,7 @@ def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(tmp_path, ca
     from scripts.ci_mutation.selection import collect_parallel_stats
 
     saved = []
+    environment = os.environ.get("MUTANT_UNDER_TEST")
     engine = SimpleNamespace(tests_by_mangled_function_name=defaultdict(set), duration_by_test={}, stats_time=None)
     runner = SimpleNamespace(
         mutmut=engine, save_stats=lambda: saved.append(dict(engine.tests_by_mangled_function_name))
@@ -392,8 +432,9 @@ def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(tmp_path, ca
 
         def run_stats(self, *, tests):
             assert os.environ["MUTANT_UNDER_TEST"] == "stats"
-            assert self._pytest_add_cli_args[0] == "-q"
-            assert self._pytest_add_cli_args[1].startswith("--basetemp=")
+            basetemp = Path(self._pytest_add_cli_args[1].removeprefix("--basetemp="))
+            assert basetemp.is_dir()
+            assert basetemp.name.startswith("mutation-stats-")
             for test in tests:
                 engine.tests_by_mangled_function_name["m.x_f"].add(f"{test}::t")
                 engine.duration_by_test[f"{test}::t"] = 1.5
@@ -402,20 +443,22 @@ def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(tmp_path, ca
             return 3 if "tests/test_red.py" in tests else 0
 
     collect_parallel_stats(runner, TestRunner(), [["tests/test_a.py"], ["tests/test_b.py"]], tmp_path)
+    assert os.environ.get("MUTANT_UNDER_TEST") == environment
     assert engine.tests_by_mangled_function_name == {"m.x_f": {"tests/test_a.py::t", "tests/test_b.py::t"}}
     assert engine.duration_by_test == {"tests/test_a.py::t": 1.5, "tests/test_b.py::t": 1.5}
-    assert engine.stats_time >= 0
+    assert 0 <= engine.stats_time < 5
     assert saved == [{"m.x_f": {"tests/test_a.py::t", "tests/test_b.py::t"}}]
-    for shards, status in (([["tests/test_a.py"], ["tests/test_red.py"]], "[3]"), ([["tests/test_boom.py"]], "[None]")):
+    for shards, status in (([["tests/test_a.py"], ["tests/test_red.py"]], "[3]"), ([["tests/test_boom.py"]], "[1]")):
         with pytest.raises(SystemExit) as failed:
             collect_parallel_stats(runner, TestRunner(), shards, tmp_path)
         assert failed.value.code == 1
-        assert f"failed to collect stats. runner returned {status}" in capsys.readouterr().out
+        assert capsys.readouterr().out.endswith(f"failed to collect stats. runner returned {status}\n")
     engine.tests_by_mangled_function_name.clear()
     TestRunner.run_stats = lambda self, *, tests: 0
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as empty:
         collect_parallel_stats(runner, TestRunner(), [["tests/test_a.py"]], tmp_path)
-    assert "no selected test reaches a mutated function" in capsys.readouterr().out
+    assert empty.value.code == 1
+    assert capsys.readouterr().out == "failed to collect stats: no selected test reaches a mutated function\n"
     assert len(saved) == 1
 
 

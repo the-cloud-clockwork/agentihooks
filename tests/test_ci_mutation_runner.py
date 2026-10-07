@@ -135,6 +135,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
     (root / "hooks" / "__pycache__").mkdir()
     (root / "hooks" / "__pycache__" / "old.pyc").write_bytes(b"old")
     (root / "hooks" / "old.pyc").write_bytes(b"old")
+    (root / ".test_durations").write_text('{"tests/test_sample.py::t": 1.5}')
     work = tmp_path / "nested" / "work"
     work.mkdir(parents=True)
     prepare_workspace(root, work, ["hooks/sample.py", "scripts/other.py"], ["tests/test_sample.py"])
@@ -160,6 +161,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         assert (work / name / "asset.txt").read_text() == name
     assert not (work / "hooks/__pycache__").exists()
     assert not (work / "hooks/old.pyc").exists()
+    assert (work / ".test_durations").read_text() == '{"tests/test_sample.py::t": 1.5}'
 
 
 def test_workspace_mutating_the_identity_plugin_does_not_load_its_mutated_copy(tmp_path):
@@ -173,6 +175,7 @@ def test_workspace_mutating_the_identity_plugin_does_not_load_its_mutated_copy(t
     work = tmp_path / "work"
     work.mkdir()
     prepare_workspace(root, work, ["scripts/ci_mutation/identity.py"], ["tests/test_ci_mutation_identity.py"])
+    assert not (work / ".test_durations").exists()
     args = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]["pytest_add_cli_args"]
     assert args == ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
 
