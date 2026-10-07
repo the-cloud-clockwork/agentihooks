@@ -26,7 +26,7 @@ def red_checks(record: dict, now_ms: int) -> list[Finding]:
         if c["head_sha"] == record["pr"]["head"]["sha"]
         and c["conclusion"] in {"failure", "timed_out", "action_required", "startup_failure"}
     ]
-    if not checks or now_ms - record["pushed_at"] < ledger_events.RED_QUIET_MS:
+    if not checks or now_ms - record["committed_at"] < ledger_events.RED_QUIET_MS:
         return []
     return [
         Finding(

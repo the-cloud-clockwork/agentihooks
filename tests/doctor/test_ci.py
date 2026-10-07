@@ -18,7 +18,7 @@ def test_recorded_ci_and_planted_rerun():
 
 def test_recorded_checks_and_planted_red_check():
     record = load("ci")
-    later = record["pushed_at"] + ledger_events.RED_QUIET_MS
+    later = record["committed_at"] + ledger_events.RED_QUIET_MS
     assert ci.red_checks(record, later) == []
     planted = copy.deepcopy(record)
     planted["checks"][0]["conclusion"] = "failure"
@@ -39,30 +39,30 @@ def _red(record):
 
 def test_a_red_head_is_reported_only_after_the_tick_red_window_without_a_push():
     planted = _red(load("ci"))
-    pushed = planted["pushed_at"]
-    assert ci.red_checks(planted, pushed + ledger_events.RED_QUIET_MS - 1) == []
-    assert [f.id for f in ci.red_checks(planted, pushed + ledger_events.RED_QUIET_MS)] == ["red-checks/487"]
-    assert [f.id for f in ci.findings(planted, pushed + ledger_events.RED_QUIET_MS)] == ["red-checks/487"]
-    assert ci.findings(planted, pushed) == []
+    committed = planted["committed_at"]
+    assert ci.red_checks(planted, committed + ledger_events.RED_QUIET_MS - 1) == []
+    assert [f.id for f in ci.red_checks(planted, committed + ledger_events.RED_QUIET_MS)] == ["red-checks/487"]
+    assert [f.id for f in ci.findings(planted, committed + ledger_events.RED_QUIET_MS)] == ["red-checks/487"]
+    assert ci.findings(planted, committed) == []
 
 
 def test_the_red_window_is_read_from_the_tick_setting(monkeypatch):
     planted = _red(load("ci"))
     monkeypatch.setattr(ledger_events, "RED_QUIET_MS", 5 * 60_000)
-    assert ci.red_checks(planted, planted["pushed_at"] + 5 * 60_000 - 1) == []
-    assert len(ci.red_checks(planted, planted["pushed_at"] + 5 * 60_000)) == 1
+    assert ci.red_checks(planted, planted["committed_at"] + 5 * 60_000 - 1) == []
+    assert len(ci.red_checks(planted, planted["committed_at"] + 5 * 60_000)) == 1
 
 
 def test_a_push_since_the_red_head_restarts_the_window():
     planted = _red(load("ci"))
-    stale = planted["pushed_at"] + 3 * ledger_events.RED_QUIET_MS
+    stale = planted["committed_at"] + 3 * ledger_events.RED_QUIET_MS
     assert len(ci.red_checks(planted, stale)) == 1
     planted["pr"]["head"]["sha"] = "pushed"
-    planted["pushed_at"] = stale - 60_000
+    planted["committed_at"] = stale - 60_000
     assert ci.red_checks(planted, stale) == []
     planted["checks"][0]["head_sha"] = "pushed"
     assert ci.red_checks(planted, stale) == []
-    assert len(ci.red_checks(planted, planted["pushed_at"] + ledger_events.RED_QUIET_MS)) == 1
+    assert len(ci.red_checks(planted, planted["committed_at"] + ledger_events.RED_QUIET_MS)) == 1
 
 
 def test_recorded_tests_and_planted_flake_on_the_same_commit():

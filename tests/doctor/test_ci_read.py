@@ -43,7 +43,7 @@ def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs():
 
     record = ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=gh)
     assert len(record["checks"]) == 10
-    assert record["pushed_at"] == fixture["pushed_at"]
+    assert record["committed_at"] == fixture["committed_at"]
     assert [r["id"] for r in record["runs"]] == [37323835080]
     assert [a["attempt"] for a in record["attempts"]] == [1, 2]
     assert len(ci.flaky_tests(record)) == 1

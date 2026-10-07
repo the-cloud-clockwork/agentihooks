@@ -63,10 +63,10 @@ def pull_request(repo: str, number: int, run: Callable = subprocess.run) -> dict
     runs = [
         r for r in _pages(f"{root}/actions/runs?head_sha={sha}&per_page=100", "workflow_runs", run) if _belongs(r, pr)
     ]
-    pushed = _gh(["api", f"{root}/commits/{sha}", "--jq", ".commit.committer.date"], run).strip()
+    committed = _gh(["api", f"{root}/commits/{sha}", "--jq", ".commit.committer.date"], run).strip()
     return {
         "pr": pr,
-        "pushed_at": iso_ms(pushed),
+        "committed_at": iso_ms(committed),
         "checks": checks,
         "runs": runs,
         "attempts": _attempts(repo, runs, run),

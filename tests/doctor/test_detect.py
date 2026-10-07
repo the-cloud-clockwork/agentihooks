@@ -73,8 +73,8 @@ def test_ci_reports_a_red_head_only_past_the_tick_red_window(monkeypatch):
     import fakeredis
 
     store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
-    early = detect.readers(store, ledger, "s", record["pushed_at"] + window - 1, environ={})["ci"]()
-    late = detect.readers(store, ledger, "s", record["pushed_at"] + window, environ={})["ci"]()
+    early = detect.readers(store, ledger, "s", record["committed_at"] + window - 1, environ={})["ci"]()
+    late = detect.readers(store, ledger, "s", record["committed_at"] + window, environ={})["ci"]()
     assert early == []
     assert [f.id for f in late] == ["red-checks/487"]
 
