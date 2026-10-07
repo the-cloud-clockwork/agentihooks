@@ -436,7 +436,8 @@ def test_the_waker_command_runs_the_waker_with_the_swarm_clock(monkeypatch):
     assert ran == [("store", cli.delivery.HerdrMessenger, cli.now_ms)]
 
 
-def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path):
+def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: 7.0)
     seen = []
 
     def fake_run(argv, **kw):
@@ -469,6 +470,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path):
         model_source="lane-default",
         profile_decision={**decision, "validation": placed.profile_decision["validation"]},
         choice="share",
+        launched_at=7_000,
     )
     assert placed.profile_decision["validation"]["state"] == "validated"
     assert seen[0][1:4] == ["init-agent", "--host", "herdr"]

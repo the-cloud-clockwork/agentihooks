@@ -193,11 +193,11 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         )
     lines += [
         "",
-        f"Before anything else, read the ledger {ledger_path(slug)} in full: every task and its state, "
-        "the operator's notes, answers and comments. It is your starting point; take only your own task.",
+        f"You are a member of the ledger crew. Before anything else, run once: {led} join. {INBOX_LINE} "
+        f"Act on every OPERATOR line about your work, then run {led} ack.",
         "",
-        f"You are a member of the ledger crew. Run once: {led} join. {INBOX_LINE} Act on every OPERATOR line about "
-        f"your work, then run {led} ack.",
+        f"Then read the ledger {ledger_path(slug)} in full: every task and its state, "
+        "the operator's notes, answers and comments. It is your starting point; take only your own task.",
         "Page chat is for the master: act on a chat line only when it starts with @ and your name.",
         f'Keep the ledger current as you go: {led} comment phases/{phase} "<what you did>" when your work lands, '
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
