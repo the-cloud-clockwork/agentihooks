@@ -533,7 +533,8 @@ def test_the_herdr_adapter_reads_the_screen_as_raw_text(monkeypatch):
     assert herdr_gc.Herdr(environ).screen("w1:p2") == PROMPT
     [(argv, kwargs)] = ran
     assert argv == ["/bin/herdr", "pane", "read", "w1:p2", "--source", "visible", "--format", "text"]
-    assert kwargs["env"] is environ and kwargs["timeout"] == 30
+    assert kwargs == {"capture_output": True, "text": True, "env": environ, "timeout": 30}
+    assert kwargs["env"] is environ
 
 
 @pytest.mark.parametrize(
