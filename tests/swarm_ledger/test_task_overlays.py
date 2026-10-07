@@ -72,3 +72,23 @@ def test_task_cli_sends_the_overlays_as_a_list(monkeypatch):
         ledger.cmd_task(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "liaison", *argv]))
     assert [f.get("overlays") for _, f in sent[:2]] == [["tuner", "trader"], None]
     assert [f["fields"] for _, f in sent[2:]] == [{"overlays": ["scout"]}, {"overlays": []}]
+
+
+def test_task_cli_sends_dependencies_and_territory_as_lists(monkeypatch):
+    sent = []
+    monkeypatch.setattr(ledger, "send", lambda args, kind, **f: sent.append((kind, f)))
+    for argv in (
+        ["task", "add", "t3", "b", "--depends-on", "t1, t2", "--territory", "scripts/a.py"],
+        ["task", "set", "t3", "depends_on=t1", "territory=scripts/b.py,docs"],
+    ):
+        ledger.cmd_task(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "liaison", *argv]))
+    assert (sent[0][1]["depends_on"], sent[0][1]["territory"]) == (["t1", "t2"], ["scripts/a.py"])
+    assert sent[1][1]["fields"] == {"depends_on": ["t1"], "territory": ["scripts/b.py", "docs"]}
+
+
+def test_task_help_names_the_overlays_option(capsys):
+    with pytest.raises(SystemExit):
+        ledger.build_parser().parse_args(["task", "--help"])
+    assert "comma separated overlays this task's agent wears, at most three" in " ".join(
+        capsys.readouterr().out.split()
+    )

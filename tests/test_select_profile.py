@@ -487,6 +487,27 @@ def test_a_launch_without_overlays_clears_overlays_the_caller_wears(profile, mon
     assert "export AGENTIHOOKS_OVERLAYS=tuner" not in text
 
 
+def test_an_inherited_profile_without_overlays_exports_an_empty_list(monkeypatch, tmp_path):
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/bin/agentihooks" if name == "agentihooks" else None)
+    assert _dry_launch(tmp_path, [], {"AGENTIHOOKS_PROFILE": "engineer"}) == 0
+    text = next((tmp_path / "agentihooks-claude-terminal").glob("*.sh")).read_text()
+    assert "export AGENTIHOOKS_PROFILE=engineer\nexport AGENTIHOOKS_OVERLAYS=''\n" in text
+
+
+@pytest.mark.parametrize(
+    "run,expected",
+    [
+        (lambda: init_agent._parser().parse_args(["--help"]), "Overlay the profile wears; repeat for up to three"),
+        (lambda: select_profile.main(["engineer", "--help"]), "Wear this overlay; repeat for up to three"),
+    ],
+)
+def test_overlay_help_reads_as_written(run, expected, capsys):
+    with pytest.raises(SystemExit):
+        run()
+    assert expected in " ".join(capsys.readouterr().out.split())
+
+
 def test_a_launch_without_a_profile_exports_no_overlays(monkeypatch, tmp_path):
     monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
     monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/bin/agentihooks" if name == "agentihooks" else None)

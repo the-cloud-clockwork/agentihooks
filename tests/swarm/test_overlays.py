@@ -130,6 +130,25 @@ def test_available_is_empty_without_a_bundle(monkeypatch):
     assert overlays.revision() == ""
 
 
+def test_setting_takes_three_overlays():
+    offered = [*OFFERED, {"name": "scout", "wears": ["engineer"]}]
+    assert overlays.setting("overlays-engineer", "tuner,trader,scout", {}, offered) == {
+        "engineer": ["tuner", "trader", "scout"]
+    }
+
+
+def test_revision_waits_ten_seconds_for_git(bundle, monkeypatch):
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout="abc\n")
+
+    monkeypatch.setattr(overlays.subprocess, "run", run)
+    assert overlays.revision() == "abc"
+    assert seen == {"capture_output": True, "text": True, "timeout": 10}
+
+
 def test_revision_is_the_bundle_head_commit(bundle):
     assert overlays.revision() == ""
     subprocess.run(["git", "init", "-q", str(bundle)], check=True)
