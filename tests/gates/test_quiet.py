@@ -129,7 +129,15 @@ def test_an_agent_skipped_first_never_stops_the_next_from_being_measured(rig):
     assert gate.quiet_minutes(rig.store.redis, SLUG, [planner, me], rig.rows, NOW) == {ME: 40}
 
 
-@pytest.mark.parametrize("on", [None, {"kind": "task", "target": "t2"}])
+@pytest.mark.parametrize(
+    "on",
+    [
+        None,
+        {"kind": "task", "target": "t2"},
+        {"kind": "reply", "target": "abc"},
+        {"kind": "checks", "target": "https://github.com/o/r/pull/7"},
+    ],
+)
 def test_a_declared_wait_bare_or_checked_is_never_quiet(rig, on):
     idle.declare_wait(rig.store.redis, SLUG, ME, NOW + MIN, "deploy", NOW - MIN, on=on)
     assert rig.minutes() == {}

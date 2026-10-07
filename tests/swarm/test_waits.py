@@ -296,6 +296,21 @@ def test_a_wait_end_is_kept_a_day_past_the_wait(tick):
     assert day - 5_000 < redis.pttl(idle.key("sw", "waited", ME)) <= day
 
 
+@pytest.mark.parametrize(
+    "entry, named",
+    [
+        ({"reason": "deploy"}, True),
+        ({"reason": "", "on": {"kind": "task", "target": "t2"}}, True),
+        ({"on": {"kind": "reply", "target": "abc"}}, True),
+        ({"reason": "  "}, False),
+        ({"reason": ""}, False),
+        ({}, False),
+    ],
+)
+def test_a_wait_is_named_by_its_target_or_its_reason(entry, named):
+    assert idle.named(entry) is named
+
+
 def test_a_skipped_agent_never_stops_the_pass_for_the_next(tick):
     bare, running, done = (f"engineer@a1b2c3-000{n}" for n in (0, 2, 3))
     for name in (bare, running, done):
