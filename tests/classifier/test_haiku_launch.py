@@ -29,7 +29,11 @@ def _launcher(seen, report=None, code=0, stdout=ROUTED + json.dumps({"structured
 
 @pytest.mark.parametrize("route", [None, "routed"])
 @pytest.mark.parametrize("parent_token", [None, "parent-placeholder"])
-def test_haiku_launches_through_agentihooks_claude(monkeypatch, route, parent_token):
+def test_haiku_launches_through_agentihooks_claude(monkeypatch, tmp_path, route, parent_token):
+    launcher = tmp_path / "agentihooks"
+    launcher.write_text("#!/bin/sh\n")
+    launcher.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN")
     if parent_token:
         monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", parent_token)
@@ -41,9 +45,8 @@ def test_haiku_launches_through_agentihooks_claude(monkeypatch, route, parent_to
     args, kwargs = seen[0]
     wire = Path(kwargs["cwd"]) / "request.json"
     assert args[:3] == ["bash", "-lic", f'exec "$0" "$@" < {wire}']
-    assert Path(args[3]).name == "agentihooks"
-    assert args[4:6] == ["claude", "--agentihooks-report"]
-    assert Path(args[6]).parent == Path(kwargs["cwd"])
+    assert args[3:6] == [str(launcher), "claude", "--agentihooks-report"]
+    assert args[6] == str(Path(kwargs["cwd"]) / "route")
     assert args[7 : args.index("-p")] == (["--route", route] if route else [])
     assert args[args.index("-p") :][:3] == ["-p", "--model", "haiku"]
     assert args[args.index("--system-prompt") + 1] == fallbacks.PROMPT
@@ -53,9 +56,9 @@ def test_haiku_launches_through_agentihooks_claude(monkeypatch, route, parent_to
 def test_unroutable_account_fails_naming_why(monkeypatch, tmp_path):
     seen = []
     written = tmp_path / "route"
-    _write_route_report(str(written), status="failed", error="no non-empty AH_CC_TOKEN_* variables found")
+    _write_route_report(str(written), status="failed", error="no account with routing_left=0% has room")
     monkeypatch.setattr(fallbacks.subprocess, "run", _launcher(seen, report=written.read_text(), code=3, stdout=""))
-    with pytest.raises(BackendFailure, match=r"^no Claude account: no non-empty AH_CC_TOKEN_\* variables found$"):
+    with pytest.raises(BackendFailure, match="^no Claude account: no account with routing_left=0% has room$"):
         fallbacks.ClaudeCliBackend().decide(REQUEST)
     assert len(seen) == 1
 

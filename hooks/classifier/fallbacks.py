@@ -61,7 +61,7 @@ def _route_refusal(report: Path) -> str | None:
         fields = dict(line.partition("=")[::2] for line in report.read_text().splitlines())
     except OSError:
         return None
-    return fields.get("error", "") if fields.get("status") == "failed" else None
+    return fields.get("error") if fields.get("status") == "failed" else None
 
 
 class ClaudeCliBackend:
