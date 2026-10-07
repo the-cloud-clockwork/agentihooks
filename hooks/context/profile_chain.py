@@ -72,7 +72,9 @@ def overlays(path: Path) -> list[str]:
 
 def rendered_overlays(home: Path) -> list[str]:
     try:
-        return [str(name) for name in json.loads((Path(home) / RENDER_STAMP).read_text())["overlays"]]
+        stamp = json.loads((Path(home) / RENDER_STAMP).read_text())
+        rendered = stamp["render"] if "render" in stamp else stamp
+        return [str(name) for name in rendered["overlays"]]
     except (OSError, ValueError, KeyError, TypeError):
         return []
 
