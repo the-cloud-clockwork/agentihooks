@@ -652,3 +652,37 @@ def test_the_tick_preserves_a_wait_redeclared_during_its_probe(tick, head, resol
         "on": {"kind": "checks", "target": URL, "head": "third"},
     }
     assert tick.told() == []
+
+
+def test_a_pending_current_head_does_not_rewrite_the_wait(tick, monkeypatch):
+    from types import SimpleNamespace
+
+    tick.hold("checks", URL)
+    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="first", resolved=False, red=False)
+
+    def unexpected_write(*args, **kwargs):
+        pytest.fail("an unresolved wait with the same head needs no Redis write")
+
+    monkeypatch.setattr(tick.store.redis, "transaction", unexpected_write)
+    assert tick.end() == []
+
+
+def test_a_replaced_wait_does_not_stop_resolution_for_the_next_agent(tick):
+    from types import SimpleNamespace
+
+    following = "engineer@a1b2c3-0002"
+    tick.store.put_agent("sw", AgentRecord(name=following, lane="eng", task="t2", seat="eng-2@sw"))
+    tick.hold("checks", URL)
+    idle.declare_wait(tick.store.redis, "sw", following, 10_000_000, "", 1, on={"kind": "task", "target": "t3"})
+
+    def github(url):
+        idle.declare_wait(
+            tick.store.redis, "sw", ME, 20_000_000, "", 2, on={"kind": "checks", "target": URL, "head": "third"}
+        )
+        return SimpleNamespace(state="OPEN", head="second", resolved=True, red=False)
+
+    assert waits.end_pass(tick.store, "sw", {"t3": {"state": "done"}}, tick.inbox, github) == [
+        f"ended the wait of {following}: task t3, now done"
+    ]
+    assert idle.wait(tick.store.redis, "sw", ME)["on"]["head"] == "third"
+    assert idle.wait(tick.store.redis, "sw", following) is None
