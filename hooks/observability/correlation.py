@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
+import tempfile
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -14,6 +14,14 @@ SCHEMA = "agentihooks.correlation/1"
 PREFIX = "agentihooks.correlation."
 PRESENT, MISSING, UNSUPPORTED = "present", "missing", "unsupported"
 CACHE_TTL_SEC = 60
+KEYS = (
+    "AGENTIHOOKS_SWARM",
+    "AGENTIHOOKS_AGENT_NAME",
+    "AGENTIHOOKS_SWARM_TASK",
+    "AGENTIHOOKS_PROFILE",
+    "AGENTIHOOKS_PROFILE_REPORT",
+    "AGENTIHOOKS_TARGET",
+)
 
 SOURCES = {
     "ledger": "env AGENTIHOOKS_SWARM",
@@ -80,7 +88,7 @@ def envelope(inputs: Inputs) -> dict[str, tuple[str, object]]:
     report = inputs.report if inputs.report is not None else {}
     validated = report.get("validation") if report.get("state") == "validated" else None
     validated = validated if isinstance(validated, dict) else {}
-    name = env.get("AGENTIHOOKS_AGENT_NAME", "")
+    name = env.get("AGENTIHOOKS_AGENT_NAME")
     started = agent.get("started_at")
     account = environment_account(env)
     has_agent, has_report = inputs.agent is not None, inputs.report is not None
@@ -139,17 +147,17 @@ def _agent_record(slug: str, name: str) -> dict:
 
 
 def _ledger_task(slug: str, task: str) -> dict:
-    root = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
+    root = Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
     try:
-        rows = json.loads((root / f"{slug}.json").read_text(encoding="utf-8")).get("tasks", [])
-    except (OSError, ValueError, AttributeError):
+        rows = json.loads((root / f"{slug}.json").read_text())["tasks"]
+        return next(row for row in rows if isinstance(row, dict) and row.get("id") == task)
+    except (OSError, ValueError, KeyError, TypeError, StopIteration):
         return {}
-    return next((row for row in rows if isinstance(row, dict) and row.get("id") == task), {})
 
 
 def _report(path: str) -> dict:
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        data = json.loads(Path(path).read_text())
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
@@ -158,44 +166,40 @@ def _report(path: str) -> dict:
 def gather(session_id: str, environ: Mapping[str, str]) -> Inputs:
     from hooks.targets import DEFAULT_TARGET
 
-    slug, name, task = (
-        environ.get("AGENTIHOOKS_SWARM", ""),
-        environ.get("AGENTIHOOKS_AGENT_NAME", ""),
-        environ.get("AGENTIHOOKS_SWARM_TASK", ""),
-    )
-    report = environ.get("AGENTIHOOKS_PROFILE_REPORT", "")
+    slug, name, task = (environ.get(key) for key in KEYS[:3])
+    report = environ.get("AGENTIHOOKS_PROFILE_REPORT")
     return Inputs(
         session_id=session_id,
         environ=environ,
-        harness=environ.get("AGENTIHOOKS_TARGET", "").strip().lower() or DEFAULT_TARGET,
+        harness=(environ.get("AGENTIHOOKS_TARGET") or DEFAULT_TARGET).strip().lower(),
         agent=(_agent_record(slug, name) if name else {}) if slug else None,
         report=_report(report) if report else None,
         task=(_ledger_task(slug, task) if task else {}) if slug else None,
     )
 
 
-def _cache_path(session_id: str, environ: Mapping[str, str]) -> Path:
-    keys = ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_PROFILE_REPORT", "AGENTIHOOKS_TARGET")
-    key = hashlib.sha256("\0".join([session_id, *(environ.get(k, "") for k in keys)]).encode()).hexdigest()
-    from hooks import config
-
-    return config.AGENTIHOOKS_HOME / "correlation" / f"{key[:32]}.json"
-
-
 def resolve(session_id: str, environ: Mapping[str, str] | None = None) -> dict[str, object]:
+    """Envelope attributes, cached per session for CACHE_TTL_SEC while the launch environment is unchanged."""
+    from hooks import config
+    from hooks.context.account_sessions import environment_account
+    from hooks.observability.signals import safe_name
+
     env = os.environ if environ is None else environ
-    path = _cache_path(session_id, env)
+    launch = [session_id, environment_account(env), *(env.get(key, "") for key in KEYS)]
+    path = config.AGENTIHOOKS_HOME / "telemetry" / "correlation" / f"{safe_name(session_id)}.json"
     try:
-        if time.time() < path.stat().st_mtime + CACHE_TTL_SEC:
-            return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        cached = json.loads(path.read_text())
+        if cached["launch"] == launch and time.time() < cached["at"] + CACHE_TTL_SEC:
+            return cached["attributes"]
+    except (OSError, ValueError, KeyError, TypeError):
         pass
     flat = attributes(envelope(gather(session_id, env)))
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(f".{os.getpid()}.tmp")
-        temp.write_text(json.dumps(flat), encoding="utf-8")
-        temp.replace(path)
+        handle, temp = tempfile.mkstemp(dir=path.parent)
+        with os.fdopen(handle, "w") as out:
+            json.dump({"launch": launch, "at": time.time(), "attributes": flat}, out)
+        os.replace(temp, path)
     except OSError:
         pass
     return flat

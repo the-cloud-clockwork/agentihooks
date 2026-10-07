@@ -320,11 +320,7 @@ def _flush_pending() -> bool:
 def flush() -> None:
     if _q is None:
         return
-    confirmed = False
-    try:
-        confirmed = _drain()
-    finally:
-        _persist_counts(confirmed)
+    _persist_counts(_drain())
 
 
 def _persist_counts(confirmed: bool) -> None:
@@ -336,9 +332,8 @@ def _persist_counts(confirmed: bool) -> None:
         _counts.clear()
     if not confirmed:
         for (session, signal, outcome), count in list(counts.items()):
-            sent = count - counts.get((session, signal, "unsupported"), 0)
-            if outcome == "queued" and sent > 0:
-                counts[(session, signal, "unconfirmed")] = sent
+            if outcome == "queued":
+                counts[(session, signal, "unconfirmed")] = count
     signals.record(counts)
 
 

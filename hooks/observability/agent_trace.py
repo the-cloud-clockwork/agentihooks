@@ -311,7 +311,7 @@ def _cursor_path(session_id: str) -> Path:
 
 def _cursor(session_id: str) -> dict:
     try:
-        data = json.loads(_cursor_path(session_id).read_text(encoding="utf-8"))
+        data = json.loads(_cursor_path(session_id).read_text())
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
@@ -472,4 +472,4 @@ def export_session(session_id: str, transcript_path: str, identity: Identity | N
     path = _cursor_path(session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     cursor = {"turns": max(exported, len(turns(entries))), "accepted_at": datetime.now(timezone.utc).isoformat()}
-    path.write_text(json.dumps(cursor), encoding="utf-8")
+    path.write_text(json.dumps(cursor))

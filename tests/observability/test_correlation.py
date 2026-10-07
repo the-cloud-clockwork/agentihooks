@@ -1,4 +1,6 @@
+import fcntl
 import json
+import os
 import queue
 
 import pytest
@@ -16,8 +18,16 @@ ENV = {
     "AGENTIHOOKS_SWARM_TASK": "t44",
     "AGENTIHOOKS_AGENT_NAME": "engineer@1-2",
     "AGENTIHOOKS_PROFILE": "engineer",
-    "AH_CC_TOKEN_tccgma": TOKEN_SENTINEL,
+    "AH_CC_TOKEN_probeacct": TOKEN_SENTINEL,
 }
+
+
+@pytest.fixture(autouse=True)
+def _no_routed_shell(monkeypatch):
+    for name in [n for n in os.environ if n.startswith("AH_CC_TOKEN_")] + list(correlation.KEYS):
+        monkeypatch.delenv(name, raising=False)
+
+
 AGENT = {
     "name": "engineer@1-2",
     "seat": "eng-4@rig",
@@ -83,7 +93,7 @@ def test_every_field_resolves_from_its_source_with_its_type():
         f"{P}model.source": "luna",
         f"{P}model.confidence": 0.8,
         f"{P}effort": "high",
-        f"{P}account": "tccgma",
+        f"{P}account": "probeacct",
         f"{P}revision": "agentihooks-bundle@beef,agentihooks@f00d",
         f"{P}revision.sources": "abc123",
     }
@@ -92,13 +102,31 @@ def test_every_field_resolves_from_its_source_with_its_type():
 
 def test_a_session_outside_any_swarm_marks_every_field_present_or_gapped():
     flat = _flat(session_id="", environ={}, harness="codex", agent=None, report=None, task=None)
-    for name in correlation.SOURCES:
-        assert (f"{P}{name}" in flat) != (f"{P}{name}.state" in flat), name
-    assert flat[f"{P}seat.state"] == correlation.UNSUPPORTED
-    assert flat[f"{P}profile.resolved.state"] == correlation.UNSUPPORTED
-    assert flat[f"{P}session.id.state"] == correlation.MISSING
-    assert flat[f"{P}trace.id.state"] == correlation.MISSING
-    assert flat[f"{P}harness"] == "codex"
+    unsupported = {
+        "ledger",
+        "task",
+        "phase",
+        "seat",
+        "agent.started_at",
+        "agent.life",
+        "conversation.id",
+        "profile.validation",
+        "profile.resolved",
+        "profile.source",
+        "classifier.model",
+        "classifier.confidence",
+        "model",
+        "model.source",
+        "model.confidence",
+        "effort",
+        "revision",
+        "revision.sources",
+    }
+    expected = {f"{P}{name}.state": correlation.UNSUPPORTED for name in unsupported}
+    missing = set(correlation.SOURCES) - unsupported - {"harness"}
+    expected.update({f"{P}{name}.state": correlation.MISSING for name in missing})
+    assert flat == {f"{P}schema": correlation.SCHEMA, f"{P}harness": "codex", **expected}
+    assert missing == {"agent.name", "session.id", "trace.id", "profile.requested", "account"}
 
 
 @pytest.mark.parametrize("state", ["pending", "failed"])
@@ -141,14 +169,14 @@ def test_an_unreadable_swarm_record_is_missing_not_unsupported():
 
 def test_account_names_the_token_variable_and_never_its_value():
     flat = _flat()
-    assert flat[f"{P}account"] == "tccgma"
+    assert flat[f"{P}account"] == "probeacct"
     assert TOKEN_SENTINEL not in json.dumps(flat)
 
 
 def test_gather_reads_the_record_ledger_task_and_report(monkeypatch, tmp_path):
     report = tmp_path / "report.json"
     report.write_text(json.dumps(REPORT))
-    (tmp_path / "rig.json").write_text(json.dumps({"tasks": [{"id": "t1"}, {"id": "t44", "phase": "p23"}]}))
+    (tmp_path / "rig.json").write_text(json.dumps({"tasks": ["x", {"id": "t1"}, {"id": "t44", "phase": "p23"}]}))
     monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
     looked_up = []
     monkeypatch.setattr(correlation, "_agent_record", lambda slug, name: looked_up.append((slug, name)) or AGENT)
@@ -157,9 +185,38 @@ def test_gather_reads_the_record_ledger_task_and_report(monkeypatch, tmp_path):
     inputs = correlation.gather("sess-1", env)
 
     assert looked_up == [("rig", "engineer@1-2")]
-    assert inputs.task == {"id": "t44", "phase": "p23"}
-    assert inputs.report == REPORT
-    assert inputs.harness == "codex"
+    assert inputs == correlation.Inputs("sess-1", env, "codex", AGENT, REPORT, {"id": "t44", "phase": "p23"})
+
+
+def test_gather_in_a_swarm_without_name_task_or_report_looks_nothing_up(monkeypatch):
+    monkeypatch.setattr(correlation, "_agent_record", lambda *a: pytest.fail("no agent lookup without a name"))
+    monkeypatch.setattr(correlation, "_ledger_task", lambda *a: pytest.fail("no ledger read without a task"))
+    inputs = correlation.gather("sess-1", {"AGENTIHOOKS_SWARM": "rig"})
+    assert (inputs.agent, inputs.report, inputs.task) == ({}, None, {})
+
+
+def test_ledger_task_defaults_to_the_home_ledger_folder_and_reads_gaps_as_empty(monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.delenv("LEDGER_DIR", raising=False)
+    folder = Path.home() / "development-ledger"
+    folder.mkdir()
+    (folder / "rig.json").write_text(json.dumps({"tasks": [{"id": "t44", "phase": "p23"}]}))
+    (folder / "untasked.json").write_text(json.dumps({"title": "no tasks key"}))
+    (folder / "odd.json").write_text(json.dumps({"tasks": None}))
+    assert correlation._ledger_task("rig", "t44") == {"id": "t44", "phase": "p23"}
+    assert correlation._ledger_task("rig", "t99") == {}
+    assert correlation._ledger_task("untasked", "t44") == {}
+    assert correlation._ledger_task("odd", "t44") == {}
+    assert correlation._ledger_task("absent", "t44") == {}
+
+
+def test_report_reads_a_json_object_or_nothing(tmp_path):
+    (tmp_path / "list.json").write_text("[1]")
+    (tmp_path / "bad.json").write_text("{")
+    assert correlation._report(str(tmp_path / "list.json")) == {}
+    assert correlation._report(str(tmp_path / "bad.json")) == {}
+    assert correlation._report(str(tmp_path / "absent.json")) == {}
 
 
 def test_gather_without_a_swarm_or_report_marks_those_sources_absent():
@@ -171,25 +228,102 @@ def test_agent_record_lookup_failure_reads_as_an_empty_record():
     assert correlation._agent_record("rig", "engineer@1-2") == {}
 
 
+def test_agent_record_reads_the_named_agent_from_the_swarm_store(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import store
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    live = store.RedisStore(redis)
+    redis.hset(live.key("rig", "agents"), mapping={"engineer@1-2": json.dumps(AGENT), "other": "{}"})
+    monkeypatch.setattr(store, "connect", lambda: live)
+    assert correlation._agent_record("rig", "engineer@1-2") == AGENT
+    assert correlation._agent_record("rig", "absent") == {}
+    assert correlation._agent_record("other-swarm", "engineer@1-2") == {}
+
+
 def test_resolve_caches_per_session_until_the_ttl(monkeypatch):
+    from hooks import config
+
     calls = []
     monkeypatch.setattr(correlation, "gather", lambda s, e: calls.append(s) or _inputs(session_id=s))
-    first = correlation.resolve("sess-1", ENV)
-    assert correlation.resolve("sess-1", ENV) == first
-    assert calls == ["sess-1"]
+    now = [1000.0]
+    monkeypatch.setattr(correlation.time, "time", lambda: now[0])
+    first = correlation.resolve("sess/1", ENV)
+    assert correlation.resolve("sess/1", ENV) == first
+    assert calls == ["sess/1"]
+    cached = json.loads((config.AGENTIHOOKS_HOME / "telemetry" / "correlation" / "sess_1.json").read_text())
+    assert cached["attributes"] == first
     correlation.resolve("sess-2", ENV)
-    assert calls == ["sess-1", "sess-2"]
-    monkeypatch.setattr(correlation, "CACHE_TTL_SEC", -1)
+    assert calls == ["sess/1", "sess-2"]
+    now[0] += correlation.CACHE_TTL_SEC - 0.5
+    correlation.resolve("sess/1", ENV)
+    assert calls == ["sess/1", "sess-2"]
+    now[0] += 0.5
+    correlation.resolve("sess/1", ENV)
+    correlation.resolve("sess/1", ENV)
+    assert calls == ["sess/1", "sess-2", "sess/1"]
+
+
+@pytest.mark.parametrize("key", [*correlation.KEYS, "AH_CC_TOKEN_other"])
+def test_a_changed_launch_environment_recomputes_the_envelope(monkeypatch, key):
+    calls = []
+    monkeypatch.setattr(correlation, "gather", lambda s, e: calls.append(dict(e)) or _inputs(session_id=s))
     correlation.resolve("sess-1", ENV)
-    assert calls == ["sess-1", "sess-2", "sess-1"]
+    changed = {k: v for k, v in ENV.items() if not k.startswith("AH_CC_TOKEN_")} if key.startswith("AH_") else ENV
+    correlation.resolve("sess-1", {**changed, key: "changed"})
+    assert len(calls) == 2
+
+
+def test_an_unwritable_cache_still_returns_the_envelope(monkeypatch):
+    from hooks import config
+
+    monkeypatch.setattr(correlation, "gather", lambda s, e: _inputs(session_id=s))
+    (config.AGENTIHOOKS_HOME / "telemetry").write_text("a file where the folder belongs")
+    assert correlation.resolve("sess-1", ENV)[f"{P}session.id"] == "sess-1"
 
 
 def test_signal_counts_accumulate_per_session():
-    signals.record({("s1", "events", "queued"): 2, ("s1", "events", "dropped"): 1, ("", "gauges", "queued"): 1})
-    signals.record({("s1", "events", "queued"): 3, ("s1", "events", "unsupported"): 0})
-    assert signals.read("s1") == {"events.queued": 5, "events.dropped": 1}
-    assert signals.attributes("s1") == {"agentihooks.signals.events.dropped": 1, "agentihooks.signals.events.queued": 5}
-    assert signals.read(signals.UNATTRIBUTED) == {"gauges.queued": 1}
+    from hooks import config
+
+    signals.record({("s/1", "events", "queued"): 2, ("s/1", "events", "dropped"): 1, ("", "gauges", "queued"): 1})
+    signals.record({("s/1", "events", "queued"): 3, ("s/1", "events", "unsupported"): 0})
+    signals.record({("unattributed", "gauges", "queued"): 2, ("", "gauges", "queued"): 4})
+    assert signals.read("s/1") == {"events.queued": 5, "events.dropped": 1}
+    assert signals.attributes("s/1") == {
+        "agentihooks.signals.events.dropped": 1,
+        "agentihooks.signals.events.queued": 5,
+    }
+    assert signals.read("") == {"gauges.queued": 7}
+    folder = config.AGENTIHOOKS_HOME / "telemetry" / "signals"
+    assert sorted(p.name for p in folder.iterdir()) == ["s_1.json", "unattributed.json"]
+
+
+def test_one_unwritable_session_does_not_stop_the_others():
+    from hooks import config
+
+    (config.AGENTIHOOKS_HOME / "telemetry" / "signals" / "bad.json").mkdir(parents=True)
+    signals.record({("bad", "events", "queued"): 1, ("good", "events", "queued"): 1})
+    assert signals.read("good") == {"events.queued": 1}
+    assert signals.read("bad") == {}
+
+
+def test_counts_are_added_under_an_exclusive_folder_lock(monkeypatch):
+    locks = []
+    monkeypatch.setattr(signals.fcntl, "flock", lambda fd, op: locks.append(op))
+    signals.record({("s1", "events", "queued"): 1})
+    assert locks == [fcntl.LOCK_EX]
+
+
+def test_a_non_object_signal_file_reads_empty():
+    from hooks import config
+
+    folder = config.AGENTIHOOKS_HOME / "telemetry" / "signals"
+    folder.mkdir(parents=True)
+    (folder / "s1.json").write_text("[1]")
+    (folder / "s2.json").write_text('{"events.queued": 2, "note": "x"}')
+    assert signals.read("s1") == {}
+    assert signals.read("s2") == {"events.queued": 2}
 
 
 @pytest.fixture
@@ -230,7 +364,110 @@ def test_no_worker_counts_unsupported(monkeypatch):
     monkeypatch.setattr(otel, "_q", None)
     monkeypatch.setattr(otel, "_counts", {})
     otel.emit_event("e", {"session.id": "s1"})
-    assert otel._counts == {("s1", "events", "unsupported"): 1}
+    otel.record_gauge("g", 1.0, {})
+    assert otel._counts == {("s1", "events", "unsupported"): 1, ("", "gauges", "unsupported"): 1}
+
+
+def test_queued_signals_reach_the_worker_unchanged_and_are_counted(worker, monkeypatch):
+    monkeypatch.setattr(otel, "_q", queue.Queue(maxsize=3))
+    otel.emit_event("e", {"session.id": "s1"})
+    otel.emit_event("f", {"session.id": "s1"})
+    otel.record_gauge("g", 2, {})
+    assert [otel._q.get_nowait() for _ in range(3)] == [
+        ("event", "e", {"session.id": "s1"}),
+        ("event", "f", {"session.id": "s1"}),
+        ("gauge", "g", 2.0, {}),
+    ]
+    otel.flush()
+    assert signals.read("s1") == {"events.queued": 2}
+    assert signals.read(signals.UNATTRIBUTED) == {"gauges.queued": 1}
+
+
+@pytest.fixture
+def drain_env(monkeypatch):
+    from hooks import config
+
+    monkeypatch.setenv("AGENTIHOOKS_OTLP_ENDPOINT", "http://collector:4318")
+    folder = config.AGENTIHOOKS_HOME / "telemetry"
+    folder.mkdir(parents=True, exist_ok=True)
+    states = list(folder.glob("flush-*"))
+    assert not states
+    return folder
+
+
+def _state(folder):
+    import hashlib
+
+    key = hashlib.sha256(b"http://collector:4318|").hexdigest()
+    return folder / f"flush-{key}"
+
+
+def test_drain_without_a_collector_reports_the_worker_flush(monkeypatch):
+    monkeypatch.setattr(otel, "_flush_pending", lambda: True)
+    assert otel._drain() is True
+    monkeypatch.setattr(otel, "_flush_pending", lambda: False)
+    assert otel._drain() is False
+
+
+def test_drain_confirms_a_flush_and_clears_the_cooldown(drain_env, monkeypatch):
+    _state(drain_env).touch()
+    os.utime(_state(drain_env), (0, 0))
+    monkeypatch.setattr(otel, "_flush_pending", lambda: True)
+    assert otel._drain() is True
+    assert not _state(drain_env).exists()
+
+
+def test_drain_inside_the_cooldown_is_unconfirmed(drain_env, monkeypatch):
+    _state(drain_env).touch()
+    monkeypatch.setattr(otel, "_flush_pending", lambda: pytest.fail("cooldown skips the flush"))
+    assert otel._drain() is False
+
+
+def test_a_failed_drain_starts_the_cooldown(drain_env, monkeypatch):
+    monkeypatch.setattr(otel, "_flush_pending", lambda: False)
+    assert otel._drain() is False
+    assert _state(drain_env).exists()
+
+
+def test_a_drain_racing_another_failure_is_unconfirmed(drain_env, monkeypatch):
+    def other_failed():
+        _state(drain_env).touch()
+        return False
+
+    monkeypatch.setattr(otel, "_flush_pending", other_failed)
+    assert otel._drain() is False
+
+
+def test_a_drain_while_another_holds_the_lock_is_unconfirmed(drain_env, monkeypatch):
+    monkeypatch.setattr(otel, "_flush_pending", lambda: False)
+    with _state(drain_env).with_suffix(".lock").open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        assert otel._drain() is False
+    assert not _state(drain_env).exists()
+
+
+def test_a_drain_that_cannot_write_its_state_is_unconfirmed(monkeypatch):
+    from hooks import config
+
+    monkeypatch.setenv("AGENTIHOOKS_OTLP_ENDPOINT", "http://collector:4318")
+    (config.AGENTIHOOKS_HOME / "telemetry").write_text("a file where the folder belongs")
+    monkeypatch.setattr(otel, "_flush_pending", lambda: False)
+    assert otel._drain() is False
+
+
+def test_a_worker_event_without_a_session_resolves_the_unattributed_envelope(monkeypatch):
+    seen = []
+    monkeypatch.setattr(correlation, "resolve", lambda session: seen.append(session) or {})
+    otel._correlation({})
+    otel._correlation({"session.id": None})
+    assert seen == ["", ""]
+
+
+def test_flush_without_a_worker_writes_nothing(monkeypatch):
+    monkeypatch.setattr(otel, "_q", None)
+    monkeypatch.setattr(otel, "_counts", {("s1", "events", "unsupported"): 1})
+    otel.flush()
+    assert signals.read("s1") == {}
 
 
 class _Emitter:
@@ -273,6 +510,7 @@ def test_the_trace_root_carries_envelope_counters_freshness_and_truncation(monke
     monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "cursor")
     monkeypatch.setattr(correlation, "resolve", lambda session: {f"{P}session.id": session})
     monkeypatch.setattr("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 3)
+    monkeypatch.setattr("hooks.context.context_usage.session_cost", lambda s: 2.5 if s == "sess-1" else None)
     signals.record({("sess-1", "events", "dropped"): 2})
     exporter = _Exporter()
     monkeypatch.setattr(otel, "langfuse_exporter", lambda: exporter)
@@ -290,13 +528,14 @@ def test_the_trace_root_carries_envelope_counters_freshness_and_truncation(monke
     assert root["agentihooks.signals.events.dropped"] == 2
     assert root["agentihooks.export.last_accepted_at.state"] == correlation.MISSING
     assert root["agentihooks.export.queued.state"] == correlation.UNSUPPORTED
-    assert root["agentihooks.export.generated_at"]
+    assert root["agentihooks.export.generated_at"].endswith("+00:00")
+    assert root["gen_ai.usage.cost"] == 2.5
     assert root["agentihooks.export.spans"] == len(spans)
     assert root["agentihooks.export.truncated_fields"] == truncated > 0
     assert signals.read("sess-1")["traces.accepted"] == len(spans)
     assert signals.read("sess-1")["traces.truncated"] == truncated
     cursor = json.loads((tmp_path / "cursor" / "sess-1.json").read_text())
-    assert cursor["turns"] == 2 and cursor["accepted_at"]
+    assert cursor["turns"] == 2 and cursor["accepted_at"].endswith("+00:00")
 
     agent_trace.export_session("sess-1", path, _identity())
     root = exporter.batches[1][0].attributes
