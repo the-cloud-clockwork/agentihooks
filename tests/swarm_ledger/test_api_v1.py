@@ -1999,8 +1999,8 @@ def test_tick_tasks_span_more_than_one_page(live):
 
 
 def test_service_flag_keeps_operator_and_worker_credentials_distinct(live, monkeypatch):
-    from types import SimpleNamespace
     import urllib.request
+    from types import SimpleNamespace
 
     from scripts.swarm.ledger_client import LedgerClient
     from tests.swarm_ledger.test_ledger_authority import ledger
