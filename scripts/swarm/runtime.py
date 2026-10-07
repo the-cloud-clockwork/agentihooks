@@ -10,7 +10,7 @@ from pathlib import Path
 
 from scripts import agent_choice
 from scripts.profiles import plugins
-from scripts.swarm import effort_range, model_pick, naming, priming_trace, prompt
+from scripts.swarm import effort_range, model_pick, naming, priming_trace, profile_choice, prompt
 from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
 from scripts.swarm.templates import DEFAULT_PROFILES
@@ -97,7 +97,8 @@ class HerdrRuntime:
 
     def spawn(self, config, lane, name, task, spawns=None):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
-        profile = task.get("profile") or chosen.get("profile", DEFAULT_PROFILES[lane])
+        decision = profile_choice.choose(config.slug, lane, chosen, task, environ)
+        profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
         if spawns is None:
             agent, reason = self.choose(requested, environ)
@@ -123,7 +124,12 @@ class HerdrRuntime:
             name,
             [*argv, "--", *_model_args(agent, picked.__dict__, environ, effort_range.of(config)), *mode],
         )
-        return replace(placed, model_source=picked.source, model_confidence=picked.confidence)
+        return replace(
+            placed,
+            model_source=picked.source,
+            model_confidence=picked.confidence,
+            profile_decision=decision.record(),
+        )
 
     def resume(self, config, agent, text):
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""

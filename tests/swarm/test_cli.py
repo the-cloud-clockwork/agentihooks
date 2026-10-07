@@ -394,7 +394,16 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path):
     config = cli.SwarmConfig("sw", "/repo", 1, 1)
     placed = rt.spawn(config, "ci", "ci@a1b2c3-0001", {"id": "t2", "title": "speed up the tests"})
     prompt_path = tmp_path / "sw" / "prompts" / "ci@a1b2c3-0001.md"
-    assert placed == runtime.Placed("w3:p1", "codex", "acct", model_source="lane-default")
+    decision = {
+        "profile": "cicd",
+        "source": "lane",
+        "responsibility": "ci lane",
+        "model": "",
+        "confidence": None,
+        "calibrated": None,
+        "anchors": [],
+    }
+    assert placed == runtime.Placed("w3:p1", "codex", "acct", model_source="lane-default", profile_decision=decision)
     assert seen[0][1:4] == ["init-agent", "--host", "herdr"]
     assert seen[0][seen[0].index("--name") + 1 : seen[0].index("--name") + 4] == ["ci@a1b2c3-0001", "--agent", "codex"]
     assert oct(prompt_path.stat().st_mode)[-3:] == "600"
