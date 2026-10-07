@@ -334,7 +334,8 @@ class CodexAdapter:
                 for g in prior
                 if not any(_command_is_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
             ]
-            merged[event] = foreign + groups
+            # Ours first: codex keys hook trust by group position and herdr appends its group.
+            merged[event] = groups + foreign
         # Reap our own entries under events we no longer wire (e.g. a stale
         # PostCompact from an earlier install) — foreign groups there survive.
         for event in [e for e in merged if e not in desired]:

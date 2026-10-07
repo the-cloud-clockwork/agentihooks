@@ -10,12 +10,14 @@ codex sessions simply log nothing here.
 """
 
 import json
+import re
 from pathlib import Path
 
 from hooks.config import AGENTIHOOKS_HOME, LOG_TRANSCRIPT
 
 # Track last logged line per session to avoid duplicates
 POSITION_DIR = AGENTIHOOKS_HOME / "transcript_positions"
+_SECRET_NAME_RE = re.compile(r"(?:^|[^a-z])(?:token|secret[_-]?key|api[_-]?key|passwd)$", re.IGNORECASE)
 
 
 def get_last_position(session_id: str) -> int:
@@ -197,14 +199,15 @@ def mask_value(value: object) -> object:
 def mask_member(key: str, value: object) -> object:
     from hooks.secrets import contains_generic_secret, redact
 
+    label = "SECRET" if _SECRET_NAME_RE.search(key) else key
     if isinstance(value, (list, tuple)):
         return [mask_member(key, item) for item in value]
     if isinstance(value, dict):
-        probe = f"{key}=12345678"
+        probe = f"{label}=12345678"
         context = key if contains_generic_secret(probe) else ""
         return {redact(name, mode="strict"): mask_member(context or name, item) for name, item in value.items()}
     masked = mask_value(value)
-    contextual = f"{key}={json.dumps(masked, ensure_ascii=False)}"
+    contextual = f"{label}={json.dumps(masked, ensure_ascii=False)}"
     if contains_generic_secret(contextual):
         return "[REDACTED:generic_secret]"
     return masked
