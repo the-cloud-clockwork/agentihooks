@@ -341,7 +341,9 @@ def cmd_take_master(store, args):
     runtime = HerdrRuntime()
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, runtime.live_names())
-    name = os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    from scripts.gates import Who
+
+    name = Who.from_env().name
     record, transfer = take_master.take(store, args.slug, name, runtime, now_ms(), args.replace)
     ledger = LedgerClient()
     if ledger.closed(args.slug):
@@ -599,7 +601,9 @@ def cmd_send_message(store, args):
 
 
 def _me(store, args):
-    name = store.names.resolve(args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", ""))
+    from scripts.gates import Who
+
+    name = store.names.resolve(args.name or Who.from_env().name)
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
     if agent is None:
         raise SwarmError(f"{name or 'this session'} is not an agent of swarm {args.slug}")

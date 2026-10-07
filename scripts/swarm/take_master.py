@@ -42,10 +42,10 @@ def take(store, slug, name, runtime, now_ms, replace_live=False):
     pid = agent_pid()
     if not seated:
         name = store.next_name(slug, MASTER, now_ms)
-        if not name_session(pid, name):
-            raise SwarmError("this session is not registered with agentihooks, so the tick could not see it as master")
-        if carried:
-            store.names.alias(carried, name)
+    if not name_session(pid, name):
+        raise SwarmError("this session is not registered with agentihooks, so the tick could not see it as master")
+    if not seated and carried and not store.names.entry(carried):
+        store.names.alias(carried, name)
     for agent in others:
         if not runtime.retire(agent, agent.name in live):
             raise SwarmError(f"could not retire {agent.name}; try again")

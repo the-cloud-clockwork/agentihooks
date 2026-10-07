@@ -75,7 +75,7 @@ def test_a_session_already_named_as_this_swarms_master_keeps_its_name(taker, mon
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
     assert run("sw", "take-master") == 0
     assert _masters(store) == [(name, "master@sw", "codex")]
-    assert named == []
+    assert named == [(4242, name)]
 
 
 def test_a_master_retaking_its_own_seat_keeps_its_record_and_name(taker, monkeypatch):
@@ -85,7 +85,7 @@ def test_a_master_retaking_its_own_seat_keeps_its_record_and_name(taker, monkeyp
     rt.live.add(name)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
     assert run("sw", "take-master") == 0
-    assert rt.killed == [] and named == []
+    assert rt.killed == [] and named == [(4242, name)]
     assert _masters(store) == [(name, "master@sw", "codex")]
     assert store.redis.lrange(store.key("sw", "history"), 0, -1) == []
 
