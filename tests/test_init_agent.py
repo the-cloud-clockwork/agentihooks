@@ -463,6 +463,73 @@ def test_a_swarm_spawn_exports_its_compact_limit(tmp_path):
     assert text.index("AGENTIHOOKS_COMPACT_LIMIT") < text.index(" claude ")
 
 
+def test_a_swarm_launcher_pins_its_own_pid(tmp_path):
+    lines = _launcher_text(tmp_path, {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_SWARM_TASK": "t1"}).splitlines()
+    assert {"export AGENTIHOOKS_SWARM=sw", "export AGENTIHOOKS_SWARM_TASK=t1"} <= set(lines)
+    assert "export AGENTIHOOKS_SWARM_LAUNCHER=$$" in lines
+    text = "\n".join(lines)
+    assert text.index("AGENTIHOOKS_SWARM_LAUNCHER") < text.index(" claude ")
+
+
+AGENT_ENV = {
+    "AGENTIHOOKS_AGENT_NAME": "engineer@abcdef-0001",
+    "AGENTIHOOKS_SWARM": "sw",
+    "AGENTIHOOKS_SWARM_LANE": "eng",
+    "AGENTIHOOKS_SWARM_TASK": "t1",
+    "AGENTIHOOKS_SWARM_LAUNCHER": "10",
+}
+
+
+def _dry_launcher(monkeypatch, tmp_path, name, environ, *extra):
+    monkeypatch.setattr(
+        init_agent,
+        "_launch_command",
+        lambda launcher, directory, title, env: ("linux", ["/usr/bin/terminal", str(launcher)]),
+    )
+    runtime = tmp_path / "runtime"
+    env = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(runtime), **environ}
+    argv = ["--dir", str(tmp_path), "--name", name, "--agent", "claude", *extra, "--dry-run"]
+    assert init_agent.main(argv, env) == 0
+    return next((runtime / "agentihooks-claude-terminal").glob("*.sh")).read_text()
+
+
+def test_a_launch_from_an_agent_starts_without_its_swarm_identity(monkeypatch, tmp_path):
+    text = _dry_launcher(monkeypatch, tmp_path, "proof", AGENT_ENV)
+    assert "AGENTIHOOKS_SWARM" not in text
+    assert "export AGENTIHOOKS_AGENT_NAME=proof\n" in text
+
+
+def test_a_tick_spawn_keeps_its_swarm_identity_without_the_mark(monkeypatch, tmp_path):
+    text = _dry_launcher(monkeypatch, tmp_path, "engineer@abcdef-0002", {**AGENT_ENV, "AGENTIHOOKS_SWARM_SPAWN": "1"})
+    assert "export AGENTIHOOKS_SWARM_TASK=t1\n" in text
+    assert "export AGENTIHOOKS_SWARM_LAUNCHER=$$\n" in text
+    assert "AGENTIHOOKS_SWARM_SPAWN" not in text
+
+
+def test_a_quota_handoff_keeps_its_swarm_identity(monkeypatch, tmp_path):
+    assert _handoff(monkeypatch, tmp_path, None, extra=["--dry-run"], env_extra=AGENT_ENV) == 0
+    launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh"))
+    assert "export AGENTIHOOKS_SWARM_TASK=t1\n" in launcher.read_text()
+
+
+def test_an_agent_relaunching_itself_keeps_its_swarm_identity(monkeypatch, tmp_path):
+    text = _dry_launcher(monkeypatch, tmp_path, "engineer@abcdef-0001", AGENT_ENV)
+    assert "export AGENTIHOOKS_SWARM_TASK=t1\n" in text
+
+
+def test_the_launch_environment_drops_identity_and_keeps_swarm_settings():
+    environ = {
+        **AGENT_ENV,
+        "AGENTIHOOKS_SWARM_AUTONOMY": "full",
+        "AGENTIHOOKS_SWARM_EFFORT_RANGE": "low:high",
+        "AGENTIHOOKS_SWARM_REDIS_URL": "redis://r",
+    }
+    dropped = init_agent._launch_environ(environ, "proof", False)
+    assert dropped == {"AGENTIHOOKS_AGENT_NAME": "engineer@abcdef-0001", "AGENTIHOOKS_SWARM_REDIS_URL": "redis://r"}
+    assert init_agent._launch_environ(environ, "proof", True) == environ
+    assert init_agent._launch_environ({**environ, "AGENTIHOOKS_SWARM_SPAWN": "1"}, "proof", False) == environ
+
+
 def test_a_launch_outside_a_swarm_leaves_langfuse_alone(tmp_path):
     text = _launcher_text(tmp_path, {})
     assert "AGENTIHOOKS_SWARM" not in text
