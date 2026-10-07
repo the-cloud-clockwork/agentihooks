@@ -15,6 +15,8 @@ jobs:
   ledger-equivalence:
     if: contains(github.event.pull_request.body, '<!-- ledger-equivalence -->')
     runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,13 +56,9 @@ jobs:
             exit 1
           fi
           echo 'PASS: identical base and head; planted checkbox fault rejected'
-      - name: Use the Ubuntu archive for browser dependencies
-        timeout-minutes: 1
-        run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
-
       - name: Install the page replay browser
         timeout-minutes: 2
-        run: python -m playwright install --with-deps chromium
+        uses: ./head/.github/actions/browser-cache
       - name: Compare recorded page actions
         run: |
           python -I head/tests/swarm_ledger/page_replay.py "$PWD/base" "$RUNNER_TEMP/base-page" base-page.json
