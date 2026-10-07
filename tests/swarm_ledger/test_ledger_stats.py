@@ -314,8 +314,28 @@ class TestStatsSyncEvent:
         assert d["time_left_minutes"] == 60
         refresh = ctx.meta["stats_refresh"]
         assert refresh["state"] == "refreshed"
+        assert refresh["id"] == "busy"
+        assert refresh["at"] == NOW
         assert refresh["rev"] == ctx.rev
         assert refresh["completed_at"] == NOW
+        assert refresh["calculation"] == {
+            "minutes": 60,
+            "remaining": 1,
+            "rate": 1,
+            "chain": 1,
+            "mean": 20,
+            "stale": True,
+            "gap": "",
+        }
+        assert ctx.stamps["time_left_minutes"] == {"at": NOW, "rev": ctx.rev, "by": "stats"}
+        assert ctx.events[0] == {
+            "rev": ctx.rev,
+            "at": NOW,
+            "by": "stats",
+            "kind": "stats refreshed",
+            "target": "",
+            "id": "busy",
+        }
         assert refresh["counts"] == {
             "phases": {"done": 0, "total": 1},
             "tasks": {"done": 1, "total": 2},
@@ -338,7 +358,25 @@ class TestStatsSyncEvent:
         assert d["time_left_minutes"] == 400
         assert ctx.meta["stats_refresh"]["state"] == "failed"
         assert ctx.meta["stats_refresh"]["error"] == "Stats calculation failed: ValueError"
-        assert ctx.meta["stats_refresh"]["completed_at"] == NOW
+        assert ctx.meta["stats_refresh"] == {
+            "id": "failed",
+            "rev": ctx.rev,
+            "at": NOW,
+            "state": "failed",
+            "completed_at": NOW,
+            "error": "Stats calculation failed: ValueError",
+        }
+        assert ctx.events[0] == {
+            "rev": ctx.rev,
+            "at": NOW,
+            "by": "stats",
+            "kind": "stats refresh failed",
+            "target": "",
+            "id": "failed",
+        }
+        assert ctx.events[1]["text"] == (
+            "Stats calculation failed: ValueError. Prior estimate retained; retry the refresh. Judge open follow-ups separately."
+        )
         ctx.meta["events"] += ctx.events
         ctx.events = []
         assert ledger_core.record_sync(d, {"op": "stats_sync", "id": "retry"}, ctx)
@@ -368,3 +406,97 @@ class TestStatsSyncEvent:
             "followups": {"done": 1, "total": 1},
         }
         assert d["time_left_minutes"] == 0
+
+    def test_refresh_result_and_events_are_complete(self):
+        d = doc(
+            tasks=[task("a", "done"), task("b", "open")],
+            time_left_minutes=400,
+        )
+        ctx = self.ctx([event("task claimed", "a", NOW - 30 * MINUTE), event("task done", "a", NOW - 10 * MINUTE)])
+        text = ledger_stats.refresh(d, ctx, "computed")
+        assert ctx.meta["stats_refresh"] == {
+            "id": "computed",
+            "rev": 1,
+            "at": NOW,
+            "state": "refreshed",
+            "completed_at": NOW,
+            "counts": {
+                "phases": {"done": 0, "total": 0},
+                "tasks": {"done": 1, "total": 2},
+                "followups": {"done": 0, "total": 0},
+            },
+            "calculation": {
+                "minutes": 60,
+                "remaining": 1,
+                "rate": 1,
+                "chain": 1,
+                "mean": 20,
+                "stale": True,
+                "gap": "",
+            },
+        }
+        assert d["time_left_minutes"] == 60
+        assert ctx.events == [
+            {"rev": 1, "at": NOW, "by": "stats", "kind": "stats refreshed", "target": "", "id": "computed"}
+        ]
+        assert ctx.stamps == {"time_left_minutes": {"rev": 1, "at": NOW, "by": "stats"}}
+        assert "computed 1h 0m" in text
+
+    def test_refresh_helper_failure_retains_estimate_and_records_failure(self, monkeypatch):
+        d = doc(time_left_minutes=400)
+        ctx = self.ctx()
+
+        def fail(*args):
+            raise ValueError("synthetic failure")
+
+        monkeypatch.setattr(ledger_stats, "calculate", fail)
+        text = ledger_stats.refresh(d, ctx, "failure")
+        assert d["time_left_minutes"] == 400
+        assert ctx.stamps == {}
+        assert ctx.meta["stats_refresh"] == {
+            "id": "failure",
+            "rev": 1,
+            "at": NOW,
+            "state": "failed",
+            "completed_at": NOW,
+            "error": "Stats calculation failed: ValueError",
+        }
+        assert ctx.events == [
+            {"rev": 1, "at": NOW, "by": "stats", "kind": "stats refresh failed", "target": "", "id": "failure"}
+        ]
+        assert (
+            text
+            == "Stats calculation failed: ValueError. Prior estimate retained; retry the refresh. Judge open follow-ups separately."
+        )
+
+    def test_calculation_names_missing_close_history(self):
+        result = ledger_stats.calculate(doc(tasks=[task("a", "open")]), [], NOW)
+        assert result["gap"] == "No task closed in the last hour"
+        assert result["minutes"] is None
+
+    def test_review_uses_the_supplied_calculation(self):
+        d = doc(time_left_minutes=400)
+        result = {
+            "minutes": 75,
+            "remaining": 3,
+            "rate": 2,
+            "chain": 2,
+            "mean": 30,
+            "stale": False,
+            "gap": "",
+        }
+        text = ledger_stats.review(d, {"events": []}, NOW, result)
+        assert "computed 1h 15m from 3 remaining at 2 an hour and a chain of 2 at 30m a task, current" in text
+
+    def test_successful_stats_refresh_keeps_its_cooldown(self):
+        ctx = self.ctx([{"kind": "stats sync requested", "at": NOW - 1}])
+        assert ledger_core.record_sync(doc(), {"op": "stats_sync", "id": "early"}, ctx) is False
+        assert ctx.events == []
+        ctx.at += ledger_core.SYNC_COOLDOWN_MS - 1
+        assert ledger_core.record_sync(doc(), {"op": "stats_sync", "id": "boundary"}, ctx) is True
+
+    def test_failed_stats_refresh_does_not_bypass_crew_sync_cooldown(self):
+        ctx = self.ctx([{"kind": "sync requested", "at": NOW - 1}])
+        ctx.meta["stats_refresh"] = {"state": "failed"}
+        assert ledger_core.record_sync(doc(), {"op": "sync", "id": "crew"}, ctx) is False
+        assert ctx.events == []

@@ -152,7 +152,7 @@ def review(doc, meta, now, calculation=None):
 
 
 def refresh(doc: dict, ctx: "Context", request_id: str) -> str:
-    state = {"id": request_id, "rev": ctx.rev, "at": ctx.at, "state": "pending"}
+    state = {"id": request_id, "rev": ctx.rev, "at": ctx.at}
     ctx.meta["stats_refresh"] = state
     events = ctx.meta["events"] + ctx.events
     try:
