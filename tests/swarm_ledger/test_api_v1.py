@@ -37,6 +37,8 @@ def live(authority_live):
 
 
 from scripts.swarm_ledger import api as api
+from scripts.swarm_ledger import ledger as ledger
+from scripts.swarm_ledger import ledger_server as ledger_server
 from scripts.swarm_ledger.api import admin as admin
 from scripts.swarm_ledger.api import errors as errors
 from scripts.swarm_ledger.api import mutations as mutations
@@ -592,3 +594,298 @@ def test_forbidden_error_envelope_keeps_its_status_and_bounds(live, monkeypatch)
     assert reply["error"]["code"] == "forbidden"
     assert reply["error"]["details"]["rejected"] == ["denied-bound"]
     assert any("cannot write as other" in row for row in reply["error"]["details"]["_meta"]["warnings"])
+
+
+def test_request_errors_have_stable_envelopes(live):
+    cases = [
+        ("GET", "missing", None, {}, 404, "resource_missing", "No such resource"),
+        ("GET", "metadata", None, {"Host": "untrusted.invalid"}, 403, "forbidden", "Host not allowed"),
+        ("GET", "metadata", None, {"Origin": "https://untrusted.invalid"}, 403, "forbidden", "Origin not allowed"),
+        (
+            "GET",
+            "metadata",
+            None,
+            {"X-Ledger-Token": "invalid"},
+            403,
+            "forbidden",
+            "Missing or wrong ledger credential",
+        ),
+        (
+            "POST",
+            "operations",
+            {},
+            {"Content-Type": "text/plain"},
+            415,
+            "content_type",
+            "Content-Type must be application/json",
+        ),
+        (
+            "POST",
+            "operations",
+            {"ops": "invalid"},
+            {},
+            400,
+            "schema_invalid",
+            "Request does not match the resource schema",
+        ),
+        ("GET", "chat?limit=invalid", None, {}, 400, "schema_invalid", "Limit must be an integer"),
+        ("GET", "chat?limit=1&limit=2", None, {}, 400, "schema_invalid", "Query parameters must be unique"),
+    ]
+    for method, resource, payload, headers, status, code, message in cases:
+        assert request(live, method, resource, payload, **headers) == (
+            status,
+            {"error": {"code": code, "message": message}},
+        )
+
+
+def test_layout_write_and_bin_lifecycle_are_versioned(live):
+    status, data, _ = send(
+        live,
+        "PUT",
+        "/api/v1/layout",
+        json.dumps({"capacity-box": {"height": 300}}).encode(),
+        **{"Origin": sorted(server.ALLOWED_ORIGINS)[0], "Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert json.loads(data)["data"] == {"capacity-box": {"height": 300}}
+    for action in ("delete", "restore"):
+        status, data, _ = send(
+            live,
+            "POST",
+            "/api/v1/bin/actions",
+            json.dumps({"action": action, "slug": SLUG}).encode(),
+            **{"Origin": sorted(server.ALLOWED_ORIGINS)[0], "Content-Type": "application/json"},
+        )
+        assert status == 200
+        assert json.loads(data) == {"slug": SLUG, "action": action}
+    status, data, _ = send(live, "GET", f"/api/v1/ledgers/{SLUG}", **{"X-Ledger-Token": live["admin"]})
+    assert status == 200
+    assert json.loads(data)["data"]["title"] == "Authority"
+
+
+def test_put_operations_and_options_keep_the_versioned_transport(live):
+    import http.client
+
+    rev = request(live, "GET", "chat")[1]["revision"]
+    payload = {
+        "ops": [{"op": "add", "id": "put-proof", "thread": "chat", "text": "Put canary"}],
+        "guards": {"chat": rev},
+    }
+    assert request(live, "PUT", "operations", payload)[0] == 200
+    conn = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=5)
+    try:
+        conn.request(
+            "OPTIONS",
+            f"/api/v1/ledgers/{SLUG}/operations",
+            headers={"Host": live["host"], "Origin": "null", "Access-Control-Request-Private-Network": "true"},
+        )
+        response = conn.getresponse()
+        assert response.status == 204
+        assert response.getheader("Access-Control-Allow-Origin") == "null"
+        assert response.getheader("Access-Control-Allow-Methods") == "GET, PUT, POST"
+        assert response.getheader("Access-Control-Allow-Headers") == "Content-Type, X-Ledger-Token, X-Ledger-Agent"
+        assert response.getheader("Access-Control-Allow-Private-Network") == "true"
+        assert response.read() == b""
+    finally:
+        conn.close()
+
+
+def test_command_export_audit_and_purge_use_resources(live, capsys):
+    from types import SimpleNamespace
+
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    assert ledger.export(SLUG, service=True)["phases"][0]["id"] == "p1"
+    ledger.cmd_audit(SimpleNamespace(slug=SLUG))
+    assert "to clean" in capsys.readouterr().out
+    ledger.cmd_artifact_purge(SimpleNamespace(slug=SLUG, name="api-reader"))
+    assert json.loads(capsys.readouterr().out) == {"purged": 0, "artifacts": 0}
+
+
+def test_domain_operation_families_use_their_named_guards(live):
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    client.mutate(SLUG, [{"op": "join", "id": "master-join", "by": "boss", "role": "orchestrator"}])
+    client.mutate(
+        SLUG,
+        [
+            {
+                "op": "task_add",
+                "id": "task-seed",
+                "by": "boss",
+                "task": "t1",
+                "title": "Proof",
+                "lane": "eng",
+                "phase": "p1",
+            }
+        ],
+    )
+    client.mutate(SLUG, [{"op": "add_item", "id": "q1", "by": "boss", "list": "questions", "text": "Question"}])
+    client.mutate(SLUG, [{"op": "add_item", "id": "f1", "by": "boss", "list": "followups", "text": "Follow up"}])
+    cases = [
+        ("phases/p1", {"op": "claim", "by": "api-reader", "item": "phases/p1"}),
+        ("questions", {"op": "add_item", "by": "swarm", "list": "questions", "text": "Another question"}),
+        ("metadata", {"op": "gate_bypass", "by": "api-reader", "unhandled": 0}),
+        ("metadata", {"op": "gate_lift", "by": "api-reader", "gate": "watch"}),
+        ("members", {"op": "ack", "by": "api-reader", "rev": 1}),
+        ("members", {"op": "leave", "by": "api-reader"}),
+        ("members", {"op": "agent_rename", "by": "swarm", "old": "boss", "new": "boss-new"}),
+        ("metadata", {"op": "sync"}),
+        ("metadata", {"op": "stats_sync"}),
+        ("metadata", {"op": "title_set", "text": "Resource title"}),
+        ("metadata", {"op": "summary_set", "by": "swarm", "note": "Summary"}),
+        ("metadata", {"op": "size_set", "by": "swarm", "size": "swarm"}),
+        ("metadata", {"op": "set", "by": "swarm", "path": "time_left_minutes", "value": 20}),
+        ("sources", {"op": "source_add", "by": "swarm", "source": "https://example.com/proof"}),
+        ("tasks/t1", {"op": "task_update", "by": "swarm", "item": "tasks/t1", "fields": {"description": "Updated"}}),
+        ("phases/p1", {"op": "phase_update", "by": "swarm", "item": "phases/p1", "fields": {"description": "Updated"}}),
+        ("phases", {"op": "phase_add", "by": "swarm", "phase": "p2", "title": "Later"}),
+        ("questions/q1", {"op": "retext", "by": "swarm", "item": "questions/q1", "text": "New question"}),
+        ("questions/q1", {"op": "answer", "by": "swarm", "item": "questions/q1", "text": "Answer"}),
+        ("followups/f1", {"op": "set", "by": "swarm", "path": "followups/f1/done", "value": True}),
+        ("followups/f1", {"op": "verdict", "item": "followups/f1", "verdict": "approved"}),
+        ("priorities", {"op": "priority", "by": "swarm", "item": "questions/q1", "text": "Decide"}),
+        ("priorities", {"op": "priority_clear", "target": "all"}),
+        ("notifications", {"op": "notification_clear", "target": "all"}),
+    ]
+    for target, operation in cases:
+        operation["id"] = uuid.uuid4().hex
+        expected = request(live, "GET", target)[1]["revision"]
+        status, reply = request(live, "POST", "operations", {"ops": [operation], "guards": {target: expected}})
+        assert status == 200, operation["op"]
+        assert "rejected" in reply
+
+
+def test_resource_reads_preserve_pinned_identity(live):
+    from unittest.mock import patch
+
+    from tests.swarm_ledger.test_ledger_authority import ledger, pinned
+
+    original = ledger.urllib.request.urlopen
+    with pinned("api-reader"), patch.object(ledger.urllib.request, "urlopen", wraps=original) as opened:
+        assert ledger.resource(SLUG, "metadata")["title"] == "Authority"
+        outgoing = opened.call_args.args[0]
+        assert outgoing.get_header("X-ledger-agent") == "api-reader"
+        assert outgoing.get_header("X-ledger-token") != live["admin"]
+
+
+def test_swarm_control_families_keep_domain_arguments(live):
+    from unittest.mock import patch
+
+    cases = [
+        ({"action": "terminate", "name": "engineer"}, ["terminate", "engineer"], "swarm"),
+        (
+            {"action": "restore-decision", "agent": "engineer", "choice": "fresh"},
+            ["restore-decision", "engineer", "fresh"],
+            "swarm",
+        ),
+        ({"action": "lift", "agent": "engineer", "gate": "watch"}, ["lift", "engineer", "watch"], "swarm"),
+        ({"action": "doctor_start"}, ["start"], "doctor"),
+        ({"action": "doctor_stop"}, ["stop"], "doctor"),
+        (
+            {
+                "action": "set",
+                "max_eng": 2,
+                "max_ci": 3,
+                "max_plan": 1,
+                "codex_share": 20,
+                "compact_limit": 600,
+                "effort_min": "medium",
+                "effort_max": "high",
+                "autonomy": "full",
+            },
+            [
+                "set",
+                "max-eng-agents=2",
+                "max-ci-agents=3",
+                "max-plan-agents=1",
+                "codex-share=20",
+                "compact-limit=600",
+                "effort-min=medium",
+                "effort-max=high",
+                "autonomy=full",
+            ],
+            "swarm",
+        ),
+    ]
+    for payload, args, command in cases:
+        with patch.object(server, "swarm_control", return_value=({}, None)) as control:
+            assert request(live, "POST", "swarm/actions", payload) == (
+                200,
+                {"action": payload["action"], "accepted": True},
+            )
+            assert control.call_args.args == (SLUG, args, command)
+    with patch.object(server, "refresh_quota", return_value=({}, None)) as refresh:
+        assert request(live, "POST", "swarm/actions", {"action": "quota_refresh"}) == (
+            200,
+            {"action": "quota_refresh", "accepted": True},
+        )
+        refresh.assert_called_once_with(SLUG)
+    with patch.object(server, "swarm_control", return_value=(None, "Failure")):
+        assert request(live, "POST", "swarm/actions", {"action": "pause"}) == (
+            502,
+            {"error": {"code": "control_failed", "message": "Swarm control failed"}},
+        )
+
+
+def test_artifact_collection_and_lifecycle_keep_domain_state(live, tmp_path):
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    client.mutate(
+        SLUG,
+        [
+            {
+                "op": "task_add",
+                "id": "artifact-task",
+                "by": "swarm",
+                "task": "t1",
+                "title": "Proof",
+                "lane": "eng",
+                "artifact": True,
+            }
+        ],
+    )
+    client.mutate(
+        SLUG,
+        [
+            {
+                "op": "task_update",
+                "id": "artifact-claim",
+                "by": "swarm",
+                "item": "tasks/t1",
+                "fields": {"state": "claimed", "claimed_by": "api-reader"},
+            }
+        ],
+    )
+    source = tmp_path / "proof.md"
+    source.write_text("# Requested proof")
+    file = ledger.upload_artifact(SLUG, "api-reader", str(source))
+    published = {
+        "op": "artifact_add",
+        "id": "published-artifact",
+        "by": "api-reader",
+        "task": "t1",
+        "title": "Proof",
+        "file": file,
+    }
+    assert client.mutate(SLUG, [published])["rejected"] == []
+    assert client.request(SLUG, "artifacts/published-artifact")["data"]["title"] == "Proof"
+    assert (
+        client.mutate(SLUG, [{"op": "artifact_delete", "id": "remove-artifact", "target": "published-artifact"}])[
+            "rejected"
+        ]
+        == []
+    )
+    assert client.collection(SLUG, "artifacts") == []
+    assert client.collection(SLUG, "artifact_trash")[0]["id"] == "published-artifact"
+    assert (
+        client.mutate(SLUG, [{"op": "artifact_restore", "id": "restore-artifact", "target": "published-artifact"}])[
+            "rejected"
+        ]
+        == []
+    )
+    assert len(client.collection(SLUG, "artifacts")) == 1

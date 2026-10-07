@@ -1246,5 +1246,53 @@
   "scripts/swarm_ledger/storage_migration/__init__.py:scripts.swarm_ledger.storage_migration.x_import_directory__mutmut_50:1769306d531c2d7c69d3249c1ab079e886e0c7016f0f374507f85964f7e19bf2": {
     "reader": "Standards",
     "reason": "import_directory imports core and load_state from the same repository.file module. Runtime identity check confirms its explicit core argument is exactly load_state default core; mutating module attributes affects that same object in both versions. Omitting the duplicate argument changes no loader behavior."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_layout__mutmut_5:0c083d67c3593f83d199a9f0a1bca2bee8ed08af1256a3bdca979c50a29f6d7f": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The layout HTTPMessage Origin lookup changes only key case. The operator-origin authorization decision and subsequent layout operation are identical."
+  },
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_layout__mutmut_6:b4059cb3e7d3e96d43ce220c7d877c3d510a733234e0c8f95bd33c7424d066da": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The layout HTTPMessage Origin lookup changes only key case. The operator-origin authorization decision and subsequent layout operation are identical."
+  },
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1request__mutmut_5:5d3b3f0dbb96f364e928786c53708b3307c0efa8846b6f426a862971044cac5f": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Request.get_method infers GET exactly when data is None and POST otherwise. This function supplies None for missing payload and non-None encoded JSON for every present payload; method=None yields the same HTTP verb and returned JSON."
+  },
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1request__mutmut_9:6cbd362a2e80218b762227cb5787ef39c82ab983c095d993ccbf9bcae4096c5c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Omitting method uses Request.get_method inference: GET for None data, POST for encoded JSON. These are exactly the two branches of the removed explicit argument, preserving HTTP verb and returned JSON."
+  },
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1request__mutmut_14:4d38f1093d61200281fea656f0c8d568ca713fb29664181ec96cf8befb3614c2": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Adding X to quote safe characters changes nothing: ASCII X is always unreserved and never escaped, independently of safe. All other ASCII and all encoded non-ASCII characters retain the same quoting."
+  },
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1request__mutmut_18:a40580fb0eb5e9ca6e8ced66dbe94b997f73b6c8e3a916675bf45fb18dbf54c7": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "urllib.request.Request normalizes Content-Type, content-type and CONTENT-TYPE to the identical Content-type header key. Values, credentials, serialized HTTP header and response JSON remain identical."
+  },
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1request__mutmut_19:2087c0eac6f45f4b6043560a4842f3c01ddbad8409c9ae2b6defe698de7a80fe": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "urllib.request.Request normalizes Content-Type, content-type and CONTENT-TYPE to the identical Content-type header key. Values, credentials, serialized HTTP header and response JSON remain identical."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_body__mutmut_23:960957e27b2b43b54d0f04fe3f91fdd193c25b1a1c178fde1b35c521111eb596": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The HTTPMessage lookup changes only Content-Length key case; HTTPMessage compares field names case-insensitively, preserving value, length conversion, status and body."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_3:77d800181aaf3c90617daf87e15fbc84c2d56924276d859e21fe2c0020c09709": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The HTTPMessage Host lookup changes only key case. The same value reaches the unchanged allowlist predicate and produces the same status and envelope."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_4:3b7f94f360d386775e2e6cea0def19b248404ddf3dc4108b061dca0815c8e231": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The HTTPMessage Host lookup changes only key case. The same value reaches the unchanged allowlist predicate and produces the same status and envelope."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_21:a2ea0afde3a3050f0fe907fcbf48de136c0221371f78c11879087f5f778cda9e": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The HTTPMessage Origin lookup changes only key case. Supplied and missing origins are identical before the unchanged origin guard."
+  },
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_22:6a85ce261f0886cdf92c8f7e20df9548386a579447cfe54d73e421c8dff9b62c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The HTTPMessage Origin lookup changes only key case. Supplied and missing origins are identical before the unchanged origin guard."
   }
 }
