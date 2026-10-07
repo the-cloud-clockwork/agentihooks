@@ -239,6 +239,26 @@ class HerdrRuntime:
         seat = session_bands.pick(seats(self._quota_accounts))
         return (seat.harness, "rotation") if seat else ("claude", agent_choice.ALL_FULL)
 
+    def _quota_transfer(self, saved, profile, environ, lane):
+        from scripts.swarm import quota_handoff
+
+        allocation = getattr(self, "_quota_allocations", {}).get(lane, {"claude": 1, "codex": 1})
+        account = quota_handoff.successor(
+            [row for row in self._quota_accounts if allocation[row.harness]],
+            self._quota_cap,
+            self._quota_floor,
+            not plugins.claude_only(profile),
+            quota_handoff.Thresholds.from_env(environ),
+        )
+        if account is None:
+            raise SpawnError("no account has room for a quota handoff")
+        return {
+            **saved,
+            "harness": account.harness,
+            "account": account.name,
+            **({"model": ""} if account.harness != saved["harness"] else {}),
+        }
+
     def _planned_account(self, task_id, agent):
         planned = getattr(self, "_quota_tasks", {}).get(task_id)
         return getattr(self, "_quota_task_accounts", {}).get(task_id) if planned == agent else None
@@ -256,6 +276,15 @@ class HerdrRuntime:
         return row
 
     def spawn(self, config, lane, name, task):
+
+    def _reserve_account(self, account, lane, agent):
+        if account is not None:
+            if lane in getattr(self, "_quota_allocations", {}):
+                self._quota_allocations[lane][agent] -= 1
+            self._quota_accounts = [
+                replace(row, sessions=row.sessions + 1) if row == account else row for row in self._quota_accounts
+            ]
+
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
         saved = relaunch or _transfer(task)
@@ -281,7 +310,7 @@ class HerdrRuntime:
             kind = "master affinity" if lane == MASTER else "lane harness"
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}")
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
-        saved = self._quota_transfer(saved, profile, environ) if saved and quota_transfer else saved
+        saved = self._quota_transfer(saved, profile, environ, lane) if saved and quota_transfer else saved
         if saved and want and saved["harness"] != want and not quota_transfer:
             saved = {}
         if want and not saved:
@@ -323,7 +352,7 @@ class HerdrRuntime:
         elif lane in PICKED_LANES:
             picked = timing.call(model_pick.pick, agent, chosen, task, environ)
         else:
-            picked = _lane_default(lane, agent, chosen)
+            picked = _lane_default(lane, agent, {} if quota_transfer else chosen)
         mode = PLAN_MODE if (lane, agent) == ("plan", "claude") else []
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
@@ -348,12 +377,7 @@ class HerdrRuntime:
             ],
             predecessor=_predecessor(task),
         )
-        if account is not None:
-            if lane in getattr(self, "_quota_allocations", {}):
-                self._quota_allocations[lane][agent] -= 1
-            self._quota_accounts = [
-                replace(row, sessions=row.sessions + 1) if row == account else row for row in self._quota_accounts
-            ]
+        self._reserve_account(account, lane, agent)
         return replace(
             placed,
             model_source=picked.source,

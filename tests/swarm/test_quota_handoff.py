@@ -237,7 +237,7 @@ def test_tick_warns_once_per_agent_without_retiring_it(monkeypatch):
     ledger.comment = lambda *args, **kwargs: None
     rt = FakeRuntime()
     rt.live.add(agent.name)
-    rt.quota_capacity = lambda cfg, agents, now: capacity.calculate(cfg, [account()], agents, 3, 5)
+    rt.quota_capacity = lambda cfg, agents, now, demand: capacity.calculate(cfg, [account()], agents, 3, 5, demand)
     tick("sw", store, ledger, rt, 1000)
     tick("sw", store, ledger, rt, 2000)
     messages = InboxStore(store.redis).pending_items(agent.name)
@@ -287,7 +287,8 @@ def test_successor_falls_back_to_codex_and_respects_profile_and_floor():
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_quota_transfer_routes_to_best_account_and_preserves_profile(tmp_path, monkeypatch, target):
+@pytest.mark.parametrize("lane", ["eng", "ci", "plan", "master"])
+def test_quota_transfer_routes_to_best_account_and_preserves_profile(tmp_path, monkeypatch, target, lane):
     rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
     rt._quota_accounts = [account("old", state="DRAIN"), account("best", target, five=10, week=20)]
     rt._quota_cap, rt._quota_floor, rt._quota_share = 3, 5, 0
@@ -298,7 +299,33 @@ def test_quota_transfer_routes_to_best_account_and_preserves_profile(tmp_path, m
         "_launch",
         lambda cfg, lane, task, name, argv, **kw: seen.append(argv) or runtime.Placed("pane", target, "best"),
     )
-    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3")
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3", lanes={lane: {"model": "opus"}})
+    task = {
+        "id": "e",
+        "title": "Continue task",
+        "handoff": "Saved Handoff v2",
+        "handoff_envelope": {
+            "reason": "quota",
+            "launch": {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "account": "old"},
+        },
+    }
+    placed = rt.spawn(config, lane, "engineer@a1b2c3-0002", task)
+    assert placed.harness == target
+    assert seen[0][seen[0].index("--route") + 1] == "best"
+    assert seen[0][seen[0].index("--profile") + 1] == "engineer"
+    assert seen[0][seen[0].index("--agent") + 1] == target
+    if target == "codex":
+        assert "opus" not in seen[0]
+
+
+def test_quota_successor_uses_its_lane_reservation(tmp_path, monkeypatch):
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
+    rt._quota_accounts = [account("cc", five=0, week=0), account("cx", "codex", five=10, week=20)]
+    rt._quota_cap, rt._quota_floor, rt._quota_share = 3, 5, 30
+    rt._quota_allocations = {"eng": {"claude": 0, "codex": 1}, "ci": {"claude": 1, "codex": 0}}
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    monkeypatch.setattr(rt, "_launch", lambda *args, **kw: runtime.Placed("pane", "codex", "cx"))
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=1, code="a1b2c3")
     task = {
         "id": "e",
         "title": "Continue task",
@@ -309,9 +336,5 @@ def test_quota_transfer_routes_to_best_account_and_preserves_profile(tmp_path, m
         },
     }
     placed = rt.spawn(config, "eng", "engineer@a1b2c3-0002", task)
-    assert placed.harness == target
-    assert seen[0][seen[0].index("--route") + 1] == "best"
-    assert seen[0][seen[0].index("--profile") + 1] == "engineer"
-    assert seen[0][seen[0].index("--agent") + 1] == target
-    if target == "codex":
-        assert "opus" not in seen[0]
+    assert placed.harness == "codex"
+    assert rt._quota_allocations == {"eng": {"claude": 0, "codex": 0}, "ci": {"claude": 1, "codex": 0}}
