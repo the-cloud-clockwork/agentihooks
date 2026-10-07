@@ -155,3 +155,7 @@ def redact(text: str, *, mode: str | None = None) -> str:
         for m in reversed(pattern.matches(text)):
             text = f"{text[: m.start()]}[REDACTED:{pattern.name}]{text[m.end() :]}"
     return text
+
+
+def contains_generic_secret(text: str) -> bool:
+    return any(pattern.matches(text) for pattern in _STANDARD_PATTERNS if pattern.name == "generic_secret")

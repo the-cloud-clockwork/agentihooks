@@ -111,6 +111,14 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
             else []
         ),
         plan_review.review_line(me, autonomy),
+        *(
+            [
+                f'- Answer an agent\'s question you can decide with {led} answer questions/<id> "<answer>": it is '
+                "recorded as yours and leaves the operator's Priorities. Raise the rest to the operator."
+            ]
+            if autonomy in (DELEGATE, FULL)
+            else []
+        ),
         f"- Steer the swarm when asked: {me} set max-eng-agents=N max-ci-agents=N max-plan-agents=N, {me} pause, {me} start, "
         f"{me} stop, {me} status.",
         f"- Give every new health finding a verdict once you have checked its evidence: {me} verdict <finding id> "

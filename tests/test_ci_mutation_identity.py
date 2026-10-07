@@ -27,7 +27,8 @@ def tree(tmp_path, monkeypatch):
 def install(root, path):
     from scripts.ci_mutation import identity
 
-    config = SimpleNamespace(known_args_namespace=SimpleNamespace(mutated_path=path), rootpath=root, cleanups=[])
+    paths = None if path is None else [path] if isinstance(path, str) else path
+    config = SimpleNamespace(known_args_namespace=SimpleNamespace(mutated_path=paths), rootpath=root, cleanups=[])
     config.add_cleanup = config.cleanups.append
     identity.pytest_load_initial_conftests(config, None, [])
     return config
@@ -100,4 +101,19 @@ def test_option_is_registered_for_the_mutated_path():
     added = []
     parser = SimpleNamespace(addoption=lambda *args, **kwargs: added.append((args, kwargs)))
     identity.pytest_addoption(parser)
-    assert added == [(("--mutated-path",), {"default": None})]
+    assert added == [(("--mutated-path",), {"action": "append", "default": None})]
+
+
+def test_every_mutated_path_gets_its_own_alias_and_cleanup(tree, monkeypatch):
+    (tree / "other" / "extra.py").write_text("EXTRA = True\n")
+    (tree / "other" / "__init__.py").write_text("")
+    meta_path = list(sys.meta_path)
+    config = install(tree, ["pkg/sub/mod.py", "other/extra.py"])
+    monkeypatch.syspath_prepend(str(tree / "other"))
+    monkeypatch.syspath_prepend(str(tree / "pkg" / "sub"))
+    assert importlib.import_module("mod") is importlib.import_module("pkg.sub.mod")
+    assert importlib.import_module("extra") is importlib.import_module("other.extra")
+    assert sys.meta_path[2:] == meta_path
+    for cleanup in config.cleanups:
+        cleanup()
+    assert sys.meta_path == meta_path

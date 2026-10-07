@@ -38,6 +38,19 @@ def build(store, slug, agent, reason, rows, at, run=subprocess.run):
         "inbox": _open_items(store, agent),
         "claims": UNKNOWN if rows is None else [r["id"] for r in rows if store.claimant(slug, r["id"]) == agent.name],
         "conversation_id": agent.conversation_id or UNKNOWN,
+        "launch": {
+            key: getattr(agent, key)
+            for key in (
+                "profile",
+                "harness",
+                "model",
+                "effort",
+                "account",
+                "model_source",
+                "model_confidence",
+                "profile_decision",
+            )
+        },
     }
 
 

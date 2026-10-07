@@ -16,6 +16,9 @@ from tests.swarm.test_tick import FakeLedger, FakeRuntime
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
+from tests.swarm.profile_fixture import validated
+
+
 @pytest.fixture
 def env(monkeypatch, tmp_path):
     import fakeredis
@@ -387,7 +390,10 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path):
     def fake_run(argv, **kw):
         seen.append(argv)
         return subprocess.CompletedProcess(
-            argv, 0, stdout="pane_id=w3:p1\nstatus=started\nroute_status=direct\naccount=acct\nagent=codex\n", stderr=""
+            argv,
+            0,
+            stdout=validated(argv, "pane_id=w3:p1\nstatus=started\nroute_status=direct\naccount=acct\nagent=codex\n"),
+            stderr="",
         )
 
     rt = runtime.HerdrRuntime(home=tmp_path, run=fake_run, choose=lambda r, e: ("codex", "priority"))
@@ -403,7 +409,16 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path):
         "calibrated": None,
         "anchors": [],
     }
-    assert placed == runtime.Placed("w3:p1", "codex", "acct", model_source="lane-default", profile_decision=decision)
+    assert placed == runtime.Placed(
+        "w3:p1",
+        "codex",
+        "acct",
+        profile="cicd",
+        model_source="lane-default",
+        profile_decision={**decision, "validation": placed.profile_decision["validation"]},
+        choice="share",
+    )
+    assert placed.profile_decision["validation"]["state"] == "validated"
     assert seen[0][1:4] == ["init-agent", "--host", "herdr"]
     assert seen[0][seen[0].index("--name") + 1 : seen[0].index("--name") + 4] == ["ci@a1b2c3-0001", "--agent", "codex"]
     assert oct(prompt_path.stat().st_mode)[-3:] == "600"

@@ -38,7 +38,7 @@ def _flat(text: str) -> str:
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
+def world(tmp_path, monkeypatch, _isolate_real_user_paths):
     from scripts.targets._common import _install_module
 
     install = _install_module()
@@ -121,6 +121,9 @@ def test_claude_render_tree(world, capsys):
     assert "KIT README" not in persona and "KIT NOTES" not in persona
     assert persona.startswith(render.HEADER)
     assert persona.endswith(f"\n\n{render.FOOTER}\n")
+    assert persona.count(render.FOOTER) == 1
+    assert "\n\nNone\n" not in persona
+    assert render.binding.inspect(out, "rb-role", "claude")["profile"] == "rb-role"
 
 
 @pytest.mark.parametrize("role", ["engineer", "cicd", "planner", "master", "qa", "frontend"])
@@ -600,10 +603,13 @@ def test_codex_render_links_into_the_claude_profile(world):
     claude = render.rendered_root() / "rb-role" / "claude"
     assert out == render.rendered_root() / "rb-role" / "codex"
     assert os.readlink(out / "AGENTS.md") == str(claude / "CLAUDE.md")
+    assert render.binding.inspect(out, "rb-role", "codex")["profile"] == "rb-role"
     linked = {p.name: os.readlink(p) for p in (out / "skills").iterdir() if p.is_symlink()}
     assert linked == {p.name: str(p) for p in (claude / "skills").iterdir()}
     assert {"bundle-skill", "role-skill"} <= set(linked)
-    assert sorted(p.name for p in out.iterdir() if not p.is_symlink()) == ["config.toml", "skills"]
+    assert sorted(p.name for p in out.iterdir() if not p.is_symlink()) == sorted(
+        [".profile-binding.json", render.STAMP, "config.toml", "skills"]
+    )
     sources = render.sources.path("rb-role", "codex", render.rendered_root())
     assert os.readlink(sources) == str(render.sources.path("rb-role", "claude", render.rendered_root()))
 
@@ -796,9 +802,11 @@ def test_codex_render_config_has_no_persona_and_only_profile_servers(world):
         for name in ("bundle-skill", "other-skill", "role-skill")
     ]
     assert doc["project_doc_max_bytes"] == 65536
-    assert doc["agentihooks"]["render"] == render.stamp("rb-role")
+    assert "agentihooks" not in doc
+    stamp = json.loads((render.rendered_root() / "rb-role" / "codex" / render.STAMP).read_text())
+    assert stamp["render"] == render.stamp("rb-role")
     operator = (home / ".codex" / "config.toml").read_bytes()
-    assert doc["agentihooks"]["operator"] == hashlib.sha256(operator).hexdigest()
+    assert stamp["operator"] == hashlib.sha256(operator).hexdigest()
     assert render.render_codex("rb-role") is None
 
 
@@ -961,7 +969,6 @@ def test_claude_render_keeps_the_profile_deny_rules_ahead_of_connector_denies(wo
             {},
             "Claude has no native tool allowlist; only an http server's tools can be listed",
         ),
-        (_gateway(enabled_tools=READS), {"GW_KEY": None}, "environment variable GW_KEY is unset"),
         (_gateway(enabled_tools=READS), {"FAIL": "1"}, "tool listing failed: ConnectionError: refused"),
     ],
 )
@@ -1238,7 +1245,7 @@ def test_cli_usage(world, capsys):
     )
     with pytest.raises(SystemExit):
         render.main([])
-    assert capsys.readouterr().err.startswith("usage: agentihooks profile [-h] {render,measure}")
+    assert capsys.readouterr().err.startswith("usage: agentihooks profile [-h] {render,measure,validate}")
     with pytest.raises(SystemExit):
         render.main(["--help"])
     assert re.search(

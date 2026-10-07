@@ -98,7 +98,7 @@ def test_a_handoff_stays_on_claude(monkeypatch, tmp_path, capsys):
         {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")},
     )
     assert rc == 2
-    assert "--handoff moves work to another Claude account" in capsys.readouterr().err
+    assert "unsupported quota transfer" in capsys.readouterr().err
 
 
 def test_an_explicit_codex_agent_is_used_even_when_claude_has_quota(monkeypatch):
@@ -258,6 +258,21 @@ def test_an_explicit_lane_harness_wins_over_the_share(monkeypatch):
     assert agent_choice.choose_shared("codex", {}, {"codex": 9}, share=30, min_week_left=5) == ("codex", "requested")
 
 
+@pytest.mark.parametrize(
+    ("reason", "kind"),
+    [
+        ("codex share 2/10 below 30%", "share"),
+        ("priority", "share"),
+        ("fallthrough: claude is at its session cap", "overflow"),
+        ("fallthrough: claude has no quota", "overflow"),
+        ("requested", "forced"),
+        ("no agent has quota", "other"),
+    ],
+)
+def test_each_router_reason_names_its_choice_kind(reason, kind):
+    assert agent_choice.choice_kind(reason) == kind
+
+
 def test_codex_week_left_is_the_best_signed_in_account(monkeypatch):
     from scripts import codex_router
     from scripts.claude_quota_balancer import QuotaWindow
@@ -276,3 +291,15 @@ def test_codex_week_left_is_the_best_signed_in_account(monkeypatch):
     monkeypatch.setattr(codex_router, "routing_pool", lambda environ: pool)
     monkeypatch.setattr(codex_router, "quotas", lambda accounts, environ: {a.name: seen[a.name] for a in accounts})
     assert agent_choice.codex_week_left({}) == 60.0
+
+
+def test_share_picks_count_share_choices_from_since_with_the_latest_row_per_name():
+    rows = [
+        {"name": "a", "harness": "codex", "started_at": 100, "choice": "overflow"},
+        {"name": "a", "harness": "codex", "started_at": 100, "choice": "share"},
+        {"name": "b", "harness": "claude", "started_at": 99, "choice": "share"},
+        {"name": "c", "harness": "claude", "started_at": 100, "choice": "share"},
+        {"name": "d", "harness": "codex", "started_at": 200, "choice": "forced"},
+    ]
+    assert agent_choice.share_picks(rows, 100) == {"codex": 1, "claude": 1}
+    assert agent_choice.share_picks([{"name": "e", "harness": "codex", "choice": "share"}], 1) == {}

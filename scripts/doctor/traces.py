@@ -101,13 +101,14 @@ def task_cost(record: dict, limits: Limits) -> list[Finding]:
             Finding(
                 "task cost",
                 cost["task"],
-                f"{cost['tokens']} tokens, over {limits.task_cost_ratio} times the other merged tasks",
+                f"{cost['tokens']} uncached tokens, over {limits.task_cost_ratio} times the other merged tasks",
                 (
                     f"turns {cost['turns']}",
                     f"traced sessions {cost['sessions']}",
-                    f"tokens {cost['tokens']}, median of the other merged tasks {round(median(others))}",
+                    f"uncached tokens {cost['tokens']}, median of the other merged tasks {round(median(others))}",
+                    "uncached tokens are input, cache writes and output; cache reads are left out",
                 ),
-                f"over {limits.task_cost_ratio} times the median tokens of the other merged tasks",
+                f"over {limits.task_cost_ratio} times the median uncached tokens of the other merged tasks",
                 cost["tokens"],
             )
         )

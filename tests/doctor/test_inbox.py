@@ -46,6 +46,22 @@ def test_planted_fault_an_item_left_open_past_its_window_is_raised():
     assert f"from {planted['sender']} to {planted['address']}" in found.evidence
 
 
+def test_past_window_separates_unread_delivery_from_receiver_backlog_and_labels_sent_age():
+    row = copy.deepcopy(recorded()["items"][0])
+    row.update(created_at=MIN, updated_at=10 * MIN, state="pending")
+    row["history"] = [{"state": "pending", "at": MIN}]
+    [unread] = inbox.past_window([row], 11 * MIN, WINDOW)
+    row["state"] = "delivered"
+    row["history"].append({"state": "delivered", "at": 10 * MIN})
+    [delivered] = inbox.past_window([row], 11 * MIN, WINDOW)
+    row["state"] = "read"
+    [read] = inbox.past_window([row], 11 * MIN, WINDOW)
+    assert unread.summary == "unread delivery; sent 10 minutes ago"
+    assert delivered.summary == read.summary == "delivered backlog; sent 10 minutes ago"
+    assert unread.id == delivered.id == read.id
+    assert unread.measure == delivered.measure == read.measure == 10
+
+
 def test_planted_fault_an_escalated_item_names_each_step():
     rec = recorded()
     items = copy.deepcopy(rec["items"])

@@ -1,8 +1,10 @@
+import json
 from unittest.mock import Mock
 
 import pytest
 
 from scripts import init_agent, select_profile
+from scripts.profiles import binding
 
 
 @pytest.fixture
@@ -11,6 +13,9 @@ def profile(monkeypatch, tmp_path):
     root.mkdir()
     (root / "profile.yml").write_text("model: sonnet\neffort: medium\n")
     renderer = Mock()
+    from scripts.targets._common import _install_module
+
+    monkeypatch.setattr(_install_module(), "_resolve_profile_chain", lambda name: [(name, root)])
     monkeypatch.setattr(select_profile.profiles, "_chain", lambda name: [(name, root)])
     monkeypatch.setattr(select_profile.profiles, "render", renderer)
     monkeypatch.setattr(select_profile.profiles, "rendered_root", lambda: tmp_path / "rendered")
@@ -56,6 +61,27 @@ def test_copilot_refused_before_render(profile, capsys):
     assert select_profile.main(["qa", "--agent", "copilot"]) == 2
     assert capsys.readouterr().err == "agentihooks select-profile: copilot per-run profiles are not supported\n"
     profile[1].assert_not_called()
+
+
+@pytest.mark.parametrize("state", ["pending", "validated", "failed"])
+def test_a_failed_selection_fails_only_a_pending_launch_report(profile, monkeypatch, state):
+    root, _ = profile
+    report = root / "report.json"
+    requested = {"profile": "qa", "harness": "copilot", "state": state}
+    report.write_text(json.dumps(requested))
+    monkeypatch.setenv(binding.REPORT, str(report))
+    assert select_profile.main(["qa", "--agent", "copilot"]) == 2
+    if state == "pending":
+        requested.update(state="failed", reason="profile selection failed: copilot per-run profiles are not supported")
+    assert json.loads(report.read_text()) == requested
+
+
+def test_a_failed_selection_without_a_launch_report_writes_nothing(profile, monkeypatch):
+    root, _ = profile
+    monkeypatch.delenv(binding.REPORT, raising=False)
+    before = sorted(root.rglob("*"))
+    assert select_profile.main(["qa", "--agent", "copilot"]) == 2
+    assert sorted(root.rglob("*")) == before
 
 
 def test_routed_launch_preserves_environment_and_exit_code(profile, monkeypatch):
@@ -346,3 +372,45 @@ def test_profile_render_dispatch_forwards_arguments_and_exit(monkeypatch):
     monkeypatch.setattr(select_profile.profiles, "main", main)
     assert select_profile.dispatch(["profile", "render", "engineer", "--target", "claude"]) == 7
     main.assert_called_once_with(["render", "engineer", "--target", "claude"])
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_init_agent_refuses_claude_only_profile_before_render_or_launch(profile, monkeypatch, tmp_path, capsys, resume):
+    root, renderer = profile
+    settings = root / "engineer" / ".claude" / "settings.overrides.json"
+    settings.parent.mkdir()
+    settings.write_text('{"enabledPlugins": {"frontend-design@claude-plugins-official": true}}')
+    launcher = Mock()
+    monkeypatch.setattr(init_agent, "_write_launcher", launcher)
+    flags = ["--resume", "saved-session"] if resume else []
+    result = init_agent.main(
+        ["--profile", "frontend", "--agent", "codex", "--dir", str(tmp_path), *flags],
+        {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path)},
+    )
+    assert result == 2
+    assert capsys.readouterr().err == (
+        "agentihooks init-agent: profile frontend does not support codex; supported harness: claude\n"
+    )
+    renderer.assert_not_called()
+    launcher.assert_not_called()
+
+
+@pytest.mark.parametrize("agent,enabled", [("claude", True), ("codex", False)])
+def test_init_agent_allows_supported_profile_harness_pair(profile, tmp_path, capsys, agent, enabled):
+    root, renderer = profile
+    settings = root / "engineer" / ".claude" / "settings.overrides.json"
+    settings.parent.mkdir()
+    settings.write_text('{"enabledPlugins": {"frontend-design@claude-plugins-official": ' + str(enabled).lower() + "}}")
+    assert (
+        init_agent.main(
+            ["--profile", "engineer", "--agent", agent, "--dir", str(tmp_path), "--host", "herdr", "--dry-run"],
+            {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path)},
+        )
+        == 0
+    )
+    renderer.assert_called_once_with(agent, "engineer")
+    output = capsys.readouterr()
+    assert output.err == ""
+    assert f"agent={agent}\n" in output.out
+    assert "profile=engineer\n" in output.out
+    assert "status=dry-run\n" in output.out

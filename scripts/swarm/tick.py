@@ -56,6 +56,7 @@ class Placed:
     model_source: str = ""
     model_confidence: float | None = None
     profile_decision: dict = field(default_factory=dict)
+    choice: str = ""
 
 
 class Ledger(Protocol):
@@ -120,8 +121,10 @@ def _close_space(slug, config, store, runtime):
 
 
 def _bin_closed(slug, store, ledger, doc):
-    if doc.get("closed_at") and not store.agents(slug) and ledger.bin_closed(slug, doc["closed_at"]):
-        return ["the closed ledger moved to the bin"]
+    if doc.get("closed_at") and not store.agents(slug):
+        exits.close_swarm(InboxStore(store.redis), slug)
+        if ledger.bin_closed(slug, doc["closed_at"]):
+            return ["the closed ledger moved to the bin"]
     return []
 
 
@@ -343,7 +346,9 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                 task.update(fields)
                 store.seats.occupy(seat, name, now_ms)
                 task["transfer"] = transfers.attach(store, slug, record)
-                placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task), spawns=store.spawns(slug))
+                placed = runtime.spawn(
+                    config, lane, name, primed(store, slug, seat, task), spawns=store.share_picks(slug, now_ms)
+                )
             except Exception as exc:
                 transfers.failed(store, slug, record)
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
@@ -425,6 +430,7 @@ def _placed(record, placed):
         model_source=placed.model_source,
         model_confidence=placed.model_confidence,
         profile_decision=placed.profile_decision,
+        choice=placed.choice,
         state="working",
     )
 

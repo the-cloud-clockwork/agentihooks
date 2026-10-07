@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import logging
@@ -9,7 +10,7 @@ import os
 import re
 import sys
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,6 +20,8 @@ CURSOR_DIR = AGENTIHOOKS_HOME / "agent_trace"
 SYSTEM = "anthropic"
 _EXPORTER_LOGGER = "opentelemetry"
 BATCH_CHARS = 2_000_000
+PENDING_MAX_BYTES = 8_000_000
+TRIGGER_ENV = "AGENTIHOOKS_TRACE_FLUSH_TRIGGER"
 
 
 @dataclass(frozen=True)
@@ -121,17 +124,33 @@ def _usage_attributes(usage: dict) -> dict:
 
 
 def _field(text: str) -> str:
+    return _field_info(text)[0]
+
+
+def _field_info(text: str) -> tuple[str, int]:
     from hooks import config
     from hooks.secrets import redact
 
     text = redact(text, mode="strict")
     cap = config.LANGFUSE_FIELD_MAX_CHARS
-    return text if len(text) <= cap else f"{text[:cap]}…[truncated {len(text) - cap} chars]"
+    removed = max(0, len(text) - cap)
+    return (f"{text[:cap]}…[truncated {removed} chars]" if removed else text), removed
+
+
+def _fields(fields: dict[str, str]) -> dict:
+    result = {}
+    for key, text in fields.items():
+        if not text:
+            continue
+        value, removed = _field_info(text)
+        result[key] = value
+        if removed:
+            result[f"agentihooks.truncation.{key}.chars"] = removed
+    return result
 
 
 def _io(input_text: str = "", output_text: str = "") -> dict:
-    fields = {"langfuse.observation.input": input_text, "langfuse.observation.output": output_text}
-    return {key: _field(value) for key, value in fields.items() if value}
+    return _fields({"langfuse.observation.input": input_text, "langfuse.observation.output": output_text})
 
 
 def _text(content: object) -> str:
@@ -172,7 +191,15 @@ def _generations(turn: list[dict]) -> dict[str, tuple[int, dict]]:
     return found
 
 
-def _turn_spans(session_id: str, number: int, turn: list[dict], root: int) -> list[SpanSpec]:
+def _outcome(result: dict) -> dict:
+    if not result:
+        return {"tool.outcome.state": "missing"}
+    return {"tool.outcome": "error" if result.get("is_error") else "success"}
+
+
+def _turn_spans(
+    session_id: str, number: int, turn: list[dict], root: int, results: dict | None = None
+) -> list[SpanSpec]:
     turn_id = _span_id(session_id, turn[0].get("uuid", str(number)))
     spans = [
         SpanSpec(
@@ -205,7 +232,7 @@ def _turn_spans(session_id: str, number: int, turn: list[dict], root: int) -> li
         spans.append(
             SpanSpec(model or "generation", _span_id(session_id, message_id), turn_id, start, _ns(entry), attributes)
         )
-    results = {
+    results = results or {
         b.get("tool_use_id"): (entry, b)
         for entry in turn
         for b in _blocks(entry)
@@ -222,6 +249,7 @@ def _turn_spans(session_id: str, number: int, turn: list[dict], root: int) -> li
                 "gen_ai.tool.name": block.get("name", ""),
                 "gen_ai.tool.call.id": block.get("id", ""),
                 "error": bool(result.get("is_error")),
+                **_outcome(result),
                 **_io(json.dumps(block.get("input", {}), ensure_ascii=False), _text(result.get("content"))),
             }
             span_id = _span_id(session_id, block.get("id", ""))
@@ -230,7 +258,11 @@ def _turn_spans(session_id: str, number: int, turn: list[dict], root: int) -> li
 
 
 def session_spans(
-    entries: list[dict], identity: Identity, cost: float | None = None, first_turn: int = 0
+    entries: list[dict],
+    identity: Identity,
+    cost: float | None = None,
+    first_turn: int = 0,
+    root: Mapping[str, object] | None = None,
 ) -> list[SpanSpec]:
     all_turns = turns(entries)
     if not all_turns:
@@ -261,14 +293,21 @@ def session_spans(
     }
     if cost is not None:
         attributes["gen_ai.usage.cost"] = float(cost)
+    attributes.update(root or {})
     trace_io = {
         "langfuse.trace.input": _prompt_text(all_turns[0]),
         "langfuse.trace.output": _assistant_text(all_turns[-1]),
     }
-    attributes.update({key: _field(value) for key, value in trace_io.items() if value})
+    attributes.update(_fields(trace_io))
     spans = [SpanSpec(name, root_id, None, _ns(all_turns[0][0]), _ns(all_turns[-1][-1]), attributes)]
+    results = {
+        block.get("tool_use_id"): (entry, block)
+        for entry in entries
+        for block in _blocks(entry)
+        if isinstance(block, dict) and block.get("type") == "tool_result"
+    }
     for number, turn in enumerate(all_turns[first_turn:], start=first_turn + 1):
-        spans.extend(_turn_spans(session_id, number, turn, root_id))
+        spans.extend(_turn_spans(session_id, number, turn, root_id, results))
     shared = {"langfuse.session.id": session_id, "langfuse.user.id": identity.user_id()}
     for span in spans:
         span.attributes.update({key: value for key, value in shared.items() if value})
@@ -276,20 +315,18 @@ def session_spans(
 
 
 def read_entries(transcript_path: str) -> list[dict]:
-    entries = []
-    with open(transcript_path, encoding="utf-8") as handle:
-        for line in handle:
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(entry, dict):
-                entries.append(entry)
-    if any(entry.get("type") == "session_meta" for entry in entries):
+    from hooks.observability.transcript import complete_records
+
+    entries, _, _ = complete_records(transcript_path)
+    return _normalize(entries)
+
+
+def _normalize(records: list[dict]) -> list[dict]:
+    if any(record.get("type") in ("session_meta", "response_item", "turn_context") for record in records):
         from hooks.observability.codex_transcript import normalize_entries
 
-        return normalize_entries(entries)
-    return entries
+        return normalize_entries(records)
+    return records
 
 
 def _cursor_path(session_id: str) -> Path:
@@ -297,11 +334,65 @@ def _cursor_path(session_id: str) -> Path:
     return CURSOR_DIR / f"{safe_id}.json"
 
 
+def _cursor(session_id: str) -> dict:
+    try:
+        data = json.loads(_cursor_path(session_id).read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _exported_turns(session_id: str) -> int:
     try:
-        return int(json.loads(_cursor_path(session_id).read_text(encoding="utf-8"))["turns"])
-    except (OSError, ValueError, TypeError, KeyError):
+        return int(_cursor(session_id)["turns"])
+    except (ValueError, TypeError, KeyError):
         return 0
+
+
+_TRUNCATED = re.compile(r"…\[truncated (\d+) chars\]\Z")
+
+
+def _truncated_fields(spans: list[SpanSpec]) -> int:
+    return sum(1 for spec in spans for key in spec.attributes if key.startswith("agentihooks.truncation."))
+
+
+def _root_attributes(session_id: str) -> dict:
+    from hooks.observability import correlation, signals
+
+    accepted = _cursor(session_id).get("accepted_at")
+    freshness = {
+        "agentihooks.export.generated_at": datetime.now(timezone.utc).isoformat(),
+        "agentihooks.export.queued.state": correlation.UNSUPPORTED,
+        "agentihooks.export.trigger": os.environ.get(TRIGGER_ENV, "direct"),
+        "agentihooks.export.unwritten_events.state": "unavailable",
+    }
+    if accepted:
+        freshness["agentihooks.export.last_accepted_at"] = accepted
+    else:
+        freshness["agentihooks.export.last_accepted_at.state"] = correlation.MISSING
+    return {**correlation.resolve(session_id), **signals.attributes(session_id), **freshness}
+
+
+def _collector_outcomes(session_id: str, spans: list[SpanSpec], result: str, truncated: int) -> None:
+    from hooks.observability import otel, signals
+
+    keys = ("gen_ai.tool.name", "gen_ai.tool.call.id", "tool.outcome", "tool.outcome.state")
+    for spec in spans:
+        if spec.attributes.get("langfuse.observation.type") != "tool":
+            continue
+        fields = {key: spec.attributes[key] for key in keys if key in spec.attributes}
+        otel.emit_event(
+            "agentihooks.tool.outcome",
+            {
+                "session.id": session_id,
+                **fields,
+                "tool.started_at_ns": spec.start_ns,
+                "tool.ended_at_ns": spec.end_ns,
+                "agentihooks.export.result": result,
+            },
+        )
+    signals.record({(session_id, "traces", result): len(spans), (session_id, "traces", "truncated"): truncated})
+    otel.flush()
 
 
 def _readable(spec: SpanSpec, trace: int):
@@ -363,38 +454,276 @@ def _log_failure(status: object, reason: str) -> None:
     sys.stderr.write(f"{stamp} agent_trace export failed endpoint={endpoint} status={status} reason={reason}\n")
 
 
-def export_session(session_id: str, transcript_path: str, identity: Identity | None = None) -> None:
+def _save_progress(session_id: str, state: dict) -> None:
+    import tempfile
+
+    path = _cursor_path(session_id)
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+        json.dump(state, handle, ensure_ascii=False)
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        temporary.replace(path)
+        descriptor = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _progress(session_id: str) -> dict:
+    path = _cursor_path(session_id)
+    if not path.exists():
+        return {"version": 2, "records": {}, "accepted": {}, "pending": [], "source": {}}
+    state = json.loads(path.read_text())
+    if state.get("version") == 2:
+        return state
+    if "version" in state:
+        raise ValueError("unsupported exporter progress version")
+    return {
+        "version": 2,
+        "records": {},
+        "accepted": {},
+        "pending": [],
+        "source": {},
+        "legacy_turns": state.get("turns", 0),
+    }
+
+
+def _record_revisions(records: dict) -> dict:
+    return {
+        key: hashlib.sha256(json.dumps(record, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        for key, record in records.items()
+    }
+
+
+def _pending_bytes(state: dict, records: dict, pending: list) -> int:
+    revisions = _record_revisions(records)
+    accepted = state.get("accepted_records", {})
+    waiting = {key: record for key, record in records.items() if accepted.get(key) != revisions[key]}
+    return len(json.dumps({"records": waiting, "pending": pending}, ensure_ascii=False).encode())
+
+
+def _stage_source(state: dict, transcript_path: str) -> None:
+    from hooks.observability.transcript import complete_records, mask_value, record_id
+
+    records, position, unsupported = complete_records(transcript_path)
+    merged = dict(state["records"])
+    legacy = "legacy_turns" in state and not merged
+    for index, record in enumerate(records):
+        key = record_id(record)
+        masked = mask_value(record)
+        source_id = str(index) if legacy and record.get("type") == "response_item" else key
+        masked["_source_id"] = merged.get(key, {}).get("_source_id", source_id)
+        merged[key] = masked
+    size = _pending_bytes(state, merged, state["pending"])
+    if size > PENDING_MAX_BYTES:
+        state["overflow"] = {"bytes": size, "limit": PENDING_MAX_BYTES}
+        _report_progress(state, "overflow")
+        return
+    state.pop("overflow", None)
+    state["records"] = merged
+    state["unsupported_records"] = unsupported
+    stat = Path(transcript_path).stat()
+    state["source"] = {
+        "device": stat.st_dev,
+        "inode": stat.st_ino,
+        "buffered_bytes": position,
+        "records": len(records),
+        "accepted_bytes": state["source"].get("accepted_bytes", 0),
+    }
+
+
+def _revision(spec: SpanSpec) -> str:
+    data = asdict(spec)
+    volatile = {
+        "agentihooks.export.generated_at",
+        "agentihooks.export.last_accepted_at",
+        "agentihooks.export.last_accepted_at.state",
+        "agentihooks.export.trigger",
+    }
+    data["attributes"] = {
+        key: value
+        for key, value in spec.attributes.items()
+        if key not in volatile and not key.startswith("agentihooks.signals.traces.")
+    }
+    return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def _unsupported_io(records: list[dict], entries: list[dict]) -> int:
+    dropped = sum(
+        1
+        for record in records
+        if record.get("type") == "response_item"
+        and record.get("payload", {}).get("type")
+        not in ("message", "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output")
+    )
+    omitted = sum(
+        1
+        for record in records
+        if record.get("type") == "response_item" and record.get("payload", {}).get("type") == "message"
+        for block in record["payload"].get("content", [])
+        if "text" not in block
+    )
+    normalized = sum(
+        1
+        for entry in entries
+        for block in _blocks(entry)
+        if not isinstance(block, dict) or block.get("type") not in ("text", "image", "tool_use", "tool_result")
+    )
+    return dropped + omitted + normalized
+
+
+def _prepare_pending(session_id: str, state: dict, identity: Identity) -> None:
+    from hooks.context.context_usage import session_cost
+    from hooks.observability.transcript import mask_value
+
+    entries = _normalize(list(state["records"].values()))
+    spans = session_spans(entries, identity, session_cost(session_id), root=_root_attributes(session_id))
+    spans = list({spec.span_id: spec for spec in spans}.values())
+    unsupported = _unsupported_io(list(state["records"].values()), entries)
+    if spans:
+        spans[0].attributes.update(
+            {
+                "agentihooks.export.spans": len(spans),
+                "agentihooks.export.truncated_fields": _truncated_fields(spans),
+                "agentihooks.export.unsupported_io": unsupported,
+                "agentihooks.export.unsupported_records": state.get("unsupported_records", 0),
+                "agentihooks.export.replay_contract": "legacy-observations",
+                "agentihooks.export.v4_replay.state": "unsupported",
+            }
+        )
+    if "legacy_turns" in state:
+        previous_entries = [entry for turn in turns(entries)[: state["legacy_turns"]] for entry in turn]
+        for spec in session_spans(previous_entries, identity):
+            state["accepted"].setdefault(f"{spec.span_id:016x}", "legacy")
+    pending = []
+    for spec in spans:
+        spec.name = mask_value(spec.name)
+        spec.attributes = mask_value(spec.attributes)
+        key = f"{spec.span_id:016x}"
+        if state["accepted"].get(key) != _revision(spec):
+            pending.append(asdict(spec))
+    size = _pending_bytes(state, state["records"], pending)
+    if size > PENDING_MAX_BYTES:
+        state["overflow"] = {"bytes": size, "limit": PENDING_MAX_BYTES}
+        _report_progress(state, "overflow")
+        return
+    state["pending"] = pending
+    state["buffered_turns"] = len(turns(entries))
+    state["pending_source"] = dict(state["source"])
+    state["pending_records"] = _record_revisions(state["records"])
+
+
+def _report_progress(state: dict, result: str) -> None:
+    from hooks.observability import signals
+
+    session_id = state.get("session_id", "")
+    signals.record({(session_id, "traces", result): 1})
+    print(f"agent trace export {result}: {json.dumps(state.get('overflow', {}))}", file=sys.stderr)
+
+
+def _batch_accepted(exporter, batch: list[SpanSpec], trace: int) -> bool:
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
     from opentelemetry.sdk.trace.export import SpanExportResult
 
-    from hooks.context.context_usage import session_cost
+    readable = [_readable(spec, trace) for spec in batch]
+    if not isinstance(exporter, OTLPSpanExporter):
+        return exporter.export(readable) is SpanExportResult.SUCCESS
+    import requests
+    from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceResponse
+
+    from hooks.observability import otel
+
+    settings = otel.langfuse_exporter_config()
+    response = requests.post(
+        settings["endpoint"],
+        data=encode_spans(readable).SerializeToString(),
+        headers={"Content-Type": "application/x-protobuf", **settings["headers"]},
+        timeout=otel.LANGFUSE_EXPORT_TIMEOUT_SEC,
+    )
+    if response.status_code != 200:
+        _log_failure(response.status_code, response.reason)
+        return False
+    if not response.content:
+        return True
+    if "application/x-protobuf" in response.headers.get("Content-Type", ""):
+        acknowledgement = ExportTraceServiceResponse.FromString(response.content)
+        return acknowledgement.partial_success.rejected_spans == 0
+    return _json_acknowledged(response.json())
+
+
+def _json_acknowledged(acknowledgement: object) -> bool:
+    if not isinstance(acknowledgement, dict) or "error" in acknowledgement or "errors" in acknowledgement:
+        return False
+    if not acknowledgement:
+        return True
+    if "partialSuccess" in acknowledgement or "partial_success" in acknowledgement:
+        partial = acknowledgement.get("partialSuccess", acknowledgement.get("partial_success", {}))
+        if not isinstance(partial, dict):
+            return False
+        rejected = partial.get("rejectedSpans", partial.get("rejected_spans", 0))
+        return not isinstance(rejected, bool) and isinstance(rejected, (int, str)) and rejected in (0, "0")
+    if "jobId" in acknowledgement:
+        job_id = acknowledgement["jobId"]
+        return isinstance(job_id, str) and bool(job_id)
+    return all(
+        isinstance(acknowledgement.get(key), str) and acknowledgement[key]
+        for key in ("id", "name", "queueQualifiedName")
+    ) and isinstance(acknowledgement.get("data"), dict)
+
+
+def _send_pending(session_id: str, state: dict, exporter) -> None:
+    trace = trace_id(session_id)
+    specs = [SpanSpec(**record) for record in state["pending"]]
+    for batch in _batches(specs):
+        if not batch:
+            continue
+        if not _batch_accepted(exporter, batch, trace):
+            _collector_outcomes(session_id, batch, "unconfirmed", _truncated_fields(batch))
+            return
+        new = [spec for spec in batch if f"{spec.span_id:016x}" not in state["accepted"]]
+        for spec in batch:
+            state["accepted"][f"{spec.span_id:016x}"] = _revision(spec)
+        state["pending"] = state["pending"][len(batch) :]
+        state["accepted_at"] = datetime.now(timezone.utc).isoformat()
+        _save_progress(session_id, state)
+        _collector_outcomes(session_id, new, "accepted", _truncated_fields(new))
+        updated = [spec for spec in batch if spec not in new]
+        if updated:
+            _collector_outcomes(session_id, updated, "updated", _truncated_fields(updated))
+    if not state["pending"] and state["accepted"]:
+        state.setdefault("accepted_records", {}).update(state.get("pending_records", {}))
+        accepted_source = state.get("pending_source", {})
+        state["source"]["accepted_bytes"] = accepted_source.get("buffered_bytes", 0)
+        state["turns"] = state.get("buffered_turns", 0)
+        _save_progress(session_id, state)
+
+
+def export_session(session_id: str, transcript_path: str, identity: Identity | None = None) -> None:
     from hooks.observability import otel
 
     exporter = otel.langfuse_exporter()
     if exporter is None or not session_id or not transcript_path:
         return
-    identity = identity or identity_from_env(session_id)
-    entries = read_entries(transcript_path)
-    exported = _exported_turns(session_id)
-    spans = session_spans(entries, identity, session_cost(session_id), first_turn=exported)
-    if not spans:
-        return
-    trace = trace_id(session_id)
-    errors = _ExportErrors()
-    logging.getLogger(_EXPORTER_LOGGER).addHandler(errors)
-    try:
-        for batch in _batches(spans):
-            result = exporter.export([_readable(spec, trace) for spec in batch])
-            if result is not SpanExportResult.SUCCESS:
-                break
-    except Exception as e:  # noqa: BLE001
-        errors.reason = f"{type(e).__name__}: {e}"
-        result = SpanExportResult.FAILURE
-    finally:
-        logging.getLogger(_EXPORTER_LOGGER).removeHandler(errors)
-        exporter.shutdown()
-    if result is not SpanExportResult.SUCCESS:
-        _log_failure(errors.status, errors.reason)
-        return
     path = _cursor_path(session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"turns": max(exported, len(turns(entries)))}), encoding="utf-8")
+    descriptor = os.open(path.with_suffix(".lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        with os.fdopen(descriptor, "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            state = _progress(session_id)
+            state["session_id"] = session_id
+            _stage_source(state, transcript_path)
+            if not state["pending"]:
+                _prepare_pending(session_id, state, identity or identity_from_env(session_id))
+            _save_progress(session_id, state)
+            _send_pending(session_id, state, exporter)
+    except Exception as error:  # noqa: BLE001
+        _log_failure(None, f"{type(error).__name__}: {error}")
+    finally:
+        exporter.shutdown()
