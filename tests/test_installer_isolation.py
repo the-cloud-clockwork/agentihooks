@@ -153,7 +153,7 @@ def test_guard_refuses_mutation_through_an_open_descriptor(tmp_path, monkeypatch
     ("operation", "refused"),
     [
         ("subprocess.run(['cat'], input=b'probe', capture_output=True, check=True)", False),
-        ("Path('state.json').write_text('probe')", True),
+        ("os.fdopen(state, 'w').write('probe')", True),
     ],
 )
 def test_guard_classifies_descriptors_from_a_live_home_working_directory(tmp_path, monkeypatch, operation, refused):
@@ -165,11 +165,12 @@ def test_guard_classifies_descriptors_from_a_live_home_working_directory(tmp_pat
         "workspace = Path(os.environ['OPERATOR_HOME']) / '.agentihooks' / 'mutants'\n"
         "workspace.mkdir(parents=True)\n"
         "os.chdir(workspace)\n"
+        "state = os.open('state.json', os.O_RDWR | os.O_CREAT)\n"
     )
     result, sentinel = _run_probe(tmp_path, f"    {operation}\n", preload)
     assert result.returncode == int(refused), result.stdout + result.stderr
     assert ("refusing installer write outside the test directory" in result.stdout) is refused
-    assert not (sentinel / ".agentihooks" / "mutants" / "state.json").exists()
+    assert (sentinel / ".agentihooks" / "mutants" / "state.json").read_text() == ""
 
 
 def test_installer_fixture_allows_scratchpad_home(tmp_path):
