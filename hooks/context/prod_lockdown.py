@@ -17,6 +17,8 @@ Note: kubectl anton-prod is NOT blocked (operator unlocked 2026-04-15).
 import re
 from pathlib import Path
 
+import bashlex
+
 from hooks._redis import get_redis, redis_key
 from hooks.common import log
 from hooks.config import AGENTIHOOKS_HOME
@@ -198,16 +200,46 @@ def _has_hotfix_signal(session_id: str) -> bool:
     return _hotfix_flag(session_id).exists()
 
 
+class _ProductionCommands(bashlex.ast.nodevisitor):
+    def __init__(self, source: str) -> None:
+        self.source = source
+        self.lines = []
+
+    def visitcommand(self, node: bashlex.ast.node, parts: list[bashlex.ast.node]) -> None:
+        from hooks.context._strip import strip_non_command_content
+        from hooks.context.branch_guard import _SHELL_SCRIPT_FLAG, _SHELLS, _command_lines
+
+        words = [part for part in parts if part.kind == "word"]
+        text = _command_lines(strip_non_command_content(self.source[node.pos[0] : node.pos[1]]))
+        merge = re.search(r"\bgh\b[^|&;\n]*\bpr\s+merge\b", text)
+        message_flags = {"--subject", "--body", "-t", "-b"}
+        operands, message_next = [], False
+        for part in words:
+            if message_next:
+                message_next = False
+                continue
+            if merge and part.word.split("=", 1)[0] in message_flags:
+                message_next = "=" not in part.word
+                continue
+            operands.append(self.source[part.pos[0] : part.pos[1]])
+        self.lines.append(_command_lines(strip_non_command_content(" ".join(operands))))
+        for index, part in enumerate(words[:-1]):
+            if _SHELL_SCRIPT_FLAG.fullmatch(part.word) and any(
+                Path(word.word).name in _SHELLS for word in words[:index]
+            ):
+                self.lines.append(_strip_safe_content(words[index + 1].word))
+
+
 def _strip_safe_content(command: str) -> str:
-    """Strip non-command content before pattern matching.
-
-    Delegates to shared utility that handles heredocs, commit messages,
-    echo/printf bodies, curl payloads, python -c strings, and jq/awk args.
-    """
-    from hooks.context._strip import strip_non_command_content
-    from hooks.context.branch_guard import _command_lines
-
-    return _command_lines(strip_non_command_content(command))
+    command = re.sub(r"<<-?\s*['\"]?(\w+)['\"]?.*?\n\1\b", "", command, flags=re.DOTALL)
+    try:
+        trees = bashlex.parse(command)
+    except (bashlex.errors.ParsingError, NotImplementedError):
+        return command
+    visitor = _ProductionCommands(command)
+    for tree in trees:
+        visitor.visit(tree)
+    return "\n".join(visitor.lines)
 
 
 def _has_release_signal(session_id: str) -> bool:
