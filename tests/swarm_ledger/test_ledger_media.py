@@ -1,9 +1,9 @@
 import os
 
-import ledger_artifacts as artifacts
 import ledger_core as core
 import pytest
 
+from scripts.swarm_ledger import ledger_artifacts as artifacts
 from scripts.swarm_ledger import ledger_media
 from tests.swarm_ledger.test_bin import make_ledger
 from tests.swarm_ledger.test_media import png
@@ -96,3 +96,10 @@ def test_reupload_renews_the_pending_entry_grace(artifact):
     assert upload() == entry
     core.sync("reupload-media")
     assert path.read_bytes() == data
+
+
+def test_storing_media_creates_a_missing_ledger_parent(tmp_path, monkeypatch):
+    monkeypatch.setattr(ledger_media.core, "LEDGER_DIR", tmp_path / "missing" / "ledgers")
+    data = png(11, 11)
+    entry = ledger_media.store("nested-media", data)
+    assert (ledger_media.folder("nested-media") / entry["id"]).read_bytes() == data

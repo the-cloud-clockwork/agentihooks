@@ -6,10 +6,10 @@ from http.server import ThreadingHTTPServer
 
 import ledger
 import ledger_core as core
-import ledger_server as server
 import pytest
 
 from scripts.swarm_ledger import ledger_artifacts as artifacts
+from scripts.swarm_ledger import ledger_server as server
 from tests.swarm_ledger.test_bin import make_ledger
 
 MASTER = "master@abcdef-0001"
@@ -177,6 +177,40 @@ def test_invalid_publication_title_leaves_the_media_folder_unchanged(publication
     with pytest.raises(SystemExit):
         ledger.cmd_artifact(args)
     assert {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()} == before
+
+
+def test_master_publication_on_a_real_task_keeps_its_task(publication):
+    slug, path, _ = publication
+    core.sync(
+        slug,
+        ops=[
+            {
+                "op": "task_add",
+                "id": "add-work",
+                "by": MASTER,
+                "task": "work",
+                "title": "Requested document",
+                "lane": "eng",
+                "artifact": True,
+            }
+        ],
+    )
+    file = ledger.upload_artifact(slug, MASTER, str(path), {"task": "work", "title": "Audit summary"})
+    state = ledger.call(
+        slug,
+        [
+            {
+                "op": "artifact_add",
+                "id": "published-work",
+                "by": MASTER,
+                "task": "work",
+                "title": "Audit summary",
+                "file": file,
+            }
+        ],
+    )
+    assert not state["rejected"]
+    assert state["artifacts"][-1]["task"] == "work"
 
 
 @pytest.mark.parametrize("harness", ["claude", "codex"])

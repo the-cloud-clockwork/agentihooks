@@ -3,11 +3,12 @@ import urllib.error
 import urllib.request
 from unittest.mock import patch
 
-import ledger_artifacts as artifacts  # noqa: E402
 import pytest
 
 from scripts.swarm_ledger import ledger
-from tests.swarm_ledger.test_media import Endpoint, core, media, png, server
+from scripts.swarm_ledger import ledger_artifacts as artifacts
+from scripts.swarm_ledger import ledger_server as server
+from tests.swarm_ledger.test_media import Endpoint, core, media, png
 
 MARKDOWN = b"# Handoff template\n\n| Field | Use |\n| --- | --- |\n| Done | what landed |\n\n```\nagentihooks swarm done\n```\n\n- Keep it short\n"
 JSON_DOC = b'{"proposal": {"sections": ["Done", "Stopped at"], "version": 2}}'
@@ -103,6 +104,8 @@ class ArtifactEndpoint(Endpoint):
         ):
             code, body = self.publish("invalid-engineer", "invalid.md", b"# Invalid upload\n", request=request)
             assert code == expected, body
+            if isinstance(request, dict) and request.get("task") == "absent":
+                assert body == "join the ledger first and name a task it holds"
             assert {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()} == before
 
     def test_a_published_plan_upload_uses_the_same_request_as_its_entry(self):
