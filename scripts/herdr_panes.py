@@ -53,9 +53,7 @@ def _store(environ: dict[str, str]) -> str:
 def _write(record: PaneRecord, environ: dict[str, str]) -> PaneRecord:
     path = _path(record, environ)
     path.parent.mkdir(parents=True, exist_ok=True)
-    spare = path.with_suffix(".tmp")
-    spare.write_text(json.dumps(asdict(record)), encoding="utf-8")
-    spare.replace(path)
+    path.write_text(json.dumps(asdict(record)), encoding="utf-8")
     return record
 
 

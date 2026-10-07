@@ -4,7 +4,9 @@ closed, and nothing closes inside the launch grace, while its input line holds t
 import hashlib
 import os
 import re
+import stat
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -137,7 +139,7 @@ def grace_ms(environ: dict[str, str]) -> int:
 
 
 def digest(screen: str) -> str:
-    return hashlib.sha256(screen.encode()).hexdigest()[:16]
+    return hashlib.sha256(screen.encode()).hexdigest()
 
 
 def _is_shell(process: dict) -> bool:
@@ -176,8 +178,11 @@ def _forget(record: PaneRecord, ctx: Context, reason: str) -> Finding:
 
 
 def _look(record: PaneRecord, ctx: Context) -> Finding:
+    state = ctx.owners.state(record)
+    if state == UNKNOWN:
+        return Finding(record, KEEP, "its swarm store cannot be read")
     bare = bare_shell(ctx.herdr.process_info(record.pane_id))
-    reason = _gone(record, bare, ctx.owners.state(record))
+    reason = _gone(record, bare, state)
     if not reason:
         return Finding(record, KEEP, "its agent is live")
     screen = ctx.herdr.screen(record.pane_id)
@@ -185,7 +190,7 @@ def _look(record: PaneRecord, ctx: Context) -> Finding:
         return Finding(record, KEEP, "its input line holds text")
     seen = digest(screen)
     active = record.active_at if seen == record.seen else ctx.now_ms
-    if ctx.act and seen != record.seen:
+    if seen != record.seen:
         herdr_panes.update(record, ctx.environ, seen=seen, active_at=active)
     if ctx.now_ms - max(active, ctx.owners.prompted_at(record) or 0) < wake.quiet_ms(ctx.environ):
         return Finding(record, KEEP, "used inside the quiet window")
@@ -225,7 +230,7 @@ def _close_emptied(closed: list[PaneRecord], herdr) -> list[Emptied]:
     return done
 
 
-def sweep(environ: dict[str, str], now_ms: int, act: bool, herdr, owners) -> list:
+def sweep(environ: dict[str, str], now_ms: int, act: bool, herdr: Herdr, owners: Owners) -> list:
     ctx = Context(environ, now_ms, act, herdr, owners)
     panes = herdr.list_panes()
     found = [judge(record, panes.get(record.pane_id), ctx) for record in herdr_panes.load(environ)]
@@ -263,18 +268,19 @@ def _launch_file(path: Path, alive) -> bool:
 
 def _older(path: Path, now_s: float) -> bool:
     try:
-        return path.is_file() and now_s - path.stat().st_mtime > RUN_FILE_AGE_S
+        found = path.stat()
     except OSError:
         return False
+    return stat.S_ISREG(found.st_mode) and now_s - found.st_mtime > RUN_FILE_AGE_S
 
 
-def stale_launch_files(folder: Path, now_s: float, alive=_alive) -> list[Path]:
+def stale_launch_files(folder: Path, now_s: float, alive: Callable[[int], bool] = _alive) -> list[Path]:
     if not folder.is_dir():
         return []
     return [path for path in sorted(folder.iterdir()) if _older(path, now_s) and _launch_file(path, alive)]
 
 
-def clean_run_dir(folder: Path, now_s: float, act: bool, alive=_alive) -> list[str]:
+def clean_run_dir(folder: Path, now_s: float, act: bool, alive: Callable[[int], bool] = _alive) -> list[str]:
     out = []
     for path in stale_launch_files(folder, now_s, alive):
         if act:
