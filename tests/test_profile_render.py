@@ -603,7 +603,7 @@ def test_codex_render_links_into_the_claude_profile(world):
     linked = {p.name: os.readlink(p) for p in (out / "skills").iterdir() if p.is_symlink()}
     assert linked == {p.name: str(p) for p in (claude / "skills").iterdir()}
     assert {"bundle-skill", "role-skill"} <= set(linked)
-    assert sorted(p.name for p in out.iterdir() if not p.is_symlink()) == ["config.toml", "skills"]
+    assert sorted(p.name for p in out.iterdir() if not p.is_symlink()) == [render.STAMP, "config.toml", "skills"]
     sources = render.sources.path("rb-role", "codex", render.rendered_root())
     assert os.readlink(sources) == str(render.sources.path("rb-role", "claude", render.rendered_root()))
 
@@ -796,9 +796,11 @@ def test_codex_render_config_has_no_persona_and_only_profile_servers(world):
         for name in ("bundle-skill", "other-skill", "role-skill")
     ]
     assert doc["project_doc_max_bytes"] == 65536
-    assert doc["agentihooks"]["render"] == render.stamp("rb-role")
+    assert "agentihooks" not in doc
+    stamp = json.loads((render.rendered_root() / "rb-role" / "codex" / render.STAMP).read_text())
+    assert stamp["render"] == render.stamp("rb-role")
     operator = (home / ".codex" / "config.toml").read_bytes()
-    assert doc["agentihooks"]["operator"] == hashlib.sha256(operator).hexdigest()
+    assert stamp["operator"] == hashlib.sha256(operator).hexdigest()
     assert render.render_codex("rb-role") is None
 
 
