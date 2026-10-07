@@ -236,7 +236,7 @@ def _production_command_lines(node: Node) -> list[str]:
     if node.type == "command":
         lines.extend(_production_operands(node))
     elif node.type == "word" and node.parent.type == "expansion":
-        tree = Parser(Language(tree_sitter_bash.language())).parse(b"echo " + node.text)
+        tree = Parser(Language(tree_sitter_bash.language())).parse(b"echo word" + node.text)
         for child in tree.root_node.named_children[0].named_children[1:]:
             lines.extend(_production_command_lines(child))
     for child in node.named_children:

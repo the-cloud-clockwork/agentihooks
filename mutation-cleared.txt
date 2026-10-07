@@ -1314,5 +1314,17 @@
   "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_member__mutmut_24:fcedbddd680c1d30e117ddbc4e1035fc15d421b65072ba6f99093274f0bb567c": {
     "reader": "Standards reader",
     "reason": "ensure_ascii False and None take the same false branch, producing identical JSON and contextual redaction input."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_39:f4dbfcc6bfe6005080e7d21501efb923cfab37e5310ea952aaa9870a5ad37696": {
+    "reader": "Standards",
+    "reason": "None and False are tested only for truthiness; neither reaches output."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_46:ff3f8c6951c9f5a3af3816335b2ee24249e03ee2a07d8a4d7b8c4580a83fe010": {
+    "reader": "Standards",
+    "reason": "Unlimited splitting preserves the first segment used to identify the option."
+  },
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_49:fd5b19fb8b5769b93feecb39e8f69a70896e3401d05a66484161915ee3e36b84": {
+    "reader": "Standards",
+    "reason": "Increasing the split limit preserves the first segment used to identify the option."
   }
 }

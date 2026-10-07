@@ -32,6 +32,21 @@ def test_single_word_merge_message_is_not_a_branch(message):
     _check(f"gh pr merge 123 --base dev {message}")
 
 
+def test_merge_message_may_contain_several_equals():
+    _check('gh pr merge 123 --base dev --subject="main=checkpoint=done"')
+
+
+def test_inline_message_cannot_hide_the_following_real_target():
+    from hooks.hook_manager import BlockAction
+
+    with pytest.raises(BlockAction):
+        _check('gh pr merge 123 --subject="message" --base=main')
+
+
+def test_shell_script_message_is_not_executed():
+    _check('sh notify.sh "gh pr merge 123 --base main"')
+
+
 @pytest.mark.parametrize("separator", [";", "\n", "&&", "||", "|"])
 @pytest.mark.parametrize("commands", [("gh pr", "merge main"), ("gh workflow", "run release.yml")])
 def test_operands_of_separate_commands_do_not_join(separator, commands):
@@ -97,6 +112,13 @@ def test_parameter_expansion_keeps_executed_commands(command):
 
     with pytest.raises(BlockAction):
         _check(command)
+
+
+def test_parameter_default_hash_does_not_comment_out_a_substitution():
+    from hooks.hook_manager import BlockAction
+
+    with pytest.raises(BlockAction):
+        _check('echo "${x:-#`gh pr merge 123 --base main`}"')
 
 
 def test_arithmetic_does_not_turn_a_literal_message_into_an_operation():
