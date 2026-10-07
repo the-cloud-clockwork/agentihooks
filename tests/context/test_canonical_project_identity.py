@@ -73,14 +73,14 @@ def test_swarm_does_not_confuse_equal_repository_basenames(monkeypatch, tmp_path
         "https://github.com/first/.git",
     ],
 )
-def test_unsafe_or_ambiguous_remotes_remain_unknown_and_unstored(tmp_path, remote, record_property):
+def test_unsafe_or_ambiguous_remotes_remain_unknown_and_unstored(tmp_path, remote, request):
     repo = checkout(tmp_path / "common", remote)
     config = (repo / ".git" / "config").read_bytes()
     identity = project_identity.resolve_project(str(repo), {})
     assert identity.project_id == "unknown"
     assert identity.remote == ""
     assert identity.project_identity_ambiguities_total == 1
-    record_property("project_identity_ambiguities_total", identity.project_identity_ambiguities_total)
+    request.node.user_properties.append(("project_identity_ambiguities_total", identity.project_identity_ambiguities_total))
     assert remote not in json.dumps(identity.attributes())
     assert (repo / ".git" / "config").read_bytes() == config
     git(repo, "remote", "set-url", "origin", "https://github.com/first/common.git")
