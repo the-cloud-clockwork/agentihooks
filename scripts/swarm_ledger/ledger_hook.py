@@ -265,6 +265,8 @@ HANDLERS = {"PostToolUse": on_tool, "UserPromptSubmit": on_prompt, "Stop": on_st
 def serve_ledgers():
     import ledger_link
 
+    from scripts.swarm_ledger import server_lifetime
+
     if not any(LEDGER_DIR.glob("*.json")):
         return
     try:
@@ -277,6 +279,7 @@ def serve_ledgers():
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
+            env=server_lifetime.environment(LEDGER_DIR, address[1]),
         )
 
 

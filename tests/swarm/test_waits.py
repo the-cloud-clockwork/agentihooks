@@ -578,8 +578,8 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "commits(last:1){nodes{commit{committedDate "
                 'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"
-                "nodes{...on CheckRun{name conclusion} ...on StatusContext{context state}} "
-                "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId}} "
+                "nodes{...on CheckRun{name conclusion completedAt} ...on StatusContext{context state createdAt}} "
+                "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId createdAt}} "
                 "pageInfo{hasNextPage}}}}}}}}",
                 "-f",
                 f"url={URL}",

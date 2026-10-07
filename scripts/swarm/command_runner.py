@@ -22,7 +22,12 @@ def run(argv: list[str], env: dict) -> str:
 
 def execute(store: RedisStore, slug: str, row: dict) -> str:
     command, argv = row["command"], row["argv"]
-    env = {**os.environ, "AGENTIHOOKS_AGENT_NAME": "operator", "AGENTIHOOKS_CONTROL_SOURCE": "page"}
+    env = {
+        **os.environ,
+        "AGENTIHOOKS_AGENT_NAME": "operator",
+        "AGENTIHOOKS_SWARM": "",
+        "AGENTIHOOKS_CONTROL_SOURCE": "page",
+    }
     if command == "quota":
         from scripts import agents_quota
 
