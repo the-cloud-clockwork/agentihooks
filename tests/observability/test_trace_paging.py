@@ -178,7 +178,7 @@ def test_one_long_streamed_generation_keeps_paging_bounded(tmp_path, monkeypatch
     monkeypatch.setattr("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 500)
     records = _claude(1, 80)
     for record in records:
-        if record["type"] == "assistant" and not record["uuid"].startswith("e"):
+        if record["type"] == "assistant" and not record["uuid"].startswith("e") and record["message"]["id"] != "m0-0":
             record["message"]["id"] = "streamed-generation"
     reference, _, _ = _run(tmp_path, monkeypatch, "reference", 10**9, records, len(records))
     paged, sizes, path = _run(tmp_path, monkeypatch, "paged", 16000, records, 3)

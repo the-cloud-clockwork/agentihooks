@@ -213,7 +213,7 @@ def _turn_output(turn: list[dict], carry: Mapping | None) -> str:
 
 
 def _generation_text(turn: list[dict], message_id: str, carry: Mapping) -> str:
-    earlier = carry.get("generation_text", "") if carry.get("generation") == message_id else ""
+    earlier = carry.get("generation_text") if carry.get("generation") == message_id else ""
     entries = [e for e in turn if isinstance(e.get("message"), dict) and e["message"].get("id") == message_id]
     return "\n\n".join(text for text in (earlier, _assistant_text(entries)) if text)
 
