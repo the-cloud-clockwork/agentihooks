@@ -32,7 +32,10 @@ def page(controls, monkeypatch):
         },
     )
     token = core.read_token(core.paths("demo")[0].read_text())
-    monkeypatch.setattr(server.shutil, "which", lambda name: "agentihooks")
+    from scripts.swarm import command_runner
+
+    monkeypatch.setattr(server, "swarm_store", lambda: store)
+    monkeypatch.setattr(command_runner.shutil, "which", lambda name: "agentihooks")
     monkeypatch.setattr(cli.signal, "signal", lambda *args: None)
     monkeypatch.setattr(doctor.swarm, "connect", lambda: store)
     monkeypatch.setattr(cli, "cmd_close", lambda store, args: store.update(args.slug, state="stopped"))
@@ -65,7 +68,9 @@ def page(controls, monkeypatch):
         )
         try:
             with urllib.request.urlopen(req) as response:
-                return response.status
+                code = response.status
+            command_runner.consume(store, "demo")
+            return code
         except urllib.error.HTTPError as exc:
             return exc.code
 
@@ -121,7 +126,10 @@ def test_failed_page_commands_send_nothing(page, monkeypatch, action):
         monkeypatch.setattr(cli, "cmd_pause", fail)
     else:
         monkeypatch.setitem(doctor.COMMANDS, "start", fail)
-    assert put({"action": action}) == 502
+    from scripts.swarm import commands
+
+    assert put({"action": action}) == 200
+    assert commands.rows(store, "demo")[-1]["state"] == "failed"
     assert InboxStore(store.redis).mailbox(master.name) == []
     assert ledger.said == []
 
