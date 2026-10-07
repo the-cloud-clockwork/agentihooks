@@ -15,6 +15,7 @@ import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
+from tests.swarm_ledger.ledger_page import chromium, ledger_state, shell_html, show  # noqa: E402
 
 SLUG = "static-shell"
 CONTENT = {
@@ -187,3 +188,51 @@ def test_the_ledger_rows_carry_their_swarm_state(base, monkeypatch):
 def test_the_event_snapshot_carries_only_the_ledger_and_swarm(monkeypatch):
     monkeypatch.setattr(server, "swarm_status", lambda slug, ledger=None: {"state": "running"})
     assert set(server.stream_resources(SLUG)) == {"ledger", "swarm"}
+
+
+def history(copies):
+    def said(n):
+        return [{"id": f"c{n}-{i}", "by": "operator", "text": f"line {i}", "at": i + 1} for i in range(copies)]
+
+    tasks = [
+        {"id": f"t{n}", "title": f"Task {n}", "lane": "eng", "state": "done" if n % 2 else "open", "comments": said(n)}
+        for n in range(300)
+    ]
+    return {
+        "title": "Bounded",
+        "overview": "o",
+        "tasks": tasks,
+        "notes": [{"id": f"n{n}", "text": f"note {n}", "comments": said(n)} for n in range(40 * copies)],
+        "chat": [{"id": f"m{i}", "by": "operator", "text": f"chat {i}", "at": i + 1} for i in range(200 * copies)],
+        "followups": [{"id": f"f{n}", "text": f"follow up {n}", "comments": said(n)} for n in range(30 * copies)],
+    }
+
+
+@pytest.fixture(scope="module")
+def chromium_browser():
+    with chromium() as launched:
+        yield launched
+
+
+def rendered_elements(browser, doc):
+    page = browser.new_page(viewport={"width": 1920, "height": 1080})
+    try:
+        show(page, shell_html(), ledger=ledger_state(doc), swarm=None)
+        return page.evaluate("() => document.getElementsByTagName('*').length")
+    finally:
+        page.close()
+
+
+def test_the_rendered_page_stays_bounded_as_history_doubles(chromium_browser):
+    once = rendered_elements(chromium_browser, history(2))
+    twice = rendered_elements(chromium_browser, history(4))
+    assert twice <= once * 1.1
+    assert twice < 3000
+    page = chromium_browser.new_page(viewport={"width": 1920, "height": 1080})
+    try:
+        show(page, shell_html(), ledger=ledger_state(history(4)), swarm=None)
+        page.click("#tasks-box > summary")
+        page.wait_for_selector("#tasks .page-more button")
+        assert page.locator("#tasks li[id^='item-tasks-']").count() == 50
+    finally:
+        page.close()
