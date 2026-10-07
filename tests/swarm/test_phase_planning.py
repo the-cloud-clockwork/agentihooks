@@ -454,7 +454,7 @@ def test_a_problem_line_is_shown_only_while_the_comment_keeps_room_for_its_tail(
 def test_ledger_client_writes_a_phase_comment_and_a_review_record(monkeypatch):
     sent = []
     monkeypatch.setattr(
-        ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops: sent.append(ops) or {})
+        ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops, service: sent.append(ops) or {})
     )
     client = ledger_client.LedgerClient()
     client.comment_phase("demo", "p1", "Slice checked.", "swarm")
@@ -485,7 +485,7 @@ def test_ledger_client_writes_a_phase_comment_and_a_review_record(monkeypatch):
 def test_ledger_client_sends_an_override_only_when_one_is_given(monkeypatch):
     sent = []
     monkeypatch.setattr(
-        ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops: sent.append(ops) or {})
+        ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops, service: sent.append(ops) or {})
     )
     client = ledger_client.LedgerClient()
     override = {"reason": "Accepted", "problems": ["Task t1 names no territory."]}

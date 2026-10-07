@@ -8,7 +8,7 @@ from scripts.swarm.store import SwarmError
 
 def test_refused_plan_completion_names_invalid_slice(monkeypatch):
     response = {"rejected": ["finish"], "_meta": {"warnings": ["tasks/plan has invalid slice task ids: other"]}}
-    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops: response))
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops, service: response))
     with pytest.raises(SwarmError, match="invalid slice task ids: other"):
         ledger_client.LedgerClient().update_task("demo", "plan", {"state": "done", "proof": {"slice": "other"}})
 
@@ -26,7 +26,7 @@ def test_refused_plan_completion_names_invalid_slice(monkeypatch):
     ],
 )
 def test_refusal_keeps_diagnostics_or_operation_fallback(monkeypatch, response, expected):
-    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops: response))
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops, service: response))
     with pytest.raises(SwarmError) as caught:
         ledger_client.LedgerClient().update_task("demo", "plan", {"state": "done"})
     assert str(caught.value) == expected
@@ -34,5 +34,5 @@ def test_refusal_keeps_diagnostics_or_operation_fallback(monkeypatch, response, 
 
 def test_accepted_state_is_returned_unchanged(monkeypatch):
     response = {"tasks": [], "_meta": {"warnings": ["Historical warning"]}, "rejected": []}
-    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops: response))
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops, service: response))
     assert ledger_client.LedgerClient().state("demo") is response

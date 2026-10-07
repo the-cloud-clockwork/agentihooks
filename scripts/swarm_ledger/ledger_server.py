@@ -32,6 +32,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(1, str(Path(__file__).resolve().parents[2]))
 import ledger_artifacts  # noqa: E402
+import ledger_authority as authority  # noqa: E402
 import ledger_bin  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate  # noqa: E402
@@ -528,15 +529,21 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Host") not in ALLOWED_HOSTS:
             return self.send(403, "host not allowed", "text/plain") or True
         if slug is not None:
-            token = core.read_token(repository.read_page(slug))
-            if not token or self.headers.get("X-Ledger-Token") != token:
+            self.principal = authority.principal(
+                core.read_token(repository.read_page(slug)),
+                slug,
+                self.headers.get("X-Ledger-Token"),
+                self.headers.get("X-Ledger-Agent"),
+            )
+            if self.principal is None:
                 return self.send(403, "missing or wrong ledger token", "text/plain") or True
         return False
 
     def agent_view(self):
         return urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("view") == ["agent"]
 
-    def reply_state(self, slug, changes=None, ops=None):
+    def reply_state(self, slug, changes=None, ops=None, refusals=None):
+        refusals = refusals or {}
         try:
             state, rejected = repository.apply_ops(
                 slug, changes=changes, ops=ops, gate=talk.Budget(slug) if ops else None
@@ -551,7 +558,11 @@ class Handler(BaseHTTPRequestHandler):
             "page_version": core.page_version(),
             "crew": ledger_gate.crew(state["_meta"]),
         }
-        reply = {**(state if self.agent_view() else with_workspaces(slug, state)), "rejected": rejected}
+        state["_meta"]["warnings"] = [*state["_meta"].get("warnings", []), *refusals.values()]
+        reply = {
+            **(state if self.agent_view() else with_workspaces(slug, state)),
+            "rejected": [*rejected, *refusals],
+        }
         return self.send(200, json.dumps(reply, ensure_ascii=False), "application/json")
 
     def do_OPTIONS(self):
@@ -604,6 +615,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, "no such ledger", "text/plain")
         if self.refused(slug):
             return None
+        if self.principal:
+            return self.send(403, "swarm controls need the operator", "text/plain")
         try:
             length = int(self.headers.get("Content-Length") or 0)
             if not 0 <= length <= MAX_BODY:
@@ -765,7 +778,11 @@ class Handler(BaseHTTPRequestHandler):
             ledger_artifacts.resolve(slug, ops)
         except ValueError as exc:
             return self.send(400, f'body must be {{"changes": [...], "ops": [...]}}: {exc}', "text/plain")
-        return self.reply_state(slug, changes, ops)
+        if self.principal and changes:
+            return self.send(403, "page changes need the operator", "text/plain")
+        refusals = {op["id"]: text for op in ops if (text := authority.refusal(self.principal, op))}
+        allowed = [op for op in ops if op["id"] not in refusals]
+        return self.reply_state(slug, changes, allowed, refusals)
 
 
 def code_stamp(code_dirs=CODE_DIRS):

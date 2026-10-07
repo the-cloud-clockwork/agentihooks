@@ -734,5 +734,21 @@
   "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁread_snapshot__mutmut_6:4cf49a8e028eef0200c330b480f3e0598383a25882b4167acf0cf88fcc4f6f48": {
     "reader": "Standards",
     "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
+  },
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_request__mutmut_4:af0af85b23380d0c7c51dbaa1258d2ea95e98cef722213c7cc6265b6b9ddc716": {
+    "reader": "Standards",
+    "reason": "urllib capitalizes request header names, so the changed key casing sends the same header."
+  },
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_request__mutmut_5:0998bb7cc0915b802d758f795db0d447a8cdc38a1e3ca981dafc617cad0a0713": {
+    "reader": "Standards",
+    "reason": "urllib capitalizes request header names, so the changed key casing sends the same header."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁrefused__mutmut_18:a8475961407734a792c2605a007486f4f4d9bbefd15882f2223d02abaa6f7d54": {
+    "reader": "Standards",
+    "reason": "http.server header lookup is case insensitive, so the changed name casing reads the same header."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁrefused__mutmut_19:abd65b2f5e3dd98506b15c18eefd38150a9ca5498070281a717f5d6bb8bd21b3": {
+    "reader": "Standards",
+    "reason": "http.server header lookup is case insensitive, so the changed name casing reads the same header."
   }
 }
