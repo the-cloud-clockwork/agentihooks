@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scripts.doctor import read
+from scripts.doctor import handoffs, read
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import RedisStore
 
@@ -93,7 +93,7 @@ def test_a_handoff_still_waiting_for_its_successor_is_read(redis, tmp_path):
     store, box = RedisStore(redis), InboxStore(redis)
     seat = f"eng-2@{SLUG}"
     store.seats.occupy(seat, f"{SLUG}-eng-2", 10)
-    store.put_handoff(SLUG, "t2", "# t2 handoff", seat=seat)
+    store.put_handoff(SLUG, "t2", "# t2 handoff", seat=seat, envelope={"agent": f"{SLUG}-eng-2", "task": "t2"})
     [record] = read.handoffs(store, box, tmp_path, SLUG)
     assert (record["task"], record["from"], record["to"], record["document"]) == (
         "t2",
@@ -101,3 +101,38 @@ def test_a_handoff_still_waiting_for_its_successor_is_read(redis, tmp_path):
         "",
         "# t2 handoff",
     )
+
+
+def test_a_waiting_handoff_is_authored_by_its_envelope_agent_not_the_next_seat_holder(redis, tmp_path):
+    store, box = RedisStore(redis), InboxStore(redis)
+    seat = f"eng-2@{SLUG}"
+    store.seats.occupy(seat, f"{SLUG}-eng-2", 10)
+    store.memory.add_recap(seat, f"{SLUG}-eng-2", "t2", "did half", 15)
+    store.put_handoff(SLUG, "t2", "# t2 handoff", seat=seat, envelope={"agent": f"{SLUG}-eng-2", "task": "t2"})
+    store.seats.occupy(seat, f"{SLUG}-eng-7", 20)
+    [record] = read.handoffs(store, box, tmp_path, SLUG)
+    assert (record["task"], record["from"]) == ("t2", f"{SLUG}-eng-2")
+    assert handoffs.missing_recap([record]) == []
+
+
+def test_a_waiting_handoff_without_an_envelope_never_names_the_seat_holder(redis, tmp_path):
+    store, box = RedisStore(redis), InboxStore(redis)
+    seat = f"eng-2@{SLUG}"
+    store.seats.occupy(seat, f"{SLUG}-eng-7", 20)
+    store.put_handoff(SLUG, "t2", "# t2 handoff", seat=seat)
+    [record] = read.handoffs(store, box, tmp_path, SLUG)
+    assert record["from"] == ""
+    [finding] = handoffs.missing_recap([record])
+    assert finding.subject == seat
+
+
+def test_a_waiting_handoff_whose_author_left_no_recap_is_raised_on_that_author(redis, tmp_path):
+    store, box = RedisStore(redis), InboxStore(redis)
+    seat = f"eng-2@{SLUG}"
+    store.seats.occupy(seat, f"{SLUG}-eng-2", 10)
+    store.put_handoff(SLUG, "t2", "# t2 handoff", seat=seat, envelope={"agent": f"{SLUG}-eng-2", "task": "t2"})
+    store.seats.occupy(seat, f"{SLUG}-eng-7", 20)
+    store.memory.add_recap(seat, f"{SLUG}-eng-7", "t9", "other task", 25)
+    [finding] = handoffs.missing_recap(read.handoffs(store, box, tmp_path, SLUG))
+    assert finding.subject == f"{SLUG}-eng-2"
+    assert finding.evidence[:2] == (f"task t2 on seat {seat}", f"handed off by {SLUG}-eng-2")
