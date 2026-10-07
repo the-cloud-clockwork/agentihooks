@@ -29,8 +29,9 @@ def _commit(work, message, branch="dev"):
     return _git("rev-parse", "HEAD", cwd=work)
 
 
-def _plant(root):
+def _plant(root, tag=""):
     shutil.copy(FIXTURE, root / "sources.json")
+    _git("init", "-q", "--bare", str(root / "stale-checkout.git"), cwd=root)
     heads = {}
     for name in REPOS:
         bare = root / f"{name}.git"
@@ -38,7 +39,7 @@ def _plant(root):
         work = root / f"{name}-work"
         _git("clone", "-q", str(bare), str(work), cwd=root)
         _git("checkout", "-q", "-b", "dev", cwd=work)
-        heads[name] = _commit(work, f"{name} first")
+        heads[name] = _commit(work, f"{name} first{tag}")
     return root / "sources.json", heads
 
 
@@ -96,7 +97,7 @@ def test_report_separates_source_deployed_and_unknown_for_every_repo(planted):
     assert repos["agentihooks"]["unknown_live"] == ["swarm controller version on Anton"]
     git_version = subprocess.run(["git", "--version"], capture_output=True, text=True, check=True).stdout.strip()
     assert repos["antoncore"]["deployed"] == [
-        {"name": "argocd sync revision", "status": "verified", "value": git_version}
+        {"name": "read-only command stand-in", "status": "verified", "value": git_version}
     ]
     assert repos["antoncore"]["unknown_live"] == ["live autoscaling group desired capacity"]
     assert report["schema"] == "swarm-v2-baseline/1"
@@ -111,7 +112,8 @@ def test_second_independent_fixture_gives_the_same_shape(tmp_path):
     first_root.mkdir()
     second_root.mkdir()
     first_sources, first_heads = _plant(first_root)
-    second_sources, second_heads = _plant(second_root)
+    second_sources, second_heads = _plant(second_root, " again")
+    assert all(first_heads[name] != second_heads[name] for name in REPOS)
     first = _by_repo(_collect(first_sources, FIRST))
     second = _by_repo(_collect(second_sources, FIRST))
     for name in REPOS:
@@ -357,6 +359,104 @@ def test_sanitize_redacts_addresses_and_bearers(raw, clean):
     assert baseline.sanitize(raw) == clean
 
 
+@pytest.mark.parametrize(
+    ("raw", "clean"),
+    [
+        ("from git@github.com:o/r.git ok", "from <redacted-url> ok"),
+        ("image ghcr.io/o/app@sha256:abc123 ok", "image ghcr.io/o/app@sha256:abc123 ok"),
+        ("node 2001:db8::8a2e:370:7334 down", "node <redacted-ip> down"),
+        ("loop ::1 and fe80::1", "loop <redacted-ip> and <redacted-ip>"),
+        ("at 19:28:16 and a:b", "at 19:28:16 and a:b"),
+    ],
+)
+def test_sanitize_redacts_ssh_and_ipv6_addresses(raw, clean):
+    assert baseline.sanitize(raw) == clean
+
+
+@pytest.mark.parametrize("key", ["token", "Password", "secret", "api_key"])
+def test_sanitize_redacts_colon_credentials(key):
+    assert baseline.sanitize(f"{key}: v1 rest") == f"{key}: <redacted> rest"
+
+
+@pytest.mark.parametrize("prefix", ["gh" + "p_", "gh" + "s_", "github" + "_pat_", "s" + "k-", "xo" + "xb-"])
+def test_sanitize_redacts_bare_tokens(prefix):
+    assert baseline.sanitize(f"use {prefix}{'A1' * 6} now") == "use <redacted> now"
+    assert baseline.sanitize(f"use {prefix}short now") == f"use {prefix}short now"
+
+
+def test_missing_git_binary(monkeypatch, planted):
+    sources, _ = planted
+
+    def absent(*args, **kwargs):
+        raise FileNotFoundError(args[0][0])
+
+    monkeypatch.setattr(baseline.subprocess, "run", absent)
+    assert baseline.resolve_head("x.git", "dev")["reason"] == "git not found"
+    assert baseline._git_ok("x", "status") is None
+
+
+def test_git_that_does_not_answer_leaves_interfaces_unverified(planted, monkeypatch):
+    sources, heads = planted
+    repo = baseline.load_sources(sources).repositories[0]
+    monkeypatch.setattr(baseline, "_git_ok", lambda checkout, *args: None)
+    assert baseline.check_interfaces(repo, heads["agentihooks"]) == [
+        {"path": "file.txt", "status": "unverified", "reason": "git did not answer"},
+        {"path": "gone.py", "status": "unverified", "reason": "git did not answer"},
+    ]
+    monkeypatch.setattr(baseline, "_git_ok", lambda checkout, *args: True if args[-1].endswith("}") else None)
+    assert baseline.check_interfaces(repo, heads["agentihooks"]) == [
+        {"path": "file.txt", "status": "unverified", "reason": "git did not answer"},
+        {"path": "gone.py", "status": "unverified", "reason": "git did not answer"},
+    ]
+
+
+def _cli(sources, tmp_path, previous=None):
+    argv = ["--sources", str(sources), "--json", str(tmp_path / "b.json"), "--markdown", str(tmp_path / "b.md")]
+    return baseline.main([*argv, "--previous", str(previous)] if previous else argv)
+
+
+def test_interrupted_write_recovers_on_rerun(planted, tmp_path, monkeypatch):
+    sources, _ = planted
+    out = tmp_path / "out"
+    monkeypatch.setattr(baseline, "_utc_now", lambda: FIRST)
+    _cli(sources, out)
+    _commit(sources.parent / "antoncore-work", "antoncore second")
+    real_write = baseline._write
+
+    def crash_on_markdown(path, text):
+        if path.suffix == ".md":
+            raise OSError("disk gone")
+        real_write(path, text)
+
+    monkeypatch.setattr(baseline, "_write", crash_on_markdown)
+    monkeypatch.setattr(baseline, "_utc_now", lambda: SECOND)
+    with pytest.raises(OSError, match="disk gone"):
+        _cli(sources, out, out / "b.json")
+    monkeypatch.setattr(baseline, "_write", real_write)
+    monkeypatch.setattr(baseline, "_utc_now", lambda: "2026-10-09T00:00:00Z")
+    assert _cli(sources, out, out / "b.json") == 0
+    report = json.loads((out / "b.json").read_text())
+    assert [d["repo"] for d in report["drift"]] == ["antoncore"]
+    assert (out / "b.md").read_text() == baseline.render_markdown(report)
+    assert sorted(p.name for p in out.iterdir()) == ["b.json", "b.md"]
+
+
+@pytest.mark.parametrize("use_previous", [False, True])
+def test_older_previous_cannot_overwrite_newer_output(planted, tmp_path, monkeypatch, use_previous, capsys):
+    sources, _ = planted
+    out = tmp_path / "out"
+    older = tmp_path / "older.json"
+    older.write_text(json.dumps({"observed_at": "2026-10-06", "repositories": [], "drift": []}))
+    monkeypatch.setattr(baseline, "_utc_now", lambda: FIRST)
+    _cli(sources, out)
+    before = (out / "b.json").read_text()
+    with pytest.raises(SystemExit) as exit_info:
+        _cli(sources, out, older if use_previous else None)
+    assert exit_info.value.code == 2
+    assert "holds a newer baseline than --previous; pass it as --previous" in capsys.readouterr().err
+    assert (out / "b.json").read_text() == before
+
+
 def test_interfaces_are_present_missing_or_unverified(planted):
     sources, _ = planted
     repos = _by_repo(_collect(sources, FIRST))
@@ -419,6 +519,7 @@ def test_markdown_renders_every_state_exactly():
         "Package SV2-FND-01. Observed at 2026-10-07T00:00:00Z.\n"
         "Source is the branch head. Deployed values come from read-only probes.\n"
         "An unverified value is unknown: it never means empty, absent or zero.\n"
+        "baseline_drift_items counts drift found by this run; the Drift section keeps every earlier entry.\n"
         f"Regenerate with `{baseline.REGENERATE}`.\n"
         "\n"
         "| Repository | Source | Deployed | Unknown live values |\n"

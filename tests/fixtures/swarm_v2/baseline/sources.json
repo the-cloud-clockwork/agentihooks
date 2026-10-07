@@ -26,7 +26,7 @@
         }
       ],
       "unknown_live": [],
-      "checkout": "antoncore.git",
+      "checkout": "stale-checkout.git",
       "interfaces": [
         "file.txt"
       ]
@@ -36,7 +36,7 @@
       "url": "antoncore.git",
       "probes": [
         {
-          "name": "argocd sync revision",
+          "name": "read-only command stand-in",
           "kind": "command",
           "argv": [
             "git",

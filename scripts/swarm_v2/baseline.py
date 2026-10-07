@@ -1,4 +1,5 @@
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -46,10 +47,13 @@ REGENERATE = (
 
 _REDACTIONS = (
     (re.compile(r"(Bearer\s+)\S+"), r"\1<redacted>"),
-    (re.compile(r"((?:token|password|secret|api_?key)=)[^\s&]+", re.IGNORECASE), r"\1<redacted>"),
+    (re.compile(r"((?:token|password|secret|api_?key)\s*[:=]\s*)[^\s&]+", re.IGNORECASE), r"\1<redacted>"),
+    (re.compile(r"\b(?:gh[opsu]_|github_pat_|sk-|xox[abp]-)[A-Za-z0-9_-]{8,}"), "<redacted>"),
     (re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'<>]+"), "<redacted-url>"),
+    (re.compile(r"\b[\w.-]+@[\w-]+(?:\.[\w-]+)+:[^\s\"'<>]+"), "<redacted-url>"),
     (re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b"), "<redacted-ip>"),
 )
+_IPV6 = re.compile(r"(?<![\w:])[0-9A-Fa-f:]*:[0-9A-Fa-f:]*(?![\w:])")
 
 
 @dataclass(frozen=True)
@@ -81,10 +85,18 @@ class Sources:
     repositories: tuple[Repository, ...]
 
 
+def _ipv6(match: re.Match) -> str:
+    try:
+        ipaddress.IPv6Address(match.group())
+    except ValueError:
+        return match.group()
+    return "<redacted-ip>"
+
+
 def sanitize(text: str) -> str:
     for pattern, replacement in _REDACTIONS:
         text = pattern.sub(replacement, text)
-    return text
+    return _IPV6.sub(_ipv6, text)
 
 
 def _repo_url(url: str, base: Path) -> str:
@@ -136,6 +148,8 @@ def resolve_head(url: str, branch: str) -> dict:
         )
     except subprocess.TimeoutExpired:
         return _unresolved(branch, "timed out")
+    except FileNotFoundError:
+        return _unresolved(branch, "git not found")
     if proc.returncode:
         return _unresolved(branch, f"exit {proc.returncode}: {sanitize(proc.stderr.strip())[:REASON_LIMIT]}")
     for line in proc.stdout.splitlines():
@@ -197,11 +211,21 @@ def observe(probe: Probe, source: dict) -> dict:
     return result
 
 
-def _git_ok(checkout: str, *args: str) -> bool:
-    proc = subprocess.run(
-        ["git", "-C", checkout, *args], capture_output=True, text=True, timeout=GIT_TIMEOUT, check=False
-    )
+def _git_ok(checkout: str, *args: str) -> bool | None:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", checkout, *args], capture_output=True, text=True, timeout=GIT_TIMEOUT, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
     return proc.returncode == 0
+
+
+def _interface(checkout: str, commit: str, path: str) -> dict:
+    found = _git_ok(checkout, "cat-file", "-e", f"{commit}:{path}")
+    if found is None:
+        return {"path": path, "status": "unverified", "reason": "git did not answer"}
+    return {"path": path, "status": "present" if found else "missing"}
 
 
 def check_interfaces(repo: Repository, commit: str | None) -> list[dict]:
@@ -212,17 +236,12 @@ def check_interfaces(repo: Repository, commit: str | None) -> list[dict]:
         reason = "source head unresolved"
     elif not repo.checkout:
         reason = "no local checkout configured"
-    elif not _git_ok(repo.checkout, "cat-file", "-e", f"{commit}^{{commit}}"):
-        reason = "source head not in local checkout"
+    else:
+        found = _git_ok(repo.checkout, "cat-file", "-e", f"{commit}^{{commit}}")
+        reason = {None: "git did not answer", False: "source head not in local checkout"}.get(found, "")
     if reason:
         return [{"path": path, "status": "unverified", "reason": reason} for path in repo.interfaces]
-    return [
-        {
-            "path": path,
-            "status": "present" if _git_ok(repo.checkout, "cat-file", "-e", f"{commit}:{path}") else "missing",
-        }
-        for path in repo.interfaces
-    ]
+    return [_interface(repo.checkout, commit, path) for path in repo.interfaces]
 
 
 def _observe_repo(repo: Repository, branch: str) -> dict:
@@ -307,6 +326,7 @@ def render_markdown(report: dict) -> str:
         f"Package SV2-FND-01. Observed at {report['observed_at']}.",
         "Source is the branch head. Deployed values come from read-only probes.",
         "An unverified value is unknown: it never means empty, absent or zero.",
+        "baseline_drift_items counts drift found by this run; the Drift section keeps every earlier entry.",
         f"Regenerate with `{REGENERATE}`.",
         "",
         "| Repository | Source | Deployed | Unknown live values |",
@@ -348,6 +368,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--markdown", required=True, type=Path)
     args = parser.parse_args(argv)
     previous = json.loads(args.previous.read_text()) if args.previous else None
+    current = json.loads(args.json.read_text()) if args.json.exists() else None
+    if current and (previous is None or previous["observed_at"] < current["observed_at"]):
+        parser.error(f"{args.json} holds a newer baseline than --previous; pass it as --previous")
     report = collect(load_sources(args.sources), previous=previous)
     _write(args.json, json.dumps(report, indent=2) + "\n")
     _write(args.markdown, render_markdown(report))
