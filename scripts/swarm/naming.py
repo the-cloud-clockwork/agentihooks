@@ -6,11 +6,14 @@ counts each type on its own within the swarm and is never reused. Names the swar
 """
 
 import json
+import logging
 import re
 import secrets
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from redis.exceptions import RedisError
 
 PREFIX = "agentihooks:names"
 TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner"}
@@ -219,7 +222,11 @@ class NameRegistry:
         return ":".join((PREFIX, *parts))
 
     def resolve(self, name, reader=None):
-        return (reader if reader is not None else self.redis).get(self.key("alias", name)) or name
+        try:
+            return (reader if reader is not None else self.redis).get(self.key("alias", name)) or name
+        except RedisError as exc:
+            logging.getLogger(__name__).warning("alias lookup failed for %s: %s", name, exc)
+            return name
 
     def alias(self, old, new):
         from redis.exceptions import WatchError
@@ -280,9 +287,13 @@ class NameRegistry:
 
     def swarm_slug(self, ref):
         """The ledger slug a swarm name `swarm@<code>` stands for while that swarm holds the code; ref otherwise."""
-        code = swarm_code(ref)
-        slug = self.swarm(code).get("swarm")
-        return slug if slug and self.code_of(slug) == code else ref
+        try:
+            code = swarm_code(ref)
+            slug = self.swarm(code).get("swarm")
+            return slug if slug and self.code_of(slug) == code else ref
+        except RedisError as exc:
+            logging.getLogger(__name__).warning("swarm alias lookup failed for %s: %s", ref, exc)
+            return ref
 
     def release(self, slug):
         """Forget which code a removed swarm held; the code itself stays taken, so its names stay unique."""

@@ -48,6 +48,36 @@ def test_the_slug_or_the_name_resolves_the_same_swarm(store):
         store.config(store.names.swarm_slug("swarm@ffffff"))
 
 
+@pytest.mark.parametrize("lookup", ["swarm", "code_of"])
+def test_swarm_slug_preserves_the_reference_on_a_store_timeout(store, monkeypatch, caplog, lookup):
+    from redis.exceptions import TimeoutError
+
+    name = naming.swarm_name(store.config("sw").code)
+
+    def timeout(*args):
+        raise TimeoutError("Timeout reading from socket")
+
+    monkeypatch.setattr(store.names, lookup, timeout)
+    assert store.names.swarm_slug(name) == name
+    assert f"swarm alias lookup failed for {name}" in caplog.text
+    assert "Timeout reading from socket" in caplog.text
+
+
+def test_settings_by_slug_survive_a_swarm_alias_timeout(env, monkeypatch, caplog):  # noqa: F811
+    from redis.exceptions import TimeoutError
+
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+
+    def timeout(*args):
+        raise TimeoutError("Timeout reading from socket")
+
+    monkeypatch.setattr(store.names, "swarm", timeout)
+    assert run("sw", "set", "max-eng-agents=4") == 0
+    assert store.config("sw").max_eng == 4
+    assert "swarm alias lookup failed for sw" in caplog.text
+
+
 def test_a_removed_swarm_name_no_longer_resolves(store):
     name = naming.swarm_name(store.config("sw").code)
     store.remove("sw")
