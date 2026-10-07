@@ -63,6 +63,7 @@ def test_matching_process_facts_exclude_credential_values(mounted):
         "effort": "high",
         "account": "team",
         "hooks": True,
+        "chain": [],
     }
     assert live_binding.compare(agent, facts) == {}
     assert "private-value" not in json.dumps(facts)

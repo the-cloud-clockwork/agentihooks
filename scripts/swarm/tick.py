@@ -21,6 +21,7 @@ from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
     control_notifications,
+    launch_check,
     lifetime,
     live_binding,
     master_start,
@@ -110,6 +111,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     rows = {t["id"]: t for t in doc["tasks"]}
     exits.sweep(InboxStore(store.redis), slug, store, lambda: {t["id"]: t for t in ledger.state(slug)["tasks"]})
     actions += master_start.observe(slug, config, store, ledger, runtime, now_ms)
+    actions += _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms)
     actions += _verify(slug, store, ledger, runtime, rows, now_ms)
     actions += _reap(slug, store, ledger, runtime, rows, now_ms)
     actions += lifetime.retire_idle_master(slug, store, ledger, runtime, rows, now_ms)
@@ -194,7 +196,8 @@ def _drop(slug, store, ledger, rows, agent):
 
 
 def _verify(slug, store, ledger, runtime, rows, now_ms):
-    agents, actions = store.agents(slug), []
+    judged = launch_check.judged(store, slug)
+    agents, actions = [a for a in store.agents(slug) if a.name not in judged], []
     facts = runtime.bindings(agents)
     for agent in agents:
         if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
@@ -228,6 +231,50 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
         store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
         actions.append(f"retired {agent.name} after mismatched {fields}" + _drop(slug, store, ledger, rows, agent))
     return actions
+
+
+def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
+    waiting, actions = launch_check.pending(store, slug), []
+    agents = [a for a in store.agents(slug) if a.name in waiting]
+    for name in set(waiting) - {a.name for a in agents}:
+        launch_check.forget(store, slug, name)
+    facts = runtime.bindings(agents) if agents else {}
+    for agent in agents:
+        entry = waiting[agent.name]
+        found = launch_check.misses(
+            store, slug, agent, facts.get(agent.name, {"process": False}), doc, launch_check.bundled(agent.profile)
+        )
+        if found and now_ms - agent.started_at < launch_check.DEADLINE_MS:
+            continue
+        elapsed = launch_check.joined_at(agent, doc) - agent.started_at if not found else now_ms - agent.started_at
+        launch_check.record(store, slug, agent, found, now_ms, elapsed)
+        if not found:
+            launch_check.forget(store, slug, agent.name)
+            launch_check.mark_relaunched(store, slug, agent.task, False)
+            actions.append(f"{agent.name} passed its launch check in {max(elapsed, 0) // 1000} seconds")
+            continue
+        actions.append(_failed_launch(slug, store, ledger, runtime, rows, agent, entry, found, now_ms))
+    return actions
+
+
+def _failed_launch(slug, store, ledger, runtime, rows, agent, entry, found, now_ms):
+    fields = ", ".join(found)
+    relaunch = entry["relaunch"] and not launch_check.relaunched(store, slug, agent.task)
+    if agent.lane == MASTER:
+        ledger.notify(slug, launch_check.told(found, relaunch))
+    if not relaunch:
+        launch_check.forget(store, slug, agent.name)
+        return f"{agent.name} failed its launch check on {fields}; its one relaunch is spent"
+    if not runtime.retire(agent, agent.name in runtime.live_names()):
+        return f"could not retire {agent.name} after its launch check failed on {fields}, retrying next tick"
+    launch_check.forget(store, slug, agent.name)
+    launch_check.mark_relaunched(store, slug, agent.task, True)
+    saved = live_binding.relaunch_assignment(agent, rows.get(agent.task, {}), store.config(slug))
+    store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
+    pending = master_start.read(store, slug)
+    if agent.lane == MASTER and pending.get("name") == agent.name:
+        master_start.save(store, slug, {**pending, "name": "", "retry": True, "at": now_ms})
+    return f"retired {agent.name} after its launch check failed on {fields}" + _drop(slug, store, ledger, rows, agent)
 
 
 def _reap(slug, store, ledger, runtime, rows, now_ms):
@@ -441,6 +488,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                     actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
                 return actions
             store.put_agent(slug, _placed(record, placed))
+            launch_check.begin(store, slug, record, now_ms)
             store.count_spawn(slug, placed.harness)
             store.count_claim(slug, task["id"])
             store.clear_handoff(slug, task["id"])
@@ -597,6 +645,7 @@ def _master(slug, config, store, runtime, now_ms):
     record = _placed(record, placed)
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))
+    launch_check.begin(store, slug, record, now_ms)
     if reported:
         store.redis.delete(store.key(slug, "master-start"))
         store.clear_handoff(slug, MASTER)
