@@ -133,6 +133,19 @@ def test_an_operator_pane_is_never_touched(env):
     assert ("pane", "w1:p1") not in herdr.closed
 
 
+def test_a_sweep_on_one_herdr_server_leaves_another_servers_records(env, tmp_path):
+    shared, isolated = FakeHerdr(), FakeHerdr()
+    live = {**env, "HERDR_SOCKET_PATH": str(tmp_path / "shared.sock")}
+    scratch = {**env, "HERDR_SOCKET_PATH": str(tmp_path / "scratch.sock")}
+    kept = launch(live, shared, "w1:p2", "term_a", owner=Owner(at=NOW))
+    launch(scratch, isolated, "w1:p2", "term_z")
+    isolated.panes.clear()
+    found = actions(sweep(scratch, isolated))
+    assert found == {"w1:p2": (herdr_gc.FORGET, "herdr no longer lists it")}
+    assert herdr_panes.load(live) == [kept]
+    assert herdr_panes.load(scratch) == []
+
+
 def test_a_failed_launch_left_at_a_bare_shell_closes_after_the_grace(env):
     herdr = FakeHerdr()
     launch(env, herdr, "w1:p2", "term_a")

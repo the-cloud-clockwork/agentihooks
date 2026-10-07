@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from urllib.parse import urlparse
 
+from scripts import herdr_host
 from scripts.herdr_host import Placement
 
 ROOT_ENV = "AGENTIHOOKS_HERDR_PANES_DIR"
@@ -29,6 +30,7 @@ class PaneRecord:
     route_status: str = ""
     seen: str = ""
     active_at: int = 0
+    herdr_server: str = ""
 
 
 def root(environ: dict[str, str]) -> Path:
@@ -69,6 +71,7 @@ def record(placed: Placement, kind: str, owner_session: str, environ: dict[str, 
         launched_at=now_ms,
         owner_swarm=swarm,
         swarm_store=_store(environ) if swarm else "",
+        herdr_server=herdr_host.server_socket(environ),
     )
     return _write(made, environ)
 
@@ -98,4 +101,5 @@ def _read(path: Path) -> PaneRecord | None:
 def load(environ: dict[str, str]) -> list[PaneRecord]:
     folder = root(environ)
     found = [_read(path) for path in sorted(folder.glob("*.json"))] if folder.is_dir() else []
-    return [item for item in found if item is not None]
+    server, default = herdr_host.server_socket(environ), herdr_host.server_socket({})
+    return [item for item in found if item is not None and (item.herdr_server or default) == server]

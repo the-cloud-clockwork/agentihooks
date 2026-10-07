@@ -52,6 +52,31 @@ def test_the_default_folder_sits_under_the_home():
     assert herdr_panes.root({}) == Path.home() / ".agentihooks" / "herdr" / "panes"
 
 
+def test_the_herdr_server_is_the_socket_herdr_resolves():
+    assert herdr_host.server_socket({"HERDR_SOCKET_PATH": "/s/a.sock"}) == "/s/a.sock"
+    assert herdr_host.server_socket({}) == str(Path.home() / ".config" / "herdr" / "herdr.sock")
+
+
+def test_records_load_only_on_the_herdr_server_they_were_opened_on(tmp_path):
+    first = {herdr_panes.ROOT_ENV: str(tmp_path), "HERDR_SOCKET_PATH": "/s/a.sock"}
+    second = {herdr_panes.ROOT_ENV: str(tmp_path), "HERDR_SOCKET_PATH": "/s/b.sock"}
+    made = herdr_panes.record(PLACED, "init-agent", "a", first, 1)
+    other = herdr_panes.record(Placement("w1", "w1:t3", "w1:p3", "term_b"), "init-agent", "b", second, 2)
+    assert made.herdr_server == "/s/a.sock"
+    assert herdr_panes.load(first) == [made]
+    assert herdr_panes.load(second) == [other]
+    herdr_panes.mark("w1:p3", first, route_status="routed")
+    assert herdr_panes.load(second) == [other]
+
+
+def test_a_record_without_a_herdr_server_belongs_to_the_default_server(tmp_path):
+    env = {herdr_panes.ROOT_ENV: str(tmp_path)}
+    legacy = replace(herdr_panes.record(PLACED, "init-agent", "a", env, 1), herdr_server="")
+    herdr_panes.update(legacy, env)
+    assert herdr_panes.load(env) == [legacy]
+    assert herdr_panes.load({**env, "HERDR_SOCKET_PATH": "/s/a.sock"}) == []
+
+
 def test_a_created_pane_carries_its_terminal_id(tmp_path, monkeypatch):
     pane = {"workspace_id": "w9", "tab_id": "w9:t2", "pane_id": "w9:p4", "terminal_id": "term_9"}
     monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: {"root_pane": pane})
