@@ -249,3 +249,28 @@ def test_process_binding_reads_only_allowed_fields_from_real_ancestor_shape(
         binding.process(tmp_path, 1)
     with pytest.raises(ValueError, match="unsupported live process"):
         binding.process(tmp_path / "absent", 3)
+
+
+@pytest.mark.parametrize("args", [["--handoff"], ["--resume", "conversation"]])
+def test_continuation_without_required_profile_refuses_before_spawn(tmp_path, monkeypatch, capsys, args):
+    from scripts import init_agent
+
+    monkeypatch.setattr(init_agent, "_write_launcher", lambda *a: pytest.fail("missing profile launched"))
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda *a: ("claude", "explicit"))
+    result = init_agent.main([*args, "--dir", str(tmp_path), "--prompt", "continue"], {})
+    assert result == 2
+    assert "original required profile" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_resume_refuses_to_change_recorded_effort_when_policy_changed(tmp_path, harness):
+    from dataclasses import replace
+
+    from scripts.swarm.tick import SpawnError
+    from tests.swarm.test_runtime import _resuming
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness)
+    config.effort_min = config.effort_max = "high"
+    with pytest.raises(SpawnError, match="saved effort"):
+        runtime.resume(config, replace(agent, effort="medium"), "continue")
+    assert not seen["runs"]

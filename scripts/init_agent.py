@@ -275,12 +275,15 @@ def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], env
     from scripts.profiles import binding
     from scripts.select_profile import prepare
 
-    if not args.profile and (args.handoff or args.resume or "--resume" in flags):
+    continuing = args.handoff or args.resume or "--resume" in flags or (agent == "codex" and flags[:1] == ["resume"])
+    if not args.profile and continuing:
         args.profile = environ.get("AGENTIHOOKS_PROFILE", "")
+    if continuing and not args.profile:
+        raise ValueError("unsupported continuation: original required profile is missing; pass --profile")
     if not args.profile:
         return flags
     if args.handoff:
-        flags = binding.continuation(flags, agent)
+        flags = binding.continuation(flags, agent, environ)
     profile_env, flags = prepare(args.profile, agent, "", "", flags, environ)
     environ.update(profile_env)
     return flags
@@ -323,6 +326,7 @@ def _binding_export(environ: dict[str, str]) -> str:
         "CODEX_HOME",
         "AGENTIHOOKS_RUN_MODEL",
         "AGENTIHOOKS_RUN_EFFORT",
+        effort_range.VARIABLE,
     )
     return "".join(f"export {key}={shlex.quote(environ[key])}\n" for key in names if environ.get(key))
 
@@ -633,6 +637,12 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         report.append(f"agent_name={herdr_host.agent_name(name) if renamed else 'unset'}")
         if channel:
             report.append(f"channel_warning={_answer_channel_warning(pane, active_env)}")
+    if args.handoff and route.get("status") != "routed":
+        print("\n".join([*report, "handoff=failed"]))
+        print(
+            "agentihooks init-agent: handoff failed; the new session was not routed to another account", file=sys.stderr
+        )
+        return 3
     try:
         report += _binding_result(active_env, args.route_timeout, route)
     except (OSError, ValueError) as exc:
@@ -643,13 +653,6 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         print("\n".join(report))
         return 0
 
-    if route.get("status") != "routed":
-        print("\n".join([*report, "handoff=failed"]))
-        print(
-            "agentihooks init-agent: handoff failed; the new session was not routed to another account",
-            file=sys.stderr,
-        )
-        return 3
     from hooks.context.account_sessions import agent_pid
     from hooks.context.broadcast import mark_handed_off
 

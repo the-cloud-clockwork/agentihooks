@@ -15,10 +15,25 @@ def _no_herdr(monkeypatch):
     monkeypatch.setattr("scripts.profile_telemetry.installed_langfuse_env", lambda target: {})
 
 
+def _profile(monkeypatch, tmp_path, target="claude"):
+    from scripts import select_profile
+    from scripts.profiles import binding
+
+    home = tmp_path / "engineer" / target
+    home.mkdir(parents=True, exist_ok=True)
+    (home / binding.PERSONAS[target]).write_text(binding.persona("Engineer instructions.\n"))
+    (home.parent / f"{target}.sources.json").write_text("[]")
+    binding.write(home, "engineer", target)
+    env = {"AGENTIHOOKS_PROFILE": "engineer", binding.HOMES[target]: str(home)}
+    monkeypatch.setattr(select_profile, "prepare", lambda *a: (env, a[4]))
+    return binding, env
+
+
 def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeypatch, tmp_path, capsys):
     project = tmp_path / "project"
     project.mkdir()
     runtime = tmp_path / "runtime"
+    _, profile_env = _profile(monkeypatch, tmp_path)
     prompt = "apostrophe ' quote \" semicolon ; and $(command)"
 
     monkeypatch.setattr(
@@ -46,7 +61,7 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
             "--model",
             "fable",
         ],
-        {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(runtime), "SHELL": "/bin/bash"},
+        {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(runtime), "SHELL": "/bin/bash", **profile_env},
     )
 
     assert rc == 0
@@ -54,7 +69,7 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
     launcher_text = launcher.read_text()
     route_report = launcher.with_suffix(".route")
     assert (
-        f"/usr/bin/agentihooks claude --agentihooks-fallback-bare --agentihooks-report {route_report} --name quota-test"
+        f"/usr/bin/agentihooks select-profile engineer --agent claude -- --agentihooks-fallback-bare --agentihooks-report {route_report} --name quota-test"
     ) in launcher_text
     assert "--resume session-id --fork-session --model fable" in launcher_text
     assert prompt not in launcher_text
@@ -210,8 +225,25 @@ def _handoff(monkeypatch, tmp_path, popen, extra=(), env_extra=None):
         "_launch_command",
         lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
     )
-    monkeypatch.setattr(init_agent.subprocess, "Popen", popen)
-    env = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime"), "AH_CC_TOKEN_alpha": "tok"}
+    binding, profile_env = _profile(monkeypatch, tmp_path)
+    original = {**profile_env, "AGENTIHOOKS_RUN_MODEL": "opus", "AGENTIHOOKS_RUN_EFFORT": "medium"}
+    monkeypatch.setattr(binding, "process", lambda: (123, "claude", original, "alpha"))
+
+    def validated_popen(command, **kwargs):
+        popen(command, **kwargs)
+        env = kwargs["env"]
+        route = init_agent._read_route_report(Path(command[-1]).with_suffix(".route"))
+        if route.get("status") == "routed":
+            monkeypatch.setattr(binding, "process", lambda: (123, "claude", env, route["account"]))
+            binding.validate(binding.inspect(Path(env["CLAUDE_CONFIG_DIR"]), "engineer", "claude")["canary"])
+
+    monkeypatch.setattr(init_agent.subprocess, "Popen", validated_popen)
+    env = {
+        "HOME": str(tmp_path),
+        "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
+        "AH_CC_TOKEN_alpha": "tok",
+        **profile_env,
+    }
     env.update(env_extra or {})
     return init_agent.main(
         [
@@ -238,7 +270,7 @@ def test_handoff_excludes_this_account_and_never_falls_back_to_bare(monkeypatch,
     assert rc == 0
     launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh"))
     text = launcher.read_text()
-    assert "claude --agentihooks-exclude alpha --agentihooks-report" in text
+    assert "select-profile engineer --agent claude -- --agentihooks-exclude alpha --agentihooks-report" in text
     assert "--agentihooks-fallback-bare" not in text
 
 
@@ -459,7 +491,8 @@ def test_init_agent_passes_resume_through_to_the_launch(monkeypatch, tmp_path, c
     monkeypatch.setattr(
         init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal"])
     )
-    env = {"XDG_RUNTIME_DIR": str(tmp_path)}
+    _, profile_env = _profile(monkeypatch, tmp_path, "codex")
+    env = {"XDG_RUNTIME_DIR": str(tmp_path), **profile_env}
     args = ["--dir", str(tmp_path), "--name", "m", "--agent", "codex", "--resume", "c0ffee", "--dry-run"]
     assert init_agent.main(args, env) == 0
     launcher = next(

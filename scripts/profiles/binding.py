@@ -83,7 +83,9 @@ def validate(canary: str) -> dict:
     try:
         if requested["harness"] != target or requested["profile"] != env.get("AGENTIHOOKS_PROFILE"):
             raise ValueError("live harness profile mismatch with requested choice")
-        data = inspect(Path(env.get(HOMES[target], "")), requested["profile"], target)
+        if not env.get(HOMES[target]):
+            raise ValueError(f"missing profile home: {HOMES[target]} is unset")
+        data = inspect(Path(env[HOMES[target]]), requested["profile"], target)
         if not data.get("canary") or data["canary"] != canary:
             raise ValueError("mounted instruction canary mismatch")
         result = {
@@ -142,7 +144,7 @@ def fields(data: dict, profile: str, target: str) -> dict:
     return result
 
 
-def continuation(args: list[str], target: str) -> list[str]:
+def continuation(args: list[str], target: str, environ: dict[str, str] | None = None) -> list[str]:
     from scripts.init_agent import model_flags
     from scripts.select_profile import _native_options
 
@@ -154,7 +156,13 @@ def continuation(args: list[str], target: str) -> list[str]:
     effort = effort or env.get("AGENTIHOOKS_RUN_EFFORT", "")
     if not model or not effort:
         raise ValueError("unsupported quota transfer: original model and effort binding unavailable")
-    return [*model_flags(target, model, effort), *remaining]
+    from scripts.swarm import effort_range
+
+    flags = model_flags(target, model, effort)
+    _, bounded, _ = _native_options(target, effort_range.launch_args(target, flags, environ or {}))
+    if bounded != effort:
+        raise ValueError("unsupported quota transfer: saved effort is outside the current swarm range")
+    return [*flags, *remaining]
 
 
 def write(home: Path, profile: str, target: str) -> None:

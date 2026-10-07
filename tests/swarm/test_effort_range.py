@@ -84,7 +84,7 @@ def test_a_resumed_agent_relaunches_inside_the_range(tmp_path):
 
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
     config.lanes = {"eng": {"model": "fable", "effort": "max"}}
-    runtime.resume(config, replace(agent, model="sonnet", effort="low"), "you were restored")
+    runtime.resume(config, replace(agent, model="sonnet", effort="medium"), "you were restored")
     assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "sonnet", "--effort", "medium"]
 
 

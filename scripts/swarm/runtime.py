@@ -36,11 +36,14 @@ def _set(value):
     return "" if value in (None, "", AUTO) else value
 
 
-def _model_args(agent, chosen, environ, bounds):
+def _model_args(agent, chosen, environ, bounds, preserve=False):
     from scripts.init_agent import model_effort, model_flags
 
     model, effort = model_effort(agent, [], environ)
-    effort = effort_range.clamp(agent, _set(chosen.get("effort")) or effort, bounds)
+    saved = _set(chosen.get("effort")) or effort
+    effort = effort_range.clamp(agent, saved, bounds)
+    if preserve and effort != saved:
+        raise SpawnError("unsupported transfer: saved effort is outside the current swarm range")
     return model_flags(agent, _set(chosen.get("model")) or model, effort)
 
 
@@ -148,7 +151,13 @@ class HerdrRuntime:
             lane,
             task["id"],
             name,
-            [*argv, "--", *route, *_model_args(agent, picked.__dict__, environ, effort_range.of(config)), *mode],
+            [
+                *argv,
+                "--",
+                *route,
+                *_model_args(agent, picked.__dict__, environ, effort_range.of(config), preserve=bool(saved)),
+                *mode,
+            ],
         )
         return replace(
             placed,
@@ -176,7 +185,9 @@ class HerdrRuntime:
             source=agent.model_source or ("recorded" if agent.model else defaults.source),
         )
         route = ["--route", agent.account] if agent.account else []
-        model = _model_args(agent.harness, picked.__dict__, dict(os.environ), effort_range.of(config))
+        model = _model_args(
+            agent.harness, picked.__dict__, dict(os.environ), effort_range.of(config), preserve=bool(agent.effort)
+        )
         argv += ["--resume", agent.conversation_id, "--", *route, *model]
         placed = self._launch(config, agent.lane, agent.task, agent.name, argv)
         if not self._holds(placed.pane_id, agent.conversation_id):
