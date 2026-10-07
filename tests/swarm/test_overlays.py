@@ -230,18 +230,57 @@ def test_spawn_without_overlays_passes_none(bundle, tmp_path, monkeypatch):
 
 
 def test_a_relaunch_wears_the_overlays_its_launch_recorded(bundle, tmp_path, monkeypatch):
-    saved = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "overlays": ["scout"]}
+    saved = {
+        "profile": "engineer",
+        "harness": "claude",
+        "model": "opus",
+        "effort": "high",
+        "overlays": ["scout"],
+        "bundle_revision": "def456",
+    }
     placed, argv = _spawned(tmp_path, monkeypatch, {"launch_assignment": saved}, {"engineer": ["tuner"]})
     assert _passed_overlays(argv) == ["scout"]
     assert placed.overlays == ["scout"]
+    assert placed.profile_decision["bundle_revision"] == "def456"
+
+
+def test_a_handoff_keeps_the_bundle_revision_its_launch_recorded(bundle, tmp_path, monkeypatch):
+    launch = {
+        "profile": "engineer",
+        "harness": "claude",
+        "model": "opus",
+        "effort": "high",
+        "overlays": ["scout"],
+        "profile_decision": {"bundle_revision": "fed789"},
+    }
+    task = {"profile": "", "handoff_envelope": {"launch": launch}}
+    placed, argv = _spawned(tmp_path, monkeypatch, task, {"engineer": ["tuner"]})
+    assert _passed_overlays(argv) == ["scout"]
+    assert placed.profile_decision["bundle_revision"] == "fed789"
+
+
+def test_a_relaunch_without_a_recorded_revision_pins_the_current_one(bundle, tmp_path, monkeypatch):
+    saved = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high"}
+    placed, _ = _spawned(tmp_path, monkeypatch, {"launch_assignment": saved}, {})
+    assert placed.profile_decision["bundle_revision"] == "abc123"
 
 
 def test_the_relaunch_assignment_carries_the_agent_overlays():
     from scripts.swarm import live_binding
 
-    agent = store.AgentRecord("engineer@a1b2c3-0001", "eng", "t1", profile="engineer", overlays=["tuner"])
+    agent = store.AgentRecord(
+        "engineer@a1b2c3-0001",
+        "eng",
+        "t1",
+        profile="engineer",
+        overlays=["tuner"],
+        profile_decision={"bundle_revision": "abc123"},
+    )
     config = store.SwarmConfig("sw", "/repo", 1, 0)
-    assert live_binding.relaunch_assignment(agent, {}, config)["overlays"] == ["tuner"]
+    saved = live_binding.relaunch_assignment(agent, {}, config)
+    assert (saved["overlays"], saved["bundle_revision"]) == (["tuner"], "abc123")
+    bare = store.AgentRecord("engineer@a1b2c3-0002", "eng", "t1", profile="engineer")
+    assert live_binding.relaunch_assignment(bare, {}, config)["bundle_revision"] == ""
 
 
 def test_resume_wears_the_overlays_the_agent_was_launched_with(tmp_path, monkeypatch):

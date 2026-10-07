@@ -154,12 +154,17 @@ class HerdrRuntime:
         saved = relaunch or _transfer(task)
         decision = (
             profile_choice.ProfileDecision(
-                saved["profile"], "handoff", "original seat profile", overlays=tuple(saved.get("overlays", ()))
+                saved["profile"],
+                "handoff",
+                "original seat profile",
+                overlays=tuple(saved.get("overlays", ())),
+                bundle_revision=saved.get("bundle_revision")
+                or saved.get("profile_decision", {}).get("bundle_revision", ""),
             )
             if saved and (relaunch or not task.get("profile"))
             else profile_choice.choose(config.slug, lane, chosen, task, environ, getattr(config, "overlays", {}))
         )
-        decision = replace(decision, bundle_revision=overlays.revision())
+        decision = decision if decision.bundle_revision else replace(decision, bundle_revision=overlays.revision())
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
         want = affinity.desired(config) if lane == MASTER else _set(chosen.get("agent"))
