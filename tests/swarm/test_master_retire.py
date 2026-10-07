@@ -325,8 +325,9 @@ def test_a_done_master_past_the_idle_limit_is_asked(swarm):
 
 def test_a_held_master_does_not_stop_a_later_agent_from_being_verified(swarm):
     store, runtime, ledger, master = swarm
-    worker = replace(master, name="engineer@zz", lane="eng", task="t1", seat="eng-1@sw", pane_id="w1:p9")
+    worker = replace(master, name="worker@zz", lane="eng", task="t1", seat="eng-1@sw", pane_id="w1:p9")
     store.put_agent("sw", worker)
+    assert [a.name for a in store.agents("sw")] == [master.name, worker.name]
     runtime.live.add(worker.name)
     runtime.bindings = lambda agents: {a.name: {**live_binding.assignment(a), "hooks": False} for a in agents}
     tick("sw", store, ledger, runtime, 200)
