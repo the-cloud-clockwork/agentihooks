@@ -1,3 +1,5 @@
+import hashlib
+
 """Automatic transcript logging - logs new entries on each PostToolUse.
 
 Deliberately NOT migrated to hooks.memory.transcript_reader: this is an
@@ -133,3 +135,45 @@ def extract_content(entry: dict) -> str | None:
             return content
 
     return None
+
+
+def record_id(record: dict) -> str:
+    native = record.get("uuid")
+    if native:
+        return str(native)
+    payload = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def complete_records(transcript_path: str) -> tuple[list[dict], int, int]:
+    records = []
+    position = 0
+    unsupported = 0
+    with open(transcript_path, "rb") as handle:
+        for line in handle:
+            if not line.endswith(b"\n"):
+                break
+            position += len(line)
+            try:
+                record = json.loads(line)
+            except (ValueError, UnicodeDecodeError):
+                unsupported += 1
+                continue
+            if isinstance(record, dict):
+                records.append(record)
+            else:
+                unsupported += 1
+    return records, position, unsupported
+
+
+def mask_value(value: object) -> object:
+    from hooks.secrets import redact
+
+    if isinstance(value, str):
+        return redact(value, mode="strict")
+    if isinstance(value, (list, tuple)):
+        return [mask_value(item) for item in value]
+    if isinstance(value, dict):
+        masked = {redact(key, mode="strict"): mask_value(item) for key, item in value.items()}
+        return json.loads(redact(json.dumps(masked, ensure_ascii=False), mode="strict"))
+    return value
