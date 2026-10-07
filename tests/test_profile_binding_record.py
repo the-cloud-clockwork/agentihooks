@@ -80,3 +80,26 @@ def test_profile_check_failure_names_the_binding_command(tmp_path, home, monkeyp
         "profile validation failed: mounted instruction canary mismatch; "
         "read the binding record with agentihooks profile binding\n"
     )
+
+
+def test_binding_command_reports_a_failed_check_and_a_missing_home(tmp_path, home, monkeypatch, capsys):
+    monkeypatch.setattr(binding, "process", _session(tmp_path, home, []))
+    assert binding.main("wrong") == 2
+    capsys.readouterr()
+    assert render.main(["binding"]) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "failed: mounted instruction canary mismatch"
+    monkeypatch.setattr(binding, "process", lambda: (2, "claude", {}, "fixture"))
+    assert render.main(["binding"]) == 1
+    assert capsys.readouterr().err == "ERROR: missing profile home: CLAUDE_CONFIG_DIR is unset\n"
+
+
+def test_binding_command_help_names_its_record_and_home(capsys):
+    with pytest.raises(SystemExit):
+        render.main(["--help"])
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "binding Print a profile home's binding record, never an environment value" in help_text
+    with pytest.raises(SystemExit):
+        render.main(["binding", "--help"])
+    assert "--home HOME Profile home to read (default: this session's)" in " ".join(capsys.readouterr().out.split())
+    assert render.main(["binding", "--home", "relative-missing"]) == 1
+    assert capsys.readouterr().err.startswith("ERROR: [Errno 2] No such file or directory: 'relative-missing/")
