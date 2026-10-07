@@ -303,8 +303,9 @@ def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
         outcome = "relaunch"
     launch_check.record(store, slug, agent, found, now_ms, elapsed, held=outcome == "spent")
     launch_check.forget(store, slug, agent.name)
-    if agent.lane == MASTER:
-        ledger.notify(slug, launch_check.told(found, outcome))
+    enforced = {field: values for field, values in found.items() if field not in launch_check.REPORT_ONLY}
+    if agent.lane == MASTER and enforced:
+        ledger.notify(slug, launch_check.told(enforced, outcome))
     if outcome != "relaunch":
         return said
     launch_check.mark_relaunched(store, slug, agent.task)
