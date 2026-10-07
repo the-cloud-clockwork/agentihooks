@@ -1,3 +1,4 @@
+import io
 import json
 import urllib.error
 import urllib.request
@@ -8,9 +9,10 @@ from . import schemas
 
 
 class ResourceClient:
-    def __init__(self, base: str, credentials: dict) -> None:
+    def __init__(self, base: str, credentials: dict, timeout: float = 10) -> None:
         self.base = base
         self.credentials = credentials
+        self.timeout = timeout
 
     def request(self, slug: str, path: str, payload: dict | None = None) -> dict:
         request = urllib.request.Request(
@@ -19,7 +21,7 @@ class ResourceClient:
             headers={"Content-Type": "application/json", **self.credentials},
             method="GET" if payload is None else "POST",
         )
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
             return json.loads(response.read())
 
     def collection(self, slug: str, path: str) -> list:
@@ -39,6 +41,24 @@ class ResourceClient:
         return state
 
     def mutate(self, slug: str, operations: list) -> dict:
+        fetched = {schemas.target(operation) for operation in operations if not operation.get("expected_revision")}
+        try:
+            return self.send(slug, operations)
+        except urllib.error.HTTPError as exc:
+            replay, error = failure(exc)
+        if replay.code == 403 and "details" in error:
+            return error["details"]
+        if replay.code != 409 or error.get("code") != "revision_conflict" or not fetched:
+            raise replay
+        for operation in operations:
+            if schemas.target(operation) in fetched:
+                del operation["expected_revision"]
+        try:
+            return self.send(slug, operations)
+        except urllib.error.HTTPError as exc:
+            raise failure(exc)[0] from None
+
+    def send(self, slug: str, operations: list) -> dict:
         guards, ops = {}, []
         operation_id = operations[0].setdefault("operation_id", uuid.uuid4().hex)
         for operation in operations:
@@ -49,12 +69,13 @@ class ResourceClient:
             ops.append(
                 {key: value for key, value in operation.items() if key not in ("expected_revision", "operation_id")}
             )
-        try:
-            return self.request(slug, "operations", {"operation_id": operation_id, "ops": ops, "guards": guards})
-        except urllib.error.HTTPError as exc:
-            if exc.code != 403:
-                raise
-            error = json.loads(exc.read())["error"]
-            if "details" not in error:
-                raise
-            return error["details"]
+        return self.request(slug, "operations", {"operation_id": operation_id, "ops": ops, "guards": guards})
+
+
+def failure(exc: urllib.error.HTTPError) -> tuple[urllib.error.HTTPError, dict]:
+    body = exc.read()
+    try:
+        error = json.loads(body)["error"]
+    except (ValueError, KeyError, TypeError):
+        error = {}
+    return urllib.error.HTTPError(exc.url, exc.code, exc.msg, exc.hdrs, io.BytesIO(body)), error

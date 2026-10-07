@@ -237,7 +237,7 @@ def post_bypass(session, unhandled):
         import ledger
 
         op = {"op": "gate_bypass", "id": f"gb-{uuid.uuid4().hex[:8]}", "by": session["name"], "unhandled": unhandled}
-        ledger.request(session["slug"], [op], service=True)
+        ledger.request(session["slug"], [op], service=True, timeout=3)
     except Exception as exc:  # the stop must go through whatever the server does
         log(f"bypass not recorded: {exc}")
 

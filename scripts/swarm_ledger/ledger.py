@@ -106,10 +106,10 @@ def credentials(slug, service=False):
     return {"X-Ledger-Token": authority.agent_token(token, slug, who.name), "X-Ledger-Agent": who.name}
 
 
-def request(slug, ops=None, service=False):
+def request(slug, ops=None, service=False, timeout=10):
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    client = ResourceClient(BASE, credentials(slug, service))
+    client = ResourceClient(BASE, credentials(slug, service), timeout)
     return client.snapshot(slug) if ops is None else client.mutate(slug, ops)
 
 

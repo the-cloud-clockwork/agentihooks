@@ -6,18 +6,18 @@ import uuid
 
 import pytest
 
-from tests.swarm_ledger.test_api_v1 import authority_live, live, request  # noqa: F401
+from tests.swarm_ledger.test_api_v1 import authority_live, live  # noqa: F401
 from tests.swarm_ledger.test_ledger_authority import SLUG, cli_ledger, server
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 import chat_ledger  # noqa: E402
 import ledger_hook  # noqa: E402
-import ledger_link  # noqa: E402
 
 from scripts.swarm.ledger_client import LedgerClient  # noqa: E402
 from scripts.swarm_ledger import chat_ledger as chat_ledger_module  # noqa: E402, F401
 from scripts.swarm_ledger import ledger_hook as ledger_hook_module  # noqa: E402, F401
+from scripts.swarm_ledger.api import client as api_client  # noqa: E402
 
 
 @pytest.fixture
@@ -31,8 +31,6 @@ def routes(live, monkeypatch):  # noqa: F811
             return original(self)
 
         monkeypatch.setattr(server.Handler, method, record)
-    monkeypatch.setattr(chat_ledger, "BASE", cli_ledger.BASE, raising=False)
-    monkeypatch.setattr(ledger_link, "base", lambda: cli_ledger.BASE)
     return seen
 
 
@@ -67,7 +65,6 @@ def test_chat_command_posts_through_the_versioned_operations_route(routes, monke
 
 def test_chat_command_reports_a_dead_server(monkeypatch):
     monkeypatch.setattr(cli_ledger, "BASE", "http://127.0.0.1:9")
-    monkeypatch.setattr(chat_ledger, "BASE", "http://127.0.0.1:9", raising=False)
     monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "Nobody"])
     with pytest.raises(SystemExit) as exit_:
         chat_ledger.main()
@@ -85,7 +82,6 @@ def test_stop_gate_bypass_is_recorded_through_the_versioned_route(routes):
 def test_stop_gate_bypass_never_raises_when_the_server_is_gone(monkeypatch):
     logged = []
     monkeypatch.setattr(cli_ledger, "BASE", "http://127.0.0.1:9")
-    monkeypatch.setattr(ledger_link, "base", lambda: "http://127.0.0.1:9")
     monkeypatch.setattr(ledger_hook, "log", logged.append)
     ledger_hook.post_bypass({"slug": SLUG, "name": "api-reader"}, 1)
     assert len(logged) == 1
@@ -127,8 +123,9 @@ class Recorder:
     def __init__(self, reply=None, error=None):
         self.calls, self.reply, self.error = [], reply, error
 
-    def __call__(self, slug, ops, service=False):
+    def __call__(self, slug, ops, service=False, **options):
         self.calls.append((slug, [dict(op) for op in ops], service))
+        self.options = options
         if self.error is not None:
             raise self.error
         return self.reply
@@ -175,10 +172,128 @@ def test_stop_gate_bypass_sends_one_service_operation(monkeypatch):
     monkeypatch.setattr(cli_ledger, "request", recorder)
     ledger_hook.post_bypass({"slug": SLUG, "name": "api-reader"}, 4)
     [(slug, [op], service)] = recorder.calls
-    assert (slug, service) == (SLUG, True)
+    assert (slug, service, recorder.options) == (SLUG, True, {"timeout": 3})
     assert op["id"].startswith("gb-") and len(op["id"]) == 11
     assert {key: value for key, value in op.items() if key != "id"} == {
         "op": "gate_bypass",
         "by": "api-reader",
         "unhandled": 4,
     }
+
+
+def http_error(code, body):
+    return urllib.error.HTTPError("http://ledger.test", code, "Refused", {}, io.BytesIO(body))
+
+
+CONFLICT = b'{"error": {"code": "revision_conflict", "message": "Resource changed since the expected revision"}}'
+
+
+class Scripted(api_client.ResourceClient):
+    def __init__(self, *replies):
+        super().__init__("http://ledger.test", {"X-Ledger-Token": "t"})
+        self.replies, self.calls = list(replies), []
+
+    def request(self, slug, path, payload=None):
+        self.calls.append((path, json.loads(json.dumps(payload))))
+        reply = self.replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
+def chat_add(**extra):
+    return [{"op": "add", "id": "m-1", "thread": "chat", "text": "Hi", "by": "swarm", **extra}]
+
+
+def test_a_fetched_guard_is_refreshed_once_after_a_revision_conflict():
+    client = Scripted({"revision": "r1"}, http_error(409, CONFLICT), {"revision": "r2"}, {"applied": ["m-1"]})
+    assert client.mutate(SLUG, chat_add(operation_id="op-1")) == {"applied": ["m-1"]}
+    posts = [payload for path, payload in client.calls if path == "operations"]
+    assert [path for path, _ in client.calls] == ["chat", "operations", "chat", "operations"]
+    assert [post["guards"] for post in posts] == [{"chat": "r1"}, {"chat": "r2"}]
+    assert [post["operation_id"] for post in posts] == ["op-1", "op-1"]
+
+
+def test_a_fetched_guard_conflicting_twice_raises_the_server_reply():
+    client = Scripted({"revision": "r1"}, http_error(409, CONFLICT), {"revision": "r2"}, http_error(409, CONFLICT))
+    with pytest.raises(urllib.error.HTTPError) as error:
+        client.mutate(SLUG, chat_add())
+    assert (error.value.code, error.value.read()) == (409, CONFLICT)
+    assert len(client.calls) == 4
+
+
+def test_a_pinned_guard_conflict_is_not_retried():
+    client = Scripted(http_error(409, CONFLICT))
+    with pytest.raises(urllib.error.HTTPError) as error:
+        client.mutate(SLUG, chat_add(expected_revision="r0"))
+    assert (error.value.code, error.value.read()) == (409, CONFLICT)
+    assert client.calls == [
+        (
+            "operations",
+            {"operation_id": client.calls[0][1]["operation_id"], "ops": chat_add(), "guards": {"chat": "r0"}},
+        )
+    ]
+
+
+def test_an_operation_conflict_is_not_retried():
+    body = b'{"error": {"code": "operation_conflict", "message": "used"}}'
+    client = Scripted({"revision": "r1"}, http_error(409, body))
+    with pytest.raises(urllib.error.HTTPError) as error:
+        client.mutate(SLUG, chat_add())
+    assert (error.value.code, error.value.read()) == (409, body)
+    assert len(client.calls) == 2
+
+
+def test_an_authorship_refusal_returns_its_details():
+    body = b'{"error": {"code": "forbidden", "details": {"rejected": ["m-1"]}}}'
+    client = Scripted({"revision": "r1"}, http_error(403, body))
+    assert client.mutate(SLUG, chat_add()) == {"rejected": ["m-1"]}
+
+
+@pytest.mark.parametrize(
+    "code, body",
+    [(403, b'{"error": {"code": "forbidden", "message": "no token"}}'), (403, b"not json"), (500, b"[]")],
+)
+def test_a_refusal_without_details_keeps_its_body(code, body):
+    client = Scripted({"revision": "r1"}, http_error(code, body))
+    with pytest.raises(urllib.error.HTTPError) as error:
+        client.mutate(SLUG, chat_add())
+    assert (error.value.code, error.value.read()) == (code, body)
+
+
+def test_the_client_timeout_reaches_the_transport(monkeypatch):
+    seen = []
+
+    def urlopen(request, timeout):
+        seen.append(timeout)
+        return io.BytesIO(b'{"revision": "r"}')
+
+    monkeypatch.setattr(api_client.urllib.request, "urlopen", urlopen)
+    api_client.ResourceClient("http://ledger.test", {}).request(SLUG, "chat")
+    api_client.ResourceClient("http://ledger.test", {}, timeout=3).request(SLUG, "chat")
+    assert seen == [10, 3]
+
+
+def test_the_request_layer_passes_its_timeout_to_the_client(monkeypatch):
+    built = []
+
+    class Client:
+        def __init__(self, base, credentials, timeout):
+            built.append((base, timeout))
+
+        def mutate(self, slug, ops):
+            return {"applied": []}
+
+    monkeypatch.setattr(api_client, "ResourceClient", Client)
+    monkeypatch.setattr(cli_ledger, "credentials", lambda slug, service: {})
+    cli_ledger.request(SLUG, chat_add())
+    cli_ledger.request(SLUG, chat_add(), timeout=3)
+    assert built == [(cli_ledger.BASE, 10), (cli_ledger.BASE, 3)]
+
+
+def test_stop_gate_bypass_never_raises_on_any_failure(monkeypatch):
+    logged = []
+    monkeypatch.setattr(cli_ledger, "request", Recorder(error=ValueError("bad reply")))
+    monkeypatch.setattr(ledger_hook, "log", logged.append)
+    ledger_hook.post_bypass({"slug": SLUG, "name": "api-reader"}, 1)
+    assert logged == ["bypass not recorded: bad reply"]
