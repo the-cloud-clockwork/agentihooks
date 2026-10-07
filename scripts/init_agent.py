@@ -134,11 +134,13 @@ def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[s
 
 def _with_predecessor(environ: dict[str, str], handoff: bool) -> dict[str, str]:
     """Only a transfer names a predecessor: a quota handoff names this session, a tick spawn keeps what the tick named."""
-    if handoff:
-        session = environ.get("CLAUDE_CODE_SESSION_ID", "")
-    else:
-        session = environ.get(PREDECESSOR, "") if environ.get(SPAWN) == "1" else ""
     rest = {key: value for key, value in environ.items() if key != PREDECESSOR}
+    if handoff:
+        session = environ.get("CLAUDE_CODE_SESSION_ID")
+    elif environ.get(SPAWN) == "1":
+        session = environ.get(PREDECESSOR)
+    else:
+        return rest
     return {**rest, PREDECESSOR: session} if session else rest
 
 

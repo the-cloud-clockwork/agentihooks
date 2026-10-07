@@ -240,7 +240,7 @@ def _tool_output(entry: dict, result: dict) -> tuple[str, int]:
     side = Path(str(persisted["persistedOutputPath"]))
     if side.parent.name == "tool-results":
         try:
-            return side.read_text(encoding="utf-8", errors="replace"), 0
+            return side.read_bytes().decode(errors="replace"), 0
         except OSError:
             pass
     size = persisted.get("persistedOutputSize")

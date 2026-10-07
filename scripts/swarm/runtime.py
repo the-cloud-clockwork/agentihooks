@@ -127,8 +127,8 @@ def _transfer(task):
 
 
 def _predecessor(task):
-    conversation = (task.get("handoff_envelope") or {}).get("conversation_id", "")
-    return conversation if task.get("transfer") and conversation != envelope.UNKNOWN else ""
+    conversation = (task.get("handoff_envelope") or {}).get("conversation_id")
+    return conversation if task.get("transfer") and conversation != envelope.UNKNOWN else None
 
 
 class HerdrRuntime:
@@ -279,7 +279,7 @@ class HerdrRuntime:
         argv += ["--inbox-channel"] if agent == "claude" else []
         return [*argv, "--profile", profile, "--prompt-file", str(path)]
 
-    def _launch(self, config, lane, task_id, name, argv, predecessor=""):
+    def _launch(self, config, lane, task_id, name, argv, predecessor=None):
         agent = argv[argv.index("--agent") + 1]
         launched_at = int(time.time() * 1000)
         try:

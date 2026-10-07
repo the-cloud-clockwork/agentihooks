@@ -220,3 +220,27 @@ def test_a_persisted_output_counts_toward_the_root_truncated_fields(tmp_path):
 
     entries, _ = _persisted(tmp_path, None, size=40_000)
     assert agent_trace._truncated_fields(_spans(entries)) == 1
+
+
+def test_a_side_file_with_bytes_that_are_not_utf8_exports_them_replaced(tmp_path):
+    entries, _ = _persisted(tmp_path, "")
+    (tmp_path / "tool-results" / "b1.txt").write_bytes(b"ok \xff end")
+    bash = _tool(_spans(entries), "Bash")
+    assert bash.attributes["langfuse.observation.output"] == "ok � end"
+
+
+@pytest.mark.parametrize("size", [10, True])
+def test_a_size_no_larger_than_the_preview_counts_nothing(tmp_path, size):
+    entries, preview = _persisted(tmp_path, None, size=size)
+    bash = _tool(_spans(entries), "Bash")
+    assert bash.attributes["langfuse.observation.output"] == preview
+    assert not any(key.startswith("agentihooks.truncation.") for key in bash.attributes)
+
+
+def test_a_tool_call_without_input_exports_an_empty_object_and_keeps_unicode_input():
+    entries = _entries()
+    entries[2]["message"]["content"][0].pop("input")
+    entries[4]["message"]["content"][0]["input"] = {"file_path": "/café"}
+    spans = _spans(entries)
+    assert _tool(spans, "Bash").attributes["langfuse.observation.input"] == "{}"
+    assert _tool(spans, "Read").attributes["langfuse.observation.input"] == '{"file_path": "/café"}'
