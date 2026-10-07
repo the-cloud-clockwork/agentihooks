@@ -1,9 +1,9 @@
 {
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_13:eda446540d9ed0c4b259edff4160e8726c85cf8d1828349d86401b102412ae2f": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁdo_PUT__mutmut_13:eda446540d9ed0c4b259edff4160e8726c85cf8d1828349d86401b102412ae2f": {
     "reader": "Standards",
     "reason": "core.sync returns normalized state with the tasks key present; changing this unused dictionary default changes no output. Independent empty and populated task list comparisons agree."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_15:b42bf3317a26db3863deb97526ea7099ff1a9eebe8412363f16c1a548b89dd69": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁdo_PUT__mutmut_15:b42bf3317a26db3863deb97526ea7099ff1a9eebe8412363f16c1a548b89dd69": {
     "reader": "Standards",
     "reason": "core.sync returns normalized state with the tasks key present; changing this unused dictionary default changes no output. Independent empty and populated task list comparisons agree."
   },
@@ -75,19 +75,19 @@
     "reader": "Standards",
     "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
   },
-  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_13:ce23f8251c274740f77013f93f6859b9b3cb19ce3980edda2459798f0e1091d6": {
+  "hooks/classifier/api.py:hooks.classifier.api.xǁDecisionsApiBackendǁdecide__mutmut_13:ce23f8251c274740f77013f93f6859b9b3cb19ce3980edda2459798f0e1091d6": {
     "reader": "Standards",
     "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
   },
-  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_14:527757a47f1153cc8eeb015e3a6f31c57eff58a7e05e68f5c292bdd8991f8533": {
+  "hooks/classifier/api.py:hooks.classifier.api.xǁDecisionsApiBackendǁdecide__mutmut_14:527757a47f1153cc8eeb015e3a6f31c57eff58a7e05e68f5c292bdd8991f8533": {
     "reader": "Standards",
     "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
   },
-  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_18:07dfa5b18842f75a13c721d74a1a2f4ccf117d1968e974f32a29d2708d621de4": {
+  "hooks/classifier/api.py:hooks.classifier.api.xǁDecisionsApiBackendǁdecide__mutmut_18:07dfa5b18842f75a13c721d74a1a2f4ccf117d1968e974f32a29d2708d621de4": {
     "reader": "Standards",
     "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
   },
-  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_19:9a9b3078151e607f31adc9418fc92c7c46cbdd3c9777b582e778ddd37c36c192": {
+  "hooks/classifier/api.py:hooks.classifier.api.xǁDecisionsApiBackendǁdecide__mutmut_19:9a9b3078151e607f31adc9418fc92c7c46cbdd3c9777b582e778ddd37c36c192": {
     "reader": "Standards",
     "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
   },
@@ -115,19 +115,19 @@
     "reader": "Standards reviewer /root/standards",
     "reason": "An absent key resolves to a false empty string or None; both preserve every failure field. Present keys are unchanged."
   },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_5:c63c45f1668d7ba8e0cdd0a6d8644e9daf4d4a0256db7665b22486526fd4089d": {
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.xǁCodexCliBackendǁdecide__mutmut_5:c63c45f1668d7ba8e0cdd0a6d8644e9daf4d4a0256db7665b22486526fd4089d": {
     "reader": "Standards reviewer /root/standards",
     "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
   },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_6:cf037e1ee9471bc922edf71c28b727752be292deb85898276bb48d0b3ed9dd2d": {
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.xǁCodexCliBackendǁdecide__mutmut_6:cf037e1ee9471bc922edf71c28b727752be292deb85898276bb48d0b3ed9dd2d": {
     "reader": "Standards reviewer /root/standards",
     "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
   },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_9:62d7203e4d963da0d0f9a78b5c02985ebb7657773b0788f9159c806d4ef8e201": {
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.xǁCodexCliBackendǁdecide__mutmut_9:62d7203e4d963da0d0f9a78b5c02985ebb7657773b0788f9159c806d4ef8e201": {
     "reader": "Standards reviewer /root/standards",
     "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
   },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_10:9c5c029295a8637e03110a972820332ef68743e5f825bcd0d0eb85a423dd76ea": {
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.xǁCodexCliBackendǁdecide__mutmut_10:9c5c029295a8637e03110a972820332ef68743e5f825bcd0d0eb85a423dd76ea": {
     "reader": "Standards reviewer /root/standards",
     "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
   },
@@ -247,7 +247,7 @@
     "reader": "Standards",
     "reason": "Removing explicit default None preserves argparse default None. Independent reader observed identical namespaces for absent, zero and three planner caps; both retain integer conversion."
   },
-  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1observe__mutmut_40:4123c5fa4c231ce83765b6bf1b66e0f332b14e490a50d5d71dae6844e29bd60f": {
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.xǁHerdrRuntimeǁobserve__mutmut_40:4123c5fa4c231ce83765b6bf1b66e0f332b14e490a50d5d71dae6844e29bd60f": {
     "reader": "Standards /root/standards",
     "reason": "Absent capture text is empty or XXXX; both lack a selection dialog and return the same observed state."
   },
@@ -459,39 +459,39 @@
     "reader": "Standards",
     "reason": "Quote and recorded words pass through the same join, and the uppercase separator can only sit at token boundaries of lowercased text, so containment and the returned words are unchanged for every input."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_3:598997e79f7d412167c6beee1ac5fbdcca3b57fb3508ad28c522061f439fef33": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁput_layout__mutmut_3:598997e79f7d412167c6beee1ac5fbdcca3b57fb3508ad28c522061f439fef33": {
     "reader": "Standards",
     "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_4:9b560b3ea8ee97b8922ab8351286750b7970668329d2c637234a54bdcaa23c49": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁput_layout__mutmut_4:9b560b3ea8ee97b8922ab8351286750b7970668329d2c637234a54bdcaa23c49": {
     "reader": "Standards",
     "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_22:26bef4343065a27111b4674bf5791768f1b78a1edc7883bd3910126b2247e099": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁput_layout__mutmut_22:26bef4343065a27111b4674bf5791768f1b78a1edc7883bd3910126b2247e099": {
     "reader": "Standards",
     "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_23:f743e0991c556738ecf79cc64f14696cbb6a6e8247e9f7510570b658b4e25b27": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁput_layout__mutmut_23:f743e0991c556738ecf79cc64f14696cbb6a6e8247e9f7510570b658b4e25b27": {
     "reader": "Standards",
     "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_44:ff6bf571515052f282afd075fe537c98e6917c4f74038e1db2466cbf96d9d1fe": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁput_layout__mutmut_44:ff6bf571515052f282afd075fe537c98e6917c4f74038e1db2466cbf96d9d1fe": {
     "reader": "Standards",
     "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_45:dd9465c9ef8129804fadd87b9b90455a5b5e605b288544bb0bd62198c9e1cadc": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁput_layout__mutmut_45:dd9465c9ef8129804fadd87b9b90455a5b5e605b288544bb0bd62198c9e1cadc": {
     "reader": "Standards",
     "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_24:f94586b4a412c8e74058ef8cfc47294fd564d615a7a73a34bfdcdd5dbe353bb0": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁput_layout__mutmut_24:f94586b4a412c8e74058ef8cfc47294fd564d615a7a73a34bfdcdd5dbe353bb0": {
     "reader": "Standards",
     "reason": "A missing Content-Type falls back to a string that still fails the JSON prefix check, so the reply stays 415."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_4:36d3beba1cd47ad89a91902da0d676d2b1ad9b87097be0a3cc581c2935f66222": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁdo_PUT__mutmut_4:36d3beba1cd47ad89a91902da0d676d2b1ad9b87097be0a3cc581c2935f66222": {
     "reader": "Standards",
     "reason": "Splitting on every question mark leaves the same first piece, so the route match is unchanged."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_7:b236342b0227b49ca801ecc70cad325efd4519a4eb9998cf3954b53f396594d8": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁdo_PUT__mutmut_7:b236342b0227b49ca801ecc70cad325efd4519a4eb9998cf3954b53f396594d8": {
     "reader": "Standards",
     "reason": "A second split point leaves the same first piece, so the route match is unchanged."
   },
@@ -639,7 +639,7 @@
     "reader": "Standards",
     "reason": "parse of an empty and of an unknown range string both return the default range."
   },
-  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1observe__mutmut_24:19c788d22295248b72afdded7a527a1d127caff334f57559dcc85f7a5ff35f9f": {
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.xǁHerdrRuntimeǁobserve__mutmut_24:19c788d22295248b72afdded7a527a1d127caff334f57559dcc85f7a5ff35f9f": {
     "reader": "Standards",
     "reason": "A missing pane text defaults to a string with no input marker, confirmation line or escape codes, so selection_prompt and typed_input both return empty exactly as for an empty default."
   },
@@ -651,7 +651,7 @@
     "reader": "Standards",
     "reason": "The mutant omits the precomputed review argument; the same pure calculator receives identical document, events and time before mutation and yields identical persisted stats and review."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1receive__mutmut_3:47b0a5f5739a912849451da407cb6339e358d2d3c322d33c37aa97a1e532db78": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁreceive__mutmut_3:47b0a5f5739a912849451da407cb6339e358d2d3c322d33c37aa97a1e532db78": {
     "reader": "Standards",
     "reason": "FileLedgerRepository.get_document branches on reconcile truthiness; False and None select the identical locked persisted-document read."
   },
@@ -719,19 +719,19 @@
     "reader": "Standards",
     "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
   },
-  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x\u01c1FileLedgerRepository\u01c1events_since__mutmut_6:a4b51e8d9e868bfc09267f83c4b792fd822fe5b2eeded8ef384aae0a32019f92": {
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁevents_since__mutmut_6:a4b51e8d9e868bfc09267f83c4b792fd822fe5b2eeded8ef384aae0a32019f92": {
     "reader": "Standards",
     "reason": "These calls always load existing JSON with seed None. The default and supplied canonical core expose identical pure loads/normalize code and constants; locks and paths remain bound to self.domain."
   },
-  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x\u01c1FileLedgerRepository\u01c1get_document__mutmut_12:5564d2623e14c85100e77a910247efd21328caebb4f372d48c565eb6827086a2": {
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁget_document__mutmut_12:5564d2623e14c85100e77a910247efd21328caebb4f372d48c565eb6827086a2": {
     "reader": "Standards",
     "reason": "These calls always load existing JSON with seed None. The default and supplied canonical core expose identical pure loads/normalize code and constants; locks and paths remain bound to self.domain."
   },
-  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x\u01c1FileLedgerRepository\u01c1read_page__mutmut_5:74518b453d780af5cd921081ceb0b72eb7683386c0ae327941c00863fdf4bc1d": {
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁread_page__mutmut_5:74518b453d780af5cd921081ceb0b72eb7683386c0ae327941c00863fdf4bc1d": {
     "reader": "Standards",
     "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
   },
-  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x\u01c1FileLedgerRepository\u01c1read_snapshot__mutmut_6:4cf49a8e028eef0200c330b480f3e0598383a25882b4167acf0cf88fcc4f6f48": {
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁread_snapshot__mutmut_6:4cf49a8e028eef0200c330b480f3e0598383a25882b4167acf0cf88fcc4f6f48": {
     "reader": "Standards",
     "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
   },
@@ -743,11 +743,11 @@
     "reader": "Standards",
     "reason": "urllib capitalizes request header names, so the changed key casing sends the same header."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1refused__mutmut_18:a8475961407734a792c2605a007486f4f4d9bbefd15882f2223d02abaa6f7d54": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁrefused__mutmut_18:a8475961407734a792c2605a007486f4f4d9bbefd15882f2223d02abaa6f7d54": {
     "reader": "Standards",
     "reason": "http.server header lookup is case insensitive, so the changed name casing reads the same header."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1refused__mutmut_19:abd65b2f5e3dd98506b15c18eefd38150a9ca5498070281a717f5d6bb8bd21b3": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁrefused__mutmut_19:abd65b2f5e3dd98506b15c18eefd38150a9ca5498070281a717f5d6bb8bd21b3": {
     "reader": "Standards",
     "reason": "http.server header lookup is case insensitive, so the changed name casing reads the same header."
   }
