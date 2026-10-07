@@ -84,7 +84,7 @@ def check_version_guard(payload: dict) -> None:
 
 
 def _patch_body(tool_input: dict) -> str:
-    new = tool_input.get("new_string", "")
+    new = str(tool_input.get("new_string"))
     return new if "old_string" not in tool_input and new.lstrip().startswith(_PATCH_START) else ""
 
 
@@ -147,7 +147,7 @@ def _edited_text(tool_name: str, tool_input: dict, before: str) -> str:
         return tool_input.get("content", "")
     old, new = tool_input.get("old_string", ""), tool_input.get("new_string", "")
     if _patch_body(tool_input):
-        patched = _patched_text(new, tool_input.get("file_path", ""), before)
+        patched = _patched_text(new, tool_input["file_path"], before)
         if patched is not None:
             return patched
     return before.replace(old, new) if tool_input.get("replace_all") else before.replace(old, new, 1)
@@ -178,8 +178,8 @@ def _hunks(lines: list[str]):
         if line.startswith("@@"):
             if hunk:
                 yield anchor, _side(hunk, "-"), _side(hunk, "+")
-            anchor, hunk = line[2:].strip(), []
-        elif not line.startswith("*** "):
+            anchor, hunk = line.removeprefix("@@").strip(), []
+        else:
             hunk.append(line)
 
 

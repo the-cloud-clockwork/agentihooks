@@ -448,6 +448,50 @@ def test_codex_patch_with_indented_headers_is_judged(tmp_path):
     _refused(_indented_patch(target, "@@", '-version = "2.17.0"', '+version = "2.18.0"'))
 
 
+def test_claude_edit_whose_text_looks_like_a_patch_is_not_read_as_one(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    body = "\n".join(("*** Begin Patch", f"*** Update File: {target}", *_SWITCH, "*** End Patch"))
+    _refused(_edit(target, 'version = "2.17.0"', body))
+
+
+def test_codex_patch_without_a_hunk_header_is_applied(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    check_version_guard(_codex_patch(target, *_SWITCH[1:]))
+
+
+def test_codex_patch_blank_context_line_is_matched(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    check_version_guard(_codex_patch(target, *_SWITCH, ' description = "old"', "", " [tool.setuptools_scm]"))
+
+
+def test_codex_patch_context_selects_the_occurrence(tmp_path):
+    target = _manifest(tmp_path, '[tool.other]\nversion = "2.17.0"\n\n' + _STATIC)
+    bump = ('-version = "2.17.0"', '+version = "2.18.0"')
+    check_version_guard(_codex_patch(target, "@@", *bump))
+    _refused(_codex_patch(target, "@@", ' name = "x"', *bump))
+
+
+def test_codex_patch_hunk_applies_after_the_text_an_earlier_hunk_wrote(tmp_path):
+    target = _manifest(tmp_path, _STATIC + '\n[tool.other]\nkey = "v"\n')
+    patch = _codex_patch(target, "@@", '-description = "old"', '+key = "v"', "@@", '-key = "v"', '+version = "9.0"')
+    check_version_guard(patch)
+
+
+def test_codex_patch_anchor_before_the_cursor_is_refused(tmp_path):
+    target = _manifest(tmp_path, _STATIC + '\n[tool.setuptools_scm]\n\n[tool.other]\nkey = "v"\n')
+    _refused(_codex_patch(target, "@@ [tool.other]", '-key = "v"', '+key = "w"', "@@ [project]", *_SWITCH[1:]))
+
+
+def test_codex_patch_deleting_a_manifest_without_a_package_version_is_allowed(tmp_path):
+    target = _manifest(tmp_path, '[tool.ruff]\ntarget-version = "py311"\n')
+    check_version_guard(_codex_patch(target, action="Delete"))
+
+
+def test_codex_patch_adding_a_manifest_without_its_version_is_refused(tmp_path):
+    target = _manifest(tmp_path)
+    _refused(_codex_patch(target, "+[project]", '+name = "x"', action="Add"))
+
+
 def test_codex_patch_deleting_the_manifest_is_refused(tmp_path):
     _refused(_codex_patch(_manifest(tmp_path), action="Delete"))
 
