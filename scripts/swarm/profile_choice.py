@@ -90,8 +90,8 @@ def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
         return ProfileDecision(
             DEFAULT_PROFILES[CLASSIFIED_LANE],
             "lane default",
-            f"{CLASSIFIED_LANE} lane default: {result.source} answered {answer.choice} with confidence {confidence:.2f}, "
-            f"below the floor {floor:.2f}",
+            f"{CLASSIFIED_LANE} lane default: {result.source} answered {answer.choice} "
+            f"with confidence {confidence:.2f}, below the floor {floor:.2f}",
             result.source,
             answer.confidence,
             result.calibrated,
