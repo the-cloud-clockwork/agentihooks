@@ -235,13 +235,15 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
 
 def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
     waiting, actions = launch_check.pending(store, slug), []
+    if not waiting:
+        return actions
     agents = [a for a in store.agents(slug) if a.name in waiting]
     for name in set(waiting) - {a.name for a in agents}:
         launch_check.forget(store, slug, name)
-    facts = runtime.bindings(agents) if agents else {}
+    facts = runtime.bindings(agents)
     for agent in agents:
         found = launch_check.misses(
-            store, slug, agent, facts.get(agent.name, {"process": False}), doc, launch_check.bundled(agent.profile)
+            store, slug, agent, facts.get(agent.name, {}), doc, launch_check.bundled(agent.profile)
         )
         if found and now_ms - agent.started_at < launch_check.DEADLINE_MS:
             continue
@@ -253,7 +255,7 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
         launch_check.record(store, slug, agent, found, now_ms, elapsed)
         launch_check.forget(store, slug, agent.name)
         launch_check.mark_relaunched(store, slug, agent.task, False)
-        actions.append(f"{agent.name} passed its launch check in {max(elapsed, 0) // 1000} seconds")
+        actions.append(f"{agent.name} passed its launch check in {elapsed // 1000} seconds")
     return actions
 
 

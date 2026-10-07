@@ -145,15 +145,15 @@ def judged(store: RedisStore, slug: str) -> set[str]:
 
 
 def relaunched(store: RedisStore, slug: str, task: str) -> bool:
-    return store.redis.hexists(store.key(slug, "launch-check-relaunched"), task)
+    return bool(store.redis.sismember(store.key(slug, "launch-check-relaunched"), task))
 
 
 def mark_relaunched(store: RedisStore, slug: str, task: str, spent: bool) -> None:
     key = store.key(slug, "launch-check-relaunched")
     if spent:
-        store.redis.hset(key, task, 1)
+        store.redis.sadd(key, task)
     else:
-        store.redis.hdel(key, task)
+        store.redis.srem(key, task)
 
 
 def told(found: dict, outcome: str) -> str:

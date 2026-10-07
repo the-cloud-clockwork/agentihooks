@@ -264,7 +264,205 @@ def test_a_take_master_launch_that_fails_is_reported_and_kept(store, monkeypatch
     assert any("joining the ledger" in note for note in ledger.notes)
 
 
-def test_take_master_begins_a_check_that_never_relaunches(store):
-    agent = AgentRecord(f"master@{store.ensure_code('sw').code}-0001", MASTER, MASTER, seat="master@sw")
-    launch_check.begin(store, "sw", agent, LAUNCH, relaunch=False)
-    assert launch_check.pending(store, "sw") == {agent.name: {"task": MASTER, "at": LAUNCH, "relaunch": False}}
+def test_take_master_begins_a_check_that_never_relaunches(store, monkeypatch):
+    from scripts.swarm import take_master
+
+    monkeypatch.setattr(take_master, "agent_pid", lambda: 4242)
+    monkeypatch.setattr(take_master, "harness_of", lambda pid: "claude")
+    monkeypatch.setattr(take_master, "argv_of", lambda pid: ())
+    monkeypatch.setattr(take_master, "name_session", lambda pid, name: 1)
+    record, _ = take_master.take(store, "sw", "", FakeRuntime(), LAUNCH)
+    assert launch_check.pending(store, "sw") == {record.name: {"task": MASTER, "at": LAUNCH, "relaunch": False}}
+
+
+def test_joined_at_reads_through_missing_levels(launched):
+    agent, _, doc = launched
+    assert launch_check.joined_at(agent, {}) is None
+    assert launch_check.joined_at(agent, {"_meta": {}}) is None
+    assert launch_check.joined_at(agent, {"_meta": {"members": {}}}) is None
+    assert launch_check.joined_at(agent, {"_meta": {"members": {agent.name: {}}}}) is None
+    assert launch_check.joined_at(agent, doc) == LAUNCH + 20_000
+
+
+def test_joined_miss_names_the_delay_and_the_seat(store, launched):
+    agent, facts, doc = launched
+    doc["_meta"]["members"][agent.name]["joined_at"] = LAUNCH + 61_000
+    store.seats.occupy(agent.seat, "someone-else", LAUNCH + 1)
+    assert misses(store, agent, facts, doc)["joined"] == {
+        "expected": {"joined_within_ms": 60_000, "seat": "eng-1@sw"},
+        "actual": {"joined_after_ms": 61_000, "seat": ""},
+    }
+    assert misses(store, agent, facts, {})["joined"]["actual"] == {"joined_after_ms": None, "seat": ""}
+
+
+def test_joined_exactly_at_the_deadline_passes(store, launched):
+    agent, facts, doc = launched
+    doc["_meta"]["members"][agent.name]["joined_at"] = LAUNCH + 60_000
+    assert misses(store, agent, facts, doc) == {}
+
+
+def test_an_unseated_record_misses_joined(store, launched):
+    agent, facts, doc = launched
+    assert list(misses(store, replace(agent, seat=""), facts, doc)) == ["joined"]
+
+
+def test_settings_miss_names_the_assigned_values(store, launched):
+    agent, facts, doc = launched
+    assert misses(store, agent, {**facts, "hooks": False, "effort": "low"}, doc)["settings"] == {
+        "expected": {"hooks": True, "model": "opus", "effort": "high"},
+        "actual": {"hooks": False, "model": "opus", "effort": "low"},
+    }
+
+
+def test_missing_facts_miss_profile_and_settings_with_nothing_observed(store, launched):
+    agent, _, doc = launched
+    found = misses(store, agent, {}, doc)
+    assert found["profile"] == {"expected": "engineer", "actual": None}
+    assert found["settings"]["actual"] == {"hooks": None, "model": None, "effort": None}
+
+
+def test_overlay_miss_names_the_expected_chain(store, launched):
+    agent, facts, doc = launched
+    assert misses(store, agent, {**facts, "chain": ["base", "engineer"]}, doc)["overlay"] == {
+        "expected": "package:<role>, engineer",
+        "actual": ["base", "engineer"],
+    }
+    assert misses(store, agent, {**facts, "chain": []}, doc, bundled=False)["overlay"] == {
+        "expected": "engineer",
+        "actual": [],
+    }
+
+
+def test_name_miss_names_the_expected_shape(store, launched):
+    agent, facts, doc = launched
+    renamed = replace(agent, name="engineer-1")
+    store.seats.occupy(agent.seat, renamed.name, LAUNCH)
+    doc["_meta"]["members"] = {renamed.name: {"joined_at": LAUNCH}}
+    assert misses(store, renamed, facts, doc)["name"] == {
+        "expected": f"engineer@{store.config('sw').code}-<number>",
+        "actual": "engineer-1",
+    }
+
+
+def test_bundled_reads_the_linked_bundle_profiles(tmp_path, monkeypatch):
+    from hooks.context import profile_chain
+
+    (tmp_path / "profiles" / "engineer").mkdir(parents=True)
+    monkeypatch.setattr(profile_chain, "read_state", lambda: {"bundle": {"path": str(tmp_path)}})
+    assert launch_check.bundled("engineer") is True
+    assert launch_check.bundled("qa") is False
+    assert launch_check.bundled("") is False
+    monkeypatch.setattr(profile_chain, "read_state", lambda: {})
+    assert launch_check.bundled("engineer") is False
+
+
+def test_record_report_and_judged(store, launched):
+    agent, _, _ = launched
+    assert launch_check.report(store, "sw", "t1") == {}
+    found = {"name": {"expected": "a", "actual": "b"}}
+    assert launch_check.record(store, "sw", agent, found, LAUNCH + 5, 7) == {
+        "agent": agent.name,
+        "task": "t1",
+        "at": LAUNCH + 5,
+        "elapsed_ms": 7,
+        "state": "failed",
+        "misses": found,
+        "held": False,
+    }
+    assert launch_check.report(store, "sw", "t1")["state"] == "failed"
+    assert launch_check.judged(store, "sw") == set()
+    launch_check.record(store, "sw", agent, found, LAUNCH, 0, held=True)
+    other = replace(agent, name="pending-one", task="t2")
+    launch_check.begin(store, "sw", other, LAUNCH)
+    assert launch_check.judged(store, "sw") == {agent.name, "pending-one"}
+    launch_check.record(store, "sw", agent, {}, LAUNCH, 0)
+    assert launch_check.report(store, "sw", "t1")["state"] == "passed"
+    assert launch_check.judged(store, "sw") == {"pending-one"}
+    launch_check.forget(store, "sw", "pending-one")
+    assert launch_check.pending(store, "sw") == {}
+
+
+def test_relaunch_mark_is_set_and_cleared_per_task(store):
+    launch_check.mark_relaunched(store, "sw", "t1", True)
+    assert launch_check.relaunched(store, "sw", "t1") is True
+    assert launch_check.relaunched(store, "sw", "t2") is False
+    launch_check.mark_relaunched(store, "sw", "t1", False)
+    assert launch_check.relaunched(store, "sw", "t1") is False
+
+
+def test_told_names_every_field_and_the_outcome():
+    found = {"joined": {}, "overlay": {}}
+    assert launch_check.told(found, "spent") == (
+        "The master failed its launch check within a minute on joining the ledger and holding its seat, "
+        "its role overlay on the package base role. Its one automatic relaunch is spent; operator action is required."
+    )
+    assert launch_check.told({"name": {}}, "relaunch").endswith("on its name. It is being retired and relaunched once.")
+    assert launch_check.told({"settings": {}}, "report").endswith(
+        "on its hooks, model and effort. This is reported only; the master keeps running."
+    )
+    assert "its profile" in launch_check.told({"profile": {}}, "report")
+
+
+def test_findings_carry_the_field_evidence_and_threshold(store, launched):
+    from scripts.swarm.health.findings import Finding
+
+    agent, _, _ = launched
+    launch_check.record(store, "sw", agent, {"name": {"expected": "a", "actual": "b"}}, LAUNCH, 0)
+    assert launch_check.findings(store, "sw") == [
+        Finding(
+            "launch check",
+            f"{agent.name}/name",
+            f"{agent.name} failed its launch check on name",
+            ("expected a; observed b",),
+            "a launch must pass within sixty seconds",
+            1,
+        )
+    ]
+
+
+def test_a_pending_check_for_a_gone_agent_is_forgotten(store, monkeypatch):
+    ledger, runtime = checked(store, monkeypatch)
+    store.update("sw", max_eng=0)
+    launch_check.begin(store, "sw", AgentRecord("gone", "eng", "t9"), LAUNCH)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    assert "gone" not in launch_check.pending(store, "sw")
+
+
+def test_a_waiting_launch_does_not_stop_the_next_from_being_judged(store, monkeypatch):
+    ledger, runtime = checked(store, monkeypatch)
+    store.update("sw", max_eng=0)
+    code = store.ensure_code("sw").code
+    early = AgentRecord(f"engineer@{code}-0007", "eng", "t1", seat="eng-1@sw", started_at=LAUNCH + 50_000)
+    late = AgentRecord(f"engineer@{code}-0008", "eng", "t2", seat="eng-2@sw", started_at=LAUNCH)
+    for agent in (early, late):
+        store.put_agent("sw", agent)
+        launch_check.begin(store, "sw", agent, agent.started_at)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert early.name in launch_check.pending(store, "sw")
+    assert any(a.startswith(f"retired {late.name} after its launch check failed on joined, profile") for a in actions)
+
+
+def test_a_pass_after_a_relaunch_clears_the_mark_and_reports_its_timing(store, monkeypatch):
+    ledger, runtime = checked(store, monkeypatch)
+    launch_check.mark_relaunched(store, "sw", "t1", True)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    joined(ledger, runtime, LAUNCH + 9_000)
+    tick("sw", store, ledger, runtime, LAUNCH + 20_000)
+    assert launch_check.relaunched(store, "sw", "t1") is False
+    found = launch_check.report(store, "sw", "t1")
+    assert (found["at"], found["elapsed_ms"], found["state"]) == (LAUNCH + 20_000, 9_000, "passed")
+
+
+def test_a_relaunch_saves_the_assignment_and_retries_a_starting_master(store, monkeypatch):
+    ledger, runtime = checked(store, monkeypatch)
+    store.update("sw", max_eng=0)
+    runtime.reported = lambda agent: False
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (first, _) = runtime.masters[0]
+    assert master_start.read(store, "sw")["name"] == first
+    tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    second = runtime.masters[1][0]
+    assert master_start.read(store, "sw")["name"] == second
+    assert master_start.read(store, "sw")["attempt"] == 2
+    assert runtime.masters[1][1]["id"] == MASTER
+    assert launch_check.relaunched(store, "sw", MASTER) is True
