@@ -67,7 +67,7 @@ def test_ci_reads_only_the_pull_requests_of_tasks_waiting_in_review():
 def test_ci_reports_a_red_head_only_past_the_tick_red_window(monkeypatch):
     record = load("ci")
     record["checks"][0]["conclusion"] = "failure"
-    monkeypatch.setattr(detect.ci_read, "pull_request", lambda repo, number: record)
+    monkeypatch.setattr(detect.ci_read, "pull_request", lambda repo, number: {("o/r", 487): record}[(repo, number)])
     ledger = SimpleNamespace(tasks=lambda slug: [{"state": "pr", "pr_url": "https://github.com/o/r/pull/487"}])
     window = ledger_events.RED_QUIET_MS
     import fakeredis

@@ -20,7 +20,9 @@ def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs():
         calls.append(argv)
         assert kwargs["check"] is True
         assert "--method" not in argv
+        assert argv[:2] == ["gh", "api"]
         endpoint = argv[2]
+        assert endpoint.startswith("repos/the-cloud-clockwork/agentihooks/")
         if endpoint.endswith("/pulls/487"):
             output = json.dumps(fixture["pr"])
         elif "/check-runs?" in endpoint:
