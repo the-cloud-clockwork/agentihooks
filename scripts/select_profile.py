@@ -3,10 +3,12 @@ import os
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 
 import yaml
 
 from scripts import init_agent
+from scripts.profiles import binding, plugins
 from scripts.profiles import render as profiles
 
 
@@ -15,6 +17,8 @@ def prepare(
 ) -> tuple[dict[str, str], list[str]]:
     if agent not in ("claude", "codex"):
         raise ValueError(f"{agent} per-run profiles are not supported")
+    if agent == "codex" and plugins.claude_only(name):
+        raise ValueError(f"profile {name} does not support codex; supported harness: claude")
     defaults = _defaults(name)
     prefix = f"AGENTIHOOKS_{agent.upper()}"
     active = dict(environ)
@@ -96,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
         env, command = prepare(args.name, args.agent, args.model, args.effort, arguments[split + 1 :], dict(os.environ))
     except (OSError, ValueError) as exc:
         print(f"agentihooks select-profile: {exc}", file=sys.stderr)
+        if os.environ.get(binding.REPORT):
+            binding.refuse(Path(os.environ[binding.REPORT]), f"profile selection failed: {exc}")
         return 2
     command = ["agentihooks", args.agent, *command]
     if args.dry_run:

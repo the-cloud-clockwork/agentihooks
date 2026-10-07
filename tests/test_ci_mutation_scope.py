@@ -24,6 +24,20 @@ def test_tests_are_discovered_by_module_name_and_import(tmp_path):
     ]
 
 
+def test_package_initializer_selects_ordinary_package_imports(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_direct.py").write_text("import hooks.context.sample as sample\n")
+    (tests / "test_from_parent.py").write_text("from hooks.context import sample\n")
+    (tests / "test_from_package.py").write_text("from hooks.context.sample import value\n")
+    (tests / "test_other.py").write_text("from hooks.context import other\n")
+    assert select_tests(tmp_path, Path("hooks/context/sample/__init__.py")) == [
+        "tests/test_direct.py",
+        "tests/test_from_package.py",
+        "tests/test_from_parent.py",
+    ]
+
+
 def test_diff_discovers_only_changed_source_python_files(tmp_path):
     import subprocess
 

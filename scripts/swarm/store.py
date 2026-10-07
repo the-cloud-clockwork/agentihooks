@@ -4,6 +4,7 @@ import json
 import time
 from dataclasses import asdict, dataclass, field, replace
 
+from scripts import agent_choice
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
 from scripts.swarm import effort_range
@@ -231,6 +232,11 @@ class RedisStore:
 
     def spawns(self, slug):
         return {harness: int(count) for harness, count in self.redis.hgetall(self.key(slug, "spawns")).items()}
+
+    def share_picks(self, slug, now_ms):
+        history = [json.loads(row) for row in self.redis.lrange(self.key(slug, "history"), 0, -1)]
+        rows = [*history, *(asdict(agent) for agent in self.agents(slug))]
+        return agent_choice.share_picks(rows, now_ms - agent_choice.SHARE_WINDOW_MS)
 
     def count_claim(self, slug, task):
         return self.redis.hincrby(self.key(slug, "claims"), task)

@@ -1,9 +1,10 @@
 import re
 
+from scripts.agent_choice import SHARE_WINDOW_MS, share_picks
 from scripts.swarm.health.findings import Finding
 
 TICK_MS = 60_000
-WINDOW_MS = 6 * 3_600_000
+WINDOW_MS = SHARE_WINDOW_MS
 FAILURE = re.compile(r"^(?:spawn failed for ([^\s,]+).*?|master spawn failed): (.+)$")
 
 
@@ -31,9 +32,8 @@ def failed(record: dict) -> list[Finding]:
 
 def share_drift(record: dict) -> list[Finding]:
     since, target = record["now"] - WINDOW_MS, record["target"]
-    rows = {row["name"]: row for row in [*record["history"], *record["agents"]]}.values()
-    picks = [row["harness"] for row in rows if row.get("choice") == "share" and row.get("started_at", 0) >= since]
-    total, codex = len(picks), picks.count("codex")
+    picks = share_picks([*record["history"], *record["agents"]], since)
+    total, codex = sum(picks.values()), picks.get("codex", 0)
     if not total or abs(codex * 100 - total * target) <= 100:
         return []
     actual = codex * 100 / total
