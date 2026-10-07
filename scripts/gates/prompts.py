@@ -16,8 +16,9 @@ from scripts.gates.identity import program_index, simple_commands
 
 REMOVERS = frozenset({"rm", "rmdir"})
 DIRECTORY_CHANGERS = frozenset({"cd", "pushd", "popd"})
-SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+SHELLS = frozenset({"sh", "bash", "zsh"})
 INLINE_FLAG = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
+OPTION_VALUES = frozenset({"-o", "+o", "-O", "+O", "--rcfile", "--init-file"})
 KEYWORDS = frozenset({"!", "{", "}", "if", "then", "elif", "else", "do", "while", "until"})
 GLOB = re.compile(r"[*?[]")
 RUNTIME_VALUE = re.compile(r"[$`]|^~[^/]")
@@ -48,8 +49,15 @@ def inline_scripts(text):
         index = program_index(words)
         if index is None or PurePosixPath(words[index]).name not in SHELLS:
             continue
-        flags = words[index + 1 :]
-        yield from (script for flag, script in zip(flags, flags[1:]) if INLINE_FLAG.fullmatch(flag))
+        rest = iter(words[index + 1 :])
+        for word in rest:
+            if INLINE_FLAG.fullmatch(word):
+                yield next(rest, "")
+                break
+            if not word.startswith(("-", "+")):
+                break
+            if word in OPTION_VALUES:
+                next(rest, None)
 
 
 def variable_programs(script):
@@ -108,9 +116,8 @@ class PromptGuard:
             for target in targets(args):
                 if why := self.hazard(target, call.cwd, moved):
                     return Decision.deny(refusal(why))
-        for script in inline_scripts(text):
-            for program in variable_programs(script):
-                return Decision.deny(script_refusal(program))
+        if program := next((name for script in inline_scripts(text) for name in variable_programs(script)), None):
+            return Decision.deny(script_refusal(program))
         return Decision()
 
     def hazard(self, target, cwd, moved):

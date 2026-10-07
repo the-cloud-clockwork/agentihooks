@@ -271,6 +271,9 @@ def test_a_shell_c_script_running_a_variable_command_is_denied(command):
         "$EDITOR notes.txt",
         "echo bash -c '$X'",
         "bash script.sh $X",
+        'bash deploy.sh -c "$TARGET"',
+        "sh -e build.sh -c $ENV",
+        "dash -c '$X'",
     ],
 )
 def test_a_variable_outside_command_position_or_outside_a_shell_c_script_passes(command):
@@ -282,7 +285,7 @@ def test_an_unpinned_session_runs_a_variable_command_script():
 
 
 def test_inline_scripts_read_each_shell_c_form():
-    assert list(inline_scripts("bash -c 'a'; sh -ec 'b'; zsh -o pipefail -c 'c'; bash x.sh; ls -c 'd'")) == [
+    assert list(inline_scripts("bash -c 'a'; sh -ec 'b'; zsh -o pipefail -c 'c'; bash x.sh -c 'e'; ls -c 'd'")) == [
         "a",
         "b",
         "c",
