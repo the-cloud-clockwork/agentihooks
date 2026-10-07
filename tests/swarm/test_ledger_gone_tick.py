@@ -20,6 +20,6 @@ def test_a_swarm_whose_ledger_is_gone_is_reported_once_then_left_quiet():
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
     ledger, rt = GoneLedger([]), FakeRuntime()
     first = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert first == ["ledger sw does not exist; agentihooks swarm remove sw clears this swarm"]
+    assert first == ["ledger sw does not exist; agentihooks swarm remove sw clears this swarm once it has no agents"]
     assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == []
     assert rt.spawned == [] and store.redis.get(store.key("sw", "ledger-gone")) == "1"

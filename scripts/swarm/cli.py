@@ -143,7 +143,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
             doc = ledger.state(slug)
         except LedgerGone as exc:
             first = store.redis.set(store.key(slug, "ledger-gone"), 1, nx=True)
-            return [f"{exc}; agentihooks swarm remove {slug} clears this swarm"] if first else []
+            return [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
         actions = phase_planning.planning_pass(inbox, store, slug, doc, ledger, store.config(slug))
         if actions:
             doc = ledger.state(slug)
