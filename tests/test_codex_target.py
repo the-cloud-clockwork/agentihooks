@@ -96,6 +96,47 @@ class TestConfigToml:
         assert 'approval_policy = "never"' in text
         assert 'sandbox_mode = "danger-full-access"' in text
 
+    @pytest.mark.parametrize("recorded", [None, "older"])
+    def test_matching_posture_is_recorded_without_warning(self, adapter, capsys, recorded):
+        import tomlkit
+
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        settings = {"approval_policy": "never", "sandbox_mode": "danger-full-access"}
+        (home / "config.toml").write_text(tomlkit.dumps(settings))
+        if recorded:
+            (home / ".agentihooks-managed.json").write_text(
+                json.dumps({"approval_policy": "on-request", "sandbox_mode": "workspace-write"})
+            )
+
+        adapter.write_settings(settings)
+
+        assert "hand-set" not in capsys.readouterr().out
+        assert json.loads((home / ".agentihooks-managed.json").read_text()) == settings
+        doc = tomlkit.parse((home / "config.toml").read_text())
+        assert {key: doc[key] for key in settings} == settings
+
+    def test_different_unrecorded_posture_warns_and_survives(self, adapter, said):
+        import tomlkit
+
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        settings = {"approval_policy": "on-request", "sandbox_mode": "workspace-write"}
+        (home / "config.toml").write_text(tomlkit.dumps(settings))
+
+        adapter.write_settings({"approval_policy": "never", "sandbox_mode": "danger-full-access"})
+
+        warnings = [line for line in said if "hand-set" in line]
+        assert warnings == [
+            "  [!!] config.toml 'approval_policy' hand-set to 'on-request' (managed value would be "
+            "'never') — leaving operator value in place",
+            "  [!!] config.toml 'sandbox_mode' hand-set to 'workspace-write' (managed value would be "
+            "'danger-full-access') — leaving operator value in place",
+        ]
+        doc = tomlkit.parse((home / "config.toml").read_text())
+        assert {key: doc[key] for key in settings} == settings
+        assert json.loads((home / ".agentihooks-managed.json").read_text()) == {}
+
     def test_default_translation_does_not_override_operator_choice(self, adapter):
         home = codex_home()
         home.mkdir(parents=True, exist_ok=True)
