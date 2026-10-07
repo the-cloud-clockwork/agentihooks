@@ -53,6 +53,9 @@ def run_selected(selection: Path) -> None:
             "import os as _mutmut_os\n"
             "from pathlib import Path as _mutmut_Path\n"
             f"_mutmut_root = _mutmut_Path(__file__).resolve().parents[{len(Path(filename).parts) - 1}]\n"
+            # A test that copies the mutated tree elsewhere imports it from a folder without a mutmut config.
+            "if _mutmut_root.name != 'mutants':\n"
+            f"    _mutmut_root = _mutmut_Path({str((Path.cwd() / 'mutants').resolve())!r})\n"
             "_mutmut_cwd = _mutmut_os.getcwd()\n"
             "try:\n"
             "    _mutmut_os.chdir(_mutmut_root)\n"

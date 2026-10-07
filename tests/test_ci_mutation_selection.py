@@ -148,6 +148,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
             }
         )
     )
+    monkeypatch.chdir(tmp_path)
     test_runner = object()
     data = SimpleNamespace(exit_code_by_key={"selected": None})
     loaded = []
@@ -213,6 +214,11 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         assert observations == [cwd]
         assert namespace.get("__doc__") == ("sample contract" if header else None)
         assert Path.cwd() == cwd
+        assert engine_config.Config.get().source_paths == [project / "hooks"]
+        copy = {"__file__": str(tmp_path / "copy/scripts/sample.py"), "observe": observe}
+        engine_config.Config.reset()
+        exec(stream.getvalue(), copy)
+        assert observations == [cwd, cwd]
         assert engine_config.Config.get().source_paths == [project / "hooks"]
         assert calls == [("scripts/sample.py", "source", {2, 5})]
         assert runner.PytestRunner().run_tests(mutant_name=None, tests=[]) == 0
