@@ -1372,6 +1372,56 @@ def test_bundle_overlay_extending_package_role_sits_on_top(world, package_role):
     assert json.loads((out / render.STAMP).read_text())["chain"] == ["package:rb-pkg", "rb-pkg"]
 
 
+@pytest.fixture
+def brain_overlay(world, tmp_path):
+    brain = tmp_path / "kernel" / "profiles" / "rb-brain"
+    _write(brain / "profile.yml", "name: rb-brain\n")
+    _write(brain / "CLAUDE.md", "BRAIN USAGE MARKER\n")
+    _write(brain / ".claude" / ".mcp.json", json.dumps({"mcpServers": {"rb-brain-srv": {"type": "http", "url": "u"}}}))
+    _write(brain / ".claude" / "skills" / "brain-skill" / "SKILL.md", "---\nname: brain-skill\n---\n")
+    _write(brain / ".claude" / "rules" / "brain-rule.md", "BRAIN RULE MARKER\n")
+    _write(brain / ".claude" / "settings.overrides.json", json.dumps({"env": {"BRAIN_FLAG": "1"}}))
+    install = world["install"]
+    state = install._load_state()
+    state["linked_profiles"] = [{"name": "rb-brain", "path": str(brain)}]
+    install._save_state(state)
+    profiles = world["bundle"] / "profiles"
+    _write(profiles / "rb-base" / "profile.yml", "name: rb-base\nallowedOverlays: [rb-router, rb-brain]\n")
+    _write(profiles / "rb-op" / "profile.yml", "name: rb-op\nextends: [rb-base]\nallowedOverlays: [rb-brain]\n")
+    _write(profiles / "rb-op" / "CLAUDE.md", "OPERATOR PERSONA MARKER\n")
+    return brain
+
+
+@pytest.mark.parametrize("name", ["rb-role", "rb-op"])
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_render_layers_each_declared_overlay_like_a_profile(world, brain_overlay, name, target):
+    from scripts.profiles import render
+
+    render.render(target, name)
+    out = world["home"] / ".agentihooks" / "profiles" / name / "claude"
+
+    persona = (out / "CLAUDE.md").read_text()
+    assert persona.count("BRAIN USAGE MARKER") == 1 and "BRAIN RULE MARKER" in persona
+    assert "**rb-brain**" in persona and f"You are **{name}**" in persona
+    assert (out / "skills" / "brain-skill").is_symlink()
+    assert json.loads((out / "settings.json").read_text())["env"]["BRAIN_FLAG"] == "1"
+    assert "rb-brain-srv" in json.loads((out / ".claude.json").read_text())["mcpServers"]
+    chain = json.loads((out / render.STAMP).read_text())["chain"]
+    assert chain[-1] == "rb-brain" and chain.count("rb-brain") == 1 and "rb-router" not in chain
+    if target == "codex":
+        config = tomllib.loads((out.parent / "codex" / "config.toml").read_text())
+        assert "rb-brain-srv" in config["mcp_servers"]
+
+
+def test_render_skips_an_overlay_no_profile_declares(world, brain_overlay):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-other")
+
+    assert "BRAIN USAGE MARKER" not in (out / "CLAUDE.md").read_text()
+    assert json.loads((out / render.STAMP).read_text())["chain"] == ["rb-other"]
+
+
 def _scratch_bundle(world, tmp_path: Path) -> Path:
     bundle = tmp_path / "scratch-bundle"
     shutil.copytree(world["bundle"], bundle)

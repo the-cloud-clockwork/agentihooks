@@ -63,6 +63,12 @@ def parents(path: Path) -> list[str]:
     return data.get("extends", [])
 
 
+def overlays(path: Path) -> list[str]:
+    manifest = path / "profile.yml"
+    data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
+    return data.get("allowedOverlays", [])
+
+
 def inherited(profile_dirs: list[tuple[str, Path]]) -> set[str]:
     return {parent for _, path in profile_dirs for parent in parents(path)}
 
