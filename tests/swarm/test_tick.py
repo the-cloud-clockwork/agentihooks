@@ -72,7 +72,12 @@ class FakeRuntime:
         self.tasks.append(dict(task))
         self.spawns_seen.append(dict(spawns or {}))
         return Placed(
-            pane_id=f"w1:p{len(self.spawned)}", harness=self.harness, account="acct", model="opus", effort="high"
+            pane_id=f"w1:p{len(self.spawned)}",
+            harness=self.harness,
+            account="acct",
+            model="opus",
+            effort="high",
+            choice="share",
         )
 
     def recover(self, name):
@@ -896,6 +901,32 @@ def test_a_master_spawn_is_not_counted_in_the_codex_share(store):
     store.update("sw", max_eng=0, max_ci=0)
     tick("sw", store, FakeLedger([]), FakeRuntime(), 1000)
     assert store.spawns("sw") == {}
+
+
+def test_overflow_on_codex_in_the_window_leaves_the_next_free_spawn_to_the_share(store, monkeypatch):
+    from scripts import agent_choice
+
+    now = 10 * 3_600_000
+    rows = [
+        *[(f"s{i}", "claude", "share", now - i * 1000) for i in range(1, 3)],
+        *[(f"o{i}", "codex", "overflow", now - i * 1000) for i in range(1, 4)],
+        ("f1", "codex", "forced", now - 9000),
+        ("old", "codex", "share", now - 7 * 3_600_000),
+        *[(f"s{i}", "claude", "share", now - i * 1000) for i in range(3, 5)],
+    ]
+    for name, harness, choice, at in rows:
+        store.put_agent("sw", AgentRecord(name, "eng", f"x-{name}", harness=harness, started_at=at, choice=choice))
+        store.drop_agent("sw", name, at=at)
+        store.count_spawn("sw", harness)
+    rt = FakeRuntime()
+    tick("sw", store, FakeLedger([{"id": "t1"}]), rt, now)
+    assert rt.spawns_seen == [{"claude": 4}]
+    monkeypatch.setattr(agent_choice, "at_cap", lambda agent, environ: False)
+    monkeypatch.setattr(agent_choice, "codex_week_left", lambda environ: 90.0)
+    assert agent_choice.choose_shared("", {}, rt.spawns_seen[0], 20, 5, choose=lambda r, e: ("claude", "priority")) == (
+        "codex",
+        "codex share 0/4 below 20%",
+    )
 
 
 def _conversations(store):

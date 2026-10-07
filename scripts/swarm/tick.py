@@ -346,7 +346,9 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                 task.update(fields)
                 store.seats.occupy(seat, name, now_ms)
                 task["transfer"] = transfers.attach(store, slug, record)
-                placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task), spawns=store.spawns(slug))
+                placed = runtime.spawn(
+                    config, lane, name, primed(store, slug, seat, task), spawns=store.share_picks(slug, now_ms)
+                )
             except Exception as exc:
                 transfers.failed(store, slug, record)
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
