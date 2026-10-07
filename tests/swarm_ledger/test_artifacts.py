@@ -60,8 +60,10 @@ class TestStore:
 
 
 class ArtifactEndpoint(Endpoint):
-    def publish(self, name, filename, data, token=True):
+    def publish(self, name, filename, data, token=True, request=None):
         headers = {"Host": f"127.0.0.1:{server.PORT}", "X-Ledger-Agent": name, "X-Artifact-Name": filename}
+        if request is not None:
+            headers["X-Artifact-Request"] = json.dumps(request)
         if token:
             headers["X-Ledger-Token"] = self.token
         req = urllib.request.Request(
@@ -72,6 +74,54 @@ class ArtifactEndpoint(Endpoint):
                 return resp.status, json.loads(resp.read())
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read().decode()
+
+    def test_an_unrequested_upload_leaves_the_media_folder_unchanged(self):
+        self.put([{"op": "join", "id": "j-refused-upload", "by": "refused-engineer"}])
+        folder = media.folder("via-media")
+        before = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
+        code, body = self.publish("refused-engineer", "unrequested.md", b"# Unrequested upload\n")
+        after = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
+        assert after == before
+        assert code == 403
+        assert artifacts.REFUSED in body
+
+    def test_invalid_and_unknown_publication_requests_leave_no_files(self):
+        self.put([{"op": "join", "id": "j-invalid-upload", "by": "invalid-engineer"}])
+        folder = media.folder("via-media")
+        before = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
+        for request, expected in (
+            ({"task": "absent", "plan": True}, 403),
+            ({"task": "", "request": "absent"}, 403),
+            ({"task": "", "plan": False}, 400),
+            ({"task": [], "plan": True}, 400),
+            ({"task": "", "request": 1}, 400),
+            ({"task": "", "extra": True}, 400),
+            ([], 400),
+            ({"task": "", "by": "forged"}, 400),
+        ):
+            code, body = self.publish("invalid-engineer", "invalid.md", b"# Invalid upload\n", request=request)
+            assert code == expected, body
+            assert {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()} == before
+
+    def test_a_published_plan_upload_uses_the_same_request_as_its_entry(self):
+        self.put([{"op": "join", "id": "j-plan-upload", "by": "plan-engineer"}])
+        code, file = self.publish("plan-engineer", "plan.md", b"# Published plan\n", request={"task": "", "plan": True})
+        assert code == 200, file
+        code, _, body = self.put(
+            [
+                {
+                    "op": "artifact_add",
+                    "id": "a-plan-upload",
+                    "by": "plan-engineer",
+                    "task": "",
+                    "title": "Plan",
+                    "file": file,
+                    "plan": True,
+                }
+            ]
+        )
+        assert code == 200
+        assert not json.loads(body)["rejected"]
 
     def test_an_agent_publishes_markdown_json_and_svg_on_a_task(self):
         self.put([{"op": "join", "id": "j-art", "by": "art-engineer"}])
@@ -91,7 +141,7 @@ class ArtifactEndpoint(Endpoint):
             ("shape.json", JSON_DOC, "Proposal shape"),
             ("diagram.svg", SVG, "Handoff flow diagram"),
         ):
-            code, file = self.publish("art-engineer", filename, data)
+            code, file = self.publish("art-engineer", filename, data, request={"task": "av1"})
             assert code == 200, file
             op = {
                 "op": "artifact_add",
@@ -129,7 +179,10 @@ class ArtifactEndpoint(Endpoint):
 
     def test_a_record_needs_a_stored_file_a_member_and_a_known_task(self):
         self.put([{"op": "join", "id": "j-rec", "by": "rec-engineer"}])
-        file = self.publish("rec-engineer", "proposal.md", MARKDOWN)[1]
+        self.put([{"op": "add", "thread": "chat", "id": "m-upload-request", "text": "Send me the plan"}])
+        file = self.publish(
+            "rec-engineer", "proposal.md", MARKDOWN, request={"task": "", "request": "m-upload-request"}
+        )[1]
         ghost = {"id": "f" * 64 + ".md"}
         base = {"op": "artifact_add", "by": "rec-engineer", "task": "", "title": "Plan"}
         assert self.put([{**base, "id": "a-ghost", "file": ghost}])[0] == 400
@@ -175,7 +228,7 @@ def test_artifact_command_uploads_the_file_and_records_it_on_the_task(tmp_path, 
         patch.object(ledger, "call", return_value={}) as call,
     ):
         ledger.cmd_artifact(args)
-    assert upload.call_args.args == ("shots", "art-engineer", str(doc))
+    assert upload.call_args.args == ("shots", "art-engineer", str(doc), {"task": "av1"})
     op = call.call_args.args[1][0]
     assert {k: op[k] for k in ("op", "by", "task", "title", "file")} == {
         "op": "artifact_add",
@@ -197,10 +250,13 @@ def test_upload_artifact_sends_bytes_name_token_and_agent(tmp_path):
     ):
         (tmp_path / "page.html").write_text("page")
         opened.return_value.__enter__.return_value.read.return_value = b'{"id": "x"}'
-        assert ledger.upload_artifact("shots", "art-engineer", str(doc)) == {"id": "x"}
+        assert ledger.upload_artifact("shots", "art-engineer", str(doc), {"task": "av1", "request": "wanted"}) == {
+            "id": "x"
+        }
     req = opened.call_args.args[0]
     assert req.full_url.endswith("/api/artifacts/shots")
     assert req.data == MARKDOWN
     assert req.get_header("X-artifact-name") == "proposal.md"
+    assert json.loads(req.get_header("X-artifact-request")) == {"task": "av1", "request": "wanted"}
     assert req.get_header("X-ledger-agent") == "art-engineer"
     assert req.get_header("X-ledger-token") == "test-token"

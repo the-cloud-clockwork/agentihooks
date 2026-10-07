@@ -69,7 +69,7 @@ def test_joined_master_publishes_requested_markdown_without_claims(publication, 
 @pytest.mark.parametrize("task", ["master", ""])
 def test_page_server_accepts_requested_master_artifact(publication, task):
     slug, path, _ = publication
-    file = ledger.upload_artifact(slug, MASTER, str(path))
+    file = ledger.upload_artifact(slug, MASTER, str(path), {"task": "", "request": "requested"})
     op = {
         "op": "artifact_add",
         "id": "published",
@@ -102,7 +102,7 @@ def test_master_requires_operator_request(publication, request_id):
             {"op": "delete", "id": "deleted-request_id", "thread": "chat"},
         ],
     )
-    file = ledger.upload_artifact(slug, MASTER, str(path))
+    file = ledger.upload_artifact(slug, MASTER, str(path), {"task": "", "request": "requested"})
     op = {"op": "artifact_add", "id": "refused", "by": MASTER, "task": "master", "title": "Audit summary", "file": file}
     if request_id is not None:
         op["request"] = request_id
@@ -117,7 +117,7 @@ def test_master_marker_needs_joined_master_identity_and_role(publication, monkey
     slug, path, _ = publication
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", by)
     core.sync(slug, ops=[{"op": "join", "id": "role", "by": by, "role": role}])
-    file = ledger.upload_artifact(slug, by, str(path))
+    file = ledger.upload_artifact(slug, by, str(path), {"task": "", "request": "requested"})
     op = {
         "op": "artifact_add",
         "id": "refused",
@@ -134,7 +134,7 @@ def test_master_marker_needs_joined_master_identity_and_role(publication, monkey
 
 def test_unjoined_master_cannot_publish(publication):
     slug, path, _ = publication
-    file = ledger.upload_artifact(slug, MASTER, str(path))
+    file = ledger.upload_artifact(slug, MASTER, str(path), {"task": "", "request": "requested"})
     core.sync(slug, ops=[{"op": "leave", "id": "leave", "by": MASTER}])
     op = {
         "op": "artifact_add",

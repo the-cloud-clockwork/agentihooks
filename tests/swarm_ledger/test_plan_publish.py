@@ -270,11 +270,13 @@ def test_publish_plan_without_issues_stores_a_plan_artifact_for_the_planner_task
     file = {"id": f"{'b' * 64}.md", "type": "text/markdown", "size": 18}
     uploads = []
     monkeypatch.setattr(ledger.ledger_publish, "has_issues", lambda repo, run=None: False)
-    monkeypatch.setattr(ledger, "upload_artifact", lambda slug, name, path: uploads.append((slug, name, path)) or file)
+    monkeypatch.setattr(
+        ledger, "upload_artifact", lambda slug, name, path, request: uploads.append((slug, name, path, request)) or file
+    )
     monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "plan")
     cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1", "--title", "Slice plan")
     url = f"{ledger.BASE}/artifacts/{plan_ledger}/{file['id']}"
-    assert uploads == [(plan_ledger, "planner", str(plan))]
+    assert uploads == [(plan_ledger, "planner", str(plan), {"task": "plan", "plan": True})]
     state = core.sync(plan_ledger)[0]
     [row] = state["artifacts"]
     assert (row["title"], row["plan"], row["task"], row["file"]["id"]) == ("Slice plan", True, "plan", file["id"])
@@ -369,7 +371,7 @@ def test_publish_plan_artifact_outside_a_swarm_task_names_no_task(plan_ledger, t
     plan.write_text("# Master plan\n", encoding="utf-8")
     file = {"id": f"{'c' * 64}.md", "type": "text/markdown", "size": 14}
     monkeypatch.setattr(ledger.ledger_publish, "has_issues", lambda repo, run=None: False)
-    monkeypatch.setattr(ledger, "upload_artifact", lambda slug, name, path: file)
+    monkeypatch.setattr(ledger, "upload_artifact", lambda slug, name, path, request: file)
     monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
     cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1")
     [row] = core.sync(plan_ledger)[0]["artifacts"]
