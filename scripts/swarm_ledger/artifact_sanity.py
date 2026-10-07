@@ -182,8 +182,7 @@ def page_html(files: list[Path]) -> str:
 
 
 def _module(route):
-    name = route.request.url.rsplit("/", 1)[1]
-    route.fulfill(body=(MODULES / name).read_text(encoding="utf-8"), content_type="text/javascript; charset=utf-8")
+    route.fulfill(path=MODULES / route.request.url.rsplit("/", 1)[1])
 
 
 def run(browser, files: list[Path]) -> dict[str, list[str]]:
@@ -198,7 +197,7 @@ def run(browser, files: list[Path]) -> dict[str, list[str]]:
             ),
         )
         html = page_html(files)
-        tab.route(PAGE_URL, lambda route: route.fulfill(body=html, content_type="text/html; charset=utf-8"))
+        tab.route(PAGE_URL, lambda route: route.fulfill(body=html))
         tab.route("**/static/*/js/*.js", _module)
         tab.goto(PAGE_URL)
         return {path.name: _view(tab, path) for path in files}

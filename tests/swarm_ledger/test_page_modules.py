@@ -10,10 +10,10 @@ from unittest.mock import patch
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
-import ledger_core as core  # noqa: E402
-import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
+from scripts.swarm_ledger import ledger_core as core  # noqa: E402
+from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from tests.swarm_ledger.ledger_page import ORDER, page_source  # noqa: E402
 
 MODULES = core.TEMPLATE.parent / "static" / "js"

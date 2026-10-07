@@ -300,7 +300,7 @@ def watch_path(slug, name):
 def page_version():
     digest = hashlib.sha256(TEMPLATE.read_bytes() + PALETTE.read_bytes() + TOOLTIPS.read_bytes())
     for path in sorted(MODULES.glob("*.js")):
-        digest.update(path.name.encode() + b"\0" + path.read_bytes())
+        digest.update(path.read_bytes())
     return digest.hexdigest()[:12]
 
 
