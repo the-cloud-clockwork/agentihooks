@@ -34,7 +34,7 @@ def test_a_click_sets_that_gate_mode_through_the_swarm_control(open_page):
     page.tab.locator('#swarm-gates [aria-label="identity gate mode"] button', has_text="log only").click()
     page.tab.wait_for_function("() => !document.querySelector('#swarm-gates button').disabled")
     assert page.puts == [{"action": "set", "gates": {"identity": "observe"}}]
-    assert page.text("#swarm-note") == "Set gate mode: done"
+    assert page.text("#swarm-note") == "Set gate mode: pending, waiting for the hive tick"
 
 
 def test_a_status_without_gate_modes_shows_no_gate_controls(open_page):

@@ -15,11 +15,20 @@ LEDGER = {
 }
 
 
+from scripts.swarm import command_runner, commands
+from scripts.swarm_ledger import ledger_workspace
+
+
 @pytest.fixture
 def folders(tmp_path, monkeypatch):
-    real = server.ledger_workspace.folder
-    monkeypatch.setattr(server.ledger_workspace, "folder", lambda slug, task: (real(slug, task), tmp_path / task)[1])
+    real = ledger_workspace.folder
+    monkeypatch.setattr(ledger_workspace, "folder", lambda slug, task: (real(slug, task), tmp_path / task)[1])
+    monkeypatch.setattr(server, "swarm_store", lambda: "store")
     monkeypatch.setattr(server, "HUB", Hub())
+    published = {}
+    monkeypatch.setattr(commands, "publish", lambda store, slug, status, tails: published.update({slug: tails}))
+    monkeypatch.setattr(commands, "workspaces", lambda store, slug: published.get(slug, {}))
+    monkeypatch.setattr(command_runner, "status_report", lambda *args: {})
     (tmp_path / "t1").mkdir()
     return tmp_path
 
@@ -31,24 +40,37 @@ def counted(monkeypatch, module, name):
     return calls
 
 
-def test_a_work_folder_read_returns_the_current_tails_of_one_task(folders, monkeypatch):
-    reads = counted(monkeypatch, server.ledger_workspace, "tails")
+def test_a_work_folder_read_returns_the_lines_the_tick_last_published(folders, monkeypatch):
     progress = folders / "t1" / "progress.md"
     assert server.workspace_tails("s", "t1") == {}
     progress.write_text("first step\n")
+    assert server.workspace_tails("s", "t1") == {}
+    command_runner.publish("store", "s", {"tasks": [LEDGER["tasks"][0]]})
     assert server.workspace_tails("s", "t1") == {"latest_progress": "first step"}
     progress.write_text("first step\nsecond step\n")
     (folders / "t1" / "proof.md").write_text("run green\n")
+    command_runner.publish("store", "s", {"tasks": [LEDGER["tasks"][0]]})
     assert server.workspace_tails("s", "t1") == {
         "latest_progress": "first step\nsecond step",
         "latest_proof": "run green",
     }
-    assert reads == [("s", "t1")] * 3
+    assert server.workspace_tails("s", "t2") == {}
 
 
 def test_a_work_folder_read_refuses_an_unsafe_task_id(folders):
     with pytest.raises(ValueError):
         server.workspace_tails("s", "bad id")
+
+
+def test_a_work_folder_read_without_a_swarm_answers_no_lines(monkeypatch):
+    from scripts.swarm.store import SwarmError
+
+    def missing(store, slug):
+        raise SwarmError("no swarm")
+
+    monkeypatch.setattr(server, "swarm_store", lambda: "store")
+    monkeypatch.setattr(commands, "workspaces", missing)
+    assert server.workspace_tails("s", "t1") == {}
 
 
 def test_one_ledger_failing_its_swarm_read_never_stops_the_others(folders, monkeypatch, capsys):
@@ -72,7 +94,7 @@ def test_idle_sampling_reads_no_ledger_document_and_sends_nothing(folders, monke
     snapshots = counted(monkeypatch, server.repository, "read_snapshot")
     documents = counted(monkeypatch, server.repository, "get_document")
     versions = counted(monkeypatch, server.core, "page_version")
-    tails = counted(monkeypatch, server.ledger_workspace, "tails")
+    tails = counted(monkeypatch, ledger_workspace, "tails")
     for _ in range(5):
         server.sample_streams()
     assert (snapshots, documents, versions, tails) == ([], [], [], [])
@@ -146,22 +168,22 @@ def test_sampling_leaves_work_folder_changes_to_the_lazy_read(folders, monkeypat
     monkeypatch.setattr(server, "swarm_status", lambda slug, state=None: None)
     server.HUB.open("empty", lambda: {"swarm": None})
     server.HUB.open("s", lambda: {"ledger": LEDGER, "swarm": None})
-    tails = counted(monkeypatch, server.ledger_workspace, "tails")
     (folders / "t1" / "progress.md").write_text("step one\n")
+    command_runner.publish("store", "s", {"tasks": [LEDGER["tasks"][0]]})
+    tails = counted(monkeypatch, ledger_workspace, "tails")
+    reads = counted(monkeypatch, commands, "workspaces")
     server.sample_streams()
+    assert reads == []
     assert tails == []
     assert server.HUB.resource("s", "workspaces") is None
     assert list(server.HUB.channels["s"].log) == []
 
 
 def test_swarm_status_reads_the_snapshot_only_without_a_given_state(monkeypatch):
-    from scripts.swarm import status
-
     reads = []
     monkeypatch.setattr(server, "swarm_store", lambda: "store")
-    monkeypatch.setattr(status, "status_report", lambda store, slug, state: (store, slug, state))
-    monkeypatch.setattr(server.repository, "read_snapshot", lambda slug: reads.append(slug) or "stored")
-    assert server.swarm_status("s", {"given": 1}) == ("store", "s", {"given": 1})
+    monkeypatch.setattr(commands, "view", lambda store, slug: {"quota": "published"})
+    monkeypatch.setattr(server.repository, "read_snapshot", lambda slug: reads.append(slug))
+    assert server.swarm_status("s", {"given": 1}) == {"quota": "published"}
+    assert server.swarm_status("s") == {"quota": "published"}
     assert reads == []
-    assert server.swarm_status("s") == ("store", "s", "stored")
-    assert reads == ["s"]

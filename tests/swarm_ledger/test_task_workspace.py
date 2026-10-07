@@ -7,7 +7,6 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
-import ledger_workspace  # noqa: E402
 
 from tests.swarm_ledger.test_task_kinds import SLUG, make_ledger, op  # noqa: E402
 from tests.swarm_ledger.test_task_proof_page import PLAIN, render, texts  # noqa: E402
@@ -40,10 +39,15 @@ class WorkspaceField(unittest.TestCase):
 
 class WorkspaceOnThePage(unittest.TestCase):
     def test_the_reply_carries_the_latest_lines_of_tasks_with_a_work_folder(self):
-        folder = ledger_workspace.scaffold("pg", {"id": "t1", "title": "a"})
-        (folder / "progress.md").write_text("red test seen\ngreen now\n", encoding="utf-8")
-        self.assertEqual(server.workspace_tails("pg", "t1"), {"latest_progress": "red test seen\ngreen now"})
-        self.assertEqual(server.workspace_tails("pg", "t2"), {})
+        from scripts.swarm import commands
+
+        tail = {"latest_progress": "red test seen\ngreen now"}
+        with (
+            unittest.mock.patch.object(server, "swarm_store", return_value="store"),
+            unittest.mock.patch.object(commands, "workspaces", return_value={"t1": tail}),
+        ):
+            self.assertEqual(server.workspace_tails("pg", "t1"), tail)
+            self.assertEqual(server.workspace_tails("pg", "t2"), {})
 
     def test_the_proof_fold_renders_progress_and_proof(self):
         tail = {"latest_progress": "green now", "latest_proof": "run 7 passed"}

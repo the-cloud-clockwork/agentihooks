@@ -9,6 +9,7 @@ from scripts.swarm_ledger import ledger, ledger_server, ledger_workspace, new_le
 from scripts.swarm_ledger import ledger_core as core
 
 SLUG = "lean-reads-2026-01-01"
+pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 @pytest.fixture(autouse=True)
@@ -105,8 +106,18 @@ def with_work_folder():
     core.sync(SLUG, ops=[{**op, "workspace": str(folder)}])
 
 
-def test_the_page_read_leaves_work_folder_tails_to_the_task_read_and_carries_no_seed_copies(served):
+def test_the_page_read_leaves_published_work_folder_lines_to_the_task_read(served, monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import commands
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
     with_work_folder()
+    (ledger_workspace.folder(SLUG, "t1") / "progress.md").write_text("local copy differs\n")
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, "/hive", 0, 0))
+    commands.publish(store, SLUG, {}, {"t1": {"latest_progress": "red test seen"}})
+    monkeypatch.setattr(ledger_server, "swarm_store", lambda: store)
     token = core.read_token(core.paths(SLUG)[0].read_text(encoding="utf-8"))
     request = urllib.request.Request(f"{served}/api/{SLUG}", headers={"X-Ledger-Token": token})
     with urllib.request.urlopen(request) as response:
