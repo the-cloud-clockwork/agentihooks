@@ -79,6 +79,14 @@ def _bundle() -> Path | None:
     return bundle
 
 
+def _base_digest() -> str:
+    _i = _install_module()
+    digest = hashlib.sha256()
+    for name in sorted(_i._NATIVE_BASE_NAME.values()):
+        digest.update((_i.PROFILES_DIR / "_base" / name).read_bytes())
+    return digest.hexdigest()
+
+
 def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     commit = ""
     if bundle is not None:
@@ -87,6 +95,7 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     chain = [n for n, _ in dirs]
     return {
         "bundle_commit": commit,
+        "base": _base_digest(),
         "chain": chain,
         "plugins": plugins.role_defaults(chain),
         **({"browser": browser.spec()} if browser.enabled(chain) else {}),
