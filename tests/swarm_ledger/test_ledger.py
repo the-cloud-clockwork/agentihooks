@@ -63,6 +63,7 @@ def cli(monkeypatch, tmp_path):
         sent = []
 
         def request(slug, ops=None, service=False):
+            assert slug == "s"
             sent.extend(ops or [])
             ids = [op["id"] for op in ops or []]
             return reply(ids)
@@ -110,6 +111,10 @@ def test_every_write_command_prints_an_applied_write_and_exits_zero(cli, capsys,
         (["priority", "clear", "p1"], "priority_clear on p1"),
         (["claim", "tasks/t9"], "claim on tasks/t9"),
         (["leave"], "leave on the ledger"),
+        (["question", "add", "Which port?"], "add_item on questions"),
+        (["say", "Hi"], "add on chat"),
+        (["comment", "tasks/t1", "Hi"], "add on tasks/t1/comments"),
+        (["edit", "tasks/t1", "c1", "Hi"], "edit on tasks/t1/comments"),
     ],
 )
 def test_a_refusal_without_a_reason_names_each_refused_operation(cli, argv, message):
@@ -131,6 +136,29 @@ def test_a_refused_artifact_without_a_reason_says_to_join_and_name_a_task(cli):
     with pytest.raises(SystemExit) as stop:
         cli(["artifact", "PLAN", "Plan"], lambda ids: {"rejected": ids})
     assert stop.value.code == "rejected: join the ledger first and name a task it holds"
+
+
+@pytest.mark.parametrize(
+    ("argv", "entry"),
+    [
+        (["say", " Hi "], {"op": "add", "thread": "chat", "text": "Hi", "by": "eng-1"}),
+        (["comment", "tasks/t1", "Hi"], {"op": "add", "thread": "tasks/t1/comments", "text": "Hi", "by": "eng-1"}),
+        (["edit", "chat", "m1", "Hi"], {"op": "edit", "thread": "chat", "id": "m1", "text": "Hi", "by": "eng-1"}),
+    ],
+)
+def test_text_commands_send_their_entry(cli, capsys, argv, entry):
+    (sent,) = cli(argv, applied)
+    assert {key: sent[key] for key in entry} == entry
+    assert capsys.readouterr().out
+
+
+@pytest.mark.parametrize("argv", [["say", "Hi"], ["comment", "tasks/t1", "Hi"]], ids=" ".join)
+def test_text_commands_print_whether_the_write_landed(cli, capsys, argv):
+    cli(argv, applied)
+    assert json.loads(capsys.readouterr().out) == {"posted": True}
+    with pytest.raises(SystemExit):
+        cli(argv, refused)
+    assert json.loads(capsys.readouterr().out) == {"posted": False}
 
 
 def test_a_refusal_leaves_out_the_ledger_size_warnings():
