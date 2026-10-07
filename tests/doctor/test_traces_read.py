@@ -110,6 +110,7 @@ class Langfuse:
     def __call__(self, path, params):
         self.calls.append((path, dict(params)))
         if path == "traces":
+            assert sum(1 for call in self.calls if call[0] == "traces") <= traces_read.Budget().trace_pages * 3
             return _page(self.traces if params["page"] == 1 else [], params["page"], self.pages)
         row = {"type": "TOOL", "name": params["traceId"], "startTime": "2026-10-05T15:00:00Z"}
         return _page([row], params["page"], 1)

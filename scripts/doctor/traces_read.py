@@ -18,6 +18,7 @@ from pathlib import Path
 
 import httpx
 
+from hooks.observability.signals import safe_name
 from scripts.doctor import registry
 from scripts.swarm.runtime import SWARM_HOME
 
@@ -86,7 +87,7 @@ def _observation(row):
 
 
 def _cache_path(cache: Path, trace_id: str) -> Path:
-    return cache / f"{registry.safe_name(trace_id)}.json"
+    return cache / f"{safe_name(trace_id)}.json"
 
 
 def _cached(cache: Path, trace: dict) -> dict:

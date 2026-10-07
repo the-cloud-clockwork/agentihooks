@@ -302,10 +302,6 @@ def test_times_that_do_not_parse_are_zero():
     assert registry._ms("2026-10-07T08:00:00Z") == 1791360000000
 
 
-def test_safe_names_keep_word_characters_and_dashes_only():
-    assert registry.safe_name("Ab-9_z/..:x y") == "Ab-9_z____x_y"
-
-
 def test_an_agent_record_missing_optional_fields_binds_with_empty_values():
     [found] = registry.bindings([{"name": "engineer@1-0003", "state": "working"}])
     assert found == {

@@ -41,10 +41,6 @@ def _iso(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def safe_name(text: str) -> str:
-    return "".join(c if c.isalnum() or c in "-_" else "_" for c in text)
-
-
 def load(path: Path) -> dict:
     return _json(path)
 
