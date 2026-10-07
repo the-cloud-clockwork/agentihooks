@@ -31,18 +31,16 @@ def _master_name(name, code):
 
 def take(store, slug, name, runtime, now_ms, replace_live=False):
     live = runtime.live_names()
-    carried = name
-    name = store.names.resolve(name) if name else ""
-    if not _master_name(name, store.ensure_code(slug).code):
-        name = ""
-    own = {carried, name} - {""}
+    carried, name = name, store.names.resolve(name)
+    seated = _master_name(name, store.ensure_code(slug).code)
+    own = {carried, name}
     masters = [a for a in store.agents(slug) if a.lane == MASTER]
     others = [a for a in masters if a.name not in own]
     running = [a.name for a in others if a.state != "finished" and a.name in live]
     if running and not replace_live:
         raise SwarmError(f"{running[0]} is the live master of {slug}; run take-master --replace to retire it first")
     pid = agent_pid()
-    if not name:
+    if not seated:
         name = store.next_name(slug, MASTER, now_ms)
         if not name_session(pid, name):
             raise SwarmError("this session is not registered with agentihooks, so the tick could not see it as master")

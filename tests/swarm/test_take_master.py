@@ -78,6 +78,18 @@ def test_a_session_already_named_as_this_swarms_master_keeps_its_name(taker, mon
     assert named == []
 
 
+def test_a_master_retaking_its_own_seat_keeps_its_record_and_name(taker, monkeypatch):
+    store, _, rt, named = taker
+    name = store.next_name("sw", "master")
+    store.put_agent("sw", AgentRecord(name, "master", "master", seat="master@sw"))
+    rt.live.add(name)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    assert run("sw", "take-master") == 0
+    assert rt.killed == [] and named == []
+    assert _masters(store) == [(name, "master@sw", "codex")]
+    assert store.redis.lrange(store.key("sw", "history"), 0, -1) == []
+
+
 def test_a_hand_taken_master_under_its_session_name_is_renamed_without_killing_itself(taker, monkeypatch):
     store, _, rt, named = taker
     store.put_agent("sw", AgentRecord("s-261007-104655", "master", "master", seat="master@sw"))
