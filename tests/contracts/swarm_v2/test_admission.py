@@ -192,6 +192,28 @@ def test_a_schema_failure_names_the_path_and_keyword_but_not_the_value(loaded):
     assert "private-value" not in json.dumps(refusal)
 
 
+def test_a_nested_failure_joins_its_path_with_slashes(loaded):
+    doc = _fixture("launch")
+    doc["authority"]["task_generation"] = 0
+    assert contracts.check(loaded, "launch", doc)["detail"] == "authority/task_generation: fails minimum"
+
+
+def test_writes_go_through_a_sibling_temp_file(loaded, tmp_path, monkeypatch):
+    real = Path.replace
+    moves = []
+
+    def record(self, target):
+        moves.append((self.name, Path(target).name))
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "replace", record)
+    doc = _fixture("heartbeat")
+    contracts.admit(loaded, tmp_path / "store", "heartbeat", doc)
+    record_name = f"{doc['operation_id']}.json"
+    assert moves == [("generations.json.tmp", "generations.json"), (f"{record_name}.tmp", record_name)]
+    assert _files(tmp_path / "store") == [".lock", "generations.json", f"heartbeat/{record_name}"]
+
+
 def test_a_missing_body_field_names_only_the_missing_names(loaded):
     doc = _fixture("receipt")
     del doc["receipt_id"]

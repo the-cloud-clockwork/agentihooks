@@ -115,13 +115,14 @@ def _commit(contracts: dict, store: Path, name: str, doc: dict) -> dict:
     authority = doc["authority"]
     index = store / "generations.json"
     generations = json.loads(index.read_text()) if index.exists() else {}
-    held = generations.get(authority["task_id"], {"generation": 0, "execution_id": None})
-    if authority["task_generation"] < held["generation"]:
-        detail = "task generation is older than the accepted generation"
-        return _refusal(contracts, doc, "stale_generation", "older_generation", detail, retry="never")
-    if authority["task_generation"] == held["generation"] and authority["execution_id"] != held["execution_id"]:
-        detail = "another execution holds this task generation"
-        return _refusal(contracts, doc, "stale_generation", "generation_held", detail, retry="never")
+    held = generations.get(authority["task_id"])
+    if held:
+        if authority["task_generation"] < held["generation"]:
+            detail = "task generation is older than the accepted generation"
+            return _refusal(contracts, doc, "stale_generation", "older_generation", detail, retry="never")
+        if authority["task_generation"] == held["generation"] and authority["execution_id"] != held["execution_id"]:
+            detail = "another execution holds this task generation"
+            return _refusal(contracts, doc, "stale_generation", "generation_held", detail, retry="never")
     generations[authority["task_id"]] = {
         "generation": authority["task_generation"],
         "execution_id": authority["execution_id"],

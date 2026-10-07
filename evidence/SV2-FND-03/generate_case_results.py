@@ -39,6 +39,7 @@ CASES = {
             "test_an_unknown_authority",
             "test_an_authority_name_outside",
             "test_a_schema_failure",
+            "test_a_nested",
             "test_a_missing_body",
             "test_every_refusal",
             "test_a_display_label",
@@ -56,6 +57,7 @@ CASES = {
             "test_an_interrupted",
             "test_admission_waits",
             "test_a_newer_generation_fences",
+            "test_writes_go",
         ),
     ),
 }
