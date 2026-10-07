@@ -137,15 +137,12 @@ def _replay_source(session_id: str, record: dict) -> str:
     if alive(_owner(_read(owner_path(session_id)), "supervisor_")):
         return ""
     state = _cursor(session_id)
-    if not state:
-        return ""
     transcript = _transcript(session_id, record)
     size = _size(transcript)
-    if size is None:
+    if not state or size is None:
         return ""
-    if state.get("pending") or state.get("overflow") or state.get("source", {}).get("accepted_bytes", 0) < size:
-        return transcript
-    return ""
+    behind = state.get("pending") or state.get("source", {}).get("accepted_bytes", 0) < size
+    return transcript if behind else ""
 
 
 def recover(limits: Budget | None = None, send: Callable[[str, str, float, str], bool] | None = None) -> int:
@@ -220,18 +217,17 @@ def attempt(session_id: str, transcript_path: str, timeout: float, trigger: str)
 def flush_once(session_id: str, transcript_path: str) -> int:
     from hooks.observability.agent_trace import _cursor, export_session
 
-    previous = -1
+    position = None
     while True:
         export_session(session_id, transcript_path)
         state = _cursor(session_id)
         if state.get("pending"):
             return 1
-        position = state.get("source", {}).get("accepted_bytes", 0)
         if not state.get("overflow"):
             return 0
-        if position <= previous:
+        if state["source"]["accepted_bytes"] == position:
             return 1
-        previous = position
+        position = state["source"]["accepted_bytes"]
 
 
 def _lock(session_id: str, wait: float, clock: Callable[[], float], sleep: Callable[[float], None]):
