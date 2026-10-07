@@ -1446,5 +1446,9 @@
   "hooks/observability/trace_flush.py:hooks.observability.trace_flush.x_flush_once__mutmut_1:80d09be3f11ee776f97113ffcd7c849ef5162a181d27c420ef1102c3a63e84a8": {
     "reader": "Standards",
     "reason": "accepted_bytes is always an int, so the first comparison against None or an empty string is False either way and flush_once takes the same path."
+  },
+  "scripts/herdr_gc.py:scripts.herdr_gc.xǁOwnersǁ_store__mutmut_8:d8f932aa2f50c70ae67799a34b247644795d96ed80140240ad8c99bd27e44f00": {
+    "reader": "Standards",
+    "reason": "A failed connection cached as an empty string instead of None gives the same outcomes: state still returns unknown and prompted_at still returns None through their exception handlers, and the connection is attempted once per address either way."
   }
 }
