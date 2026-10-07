@@ -112,7 +112,7 @@ def choose_shared(
             if left is not None and left >= min_week_left:
                 return "codex", f"codex share {codex}/{total} below {share}%"
     agent, reason = choose(requested, environ)
-    if agent == "codex" and not codex_open(environ, share, min_week_left):
+    if not requested and agent == "codex" and not codex_open(environ, share, min_week_left):
         return "claude", choose("", {**environ, "AGENTIHOOKS_AGENT_PRIORITY": "claude"})[1]
     return agent, reason
 

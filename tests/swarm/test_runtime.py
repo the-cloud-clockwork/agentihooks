@@ -270,6 +270,73 @@ def _spawn_seen(tmp_path, lanes, lane="eng"):
     return seen
 
 
+@pytest.mark.parametrize("pin", ["claude", "codex"])
+@pytest.mark.parametrize("saved_kind", ["launch_assignment", "handoff_envelope", "none"])
+def test_a_lane_pin_wins_over_an_opposite_saved_harness(tmp_path, monkeypatch, pin, saved_kind):
+    from scripts import agent_choice
+    from scripts.swarm import model_pick
+
+    opposite = "codex" if pin == "claude" else "claude"
+    saved = {
+        "profile": "engineer",
+        "harness": opposite,
+        "model": "gpt-6.1-sol" if opposite == "codex" else "opus",
+        "effort": "high",
+        "account": "old-account",
+        "model_source": "old-classifier",
+    }
+    task = {"id": "t1", "title": "Fix routing", "profile": "engineer"}
+    if saved_kind == "launch_assignment":
+        task[saved_kind] = saved
+    elif saved_kind == "handoff_envelope":
+        task[saved_kind] = {"launch": saved}
+        task["handoff"] = "Original task context"
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    def pick(harness, lane, task, environ):
+        seen["classifier_harness"] = harness
+        return model_pick.ModelPick("", "high", "classifier", 0.9)
+
+    monkeypatch.setattr(agent_choice, "codex_open", lambda *args: False)
+    monkeypatch.setattr(model_pick, "pick", pick)
+    runtime = HerdrRuntime(
+        home=tmp_path,
+        run=run,
+        choose=lambda requested, environ: (requested or opposite, "requested" if requested else "priority"),
+    )
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        codex_share=0,
+        codex_min_week_left=5,
+        lanes={"eng": {"agent": pin, "effort": "auto"}},
+        autonomy="delegate",
+    )
+    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task, spawns={"claude": 20})
+    argv = seen["argv"]
+    assert argv[argv.index("--agent") + 1] == pin
+    assert placed.harness == pin
+    assert seen["classifier_harness"] == pin
+    assert placed.model_source == "classifier"
+    assert "--route" not in argv
+
+
+def test_a_codex_lane_pin_refuses_a_claude_only_profile(tmp_path, monkeypatch):
+    from scripts.swarm.runtime import plugins
+    from scripts.swarm.tick import SpawnError
+
+    monkeypatch.setattr(plugins, "claude_only", lambda profile: True)
+    with pytest.raises(SpawnError) as error:
+        _spawn_seen(tmp_path, {"eng": {"agent": "codex", "profile": "engineer"}})
+    assert str(error.value) == "lane harness codex cannot mount the claude only profile engineer"
+
+
 def _passed(argv):
     return argv[argv.index("--") + 1 :] if "--" in argv else []
 
@@ -379,7 +446,7 @@ def test_a_spawn_carries_the_router_choice_kind(tmp_path, monkeypatch, reason, c
 
 @pytest.mark.parametrize(
     ("profile", "lane_agent", "harness"),
-    [("frontend", "auto", "claude"), ("frontend", "codex", "claude"), ("engineer", "auto", "codex")],
+    [("frontend", "auto", "claude"), ("frontend", "claude", "claude"), ("engineer", "auto", "codex")],
 )
 def test_a_task_naming_a_claude_only_profile_spawns_on_claude_at_codex_share_one_hundred(
     tmp_path, monkeypatch, profile, lane_agent, harness
@@ -415,9 +482,7 @@ def test_a_task_naming_a_claude_only_profile_spawns_on_claude_at_codex_share_one
 
 @pytest.mark.parametrize(("lane", "spawns"), [("eng", {"claude": 3}), ("ci", {}), ("plan", {}), ("master", None)])
 @pytest.mark.parametrize("lane_agent", ["auto", "codex"])
-def test_a_zero_codex_share_spawns_claude_when_the_picker_chooses_codex(
-    tmp_path, monkeypatch, lane, spawns, lane_agent
-):
+def test_a_zero_codex_share_applies_only_to_auto_lanes(tmp_path, monkeypatch, lane, spawns, lane_agent):
     from scripts import agent_choice
 
     monkeypatch.setattr(agent_choice, "codex_week_left", lambda *_: 90.0)
@@ -440,7 +505,7 @@ def test_a_zero_codex_share_spawns_claude_when_the_picker_chooses_codex(
     )
     task = {**SEAT_TASKS[lane], "profile": "engineer"}
     placed = runtime.spawn(config, lane, "engineer@a1b2c3-0001", task, spawns=spawns)
-    expected = "codex" if (lane, lane_agent) == ("master", "codex") else "claude"
+    expected = "codex" if lane_agent == "codex" else "claude"
     assert seen["argv"][seen["argv"].index("--agent") + 1] == expected
     assert placed.harness == expected
 
@@ -488,7 +553,7 @@ def test_a_claude_only_profile_asks_the_plain_choice_for_claude_with_the_environ
         compact_limit=0,
         codex_share=None,
         codex_min_week_left=0,
-        lanes={"eng": {"agent": "codex"}},
+        lanes={"eng": {"agent": "auto"}},
         autonomy="delegate",
     )
     runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "profile": "frontend"})

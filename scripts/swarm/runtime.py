@@ -151,9 +151,10 @@ class HerdrRuntime:
         )
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
-        want = affinity.desired(config) if lane == MASTER else ""
+        want = affinity.desired(config) if lane == MASTER else _set(chosen.get("agent"))
         if want and plugins.claude_only(profile) and want != "claude":
-            raise SpawnError(f"master affinity {want} cannot mount the claude only profile {profile}")
+            kind = "master affinity" if lane == MASTER else "lane harness"
+            raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}")
         if saved and want and saved["harness"] != want:
             saved = {}
         if want and not saved:
