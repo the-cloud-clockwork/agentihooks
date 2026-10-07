@@ -5,9 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 import tomllib
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -109,7 +107,7 @@ def test_claude_render_tree(world, capsys):
     home, install = world["home"], world["install"]
     out = render.render_claude("rb-role")
 
-    assert out == home / ".agentihooks" / "profiles" / "rb-role" / "claude"
+    assert out == (home / ".agentihooks" / "profiles" / "rb-role" / "claude").resolve()
     package_skills = {p.name for p in (install.PACKAGE_FEATURES_DIR / "skills").iterdir() if p.is_dir()}
     skills = {p.name for p in (out / "skills").iterdir()}
     assert skills == package_skills | {"role-skill", "bundle-skill"}
@@ -223,8 +221,9 @@ def test_claude_render_drops_the_rules_folder_of_an_earlier_render(world):
     (out / "rules" / "linked.md").symlink_to(world["bundle"] / ".claude" / "rules" / "bundle-rule.md")
     (out / render.STAMP).write_text(json.dumps(render.stamp("rb-role")))
 
-    assert render.render_claude("rb-role") == out
-    assert not (out / "rules").exists()
+    fresh = render.render_claude("rb-role")
+    assert fresh not in (None, out)
+    assert not (fresh / "rules").exists()
     assert (world["bundle"] / ".claude" / "rules" / "bundle-rule.md").read_text() == "BUNDLE RULE MARKER\n"
     assert render.render_claude("rb-role") is None
 
@@ -236,8 +235,9 @@ def test_claude_render_refreshes_folded_rules(world):
     source = world["bundle"] / ".claude" / "rules" / "bundle-rule.md"
     _write(source, "---\npaths: ['**/*.py']\n---\nUPDATED BUNDLE RULE\n")
 
-    assert render.render_claude("rb-role", force=True) == out
-    persona = (out / "CLAUDE.md").read_text()
+    fresh = render.render_claude("rb-role", force=True)
+    assert fresh != out
+    persona = (fresh / "CLAUDE.md").read_text()
     assert "UPDATED BUNDLE RULE" in persona
     assert "BUNDLE RULE MARKER" not in persona
 
@@ -251,11 +251,14 @@ def test_refresh_rules_updates_the_rendered_claude_md(world, monkeypatch):
     source = world["bundle"] / ".claude" / "rules" / "bundle-rule.md"
     _write(source, "UPDATED RENDERED RULE\n")
     _write(out / "CLAUDE.local.md", "ROLE LOCAL OVERRIDE\n")
+    before = _home_files(out)
 
     payload = refresh_rules(out / "rules", out / "CLAUDE.md", out / "CLAUDE.local.md", False)
 
-    assert "UPDATED RENDERED RULE" in (out / "CLAUDE.md").read_text()
-    assert not (out / "rules").exists()
+    fresh = render.profile_dir("rb-role") / "claude"
+    assert fresh != out and _home_files(out) == before
+    assert "UPDATED RENDERED RULE" in (fresh / "CLAUDE.md").read_text()
+    assert not (fresh / "rules").exists()
     assert "UPDATED RENDERED RULE" in payload
     assert "ROLE PERSONA MARKER" in payload
     assert "ROLE LOCAL OVERRIDE" in payload
@@ -562,10 +565,12 @@ def test_cached_role_home_fills_missing_onboarding_without_resetting_state(world
     path.write_text(json.dumps(doc))
     operator = (world["home"] / ".claude.json").read_bytes()
 
-    assert render.render_claude("rb-role") == out
+    fresh = render.render_claude("rb-role")
+    assert fresh != out
 
-    actual = json.loads(path.read_text())
+    actual = json.loads((fresh / ".claude.json").read_text())
     assert actual == {**doc, "hasCompletedOnboarding": True}
+    assert json.loads(path.read_text()) == doc
     assert (world["home"] / ".claude.json").read_bytes() == operator
 
 
@@ -578,8 +583,9 @@ def test_role_rerender_preserves_explicit_onboarding_and_runtime_state(world):
     doc.update(hasCompletedOnboarding=False, theme="light", numStartups=11)
     path.write_text(json.dumps(doc))
 
-    assert render.render_claude("rb-role", force=True) == out
-    assert json.loads(path.read_text()) == doc
+    fresh = render.render_claude("rb-role", force=True)
+    assert fresh != out
+    assert json.loads((fresh / ".claude.json").read_text()) == doc
 
 
 def test_claude_render_gives_each_home_its_own_plans_folder(world):
@@ -590,8 +596,8 @@ def test_claude_render_gives_each_home_its_own_plans_folder(world):
 
     (out / "plans").rmdir()
     (out / "plans").symlink_to(world["home"] / ".claude" / "plans")
-    render.render_claude("rb-role", force=True)
-    assert (out / "plans").is_dir() and not (out / "plans").is_symlink()
+    fresh = render.render_claude("rb-role", force=True)
+    assert (fresh / "plans").is_dir() and not (fresh / "plans").is_symlink()
 
 
 def test_claude_render_from_inside_a_rendered_home(world, monkeypatch):
@@ -621,12 +627,13 @@ def test_claude_render_keeps_runtime_state_of_previous_render(world):
     (out / "skills" / "gone").symlink_to(out)
 
     assert render.render_claude("rb-role") is None
-    assert render.render_claude("rb-role", force=True) == out
+    fresh = render.render_claude("rb-role", force=True)
+    assert fresh != out
 
-    claude_json = json.loads((out / ".claude.json").read_text())
+    claude_json = json.loads((fresh / ".claude.json").read_text())
     assert claude_json["numStartups"] == 7
     assert "stale" not in claude_json["mcpServers"]
-    assert not (out / "skills" / "gone").is_symlink()
+    assert not (fresh / "skills" / "gone").is_symlink()
 
 
 CODEX_STATE = ("auth.json", "sessions", "history.jsonl", "session_index.jsonl", "hooks.json")
@@ -647,8 +654,8 @@ def test_codex_render_links_into_the_claude_profile(world):
 
     out = render.render_codex("rb-role")
 
-    claude = render.rendered_root() / "rb-role" / "claude"
-    assert out == render.rendered_root() / "rb-role" / "codex"
+    claude = out.parent / "claude"
+    assert out == (render.rendered_root() / "rb-role" / "codex").resolve()
     assert os.readlink(out / "AGENTS.md") == str(claude / "CLAUDE.md")
     assert render.binding.inspect(out, "rb-role", "codex")["profile"] == "rb-role"
     linked = {p.name: os.readlink(p) for p in (out / "skills").iterdir() if p.is_symlink()}
@@ -657,8 +664,8 @@ def test_codex_render_links_into_the_claude_profile(world):
     assert sorted(p.name for p in out.iterdir() if not p.is_symlink()) == sorted(
         [".profile-binding.json", render.STAMP, "config.toml", "skills"]
     )
-    sources = render.sources.path("rb-role", "codex", render.rendered_root())
-    assert os.readlink(sources) == str(render.sources.path("rb-role", "claude", render.rendered_root()))
+    sources = render.sources.path(out.parent.name, "codex", out.parent.parent)
+    assert os.readlink(sources) == str(render.sources.path(out.parent.name, "claude", out.parent.parent))
 
 
 def test_codex_master_replaces_monitor_instructions_without_changing_claude(world):
@@ -693,10 +700,11 @@ def test_codex_master_updates_an_old_linked_persona(world):
     out = render.render_codex("master")
     agents = out / "AGENTS.md"
     agents.unlink()
-    agents.symlink_to(render.rendered_root() / "master" / "claude" / "CLAUDE.md")
+    agents.symlink_to(out.parent / "claude" / "CLAUDE.md")
 
-    assert render.render_codex("master") == out
-    assert not agents.is_symlink()
+    fresh = render.render_codex("master")
+    assert fresh not in (None, out)
+    assert not (fresh / "AGENTS.md").is_symlink()
 
 
 def test_an_explicit_packaged_codex_master_uses_inbox_waits(world):
@@ -824,9 +832,9 @@ def test_codex_render_drops_the_skill_of_a_removed_command(world):
     _write(out / "skills" / ".system" / "codex" / "SKILL.md", "codex's own\n")
     command.unlink()
 
-    render.render_codex("rb-role", force=True)
+    fresh = render.render_codex("rb-role", force=True)
 
-    assert not (out / "skills" / "deploy").exists()
+    assert not (fresh / "skills" / "deploy").exists()
     assert (out / "skills" / ".system" / "codex" / "SKILL.md").read_text() == "codex's own\n"
 
 
@@ -1056,11 +1064,12 @@ def test_codex_render_force_rerenders_the_claude_profile(world):
     from scripts.profiles import render
 
     out = render.render_codex("rb-role")
-    persona = render.rendered_root() / "rb-role" / "claude" / "CLAUDE.md"
+    persona = out.parent / "claude" / "CLAUDE.md"
     persona.write_text("stale\n")
 
-    assert render.render_codex("rb-role", force=True) == out
-    assert "ROLE PERSONA MARKER" in (out / "AGENTS.md").read_text()
+    fresh = render.render_codex("rb-role", force=True)
+    assert fresh != out
+    assert "ROLE PERSONA MARKER" in (fresh / "AGENTS.md").read_text()
 
 
 def test_codex_render_links_state_back_to_the_operator_home(world):
@@ -1086,8 +1095,10 @@ def test_codex_render_follows_operator_changes(world):
     out = render.render_codex("rb-role")
     _operator_codex(world["home"])
 
-    assert render.render_codex("rb-role") == out
-    assert tomllib.loads((out / "config.toml").read_text())["model"] == "gpt-op"
+    fresh = render.render_codex("rb-role")
+    assert fresh not in (None, out)
+    assert fresh == render.profile_dir("rb-role") / "codex"
+    assert tomllib.loads((fresh / "config.toml").read_text())["model"] == "gpt-op"
 
 
 def test_codex_render_from_inside_a_profile_codex_home(world, monkeypatch):
@@ -1135,27 +1146,17 @@ def test_codex_render_retires_the_old_profile_config(world):
     assert hand.read_text() == 'model = "hand-written"\n'
 
 
-def test_codex_render_backs_up_an_old_plain_sources_file(world, monkeypatch, request):
+def test_codex_render_leaves_an_old_plain_sources_file_of_an_earlier_layout(world):
     from scripts.profiles import render
 
     manifest = render.sources.path("rb-role", "codex", render.rendered_root())
     old = _write(manifest, '{"old": true}\n')
-    beside = _write(manifest.parent / "notes.json", "hand written\n")
 
-    request.addfinalizer(time.tzset)
-    with monkeypatch.context() as zone:
-        zone.setenv("TZ", "Etc/GMT+12")
-        time.tzset()
-        assert render.render_codex("rb-role") is not None
-        render.render_codex("rb-role", force=True)
-    time.tzset()
+    out = render.render_codex("rb-role")
 
-    assert os.readlink(manifest) == str(render.sources.path("rb-role", "claude", render.rendered_root()))
-    backups = sorted(old.parent.glob(f"{old.name}.bak.*"))
-    assert [b.read_text() for b in backups] == ['{"old": true}\n']
-    stamp = datetime.strptime(backups[0].name.removeprefix(f"{old.name}.bak."), "%Y%m%d%H%M%S")
-    assert abs(datetime.now(timezone.utc) - stamp.replace(tzinfo=timezone.utc)) < timedelta(minutes=5)
-    assert beside.read_text() == "hand written\n"
+    linked = render.sources.path(out.parent.name, "codex", out.parent.parent)
+    assert os.readlink(linked) == str(render.sources.path(out.parent.name, "claude", out.parent.parent))
+    assert old.read_text() == '{"old": true}\n'
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -1275,9 +1276,11 @@ def test_a_running_agent_stays_valid_after_a_package_rule_rerenders_its_home(wor
     launched = binding.validate(binding.inspect(home, "rb-role", target)["canary"])
 
     _write(package / "rules" / "fresh-rule.md", "FRESH PACKAGE RULE MARKER\n")
-    assert render.render(target, "rb-role") == home
-    fresh = binding.inspect(home, "rb-role", target)
+    rerendered = render.render(target, "rb-role")
+    assert rerendered not in (None, home)
+    fresh = binding.inspect(rerendered, "rb-role", target)
     assert fresh["canary"] != launched["canary"]
+    assert binding.inspect(home, "rb-role", target)["canary"] == launched["canary"]
 
     assert binding.validate(launched["canary"])["persona"] == launched["persona"]
 
@@ -1325,7 +1328,8 @@ def test_init_rerenders_every_existing_profile_home(world, monkeypatch, capsys):
 
     install.cmd_init_unified(Namespace(profile="rb-role"))
 
-    assert (home / "skills" / "new-skill").is_symlink()
+    assert not (home / "skills" / "new-skill").exists()
+    assert (render.profile_dir("rb-role") / "claude" / "skills" / "new-skill").is_symlink()
     lines = capsys.readouterr().out.splitlines()
     assert f"{install._DIM}[--] Profile home gone kept as it was: Profile 'gone' not found{install._RESET}" in lines
     assert f"{install._GREEN}[OK]{install._RESET} Re-rendered the rb-role profile home" in lines
@@ -1368,13 +1372,15 @@ def test_running_profile_validates_its_launched_persona_after_other_profile_rend
 
     _write(world["role"] / "CLAUDE.md", "UPDATED ENGINEER PERSONA\n")
     _commit(world["bundle"], "change launched profile")
-    render.render(target, "rb-role", force=True)
-    refreshed = binding.inspect(home, "rb-role", target)
+    fresh = render.render(target, "rb-role", force=True)
+    assert binding.inspect(home, "rb-role", target) == launched
+    refreshed = binding.inspect(fresh, "rb-role", target)
     assert refreshed["canary"] != launched["canary"]
     result = binding.validate(launched["canary"])
     assert result["persona"] == launched["persona"]
     assert result["source_blobs"] == launched["source_blobs"]
 
+    env[binding.HOMES[target]] = str(fresh)
     binding.request(report, "rb-role", target)
     with pytest.raises(ValueError, match="canary mismatch"):
         binding.validate(launched["canary"])
@@ -1421,11 +1427,11 @@ def test_cli_renders_and_refuses(world, capsys):
 
     out = Path.home() / ".agentihooks" / "profiles" / "rb-role" / "claude"
     assert render.main(["render", "rb-role"]) == 0
-    assert capsys.readouterr().out.endswith(f"\nRendered rb-role (claude) → {out}\n")
+    assert capsys.readouterr().out.endswith(f"\nRendered rb-role (claude) → {out.resolve()}\n")
     assert render.main(["render", "rb-role", "--target", "claude"]) == 0
     assert capsys.readouterr().out == "rb-role (claude) is up to date\n"
     assert render.main(["render", "rb-role", "--force"]) == 0
-    assert capsys.readouterr().out.endswith(f"\nRendered rb-role (claude) → {out}\n")
+    assert capsys.readouterr().out.endswith(f"\nRendered rb-role (claude) → {out.resolve()}\n")
     assert render.main(["render", "rb-role", "--target", "copilot"]) == 2
     assert capsys.readouterr().err == "copilot per-run profiles are not supported\n"
     assert render.main(["render", "rb-missing", "--target", "codex"]) == 1
@@ -1442,7 +1448,7 @@ def test_cli_usage(world, capsys):
     )
     with pytest.raises(SystemExit):
         render.main([])
-    assert capsys.readouterr().err.startswith("usage: agentihooks profile [-h] {render,measure,validate}")
+    assert capsys.readouterr().err.startswith("usage: agentihooks profile [-h] {render,measure,validate,binding}")
     with pytest.raises(SystemExit):
         render.main(["--help"])
     assert re.search(
@@ -1594,7 +1600,7 @@ def test_scratch_render_writes_only_under_its_home(world, tmp_path, capfd):
     assert render.main(["render", "rb-role", "--out", str(out), "--bundle", str(bundle)]) == 0
 
     home = out / "profiles" / "rb-role" / "claude"
-    assert capfd.readouterr().out.endswith(f"Rendered rb-role (claude) → {home}\n")
+    assert capfd.readouterr().out.endswith(f"Rendered rb-role (claude) → {home.resolve()}\n")
     assert "SCRATCH PERSONA MARKER" in (home / "CLAUDE.md").read_text()
     assert "SCRATCH PERSONA MARKER" not in (live / "CLAUDE.md").read_text()
     assert _tree_hashes(render.rendered_root(), tmp_path / "none") == before
@@ -1631,11 +1637,11 @@ def test_scratch_render_defaults_to_the_linked_bundle_and_passes_force(world, tm
 
     assert render.main(["render", "rb-role", "--out", str(out)]) == 0
     assert "ROLE PERSONA MARKER" in (home / "CLAUDE.md").read_text()
-    assert capfd.readouterr().out.endswith(f"Rendered rb-role (claude) → {home}\n")
+    assert capfd.readouterr().out.endswith(f"Rendered rb-role (claude) → {home.resolve()}\n")
     assert render.main(["render", "rb-role", "--out", str(out)]) == 0
     assert capfd.readouterr().out.endswith("rb-role (claude) is up to date\n")
     assert render.main(["render", "rb-role", "--out", str(out), "--force"]) == 0
-    assert capfd.readouterr().out.endswith(f"Rendered rb-role (claude) → {home}\n")
+    assert capfd.readouterr().out.endswith(f"Rendered rb-role (claude) → {home.resolve()}\n")
     assert not (render.rendered_root() / "rb-role").exists()
 
 
@@ -1685,7 +1691,7 @@ def test_scratch_render_works_from_both_entry_paths(world, tmp_path, entry):
 
     home = out / "profiles" / "rb-role" / "claude"
     assert (done.returncode, done.stderr) == (0, "")
-    assert done.stdout.endswith(f"Rendered rb-role (claude) → {home}\n")
+    assert done.stdout.endswith(f"Rendered rb-role (claude) → {home.resolve()}\n")
     assert "SCRATCH PERSONA MARKER" in (home / "CLAUDE.md").read_text()
     assert not (render.rendered_root() / "rb-role").exists()
 
@@ -1777,3 +1783,105 @@ def test_install_root_is_the_editable_source(world, tmp_path, monkeypatch):
 
     monkeypatch.setattr(install.metadata, "distribution", missing)
     assert install.install_root() == install.AGENTIHOOKS_ROOT
+
+
+def _home_files(home: Path) -> dict[str, bytes]:
+    names = ("settings.json", "CLAUDE.md", ".claude.json", "config.toml", "AGENTS.md", ".profile-binding.json")
+    found = {name: (home / name).read_bytes() for name in names if (home / name).is_file()}
+    manifest = home.parent / f"{home.name}.sources.json"
+    return {**found, "sources": manifest.read_bytes()}
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_a_new_render_stamp_launches_into_a_fresh_profile_home(world, monkeypatch, target):
+    from scripts import select_profile
+    from scripts.profiles import render
+
+    monkeypatch.setattr(render.homes, "live_homes", lambda: [])
+    first = render.render(target, "rb-role")
+    _commit(world["bundle"], "stamp changes")
+
+    second = render.render(target, "rb-role")
+
+    assert second is not None and second.resolve() != first.resolve()
+    digest = hashlib.sha256(json.dumps(render.stamp("rb-role"), sort_keys=True).encode()).hexdigest()[:12]
+    assert second.name == target and second.parent.name.startswith(f"{digest}-")
+    env, _ = select_profile.prepare("rb-role", target, "", "", [], {})
+    assert env[render.binding.HOMES[target]] == str(second.resolve())
+    assert render.render(target, "rb-role") is None
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_a_home_live_sessions_run_on_is_never_rewritten(world, monkeypatch, target):
+    from scripts.profiles import render
+
+    first = render.render(target, "rb-role")
+    monkeypatch.setattr(render.homes, "live_homes", lambda: [first.resolve()])
+    before = _home_files(first)
+
+    _commit(world["bundle"], "stamp changes")
+    render.render(target, "rb-role")
+    render.render(target, "rb-role", force=True)
+    _write(world["role"] / "CLAUDE.md", "UPDATED ROLE PERSONA\n")
+    render.render(target, "rb-role")
+
+    assert _home_files(first) == before
+    assert render.binding.inspect(first, "rb-role", target)["persona"] == render.binding.digest(
+        first / render.binding.PERSONAS[target]
+    )
+
+
+@pytest.mark.parametrize("target", ["codex", "claude"])
+def test_a_running_session_keeps_passing_its_check_after_a_bundle_content_render(world, monkeypatch, tmp_path, target):
+    from scripts.profiles import binding, render
+
+    home = render.render(target, "rb-role")
+    monkeypatch.setattr(render.homes, "live_homes", lambda: [home.resolve()])
+    report = tmp_path / "report.json"
+    binding.request(report, "rb-role", target, home)
+    env = {"AGENTIHOOKS_PROFILE": "rb-role", binding.HOMES[target]: str(home), binding.REPORT: str(report)}
+    monkeypatch.setattr(binding, "process", lambda: (123, target, env, "default"))
+    launched = binding.validate(binding.inspect(home, "rb-role", target)["canary"])
+
+    _write(world["bundle"] / ".claude" / "CLAUDE.md", "BUNDLE DIRECTIVE MARKER\nNEW MANIFESTO LINE\n")
+    _commit(world["bundle"], "manifesto change")
+    fresh = render.render(target, "rb-role")
+
+    assert fresh not in (None, home)
+    assert "NEW MANIFESTO LINE" in (fresh / binding.PERSONAS[target]).read_text()
+    assert binding.inspect(home, "rb-role", target)["persona"] == launched["persona"]
+    assert binding.validate(launched["canary"])["persona"] == launched["persona"]
+
+
+def test_old_homes_go_once_no_live_session_uses_them(world, monkeypatch):
+    from scripts.profiles import render
+
+    monkeypatch.setattr(render.homes, "GRACE_SECONDS", 0)
+    legacy = render.rendered_root() / "rb-role"
+    _write(legacy / "claude" / "settings.json", "{}")
+    live = [(legacy / "claude").resolve()]
+    monkeypatch.setattr(render.homes, "live_homes", lambda: live)
+    first = render.render_claude("rb-role")
+    live.append(first.resolve())
+    _commit(world["bundle"], "two")
+    second = render.render_claude("rb-role")
+
+    assert (legacy / "claude" / "settings.json").is_file() and first.is_dir()
+
+    live.clear()
+    _commit(world["bundle"], "three")
+    third = render.render_claude("rb-role")
+
+    assert not first.exists() and not second.exists() and third.is_dir()
+    assert (render.rendered_root() / "rb-role" / "claude").resolve() == third.resolve()
+    assert render.rendered_profiles("claude") == ["rb-role"]
+
+
+def test_a_superseded_home_waits_out_the_launch_grace(world, monkeypatch):
+    from scripts.profiles import render
+
+    monkeypatch.setattr(render.homes, "live_homes", lambda: [])
+    first = render.render_claude("rb-role")
+    render.render_claude("rb-role", force=True)
+
+    assert first.is_dir()

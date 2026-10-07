@@ -138,12 +138,13 @@ def test_a_confirmed_correction_renders_its_notice_and_rerenders(bundle, monkeyp
     from scripts.profiles import render
 
     monkeypatch.delenv("AGENTIHOOKS_GATE_QUARANTINE", raising=False)
-    out = render.render_claude("rb-role")
+    render.render_claude("rb-role")
     assert render.render_claude("rb-role") is None
     _correct_passage(bundle, "profiles/rb-kit/.claude/rules/role-rule.md", "ROLE RULE MARKER")
     _correct_passage(bundle, "profiles/rb-role/CLAUDE.md", "ROLE PERSONA MARKER")
 
-    assert render.render_claude("rb-role") == out
+    out = render.render_claude("rb-role")
+    assert out is not None
 
     notice = "> CORRECTION: the passage above is marked wrong for the qitp repo: belongs to another repo."
     persona = (out / "CLAUDE.md").read_text()

@@ -31,11 +31,23 @@ def walk_stats(path: Path) -> tuple[float, int]:
     return newest, size
 
 
+def _unreadable(path: Path) -> str:
+    try:
+        os.listdir(path)
+    except OSError as error:
+        return f"unreadable, skipped: {error.strerror}"
+    return ""
+
+
 def task_dirs(root: Path) -> list[Path]:
     found = []
     for group in sorted(root.iterdir()) if root.is_dir() else []:
-        if group.is_dir() and not group.is_symlink():
-            found += [task for task in sorted(group.iterdir()) if task.is_dir() and not task.is_symlink()]
+        if not group.is_dir() or group.is_symlink():
+            continue
+        if _unreadable(group):
+            found.append(group)
+            continue
+        found += [task for task in sorted(group.iterdir()) if task.is_dir() and not task.is_symlink()]
     return found
 
 
@@ -72,6 +84,10 @@ def _evict(findings: list[Finding], budget: int) -> list[Finding]:
 def classify_scratch(root: Root, snap: Snapshot, held_trees: set[str]) -> list[Finding]:
     findings = []
     for path in task_dirs(Path(root.path)):
+        skipped = _unreadable(path)
+        if skipped:
+            findings.append(Finding(str(path), root.id, "scratch", "keep", skipped))
+            continue
         newest, size = walk_stats(path)
         newest = min(newest, snap.now)
         held = _held(path, snap, held_trees)

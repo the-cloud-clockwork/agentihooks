@@ -155,6 +155,31 @@ def test_without_a_known_transcript_the_cursor_staged_bytes_are_the_generated_pr
     assert registry.progress("lost", "claude")["oldest_unaccepted"] == 1_791_360_020_000
 
 
+@pytest.mark.parametrize(
+    ("pending", "expected"),
+    [
+        (
+            [{"parent_id": None, "start_ns": 1_791_360_000_000_000_000, "end_ns": 1_791_360_100_000_000_000}],
+            1_791_360_100_000,
+        ),
+        (
+            [
+                {"parent_id": None, "start_ns": 1_791_360_000_000_000_000, "end_ns": 1_791_360_100_000_000_000},
+                {"parent_id": 1, "start_ns": 1_791_360_050_000_000_000, "end_ns": 1_791_360_090_000_000_000},
+                {"parent_id": 1, "start_ns": 1_791_360_020_000_000_000, "end_ns": 1_791_360_080_000_000_000},
+                {},
+            ],
+            1_791_360_020_000,
+        ),
+    ],
+)
+def test_without_a_request_the_backlog_uses_current_events_instead_of_the_session_start(cursors, pending, expected):
+    cursor = {"source": {"buffered_bytes": 900, "accepted_bytes": 0}, "pending": pending}
+    agent_trace._cursor_path("lost").write_text(json.dumps(cursor))
+    assert not trace_flush.request_path("lost").exists()
+    assert registry.progress("lost", "claude")["oldest_unaccepted"] == expected
+
+
 def test_a_codex_session_without_a_request_reads_its_rollout(cursors, monkeypatch):
     rollout = cursors / "rollout.jsonl"
     _transcript(rollout, ["2026-10-07T08:00:00Z"])

@@ -111,13 +111,60 @@ def test_a_new_finding_restarts_the_quiet_count_and_reaches_the_doctor_master(st
     assert closed == [T0 + 305 * MINUTE_MS]
 
 
-def test_detection_runs_once_per_interval(store):
-    _, seen = step(store, T0, closed=[])
-    assert seen == [WATCHED]
-    _, seen = step(store, T0 + 9 * MINUTE_MS, closed=[])
-    assert seen == []
-    _, seen = step(store, T0 + 10 * MINUTE_MS, closed=[])
-    assert seen == [WATCHED]
+def passes(store, ticks):
+    ran = []
+    for at in ticks:
+        _, seen = step(store, at, closed=[])
+        ran += [at] * len(seen)
+    return ran
+
+
+def spacing(ran):
+    return [later - earlier for earlier, later in zip(ran, ran[1:])]
+
+
+def run_of_ticks(gaps_s, minutes=180):
+    at, ticks = T0, []
+    while at < T0 + minutes * MINUTE_MS:
+        ticks.append(at)
+        at += gaps_s[len(ticks) % len(gaps_s)] * 1000
+    return ticks
+
+
+def test_detection_runs_once_per_interval_on_minute_ticks(store):
+    ran = passes(store, [T0 + m * MINUTE_MS for m in range(31)])
+    assert ran == [T0, T0 + 10 * MINUTE_MS, T0 + 20 * MINUTE_MS, T0 + 30 * MINUTE_MS]
+
+
+@pytest.mark.parametrize("gaps_s", [[66], [60, 66, 63], [61, 72], [90]])
+def test_passes_are_never_more_than_the_interval_apart_over_a_run_of_ticks(store, gaps_s):
+    ran = passes(store, run_of_ticks(gaps_s))
+    assert max(spacing(ran)) <= 10 * MINUTE_MS
+    assert len(ran) >= 18
+    assert min(spacing(ran)) > 10 * MINUTE_MS - 2 * max(gaps_s) * 1000
+
+
+def test_a_slow_tick_pulls_the_next_pass_forward_only_until_that_pass(store):
+    ran = passes(store, [T0, T0 + 4 * MINUTE_MS, T0 + 5 * MINUTE_MS, T0 + 6 * MINUTE_MS + 1])
+    assert ran == [T0, T0 + 6 * MINUTE_MS + 1]
+    later = T0 + 7 * MINUTE_MS + 1
+    ran = passes(store, [later + m * MINUTE_MS for m in range(10)])
+    assert ran == [later + 9 * MINUTE_MS]
+
+
+def test_the_timer_keeps_each_tick_and_the_slowest_gap_since_the_last_pass(store):
+    key = loop._timer_key(store, DOCTOR)
+    store.redis.hset(key, mapping={"last": T0, "last_new": T0})
+
+    def saved():
+        return {k: int(v) for k, v in store.redis.hgetall(key).items()}
+
+    passes(store, [T0 + MINUTE_MS])
+    assert saved() == {"last": T0, "last_new": T0, "gap": 0, "tick": T0 + MINUTE_MS}
+    passes(store, [T0 + 3 * MINUTE_MS, T0 + 4 * MINUTE_MS])
+    assert saved() == {"last": T0, "last_new": T0, "gap": 2 * MINUTE_MS, "tick": T0 + 4 * MINUTE_MS}
+    assert passes(store, [T0 + 9 * MINUTE_MS]) == [T0 + 9 * MINUTE_MS]
+    assert saved() == {"last": T0 + 9 * MINUTE_MS, "last_new": T0, "gap": 0, "tick": T0 + 9 * MINUTE_MS}
 
 
 def test_the_interval_and_the_quiet_window_come_from_the_environment(store):

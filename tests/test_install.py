@@ -2561,3 +2561,40 @@ class TestAgentienvMultilineValues:
     def test_agentienv_is_quiet_without_multiline_values(self, tmp_path):
         r = self._source(tmp_path, "SINGLE_0001=x\n")
         assert r.stderr == ""
+
+    def test_one_init_after_the_shell_prints_the_warning_once(self, tmp_path):
+        import os
+        import subprocess
+        import sys
+
+        bashrc = tmp_path / ".bashrc"
+        env_file = tmp_path / ".agentihooks" / ".env"
+        env_file.parent.mkdir()
+        env_file.write_text("GOOD_NAME_0001=ok\n")
+        with patch.object(install, "_BASHRC", bashrc), patch.object(install, "_ENV_FILE_DST", env_file):
+            install._update_bashrc_block()
+        init = tmp_path / "init.py"
+        init.write_text(
+            "import io, sys\n"
+            "from hooks import config\n"
+            "class Tty(io.StringIO):\n"
+            "    def isatty(self):\n"
+            "        return True\n"
+            "sys.stderr = Tty()\n"
+            "config._load_user_env()\n"
+            "sys.__stderr__.write(sys.stderr.getvalue())\n"
+        )
+        r = subprocess.run(
+            ["bash", "-c", f'. "{bashrc}"; agentienv; "{sys.executable}" "{init}"'],
+            env={
+                "HOME": str(tmp_path),
+                "PATH": os.environ.get("PATH", ""),
+                "PYTHONPATH": str(Path(install.__file__).resolve().parents[1]),
+                "FAKE_INHERITED_0001": self.FAKE_FIRST + "\n" + self.FAKE_REST,
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert r.stderr.count("span several lines") == 1, r.stderr
+        assert "[agentienv] WARNING: these values span several lines" in r.stderr
+        assert "[agentihooks]" not in r.stderr

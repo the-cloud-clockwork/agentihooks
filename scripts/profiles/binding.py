@@ -12,6 +12,7 @@ PERSONAS = {"claude": "CLAUDE.md", "codex": "AGENTS.md"}
 FILE = ".profile-binding.json"
 HOMES = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}
 REPORT = "AGENTIHOOKS_PROFILE_REPORT"
+SHOW = "agentihooks profile binding"
 PROMPT = "Validate your mounted profile using the binding canary command in its instructions before continuing. Stop if validation fails."
 
 
@@ -138,7 +139,7 @@ def main(canary: str) -> int:
     try:
         print(json.dumps(validate(canary)))
     except (OSError, ValueError, KeyError) as exc:
-        print(f"profile validation failed: {exc}", file=sys.stderr)
+        print(f"profile validation failed: {exc}; read the binding record with {SHOW}", file=sys.stderr)
         return 2
     return 0
 
@@ -229,3 +230,24 @@ def inspect(home: Path, profile: str, target: str) -> dict:
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"missing or invalid rendered profile evidence: {exc}") from exc
     return data
+
+
+def record(home: Path | None = None) -> dict:
+    account, report = None, None
+    if home is None:
+        _, target, env, account = process()
+        if not env.get(HOMES[target]):
+            raise ValueError(f"missing profile home: {HOMES[target]} is unset")
+        home, report = Path(env[HOMES[target]]), env.get(REPORT)
+    data = json.loads((home / FILE).read_text())
+    if report:
+        requested = json.loads(Path(report).read_text())
+        state = f"failed: {requested['reason']}" if requested["state"] == "failed" else requested["state"]
+    else:
+        try:
+            inspect(home, data.get("profile"), data.get("harness"))
+            state = "rendered"
+        except ValueError as exc:
+            state = f"invalid: {exc}"
+    shown = {key: data.get(key) for key in ("profile", "harness", "persona", "sources")}
+    return {**shown, "state": state, "account": account}

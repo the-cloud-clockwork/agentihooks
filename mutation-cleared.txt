@@ -1447,9 +1447,13 @@
     "reader": "Standards",
     "reason": "accepted_bytes is always an int, so the first comparison against None or an empty string is False either way and flush_once takes the same path."
   },
-  "scripts/herdr_gc.py:scripts.herdr_gc.xǁOwnersǁ_store__mutmut_8:d8f932aa2f50c70ae67799a34b247644795d96ed80140240ad8c99bd27e44f00": {
+  "scripts/herdr_gc.py:scripts.herdr_gc.x\u01c1Owners\u01c1_store__mutmut_8:d8f932aa2f50c70ae67799a34b247644795d96ed80140240ad8c99bd27e44f00": {
     "reader": "Standards",
     "reason": "A failed connection cached as an empty string instead of None gives the same outcomes: state still returns unknown and prompted_at still returns None through their exception handlers, and the connection is attempted once per address either way."
+  },
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_run_selected__mutmut_6:ac87d1bd5af2a0c42f9e86dda6d9b72e13abab395e6437b580c2cfb8ed5efce0": {
+    "reader": "Standards",
+    "reason": "mutmut's forced fail control only checks whether the run returned zero, so returning 2 instead of 1 from the collection failure branch gives every caller the same outcome."
   },
   "scripts/swarm/stack.py:scripts.swarm.stack.x__restack_base__mutmut_13:14cda51a2caf4cc4c81831736d54310a4b6a693ca5a80db277471627fe5715f9": {
     "reader": "Standards",

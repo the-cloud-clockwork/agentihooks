@@ -179,3 +179,35 @@ class TestMultilineEnvValues:
                 del os.environ[k]
             _, err = self._load(home, monkeypatch, capsys)
         assert err == ""
+
+    def test_loader_skips_a_value_the_shell_already_reported(self, tmp_path, monkeypatch, capsys):
+        home = tmp_path / "home"
+        home.mkdir()
+        inherited = {
+            "FAKE_INHERITED_0001": self.FAKE_FIRST + "\n" + self.FAKE_REST,
+            "AGENTIHOOKS_MULTILINE_REPORTED": " FAKE_INHERITED_0001",
+        }
+        _, err = self._load(home, monkeypatch, capsys, inherited=inherited)
+        assert "FAKE_INHERITED_0001" not in err
+
+    @pytest.mark.parametrize(
+        ("earlier", "marked"), [(None, "FAKE_MULTI_0001"), ("EARLIER_0001", "EARLIER_0001 FAKE_MULTI_0001")]
+    )
+    def test_loader_reports_a_value_once_and_marks_it_for_child_processes(
+        self, tmp_path, monkeypatch, capsys, earlier, marked
+    ):
+        from hooks import config
+
+        monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+        env = {"AGENTIHOOKS_HOME": str(self._home(tmp_path))}
+        with patch.dict(os.environ, env, clear=False):
+            for k in [k for k, v in os.environ.items() if "\n" in v]:
+                del os.environ[k]
+            os.environ.pop("AGENTIHOOKS_MULTILINE_REPORTED", None)
+            if earlier:
+                os.environ["AGENTIHOOKS_MULTILINE_REPORTED"] = earlier
+            config._load_user_env()
+            config._load_user_env()
+            assert os.environ["AGENTIHOOKS_MULTILINE_REPORTED"] == marked
+        err = capsys.readouterr().err
+        assert err.count("[agentihooks] these values span several lines") == 1

@@ -17,6 +17,7 @@ TEMPLATE = (
     "If not, update the issue and the pull request and record progress on the ledger."
 )
 SENDER = "swarm"
+SETTLED = "a later stop passed with the work committed, on origin and recorded"
 PUSHED = "pushed"
 GITHUB_RE = re.compile(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
 GIT_TIMEOUT_S = 60
@@ -112,6 +113,7 @@ class PushStop:
             owed = owed or tree.dirty or (tree.unpushed and not self.on_origin(tree))
             owed = owed or (doc and tree.own and not task.get("pr_url") and self.unrecorded(store, doc, who))
         if not owed:
+            self.settle(store, who)
             return Decision()
         self.notify(store, who)
         return Decision.deny(TEMPLATE)
@@ -146,6 +148,14 @@ class PushStop:
         address = inbox.names.resolve(who.name)
         if not any(item.text == TEMPLATE and item.state not in CLOSED for item in inbox.inbox(address)):
             inbox.send(SENDER, address, TEMPLATE)
+
+    def settle(self, store, who):
+        from scripts.inbox.store import CLOSED, InboxStore
+
+        inbox = InboxStore(store.redis)
+        for item in inbox.inbox(inbox.names.resolve(who.name)):
+            if item.text == TEMPLATE and item.state not in CLOSED:
+                inbox.close(item.id, SENDER, "done", SETTLED)
 
     def root(self):
         return self._root or os.environ.get("WORKTREE_ROOT") or Path.home() / "dev" / "worktrees"
