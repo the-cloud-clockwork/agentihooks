@@ -63,7 +63,7 @@ def apply(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
     if refusals:
         details = {
             "rejected": [op["id"] for op in operations],
-            "_meta": {"warnings": [*doc["_meta"].get("warnings", []), *refusals][:100]},
+            "_meta": {"warnings": [*doc["_meta"].get("warnings", [])[:10], *refusals]},
         }
         raise APIError(403, "forbidden", "Caller cannot perform this operation as its author", details)
     server.ledger_media.resolve(slug, operations)

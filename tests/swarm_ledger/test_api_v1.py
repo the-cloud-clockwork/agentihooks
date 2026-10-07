@@ -565,3 +565,30 @@ def test_metadata_resource_reports_its_named_fields(live, monkeypatch):
     assert status == 200
     assert reply["data"] == document
     assert len(reply["revision"]) == 64
+
+
+def test_forbidden_error_envelope_keeps_its_status_and_bounds(live, monkeypatch):
+    from scripts.swarm_ledger.api.resources import MAX_REPLY
+    from tests.swarm_ledger.test_ledger_authority import authority
+
+    document = {"tasks": [], "_meta": {"warnings": ["x" * 3000] * 100}}
+    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    headers = {
+        "X-Ledger-Agent": "api-reader",
+        "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, "api-reader"),
+    }
+    status, reply = request(
+        live,
+        "POST",
+        "operations",
+        {
+            "ops": [{"op": "add", "id": "denied-bound", "thread": "chat", "by": "other", "text": "Forbidden"}],
+            "guards": {},
+        },
+        **headers,
+    )
+    assert status == 403
+    assert len(json.dumps(reply, ensure_ascii=False).encode()) <= MAX_REPLY
+    assert reply["error"]["code"] == "forbidden"
+    assert reply["error"]["details"]["rejected"] == ["denied-bound"]
+    assert any("cannot write as other" in row for row in reply["error"]["details"]["_meta"]["warnings"])
