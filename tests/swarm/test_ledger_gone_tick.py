@@ -1,4 +1,3 @@
-import fakeredis
 import pytest
 
 from scripts.swarm import cli
@@ -16,6 +15,8 @@ class GoneLedger(FakeLedger):
 
 
 def test_a_swarm_whose_ledger_is_gone_is_reported_once_then_left_quiet():
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
     ledger, rt = GoneLedger([]), FakeRuntime()
