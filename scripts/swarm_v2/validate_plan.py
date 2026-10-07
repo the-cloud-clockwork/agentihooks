@@ -15,6 +15,7 @@ INDEX = "docs/swarm-v2/evidence-index.json"
 MARKDOWN = "docs/swarm-v2/evidence-index.md"
 CLASSES = ("transcript_durability", "scope_isolation", "execution_safety", "knowledge_integrity")
 CLAIMS = ("open", "complete")
+CHANGE_KEYS = ("operation", "base_revision", "package", "evidence")
 CASES = (("A", "positive case result"), ("B", "negative case result"), ("C", "recovery proof"))
 PROVES = ("live_canary", "test")
 NEEDS_COMMIT = frozenset({"test", "pull_request", "live_canary", "migration"})
@@ -29,7 +30,8 @@ INVARIANT_RE = re.compile(r"^`(INV-[A-Z]\d\d)`:", re.M)
 CASE_RE = re.compile(r"^- (?:Positive|Negative|Recovery) case: \[(T-SV2-[A-Z]+-\d\d-([ABC]))\]", re.M)
 URL_RE = re.compile(r"https://\S+")
 SHA_RE = re.compile(r"[0-9a-f]{40}")
-IMAGE_RE = re.compile(r"\.(?:png|jpe?g|gif|webp|bmp|svg)$", re.I)
+RUN_RE = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/actions/runs/\d+(?:/job/\d+)?")
+RESULT = "a test or live canary result must be a GitHub Actions run or a text file in the repository"
 
 
 class EvidenceError(ValueError):
@@ -94,13 +96,25 @@ def _ref_error(item: dict, root: Path) -> str:
     return ""
 
 
+def _result_ref(ref: str, root: Path) -> bool:
+    if RUN_RE.fullmatch(ref):
+        return True
+    if URL_RE.fullmatch(ref):
+        return False
+    try:
+        (root / ref).read_bytes().decode()
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
 def _item_errors(item: dict, root: Path) -> list[str]:
     kind = item.get("kind")
     if kind not in KINDS:
         return [f"unknown kind {kind!r}"]
     errors = [_ref_error(item, root)]
-    if kind in PROVES and IMAGE_RE.search(str(item.get("ref", ""))):
-        errors.append("a test or live canary result cannot be an image")
+    if kind in PROVES and not errors[0] and not _result_ref(str(item["ref"]), root):
+        errors.append(RESULT)
     if kind in NEEDS_COMMIT and not SHA_RE.fullmatch(str(item.get("commit", ""))):
         errors.append("commit must be a full 40 character sha")
     if (kind in NEEDS_CASE or "case" in item) and item.get("case") not in CASE_IDS:
@@ -124,6 +138,10 @@ def _requirement_errors(index: dict, plan: dict) -> list[str]:
     return errors + [f"{inv} is not mapped to any package" for inv in plan["invariants"] if inv not in mapped]
 
 
+def _identified(item: object) -> bool:
+    return isinstance(item, dict) and isinstance(item.get("id"), str)
+
+
 def _package_errors(index: dict, plan: dict, root: Path) -> list[str]:
     errors = []
     ids = []
@@ -134,7 +152,7 @@ def _package_errors(index: dict, plan: dict, root: Path) -> list[str]:
         if entry["claim"] not in CLAIMS:
             errors.append(f"{pid}: unknown claim {entry['claim']!r}")
         for item in entry["evidence"]:
-            if not isinstance(item.get("id"), str):
+            if not _identified(item):
                 errors.append(f"{pid}: evidence needs an id")
                 continue
             ids.append(item["id"])
@@ -169,7 +187,8 @@ def _screenshot_note(evidence: list[dict], case: str, classes: list[str]) -> str
 
 
 def _missing(index: dict, plan: dict, pid: str, seen: tuple[str, ...] = ()) -> list[str]:
-    spec, evidence = plan["packages"][pid], index["packages"][pid]["evidence"]
+    spec = plan["packages"][pid]
+    evidence = [e for e in index["packages"][pid]["evidence"] if isinstance(e, dict)]
     reasons = []
     tested = [e.get("commit") for e in evidence if _pull_request(e, spec["repository"])]
     if not tested:
@@ -250,6 +269,9 @@ def _recorded(index: dict) -> dict[str, dict]:
 
 def _record(path: Path | str, change: dict, plan: dict, root: Path | str) -> dict:
     index = load_index(path)
+    lacking = [key for key in CHANGE_KEYS if key not in change]
+    if lacking:
+        raise EvidenceError(f"change lacks {', '.join(lacking)}")
     operation, sha256 = change["operation"], digest(change)
     done = _replayed(index, operation, sha256)
     if done:
@@ -259,6 +281,8 @@ def _record(path: Path | str, change: dict, plan: dict, root: Path | str) -> dic
             f"change is based on revision {change['base_revision']}; the registry is at revision {index['revision']}"
         )
     pid = change["package"]
+    if not all(_identified(item) for item in change["evidence"]):
+        raise EvidenceError(f"{pid}: evidence needs an id")
     recorded = _recorded(index)
     for item in change["evidence"]:
         if item.get("id") in recorded and recorded[item["id"]] != item:
@@ -447,7 +471,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return _run(args)
-    except (OSError, KeyError, ValueError) as exc:
+    except (EvidenceError, OSError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

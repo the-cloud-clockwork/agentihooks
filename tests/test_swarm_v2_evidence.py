@@ -699,10 +699,12 @@ def test_an_image_cannot_be_a_test_or_live_canary_result(kind):
     sha = hashlib.sha256((ROOT / SCREENSHOT).read_bytes()).hexdigest()
     shot = {**_test("C", kind=kind), "ref": SCREENSHOT, "sha256": sha}
     index = _alone("SV2-FND-04", _complete(_pull(), _test("A"), _test("B"), shot))
-    assert _errors(index) == ["SV2-FND-04/case-c: a test or live canary result cannot be an image"]
-    linked = {**_test("C", kind=kind), "ref": f"{PULL}/pod.JPG"}
+    assert _errors(index) == [
+        "SV2-FND-04/case-c: a test or live canary result must be a GitHub Actions run or a text file in the repository"
+    ]
+    linked = {**_test("C", kind=kind), "ref": f"{PULL}/pod.JPG?size=1#top"}
     assert _errors(_alone("SV2-FND-04", _complete(linked))) == [
-        "SV2-FND-04/case-c: a test or live canary result cannot be an image"
+        "SV2-FND-04/case-c: a test or live canary result must be a GitHub Actions run or a text file in the repository"
     ]
 
 
@@ -719,6 +721,7 @@ def test_non_string_evidence_fields_are_refused_without_crashing():
         {**_test("B"), "case": ["B"]},
         {**_test("C"), "commit": [COMMIT], "ref": [PULL]},
         {**_pull(), "id": ["x"]},
+        "not an object",
     ]
     assert _errors(_alone("SV2-FND-04", _complete(*items))) == [
         "SV2-FND-04/case-a: unknown kind ['test']",
@@ -726,7 +729,18 @@ def test_non_string_evidence_fields_are_refused_without_crashing():
         "SV2-FND-04/case-c: ref must be an https link or a repository file with its sha256",
         "SV2-FND-04/case-c: commit must be a full 40 character sha",
         "SV2-FND-04: evidence needs an id",
+        "SV2-FND-04: evidence needs an id",
     ]
+
+
+@pytest.mark.parametrize("item", [{**_pull(), "id": ["x"]}, "not an object", {"kind": "test"}])
+def test_a_record_refuses_evidence_without_a_string_id_without_writing(tmp_path, item):
+    path = _registry(tmp_path)
+    _refused(
+        path,
+        lambda: vp.record(path, _change(evidence=[_pull(), item]), PLAN, ROOT),
+        "SV2-FND-04: evidence needs an id",
+    )
 
 
 def test_a_backup_missing_recorded_operations_is_refused(tmp_path):
@@ -782,4 +796,49 @@ def test_a_change_without_an_operation_is_a_refusal_not_a_traceback(tmp_path):
     change = tmp_path / "change.json"
     change.write_text(json.dumps({"base_revision": 1, "package": "SV2-FND-04", "evidence": []}))
     result = _run("record", "--index", path, "--change", change, "--markdown", tmp_path / "index.md")
-    assert (result.returncode, result.stderr) == (2, "error: 'operation'\n")
+    assert (result.returncode, result.stderr) == (2, "error: change lacks operation\n")
+
+
+def test_a_change_lacking_several_keys_names_each_without_writing(tmp_path):
+    path = _registry(tmp_path)
+    _refused(
+        path,
+        lambda: vp.record(path, {"package": "SV2-FND-04"}, PLAN, ROOT),
+        "change lacks operation, base_revision, evidence",
+    )
+
+
+def test_malformed_registry_json_is_a_refusal_not_a_traceback(tmp_path):
+    path = tmp_path / "evidence-index.json"
+    path.write_text("{ torn")
+    result = _run("check", "--index", path)
+    assert (result.returncode, result.stderr) == (
+        2,
+        "error: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)\n",
+    )
+
+
+@pytest.mark.parametrize("kind", ["test", "live_canary"])
+def test_a_proof_must_be_an_actions_run_or_a_text_result_file(tmp_path, kind):
+    disguised = tmp_path / "result.json"
+    disguised.write_bytes((ROOT / SCREENSHOT).read_bytes())
+    text = tmp_path / "result.log"
+    text.write_text("3 passed\n")
+    items = [
+        {**_test("A", kind=kind), "ref": "https://example.com/pod?format=png"},
+        {**_test("B", kind=kind), "ref": "https://github.com/the-cloud-clockwork/agentihooks/pull/1"},
+        {**_test("C", kind=kind), "ref": "result.json", "sha256": hashlib.sha256(disguised.read_bytes()).hexdigest()},
+        {
+            **_test("C", eid="SV2-FND-04/log", kind=kind),
+            "ref": "result.log",
+            "sha256": hashlib.sha256(b"3 passed\n").hexdigest(),
+        },
+        {**_test("C", eid="SV2-FND-04/job", kind=kind), "ref": f"{PULL.split('/pull')[0]}/actions/runs/9/job/8"},
+    ]
+    index = {**_index(), "packages": {"SV2-FND-04": _complete(*items)}}
+    message = "a test or live canary result must be a GitHub Actions run or a text file in the repository"
+    assert vp.check(index, PLAN, tmp_path)["errors"] == [
+        f"SV2-FND-04/case-a: {message}",
+        f"SV2-FND-04/case-b: {message}",
+        f"SV2-FND-04/case-c: {message}",
+    ]
