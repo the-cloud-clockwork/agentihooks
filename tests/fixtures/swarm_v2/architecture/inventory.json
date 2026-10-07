@@ -1,0 +1,31 @@
+{
+  "schema": "swarm-v2-design-inventory/1",
+  "operation": "fixture-inventory-1",
+  "base_revision": 1,
+  "proposals": [
+    {
+      "id": "duplicate-dispatcher",
+      "name": "Kubernetes task dispatcher",
+      "kind": "dispatcher",
+      "carries": "coding_tasks",
+      "bounded": true,
+      "launches_agents": true,
+      "code_owner": "agentihooks",
+      "state_owner": "agentihooks",
+      "deployment_owner": "antoncore",
+      "authoritative_state": "Redis list of pending coding tasks"
+    },
+    {
+      "id": "embedding-backlog",
+      "name": "Brain arc embedding backlog",
+      "kind": "backlog",
+      "carries": "changed_content",
+      "bounded": true,
+      "launches_agents": false,
+      "code_owner": "agentibrain-kernel",
+      "state_owner": "agentibrain-kernel",
+      "deployment_owner": "antoncore",
+      "authoritative_state": "Changed arc ids awaiting embedding"
+    }
+  ]
+}
