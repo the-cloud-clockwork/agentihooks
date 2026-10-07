@@ -1,4 +1,3 @@
-import fakeredis
 import pytest
 
 from scripts import claude_quota_balancer as balancer
@@ -8,6 +7,12 @@ from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
+def _store():
+    import fakeredis
+
+    return RedisStore(fakeredis.FakeRedis(decode_responses=True))
 
 
 def account(name="a", state="NORMAL", sessions=0, left=90, harness="claude"):
@@ -83,7 +88,7 @@ def test_one_seat_goes_to_the_empty_lane_before_another_engineer():
 
 
 def test_reduced_caps_do_not_retire_work_and_changes_are_recorded_once(monkeypatch):
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store = _store()
     config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=0, state="running")
     store.create(config)
     ledger = FakeLedger([{"id": "e"}, {"id": "e2"}, {"id": "c", "lane": "ci"}])
@@ -91,7 +96,7 @@ def test_reduced_caps_do_not_retire_work_and_changes_are_recorded_once(monkeypat
     ledger.comment = lambda slug, item, text, by: ledger.comments.append((slug, item, text, by))
     runtime = FakeRuntime()
     monkeypatch.setattr(capacity, "accounts", lambda env, now: [account(sessions=1)])
-    runtime.quota_capacity = lambda cfg, agents, now, demand: capacity.calculate(
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
         cfg, capacity.accounts({}, now), agents, 3, 5, demand
     )
     tick("sw", store, ledger, runtime, 1000)
@@ -146,7 +151,7 @@ def test_reset_changes_account_state_from_drain_to_normal(monkeypatch):
 def test_effective_caps_are_exposed_in_status(monkeypatch):
     from scripts.swarm import status
 
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store = _store()
     store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
     decision = {"effective": {"eng": 0, "ci": 0, "plan": 0}, "reason": "accounts are drain"}
     store.redis.set(
@@ -190,12 +195,14 @@ def test_automatic_lanes_preserve_seats_required_by_fixed_lanes():
 
 
 def test_failed_capacity_comment_is_retried_without_losing_the_decision():
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store = _store()
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
     store.create(config)
     ledger = FakeLedger([{"id": "e"}])
     runtime = FakeRuntime()
-    runtime.quota_capacity = lambda cfg, agents, now, demand: capacity.calculate(cfg, [account()], agents, 3, 5, demand)
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
+        cfg, [account()], agents, 3, 5, demand
+    )
     ledger.comment = lambda *args, **kw: (_ for _ in ()).throw(RuntimeError("ledger unavailable"))
     with pytest.raises(RuntimeError, match="ledger unavailable"):
         capacity.apply("sw", config, store, ledger, runtime, 1000)
@@ -255,3 +262,25 @@ def test_failed_fresh_probe_does_not_leave_a_stale_healthy_account_placeable(mon
     seen = capacity.accounts({"AH_CC_TOKEN_a": "fake-a"}, 200)
     assert seen[0].state == "BLOCKED"
     assert capacity.free_seats(seen[0], 3, 5) == 0
+
+
+@pytest.mark.parametrize("saved", [False, True])
+def test_profile_and_saved_handoff_harnesses_are_reserved_before_automatic_work(tmp_path, monkeypatch, saved):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    runtime = HerdrRuntime(home=tmp_path)
+    monkeypatch.setattr("scripts.swarm.runtime.plugins.claude_only", lambda profile: profile == "frontend")
+    task = {"id": "e", "profile": "frontend"}
+    if saved:
+        task = {"id": "e", "handoff_envelope": {"launch": {"profile": "engineer", "harness": "claude"}}}
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=1, max_plan=0)
+    requirements = runtime.quota_requirements(config, {"eng": [task], "ci": [{"id": "c"}], "plan": []})
+    assert requirements == {"eng": [("claude",)], "ci": [("claude", "codex")], "plan": []}
+    observed = [account(sessions=2), account("cx", sessions=2, harness="codex")]
+    decision = capacity.calculate(config, observed, [], 3, 5, {"eng": 1, "ci": 1, "plan": 0}, requirements)
+    runtime._quota_accounts = observed
+    runtime._quota_cap, runtime._quota_floor, runtime._quota_share = 3, 5, 30
+    runtime._quota_allocations = decision["allocation"]
+    assert runtime._quota_choice("claude", "required", True, "eng") == ("claude", "required")
+    assert runtime._quota_choice("claude", "priority", False, "ci")[0] == "codex"
+    assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0}

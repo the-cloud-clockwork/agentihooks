@@ -151,7 +151,7 @@ class HerdrRuntime:
             agent_choice.choose_shared("", environ, None, share, floor, choose=self.choose)[1] != agent_choice.ALL_FULL
         )
 
-    def quota_capacity(self, config, agents, now, demand=None):
+    def quota_capacity(self, config, agents, now, demand=None, requirements=None):
         from hooks.context import account_sessions
         from scripts.swarm import capacity
 
@@ -166,9 +166,37 @@ class HerdrRuntime:
             self._quota_cap,
             self._quota_floor,
             demand,
+            requirements,
         )
         self._quota_allocations = decision["allocation"]
         return decision
+
+    def quota_requirements(self, config, ready):
+        from scripts.swarm.capacity import _harnesses
+
+        requirements = {}
+        for lane, tasks in ready.items():
+            options = []
+            for task in tasks:
+                chosen = config.lanes.get(lane, {})
+                saved = task.get("launch_assignment") or (task.get("handoff_envelope") or {}).get("launch") or {}
+                profile = (
+                    saved.get("profile")
+                    or task.get("profile")
+                    or chosen.get("profile")
+                    or profile_choice.DEFAULT_PROFILES[lane]
+                )
+                requested = _set(chosen.get("agent"))
+                if plugins.claude_only(profile):
+                    options.append(("claude",))
+                elif requested:
+                    options.append((requested,))
+                elif saved.get("harness") in agent_choice.AGENTS:
+                    options.append((saved["harness"],))
+                else:
+                    options.append(_harnesses(config, lane))
+            requirements[lane] = options
+        return requirements
 
     def _quota_eligible(self, harness):
         from scripts.swarm.capacity import free_seats

@@ -81,22 +81,40 @@ def _harnesses(config, lane: str) -> tuple[str, ...]:
     return ("claude",) if config.codex_share == 0 else ("claude", "codex")
 
 
-def _allocate(config, effective: dict, limits: dict, remaining: dict) -> dict:
+def _allowed(config, lane: str, allocation: dict, requirements: dict | None) -> tuple:
+    index = sum(allocation[lane].values())
+    return requirements[lane][index] if requirements is not None else _harnesses(config, lane)
+
+
+def _reserved(config, remaining: dict, effective: dict, allocation: dict, requirements: dict | None) -> dict:
+    result = {"claude": 0, "codex": 0}
+    for lane in LANES:
+        count = remaining[lane] - effective[lane]
+        index = sum(allocation[lane].values())
+        future = (
+            requirements[lane][index : index + count]
+            if requirements is not None
+            else [_harnesses(config, lane)] * count
+        )
+        for harness in result:
+            result[harness] += sum(options == (harness,) for options in future)
+    return result
+
+
+def _allocate(config, effective: dict, limits: dict, remaining: dict, requirements: dict | None) -> dict:
     allocation = {lane: {"claude": 0, "codex": 0} for lane in LANES}
     while True:
         ready = [
             lane
             for lane in LANES
-            if effective[lane] < limits[lane] and any(remaining[h] for h in _harnesses(config, lane))
+            if effective[lane] < limits[lane]
+            and any(remaining[h] for h in _allowed(config, lane, allocation, requirements))
         ]
         if not ready:
             return allocation
         lane = min(ready, key=lambda name: effective[name])
-        reserved = {
-            h: sum(limits[name] - effective[name] for name in LANES if _harnesses(config, name) == (h,))
-            for h in remaining
-        }
-        eligible = [h for h in _harnesses(config, lane) if remaining[h]]
+        reserved = _reserved(config, limits, effective, allocation, requirements)
+        eligible = [h for h in _allowed(config, lane, allocation, requirements) if remaining[h]]
         harness = max(eligible, key=lambda h: remaining[h] - reserved[h])
         remaining[harness] -= 1
         allocation[lane][harness] += 1
@@ -104,7 +122,13 @@ def _allocate(config, effective: dict, limits: dict, remaining: dict) -> dict:
 
 
 def calculate(
-    config, observations: list[Account], agents: list, cap: int, week_floor: float, demand: dict | None = None
+    config,
+    observations: list[Account],
+    agents: list,
+    cap: int,
+    week_floor: float,
+    demand: dict | None = None,
+    requirements: dict | None = None,
 ) -> dict:
     configured = dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan), strict=True))
     busy = {lane: sum(a.lane == lane and a.state != "finished" for a in agents) for lane in LANES}
@@ -117,7 +141,7 @@ def calculate(
         h: sum(free_seats(row, cap, week_floor) for row in observations if row.harness == h)
         for h in ("claude", "codex")
     }
-    allocation = _allocate(config, effective, limits, dict(placeable))
+    allocation = _allocate(config, effective, limits, dict(placeable), requirements)
     restricted = sorted({row.state.lower().replace("_", " ") for row in observations if row.state != "NORMAL"})
     reason = "accounts have quota" if not restricted else "accounts are " + ", ".join(restricted)
     reason += f"; Claude has {placeable['claude']} free seats and Codex has {placeable['codex']} free seats"
@@ -143,17 +167,31 @@ def status_line(decision: dict) -> str:
     return f"quota capacity eng {caps['eng']} ci {caps['ci']} plan {caps['plan']} because {decision['reason']}"
 
 
+def _prepared(store, slug: str, task: dict) -> dict:
+    saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
+    return {
+        **task,
+        "handoff_envelope": store.handoff_envelope(slug, task["id"]),
+        "launch_assignment": json.loads(saved) if saved else {},
+    }
+
+
 def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     reader = getattr(runtime, "quota_capacity", None)
     if reader is None:
         return []
-    from scripts.swarm.tick import _claimable, _ended
+    from scripts.swarm.tick import _claimable, _ended, _launch_order
 
     doc = ledger.state(slug)
     rows = {task["id"]: task for task in doc["tasks"]}
-    demand = {lane: len(_claimable(slug, store, rows, doc, lane)) for lane in LANES}
+    ready = {lane: _launch_order(slug, store, _claimable(slug, store, rows, doc, lane)) for lane in LANES}
+    demand = {lane: len(tasks) for lane, tasks in ready.items()}
+    requirements = None
+    if hasattr(runtime, "quota_requirements"):
+        prepared = {lane: [_prepared(store, slug, task) for task in tasks] for lane, tasks in ready.items()}
+        requirements = runtime.quota_requirements(config, prepared)
     agents = [agent for agent in store.agents(slug) if not _ended(agent, rows)]
-    decision = reader(config, agents, now_ms / 1000, demand)
+    decision = reader(config, agents, now_ms / 1000, demand, requirements)
     previous = read(store, slug)
     changed = any(previous.get(key) != decision[key] for key in ("configured", "effective", "reason"))
     decision["at"] = now_ms if changed else previous["at"]
