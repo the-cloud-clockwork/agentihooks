@@ -1882,5 +1882,21 @@
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_doctor_phrase__mutmut_9:790c064abbdf0cf00090b29d8b0741d3dfde0df5a5bec6a63c4fb9af83be78f9": {
     "reader": "Standards /root/standards_reader",
     "reason": "For event dictionaries, present text values follow identical code. Missing text normalizes to empty string versus xxxx; both differ from the fixed DOCTOR_PHRASE rig doctor stop, so neither queues a command. The fallback is not otherwise exposed or persisted. No alternate implementation or consumer found. Evidence: CI run 37692175970, mutant-map and parent symbol dumps. Adversarial Standards ruling."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__project_aliases__mutmut_26:22a9a06ae36882a722dc70af57dfab9710e9567a078e6a40c1c919dbb3ba2184": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "For the supported JSON alias-document contract, every non-string source or target fails canonical_remote string equality even when the early type guard changes OR to AND. The later check raises the identical ValueError before traversal or mutation. Adversarial JSON null, booleans, numbers, arrays, objects and strings produced identical outputs across 77 combinations. This ruling excludes arbitrary custom Python objects outside the JSON schema."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_13:101dc562aeb263d9acf918ddd1ef07936cbc0cd47bd996d6f066585d4649c7da": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Missing repo is used only as a truth operand before _registered_project. Empty string and None both select identity None, so the same outer fallback and output result."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_15:aadd7a110850759e45830328416c9e2a07059fca214ab2e9a2178c7442d1d180": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Omitting the dict get default changes only a missing repo from empty string to None. Both select identity None without any path operation, yielding the same fallback and output."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_20:117cb0adedb7e2ba99e15e8948e79dc66b212bac25190d65e20f679e3e8c341e": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The config-read exception fallback repo is used only as a truth operand. Empty string and None both select identity None and return None; no path operation consumes the changed value."
   }
 }
