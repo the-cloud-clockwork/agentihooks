@@ -153,3 +153,21 @@ class KindCli(unittest.TestCase):
                 ledger.cmd_task(ledger.build_parser().parse_args(argv))
         self.assertIn("not both", str(exit_.exception.code))
         self.assertEqual(sent, [])
+
+    def test_task_set_refuses_a_whole_object_naming_the_dotted_form(self):
+        import ledger
+
+        for name, value, form, allowed in (
+            ("proof", '{"evidence":"E","output":"O"}', "proof.evidence=E proof.output=O", ledger_kinds.PROOF_KEYS),
+            ("contract", '{"must":"M"}', "contract.must=M contract.check=C", ledger_kinds.CONTRACT_KEYS),
+        ):
+            sent = []
+            argv = ["--slug", SLUG, "--as", "x", "task", "set", "t1", f"{name}={value}"]
+            with unittest.mock.patch.object(ledger, "send", lambda args, kind, /, **f: sent.append((kind, f))):
+                with self.assertRaises(SystemExit) as exit_:
+                    ledger.cmd_task(ledger.build_parser().parse_args(argv))
+            refusal = str(exit_.exception.code)
+            self.assertIn(form, refusal)
+            self.assertIn(f"not {name}=VALUE", refusal)
+            self.assertIn(str(allowed), refusal)
+            self.assertEqual(sent, [])

@@ -94,6 +94,10 @@ from scripts.gates.base import Who
 from scripts.swarm_ledger.repository import repository
 
 BASE = ledger_link.base()
+OBJECT_FORMS = {
+    "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
+    "contract": (ledger_kinds.CONTRACT_KEYS, "contract.must=M contract.check=C"),
+}
 
 
 def credentials(slug, service=False):
@@ -534,6 +538,11 @@ def cmd_task(args):
         if not isinstance(fields.get(name, {}), dict):
             sys.exit(f"task set takes {name}=VALUE or {name}.KEY=VALUE pairs, not both")
         fields.setdefault(name, {})[sub] = fields.pop(dotted)
+    for name, (allowed, example) in OBJECT_FORMS.items():
+        if isinstance(fields.get(name, {}), str):
+            sys.exit(
+                f"task set takes one {name}.KEY=VALUE pair per key among {allowed}, e.g. {example}, not {name}=VALUE"
+            )
     send(args, "task_update", item=f"tasks/{args.id}", fields=fields)
     print(json.dumps({"task": args.id, **fields}))
 
