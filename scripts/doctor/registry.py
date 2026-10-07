@@ -117,7 +117,8 @@ def progress(session_id: str, harness: str) -> dict | None:
         "oldest_unaccepted": _oldest(transcript, accepted_bytes, _fallback(stat, path, cursor)) if unaccepted else 0,
         "pending": len(cursor.get("pending") or []),
         "overflow": int((cursor.get("overflow") or {}).get("bytes", 0)),
-        "accepted": sum(1 for revision in (cursor.get("accepted") or {}).values() if revision != "legacy"),
+        "accepted": sum(1 for revision in (cursor.get("accepted") or {}).values() if revision != "legacy")
+        + int((cursor.get("paged") or {}).get("spans", 0)),
         "accepted_at": _ms(cursor["accepted_at"]) if cursor.get("accepted_at") else 0,
         "exporter_alive": trace_flush.alive(owner),
         "requested_at": int(request["at"]) // 1_000_000 if request.get("at") else 0,
