@@ -246,9 +246,8 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
         if found and now_ms - agent.started_at < launch_check.DEADLINE_MS:
             continue
         if found:
-            actions.append(
-                _failed_launch(slug, store, ledger, runtime, rows, agent, waiting[agent.name], found, now_ms)
-            )
+            miss = launch_check.Miss(agent, found, waiting[agent.name]["relaunch"])
+            actions.append(_failed_launch(slug, store, ledger, runtime, rows, miss, now_ms))
             continue
         elapsed = launch_check.joined_at(agent, doc) - agent.started_at
         launch_check.record(store, slug, agent, found, now_ms, elapsed)
@@ -258,9 +257,10 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
     return actions
 
 
-def _failed_launch(slug, store, ledger, runtime, rows, agent, entry, found, now_ms):
+def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
+    agent, found = miss.agent, miss.found
     fields, elapsed = ", ".join(found), now_ms - agent.started_at
-    if not entry["relaunch"] or set(found) <= launch_check.REPORT_ONLY:
+    if not miss.relaunch or set(found) <= launch_check.REPORT_ONLY:
         outcome, said = "report", f"{agent.name} failed its launch check on {fields}; reported only"
     elif launch_check.relaunched(store, slug, agent.task):
         outcome, said = "spent", f"{agent.name} failed its launch check on {fields}; its one relaunch is spent"

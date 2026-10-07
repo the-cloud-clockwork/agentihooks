@@ -4,6 +4,7 @@ profile, hooks, model and effort, sits on its package base role and carries a pa
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from hooks.context import profile_chain
@@ -27,6 +28,13 @@ OUTCOMES = {
     "spent": "Its one automatic relaunch is spent; operator action is required.",
     "report": "This is reported only; the master keeps running.",
 }
+
+
+@dataclass(frozen=True)
+class Miss:
+    agent: AgentRecord
+    found: dict
+    relaunch: bool
 
 
 def begin(store: RedisStore, slug: str, agent: AgentRecord, at: int, relaunch: bool = True) -> None:
