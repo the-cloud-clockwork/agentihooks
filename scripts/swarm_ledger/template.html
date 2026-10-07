@@ -625,7 +625,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 <div class="sw-grip sw-grip-y" data-grip="height" data-row="handoff-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Handoff outcomes height" tabindex="0"></div>
 </div></div>
 
-</div><aside id="stats-column" class="side"><section><details class="sources-box fold" id="stats-box" open><summary>Stats<span class="sync-state end" id="stats-state"></span><button class="mini-sync" id="stats-sync" type="button" aria-label="Ask master to recheck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg></button></summary><dl id="stats"></dl></details></section></aside></div>
+</div><aside id="stats-column" class="side"><section><details class="sources-box fold" id="stats-box" open><summary>Stats<span class="sync-state end" id="stats-state"></span><button class="mini-sync" id="stats-sync" type="button" aria-label="Refresh stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg></button></summary><dl id="stats"></dl></details></section></aside></div>
 </main>
 <button class="sync" id="sync" type="button" title="Sync the crew" aria-label="Sync the crew">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
@@ -1242,6 +1242,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   }
 
   function itemActions(key, item) {
+    if (item.done) return h("div", { class: "item-actions" }, scopeDot(key, item));
     return h("div", { class: "item-actions" }, verdictButton(key, "approved", "approve", "Approve"), verdictButton(key, "denied", "deny", "Deny"), scopeDot(key, item));
   }
 
@@ -1511,10 +1512,12 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const out = ["phases", "questions", "followups"].reduce((n, l) => n + doc[l].length - inScope(doc[l]).length, 0);
     const started = meta.created_at, elapsed = started ? Date.now() - started : null;
     const left = doc.time_left_minutes;
-    const leftText = left === null ? "not set" : span(left * 60000);
+    const refresh = meta.stats_refresh;
+    const gap = refresh && refresh.calculation && refresh.calculation.gap;
+    const leftText = gap ? `unknown · ${gap}${left === null ? "" : ` · prior ${span(left * 60000)}`}` : left === null ? "not set" : span(left * 60000);
     const last = (meta.events || []).reduce((m, e) => Math.max(m, e.at || 0), 0);
     const pct = total ? Math.round(100 * done / total) : 0;
-    const row = (label, value, extra) => h("div", { class: "stat" }, h("dt", { text: label }), h("dd", {}, value, extra));
+    const row = (label, value, extra) => h("div", { class: "stat", style: gap && label === "Time left" ? "grid-template-columns:75px minmax(0,1fr)" : "" }, h("dt", { text: label }), h("dd", {}, value, extra));
     $("stats").replaceChildren(
       row("Started", started ? when(started) : "—"),
       row("Elapsed", elapsed === null ? "—" : span(elapsed)),
@@ -1639,17 +1642,17 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     return [...(meta.events || [])].reverse().find((e) => e.kind === kind);
   }
 
-  function statsCheck(events, local) {
-    if (local && !events.some((e) => e.id === local.id)) return { state: "sent", at: local.at };
+  function statsCheck(events, local, refresh) {
+    if (local && (!refresh || local.id !== refresh.id) && !events.some((e) => e.id === local.id))
+      return local.state === "failed" ? local : { state: "pending", at: local.at };
+    if (refresh) return refresh;
     const sent = [...events].reverse().find((e) => e.kind === "stats sync requested");
-    if (!sent) return null;
-    const answer = events.find((e) => e.kind === "stats check answered" && e.id === sent.id);
-    if (!answer) return { state: "sent", at: sent.at };
-    return { state: "answered", at: sent.at, answered_at: answer.at };
+    return sent ? { state: "pending", at: sent.at } : null;
   }
 
   function statsCheckText(check) {
-    return check.state === "answered" ? `answered ${when(check.answered_at)}` : `sent ${when(check.at)}`;
+    const age = Math.max(0, Math.floor((Date.now() - (check.completed_at || check.at)) / 1000));
+    return `${check.state} ${age < 60 ? `${age}s` : span(age * 1000)} ago`;
   }
 
   function cooldown(op, kind) {
@@ -1669,22 +1672,26 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const waiting = pending ? `${pending} of ${crew.length} agents have not synced yet` : "";
     $("sync").ariaLabel = [waiting, wait ? `Sync ${wait}` : "Sync the crew"].filter(Boolean).join(" · ");
     const statsWait = cooldown("stats_sync", "stats sync requested");
-    $("stats-sync").disabled = !!statsWait;
-    const check = statsCheck(meta.events || [], statsSent);
+    const check = statsCheck(meta.events || [], statsSent, meta.stats_refresh);
+    const failed = check && check.state === "failed";
+    $("stats-sync").disabled = !failed && !!statsWait;
     const checked = check ? `Stats check ${statsCheckText(check)}` : "";
-    $("stats-sync").ariaLabel = [checked, statsWait ? `Stats check ${statsWait}` : "Ask master to recheck"].filter(Boolean).join(" · ");
+    $("stats-sync").ariaLabel = [checked, failed ? "Retry stats refresh" : statsWait ? `Stats refresh ${statsWait}` : "Refresh stats"].filter(Boolean).join(" · ");
     $("stats-state").textContent = check ? statsCheckText(check) : "";
+    $("stats-state").title = check ? check.error || (check.calculation && check.calculation.gap) || "" : "";
   }
 
   function sendSync(op, buttonId) {
     const button = $(buttonId);
     if (button.disabled) return;
     sentAt[op] = Date.now();
-    const id = newId(op);
+    const retry = op === "stats_sync" && statsSent && statsSent.state === "failed" && ops.find((queued) => queued.id === statsSent.id);
+    const id = retry ? retry.id : newId(op);
     if (op === "stats_sync") statsSent = { id, at: sentAt[op] };
     button.classList.add("sending");
     setTimeout(() => button.classList.remove("sending"), 1200);
-    queue({ op, id });
+    if (retry) flush(false);
+    else queue({ op, id });
     renderSync();
   }
 
@@ -2423,6 +2430,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   }
 
   function applyServer(server) {
+    if ((server._meta || {}).rev < rev) return;
     meta = server._meta || {};
     rev = meta.rev;
     doc = withDefaults(server);
@@ -2450,6 +2458,10 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       applyServer(server);
       status("saved " + new Date().toLocaleTimeString());
     } catch (e) {
+      if (statsSent && sentOps.some((op) => op.id === statsSent.id)) {
+        statsSent = { ...statsSent, state: "failed", completed_at: Date.now(), error: "Stats request failed; retry refresh" };
+        renderSync();
+      }
       status(OFFLINE, "offline");
     } finally {
       inflight = false;

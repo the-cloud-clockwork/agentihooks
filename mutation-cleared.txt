@@ -1,4 +1,16 @@
 {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_13:eda446540d9ed0c4b259edff4160e8726c85cf8d1828349d86401b102412ae2f": {
+    "reader": "Standards",
+    "reason": "core.sync returns normalized state with the tasks key present; changing this unused dictionary default changes no output. Independent empty and populated task list comparisons agree."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_15:b42bf3317a26db3863deb97526ea7099ff1a9eebe8412363f16c1a548b89dd69": {
+    "reader": "Standards",
+    "reason": "core.sync returns normalized state with the tasks key present; changing this unused dictionary default changes no output. Independent empty and populated task list comparisons agree."
+  },
+  "scripts/swarm_ledger/ledger_comments.py:scripts.swarm_ledger.ledger_comments.x_problems__mutmut_11:a2dac3da8a95a1cce5d5e2bd0440b659cda0e1d1135014f72885e4e0e7817f0d": {
+    "reader": "Standards",
+    "reason": "Replacing a complete registered token with uppercase X text instead of spaces cannot match the lowercase hexadecimal rule or join neighboring hashes. Other checks use original text. Independent comparison across punctuation, neighboring hashes, URLs, kinds and length modes returned 968 equal outputs."
+  },
   "scripts/ci_mutation/__main__.py:scripts.ci_mutation.__main__.x_main__mutmut_52:01622f33bcc9fe0c5032b2b0b2ab5be8e6195e4407cac994d0799c1ee82d0e02": {
     "reader": "Standards",
     "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
@@ -631,16 +643,12 @@
     "reader": "Standards",
     "reason": "A missing pane text defaults to a string with no input marker, confirmation line or escape codes, so selection_prompt and typed_input both return empty exactly as for an empty default."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_13:eda446540d9ed0c4b259edff4160e8726c85cf8d1828349d86401b102412ae2f": {
+  "scripts/swarm_ledger/ledger_stats.py:scripts.swarm_ledger.ledger_stats.x_refresh__mutmut_26:ff7d5dc88ba11da2c1bfa6f5bc2ff2add34c463730098f93f86faf30f9ca4c9b": {
     "reader": "Standards",
-    "reason": "core.sync returns normalized state with the tasks key present; changing this unused dictionary default changes no output. Independent empty and populated task list comparisons agree."
+    "reason": "The mutant omits the precomputed review argument; the same pure calculator receives identical document, events and time before mutation and yields identical persisted stats and review."
   },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_15:b42bf3317a26db3863deb97526ea7099ff1a9eebe8412363f16c1a548b89dd69": {
+  "scripts/swarm_ledger/ledger_stats.py:scripts.swarm_ledger.ledger_stats.x_refresh__mutmut_30:4f6313b8a5da9c95982aff3a3b0fd99c52ed8c8508b50aafbddabd1330a11299": {
     "reader": "Standards",
-    "reason": "core.sync returns normalized state with the tasks key present; changing this unused dictionary default changes no output. Independent empty and populated task list comparisons agree."
-  },
-  "scripts/swarm_ledger/ledger_comments.py:scripts.swarm_ledger.ledger_comments.x_problems__mutmut_11:a2dac3da8a95a1cce5d5e2bd0440b659cda0e1d1135014f72885e4e0e7817f0d": {
-    "reader": "Standards",
-    "reason": "Replacing a complete registered token with uppercase X text instead of spaces cannot match the lowercase hexadecimal rule or join neighboring hashes. Other checks use original text. Independent comparison across punctuation, neighboring hashes, URLs, kinds and length modes returned 968 equal outputs."
+    "reason": "The mutant omits the precomputed review argument; the same pure calculator receives identical document, events and time before mutation and yields identical persisted stats and review."
   }
 }

@@ -186,6 +186,9 @@ is left alone with a warning.
 **Degrades.** Codex has no command-backed statusline (upstream openai/codex
 #20140), so `tui.status_line` gets the closest built-in items and the `ah:`
 profile line is emitted as a SessionStart banner instead.
+Status items carry fixed labels: `used-tokens` renders `<N> used`, the session's
+cumulative total, so the line pairs `context-used` with `context-window-size` and
+leaves the cumulative item out (codex-cli 0.160.0, `StatusLineItem`).
 
 **Project bridge.** `hooks/context/project_bridge.py` runs at SessionStart
 (flag `PROJECT_BRIDGE_ENABLED`, budget `PROJECT_BRIDGE_MAX_BYTES`, 0 = whole).

@@ -4,9 +4,10 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
-import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
 import new_ledger  # noqa: E402
+
+from scripts.swarm_ledger import ledger_core as core  # noqa: E402
 
 SLUG = "sync-2026-01-01"
 
@@ -139,6 +140,50 @@ class StatsSync(unittest.TestCase):
         rev = core.sync(SLUG, ops=[{"op": "stats_sync", "id": "t8"}])[0]["_meta"]["rev"]
         state, _ = core.sync(SLUG, ops=[{"op": "ack", "id": "a6", "by": "boss", "rev": rev}])
         self.assertEqual([e["id"] for e in self.answers(state)], ["t8"])
+
+    def test_refresh_is_persisted_before_reply_while_master_remains_busy(self):
+        state, _ = core.sync(SLUG)
+        state["tasks"] = [
+            {"id": "closed", "state": "done", "done": True, "comments": []},
+            {"id": "remaining", "state": "open", "done": False, "comments": []},
+        ]
+        state["time_left_minutes"] = 400
+        now = core.now_ms()
+        state["_meta"]["events"].append({"kind": "task done", "target": "tasks/closed", "at": now})
+        core.paths(SLUG)[1].write_text(core.json.dumps(state), encoding="utf-8")
+        reply, rejected = core.sync(SLUG, ops=[{"op": "stats_sync", "id": "persist"}])
+        self.assertEqual(rejected, [])
+        self.assertEqual(reply["time_left_minutes"], 60)
+        persisted = core.json.loads(core.paths(SLUG)[1].read_text(encoding="utf-8"))
+        self.assertEqual(persisted["_meta"]["stats_refresh"], reply["_meta"]["stats_refresh"])
+        self.assertEqual(persisted["time_left_minutes"], 60)
+        self.assertEqual(core.parse_seed(core.paths(SLUG)[0].read_text(encoding="utf-8"))["time_left_minutes"], 60)
+        self.assertEqual(reply["_meta"]["stats_refresh"]["state"], "refreshed")
+        self.assertEqual(len(gate.unhandled_for(reply["_meta"], "boss")), 1)
+
+    def test_refresh_uses_changes_reconciled_in_the_latest_transaction(self):
+        state, _ = core.sync(SLUG)
+        followup = state["followups"][0]
+        reply, rejected = core.sync(
+            SLUG,
+            changes=[{"path": f"followups/{followup['id']}/done", "value": True, "base": False}],
+            ops=[{"op": "stats_sync", "id": "latest"}],
+        )
+        self.assertEqual(rejected, [])
+        self.assertEqual(reply["_meta"]["stats_refresh"]["counts"]["followups"], {"done": 1, "total": 1})
+
+    def test_refresh_runs_after_later_task_mutations_in_the_same_batch(self):
+        reply, rejected = core.sync(
+            SLUG,
+            ops=[
+                {"op": "stats_sync", "id": "batch"},
+                {"op": "task_add", "id": "new", "by": "boss", "task": "t1", "title": "New work", "lane": "eng"},
+            ],
+        )
+        self.assertEqual(rejected, [])
+        self.assertEqual(reply["_meta"]["stats_refresh"]["counts"]["tasks"], {"done": 0, "total": 1})
+        self.assertEqual(reply["_meta"]["stats_refresh"]["calculation"]["remaining"], 1)
+        self.assertIsNone(reply["_meta"]["stats_refresh"]["calculation"]["minutes"])
 
 
 if __name__ == "__main__":
