@@ -1435,8 +1435,16 @@
     "reader": "Standards",
     "reason": "The label feeds only contains_generic_secret, whose generic_secret regex is compiled case insensitive, so SECRET and secret match identically."
   },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__is_prompt__mutmut_13:063574d38e70f504275dca5e86907998b7435d94a31ea43cf963dad980568e0e": {
+    "reader": "Standards",
+    "reason": "Absent UUID defaults empty and XXXX both fail the Codex prefix predicate; present UUID values are unchanged."
+  },
   "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_member__mutmut_8:b2767610ba1fd15af0ebdf8f402f7a23c29e41b6cfb90e8793a6e75ad8e11c90": {
     "reader": "Standards",
     "reason": "json.dumps checks ensure_ascii for truth only, so False and None produce identical output with non-ASCII characters preserved."
+  },
+  "hooks/observability/trace_flush.py:hooks.observability.trace_flush.x_flush_once__mutmut_1:80d09be3f11ee776f97113ffcd7c849ef5162a181d27c420ef1102c3a63e84a8": {
+    "reader": "Standards",
+    "reason": "accepted_bytes is always an int, so the first comparison against None or an empty string is False either way and flush_once takes the same path."
   }
 }

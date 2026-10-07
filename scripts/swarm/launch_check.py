@@ -19,10 +19,11 @@ WORDS = {
     "joined": "joining the ledger and holding its seat",
     "profile": "its profile",
     "settings": "its hooks, model and effort",
-    "overlay": "its role overlay on the package base role",
+    "base": "its role on the package base role",
+    "overlay": "every overlay its profile declares",
     "name": "its name",
 }
-REPORT_ONLY = frozenset({"overlay"})
+REPORT_ONLY = frozenset({"base"})
 OUTCOMES = {
     "relaunch": "It is being retired and relaunched once.",
     "spent": "Its one automatic relaunch is spent; operator action is required.",
@@ -62,6 +63,12 @@ def bundled(profile: str) -> bool:
     return bool(bundle and profile and (bundle / "profiles" / profile).is_dir())
 
 
+def declared(profile: str) -> list[str]:
+    from scripts.profiles import render
+
+    return render.declared(profile)
+
+
 def joined_at(agent: AgentRecord, doc: dict) -> int | None:
     return doc.get("_meta", {}).get("members", {}).get(agent.name, {}).get("joined_at")
 
@@ -92,13 +99,21 @@ def _process(agent, facts):
     return found
 
 
-def _overlay(agent, facts, on_bundle):
-    found = facts.get("chain") or []
+def _base(agent, facts, on_bundle):
+    rendered = facts.get("overlays") or []
+    found = [name for name in facts.get("chain") or [] if name not in rendered]
     ends = bool(found) and found[-1] == agent.profile
     if ends and (not on_bundle or any(name.startswith(profile_chain.PACKAGE_PREFIX) for name in found[:-1])):
         return {}
     base = f"{profile_chain.PACKAGE_PREFIX}<role>, " if on_bundle else ""
-    return {"overlay": {"expected": f"{base}{agent.profile}", "actual": found}}
+    return {"base": {"expected": f"{base}{agent.profile}", "actual": found}}
+
+
+def _overlays(facts, declared):
+    rendered = facts.get("overlays") or []
+    if all(name in rendered for name in declared):
+        return {}
+    return {"overlay": {"expected": declared, "actual": rendered}}
 
 
 def _name(store, slug, agent):
@@ -109,11 +124,14 @@ def _name(store, slug, agent):
     return {"name": {"expected": f"{naming.TYPES[agent.lane]}@{code}-<number>", "actual": agent.name}}
 
 
-def misses(store: RedisStore, slug: str, agent: AgentRecord, facts: dict, doc: dict, on_bundle: bool) -> dict:
+def misses(
+    store: RedisStore, slug: str, agent: AgentRecord, facts: dict, doc: dict, on_bundle: bool, declared: list[str]
+) -> dict:
     return {
         **_joined(store, agent, doc, agent.started_at),
         **_process(agent, facts),
-        **_overlay(agent, facts, on_bundle),
+        **_base(agent, facts, on_bundle),
+        **_overlays(facts, declared),
         **_name(store, slug, agent),
     }
 
@@ -137,6 +155,10 @@ def record(
 def report(store: RedisStore, slug: str, task: str) -> dict:
     raw = store.redis.hget(store.key(slug, "launch-check-reports"), task)
     return json.loads(raw) if raw else {}
+
+
+def reports(store: RedisStore, slug: str) -> list[dict]:
+    return [json.loads(raw) for raw in store.redis.hgetall(store.key(slug, "launch-check-reports")).values()]
 
 
 def judged(store: RedisStore, slug: str) -> set[str]:
@@ -166,6 +188,8 @@ def findings(store: RedisStore, slug: str) -> list[Finding]:
     for raw in store.redis.hgetall(store.key(slug, "launch-check-reports")).values():
         found = json.loads(raw)
         for field, values in found["misses"].items():
+            if field in REPORT_ONLY:
+                continue
             result.append(
                 Finding(
                     "launch check",

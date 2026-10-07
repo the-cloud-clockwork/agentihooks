@@ -129,10 +129,61 @@ def request(
     return True
 
 
+def _replay_source(session_id: str, record: dict) -> str:
+    from hooks.observability.agent_trace import _cursor
+
+    if record.get("target") != "codex" or alive(_owner(record, "owner_")):
+        return ""
+    if alive(_owner(_read(owner_path(session_id)), "supervisor_")):
+        return ""
+    state = _cursor(session_id)
+    transcript = _transcript(session_id, record)
+    size = _size(transcript)
+    if not state or size is None:
+        return ""
+    behind = state.get("pending") or state.get("source", {}).get("accepted_bytes", 0) < size
+    return transcript if behind else ""
+
+
+def recover(limits: Budget | None = None, send: Callable[[str, str, float, str], bool] | None = None) -> int:
+    from hooks.observability.agent_trace import CURSOR_DIR
+
+    limits = limits or budget()
+    send = send or attempt
+    CURSOR_DIR.mkdir(parents=True, exist_ok=True)
+    with (CURSOR_DIR / "recovery.lock").open("w") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return 0
+        stamp = CURSOR_DIR / "recovery.scan.json"
+        previous = _read(stamp)
+        now = time.time()
+        if now - previous.get("at", 0) < 60:
+            return 0
+        paths = sorted(CURSOR_DIR.glob("*.request.json"))
+        after = previous.get("after", "")
+        paths = [path for path in paths if path.name > after] + [path for path in paths if path.name <= after]
+        count = 0
+        _write(stamp, {"at": now, "after": after})
+        for path in paths:
+            session_id = path.name.removesuffix(".request.json")
+            transcript = _replay_source(session_id, _read(path))
+            if not transcript:
+                continue
+            _write(stamp, {"at": now, "after": path.name})
+            _drain(session_id, transcript, limits, send, "recovery")
+            count += 1
+            if count == 3:
+                break
+        return count
+
+
 def _spawn(session_id: str) -> None:
     from hooks._async import fork_and_call
 
     fork_and_call(run, session_id, timeout_sec=7 * 24 * 3600, task_name="trace_flush")
+    fork_and_call(recover, timeout_sec=60, task_name="trace_recovery")
 
 
 def run(session_id: str) -> None:
@@ -166,8 +217,17 @@ def attempt(session_id: str, transcript_path: str, timeout: float, trigger: str)
 def flush_once(session_id: str, transcript_path: str) -> int:
     from hooks.observability.agent_trace import _cursor, export_session
 
-    export_session(session_id, transcript_path)
-    return 1 if _cursor(session_id).get("pending") else 0
+    position = None
+    while True:
+        export_session(session_id, transcript_path)
+        state = _cursor(session_id)
+        if state.get("pending"):
+            return 1
+        if not state.get("overflow"):
+            return 0
+        if state["source"]["accepted_bytes"] == position:
+            return 1
+        position = state["source"]["accepted_bytes"]
 
 
 def _lock(session_id: str, wait: float, clock: Callable[[], float], sleep: Callable[[float], None]):

@@ -328,10 +328,11 @@ def main() -> None:
             _ch_str = ",".join(_l_channels)
             _ch_display = f"{_DIM}{_ch_str}{_RESET}"
 
-            from hooks import config as _ah_config
+            from hooks.context.profile_chain import rendered_overlays as _rendered_overlays
 
-            _brain_on = _ah_config.BRAIN_ENABLED and _ah_config.BRAIN_CHANNEL in _l_channels
-            _ovl_display = f"{_CYAN}brain{_RESET}" if _brain_on else f"{_DIM}none{_RESET}"
+            _home = os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude"
+            _overlays = _rendered_overlays(Path(_home))
+            _ovl_display = f"{_CYAN}{','.join(_overlays)}{_RESET}" if _overlays else f"{_DIM}none{_RESET}"
 
             _voice_str = ""
             _voice_sid = payload.get("session_id", "")

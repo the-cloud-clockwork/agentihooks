@@ -892,6 +892,40 @@ def test_status_text_names_the_promoted_engineer(env, capsys):
     assert "promoted  engineer@a1b2c3-0001  restoring the master: master spawn failed: boom" in out
 
 
+def test_status_text_logs_report_only_launch_misses_without_a_finding(env, capsys):
+    from scripts.swarm import launch_check
+
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1")
+    launch_check.record(
+        store, "sw", agent, {"base": {"expected": "package:engineer", "actual": "engineer"}}, 10, 60_000
+    )
+    run("sw", "status")
+    out = capsys.readouterr().out.splitlines()
+    assert "launch  engineer@a1b2c3-0001  failed  60000ms" in out
+    assert "  base  report only  expected package:engineer; observed engineer" in out
+    assert not any(line.startswith("finding  launch check") for line in out)
+
+
+def test_status_text_logs_enforced_and_passed_launch_checks(env, capsys):
+    from scripts.swarm import launch_check
+
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1")
+    launch_check.record(store, "sw", agent, {"name": {"expected": "a", "actual": "b"}}, 10, 60_000)
+    launch_check.record(store, "sw", AgentRecord("engineer@a1b2c3-0002", "eng", "t2"), {}, 10, 2000)
+    run("sw", "status")
+    out = capsys.readouterr().out.splitlines()
+    assert "launch  engineer@a1b2c3-0001  failed  60000ms" in out
+    assert "  name  enforced  expected a; observed b" in out
+    assert "launch  engineer@a1b2c3-0002  passed  2000ms" in out
+    assert (
+        "finding  launch check  engineer@a1b2c3-0001/name: engineer@a1b2c3-0001 failed its launch check on name" in out
+    )
+
+
 def test_status_text_lists_each_phase_lifecycle_and_the_tasks_it_holds(env, capsys):
     _, ledger, _ = env
     ledger.rows["t1"]["phase"], ledger.rows["t2"]["phase"] = "p1", "p2"

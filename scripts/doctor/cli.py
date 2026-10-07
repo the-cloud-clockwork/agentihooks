@@ -32,7 +32,7 @@ from argparse import Namespace
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.doctor import detect, interventions, loop, rates, rates_read
+from scripts.doctor import detect, interventions, loop, rates, rates_read, spawn_read, spawns
 from scripts.doctor.priming import SUFFIX, TEMPLATE, cancel_master_items, doctor_slug
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli as swarm
@@ -248,17 +248,38 @@ def cmd_task(store, args):
 
 def cmd_measure(store, args):
     slug, _ = _pair_of(store, args.slug)
-    found, failed = detect.collect(detect.readers(store, swarm.LedgerClient(), slug, swarm.now_ms()))
+    now = swarm.now_ms()
+    bounds = _spawn_bounds(args, now)
+    if args.finding.startswith("failed-spawn/"):
+        found = spawns.failed(spawn_read.records(store, slug, now, **bounds))
+        failed = []
+    else:
+        found, failed = detect.collect(detect.readers(store, swarm.LedgerClient(), slug, now))
     for line in failed:
         print(line, file=sys.stderr)
     print(f"{args.finding} {next((f.measure for f in found if f.id == args.finding), 0)}")
 
 
-def _at_ms(text):
+def _spawn_bounds(args: Namespace, now: int) -> dict:
+    if bool(args.since) != bool(args.until):
+        raise SwarmError("--since and --until must be supplied together")
+    if args.since is None:
+        return {}
+    if not args.finding.startswith("failed-spawn/"):
+        raise SwarmError("journal bounds are only supported for failed-spawn findings")
+    since, until = _at_ms(args.since, "--since"), _at_ms(args.until, "--until")
+    if since >= until:
+        raise SwarmError("--since must precede --until")
+    if until > now:
+        raise SwarmError("--until must not be in the future")
+    return {"since": f"@{since / 1000:.3f}", "until": f"@{until / 1000:.3f}"}
+
+
+def _at_ms(text, flag="--at"):
     try:
         when = datetime.fromisoformat(text)
     except ValueError as exc:
-        raise SwarmError(f"--at takes an ISO time such as 2026-10-06T12:00Z, not {text}") from exc
+        raise SwarmError(f"{flag} takes an ISO time such as 2026-10-06T12:00Z, not {text}") from exc
     return int((when if when.tzinfo else when.replace(tzinfo=timezone.utc)).timestamp() * 1000)
 
 
@@ -297,7 +318,10 @@ def build_parser():
     task = sub.add_parser("task")
     task.add_argument("finding")
     task.add_argument("--fix", required=True, choices=loop.FIXES)
-    sub.add_parser("measure").add_argument("finding")
+    measured = sub.add_parser("measure")
+    measured.add_argument("finding")
+    measured.add_argument("--since")
+    measured.add_argument("--until")
     rated = sub.add_parser("rates")
     rated.add_argument("--hours", type=float, default=24)
     rated.add_argument("--at")

@@ -12,6 +12,7 @@ import yaml
 BUILT_IN_PROFILES = Path(__file__).resolve().parents[2] / "profiles"
 PACKAGE_ROLES = BUILT_IN_PROFILES / "package" / "roles"
 PACKAGE_PREFIX = "package:"
+RENDER_STAMP = ".agentihooks-render.json"
 
 
 def state_path() -> Path:
@@ -67,6 +68,13 @@ def overlays(path: Path) -> list[str]:
     manifest = path / "profile.yml"
     data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
     return data.get("allowedOverlays", [])
+
+
+def rendered_overlays(home: Path) -> list[str]:
+    try:
+        return [str(name) for name in json.loads((Path(home) / RENDER_STAMP).read_text())["overlays"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
 
 
 def inherited(profile_dirs: list[tuple[str, Path]]) -> set[str]:
@@ -131,3 +139,10 @@ def profile_dirs(bundle: Path | None, profile_csv: str | None, linked: dict[str,
         if found is not None:
             out.append((name, found))
     return out
+
+
+def rendered_dirs(bundle: Path | None, profile_csv: str, linked: dict[str, Path]) -> list[tuple[str, Path]]:
+    """The chain a profile home renders: the profile's dirs plus every overlay the chain declares."""
+    dirs = profile_dirs(bundle, profile_csv, linked)
+    declared = [overlay for _, path in dirs for overlay in overlays(path)]
+    return profile_dirs(bundle, ",".join([profile_csv, *declared]), linked) if declared else dirs

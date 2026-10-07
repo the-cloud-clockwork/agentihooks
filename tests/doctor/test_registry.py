@@ -88,6 +88,34 @@ def test_progress_reads_generated_and_accepted_progress_and_the_oldest_unaccepte
     assert 0 < found["accepted_bytes"] < size
 
 
+def test_accepted_observations_paged_out_of_the_cursor_still_count_as_accepted(cursors):
+    accepted = {"a": "rev", "b": "legacy"}
+    _session(cursors, "sid", ["2026-10-07T08:00:00Z"], 1, accepted=accepted, paged={"spans": 200, "turns": 9})
+    assert registry.progress("sid", "claude")["accepted"] == 201
+
+
+def test_a_lost_acknowledgement_after_paging_is_a_stale_finding(cursors):
+    from scripts.doctor import traces
+
+    accepted_at = "2026-10-07T08:00:10+00:00"
+    _session(
+        cursors, "sid", ["2026-10-07T08:00:00Z"], 1, accepted={"a": "rev"}, paged={"spans": 45}, accepted_at=accepted_at
+    )
+    local = registry.progress("sid", "claude")
+    now = local["accepted_at"] + 120_000
+    binding = {
+        **registry.bindings([{**AGENT, "conversation_id": "sid", "started_at": now - 600_000}])[0],
+        "read": True,
+        "traces": [],
+        "remote": {"trace": "tr-1", "fresh_ms": now - 130_000, "observations": 44},
+        "local": local,
+    }
+    record = {"slug": "s", "now_ms": now, "active": [binding]}
+    [found] = traces.active(record, traces.Limits())
+    assert found.kind == "telemetry stale"
+    assert "exporter recorded 46 accepted observations, Langfuse holds 44" in found.evidence
+
+
 def test_fully_accepted_progress_has_no_unaccepted_event(cursors):
     _session(cursors, "sid", ["2026-10-07T08:00:00Z"], 1)
     found = registry.progress("sid", "claude")

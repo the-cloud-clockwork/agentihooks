@@ -176,6 +176,7 @@ def status_report(store, slug, state):
         "tasks": task_counts(tasks),
         "spawns": store.spawns(slug),
         "findings": findings(store, slug, config, tasks, events),
+        "launch_checks": launch_check.reports(store, slug),
         "auto_snapshot": auto_snapshot(config),
         "restored": store.restored(slug),
         "transfers": handed,

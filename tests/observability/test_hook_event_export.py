@@ -127,7 +127,9 @@ def test_native_token_measurements_reach_collector(collector, tmp_path, target):
     script = _HOOK_WITH_LOAD_PROOF_FLUSH
     if target == "claude":
         payload["context_window"] = {"context_window_size": 200000, "used_percentage": 25}
-        script = "from hooks.statusline import main; main()"
+        script = _HOOK_WITH_LOAD_PROOF_FLUSH.replace(
+            "runpy.run_module('hooks', run_name='__main__')", "from hooks.statusline import main\nmain()"
+        )
     result = subprocess.run(
         [sys.executable, "-c", script],
         input=json.dumps(payload),
