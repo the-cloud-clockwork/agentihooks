@@ -57,6 +57,7 @@ def test_unterminated_private_key_body_is_masked():
     assert "QASENTINELpem" not in mask_value(pem)
 
 
-def test_failure_log_reason_is_redacted(capsys):
-    agent_trace._log_failure(None, "ValueError: Authorization: Bearer " + SENTINEL + "abcdefghij")
+def test_failure_log_reason_is_redacted_strictly(capsys, monkeypatch):
+    monkeypatch.setattr("hooks.config.SECRETS_MODE", "off")
+    agent_trace._log_failure(None, "ValueError: header Bearer " + SENTINEL + "abcdefghij")
     assert SENTINEL not in capsys.readouterr().err
