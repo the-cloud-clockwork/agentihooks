@@ -550,6 +550,7 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                                                     "pageInfo": {"hasNextPage": False},
                                                 }
                                             },
+                                            "checkSuites": {"nodes": [], "pageInfo": {"hasNextPage": False}},
                                         }
                                     }
                                 ]
@@ -586,7 +587,8 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
 
 
 @pytest.mark.parametrize(
-    "commits", [[], [{"commit": {"committedDate": "2026-10-07T17:00:00Z", "statusCheckRollup": None}}]]
+    "commits",
+    [[], [{"commit": {"committedDate": "2026-10-07T17:00:00Z", "statusCheckRollup": None, "checkSuites": None}}]],
 )
 def test_the_probe_without_checks_is_unresolved(commits):
     from types import SimpleNamespace
@@ -644,7 +646,11 @@ def test_a_checks_wait_stays_held_while_the_new_heads_run_is_queued(tick):
         (0, "invalid json"),
         (
             0,
-            '{"data":{"resource":{"state":"OPEN","headRefOid":"first","commits":{"nodes":[{"commit":{"committedDate":"2026-10-07T17:00:00Z","statusCheckRollup":{"contexts":{"nodes":[{"conclusion":"SUCCESS"}],"pageInfo":{"hasNextPage":true}}}}}]}}}}',
+            '{"data":{"resource":{"state":"OPEN","headRefOid":"first","commits":{"nodes":[{"commit":{"committedDate":"2026-10-07T17:00:00Z","statusCheckRollup":{"contexts":{"nodes":[{"conclusion":"SUCCESS"}],"pageInfo":{"hasNextPage":true}}},"checkSuites":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}]}}}}',
+        ),
+        (
+            0,
+            '{"data":{"resource":{"state":"OPEN","headRefOid":"first","commits":{"nodes":[{"commit":{"committedDate":"2026-10-07T17:00:00Z","statusCheckRollup":{"contexts":{"nodes":[{"conclusion":"SKIPPED"}],"pageInfo":{"hasNextPage":false}}}}}]}}}}',
         ),
     ],
 )
