@@ -861,10 +861,13 @@ def _paging_cut(all_turns: list[list[dict]], results: dict) -> tuple[int, int] |
         for entry_index, entry in enumerate(turn)
     ]
     cut = None
+    generation = None
     for index, (position, entry) in enumerate(flat):
         message = _message_id(entry)
-        if index and (message is None or message != _message_id(flat[index - 1][1])):
+        if index and (_is_prompt(entry) or (message is not None and message != generation)):
             cut = position
+        if message is not None or _is_prompt(entry):
+            generation = message
         if position[0] == len(all_turns) - 1 and _open_calls(entry, results):
             break
     return cut

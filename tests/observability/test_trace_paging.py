@@ -174,6 +174,35 @@ def quiet(monkeypatch):
     monkeypatch.setattr("hooks.context.context_usage.session_cost", lambda session: None)
 
 
+def test_repeated_streamed_generations_page_without_lost_or_doubled_observations(tmp_path, monkeypatch, quiet):
+    monkeypatch.setattr("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 500)
+    records = _claude(40, 3)
+    for record in records:
+        if record["type"] == "assistant" and not record["uuid"].startswith("e"):
+            record["message"]["id"] = record["message"]["id"].split("-")[0]
+    reference, _, _ = _run(tmp_path, monkeypatch, "reference", 10**9, records, len(records))
+    paged, sizes, path = _run(tmp_path, monkeypatch, "paged", CAP, records, 3)
+    state = agent_trace._cursor("session")
+    assert _observed(paged) == _observed(reference)
+    assert len(state["accepted"]) + state["paged"]["spans"] == len(paged.observations)
+    assert state["source"]["accepted_bytes"] == path.stat().st_size
+    assert max(sizes) < 4 * CAP
+    assert len(state["records"]) < len(records) / 4
+
+
+@pytest.mark.parametrize("chunk", [1, 3])
+def test_streamed_generation_keeps_its_accepted_identity_after_tool_results(tmp_path, monkeypatch, quiet, chunk):
+    records = _claude(1, 2)
+    records = [records[index] for index in (0, 2, 3, 5, 6)]
+    records[3]["message"]["id"] = records[1]["message"]["id"]
+    receiver, _, _ = _run(tmp_path, monkeypatch, "streamed", CAP, records, chunk)
+    state = agent_trace._cursor("session")
+    assert len(receiver.observations) == 5
+    assert len(state["accepted"]) + state.get("paged", {}).get("spans", 0) == 5
+    generation = receiver.observations[agent_trace._span_id("session", records[1]["message"]["id"])]
+    assert generation.attributes["gen_ai.usage.input_tokens"] == 11
+
+
 @pytest.mark.parametrize("session", sorted(SESSIONS))
 def test_export_continues_past_the_pending_cap_without_lost_or_doubled_observations(
     session, tmp_path, monkeypatch, quiet
