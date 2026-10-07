@@ -76,3 +76,16 @@ def test_server_still_refuses_real_hashes_and_unregistered_tokens(ledger_page, t
     )
     assert status == 400
     assert "commit hash" in reason
+
+
+def test_audit_accepts_registered_tasks_and_keeps_real_hash_findings():
+    text = "Cut from the plan of task fx-8be892c4-code: more work"
+    doc = {
+        "tasks": [{"id": "fx-8be892c4-code"}],
+        "followups": [{"id": "f1", "text": text}],
+        "phases": [{"id": "p1", "comments": [{"id": "c1", "by": "engineer", "text": text}]}],
+        "chat": [{"id": "chat", "by": "engineer", "text": text}],
+    }
+    assert core.ledger_comments.audit(doc) == []
+    doc["chat"][0]["text"] += " and commit 8be892c4"
+    assert core.ledger_comments.audit(doc) == [("chat", "chat", "engineer", ["commit hash '8be892c4'"])]

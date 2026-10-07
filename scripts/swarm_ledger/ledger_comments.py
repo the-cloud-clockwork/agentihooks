@@ -133,17 +133,17 @@ def agent_thread_op(thread, op, ctx, target, noun):
     return True
 
 
-def audit_item(where, item):
+def audit_item(where, item, task_ids=()):
     rows = []
-    if "text" in item and problems(item["text"], "item"):
-        rows.append((where, "text", "", problems(item["text"], "item")))
+    if "text" in item and problems(item["text"], "item", task_ids=task_ids):
+        rows.append((where, "text", "", problems(item["text"], "item", task_ids=task_ids)))
     counts = {}
     for entry in item.get("comments", []):
         if entry.get("deleted") or entry.get("by") == "operator":
             continue
         counts[entry["by"]] = counts.get(entry["by"], 0) + 1
-        if problems(entry["text"], "comment"):
-            rows.append((where, entry["id"], entry["by"], problems(entry["text"], "comment")))
+        if problems(entry["text"], "comment", task_ids=task_ids):
+            rows.append((where, entry["id"], entry["by"], problems(entry["text"], "comment", task_ids=task_ids)))
     rows += [(where, "-", by, [f"{n} comments, keep one status"]) for by, n in counts.items() if n > 1]
     return rows
 
@@ -151,10 +151,15 @@ def audit_item(where, item):
 def audit(doc):
     """Every agent-written text the filter would refuse today, as (where, entry id, author, reasons)."""
     rows = []
+    task_ids = tuple(task["id"] for task in doc.get("tasks", []))
     for name in ("phases", "questions", "followups"):
         for item in doc.get(name, []):
-            rows += audit_item(f"{name}/{item['id']}", item)
+            rows += audit_item(f"{name}/{item['id']}", item, task_ids)
     for entry in doc.get("chat", []):
-        if not entry.get("deleted") and entry.get("by") != "operator" and problems(entry["text"], "chat"):
-            rows.append(("chat", entry["id"], entry["by"], problems(entry["text"], "chat")))
+        if (
+            not entry.get("deleted")
+            and entry.get("by") != "operator"
+            and problems(entry["text"], "chat", task_ids=task_ids)
+        ):
+            rows.append(("chat", entry["id"], entry["by"], problems(entry["text"], "chat", task_ids=task_ids)))
     return rows
