@@ -85,7 +85,7 @@ def _move_agent(store, slug, agent, new, at):
         if occupant != new and store.names.resolve(occupant) == new:
             store.seats.occupy(agent.seat, new, at)
     for old in store.names.aliases(new):
-        for kind in ("heartbeat", "wait"):
+        for kind in ("heartbeat", "wait", "waited"):
             key = store.key(slug, kind, old)
             if store.redis.exists(key):
                 store.redis.renamenx(key, store.key(slug, kind, new))

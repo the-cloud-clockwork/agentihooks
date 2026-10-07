@@ -1,3 +1,6 @@
+import ast
+from pathlib import Path
+
 from scripts.ci_mutation.__main__ import main
 
 
@@ -44,3 +47,149 @@ def test_cli_defaults_and_success(tmp_path, monkeypatch):
     monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", discover)
     monkeypatch.setattr("scripts.ci_mutation.__main__.run_gate", gate)
     assert main() == 0
+
+
+def test_browser_preflight_skips_test_only_changes(tmp_path, monkeypatch, capsys):
+    from scripts.ci_mutation import browser
+
+    monkeypatch.chdir(tmp_path)
+
+    def discover(root, base, head):
+        assert (root, base, head) == (tmp_path, "base", "HEAD")
+        return {}
+
+    monkeypatch.setattr(browser, "discover_changes", discover)
+    monkeypatch.setattr("sys.argv", ["browser", "--base", "base"])
+    output = tmp_path / "outputs"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    assert browser.main() == 0
+    assert output.read_text() == "browser=false\n"
+    assert "Selected mutation tests: 0" in capsys.readouterr().out
+
+
+def test_browser_preflight_uses_mutation_test_selection(tmp_path, monkeypatch, capsys):
+    from scripts.ci_mutation import browser
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_page.py").write_text('import pytest\npytest.importorskip("playwright.sync_api")\n')
+    monkeypatch.chdir(tmp_path)
+    calls = []
+
+    def select(root, source):
+        calls.append((root, source))
+        return ["tests/test_page.py"]
+
+    monkeypatch.setattr(browser, "discover_changes", lambda *args: {"scripts/page.py": {1}})
+    monkeypatch.setattr(browser, "select_tests", select)
+    monkeypatch.setattr("sys.argv", ["browser", "--base", "base"])
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    assert browser.main() == 0
+    assert calls == [(tmp_path, Path("scripts/page.py"))]
+    assert "Browser required: true" in capsys.readouterr().out
+
+
+def test_browser_detection_follows_local_imports_and_parent_fixtures(tmp_path):
+    from scripts.ci_mutation.browser import needs_browser
+
+    folder = tmp_path / "tests/page"
+    folder.mkdir(parents=True)
+    test = folder / "test_page.py"
+    test.write_text("from .helper import render\n")
+    helper = folder / "helper.py"
+    helper.write_text("from tests.page import shared\n")
+    (folder / "shared.py").write_text("from playwright.sync_api import sync_playwright\n")
+    assert needs_browser(tmp_path, ["tests/page/test_page.py"]) is True
+    helper.write_text("")
+    (tmp_path / "tests/conftest.py").write_text("import playwright.async_api\n")
+    assert needs_browser(tmp_path, ["tests/page/test_page.py"]) is True
+
+
+def test_browser_detection_skips_plain_tests_and_handles_import_cycles(tmp_path):
+    from scripts.ci_mutation.browser import needs_browser
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_plain.py").write_text("from tests import helper\n")
+    (tmp_path / "tests/helper.py").write_text("import tests.test_plain\n")
+    assert needs_browser(tmp_path, ["tests/test_plain.py"]) is False
+
+
+def test_browser_detection_does_not_follow_unrelated_application_imports(tmp_path):
+    from scripts.ci_mutation.browser import needs_browser
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests/test_plain.py").write_text("from scripts import app\n")
+    (tmp_path / "tests/conftest.py").write_text("from scripts import app\n")
+    (tmp_path / "scripts/app.py").write_text("def render():\n    import playwright.sync_api\n")
+    assert needs_browser(tmp_path, ["tests/test_plain.py"]) is False
+
+
+def test_browser_preflight_defaults_and_appends_output(tmp_path, monkeypatch, capsys):
+    from scripts.ci_mutation import browser
+
+    def discover(root, base, head):
+        assert (root, base, head) == (tmp_path, "origin/dev", "HEAD")
+        return {}
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(browser, "discover_changes", discover)
+    monkeypatch.setattr("sys.argv", ["browser"])
+    output = tmp_path / "outputs"
+    output.write_text("earlier=output\n")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    assert browser.main() == 0
+    assert output.read_text() == "earlier=output\nbrowser=false\n"
+    assert capsys.readouterr().out == "Selected mutation tests: 0\nBrowser required: false\n"
+
+
+def test_browser_local_imports_resolve_parent_package_and_uppercase_module(tmp_path):
+    from scripts.ci_mutation.browser import imported_paths
+
+    folder = tmp_path / "tests/sub"
+    folder.mkdir(parents=True)
+    (tmp_path / "tests/helper.py").touch()
+    (folder / "__init__.py").touch()
+    (tmp_path / "tests/X.py").touch()
+    test = folder / "test_page.py"
+    nodes = list(ast.walk(ast.parse("from .. import helper\nfrom tests import sub\nfrom tests.X import render\n")))
+    assert imported_paths(tmp_path, test, nodes) == [
+        tmp_path / "tests/helper.py",
+        folder / "__init__.py",
+        tmp_path / "tests/X.py",
+    ]
+
+
+def test_browser_detection_checks_package_initializers_and_dynamic_calls(tmp_path):
+    from scripts.ci_mutation.browser import needs_browser
+
+    folder = tmp_path / "tests/package"
+    folder.mkdir(parents=True)
+    test = folder / "test_page.py"
+    test.write_text("")
+    initializer = folder / "__init__.py"
+    initializer.write_text("import playwright.sync_api\n")
+    assert needs_browser(tmp_path, ["tests/package/test_page.py"]) is True
+    initializer.write_text("")
+    test.write_text('print("ordinary string")\n')
+    assert needs_browser(tmp_path, ["tests/package/test_page.py"]) is False
+    test.write_text('import importlib\nimportlib.import_module("playwright")\n')
+    assert needs_browser(tmp_path, ["tests/package/test_page.py"]) is True
+
+
+def test_browser_cycles_do_not_hide_later_tests_or_revisit_modules(tmp_path, monkeypatch):
+    from scripts.ci_mutation import browser
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_page.py").write_text("import playwright.sync_api\n")
+    (tmp_path / "tests/test_cycle.py").write_text("import tests.helper\n")
+    (tmp_path / "tests/helper.py").write_text("import tests.test_cycle\n")
+    original = browser.imported_paths
+    seen = set()
+
+    def imports(root, path, nodes):
+        assert path not in seen
+        seen.add(path)
+        return original(root, path, nodes)
+
+    monkeypatch.setattr(browser, "imported_paths", imports)
+    assert browser.needs_browser(tmp_path, ["tests/test_page.py", "tests/test_cycle.py"]) is True

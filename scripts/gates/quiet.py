@@ -31,14 +31,21 @@ def written_at(slug, task_id):
 
 
 def last_signal(redis, slug, agent):
-    return max(Progress(redis, slug).read(agent.name).outcome_at, written_at(slug, agent.task), agent.started_at)
+    from scripts.swarm import idle
+
+    return max(
+        Progress(redis, slug).read(agent.name).outcome_at,
+        written_at(slug, agent.task),
+        agent.started_at,
+        idle.waited(redis, slug, agent.name),
+    )
 
 
-def checked_wait(redis, slug, name, now_ms):
+def declared_wait(redis, slug, name, now_ms):
     from scripts.swarm import idle
 
     held = idle.wait(redis, slug, name)
-    return bool(held and held.get("on") and held["until"] > now_ms)
+    return bool(held and held["until"] > now_ms and idle.named(held))
 
 
 def holding(agent, rows):
@@ -52,11 +59,11 @@ def holding(agent, rows):
 
 
 def quiet_minutes(redis, slug, agents, rows, now_ms):
-    """Minutes each worker holding its claim has gone without a progress signal; a checked wait is never quiet, and
-    an agent with no signal at all, not even a start time, is not measured."""
+    """Minutes each worker holding its claim has gone without a progress signal; a declared wait is never quiet and
+    its end restarts the clock, and an agent with no signal at all, not even a start time, is not measured."""
     found = {}
     for agent in agents:
-        if not holding(agent, rows) or checked_wait(redis, slug, agent.name, now_ms):
+        if not holding(agent, rows) or declared_wait(redis, slug, agent.name, now_ms):
             continue
         signal = last_signal(redis, slug, agent)
         if signal:
