@@ -959,6 +959,7 @@ def test_every_swarm_launch_subscribes_the_brain_overlay_its_profile_renders(
     (root / "profile.yml").write_text("allowedOverlays: [brain]\n")
     monkeypatch.setattr(select_profile.profiles, "_chain", lambda name: [(name, root), ("brain", brain)])
     monkeypatch.setattr(select_profile.profiles, "render", lambda *a: None)
+    monkeypatch.setattr(select_profile.profiles, "profile_dir", lambda name: tmp_path / "rendered" / name)
     env, _ = select_profile.prepare(profile, argv[argv.index("--agent") + 1], "", "", [], {})
     assert "brain" in env["AGENTIHOOKS_BASE_CHANNELS"].split(",")
 
