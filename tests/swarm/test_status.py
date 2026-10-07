@@ -1,12 +1,16 @@
-import fakeredis
+import pytest
 
 from scripts.swarm.status import findings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 
 def test_repeated_failed_launches_report_the_errors_without_a_proof_loop():
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
     ledger, runtime = FakeLedger([{"id": "t1", "title": "Repair launch"}]), FakeRuntime(fail=True)
@@ -24,6 +28,8 @@ def test_repeated_failed_launches_report_the_errors_without_a_proof_loop():
 
 
 def test_started_lives_still_raise_the_proof_loop_finding():
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
     for n in range(4):
