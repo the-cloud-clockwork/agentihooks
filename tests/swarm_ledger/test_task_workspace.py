@@ -7,7 +7,6 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
-import ledger_workspace  # noqa: E402
 
 from tests.swarm_ledger.test_task_kinds import SLUG, make_ledger, op  # noqa: E402
 from tests.swarm_ledger.test_task_proof_page import PLAIN, render, texts  # noqa: E402
@@ -40,11 +39,13 @@ class WorkspaceField(unittest.TestCase):
 
 class WorkspaceOnThePage(unittest.TestCase):
     def test_the_reply_carries_the_latest_lines_of_tasks_with_a_work_folder(self):
-        folder = ledger_workspace.scaffold("pg", {"id": "t1", "title": "a"})
-        (folder / "progress.md").write_text("red test seen\ngreen now\n", encoding="utf-8")
-        state = {"tasks": [{"id": "t1", "workspace": str(folder)}, {"id": "t2"}]}
-        tasks = server.with_workspaces("pg", state)["tasks"]
-        self.assertEqual(tasks[0]["workspace_tail"], {"latest_progress": "red test seen\ngreen now"})
+        from unittest.mock import patch
+
+        tail = {"latest_progress": "red test seen\ngreen now"}
+        state = {"tasks": [{"id": "t1", "workspace": "/remote/task"}, {"id": "t2"}]}
+        with patch.object(server, "workspace_tails", return_value={"t1": tail}):
+            tasks = server.with_workspaces("pg", state)["tasks"]
+        self.assertEqual(tasks[0]["workspace_tail"], tail)
         self.assertNotIn("workspace_tail", tasks[1])
         self.assertNotIn("workspace_tail", state["tasks"][0])
 
