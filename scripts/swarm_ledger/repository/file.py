@@ -23,7 +23,7 @@ def load_state(json_path, seed, core=core):
         return core.normalize(state), meta, False
     if seed is None:
         raise ValueError(f"{json_path} is missing and the HTML seed is unreadable")
-    doc = {k: v for k, v in seed.items() if k not in ("_rev", "notifications", "alerts")}
+    doc = {k: v for k, v in seed.items() if k not in ("_rev", "notifications")}
     doc["phases"] = [{k: v for k, v in phase.items() if k != "review"} for phase in doc["phases"]]
     meta = {"rev": 0, "stamps": {}, "events": [], "seeds": {"0": doc}, "seed_error": None, "updated_at": core.now_ms()}
     return doc, meta, True

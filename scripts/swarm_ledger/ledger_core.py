@@ -176,7 +176,6 @@ def normalize(doc):
     doc.setdefault("chat", [])
     doc.setdefault("priorities", [])
     doc.setdefault("notifications", [])
-    doc.setdefault("alerts", [])
     doc.setdefault("artifacts", [])
     doc.setdefault("artifact_trash", [])
     doc.setdefault("tasks", [])
