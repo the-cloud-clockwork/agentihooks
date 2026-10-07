@@ -859,8 +859,11 @@ def test_legacy_reader_prefers_registered_assigned_harness(monkeypatch, proof_ha
     assert HerdrRuntime().bindings([agent]) == {"engineer": {"pid": 22}}
 
 
-@pytest.mark.parametrize("lanes", [{"master": {"profile": "master"}}, {}])
-def test_legacy_master_relaunch_uses_its_declared_profile(ticking, lanes):
+@pytest.mark.parametrize(
+    "lanes, expected",
+    [({"master": {"profile": "master"}}, "master"), ({}, "master"), ({"master": {"profile": "qa"}}, "qa")],
+)
+def test_legacy_master_relaunch_uses_its_declared_profile(ticking, lanes, expected):
     from scripts.swarm.tick import tick
 
     store, runtime, ledger = ticking
@@ -874,7 +877,7 @@ def test_legacy_master_relaunch_uses_its_declared_profile(ticking, lanes):
     }
     tick("sw", store, ledger, runtime, 200)
     saved = runtime.masters[-1][1]["launch_assignment"]
-    assert saved["profile"] == "master"
+    assert saved["profile"] == expected
     assert saved["model"] == "opus"
     assert saved["effort"] == "high"
 

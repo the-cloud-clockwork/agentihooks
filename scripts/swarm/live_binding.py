@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts.swarm.health.findings import Finding
-from scripts.swarm.store import AgentRecord, RedisStore
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
 if TYPE_CHECKING:
     from scripts.terminate_agent import Session
@@ -105,7 +105,7 @@ def assignment(agent: AgentRecord) -> dict:
     }
 
 
-def relaunch_assignment(agent: AgentRecord, task: dict, config) -> dict:
+def relaunch_assignment(agent: AgentRecord, task: dict, config: SwarmConfig) -> dict:
     from scripts.swarm.templates import DEFAULT_PROFILES
 
     saved = {**assignment(agent), "seat": agent.seat}
