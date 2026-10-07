@@ -762,5 +762,41 @@
   "scripts/gates/intent_history.py:scripts.gates.intent_history.x_masked__mutmut_34:9c51a3907bd4aee652398441fa5330acc1ce49f6bd5c8bb3e6e36b095a603e19": {
     "reader": "Standards",
     "reason": "Uppercasing Bearer in the regex under re.I changes no matches or replacement outputs. Standards independently verified all Unicode code points and case variants."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_59:05210dc1151d48d72767e750fca5d5ea4934c893d62e604012d7f92ccbdb8fe6": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_61:3c9e34017a302701402ea9ef080bc8daa13271b523eba8df48948ca572044028": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_62:44dae3fe77dbc5217311bdd59de0f0f98aed99b698b59ac6ae5a2e6578ed04ca": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_74:fb71c1343f0fc7cbe6dba69d729a2d9c91d87e47071f76900058eb30432106f5": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_76:d0db50135453e8ce52e9d625d248dc22692275822e4cec40733dc09c450e6df0": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_78:f16360a19cea468dcde40c87e391c6943baf26f3144cf17e02252dcbca6e2aaa": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_80:aba9f12bd0411ab1d79645829ef97374ce4a1faa659598b0e4a815b06d350ae1": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_82:6fd9c6f85614e9c48e1272eca176806a4e0b1b440394d40f3fafcacd850f9373": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  },
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_83:4dce6088b0e1f8757aad3b93828b0adcd3faaa824e76f6150771a83eaa482223": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
   }
 }
