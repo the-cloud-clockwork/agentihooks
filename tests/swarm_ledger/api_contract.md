@@ -15,6 +15,7 @@ All routes retain the host check. Ledger resources authenticate the stored opera
 | Bin delete and restore | POST `/api/v1/bin/actions` | Schema checked action and slug; acknowledgment |
 | Start, pause, stop, stop now, close, reopen, set, terminate, verdict, restore decision, lift, quota refresh, Doctor start and stop | POST `/swarm/actions` | Central control schema plus existing domain validation; acknowledgment |
 | Media and artifact upload | POST `/uploads/media`, POST `/uploads/artifacts` | Schema checked length, content type and artifact name; existing binary validation; file descriptor |
+| Live changes for pages and watchers | GET `/events` with `Accept: text/event-stream` | Server sent events: snapshot, then ledger, swarm and workspaces patches and heartbeats; `Last-Event-ID` replays retained events; an unknown or expired cursor answers 410 `cursor_expired` |
 | Explicit large export and comment audit | POST `/export`, POST `/swarm/export` | Empty object request; complete ledger without seeds or receipt index, or complete swarm status |
 
 Relative routes are under `/api/v1/ledgers/{slug}`. Old routes remain available.

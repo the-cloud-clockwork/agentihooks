@@ -1,6 +1,6 @@
 import { SLUG } from "./config.js";
 import { $, age, clock, h, span } from "./dom.js";
-import { readSwarm, writeSwarm } from "./api.js";
+import { writeSwarm } from "./api.js";
 import { inScope } from "./state.js";
 import { doc } from "./sync.js";
 import { renderStats } from "./render.js";
@@ -16,22 +16,20 @@ export let pending = "";
 
 export let capDraft = {};
 
-export async function pollSwarm() {
-  try {
-    const resp = await readSwarm();
-    if (!resp.ok) throw new Error(`server answered ${resp.status}`);
-    const sw = await resp.json();
-    if (swarmReadError && !pending) $("swarm-note").textContent = "";
-    swarmReadError = false;
-    renderSwarm(sw);
-    renderChatTo(sw);
-  } catch (error) {
-    swarmReadError = true;
-    renderSwarm(swarm);
-    $("swarm-note").className = "sw-note bad";
-    $("swarm-note").textContent = `Could not read swarm status: ${error.message}. Retrying. ${swarm ? "Last observed state shown." : "State is unavailable."}`;
-    renderControls();
-  }
+export function receiveSwarm(sw) {
+  if (!sw) return swarmLost("no swarm for this ledger");
+  if (swarmReadError && !pending) $("swarm-note").textContent = "";
+  swarmReadError = false;
+  renderSwarm(sw);
+  renderChatTo(sw);
+}
+
+export function swarmLost(reason) {
+  swarmReadError = true;
+  renderSwarm(swarm);
+  $("swarm-note").className = "sw-note bad";
+  $("swarm-note").textContent = `Could not read swarm status: ${reason}. Retrying. ${swarm ? "Last observed state shown." : "State is unavailable."}`;
+  renderControls();
 }
 
 export function doctorOn(sw) {

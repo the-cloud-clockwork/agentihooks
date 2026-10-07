@@ -1,5 +1,6 @@
 import pytest
 
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events
 from tests.swarm_ledger.test_tabs import SWARM, browser, tab
 
 __all__ = ["browser", "tab"]
@@ -16,9 +17,11 @@ def test_codex_and_eng_steps_wait_for_one_apply(tab):
     def receive(route):
         if route.request.method == "PUT":
             sent.append(route.request.post_data_json)
+        if is_events(route.request.url):
+            return fulfill_events(route, swarm=SWARM)
         route.fulfill(json=SWARM)
 
-    tab.route("**/api/swarm/**", receive)
+    tab.route("**/api/**", receive)
     tab.get_by_role("tab", name="Swarm").click()
     tab.locator('[data-swarm="codex_up"]').click()
     tab.locator('[data-swarm="eng_up"]').click()
@@ -44,9 +47,11 @@ def test_codex_step_bounds(tab, share, action, disabled, expected):
     def receive(route):
         if route.request.method == "PUT":
             sent.append(route.request.post_data_json)
+        if is_events(route.request.url):
+            return fulfill_events(route, swarm=sw)
         route.fulfill(json=sw)
 
-    tab.route("**/api/swarm/**", receive)
+    tab.route("**/api/**", receive)
     tab.reload()
     tab.get_by_role("tab", name="Swarm").click()
     if share in (0, 100):

@@ -49,11 +49,16 @@ def ledger(monkeypatch):
     return start
 
 
+def file_snapshot(slug, cursor=None, headers=None):
+    yield "snapshot", {"ledger": json.loads(core.paths(slug)[1].read_text())}, "c0"
+
+
 def watch(monkeypatch, capsys, start, *flags):
     def stop(_):
         raise SystemExit
 
     monkeypatch.setattr(watch_ledger.time, "sleep", stop)
+    monkeypatch.setattr(watch_ledger, "stream", file_snapshot)
     monkeypatch.setattr(sys, "argv", ["watch_ledger.py", SLUG, "--since-rev", str(start), *flags])
     with pytest.raises(SystemExit):
         watch_ledger.main()
