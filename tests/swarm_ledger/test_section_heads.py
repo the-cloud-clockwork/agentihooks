@@ -122,6 +122,7 @@ def test_counts_follow_an_item_change(tab):
     tab.locator("#item-phases-p0 input[type=checkbox]").evaluate("(el) => el.click()")
     settle(tab)
     assert counts(tab)["phases"] == "· 1 open · 2 done"
+    tab.locator("#followups-done > summary").click()
     tab.locator("#item-followups-f1 input[type=checkbox]").evaluate("(el) => el.click()")
     settle(tab)
     assert counts(tab)["followups"] == "· 1 open"
@@ -143,16 +144,15 @@ def test_sections_toggle_sits_under_the_overview_and_flips_every_section(tab):
 
 
 def test_sections_toggle_leaves_comments_and_outline_alone(tab):
-    before = tab.evaluate(
-        """() => [...document.querySelectorAll("details[data-key], #outline details.fold")].map((d) => d.open)"""
-    )
+    probe = """() => Object.fromEntries([...document.querySelectorAll("details[data-key], #outline details.fold")]
+             .map((d) => [d.dataset.key || d.id, d.open]))"""
+    before = tab.evaluate(probe)
     tab.click("#sections-all")
     tab.click("#sections-all")
     settle(tab)
-    after = tab.evaluate(
-        """() => [...document.querySelectorAll("details[data-key], #outline details.fold")].map((d) => d.open)"""
-    )
-    assert after == before
+    after = tab.evaluate(probe)
+    assert before.items() <= after.items()
+    assert all(v is False for k, v in after.items() if k not in before)
 
 
 def test_sections_state_survives_a_reload(tab):

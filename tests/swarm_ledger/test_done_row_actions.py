@@ -1,9 +1,8 @@
-import json
 from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events, ledger_state, loaded, serve_modules, shell_html
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/done-rows"
@@ -38,19 +37,22 @@ def browser():
 def ledger(browser):
     context = browser.new_context(viewport={"width": 1600, "height": 900})
     html = shell_html()
-    served = {"doc": None}
+    served = {"doc": ledger_state(DOC)}
 
     def answer(route):
         if route.request.url == URL:
             return route.fulfill(body=html, content_type="text/html")
-        if route.request.url == API and route.request.method == "GET" and served["doc"]:
-            return route.fulfill(body=json.dumps(served["doc"]), content_type="application/json")
+        if is_events(route.request.url):
+            return fulfill_events(route, ledger=served["doc"])
         return route.abort()
 
     context.route("**/*", answer)
-    serve_modules(context, ledger_state(DOC))
+    serve_modules(context)
     page = context.new_page()
     page.goto(URL)
+    loaded(page)
+    page.click("#tasks-box > summary")
+    page.click("#tasks-done > summary")
     yield page, served
     context.close()
 

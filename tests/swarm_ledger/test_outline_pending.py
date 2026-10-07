@@ -9,7 +9,7 @@ from tests.swarm_ledger.ledger_page import fulfill_events, is_events, loaded, pa
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 TEMPLATE = SCRIPTS / "template.html"
 URL = "http://ledger.test/swarm-buildout"
-API = "http://ledger.test/api/swarm-buildout"
+API = "http://ledger.test/api/__LEDGER_SLUG__"
 
 
 def notice(nid, item, text):
@@ -53,7 +53,7 @@ def server():
 @pytest.fixture
 def tab(browser, server):
     context = browser.new_context(viewport={"width": 1600, "height": 900})
-    html = new_ledger.render(DOC, "swarm-buildout", 8765)
+    html = shell_html()
 
     def handle(route):
         request = route.request
@@ -78,6 +78,8 @@ def tab(browser, server):
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())
     page.goto(URL)
+    loaded(page)
+    page.click("#bell")
     yield page
     context.close()
 

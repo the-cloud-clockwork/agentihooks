@@ -80,9 +80,10 @@ def test_every_comment_section_shows_one_control_and_the_outline_one(tab):
 
 def test_notes_show_replies_under_the_note_and_remember_the_comments_toggle(tab):
     note = tab.locator("#item-notes-n1")
+    note.locator("details[data-key] > summary").click()
     assert note.locator(".entry-body").all_text_contents() == ["Keep replies here", COMMENT["text"]]
     assert tab.locator("#item-notes-n2 details[data-key]").count() == 1
-    assert comments(tab, "sec-notes") == {"labels": ["Show all comments"], "open": [False, False]}
+    assert comments(tab, "sec-notes") == {"labels": ["Show all comments"], "open": [True, False]}
     tab.click("#sec-notes button[data-comments]")
     settle(tab)
     assert comments(tab, "sec-notes") == {"labels": ["Hide all comments"], "open": [True, True]}

@@ -11,14 +11,12 @@ SCRIPTS = ROOT / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
-import new_ledger  # noqa: E402
 
 from tests.swarm_ledger.ledger_page import page_source  # noqa: E402
 
 LITERAL = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(|(?<![-\w])(white|black)(?![-\w])")
 ROLES = ("canvas", "surface-1", "surface-2", "overlay", "text", "muted", "dim", "rule", "edge")
 HUES = ("accent", "positive", "warn", "destructive")
-DOC = {"title": "Design", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
 
 
 def palette():
@@ -30,8 +28,18 @@ def css_of(page):
 
 
 def home_style():
-    page = server.HOME_PAGE.read_text(encoding="utf-8")
-    return re.search(r"<style>__HOME_PALETTE__(.*?)</style>", page, re.S).group(1).replace("\n", "")
+    static = core.static_assets()
+    css = static["css/home.css"].read_text(encoding="utf-8") + static["css/tooltips.css"].read_text(encoding="utf-8")
+    return css.replace("\n", "")
+
+
+def home_page_source(view):
+    page = server.index_page(view)
+    version = server.served_version()
+    for name, path in core.static_assets().items():
+        href = f'<link rel="stylesheet" href="/static/{version}/{name}">'
+        page = page.replace(href, f"<style>\n{path.read_text(encoding='utf-8')}</style>")
+    return page
 
 
 class Palette(unittest.TestCase):
@@ -56,7 +64,7 @@ class Palette(unittest.TestCase):
         self.assertEqual(value("--positive"), "#4ade80")
 
     def test_the_palette_is_the_only_place_a_colour_value_appears(self):
-        template = page_source()
+        template = page_source().replace(f"<style>\n{palette()}</style>", "")
         self.assertIsNone(LITERAL.search(template), LITERAL.search(template))
         self.assertIsNone(LITERAL.search(home_style()))
 
@@ -67,13 +75,13 @@ class Palette(unittest.TestCase):
 
 class PaletteReachesEveryPage(unittest.TestCase):
     def test_a_rendered_ledger_page_carries_the_palette(self):
-        page = new_ledger.render(new_ledger.build_doc(DOC), "design-2026-01-01", 8765)
+        page = page_source()
         self.assertIn(palette().strip(), css_of(page))
         self.assertNotIn("__LEDGER_PALETTE__", page)
 
     def test_home_and_bin_carry_the_palette(self):
         for view in ("home", "bin"):
-            self.assertIn(palette().strip(), css_of(server.index_page(view)))
+            self.assertIn(palette().strip(), css_of(home_page_source(view)))
 
     def test_a_palette_edit_changes_the_page_version(self):
         before = core.page_version()

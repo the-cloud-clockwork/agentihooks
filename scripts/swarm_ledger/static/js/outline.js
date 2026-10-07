@@ -17,7 +17,8 @@ export function revealTarget(id) {
     const section = document.querySelector(`section[data-outline="${id.split("-")[1]}"] > details.fold`);
     if (section) section.open = true;
     wanted.id = id;
-    try { render(); } finally { wanted.id = null; }
+    render();
+    setTimeout(() => { wanted.id = null; }, 0);
     el = document.getElementById(id);
   }
   if (el) reveal(el);

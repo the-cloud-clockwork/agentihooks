@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_
 
 from scripts.swarm_ledger import ledger_core as core  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
-from tests.swarm_ledger.ledger_page import page_source  # noqa: E402
+from tests.swarm_ledger.ledger_page import chromium, page_source, rendered_home  # noqa: E402
 
 LOGO_LINK = '<a class="logo-link" href="/" aria-label="HOME"><span class="logo" aria-hidden="true"></span></a>'
 BRAND = f'<header>{LOGO_LINK}<span class="brand">agentihooks</span>'
@@ -26,30 +26,23 @@ def rule(selector):
 
 
 def home_style():
-    page = server.HOME_PAGE.read_text(encoding="utf-8")
-    return re.search(r"<style>__HOME_PALETTE__(.*?)</style>", page, re.S).group(1).replace("\n", "")
-
-
-@pytest.fixture
-def rows():
-    with (
-        patch.object(server, "ledger_row", side_effect=lambda s, cells, control: f'<li class="row">{s["slug"]}</li>'),
-        patch.object(server, "home_row", side_effect=lambda s, state, now: f'<li class="row">{s["slug"]}</li>'),
-        patch.object(server, "home_cells", return_value=""),
-        patch.object(server, "bin_cells", return_value=""),
-        patch.object(server, "swarm_state", return_value=None),
-        patch.object(server.ledger_bin, "entries", return_value=[]),
-    ):
-        yield
+    static = core.static_assets()
+    css = static["css/home.css"].read_text(encoding="utf-8") + static["css/tooltips.css"].read_text(encoding="utf-8")
+    return css.replace("\n", "")
 
 
 def summaries(*slugs):
     return [{"slug": slug, "closed_at": 0} for slug in slugs]
 
 
-def test_home_reads_logo_agentihooks_home_without_a_ledger_count(rows):
-    with patch.object(server, "ledger_summaries", return_value=summaries("a", "b")):
-        page = server.index_page(now=0)
+@pytest.fixture(scope="module")
+def browser():
+    with chromium() as launched:
+        yield launched
+
+
+def test_home_reads_logo_agentihooks_home_without_a_ledger_count():
+    page = server.index_page()
     assert f'{WATERMARK}<main class="home">{BRAND}<h1>HOME</h1>{server.FOLD_ALL}</header>' in page
     assert 'class="total"' not in page
     divider = rule("h1::before")
@@ -57,11 +50,12 @@ def test_home_reads_logo_agentihooks_home_without_a_ledger_count(rows):
 
 
 @pytest.mark.parametrize(("slugs", "total"), [(("a",), "1 ledger"), (("a", "b"), "2 ledgers")])
-def test_the_bin_keeps_its_count_and_has_no_watermark(rows, slugs, total):
+def test_the_bin_keeps_its_count_and_has_no_watermark(browser, slugs, total):
     with patch.object(server, "bin_summaries", return_value=summaries(*slugs)):
-        page = server.index_page(view="bin", now=0)
-    assert f'<main class="bin">{BRAND}<h1>BIN</h1><span class="total">{total}</span></header>' in page
-    assert f'</style><main class="bin">{BRAND}' in page
+        page = rendered_home(server, browser, "bin")
+    assert f'<main class="bin">{BRAND}<h1>BIN</h1>' in page
+    assert f'<span class="total" id="total">{total}</span>' in page
+    assert WATERMARK not in page
 
 
 def test_the_watermark_is_faint_centred_half_the_viewport_and_never_takes_clicks():
@@ -77,12 +71,12 @@ def logo_links(page):
     return re.findall(r'<a [^>]*href="/"[^>]*>\s*<span class="logo" aria-hidden="true"></span>\s*</a>', page)
 
 
-def test_the_logo_links_home_on_a_rendered_ledger_page_and_the_bin(rows):
-    ledger = server.new_ledger.render(server.new_ledger.build_doc({"title": "Logo", "phases": []}), "logo", 8765)
-    with patch.object(server, "bin_summaries", return_value=summaries("a")):
-        bin_view = server.index_page(view="bin", now=0)
-    with patch.object(server, "ledger_summaries", return_value=summaries("a")):
-        home = server.index_page(now=0)
+def test_the_logo_links_home_on_a_rendered_ledger_page_and_the_bin():
+    content = {"title": "Logo", "overview": "o", "sources": [], "phases": [{"title": "p", "description": "d"}]}
+    server.repository.create("logo", content)
+    ledger = server.page_for("logo")
+    bin_view = server.index_page(view="bin")
+    home = server.index_page()
     for page in (ledger, bin_view, home):
         assert logo_links(page) == [LOGO_LINK]
         assert page.count('class="logo"') == 1

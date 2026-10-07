@@ -1,4 +1,3 @@
-import json
 import re
 import sys
 from pathlib import Path
@@ -6,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import fulfill_events, is_events, serve_modules
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events, ledger_state, serve_modules, served, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -60,27 +59,17 @@ STATUS = {
 
 
 def ledger_html():
-    html = (LEDGER / "template.html").read_text().replace("__LEDGER_DATA__", json.dumps(DOC))
-    html = html.replace("__LEDGER_PALETTE__", (LEDGER / "palette.css").read_text())
-    tips = LEDGER / "tooltips.js"
-    return html.replace("/*__LEDGER_TOOLTIPS__*/", tips.read_text() if tips.exists() else "")
+    return shell_html()
 
 
 def home_html(view):
-    row = {"slug": "s", "title": "T", "overview": "o", "size": "swarm", "open": 1, "done": 0, "updated_at": 0}
-    with (
-        patch.object(server, "ledger_summaries", return_value=[{**row, "closed_at": 0}, {**row, "closed_at": 5}]),
-        patch.object(server, "bin_summaries", return_value=[{**row, "deleted_at": 0, "days_left": 3}]),
-        patch.object(server, "swarm_state", return_value="running"),
-        patch.object(server.ledger_bin, "entries", return_value=[{}]),
-    ):
-        return server.index_page(view, now=0)
+    return server.index_page(view)
 
 
 def route(r, html):
     url = r.request.url
     if is_events(url):
-        fulfill_events(r, swarm=STATUS)
+        fulfill_events(r, ledger=ledger_state(DOC), swarm=STATUS)
     elif "/api/swarm/" in url:
         r.fulfill(json=STATUS)
     elif "/api/" in url:
@@ -147,9 +136,25 @@ def test_every_button_like_control_on_the_ledger_page_has_a_tip_of_at_most_25_wo
 
 
 @pytest.mark.parametrize("view", ["home", "bin"])
-def test_every_button_like_control_on_home_and_the_bin_has_a_tip_of_at_most_25_words(tab, view):
-    page = tab(home_html(view))
-    assert_every_control_has_a_short_tip(page, 2)
+def test_every_button_like_control_on_home_and_the_bin_has_a_tip_of_at_most_25_words(browser, view):
+    row = {"slug": "s", "title": "T", "overview": "o", "size": "swarm", "open": 1, "done": 0, "updated_at": 0}
+    with (
+        patch.object(server, "ledger_summaries", return_value=[{**row, "closed_at": 0}, {**row, "closed_at": 5}]),
+        patch.object(server, "bin_summaries", return_value=[{**row, "deleted_at": 0, "days_left": 3}]),
+        patch.object(server, "swarm_state", return_value="running"),
+        patch.object(server.ledger_bin, "entries", return_value={}),
+    ):
+        with served(server) as base:
+            context = browser.new_context(viewport={"width": 1440, "height": 900})
+            errors = []
+            page = context.new_page()
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.set_default_timeout(3000)
+            page.goto(base + ("/?view=bin" if view == "bin" else "/"))
+            page.wait_for_function("() => document.getElementById('rows').children.length > 0")
+            assert_every_control_has_a_short_tip(page, 2)
+            context.close()
+    assert errors == []
 
 
 def tip_shown(page):
@@ -200,14 +205,24 @@ def test_the_tip_hides_on_pointer_leave_click_or_scroll(tab, leave):
 
 def test_the_tip_module_holds_no_colour_and_is_served_with_both_pages():
     js = (LEDGER / "tooltips.js").read_text()
+    css = (LEDGER / "static" / "css" / "tooltips.css").read_text()
     assert not re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(", js)
-    assert re.findall(r"var\(--([\w-]+)\)", js)
-    assert "<script>/*__LEDGER_TOOLTIPS__*/</script>" in (LEDGER / "template.html").read_text()
-    assert js in home_html("home")
-    content = {"title": "T", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
-    rendered = new_ledger.render(new_ledger.build_doc(content), "tips", 8765)
-    assert f"<script>{js}</script>" in rendered
-    assert "__LEDGER_" not in rendered
+    assert not re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(", css)
+    assert re.findall(r"var\(--([\w-]+)\)", css)
+    tag = f'<script src="/static/{core.page_version()}/tooltips.js"></script>'
+    assert tag in home_html("home")
+    content = {
+        "title": "T",
+        "overview": "o",
+        "sources": [],
+        "phases": [{"title": "p", "description": "d"}],
+        "questions": [],
+        "followups": [],
+    }
+    server.repository.create("tips", content)
+    served_page = server.page_for("tips")
+    assert tag in served_page
+    assert "__LEDGER_" not in served_page
 
 
 def test_the_page_version_follows_the_tip_module(tmp_path):
@@ -221,15 +236,21 @@ def test_the_page_version_follows_the_tip_module(tmp_path):
 
 
 def test_upgrading_a_ledger_page_inlines_the_tip_module():
-    content = {"title": "T", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
+    content = {
+        "title": "T",
+        "overview": "o",
+        "sources": [],
+        "phases": [{"title": "p", "description": "d"}],
+        "questions": [],
+        "followups": [],
+    }
     html_path, json_path = ledger_core.paths("tips-upgrade")
     ledger_core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(
-        new_ledger.render(new_ledger.build_doc(content), "tips-upgrade", 8765).replace(core.TOOLTIPS.read_text(), "")
-    )
+    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), "tips-upgrade", 8765))
     json_path.unlink(missing_ok=True)
     ledger_core.sync("tips-upgrade")
     new_ledger.upgrade_page("tips-upgrade")
     page = html_path.read_text()
-    assert f"<script>{core.TOOLTIPS.read_text()}</script>" in page
     assert "__LEDGER_" not in page
+    served_page = server.page_for("tips-upgrade")
+    assert f'<script src="/static/{core.page_version()}/tooltips.js"></script>' in served_page

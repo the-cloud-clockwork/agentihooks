@@ -10,14 +10,20 @@ from unittest.mock import patch
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
-import new_ledger  # noqa: E402
 
 from scripts.swarm_ledger import ledger_core as core  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from tests.swarm_ledger.ledger_page import ORDER, page_source  # noqa: E402
 
 MODULES = core.TEMPLATE.parent / "static" / "js"
-CONTENT = {"title": "Modules", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
+CONTENT = {
+    "title": "Modules",
+    "overview": "o",
+    "sources": [],
+    "phases": [{"title": "p", "description": "d"}],
+    "questions": [],
+    "followups": [],
+}
 
 
 @pytest.fixture
@@ -46,11 +52,12 @@ def imports(name):
 
 
 def test_the_page_loads_its_script_as_a_module_under_the_page_version():
-    page = new_ledger.render(new_ledger.build_doc(CONTENT), "modules", 8765)
+    server.repository.create("modules", CONTENT)
+    page = server.page_for("modules")
     version = core.page_version()
     assert f'<script type="module" src="/static/{version}/js/main.js"></script>' in page
-    assert page.count("<script>") == 1
-    assert f"<script>{core.TOOLTIPS.read_text()}</script>" in page
+    assert f'<script src="/static/{version}/tooltips.js"></script>' in page
+    assert page.count("<script") == 2
 
 
 def test_every_module_the_page_imports_exists_and_no_module_holds_the_whole_script():
@@ -87,7 +94,7 @@ def test_the_server_serves_each_module_at_the_current_version(base):
     ],
 )
 def test_the_server_refuses_a_stale_version_or_an_unknown_file(base, route):
-    assert get(base + route.format(v=core.page_version())) == (404, "text/plain", "no such module")
+    assert get(base + route.format(v=core.page_version())) == (404, "text/plain", "no such asset")
 
 
 def test_a_module_edit_changes_the_page_version(tmp_path):

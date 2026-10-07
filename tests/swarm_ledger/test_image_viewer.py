@@ -25,6 +25,7 @@ def image_page(browser):
     html = shell_html()
     html = html.replace("__LEDGER_PALETTE__", (TEMPLATE.parent / "palette.css").read_text())
     show(tab, html, ledger=ledger_state(doc))
+    tab.locator("#item-phases-p1 details[data-key]").evaluate("el => el.open = true")
     for image in tab.locator(".attach-row img").all():
         image.evaluate(
             "el => el.src = 'data:image/png;base64,' + "
@@ -32,7 +33,6 @@ def image_page(browser):
                 base64.b64encode(png(int(image.get_attribute("width")), int(image.get_attribute("height")))).decode()
             )
         )
-    tab.locator("#item-phases-p1 details[data-key]").evaluate("el => el.open = true")
     yield tab
     tab.close()
 
@@ -77,7 +77,7 @@ def test_viewer_keeps_page_full_size_navigation_and_three_close_paths(image_page
 def test_phone_viewer_preserves_full_size_with_scroll_and_chat_opens_viewer(image_page):
     tab = image_page
     tab.set_viewport_size({"width": 390, "height": 844})
-    tab.locator("#chat-panel").evaluate("el => el.hidden = false")
+    tab.locator("#chat-fab").click()
     tab.locator("#chat-panel .thumb").first.click()
     viewer = tab.get_by_role("dialog", name="Image viewer")
     assert viewer.is_visible()

@@ -1,3 +1,4 @@
+import json
 from collections import Counter
 from pathlib import Path
 
@@ -161,18 +162,19 @@ class TestPage:
     def test_each_file_is_listed_by_name_and_type_on_an_unreachable_port(self, tmp_path):
         svg = tmp_path / "flow.svg"
         svg.write_bytes(SVG)
-        html = sanity.page_html([AUDIT, svg])
+        doc = sanity.ledger_doc([AUDIT, svg])
         rows = '[{"id": "art-0", "title": "impeccable-audit-summary.md", "file": {"id": "impeccable-audit-summary.md", '
         assert (
-            rows
+            json.dumps(doc["artifacts"])
+            == rows
             + '"type": "text/markdown"}}, {"id": "art-1", "title": "flow.svg", "file": {"id": "flow.svg", "type": "image/svg+xml"}}]'
-            in html
         )
-        assert '{"title": "Artifact sanity", "artifacts": [' in html
+        assert doc["title"] == "Artifact sanity"
+        html = sanity.page_html()
         assert '<meta name="ledger-port" content="9">' in html
-        for placeholder in ("DATA", "PALETTE", "PORT"):
-            assert f"__LEDGER_{placeholder}__" not in html
-        assert "--canvas" in html
+        assert "__LEDGER_" not in html
+        assert '<link rel="stylesheet" href="/static/000000000000/palette.css">' in html
+        assert "--canvas" in sanity.assets()["palette.css"].read_text()
 
 
 @pytest.fixture
@@ -182,13 +184,13 @@ def fixture_files():
 
 @pytest.fixture
 def narrow(tmp_path, monkeypatch):
-    template = tmp_path / "template.html"
+    served = sanity.assets()
+    styles = tmp_path / "ledger.css"
     wide = ".art-doc { max-width: 180ch; margin: 0 auto; line-height: 1.6; overflow-wrap: break-word; }"
-    source = sanity.TEMPLATE.read_text()
+    source = served["css/ledger.css"].read_text()
     assert wide in source
-    template.write_text(source.replace(wide, NARROW))
-    (tmp_path / "palette.css").write_text((sanity.TEMPLATE.parent / "palette.css").read_text())
-    monkeypatch.setattr(sanity, "TEMPLATE", template)
+    styles.write_text(source.replace(wide, NARROW))
+    monkeypatch.setattr(sanity, "assets", lambda: {**served, "css/ledger.css": styles})
 
 
 def test_real_artifacts_render_wide_and_readable_in_the_viewer(browser, fixture_files):

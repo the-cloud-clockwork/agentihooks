@@ -6,9 +6,9 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
+from urllib.parse import urlsplit
 
-TEMPLATE = Path(__file__).resolve().parent / "template.html"
-MODULES = TEMPLATE.parent / "static" / "js"
+SHELL = Path(__file__).resolve().parent / "shell.html"
 PAGE_URL = "http://127.0.0.1:9/artifact-sanity"
 VIEWPORT = {"width": 1920, "height": 1080}
 BASELINE_CH = 90
@@ -170,23 +170,41 @@ def _markdown(measure, expected):
     return failures
 
 
-def page_html(files: list[Path]) -> str:
+def ledger_doc(files: list[Path]) -> dict:
     rows = [
         {"id": f"art-{n}", "title": path.name, "file": {"id": path.name, "type": TYPES[path.suffix]}}
         for n, path in enumerate(files)
     ]
-    doc = {"title": "Artifact sanity", "artifacts": rows}
-    html = TEMPLATE.read_text().replace("__LEDGER_DATA__", json.dumps(doc))
-    html = html.replace("__LEDGER_PALETTE__", (TEMPLATE.parent / "palette.css").read_text())
-    return html.replace("__LEDGER_PORT__", "9")
+    return {"title": "Artifact sanity", "artifacts": rows, "_meta": {"rev": 1}}
 
 
-def _module(route):
-    route.fulfill(path=MODULES / route.request.url.rsplit("/", 1)[1])
+def page_html() -> str:
+    values = {"TOKEN": "", "PAGE": "0" * 12, "SLUG": "artifact-sanity", "PORT": "9", "TITLE": "Artifact sanity"}
+    return re.sub(r"__LEDGER_(TOKEN|PAGE|SLUG|PORT|TITLE)__", lambda m: values[m.group(1)], SHELL.read_text())
+
+
+def assets() -> dict[str, Path]:
+    from scripts.swarm_ledger import ledger_core
+
+    return ledger_core.static_assets()
+
+
+def _asset(route, served):
+    path = served.get(urlsplit(route.request.url).path.split("/", 3)[3])
+    if path is None:
+        return route.fulfill(status=404, body="no such asset")
+    kind = "text/css" if path.suffix == ".css" else "text/javascript"
+    return route.fulfill(body=path.read_text(), content_type=f"{kind}; charset=utf-8")
+
+
+def _events(route, doc):
+    data = json.dumps({"ledger": doc, "swarm": None})
+    route.fulfill(body=f"id: c0\nevent: snapshot\ndata: {data}\n\n", content_type="text/event-stream")
 
 
 def run(browser, files: list[Path]) -> dict[str, list[str]]:
     by_name = {path.name: path for path in files}
+    doc, served = ledger_doc(files), assets()
     tab = browser.new_page(viewport=VIEWPORT)
     try:
         tab.route(
@@ -196,10 +214,12 @@ def run(browser, files: list[Path]) -> dict[str, list[str]]:
                 content_type=TYPES[Path(route.request.url).suffix],
             ),
         )
-        html = page_html(files)
-        tab.route(PAGE_URL, lambda route: route.fulfill(body=html))
-        tab.route("**/static/*/js/*.js", _module)
+        html = page_html()
+        tab.route(PAGE_URL, lambda route: route.fulfill(body=html, content_type="text/html; charset=utf-8"))
+        tab.route("**/static/*/**", lambda route: _asset(route, served))
+        tab.route("**/api/v1/ledgers/*/events", lambda route: _events(route, doc))
         tab.goto(PAGE_URL)
+        tab.wait_for_function("() => document.getElementById('status').textContent !== 'loading'")
         return {path.name: _view(tab, path) for path in files}
     finally:
         tab.close()

@@ -42,15 +42,12 @@ class WorkspaceOnThePage(unittest.TestCase):
     def test_the_reply_carries_the_latest_lines_of_tasks_with_a_work_folder(self):
         folder = ledger_workspace.scaffold("pg", {"id": "t1", "title": "a"})
         (folder / "progress.md").write_text("red test seen\ngreen now\n", encoding="utf-8")
-        state = {"tasks": [{"id": "t1", "workspace": str(folder)}, {"id": "t2"}]}
-        tasks = server.with_workspaces("pg", state)["tasks"]
-        self.assertEqual(tasks[0]["workspace_tail"], {"latest_progress": "red test seen\ngreen now"})
-        self.assertNotIn("workspace_tail", tasks[1])
-        self.assertNotIn("workspace_tail", state["tasks"][0])
+        self.assertEqual(server.workspace_tails("pg", "t1"), {"latest_progress": "red test seen\ngreen now"})
+        self.assertEqual(server.workspace_tails("pg", "t2"), {})
 
     def test_the_proof_fold_renders_progress_and_proof(self):
         tail = {"latest_progress": "green now", "latest_proof": "run 7 passed"}
-        shown = texts(render({**PLAIN, "workspace": "/w/t1", "workspace_tail": tail})["tree"])
+        shown = texts(render({**PLAIN, "workspace": "/w/t1"}, tail)["tree"])
         for text in ("Contract and proof", "Latest progress", "green now", "Latest proof", "run 7 passed"):
             self.assertIn(text, shown)
 
