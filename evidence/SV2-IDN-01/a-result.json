@@ -1,8 +1,8 @@
 {
   "case": "T-SV2-IDN-01-A",
-  "tested_commit": "adc5491688364657155a331accfc1ddccd6b25af",
+  "tested_commit": "73b36d8279c8c69f1e654d492f973d27272cf35b",
   "evidence_class": "local isolated Git fixtures; not live rollout or CI proof",
-  "passed": 14,
+  "passed": 15,
   "tests": [
     "test_canonical_checkout_worktree_nested_and_owner_isolation[0]",
     "test_canonical_checkout_worktree_nested_and_owner_isolation[1]",
@@ -17,7 +17,8 @@
     "test_normalized_forge_host_and_case[https://github..com/first/common-unknown]",
     "test_normalized_forge_host_and_case[https://github.com:443/first/common-unknown]",
     "test_normalized_forge_host_and_case[ssh://alice@github.com/first/common-unknown]",
-    "test_metadata_schema_and_authority_boundary"
+    "test_metadata_schema_and_authority_boundary",
+    "test_git_registration_and_swarm_worktree_expand_tilde"
   ],
   "project_identity_ambiguities_total": 0
 }

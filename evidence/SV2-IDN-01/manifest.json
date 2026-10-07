@@ -1,10 +1,10 @@
 {
-  "tested_commit": "adc5491688364657155a331accfc1ddccd6b25af",
+  "tested_commit": "73b36d8279c8c69f1e654d492f973d27272cf35b",
   "inputs": {
     "tests/fixtures/swarm_v2/project-identity.json": "e8f366bad14a2c2488f6d7684ef5f8a620063c2812681b92bb8e6565ed9c21c8",
-    "hooks/context/project_identity.py": "6ed76a765de71ffdf06fd050812f3addc2edae87d0c9746630802ef760202dcd",
+    "hooks/context/project_identity.py": "6e10ef0c84532d4c9b44c7b0122f28062ab2568cbbcb90797b82d73168d7975b",
     "docs/swarm-v2/schemas/project.json": "720982bc90567045f8760496dc0e6e4dcbacb9e66d854454e1254da3bd39f86d",
-    "tests/context/test_canonical_project_identity.py": "aa9ae1a721c303e7c6572c852931455dfd018f0d782dd1470f43d22339d89e06"
+    "tests/context/test_canonical_project_identity.py": "9b3a71820f5130ddd12b14a28b8b76318392433cfb05f57d5861e6e4c49156e1"
   },
-  "junit_sha256": "70e15dc6a2a0f7040294323f6d84426c3d3346ce7cc2e1c4f9f50cc4dd161316"
+  "junit_sha256": "771ef0417ae65ba05a3ce3611a41d00cb2fb6790ea05328b0ca2f3da218b4cb6"
 }
