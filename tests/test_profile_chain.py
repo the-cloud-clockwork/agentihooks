@@ -393,6 +393,18 @@ def test_wears_reads_only_an_overlay_manifest(overlay_profiles, tmp_path):
     assert profile_chain.wears(empty) == []
 
 
+@pytest.mark.parametrize("roles", ["engineer", "5", "{engineer: true}"])
+def test_wears_refuses_a_value_that_is_not_a_list(tmp_path, roles):
+    overlay = tmp_path / "tuner"
+    overlay.mkdir()
+    (overlay / "profile.yml").write_text(f"kind: overlay\nwears: {roles}\n")
+    with pytest.raises(ValueError) as refused:
+        profile_chain.wears(overlay)
+    assert str(refused.value) == "overlay tuner wears must be a list of roles"
+    (overlay / "profile.yml").write_text(f"wears: {roles}\n")
+    assert profile_chain.wears(overlay) == []
+
+
 def test_role_is_the_package_base_role_of_the_chain(overlay_profiles, tmp_path):
     chain, _ = overlay_profiles
     assert profile_chain.role(chain) == "engineer"

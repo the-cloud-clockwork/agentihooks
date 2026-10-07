@@ -74,7 +74,12 @@ def overlays(path: Path) -> list[str]:
 def wears(path: Path) -> list[str]:
     manifest = path / "profile.yml"
     data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
-    return [str(role) for role in data.get("wears") or []] if data.get("kind") == "overlay" else []
+    if data.get("kind") != "overlay":
+        return []
+    roles = data.get("wears") or []
+    if not isinstance(roles, list):
+        raise ValueError(f"overlay {path.name} wears must be a list of roles")
+    return [str(role) for role in roles]
 
 
 def role(profile_dirs: list[tuple[str, Path]]) -> str | None:

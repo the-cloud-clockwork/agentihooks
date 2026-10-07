@@ -197,8 +197,8 @@ def _channels(channels: str, dirs: list[tuple[str, Path]]) -> str:
     return ",".join(names)
 
 
-def channels(name: str, overlays: Sequence[str] = ()) -> str:
-    dirs = _chain(name, overlays)
+def channels(name: str) -> str:
+    dirs = _chain(name)
     return _channels(_settings("claude", _bundle(), dirs)["env"].get(CHANNELS, ""), dirs)
 
 

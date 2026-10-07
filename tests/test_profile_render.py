@@ -2038,7 +2038,6 @@ def test_each_overlay_set_renders_its_own_home(world, overlays):
     assert json.loads((codex / render.STAMP).read_text())["render"]["overlays"] == ["ov-a"]
     assert render.render_codex("rb-eng", overlays=["ov-a"]) is None
     assert render.render("codex", "rb-eng", overlays=["ov-a"]) is None
-    assert render.channels("rb-eng", ["ov-a"]) == ""
 
 
 def test_init_and_rule_refresh_rerender_an_overlay_home_with_its_overlays(world, overlays, monkeypatch, capsys):
