@@ -1153,6 +1153,22 @@ def test_stamp_ignores_operator_plugins(world, target):
     assert render.render(target, "rb-role") is None
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_stamp_redoes_render_when_agentihooks_base_settings_change(world, target, tmp_path, monkeypatch):
+    from scripts.profiles import render
+
+    install = world["install"]
+    profiles = tmp_path / "agentihooks-profiles"
+    shutil.copytree(install.PROFILES_DIR / "_base", profiles / "_base")
+    monkeypatch.setattr(install, "PROFILES_DIR", profiles)
+    assert render.render(target, "rb-role") is not None
+    assert render.render(target, "rb-role") is None
+
+    base = profiles / "_base" / install._NATIVE_BASE_NAME[target]
+    base.write_text(base.read_text() + "\n")
+    assert render.render(target, "rb-role") is not None
+
+
 def test_stamp_names_the_chain_role_defaults(world, monkeypatch):
     from scripts.profiles import plugins, render
 
@@ -1207,8 +1223,15 @@ def test_stamp_names_bundle_commit_and_chain(world):
 
     head = _git(world["bundle"], "rev-parse", "HEAD").strip()
     chain = ["rb-base", "rb-kit", "rb-role"]
-    assert render.stamp("rb-role") == {"bundle_commit": head, "chain": chain, "plugins": {}, "corrections": ""}
-    assert render._stamp(None, []) == {"bundle_commit": "", "chain": [], "plugins": {}, "corrections": ""}
+    base = render._base_digest()
+    assert render.stamp("rb-role") == {
+        "bundle_commit": head,
+        "base": base,
+        "chain": chain,
+        "plugins": {},
+        "corrections": "",
+    }
+    assert render._stamp(None, []) == {"bundle_commit": "", "base": base, "chain": [], "plugins": {}, "corrections": ""}
     assert render._roots(None, [("rb-role", world["role"])]) == [world["role"]]
 
 

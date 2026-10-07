@@ -173,6 +173,10 @@ operator home:
 
 Codex keys hook trust by the hooks file path and a content hash; the hash does
 not depend on the path (codex-cli 0.160.0, live probe), so rekeyed trust holds.
+The key also carries each hook's position (`hooks.json:session_start:0:0`), so a
+moved group loses its trust and Codex stops at the hooks review screen before its
+first turn. `init` writes the agentihooks group first in every event; tools that
+append their own group, such as herdr, keep the positions the operator trusted.
 A command reaches Codex as a hardlinked `SKILL.md`: codex-cli 0.160.0 skips a
 symlinked `SKILL.md` and refuses one without `---` frontmatter (live probe). The old `~/.codex/NAME.config.toml` files
 are removed when their profile renders.

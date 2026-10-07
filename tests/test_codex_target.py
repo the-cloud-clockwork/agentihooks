@@ -218,6 +218,21 @@ class TestHooksJson:
         ]
         assert len(own) == 1
 
+    @pytest.mark.parametrize("ours_first", [True, False])
+    def test_reinstall_keeps_own_group_first_so_codex_trust_positions_hold(self, adapter, ours_first):
+        """Codex keys hook trust by `hooks.json:<event>:<group>:<hook>`; moving a group voids its approval."""
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        ours = {"hooks": [{"type": "command", "command": str(home / "agentihooks-hook.sh")}]}
+        herdr = {"hooks": [{"type": "command", "command": "bash herdr-agent-state.sh session", "timeout": 10}]}
+        groups = [ours, herdr] if ours_first else [herdr, ours]
+        (home / "hooks.json").write_text(json.dumps({"hooks": {"SessionStart": groups}}))
+        adapter.write_settings({})
+        commands = [
+            g["hooks"][0]["command"] for g in json.loads((home / "hooks.json").read_text())["hooks"]["SessionStart"]
+        ]
+        assert commands == [str(home / "agentihooks-hook.sh"), "bash herdr-agent-state.sh session"]
+
     def test_disabled_foreign_hook_with_wrapper_suffix_preserved(self, adapter):
         """A substring match would misclassify `<wrapper>.disabled-by-operator` as ours."""
         home = codex_home()
