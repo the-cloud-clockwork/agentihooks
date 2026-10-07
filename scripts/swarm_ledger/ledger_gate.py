@@ -22,6 +22,7 @@ WRITE_COMMANDS = (
     "retext",
     "task",
     "relay",
+    "answer",
 )
 WATCH_STALE_SECONDS = 20
 
