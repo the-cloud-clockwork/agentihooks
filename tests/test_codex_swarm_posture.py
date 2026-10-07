@@ -76,3 +76,35 @@ def test_a_scratch_render_refuses_a_linked_bundle_whose_folder_is_gone(world, tm
         f"ERROR: linked bundle {gone} is missing; relink it with agentihooks bundle link <path> before rendering\n"
     )
     assert not out.exists()
+
+
+def test_the_bundle_path_variable_stands_in_for_a_stale_link(world, tmp_path, monkeypatch):
+    from scripts.profiles import render
+
+    world["install"]._save_state({"bundle": {"path": str(tmp_path / "gone")}})
+    monkeypatch.setenv("AGENTIHOOKS_BUNDLE_PATH", str(world["bundle"]))
+
+    out = render.render_codex("engineer")
+
+    assert render.stamp("engineer")["bundle_commit"] == render._stamp(world["bundle"], [])["bundle_commit"] != ""
+    assert _posture(out) == ("never", "danger-full-access")
+
+
+def test_refresh_rules_names_a_missing_linked_bundle_instead_of_a_traceback(world, tmp_path, monkeypatch, capsys):
+    from argparse import Namespace
+
+    from scripts.profiles import render
+
+    install = world["install"]
+    home = render.render_claude("engineer")
+    gone = tmp_path / "gone"
+    install._save_state({"bundle": {"path": str(gone)}})
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+
+    with pytest.raises(SystemExit) as caught:
+        install._cmd_refresh_rules(Namespace(profile="engineer", clear=False, dry_run=False))
+
+    assert caught.value.code == 1
+    assert capsys.readouterr().out.endswith(
+        f"[ERROR] linked bundle {gone} is missing; relink it with agentihooks bundle link <path> before rendering\n"
+    )

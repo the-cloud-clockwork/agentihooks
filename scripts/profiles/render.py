@@ -70,12 +70,13 @@ def _chain(name: str) -> list[tuple[str, Path]]:
 
 def _bundle() -> Path | None:
     _i = _install_module()
+    bundle = _i._get_bundle_path()
     linked = (_i._load_state().get("bundle") or {}).get("path")
-    if linked and not Path(linked).is_dir():
+    if bundle is None and linked:
         raise ValueError(
             f"linked bundle {linked} is missing; relink it with agentihooks bundle link <path> before rendering"
         )
-    return _i._get_bundle_path()
+    return bundle
 
 
 def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:

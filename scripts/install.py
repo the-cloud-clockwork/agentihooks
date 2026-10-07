@@ -5973,7 +5973,11 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
         print(f"[ERROR] No rules found at {rules_dir} / {claude_md} / {claude_local_md}. Is agentihooks installed?")
         sys.exit(1)
 
-    payload = refresh_rules(rules_dir, claude_md, claude_local_md, args.dry_run)
+    try:
+        payload = refresh_rules(rules_dir, claude_md, claude_local_md, args.dry_run)
+    except ValueError as exc:
+        print(f"[ERROR] {exc}")
+        sys.exit(1)
 
     if args.dry_run:
         import hashlib as _hash
