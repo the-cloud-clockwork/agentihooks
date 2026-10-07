@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from scripts.handoff import transfers
 from scripts.inbox.seats import seat_address
-from scripts.swarm import affinity, effort_range, master_start, model_pick
+from scripts.swarm import affinity, effort_range, launch_check, master_start, model_pick
 from scripts.swarm.resume import blocker
 from scripts.swarm.snapshot import ledger_path
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
@@ -166,6 +166,7 @@ def _new(store, slug, runtime, at):
     record = placed_record(record, placed)
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))
+    launch_check.begin(store, slug, record, at)
     if reported:
         store.redis.delete(store.key(slug, "master-start"))
         store.clear_handoff(slug, MASTER)

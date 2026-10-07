@@ -6,7 +6,7 @@ import pytest
 
 from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
-from scripts.swarm import affinity, master_launch, master_start, runtime
+from scripts.swarm import affinity, launch_check, master_launch, master_start, runtime
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm.tick import Placed, SpawnError
@@ -586,6 +586,7 @@ def test_a_new_master_is_named_seated_and_primed_at_launch_time(up):
     assert rt.spawn_states == ["starting"] and rt.configs == ["sw"]
     assert masters(store)[0].started_at == AT
     assert store.redis.hget(store.key("sw", "launch-assignments"), MASTER) is None
+    assert launch_check.pending(store, "sw") == {name: {"task": MASTER, "at": AT, "relaunch": True}}
 
 
 def test_an_unreported_new_master_is_watched_from_launch_time(up, monkeypatch):
