@@ -62,7 +62,7 @@ def status_line(state) -> str:
     return f"promoted  {state['promoted']}  restoring the master: {state['failure']}"
 
 
-def run(slug, config, store, ledger, runtime, now_ms, launch):
+def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
     """launch runs the tick's own master launch and returns its actions."""
     state, minutes = read(store, slug), down_minutes(os.environ)
     forcing = bool(state) and config.state != "stopping" and _due(state, now_ms, minutes)
