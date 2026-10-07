@@ -734,5 +734,17 @@
   "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁread_snapshot__mutmut_6:4cf49a8e028eef0200c330b480f3e0598383a25882b4167acf0cf88fcc4f6f48": {
     "reader": "Standards",
     "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
+  },
+  "scripts/inbox/addresses.py:scripts.inbox.addresses.x_settle_unresolved__mutmut_6:3f6c79fa333f7b5e2d7bb17a56f8ba534cb5c9702c13ab9d8cbc4ebdf1a8797d": {
+    "reader": "Standards",
+    "reason": "The sole production caller passes InboxStore.pending(), sorted ascending by (created_at, sequence, id). Once an item is younger than the fixed window, every subsequent item is younger and performs no withdrawal or action append. Break and continue therefore process the same eligible items. Sorted creation-time sequences through length six were exhaustively compared with identical results."
+  },
+  "scripts/inbox/addresses.py:scripts.inbox.addresses.x_settle_unresolved__mutmut_14:39843caea8de3ffa50c93e4f6e088ec5a6454ebcd5c5e8d54bf92e794e6b27a3": {
+    "reader": "Standards",
+    "reason": "An absent name yields an empty string originally and None in the mutant. Both are removed by the comprehension's if n filter; present values and session identifiers are identical. Missing, empty, None, and present-name cases were compared with identical live sets."
+  },
+  "scripts/inbox/addresses.py:scripts.inbox.addresses.x_settle_unresolved__mutmut_16:260f69de5c9a7e375f6eb322edbe6d4bff23b9fe6bbdfa168d273b6d6fbe82cf": {
+    "reader": "Standards",
+    "reason": "Omitting dict.get's default produces None for an absent name instead of an empty string. Both are removed by if n; present values and session identifiers are identical. Missing, empty, None, and present-name cases were compared with identical live sets."
   }
 }
