@@ -19,7 +19,14 @@ IDENTITY = "scripts/ci_mutation/identity.py"
 
 def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int | None:
     with log.open("w") as stream:
-        process = subprocess.Popen(command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            stdout=stream,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
         try:
             return process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
