@@ -92,7 +92,8 @@ def _resolved(gated, checks, results, running):
 
 def declares_gate(tree):
     entries = ((tree or {}).get("object") or {}).get("entries") or []
-    return any(GATE_JOB.search((entry.get("object") or {}).get("text") or "") for entry in entries)
+    texts = [(entry.get("object") or {}).get("text") for entry in entries]
+    return any(GATE_JOB.search(text) for text in texts if text)
 
 
 def view(url, run=subprocess.run):

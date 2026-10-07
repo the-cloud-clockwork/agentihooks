@@ -652,6 +652,7 @@ def test_a_checks_wait_stays_held_while_the_new_heads_run_is_queued(tick):
 
 
 GATE_WORKFLOW = "jobs:\n  gate-required:\n    name: Gate — Required\n    needs: [unit]\n"
+UNIT_PASSED = SKIPPED_ONLY + [{"name": "unit", "conclusion": "SUCCESS"}]
 
 
 def workflows(*texts):
@@ -681,7 +682,7 @@ def gated_probe(rollup, suites, tree):
     ],
 )
 def test_the_probe_reads_a_declared_gate_from_the_head_workflows(text):
-    assert gated_probe(SKIPPED_ONLY, [], workflows("name: Docs\n", text)).resolved is False
+    assert gated_probe(UNIT_PASSED, [], workflows("name: Docs\n", text)).resolved is False
 
 
 @pytest.mark.parametrize(
@@ -701,7 +702,7 @@ def test_the_probe_reads_a_declared_gate_from_the_head_workflows(text):
     ],
 )
 def test_the_probe_without_a_declared_gate_resolves_on_every_check(tree):
-    pull = gated_probe(SKIPPED_ONLY + [{"name": "unit", "conclusion": "SUCCESS"}], [], tree)
+    pull = gated_probe(UNIT_PASSED, [], tree)
     assert pull.resolved is True
     assert pull.red is False
 
@@ -713,7 +714,7 @@ def test_the_probe_reads_the_gate_from_the_last_commit():
         return {
             "commit": {
                 "committedDate": "2026-10-07T17:00:00Z",
-                "statusCheckRollup": {"contexts": {"nodes": SKIPPED_ONLY, "pageInfo": {"hasNextPage": False}}},
+                "statusCheckRollup": {"contexts": {"nodes": UNIT_PASSED, "pageInfo": {"hasNextPage": False}}},
                 "checkSuites": NO_SUITES,
                 "file": tree,
             }
@@ -728,9 +729,9 @@ def test_the_probe_reads_the_gate_from_the_last_commit():
 @pytest.mark.parametrize(
     ("rollup", "outcome"),
     [
-        (SKIPPED_ONLY, []),
-        (SKIPPED_ONLY + [{"name": "Gate — Required", "conclusion": "SUCCESS"}], [f"checks on {URL}, now green"]),
-        (SKIPPED_ONLY + [{"name": "Gate — Required", "conclusion": "FAILURE"}], [f"checks on {URL}, now red"]),
+        (UNIT_PASSED, []),
+        (UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "SUCCESS"}], [f"checks on {URL}, now green"]),
+        (UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "FAILURE"}], [f"checks on {URL}, now red"]),
     ],
 )
 def test_a_gated_checks_wait_ends_only_on_its_gate(tick, rollup, outcome):
