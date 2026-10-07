@@ -1041,3 +1041,129 @@ def test_complete_metadata_waits_for_an_accepted_observation(export, tmp_path):
     assert state["source"]["accepted_bytes"] == 0
     assert not state.get("accepted_records")
     assert state["records"]
+
+
+@pytest.mark.parametrize(
+    "acknowledgement",
+    [
+        None,
+        [],
+        {"unknown": True},
+        {"error": "controlled"},
+        {"errors": []},
+        {"jobId": ""},
+        {"id": "job"},
+        {"id": "job", "name": "trace", "queueQualifiedName": "queue", "data": None},
+    ],
+)
+def test_unknown_json_acknowledgement_is_retryable(acknowledgement):
+    assert agent_trace._json_acknowledged(acknowledgement) is False
+
+
+def test_deployed_queue_acknowledgement_is_accepted():
+    receipt = {"id": "job", "name": "trace", "queueQualifiedName": "queue", "data": {}}
+    assert agent_trace._json_acknowledged(receipt) is True
+    for key in receipt:
+        missing = {k: v for k, v in receipt.items() if k != key}
+        assert agent_trace._json_acknowledged(missing) is False
+    assert agent_trace._json_acknowledged({**receipt, "error": "controlled"}) is False
+
+
+def test_legacy_source_bootstrap_carries_original_record_positions(export, transcript):
+    path, records = transcript
+    state = agent_trace._progress("session")
+    state["legacy_turns"] = 1
+    agent_trace._stage_source(state, str(path))
+    for index, record in enumerate(records[:-1]):
+        from hooks.observability.transcript import record_id
+
+        saved = state["records"][record_id(record)]
+        expected = str(index) if record["type"] == "response_item" else record_id(record)
+        assert saved["_source_id"] == expected
+
+
+def test_session_spans_ignore_unsupported_non_mapping_blocks():
+    stamp = "2026-10-07T10:00:00Z"
+    entries = [
+        {"type": "user", "uuid": "prompt", "timestamp": stamp, "message": {"content": "probe"}},
+        {
+            "type": "assistant",
+            "uuid": "response",
+            "timestamp": stamp,
+            "message": {"id": "generation", "content": [None]},
+        },
+    ]
+    spans = agent_trace.session_spans(entries, agent_trace.Identity("session"))
+    assert [s.attributes["langfuse.observation.type"] for s in spans] == ["agent", "span", "generation"]
+
+
+def test_legacy_overflow_keeps_previous_acceptance_and_reports_only_overflow(export, transcript, monkeypatch, capsys):
+    path, _ = transcript
+    cursor = agent_trace._cursor_path("session")
+    cursor.parent.mkdir()
+    cursor.write_text('{"turns":1}')
+    state = agent_trace._progress("session")
+    agent_trace._stage_source(state, str(path))
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", agent_trace._pending_bytes(state, state["records"], []) + 1)
+    flush(path)
+    result = agent_trace._cursor("session")
+    assert result["overflow"] and result["accepted"] and not result["pending"]
+    assert result["accepted_records"] == {} and result["source"]["accepted_bytes"] == 0
+    assert result["turns"] == 0
+    assert "agent_trace export failed" not in capsys.readouterr().err
+    assert not export.calls
+
+
+def test_invalid_json_text_uses_strict_redaction_with_operator_mode_off(monkeypatch):
+    from hooks.observability import transcript as source
+
+    monkeypatch.setattr("hooks.config.SECRETS_MODE", "off")
+    planted = "sk_" + "live_" + "Q7" * 18
+    assert source.mask_value("[invalid " + planted) == "[invalid [REDACTED:stripe_key]"
+
+
+def test_masked_json_retains_unicode_characters():
+    from hooks.observability import transcript as source
+
+    assert (
+        source.mask_value('{"password":12345678,"label":"ñ"}')
+        == '{"password": "[REDACTED:generic_secret]", "label": "ñ"}'
+    )
+
+
+def test_nested_mapping_keys_are_strictly_masked_and_keep_child_context(monkeypatch):
+    from hooks.observability import transcript as source
+
+    monkeypatch.setattr("hooks.config.SECRETS_MODE", "off")
+    planted = "sk_" + "live_" + "Q7" * 18
+    assert source.mask_value({"ordinary": {planted: "literal"}}) == {"ordinary": {"[REDACTED:stripe_key]": "literal"}}
+    assert source.mask_value({planted: {"password": 12345678}}) == {
+        "[REDACTED:stripe_key]": {"password": "[REDACTED:generic_secret]"}
+    }
+    assert source.mask_value({"[REDACTED:generic_secret]": {"password": 12345678}}) == {
+        "[REDACTED:generic_secret]": {"password": "[REDACTED:generic_secret]"}
+    }
+
+
+def test_short_unicode_literal_obeys_existing_secret_policy():
+    from hooks.observability import transcript as source
+
+    assert source.mask_value({"password": "ññ"}) == {"password": "ññ"}
+
+
+@pytest.mark.parametrize(
+    "acknowledgement",
+    [
+        {"jobId": 1},
+        {"jobId": True},
+        {"partialSuccess": None},
+        {"partialSuccess": {"rejectedSpans": 0.5}},
+        {"partialSuccess": {"rejectedSpans": False}},
+        {"partialSuccess": {"rejectedSpans": "unknown"}},
+        {"partialSuccess": {"rejectedSpans": -1}},
+        {"partialSuccess": {"rejectedSpans": "00"}},
+        {"id": 1, "name": "trace", "queueQualifiedName": "queue", "data": {}},
+    ],
+)
+def test_malformed_typed_acknowledgements_are_retryable(acknowledgement):
+    assert agent_trace._json_acknowledged(acknowledgement) is False

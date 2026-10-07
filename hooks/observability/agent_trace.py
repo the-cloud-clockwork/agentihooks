@@ -650,9 +650,27 @@ def _batch_accepted(exporter, batch: list[SpanSpec], trace: int) -> bool:
     if "application/x-protobuf" in response.headers.get("Content-Type", ""):
         acknowledgement = ExportTraceServiceResponse.FromString(response.content)
         return acknowledgement.partial_success.rejected_spans == 0
-    acknowledgement = response.json()
-    partial = acknowledgement.get("partialSuccess", acknowledgement.get("partial_success", {}))
-    return int(partial.get("rejectedSpans", partial.get("rejected_spans", 0))) == 0
+    return _json_acknowledged(response.json())
+
+
+def _json_acknowledged(acknowledgement: object) -> bool:
+    if not isinstance(acknowledgement, dict) or "error" in acknowledgement or "errors" in acknowledgement:
+        return False
+    if not acknowledgement:
+        return True
+    if "partialSuccess" in acknowledgement or "partial_success" in acknowledgement:
+        partial = acknowledgement.get("partialSuccess", acknowledgement.get("partial_success", {}))
+        if not isinstance(partial, dict):
+            return False
+        rejected = partial.get("rejectedSpans", partial.get("rejected_spans", 0))
+        return not isinstance(rejected, bool) and isinstance(rejected, (int, str)) and rejected in (0, "0")
+    if "jobId" in acknowledgement:
+        job_id = acknowledgement["jobId"]
+        return isinstance(job_id, str) and bool(job_id)
+    return all(
+        isinstance(acknowledgement.get(key), str) and acknowledgement[key]
+        for key in ("id", "name", "queueQualifiedName")
+    ) and isinstance(acknowledgement.get("data"), dict)
 
 
 def _send_pending(session_id: str, state: dict, exporter) -> None:
