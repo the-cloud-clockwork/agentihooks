@@ -141,6 +141,13 @@ def test_a_task_without_branch_or_park_fields_passes():
     ledger_tasks.check_task({"id": "t1", "title": "a", "lane": "eng", "kind": "code"})
 
 
+@pytest.mark.parametrize("fields", [{"depends_on": ["t9"]}, {"depends_on": ["t0"], "parked_on": ["t9"]}])
+def test_depends_on_still_names_only_tasks_on_the_ledger(fields):
+    doc = stacked_ledger()
+    applied, ctx = update(doc, fields, [])
+    assert applied is False and "depends_on" not in doc["tasks"][1] and ctx.dirty is False
+
+
 def test_parked_on_names_only_tasks_on_the_ledger():
     doc = stacked_ledger()
     applied, ctx = update(doc, {"parked_on": ["t9"]}, [])

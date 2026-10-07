@@ -1069,6 +1069,19 @@ def test_a_checkout_on_no_branch_is_refused(answer):
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("failure", [subprocess.TimeoutExpired(["git"], 20), FileNotFoundError("git")])
+@pytest.mark.parametrize("step", ["branch", "ls-remote"])
+def test_a_git_call_that_cannot_run_is_a_clean_refusal(failure, step):
+    def fake(argv, **kwargs):
+        if argv[1] == step:
+            raise failure
+        return subprocess.CompletedProcess(argv, 0, "engineer-a1b2c3-0001\n", "")
+
+    with pytest.raises(SwarmError) as refused:
+        cli.worktree_branch(run=fake)
+    assert str(refused.value) == f"git {step} could not run: {failure}"
+
+
 def test_the_pull_request_head_branch_is_read_from_github():
     calls = []
 
@@ -1100,8 +1113,13 @@ def test_swarm_branch_records_the_worktree_branch_on_the_agent_task(env, monkeyp
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setattr(cli, "worktree_branch", lambda: "engineer-a1b2c3-0001")
+    writes, update = [], ledger.update_task
+    ledger.update_task = lambda slug, task, fields, by="swarm": (
+        writes.append((task, fields, by)) or update(slug, task, fields)
+    )
     capsys.readouterr()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "branch") == 0
+    assert writes == [("t1", {"branch": "engineer-a1b2c3-0001"}, "engineer@a1b2c3-0001")]
     assert ledger.rows["t1"]["branch"] == "engineer-a1b2c3-0001"
     assert json.loads(capsys.readouterr().out) == {"task": "t1", "branch": "engineer-a1b2c3-0001"}
 

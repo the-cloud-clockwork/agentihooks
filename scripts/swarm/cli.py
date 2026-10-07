@@ -671,15 +671,19 @@ def cmd_issue(store, args):
     print(json.dumps({"task": agent.task, "issue_url": args.url}))
 
 
+def _git(run, *args):
+    try:
+        return run(["git", *args], capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SwarmError(f"git {args[0]} could not run: {exc}") from exc
+
+
 def worktree_branch(run=subprocess.run):
-    current = run(["git", "branch", "--show-current"], capture_output=True, text=True, timeout=20)
+    current = _git(run, "branch", "--show-current")
     branch = current.stdout.strip() if current.returncode == 0 else ""
     if not branch:
         raise SwarmError("swarm branch runs in a worktree on a branch; this checkout is on none")
-    remote = run(
-        ["git", "ls-remote", "--exit-code", "--heads", "origin", branch], capture_output=True, text=True, timeout=20
-    )
-    if remote.returncode != 0:
+    if _git(run, "ls-remote", "--exit-code", "--heads", "origin", branch).returncode != 0:
         raise SwarmError(f"branch {branch} is not on origin; push it first with git push -u origin {branch}")
     return branch
 
