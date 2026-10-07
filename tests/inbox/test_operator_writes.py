@@ -141,14 +141,34 @@ def test_a_chat_line_to_the_swarm_is_one_item_for_every_live_agent_with_its_imag
     assert pending(inbox, f"eng-2@{SLUG}") == []
 
 
-def test_an_engineers_item_for_an_operator_chat_line_carries_the_answer_rule(swarm):
+def test_a_chat_line_to_the_swarm_is_one_work_item_for_the_master_and_information_for_the_rest(swarm):
     _, inbox = swarm
     relay(swarm, write(5, "chat", kind="message added", text="@swarm can anyone reply"))
-    [(_, text, _)] = pending(inbox, ENG.seat)
-    assert text.endswith(operator_mail.ANSWER_RULE.format(master=MASTER_SEAT))
-    [(_, boss_text, _)] = pending(inbox, MASTER_SEAT)
-    assert boss_text.endswith(operator_mail.MASTER_RULE)
-    assert MASTER_SEAT not in boss_text
+    items = {a.seat: inbox.pending_items(a.seat) for a in (ENG, CI, BOSS)}
+    work = [(seat, item) for seat, got in items.items() for item in got if not item.fyi]
+    assert [seat for seat, _ in work] == [MASTER_SEAT]
+    assert work[0][1].text.endswith(operator_mail.MASTER_RULE)
+    for seat in (ENG.seat, CI.seat):
+        [item] = items[seat]
+        assert item.fyi
+        assert item.text.endswith(operator_mail.INFO_RULE.format(master=MASTER_SEAT))
+
+
+def test_a_note_to_the_swarm_is_read_from_its_note_text_and_is_the_masters_to_answer(swarm):
+    _, inbox = swarm
+    relay(swarm, write(5, "notes/n1", kind="note added", text="body only", note_text="@swarm read the note"))
+    [eng_item] = inbox.pending_items(ENG.seat)
+    [boss_item] = inbox.pending_items(MASTER_SEAT)
+    assert eng_item.fyi
+    assert not boss_item.fyi
+
+
+def test_an_engineers_item_for_an_operator_chat_line_to_it_carries_the_answer_rule(swarm):
+    _, inbox = swarm
+    relay(swarm, write(5, "chat", kind="message added", text="@sw-eng-1 can you reply"))
+    [item] = inbox.pending_items(ENG.seat)
+    assert not item.fyi
+    assert item.text.endswith(operator_mail.ANSWER_RULE.format(master=MASTER_SEAT))
 
 
 def test_an_operator_write_that_is_not_chat_carries_no_answer_rule(swarm):

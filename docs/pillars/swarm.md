@@ -334,7 +334,9 @@ Every operator write on the page reaches the inbox the moment the ledger server 
 an answer, a note, a check or uncheck, a chat line. A write on a task goes to the agent that claimed it, a chat
 line to its addressee, everything else to the master's seat; an addressee that is gone falls back to the master.
 A chat line sent To swarm (`@swarm`) is one item for every live agent, master included, with the same text and
-images; the page shows it once, marked as sent to the whole swarm.
+images; the page shows it once, marked as sent to the whole swarm. Only the master's item is work it must answer;
+every other agent's copy is information only and asks for no reply. With no live master the item waits at the
+master seat for the next one, and the tick tells the page chat that the master is down.
 A stopped swarm whose master seat holds a pending item is paused, so the tick starts its master and no engineer.
 The ledger hook, the ledger watch and the inbox share one seen mark per agent and write, so each write reaches each
 agent once, through whichever path shows it first.
