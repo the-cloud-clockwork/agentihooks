@@ -1167,3 +1167,76 @@ def test_short_unicode_literal_obeys_existing_secret_policy():
 )
 def test_malformed_typed_acknowledgements_are_retryable(acknowledgement):
     assert agent_trace._json_acknowledged(acknowledgement) is False
+
+
+def test_codex_native_input_text_tool_result_is_exported(export, transcript):
+    path, records = transcript
+    if records[0]["type"] != "session_meta":
+        pytest.skip("native input text tool results are Codex specific")
+    records[-1]["payload"]["output"] = [{"type": "input_text", "text": "native output"}]
+    path.write_text("".join(json.dumps(r) + "\n" for r in records))
+    flush(path)
+    tool = export.observations[agent_trace._span_id("session", "tool")]
+    assert tool.attributes["langfuse.observation.output"] == "native output"
+
+
+@pytest.mark.parametrize(
+    "acknowledgement",
+    [
+        {"partial_success": {}},
+        {"partialSuccess": {}},
+        {"partial_success": {"rejected_spans": 0}},
+        {"partial_success": {"rejected_spans": "0"}},
+    ],
+)
+def test_zero_and_default_partial_acknowledgements_are_accepted(acknowledgement):
+    assert agent_trace._json_acknowledged(acknowledgement) is True
+
+
+def test_error_list_overrides_an_otherwise_valid_receipt():
+    receipt = {"id": "job", "name": "trace", "queueQualifiedName": "queue", "data": {}, "errors": []}
+    assert agent_trace._json_acknowledged(receipt) is False
+
+
+def test_native_record_identity_uses_versioned_canonical_field_names():
+    import hashlib
+
+    from hooks.observability import transcript as source
+
+    record = {"type": "response_item", "payload": {"type": "function_call", "id": "native"}}
+    expected = hashlib.sha256('{"id":"native","kind":"function_call","type":"response_item"}'.encode()).hexdigest()
+    assert source.record_id(record) == expected
+    assert source.record_id({"type": "response_item"}) == hashlib.sha256(b'{"type":"response_item"}').hexdigest()
+
+
+def test_preparation_reports_the_exact_pending_byte_count(export, transcript, monkeypatch):
+    path, _ = transcript
+    state = agent_trace._progress("session")
+    agent_trace._stage_source(state, str(path))
+    agent_trace._prepare_pending("session", state, agent_trace.Identity("session"))
+    expected = len(json.dumps({"records": state["records"], "pending": state["pending"]}, ensure_ascii=False).encode())
+    staged = agent_trace._progress("session")
+    agent_trace._stage_source(staged, str(path))
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", expected - 1)
+    agent_trace._prepare_pending("session", staged, agent_trace.Identity("session"))
+    assert staged["overflow"] == {"bytes": expected, "limit": expected - 1}
+
+
+@pytest.mark.parametrize("kind", ["function_call_output", "custom_tool_call_output"])
+@pytest.mark.parametrize("block_type", ["input_text", "output_text", "text"])
+def test_codex_native_result_text_blocks_keep_their_content(kind, block_type):
+    from hooks.observability import codex_transcript
+
+    assert codex_transcript._content(
+        {"type": kind, "call_id": "call", "output": [{"type": block_type, "text": "output"}]}
+    ) == [{"type": "tool_result", "tool_use_id": "call", "content": [{"type": "text", "text": "output"}]}]
+
+
+def test_codex_native_result_keeps_other_block_types_for_reporting():
+    from hooks.observability import codex_transcript
+
+    blocks = [None, {"type": "audio", "data": "unsupported"}]
+    assert (
+        codex_transcript._content({"type": "function_call_output", "call_id": "call", "output": blocks})[0]["content"]
+        == blocks
+    )

@@ -14,7 +14,15 @@ def _content(item: dict) -> list[dict]:
                 pass
         return [{"type": "tool_use", "id": item.get("call_id", ""), "name": item.get("name", ""), "input": arguments}]
     if kind in ("function_call_output", "custom_tool_call_output"):
-        return [{"type": "tool_result", "tool_use_id": item.get("call_id", ""), "content": item.get("output", "")}]
+        output = item.get("output", "")
+        if isinstance(output, list):
+            output = [
+                {"type": "text", "text": block["text"]}
+                if isinstance(block, dict) and block.get("type") in ("input_text", "output_text")
+                else block
+                for block in output
+            ]
+        return [{"type": "tool_result", "tool_use_id": item.get("call_id", ""), "content": output}]
     return []
 
 
