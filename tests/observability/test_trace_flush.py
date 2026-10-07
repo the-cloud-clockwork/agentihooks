@@ -192,6 +192,24 @@ def test_a_request_wakes_the_exporter_before_its_interval(home, tmp_path):
     assert calls == [(0, "request:start"), (4, "request:stop")]
 
 
+def test_requests_do_not_wake_a_failing_exporter_before_its_interval(home, tmp_path):
+    transcript = tmp_path / "t.jsonl"
+    _grow(transcript)
+    _request("session", transcript)
+    clock, calls, state = Clock(), [], {"alive": True}
+    clock.hooks += [(5, lambda: _request("session", transcript, "stop"))]
+    clock.hooks += [(20, lambda: state.update(alive=False))]
+    trace_flush.supervise(
+        "session",
+        trace_flush.Budget(15, 5, 3),
+        lambda *args: calls.append((clock(), args[3])) or False,
+        clock,
+        clock.sleep,
+        lambda owner: state["alive"],
+    )
+    assert calls == [(0, "request:start")] * 3 + [(15, "request:stop")] * 3 + [(20, "final")] * 3
+
+
 def test_a_resumed_owner_takes_over_the_running_exporter(home, tmp_path):
     transcript = tmp_path / "t.jsonl"
     _grow(transcript)

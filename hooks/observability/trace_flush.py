@@ -136,6 +136,7 @@ def _spawn(session_id: str) -> None:
 
 def run(session_id: str) -> None:
     signal.alarm(0)
+    os.nice(10)
     print(f"trace_flush {session_id}: {supervise(session_id)}", file=sys.stderr)
 
 
@@ -199,12 +200,12 @@ def supervise(
     with handle:
         me = {"supervisor_pid": os.getpid(), "supervisor_start": start_time(os.getpid())}
         _write(owner_path(session_id), me)
-        flushed_size, seen, due = -1, None, clock()
+        flushed_size, failing, seen, due = -1, False, None, clock()
         while True:
             record = _read(request_path(session_id))
             owner_alive = is_alive(_owner(record, "owner_"))
             fresh = record.get("at") != seen
-            if not fresh and owner_alive and clock() < due:
+            if (failing or not fresh) and owner_alive and clock() < due:
                 sleep(POLL_SEC)
                 continue
             seen = record.get("at")
@@ -212,7 +213,8 @@ def supervise(
             transcript = _transcript(session_id, record)
             size = _size(transcript)
             if transcript and size != flushed_size:
-                flushed_size = size if _drain(session_id, transcript, limits, send, trigger) else -1
+                failing = not _drain(session_id, transcript, limits, send, trigger)
+                flushed_size = -1 if failing else size
             due = clock() + limits.interval
             if owner_alive:
                 continue
