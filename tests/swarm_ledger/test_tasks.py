@@ -261,7 +261,7 @@ class TaskBlockersOnThePage(unittest.TestCase):
             [
                 "",
                 "",
-                "Waiting until Build the inbox is done, and Speed up the tick leaves the same files",
+                "Waiting until Build the inbox is done",
                 "",
             ],
         )
