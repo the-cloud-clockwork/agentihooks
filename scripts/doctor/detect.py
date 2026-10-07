@@ -46,7 +46,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME):
         "ci": lambda: [
             f
             for repo, number in open_pulls(ledger.tasks(slug))
-            for f in ci.findings(ci_read.pull_request(repo, number))
+            for f in ci.findings(ci_read.pull_request(repo, number), now_ms)
         ],
         "trace": lambda: traces.findings(
             traces_read.record(

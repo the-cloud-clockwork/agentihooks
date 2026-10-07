@@ -61,4 +61,9 @@ def pull_request(repo: str, number: int, run: Callable = subprocess.run) -> dict
     runs = [
         r for r in _pages(f"{root}/actions/runs?head_sha={sha}&per_page=100", "workflow_runs", run) if _belongs(r, pr)
     ]
-    return {"pr": pr, "checks": checks, "runs": runs, "attempts": _attempts(repo, runs, run)}
+    return {
+        "pr": pr,
+        "checks": checks,
+        "runs": runs,
+        "attempts": _attempts(repo, runs, run),
+    }

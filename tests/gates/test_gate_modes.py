@@ -157,13 +157,15 @@ class TestSwarmSet:
         run("sw", "create", "--repo", "/repo")
         monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@1-1")
         assert run("sw", "set", f"{name}-gate=off") == 1
-        assert f"only the operator sets {name}-gate" in capsys.readouterr().err
+        assert capsys.readouterr().err == (
+            "swarm: only the operator or the master of swarm sw uses its swarm controls, and engineer@1-1 is neither\n"
+        )
         assert store.config("sw").gates == {}
 
     def test_an_unknown_gate_key_is_refused(self):
         assert "nope-gate" not in cli.GATE_KEYS
         with pytest.raises(SwarmError, match="watch-gate takes deny"):
-            cli.gate_mode("watch-gate", "loud", {})
+            cli.gate_mode("watch-gate", "loud")
 
 
 class TestServerControl:

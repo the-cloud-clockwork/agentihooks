@@ -27,7 +27,7 @@ All domain mutations use POST or PUT `/operations`. The envelope has a transport
 | --- | --- | --- |
 | Threads | add, edit, delete, clear | Named thread |
 | Reconciliation | sync, stats_sync | Metadata |
-| Membership | join, leave, ack, agent_rename | Members |
+| Membership | join, leave, agent_rename; ack needs no guard because it only raises the caller's handled revision | Members |
 | Agent state | claim, set, add_item, retext, gate_bypass, gate_lift | Named item, list or metadata |
 | Tasks | task_add, task_update, task_rank | Tasks collection or named task |
 | Phases | phase_add, phase_update, phase_review, phase_append | Phases collection or named phase |

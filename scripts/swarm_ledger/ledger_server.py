@@ -46,6 +46,7 @@ import ledger_media  # noqa: E402
 import ledger_workspace  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
+from scripts.swarm_ledger import server_lifetime  # noqa: E402
 from scripts.swarm_ledger.events import Hub  # noqa: E402
 from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
 from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
@@ -394,7 +395,12 @@ def swarm_control(slug, argv, command="swarm"):
     try:
         if command == "swarm" and argv[0] == "terminate":
             return terminate_control(slug, argv[1])
-        env = {**os.environ, "AGENTIHOOKS_AGENT_NAME": "operator", "AGENTIHOOKS_CONTROL_SOURCE": "page"}
+        env = {
+            **os.environ,
+            "AGENTIHOOKS_AGENT_NAME": "operator",
+            "AGENTIHOOKS_SWARM": "",
+            "AGENTIHOOKS_CONTROL_SOURCE": "page",
+        }
         done = subprocess.run([exe, command, slug, *argv], capture_output=True, text=True, timeout=60, env=env)
     except (OSError, subprocess.SubprocessError) as exc:
         return None, str(exc)
@@ -886,9 +892,14 @@ def serve():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     threading.Thread(target=watch_seeds, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
+    stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)
     PIDFILE.write_text(str(os.getpid()))
     print(f"ledger server on {BASE}, dir {core.LEDGER_DIR}", flush=True)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        stopped.set()
+        server.server_close()
 
 
 def port_held() -> bool:
@@ -936,7 +947,10 @@ def ensure():
                     stderr=log,
                     stdin=subprocess.DEVNULL,
                     start_new_session=True,
-                    env={**os.environ, "SWARM_RELOAD": os.environ.get("SWARM_RELOAD", "1")},
+                    env={
+                        **server_lifetime.environment(core.LEDGER_DIR, PORT),
+                        "SWARM_RELOAD": os.environ.get("SWARM_RELOAD", "1"),
+                    },
                 )
             started = True
         time.sleep(min(0.1, remaining))

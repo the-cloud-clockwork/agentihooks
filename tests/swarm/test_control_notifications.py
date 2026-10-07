@@ -65,7 +65,8 @@ def test_the_masters_own_pause_sends_it_nothing(controls, monkeypatch, explicit)
     assert cli.main(argv) == 0
     assert store.config("demo").state == "paused"
     assert InboxStore(store.redis).mailbox(master.name) == []
-    assert ledger.said == []
+    record = ("demo master 1 changed the swarm state with pause from running to paused.", "swarm")
+    assert ledger.said == ([] if explicit else [record])
 
 
 def test_a_master_without_a_seat_receives_the_notification_by_name(controls):
@@ -85,11 +86,10 @@ def test_failed_cli_settings_send_nothing(controls):
     assert ledger.said == []
 
 
-def test_another_named_caller_is_identified_in_the_notice(controls):
+def test_another_named_caller_is_refused_and_the_master_hears_nothing(controls, monkeypatch):
     store, ledger, master = controls
-    assert cli.main(["demo", "--as", "worker-2", "pause"]) == 0
-    items = InboxStore(store.redis).mailbox(master.name)
-    assert len(items) == 1
-    assert items[0].sender == "worker-2"
-    assert items[0].text.startswith("worker 2 paused the swarm from the command line.")
-    assert ledger.said == [(items[0].text, "swarm")]
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "worker-2")
+    assert cli.main(["demo", "pause"]) == 1
+    assert store.config("demo").state == "running"
+    assert InboxStore(store.redis).mailbox(master.name) == []
+    assert ledger.said == []

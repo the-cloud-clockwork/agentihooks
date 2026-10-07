@@ -575,9 +575,11 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "graphql",
                 "-f",
                 "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
-                "commits(last:1){nodes{commit{committedDate statusCheckRollup{contexts(first:100){"
-                "nodes{...on CheckRun{name conclusion} ...on StatusContext{context state}} "
-                "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId}} "
+                "commits(last:1){nodes{commit{committedDate "
+                'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
+                "statusCheckRollup{contexts(first:100){"
+                "nodes{...on CheckRun{name conclusion completedAt} ...on StatusContext{context state createdAt}} "
+                "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId createdAt}} "
                 "pageInfo{hasNextPage}}}}}}}}",
                 "-f",
                 f"url={URL}",
@@ -647,6 +649,97 @@ def test_a_checks_wait_stays_held_while_the_new_heads_run_is_queued(tick):
     assert tick.end() == []
     assert tick.told() == []
     assert idle.wait(tick.store.redis, "sw", ME)["on"]["head"] == "second"
+
+
+GATE_WORKFLOW = "jobs:\n  gate-required:\n    name: Gate — Required\n    needs: [unit]\n"
+UNIT_PASSED = SKIPPED_ONLY + [{"name": "unit", "conclusion": "SUCCESS"}]
+
+
+def workflows(*texts):
+    return {"object": {"entries": [{"name": f"w{n}.yml", "object": {"text": text}} for n, text in enumerate(texts)]}}
+
+
+def gated_probe(rollup, suites, tree):
+    from types import SimpleNamespace
+
+    commit = {
+        "committedDate": "2026-10-07T17:00:00Z",
+        "statusCheckRollup": {"contexts": {"nodes": rollup, "pageInfo": {"hasNextPage": False}}},
+        "checkSuites": {"nodes": suites, "pageInfo": {"hasNextPage": False}},
+        "file": tree,
+    }
+    raw = {"data": {"resource": {"state": "OPEN", "headRefOid": "second", "commits": {"nodes": [{"commit": commit}]}}}}
+    return github_view(URL, lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(raw)))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        GATE_WORKFLOW,
+        "jobs:\n  gate:\n    name: 'Gate — Required'\n",
+        'jobs:\n  gate:\n    name: "Gate — Required"  \n',
+        "jobs:\n  gate:\n\tname:\tGate — Required\t\n\n",
+    ],
+)
+def test_the_probe_reads_a_declared_gate_from_the_head_workflows(text):
+    assert gated_probe(UNIT_PASSED, [], workflows("name: Docs\n", text)).resolved is False
+
+
+@pytest.mark.parametrize(
+    "tree",
+    [
+        None,
+        {"object": None},
+        {"object": {"entries": None}},
+        workflows("name: Docs\n", None),
+        workflows("jobs:\n  gate:\n    name: Gate — Required later\n"),
+        workflows("jobs:\n  gate:\n    # name: Gate — Required\n"),
+        workflows("jobs:\n  gate:\n    name: 'Gate — Required\"\n"),
+        {"object": {"entries": [{"name": "x.yml", "object": None}]}},
+        workflows("name: Gate — Required\njobs:\n  unit:\n    runs-on: ubuntu-latest\n"),
+        workflows("on: push\n\nname: Gate — Required\n"),
+        workflows("jobs:\n  gate:\n    name:\n      Gate — Required\n"),
+    ],
+)
+def test_the_probe_without_a_declared_gate_resolves_on_every_check(tree):
+    pull = gated_probe(UNIT_PASSED, [], tree)
+    assert pull.resolved is True
+    assert pull.red is False
+
+
+def test_the_probe_reads_the_gate_from_the_last_commit():
+    from types import SimpleNamespace
+
+    def commit(tree):
+        return {
+            "commit": {
+                "committedDate": "2026-10-07T17:00:00Z",
+                "statusCheckRollup": {"contexts": {"nodes": UNIT_PASSED, "pageInfo": {"hasNextPage": False}}},
+                "checkSuites": NO_SUITES,
+                "file": tree,
+            }
+        }
+
+    nodes = [commit(None), commit(workflows(GATE_WORKFLOW))]
+    raw = {"data": {"resource": {"state": "OPEN", "headRefOid": "second", "commits": {"nodes": nodes}}}}
+    pull = github_view(URL, lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(raw)))
+    assert pull.resolved is False
+
+
+@pytest.mark.parametrize(
+    ("rollup", "outcome"),
+    [
+        (UNIT_PASSED, []),
+        (UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "SUCCESS"}], [f"checks on {URL}, now green"]),
+        (UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "FAILURE"}], [f"checks on {URL}, now red"]),
+    ],
+)
+def test_a_gated_checks_wait_ends_only_on_its_gate(tick, rollup, outcome):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe(rollup, [], workflows(GATE_WORKFLOW))
+    assert tick.end() == []
+    assert tick.end() == [f"ended the wait of {ME}: {line}" for line in outcome]
+    assert (idle.wait(tick.store.redis, "sw", ME) is None) is bool(outcome)
 
 
 @pytest.mark.parametrize(
