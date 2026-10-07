@@ -146,3 +146,25 @@ def test_package_core_clock_is_preserved_when_json_is_missing(stored, monkeypatc
     repo = FileLedgerRepository(package_core)
     doc = repo.get_document("reconcile")
     assert doc["_meta"]["created_at"] == 1000
+
+
+def test_events_require_a_persisted_document(stored):
+    core.paths("reconcile")[1].unlink()
+    with pytest.raises(ValueError, match="missing and the HTML seed is unreadable"):
+        stored.events_since("reconcile", 0)
+
+
+def test_core_loaded_under_another_name_keeps_its_clock(stored, monkeypatch):
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location("ledger_core_clock_proof", core.__file__)
+    alias = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, alias)
+    spec.loader.exec_module(alias)
+    monkeypatch.setattr(alias, "now_ms", lambda: 1000)
+    monkeypatch.setattr(core, "now_ms", lambda: 500)
+    seed = core.parse_seed(stored.read_page("reconcile"))
+    core.paths("reconcile")[1].unlink()
+    _, meta, created = alias.load_state(core.paths("reconcile")[1], seed)
+    assert created is True and meta["updated_at"] == 1000
