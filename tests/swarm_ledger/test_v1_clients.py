@@ -173,7 +173,7 @@ def test_stop_gate_bypass_sends_one_service_operation(monkeypatch):
     monkeypatch.setattr(cli_ledger, "request", recorder)
     ledger_hook.post_bypass({"slug": SLUG, "name": "api-reader"}, 4)
     [(slug, [op], service)] = recorder.calls
-    assert (slug, service, recorder.options) == (SLUG, True, {"timeout": 3})
+    assert (slug, service, recorder.options) == (SLUG, True, {"timeout": 2})
     assert op["id"].startswith("gb-") and len(op["id"]) == 11
     assert {key: value for key, value in op.items() if key != "id"} == {
         "op": "gate_bypass",
