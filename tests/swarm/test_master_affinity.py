@@ -53,7 +53,8 @@ def _start(store, runtime, harness):
 
 
 def _orders(store, address="master@sw"):
-    return [i for i in InboxStore(store.redis).pending_items(address) if i.sender == "operator"]
+    pending = InboxStore(store.redis).pending_items(address)
+    return [i for i in pending if i.sender == "operator" and i.text.startswith("The operator set the master affinity")]
 
 
 @pytest.mark.parametrize("start", ["claude", "codex"])
