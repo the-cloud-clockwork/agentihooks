@@ -145,6 +145,7 @@ function commandAction(command) {
   if (command.command === "quota") return "quota_refresh";
   if (command.command === "doctor") return `doctor_${command.argv[0]}`;
   const action = command.argv[0] === "--as" ? command.argv[2] : command.argv[0];
+  if (action === "session-cap") return "session_cap";
   return action === "stop" && command.argv.includes("--now") ? "stop_now" : action;
 }
 
