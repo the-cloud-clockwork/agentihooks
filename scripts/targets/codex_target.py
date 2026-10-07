@@ -169,7 +169,7 @@ def codex_mcp_entry(name: str, spec: dict) -> tuple[dict | None, str]:
     """A declared (Claude-shaped) MCP server as its codex entry, or None and why it cannot mount."""
     if drop_if_credentialed(name, spec, "config.toml"):
         return None, "credential-shaped literal in url, command or args"
-    if spec.get("type", "stdio" if spec.get("command") else "http") == "sse":
+    if spec.get("type") == "sse":
         _install_module()._cprint(
             f"  [!!] MCP '{name}' uses SSE — codex has no SSE transport; skipped. "
             "Expose a streamable-HTTP endpoint and re-run init."

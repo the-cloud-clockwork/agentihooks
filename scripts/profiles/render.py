@@ -245,7 +245,7 @@ def render_claude(name: str, force: bool = False) -> Path | None:
     connectors.write(connectors.path(name, "claude", rendered_root()), mounts, name, "claude")
     settings = _claude_settings(bundle, dirs)
     if deny:
-        permissions = settings.setdefault("permissions", {})
+        permissions = settings["permissions"]
         permissions["deny"] = [*permissions.get("deny", []), *deny]
     _i.save_json(out / "settings.json", settings)
     for subdir, keep in FEATURES:

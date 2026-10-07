@@ -525,6 +525,35 @@ class TestCodexEntry:
             "Export it in the shell environment instead of writing it to disk."
         ]
 
+    def test_strict_secrets_are_dropped_and_every_finding_named(self, said):
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        both = "AKIA" + "TESTDUMMY0000000 " + "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghijklmnop"
+        assert codex_mcp_entry("loc", {"command": "/py", "env": {"KEY": both}}) == ({"command": "/py"}, "")
+        assert codex_mcp_entry("gw", {"url": "https://g.example", "headers": {"K": both}}) == (
+            {"url": "https://g.example"},
+            "",
+        )
+        assert said == [
+            "  [!!] MCP 'loc' env var 'KEY' looks like a credential (aws_access_key, jwt_token) — dropped from "
+            "config.toml. Export it in the shell environment instead of writing it to disk.",
+            "  [!!] MCP 'gw' header 'K' looks like a credential (aws_access_key, jwt_token) — dropped from config.toml. "
+            "Reference it via Authorization Bearer ${VAR} (mapped to bearer_token_env_var) instead of a literal value.",
+        ]
+
+    def test_credential_in_args_names_the_server_and_file(self, said):
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        tok = "ghp_" + "h" * 36
+        assert codex_mcp_entry("leak", {"command": "/a", "args": ["--t", tok]}) == (
+            None,
+            "credential-shaped literal in url, command or args",
+        )
+        assert said == [
+            "  [!!] MCP 'leak' carries credential-shaped literals in args[1] (github_token) — server NOT written to "
+            "config.toml. Reference secrets via environment variables instead of embedding the value."
+        ]
+
     def test_stdio_without_args_or_env_is_only_its_command(self, said):
         from scripts.targets.codex_target import codex_mcp_entry
 

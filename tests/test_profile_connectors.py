@@ -64,6 +64,7 @@ def test_list_walks_every_page_with_the_given_headers(monkeypatch):
 
         async def list_tools(self, cursor=None):
             seen["cursors"].append(cursor)
+            assert len(seen["cursors"]) <= len(pages)
             names, nxt = pages[cursor]
             return SimpleNamespace(tools=[SimpleNamespace(name=n) for n in names], nextCursor=nxt)
 
@@ -143,22 +144,22 @@ def test_claude_filter_reports_a_failed_listing(monkeypatch):
 def test_claude_mounts_plain_entries_and_collects_deny_rules(listing, said):
     leak = "ghp_" + "a" * 36
     servers = {
-        "gw": {"type": "http", "url": "u", "headers": {"A": "${GW_REF:-x}"}, "enabled_tools": ["lf-a", "lf-b"]},
-        "plain": {"command": "p", "disabled_tools": ["t"]},
         "leaky": {"command": "s", "args": ["--token", leak]},
         "stdio": {"command": "s", "enabled_tools": READS},
+        "gw": {"type": "http", "url": "u", "headers": {"A": "${GW_REF:-x}"}, "enabled_tools": ["lf-a", "lf-z"]},
+        "plain": {"command": "p", "disabled_tools": ["t"]},
     }
     mounted, deny, manifest = connectors.claude(servers, "dst.json")
     assert mounted == {
         "gw": {"type": "http", "url": "u", "headers": {"A": "${GW_REF:-x}"}},
         "plain": {"command": "p"},
     }
-    assert deny == ["mcp__gw__lf-c", "mcp__gw__lf-d", "mcp__plain__t"]
+    assert deny == ["mcp__gw__lf-b", "mcp__gw__lf-c", "mcp__gw__lf-d", "mcp__plain__t"]
     assert manifest == {
-        "gw": {"mounted": True, "enabled_tools": ["lf-a", "lf-b"]},
-        "plain": {"mounted": True},
         "leaky": {"mounted": False, "reason": "credential-shaped literal in url, command or args"},
         "stdio": {"mounted": False, "reason": NO_ALLOWLIST},
+        "gw": {"mounted": True, "enabled_tools": ["lf-a", "lf-z"], "absent_tools": ["lf-z"]},
+        "plain": {"mounted": True},
     }
 
 
@@ -186,6 +187,10 @@ def test_codex_translates_each_declared_server(said):
         "gw": {"mounted": True, "enabled_tools": READS},
         "old": {"mounted": False, "reason": "codex has no SSE transport"},
     }
+    assert said == [
+        "  [!!] MCP 'old' uses SSE — codex has no SSE transport; skipped. "
+        "Expose a streamable-HTTP endpoint and re-run init."
+    ]
 
 
 def test_write_records_the_manifest_and_names_every_gap(tmp_path, said):

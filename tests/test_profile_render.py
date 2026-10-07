@@ -793,6 +793,20 @@ def test_claude_render_denies_a_disabled_tool_without_listing(world, advertised)
     assert advertised == []
 
 
+def test_claude_render_keeps_the_profile_deny_rules_ahead_of_connector_denies(world, advertised):
+    from scripts.profiles import render
+
+    overrides = world["role"] / ".claude" / "settings.overrides.json"
+    doc = json.loads(overrides.read_text())
+    doc["permissions"] = {"deny": ["Bash(rm:*)"]}
+    overrides.write_text(json.dumps(doc))
+    _declare(world, gw=_gateway(disabled_tools=["lf-x"]))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["permissions"]["deny"] == ["Bash(rm:*)", "mcp__gw__lf-x"]
+
+
 @pytest.mark.parametrize(
     ("spec", "env", "reason"),
     [
