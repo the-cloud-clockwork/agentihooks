@@ -54,7 +54,7 @@ def canonical_remote(remote: str) -> str:
     return project_id.lower() if host.lower() == "github.com" else project_id
 
 
-def _folder_identity(cwd: str) -> ProjectIdentity | None:
+def _folder_identity(cwd: str, registered: str = "") -> ProjectIdentity | None:
     path = Path(cwd).expanduser().resolve()
     common = _git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if common:
@@ -66,10 +66,15 @@ def _folder_identity(cwd: str) -> ProjectIdentity | None:
             root.name, root.name, Path(top).name if top != str(root) else "", str(path), slug, project_id
         )
     scratch = Path.home() / "scratchpad"
+    identity = None
     if path.is_relative_to(scratch) and len(path.relative_to(scratch).parts) >= 2:
         project = path.relative_to(scratch).parts[0]
-        return ProjectIdentity(project, project, cwd=str(path))
-    return None
+        identity = ProjectIdentity(project, project, cwd=str(path))
+    if registered:
+        if not re.fullmatch(r"local:[A-Za-z0-9][A-Za-z0-9._-]{0,127}", registered):
+            raise ValueError("Invalid registered project ID")
+        return replace(identity or ProjectIdentity(path.name, path.name, cwd=str(path)), project_id=registered)
+    return identity
 
 
 def _same_checkout(working: ProjectIdentity, repo: str) -> bool:
@@ -102,25 +107,15 @@ def _project_aliases(document: Mapping[str, object] | None) -> Mapping[str, str]
 
 
 def _aliased_project(project_id: str, aliases: Mapping[str, str]) -> str:
-    seen = set()
-    while project_id in aliases:
-        if project_id in seen:
-            raise ValueError("Invalid project alias map: cycle")
-        seen.add(project_id)
+    for _ in range(len(aliases) + 1):
+        if project_id not in aliases:
+            return project_id
         project_id = aliases[project_id]
-    return project_id
+    raise ValueError("Invalid project alias map: cycle")
 
 
 def _registered_project(cwd: str, env: Mapping[str, str]) -> ProjectIdentity | None:
-    identity = _folder_identity(cwd) if cwd else None
-    registered = env.get("AGENTIHOOKS_PROJECT_ID", "")
-    if registered and cwd and not _git(Path(cwd).expanduser().resolve(), "rev-parse", "--git-common-dir"):
-        if not re.fullmatch(r"local:[A-Za-z0-9][A-Za-z0-9._-]{0,127}", registered):
-            raise ValueError("Invalid registered project ID")
-        path = Path(cwd).expanduser().resolve()
-        identity = identity or ProjectIdentity(path.name, path.name, cwd=str(path))
-        return replace(identity, project_id=registered)
-    return identity
+    return _folder_identity(cwd, env.get("AGENTIHOOKS_PROJECT_ID", "")) if cwd else None
 
 
 def _swarm_identity(cwd: str, env: Mapping[str, str]) -> ProjectIdentity | None:

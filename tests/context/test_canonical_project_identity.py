@@ -52,9 +52,14 @@ def test_swarm_does_not_confuse_equal_repository_basenames(monkeypatch, tmp_path
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path / "state")
     env = {"AGENTIHOOKS_SWARM": "fixture"}
     assert project_identity.resolve_project(str(linked), env).worktree == "linked"
+    nested_identity = project_identity.resolve_project(str(first / "nested"), env)
+    assert nested_identity.worktree == ""
+    assert nested_identity.cwd == str(first / "nested")
     identity = project_identity.resolve_project(str(second), env)
     assert identity.project_id == "github.com/first/common"
     assert identity.worktree == ""
+    assert identity.cwd == str(second)
+    assert project_identity.resolve_project("", env).cwd == str(first)
 
 
 @pytest.mark.parametrize(
@@ -71,6 +76,9 @@ def test_swarm_does_not_confuse_equal_repository_basenames(monkeypatch, tmp_path
         "https://github.com/group/subgroup/common",
         "https://github.com/../common",
         "https://github.com/first/.git",
+        "https://github.com/./common",
+        "https://github.com/first/.",
+        "https://github.com/first/..",
     ],
 )
 def test_unsafe_or_ambiguous_remotes_remain_unknown_and_unstored(tmp_path, remote, request):
@@ -89,8 +97,8 @@ def test_unsafe_or_ambiguous_remotes_remain_unknown_and_unstored(tmp_path, remot
     assert project_identity.resolve_project(str(repo), {}).project_id == "github.com/first/common"
 
 
-@pytest.mark.parametrize("folder", ["plain", "scratchpad/common/task"])
-def test_explicit_non_git_registration_is_stable(monkeypatch, tmp_path, folder):
+@pytest.mark.parametrize("folder,project", [("plain", "plain"), ("scratchpad/common/task", "common")])
+def test_explicit_non_git_registration_is_stable(monkeypatch, tmp_path, folder, project):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     path = tmp_path / folder
     path.mkdir(parents=True)
@@ -98,6 +106,8 @@ def test_explicit_non_git_registration_is_stable(monkeypatch, tmp_path, folder):
     identity = project_identity.resolve_project(str(path), env)
     assert identity.project_id == "local:registered-project"
     assert identity.cwd == str(path)
+    assert identity.project == project
+    assert identity.repo == project
     assert identity.project_identity_ambiguities_total == 0
     unregistered = project_identity.resolve_project(str(path), {})
     assert unregistered is None or unregistered.project_id == "unknown"
@@ -105,7 +115,7 @@ def test_explicit_non_git_registration_is_stable(monkeypatch, tmp_path, folder):
 
 @pytest.mark.parametrize("project_id", ["common", "local:", "local:../common", "github.com/first/common"])
 def test_invalid_non_git_registration_is_refused(tmp_path, project_id):
-    with pytest.raises(ValueError, match="Invalid registered project ID"):
+    with pytest.raises(ValueError, match="^Invalid registered project ID$"):
         project_identity.resolve_project(str(tmp_path), {"AGENTIHOOKS_PROJECT_ID": project_id})
 
 
@@ -145,6 +155,9 @@ def test_alias_rename_recovery_and_rollback(repositories, tmp_path, repeat):
     [
         {"schema_version": "1.0", "aliases": {}},
         {"schema_version": "2.0", "aliases": []},
+        {"schema_version": "2.0", "aliases": {"unknown": "github.com/first/common"}},
+        {"schema_version": "2.0", "aliases": {"github.com/first/common": "unknown"}},
+        {"schema_version": "2.0", "aliases": {"github.com/other/common": "github.com/other/common"}},
         {"schema_version": "2.0", "aliases": {"common": "github.com/first/common"}},
         {"schema_version": "2.0", "aliases": {"github.com/first/common": "local:other"}},
         {"schema_version": "2.0", "aliases": {"github.com/first/common": "github.com/first/common"}},
@@ -161,7 +174,7 @@ def test_invalid_alias_maps_are_refused_without_mutation(repositories, aliases):
     first = repositories[0]
     config = (first / ".git" / "config").read_bytes()
     original = json.dumps(aliases)
-    with pytest.raises(ValueError, match="Invalid project alias map"):
+    with pytest.raises(ValueError, match="^Invalid project alias map(: cycle)?$"):
         project_identity.resolve_project(str(first), {}, aliases=aliases)
     assert json.dumps(aliases) == original
     assert (first / ".git" / "config").read_bytes() == config
@@ -202,7 +215,7 @@ def test_alias_map_checks_all_types_before_following_chains(repositories):
         "schema_version": "2.0",
         "aliases": {"github.com/first/common": "github.com/first/new", "github.com/first/new": []},
     }
-    with pytest.raises(ValueError, match="Invalid project alias map"):
+    with pytest.raises(ValueError, match="^Invalid project alias map(: cycle)?$"):
         project_identity.resolve_project(str(repositories[0]), {}, aliases=aliases)
 
 
@@ -252,3 +265,39 @@ def test_git_registration_and_swarm_worktree_expand_tilde(monkeypatch, tmp_path,
     identity = project_identity.resolve_project(str(linked), {"AGENTIHOOKS_SWARM": "fixture"})
     assert identity.project_id == "github.com/first/common"
     assert identity.worktree == "linked"
+
+
+@pytest.mark.parametrize("remote", ["https://github.com/first/common.git", ""])
+def test_git_observation_survives_failed_rediscovery(tmp_path, monkeypatch, remote):
+    replies = iter([str(tmp_path / ".git"), str(tmp_path), remote, ""])
+    monkeypatch.setattr(project_identity, "_git", lambda *args: next(replies))
+    identity = project_identity.resolve_project(str(tmp_path), {"AGENTIHOOKS_PROJECT_ID": "local:registered"})
+    assert identity.project_id == ("github.com/first/common" if remote else "unknown")
+    assert next(replies) == ""
+
+
+@pytest.mark.parametrize("registered", ["local:UpperCase", "local:" + "a" * 128])
+def test_registration_preserves_valid_case_and_length(tmp_path, registered):
+    assert (
+        project_identity.resolve_project(str(tmp_path), {"AGENTIHOOKS_PROJECT_ID": registered}).project_id == registered
+    )
+
+
+def test_non_git_checkout_provenance_includes_nested_folder(tmp_path):
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    inside = project_identity.ProjectIdentity("local", "local", cwd=str(nested))
+    outside = project_identity.ProjectIdentity("local", "local", cwd=str(tmp_path.parent))
+    assert project_identity._same_checkout(inside, str(tmp_path))
+    assert not project_identity._same_checkout(outside, str(tmp_path))
+
+
+@pytest.mark.parametrize("contents", ["{}", "{"])
+def test_missing_swarm_repository_keeps_observed_git_identity(monkeypatch, tmp_path, repositories, contents):
+    first = repositories[0]
+    config = tmp_path / "state" / "swarm" / "fixture" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(contents)
+    monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path / "state")
+    env = {"AGENTIHOOKS_SWARM": "fixture", "AGENTIHOOKS_PROJECT_ID": "local:registered"}
+    assert project_identity.resolve_project(str(first), env).project_id == "github.com/first/common"
