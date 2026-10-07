@@ -75,9 +75,25 @@ def end_pass(store, slug, rows, inbox, github):
             continue
         idle.end_wait(store.redis, slug, agent.name)
         text = (
-            f"Your wait on {outcome} has ended. Pick task {agent.task} back up: agentihooks swarm {slug} done, block, "
+            f"Your wait on {outcome} has ended.{_pick_up(agent.task)} agentihooks swarm {slug} done, block, "
             "or wait on the next thing."
         )
         inbox.send(SENDER, agent.seat or agent.name, text)
         ended.append(f"ended the wait of {agent.name}: {outcome}")
     return ended
+
+
+def _pick_up(task):
+    return f" Pick task {task} back up:"
+
+
+def settle_notices(inbox, agent, action):
+    """Close the open wait ended notices for the agent's task, naming the action it recorded on that task."""
+    for address in dict.fromkeys(filter(None, (agent.seat, agent.name))):
+        for item in inbox.inbox(address):
+            if item.sender != SENDER or item.state in CLOSED or _pick_up(agent.task) not in item.text:
+                continue
+            try:
+                inbox.close(item.id, SENDER, "done", f"{agent.name} recorded {action} on task {agent.task}")
+            except InboxError:
+                continue
