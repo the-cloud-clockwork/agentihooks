@@ -199,12 +199,12 @@ def mask_member(key: str, value: object) -> object:
         return [mask_member(key, item) for item in value]
     if isinstance(value, dict):
         probe = f"{key}=12345678"
-        redacted = redact(probe, mode="strict")
-        context = key if redacted != probe and "[REDACTED:generic_secret]" in redacted else ""
+        redacted = redact(probe, mode="standard")
+        context = key if redacted.count("[REDACTED:generic_secret]") > probe.count("[REDACTED:generic_secret]") else ""
         return {redact(name, mode="strict"): mask_member(context or name, item) for name, item in value.items()}
     masked = mask_value(value)
     contextual = f"{key}={json.dumps(masked, ensure_ascii=False)}"
-    redacted = redact(contextual, mode="strict")
-    if redacted != contextual and "[REDACTED:generic_secret]" in redacted:
+    redacted = redact(contextual, mode="standard")
+    if redacted.count("[REDACTED:generic_secret]") > contextual.count("[REDACTED:generic_secret]"):
         return "[REDACTED:generic_secret]"
     return masked

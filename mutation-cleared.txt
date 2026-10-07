@@ -1246,5 +1246,69 @@
   "scripts/swarm_ledger/storage_migration/__init__.py:scripts.swarm_ledger.storage_migration.x_import_directory__mutmut_50:1769306d531c2d7c69d3249c1ab079e886e0c7016f0f374507f85964f7e19bf2": {
     "reader": "Standards",
     "reason": "import_directory imports core and load_state from the same repository.file module. Runtime identity check confirms its explicit core argument is exactly load_state default core; mutating module attributes affects that same object in both versions. Omitting the duplicate argument changes no loader behavior."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__save_progress__mutmut_16:7b7035313938d6143d6ef04f1e0017853c0475147ef735f4ff95832782f2f2e5": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None take the same false branch and serialize identically."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__record_revisions__mutmut_4:3240d2852a07c877863538bf65e52a60fd838997c2278ee1b9f7ee27651ef93b": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize identically, preserving revision hashes."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__revision__mutmut_22:82c190432e4f89f407e8188a9a05bfa85256b6a656b175fc44e3a6eed1583e71": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize identically, preserving observation hashes."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_23:a354b6a6efa63c8f7cfac048264fbb435343acb765671f884d54a59aba383570": {
+    "reader": "Standards reader",
+    "reason": "HTTP field names are case insensitive; requests prepared headers preserve the same Content-Type lookup."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_24:b812c17089aadba3febbd62310f765419c92eb2a0290e4ae22030d699f006db2": {
+    "reader": "Standards reader",
+    "reason": "HTTP field names are case insensitive; requests prepared headers preserve the same Content-Type lookup."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_46:68e8c965e6cdee1afeb29f4011e5ce1f48470d29b209d18f73abeca568ed595c": {
+    "reader": "Standards reader",
+    "reason": "requests Response.headers is CaseInsensitiveDict, giving identical lookups for header name casing."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_47:a82769ca2640d9cebdd24a8b32de90b7eb5c6cf73150a0b28dc266691ac20c99": {
+    "reader": "Standards reader",
+    "reason": "requests Response.headers is CaseInsensitiveDict, giving identical lookups for header name casing."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_48:a62189ccfa77b0caa74f97d33473bb09510b70755310d76aa4447d09da3fff62": {
+    "reader": "Standards reader",
+    "reason": "Both absent-header defaults exclude the protobuf substring and select the same JSON acknowledgement branch."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__json_acknowledged__mutmut_30:7c53e8b89f449e80bb7b8de6b94c8cc57ba2e19629bf6878f522c5c6dbe44d41": {
+    "reader": "Standards reader",
+    "reason": "The enclosing presence branch guarantees at least one partial-success key exists; the changed inner default is never selected for the resulting partial value."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__json_acknowledged__mutmut_32:10a46f6eb1a70d1d383832e9ca2b0bfd3cb0658095bf6e980c6773d28661f126": {
+    "reader": "Standards reader",
+    "reason": "The enclosing presence branch guarantees at least one partial-success key exists; the changed inner default is never selected for the resulting partial value."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__send_pending__mutmut_6:d58b1f2dc2688f92de5df1510dd30b34bce4df837c85e483739026a0395ae193": {
+    "reader": "Standards reader",
+    "reason": "_batches produces an empty batch only as its terminal yield with empty specs; continue and break both end without exporting."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x_export_session__mutmut_22:6940fb1023e2b2ed9584779514a61053cba95624a5d1dfbb9072d6d89015af56": {
+    "reader": "Standards reader",
+    "reason": "Both wrappers retain the same O_RDWR descriptor; the lock stream has no reads or writes and flock and close are unchanged."
+  },
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_record_id__mutmut_44:3a8b5646d8a1577bded2a7472b025da730d578e0a45d7836f79da0dd06b2d6da": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize identically, preserving source identity hashes."
+  },
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_value__mutmut_17:c454c200db8310362b7683bbf61aaf6273820e1afa22f3036fb7e18cc8cd8b48": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize the same masked embedded JSON."
+  },
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_member__mutmut_36:3f9cd2499f322646cf1a043bca8729e57e2abb3dc348fbecf4178311ce06bee4": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None produce the same contextual string before strict redaction."
+  },
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_26:c5af9b4c0b57e22d330bf31c5c125997950c723a1bfb613090e48269adeaa235": {
+    "reader": "Standards reader",
+    "reason": "Deployed Langfuse v3.163.0 traces route lowercases Content-Type before protobuf matching; APPLICATION/X-PROTOBUF and application/x-protobuf select identical decoding. Primary tagged route source and deployed version proof are recorded in final-mutation-symbols.md."
   }
 }

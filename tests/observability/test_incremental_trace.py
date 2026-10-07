@@ -1260,3 +1260,16 @@ def test_codex_empty_native_result_keeps_declared_field_types():
     assert codex_transcript._content({"type": "function_call_output"}) == [
         {"type": "tool_result", "tool_use_id": "", "content": ""}
     ]
+
+
+def test_literal_marker_and_secret_in_key_do_not_mask_public_values():
+    from hooks.observability import transcript as source
+
+    planted = "sk_" + "live_" + "Q7" * 18
+    key = "[REDACTED:generic_secret] " + planted
+    expected_key = "[REDACTED:generic_secret] [REDACTED:stripe_key]"
+    assert source.mask_value({key: "controlled-literal-value"}) == {expected_key: "controlled-literal-value"}
+    assert source.mask_value({key: {"value": "controlled-literal-value"}}) == {
+        expected_key: {"value": "controlled-literal-value"}
+    }
+    assert source.mask_value({key: {"password": 12345678}}) == {expected_key: {"password": "[REDACTED:generic_secret]"}}
