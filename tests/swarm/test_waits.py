@@ -317,17 +317,18 @@ def test_acting_on_the_task_closes_its_wait_ended_notice_with_the_action(started
     store, ledger = started
     inbox = InboxStore(store.redis)
     [agent] = [a for a in store.agents("sw") if a.name == ME]
+    address = agent.seat or agent.name
+    earlier = inbox.send("master@sw", address, "an unrelated question")
     assert run("sw", "--as", ME, "wait", "--on", "task", "t2") == 0
     ledger.rows["t2"].update(state="done")
     cli.run_tick(store, "sw", ledger, FakeRuntime(), FakeHerdr({}))
-    address = agent.seat or agent.name
     [notice] = [item for item in inbox.inbox(address) if item.text.startswith("Your wait on")]
     inbox.deliver(notice.id, ME)
-    other = inbox.send("master@sw", address, "an unrelated question")
+    quoted = inbox.send("master@sw", address, "You were told: Pick task t1 back up: then?")
     assert run("sw", "--as", ME, *command) == 0
     closed = inbox.get(notice.id)
     assert (closed.state, closed.reason) == ("done", f"done: {ME} recorded {action} on task t1")
-    assert inbox.get(other.id).state not in ("done", "cancelled")
+    assert [inbox.get(item.id).state for item in (earlier, quoted)] == ["pending", "pending"]
 
 
 def test_a_wait_ended_notice_for_another_task_stays_open(tick):

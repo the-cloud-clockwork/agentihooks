@@ -93,7 +93,4 @@ def settle_notices(inbox, agent, action):
         for item in inbox.inbox(address):
             if item.sender != SENDER or item.state in CLOSED or _pick_up(agent.task) not in item.text:
                 continue
-            try:
-                inbox.close(item.id, SENDER, "done", f"{agent.name} recorded {action} on task {agent.task}")
-            except InboxError:
-                continue
+            inbox.close(item.id, SENDER, "done", f"{agent.name} recorded {action} on task {agent.task}")
