@@ -153,7 +153,7 @@ def test_on_stop_restarts_this_agent_through_its_launch_profile(monkeypatch, tmp
     monkeypatch.setattr(refresh, "_home", lambda: tmp_path)
     monkeypatch.setattr(account_sessions, "agent_pid", os.getpid)
     monkeypatch.setattr(broadcast, "_load_sessions", lambda: {"sid-1": {"cwd": "/work/wt", "account": "acct2"}})
-    monkeypatch.setattr(refresh, "_closing_marker", lambda pid, environ: tmp_path / f"closing-{pid}")
+    monkeypatch.setattr(refresh, "_closing_marker", lambda pid, environ: tmp_path / environ["AGENTIHOOKS_PROFILE"])
     monkeypatch.setattr(refresh.shutil, "which", lambda name: "/bin/agentihooks")
     monkeypatch.setattr(_async, "fork_and_call", lambda *args, **kwargs: calls.append((args, kwargs)))
     for key, value in {
@@ -169,7 +169,7 @@ def test_on_stop_restarts_this_agent_through_its_launch_profile(monkeypatch, tmp
     assert (func, commands, marker, session_id) == (
         refresh.restart,
         refresh.restart_commands(expected),
-        tmp_path / f"closing-{os.getpid()}",
+        tmp_path / "engineer",
         "sid-1",
     )
     assert kwargs == {"timeout_sec": 600, "task_name": "session-refresh"}
