@@ -67,6 +67,8 @@ def serving(timeout: float = 1, url: str | None = None) -> str | None:
     try:
         with urllib.request.urlopen(f"{url or base()}/healthz", timeout=timeout) as resp:
             body = json.loads(resp.read())
+    except http.client.RemoteDisconnected:
+        return None
     except (urllib.error.HTTPError, http.client.HTTPException, ValueError):
         return ""
     except OSError:

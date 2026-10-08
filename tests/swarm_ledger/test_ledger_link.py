@@ -145,6 +145,20 @@ def test_serving_is_empty_for_a_reply_that_is_not_http():
         assert ledger_link.serving(url=f"http://127.0.0.1:{listener.getsockname()[1]}") == ""
 
 
+def test_serving_is_none_when_the_port_closes_without_a_reply():
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+
+        def close():
+            conn, _ = listener.accept()
+            with conn:
+                conn.recv(1024)
+
+        threading.Thread(target=close, daemon=True).start()
+        assert ledger_link.serving(url=f"http://127.0.0.1:{listener.getsockname()[1]}") is None
+
+
 def test_the_ledger_folder_defaults_to_the_home_ledger(monkeypatch):
     monkeypatch.delenv("LEDGER_DIR", raising=False)
     assert ledger_link.folder() == Path.home() / "development-ledger"
