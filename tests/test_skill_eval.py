@@ -229,3 +229,12 @@ def test_skill_without_eval_prints_its_usage(argv, launch, monkeypatch):
     assert error.value.code == "usage: agentihooks skill eval [--agent {claude,codex}] -- <command>"
     loader.assert_not_called()
     execute.assert_not_called()
+
+
+def test_agentihooks_help_lists_the_skill_command(monkeypatch, capsys):
+    monkeypatch.setattr(install.sys, "argv", ["agentihooks", "--help"])
+    with pytest.raises(SystemExit) as error:
+        install.main()
+    assert error.value.code == 0
+    listing = " ".join(capsys.readouterr().out.split())
+    assert "skill Run skill evaluations with quota routed Claude authentication: eval -- <command>" in listing
