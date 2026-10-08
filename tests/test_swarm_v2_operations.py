@@ -416,3 +416,14 @@ def test_stale_entry_cannot_stop_current_operation_recovery(fixture):
     assert store.operation_journal.get("fixture", pending.operation_id) == by_id[pending.operation_id]
     assert transport.creations == 2
     assert operations.runtime_ambiguous_operations("fixture") == 1
+
+
+def test_legacy_store_construction_does_not_load_new_runtime_service():
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; from scripts.swarm.store import RedisStore; RedisStore(object()); "
+        "assert 'scripts.swarm_v2.runtime.operations' not in sys.modules"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
