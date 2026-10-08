@@ -1,0 +1,124 @@
+[
+  {
+    "event": "PermissionRequest",
+    "tool_name": "Bash",
+    "trigger": null,
+    "keys": [
+      "cwd",
+      "hook_event_name",
+      "model",
+      "permission_mode",
+      "session_id",
+      "tool_input",
+      "tool_name",
+      "transcript_path",
+      "turn_id"
+    ]
+  },
+  {
+    "event": "PostToolUse",
+    "tool_name": "Bash",
+    "trigger": null,
+    "keys": [
+      "cwd",
+      "hook_event_name",
+      "model",
+      "permission_mode",
+      "session_id",
+      "tool_input",
+      "tool_name",
+      "tool_response",
+      "tool_use_id",
+      "transcript_path",
+      "turn_id"
+    ]
+  },
+  {
+    "event": "PreCompact",
+    "tool_name": null,
+    "trigger": "manual",
+    "keys": [
+      "cwd",
+      "hook_event_name",
+      "model",
+      "session_id",
+      "transcript_path",
+      "trigger",
+      "turn_id"
+    ]
+  },
+  {
+    "event": "PreToolUse",
+    "tool_name": "Bash",
+    "trigger": null,
+    "keys": [
+      "cwd",
+      "hook_event_name",
+      "model",
+      "permission_mode",
+      "session_id",
+      "tool_input",
+      "tool_name",
+      "tool_use_id",
+      "transcript_path",
+      "turn_id"
+    ]
+  },
+  {
+    "event": "SessionEnd",
+    "tool_name": null,
+    "trigger": null,
+    "keys": [
+      "cwd",
+      "hook_event_name",
+      "reason",
+      "session_id",
+      "transcript_path"
+    ]
+  },
+  {
+    "event": "SessionStart",
+    "tool_name": null,
+    "trigger": null,
+    "keys": [
+      "cwd",
+      "hook_event_name",
+      "model",
+      "permission_mode",
+      "session_id",
+      "source",
+      "transcript_path"
+    ]
+  },
+  {
+    "event": "Stop",
+    "tool_name": null,
+    "trigger": null,
+    "keys": [
+      "cwd",
+      "hook_event_name",
+      "last_assistant_message",
+      "model",
+      "permission_mode",
+      "session_id",
+      "stop_hook_active",
+      "transcript_path",
+      "turn_id"
+    ]
+  },
+  {
+    "event": "UserPromptSubmit",
+    "tool_name": null,
+    "trigger": null,
+    "keys": [
+      "cwd",
+      "hook_event_name",
+      "model",
+      "permission_mode",
+      "prompt",
+      "session_id",
+      "transcript_path",
+      "turn_id"
+    ]
+  }
+]
