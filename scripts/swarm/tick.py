@@ -23,6 +23,7 @@ from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
     ci_speed,
+    claim_order,
     control_notifications,
     difficulty,
     launch_check,
@@ -35,6 +36,7 @@ from scripts.swarm import (
     retire_watch,
     session_model,
     tick_master,
+    time_left,
     timing,
 )
 from scripts.swarm import idle as idle_state
@@ -43,7 +45,7 @@ from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig
-from scripts.swarm_ledger import ledger_rank, ledger_workspace
+from scripts.swarm_ledger import ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
@@ -158,6 +160,7 @@ def tick(slug, store, ledger, runtime, now_ms):
 
     actions += skip_refused(capacity.apply, slug, config, store, ledger, runtime, now_ms)
     actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
+    actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, doc, now_ms)
     if not sleeping:
         actions += skip_refused(_codex_hook_order)
         actions += skip_refused(_master_down, slug, config, store, ledger, runtime, now_ms)
@@ -509,7 +512,7 @@ def _claimable(slug, store, rows, doc, lane):
     awaiting = {a.task for a in store.agents(slug) if a.state == "awaiting-decision"}
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     clear, overlapping = [], []
-    for t in sorted(rows.values(), key=ledger_rank.order):
+    for t in sorted(rows.values(), key=claim_order.key(rows)):
         if (
             t.get("lane") == lane
             and t.get("state") == "open"

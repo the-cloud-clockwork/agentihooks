@@ -4,6 +4,7 @@ Pure functions over a ledger document and its `_meta` events.
 """
 
 import math
+import statistics
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -12,6 +13,13 @@ if TYPE_CHECKING:
 HOUR_MS = 3_600_000
 MINUTE_MS = 60_000
 STALE_FLOOR_MINUTES = 15
+DEFAULT_MINUTES = {"S": 10, "M": 25, "L": 40}
+DEFAULT_DIFFICULTY = "M"
+SAMPLES = 5
+SAMPLE_WINDOW_MS = 24 * HOUR_MS
+IN_FLIGHT = ("claimed", "pr")
+UNOBSERVED = "live capacity has not been observed"
+NO_SLOT = "the quota allows no agent slot now"
 
 
 def live(doc, name):
@@ -51,41 +59,56 @@ def closed_last_hour(doc, events, now):
     return [t["id"] for t in live(doc, "tasks") if finished(t) and f"tasks/{t['id']}" in recent]
 
 
-def mean_minutes(events, task_ids):
-    spans = []
-    for tid in task_ids:
-        target = f"tasks/{tid}"
-        done = [e["at"] for e in events if e["kind"] == "task done" and e["target"] == target]
-        claims = [e["at"] for e in events if e["kind"] == "task claimed" and e["target"] == target]
-        if done and claims:
-            spans.append(done[-1] - claims[-1])
-    return round(sum(spans) / len(spans) / MINUTE_MS) if spans else None
+def difficulty(task):
+    return task.get("difficulty") if task.get("difficulty") in DEFAULT_MINUTES else DEFAULT_DIFFICULTY
 
 
-def chain_length(doc):
-    unfinished = {t["id"]: t for t in live(doc, "tasks") if not finished(t)}
-    depth = {}
+def claim_to_pr(doc, events, now):
+    rows = {f"tasks/{t['id']}": t for t in live(doc, "tasks")}
+    claimed, spans = {}, {name: [] for name in DEFAULT_MINUTES}
+    for e in events:
+        if e["kind"] == "task claimed":
+            claimed[e["target"]] = e["at"]
+        elif e["kind"] == "task pr" and e["target"] in claimed and e["target"] in rows:
+            start = claimed.pop(e["target"])
+            if now - e["at"] <= SAMPLE_WINDOW_MS:
+                spans[difficulty(rows[e["target"]])].append((e["at"] - start) / MINUTE_MS)
+    return spans
+
+
+def agent_minutes(doc, events, now):
+    spans = claim_to_pr(doc, events, now)
+    return {
+        name: {
+            "minutes": round(statistics.median(found), 1) if len(found) >= SAMPLES else DEFAULT_MINUTES[name],
+            "samples": len(found),
+        }
+        for name, found in spans.items()
+    }
+
+
+def remaining_minutes(task, tiers, ci, events, now):
+    estimate = tiers[difficulty(task)]["minutes"] + ci
+    if task.get("state") not in IN_FLIGHT:
+        return estimate
+    target, kind = f"tasks/{task['id']}", f"task {task['state']}"
+    full = ci if task["state"] == "pr" else estimate
+    since = [e["at"] for e in events if e["kind"] == kind and e["target"] == target]
+    return max(0, full - (now - since[-1]) / MINUTE_MS) if since else full
+
+
+def chain_minutes(unfinished, left):
+    total = {}
 
     def walk(tid, stack):
-        if tid in depth:
-            return depth[tid]
+        if tid in total:
+            return total[tid]
         stack = stack | {tid}
         deps = [d for d in unfinished[tid].get("depends_on", []) if d in unfinished and d not in stack]
-        depth[tid] = 1 + max((walk(d, stack) for d in deps), default=0)
-        return depth[tid]
+        total[tid] = left[tid] + max((walk(d, stack) for d in deps), default=0)
+        return total[tid]
 
     return max((walk(tid, frozenset()) for tid in unfinished), default=0)
-
-
-def time_left(remaining, rate, chain, mean):
-    if remaining == 0:
-        return 0
-    if rate == 0:
-        return None
-    bound = remaining * 60 / rate
-    if mean is not None:
-        bound = max(bound, chain * mean)
-    return math.ceil(bound)
 
 
 def is_stale(shown, computed):
@@ -96,19 +119,30 @@ def is_stale(shown, computed):
     return abs(shown - computed) > max(STALE_FLOOR_MINUTES, computed / 4)
 
 
-def calculate(doc: dict, events: list, now: int) -> dict:
-    closed = closed_last_hour(doc, events, now)
-    remaining = sum(1 for t in live(doc, "tasks") if not finished(t))
-    chain, mean = chain_length(doc), mean_minutes(events, closed)
-    minutes = time_left(remaining, len(closed), chain, mean)
+def calculate(doc: dict, events: list, now: int, inputs: dict | None = None) -> dict:
+    slots, ci = (inputs or {}).get("slots"), (inputs or {}).get("ci_minutes")
+    tiers = agent_minutes(doc, events, now)
+    unfinished = {t["id"]: t for t in live(doc, "tasks") if not finished(t)}
+    left = {tid: remaining_minutes(t, tiers, ci or 0, events, now) for tid, t in unfinished.items()}
+    chain, work = chain_minutes(unfinished, left), sum(left.values())
+    throughput = work / slots if slots else None
+    if not unfinished:
+        minutes, gap = 0, ""
+    elif throughput is None:
+        minutes, gap = None, NO_SLOT if slots == 0 else UNOBSERVED
+    else:
+        minutes, gap = math.ceil(max(chain, throughput)), ""
     return {
         "minutes": minutes,
-        "remaining": remaining,
-        "rate": len(closed),
-        "chain": chain,
-        "mean": mean,
+        "remaining": len(unfinished),
+        "work": round(work, 1),
+        "chain": round(chain, 1),
+        "throughput": None if throughput is None else round(throughput, 1),
+        "slots": slots,
+        "ci_minutes": ci,
+        "tiers": tiers,
         "stale": is_stale(doc.get("time_left_minutes"), minutes),
-        "gap": "No task closed in the last hour" if minutes is None else "",
+        "gap": gap,
     }
 
 
@@ -120,18 +154,25 @@ def time_left_line(doc, events, now, calculation=None):
     result = calculate(doc, events, now) if calculation is None else calculation
     shown, computed = doc.get("time_left_minutes"), result["minutes"]
     if computed is None:
-        return f"the page shows {clock(shown)}, no task closed in the last hour so code cannot compute it"
-    mean = result["mean"]
-    per_task = "" if mean is None else f" at {mean}m a task"
+        return f"the page shows {clock(shown)}, code cannot compute it: {result['gap']}"
     verdict = "stale" if result["stale"] else "current"
+    if not result["remaining"]:
+        return f"the page shows {clock(shown)}, computed 0h 0m with no task remaining, {verdict}"
+    tiers = ", ".join(f"{name} {entry['minutes']:g}m" for name, entry in result["tiers"].items())
+    ci = "no CI median yet" if result["ci_minutes"] is None else f"{result['ci_minutes']:g}m of CI"
     return (
-        f"the page shows {clock(shown)}, computed {clock(computed)} from {result['remaining']} remaining at "
-        f"{result['rate']} an hour and a chain of {result['chain']}{per_task}, {verdict}"
+        f"the page shows {clock(shown)}, computed {clock(computed)} as the larger of a {result['chain']:g}m chain "
+        f"and {result['work']:g}m of work over {result['slots']} slots, for {result['remaining']} remaining tasks "
+        f"at {tiers} and {ci}, {verdict}"
     )
 
 
 def listed(items):
     return "; ".join(i.rstrip(". ") for i in items) or "none"
+
+
+def tick_inputs(meta):
+    return (meta.get("time_left") or {}).get("inputs")
 
 
 def review(doc, meta, now, calculation=None):
@@ -140,6 +181,8 @@ def review(doc, meta, now, calculation=None):
     events = meta.get("events", [])
     counts = task_counts(doc)
     rate = len(closed_last_hour(doc, events, now))
+    if calculation is None:
+        calculation = calculate(doc, events, now, tick_inputs(meta))
     return (
         "Operator stats check, computed now. "
         f"Stale phases: {listed(stale_phases(doc))}. "
@@ -156,7 +199,7 @@ def refresh(doc: dict, ctx: "Context", request_id: str) -> str:
     ctx.meta["stats_refresh"] = state
     events = ctx.meta["events"] + ctx.events
     try:
-        result = calculate(doc, events, ctx.at)
+        result = calculate(doc, events, ctx.at, tick_inputs(ctx.meta))
         text = review(doc, {"events": events}, ctx.at, result)
         counts = {
             name: {

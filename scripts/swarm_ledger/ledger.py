@@ -52,8 +52,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       --scaffold creates its work folder (steering, progress, proof) in the same call;
                                       --artifact marks a file the operator asked for, so the task may publish it;
                                       R is the queue rank, urgent, high, normal (default) or low, next meaning
-                                      urgent: the swarm claims eligible tasks highest rank first, ledger order
-                                      within a rank; only the master, a planner or the operator sets it;
+                                      urgent: the swarm claims eligible tasks highest rank first, then by
+                                      critical path; only the master, a planner or the operator sets it;
                                       D is the task size, S, M or L, recorded as the operator's choice
   task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory, kind, rank,
                                       difficulty (S, M or L) or artifact (yes or no) of a task;

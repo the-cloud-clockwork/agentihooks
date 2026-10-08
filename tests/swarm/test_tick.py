@@ -663,6 +663,38 @@ def test_a_finished_agent_frees_its_slot_on_the_same_tick(store):
     assert [a.name for a in workers(store)] == ["engineer@a1b2c3-0002"]
 
 
+def test_every_tick_sends_the_ledger_its_time_left_inputs(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    sent = []
+    ledger.time_left = lambda slug, slots, ci_minutes: sent.append((slug, slots, ci_minutes))
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert sent == [("sw", None, None), ("sw", None, None)]
+
+
+def test_the_tick_sends_quota_slots_and_counts_ledger_events_against_its_clock(store):
+    ledger, runtime = FakeLedger([{"id": "t0", "state": "done", "done": True}, {"id": "t1"}]), FakeRuntime()
+    ledger.log = [
+        {"kind": "task claimed", "target": "tasks/t0", "at": 1_000, "by": "eng", "rev": 1},
+        {"kind": "task pr", "target": "tasks/t0", "at": 61_000, "by": "eng", "rev": 2},
+    ]
+    ledger.comment = lambda slug, item, text, by: None
+    lanes = ("eng", "ci", "plan")
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: {
+        "configured": {"eng": 2, "ci": 1, "plan": 1},
+        "effective": dict.fromkeys(lanes, 0),
+        "placeable": {"claude": 3, "codex": 0},
+        "reason": "accounts have quota",
+        "accounts": [],
+        "allocation": {lane: {"claude": 0, "codex": 0} for lane in lanes},
+        "placements": {lane: [] for lane in lanes},
+    }
+    sent = []
+    ledger.time_left = lambda slug, slots, ci_minutes: sent.append((slug, slots, ci_minutes))
+    tick("sw", store, ledger, runtime, now_ms=120_000)
+    assert sent == [("sw", 3, None)]
+
+
 def test_a_finished_agent_whose_retire_fails_holds_no_lane_slot(store):
     store.update("sw", max_eng=1)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
@@ -1377,6 +1409,23 @@ def test_equal_ranks_keep_ledger_order_and_ranks_order_the_rest(store):
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert spawned_ids(runtime) == ["t6", "t3", "t5", "t2", "t4", "t1"]
+
+
+def test_claims_follow_rank_then_the_small_fast_clear_task_then_critical_path_depth(store):
+    store.update("sw", max_eng=6)
+    ledger = FakeLedger(
+        [
+            {"id": "shallow", "phase": "p1"},
+            {"id": "deep", "phase": "p2"},
+            {"id": "w1", "depends_on": ["deep"], "rank": "low", "phase": "p2"},
+            {"id": "w2", "depends_on": ["w1"], "rank": "low", "phase": "p2"},
+            {"id": "small", "difficulty": "S", "phase": "p3"},
+            {"id": "top", "rank": "high", "phase": "p9"},
+        ]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["top", "small", "deep", "shallow"]
 
 
 def test_a_rank_change_applies_on_the_next_tick(store):

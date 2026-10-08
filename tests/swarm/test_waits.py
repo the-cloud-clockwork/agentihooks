@@ -77,7 +77,7 @@ def test_checked_wait_targets_are_checked(started, capsys):
     assert run("sw", "--as", ME, "wait", "--on", "task", "t1") == 1
     assert "task t1 is your own task" in capsys.readouterr().err
     assert run("sw", "--as", ME, "wait", "--on", "deploy", "x") == 1
-    assert "wait on one of: checks, reply, task" in capsys.readouterr().err
+    assert "wait on one of: checks, merge, reply, task" in capsys.readouterr().err
 
 
 def test_a_bare_wait_is_capped_at_sixty_minutes(started, capsys):
@@ -178,6 +178,43 @@ def test_a_checks_wait_stays_while_checks_run_or_github_cannot_answer(tick, pull
     assert tick.end() == []
     assert idle.wait(tick.store.redis, "sw", ME)["on"]["target"] == URL
     assert tick.told() == []
+
+
+@pytest.mark.parametrize("state", ["OPEN", "CLOSED"])
+def test_a_merge_wait_ends_red_when_the_queued_pull_request_drops_out(tick, state):
+    tick.hold("merge", URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, False, resolved=True, queued=True)
+    assert tick.end() == []
+    tick.pulls[URL] = None
+    assert tick.end() == []
+    tick.pulls[URL] = PullRequest(state, None, 1, False, resolved=True)
+    assert tick.end() == [
+        f"ended the wait of {ME}: pull request {URL}, now red; left the merge queue without merging; fix it and queue it again"
+    ]
+    assert held(tick.store) is None
+    assert "now red" in tick.told()[0]
+    assert "fix it and queue it again" in tick.told()[0]
+    assert tick.end() == []
+
+
+def test_the_tick_accepts_a_merge_wait_only_after_the_pull_request_lands(tick):
+    tick.hold("merge", URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, False, resolved=True, queued=True)
+    assert tick.end() == []
+    assert held(tick.store)["on"] == {"kind": "merge", "target": URL}
+    tick.pulls[URL] = PullRequest("MERGED", 2, 1, False)
+    assert tick.end() == [f"ended the wait of {ME}: pull request {URL}, now merged"]
+    assert held(tick.store) is None
+    assert f"Your wait on pull request {URL}, now merged has ended." in tick.told()[0]
+    assert tick.end() == []
+
+
+def test_cli_records_a_checked_merge_wait_with_a_pull_request_url(started, capsys):
+    store, _ = started
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 0
+    assert held(store)["on"] == {"kind": "merge", "target": URL}
+    assert run("sw", "--as", ME, "wait", "--on", "merge", "bad-url") == 1
+    assert "wait on merge needs a pull request url" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -333,7 +370,7 @@ def test_an_agent_without_a_seat_is_told_by_name(tick):
 
 
 def test_cli_wait_refuses_a_checked_wait_for_an_unknown_kind():
-    with pytest.raises(SwarmError, match="wait on one of: checks, reply, task"):
+    with pytest.raises(SwarmError, match="wait on one of: checks, merge, reply, task"):
         waits.on("deploy", "x")
 
 
@@ -449,6 +486,35 @@ def test_a_wait_ended_notice_for_another_task_stays_open(tick):
     assert tick.inbox.get(notice.id).state == "pending"
 
 
+def test_a_handoff_closes_its_wait_ended_notice_before_the_seat_passes_on(started, tmp_path):
+    from tests.swarm.test_cli import _handoff_doc
+    from tests.swarm.test_delivery import FakeHerdr
+    from tests.swarm.test_tick import FakeRuntime
+
+    store, ledger = started
+    inbox = InboxStore(store.redis)
+    [agent] = [a for a in store.agents("sw") if a.name == ME]
+    assert run("sw", "--as", ME, "wait", "--on", "task", "t2") == 0
+    ledger.rows["t2"].update(state="done")
+    cli.run_tick(store, "sw", ledger, FakeRuntime(), FakeHerdr({}))
+    [notice] = [item for item in inbox.inbox(agent.seat) if item.text.startswith("Your wait on")]
+    assert waits.notice_task(notice) == "t1"
+    inbox.deliver(notice.id, ME)
+    assert run("sw", "--as", ME, "handoff", str(_handoff_doc(tmp_path))) == 0
+    closed = inbox.get(notice.id)
+    assert (closed.state, closed.reason) == ("done", f"done: {ME} recorded a handoff on task t1")
+
+
+def test_notice_task_names_the_task_only_a_swarm_wait_ended_notice_asks_back():
+    from scripts.inbox.store import Item
+
+    text = f"Your wait on checks on {URL}, now red has ended. Pick task t13 back up: agentihooks swarm sw done"
+    notice = Item(id="n", sender="swarm", address="eng-1@sw", text=text, state="delivered", created_at=1, updated_at=1)
+    assert waits.notice_task(notice) == "t13"
+    assert waits.notice_task(Item(**{**notice.__dict__, "sender": "master@sw"})) == ""
+    assert waits.notice_task(Item(**{**notice.__dict__, "text": "Pick task t13 back up: then"})) == ""
+
+
 def test_checks_declaration_records_the_remote_head(started, monkeypatch, capsys):
     from types import SimpleNamespace
 
@@ -540,6 +606,7 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                         "resource": {
                             "state": "OPEN",
                             "headRefOid": "first",
+                            "mergeQueueEntry": {"id": "entry"},
                             "commits": {
                                 "nodes": [
                                     {
@@ -567,6 +634,7 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
     assert pull.resolved is True
     assert pull.red is False
     assert pull.pushed_at == 1791392400000
+    assert pull.queued is True
     assert calls == [
         (
             [
@@ -574,7 +642,7 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "api",
                 "graphql",
                 "-f",
-                "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
+                "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id} "
                 "commits(last:1){nodes{commit{committedDate "
                 'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"

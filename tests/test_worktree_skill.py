@@ -163,6 +163,54 @@ class Done(WtBase):
         self.assertTrue(self.branch_exists("unmerged-one"))
         self.assertIn("kept", result.stderr)
 
+    def test_done_preserves_an_open_pull_request_worktree_until_the_queue_lands(self):
+        dest = self._new("queue-one")
+        state = Path(self.tmp) / "pr-state"
+        state.write_text("open")
+        gh = self.bin / "gh"
+        gh.write_text(
+            f"#!{BASH}\nset -euo pipefail\n"
+            f'current="$(<"{state}")"\n'
+            'if [[ "$current" != merged && ( "$*" == *"--state all"* || "$current" != closed ) ]]; then\n'
+            '  echo "https://github.com/o/r/pull/9"\n'
+            "fi\n"
+        )
+        gh.chmod(0o755)
+        for value in ("open", "dropped", "closed"):
+            state.write_text(value)
+            result = self.run_wt("done", "queue-one", "--repo", str(self.primary))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not merged", result.stderr)
+            self.assertTrue(dest.is_dir())
+            self.assertEqual(self.branch_of(dest), "queue-one")
+            self.assertTrue(self.branch_exists("queue-one"))
+        state.write_text("merged")
+        result = self.run_wt("done", "queue-one", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("queue-one"))
+
+    def test_done_keeps_the_worktree_when_github_cannot_read_its_pull_request(self):
+        dest = self._new("queue-unknown")
+        gh = self.bin / "gh"
+        gh.write_text(f"#!{BASH}\nset -euo pipefail\nexit 1\n")
+        gh.chmod(0o755)
+        result = self.run_wt("done", "queue-unknown", "--repo", str(self.primary))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot read", result.stderr)
+        self.assertTrue(dest.is_dir())
+        self.assertTrue(self.branch_exists("queue-unknown"))
+
+    def test_done_keeps_a_published_worktree_when_github_cli_is_missing_even_with_force(self):
+        dest = self._new("queue-no-gh")
+        _git(dest, "push", "--quiet", "-u", "origin", "queue-no-gh", env=self.gitenv)
+        for flags in ((), ("--force",)):
+            result = self.run_wt("done", "queue-no-gh", "--repo", str(self.primary), *flags)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("cannot verify", result.stderr)
+            self.assertTrue(dest.is_dir())
+            self.assertTrue(self.branch_exists("queue-no-gh"))
+
 
 CONCURRENT_GIT = """#!{bash}
 "{real}" "$@"

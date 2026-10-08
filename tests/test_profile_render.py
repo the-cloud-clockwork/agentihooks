@@ -294,11 +294,11 @@ def test_claude_render_settings(world):
     assert {"type": "command", "command": f"bash {resolved}"} in settings["hooks"]["Stop"][-1]["hooks"]
 
 
-def test_claude_render_enables_only_the_chain_plugins(world):
+def test_an_operator_home_carries_the_operator_user_scope_plugins(world):
     from scripts.profiles import render
 
     home, bundle = world["home"], world["bundle"]
-    operator = {"model": "opus", "enabledPlugins": {"mine@m": True, "kit@m": False}}
+    operator = {"model": "opus", "enabledPlugins": {"mine@m": True, "kit@m": False, "muted@m": True, "off@m": False}}
     _write(home / ".claude" / "settings.json", json.dumps(operator))
     plugin = {"kind": "claude-plugin", "check": ["true"], "install": ["true"]}
     _write(bundle / "deps.json", json.dumps({"deps": [{**plugin, "id": "fleet@m"}]}))
@@ -307,7 +307,7 @@ def test_claude_render_enables_only_the_chain_plugins(world):
 
     out = render.render_claude("rb-role")
 
-    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"kit@m": True}
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"mine@m": True, "kit@m": True}
     assert json.loads((home / ".claude" / "settings.json").read_text()) == operator
 
 
@@ -363,6 +363,128 @@ def test_a_profile_extending_a_role_keeps_its_defaults(world):
         MATTPOCOCK: True,
         "frontend-design@claude-plugins-official": True,
     }
+
+
+def _install_in_home(out: Path, plugin: str) -> None:
+    settings = json.loads((out / "settings.json").read_text())
+    settings["enabledPlugins"] = {**settings["enabledPlugins"], plugin: True}
+    (out / "settings.json").write_text(json.dumps(settings))
+
+
+@pytest.mark.parametrize(("name", "rendered"), [("rb-role", {"mine@m": True}), ("engineer", {MATTPOCOCK: True})])
+def test_a_plugin_installed_inside_a_home_survives_the_next_render(world, name, rendered):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / "engineer" / "profile.yml", "name: engineer\nextends: [rb-base]\n")
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
+    _install_in_home(render.render_claude(name), "local@m")
+
+    out = render.render_claude(name, force=True)
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {**rendered, "local@m": True}
+
+
+def test_init_carries_a_user_scope_install_into_the_rendered_home(world):
+    from scripts.profiles import render
+
+    render.render_claude("rb-role")
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"new@m": True}}))
+
+    world["install"]._rerender_profile_homes("claude")
+
+    out = render.profile_dir("rb-role") / "claude"
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"new@m": True}
+
+
+def test_a_home_without_a_plugin_record_keeps_what_is_enabled_inside_it(world):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    _install_in_home(out, "local@m")
+    (out / render.PLUGINS).unlink()
+
+    out = render.render_claude("rb-role", force=True)
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"local@m": True}
+
+
+def test_a_home_without_a_stamp_still_drops_a_plugin_its_source_dropped(world):
+    from scripts.profiles import render
+
+    kit = world["bundle"] / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json"
+    _write(kit, json.dumps({"enabledPlugins": {"kit@m": True}}))
+    out = render.render_claude("rb-role")
+    _install_in_home(out, "local@m")
+    (out / render.STAMP).unlink()
+    _write(kit, json.dumps({}))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"local@m": True}
+
+
+def test_a_home_built_on_a_package_role_leaves_out_the_operator_plugins(world):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / "rb-front" / "profile.yml", "name: rb-front\nextends: [package:engineer]\n")
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
+
+    out = render.render_claude("rb-front")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {MATTPOCOCK: True}
+
+
+def test_a_plugin_the_bundle_layer_drops_leaves_the_home(world):
+    from scripts.profiles import render
+
+    layer = world["bundle"] / ".claude" / "settings.overrides.json"
+    _write(layer, json.dumps({"enabledPlugins": {"bundle@m": True}}))
+    render.render_claude("rb-role")
+    _write(layer, json.dumps({}))
+
+    out = render.render_claude("rb-role", force=True)
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
+
+
+def test_a_render_inside_a_profile_home_reads_the_operator_plugins(world, monkeypatch):
+    from scripts.profiles import render
+
+    inside = _write(world["home"] / "inside" / "settings.json", json.dumps({"enabledPlugins": {"inner@m": True}}))
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(inside.parent))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"mine@m": True}
+
+
+def test_a_profile_disable_beats_a_plugin_installed_inside_the_home(world):
+    from scripts.profiles import render
+
+    _install_in_home(render.render_claude("rb-role"), "local@m")
+    off = {"enabledPlugins": {"local@m": False}}
+    _write(world["bundle"] / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json", json.dumps(off))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
+
+
+def test_a_plugin_the_render_wrote_leaves_when_its_source_drops_it(world):
+    from scripts.profiles import render
+
+    kit = world["bundle"] / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json"
+    settings = world["home"] / ".claude" / "settings.json"
+    _write(settings, json.dumps({"enabledPlugins": {"mine@m": True}}))
+    _write(kit, json.dumps({"enabledPlugins": {"kit@m": True}}))
+    render.render_claude("rb-role")
+
+    _write(settings, json.dumps({"enabledPlugins": {}}))
+    _write(kit, json.dumps({}))
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
 
 
 def test_a_profile_whose_own_layers_enable_plugins_is_claude_only(world):
@@ -1338,15 +1460,21 @@ def test_stamp_skips_fresh_render_and_redoes_stale(world, target):
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_stamp_ignores_operator_plugins(world, target):
+def test_operator_plugins_redo_only_operator_homes(world, target):
     from scripts.profiles import render
 
+    _write(world["bundle"] / "profiles" / "engineer" / "profile.yml", "name: engineer\nextends: [rb-base]\n")
     settings = world["home"] / ".claude" / "settings.json"
     _write(settings, json.dumps({"enabledPlugins": {"mine@m": True}}))
     assert render.render(target, "rb-role") is not None
+    assert render.render(target, "engineer") is not None
 
     _write(settings, json.dumps({"enabledPlugins": {"mine@m": True, "later@m": True}}))
+    assert render.render(target, "engineer") is None
+    assert render.render(target, "rb-role") is not None
     assert render.render(target, "rb-role") is None
+    enabled = json.loads((render.profile_dir("rb-role") / "claude" / "settings.json").read_text())["enabledPlugins"]
+    assert enabled == {"mine@m": True, "later@m": True}
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -1437,12 +1565,12 @@ def test_stamp_names_the_chain_role_defaults(world, monkeypatch):
     from scripts.profiles import plugins, render
 
     _write(world["bundle"] / "profiles" / "master" / "profile.yml", "name: master\nextends: [rb-role]\n")
-    assert render.stamp("rb-role")["plugins"] == {}
-    assert render.stamp("master")["plugins"] == {PLAYWRIGHT: True}
+    assert render.stamp("rb-role")["enabled_plugins"] == {}
+    assert render.stamp("master")["enabled_plugins"] == {PLAYWRIGHT: True}
     assert render.render("claude", "master") is not None
 
     monkeypatch.setitem(plugins.ROLE_PLUGINS, "master", ("other@m",))
-    assert render.stamp("master")["plugins"] == {"other@m": True}
+    assert render.stamp("master")["enabled_plugins"] == {"other@m": True}
     assert render.render("claude", "master") is not None
 
 
@@ -1548,7 +1676,7 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "profiles": profiles,
         "chain": chain,
         "overlays": [],
-        "plugins": {},
+        "enabled_plugins": {},
         "corrections": "",
     }
     assert render._stamp(None, []) == {
@@ -1557,7 +1685,7 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "profiles": render._profiles_digest([]),
         "chain": [],
         "overlays": [],
-        "plugins": {},
+        "enabled_plugins": {},
         "corrections": "",
     }
     assert render._roots(None, [("rb-role", world["role"])]) == [world["role"]]

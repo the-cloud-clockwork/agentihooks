@@ -35,19 +35,24 @@ def inbox_items(inbox, slug):
 
 
 def inbox_receivers(store, inbox, slug, items):
-    """Each address the items reach: scoped within the swarm, its Doctor and the operator, live while its agent runs."""
-    from scripts.doctor.inbox import Receiver
+    """Each address the items reach and each agent that took delivery: scoped within the swarm, its Doctor and the
+    operator, live while its agent runs."""
+    from scripts.doctor.inbox import Receiver, reader
     from scripts.doctor.priming import doctor_slug
 
     slugs, names = (slug, doctor_slug(slug)), NameRegistry(inbox.redis)
     agents = {a.name: a for s in slugs for a in store.agents(s) if a.state != FINISHED}
     found = {}
-    for address in {item["address"] for item in items}:
+    for item in items:
+        address, taker = item["address"], reader(item)
         if address != OPERATOR and not any(of_swarm(address, s, names) for s in slugs):
             found[address] = Receiver(scoped=False)
             continue
-        agent = agents.get(names.resolve(inbox.seats.occupant(address).occupant if is_seat(address) else address))
-        found[address] = Receiver(live=True, quiet_ms=agent.idle_ticks * MINUTE_MS) if agent else Receiver()
+        held = inbox.seats.occupant(address).occupant if is_seat(address) else address
+        for key, name in ((address, held), (taker, taker)):
+            if key and key not in found:
+                agent = agents.get(names.resolve(name))
+                found[key] = Receiver(live=True, quiet_ms=agent.idle_ticks * MINUTE_MS) if agent else Receiver()
     return found
 
 

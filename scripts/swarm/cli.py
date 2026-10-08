@@ -93,7 +93,7 @@ from scripts.swarm import (
 )
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
-from scripts.swarm.ledger_client import LedgerClient, LedgerGone
+from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
@@ -319,7 +319,10 @@ def stop_now(store, slug, runtime, ledger):
         store.drop_agent(slug, agent.name)
         row = rows.get(agent.task, {})
         if agent.state != "finished" and row.get("state") in ("claimed", "pr") and row.get("claimed_by") == agent.name:
-            ledger.update_task(slug, agent.task, {"state": "open", "claimed_by": ""})
+            try:
+                ledger.update_task(slug, agent.task, {"state": "open", "claimed_by": ""})
+            except LedgerRefused as exc:
+                print(f"task {agent.task} not reopened, the ledger refused its write: {exc}", file=sys.stderr)
     config = store.update(slug, state="stopping" if left else "stopped")
     if not left:
         runtime.close_space(config)
@@ -803,7 +806,21 @@ def cmd_done(store, args):
     if missing:
         flags = ", ".join("--" + key.replace("_", "-").replace(" or ", " or --") for key in missing)
         raise SwarmError(f"a {ledger_kinds.kind(row)} task is done only with its proof: give {flags}")
-    refused = done_gate.refusal(row, args.pr or row.get("pr_url"), ledger_events.view)
+    url = args.pr or row.get("pr_url")
+    pull = ledger_events.view(url) if ledger_kinds.kind(row) in done_gate.GATED and url else None
+    if pull is not None and pull.state == "OPEN" and pull.queued:
+        at = now_ms()
+        idle.declare_wait(
+            store.redis,
+            args.slug,
+            agent.name,
+            at + waits.CHECKED_MINUTES * 60_000,
+            "merge queue",
+            at,
+            on=waits.on("merge", url),
+        )
+        raise SwarmError(f"pull request {url} is in the merge queue; waiting for it to land before swarm done")
+    refused = done_gate.refusal(row, url, lambda target: pull)
     if refused:
         raise SwarmError(refused)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
@@ -943,6 +960,7 @@ def _hand_off(store, slug, agent, text, reason, ledger):
     recap = "\n\n".join(
         f"## {heading}\n{handoff_check.section(text, heading)}" for heading in ("Done", "Stopped at", "Next")
     )
+    waits.settle_notices(InboxStore(store.redis), agent, "a handoff")
     envelope = handoff_envelope.build(store, slug, agent, reason, _ledger_rows(ledger, slug), now_ms())
     store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=envelope)
