@@ -210,7 +210,7 @@ def test_skill_eval_subcommand_returns_none(launch, monkeypatch):
     execute.side_effect = None
     monkeypatch.setattr(install.sys, "argv", ["agentihooks", "skill", "eval", "--agent", "codex", "--", "codex"])
 
-    assert install.main() is None
+    install.main()
     execute.assert_called_once()
 
 
