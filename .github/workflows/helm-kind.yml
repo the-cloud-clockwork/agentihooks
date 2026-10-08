@@ -1,0 +1,28 @@
+name: Helm chart in kind
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      KIND_VERSION: v0.27.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kind
+        run: |
+          if ! kind version; then
+            curl -fsSLo kind "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64"
+            sudo install -m 0755 kind /usr/local/bin/kind
+            kind version
+          fi
+          helm version --short
+          kubectl version --client
+      - name: Lint, install and prove the chart in kind
+        run: bash deploy/helm/agentihooks-swarm/ci/kind-smoke.sh

@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "swarm.fullname" . }}-controller
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "controller") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "swarm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: controller
+    spec:
+      {{- include "swarm.podSecurity" . | nindent 6 }}
+      containers:
+        - name: controller
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command: [python, -c, "import sys; from scripts.swarm.controller import main; sys.exit(main(['run']))"]
+          env:
+            {{- include "swarm.env" . | nindent 12 }}
+            {{- include "swarm.extraEnv" .Values.controller.env | nindent 12 }}
+          {{- include "swarm.envFrom" . | nindent 10 }}
+          {{- with .Values.controller.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}

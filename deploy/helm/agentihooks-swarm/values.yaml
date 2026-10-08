@@ -1,0 +1,59 @@
+deployment: distributed
+
+image:
+  repository: ghcr.io/the-cloud-clockwork/agentihooks-swarm
+  tag: dev
+  pullPolicy: Always
+
+hive:
+  id: ""
+
+secretEnv: []
+envFromSecrets: []
+externalSecrets: []
+
+ledger:
+  port: 8765
+  publicUrl: ""
+  persistence:
+    size: 1Gi
+    storageClassName: ""
+  env: {}
+  resources: {}
+
+redis:
+  enabled: true
+  url: ""
+  existingSecret:
+    name: ""
+    key: ""
+  image:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+  persistence:
+    size: 1Gi
+    storageClassName: ""
+  resources: {}
+
+controller:
+  env: {}
+  resources: {}
+
+worker:
+  enabled: false
+  replicas: 0
+  command: []
+  env: {}
+  resources: {}
+
+networkPolicy:
+  enabled: true
+  ingressFrom: []
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  annotations: {}
+  tls: []
