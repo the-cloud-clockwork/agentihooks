@@ -155,6 +155,22 @@ def test_launch_succeeds_only_after_the_terminal_starts_the_launcher(monkeypatch
     assert not list((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.started"))
 
 
+def test_launch_reports_when_the_launcher_and_the_harness_started(monkeypatch, tmp_path, capsys):
+    def popen(command, **kwargs):
+        launcher = Path(command[-1])
+        launcher.with_suffix(".started").touch()
+        launcher.with_suffix(".route").write_text("status=routed\naccount=a\nplacement=open\n")
+        os.utime(launcher.with_suffix(".started"), (1_791_000_001.5, 1_791_000_001.5))
+        os.utime(launcher.with_suffix(".route"), (1_791_000_009.25, 1_791_000_009.25))
+
+    rc = _launch(monkeypatch, tmp_path, popen)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "launcher_at=1791000001500" in out.splitlines()
+    assert "harness_at=1791000009250" in out.splitlines()
+
+
 def test_terminal_that_never_starts_the_launcher_fails_and_discards_it(monkeypatch, tmp_path, capsys):
     rc = _launch(monkeypatch, tmp_path, lambda command, **kwargs: None)
 

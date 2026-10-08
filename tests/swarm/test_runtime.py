@@ -56,6 +56,38 @@ def test_spawn_stamps_the_launch_start_before_init_agent_runs(tmp_path, monkeypa
     assert placed.launched_at == 5_000_000
 
 
+def test_spawn_records_each_launch_step_and_the_host_load(tmp_path, monkeypatch):
+    clock = iter([5_000.0, 9_000.0])
+    loads = iter([(7.25, 6.5, 5.0), (12.0, 8.0, 6.0)])
+    monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: next(clock))
+    monkeypatch.setattr("scripts.swarm.runtime.os.getloadavg", lambda: next(loads))
+    out = "status=started\nlauncher_at=5001000\nroute_status=routed\nharness_at=5004000\n"
+
+    def run(argv, **kwargs):
+        return SimpleNamespace(returncode=0, stdout=validated(argv, out), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("codex", "open"))
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
+        lanes={},
+        autonomy="delegate",
+    )
+    placed = runtime.spawn(config, "eng", "sw-eng-1", {"id": "t1", "title": "x"})
+    assert placed.launch_timings == {
+        "launched_at": 5_000_000,
+        "launcher_at": 5_001_000,
+        "harness_at": 5_004_000,
+        "returned_at": 9_000_000,
+        "load_at_launch": [7.25, 6.5, 5.0],
+        "load_at_return": [12.0, 8.0, 6.0],
+    }
+
+
 @pytest.mark.parametrize(
     ("lanes", "task", "profile"),
     [

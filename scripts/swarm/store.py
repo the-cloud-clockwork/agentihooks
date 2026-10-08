@@ -72,6 +72,7 @@ class AgentRecord:
     choice: str = ""
     launched_at: int = 0
     overlays: list = field(default_factory=list)
+    launch_timings: dict = field(default_factory=dict)
 
 
 class RedisStore:

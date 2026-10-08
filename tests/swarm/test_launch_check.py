@@ -75,10 +75,26 @@ def test_not_joined_is_named(store, launched):
     assert list(misses(store, agent, facts, {"_meta": {"members": {}}})) == ["joined"]
 
 
-def test_joined_after_the_deadline_is_named(store, launched):
+def test_a_seated_join_after_the_deadline_is_named_late(store, launched):
     agent, facts, doc = launched
     doc["_meta"]["members"][agent.name]["joined_at"] = LAUNCH + launch_check.DEADLINE_MS + 1
-    assert list(misses(store, agent, facts, doc)) == ["joined"]
+    assert list(misses(store, agent, facts, doc)) == ["late"]
+    assert "late" in launch_check.REPORT_ONLY
+
+
+def test_the_join_deadline_starts_at_the_harness_start(store, launched):
+    agent, facts, doc = launched
+    agent = replace(agent, launched_at=LAUNCH, launch_timings={"harness_at": LAUNCH + 30_000})
+    doc["_meta"]["members"][agent.name]["joined_at"] = LAUNCH + 89_000
+    assert misses(store, agent, facts, doc) == {}
+    doc["_meta"]["members"][agent.name]["joined_at"] = LAUNCH + 91_000
+    assert misses(store, agent, facts, doc)["late"]["actual"]["joined_after_ms"] == 61_000
+
+
+def test_a_harness_start_before_the_launch_is_ignored(store, launched):
+    agent, facts, doc = launched
+    agent = replace(agent, launched_at=LAUNCH, launch_timings={"harness_at": LAUNCH - 30_000})
+    assert launch_check.session_started_at(agent) == LAUNCH
 
 
 def test_seat_held_by_another_is_named(store, launched):
@@ -289,6 +305,51 @@ def test_the_join_clock_starts_at_the_launch_not_at_the_tick(store, monkeypatch)
     joined(ledger, runtime, LAUNCH + 100_000)
     actions = tick("sw", store, ledger, runtime, LAUNCH + 105_000)
     assert f"{name} passed its launch check in 50 seconds" in actions
+
+
+def test_the_tick_times_the_join_from_the_harness_start(store, monkeypatch):
+    ledger, runtime = checked(store, monkeypatch)
+    spawn = runtime.spawn
+
+    def slow_launcher(config, lane, name, task, spawns=None):
+        placed = replace(spawn(config, lane, name, task, spawns), launched_at=LAUNCH)
+        return replace(placed, launch_timings={"launched_at": LAUNCH, "harness_at": LAUNCH + 30_000})
+
+    runtime.spawn = slow_launcher
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (name,) = [n for _, n, _ in runtime.spawned]
+    waiting = tick("sw", store, ledger, runtime, LAUNCH + 70_000)
+    assert not any(name in a and "launch check" in a for a in waiting)
+    joined(ledger, runtime, LAUNCH + 80_000)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + 85_000)
+    assert f"{name} passed its launch check in 50 seconds" in actions
+    assert name not in runtime.killed
+
+
+def test_a_late_join_that_holds_its_seat_is_reported_and_kept(store, monkeypatch):
+    ledger, runtime = checked(store, monkeypatch)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (name,) = [n for _, n, _ in runtime.spawned]
+    joined(ledger, runtime, LAUNCH + 71_000)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + 120_000)
+    assert f"{name} failed its launch check on late; reported only" in actions
+    assert name not in runtime.killed
+    assert len(runtime.spawned) == 1
+    report = launch_check.report(store, "sw", "t1")
+    assert report["misses"]["late"]["actual"] == {"joined_after_ms": 71_000, "seat": "eng-1@sw"}
+    assert launch_check.findings(store, "sw") == []
+    assert name not in launch_check.pending(store, "sw")
+
+
+def test_an_agent_that_never_joins_is_still_retired_and_relaunched(store, monkeypatch, scratch):
+    scratch("t1")
+    ledger, runtime = checked(store, monkeypatch)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (name,) = [n for _, n, _ in runtime.spawned]
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert any(a.startswith(f"retired {name} after its launch check failed on joined") for a in actions)
+    assert name in runtime.killed
+    assert len(runtime.spawned) == 2
 
 
 def test_a_failed_launch_names_every_miss_and_times_from_the_launch(store, monkeypatch, scratch):
@@ -504,7 +565,7 @@ def test_retained_join_deadline_and_identity(store, launched, source, delay):
         else {agent.name: [LAUNCH - 1, LAUNCH + delay, LAUNCH + 70_000]}
     )
     doc["_meta"][source] = evidence
-    assert ("joined" in misses(store, agent, facts, doc)) == (delay > 60_000)
+    assert list(misses(store, agent, facts, doc)) == (["late"] if delay > 60_000 else [])
     assert launch_check.joined_at(agent, doc) == LAUNCH + delay
     store.seats.occupy(agent.seat, "someone-else", LAUNCH + 1)
     assert "joined" in misses(store, agent, facts, doc)
