@@ -57,6 +57,31 @@ free slot.
 [agenti] account=work routing_left=62% 5h_left=80% 7d_left=62% sessions=1/2 source=cached
 ```
 
+## Skill evaluations
+
+Run Claude skill evaluations through `agentihooks-skill-eval` from the evaluation
+runner's directory. The wrapper loads the launch credentials, selects an account
+using the same quota and session cap rules as launches, and exports its OAuth token
+through the child environment. It exits with status 3 when no account can route.
+
+For the installed skill creator's trigger runner:
+
+```bash
+agentihooks-skill-eval \
+  --agent claude \
+  -- python3 -m scripts.run_eval \
+  --eval-set "$EVAL_SET" \
+  --skill-path "$SKILL_PATH" \
+  --model haiku \
+  --num-workers 1
+```
+
+The wrapper writes `[skill-eval] account=<slug>` to stderr as the account proof;
+the runner's stdout and arguments stay intact. Every Claude subprocess started
+by that runner inherits the selected account. The default Claude login is unused.
+Use `--agent codex` to execute a Codex evaluation command with its arguments and
+environment unchanged.
+
 ## Counting sessions
 
 Live sessions are counted from `/proc`: every interactive `claude` process (not

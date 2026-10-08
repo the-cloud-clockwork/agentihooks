@@ -30,6 +30,7 @@ jobs:
       contents: read
       actions: read
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
         shard: [1, 2, 3, 4]
@@ -283,7 +284,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, lint, sonar]
+    needs: [unit, lint, sonar, mutation]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -291,9 +292,10 @@ jobs:
       - name: Require every gate to succeed
         env:
           NEEDS: ${{ toJSON(needs) }}
+          MUTATION: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
         run: |
           echo "$NEEDS"
-          if ! jq -e 'all(.[]; .result == "success")' <<< "$NEEDS"; then
+          if ! jq -e --arg mutation "$MUTATION" 'all(to_entries[]; .value.result == "success" or (.key == "mutation" and .value.result == "skipped" and $mutation == "false"))' <<< "$NEEDS"; then
             echo "::error::Every required gate must succeed."
             exit 1
           fi

@@ -489,11 +489,11 @@ def test_a_new_head_resets_checks_before_current_head_resolution(tick, red):
     from types import SimpleNamespace
 
     tick.hold("checks", URL)
-    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="first", resolved=False, red=False)
+    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="first", resolved=False, red=False, unpassed_gate="")
     assert tick.end() == []
     before = idle.wait(tick.store.redis, "sw", ME)
     assert before["on"]["head"] == "first"
-    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="second", resolved=True, red=red)
+    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="second", resolved=True, red=red, unpassed_gate="")
     assert tick.end() == []
     after = idle.wait(tick.store.redis, "sw", ME)
     assert after == {**before, "on": {"kind": "checks", "target": URL, "head": "second"}}
@@ -508,12 +508,12 @@ def test_a_push_or_missing_checks_during_resolution_keeps_the_wait(tick, confirm
     from types import SimpleNamespace
 
     tick.hold("checks", URL)
-    current = SimpleNamespace(state="OPEN", head="first", resolved=False, red=False)
+    current = SimpleNamespace(state="OPEN", head="first", resolved=False, red=False, unpassed_gate="")
     tick.pulls[URL] = current
     assert tick.end() == []
     current.resolved = True
     latest = (
-        SimpleNamespace(state="OPEN", head=confirmation[0], resolved=confirmation[1], red=False)
+        SimpleNamespace(state="OPEN", head=confirmation[0], resolved=confirmation[1], red=False, unpassed_gate="")
         if confirmation
         else None
     )
@@ -682,7 +682,7 @@ def gated_probe(rollup, suites, tree):
     ],
 )
 def test_the_probe_reads_a_declared_gate_from_the_head_workflows(text):
-    assert gated_probe(UNIT_PASSED, [], workflows("name: Docs\n", text)).resolved is False
+    assert gated_probe(UNIT_PASSED, [], workflows("name: Docs\n", text)).unpassed_gate == "Gate — Required"
 
 
 @pytest.mark.parametrize(
@@ -723,13 +723,13 @@ def test_the_probe_reads_the_gate_from_the_last_commit():
     nodes = [commit(None), commit(workflows(GATE_WORKFLOW))]
     raw = {"data": {"resource": {"state": "OPEN", "headRefOid": "second", "commits": {"nodes": nodes}}}}
     pull = github_view(URL, lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(raw)))
-    assert pull.resolved is False
+    assert pull.unpassed_gate == "Gate — Required"
 
 
 @pytest.mark.parametrize(
     ("rollup", "outcome"),
     [
-        (UNIT_PASSED, []),
+        (UNIT_PASSED, [f"checks on {URL}, now red; Gate — Required never passed"]),
         (UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "SUCCESS"}], [f"checks on {URL}, now green"]),
         (UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "FAILURE"}], [f"checks on {URL}, now red"]),
     ],
@@ -773,7 +773,7 @@ def test_a_tick_without_a_head_does_not_resolve_or_reset_the_wait(tick, head):
 
     tick.hold("checks", URL)
     before = idle.wait(tick.store.redis, "sw", ME)
-    tick.pulls[URL] = SimpleNamespace(state="OPEN", head=head, resolved=True, red=False)
+    tick.pulls[URL] = SimpleNamespace(state="OPEN", head=head, resolved=True, red=False, unpassed_gate="")
     assert tick.end() == []
     assert idle.wait(tick.store.redis, "sw", ME) == before
     assert tick.told() == []
@@ -783,7 +783,7 @@ def test_a_legacy_checks_wait_binds_before_resolving(tick, monkeypatch):
     from types import SimpleNamespace
 
     idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "tests", 1, on={"kind": "checks", "target": URL})
-    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="first", resolved=True, red=False)
+    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="first", resolved=True, red=False, unpassed_gate="")
     key = idle.key("sw", "wait", ME)
     ttl = tick.store.redis.pttl(key)
     assert tick.end() == []
@@ -803,8 +803,8 @@ def test_checks_resolution_uses_the_confirmed_current_head_result(tick):
     tick.hold("checks", URL)
     replies = iter(
         [
-            SimpleNamespace(state="OPEN", head="first", resolved=True, red=False),
-            SimpleNamespace(state="OPEN", head="first", resolved=True, red=True),
+            SimpleNamespace(state="OPEN", head="first", resolved=True, red=False, unpassed_gate=""),
+            SimpleNamespace(state="OPEN", head="first", resolved=True, red=True, unpassed_gate=""),
         ]
     )
     assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000) == [
@@ -824,7 +824,7 @@ def test_the_tick_preserves_a_wait_redeclared_during_its_probe(tick, head, resol
         idle.declare_wait(
             tick.store.redis, "sw", ME, 20_000_000, "new wait", 2, on={"kind": "checks", "target": URL, "head": "third"}
         )
-        return SimpleNamespace(state="OPEN", head=head, resolved=resolved, red=False)
+        return SimpleNamespace(state="OPEN", head=head, resolved=resolved, red=False, unpassed_gate="")
 
     assert waits.end_pass(tick.store, "sw", {}, tick.inbox, github, 5_000) == []
     assert idle.wait(tick.store.redis, "sw", ME) == {
@@ -840,7 +840,7 @@ def test_a_pending_current_head_does_not_rewrite_the_wait(tick, monkeypatch):
     from types import SimpleNamespace
 
     tick.hold("checks", URL)
-    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="first", resolved=False, red=False)
+    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="first", resolved=False, red=False, unpassed_gate="")
 
     def unexpected_write(*args, **kwargs):
         pytest.fail("an unresolved wait with the same head needs no Redis write")
@@ -861,10 +861,38 @@ def test_a_replaced_wait_does_not_stop_resolution_for_the_next_agent(tick):
         idle.declare_wait(
             tick.store.redis, "sw", ME, 20_000_000, "", 2, on={"kind": "checks", "target": URL, "head": "third"}
         )
-        return SimpleNamespace(state="OPEN", head="second", resolved=True, red=False)
+        return SimpleNamespace(state="OPEN", head="second", resolved=True, red=False, unpassed_gate="")
 
     assert waits.end_pass(tick.store, "sw", {"t3": {"state": "done"}}, tick.inbox, github, 5_000) == [
         f"ended the wait of {following}: task t3, now done"
     ]
     assert idle.wait(tick.store.redis, "sw", ME)["on"]["head"] == "third"
     assert idle.wait(tick.store.redis, "sw", following) is None
+
+
+@pytest.mark.parametrize("rollup", [[], UNIT_PASSED, [{"name": "Gate — Required", "conclusion": "SKIPPED"}]])
+def test_a_dead_required_gate_ends_the_wait_red_and_names_the_gate(tick, rollup):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe(rollup, [], workflows(GATE_WORKFLOW))
+    assert tick.end() == []
+    outcome = f"checks on {URL}, now red; Gate — Required never passed"
+    assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert tick.told() == [
+        f"Your wait on {outcome} has ended. Pick task t1 back up: "
+        "agentihooks swarm sw done, block, or wait on the next thing."
+    ]
+    assert tick.end() == []
+
+
+@pytest.mark.parametrize("rollup", [[], UNIT_PASSED, [{"name": "Gate — Required", "conclusion": "SKIPPED"}]])
+@pytest.mark.parametrize("status", ["QUEUED", "IN_PROGRESS"])
+def test_a_dead_gate_keeps_waiting_while_its_workflow_run_is_active(tick, rollup, status):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe(
+        rollup, [{"status": status, "workflowRun": {"databaseId": 1}}], workflows(GATE_WORKFLOW)
+    )
+    assert tick.end() == []
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "second"}
+    assert tick.told() == []

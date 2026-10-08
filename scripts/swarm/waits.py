@@ -45,7 +45,10 @@ def checks_resolution(held, github):
     if current.head != pull.head:
         held["head"] = current.head
         return ""
-    return f"checks on {target}, now {'red' if current.red else 'green'}" if current.resolved else ""
+    if not current.resolved:
+        return ""
+    outcome = f"checks on {target}, now {'red' if current.red else 'green'}"
+    return f"{outcome}; {current.unpassed_gate} never passed" if current.unpassed_gate else outcome
 
 
 def _save_wait(redis, slug, name, previous, held, outcome, now_ms):

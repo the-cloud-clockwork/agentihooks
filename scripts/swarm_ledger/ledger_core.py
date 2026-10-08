@@ -45,6 +45,8 @@ TEMPLATE = Path(__file__).resolve().parent / "template.html"
 PALETTE = TEMPLATE.with_name("palette.css")
 TOOLTIPS = TEMPLATE.with_name("tooltips.js")
 MODULES = TEMPLATE.parent / "static" / "js"
+SHELL = TEMPLATE.with_name("shell.html")
+HOME = TEMPLATE.with_name("home.html")
 TOKEN_RE = re.compile(r'<meta name="ledger-token" content="([A-Za-z0-9_-]{16,})">')
 LEGACY_LINE_RE = re.compile(r"^([A-Za-z][\w.-]*)(?: [0-9:]+Z?| \([^)]*\))?: (.+)$")
 LISTS = {
@@ -297,10 +299,24 @@ def watch_path(slug, name):
     return next((path for path in paths if path.exists()), paths[0])
 
 
-def page_version():
-    digest = hashlib.sha256(TEMPLATE.read_bytes() + PALETTE.read_bytes() + TOOLTIPS.read_bytes())
-    for path in sorted(MODULES.glob("*.js")):
-        digest.update(path.read_bytes())
+def static_assets():
+    """Every file a page loads, by its path under /static/<page version>/."""
+    static = MODULES.parent
+    return {
+        "palette.css": PALETTE,
+        "tooltips.js": TOOLTIPS,
+        **{f"css/{p.name}": p for p in sorted((static / "css").glob("*.css"))},
+        **{f"js/{p.name}": p for p in sorted(MODULES.glob("*.js"))},
+        **{f"home/{p.name}": p for p in sorted((static / "home").glob("*.js"))},
+    }
+
+
+def page_version(assets=None):
+    if assets is None:
+        assets = {name: path.read_bytes() for name, path in static_assets().items()}
+    digest = hashlib.sha256(TEMPLATE.read_bytes() + SHELL.read_bytes() + HOME.read_bytes())
+    for name, data in assets.items():
+        digest.update(name.encode() + b"\0" + data)
     return digest.hexdigest()[:12]
 
 

@@ -1,6 +1,6 @@
 (() => {
   const DELAY = 1000;
-  const CONTROLS = 'button, [role="tab"], [role="button"], [role="switch"], a.sync, a.fab, [data-gate-name]';
+  const CONTROLS = 'button, [role="tab"], [role="button"], [role="switch"], a.sync, a.fab, [data-gate-name], [data-tip]:not([data-tip=""])';
   const TIPS = [
     ["#title-edit", "Rename this ledger. The new title shows here and on HOME."],
     ['#title-form [type="submit"]', "Save the new ledger title."],
@@ -113,11 +113,6 @@
     ["#home-fab", "Back to HOME, the list of every ledger."],
   ];
 
-  const css = document.createElement("style");
-  css.textContent = ".ledger-tip{position:fixed;inset:auto;margin:0;max-width:280px;padding:6px 10px;border:0;"
-    + "border-radius:8px;background:var(--overlay);color:var(--text-2);font-size:12px;line-height:1.45;"
-    + "pointer-events:none;overflow:visible}";
-  document.head.append(css);
   const box = document.createElement("div");
   box.className = "ledger-tip";
   box.popover = "manual";
@@ -133,6 +128,7 @@
   function tip(el) {
     const target = control(el);
     if (!target) return null;
+    if (target.dataset.tip) return target.dataset.tip;
     const found = TIPS.find(([selector]) => target.matches(selector));
     return found ? found[1] : null;
   }

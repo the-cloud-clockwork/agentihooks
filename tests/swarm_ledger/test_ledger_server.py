@@ -13,6 +13,7 @@ import new_ledger  # noqa: E402
 
 from scripts.swarm.store import SwarmError  # noqa: E402
 from scripts.swarm_ledger.repository.file import FileLedgerRepository
+from tests.swarm_ledger.ledger_page import chromium, rendered_home  # noqa: E402
 
 storage = FileLedgerRepository(core)
 
@@ -26,8 +27,23 @@ def rule(selector):
 
 
 def home_style():
-    page = server.HOME_PAGE.read_text(encoding="utf-8")
-    return re.search(r"<style>__HOME_PALETTE__(.*?)</style>", page, re.S).group(1).replace("\n", "")
+    return core.static_assets()["css/home.css"].read_text(encoding="utf-8").replace("\n", "")
+
+
+@pytest.fixture(scope="module")
+def browser():
+    with chromium() as launched:
+        yield launched
+
+
+def home(browser, view="home", now=None):
+    return rendered_home(server, browser, view, now)
+
+
+def one_row(browser, now, **fields):
+    s = {"slug": "one", "title": "One", "overview": "o", "size": "swarm", "open": 0, "done": 0, "closed_at": None}
+    with patch.object(server, "ledger_summaries", return_value=[{**s, **fields}]):
+        return home(browser, now=now)
 
 
 def make(slug, title="T", overview="O", size="swarm", phases=()):
@@ -82,14 +98,18 @@ def test_home_spans_the_full_window_width():
     assert "max-width" not in rule("ul")
 
 
-def test_each_row_carries_title_kind_counts_swarm_state_and_last_activity(updated_at):
-    found = row(server.index_page(now=updated_at + 5 * MINUTE), SLUG)
-    assert '<a class="title" href="/rows-2026-01-03" title="Rows plan">Rows plan</a>' in found
+def test_each_row_carries_title_kind_counts_swarm_state_and_last_activity(browser, updated_at):
+    found = row(home(browser, now=updated_at + 5 * MINUTE), SLUG)
+    assert '<a class="title" href="/rows-2026-01-03" data-tip="Rows plan">Rows plan</a>' in found
     assert '<span class="kind">swarm</span>' in found
     assert '<span class="num open"><b>2</b> open</span><span class="num done"><b>1</b> done</span>' in found
     assert '<span class="state s-running">running</span>' in found
-    assert re.search(r'<time class="when" datetime="[^"]+" title="[^"]+">5m ago</time>', found)
-    assert re.search(r'<span class="ov" title="A long overview[^"]*">A long overview', found)
+    assert re.search(r'<time class="when" datetime="[^"]+" data-tip="[^"]+">5m ago</time>', found)
+    assert re.search(
+        r'</a><span class="kind">swarm</span><span class="ov" data-tip="A long overview[^"]*">A long overview[^<]*</span>'
+        r'<span class="num open">',
+        found,
+    )
     assert '<span class="acts"><button class="act del" type="button" data-act="delete"' in found
     assert 'data-slug="rows-2026-01-03" title="Move to the bin" aria-label="Move Rows plan to the bin">' in found
     assert 'data-act="reopen"' not in found
@@ -107,16 +127,16 @@ def test_a_ledger_without_tasks_counts_its_phases():
     assert (found["open"], found["done"], found["size"]) == (1, 1, "small")
 
 
-def test_a_ledger_without_a_swarm_says_so_in_its_row(updated_at):
+def test_a_ledger_without_a_swarm_says_so_in_its_row(browser, updated_at):
     make("no-swarm")
-    found = row(server.index_page(), "no-swarm")
+    found = row(home(browser), "no-swarm")
     assert '<span class="state s-none">no swarm</span>' in found
 
 
-def test_a_closed_ledger_shows_closed_and_a_reopen_button(updated_at):
+def test_a_closed_ledger_shows_closed_and_a_reopen_button(browser, updated_at):
     make("closed-row")
     storage.apply_ops("closed-row", ops=[{"op": "close", "id": "c1", "by": "swarm"}])
-    found = row(server.index_page(), "closed-row")
+    found = row(home(browser), "closed-row")
     assert '<span class="state s-closed">closed</span>' in found
     assert '<span class="acts"><button class="act reopen"' in found
     assert '>Reopen</button><button class="act del"' in found
@@ -135,54 +155,59 @@ def test_buttons_and_the_floating_bin_entry_are_flat_at_rest():
         assert "border:0" in rule(selector)
 
 
-def test_the_header_brands_home_without_a_ledger_count_and_names_each_column(updated_at):
+def test_the_header_brands_home_without_a_ledger_count_and_names_each_column(browser, updated_at):
     make("header-a")
     make("header-b")
-    page = server.index_page()
+    page = home(browser)
     count = len(server.ledger_summaries())
     assert count > 1
     assert (
         '<header><a class="logo-link" href="/" aria-label="HOME"><span class="logo" aria-hidden="true"></span></a><span class="brand">agentihooks</span><h1>HOME</h1>'
-        f"{server.FOLD_ALL}</header>" in page
+        '<button class="act toggle-all" id="fold-all" type="button">Expand all</button></header>' in page
     )
     assert 'class="total"' not in page
     head = re.search(r'<div class="row head">(.*?)</div>', page).group(1)
-    arrow = '<i aria-hidden="true">&#8597;</i></button>'
+    arrow = '<i aria-hidden="true">▼</i></button>'
+    still = '<i aria-hidden="true">↕</i></button>'
     assert head == (
-        f'<span></span><span>Ledger</span><button class="sort" type="button" data-sort="kind">Kind{arrow}'
-        f'<span>Overview</span><button class="sort r" type="button" data-sort="open">Open{arrow}'
-        f'<button class="sort r" type="button" data-sort="done">Done{arrow}'
-        f'<button class="sort" type="button" data-sort="swarm">Swarm{arrow}'
-        f'<button class="sort r" type="button" data-sort="at">Activity{arrow}<span></span>'
+        f'<span></span><span>Ledger</span><button class="sort" type="button" data-sort="kind">Kind{still}'
+        f'<span>Overview</span><button class="sort r" type="button" data-sort="open">Open{still}'
+        f'<button class="sort r" type="button" data-sort="done">Done{still}'
+        f'<button class="sort" type="button" data-sort="swarm">Swarm{still}'
+        f'<button class="sort r" type="button" data-sort="at" data-dir="desc">Activity{arrow}<span></span>'
     )
     assert '<main class="home">' in page
     assert '</li><li class="row" data-slug=' in page
 
 
-def test_the_bin_lists_days_left_and_a_restore_button(updated_at):
+def test_the_bin_lists_days_left_and_a_restore_button(browser, updated_at):
     ledger_bin.delete(SLUG, now=updated_at)
-    assert f'href="/{SLUG}"' not in server.index_page()
-    page = server.index_page(view="bin", now=updated_at + 29 * 24 * 60 * MINUTE)
+    assert f'href="/{SLUG}"' not in home(browser)
+    with patch.object(server.core, "now_ms", return_value=updated_at + 29 * 24 * 60 * MINUTE):
+        page = home(browser, "bin")
     found = row(page, SLUG)
     date = server.time.strftime("%Y-%m-%d", server.time.localtime(updated_at / 1000))
     assert f'<span class="deleted">{date}</span><span class="left">1 day left</span>' in found
     assert f'<button class="act restore" type="button" data-act="restore" data-slug="{SLUG}"' in found
     assert "Restore</button>" in found
     assert (
-        '<main class="bin"><header><a class="logo-link" href="/" aria-label="HOME"><span class="logo" aria-hidden="true"></span></a><span class="brand">agentihooks</span><h1>BIN</h1><span class="total">1 ledger</span></header>'
+        '<main class="bin"><header><a class="logo-link" href="/" aria-label="HOME"><span class="logo" aria-hidden="true"></span></a><span class="brand">agentihooks</span><h1>BIN</h1><span class="total" id="total">1 ledger</span></header>'
         in page
     )
     assert 'class="watermark"' not in page
     assert '<span class="r">Deleted</span><span class="r">Left</span><span></span></div>' in page
     assert 'id="home-fab" href="/"' in page
-    assert server.bin_cells({"deleted_at": updated_at, "days_left": 30}).endswith(">30 days left</span>")
+    with patch.object(
+        server, "bin_summaries", return_value=[{**summary(SLUG), "deleted_at": updated_at, "days_left": 30}]
+    ):
+        assert '<span class="left">30 days left</span>' in row(home(browser, "bin"), SLUG)
 
 
-def test_the_bin_entry_carries_the_bin_count_and_an_empty_bin_says_so(updated_at):
-    assert '<span class="count">' not in server.index_page()
-    assert '<li class="empty">The bin is empty.</li>' in server.index_page(view="bin")
+def test_the_bin_entry_carries_the_bin_count_and_an_empty_bin_says_so(browser, updated_at):
+    assert '<span class="count">' not in home(browser)
+    assert '<li class="empty">The bin is empty.</li>' in home(browser, "bin")
     ledger_bin.delete(SLUG)
-    assert '<span class="count">1</span></a>' in server.index_page()
+    assert '<span class="count">1</span></a>' in home(browser)
 
 
 @pytest.mark.parametrize(
@@ -190,19 +215,19 @@ def test_the_bin_entry_carries_the_bin_count_and_an_empty_bin_says_so(updated_at
     [(0, "just now"), (0.9, "just now"), (1, "1m ago"), (59, "59m ago"), (60, "1h ago"), (1439, "23h ago")]
     + [(1440, "1d ago"), (3000, "2d ago")],
 )
-def test_last_activity_reads_in_the_largest_whole_unit(minutes, text):
-    assert server.ago(1000, 1000 + int(minutes * MINUTE)) == text
+def test_last_activity_reads_in_the_largest_whole_unit(browser, minutes, text):
+    assert f">{text}</time>" in one_row(browser, 1000 + int(minutes * MINUTE), updated_at=1000)
 
 
-def test_activity_in_the_future_reads_just_now_and_unknown_when_missing():
-    assert server.ago(5 * MINUTE, 0) == "just now"
-    assert server.activity(None, 0) == '<span class="when">unknown</span>'
-    stamp = server.activity(MINUTE, 3 * MINUTE)
-    assert stamp.startswith('<time class="when" datetime="1970-01-01T00:01:00Z" title="1970-01-01 ')
+def test_activity_in_the_future_reads_just_now_and_unknown_when_missing(browser):
+    assert ">just now</time>" in one_row(browser, 0, updated_at=5 * MINUTE)
+    assert '<span class="when">unknown</span>' in one_row(browser, 0, updated_at=None)
+    stamp = re.search(r'<time class="when"[^>]*>[^<]*</time>', one_row(browser, 3 * MINUTE, updated_at=MINUTE)).group(0)
+    assert stamp.startswith('<time class="when" datetime="1970-01-01T00:01:00Z" data-tip="1970-01-01 ')
     assert stamp.endswith('">2m ago</time>')
     at = 1_791_290_000_000
     local = server.time.strftime("%Y-%m-%d %H:%M", server.time.localtime(at / 1000))
-    assert f'title="{local}">just now</time>' in server.activity(at, at)
+    assert f'data-tip="{local}">just now</time>' in one_row(browser, at, updated_at=at)
 
 
 def test_the_swarm_state_comes_from_the_swarm_config():
@@ -228,9 +253,10 @@ def test_the_swarm_state_comes_from_the_swarm_config():
     err.write.assert_called_once_with("swarm state sw: refused\n")
 
 
-def test_home_cells_escape_an_unknown_state():
-    cells = server.home_cells({"closed_at": None, "open": 0, "done": 0, "updated_at": None}, "<b>", 0)
-    assert '<span class="state s-&lt;b&gt;">&lt;b&gt;</span>' in cells
+def test_home_cells_escape_an_unknown_state(browser):
+    with patch.object(server, "swarm_state", return_value="<b>"):
+        page = one_row(browser, 0, updated_at=None)
+    assert re.search(r'<span class="state s-(&lt;|<)b(&gt;|>)">&lt;b&gt;</span>', page)
 
 
 class Swarms:
@@ -290,7 +316,7 @@ def test_an_unreachable_swarm_store_bins_nothing():
     assert "unreachable" not in ledger_bin.entries()
 
 
-def test_home_bins_closed_ledgers_without_a_swarm_before_it_renders():
+def test_the_home_shell_bins_nothing_and_the_watch_loop_bins_closed_ledgers_without_a_swarm():
     closed("served-closed")
     handler = server.Handler.__new__(server.Handler)
     handler.path, handler.headers = "/", {"Host": f"127.0.0.1:{server.PORT}"}
@@ -299,5 +325,16 @@ def test_home_bins_closed_ledgers_without_a_swarm_before_it_renders():
     with patch.object(server, "swarm_store", return_value=Swarms()):
         handler.do_GET()
     assert sent[0][0] == 200
-    assert 'href="/served-closed"' not in sent[0][1]
+    assert "served-closed" not in ledger_bin.entries()
+
+    def finish(interval):
+        raise RuntimeError("watch ended")
+
+    with (
+        patch.object(server, "swarm_store", return_value=Swarms()),
+        patch.object(server, "sample_streams"),
+        patch.object(server.time, "sleep", finish),
+        pytest.raises(RuntimeError, match="watch ended"),
+    ):
+        server.watch_seeds()
     assert "served-closed" in ledger_bin.entries()

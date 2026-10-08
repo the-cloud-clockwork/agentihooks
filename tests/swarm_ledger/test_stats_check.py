@@ -55,6 +55,7 @@ def test_older_server_response_cannot_replace_newer_stats():
         + "let rev = 12, meta = {rev: 12}, doc = {time_left_minutes: 60};\n"
         + "let ops = [], seedBroken = false;\n"
         + "const withDefaults = x => x, applyChecks = () => {}, banner = () => {}, render = () => {}, lsWrite = () => {};\n"
+        + "let firstState = () => {};\n"
         + "applyServer({_meta: {rev: 11}, time_left_minutes: 400});\n"
         + "assert.equal(rev, 12); assert.equal(doc.time_left_minutes, 60);\n"
         + "applyServer({_meta: {rev: 13}, time_left_minutes: 30});\n"

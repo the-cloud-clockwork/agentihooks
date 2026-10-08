@@ -3,6 +3,7 @@ import { $, grow, h, newId, when } from "./dom.js";
 import { doc, queue } from "./sync.js";
 import { attachable, attachmentsView, refreshTray, withAttachments } from "./media.js";
 import { entryBody, wireKeys } from "./threads.js";
+import { lastPage, limit, moreButton } from "./pages.js";
 
 let chatSeen = 0;
 
@@ -11,11 +12,16 @@ export function renderChat() {
   const log = $("chat-log");
   const list = doc.chat.filter((e) => !e.deleted);
   $("chat-clear").hidden = !list.length;
-  const sig = list.map((e) => `${e.id}${e.sending ? "~" : ""}`).join();
+  if ($("chat-panel").hidden) {
+    delete log.dataset.sig;
+    return log.replaceChildren();
+  }
+  const page = lastPage("chat", list, () => null);
+  const sig = `${limit("chat")}:` + page.map((e) => `${e.id}${e.sending ? "~" : ""}`).join();
   if (log.dataset.sig === sig) return;
   const stick = log.dataset.sig === undefined || log.scrollHeight - log.scrollTop - log.clientHeight < 48;
   log.dataset.sig = sig;
-  log.replaceChildren(...list.map((e) => h("div", { class: "entry" + (e.by === "operator" ? " mine" : "") + (e.sending ? " sending" : "") },
+  log.replaceChildren(moreButton("chat", list.length, "older messages", renderChat, "div") || "", ...page.map((e) => h("div", { class: "entry" + (e.by === "operator" ? " mine" : "") + (e.sending ? " sending" : "") },
     h("div", { class: "entry-head" }, h("span", { class: "who", text: chatWho(e) }), h("span", { text: when(e.at) })),
     entryBody(e.text, new Set(doc.tasks.map((t) => t.id))), attachmentsView(e.attachments))));
   if (!list.length) log.append(h("div", { class: "empty", text: "No messages yet." }));
@@ -46,7 +52,8 @@ export function renderChatBadge() {
 export function showChat(open) {
   $("chat-panel").hidden = !open;
   $("chat-fab").setAttribute("aria-expanded", String(open));
-  if (!open) return;
+  if (!open) return renderChat();
+  renderChat();
   renderChatBadge();
   const log = $("chat-log");
   log.scrollTop = log.scrollHeight;

@@ -9,6 +9,8 @@ import { renderOutline } from "./outline.js";
 import { collapsible, markToggles } from "./folds.js";
 import { renderChat, renderChatBadge } from "./chat.js";
 import { renderSwarm, swarm } from "./swarm.js";
+import { readWorkspace } from "./api.js";
+import { firstPage, lazy, moreButton, wanted } from "./pages.js";
 
 function scopeDot(key, item) {
   if (item.done) return null;
@@ -104,16 +106,30 @@ function taskBlockers(task, tasks) {
   return open.length ? `Ready to start on ${open.map((id) => `branch ${byId[id].branch} of ${title(id)}`).join(", and ")}` : "";
 }
 
-function taskProof(key, item) {
-  const rows = [item.contract, item.proof, item.workspace_tail].flatMap((o) => Object.entries(o || {})).filter(([, v]) => String(v).trim());
-  if (!rows.length) return null;
+function proofRows(...sources) {
+  return sources.flatMap((o) => Object.entries(o || {})).filter(([, v]) => String(v).trim());
+}
+
+function proofList(rows) {
   const label = (k) => k[0].toUpperCase() + k.slice(1).replace("_", " ");
   const value = (v) => /^https?:\/\//.test(v) ? h("dd", {}, h("a", { href: v, target: "_blank", rel: "noopener", text: v })) : h("dd", { text: v });
-  const box = h("details", { class: "task-proof" }, h("summary", {}, "Contract and proof"),
-    h("dl", {}, ...rows.flatMap(([k, v]) => [h("dt", { text: label(k) }), value(v)])));
+  return h("dl", {}, ...rows.flatMap(([k, v]) => [h("dt", { text: label(k) }), value(v)]));
+}
+
+function proofBody(item) {
+  const list = proofList(proofRows(item.contract, item.proof));
+  if (item.workspace) readWorkspace(item.id).then((resp) => (resp.ok ? resp.json() : null)).then((tails) => {
+    if (tails) list.replaceWith(proofList(proofRows(item.contract, item.proof, tails.data)));
+  }).catch(() => null);
+  return list;
+}
+
+function taskProof(key, item) {
+  if (!item.workspace && !proofRows(item.contract, item.proof).length) return null;
+  const box = h("details", { class: "task-proof" }, h("summary", {}, "Contract and proof"));
   box.open = openComments.has(key);
   box.addEventListener("toggle", () => rememberComment(key, box.open));
-  return box;
+  return lazy(box, () => proofBody(item));
 }
 
 function rankPick(key, item) {
@@ -157,9 +173,17 @@ function stateCounts(list, labels) {
   return headCount(Object.entries(labels).map(([st, label]) => [n[st], label]));
 }
 
-function listInto(id, items, make) {
+function sectionOpen(id) {
+  const box = $(id).closest("details");
+  if (!box || box.open) return true;
+  $(id).replaceChildren();
+  return false;
+}
+
+function listInto(id, items, make, idOf = (i) => `item-${id}-${i.id}`) {
   const el = $(id);
-  el.replaceChildren(...items.map(make));
+  if (!sectionOpen(id)) return;
+  el.replaceChildren(...firstPage(id, items, idOf).map(make), moreButton(id, items.length, `more ${id}`, render) || "");
   if (!items.length) el.append(h("li", { class: "empty", text: "None." }));
 }
 
@@ -174,7 +198,7 @@ export function render(focusKey) {
   $("closed-label").textContent = closedText(doc.closed_at);
   $("closed-banner").hidden = !doc.closed_at;
   $("sources-count").textContent = headCount([[doc.sources.length]]);
-  listInto("sources", doc.sources, (s, n) => h("li", { id: `item-sources-${n}`, text: s }));
+  listInto("sources", doc.sources.map((s, n) => ({ id: n, text: s })), (s) => h("li", { id: `item-sources-${s.id}`, text: s.text }));
   $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" });
   listInto("phases", doc.phases, (p, i) => phaseRow(p, i + 1));
   $("tasks-count").textContent = taskCounts(doc.tasks);
@@ -182,7 +206,7 @@ export function render(focusKey) {
   $("questions-count").textContent = stateCounts("questions", { open: "open", done: "answered" });
   listInto("questions", [...doc.questions].sort((a, b) => (a.answers || []).length - (b.answers || []).length), (q, i) => questionRow(q, i + 1));
   $("notes-count").textContent = headCount([[doc.notes.filter((e) => !e.deleted).length]]);
-  $("notes").replaceChildren(threadView("notes", doc.notes, "thread flat"));
+  if (sectionOpen("notes")) $("notes").replaceChildren(threadView("notes", doc.notes, "thread flat"));
   $("followups-count").textContent = stateCounts("followups", { open: "open", done: "done" });
   groupedWork("followups", doc.followups, (f) => checkRow("followups", f, 0, f.text, ""));
   renderSync();
@@ -207,15 +231,22 @@ export function render(focusKey) {
   }
 }
 
+const NOUNS = { tasks: "tasks", followups: "follow-ups" };
+
 function groupedWork(name, items, row) {
+  if (!sectionOpen(name)) return;
+  const idOf = (i) => `item-${name}-${i.id}`;
   const live = items.filter((i) => !i.deleted && !i.done && i.state !== "done");
   const done = items.filter((i) => !i.deleted && (i.done || i.state === "done"));
   const rank = { pr: 0, claimed: 1, open: 2, blocked: 3 };
   live.sort((a, b) => (rank[a.state || "open"] ?? 4) - (rank[b.state || "open"] ?? 4) || taskRanks().indexOf(taskRank(a)) - taskRanks().indexOf(taskRank(b)));
-  $(name).replaceChildren(...live.map(row));
+  $(name).replaceChildren(...firstPage(name, live, idOf).map(row), moreButton(name, live.length, `more ${NOUNS[name]}`, render) || "");
   if (!done.length) return;
-  const box = h("details", { class: "fold", id: name + "-done" }, h("summary", { text: `${done.length} done` }), h("ol", {}, ...done.map(row)));
+  const box = h("details", { class: "fold", id: name + "-done" }, h("summary", { text: `${done.length} done` }));
   collapsible(box);
+  if (done.some((i) => idOf(i) === wanted.id)) box.open = true;
+  const key = `${name}-done`;
+  lazy(box, () => h("ol", {}, ...firstPage(key, done, idOf).map(row), moreButton(key, done.length, `more done ${NOUNS[name]}`, render) || ""));
   $(name).append(h("li", {}, box));
 }
 

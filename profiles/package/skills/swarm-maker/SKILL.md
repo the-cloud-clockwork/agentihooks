@@ -10,13 +10,19 @@ install the package with `uv tool install agentihooks`; a missing Git requires
 the host's system dependency process. Run commands below; do not reimplement
 the scaffold or edit the ledger JSON or swarm store directly.
 
+**Selection invariant:** restarting, relaunching or handing off an agent reuses
+its launch record and cannot apply a changed selection. Only a newly placed
+agent reads current role/task choices. Explain this with selection commands;
+never recommend a restart or handoff to pick up changed overlays.
+
 1. **Interview.** Reuse answers already given. Ask for the outcome and its proof,
    an existing swarm or a new accepted plan, what each role needs to know or do,
    source material to reuse, and the required tools and harnesses. Summarize a
    role → overlays → capabilities → proof mapping. Keep `master`, `engineer`,
    `planner`, `qa` and `cicd` as the five base roles; domain experts are overlays,
    not new roles. Each agent can wear at most three selected overlays. If the
-   request exceeds that cap, settle a smaller selection before writing it.
+   request exceeds that cap, state the three-overlay limit and ask which to
+   omit before scaffolding or saving a selection.
    Done when the mapping has a checkable outcome and no unanswered choice that
    changes its capabilities.
 
@@ -88,12 +94,11 @@ the scaffold or edit the ledger JSON or swarm store directly.
      overlays=risk-auditor
    ```
 
-   The task's list replaces the role default. `overlays=` is an explicit empty
-   task override; `overlays-engineer=` clears the role default. An omitted task
+   Explain that the task's list replaces the role default. `overlays=` is an
+   explicit empty task override; `overlays-engineer=` clears the role default. An omitted task
    field inherits the role default. Every selected overlay must wear the
    agent's role. The page's OVERLAYS controls set the same role defaults.
-   Changes apply at the next fresh launch; running agents are not restarted,
-   and relaunches and handoffs retain their recorded overlays. For a new swarm,
+   For a new swarm,
    use init-swarm only after the plan is accepted, then set the role defaults
    before its start step. Let that skill generate the swarm name and tasks.
    Done when `agentihooks swarm SWARM status` and the affected task record show

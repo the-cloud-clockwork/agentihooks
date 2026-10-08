@@ -1,5 +1,8 @@
+import json
+import sys
 from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -161,18 +164,19 @@ class TestPage:
     def test_each_file_is_listed_by_name_and_type_on_an_unreachable_port(self, tmp_path):
         svg = tmp_path / "flow.svg"
         svg.write_bytes(SVG)
-        html = sanity.page_html([AUDIT, svg])
+        doc = sanity.ledger_doc([AUDIT, svg])
         rows = '[{"id": "art-0", "title": "impeccable-audit-summary.md", "file": {"id": "impeccable-audit-summary.md", '
         assert (
-            rows
+            json.dumps(doc["artifacts"])
+            == rows
             + '"type": "text/markdown"}}, {"id": "art-1", "title": "flow.svg", "file": {"id": "flow.svg", "type": "image/svg+xml"}}]'
-            in html
         )
-        assert '{"title": "Artifact sanity", "artifacts": [' in html
+        assert doc["title"] == "Artifact sanity"
+        html = sanity.page_html()
         assert '<meta name="ledger-port" content="9">' in html
-        for placeholder in ("DATA", "PALETTE", "PORT"):
-            assert f"__LEDGER_{placeholder}__" not in html
-        assert "--canvas" in html
+        assert "__LEDGER_" not in html
+        assert '<link rel="stylesheet" href="/static/000000000000/palette.css">' in html
+        assert "--canvas" in sanity.assets()["palette.css"].read_text()
 
 
 @pytest.fixture
@@ -182,13 +186,13 @@ def fixture_files():
 
 @pytest.fixture
 def narrow(tmp_path, monkeypatch):
-    template = tmp_path / "template.html"
+    served = sanity.assets()
+    styles = tmp_path / "ledger.css"
     wide = ".art-doc { max-width: 180ch; margin: 0 auto; line-height: 1.6; overflow-wrap: break-word; }"
-    source = sanity.TEMPLATE.read_text()
+    source = served["css/ledger.css"].read_text()
     assert wide in source
-    template.write_text(source.replace(wide, NARROW))
-    (tmp_path / "palette.css").write_text((sanity.TEMPLATE.parent / "palette.css").read_text())
-    monkeypatch.setattr(sanity, "TEMPLATE", template)
+    styles.write_text(source.replace(wide, NARROW))
+    monkeypatch.setattr(sanity, "assets", lambda: {**served, "css/ledger.css": styles})
 
 
 def test_real_artifacts_render_wide_and_readable_in_the_viewer(browser, fixture_files):
@@ -209,3 +213,105 @@ def test_the_old_narrow_column_fails_width_and_compacts_the_delivery_table(brows
         assert any(f.startswith("reading width") for f in report[name]), report[name]
     assert any("broken mid word" in f for f in report[DELIVERY.name]), report[DELIVERY.name]
     assert report["handoff-proposal.json"] == [] and report["handoff-flow.svg"] == []
+
+
+class FakeRoute:
+    def __init__(self, url=""):
+        self.request = SimpleNamespace(url=url)
+        self.answer = None
+
+    def fulfill(self, **answer):
+        self.answer = answer
+
+
+class FakeTab:
+    def __init__(self):
+        self.routes, self.visited, self.waited, self.closed = {}, [], [], False
+
+    def route(self, pattern, handler):
+        self.routes[pattern] = handler
+
+    def goto(self, url):
+        self.visited.append(url)
+
+    def wait_for_function(self, script):
+        self.waited.append(script)
+
+    def close(self):
+        self.closed = True
+
+
+class FakeBrowser:
+    def new_page(self, viewport):
+        self.viewport, self.tab = viewport, FakeTab()
+        return self.tab
+
+
+def answered(handler, url=""):
+    route = FakeRoute(url)
+    handler(route)
+    return route.answer
+
+
+def test_the_harness_serves_each_asset_with_its_type_and_refuses_an_unknown_one():
+    served = sanity.assets()
+    base = "http://127.0.0.1:9/static/000000000000/"
+    css, js = served["css/ledger.css"], served["js/main.js"]
+    assert answered(lambda r: sanity._asset(r, served), base + "css/ledger.css") == {
+        "body": css.read_text(),
+        "content_type": "text/css; charset=utf-8",
+    }
+    assert answered(lambda r: sanity._asset(r, served), base + "js/main.js") == {
+        "body": js.read_text(),
+        "content_type": "text/javascript; charset=utf-8",
+    }
+    assert answered(lambda r: sanity._asset(r, served), base + "js/missing.js") == {
+        "status": 404,
+        "body": "no such asset",
+    }
+
+
+def test_the_harness_streams_the_ledger_as_one_snapshot():
+    assert answered(lambda r: sanity._events(r, {"title": "t"})) == {
+        "body": 'id: c0\nevent: snapshot\ndata: {"ledger": {"title": "t"}, "swarm": null}\n\n',
+        "content_type": "text/event-stream",
+    }
+
+
+def test_the_harness_shell_fills_every_placeholder_with_the_sanity_values():
+    page = sanity.page_html()
+    for meta in (
+        'ledger-token" content=""',
+        'ledger-page" content="000000000000"',
+        'ledger-slug" content="artifact-sanity"',
+    ):
+        assert f'<meta name="{meta}>' in page
+    assert "<title>Artifact sanity</title>" in page
+    assert sanity.ledger_doc([])["_meta"] == {"rev": 1}
+
+
+def test_the_harness_puts_its_folder_on_the_import_path_once(monkeypatch):
+    folder = str(sanity.SHELL.parent)
+    monkeypatch.setattr(sys, "path", [p for p in sys.path if p != folder])
+    sanity.assets()
+    sanity.assets()
+    assert sys.path[0] == folder
+    assert sys.path.count(folder) == 1
+
+
+def test_the_harness_routes_the_page_its_assets_and_its_stream_then_closes_the_tab():
+    browser = FakeBrowser()
+    assert sanity.run(browser, []) == {}
+    tab = browser.tab
+    assert browser.viewport == sanity.VIEWPORT
+    assert tab.visited == [sanity.PAGE_URL]
+    assert tab.waited == ["() => document.getElementById('status').textContent !== 'loading'"]
+    assert tab.closed
+    assert answered(tab.routes[sanity.PAGE_URL]) == {
+        "body": sanity.page_html(),
+        "content_type": "text/html; charset=utf-8",
+    }
+    css = "http://127.0.0.1:9/static/000000000000/css/home.css"
+    assert answered(tab.routes["**/static/*/**"], css)["body"] == sanity.assets()["css/home.css"].read_text()
+    snapshot = answered(tab.routes["**/api/v1/ledgers/*/events"])["body"]
+    assert json.loads(snapshot.split("data: ", 1)[1]) == {"ledger": sanity.ledger_doc([]), "swarm": None}

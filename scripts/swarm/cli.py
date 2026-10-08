@@ -824,7 +824,18 @@ def cmd_done(store, args):
 
 def cmd_block(store, args):
     agent = _worker(store, args)
-    block_agent(store, args.slug, agent, args.note, LedgerClient())
+    ledger = LedgerClient()
+    rows = {task["id"]: task for task in ledger.tasks(args.slug)}
+    for dependency in rows[agent.task].get("depends_on", []):
+        if rows[dependency]["state"] != "done":
+            held = waits.on("task", dependency)
+            at = now_ms()
+            until = at + waits.CHECKED_MINUTES * 60_000
+            idle.declare_wait(store.redis, args.slug, agent.name, until, args.note, at, on=held)
+            waits.settle_notices(InboxStore(store.redis), agent, "a new wait")
+            print(json.dumps({"task": agent.task, "state": "claimed", "waits_on": held}))
+            return
+    block_agent(store, args.slug, agent, args.note, ledger)
     print(json.dumps({"task": agent.task, "state": "blocked", "next": "stop now; the swarm closes this session"}))
 
 

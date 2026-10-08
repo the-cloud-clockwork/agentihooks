@@ -106,7 +106,7 @@ def with_work_folder():
     core.sync(SLUG, ops=[{**op, "workspace": str(folder)}])
 
 
-def test_the_page_read_carries_work_folder_tails_but_no_seed_copies(served, monkeypatch):
+def test_the_page_read_leaves_published_work_folder_lines_to_the_task_read(served, monkeypatch):
     import fakeredis
 
     from scripts.swarm import commands
@@ -123,7 +123,12 @@ def test_the_page_read_carries_work_folder_tails_but_no_seed_copies(served, monk
     with urllib.request.urlopen(request) as response:
         state = json.load(response)
     assert "seeds" not in state["_meta"]
-    assert state["tasks"][0]["workspace_tail"] == {"latest_progress": "red test seen"}
+    assert "workspace_tail" not in state["tasks"][0]
+    request = urllib.request.Request(
+        f"{served}/api/v1/ledgers/{SLUG}/tasks/t1/workspace", headers={"X-Ledger-Token": token}
+    )
+    with urllib.request.urlopen(request) as response:
+        assert json.load(response)["data"] == {"latest_progress": "red test seen"}
 
 
 def test_the_agent_client_read_leaves_out_seeds_and_work_folder_tails(served):

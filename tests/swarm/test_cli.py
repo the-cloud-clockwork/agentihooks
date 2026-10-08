@@ -144,13 +144,76 @@ def test_the_tick_reopens_a_done_task_whose_pull_request_closed_unmerged(env, mo
     assert ledger.comments[-1][0::2] == ("t2", "swarm")
 
 
-def test_block_comments_parks_and_finishes(env):
+@pytest.mark.parametrize("dependencies", [None, [], ["done"]])
+def test_block_comments_parks_and_finishes(env, dependencies, capsys):
+    from scripts.swarm import idle
+
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    if dependencies is not None:
+        ledger.rows["t2"]["depends_on"] = dependencies
+    ledger.rows["done"] = {"id": "done", "state": "done"}
+    capsys.readouterr()
     assert run("sw", "--as", "ci@a1b2c3-0001", "block", "waiting on a token only the operator can create") == 0
     assert ledger.rows["t2"]["state"] == "blocked"
     assert ledger.comments == [("t2", "waiting on a token only the operator can create", "ci@a1b2c3-0001")]
+    assert store.agents("sw")[0].state == "finished"
+    assert store.claimant("sw", "t2") is None
+    assert idle.wait(store.redis, "sw", "ci@a1b2c3-0001") is None
+    assert json.loads(capsys.readouterr().out) == {
+        "task": "t2",
+        "state": "blocked",
+        "next": "stop now; the swarm closes this session",
+    }
+
+
+@pytest.mark.parametrize("dependency_state", ["open", "claimed", "pr", "blocked"])
+def test_block_waits_on_the_first_unfinished_dependency(env, capsys, monkeypatch, dependency_state):
+    from scripts.swarm import idle
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    agent = store.agents("sw")[0]
+    ledger.rows[agent.task]["depends_on"] = ["done", "first", "second"]
+    ledger.rows.update(
+        done={"id": "done", "state": "done"},
+        first={"id": "first", "state": dependency_state},
+        second={"id": "second", "state": "pr"},
+    )
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", agent.name, "continue after the prerequisite")
+    notice = inbox.send("swarm", agent.name, f"Your wait ended. Pick task {agent.task} back up: continue.")
+    before = dict(ledger.rows[agent.task])
+    monkeypatch.setattr(cli, "now_ms", lambda: 1_000)
+    capsys.readouterr()
+
+    assert run("sw", "--as", agent.name, "block", "waiting for the prerequisite") == 0
+
+    assert ledger.rows[agent.task] == before
+    assert before["state"] == "claimed"
+    assert store.claimant("sw", agent.task) == agent.name
+    assert store.agents("sw")[0].state == "working"
+    assert ledger.comments == []
+    assert ledger.notes == []
+    assert inbox.get(item.id).state == "pending"
+    closed = inbox.get(notice.id)
+    assert (closed.state, closed.reason) == (
+        "done",
+        f"done: {agent.name} recorded a new wait on task {agent.task}",
+    )
+    assert idle.wait(store.redis, "sw", agent.name) == {
+        "until": 43_201_000,
+        "reason": "waiting for the prerequisite",
+        "at": 1_000,
+        "on": {"kind": "task", "target": "first"},
+    }
+    assert json.loads(capsys.readouterr().out) == {
+        "task": agent.task,
+        "state": "claimed",
+        "waits_on": {"kind": "task", "target": "first"},
+    }
 
 
 def test_say_addresses_and_strangers_are_refused(env, capsys):

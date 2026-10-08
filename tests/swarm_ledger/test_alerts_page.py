@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import serve_modules
+from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -31,7 +31,7 @@ SERVER = {**DOC, "_meta": {"rev": 5, "warnings": [WARNING], "events": []}}
 @pytest.fixture
 def tab(browser):
     context = browser.new_context(viewport={"width": 1920, "height": 1080})
-    html = (ROOT / "scripts/swarm_ledger/template.html").read_text().replace("__LEDGER_DATA__", json.dumps(DOC))
+    html = shell_html()
     html = html.replace("__LEDGER_SLUG__", "alerts-page").replace(
         "__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text()
     )
@@ -56,7 +56,7 @@ def tab(browser):
         return route.fulfill(json={**server, "rejected": []})
 
     context.route("**/*", answer)
-    serve_modules(context)
+    serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     page.goto(URL)
     page.set_default_timeout(2000)
