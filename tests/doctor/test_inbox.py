@@ -129,3 +129,12 @@ def test_mail_to_a_session_outside_the_swarm_is_left_out():
     outside = {row["address"]: inbox.Receiver(scoped=False)}
     assert inbox.past_window([row], 20 * MIN, WINDOW, outside) == []
     assert inbox.findings([row], 20 * MIN, WINDOW, outside) == []
+
+
+def test_delivered_seat_mail_is_backlog_once_the_agent_that_took_it_left_though_the_seat_has_a_live_occupant():
+    row = _delivered()
+    row["history"][1]["by"] = "engineer@a-0001"
+    live = {row["address"]: inbox.Receiver(live=True), "engineer@a-0001": inbox.Receiver(live=False)}
+    assert [f.subject for f in inbox.past_window([row], 20 * MIN, WINDOW, live)] == [row["id"]]
+    taker = {**live, "engineer@a-0001": inbox.Receiver(live=True)}
+    assert inbox.past_window([row], 20 * MIN, WINDOW, taker) == []

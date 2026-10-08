@@ -191,3 +191,31 @@ def test_the_sweep_closes_a_seat_notice_sent_before_any_occupant_as_unknown(monk
     store.seats.occupy("eng-1@sw", "sw-eng-1", item.created_at + 1)
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(item.id).reason == f"done: {exits.UNKNOWN_OWNER}"
+
+
+def test_the_sweep_closes_a_wait_ended_notice_left_on_a_seat_by_an_agent_that_left(redis):
+    from scripts.swarm.store import AgentRecord
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    text = "Your wait on checks on https://x/pull/1, now red has ended. Pick task t1 back up: agentihooks swarm sw done"
+    notice = inbox.send("swarm", "eng-1@sw", text)
+    other = inbox.send("master@sw", "eng-1@sw", "Your wait on the master has ended. Pick task t1 back up: then?")
+    inbox.deliver(notice.id, "sw-eng-1")
+    store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw"))
+    store.seats.occupy("eng-1@sw", "sw-eng-2", notice.created_at + 1)
+    exits.sweep(inbox, "sw", store, dict)
+    closed = inbox.get(notice.id)
+    assert (closed.state, closed.reason) == ("done", "done: sw-eng-1 left its seat before picking task t1 back up")
+    assert inbox.get(other.id).state == "pending"
+
+
+def test_the_sweep_leaves_a_wait_ended_notice_open_while_its_agent_is_live(redis):
+    from scripts.swarm.store import AgentRecord
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    notice = inbox.send("swarm", "eng-1@sw", "Your wait on task t2, now done has ended. Pick task t1 back up: done")
+    store.put_agent("sw", AgentRecord(name="sw-eng-1", lane="eng", task="t1", seat="eng-1@sw"))
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(notice.id).state == "pending"

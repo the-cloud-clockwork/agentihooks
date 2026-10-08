@@ -967,6 +967,7 @@ def _hand_off(store, slug, agent, text, reason, ledger):
     recap = "\n\n".join(
         f"## {heading}\n{handoff_check.section(text, heading)}" for heading in ("Done", "Stopped at", "Next")
     )
+    waits.settle_notices(InboxStore(store.redis), agent, "a handoff")
     envelope = handoff_envelope.build(store, slug, agent, reason, _ledger_rows(ledger, slug), now_ms())
     store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=envelope)
