@@ -30,6 +30,8 @@
   --blue-500-018: rgba(59, 130, 246, .18);
   --blue-500-006: rgba(59, 130, 246, .06);
   --blue-300-010: rgba(147, 197, 253, .10);
+  --bay-050: rgba(147, 197, 253, .05);
+  --bay-075: rgba(147, 197, 253, .075);
 
   --canvas: var(--ink-950);
   --backdrop: radial-gradient(ellipse 70% 45% at 50% -8%, var(--indigo-600-012), transparent 70%),
@@ -68,4 +70,9 @@
   --pending: var(--slate-050);
   --selection: var(--blue-700);
   --grip: var(--blue-400);
+}
+
+main:not(.home) {
+  --surface-1: var(--bay-050);
+  --surface-2: var(--bay-075);
 }

@@ -9,9 +9,10 @@ import uuid
 from dataclasses import asdict, dataclass, replace
 
 from scripts.inbox.seats import SeatRegistry, is_seat, master_of
+from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
 
-PREFIX = "agentihooks:inbox"
+PREFIX = f"{ROOT}:inbox"
 NOTIFY = f"{PREFIX}:notify"
 MOVE_ATTEMPTS = 3
 STATES = ("pending", "delivered", "read", "done", "blocked", "handed_off", "cancelled")

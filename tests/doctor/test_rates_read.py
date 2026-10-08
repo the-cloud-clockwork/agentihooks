@@ -7,6 +7,7 @@ import pytest
 from hooks import config
 from scripts.doctor import rates_read
 from scripts.doctor.rates import Pull, Window
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.store import RedisStore
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -63,10 +64,10 @@ def test_pulls_are_cached_settled_for_a_week_and_open_for_five_minutes():
     again = rates_read.pulls(redis, "sw", [URL.format(1)], run)
     assert first == again == {URL.format(1): rates_read.pull(RAW)}
     assert len(run.calls) == 1
-    key = f"agentihooks:swarm:sw:rates-pull:{URL.format(1)}"
+    key = f"{KEY_ROOT}:swarm:sw:rates-pull:{URL.format(1)}"
     assert rates_read.OPEN_TTL_S < redis.ttl(key) <= rates_read.SETTLED_TTL_S
     rates_read.pulls(redis, "sw", [URL.format(2)], Run({**RAW, "state": "OPEN"}))
-    assert 0 < redis.ttl(f"agentihooks:swarm:sw:rates-pull:{URL.format(2)}") <= rates_read.OPEN_TTL_S
+    assert 0 < redis.ttl(f"{KEY_ROOT}:swarm:sw:rates-pull:{URL.format(2)}") <= rates_read.OPEN_TTL_S
 
 
 def test_an_unreadable_pull_request_is_left_out_and_not_cached():
@@ -122,7 +123,7 @@ class Ledger:
 
 def test_load_reads_every_source_and_fetches_only_pull_requests_of_tasks_done_in_the_span(home, tmp_path):
     store = RedisStore(fake_redis())
-    store.redis.hset("agentihooks:swarm:sw:findings", "stale-claim/t1", json.dumps({"seen_at": 5, "measure": 40}))
+    store.redis.hset(f"{KEY_ROOT}:swarm:sw:findings", "stale-claim/t1", json.dumps({"seen_at": 5, "measure": 40}))
     (home / "swarm-activity" / "sw").mkdir(parents=True)
     (home / "swarm-activity" / "sw" / "sw-eng-1.jsonl").write_text(json.dumps({"kind": "watch", "at": 3}) + "\n")
     (home / "injection_corrections.jsonl").write_text(json.dumps({"at": "2026-10-06T10:00:00Z", "source": "e1"}))

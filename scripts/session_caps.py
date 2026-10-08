@@ -6,7 +6,9 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-KEY = "agentihooks:session-caps"
+from scripts.swarm.keyspace import ROOT
+
+KEY = f"{ROOT}:session-caps"
 HARNESSES = ("claude", "codex")
 MAX_CAP = 50
 ACCOUNT_RE = re.compile(r"[A-Za-z0-9._][A-Za-z0-9._-]{0,199}")
