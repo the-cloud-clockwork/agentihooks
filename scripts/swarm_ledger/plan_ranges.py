@@ -3,7 +3,8 @@ from urllib.parse import urlsplit
 
 from scripts.swarm_ledger import ledger_artifacts
 
-HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
+HEADING = re.compile(r"^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$")
+FENCE = re.compile(r"^(`{3,}|~{3,})(.*)$")
 ANCHOR = re.compile(r"^\s*<!--\s*slice:\s*([\w.-]+)\s*-->\s*$")
 LINES = re.compile(r"([1-9][0-9]*)-([1-9][0-9]*)")
 
@@ -28,11 +29,14 @@ def sections(text: str) -> list[tuple[int, int, str]]:
     result = []
     fence = None
     for number, line in enumerate(text.splitlines(), 1):
-        stripped = line.lstrip()
-        if stripped.startswith(("```", "~~~")):
-            marker = stripped[:3]
-            fence = None if fence == marker else marker if fence is None else fence
-            continue
+        if marker := FENCE.match(line.lstrip()):
+            run, info = marker[1], marker[2].strip()
+            if fence is None:
+                fence = run
+                continue
+            if run[0] == fence[0] and len(run) >= len(fence) and not info:
+                fence = None
+                continue
         if fence is None:
             result.append(
                 (number, len(match[1]), match[2]) if (match := HEADING.fullmatch(line)) else (number, 0, line)
@@ -58,29 +62,28 @@ def phase_lines(text: str, phases: list[dict]) -> dict[str, str]:
 
 
 def slice_lines(text: str, name: str, phase_range: str) -> str:
+    lines = text.splitlines()
     start, end = bounds(phase_range)
+    end = min(end, len(lines))
     entries = [(n, level, line) for n, level, line in sections(text) if start <= n <= end]
     matches = [n for n, _, line in entries if (match := ANCHOR.fullmatch(line)) and match[1] == name]
     if len(matches) != 1:
         raise ValueError(f"slice anchor {name} is missing or repeated in its phase")
-    first, body, level = _owner(entries, matches[0], start)
+    first = matches[0]
+    body, level = _owner(entries, first)
     stop = next(
         (n for n, depth, line in entries if n > body and (ANCHOR.fullmatch(line) or 0 < depth <= level)), end + 1
     )
-    lines = text.splitlines()
     last = next(n for n in range(stop - 1, body - 1, -1) if n == body or lines[n - 1].strip())
     return f"{first}-{last}"
 
 
-def _owner(entries: list[tuple[int, int, str]], anchor: int, start: int) -> tuple[int, int, int]:
+def _owner(entries: list[tuple[int, int, str]], anchor: int) -> tuple[int, int]:
     after = next(((n, depth) for n, depth, line in entries if n > anchor and (depth or line.strip())), None)
     if after and after[1]:
-        return anchor, after[0], after[1]
-    before = [(n, depth) for n, depth, line in entries if n < anchor and (depth or line.strip())]
-    if before and before[-1][1] and before[-1][0] > start:
-        return before[-1][0], anchor, before[-1][1]
+        return after
     headings = [depth for n, depth, _ in entries if n < anchor and depth]
-    return anchor, anchor, headings[-1] if headings else 6
+    return anchor, headings[-1] if headings else 6
 
 
 def stored_text(ref: dict, doc: dict) -> str:
@@ -94,6 +97,12 @@ def stored_text(ref: dict, doc: dict) -> str:
     return ledger_artifacts.path_of(slug, file_id).read_text(encoding="utf-8")
 
 
+def check_phase_ref(doc: dict, phase: dict) -> None:
+    ref = phase["plan_ref"]
+    if phase_lines(stored_text(ref, doc), [phase])[phase["id"]] != ref["lines"]:
+        raise ValueError(f"plan_ref lines for phase {phase['id']} must be the range computed from its plan")
+
+
 def task_slice(doc: dict, phase: dict, name: str) -> str:
     ref = phase.get("plan_ref")
     if ref is None:
@@ -102,16 +111,15 @@ def task_slice(doc: dict, phase: dict, name: str) -> str:
 
 
 def invalid_tasks(plan: dict, doc: dict, ids: list[str]) -> list[str]:
+    phase = next((p for p in doc["phases"] if p["id"] == plan["phase"]), {})
     bad = []
     for task in doc["tasks"]:
         if task["id"] not in ids:
             continue
-        phase = next(p for p in doc["phases"] if p["id"] == plan["phase"])
         try:
-            expected = task_slice(doc, phase, task.get("plan_slice", task["id"]))
+            expected = task_slice(doc, phase, task["plan_slice"]) if "plan_slice" in task else None
         except ValueError:
-            bad.append(task["id"])
-            continue
-        if task.get("plan_lines") != expected:
+            expected = None
+        if expected is None or task.get("plan_lines") != expected:
             bad.append(task["id"])
     return bad

@@ -281,7 +281,7 @@ def test_publish_plan_without_issues_stores_a_plan_artifact_for_the_planner_task
     core.sync(plan_ledger, ops=[join])
     plan = tmp_path / "plan.md"
     plan.write_text("# Ignored heading\n", encoding="utf-8")
-    file = {"id": f"{'b' * 64}.md", "type": "text/markdown", "size": 18}
+    file = ledger_artifacts.store(plan_ledger, "plan.md", plan.read_bytes())
     uploads = []
     monkeypatch.setattr(ledger.ledger_publish, "has_issues", lambda repo, run=None: False)
     monkeypatch.setattr(
@@ -403,7 +403,7 @@ def test_publish_plan_artifact_outside_a_swarm_task_names_no_task(plan_ledger, t
     core.sync(plan_ledger, ops=[{"op": "join", "id": "join-planner", "by": "planner", "role": "member"}])
     plan = tmp_path / "plan.md"
     plan.write_text("# Master plan\n", encoding="utf-8")
-    file = {"id": f"{'c' * 64}.md", "type": "text/markdown", "size": 14}
+    file = ledger_artifacts.store(plan_ledger, "plan.md", plan.read_bytes())
     monkeypatch.setattr(ledger.ledger_publish, "has_issues", lambda repo, run=None: False)
     monkeypatch.setattr(ledger, "upload_artifact", lambda slug, name, path, request: file)
     monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)

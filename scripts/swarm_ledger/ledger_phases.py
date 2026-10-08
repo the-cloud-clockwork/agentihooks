@@ -191,6 +191,10 @@ def apply(doc: dict, op: dict, ctx) -> bool:
     after = {**(phase or {"id": phase_id, "description": "", "done": False, "comments": []}), **fields}
     try:
         validate([after if p["id"] == phase_id else p for p in phases] + ([after] if phase is None else []))
+        if "plan_ref" in fields:
+            from scripts.swarm_ledger import plan_ranges
+
+            plan_ranges.check_phase_ref(doc, after)
     except ValueError as exc:
         ctx.refused.append(str(exc))
         return False

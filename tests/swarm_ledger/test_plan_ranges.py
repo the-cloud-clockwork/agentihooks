@@ -104,10 +104,10 @@ def lines_of(text, name, phase_range=None):
     return plan_ranges.slice_lines(text, name, phase_range or f"1-{len(text.splitlines())}")
 
 
-def test_anchor_after_its_heading_starts_at_the_heading():
+def test_anchor_after_its_heading_runs_to_the_next_heading_of_that_level():
     text = "## Build\n### First\n<!-- slice: first -->\nOne\n\n### Second\n<!-- slice: second -->\nTwo\n"
-    assert lines_of(text, "first") == "2-4"
-    assert lines_of(text, "second") == "6-8"
+    assert lines_of(text, "first") == "3-4"
+    assert lines_of(text, "second") == "7-8"
 
 
 def test_plain_text_sections_run_to_the_next_anchor_or_phase_heading():
@@ -122,6 +122,24 @@ def test_anchor_ranges_stay_inside_their_phase_and_skip_fenced_text():
     with pytest.raises(ValueError, match="slice anchor b is missing or repeated in its phase"):
         lines_of(text, "b", "1-6")
     assert lines_of(text, "b", "7-9") == "8-9"
+
+
+def test_a_fence_closes_only_on_a_bare_marker_and_heading_titles_keep_inner_hashes():
+    from scripts.swarm_ledger import plan_ranges
+
+    text = "# C#\n````\n```python\n## Inside\n```\n````\n# Ship ##\n"
+    assert [(n, level, title) for n, level, title in plan_ranges.sections(text) if level] == [
+        (1, 1, "C#"),
+        (7, 1, "Ship"),
+    ]
+    assert plan_ranges.phase_lines(text, [{"id": "p1", "title": "C#"}, {"id": "p2", "title": "Ship"}]) == {
+        "p1": "1-6",
+        "p2": "7-7",
+    }
+
+
+def test_a_range_past_the_plan_end_is_clamped():
+    assert lines_of("## Build\n<!-- slice: a -->\nmore\n", "a", "1-99") == "2-3"
 
 
 def test_repeated_anchor_is_refused():
@@ -157,3 +175,14 @@ def test_slice_needs_a_published_plan_artifact(plan_ledger):
     state, rejected = add(plan_ledger, "early", plan_slice="early")
     assert rejected == ["add-early"]
     assert state["_meta"]["warnings"][0] == "publish a plan artifact for the phase before adding a plan slice"
+
+
+def test_typed_phase_lines_are_refused(published):
+    ref = core.sync(published)[0]["phases"][0]["plan_ref"]
+    op = {"op": "phase_update", "id": "typed", "by": "planner", "item": "phases/p1"}
+    op["fields"] = {"plan_ref": {**ref, "lines": "1-5"}}
+    core.check_op(op)
+    state, rejected = core.sync(published, ops=[op])
+    assert rejected == ["typed"]
+    assert state["_meta"]["warnings"][0] == "plan_ref lines for phase p1 must be the range computed from its plan"
+    assert state["phases"][0]["plan_ref"] == ref
