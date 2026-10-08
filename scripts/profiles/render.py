@@ -95,8 +95,11 @@ def _pin(bundle: Path | None, revision: str) -> None:
     if bundle is None:
         raise ValueError(f"{recorded} no bundle is linked")
     git = ["git", "-C", str(bundle)]
-    head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
-    status = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, timeout=10)
+    try:
+        head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
+        status = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, timeout=10)
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(f"{recorded} git did not answer within 10 seconds for the bundle at {bundle}") from exc
     for done in (head, status):
         if done.returncode:
             raise ValueError(f"{recorded} git cannot read the bundle at {bundle}: {done.stderr.strip()}")

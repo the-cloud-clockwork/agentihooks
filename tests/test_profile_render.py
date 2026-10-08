@@ -2322,6 +2322,24 @@ def test_an_overlay_render_refuses_a_bundle_git_cannot_read(world, overlays, mon
     )
 
 
+def test_an_overlay_render_refuses_a_bundle_git_does_not_answer(world, overlays, monkeypatch):
+    from scripts.profiles import render
+
+    def hang(argv, **kwargs):
+        assert kwargs["timeout"] == 10
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    monkeypatch.setattr(render.subprocess, "run", hang)
+
+    with pytest.raises(ValueError) as refused:
+        render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision="abc123")
+
+    assert str(refused.value) == (
+        f"the launch recorded bundle commit abc123, but git did not answer within 10 seconds for the bundle at "
+        f"{world['bundle']}"
+    )
+
+
 def test_an_overlay_render_from_the_recorded_commit_renders_and_stamps_it(world, overlays):
     from scripts.profiles import render
 
