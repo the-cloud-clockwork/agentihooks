@@ -68,6 +68,34 @@ def test_band_caps_follow_the_claude_five_hour_window_left(monkeypatch, five_use
     assert row.state == ("CLOSED" if expected_cap == 0 else "OPEN")
 
 
+def test_a_reset_window_raises_the_cap_and_the_effective_caps_on_the_next_tick(monkeypatch):
+    five, week = balancer.QuotaWindow(used=98, resets_at=200), balancer.QuotaWindow(used=97, resets_at=250)
+    result = balancer.ProbeResult("a", "allowed", "NORMAL", 2, five, week)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, result)])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"a": 1})
+    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    config = SwarmConfig("sw", "/repo", max_eng=3, max_ci=1, max_plan=0)
+    agents = [AgentRecord("engineer", "eng", "e", harness="claude")]
+    (drained,) = capacity.accounts({}, 150)
+    (freed,) = capacity.accounts({}, 300)
+    assert (drained.state, drained.cap, drained.week_resets_at) == ("CLOSED", 0, 250)
+    assert (freed.state, freed.cap, freed.five_left, freed.week_left) == ("OPEN", 6, 100, 100)
+    before = capacity.calculate(config, [drained], agents)
+    after = capacity.calculate(config, [freed], agents)
+    assert (before["effective"], before["placeable"]["claude"]) == ({"eng": 1, "ci": 0, "plan": 0}, 0)
+    assert (after["effective"], after["placeable"]["claude"]) == ({"eng": 3, "ci": 1, "plan": 0}, 5)
+
+
+def test_placement_spends_the_soonest_week_reset_first_only_above_the_handoff_margin():
+    soon = replace(account("soon"), week_resets_at=1000)
+    late = replace(account("late"), week_resets_at=9000)
+    edge = capacity.Account("claude", "edge", "OPEN", 0, 5, 90, 2, 10)
+    assert [seat.spend_before for seat in capacity.seats([soon, late, edge])] == [1000, 9000, None]
+    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0)
+    result = capacity.calculate(config, [late, edge, soon], [])
+    assert [slot["account"] for slot in result["placements"]["eng"]] == ["soon", "late"]
+
+
 def test_a_stale_claude_reading_gets_no_seat(monkeypatch):
     result = balancer.ProbeResult(
         "a", "allowed", "NORMAL", 90, balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=0)
@@ -89,11 +117,11 @@ def test_a_fresh_codex_reading_with_only_the_week_gets_the_top_band(monkeypatch)
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
     pool = [capacity.codex_router.CodexAccount("a", "AH_CX_TOKEN_a")]
     monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: pool)
-    weekly = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10))
+    weekly = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=500))
     monkeypatch.setattr(capacity.codex_router, "quotas", lambda accounts, env: {"a": weekly})
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: pytest.fail("reached the real codex probe"))
     seen = capacity.accounts({}, 100)
-    assert seen == [capacity.Account("codex", "a", "OPEN", 0, None, 90, 6)]
+    assert seen == [capacity.Account("codex", "a", "OPEN", 0, None, 90, 6, 500)]
 
 
 def test_accounts_judge_every_window_at_the_given_time_and_pass_the_environment(monkeypatch):
