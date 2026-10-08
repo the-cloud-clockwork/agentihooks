@@ -145,13 +145,13 @@ def test_an_owner_taken_inside_the_renew_transaction_is_not_extended(store, disp
 
     taken = []
 
-    def take_over_then_read():
+    def take_over_and_return_ttl():
         if not taken:
             taken.append(1)
             store.redis.set(owner_key("bob"), "bridge-2", ex=5)
         return 30
 
-    monkeypatch.setattr(dispatch, "owner_ttl_s", take_over_then_read)
+    monkeypatch.setattr(dispatch, "owner_ttl_s", take_over_and_return_ttl)
     assert dispatcher.renew("bob", "bridge-1") is False
     assert dispatcher.owner("bob") == "bridge-2"
     assert store.redis.ttl(owner_key("bob")) == 5
@@ -180,18 +180,29 @@ def test_a_killed_bridge_releases_its_recipient_within_the_expiry_window(store, 
 def test_a_killed_bridge_keeps_its_in_flight_items_for_a_successor(store, dispatcher, clock):
     first = store.send("alice", "bob", "submitted")
     second = store.send("alice", "bob", "reserved")
-    submitted, reserved = dispatcher.reserve("bob", "bridge-1")
+    submitted, _ = dispatcher.reserve("bob", "bridge-1")
     dispatcher.receipts.submitting(submitted.id, "bridge-1")
     clock(31)
     after = store.send("alice", "bob", "after")
-    assert [shown.id for shown in claim(store, "bob")] == [after.id]
+    assert [shown.id for shown in claim(store, "bob")] == [second.id, after.id]
     assert store.get(first.id).state == "pending"
-    assert store.get(second.id).state == "pending"
     successor = Dispatcher(store)
     successor.own("bob", "bridge-2")
     recovered = {d.item: (d.state, d.reason) for d in successor.receipts.recover("bob", "bridge-2")}
     assert recovered == {first.id: ("unknown", ""), second.id: ("rejected", RELEASED)}
-    assert [d.item for d in successor.reserve("bob", "bridge-2")] == [second.id]
+    assert successor.reserve("bob", "bridge-2") == []
+
+
+def test_a_lapsed_bridge_cannot_submit_an_item_the_hook_path_delivered(store, dispatcher, clock):
+    item = store.send("alice", "bob", "hi")
+    [delivery] = dispatcher.reserve("bob", "bridge-1")
+    clock(31)
+    assert [shown.id for shown in claim(store, "bob")] == [item.id]
+    dispatcher.own("bob", "bridge-1")
+    with pytest.raises(DispatchError) as refused:
+        dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    assert str(refused.value) == f"message {item.id} was delivered while its owner had lapsed"
+    assert dispatcher.receipts.get(delivery.id).state == "reserved"
 
 
 def test_a_killed_bridge_lets_the_ledger_marks_through_again(store, dispatcher, clock):
@@ -234,11 +245,20 @@ def test_renew_watches_the_owner(store, dispatcher, watched):
 
 def test_hook_delivery_watches_the_reservation_once_the_owner_expired(store, dispatcher, clock, watched):
     item = store.send("alice", "bob", "hi")
-    dispatcher.reserve("bob", "bridge-1")
+    [delivery] = dispatcher.reserve("bob", "bridge-1")
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
     clock(31)
     watched.clear()
     assert store.deliver(item.id, "bob") is None
-    assert store.key("reservation", item.id) in watched
+    assert {store.key("reservation", item.id), store.key("delivery", delivery.id)} <= set(watched)
+
+
+def test_submitting_watches_the_item(store, dispatcher, watched):
+    item = store.send("alice", "bob", "hi")
+    [delivery] = dispatcher.reserve("bob", "bridge-1")
+    watched.clear()
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    assert store.key("item", item.id) in watched
 
 
 def test_reserve_takes_pending_items_in_inbox_order_with_a_digest(store, dispatcher):

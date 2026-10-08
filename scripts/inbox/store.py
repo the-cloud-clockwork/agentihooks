@@ -566,9 +566,14 @@ class InboxStore:
         return pipe.get(key) is not None
 
     def _reserved(self, pipe, item_id):
+        """True once a delivery owner may have submitted the item; one only reserved stays deliverable."""
         key = self.key("reservation", item_id)
         pipe.watch(key)
-        return pipe.exists(key) == 1
+        held = pipe.get(key)
+        if not held:
+            return False
+        pipe.watch(self.key("delivery", held))
+        return pipe.hget(self.key("delivery", held), "state") != "reserved"
 
     def last_pending(self, pipe, item):
         pending = self.key("pending", item.address)

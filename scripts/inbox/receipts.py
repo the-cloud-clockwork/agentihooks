@@ -65,7 +65,14 @@ class Receipts:
         return _delivery(self.redis.hgetall(self.key("delivery", delivery_id)), delivery_id)
 
     def submitting(self, delivery_id, owner):
-        return transact(self.redis, lambda pipe: self._advance(pipe, delivery_id, owner, ("reserved",), "submitting"))
+        return transact(self.redis, lambda pipe: self._submit(pipe, delivery_id, owner))
+
+    def _submit(self, pipe, delivery_id, owner):
+        item = self._open(pipe, delivery_id, owner, ("reserved",)).item
+        pipe.watch(self.key("item", item))
+        if self.store.get(item).state != "pending":
+            raise DispatchError(f"message {item} was delivered while its owner had lapsed")
+        return self._advance(pipe, delivery_id, owner, ("reserved",), "submitting")
 
     def accept(self, delivery_id, owner, evidence):
         if evidence != self.get(delivery_id).digest:
