@@ -36,3 +36,23 @@ def test_accepted_state_is_returned_unchanged(monkeypatch):
     response = {"tasks": [], "_meta": {"warnings": ["Historical warning"]}, "rejected": []}
     monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops, service: response))
     assert ledger_client.LedgerClient().state("demo") is response
+
+
+@pytest.mark.parametrize(
+    ("exit_text", "refused"),
+    [
+        ('server refused: 400 {"error": {"code": "schema_invalid"}}', True),
+        ('server refused: 409 {"error": {"code": "conflict"}}', True),
+        ("server refused: 503 unavailable", False),
+        ("ledger server not answering", False),
+    ],
+)
+def test_a_client_error_from_the_server_is_a_ledger_refusal(monkeypatch, exit_text, refused):
+    def call(slug, ops, service):
+        raise SystemExit(exit_text)
+
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=call, Missing=LookupError))
+    with pytest.raises(SwarmError) as caught:
+        ledger_client.LedgerClient().comment("demo", "t1", "text", by="swarm")
+    assert isinstance(caught.value, ledger_client.LedgerRefused) is refused
+    assert str(caught.value) == f"ledger demo: {exit_text}"

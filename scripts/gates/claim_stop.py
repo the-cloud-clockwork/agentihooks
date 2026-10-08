@@ -50,6 +50,12 @@ def ruling(task, pull, waiting):
     return "idle", ""
 
 
+def parked_by(store, who, task):
+    if not task.get("parked_on"):
+        return False
+    return any(a.name == who.name and a.state == "finished" for a in store.agents(who.swarm))
+
+
 def refusal(owed, slug, task, pull):
     url, block = task.get("pr_url"), f'agentihooks swarm {slug} block "<why>"'
     name_wait = (
@@ -93,6 +99,8 @@ class ClaimStop:
         from scripts.swarm import idle
 
         store, now = self.connect(), self.now()
+        if parked_by(store, who, task):
+            return Decision()
         url = task.get("pr_url")
         held = idle.wait(store.redis, who.swarm, who.name)
         live = held if held and held["until"] > now else None

@@ -77,6 +77,7 @@ class AgentRecord:
     generation: int = 0
     runtime_backend: str = "local"
     runtime_target: dict = field(default_factory=dict)
+    launch_timings: dict = field(default_factory=dict)
 
 
 class RedisStore:
