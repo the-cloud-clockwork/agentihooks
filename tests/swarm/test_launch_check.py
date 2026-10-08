@@ -220,7 +220,7 @@ def checked(store, monkeypatch, profile="engineer", task_profile="engineer"):
     from hooks.context import profile_chain
 
     monkeypatch.setattr(profile_chain, "read_state", lambda: {})
-    monkeypatch.setattr(launch_check, "declared", lambda profile: [])
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): [])
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
     ledger, runtime = JoiningLedger([{"id": "t1", "profile": task_profile}]), CheckedRuntime()
     original = runtime.spawn
@@ -248,6 +248,32 @@ def test_tick_passes_a_launch_that_joined(store, monkeypatch):
     assert launch_check.pending(store, "sw") == {}
     assert launch_check.findings(store, "sw") == []
     assert launch_check.report(store, "sw", "t1")["state"] == "passed"
+
+
+@pytest.mark.parametrize("check_delay", [199_437, 286_137, 86_400_000])
+def test_delayed_tick_passes_a_joined_agent_after_leave(store, monkeypatch, check_delay):
+    ledger, runtime = checked(store, monkeypatch)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (name,) = [n for _, n, _ in runtime.spawned]
+    joined(ledger, runtime, LAUNCH + 15_000)
+    ledger.members.pop(name)
+    original = ledger.state
+
+    def state(slug):
+        doc = original(slug)
+        doc["_meta"]["events"] = [
+            {"kind": "joined", "by": name, "at": LAUNCH + 15_000},
+            {"kind": "left", "by": name, "at": LAUNCH + 100_000},
+        ]
+        return doc
+
+    ledger.state = state
+    actions = tick("sw", store, ledger, runtime, LAUNCH + check_delay)
+    assert f"{name} passed its launch check in 15 seconds" in actions
+    report = launch_check.report(store, "sw", "t1")
+    assert report["state"] == "passed"
+    assert report["elapsed_ms"] == 15_000
+    assert launch_check.pending(store, "sw") == {}
 
 
 def test_the_join_clock_starts_at_the_launch_not_at_the_tick(store, monkeypatch):
@@ -385,7 +411,7 @@ def test_a_wrong_base_retires_and_relaunches_the_launch(store, monkeypatch, tmp_
 def test_tick_retires_and_relaunches_a_launch_missing_a_declared_overlay(store, monkeypatch, scratch):
     scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
-    monkeypatch.setattr(launch_check, "declared", lambda profile: ["brain"])
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): ["brain"])
     tick("sw", store, ledger, runtime, LAUNCH)
     first = runtime.spawned[0][1]
     joined(ledger, runtime, LAUNCH + 1)
@@ -393,6 +419,18 @@ def test_tick_retires_and_relaunches_a_launch_missing_a_declared_overlay(store, 
     assert any(a.startswith(f"retired {first} after its launch check failed on overlay") for a in actions)
     assert first in runtime.killed
     assert launch_check.report(store, "sw", "t1")["misses"]["overlay"] == {"expected": ["brain"], "actual": []}
+
+
+def test_tick_expects_the_overlays_the_agent_was_launched_wearing(store, monkeypatch, scratch):
+    scratch("t1")
+    ledger, runtime = checked(store, monkeypatch)
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): list(worn))
+    original = runtime.spawn
+    runtime.spawn = lambda *args, **kwargs: replace(original(*args, **kwargs), overlays=["tuner"])
+    tick("sw", store, ledger, runtime, LAUNCH)
+    joined(ledger, runtime, LAUNCH + 1)
+    tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert launch_check.report(store, "sw", "t1")["misses"]["overlay"] == {"expected": ["tuner"], "actual": []}
 
 
 def test_a_take_master_launch_that_fails_is_reported_and_kept(store, monkeypatch):
@@ -429,6 +467,51 @@ def test_joined_at_reads_through_missing_levels(launched):
     assert launch_check.joined_at(agent, {"_meta": {"members": {}}}) is None
     assert launch_check.joined_at(agent, {"_meta": {"members": {agent.name: {}}}}) is None
     assert launch_check.joined_at(agent, doc) == LAUNCH + 20_000
+
+
+@pytest.mark.parametrize("delay", [23_106, 19_737])
+def test_a_retained_join_passes_after_leaving(store, launched, delay):
+    agent, facts, doc = launched
+    doc["_meta"]["members"] = {}
+    doc["_meta"]["events"] = [
+        {"kind": "joined", "by": agent.name, "at": LAUNCH + delay},
+        {"kind": "left", "by": agent.name, "at": LAUNCH + 160_000},
+    ]
+    assert misses(store, agent, facts, doc) == {}
+    assert launch_check.joined_at(agent, doc) == LAUNCH + delay
+
+
+@pytest.mark.parametrize("source", ["members", "events", "join_history"])
+def test_a_join_from_an_earlier_launch_does_not_pass(store, launched, source):
+    agent, facts, doc = launched
+    old = LAUNCH - 1
+    doc["_meta"] = {
+        "members": {agent.name: {"joined_at": old}} if source == "members" else {},
+        "events": [{"kind": "joined", "by": agent.name, "at": old}] if source == "events" else [],
+        "join_history": {agent.name: [old]} if source == "join_history" else {},
+    }
+    assert "joined" in misses(store, agent, facts, doc)
+
+
+@pytest.mark.parametrize("source", ["events", "join_history"])
+@pytest.mark.parametrize("delay", [0, 60_000, 60_001])
+def test_retained_join_deadline_and_identity(store, launched, source, delay):
+    agent, facts, doc = launched
+    doc["_meta"] = {"members": {}}
+    evidence = (
+        [{"kind": "joined", "by": agent.name, "at": LAUNCH + delay}]
+        if source == "events"
+        else {agent.name: [LAUNCH - 1, LAUNCH + delay, LAUNCH + 70_000]}
+    )
+    doc["_meta"][source] = evidence
+    assert ("joined" in misses(store, agent, facts, doc)) == (delay > 60_000)
+    assert launch_check.joined_at(agent, doc) == LAUNCH + delay
+    store.seats.occupy(agent.seat, "someone-else", LAUNCH + 1)
+    assert "joined" in misses(store, agent, facts, doc)
+    store.seats.occupy(agent.seat, agent.name, LAUNCH + 2)
+    agent = replace(agent, name=agent.name + "-other")
+    assert launch_check.joined_at(agent, doc) is None
+    assert "joined" in misses(store, agent, facts, doc)
 
 
 def test_joined_miss_names_the_delay_and_the_seat(store, launched):

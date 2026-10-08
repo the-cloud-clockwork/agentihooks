@@ -44,6 +44,7 @@ class SwarmConfig:
     effort_min: str = effort_range.DEFAULT[0]
     effort_max: str = effort_range.DEFAULT[1]
     codex_share_changed_at: int = 0
+    overlays: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,7 @@ class AgentRecord:
     input_ticks: int = 0
     choice: str = ""
     launched_at: int = 0
+    overlays: list = field(default_factory=list)
 
 
 class RedisStore:
@@ -126,6 +128,7 @@ class RedisStore:
             raw.get("effort_min") or effort_range.DEFAULT[0],
             raw.get("effort_max") or effort_range.DEFAULT[1],
             int(raw.get("codex_share_changed_at", 0)),
+            json.loads(raw.get("overlays") or "{}"),
         )
 
     def update(self, slug, **changes):
