@@ -5,7 +5,7 @@
   "manifest": {
     "fixture": "tests/fixtures/swarm_v2/execution-identity.json",
     "sha256": "64f178abfa892e96a5f3609ebdd96c05d78e45a24836f467c0943f41a3d25769",
-    "tested_commit": "6433fc51d7481099ed8677d039f28114afe64fa8",
+    "tested_commit": "19c19494e9d8938aadae449b7cfbb9c47268c653",
     "evidence_class": "isolated fakeredis metadata fixture; Pods are synthetic; no rollout claim",
     "grant": "fixture metadata only; no runtime or mutation authority"
   },

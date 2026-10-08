@@ -5,7 +5,7 @@
   "manifest": {
     "fixture": "tests/fixtures/swarm_v2/execution-identity.json",
     "sha256": "64f178abfa892e96a5f3609ebdd96c05d78e45a24836f467c0943f41a3d25769",
-    "tested_commit": "6433fc51d7481099ed8677d039f28114afe64fa8",
+    "tested_commit": "19c19494e9d8938aadae449b7cfbb9c47268c653",
     "evidence_class": "isolated fakeredis metadata fixture; Pods are synthetic; no rollout claim",
     "grant": "fixture metadata only; no runtime or mutation authority"
   },
@@ -13,7 +13,7 @@
     {
       "repeat": 0,
       "occupant": {
-        "name": "engineer@3e2bcc-0001",
+        "name": "engineer@f53061-0001",
         "lane": "eng",
         "task": "task",
         "pane_id": "",
@@ -36,7 +36,7 @@
         "choice": "",
         "launched_at": 0,
         "overlays": [],
-        "execution_id": "exe-aca7506116904e1d861b565dfc087b6f",
+        "execution_id": "exe-c809a38f9ac24b2d87a9cf0ec948ace4",
         "generation": 3,
         "runtime_backend": "local",
         "runtime_target": {}
@@ -50,7 +50,7 @@
     {
       "repeat": 1,
       "occupant": {
-        "name": "engineer@dfa227-0001",
+        "name": "engineer@cc8245-0001",
         "lane": "eng",
         "task": "task",
         "pane_id": "",
@@ -73,7 +73,7 @@
         "choice": "",
         "launched_at": 0,
         "overlays": [],
-        "execution_id": "exe-5f23cde5522844bbb948c07479ad023d",
+        "execution_id": "exe-c0209d04308a4d21b0d8e1daf3ae23ea",
         "generation": 3,
         "runtime_backend": "local",
         "runtime_target": {}

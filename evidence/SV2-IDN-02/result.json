@@ -5,7 +5,7 @@
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1518",
   "status": "implemented; isolated fixture and rollback proofs passed; CI qualification required before merge",
   "evidence_class": "isolated fakeredis metadata fixture; Pods are synthetic; no rollout claim",
-  "tested_commit": "6433fc51d7481099ed8677d039f28114afe64fa8",
+  "tested_commit": "19c19494e9d8938aadae449b7cfbb9c47268c653",
   "supported_versions": {
     "execution_metadata": "2.0",
     "legacy_local_agent_records": "preceding shape retained"
@@ -21,9 +21,9 @@
     "RedisStore.export and restore"
   ],
   "states": {
-    "observed": "300 focused tests passed; lint and format passed; preceding strict reader executed successfully",
+    "observed": "Earlier focused suite passed 300 tests; latest focused identity, store and worker grouping suite passed 93; repository lint and format passed; final focused compatibility suite recorded in task proof.",
     "accepted": "two independent positive rejection and recovery fixtures passed; historical attempts and seat memory preserved; three identity conflicts counted in each negative fixture",
-    "committed": "6433fc51d7481099ed8677d039f28114afe64fa8",
+    "committed": "19c19494e9d8938aadae449b7cfbb9c47268c653",
     "externally_verified": "CI evidence is required before merge and is recorded on the pull request and task proof; no live Pod or rollout claim"
   },
   "measurements": {
@@ -64,5 +64,21 @@
     "Seat execution generation is distinct from task ownership generation and controller epoch.",
     "Latest recorded occupancy is metadata, including terminal states, and is neither liveness proof nor authority.",
     "Kubernetes fixtures use synthetic Pod identities; live qualification belongs to its rollout gate."
-  ]
+  ],
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1533",
+  "ci": {
+    "initial_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37710855941",
+    "initial_head": "e6090d977bb6e23d3147afc4f41c4bc0c4328289",
+    "initial_result": "red: missing fakeredis test worker group and 103 mutation survivors; exact grouping correction and adversarial triage are committed; current head requires requalification"
+  },
+  "mutation": {
+    "initial_counts": {
+      "execution_killed": 446,
+      "execution_survived": 103,
+      "store_killed": 31
+    },
+    "independently_cleared": 17,
+    "remaining": "additional diagnostic, boundary and race tests await CI kill evidence",
+    "job": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37710855941/job/113096181047"
+  }
 }
