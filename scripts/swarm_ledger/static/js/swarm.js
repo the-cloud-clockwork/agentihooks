@@ -172,7 +172,7 @@ function resetIn(at, now) {
 
 function accountState(sw, r) {
   const seen = ((sw.quota_capacity || {}).accounts || []).find((a) => a.name === r.account && a.harness === r.agent);
-  return seen ? { state: seen.state.toLowerCase().replace(/_/g, " "), routing: percent(seen.routing) } : { state: "—", routing: "—" };
+  return seen ? { state: seen.state.toLowerCase(), routing: percent(seen.routing) } : { state: "—", routing: "—" };
 }
 
 function quotaRows(sw, now) {

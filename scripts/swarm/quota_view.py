@@ -15,7 +15,7 @@ def left_text(value: float | None) -> str:
 
 
 def state_text(account: dict) -> str:
-    return account["state"].lower().replace("_", " ")
+    return account["state"].lower()
 
 
 def _changed(at: int, now_ms: int) -> str:

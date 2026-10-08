@@ -21,17 +21,32 @@ def _store():
 
 
 def _drain_swarm(
-    state="CLOSED", agent_state="working", idle_ticks=0, warned_at=1_000_000, harness="claude", store=None, slug=SLUG
+    state="CLOSED",
+    agent_state="working",
+    idle_ticks=0,
+    warned_at=1_000_000,
+    harness="claude",
+    store=None,
+    slug=SLUG,
+    week=7.5,
+    started_at=0,
 ):
     store = store or _store()
     store.redis.set(
         store.key(slug, "quota-capacity"),
-        json.dumps({**DECISION, "accounts": [row("alpha", state, 1, 40.0, 7.5, harness)]}),
+        json.dumps({**DECISION, "accounts": [row("alpha", state, 1, 40.0, week, harness)]}),
     )
     store.put_agent(
         slug,
         AgentRecord(
-            "engineer@abc-0001", "eng", "t1", harness=harness, account="alpha", state=agent_state, idle_ticks=idle_ticks
+            "engineer@abc-0001",
+            "eng",
+            "t1",
+            harness=harness,
+            account="alpha",
+            state=agent_state,
+            idle_ticks=idle_ticks,
+            started_at=started_at,
         ),
     )
     inbox = InboxStore(store.redis)
@@ -56,6 +71,14 @@ def test_an_agent_still_working_on_a_closed_account_past_its_warning_is_a_findin
     assert found[0].id == "working-on-drain/engineer@abc-0001"
 
 
+def test_an_open_account_with_ten_percent_or_less_routing_left_counts_as_draining():
+    assert drain_watch.draining(row("a", "OPEN", five=40.0, week=10.0))
+    assert not drain_watch.draining(row("a", "OPEN", five=40.0, week=10.5))
+    assert not drain_watch.draining(row("a", "UNKNOWN", five=None, week=3.0))
+    found = drain_watch.findings(_drain_swarm("OPEN", week=9.0), SLUG, Limits(), 1_000_000 + 11 * MINUTE)
+    assert [f.evidence for f in found] == [("account alpha is open, routing 9% left", "task t1")]
+
+
 def test_a_closed_codex_account_counts_as_draining():
     found = drain_watch.findings(_drain_swarm(harness="codex"), SLUG, Limits(), 1_000_000 + 11 * MINUTE)
     assert [f.summary for f in found] == [
@@ -67,8 +90,9 @@ def test_a_closed_codex_account_counts_as_draining():
     "kwargs,now",
     [
         ({}, 1_000_000 + 11 * MINUTE - 1),
-        ({"state": "OPEN"}, 1_000_000 + 60 * MINUTE),
-        ({"state": "UNKNOWN"}, 1_000_000 + 60 * MINUTE),
+        ({"state": "OPEN", "week": 10.5}, 1_000_000 + 60 * MINUTE),
+        ({"state": "UNKNOWN", "week": None}, 1_000_000 + 60 * MINUTE),
+        ({"started_at": 1_000_001}, 1_000_000 + 60 * MINUTE),
         ({"agent_state": "finished"}, 1_000_000 + 60 * MINUTE),
         ({"idle_ticks": 1}, 1_000_000 + 60 * MINUTE),
     ],
