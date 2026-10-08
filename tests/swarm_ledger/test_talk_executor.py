@@ -2,7 +2,6 @@
 
 import json
 import os
-import socket
 import subprocess
 import sys
 import threading
@@ -22,14 +21,8 @@ BUDGET = 10
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
-def spare_port():
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
 @pytest.fixture
-def rig(tmp_path, monkeypatch):
+def rig(tmp_path, monkeypatch, ledger_port):
     import redis
     from fakeredis import TcpFakeServer
 
@@ -54,7 +47,7 @@ def rig(tmp_path, monkeypatch):
         "HOME": str(tmp_path / "home"),
         "PYTHONPATH": str(ROOT),
         "LEDGER_DIR": str(ledgers),
-        "LEDGER_PORT": str(spare_port()),
+        "LEDGER_PORT": str(ledger_port),
         "AGENTIHOOKS_SWARM_REDIS_URL": url,
         "AGENTIHOOKS_SWARM": SLUG,
         "AGENTIHOOKS_AGENT_NAME": ENG,

@@ -339,9 +339,8 @@ def test_scope_accepts_the_working_folder_even_when_data_is_elsewhere(tmp_path, 
     stopped.assert_called_once_with(row, proc)
 
 
-def test_sweep_really_terminates_a_server_from_a_deleted_working_folder(tmp_path):
+def test_sweep_really_terminates_a_server_from_a_deleted_working_folder(tmp_path, ledger_port):
     import shutil
-    import socket
     import subprocess
     import sys
     import time
@@ -360,9 +359,7 @@ def test_sweep_really_terminates_a_server_from_a_deleted_working_folder(tmp_path
         "server_lifetime.watch = lambda *args: threading.Event()\n"
         "ledger_server.serve()\n"
     )
-    with socket.socket() as spare:
-        spare.bind(("127.0.0.1", 0))
-        port = spare.getsockname()[1]
+    port = ledger_port
     env = {
         **os.environ,
         "LEDGER_DIR": str(folder),

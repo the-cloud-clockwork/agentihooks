@@ -137,9 +137,11 @@ class Gate(unittest.TestCase):
         self.assertEqual((session["slug"], session["name"], session["role"]), (SLUG, "boss", "orchestrator"))
 
     def test_session_start_brings_the_server_up(self):
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", 0))
-            port = probe.getsockname()[1]
+        from tests import ledger_guard
+
+        hold = ledger_guard.reserve_port()
+        self.addCleanup(hold.close)
+        port = hold.getsockname()[1]
         env = {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR), "LEDGER_PORT": str(port)}
         payload = json.dumps({"session_id": "fresh", "hook_event_name": "SessionStart"})
         subprocess.run(

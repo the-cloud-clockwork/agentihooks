@@ -1,10 +1,10 @@
 import http.client
 import json
 import os
-import socket
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -23,12 +23,6 @@ class Stop(Exception):
 def clean_environment(**values):
     base = {key: value for key, value in os.environ.items() if not key.startswith(("SWARM_", "LEDGER_"))}
     return {**base, "PYTHONPATH": str(ROOT), **values}
-
-
-def spare_port():
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
 
 
 def test_the_bind_host_and_port_come_from_the_environment():
@@ -197,35 +191,50 @@ def test_the_page_check_refuses_an_unlisted_host_or_origin(monkeypatch, host, or
     handler.send.assert_called_once_with(403, message, "text/plain")
 
 
-@pytest.fixture
-def hosted(tmp_path):
-    port = spare_port()
-    home = tmp_path / "home"
-    home.mkdir()
+@contextmanager
+def ledger_server(base, port):
+    home = base / "home"
+    home.mkdir(parents=True)
     env = clean_environment(
         AGENTIHOOKS_HOME=str(home),
-        LEDGER_DIR=str(tmp_path / "ledgers"),
+        LEDGER_DIR=str(base / "ledgers"),
         LEDGER_HOST="127.0.0.1",
         LEDGER_PORT=str(port),
         SWARM_PUBLIC_URL="https://swarm.example.com",
         SWARM_ALLOWED_HOSTS="swarm.lan",
     )
-    log = (tmp_path / "server.log").open("w")
-    child = subprocess.Popen(
-        [sys.executable, str(ROOT / "scripts" / "swarm_ledger" / "ledger_server.py"), "--serve"],
-        env=env,
-        stdout=log,
-        stderr=log,
-    )
-    deadline = time.monotonic() + 15
-    while request(port, "/healthz", f"127.0.0.1:{port}")[0] != 200:
-        assert child.poll() is None, (tmp_path / "server.log").read_text()
-        assert time.monotonic() < deadline, (tmp_path / "server.log").read_text()
-        time.sleep(0.05)
-    yield port
-    child.terminate()
-    child.wait(timeout=5)
-    log.close()
+    log_path = base / "server.log"
+    with log_path.open("w") as log:
+        child = subprocess.Popen(
+            [sys.executable, str(ROOT / "scripts" / "swarm_ledger" / "ledger_server.py"), "--serve"],
+            env=env,
+            stdout=log,
+            stderr=log,
+        )
+        try:
+            deadline = time.monotonic() + 15
+            own = (200, json.dumps({"dir": str(base / "ledgers")}).encode())
+            while request(port, "/healthz", f"127.0.0.1:{port}") != own:
+                assert child.poll() is None, log_path.read_text()
+                assert time.monotonic() < deadline, log_path.read_text()
+                time.sleep(0.05)
+            yield port
+        finally:
+            child.terminate()
+            child.wait(timeout=5)
+
+
+@pytest.fixture
+def hosted(tmp_path, ledger_port):
+    with ledger_server(tmp_path, ledger_port) as port:
+        yield port
+
+
+def test_a_server_whose_port_another_server_holds_is_never_taken_for_its_own(tmp_path, ledger_port):
+    with ledger_server(tmp_path / "other", ledger_port):
+        with pytest.raises(AssertionError, match="Address already in use"):
+            with ledger_server(tmp_path / "own", ledger_port):
+                pass
 
 
 def request(port, path, host, origin=None):

@@ -358,6 +358,12 @@ def _real_ledger_folder_guard():
     assert ledger_guard.touched[before:] == [], "this test reached the operator's real ledger folder"
 
 
+@pytest.fixture
+def ledger_port():
+    with ledger_guard.reserve_port() as hold:
+        yield hold.getsockname()[1]
+
+
 @pytest.fixture(autouse=True)
 def _swarm_codes_in_order(monkeypatch):
     """Each test's swarms get codes a1b2c3, a1b2c4, ... in creation order, so agent names are known in advance."""
