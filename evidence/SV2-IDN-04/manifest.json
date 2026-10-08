@@ -1,11 +1,11 @@
 {
-  "tested_commit": "071987af0a2c088af1bfdaa40b30a3097fe6d383",
+  "tested_commit": "5700e3252b9665b3c4a9c23ea964b84bde4d44f1",
   "evidence_class": "local isolated fixture on an in-memory Redis with a fake clock; not live rollout proof",
   "inputs": {
     "tests/fixtures/swarm_v2/launch-grant.json": "d98b90b403a8157ccadd4b481dd64d6e3daeb6711f87978b0ad16d76bc65db5d",
-    "scripts/swarm_v2/auth_context.py": "ffa289d695d8de9c3ecb0a7d236eb07da32739e43fda3c6eae01387a325d137d",
+    "scripts/swarm_v2/auth_context.py": "aa09e8612c1d704e677d63e232a0096d58726c4eae22852cd3eeee88015b4991",
     "docs/swarm-v2/schemas/launch-grant.json": "8cb8ed60074f6e5f662d0be8dc22f116a46d7965836c97f74ed4add95de7dd70",
-    "tests/swarm/test_launch_grant.py": "b52cf9a3271ba9983e711bd7a4f7c837f80aeda3e0239d8320c63ebafa0c9aad",
+    "tests/swarm/test_launch_grant.py": "a092b0f9f2867be2a8995c82a8f2318e591652daa9eee2b81627914a4e221314",
     "evidence/SV2-IDN-04/generate_case_results.py": "a664ab3bbff8beba0f5fe0b6772c44e392de931be379adfd8bff4abc7d6b76fc"
   }
 }
