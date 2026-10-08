@@ -1,0 +1,6 @@
+{
+  "scripts/recall/store.py:scripts.recall.store.x\u01c1SQLiteRecallStore\u01c1_put__mutmut_27:47f60f16e44e0e206d3bf555e406471e50a23a7bbaf196482c700e8bd8af4332": {
+    "reader": "Standards reader of the recall archive store pull request",
+    "reason": "Case-only change to SQL text; SQLite keywords, identifiers, pragma names and the journal mode value are case-insensitive and no string literal changes. Standards reader probed original and mutant against the real schema in memory: identical rows, FTS state and returned keys."
+  }
+}
