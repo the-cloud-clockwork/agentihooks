@@ -217,6 +217,7 @@ def test_confidence_above_one_is_capped(asked):
         ("S", -0.2, 0.0),
         ("S", "high", 0.0),
         ("S", float("nan"), 0.0),
+        ("S", True, 0.0),
     ],
 )
 def test_low_confidence_or_unknown_answer_falls_back_to_medium(asked, choice, confidence, kept):

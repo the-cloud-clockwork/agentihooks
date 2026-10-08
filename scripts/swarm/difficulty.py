@@ -67,7 +67,7 @@ def classify(task: dict, doc: dict) -> dict:
     except ClassifierError:
         return sized(FALLBACK, "default", 0.0)
     raw = answer.confidence
-    confidence = min(max(raw, 0.0), 1.0) if isinstance(raw, (int, float)) and not math.isnan(raw) else 0.0
+    confidence = min(max(raw, 0.0), 1.0) if _real(raw) else 0.0
     if confidence < MIN_CONFIDENCE or answer.choice not in RUBRIC:
         return sized(FALLBACK, "default", confidence)
     return sized(answer.choice, "classifier", confidence)
@@ -88,6 +88,10 @@ def state(task: dict, doc: dict) -> dict:
 
 def sized(difficulty: str, source: str, confidence: float) -> dict:
     return {"difficulty": difficulty, "difficulty_source": source, "difficulty_confidence": confidence}
+
+
+def _real(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and not math.isnan(value)
 
 
 def _on_page(area):
