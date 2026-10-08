@@ -4,6 +4,7 @@ import { verdictButton } from "./render.js";
 import { jumpTo } from "./outline.js";
 import { foldSaved } from "./folds.js";
 import { showChat } from "./chat.js";
+import { firstPage, moreButton } from "./pages.js";
 
 export function anchorPanel(panel, icon) {
   panel.style.setProperty("--anchor-top", `${icon.getBoundingClientRect().top}px`);
@@ -30,7 +31,8 @@ export function renderPriorities() {
   $("tab-ledger").textContent = list.length ? `Ledger · ${list.length}` : "Ledger";
   if (list.length && typeof foldSaved()["prio-box"] !== "boolean") $("prio-box").open = true;
   document.querySelector(".prio-head").hidden = !list.length;
-  $("priorities").replaceChildren(...list.map((p) => {
+  if (!$("prio-box").open) return $("priorities").replaceChildren();
+  $("priorities").replaceChildren(...firstPage("priorities", list, (p) => `item-priorities-${p.id}`).map((p) => {
     const { label, title, gone } = prioritySubject(p.item);
     const link = (cls, text) => h("a", { class: cls, href: `#item-${p.item.replace("/", "-")}`, text, on: { click: (ev) => jumpTo(ev, p.item) } });
     return h("li", { class: "prio", id: `item-priorities-${p.id}` },
@@ -39,7 +41,7 @@ export function renderPriorities() {
         h("div", { class: "prio-text", text: p.text })),
       verdictButton(p.item, "approved", "approve", "Approve"),
       h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearPriority(p.id) } }));
-  }));
+  }), moreButton("priorities", list.length, "more priorities", renderPriorities) || "");
   if (!list.length) $("priorities").append(h("li", { class: "empty", text: "Nothing waits on you." }));
 }
 
@@ -62,6 +64,7 @@ export function renderNotifications() {
   $("bell-badge").hidden = !list.length;
   $("bell-badge").textContent = String(list.length);
   $("notif-clear-all").hidden = !list.length;
+  if ($("notif").hidden) return $("notifs").replaceChildren();
   $("notifs").replaceChildren(...list.map((n) => h("li", { class: "notif-row" },
     h("div", { class: "notif-meta" },
       h("span", { text: noticeTime(n.at) }),
@@ -105,6 +108,7 @@ export function renderAlerts() {
   const list = doc.alerts.filter((a) => a.state !== "done").reverse();
   $("alert-badge").hidden = !list.length;
   $("alert-badge").textContent = String(list.length);
+  if ($("alert-panel").hidden) return $("alerts").replaceChildren();
   if (document.activeElement.matches("#alerts input")) return;
   $("alerts").replaceChildren(...list.map(alertRow));
   if (!list.length) $("alerts").append(h("li", { class: "empty", text: "No open alerts." }));
@@ -113,11 +117,13 @@ export function renderAlerts() {
 export function showAlerts(open) {
   $("alert-panel").hidden = !open;
   $("alert-fab").setAttribute("aria-expanded", String(open));
+  renderAlerts();
   if (open) anchorPanel($("alert-panel"), $("alert-fab"));
 }
 
 export function showNotifications(open) {
   $("notif").hidden = !open;
   $("bell").setAttribute("aria-expanded", String(open));
+  renderNotifications();
   if (open) anchorPanel($("notif"), $("bell"));
 }

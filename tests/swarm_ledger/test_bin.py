@@ -16,6 +16,7 @@ import new_ledger  # noqa: E402
 from scripts.swarm_ledger import ledger_bin  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from scripts.swarm_ledger.repository import bin_storage
+from tests.swarm_ledger.ledger_page import browser_home
 
 DAY_MS = 24 * 60 * 60 * 1000
 
@@ -75,11 +76,11 @@ class BinState(unittest.TestCase):
         make_ledger("shown")
         make_ledger("binned")
         ledger_bin.delete("binned")
-        home = server.index_page()
+        home = browser_home(server)
         self.assertIn('data-act="delete" data-slug="shown"', home)
         self.assertNotIn('href="/binned"', home)
         self.assertIn('id="bin-fab"', home)
-        view = server.index_page(view="bin")
+        view = browser_home(server, "bin")
         self.assertIn('data-act="restore" data-slug="binned"', view)
         self.assertIn("30 days left", view)
         self.assertNotIn('data-slug="shown"', view)

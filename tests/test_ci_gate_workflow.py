@@ -17,11 +17,18 @@ def _workflow():
 def test_required_gate_runs_after_parallel_unit_and_lint():
     jobs = _workflow()["jobs"]
     gate = jobs["gate-required"]
+    required = {"unit", "lint", "sonar", "mutation"}
     assert gate["name"] == "Gate — Required"
-    assert set(gate["needs"]) == {"unit", "lint", "sonar", "mutation"}
+    assert required <= set(gate["needs"]) <= required | {"swarm-image"}
     assert gate["if"] == "${{ always() }}"
     assert "needs" not in jobs["unit"]
     assert "needs" not in jobs["lint"]
+    if "swarm-image" in gate["needs"]:
+        assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
+
+
+def test_unit_matrix_does_not_fail_fast():
+    assert _workflow()["jobs"]["unit"]["strategy"]["fail-fast"] is False
 
 
 @pytest.mark.parametrize("unit", ["success", "failure", "skipped", "cancelled", "pending"])

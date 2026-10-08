@@ -58,6 +58,8 @@
     ['[data-swarm="effort_max_down"]', "Lower the most effort a new agent may start with."],
     ['[data-swarm="effort_max_up"]', "Raise the most effort a new agent may start with."],
     ['[data-swarm="apply"]', "Send every changed capacity value to the swarm in one change."],
+    ["#overlays-apply", "Send the changed overlay choices for each role to the swarm in one change."],
+    ["[data-overlay]", "Add or remove this overlay for the role; a role wears at most three."],
     ['[data-swarm="doctor_start"]', "Start a Doctor that watches this swarm and rates each coordination failure."],
     ['[data-swarm="doctor_stop"]', "Stop the Doctor watching this swarm."],
     ["[data-message]", "Open the chat addressed to this agent."],
@@ -113,11 +115,6 @@
     ["#home-fab", "Back to HOME, the list of every ledger."],
   ];
 
-  const css = document.createElement("style");
-  css.textContent = ".ledger-tip{position:fixed;inset:auto;margin:0;max-width:280px;padding:6px 10px;border:0;"
-    + "border-radius:8px;background:var(--overlay);color:var(--text-2);font-size:12px;line-height:1.45;"
-    + "pointer-events:none;overflow:visible}";
-  document.head.append(css);
   const box = document.createElement("div");
   box.className = "ledger-tip";
   box.popover = "manual";
