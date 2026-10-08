@@ -124,7 +124,7 @@ def agent_thread_op(thread, op, ctx, target, noun):
         post_status(thread, by, op["id"], text, ctx, target, op.get("attachments"))
         return True
     if op["op"] == "add":
-        if not addressed(thread, op):
+        if noun == "message" and not addressed(thread, op):
             ctx.refused.append(f"{by} message refused: {UNADDRESSED}")
             return False
         if not any(e["id"] == op["id"] for e in thread):
