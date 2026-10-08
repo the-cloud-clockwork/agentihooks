@@ -510,7 +510,7 @@ def test_content_preserves_titles_descriptions_and_optional_fields():
         (
             "phase_update",
             {"fields": {"review": {}}},
-            "phase fields may set only ('title', 'description', 'depends_on', 'planning', 'release', 'plan_url')",
+            "phase fields may set only ('title', 'description', 'depends_on', 'planning', 'release', 'plan_url', 'plan_ref')",
         ),
         ("phase_review", {"title": "bad"}, "phase_review writes only the review record"),
         ("phase_review", {"state": "bad"}, "review state must be one of ('pending', 'approved', 'sent_back')"),

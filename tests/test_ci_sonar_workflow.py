@@ -30,7 +30,7 @@ def test_sonar_is_required_on_dev_and_main_pull_requests():
     assert gate["if"] == "steps.current.outputs.superseded != 'true'"
     assert not gate.get("continue-on-error")
     assert "needs" not in jobs["lint"]
-    assert "needs" not in jobs["unit"]
+    assert jobs["unit"]["needs"] == ["durations"]
 
 
 def test_sonar_restores_downloads_before_every_scan():
