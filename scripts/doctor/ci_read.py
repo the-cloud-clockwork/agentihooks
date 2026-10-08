@@ -1,11 +1,15 @@
+from __future__ import annotations
+
 import json
 import re
 import subprocess
 from collections.abc import Callable
-
-from redis import Redis
+from typing import TYPE_CHECKING
 
 from scripts.swarm.keyspace import ROOT
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 TEST = re.compile(
     r"(?:(PASSED|FAILED|SKIPPED) (tests/\S+::.+?)|(tests/\S+::.+?) (PASSED|FAILED|SKIPPED))(?:\s+\[\s*\d+%\])?\s*$"
