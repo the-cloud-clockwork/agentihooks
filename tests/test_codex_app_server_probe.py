@@ -227,6 +227,19 @@ def test_conversation_flags_history_whose_turn_ids_differ(fakes, tmp_path):
     }
 
 
+def test_conversation_reads_a_history_without_turns_as_empty(fakes, tmp_path):
+    scripts, _ = fakes
+    scripts["probe-conversation"] = (
+        {"thread/start": [thread()], "turn/start": [turn("T1"), turn("T2")], "thread/read": [ok({"thread": {}})]},
+        [done("T1"), done("T2")],
+    )
+    assert probe.conversation("SOCK", str(tmp_path))["thread_read"] == {
+        "turn_count": 0,
+        "turn_ids_match": False,
+        "user_texts": [],
+    }
+
+
 def steer_script(rest):
     return (
         {
