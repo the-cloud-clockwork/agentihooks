@@ -24,7 +24,7 @@ def test_sonar_is_required_on_dev_and_main_pull_requests():
     jobs = workflow["jobs"]
     assert "sonar" in jobs["gate-required"]["needs"]
     sonar = jobs["sonar"]
-    assert "needs" not in sonar
+    assert sonar["needs"] == ["unit"]
     assert "if" not in sonar
     assert not sonar.get("continue-on-error")
     gate = next(step for step in sonar["steps"] if step.get("uses") == "sonarsource/sonarqube-quality-gate-action@v1")
@@ -86,28 +86,42 @@ def _queued_step():
 
 
 @pytest.mark.parametrize(
-    ("head_ref", "args"),
+    ("head_ref", "later", "args"),
     [
         (
             "refs/heads/gh-readonly-queue/dev/pr-1630-f5eb044a8d0c2b1e3f4a5b6c7d8e9f0a1b2c3d4e",
+            "ccc",
             "-Dsonar.pullrequest.key=1630 -Dsonar.pullrequest.branch=ci-323133-0078 -Dsonar.pullrequest.base=dev",
         ),
-        ("refs/heads/dev", None),
+        (
+            "refs/heads/gh-readonly-queue/dev/pr-1630-f5eb044a8d0c2b1e3f4a5b6c7d8e9f0a1b2c3d4e",
+            "bbb",
+            "-Dsonar.pullrequest.key=1630 -Dsonar.pullrequest.branch=pr-1630 -Dsonar.pullrequest.base=dev",
+        ),
+        ("refs/heads/dev", "ccc", None),
     ],
+    ids=["one-branch-holds-the-head", "two-branches-share-the-head", "not-a-queue-ref"],
 )
-def test_queued_merges_are_analysed_as_their_pull_request(tmp_path, head_ref, args):
+def test_queued_merges_are_analysed_as_their_pull_request(tmp_path, head_ref, later, args):
     steps = _workflow()["jobs"]["sonar"]["steps"]
     step = _queued_step()
     scan = next(s for s in steps if s.get("name") == "SonarQube Scan")
     assert step["if"] == "github.event_name == 'merge_group'"
-    assert _workflow()["jobs"]["sonar"]["permissions"]["pull-requests"] == "read"
+    assert "pull-requests" not in _workflow()["jobs"]["sonar"]["permissions"]
+    assert "GH_TOKEN" not in step["env"]
     assert steps.index(step) < steps.index(scan)
     assert scan["with"]["args"] == "${{ steps.queued.outputs.args }}"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    gh = bin_dir / "gh"
-    gh.write_text('#!/usr/bin/env bash\n[[ "$2" == repos/owner/repo/pulls/1630 ]] && echo ci-323133-0078\n')
-    gh.chmod(0o755)
+    git = bin_dir / "git"
+    git.write_text(
+        "#!/usr/bin/env bash\n"
+        '[[ "$1" == ls-remote && "$*" == *origin* ]] || exit 1\n'
+        'if [[ "$*" == *refs/pull/1630/head* ]]; then printf "bbb\\trefs/pull/1630/head\\n"; exit; fi\n'
+        '[[ "$*" == *--heads* ]] || exit 1\n'
+        f'printf "aaa\\trefs/heads/dev\\nbbb\\trefs/heads/ci-323133-0078\\n{later}\\trefs/heads/later\\n"\n'
+    )
+    git.chmod(0o755)
     output = tmp_path / "output"
     output.write_text("")
     env = dict(

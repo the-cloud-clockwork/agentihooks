@@ -7,7 +7,7 @@ description: >
   edit. Use when a session starts work in a repo, when the operator says
   "worktree", "new worktree", "wt new", "list worktrees", "clean up the worktree",
   or when overlapping sub-agent work needs its own isolated checkout.
-argument-hint: "new [--from REF] | tmp [--from REF] | ls [--all] | done <name> [--force]"
+argument-hint: "new [--from REF] | tmp [--from REF] | ls [--all] | done <name> [--force | --pushed]"
 ---
 
 # Worktree — one per development cycle, always off the base branch
@@ -60,7 +60,7 @@ Commit only the files this cycle touched, push `<name>`, open the PR with `--bas
 "$WT" done <name> --repo <repo-dir>
 ```
 
-Whoever submits the merge owns it until the PR state reads `MERGED`, or reads closed and is dropped with `done --force`, then runs `done` for its worktree in that turn. Refuses a dirty worktree. Queued, open or unreadable PRs retain the remote branch and worktree, even with `--force`. A PR closed without merge is refused unless `--force`, which drops the worktree and local branch and keeps the remote branch. A confirmed merged PR permits remote branch deletion before teardown. Then fetches the base branch and fast-forwards the primary checkout to `origin/<base>` when it is on a clean base branch, and names the blocker otherwise. Deletes the local branch when it is on the remote base branch or its PR into it merged; otherwise keeps it and says so. `--force` overrides the dirty, closed without merge and local branch checks only.
+Whoever submits the merge owns it until the PR state reads `MERGED`, or reads closed and is dropped with `done --force`, then runs `done` for its worktree in that turn. Refuses a dirty worktree. Queued, open or unreadable PRs retain the remote branch and worktree, even with `--force`. A PR closed without merge is refused unless `--force`, which drops the worktree and local branch and keeps the remote branch. A confirmed merged PR permits remote branch deletion before teardown. Then fetches the base branch and fast-forwards the primary checkout to `origin/<base>` when it is on a clean base branch, and names the blocker otherwise. Deletes the local branch when it is on the remote base branch or its PR into it merged; otherwise keeps it and says so. `--force` overrides the dirty, closed without merge and local branch checks only. `--pushed` is for parked work: it skips the pull request checks, removes a clean worktree and its local branch once origin holds the worktree head, and keeps the remote branch; any other head is refused, and it does not combine with `--force`.
 
 ## Base-direct
 
