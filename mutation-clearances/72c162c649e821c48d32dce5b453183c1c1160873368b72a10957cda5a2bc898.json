@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x__window__mutmut_3:dae84d6f3f8525418fcac482316b97a4ef5c5d2ddcd4336ca721c929663bc5cf": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Omitting resets_at=None uses the QuotaWindow dataclass default None and constructs the identical value."
+  }
+}

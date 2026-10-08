@@ -168,6 +168,7 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
     runtime.live_names = lambda: set()
     runtime.conversations = lambda: {}
     runtime.has_capacity = lambda config: True
+    runtime.quota_capacity = None
 
     class Ledger:
         def state(self, slug):
