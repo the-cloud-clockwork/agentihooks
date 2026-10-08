@@ -399,6 +399,17 @@ def _ci_speed_offline(request, monkeypatch):
         monkeypatch.setattr(ci_speed, "read_runs", lambda *args, **kwargs: [])
 
 
+@pytest.fixture(autouse=True)
+def _task_sizing_offline(monkeypatch):
+    from hooks.classifier import ClassifierUnavailable
+    from scripts.swarm import difficulty
+
+    def unavailable(*args, **kwargs):
+        raise ClassifierUnavailable("classifier disabled in unit tests")
+
+    monkeypatch.setattr(difficulty, "decide", unavailable)
+
+
 @pytest.fixture
 def mock_env():
     """Provide a clean environment for tests."""
