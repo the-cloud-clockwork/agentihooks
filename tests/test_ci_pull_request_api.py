@@ -111,8 +111,9 @@ def test_a_dev_push_runs_every_step_of_the_job_itself(job):
     assert [step.get("name") for step in steps if "skip" in step.get("if", "")] == []
 
 
-def test_no_job_is_granted_the_actions_api():
-    assert [name for name, job in _jobs().items() if "actions" in job.get("permissions", {})] == []
+@pytest.mark.parametrize("job", sorted(_jobs()))
+def test_no_job_is_granted_the_actions_api(job):
+    assert "actions" not in (_jobs()[job].get("permissions") or {})
 
 
 def test_no_job_skips_on_a_tree_another_run_passed():
