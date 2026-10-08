@@ -50,9 +50,9 @@ def screen(tool: str, text: str) -> str:
     outcome = check(tool, {"text": text})
     if outcome.decision == "deny":
         raise ValueError(outcome.reason)
-    if outcome.decision != "rewrite":
+    rewritten = outcome.tool_input.get("text") if outcome.decision == "rewrite" else None
+    if not isinstance(rewritten, str):
         return text
-    rewritten = outcome.tool_input["text"]
     if not rewritten.strip():
         raise ValueError("a filter stripped all of the text")
     return rewritten

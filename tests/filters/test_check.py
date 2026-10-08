@@ -157,6 +157,12 @@ def test_screen_refuses_a_rewrite_that_leaves_no_text(monkeypatch):
     assert str(refused.value) == "a filter stripped all of the text"
 
 
+@pytest.mark.parametrize("patched", [{"text": 3}, {"case": "c"}])
+def test_screen_keeps_the_text_when_a_rewrite_carries_no_text(monkeypatch, patched):
+    monkeypatch.setattr(check, "check", lambda tool, tool_input: check.FilterOutcome("rewrite", "", patched))
+    assert check.screen("ledger_write", TEXT) == TEXT
+
+
 def test_a_strip_filter_that_removes_a_whole_comment_refuses_it(project_filters):
     (project_filters / "pre-ledger_write-x.filter.yaml").write_text(
         "mode: finders\nfinders:\n  - regex: '.+'\n    reason: all of it\naction: strip\n"
