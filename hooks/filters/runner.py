@@ -77,6 +77,8 @@ def confirm(entry: dict, spec: schema.FilterSpec, payload: dict, findings: list[
     }
     try:
         result = classifier.decide(state, questions(spec, intent, findings), purpose=PURPOSE, fallbacks=[])
+    except classifier.ClassifierInputError:
+        raise
     except classifier.ClassifierError as error:
         from hooks.common import log
 
@@ -147,7 +149,10 @@ def run(entry: dict, step: str, payload: dict) -> dict:
     if not isinstance(tool_input, dict) or not _applies(spec, tool_input):
         return _passed()
     findings = find(spec, extract.pieces(str(payload.get("tool_name") or ""), tool_input))
-    confirmed = confirm(entry, spec, payload, findings) if findings else []
+    try:
+        confirmed = confirm(entry, spec, payload, findings) if findings else []
+    except classifier.ClassifierInputError as error:
+        return {"error": f"classifier refused the questions: {error}"}
     if not confirmed:
         return _passed()
     return ACTIONS[spec.action](step, payload, confirmed)

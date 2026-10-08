@@ -63,6 +63,29 @@ def test_an_unavailable_classifier_passes_the_text_and_logs_the_pass(filters_dir
     ]
 
 
+def test_no_classifier_backend_answering_passes_the_text(filters_dir, monkeypatch):
+    (filters_dir / "pre-write-ids.filter.yaml").write_text(FILTER)
+    monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_URL", raising=False)
+    logged = []
+    monkeypatch.setattr("hooks.common.log", lambda message, data=None: logged.append((message, data)))
+    effect = conditions.pre_effect(_write_call("see task flt1"))
+    assert effect.block is None
+    assert [(m, d["error"]) for m, d in logged] == [
+        ("filter passed: classifier unavailable", "no decision backend answered")
+    ]
+
+
+def test_questions_the_classifier_refuses_fail_the_filter_as_a_condition(filters_dir, monkeypatch):
+    (filters_dir / "pre-write-ids.filter.yaml").write_text(FILTER)
+    monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_URL", raising=False)
+    effect = conditions.pre_effect(_write_call(" ".join(f"task t{i}" for i in range(129))))
+    assert effect.block is None
+    assert effect.contexts == [
+        "[condition pre-write-ids.filter.yaml] failed "
+        "(classifier refused the questions: ask 1 to 128 questions, got 129) — skipped"
+    ]
+
+
 def test_an_unknown_key_fails_the_filter_as_a_condition_and_allows_the_call(filters_dir, stub):
     (filters_dir / "pre-write-ids.filter.yaml").write_text(FILTER + "colour: red\n")
     fake = stub(yes=True)

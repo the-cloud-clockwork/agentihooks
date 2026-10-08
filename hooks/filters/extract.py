@@ -35,9 +35,9 @@ def pieces(tool_name: str, tool_input: dict) -> list[Piece]:
         return [Piece((field,), value)] if isinstance(value, str) else []
     if tool_name == "MultiEdit":
         return _items(tool_input, "edits", "new_string")
-    if isinstance(tool_input.get("text"), str):
-        return [Piece(("text",), tool_input["text"])]
-    return _items(tool_input, "evidence")
+    text = tool_input.get("text")
+    found = [Piece(("text",), text)] if isinstance(text, str) else []
+    return found + _items(tool_input, "evidence")
 
 
 def _set(patch: dict, where: tuple, value: str) -> None:

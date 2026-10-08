@@ -19,7 +19,12 @@ pytestmark = pytest.mark.unit
             [Piece(("edits", 0, "new_string"), "one"), Piece(("edits", 3, "new_string"), "two")],
         ),
         ("MultiEdit", {"edits": "no"}, []),
-        ("mcp__ledger__say", {"text": "hello", "evidence": ["x"]}, [Piece(("text",), "hello")]),
+        (
+            "mcp__ledger__say",
+            {"text": "hello", "evidence": ["x"]},
+            [Piece(("text",), "hello"), Piece(("evidence", 0), "x")],
+        ),
+        ("mcp__ledger__say", {"text": 3}, []),
         ("mcp__ledger__done", {"evidence": ["a", 2, "b"]}, [Piece(("evidence", 0), "a"), Piece(("evidence", 2), "b")]),
         ("mcp__ledger__done", {}, []),
     ],
