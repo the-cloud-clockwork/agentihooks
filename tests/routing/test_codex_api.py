@@ -113,6 +113,35 @@ def test_an_api_route_without_a_key_names_the_missing_variables():
     assert str(refused.value) == "Codex account 'api' needs CODEX_API_KEY or OPENAI_API_KEY"
 
 
+@pytest.mark.parametrize(
+    ("url", "carries"),
+    [
+        ("https://gw.example/v1", False),
+        ("http://127.0.0.1:9/v1", False),
+        ("", False),
+        ("https://user@gw.example/v1", True),
+        ("https://:pw@gw.example/v1", True),
+        ("https://gw.example/v1?key=x", True),
+        ("http://[bad", True),
+    ],
+)
+def test_a_base_url_with_userinfo_or_a_query_carries_credentials(url, carries):
+    assert codex_api.carries_credentials(url) is carries
+
+
+def test_an_api_route_refuses_a_base_url_that_would_put_credentials_in_argv():
+    environ = {"CODEX_API_KEY": SENTINEL, "AH_CX_API_BASE_URL": f"https://u:{SENTINEL}@gw.example/v1"}
+    with pytest.raises(router.RoutingError) as refused:
+        router.api_account(environ)
+    assert str(refused.value) == "AH_CX_API_BASE_URL must not carry credentials or a query"
+    environ = {"CODEX_API_KEY": SENTINEL, "OPENAI_BASE_URL": f"https://gw.example/v1?token={SENTINEL}"}
+    with pytest.raises(router.RoutingError) as refused:
+        router.api_account(environ)
+    assert str(refused.value) == "OPENAI_BASE_URL must not carry credentials or a query"
+    assert codex_api.base_url_name({"OPENAI_BASE_URL": "https://o", "AH_CX_API_BASE_URL": ""}) == "OPENAI_BASE_URL"
+    assert codex_api.base_url_name({}) == ""
+
+
 def test_an_api_child_carries_no_subscription_token_and_the_route_marker():
     environ = {**SUBSCRIPTION, "AH_CX_TOKEN_": "bare", "CODEX_API_KEY": SENTINEL, "OPENAI_BASE_URL": "https://g/v1"}
     expected = {"HOME": "/home/u", "CODEX_API_KEY": SENTINEL, "OPENAI_BASE_URL": "https://g/v1", API_MARKER: "1"}

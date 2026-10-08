@@ -1,6 +1,7 @@
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 from hooks.context.account_sessions import API_ACCOUNT
 from scripts.routing import envs
@@ -17,8 +18,20 @@ def key_name(environ: Mapping[str, str]) -> str:
     return next((name for name in KEY_NAMES if environ.get(name)), "")
 
 
+def base_url_name(environ: Mapping[str, str]) -> str:
+    return next((name for name in BASE_URL_NAMES if environ.get(name)), "")
+
+
 def base_url(environ: Mapping[str, str]) -> str:
-    return next((environ[name] for name in BASE_URL_NAMES if environ.get(name)), "")
+    return environ.get(base_url_name(environ), "")
+
+
+def carries_credentials(url: str) -> bool:
+    try:
+        parts = urlsplit(url)
+        return bool(parts.username or parts.password or parts.query)
+    except ValueError:
+        return True
 
 
 def provider(environ: Mapping[str, str]) -> str:

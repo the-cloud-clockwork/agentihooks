@@ -20,7 +20,7 @@ _PROC = Path("/proc")
 
 
 def account_from_names(names: Iterable[str], prefix: str = TOKEN_PREFIX) -> str:
-    """The one slug among names carrying ``prefix``; UNROUTED when there is none or more than one."""
+    """API_ACCOUNT under the route marker, else the one slug among names carrying ``prefix``; UNROUTED when there is none or more than one."""
     names = list(names)
     if API_MARKER in names:
         return API_ACCOUNT

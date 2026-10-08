@@ -1,7 +1,7 @@
-"""Route a Codex launch to one account: the default `codex login` or an AH_CX_TOKEN_<slug>.
+"""Route a Codex launch to one account: the default `codex login`, an AH_CX_TOKEN_<slug> or the api key.
 
-Token values only move from the environment into the child's CODEX_ACCESS_TOKEN;
-they are never printed or written anywhere.
+Token values only move from the environment into the child's CODEX_ACCESS_TOKEN, and an api
+key stays in the child's environment under its own name; neither is printed or written anywhere.
 """
 
 import contextlib
@@ -268,7 +268,10 @@ def api_account(environ: Mapping[str, str]) -> CodexAccount:
     key_env = codex_api.key_name(environ)
     if not key_env:
         raise RoutingError(f"Codex account '{API_ACCOUNT}' needs {' or '.join(codex_api.KEY_NAMES)}")
-    return CodexAccount(API_ACCOUNT, key_env=key_env, base_url=codex_api.base_url(environ))
+    base_url = codex_api.base_url(environ)
+    if codex_api.carries_credentials(base_url):
+        raise RoutingError(f"{codex_api.base_url_name(environ)} must not carry credentials or a query")
+    return CodexAccount(API_ACCOUNT, key_env=key_env, base_url=base_url)
 
 
 def _take(args: list[str], flag: str) -> tuple[str, list[str]]:
