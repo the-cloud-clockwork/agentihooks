@@ -1,4 +1,5 @@
 import inspect
+import io
 import json
 import os
 import subprocess
@@ -11,7 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
-from scripts.swarm_ledger import ledger_duplicates, ledger_task_duplicates
+from scripts.swarm_ledger import ledger, ledger_duplicates, ledger_task_duplicates, ledger_tasks
 from tests.swarm_ledger.test_ledger_authority import MASTER, SLUG, admin_put, cli_ledger, core, new_ledger, send
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
@@ -329,12 +330,149 @@ def test_the_finder_receives_only_the_lists_it_reads(monkeypatch, tmp_path):
     monkeypatch.setattr(ledger_task_duplicates, "CHILD", (sys.executable, "-c", copy))
     doc = {"tasks": [{"id": "t1"}], "phases": [], "followups": [], "_meta": {"seeds": ["a" * 1000]}}
     assert ledger_task_duplicates.find(doc, [{"task": "t9"}]) == [None]
-    assert set(json.loads(seen.read_text())["doc"]) == {"tasks", "phases", "followups"}
+    sent = json.loads(seen.read_text())
+    assert sent == {
+        "doc": {"tasks": [{"id": "t1"}], "phases": [], "followups": []},
+        "kind": "task",
+        "items": [{"task": "t9"}],
+    }
+    ledger_task_duplicates.find({"tasks": []}, [])
+    assert json.loads(seen.read_text())["doc"] == {"tasks": [], "phases": [], "followups": []}
 
 
 def test_the_server_never_loads_the_classifier_or_its_home_configuration():
-    probe = "import sys; from scripts.swarm_ledger import ledger_server; print(sorted(m for m in sys.modules if m.startswith(('hooks.classifier', 'hooks.config'))))"
+    probe = (
+        "import sys, scripts.swarm_ledger.ledger_server, scripts.swarm_ledger.api.mutations; "
+        "print(sorted(m for m in sys.modules if m.startswith(('hooks.classifier', 'hooks.config'))))"
+    )
     out = subprocess.run(
         [sys.executable, "-c", probe], cwd=ledger_task_duplicates.ROOT, capture_output=True, text=True, check=True
     ).stdout
     assert out.splitlines()[-1] == "[]"
+
+
+def finder_main(monkeypatch, capsys, doc, items, judge=None):
+    if judge:
+        monkeypatch.setattr(ledger_duplicates, "decide", judge)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"doc": doc, "kind": "task", "items": items})))
+    ledger_duplicates.main()
+    return json.loads(capsys.readouterr().out)
+
+
+def yes_to_all(state, questions, *, purpose):
+    from hooks.classifier import Answer, DecisionResult
+
+    return DecisionResult({name: Answer("noul", noul=0.9) for name in questions}, "unit-test")
+
+
+def test_the_finder_entry_writes_each_match_as_json(monkeypatch, capsys):
+    held = {"tasks": [{"id": "t1", "title": "Publish the wheel to PyPI", "state": "open", "phase": "p1"}]}
+    held["phases"] = [{"id": "p1", "title": "Release"}]
+    items = [{"task": "t9", "title": "Publish the wheel to PyPI from main"}, {"task": "t8", "title": "Fold chat"}]
+    found = finder_main(monkeypatch, capsys, held, items, yes_to_all)
+    assert found == [
+        {
+            "id": "t1",
+            "kind": "task",
+            "title": "Publish the wheel to PyPI",
+            "state": "open",
+            "rank": "normal",
+            "phase": "p1",
+            "phase_title": "Release",
+            "probability": 0.9,
+        },
+        None,
+    ]
+
+
+def test_the_finder_entry_marks_an_unanswered_check(monkeypatch, capsys):
+    held = {"tasks": [{"id": "t1", "title": "Publish the wheel to PyPI", "state": "open"}]}
+    found = finder_main(monkeypatch, capsys, held, [{"task": "t9", "title": "Publish the wheel to PyPI"}])
+    assert found == [ledger_duplicates.UNCHECKED]
+
+
+def test_the_finder_answer_is_its_last_output_line(monkeypatch):
+    monkeypatch.setattr(ledger_task_duplicates, "CHILD", (sys.executable, "-c", "print('noise'); print('[null]')"))
+    assert ledger_task_duplicates.find({}, [{"task": "t9"}]) == [None]
+
+
+def test_the_finder_runs_from_the_repository_root(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    where = "import json, os; print(json.dumps([os.getcwd()]))"
+    monkeypatch.setattr(ledger_task_duplicates, "CHILD", (sys.executable, "-c", where))
+    assert ledger_task_duplicates.find({}, []) == [str(ledger_task_duplicates.ROOT)]
+
+
+def test_a_refusal_without_a_phase_says_none():
+    match = {"id": "t1", "title": "Fold chat", "state": "open", "rank": "low", "phase_title": None}
+    assert ledger_task_duplicates.refusal({"task": "t9"}, match) == (
+        'task t9 repeats task t1 "Fold chat" (open, rank low, phase none): it is on the ledger and will be built. '
+        'If it is a different change, add it with --not-duplicate "<why it differs>"'
+    )
+
+
+@pytest.mark.parametrize(
+    ("op", "screened"),
+    [
+        ({"op": "task_add", "by": "swarm", "task": "plan-p1", "phase": "p1"}, False),
+        ({"op": "task_add", "by": "swarm", "task": "release-p1", "phase": "p1"}, False),
+        ({"op": "task_add", "by": "swarm", "task": "plan-"}, False),
+        ({"op": "task_add", "by": "swarm", "task": "plan-p2", "phase": "p1"}, True),
+        ({"op": "task_add", "by": "swarm", "task": "t9", "phase": "p1"}, True),
+        ({"op": "task_add", "by": MASTER, "task": "plan-p1", "phase": "p1"}, True),
+        ({"op": "task_add", "by": MASTER, "task": "t9", "not_duplicate": "a different package"}, False),
+        ({"op": "task_update", "by": MASTER, "item": "tasks/t9"}, False),
+    ],
+)
+def test_which_adds_are_screened(op, screened):
+    assert ledger_task_duplicates.checked(op) is screened
+
+
+@pytest.mark.parametrize(
+    ("stderr", "error"),
+    [("Traceback (most recent call last):\nKeyError: 'answers'\n", "KeyError"), ("ValueError: a: b", "ValueError")],
+)
+def test_a_dead_finder_is_named_by_its_last_error_line(stderr, error):
+    assert ledger_task_duplicates._error(stderr) == error
+
+
+def test_a_dead_finder_without_output_says_so():
+    assert ledger_task_duplicates._error("  \n") == "no message"
+
+
+@pytest.mark.parametrize("reason", ["", "  ", 5])
+def test_a_not_duplicate_reason_must_be_plain_words(reason):
+    op = {
+        "op": "task_add",
+        "id": "x",
+        "by": MASTER,
+        "task": "t9",
+        "title": "Fold chat",
+        "lane": "eng",
+        "not_duplicate": reason,
+    }
+    with pytest.raises(ValueError, match="^not_duplicate must say in plain words why the task differs from the one"):
+        ledger_tasks.check(op)
+
+
+def test_a_task_add_without_a_reason_passes_the_check():
+    ledger_tasks.check({"op": "task_add", "id": "x", "by": MASTER, "task": "t9", "title": "Fold chat", "lane": "eng"})
+
+
+def test_the_cli_flag_says_what_it_skips():
+    parser = ledger.build_parser()
+    args = parser.parse_args(["--slug", SLUG, "--as", MASTER, "task", "add", "t9", "Fold", "chat"])
+    assert args.not_duplicate == ""
+    text = " ".join(next(a for a in parser._subparsers._actions if a.choices).choices["task"].format_help().split())
+    assert (
+        "--not-duplicate NOT_DUPLICATE why the task differs from the one it resembles; skips the duplicate check"
+        in text
+    )
+
+
+def test_the_page_transport_lands_an_unchecked_add_with_its_warning(live, monkeypatch):
+    judged(monkeypatch, Judge(yes={"t1"}, error="unavailable"))
+    status, reply = admin_put(live, task("t9", REPEAT, live["phases"][0]))
+    assert (status, reply["rejected"]) == (200, [])
+    assert UNANSWERED in reply["_meta"]["warnings"]
+    assert stored("t9") is not None
