@@ -1,4 +1,3 @@
-import json
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -118,7 +117,7 @@ def sync(slug, changes=None, ops=None, gate=None, core=core):
         meta["seeds"][str(meta["rev"])] = doc
         meta["seeds"] = {k: v for k, v in meta["seeds"].items() if int(k) > meta["rev"] - core.SEEDS_KEPT}
         state = {**doc, "_meta": meta}
-        text = json.dumps(state, indent=2, ensure_ascii=False) + "\n"
+        text = core.pretty(state) + "\n"
         core.write_if_changed(json_path, text)
         stored = signature(json_path)
         written = None if seed is None else core.rewrite_seed(html_path, html, doc, meta["rev"])

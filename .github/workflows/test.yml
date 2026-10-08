@@ -596,7 +596,7 @@ jobs:
 
       - name: Install Playwright for artifact checks
         if: steps.lookup.outputs.skip != 'true' && steps.artifacts.outputs.browser == 'true'
-        run: python -m pip install "playwright>=1.44.0"
+        run: python -m pip install "playwright>=1.44.0" "orjson>=3.10"
 
       - name: Install the artifact viewer browser
         if: steps.lookup.outputs.skip != 'true' && steps.artifacts.outputs.browser == 'true'
