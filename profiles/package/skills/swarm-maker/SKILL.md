@@ -16,7 +16,8 @@ the scaffold or edit the ledger JSON or swarm store directly.
    role → overlays → capabilities → proof mapping. Keep `master`, `engineer`,
    `planner`, `qa` and `cicd` as the five base roles; domain experts are overlays,
    not new roles. Each agent can wear at most three selected overlays. If the
-   request exceeds that cap, settle a smaller selection before writing it.
+   request exceeds that cap, state the three-overlay limit and ask which to
+   omit before scaffolding or saving a selection.
    Done when the mapping has a checkable outcome and no unanswered choice that
    changes its capabilities.
 
@@ -88,7 +89,7 @@ the scaffold or edit the ledger JSON or swarm store directly.
      overlays=risk-auditor
    ```
 
-   The task's list replaces the role default. `overlays=` is an explicit empty
+   Explain that the task's list replaces the role default. `overlays=` is an explicit empty
    task override; `overlays-engineer=` clears the role default. An omitted task
    field inherits the role default. Every selected overlay must wear the
    agent's role. The page's OVERLAYS controls set the same role defaults.
