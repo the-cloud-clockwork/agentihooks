@@ -30,8 +30,8 @@ def _seconds(stamp):
 
 
 def finished(runs: list[dict]) -> list[dict]:
-    """The dev to main pull request runs on head dev and a cancelled run never reached a verdict, so both are left
-    out."""
+    """Run payloads mostly drop their pull request link, so the base is read from the head: every pull request into
+    main comes from head dev and every other one goes into dev. A cancelled run never reached a verdict."""
     return [
         r
         for r in runs
@@ -70,11 +70,11 @@ def refresh(slug, config, store, now_ms, run: Callable = subprocess.run):
         return []
     try:
         runs = read_runs(config.repo, now_ms, run)
-    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        record = {"minutes": median_minutes(runs), "runs": len(finished(runs)), "at": now_ms, "tried_at": now_ms}
+    except (subprocess.SubprocessError, OSError, ValueError, KeyError) as exc:
         error = getattr(exc, "stderr", None) or str(exc)
         print(f"ci speed kept its last value, reading Tests runs failed: {error}", file=sys.stderr)
         store.redis.set(key(slug), json.dumps({**cached, "tried_at": now_ms, "error": error}))
         return []
-    record = {"minutes": median_minutes(runs), "runs": len(finished(runs)), "at": now_ms, "tried_at": now_ms}
     store.redis.set(key(slug), json.dumps(record))
     return []
