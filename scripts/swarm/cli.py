@@ -36,6 +36,7 @@ done carries the proof its task's kind needs: ops and tune --command C --output 
 """
 
 import argparse
+import functools
 import json
 import os
 import re
@@ -179,17 +180,28 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
         skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
         doc, config = timing.call(ledger.state, slug), store.config(slug)
-        actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms())
-        actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), ledger_events.view)
+        view = functools.cache(ledger_events.view)
+        actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
+        actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
         mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
         actions += skip_refused(
-            intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge, head=intent.pr_head).run, doc
+            intent.Check(
+                slug,
+                mode,
+                now_ms(),
+                ledger,
+                mail,
+                intent.pr_view,
+                intent.judge,
+                head=lambda url: getattr(view(url), "head", None),
+            ).run,
+            doc,
         )
-        actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
+        actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
         rows = {t["id"]: t for t in doc["tasks"]}
-        actions += skip_refused(waits.end_pass, store, slug, rows, inbox, ledger_events.view, now_ms())
+        actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms())
         actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
-        actions += skip_refused(priority_sweep.priority_pass, store, slug, doc, ledger)
+        actions += skip_refused(priority_sweep.priority_pass, store, slug, doc, ledger, None, view)
         found = timing.call(findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found)
         window = wake.window_ms(os.environ)
