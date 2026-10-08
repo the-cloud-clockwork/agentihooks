@@ -118,8 +118,9 @@ def test_a_report_error_names_the_cause():
 def _stub(monkeypatch, reports):
     def resolve(root, out):
         assert isinstance(root, Path)
-        assert out.parent.is_dir()
-        return out.with_name(root.name)
+        assert out.name == root.name
+        assert out.parent.is_dir() and out.parent.resolve() != Path.cwd()
+        return out
 
     monkeypatch.setattr(audit, "resolve", resolve)
     monkeypatch.setattr(audit, "audit", lambda requirements: reports[requirements.name])
@@ -135,7 +136,7 @@ def test_main_requires_both_revisions(argv, capsys):
 def test_main_describes_itself(capsys):
     with pytest.raises(SystemExit):
         audit.main(["--help"])
-    assert "Fail on known vulnerabilities new against the base revision." in capsys.readouterr().out
+    assert "\n\nFail on known vulnerabilities new against the base revision.\n" in capsys.readouterr().out
 
 
 def test_main_fails_on_an_advisory_new_against_the_base_and_reports_every_count(monkeypatch, capsys):
