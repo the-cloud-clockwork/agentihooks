@@ -78,6 +78,7 @@ class TestCodexSessionStartSingleEnvelope:
             "AGENTIHOOKS_TARGET": "codex",
             "AGENTIHOOKS_HOME": self._empty_home,
             "AGENTIHOOKS_DISABLE_BYPASS_LOOKUP": "1",
+            "AGENTIHOOKS_FORCE_DEV_BRANCH": "true",
         }
         result = _run(
             {"hook_event_name": "SessionStart", "session_id": "codex-sid-1", "cwd": str(self._repo)},

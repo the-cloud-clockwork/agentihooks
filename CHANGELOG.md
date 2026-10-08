@@ -11,6 +11,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Shared `read-docs` skill answers operator questions from matching published
   documentation sections and proposes follow ups for missing answers.
 
+### Changed
+
+- The SessionStart switch from `main`/`master` to `dev` runs only when
+  `AGENTIHOOKS_FORCE_DEV_BRANCH` is true (default false).
+  `AUTO_DEV_SWITCH_ENABLED` is removed.
+
 ### Fixed
 
 - Plan scope classification excludes test areas and the shared mutation clearance
