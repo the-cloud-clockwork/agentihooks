@@ -10,11 +10,7 @@ if [[ "$source_run" != --downloaded ]]; then
             --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)] | first.workflow_run.id // empty')
         source_run="${passed_run:-$source_run}"
     fi
-    names=()
-    for ((shard=1; shard<=shards; shard++)); do
-        names+=(--name "coverage-3.12-$shard")
-    done
-    gh run download "$source_run" --repo "$GITHUB_REPOSITORY" "${names[@]}" --dir .coverage-shards
+    python "$(dirname "$0")/collect.py" "$source_run" "$shards" .coverage-shards
 fi
 
 reports=()
@@ -28,5 +24,9 @@ for ((shard=1; shard<=shards; shard++)); do
     reports+=("$report")
 done
 python -m coverage combine --rcfile="$config" --keep "${reports[@]}"
+table=$(mktemp)
+python -m coverage report --rcfile="$config" > "$table" &
+table_pid=$!
 python -m coverage xml --rcfile="$config" -o coverage.xml
-python -m coverage report --rcfile="$config"
+wait "$table_pid"
+cat "$table"

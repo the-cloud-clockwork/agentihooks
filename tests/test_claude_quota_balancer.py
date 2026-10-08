@@ -466,6 +466,36 @@ def test_ties_go_in_account_order_and_a_full_band_yields(monkeypatch, tmp_path):
     assert _pick(env, tmp_path, {"BEST": 2, "MID": 1, "LOW": 4}).result.account == "MID"
 
 
+def test_equal_sessions_go_to_the_account_whose_week_resets_soonest(monkeypatch, tmp_path):
+    five = balancer.QuotaWindow(used=10, resets_at=5000)
+    results = [
+        balancer.ProbeResult(name, "allowed", "NORMAL", 50, five, balancer.QuotaWindow(used=50, resets_at=reset))
+        for name, reset in (("A", 90000), ("B", 3000), ("C", None), ("D", 999))
+    ]
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: (results, "cached"))
+    env = {f"AH_CC_TOKEN_{name}": name.lower() for name in "ABCD"}
+
+    assert _pick(env, tmp_path).result.account == "B"
+    assert _pick(env, tmp_path, {"B": 1}).result.account == "A"
+    assert _pick(env, tmp_path, {"A": 1, "B": 1}).result.account == "C"
+    assert _pick(env, tmp_path, {"A": 1, "B": 1, "C": 1}).result.account == "D"
+
+
+def test_an_account_at_the_five_hour_margin_spends_last_until_its_window_resets(monkeypatch, tmp_path):
+    week = balancer.QuotaWindow(used=50, resets_at=3000)
+    other = balancer.ProbeResult(
+        "B", "allowed", "NORMAL", 50, balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=50, resets_at=90000)
+    )
+    tired = balancer.ProbeResult("T", "allowed", "NORMAL", 5, balancer.QuotaWindow(used=95, resets_at=5000), week)
+    rested = balancer.ProbeResult("R", "allowed", "NORMAL", 50, balancer.QuotaWindow(used=97, resets_at=999), week)
+    env = {f"AH_CC_TOKEN_{name}": name.lower() for name in "BTR"}
+
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([tired, other], "cached"))
+    assert _pick(env, tmp_path).result.account == "B"
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([rested, other], "cached"))
+    assert _pick(env, tmp_path).result.account == "R"
+
+
 def test_every_account_at_its_band_cap_refuses_the_launch(monkeypatch, tmp_path):
     env = _three(monkeypatch)
 

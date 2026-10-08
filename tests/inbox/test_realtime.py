@@ -88,6 +88,13 @@ def test_an_item_becomes_a_channel_event_tagged_with_its_id_and_sender(inbox):
     }
 
 
+def test_claim_delivers_an_item_a_newer_writer_stored_with_a_field_this_code_lacks(inbox):
+    item = inbox.send("operator", "bob", "a comment on your task")
+    inbox.redis.hset(inbox.key("item", item.id), "added_later", "x")
+    assert [channel.event(pushed) for pushed in channel.claim(inbox, "bob")] == [channel.event(inbox.get(item.id))]
+    assert inbox.get(item.id).state == "delivered"
+
+
 def test_the_reply_tool_answers_the_sender_and_closes_the_item(inbox):
     item = inbox.send("alice", "bob", "ping")
     text = channel.answer(inbox, "bob", item.id, "pong")
