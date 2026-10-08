@@ -6425,14 +6425,10 @@ def main() -> None:
         from scripts.swarm_ledger import run as ledger_run
 
         raise SystemExit(ledger_run(_argv[1:]))
-    if _argv and _argv[0] == "swarm":
-        from scripts.swarm.cli import main as swarm_main
+    if _argv and _argv[0] in ("swarm", "controller"):
+        from scripts.swarm import cli, controller
 
-        raise SystemExit(swarm_main(_argv[1:]))
-    if _argv and _argv[0] == "controller":
-        from scripts.swarm.controller import main as controller_main
-
-        raise SystemExit(controller_main(_argv[1:]))
+        raise SystemExit({"swarm": cli.main, "controller": controller.main}[_argv[0]](_argv[1:]))
     if _crew_doctor(_argv):
         from scripts.doctor.cli import main as doctor_main
 
@@ -6633,7 +6629,6 @@ def main() -> None:
         "swarm",
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",
     )
-    sub.add_parser("controller", help="Run the swarm controller: run [--once]")
     sub.add_parser("msg", help="Durable messages between sessions: send|inbox|read|close")
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"

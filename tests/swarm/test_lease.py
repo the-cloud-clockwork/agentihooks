@@ -172,3 +172,48 @@ def test_release_conflict_does_not_remove_the_lease(store, monkeypatch):
     monkeypatch.setattr(store.redis, "pipeline", conflicting_pipeline)
     assert lease.release(store, "sw", held) is False
     assert lease.current(store, "sw") == held
+
+
+def test_controller_loop_waits_one_tick_between_runs(store, monkeypatch, capsys):
+    from scripts import operator_env
+    from scripts.swarm import controller
+
+    calls, sleeps = [], []
+    monkeypatch.setattr(operator_env, "fill", lambda env: None)
+    monkeypatch.setattr(controller, "connect", lambda: store)
+    monkeypatch.setattr(controller, "run_once", lambda saved: calls.append(saved) or {"sw": ["worked"]})
+
+    def stop_after_wait(delay):
+        sleeps.append(delay)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(controller.time, "sleep", stop_after_wait)
+    with pytest.raises(KeyboardInterrupt):
+        controller.main(["run"])
+    assert calls == [store]
+    assert sleeps == [60.0]
+    assert capsys.readouterr().out == "sw: worked\n"
+
+
+def test_controller_reports_a_lease_error(store, monkeypatch, capsys):
+    from scripts import operator_env
+    from scripts.swarm import controller
+
+    monkeypatch.setattr(operator_env, "fill", lambda env: None)
+    monkeypatch.setattr(controller, "connect", lambda: store)
+
+    def stale(saved):
+        raise SwarmError("the controller lease is stale")
+
+    monkeypatch.setattr(controller, "run_once", stale)
+    assert controller.main(["run", "--once"]) == 1
+    assert capsys.readouterr().err == "controller: the controller lease is stale\n"
+
+
+def test_epoch_scope_resets_after_failure():
+    assert lease.EPOCH.get() is None
+    with pytest.raises(SwarmError):
+        with lease.fencing(17):
+            assert lease.EPOCH.get() == 17
+            raise SwarmError("failed")
+    assert lease.EPOCH.get() is None

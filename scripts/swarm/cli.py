@@ -143,7 +143,11 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
             return ["the swarm belongs to another hive"]
         ledger = controller.FencedLedger(store, slug, held, ledger)
         runtime = controller.FencedRuntime(
-            store, slug, held, runtime or HerdrRuntime(), os.environ.get("AGENTIHOOKS_DEPLOYMENT", "local") == "local"
+            store,
+            slug,
+            held,
+            runtime or routed(herdr=HerdrRuntime()),
+            os.environ.get("AGENTIHOOKS_DEPLOYMENT", "local") == "local",
         )
         controls = timing.call(command_runner.consume, store, slug)
         if timing.call(ledger.binned, slug):
