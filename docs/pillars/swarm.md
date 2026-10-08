@@ -326,8 +326,8 @@ before ranks existed included, counts as `normal`. `next` is accepted as an alia
 rank; it puts a task first in the queue until someone changes its rank again.
 
 The tick orders claimable tasks highest rank first. Within a rank, a task with a longer critical path goes first:
-the longest chain of open tasks waiting on it. One exception: an S task that unblocks another open task, or is the
-last open task of its phase, goes ahead of the rest of its rank. Phase order is never used, and ledger order breaks
+the longest chain of open tasks waiting on it. One exception: an S task that unblocks another open task (one whose
+other dependencies are all done), or is the last task of its phase not yet done, goes ahead of the rest of its rank. Phase order is never used, and ledger order breaks
 the remaining ties. Capacity placement reads the same order. The tick then applies the usual
 rules: lane, phase, open dependencies, territories and live claims still decide whether a task is claimable, so an
 urgent task never skips a dependency that is not done and never takes a task or a territory another agent holds.

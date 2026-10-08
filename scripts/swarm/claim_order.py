@@ -46,7 +46,7 @@ def _fast_clear(task, rows, waiting):
 
 def _unblocks(task, rows, waiting):
     return any(
-        all(dep == task["id"] or rows.get(dep, {}).get("state") == "done" for dep in rows[w].get("depends_on") or [])
+        all(dep == task["id"] or rows.get(dep, {}).get("state") == "done" for dep in rows[w]["depends_on"])
         for w in waiting.get(task["id"], [])
     )
 

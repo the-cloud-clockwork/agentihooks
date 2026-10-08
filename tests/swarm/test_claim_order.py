@@ -55,6 +55,17 @@ def test_a_small_task_does_not_unblock_a_dependent_that_still_waits_on_other_ope
     assert ordered(ledger)[:4] == ["s2", "big", "s", "y"]
 
 
+def test_a_dependency_missing_from_the_ledger_still_blocks_the_dependent():
+    ledger = rows(
+        {"id": "big"},
+        {"id": "c1", "depends_on": ["big"]},
+        {"id": "c2", "depends_on": ["c1"]},
+        {"id": "s", "difficulty": "S"},
+        {"id": "d", "depends_on": ["s", "ghost"]},
+    )
+    assert ordered(ledger)[:2] == ["big", "c1"]
+
+
 def test_key_is_rank_then_the_fast_clear_exception_then_depth():
     ledger = rows(
         {"id": "a", "rank": "high", "difficulty": "S", "phase": "p1"},
