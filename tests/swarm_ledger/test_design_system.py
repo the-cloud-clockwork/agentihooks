@@ -269,12 +269,9 @@ class BluePalette(unittest.TestCase):
             self.assertNotIn("text-shadow", css, name)
 
 
-LANDING_BAYS = "main:not(.home)"
-
-
 class LandingBays(unittest.TestCase):
     def test_ledger_and_bin_sections_take_the_landing_bay_and_inner_tiles_the_raised_bay(self):
-        scoped = block(LANDING_BAYS)
+        scoped = block("main:not(.home)")
         self.assertEqual(set(scoped), {"--surface-1", "--surface-2"})
         self.assertEqual(scoped["--surface-1"], "var(--bay-050)")
         self.assertEqual(scoped["--surface-2"], "var(--bay-075)")
