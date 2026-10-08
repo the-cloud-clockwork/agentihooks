@@ -439,6 +439,7 @@ jobs:
           name: sonar-report
           path: |
             coverage.xml
+            .coverage-shards/
             .scannerwork/report-task.txt
           include-hidden-files: true
           if-no-files-found: error
@@ -594,6 +595,56 @@ jobs:
         with:
           path: ~/durations-samples
           key: durations-samples-${{ github.sha }}
+
+  coverage-baseline:
+    needs: [gate-required, sonar]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install coverage
+        run: python -m pip install "coverage>=7.4"
+
+      - name: Resolve baseline trees
+        id: tree
+        env:
+          PREVIOUS: ${{ github.event.before }}
+        run: |
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+          echo "previous=$(git rev-parse "$PREVIOUS^{tree}")" >> "$GITHUB_OUTPUT"
+
+      - name: Restore measured coverage history
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/coverage-baseline
+          key: coverage-baseline-${{ steps.tree.outputs.previous }}
+
+      - name: Download this run's measured coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: sonar-report
+          path: baseline-coverage
+
+      - name: Compute the coverage baseline
+        run: |
+          python -m tests.coverage_baseline --shards 8 \
+            --head-shards baseline-coverage/.coverage-shards \
+            --out "$HOME/coverage-baseline/baseline.json" \
+            --previous "$HOME/coverage-baseline/baseline.json"
+
+      - name: Save the passed dev coverage baseline
+        uses: actions/cache/save@v4
+        with:
+          path: ~/coverage-baseline
+          key: coverage-baseline-${{ steps.tree.outputs.tree }}
 
   mutation:
     if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}

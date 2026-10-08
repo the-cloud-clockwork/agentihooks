@@ -12,6 +12,8 @@
 /tests/*BASELINE* @nestorcolt
 /tests/*ALLOWLIST* @nestorcolt
 /tests/count_floor.py @nestorcolt
+/tests/coverage_*.py @nestorcolt
+/tests/test_coverage_*.py @nestorcolt
 /tests/dev_durations.py @nestorcolt
 /tests/leaks.py @nestorcolt
 /tests/refresh_durations.py @nestorcolt
