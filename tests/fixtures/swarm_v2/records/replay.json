@@ -1,0 +1,123 @@
+{
+  "base": "bc0fe91d54224ea70e81fa20956c21da506ea940",
+  "outputs": {
+    "architecture": [
+      {
+        "result": {
+          "operation": "fixture-inventory-1",
+          "revision": 1,
+          "accepted": [
+            "embedding-backlog"
+          ],
+          "rejected": [
+            {
+              "id": "duplicate-dispatcher",
+              "name": "Kubernetes task dispatcher",
+              "reason": "inserts another coding-task queue beside Swarm reconciliation controller (AD-05)"
+            }
+          ],
+          "unresolved": [],
+          "unowned": [],
+          "measurements": {
+            "architecture_unowned_components": 0
+          }
+        },
+        "bytes": "c085d0e4299a3c0d56df66ce44621cdd2c08407350ea76e6f350d97a38733967"
+      },
+      {
+        "result": {
+          "operation": "fixture-inventory-1",
+          "revision": 1,
+          "accepted": [
+            "embedding-backlog"
+          ],
+          "rejected": [
+            {
+              "id": "duplicate-dispatcher",
+              "name": "Kubernetes task dispatcher",
+              "reason": "inserts another coding-task queue beside Swarm reconciliation controller (AD-05)"
+            }
+          ],
+          "unresolved": [],
+          "unowned": [],
+          "measurements": {
+            "architecture_unowned_components": 0
+          }
+        },
+        "bytes": "c085d0e4299a3c0d56df66ce44621cdd2c08407350ea76e6f350d97a38733967"
+      },
+      {
+        "result": {
+          "error": "ArchitectureError",
+          "message": "operation fixture-inventory-1 was already recorded with different content"
+        },
+        "bytes": "c085d0e4299a3c0d56df66ce44621cdd2c08407350ea76e6f350d97a38733967"
+      },
+      {
+        "result": {
+          "operation": "rollback",
+          "revision": 2,
+          "rolled_back": [
+            "Brain arc embedding backlog"
+          ],
+          "restored": []
+        },
+        "bytes": "15a72b649b71777bd314b7228de9ca4ffdddc7d9dbc42dfe7a63ecbab244e6ff"
+      },
+      {
+        "result": {
+          "operation": "rollback",
+          "revision": 2,
+          "rolled_back": [
+            "Brain arc embedding backlog"
+          ],
+          "restored": []
+        },
+        "bytes": "15a72b649b71777bd314b7228de9ca4ffdddc7d9dbc42dfe7a63ecbab244e6ff"
+      }
+    ],
+    "evidence-index": [
+      {
+        "result": {
+          "operation": "replay",
+          "revision": 2,
+          "package": "SV2-FND-04",
+          "claim": "open",
+          "added": []
+        },
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c"
+      },
+      {
+        "result": {
+          "operation": "replay",
+          "revision": 2,
+          "package": "SV2-FND-04",
+          "claim": "open",
+          "added": []
+        },
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c"
+      },
+      {
+        "result": {
+          "error": "EvidenceError",
+          "message": "operation replay was already recorded with different content"
+        },
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c"
+      },
+      {
+        "result": {
+          "error": "EvidenceError",
+          "message": "backup at revision 1 is older than the registry at revision 2"
+        },
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c"
+      },
+      {
+        "result": {
+          "error": "EvidenceError",
+          "message": "SV2-FND-04 is not claimed complete"
+        },
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c"
+      }
+    ]
+  }
+}

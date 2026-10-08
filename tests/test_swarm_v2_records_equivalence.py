@@ -1,5 +1,5 @@
+import hashlib
 import json
-import subprocess
 from pathlib import Path
 from types import FunctionType, ModuleType
 
@@ -8,20 +8,6 @@ import pytest
 from scripts.swarm_v2 import architecture, records, validate_plan
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE = "bc0fe91d"
-
-
-def _base(name):
-    source = subprocess.run(
-        ["git", "show", f"{BASE}:scripts/swarm_v2/{name}.py"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    module = ModuleType(name)
-    exec(compile(source, name, "exec"), module.__dict__)
-    return module
 
 
 def _observe(module, path, calls):
@@ -31,7 +17,7 @@ def _observe(module, path, calls):
             result = getattr(module, function)(*arguments)
         except ValueError as error:
             result = {"error": type(error).__name__, "message": str(error)}
-        outputs.append({"result": result, "bytes": path.read_bytes().hex()})
+        outputs.append({"result": result, "bytes": hashlib.sha256(path.read_bytes()).hexdigest()})
     return outputs
 
 
@@ -71,9 +57,8 @@ def _replay(module, name, path):
 
 @pytest.mark.parametrize("name,module", [("architecture", architecture), ("evidence-index", validate_plan)])
 def test_record_apis_match_the_base_and_detect_a_planted_digest_fault(name, module, tmp_path):
-    original = _base("architecture" if name == "architecture" else "validate_plan")
+    expected = json.loads((ROOT / "tests/fixtures/swarm_v2/records/replay.json").read_text())["outputs"][name]
     path = tmp_path / "record.json"
-    expected = _replay(original, name, path)
     assert _replay(module, name, path) == expected
     planted = ModuleType("planted")
     planted.__dict__.update(module.__dict__)
