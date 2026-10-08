@@ -240,9 +240,8 @@ def test_backfill_maps_repository_packages_and_reads_shared_sections(plan_ledger
     output = plan_read.read(doc, plan_ledger, "vrun5", None)
     assert (
         output
-        == "## 1. Architecture\nShared one\n## 2. Baseline\nShared two\n## 3. Boundaries\nShared three\n\n#### SV2-RUN-05: Runtime\nRuntime seam\n"
+        == "## 1. Architecture\nShared one\n## 2. Baseline\nShared two\n## 3. Boundaries\nShared three\n\n" + text
     )
-    assert "Other seam" not in output
 
 
 def test_backfill_preserves_a_range_assigned_after_its_snapshot(published, monkeypatch, capsys):
@@ -293,5 +292,71 @@ def test_package_names_and_shared_section_validation(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(plan_packages, "PLAN", path)
     assert plan_packages.text() == path.read_text(encoding="utf-8")
-    assert plan_ranges.task_slice({}, {}, "SV2-RUN-05") == "9-10"
+    assert plan_ranges.task_slice({}, {}, "SV2-RUN-05", "https://github.com/org/repo/issues/1371") == "9-10"
     assert plan_packages.shared_lines(plan_packages.text()) == "2-7"
+
+
+@pytest.mark.parametrize("description", ["SV2-RUN-050", "XSV2-RUN-05", "T-SV2-RUN-05-A"])
+def test_package_identifiers_never_match_another_identifier(description):
+    from scripts.swarm_ledger import plan_packages
+
+    assert plan_packages.name({"id": "other", "description": description}) == "other"
+
+
+def test_nonstring_slice_is_refused_instead_of_crashing(legacy):
+    doc, rejected = add(legacy, "malformed", plan_slice=True)
+    assert rejected == ["add-malformed"]
+    assert doc["_meta"]["warnings"] == ["plan slice must be a string"]
+
+
+def test_package_named_slice_keeps_its_published_artifact(legacy, monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    doc = core.sync(legacy)[0]
+    file = ledger_artifacts.store(
+        legacy, "package.md", b"# Plan\n<!-- slice: SV2-RUN-05 -->\n### Runtime\nArtifact seam\n"
+    )
+    doc["artifacts"].append({"plan": True, "file": file})
+    phase = {
+        "plan_url": "https://github.com/org/repo/issues/1",
+        "plan_ref": {"artifact": f"{ledger.BASE}/artifacts/{legacy}/{file['id']}", "lines": "1-4"},
+    }
+    monkeypatch.setattr(plan_packages, "text", lambda: pytest.fail("repository fallback must not replace an artifact"))
+    assert plan_ranges.task_slice(doc, phase, "SV2-RUN-05", phase["plan_url"]) == "2-4"
+
+
+def test_package_read_keeps_ten_lines_of_context(tmp_path, monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    shared = "## 1. Shared\nOne\n## 2. Shared\nTwo\n## 3. Shared\nThree\n"
+    before = "".join(f"Before {n}\n" for n in range(12))
+    after = "".join(f"After {n}\n" for n in range(12))
+    source = "# Plan\n" + shared + "## 4. Tasks\n" + before + "#### SV2-RUN-05: Task\nTask\n" + after
+    path = tmp_path / "plan.md"
+    path.write_text(source, encoding="utf-8")
+    monkeypatch.setattr(plan_packages, "PLAN", path)
+    output = plan_packages.read("21-22")
+    expected = (
+        shared
+        + "\n"
+        + "".join(f"Before {n}\n" for n in range(2, 12))
+        + "#### SV2-RUN-05: Task\nTask\n"
+        + "".join(f"After {n}\n" for n in range(10))
+    )
+    assert output == expected
+
+
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        ("https://github.com/org/repo/issues/1371", True),
+        ("https://github.com/org/repo/pull/1371", False),
+        ("https://example.com/org/repo/issues/1371", False),
+        ("https://github.com/org/repo/issues/1371/more", False),
+    ],
+)
+def test_repository_package_fallback_only_accepts_issue_links(url, expected):
+    from scripts.swarm_ledger import plan_packages
+
+    assert plan_packages.linked("SV2-RUN-05", url) is expected
+    assert plan_packages.linked("ordinary", url) is False

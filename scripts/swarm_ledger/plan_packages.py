@@ -4,7 +4,8 @@ from pathlib import Path
 from scripts.swarm_ledger import plan_ranges
 
 PLAN = Path(__file__).resolve().parents[2] / "Swarm-v2.md"
-PACKAGE = re.compile(r"SV2-[A-Z]+-\d{2}")
+PACKAGE = re.compile(r"(?<![\w.-])SV2-[A-Z]+-\d{2}(?![\w.-])")
+ISSUE = re.compile(r"https://github\.com/[^/]+/[^/]+/issues/\d+/?")
 
 
 def name(task: dict) -> str:
@@ -14,6 +15,10 @@ def name(task: dict) -> str:
     if len(names) > 1:
         raise ValueError("task description names more than one Swarm v2 package")
     return next(iter(names), task["id"])
+
+
+def linked(name: str, url: str) -> bool:
+    return bool(PACKAGE.fullmatch(name) and ISSUE.fullmatch(url))
 
 
 def text() -> str:
@@ -36,4 +41,4 @@ def read(lines: str) -> str:
     from scripts.swarm_ledger import plan_read
 
     source = text()
-    return plan_read.chunk(source, shared_lines(source), margin=0) + "\n" + plan_read.chunk(source, lines, margin=0)
+    return plan_read.chunk(source, shared_lines(source), margin=0) + "\n" + plan_read.chunk(source, lines)

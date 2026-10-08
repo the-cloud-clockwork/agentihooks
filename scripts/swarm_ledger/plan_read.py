@@ -65,14 +65,15 @@ def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str
     task = {} if phase_id else _sliced_task(doc, slug, task_id)
     from scripts.swarm_ledger import plan_packages
 
-    if plan_packages.PACKAGE.fullmatch(task.get("plan_slice", "")):
-        return plan_packages.read(task["plan_lines"])
     phase_id = phase_id or task.get("phase")
     phase = next((p for p in doc.get("phases", []) if p.get("id") == phase_id), None)
     if phase is None:
         raise ValueError(f"no phase {phase_id} in ledger {slug}")
     ref = phase.get("plan_ref")
-    if not ref and task and (url := task.get("plan_url") or phase.get("plan_url")):
+    url = task.get("plan_url") or phase.get("plan_url") or ""
+    if not ref and task and plan_packages.linked(task.get("plan_slice", ""), url):
+        return plan_packages.read(task["plan_lines"])
+    if not ref and task and url:
         ref = {"artifact": url, "lines": task["plan_lines"]}
     if not ref:
         raise ValueError(f"phase {phase_id} has no plan range")

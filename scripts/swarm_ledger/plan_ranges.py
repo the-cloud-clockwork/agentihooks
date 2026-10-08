@@ -142,16 +142,17 @@ def check_phase_ref(doc: dict, phase: dict) -> None:
 def task_slice(doc: dict, phase: dict, name: str, plan_url: str = "") -> str:
     from scripts.swarm_ledger import plan_packages
 
-    if plan_packages.PACKAGE.fullmatch(name):
-        text = plan_packages.text()
-        return slice_lines(text, name, f"1-{len(text.splitlines())}")
+    if not isinstance(name, str):
+        raise ValueError("plan slice must be a string")
     ref = phase.get("plan_ref")
     if ref is not None:
         return slice_lines(stored_text(ref, doc), name, ref["lines"])
     url = plan_url or phase.get("plan_url")
     if not url:
         raise ValueError("publish a plan artifact for the phase before adding a plan slice")
-    text = stored_text({"artifact": url, "lines": "1-1"}, doc)
+    text = (
+        plan_packages.text() if plan_packages.linked(name, url) else stored_text({"artifact": url, "lines": "1-1"}, doc)
+    )
     return slice_lines(text, name, f"1-{len(text.splitlines())}")
 
 
