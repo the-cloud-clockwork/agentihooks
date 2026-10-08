@@ -50,6 +50,20 @@ def test_restore_merges_into_the_existing_restored_registry():
     assert bin_storage.restored() == {"a": 10, "b": 20}
 
 
+def test_restored_reads_only_the_restored_registry_ints():
+    bin_storage.delete("other", now=1)
+    bin_storage.restore("other", now=2)
+    assert bin_storage.restored() == {"other": 2}
+    assert bin_storage.entries() == {}
+
+
+def test_registries_returns_both_the_bin_and_restored_registries_under_their_names():
+    bin_storage.delete("p", now=5)
+    bin_storage.delete("q", now=6)
+    bin_storage.restore("q", now=7)
+    assert bin_storage.registries() == {"bin": {"p": 5}, "restored": {"q": 7}}
+
+
 def test_auto_bin_does_not_fall_back_to_zero_when_created_at_is_set(monkeypatch):
     monkeypatch.setattr(
         repository,
