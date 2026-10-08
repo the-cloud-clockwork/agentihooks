@@ -50,14 +50,14 @@ def row(layer: str, file: Path) -> dict:
 
 
 def doctrine_files(bundle: Path | None, dirs: list[tuple[str, Path]]) -> list[Path]:
-    from hooks.config import _resolve_manifesto_paths
+    from scripts.profiles import manifestos
 
     files = []
     if bundle is not None:
         shared = bundle / ".claude" / "CLAUDE.md"
         files.append(shared if shared.exists() else bundle / "CLAUDE.md")
     files += [directory / "CLAUDE.md" for _, directory in dirs]
-    files += [Path(p) for p in _resolve_manifesto_paths(bundle)]
+    files += manifestos.paths(bundle, dirs)
     return [file for file in files if file.is_file() and file.read_text().strip()]
 
 
