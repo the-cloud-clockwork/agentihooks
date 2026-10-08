@@ -1,7 +1,7 @@
 > **Note (2026-10-08).** Copied verbatim from the operator's file
 > `C:\Users\nesto\Downloads\Codex-Channels-Implementation-Plan.md`
 > (WSL `/mnt/c/Users/nesto/Downloads/Codex-Channels-Implementation-Plan.md`).
-> Re-checked against dev `ee1f0c71` / `5509132f`; every seam still exists.
+> Re-checked against dev `ee1f0c71` / `5509132f`; seams present at dev `a37bf5c8` (the body records its own later recheck).
 > Operator changes: after CXCH-08 passes, `app_server` becomes the default and
 > `legacy` stays for rollback; CXCH-10 is out of scope.
 > This is an interim home until plan artifacts move to MinIO or S3.
