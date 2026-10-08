@@ -2114,3 +2114,64 @@ def test_cli_renders_the_overlays_named(world, overlays, capsys):
     with pytest.raises(SystemExit):
         render.main(["render", "--help"])
     assert re.search(r"--overlay OVERLAY\s+Wear this overlay; repeat for up to three", capsys.readouterr().out)
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_capability_overlay_refuses_before_rendering(world, overlays, monkeypatch, target):
+    from scripts.profiles import render
+
+    _write(
+        overlays / "ov-a" / "profile.yml",
+        "name: ov-a\nkind: overlay\nwears: [engineer]\nrequired_capabilities: [headed]\n",
+    )
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_CAPABILITIES", raising=False)
+    with pytest.raises(ValueError, match="overlay ov-a requires hive capabilities: headed"):
+        render.render(target, "rb-eng", overlays=["ov-a"])
+    assert render.profile_dir("rb-eng", ["ov-a"]) is None
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_capability_overlay_rechecks_cached_home(world, overlays, monkeypatch, target):
+    from scripts.profiles import render
+
+    _write(
+        overlays / "ov-a" / "profile.yml",
+        "name: ov-a\nkind: overlay\nwears: [engineer]\nrequired_capabilities: [headed]\n",
+    )
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_CAPABILITIES", "linux, headed")
+    assert render.render(target, "rb-eng", overlays=["ov-a"]) is not None
+    assert render.render(target, "rb-eng", overlays=["ov-a"]) is None
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_CAPABILITIES", "headless")
+    with pytest.raises(ValueError, match="requires hive capabilities: headed"):
+        render.render(target, "rb-eng", overlays=["ov-a"])
+
+
+@pytest.mark.parametrize("required", ["headed", "[headed, 1]", "false", "{headed: true}"])
+def test_capability_overlay_refuses_invalid_requirement(world, overlays, monkeypatch, required):
+    from scripts.profiles import render
+
+    _write(
+        overlays / "ov-a" / "profile.yml",
+        f"name: ov-a\nkind: overlay\nwears: [engineer]\nrequired_capabilities: {required}\n",
+    )
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_CAPABILITIES", "headed")
+    with pytest.raises(ValueError, match="required_capabilities must be a list of nonempty strings"):
+        render.render_claude("rb-eng", overlays=["ov-a"])
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_headed_overlay_keeps_the_vm_browser(world, overlays, monkeypatch, target):
+    from scripts.profiles import browser, render
+
+    _write(
+        overlays / "headed" / "profile.yml",
+        "name: headed\nkind: overlay\nwears: [engineer]\nrequired_capabilities: [headed]\n",
+    )
+    headed = {"command": "playwright-mcp", "args": ["--cdp-endpoint", "http://127.0.0.1:9222"]}
+    _write(overlays / "headed" / ".claude" / ".mcp.json", json.dumps({"mcpServers": {"playwright-headed": headed}}))
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_CAPABILITIES", "headed")
+    dirs = render._chain("rb-eng", ["headed"])
+    servers = render._mcp_servers(target, world["bundle"], dirs)
+    assert servers["playwright-headed"] == headed
+    assert servers["playwright-cmd"] == browser.spec()
+    assert "playwright-headed" not in render._mcp_servers(target, world["bundle"], render._chain("rb-eng"))
