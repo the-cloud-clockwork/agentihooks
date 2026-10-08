@@ -42,7 +42,7 @@ class LedgerClient:
             raise (LedgerRefused if refused else SwarmError)(f"ledger {slug}: {exc}") from exc
         if state.get("rejected"):
             detail = "; ".join(state.get("_meta", {}).get("warnings", [])) or str(state["rejected"])
-            raise SwarmError(f"ledger {slug} refused: {detail}")
+            raise LedgerRefused(f"ledger {slug} refused: {detail}")
         return state
 
     def _resource(self, slug, path, collection=False):

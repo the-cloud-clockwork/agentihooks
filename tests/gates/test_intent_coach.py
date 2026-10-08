@@ -43,7 +43,7 @@ def test_miss_coaches_then_a_fixed_head_passes(tmp_path):
     assert "Fix steps:" in text
     assert "fix round 1 of 2" in text
     assert ledger.updates == [(SLUG, TASK, {"state": "claimed"}, "swarm")]
-    assert ledger.comments[0][2] == text
+    assert ledger.comments[0][2] == intent.FAIL_COMMENT
     ledger, mail = run_check(tmp_path, "fixed", "pass", "meets intent")
     assert gate(tmp_path).allowed
     assert (ledger.updates, ledger.comments, mail.sent) == ([], [], [])
@@ -60,11 +60,19 @@ def test_two_failed_fix_rounds_allow_merge_and_done_and_record_shortfall(tmp_pat
     ledger, mail = run_check(tmp_path, "fix-two")
     assert gate(tmp_path, command).allowed
     assert ledger.updates == []
+    assert mail.sent == [
+        (
+            f"intent-shortfall:{TASK}:{NOW}",
+            "master-seat",
+            "Intent remains unmet after two fix rounds: missing behavior. The master must review this shortfall.",
+            f"tasks/{TASK}",
+        )
+    ]
     assert ledger.comments == [
         (
             SLUG,
             TASK,
-            "Intent remains unmet after two fix rounds: missing behavior. The master must review this shortfall.",
+            "Intent remains unmet after two fix rounds. The master must review this shortfall in the gate log.",
             "swarm",
         )
     ]
@@ -167,7 +175,7 @@ def test_remediation_names_the_task_seam_and_reaches_every_feedback_channel(tmp_
         (
             SLUG,
             TASK,
-            f"Intent remains unmet after two fix rounds: {reason}. The master must review this shortfall.",
+            "Intent remains unmet after two fix rounds. The master must review this shortfall in the gate log.",
             "swarm",
         )
     ]
