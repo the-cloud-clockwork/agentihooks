@@ -24,8 +24,9 @@ deduplication key when they share a native session ID, a path and every display 
 kind and the parts. Labels and URLs never appear in a key. Each cached document is written with `stamp`, which
 records the full namespace and kind; a reader accepts it only through `admits`, so a document copied or written
 under another namespace never satisfies a request. A document that carries another namespace is counted in
-`cache_scope_mismatch_total` (`hooks.context.project_cache`, per kind, in `cache-scope-mismatches.json`) and
-logged by kind only.
+`cache_scope_mismatch_total` (`hooks.context.project_cache`, per kind, in `cache-scope-mismatches.json`),
+logged by kind only and reported by `brain_status`. It counts refused reads: a foreign document left in place
+counts again on every read until a refresh rewrites it.
 
 | Key | Kind and parts | Namespace |
 |---|---|---|
@@ -34,13 +35,16 @@ logged by kind only.
 | Deferred project context | `pending`, session ID | installation, brain |
 | Last published feed hash | `publish-hash` (single file, stamped) | installation, brain |
 | Brain marker idempotency key | uuid5 of format, namespace, session ID, type, task and content | installation, brain, project |
+| Hook session state in Redis (`redis_key`: file read cache, retry breaker, branch and PR signals, controls switch, transcript positions, token counters) | `<REDIS_KEY_PREFIX>:<installation>:<type>:<id>` | installation |
 
 ## Marker keys and live sessions
 
 Every Stop re-sends every marker in the transcript and relies on the idempotency key to deduplicate. A marker
 whose transcript time is before the installation's creation time, or that has no valid time, keeps the legacy key
 (session, type and content), so a live session never reposts its old markers under a new key. Markers at or after
-the creation time use the namespaced key, which also carries the task, so the same text under two tasks of one
+the creation time use the namespaced key. Its project and task come from the session's scope log at the
+marker's own time (SV2-IDN-03), never from the current folder or the session index, so every later Stop sends
+the same key. The key carries the task, so the same text under two tasks of one
 session is two markers. An outbox file records the key of its first post and a replay sends that key unchanged,
 whichever brain is configured at replay; an outbox file without one replays with the legacy key.
 
@@ -49,17 +53,28 @@ whichever brain is configured at replay; an outbox file without one replays with
 - Legacy cache files (`feed.json`, `<24 hex>.json`, `pending-<24 hex>.json`) are never read. Each feed store
   removes at most 32 of them (`sweep_legacy`); they are rebuildable caches.
 - The legacy publish hash file is read as empty, so the next refresh rewrites it stamped.
+- Hook session state in Redis moves to installation keys at the upgrade. Old keys are never read and expire
+  with their TTL; the controls switch has none and stays behind, unread. A live session starts again from empty
+  state once: retry counts, file read cache, branch and PR signals and the controls switch reset to their safe
+  defaults, and the transcript logger re-logs that session's transcript from its first line.
+- The first feed store after the upgrade removes undelivered legacy deferred contexts, one per session at most.
 - Rollback: revert the change, then `python -m scripts.swarm_v2.keyspace drop <agentihooks home>/brain/project-memory`
-  removes only `k2-` cache files. It never touches the session index, scope logs, the outbox, the installation
-  record or legacy files; the preceding code rebuilds its own caches.
+  removes only the rebuildable `k2-feed-` and `k2-project-memory-` files. It never touches deferred contexts,
+  the session index, scope logs, the outbox, the installation record or legacy files; the preceding code rebuilds
+  its own caches and reads its own Redis keys again. The preceding code sends every marker under its legacy key, so a
+  marker posted under a namespaced key in the brain's last idempotency hour can be written again, subject to the
+  brain's own lesson and signal content checks.
+- Deleting `installation.json` creates a new installation: its later creation time moves markers stamped
+  between the two times back to legacy keys, and the brain can receive them again inside its window.
 
 ## Not covered
 
-- Hook session state in Redis (`redis_key`: file read cache, retry breaker, branch and PR signals, transcript
-  positions, token counters) stays keyed by `REDIS_KEY_PREFIX` and the native session ID. Installations that share
-  one Redis must set distinct prefixes until a later package namespaces those keys.
-- Kernel outbox drains (`agentibrain sync`, brain-ops `outbox_drain`) still compute the legacy key and ignore the
-  recorded one; within the brain's one hour idempotency window such a drain can duplicate a marker first posted
-  under a namespaced key.
-- No session transcript archive exists yet; its identities belong to the session memory packages and must be
-  built on this namespace.
+- Durable Redis records keep their keys: the memory store (`<prefix>:memory:*`) and the event relay streams are
+  authoritative data or shared contracts, not caches.
+- Kernel outbox drains (`agentibrain sync`, brain-ops `outbox_drain`) send the recorded key from the matching
+  agentibrain-kernel change; a kernel release before it recomputes the legacy key.
+- Markers from a transcript record without a time keep the legacy key permanently. A marker read from the Stop
+  payload's last message takes the Stop time.
+- The archive clause of the output contract is unmet: no session transcript archive exists yet. Its identities
+  belong to the session memory packages and must be built on this namespace.
+- `Namespace.generation` has no producer until a runtime package registers execution generations.

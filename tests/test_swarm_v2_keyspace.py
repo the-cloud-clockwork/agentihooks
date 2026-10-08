@@ -27,6 +27,7 @@ def world(monkeypatch, tmp_path):
     home = tmp_path / FIXTURE["home"]
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", home)
     monkeypatch.setattr("hooks.context.brain_adapter._HASH_CACHE_FILE", home / "brain_feed_hash")
+    monkeypatch.setattr("hooks.common.LOG_FILE", str(tmp_path / "hooks.log"))
     monkeypatch.setenv("AGENTIHOOKS_SWARM", FIXTURE["swarm"])
     monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", FIXTURE["task"])
     monkeypatch.delenv("BRAIN_PROJECT_SCOPE", raising=False)
@@ -142,6 +143,24 @@ def test_two_brains_on_one_installation_keep_separate_caches(world, monkeypatch)
     assert project_cache.cache_scope_mismatch_total() == 0
 
 
+def test_public_behaviour_matches_the_preceding_code(world, monkeypatch):
+    golden = json.loads((Path(__file__).parent / "fixtures/swarm_v2/keyspace-golden.json").read_text())
+    monkeypatch.delenv("AGENTIHOOKS_SWARM")
+    monkeypatch.setattr("hooks.config.BRAIN_SOURCE_TYPE", "none")
+    with patch("hooks.context.project_sessions.enabled", return_value=False):
+        record_session(SESSION, IDENTITY)
+    project_cache.store_feed([BrainEntry("hot-arcs", "Arcs", "golden")])
+    with patch("hooks._async.fork_and_call") as fork:
+        assert project_cache.project_context(SESSION) == golden["empty_context"]
+    with patch(
+        "hooks.context.project_memory.VaultProjectSource.fetch",
+        return_value=ProjectMemory(IDENTITY.project, lessons=["golden lesson"]),
+    ):
+        project_cache.refresh_project_cache(*fork.call_args.args[1:])
+    assert context() == golden["context"]
+    assert _marker_request({**marker(None), "scope": None}, SESSION)[1] == golden["legacy_marker_key"]
+
+
 def test_the_session_index_keeps_the_canonical_project(world):
     from hooks.context.project_sessions import _index_path, lookup
 
@@ -182,7 +201,8 @@ def test_a_cache_entry_from_another_brain_cannot_satisfy_a_context_request(world
     after = {name: body for name, body in files(world).items() if name.startswith("brain/project-memory/k2-")}
     assert after == protected
     assert project_cache.cache_scope_mismatch_total() == 2
-    log = (world / "logs" / "hooks.log").read_text() if (world / "logs" / "hooks.log").exists() else ""
+    log = (world.parents[1] / "hooks.log").read_text()
+    assert "cache scope mismatch" in log
     assert not any(secret in log for secret in SECRETS)
 
 
@@ -336,14 +356,84 @@ def test_rollback_drops_only_new_rebuildable_caches(world, monkeypatch, capsys):
     project_cache.defer_project_context(SESSION, "pending")
     state = world / "brain" / "project-memory"
     legacy = legacy_files(state, 2)
-    durable = {name: body for name, body in files(world).items() if not keyspace.NAMESPACED.fullmatch(Path(name).name)}
+    durable = {name: body for name, body in files(world).items() if not keyspace.REBUILDABLE.fullmatch(Path(name).name)}
     assert keyspace.main(["drop", str(state)]) == 0
-    assert int(capsys.readouterr().out) == 3
+    assert int(capsys.readouterr().out) == 2
     assert files(world) == durable
     assert all(path.exists() for path in legacy)
+    assert project_cache.take_project_context(SESSION) == "pending"
     assert keyspace.main(["drop"]) == 2
     assert keyspace.main(["purge", str(state)]) == 2
     assert keyspace.drop_namespaced(world / "missing") == 0
+
+
+def test_marker_keys_follow_the_event_time_scope_across_stops(world, monkeypatch):
+    from hooks.context.project_sessions import record_scope
+
+    install(world)
+    use_brain(monkeypatch, "swarm")
+    record_scope(SESSION, scope(), "2026-10-08T12:10:00+00:00")
+    first = _marker_request(marker(), SESSION)[1]
+    with patch("hooks.context.project_sessions.enabled", return_value=False):
+        record_session(SESSION, ProjectIdentity("other", "other", project_id="local:other"))
+    record_scope(SESSION, {**scope(), "task": "later"}, "2026-10-08T13:00:00+00:00")
+    assert _marker_request(marker(), SESSION)[1] == first
+    later = _marker_request(marker("2026-10-08T13:10:00+00:00"), SESSION)[1]
+    assert later != first
+
+
+def test_one_text_under_two_tasks_of_one_session_is_two_markers_and_reposts_nothing(world, monkeypatch, tmp_path):
+    from hooks.context import brain_writer_hook
+    from hooks.context.project_sessions import record_scope
+
+    install(world)
+    use_brain(monkeypatch, "swarm")
+    monkeypatch.setattr("hooks.config.BRAIN_WRITER_ENABLED", True)
+    monkeypatch.setattr("hooks.config.BRAIN_WRITER_MAX_MARKERS", 20)
+    monkeypatch.setattr("hooks.config.BRAIN_WRITER_OUTBOX", str(tmp_path / "outbox"))
+    record_scope(SESSION, {**scope(), "task": "one"}, "2026-10-08T10:00:00+00:00")
+    record_scope(SESSION, {**scope(), "task": "two"}, "2026-10-08T12:40:00+00:00")
+    text = f"<!-- @lesson -->{FIXTURE['marker']['content']}<!-- @/lesson -->"
+    times = (FIXTURE["legacy_marker_at"], FIXTURE["marker_at"], "2026-10-08T12:50:00+00:00")
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        "".join(json.dumps({"type": "assistant", "timestamp": at, "message": {"content": text}}) + "\n" for at in times)
+    )
+    with (
+        patch("hooks._brain_http.brain_http_enabled", return_value=True),
+        patch("hooks._brain_http.post", return_value={"ok": True}) as post,
+    ):
+        brain_writer_hook.write_markers(SESSION, str(transcript))
+        brain_writer_hook.write_markers(SESSION, str(transcript))
+    keys = [call.kwargs["idempotency_key"] for call in post.call_args_list]
+    assert keys[:3] == keys[3:]
+    assert keys[0] == keyspace.legacy_marker_key(SESSION, "lesson", FIXTURE["marker"]["content"])
+    assert len(set(keys[:3])) == 3
+
+
+def test_hook_redis_keys_are_scoped_by_installation(world, tmp_path, monkeypatch):
+    from hooks._redis import _KEY_PREFIX, redis_key
+    from hooks.context import controls_toggle
+
+    record = install(world)
+    first = redis_key("file_cache", SESSION)
+    assert first == f"{_KEY_PREFIX}:{record.installation_id}:file_cache:{SESSION}"
+    assert controls_toggle._global_key() == f"{_KEY_PREFIX}:{record.installation_id}:controls_disabled:_global"
+    other = tmp_path / "other" / FIXTURE["home"]
+    monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", other)
+    assert redis_key("file_cache", SESSION) != first
+    assert redis_key("file_cache", SESSION) == redis_key("file_cache", SESSION)
+
+
+def test_brain_status_reports_cache_scope_mismatches(world, monkeypatch):
+    install(world)
+    use_brain(monkeypatch, "personal")
+    project_cache.defer_project_context(SESSION, "personal pending")
+    source = project_cache._pending_path(SESSION, project_cache.namespace())
+    use_brain(monkeypatch, "swarm")
+    project_cache._pending_path(SESSION, project_cache.namespace()).write_bytes(source.read_bytes())
+    project_cache.take_project_context(SESSION)
+    assert brain_adapter.get_status()["cache_scope_mismatch_total"] == 1
 
 
 def test_concurrent_installation_creation_keeps_the_first_record(tmp_path, monkeypatch):

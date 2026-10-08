@@ -604,6 +604,7 @@ def get_status() -> dict:
         )
     except ImportError:
         return {"enabled": False, "error": "config not loaded"}
+    from hooks.context.project_cache import cache_scope_mismatch_total
 
     source = _get_source()
     entry_count = 0
@@ -658,5 +659,6 @@ def get_status() -> dict:
         "entry_count": entry_count,
         "active_broadcasts": active_broadcasts,
         "content_hash": _content_hash or _load_persisted_hash(),
+        "cache_scope_mismatch_total": cache_scope_mismatch_total(),
         "warnings": warnings,
     }

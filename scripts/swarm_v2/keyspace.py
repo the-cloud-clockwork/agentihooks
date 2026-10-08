@@ -17,6 +17,7 @@ DEFAULT_PORTS = {"http": 80, "https": 443}
 KIND = re.compile(r"[a-z][a-z0-9-]{0,31}")
 INSTALLATION_ID = re.compile(r"inst-[0-9a-f]{32}")
 NAMESPACED = re.compile(r"k2-[a-z][a-z0-9-]{0,31}-[0-9a-f]{32}\.json")
+REBUILDABLE = re.compile(r"k2-(?:feed|project-memory)-[0-9a-f]{32}\.json")
 LEGACY = re.compile(r"feed\.json|(?:pending-)?[0-9a-f]{24}\.json")
 MARKER_KEY = re.compile(r"[0-9a-f]{32}")
 
@@ -154,7 +155,7 @@ def sweep_legacy(directory: Path, limit: int = 32) -> int:
 
 
 def drop_namespaced(directory: Path) -> int:
-    return _remove(_files(directory, NAMESPACED, None))
+    return _remove(_files(directory, REBUILDABLE, None))
 
 
 def main(argv: list[str]) -> int:

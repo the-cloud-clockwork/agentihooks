@@ -32,7 +32,11 @@ from hooks.config import AGENTIHOOKS_HOME
 
 _FLAG_DIR = AGENTIHOOKS_HOME / "controls_flags"
 _GLOBAL_FLAG = _FLAG_DIR / "active.flag"
-_GLOBAL_REDIS_KEY = redis_key(CONTROLS_TYPE, "_global")
+
+
+def _global_key() -> str:
+    return redis_key(CONTROLS_TYPE, "_global")
+
 
 _RE_DISABLE = re.compile(
     r"\b(disable|turn\s+off|deactivate|kill)\s+controls\b",
@@ -58,7 +62,7 @@ def set_controls_disabled(session_id: str) -> None:
     r = get_redis()
     if r:
         try:
-            r.set(_GLOBAL_REDIS_KEY, owner)
+            r.set(_global_key(), owner)
         except Exception as e:
             log("controls_toggle.set redis failed", {"error": str(e)})
     try:
@@ -72,7 +76,7 @@ def _read_owner() -> str | None:
     r = get_redis()
     if r:
         try:
-            v = r.get(_GLOBAL_REDIS_KEY)
+            v = r.get(_global_key())
             if v:
                 return v.decode() if isinstance(v, bytes) else str(v)
         except Exception:
@@ -98,7 +102,7 @@ def clear_controls_disabled(session_id: str | None = None, force: bool = False) 
     r = get_redis()
     if r:
         try:
-            r.delete(_GLOBAL_REDIS_KEY)
+            r.delete(_global_key())
         except Exception:
             pass
     try:

@@ -31,8 +31,14 @@ from tests.test_swarm_v2_keyspace import (
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "evidence/SV2-IDN-05"
-EVIDENCE_CLASS = "local isolated fixture on temporary homes with a fixed installation time; not live rollout proof"
+EVIDENCE_CLASS = (
+    "local isolated fixture on temporary homes with a fixed installation time; mocked: the brain vault fetch, "
+    "the background refresh fork and the brain HTTP post; not live rollout proof"
+)
 INPUTS = (
+    "tests/fixtures/swarm_v2/keyspace-golden.json",
+    "hooks/_redis.py",
+    "hooks/context/controls_toggle.py",
     "tests/fixtures/swarm_v2/keyspace.json",
     "scripts/swarm_v2/keyspace.py",
     "hooks/context/project_cache.py",

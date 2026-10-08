@@ -142,8 +142,9 @@ def _write_to_outbox(markers: list[dict], session_id: str, outbox_dir: str) -> i
 def _marker_request(marker: dict, session_id: str, cwd: str | None = None) -> tuple[dict, str]:
     """Build the /marker POST body + idempotency key for one marker.
 
-    The key hashes session_id + type + content, so a marker replayed from the
-    outbox dedupes server-side against its original (possibly partial) POST.
+    The key depends only on the session, the event-time scope and the marker,
+    never on the current folder, so every Stop and every outbox replay of one
+    marker send the same key.
     """
     from hooks.context.project_identity import resolve_project
     from hooks.context.project_sessions import SCOPE_FIELDS, lookup, marker_scope
@@ -170,10 +171,10 @@ def _marker_request(marker: dict, session_id: str, cwd: str | None = None) -> tu
         "content": content,
         "attrs": attrs,
     }
-    return body, _marker_key(marker, session_id, attrs, content)
+    return body, _marker_key(marker, session_id, scope or {}, content)
 
 
-def _marker_key(marker: dict, session_id: str, attrs: dict, content: str) -> str:
+def _marker_key(marker: dict, session_id: str, scope: dict, content: str) -> str:
     from hooks.config import AGENTIHOOKS_HOME
     from hooks.context.brain_adapter import brain_id
     from scripts.swarm_v2 import keyspace
@@ -183,8 +184,8 @@ def _marker_key(marker: dict, session_id: str, attrs: dict, content: str) -> str
     record = keyspace.installation(Path(AGENTIHOOKS_HOME))
     if not keyspace.current(marker.get("at"), record):
         return keyspace.legacy_marker_key(session_id, marker["type"], content)
-    scope = keyspace.Namespace(record.installation_id, brain_id(), str(attrs.get("project_id", "")))
-    return keyspace.marker_key(scope, session_id, marker["type"], str(attrs.get("task", "")), content)
+    namespace = keyspace.Namespace(record.installation_id, brain_id(), str(scope.get("project_id", "")))
+    return keyspace.marker_key(namespace, session_id, marker["type"], str(scope.get("task", "")), content)
 
 
 def _publish_to_http(markers: list[dict], session_id: str) -> tuple[int, list[dict]]:
