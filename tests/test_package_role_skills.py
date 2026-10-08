@@ -115,10 +115,25 @@ def test_role_home_lists_its_own_role_skill_only(world, role):
     assert f"{ROLE_SKILLS[role]} skill" in (ROLES / role / "CLAUDE.md").read_text()
 
 
-@pytest.mark.parametrize("skill", [_skill("engineer"), ROLES.parent / "skills" / "worktree" / "SKILL.md"])
+@pytest.mark.parametrize(
+    "skill",
+    [
+        _skill("engineer"),
+        ROLES / "engineer" / ".claude" / "rules" / "engineer-role.md",
+        ROLES.parent / "skills" / "worktree" / "SKILL.md",
+    ],
+)
 def test_engineer_guidance_dequeues_a_queued_pull_request_before_pushing_a_fix(skill):
     text = " ".join(skill.read_text().split())
-    steps = ("only queues", "dequeuePullRequest", "then push", "queue it again")
+    steps = (
+        "only queues",
+        "refuses a push",
+        "dequeue it first",
+        "dequeuePullRequest",
+        "then push",
+        "checks pass",
+        "queue it again",
+    )
 
     assert [step for step in steps if step not in text] == []
     assert [text.index(step) for step in steps] == sorted(text.index(step) for step in steps)
