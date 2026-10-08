@@ -1,5 +1,6 @@
+import inspect
 import json
-import time
+import threading
 import uuid
 from unittest.mock import patch
 
@@ -29,13 +30,14 @@ UNANSWERED = (
 
 
 class Judge:
-    def __init__(self, yes=(), error=None, delay=0.0):
-        self.yes, self.error, self.delay, self.asked, self.lock_free = set(yes), error, delay, [], []
+    def __init__(self, yes=(), error=None, hold=None):
+        self.yes, self.error, self.hold, self.asked, self.lock_free = set(yes), error, hold, [], []
 
     def __call__(self, state, questions, *, purpose):
         self.asked.append(purpose)
         self.lock_free.append(core.LOCK.acquire(blocking=False) and (core.LOCK.release() or True))
-        time.sleep(self.delay)
+        if self.hold:
+            self.hold.wait(5)
         if self.error:
             raise self.error
         return DecisionResult(
@@ -154,9 +156,13 @@ def test_a_classifier_failure_lands_the_task_with_a_warning(live, monkeypatch):
 
 
 def test_a_classifier_past_its_budget_lands_the_task_with_a_warning(live, monkeypatch):
-    judged(monkeypatch, Judge(yes={"t1"}, delay=0.5))
+    hold = threading.Event()
+    judged(monkeypatch, Judge(yes={"t1"}, hold=hold))
     monkeypatch.setattr(ledger_task_duplicates, "BUDGET_S", 0.05)
-    status, reply = operations(live, task("t9", REPEAT, live["phases"][0]))
+    try:
+        status, reply = operations(live, task("t9", REPEAT, live["phases"][0]))
+    finally:
+        hold.set()
     assert (status, reply["rejected"]) == (200, [])
     assert (
         "the duplicate check did not run for task t9 because it took longer than 0.05 seconds, so it was added unchecked"
@@ -228,3 +234,37 @@ def test_the_cli_prints_the_warning_when_the_check_did_not_run(live, monkeypatch
 def test_an_empty_not_duplicate_reason_is_refused(live):
     status, reply = operations(live, task("t9", REPEAT, live["phases"][0], not_duplicate=" "))
     assert status == 400 and "not_duplicate" in reply["error"]["message"]
+
+
+def test_a_broken_check_lands_the_task_naming_its_error(live, monkeypatch):
+    judged(monkeypatch, Judge(yes={"t1"}, error=KeyError("answers")))
+    status, reply = operations(live, task("t9", REPEAT, live["phases"][0]))
+    assert (status, reply["rejected"]) == (200, [])
+    assert (
+        "the duplicate check did not run for task t9 because it failed with KeyError, so it was added unchecked"
+        in reply["_meta"]["warnings"]
+    )
+    assert stored("t9") is not None
+
+
+def test_a_refused_repeat_still_needs_a_current_revision(live, monkeypatch):
+    stale = guards(live)
+    core.sync(SLUG, ops=[task("t8", "Rename the ledger page title", live["phases"][1])])
+    judge = judged(monkeypatch, Judge(yes={"t1"}))
+    body = {"operation_id": uuid.uuid4().hex, "ops": [task("t9", REPEAT, live["phases"][0])], "guards": stale}
+    headers = {"X-Ledger-Token": live["admin"], "Content-Type": "application/json"}
+    status, data, _ = send(live, "POST", f"/api/v1/ledgers/{SLUG}/operations", json.dumps(body).encode(), **headers)
+    assert status == 409 and json.loads(data)["error"]["code"] == "revision_conflict"
+    assert judge.asked == ["ledger-duplicate"] and stored("t9") is None
+
+
+def test_a_plan_id_from_any_writer_but_the_tick_is_checked(live, monkeypatch):
+    judge = judged(monkeypatch, Judge(yes={"t1"}))
+    first = live["phases"][0]
+    status, reply = operations(live, task(f"plan-{first}", REPEAT, first, kind="plan", lane="plan"))
+    assert status == 200 and len(reply["rejected"]) == 1
+    assert judge.asked == ["ledger-duplicate"] and stored(f"plan-{first}") is None
+
+
+def test_the_budget_leaves_the_cli_time_for_the_locked_apply():
+    assert ledger_task_duplicates.BUDGET_S * 2 <= inspect.signature(cli_ledger.request).parameters["timeout"].default

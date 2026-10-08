@@ -1,21 +1,25 @@
 """Screens task adds against the tasks the ledger already holds, before the locked apply takes the write lock."""
 
 import os
-import threading
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as Overrun
 from dataclasses import dataclass, field
 
 from scripts.swarm_ledger import ledger_duplicates
 
-BUDGET_S = float(os.environ.get("LEDGER_DUPLICATE_BUDGET_S", "7"))
+BUDGET_S = float(os.environ.get("LEDGER_DUPLICATE_BUDGET_S", "5"))
+WORKERS = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ledger-duplicates")
 TICK = "swarm"
 MINTED = ("plan", "release")
 REFUSAL = (
     'task {new} repeats task {id} "{title}" ({state}, rank {rank}, phase {phase}): {fate}. '
     'If it is a different change, add it with --not-duplicate "<why it differs>"'
 )
-UNCHECKED = "the duplicate check did not run for task {new} because {why}, so it was added unchecked"
+UNCHECKED_PREFIX = "the duplicate check did not run"
+UNCHECKED_WARNING = UNCHECKED_PREFIX + " for task {new} because {why}, so it was added unchecked"
 UNANSWERED = "the classifier did not answer"
 SLOW = "it took longer than {budget:g} seconds"
+FAILED = "it failed with {error}"
 
 
 @dataclass(frozen=True)
@@ -27,13 +31,11 @@ class Screen:
 @dataclass(frozen=True)
 class Gate:
     screen: Screen
-    inner: object = None
+    inner: object
 
     def apply(self, doc: dict, op: dict, ctx: object, apply_op: object) -> bool:
-        if refusal := self.screen.refused.get(op["id"]):
-            ctx.refused.append(refusal)
-            return False
-        return self.inner.apply(doc, op, ctx, apply_op) if self.inner else apply_op(doc, op, ctx)
+        refusal = self.screen.refused.get(op["id"])
+        return self.inner.apply(doc, op, ctx, _refuse(refusal) if refusal else apply_op)
 
 
 def screen(doc: dict, ops: list[dict]) -> Screen:
@@ -44,7 +46,7 @@ def screen(doc: dict, ops: list[dict]) -> Screen:
     refused, warnings = {}, {}
     for op, match in zip(adds, found):
         if match == ledger_duplicates.UNCHECKED:
-            warnings[op["id"]] = UNCHECKED.format(new=op["task"], why=why)
+            warnings[op["id"]] = UNCHECKED_WARNING.format(new=op["task"], why=why)
         elif match is not None:
             refused[op["id"]] = refusal(op, match)
     return Screen(refused, warnings)
@@ -70,14 +72,20 @@ def refusal(op: dict, match: ledger_duplicates.Match) -> str:
 
 
 def _find(doc, adds):
-    result = [[ledger_duplicates.UNCHECKED] * len(adds)]
+    future = WORKERS.submit(ledger_duplicates.find, doc, "task", adds)
+    try:
+        return future.result(timeout=BUDGET_S), UNANSWERED
+    except Overrun:
+        future.cancel()
+        why = SLOW.format(budget=BUDGET_S)
+    except Exception as exc:  # a broken check lets the add land, named in its warning
+        why = FAILED.format(error=type(exc).__name__)
+    return [ledger_duplicates.UNCHECKED] * len(adds), why
 
-    def run():
-        result[0] = ledger_duplicates.find(doc, "task", adds)
 
-    worker = threading.Thread(target=run, daemon=True)
-    worker.start()
-    worker.join(BUDGET_S)
-    if worker.is_alive():
-        return [ledger_duplicates.UNCHECKED] * len(adds), SLOW.format(budget=BUDGET_S)
-    return result[0], UNANSWERED
+def _refuse(refusal):
+    def refuse(doc, op, ctx):
+        ctx.refused.append(refusal)
+        return False
+
+    return refuse

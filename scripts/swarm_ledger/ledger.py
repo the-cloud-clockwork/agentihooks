@@ -186,7 +186,7 @@ def send(args, kind, /, **fields):
     state = call(args.slug, ops)
     refused(state, ops)
     for warning in state.get("_meta", {}).get("warnings", []):
-        if warning.startswith(ledger_task_duplicates.UNCHECKED.split("{", 1)[0]):
+        if warning.startswith(ledger_task_duplicates.UNCHECKED_PREFIX):
             print(warning, file=sys.stderr)
     return state
 
@@ -515,20 +515,17 @@ def cmd_task(args):
         contract = {k: getattr(args, k) for k in ("must", "check", "judge") if getattr(args, k)}
         if contract:
             lists["contract"] = contract
-        if args.kind:
-            lists["kind"] = args.kind
         if args.artifact:
             lists["artifact"] = True
-        if args.profile:
-            lists["profile"] = args.profile
-        if args.rank:
-            lists["rank"] = args.rank
-        if args.difficulty:
-            lists["difficulty"] = args.difficulty
-        if args.plan:
-            lists["plan_url"] = args.plan
-        if getattr(args, "not_duplicate", ""):
-            lists["not_duplicate"] = args.not_duplicate
+        options = (
+            ("kind", args.kind),
+            ("profile", args.profile),
+            ("rank", args.rank),
+            ("difficulty", args.difficulty),
+            ("plan_url", args.plan),
+            ("not_duplicate", args.not_duplicate),
+        )
+        lists.update((key, value) for key, value in options if value)
         if args.scaffold:
             task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **lists}
             doc = call(args.slug) if args.kind == "plan" else None
