@@ -269,3 +269,12 @@ def test_findings_limit_preserves_exact_boundary_and_truncates_the_next_byte():
     over = intent_history.prepare({"reviewer_findings": exact + "a"})["reviewer_findings"]
     assert over == {"truncated": True, "json_prefix": json.dumps(exact + "a")[:16352]}
     assert len(json.dumps(over)) <= 32768
+
+
+def test_plan_chunk_limit_matches_the_findings_limit():
+    from scripts.gates import intent_history
+
+    exact = "a" * 32766
+    assert intent_history.prepare({"plan_chunk": exact})["plan_chunk"] == exact
+    over = intent_history.prepare({"plan_chunk": exact + "a"})["plan_chunk"]
+    assert over == {"truncated": True, "json_prefix": json.dumps(exact + "a")[:16352]}
