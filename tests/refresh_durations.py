@@ -7,6 +7,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from tests.duration_coverage import collected_tests, validate_coverage
+
 _ROOT = Path(__file__).parent.parent
 RUNS = 5
 ARTIFACTS = "repos/{owner}/{repo}/actions/artifacts?name=durations-3.12-1&per_page=100"
@@ -70,18 +72,23 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--ci-run", help="take the durations of the tests this complete CI run measured")
     args = parser.parse_args(argv)
+    candidates = {}
     with tempfile.TemporaryDirectory() as tmp:
         if args.ci or args.ci_run:
             run_ids = [args.ci_run] if args.ci_run else []
             run_ids = list(dict.fromkeys([*run_ids, *(ci_run_ids(args.ci) if args.ci else [])]))[: args.ci or 1]
             ci_download(run_ids, Path(tmp))
             for version in ("3.11", "3.12"):
-                measured = ci_medians(Path(tmp), version, args.ci_run)
-                (_ROOT / f".test_durations-{version}").write_text(json.dumps(measured, indent=4, sort_keys=True) + "\n")
+                candidates[f".test_durations-{version}"] = ci_medians(Path(tmp), version, args.ci_run)
             merged = ci_medians(Path(tmp), "*", args.ci_run)
         else:
             merged = median_durations(local_samples(Path(tmp)))
-    (_ROOT / ".test_durations").write_text(json.dumps(merged, indent=4, sort_keys=True) + "\n")
+    candidates[".test_durations"] = merged
+    collected = collected_tests(_ROOT)
+    for durations in candidates.values():
+        validate_coverage(durations, collected)
+    for name, durations in candidates.items():
+        (_ROOT / name).write_text(json.dumps(durations, indent=4, sort_keys=True) + "\n")
 
 
 if __name__ == "__main__":
