@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -24,6 +25,12 @@ def _allowed_roots(role: str, home: Path) -> list[Path]:
     if role in PLANNERS:
         config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or home / ".claude")
         roots.append((config / "plans").resolve())
+    swarm = os.environ.get("AGENTIHOOKS_SWARM", "")
+    task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
+    if task != "master" and all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", value) for value in (swarm, task)):
+        folder = home.resolve() / ".agentihooks" / "swarm" / swarm / "tasks" / task
+        if folder.resolve() == folder:
+            roots.append(folder)
     return roots
 
 
@@ -41,6 +48,7 @@ def deny_reason(payload: dict, role: str, home: Path) -> str:
         return ""
     inputs = payload["tool_input"]
     paths = [inputs[key] for key in ("file_path", "notebook_path", "relative_path") if key in inputs]
+    paths.extend(inputs.get("file_paths", []))
     cwd = Path(payload.get("cwd") or os.getcwd())
     roots = _allowed_roots(role, home)
     if paths and all(_inside(tool, value, cwd, roots) for value in paths):
