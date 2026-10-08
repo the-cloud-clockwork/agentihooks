@@ -687,7 +687,7 @@ jobs:
 
   coverage-baseline:
     needs: [gate-required, sonar]
-    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'merge_group') && needs['gate-required'].result == 'success' && needs.sonar.result == 'success' }}
+    if: ${{ !cancelled() && github.event_name == 'push' && needs['gate-required'].result == 'success' && needs.sonar.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -705,13 +705,12 @@ jobs:
       - name: Resolve baseline trees
         id: tree
         env:
-          PREVIOUS: ${{ github.event.before || github.event.merge_group.base_sha }}
+          PREVIOUS: ${{ github.event.before }}
         run: |
           echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
           echo "previous=$(git rev-parse "$PREVIOUS^{tree}")" >> "$GITHUB_OUTPUT"
 
       - name: Restore measured coverage history
-        if: github.event_name == 'push'
         uses: actions/cache/restore@v4
         with:
           path: ~/coverage-baseline
@@ -731,7 +730,6 @@ jobs:
             --previous "$HOME/coverage-baseline/baseline.json"
 
       - name: Save the passed dev coverage baseline
-        if: github.event_name == 'push'
         uses: actions/cache/save@v4
         with:
           path: ~/coverage-baseline
@@ -755,6 +753,34 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install coverage
+        run: python -m pip install "coverage>=7.4"
+
+      - name: Download this run's shard coverage
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-3.12-*
+          path: .coverage-shards
+
+      # Later queue entries wait on this upload, so it runs before Sonar and the gate rather than after them.
+      - name: Record this run's coverage baseline
+        run: python -m tests.coverage_baseline --shards 8 --head-shards .coverage-shards --out "$RUNNER_TEMP/own-baseline/baseline.json"
+
+      - name: Publish this run's coverage baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-baseline
+          path: ${{ runner.temp }}/own-baseline/
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
       - name: Mint the tcc main ci App token
         id: app-token
         uses: actions/create-github-app-token@v3.2.0

@@ -76,17 +76,24 @@ def test_no_queue_run_carries_a_baseline_from_the_latest_dev_run():
     assert "dev-coverage-baseline" not in (_ROOT / ".github/workflows/test.yml").read_text()
 
 
-def test_queue_runs_publish_their_own_baseline_for_later_queue_entries():
-    job = _jobs()["coverage-baseline"]
-    steps = job["steps"]
-    trees = _step(steps, "Resolve baseline trees")
-    restore = _step(steps, "Restore measured coverage history")
-    save = _step(steps, "Save the passed dev coverage baseline")
-    upload = _step(steps, "Publish the passed dev coverage baseline")
-    assert "(github.event_name == 'push' || github.event_name == 'merge_group')" in job["if"]
-    assert trees["env"]["PREVIOUS"] == "${{ github.event.before || github.event.merge_group.base_sha }}"
-    assert restore["if"] == save["if"] == "github.event_name == 'push'"
-    assert "if" not in upload
+def test_queue_runs_publish_their_own_baseline_before_sonar_and_the_gate():
+    jobs = _jobs()
+    steps = jobs["queue-baseline"]["steps"]
+    download = _step(steps, "Download this run's shard coverage")
+    record = _step(steps, "Record this run's coverage baseline")
+    upload = _step(steps, "Publish this run's coverage baseline")
+    find = _step(steps, "Find the run that measured the base tree")
+    assert jobs["queue-baseline"]["needs"] == ["unit"]
+    assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
+    assert record["run"] == (
+        "python -m tests.coverage_baseline --shards 8 --head-shards .coverage-shards"
+        ' --out "$RUNNER_TEMP/own-baseline/baseline.json"'
+    )
+    assert upload["with"]["name"] == "coverage-baseline"
+    assert upload["with"]["path"] == "${{ runner.temp }}/own-baseline/"
+    assert steps.index(download) < steps.index(record) < steps.index(upload) < steps.index(find)
+    assert "github.event_name == 'push'" in jobs["coverage-baseline"]["if"]
+    assert "merge_group" not in jobs["coverage-baseline"]["if"]
 
 
 def test_the_queue_baseline_holds_the_exact_base_tree_on_the_app_token():
