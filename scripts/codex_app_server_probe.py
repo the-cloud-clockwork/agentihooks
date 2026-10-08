@@ -17,6 +17,7 @@ from pathlib import Path
 from websockets.sync.client import unix_connect
 
 TURN_TIMEOUT_S = 240
+RESPONSE_TIMEOUT_S = 60
 
 
 class Client:
@@ -53,8 +54,8 @@ class Client:
         self.ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "method": method, "params": params}))
         return rid
 
-    def wait_response(self, rid: int, timeout: float = 60) -> dict:
-        end = time.monotonic() + timeout
+    def wait_response(self, rid: int, timeout: float | None = None) -> dict:
+        end = time.monotonic() + (RESPONSE_TIMEOUT_S if timeout is None else timeout)
         while time.monotonic() < end:
             with self.lock:
                 if rid in self.responses:
@@ -62,7 +63,7 @@ class Client:
             time.sleep(0.02)
         raise TimeoutError(f"{self.name}: no response to {rid}")
 
-    def request(self, method: str, params: dict, timeout: float = 60) -> dict:
+    def request(self, method: str, params: dict, timeout: float | None = None) -> dict:
         return self.wait_response(self.send(method, params), timeout)
 
     def answer(self, rid: int | str, result: dict) -> None:

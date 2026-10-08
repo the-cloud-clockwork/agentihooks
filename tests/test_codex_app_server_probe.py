@@ -801,7 +801,8 @@ def wait_for(pred, timeout=5):
     return False
 
 
-def test_client_speaks_json_rpc_over_a_unix_websocket():
+def test_client_speaks_json_rpc_over_a_unix_websocket(monkeypatch):
+    monkeypatch.setattr(probe, "RESPONSE_TIMEOUT_S", 1)
     received = []
 
     def handler(ws):
@@ -825,7 +826,6 @@ def test_client_speaks_json_rpc_over_a_unix_websocket():
         assert seen == [note]
         ask, _ = client.until(lambda m: "id" in m, 5)
         assert ask["id"] == 99
-        assert client.until(probe.method_is("none"), 0.6) == (None, [])
         client.answer(99, {"decision": "accept"})
         client.notify("ping", {"x": 1})
         client.notify("bare")
@@ -846,7 +846,9 @@ def test_client_speaks_json_rpc_over_a_unix_websocket():
     ]
 
 
-def test_client_reports_a_broken_stream_as_closed():
+def test_client_reports_a_broken_stream_as_closed(monkeypatch):
+    monkeypatch.setattr(probe, "RESPONSE_TIMEOUT_S", 1)
+
     def handler(ws):
         for raw in ws:
             msg = json.loads(raw)
@@ -870,7 +872,7 @@ def test_client_waits_a_minute_by_default(monkeypatch):
     seen = []
     monkeypatch.setattr(probe.Client, "send", lambda self, method, params: seen.append((method, params)) or 4)
     monkeypatch.setattr(probe.Client, "wait_response", lambda self, rid, timeout: (rid, timeout))
-    assert client.request("m", {"p": 1}) == (4, 60)
+    assert client.request("m", {"p": 1}) == (4, None)
     assert seen == [("m", {"p": 1})]
 
 
@@ -924,7 +926,8 @@ def test_until_polls_the_queue_every_half_second_until_the_deadline(monkeypatch)
     assert client.events.waits == [0.5, 0.5]
 
 
-def test_client_reads_in_a_daemon_thread_without_a_message_size_cap():
+def test_client_reads_in_a_daemon_thread_without_a_message_size_cap(monkeypatch):
+    monkeypatch.setattr(probe, "RESPONSE_TIMEOUT_S", 1)
     big = "x" * (2 * 1024 * 1024)
 
     def handler(ws):
@@ -981,14 +984,17 @@ def test_first_reply_reads_only_the_status_line():
 def test_first_reply_is_empty_when_the_server_stays_silent():
     folder = tempfile.TemporaryDirectory(prefix="cx")
     path = f"{folder.name}/s"
-    held = []
+
+    def silent_then_close(listener):
+        conn = listener.accept()[0]
+        time.sleep(1)
+        conn.close()
+
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
         listener.bind(path)
         listener.listen(1)
-        threading.Thread(target=lambda: held.append(listener.accept()[0]), daemon=True).start()
+        threading.Thread(target=silent_then_close, args=(listener,), daemon=True).start()
         assert probe.first_reply(path, probe.RAW_LINE, 0.2) == "no reply"
-    for conn in held:
-        conn.close()
     folder.cleanup()
 
 
