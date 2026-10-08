@@ -85,7 +85,7 @@ def _capacity(eng, claude, codex):
     )
 
 
-WARNED = "; claude old is at its five hour quota warning"
+WARNED = ", claude old is at its five hour quota warning"
 
 
 def _held(task):
