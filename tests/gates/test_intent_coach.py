@@ -421,6 +421,28 @@ def test_other_modes_never_read_the_head_alone(tmp_path, mode):
     assert (heads, views, actions) == ([], [DOC["tasks"][0]["pr_url"]], [f"task {TASK} intent check pass"])
 
 
+def test_a_rearmed_unmoved_head_keeps_its_verdict_even_when_the_full_view_fails(tmp_path, monkeypatch):
+    run_check(tmp_path, "original")
+    monkeypatch.setattr(intent, "stamp_body", lambda *args: True)
+    intent.stamp(SLUG, TASK, "url", DOC, "coach", NOW, tmp_path)
+    assert Verdicts(SLUG, "intent", tmp_path).read(TASK)["verdict"] == "pending"
+    actions = intent.Check(
+        SLUG,
+        "coach",
+        NOW + 1,
+        Ledger(),
+        Mail(),
+        lambda url: None,
+        lambda state: pytest.fail("an unmoved head is not judged again"),
+        home=tmp_path,
+        head=lambda url: "original",
+    ).run(DOC)
+    assert actions == []
+    record = Verdicts(SLUG, "intent", tmp_path).read(TASK)
+    assert (record["verdict"], record["reason"], record["head"]) == ("fail", "missing behavior", "original")
+    assert not gate(tmp_path).allowed
+
+
 def test_a_first_check_never_reads_the_head_alone(tmp_path):
     heads = []
     intent.Check(
