@@ -1,0 +1,51 @@
+name: Swarm image
+
+on:
+  pull_request:
+    branches: [dev]
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swarm-image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove a clean local Compose install
+        run: bash scripts/packaging/swarm-smoke.sh
+  tags:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    outputs:
+      tags: ${{ steps.tags.outputs.tags }}
+    steps:
+      - id: tags
+        env:
+          IMAGE: ghcr.io/the-cloud-clockwork/agentihooks-swarm
+        run: |
+          {
+            echo 'tags<<EOF'
+            echo "$IMAGE:dev"
+            echo "$IMAGE:dev-${GITHUB_SHA:0:7}"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+  publish:
+    needs: [smoke, tags]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    permissions:
+      contents: read
+      packages: write
+    uses: The-Cloud-Clockwork/.github/.github/workflows/ghcr-build-reusable.yml@main
+    with:
+      image_name: ghcr.io/the-cloud-clockwork/agentihooks-swarm
+      tags: ${{ needs.tags.outputs.tags }}
+      cache_scope: swarm

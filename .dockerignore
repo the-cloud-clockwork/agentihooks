@@ -1,0 +1,14 @@
+**
+!pyproject.toml
+!README.md
+!hooks/
+!hooks/**
+!scripts/
+!scripts/**
+!profiles/
+!profiles/**
+**/__pycache__
+**/*.pyc
+**/.env
+**/*.env
+**/.env.*
