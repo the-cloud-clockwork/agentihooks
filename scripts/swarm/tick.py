@@ -185,7 +185,7 @@ def _step(function, *args):
         return timing.call(function, *args)
     except LedgerRefused as exc:
         name = f"{function.__module__}.{function.__qualname__}"
-        print(f"{name} skipped, the ledger refused its write: {exc}", file=sys.stderr, flush=True)
+        print(f"{name} skipped, the ledger refused its write: {exc}", file=sys.stderr)
         return [f"skipped {name}: the ledger refused its write"]
 
 

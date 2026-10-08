@@ -696,7 +696,7 @@ def test_the_capacity_comment_passes_the_ledger_schema(monkeypatch):
     ledger_core.check_op(op)
 
 
-def test_a_refused_ledger_write_is_skipped_and_spawning_still_runs():
+def test_a_refused_ledger_write_is_skipped_and_spawning_still_runs(capsys):
     from scripts.swarm.ledger_client import LedgerRefused
 
     store = _store()
@@ -715,6 +715,10 @@ def test_a_refused_ledger_write_is_skipped_and_spawning_still_runs():
     actions = tick("sw", store, ledger, runtime, 1000)
     assert [task for _, _, task in runtime.spawned] == ["e"]
     assert "skipped scripts.swarm.capacity.apply: the ledger refused its write" in actions
+    assert capsys.readouterr().err == (
+        "scripts.swarm.capacity.apply skipped, the ledger refused its write: "
+        "ledger sw: server refused: 400 by is allowed only on agent chat and comment entries\n"
+    )
 
 
 def test_inherited_zero_codex_share_is_respected_when_planning_ready_tasks(tmp_path, monkeypatch):
