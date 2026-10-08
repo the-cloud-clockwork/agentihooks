@@ -50,7 +50,7 @@ def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):
     assert record["agents"] == [asdict(agent)]
     assert record["spawns"] == {"codex": 3, "claude": 5}
     assert record["restored"] == []
-    assert {f.kind for f in spawns.findings(record)} == {"failed spawn", "account overflow"}
+    assert {f.kind for f in spawns.findings(record)} == {"failed spawn"}
     assert spawns.failed(record)[0].subject == "dt2"
     assert store.export(slug) == before
 

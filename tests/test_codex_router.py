@@ -119,6 +119,18 @@ def test_a_stale_reading_is_refreshed_by_a_probe_before_placing(monkeypatch):
     assert router.fresh_quotas(pool, ENV, NOW)["default"].observed_at == NOW - 901
 
 
+def test_a_failed_probe_waits_a_freshness_window_before_the_next(monkeypatch):
+    probed = []
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {"default": None})
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: probed.append(account.name))
+    pool = [router.CodexAccount("default")]
+    router.fresh_quotas(pool, ENV, NOW)
+    router.fresh_quotas(pool, ENV, NOW + 900)
+    assert probed == ["default"]
+    router.fresh_quotas(pool, ENV, NOW + 901)
+    assert probed == ["default", "default"]
+
+
 def test_the_probe_runs_one_tiny_exec_on_the_account_and_reads_its_rollout(monkeypatch):
     seen = {}
 

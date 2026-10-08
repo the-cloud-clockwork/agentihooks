@@ -5641,7 +5641,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         report,
         status="routed",
         account=selected_credential.account,
-        placement="forced" if route else decision.placement,
+        placement="forced" if route else "open",
     )
 
     os.environ.pop("ANTHROPIC_API_KEY", None)

@@ -31,9 +31,9 @@ class AffinityRuntime(FakeRuntime):
         super().__init__()
         self.fail_master, self.store, self.orders_at_spawn = fail_master, None, []
 
-    def spawn(self, config, lane, name, task, spawns=None):
+    def spawn(self, config, lane, name, task):
         if lane != MASTER:
-            return super().spawn(config, lane, name, task, spawns)
+            return super().spawn(config, lane, name, task)
         order = affinity.pending(self.store, config.slug)
         if order:
             pending = InboxStore(self.store.redis).pending_items(f"master@{config.slug}")

@@ -5,7 +5,7 @@ import pytest
 from scripts import claude_quota_balancer as balancer
 from scripts.swarm import capacity
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm.tick import tick
+from scripts.swarm.tick import SpawnError, tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -306,6 +306,16 @@ def test_runtime_honors_reserved_harness_seats(tmp_path):
         "fallthrough: claude has no placeable quota seats",
     )
     assert runtime._quota_choice("claude", "requested", True, "ci") == ("claude", "requested")
+
+
+def test_runtime_refuses_an_account_when_its_harness_has_no_free_seat(tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    runtime = HerdrRuntime(home=tmp_path)
+    runtime._quota_accounts = [account(sessions=3), account("cx", harness="codex")]
+    with pytest.raises(SpawnError, match="no claude account has placeable quota seats"):
+        runtime._quota_account("claude", None)
+    assert runtime._quota_account("codex", None).name == "cx"
 
 
 def test_failed_fresh_probe_does_not_leave_a_stale_healthy_account_placeable(monkeypatch):

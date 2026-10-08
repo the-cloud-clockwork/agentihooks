@@ -80,7 +80,6 @@ class RouteDecision:
     source: str
     sessions: int | None = None
     max_sessions: int | None = None
-    placement: str = "open"
 
 
 class RoutingError(RuntimeError):
@@ -707,8 +706,6 @@ def format_selection(decision: RouteDecision, include_fable: bool = False) -> st
         parts.append(f"fable_left={_percent(result.fable.remaining)}")
     if decision.sessions is not None:
         parts.append(f"sessions={decision.sessions}/{decision.max_sessions}")
-    if decision.placement != "open":
-        parts.append(f"placement={decision.placement}")
     parts.append(f"source={decision.source}")
     return "[agenti] " + " ".join(parts)
 

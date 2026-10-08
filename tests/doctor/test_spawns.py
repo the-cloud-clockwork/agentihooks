@@ -23,17 +23,6 @@ def test_recorded_spawns_and_planted_failed_spawn():
     assert record["actions"] == []
 
 
-def test_recorded_placements_and_planted_overflow():
-    record = load("spawns")
-    assert spawns.overflow(record) == []
-    planted = copy.deepcopy(record)
-    planted["agents"][0]["placement"] = "overflow"
-    [found] = spawns.overflow(planted)
-    assert found.id == f"account-overflow/{record['agents'][0]['name']}"
-    assert found.measure == 1
-    assert f"account {record['agents'][0]['account']}" in found.evidence
-
-
 def test_runtime_records_the_launcher_overflow_placement(tmp_path):
     import subprocess
 

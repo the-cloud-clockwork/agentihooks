@@ -138,15 +138,30 @@ def probe(account: CodexAccount, environ: Mapping[str, str], run: Callable = sub
     return codex_quota.session_quota(dict(environ), thread) if thread else None
 
 
+def _attempts_path() -> Path:
+    return Path.home() / ".agentihooks" / "codex-probe-attempts.json"
+
+
+def _probe_attempts() -> dict[str, float]:
+    with contextlib.suppress(OSError, ValueError):
+        return json.loads(_attempts_path().read_text())
+    return {}
+
+
 def fresh_quotas(
     pool: list[CodexAccount], environ: Mapping[str, str], now: float, run: Callable = subprocess.run
 ) -> dict[str, CodexQuota | None]:
-    """Each account's newest reading, probed again when it is missing or older than the freshness window."""
+    """Each account's newest reading, probed again when it is missing or stale, at most once per freshness window."""
     found = quotas(pool, environ)
+    attempts = _probe_attempts()
     for account in pool:
         seen = found.get(account.name)
-        if account.signed_in and not session_bands.fresh(seen.observed_at if seen else None, now):
+        stale = not session_bands.fresh(seen.observed_at if seen else None, now)
+        if account.signed_in and stale and not session_bands.fresh(attempts.get(account.name), now):
+            attempts[account.name] = now
             found[account.name] = probe(account, environ, run) or seen
+    with contextlib.suppress(OSError):
+        _attempts_path().write_text(json.dumps(attempts))
     return found
 
 
@@ -157,7 +172,7 @@ def select(
     now: float,
     route: str = "",
 ) -> tuple[CodexAccount, str, session_bands.Seat | None]:
-    """(account, placement, seat): the signed in account with a free place under its band and the fewest sessions."""
+    """The signed in account with a free place under its band and the fewest sessions."""
     if route:
         for account in pool:
             if account.name == route:

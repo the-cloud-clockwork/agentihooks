@@ -250,6 +250,8 @@ class HerdrRuntime:
         row = next((row for row in eligible if row.name == preferred), None)
         if row is None:
             seat = session_bands.pick(seats(eligible))
+            if seat is None:
+                raise SpawnError(f"no {agent} account has placeable quota seats")
             row = next(row for row in eligible if row.name == seat.account)
         return row
 

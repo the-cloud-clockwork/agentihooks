@@ -53,7 +53,7 @@ class FakeLedger:
 class FakeRuntime:
     def __init__(self, fail=False, full=False, crash=None):
         self.live, self.spawned, self.killed, self.closed, self.nudged = set(), [], [], [], []
-        self.tasks, self.masters, self.spawns_seen, self.harness = [], [], [], "claude"
+        self.tasks, self.masters, self.harness = [], [], "claude"
         self.fail, self.full, self.crash, self.statuses, self.stuck = fail, full, crash, {}, set()
         self.conversation_ids, self.named, self.closed_spaces, self.typed = {}, [], [], {}
         self.capacity_for = []
@@ -63,7 +63,7 @@ class FakeRuntime:
         self.capacity_for.append(config.slug)
         return not self.full
 
-    def spawn(self, config, lane, name, task, spawns=None):
+    def spawn(self, config, lane, name, task):
         if self.crash:
             raise self.crash
         if self.fail:
@@ -74,7 +74,6 @@ class FakeRuntime:
             return Placed(pane_id=f"w1:m{len(self.masters)}", harness="claude")
         self.spawned.append((lane, name, task["id"]))
         self.tasks.append(dict(task))
-        self.spawns_seen.append(dict(spawns or {}))
         return Placed(
             pane_id=f"w1:p{len(self.spawned)}",
             harness=self.harness,
@@ -269,12 +268,12 @@ class FailingFor(FakeRuntime):
         super().__init__()
         self.failing, self.tried = set(failing), []
 
-    def spawn(self, config, lane, name, task, spawns=None):
+    def spawn(self, config, lane, name, task):
         if lane != MASTER:
             self.tried.append(task["id"])
         if task["id"] in self.failing:
             raise SpawnError("MCP_KEY_GATEWAY is unset")
-        return super().spawn(config, lane, name, task, spawns)
+        return super().spawn(config, lane, name, task)
 
 
 def test_a_failing_launch_does_not_stop_the_spawns_behind_it(store):
@@ -351,9 +350,9 @@ def test_a_spawn_claims_its_task_for_one_lease_and_records_its_seat_at_launch_ti
     ledger, runtime, seen = tasks(("t1", "eng")), FakeRuntime(), []
     spawn = runtime.spawn
 
-    def watching(config, lane, name, task, spawns=None):
+    def watching(config, lane, name, task):
         seen.extend(a.state for a in store.agents("sw") if a.name == name and lane != MASTER)
-        return spawn(config, lane, name, task, spawns)
+        return spawn(config, lane, name, task)
 
     runtime.spawn = watching
     tick("sw", store, ledger, runtime, now_ms=1_000)

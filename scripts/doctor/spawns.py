@@ -28,21 +28,6 @@ def failed(record: dict) -> list[Finding]:
     ]
 
 
-def overflow(record: dict) -> list[Finding]:
-    return [
-        Finding(
-            "account overflow",
-            agent["name"],
-            "session placed on an account at its cap",
-            (f"account {agent['account']}", f"harness {agent['harness']}", "placement overflow"),
-            "launcher reported overflow",
-            1,
-        )
-        for agent in record["agents"]
-        if agent.get("placement") == "overflow"
-    ]
-
-
 def fresh_restores(record: dict) -> list[Finding]:
     return [
         Finding(
@@ -86,4 +71,4 @@ def silent_starts(agents: list[dict], hooked: dict, now_ms: int) -> list[Finding
 
 
 def findings(record: dict) -> list[Finding]:
-    return [*failed(record), *overflow(record), *fresh_restores(record)]
+    return [*failed(record), *fresh_restores(record)]
