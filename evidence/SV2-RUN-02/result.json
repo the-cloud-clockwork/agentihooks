@@ -4,7 +4,7 @@
   "integration_gate": "G1",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1801",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1802",
-  "tested_commit": "3ac0a48bca3750850d855221db7a9daa63e40024",
+  "tested_commit": "2ddf3613965d4132eef6552a401ce3b0194b34ca",
   "ci_head": "",
   "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI and the process reaper behind HerdrRuntime, the local process table and PID namespace are fixture values, and the remote backend is an in-memory fake; not live rollout proof",
   "supported_versions": {
@@ -21,7 +21,7 @@
     "scripts.swarm.execution: a local runtime target may carry pid_start as a positive integer"
   ],
   "states": {
-    "observed": "Local on 3ac0a48b: pytest -n 2 over the process, runtime protocol, tick, execution identity, lifetime, live binding, master retire, reaper, retire watch, swarm runtime and swarm cli suites -> 807 passed on bfecd6f7; process and execution identity suites 117 passed on this commit after the mutation kill tests; ruff check and ruff format clean; size_limits against the dev checkout -> 0 errors.",
+    "observed": "Local on 2ddf3613: pytest -n 2 over the process, runtime protocol, tick, execution identity, lifetime, live binding, master retire, reaper, retire watch, swarm runtime and swarm cli suites -> 807 passed on bfecd6f7; process and execution identity suites 117 passed on this commit after the mutation kill tests; ruff check and ruff format clean; size_limits against the dev checkout -> 0 errors.",
     "accepted": "Cases A, B and C passed: A and C on two independent fixtures each, B with a snapshot of the refused record before and after.",
     "committed": "The tested commit carries the code; the case results and manifest in this folder were generated on it.",
     "externally_verified": ""
@@ -45,7 +45,9 @@
     "b": "evidence/SV2-RUN-02/b-result.json",
     "c": "evidence/SV2-RUN-02/c-result.json",
     "manifest": "evidence/SV2-RUN-02/manifest.json",
-    "generator": "evidence/SV2-RUN-02/generate_case_results.py"
+    "generator": "evidence/SV2-RUN-02/generate_case_results.py",
+    "builders": "tests/sv2_run02_cases.py (run as test_each_acceptance_case_passes)",
+    "writer": "scripts/swarm_v2/case_results.py"
   },
   "rollback_rehearsal": {
     "action": "Revert the SV2-RUN-02 commit: legacy local records already take the unchanged HerdrRuntime.retire path, so local process discovery stays intact behind the adapter; qualified records lose their namespace check only by that revert, and no stored record is rewritten",
