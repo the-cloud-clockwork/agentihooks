@@ -23,6 +23,7 @@ from scripts.targets.codex_target import codex_home
 SHARED = ("projects", "sessions", "todos", "plugins", ".credentials.json")
 CODEX_STATE = ("auth.json", "sessions", "history.jsonl", "session_index.jsonl", "hooks.json")
 CODEX_INHERITED = ("model", "model_reasoning_effort", "service_tier", "notify", "projects")
+COPILOT_STATE = ("config.json", "settings.json", "agentihooks-hook.sh", "hooks", "session-state", "logs")
 STAMP = ".agentihooks-render.json"
 KEY_SEPARATOR = "+"
 CHANNELS, BRAIN = "AGENTIHOOKS_BASE_CHANNELS", "brain"
@@ -451,8 +452,39 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -
     return out
 
 
+def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ()) -> Path | None:
+    from scripts.targets.copilot_target import CopilotAdapter, copilot_home
+
+    bundle, dirs = _bundle(), _chain(name, overlays)
+    claude_fresh = render_claude(name, force=force, overlays=overlays) is None
+    current = _stamp(bundle, dirs)
+    config = {"mcpServers": CopilotAdapter().mcp_entries(_mcp_servers("copilot", bundle, dirs))}
+    root = profile_dir(name, overlays)
+    out = root / "copilot"
+    if (
+        not force
+        and claude_fresh
+        and _read_json(out / "mcp-config.json") == config
+        and _read_json(out / STAMP) == current
+    ):
+        return None
+    if out.exists():
+        root = render_claude(name, force=True, overlays=overlays).parent
+        out = root / "copilot"
+    out.mkdir()
+    _link(out / "copilot-instructions.md", root / "claude" / "CLAUDE.md")
+    operator = copilot_home()
+    for item in COPILOT_STATE:
+        _link(out / item, operator / item)
+    # Copilot sends header values literally, so this file holds the resolved gateway credential.
+    with os.fdopen(os.open(out / "mcp-config.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
+        f.write(json.dumps(config, indent=2) + "\n")
+    _install_module().save_json(out / STAMP, current)
+    return out
+
+
 def render(target: str, name: str, force: bool = False, overlays: Sequence[str] = ()) -> Path | None:
-    renderers = {"claude": render_claude, "codex": render_codex}
+    renderers = {"claude": render_claude, "codex": render_codex, "copilot": render_copilot}
     if target not in renderers:
         raise ValueError(f"{target} per-run profiles are not supported")
     return renderers[target](name, force=force, overlays=overlays)
@@ -465,7 +497,7 @@ def rendered_profiles(target: str) -> list[str]:
         homes = {config.parent.parent.name for config in rendered_root().glob("*/codex/config.toml")}
         legacy = _operator_codex_home().glob("*.config.toml")
         return sorted(homes | {p.name.removesuffix(".config.toml") for p in legacy if _codex_stamp(p)})
-    return []
+    return sorted(config.parent.parent.name for config in rendered_root().glob(f"*/{target}/mcp-config.json"))
 
 
 def _seed_linked_profiles(out: Path) -> None:
@@ -520,9 +552,6 @@ def main(argv: list[str] | None = None) -> int:
         return measure.main(args)
     if args.bundle is not None and args.out is None:
         render_cmd.error("--bundle needs --out")
-    if args.target == "copilot":
-        print("copilot per-run profiles are not supported", file=sys.stderr)
-        return 2
     try:
         if args.out is not None:
             return _render_scratch(args)
