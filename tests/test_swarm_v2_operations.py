@@ -411,6 +411,7 @@ def test_stale_entry_cannot_stop_current_operation_recovery(fixture):
     recovered = Operations(RedisStore(store.redis), [transport], dispatch_enabled=False).recover("fixture")
     by_id = {operation.operation_id: operation for operation in recovered}
     assert by_id[stale.operation_id].phase is Phase.REFUSED
+    assert by_id[stale.operation_id].result == {}
     assert store.operation_journal.get("fixture", stale.operation_id) == stale
     assert by_id[pending.operation_id] == replace(pending, phase=Phase.APPLIED, result={"uid": "object-2"})
     assert store.operation_journal.get("fixture", pending.operation_id) == by_id[pending.operation_id]
@@ -427,3 +428,36 @@ def test_legacy_store_construction_does_not_load_new_runtime_service():
         "assert 'scripts.swarm_v2.runtime.operations' not in sys.modules"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_payload_digest_is_canonical_and_stable_across_key_order(fixture):
+    store, agent, transport, operations = fixture
+    first = operations.execute("fixture", request(agent, "command", {"b": {"d": 3, "c": 2}, "a": 1}, "canonical"))
+    retried = operations.execute("fixture", request(agent, "command", {"a": 1, "b": {"c": 2, "d": 3}}, "canonical"))
+    assert first.payload_digest == "b93739ed0e2241bce8df642a4d4273dd89eb7be70cda2a4e64a661e8f39f7023"
+    assert retried.phase is Phase.APPLIED
+    assert transport.creations == 1
+    assert retried.action == "command"
+
+
+@pytest.mark.parametrize("number", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_payload_is_rejected_without_persistence_or_dispatch(fixture, number):
+    store, agent, transport, operations = fixture
+    submitted = request(agent, payload={"number": number})
+    with pytest.raises(ValueError):
+        operations.execute("fixture", submitted)
+    with pytest.raises(ValueError):
+        store.operation_journal.prepare("fixture", submitted)
+    assert not store.operation_journal.records("fixture")
+    assert not transport.lookups
+
+
+def test_runtime_journal_uses_one_redis_connection_per_transaction(fixture):
+    store, agent, transport, operations = fixture
+    store.redis.connection_pool.max_connections = 1
+    first = operations.execute("fixture", request(agent))
+    applied = operations.execute("fixture", request(agent))
+    assert first.phase is Phase.UNKNOWN
+    assert applied.phase is Phase.APPLIED
+    assert applied.result == {"uid": "object-1"}
+    assert transport.creations == 1

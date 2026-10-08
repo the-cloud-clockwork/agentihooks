@@ -7,6 +7,21 @@ from uuid import NAMESPACE_URL, uuid5
 
 WRITE_ATTEMPTS = 5
 ACTIONS = frozenset(("spawn", "command", "drain", "terminate", "recover"))
+_CANONICAL = json.JSONEncoder(sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+SPAWN = "spawn"
+_ERRORS = {
+    "invalid": "invalid operation identity or action",
+    "generation": "invalid execution generation",
+    "payload": "operation identity conflicts with payload or execution scope",
+    "target": "operation target changed",
+    "missing": "operation journal entry is missing",
+    "identity": "operation identity changed",
+    "admission": "execution is not admitted",
+    "stale": "execution generation is stale",
+    "contention": "operation journal kept changing; no outcome committed",
+}
 
 
 class OperationConflict(ValueError):
@@ -66,7 +81,7 @@ class OperationTransport(Protocol):
 
 
 def digest(payload: dict) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    encoded = _CANONICAL.encode(payload).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -89,10 +104,10 @@ class OperationJournal:
 
     def prepare(self, slug: str, request: OperationRequest) -> Operation:
         if not request.execution_id or not request.key or request.action not in ACTIONS:
-            raise OperationConflict("invalid operation identity or action")
+            raise OperationConflict(_ERRORS["invalid"])
         if type(request.generation) is not int or request.generation < 1:
-            raise OperationConflict("invalid execution generation")
-        key = "spawn" if request.action == "spawn" else request.key
+            raise OperationConflict(_ERRORS["generation"])
+        key = SPAWN if request.action == SPAWN else request.key
         operation_id = f"op-{uuid5(NAMESPACE_URL, json.dumps([slug, request.execution_id, key])).hex}"
         payload_digest = digest({"action": request.action, "payload": request.payload})
 
@@ -112,7 +127,7 @@ class OperationJournal:
                 return expected
             previous = _decode(raw)
             if replace(previous, phase=Phase.ACCEPTED, result={}) != expected:
-                raise OperationConflict("operation identity conflicts with payload or execution scope")
+                raise OperationConflict(_ERRORS["payload"])
             return previous
 
         return self._write(slug, create)
@@ -121,13 +136,13 @@ class OperationJournal:
         def update(pipe):
             agent = self._current(slug, operation.execution_id, operation.generation, pipe)
             if agent.runtime_backend != operation.backend or agent.runtime_target != operation.target:
-                raise OperationConflict("operation target changed")
+                raise OperationConflict(_ERRORS["target"])
             raw = pipe.hget(self.store.key(slug, "runtime-operations"), operation.operation_id)
             if not raw:
-                raise OperationConflict("operation journal entry is missing")
+                raise OperationConflict(_ERRORS["missing"])
             current = _decode(raw)
             if replace(current, phase=Phase.ACCEPTED, result={}) != replace(operation, phase=Phase.ACCEPTED, result={}):
-                raise OperationConflict("operation identity changed")
+                raise OperationConflict(_ERRORS["identity"])
             if current.phase is Phase.APPLIED:
                 return current
             phase = Phase.ACCEPTED if observation.phase is Phase.ABSENT else observation.phase
@@ -138,11 +153,11 @@ class OperationJournal:
     def _current(self, slug: str, execution_id: str, generation: int, pipe: Any) -> Any:
         raw = pipe.hget(self.store.key(slug, "executions"), execution_id)
         if not raw:
-            raise OperationConflict("execution is not admitted")
+            raise OperationConflict(_ERRORS["admission"])
         agent = json.loads(raw)
         occupant = self.store.execution_registry.occupants(slug, pipe).get(agent["seat"])
         if not occupant or (occupant.execution_id, occupant.generation) != (execution_id, generation):
-            raise OperationConflict("execution generation is stale")
+            raise OperationConflict(_ERRORS["stale"])
         return occupant
 
     def _write(self, slug: str, change: Any) -> Operation:
@@ -155,12 +170,12 @@ class OperationJournal:
                     pipe.watch(key, self.store.key(slug, "executions"))
                     operation = change(pipe)
                     pipe.multi()
-                    pipe.hset(key, operation.operation_id, json.dumps(asdict(operation), sort_keys=True))
+                    pipe.hset(key, operation.operation_id, json.dumps(asdict(operation)))
                     pipe.execute()
                     return operation
                 except WatchError:
                     continue
-        raise OperationConflict("operation journal kept changing; no outcome committed")
+        raise OperationConflict(_ERRORS["contention"])
 
 
 class Operations:
@@ -170,7 +185,7 @@ class Operations:
         self.dispatch_enabled = dispatch_enabled
 
     def execute(self, slug: str, request: OperationRequest) -> Operation:
-        request = replace(request, payload=json.loads(json.dumps(request.payload, allow_nan=False)))
+        request = replace(request, payload=json.loads(json.dumps(request.payload)))
         operation = self.journal.prepare(slug, request)
         if operation.phase is Phase.APPLIED:
             return operation
@@ -198,7 +213,7 @@ class Operations:
             try:
                 result = self.journal.settle(slug, operation, observed)
             except OperationConflict:
-                result = replace(operation, phase=Phase.REFUSED, result={})
+                result = replace(operation, phase=Phase.REFUSED)
             recovered.append(result)
         return recovered
 
