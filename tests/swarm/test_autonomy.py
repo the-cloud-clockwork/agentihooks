@@ -80,7 +80,10 @@ def test_delegate_is_todays_prompt_for_every_lane():
     for lane in ("eng", "ci", MASTER):
         assert build("delegate", lane) == build(lane=lane)
     text = build("delegate")
-    assert "Merge on green checks, then agentihooks swarm sw wait --on merge <pr url>." in text
+    assert (
+        "Queue on green checks with agentihooks swarm sw merge queue <pr url>, then "
+        "agentihooks swarm sw wait --on merge <pr url>."
+    ) in text
     assert "After merged, run wt.sh done." in text
 
 
@@ -95,7 +98,9 @@ def test_manual_opens_a_draft_and_stops_for_the_operator():
 def test_assist_waits_for_an_operator_approval_line_before_merging():
     text = build("assist")
     assert "open the pull request into dev" in text and "draft" not in text.split("5. ", 1)[1].split("\n", 1)[0]
-    assert "Merge only after an OPERATOR line on the ledger approves it" in text
+    assert (
+        "Queue with agentihooks swarm sw merge queue <pr url> only after an OPERATOR line on the ledger approves it"
+    ) in text
     assert 'agentihooks ledger --slug sw --as sw-eng-1 comment tasks/t1 "<plain words: what the pull request' in text
     assert "agentihooks swarm sw done --pr <pr url>" in text
     assert "Merge on green checks" not in text

@@ -44,3 +44,53 @@ The first pull request merged through the queue must show a Tests run on the
 request rule. An unchanged ref or a dry run does not exercise that rule.
 Record the rejection and the green and planted red CI run IDs on the task
 and pull request before claiming the live controls are proven.
+
+## Release environments and version tags
+
+`version-tags.json` is a create payload for a tag ruleset: a `v*` tag cannot
+be moved, force pushed or deleted. Creation stays open because the release
+workflow pushes its tag with the workflow token, which a ruleset cannot list
+as a bypass actor.
+
+`../environments/*.json` hold the deployment environments. `release` deploys
+only from `dev`, so `release.yml` dispatched from any other ref is refused
+before a step runs. `pypi` deploys only from `main` and `v*` tags and keeps
+the operator as required reviewer; `publish-pypi.yml` uses no other
+environment. Apply as the operator:
+
+```bash
+gh api \
+  --method POST \
+  repos/The-Cloud-Clockwork/agentihooks/rulesets \
+  --input .github/rulesets/version-tags.json
+for env in release pypi; do
+  jq .environment ".github/environments/$env.json" | gh api \
+    --method PUT \
+    "repos/The-Cloud-Clockwork/agentihooks/environments/$env" \
+    --input -
+  jq -c '.deployment_branch_policies[]' ".github/environments/$env.json" |
+    while read -r policy; do
+      gh api \
+        --method POST \
+        "repos/The-Cloud-Clockwork/agentihooks/environments/$env/deployment-branch-policies" \
+        --input - <<< "$policy"
+    done
+done
+```
+
+A live policy not in the file is removed by its id. The `main` policy the
+operator added to `release` for the old publish gate goes once this merges:
+
+```bash
+gh api \
+  --method DELETE \
+  repos/The-Cloud-Clockwork/agentihooks/environments/release/deployment-branch-policies/62304415
+```
+
+Verify:
+
+```bash
+gh api repos/The-Cloud-Clockwork/agentihooks/environments/release/deployment-branch-policies --jq '.branch_policies[]|{name,type}'
+gh api repos/The-Cloud-Clockwork/agentihooks/environments/pypi/deployment-branch-policies --jq '.branch_policies[]|{name,type}'
+gh api repos/The-Cloud-Clockwork/agentihooks/rulesets --jq '.[]|select(.target=="tag")|{id,name,enforcement}'
+```

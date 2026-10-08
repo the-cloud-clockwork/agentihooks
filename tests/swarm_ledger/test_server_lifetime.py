@@ -331,6 +331,7 @@ def test_hook_pins_the_run_before_detaching_the_ensure_process(tmp_path, monkeyp
     from scripts.swarm_ledger import ledger_hook
 
     (tmp_path / "sample.json").write_text("{}")
+    monkeypatch.setenv("LEDGER_AUTOSTART", "1")
     monkeypatch.setattr(ledger_hook, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(ledger_link, "address", lambda: ("127.0.0.1", 9999))
     monkeypatch.setattr(ledger_hook.socket, "create_connection", Mock(side_effect=OSError))

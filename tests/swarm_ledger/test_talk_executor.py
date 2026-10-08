@@ -50,6 +50,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         "PYTHONPATH": str(ROOT),
         "LEDGER_DIR": str(ledgers),
         "LEDGER_PORT": str(ledger_port),
+        "LEDGER_AUTOSTART": "1",
         "AGENTIHOOKS_SWARM_REDIS_URL": url,
         "AGENTIHOOKS_SWARM": SLUG,
         "AGENTIHOOKS_AGENT_NAME": ENG,
