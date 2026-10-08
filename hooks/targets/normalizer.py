@@ -333,7 +333,7 @@ _CODEX_TOOL_NAMES = {
 }
 
 # `*** Add File: path` / `*** Update File: path` / `*** Delete File: path`
-_CODEX_PATCH_TARGET = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)
+_CODEX_PATCH_TARGET = re.compile(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$", re.MULTILINE)
 
 
 def _codex_tool_call(name: str, args: Any) -> tuple[str, dict[str, Any]]:
@@ -358,9 +358,10 @@ def _codex_tool_call(name: str, args: Any) -> tuple[str, dict[str, Any]]:
         # `new_string`.
         args.setdefault("content", body)
         args.setdefault("new_string", body)
-        target = _CODEX_PATCH_TARGET.search(body)
-        if target and not args.get("file_path"):
-            args["file_path"] = target.group(1).strip()
+        targets = [target.strip() for target in _CODEX_PATCH_TARGET.findall(body)]
+        args["file_paths"] = targets
+        if targets and not args.get("file_path"):
+            args["file_path"] = targets[0]
     return mapped, args
 
 
