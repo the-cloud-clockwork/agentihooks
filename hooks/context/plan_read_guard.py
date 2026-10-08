@@ -69,7 +69,7 @@ def _read(tool_input: dict, window) -> bool:
 
 
 def _bash(tool_input: dict, window) -> bool:
-    match = SED_RANGE.fullmatch(tool_input.get("command") or "")
+    match = SED_RANGE.fullmatch(_text("Bash", tool_input))
     return (
         bool(match)
         and PurePath(match[4]).name == window[0]
@@ -99,19 +99,36 @@ def _ledger_dir(env) -> Path:
 
 
 def _names_folder(text: str, root: Path) -> bool:
-    if FOLDER.search(text):
+    if FOLDER.search(text) or ("/artifacts/" in text and "$" in text):
         return True
     for token in text.split():
-        path = Path(token).expanduser()
-        if path == root or (path.is_relative_to(root) and any(char in token for char in "*?[")):
+        path = Path(os.path.expandvars(token)).expanduser()
+        if path == root or path.name == root.name:
+            return True
+        if path.is_relative_to(root) and any(char in token for char in "*?["):
             return True
     return False
 
 
 def _plans(env, slug: str):
-    doc = json.loads((_ledger_dir(env) / f"{slug}.json").read_text(encoding="utf-8"))
-    plans = {row["file"]["id"] for row in doc.get("artifacts", []) if row.get("plan") is True}
+    root = _ledger_dir(env)
+    doc = _load(root / f"{slug}.json")
+    plans = _plan_ids(doc)
+    for path in root.glob("*.json"):
+        if path.stem != slug:
+            try:
+                plans |= _plan_ids(_load(path))
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                continue
     return plans, _window(doc, env.get("AGENTIHOOKS_SWARM_TASK", ""))
+
+
+def _load(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _plan_ids(doc: dict) -> set[str]:
+    return {row["file"]["id"] for row in doc.get("artifacts", []) if row.get("plan") is True}
 
 
 def _window(doc: dict, task_id: str):

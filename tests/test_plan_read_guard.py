@@ -174,6 +174,24 @@ def test_errors_while_deciding_refuse(ledger):
     assert check(read(["x", PLAN], offset=45, limit=5), env(ledger))
 
 
+def test_ledger_root_by_variable_or_relative_name_refused(ledger, monkeypatch):
+    monkeypatch.setenv("LEDGERS", str(ledger))
+    assert check({"tool_name": "Grep", "tool_input": {"path": "$LEDGERS"}}, env(ledger))
+    assert check(bash(f"cd {ledger.parent} && grep -rn x {ledger.name}"), env(ledger))
+
+
+def test_other_ledger_plan_and_split_artifact_address_refused(ledger):
+    other = "d" * 64 + ".md"
+    (ledger / "other.json").write_text(json.dumps({"artifacts": [{"file": {"id": other}, "plan": True}]}))
+    (ledger / "junk.json").write_text("{")
+    assert check(bash(f"cat {ledger}/other.media/{other}"), env(ledger))
+    assert check(bash(f"curl -s http://127.0.0.1:8765/artifacts/{SLUG}/${{A}}${{B}}.md"), env(ledger))
+
+
+def test_quoted_sed_path_in_range_allowed(ledger):
+    assert check(bash(f"sed -n '35,65p' \"{stored(ledger)}\""), env(ledger)) is None
+
+
 @pytest.mark.parametrize(
     "command",
     [
