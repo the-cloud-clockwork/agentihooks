@@ -146,7 +146,7 @@ def test_a_run_that_started_exactly_a_day_ago_stays_in_the_window(swarm):
     edge_ms = (1791452123 + ci_speed.WINDOW_S) * 1000
     ci_speed.refresh("sw", config, store, edge_ms, run=gh("", []))
     cached = ci_speed.get(store.redis, "sw")
-    assert (cached["runs"], cached["minutes"]) == (1, 5.9)
+    assert (cached["runs"], "37757702814" in cached["durations"]) == (13, True)
 
 
 def test_a_cache_without_run_durations_reads_the_whole_day(swarm):
