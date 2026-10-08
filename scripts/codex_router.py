@@ -234,8 +234,12 @@ def select(
         available = ", ".join(account.name for account in pool)
         raise RoutingError(f"Codex account '{route}' not found; available: {available}")
     by_name = {account.name: account for account in pool}
-    api, weight = place.api_side(codex_api.CodexApiSource(sessions), "codex", environ or {}, now)
-    seat = place.place(api, CodexAccountSource(sessions=sessions).offer(pool, quotas, now), weight)
+    try:
+        api, weight = place.api_side(codex_api.CodexApiSource(sessions), "codex", environ or {}, now)
+    except place.SettingsError as exc:
+        raise RoutingError(str(exc)) from exc
+    pool_live = sum(sessions.get(account.name, 0) for account in pool)
+    seat = place.place(api, CodexAccountSource(sessions=sessions).offer(pool, quotas, now), weight, pool_live)
     if seat is None:
         raise RoutingError("no signed in Codex account has a fresh reading and a free session under its quota band")
     if seat.kind == API:

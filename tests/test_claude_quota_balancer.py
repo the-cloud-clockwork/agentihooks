@@ -612,7 +612,35 @@ def test_a_week_that_reset_before_now_counts_as_full():
 
 
 def _weighted(monkeypatch, weight, cap=API_UNBOUNDED):
-    monkeypatch.setattr(place, "policy", lambda harness, environ: place.ApiPolicy(weight, cap))
+    def policy(harness, environ):
+        assert harness == "claude"
+        return place.ApiPolicy(weight, cap)
+
+    monkeypatch.setattr(place, "policy", policy)
+
+
+def test_the_api_share_counts_live_sessions_on_reserved_accounts(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key", "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST"}
+    _weighted(monkeypatch, 25)
+    assert _pick(env, tmp_path, {"BEST": 4, "api": 1}).kind == API
+    assert _pick(env, tmp_path, {"BEST": 2, "api": 1}).account == "LOW"
+
+
+def test_an_unreadable_routing_setting_refuses_the_launch(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "ANTHROPIC_API_KEY": "key"}
+
+    def unreadable(harness, environ):
+        raise place.SettingsError("routing settings are unreadable: KeyError")
+
+    monkeypatch.setattr(place, "policy", unreadable)
+    with pytest.raises(balancer.RoutingError) as raised:
+        _pick(env, tmp_path)
+    assert str(raised.value) == "routing settings are unreadable: KeyError"
+
+
+def test_a_token_named_api_is_reserved_for_the_api_route():
+    env = {"AH_CC_TOKEN_api": "x", "AH_CC_TOKEN_": "y", "AH_CC_TOKEN_A": "a", "AH_CC_TOKEN_apix": "b"}
+    assert [credential.account for credential in balancer.discover_credentials(env)] == ["A", "apix"]
 
 
 def test_three_tokens_and_an_api_at_weight_25_give_api_one_of_every_four_sessions(monkeypatch, tmp_path):

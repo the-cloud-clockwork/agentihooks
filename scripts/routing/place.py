@@ -2,6 +2,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from redis import RedisError
+
 from scripts import session_bands
 from scripts.routing import split
 from scripts.routing.settings import open_store
@@ -13,6 +15,10 @@ if TYPE_CHECKING:
     from scripts.routing.slots import SlotSource
 
 
+class SettingsError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class ApiPolicy:
     weight: int = 0
@@ -20,20 +26,22 @@ class ApiPolicy:
 
 
 def _client(environ: Mapping[str, str]) -> "Redis | None":
-    from redis import RedisError
-
     from scripts.swarm import store
 
     try:
         return store.redis_client(environ)
-    except (RedisError, OSError):
+    except (RedisError, OSError, ValueError):
         return None
 
 
 def policy(harness: str, environ: Mapping[str, str]) -> ApiPolicy:
-    settings = open_store(_client(environ), environ)
-    cap = settings.get(f"{harness}-api-max-sessions")
-    return ApiPolicy(settings.get(f"{harness}-api-weight"), API_UNBOUNDED if cap is None else cap)
+    try:
+        settings = open_store(_client(environ), environ)
+        cap = settings.get(f"{harness}-api-max-sessions")
+        weight = settings.get(f"{harness}-api-weight")
+    except (RedisError, OSError, ValueError, KeyError) as exc:
+        raise SettingsError(f"routing settings are unreadable: {type(exc).__name__}") from exc
+    return ApiPolicy(weight, API_UNBOUNDED if cap is None else cap)
 
 
 def api_side(source: "SlotSource", harness: str, environ: Mapping[str, str], now: float) -> tuple[list[Slot], int]:
@@ -44,10 +52,9 @@ def api_side(source: "SlotSource", harness: str, environ: Mapping[str, str], now
     return [replace(slot, cap=rules.cap) for slot in found], rules.weight
 
 
-def place(api: Sequence[Slot], pool: Sequence[Slot], weight: int) -> Slot | None:
+def place(api: Sequence[Slot], pool: Sequence[Slot], weight: int, pool_live: int) -> Slot | None:
     open_pool = [slot for slot in pool if slot.free]
     api_live = sum(slot.sessions for slot in api)
-    pool_live = sum(slot.sessions for slot in pool)
     side = split.choose_side(api, open_pool, weight, api_live, pool_live, any(slot.free for slot in api))
     if side is None:
         return None

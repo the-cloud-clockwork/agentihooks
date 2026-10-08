@@ -359,7 +359,28 @@ def test_the_api_route_is_forced_with_its_own_live_count_and_no_cap(monkeypatch)
 
 
 def _weighted(monkeypatch, weight, cap=API_UNBOUNDED):
-    monkeypatch.setattr(place, "policy", lambda harness, environ: place.ApiPolicy(weight, cap))
+    def policy(harness, environ):
+        assert harness == "codex"
+        return place.ApiPolicy(weight, cap)
+
+    monkeypatch.setattr(place, "policy", policy)
+
+
+def test_the_codex_api_share_counts_live_sessions_on_accounts_without_a_seat(monkeypatch):
+    _weighted(monkeypatch, 25)
+    quotas = {"default": _quota(10.0), "alpha": _quota(10.0)}
+    assert router.select(_accounts(), quotas, {"beta": 4, "api": 1}, NOW, environ=API_ENV)[0] == API
+    assert router.select(_accounts(), quotas, {"beta": 2, "api": 1}, NOW, environ=API_ENV)[0].name == "alpha"
+
+
+def test_an_unreadable_codex_routing_setting_refuses_the_launch(monkeypatch):
+    def unreadable(harness, environ):
+        raise place.SettingsError("routing settings are unreadable: KeyError")
+
+    monkeypatch.setattr(place, "policy", unreadable)
+    with pytest.raises(router.RoutingError) as raised:
+        router.select(_accounts(), {"alpha": _quota(10.0)}, {}, NOW, environ=API_ENV)
+    assert str(raised.value) == "routing settings are unreadable: KeyError"
 
 
 API_ENV = {**ENV, "CODEX_API_KEY": "key"}

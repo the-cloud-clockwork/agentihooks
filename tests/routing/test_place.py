@@ -18,7 +18,8 @@ def _pool(sessions, caps=None):
 def _launches(count, weight, api_cap=API_UNBOUNDED, caps=None):
     sessions, kinds = {}, []
     for _ in range(count):
-        seat = place.place([_api(sessions.get("api", 0), api_cap)], _pool(sessions, caps), weight)
+        pool = _pool(sessions, caps)
+        seat = place.place([_api(sessions.get("api", 0), api_cap)], pool, weight, sum(s.sessions for s in pool))
         if seat is None:
             kinds.append(None)
             continue
@@ -63,16 +64,18 @@ def test_an_api_at_its_cap_yields_to_the_pool_and_both_closed_places_nothing():
     assert sessions == {"api": 1, "A": 1, "B": 1}
 
 
-def test_full_pool_accounts_still_count_toward_the_pool_share():
-    pool = [Slot("claude", "A", 6, 3), Slot("claude", "FULL", 2, 2)]
-    assert place.place([_api(1)], pool, 15) == _api(1)
-    assert place.place([_api(1)], pool, 14) == pool[0]
+def test_the_pool_share_counts_the_live_pool_sessions_it_is_given():
+    pool = [Slot("claude", "A", 6, 3)]
+    assert place.place([_api(1)], pool, 15, 5) == _api(1)
+    assert place.place([_api(1)], pool, 14, 5) == pool[0]
+    assert place.place([_api(1)], pool, 25, 3) == _api(1)
+    assert place.place([_api(1)], pool, 20, 3) == pool[0]
 
 
 def test_without_an_api_slot_the_pool_pick_is_unchanged():
     pool = [Slot("claude", "A", 6, 2), Slot("claude", "B", 6, 1), Slot("claude", "FULL", 1, 1)]
-    assert place.place([], pool, 100) == pool[1]
-    assert place.place([], [Slot("claude", "FULL", 1, 1)], 100) is None
+    assert place.place([], pool, 100, 4) == pool[1]
+    assert place.place([], [Slot("claude", "FULL", 1, 1)], 100, 1) is None
 
 
 def test_api_side_reads_no_policy_without_an_api_slot(monkeypatch):
@@ -128,13 +131,51 @@ def test_policy_reads_the_swarm_redis_when_it_answers(monkeypatch, tmp_path):
     assert seen == [env]
 
 
-def test_an_unreachable_redis_falls_back_to_the_file_store(monkeypatch):
+@pytest.mark.parametrize("error", [ConnectionRefusedError("refused"), ValueError("bad scheme"), "redis"])
+def test_an_unreachable_or_misnamed_redis_falls_back_to_the_file_store(monkeypatch, error):
     import redis
 
     from scripts.swarm import store
 
     def refused(environ):
-        raise redis.ConnectionError("refused")
+        raise redis.ConnectionError("refused") if error == "redis" else error
 
     monkeypatch.setattr(store, "redis_client", refused)
     assert place._client({}) is None
+
+
+def test_any_other_redis_client_failure_is_not_swallowed(monkeypatch):
+    from scripts.swarm import store
+
+    def broken(environ):
+        raise RuntimeError("bug")
+
+    monkeypatch.setattr(store, "redis_client", broken)
+    with pytest.raises(RuntimeError):
+        place._client({})
+
+
+def test_an_unreadable_settings_file_is_a_settings_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(place, "_client", lambda environ: None)
+    (tmp_path / "routing-settings.json").write_text("{not json")
+    with pytest.raises(place.SettingsError) as raised:
+        place.policy("claude", {"AGENTIHOOKS_HOME": str(tmp_path)})
+    assert str(raised.value) == "routing settings are unreadable: JSONDecodeError"
+    (tmp_path / "routing-settings.json").write_text("{}")
+    with pytest.raises(place.SettingsError) as raised:
+        place.policy("claude", {"AGENTIHOOKS_HOME": str(tmp_path)})
+    assert str(raised.value) == "routing settings are unreadable: KeyError"
+
+
+@pytest.mark.xdist_group("fakeredis")
+def test_a_redis_read_failure_is_a_settings_error(monkeypatch, tmp_path):
+    import redis
+
+    class Failing:
+        def hgetall(self, key):
+            raise redis.TimeoutError("slow")
+
+    monkeypatch.setattr(place, "_client", lambda environ: Failing())
+    with pytest.raises(place.SettingsError) as raised:
+        place.policy("codex", {"AGENTIHOOKS_HOME": str(tmp_path)})
+    assert str(raised.value) == "routing settings are unreadable: TimeoutError"
