@@ -31,7 +31,7 @@ def test_ci_creates_no_commits_or_bot_pull_requests():
 
 def test_dev_push_publishes_merged_durations_with_read_permissions():
     job = _workflow("test.yml")["jobs"]["refresh-durations"]
-    assert job["needs"] == ["unit", "lint"]
+    assert job["needs"] == ["unit", "lint", "shard-check"]
     assert job["if"] == "github.event_name == 'push'"
     assert job["permissions"] == {"contents": "read"}
     upload = next(s for s in job["steps"] if s.get("uses") == "actions/upload-artifact@v4")

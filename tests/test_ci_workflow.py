@@ -356,7 +356,7 @@ def test_stored_durations_allow_new_tests_concentrated_in_one_shard(tmp_path, mo
 
 def test_dev_push_refreshes_stored_durations_after_tests_pass():
     job = _workflow()["jobs"]["refresh-durations"]
-    assert job["needs"] == ["unit", "lint"]
+    assert job["needs"] == ["unit", "lint", "shard-check"]
     assert job["if"] == "github.event_name == 'push'"
     assert job["permissions"] == {"contents": "read"}
     steps = job["steps"]

@@ -83,7 +83,7 @@ jobs:
           cd "$grader"
           python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
-  # Every shard restores this one key or none, so all shards of a run split on the same durations.
+  # Every shard restores this one key, or nothing when the lookup found none, so all shards of a run split alike.
   durations:
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -546,7 +546,7 @@ jobs:
           fi
 
   refresh-durations:
-    needs: [unit, lint]
+    needs: [unit, lint, shard-check]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
