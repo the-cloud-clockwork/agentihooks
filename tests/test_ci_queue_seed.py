@@ -9,6 +9,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.unit
 
 _QUEUE = "github.event_name == 'merge_group'"
+_BASELINE = "steps.dev-run.outputs.baseline == 'true'"
 
 
 def _jobs():
@@ -45,13 +46,15 @@ def test_queue_runs_mint_a_read_only_app_token_and_skip_the_dev_cache_lookup():
 
 
 @pytest.mark.parametrize(
-    "artifact,path,republished",
+    "artifact,path,republished,condition,hidden",
     [
-        ("durations-merged", "~/dev-durations", "dev-durations"),
-        ("coverage-baseline", "~/coverage-baseline", "dev-coverage-baseline"),
+        ("durations-merged", "~/dev-durations", "dev-durations", _QUEUE, True),
+        ("coverage-baseline", "~/coverage-baseline", "dev-coverage-baseline", _BASELINE, None),
     ],
 )
-def test_queue_runs_restore_from_the_latest_passed_dev_push_on_the_app_token(artifact, path, republished):
+def test_queue_runs_restore_from_the_latest_passed_dev_push_on_the_app_token(
+    artifact, path, republished, condition, hidden
+):
     job = _jobs()["durations"]
     steps = job["steps"]
     mint = _step(steps, "Mint the tcc main ci App token")
@@ -64,7 +67,8 @@ def test_queue_runs_restore_from_the_latest_passed_dev_push_on_the_app_token(art
     )
     assert find["env"] == {"GH_TOKEN": "${{ steps.app-token.outputs.token }}"}
     assert mint["id"] == "app-token"
-    assert download["if"] == upload["if"] == find["if"] == _QUEUE
+    assert find["if"] == _QUEUE
+    assert download["if"] == upload["if"] == condition
     assert download["with"] == {
         "name": artifact,
         "path": path,
@@ -73,7 +77,7 @@ def test_queue_runs_restore_from_the_latest_passed_dev_push_on_the_app_token(art
         "github-token": "${{ steps.app-token.outputs.token }}",
     }
     assert upload["with"]["path"] == f"{path}/"
-    assert upload["with"]["include-hidden-files"] is True
+    assert upload["with"].get("include-hidden-files") is hidden
     assert upload["with"]["if-no-files-found"] == "error"
     assert steps.index(mint) < steps.index(find) < steps.index(download) < steps.index(upload)
     assert job["outputs"]["queued"] == "${{ steps.republished.outputs.queued }}"
@@ -96,10 +100,13 @@ def lookup(tmp_path):
     tools = tmp_path / "bin"
     tools.mkdir()
     gh = tools / "gh"
-    gh.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$ARGS"\nprintf "%s" "$FAKE_RUN"\n')
+    gh.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$@" >> "$ARGS"\n'
+        'if [[ "$2" == */artifacts* ]]; then printf "%s" "$FAKE_BASELINES"; else printf "%s" "$FAKE_RUN"; fi\n'
+    )
     gh.chmod(0o755)
 
-    def run(found):
+    def run(found, baselines="1"):
         output = tmp_path / "output"
         output.write_text("")
         env = dict(
@@ -107,6 +114,7 @@ def lookup(tmp_path):
             PATH=f"{tools}:{os.environ['PATH']}",
             ARGS=str(tmp_path / "args"),
             FAKE_RUN=found,
+            FAKE_BASELINES=baselines,
             GITHUB_OUTPUT=str(output),
             GITHUB_REPOSITORY="the-cloud-clockwork/agentihooks",
         )
@@ -119,13 +127,20 @@ def lookup(tmp_path):
 def test_the_lookup_asks_for_successful_dev_push_runs_of_the_tests_workflow(lookup):
     result, output, args = lookup("37847322607")
     assert result.returncode == 0, result.stderr
-    assert output == "id=37847322607\n"
+    assert output == "id=37847322607\nbaseline=true\n"
     assert "37847322607" in result.stdout
     assert args[:2] == [
         "api",
         "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs"
         "?branch=dev&event=push&status=success&per_page=1",
     ]
+    assert "repos/the-cloud-clockwork/agentihooks/actions/runs/37847322607/artifacts?name=coverage-baseline" in args
+
+
+def test_a_dev_run_without_a_baseline_restores_durations_only(lookup):
+    result, output, _ = lookup("37847322607", baselines="0")
+    assert result.returncode == 0, result.stderr
+    assert output == "id=37847322607\nbaseline=false\n"
 
 
 def test_the_lookup_is_red_when_no_dev_push_run_passed(lookup):

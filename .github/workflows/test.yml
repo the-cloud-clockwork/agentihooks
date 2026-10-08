@@ -123,8 +123,10 @@ jobs:
             echo "::error::No dev push Tests run passed, so the queue run has no dev durations or coverage baseline."
             exit 1
           fi
-          echo "Restoring dev durations and coverage baseline from dev push run $run"
+          baseline=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '.total_count')
+          echo "Restoring dev durations from dev push run $run, which kept $baseline coverage baseline artifacts"
           echo "id=$run" >> "$GITHUB_OUTPUT"
+          echo "baseline=$([[ "$baseline" -gt 0 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - name: Download the dev durations
         if: github.event_name == 'merge_group'
@@ -137,7 +139,7 @@ jobs:
           github-token: ${{ steps.app-token.outputs.token }}
 
       - name: Download the dev coverage baseline
-        if: github.event_name == 'merge_group'
+        if: steps.dev-run.outputs.baseline == 'true'
         uses: actions/download-artifact@v4
         with:
           name: coverage-baseline
@@ -158,12 +160,11 @@ jobs:
           overwrite: true
 
       - name: Republish the dev coverage baseline
-        if: github.event_name == 'merge_group'
+        if: steps.dev-run.outputs.baseline == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: dev-coverage-baseline
           path: ~/coverage-baseline/
-          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
           overwrite: true
@@ -172,7 +173,7 @@ jobs:
         id: republished
         if: github.event_name == 'merge_group'
         run: |
-          ls -A ~/dev-durations ~/coverage-baseline
+          ls -A ~/dev-durations
           echo "queued=true" >> "$GITHUB_OUTPUT"
 
   unit:
