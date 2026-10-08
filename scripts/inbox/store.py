@@ -182,7 +182,9 @@ class InboxStore:
         """The keys of every address belongs() accepts, its items and their histories, and those
         addresses' memberships in the shared waiting and indexed sets."""
         prefix = self.key("address", "")
-        addresses = sorted(a for key in self.redis.scan_iter(match=prefix + "*") if belongs(a := key[len(prefix) :]))
+        seen = {key[len(prefix) :] for key in self.redis.scan_iter(match=prefix + "*")}
+        seen.update(self.redis.smembers(self.key("open-indexed")))
+        addresses = sorted(a for a in seen if belongs(a))
         keys = []
         for address in addresses:
             ids = self.redis.zrange(self.key("address", address), 0, -1)

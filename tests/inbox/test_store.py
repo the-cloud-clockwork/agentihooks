@@ -284,3 +284,16 @@ def test_open_index_cleanup_lists_all_owned_keys(store):
         store.key("history", first.id),
     }
     assert memberships == {store.key("waiting"): ["receiver"], store.key("open-indexed"): ["receiver"]}
+
+
+def test_open_index_cleanup_keeps_empty_addresses_and_redirected_mail(store):
+    assert store.open_items("empty") == []
+    keys, memberships = store.keys_for(lambda address: address == "empty")
+    assert set(keys) == {store.key(kind, "empty") for kind in ("address", "pending", "open", "sequence")}
+    assert memberships == {store.key("open-indexed"): ["empty"]}
+    item = store.send("sender", "old", "work")
+    store.open_items("old")
+    store.redirect(item.id, "swarm", "new", "moved", "old")
+    keys, memberships = store.keys_for(lambda address: address == "old")
+    assert set(keys) == {store.key(kind, "old") for kind in ("address", "pending", "open", "sequence")}
+    assert memberships == {store.key("open-indexed"): ["old"]}
