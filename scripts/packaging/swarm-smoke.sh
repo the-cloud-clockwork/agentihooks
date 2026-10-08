@@ -4,6 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 export COMPOSE_PROJECT_NAME
 COMPOSE_PROJECT_NAME="$(python3 -c 'import uuid; print("swarm-proof-" + uuid.uuid4().hex[:12])')"
+export SWARM_REDIS_PASSWORD
+SWARM_REDIS_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe())')"
 trap 'docker compose down --volumes' EXIT
 docker compose up --build --wait --wait-timeout 120
 python3 - <<'PY'
