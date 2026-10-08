@@ -205,17 +205,22 @@ case "${cmd}" in
     fi
     if [[ "${NAME}" != _tmp/* ]]; then
       if command -v gh >/dev/null 2>&1; then
-        PR_STATE="$(cd "${REPO}" && gh pr list --head "${BR}" --base "${BASE}" --state all --json state,url --jq '.[0] | if .state == "MERGED" then .state else .url end')" \
+        PR_STATE="$(cd "${REPO}" && gh pr list --head "${BR}" --base "${BASE}" --state all --json state,url --jq '.[0] | if .state == "MERGED" then .state elif .state == "CLOSED" then "CLOSED " + .url else .url end')" \
           || die "cannot read pull requests for '${BR}' — worktree kept"
-        [[ -z "${PR_STATE}" || "${PR_STATE}" == MERGED ]] \
-          || die "pull request ${PR_STATE} is not merged — wait for it to land before worktree teardown"
-        REMOTE_BRANCH="$(git -C "${REPO}" ls-remote --heads origin "refs/heads/${BR}")" \
-          || die "cannot read remote branch '${BR}' — worktree kept"
-        if [[ -n "${REMOTE_BRANCH}" ]]; then
-          [[ "${PR_STATE}" == MERGED ]] \
-            || die "published branch '${BR}' has no confirmed merged pull request — worktree kept"
-          git -C "${REPO}" push origin --delete "${BR}" \
-            || die "cannot delete remote branch '${BR}' — worktree kept"
+        if [[ "${PR_STATE}" == "CLOSED "* ]]; then
+          [[ "${FORCE}" -eq 1 ]] \
+            || die "pull request ${PR_STATE#CLOSED } was closed without merging — pass --force to drop the worktree and branch ${BR}"
+        else
+          [[ -z "${PR_STATE}" || "${PR_STATE}" == MERGED ]] \
+            || die "pull request ${PR_STATE} is not merged — wait for it to land before worktree teardown"
+          REMOTE_BRANCH="$(git -C "${REPO}" ls-remote --heads origin "refs/heads/${BR}")" \
+            || die "cannot read remote branch '${BR}' — worktree kept"
+          if [[ -n "${REMOTE_BRANCH}" ]]; then
+            [[ "${PR_STATE}" == MERGED ]] \
+              || die "published branch '${BR}' has no confirmed merged pull request — worktree kept"
+            git -C "${REPO}" push origin --delete "${BR}" \
+              || die "cannot delete remote branch '${BR}' — worktree kept"
+          fi
         fi
       else
         PUBLISHED=0
