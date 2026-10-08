@@ -1,0 +1,6 @@
+{
+  "scripts/recall/chunker.py:scripts.recall.chunker.x__sections__mutmut_17:dc025744950dc13075020ce95a52888d1a92c4181b8e22b711dd7b761062902e": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: marker is produced by the regex alternatives `{3,}` or `~{3,}`, so it contains at least three identical characters. marker[1] always equals marker[0] and the close-fence predicate is unchanged."
+  }
+}

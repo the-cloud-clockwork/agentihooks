@@ -1,0 +1,6 @@
+{
+  "scripts/recall/chunker.py:scripts.recall.chunker.x__sections__mutmut_19:7cbc350203cf78167cb25ced4e1e6bf57f49aeca8e9d2a82b47ec776f50a85ef": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: fence is assigned only a regex marker containing at least three identical backticks or tildes. The comparison executes only when fence is truthy, so fence[1] always equals fence[0]."
+  }
+}
