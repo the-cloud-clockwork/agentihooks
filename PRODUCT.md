@@ -21,14 +21,14 @@ It is the only window onto an agentihooks swarm, and its records are the swarm's
 ## Operating Context
 
 - Served on localhost by the ledger server (`agentihooks ledger serve --ensure`, default `http://127.0.0.1:8765`), Python stdlib only, no build step. Viewed in desktop Chrome on Windows from WSL.
-- Ledger state is a JSON document per ledger under `~/development-ledger`; the page embeds a seed and syncs through the server API.
+- Ledger state lives in one SQLite database, `~/development-ledger/ledgers.sqlite3`, behind the ledger repository; a write touches only the rows it changed and no JSON or HTML file. The page shell carries no seed: it loads its state from the event stream and saves through the server API. JSON stays an explicit interchange format (`agentihooks ledger storage export` and `import`).
 - The swarm tick, inbox and health data come from Redis through the same server.
 - Agents and the operator act on the same records concurrently, often dozens of writes a minute in a busy swarm.
 
 ## Capabilities and Constraints
 
 - **Stack (operator decision):** plain HTML, CSS and vanilla JavaScript only. No frameworks, bundlers or build step (no React, Next or similar).
-- **Direction (operator, not yet designed):** the presentation layer gets its own architecture, a proper API, and possibly SQLite as the store in place of per-ledger JSON files. Undecided: schema, migration path, API shape.
+- **Architecture (delivered):** the presentation layer has its own architecture: versioned v1 resources, an event stream, static page shells and SQLite as the durable store in place of per-ledger JSON files. Legacy ledger files are imported once after a verified backup.
 - Front-end sources: `scripts/swarm_ledger/template.html` (ledger page), `scripts/swarm_ledger/home.html` (HOME and BIN), `palette.css` (every colour value, nowhere else), `tooltips.js`. The server fills `__LEDGER_*__` / `__HOME_*__` placeholders at render time.
 - Every page section folds on a click of its header and remembers that per viewer; a new section ships foldable or its test fails.
 - A page edit changes the page version (hash of template, palette and tooltips), and open ledger pages re-render from the template on their next load.

@@ -9,10 +9,10 @@ $AGENTIHOOKS_AGENT_NAME), joins it as its worker. swarm is a plan a swarm works.
 
 content.json: {"title", "overview", "sources": [paths], "phases": [{"title", "description"}],
                "questions": [{"text"}], "followups": [{"text"}]}
-Writes <LEDGER_DIR>/<slug>.html and <slug>.json. The slug is built by scripts.swarm.naming, never typed:
+Stores the ledger record in <LEDGER_DIR>/ledgers.sqlite3. The slug is built by scripts.swarm.naming, never typed:
 <plan-file-stem>-<date> for --plan, proof-<swarm code>-<task>-<n> for --proof (a swarm task session),
 small-<session> for a small ledger. --slug accepts only one of those built forms.
-Idempotent: an existing ledger is left untouched and its paths are printed.
+Idempotent: an existing ledger is left untouched and its page link is printed.
 In the shared ledger folder only a master seat or the operator creates a ledger, and a small one needs three phases
 unless --operator-asked quotes the operator asking for it.
 

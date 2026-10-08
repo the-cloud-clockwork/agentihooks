@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local ledger server: serves ~/development-ledger/<slug>.html and reads/writes <slug>.json.
+"""Local ledger server: serves the ledger pages and reads/writes the ledger records in ~/development-ledger.
 
 Usage:
   ledger_server.py --ensure   start it detached if it is not answering, print the base URL
