@@ -1,0 +1,6 @@
+{
+  "hooks/hook_manager.py:hooks.hook_manager.x_on_pre_tool_use__mutmut_11:8ae8489f0af9364207071bfabe5a22a308624d7d8ea659719e87617ed7c0402d": {
+    "reader": "Standards",
+    "reason": "The session id default predates this change; a payload without a session id has no armed gate under any default, so the guard returns the same block."
+  }
+}

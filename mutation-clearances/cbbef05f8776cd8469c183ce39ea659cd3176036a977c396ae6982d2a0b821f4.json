@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_accounts__mutmut_103:23899dbd5b8f530a34afc0a824ca96a9533e4861b1a67d7b7e48c358a561c10c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The state classifier distinguishes only exact rejected; None remains non rejected and produces identical states for every quota window."
+  }
+}

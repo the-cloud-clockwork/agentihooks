@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_83:0cbdfebb25a9f812aef21d02baa583f610987ec43e01947aaca16e46707f723a": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same Python codec; encoding, decoding and failure behavior are identical."
+  }
+}

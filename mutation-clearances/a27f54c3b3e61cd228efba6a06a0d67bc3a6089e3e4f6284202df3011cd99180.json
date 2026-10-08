@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_request__mutmut_4:af0af85b23380d0c7c51dbaa1258d2ea95e98cef722213c7cc6265b6b9ddc716": {
+    "reader": "Standards",
+    "reason": "urllib capitalizes request header names, so the changed key casing sends the same header."
+  }
+}

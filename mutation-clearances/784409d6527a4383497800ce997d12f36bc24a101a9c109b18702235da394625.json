@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/tick.py:scripts.swarm.tick.x__reap__mutmut_7:b352cc411cb90bb7cef57ba21a5944c592da8836b567de21e9c76ca6589d685c": {
+    "reader": "Standards /root/standards",
+    "reason": "Master observation returns before task rows are used."
+  }
+}

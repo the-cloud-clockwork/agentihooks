@@ -1,0 +1,6 @@
+{
+  "scripts/gates/entry.py:scripts.gates.entry.x__decide__mutmut_2:3f8777c56f6f3d9aab8c24fae1de3a19ae2d2996d677d171c372e3dc7f0f9585": {
+    "reader": "Standards reader",
+    "reason": "Production main supplies an explicit mode, so the changed optional default has no effect. Independently cleared against CI run 37680501547."
+  }
+}

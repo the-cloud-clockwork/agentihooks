@@ -1,0 +1,6 @@
+{
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__project_aliases__mutmut_26:22a9a06ae36882a722dc70af57dfab9710e9567a078e6a40c1c919dbb3ba2184": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "For the supported JSON alias-document contract, every non-string source or target fails canonical_remote string equality even when the early type guard changes OR to AND. The later check raises the identical ValueError before traversal or mutation. Adversarial JSON null, booleans, numbers, arrays, objects and strings produced identical outputs across 77 combinations. This ruling excludes arbitrary custom Python objects outside the JSON schema."
+  }
+}

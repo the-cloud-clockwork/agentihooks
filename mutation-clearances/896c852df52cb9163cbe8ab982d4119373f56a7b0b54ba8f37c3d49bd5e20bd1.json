@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_23:f743e0991c556738ecf79cc64f14696cbb6a6e8247e9f7510570b658b4e25b27": {
+    "reader": "Standards",
+    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
+  }
+}

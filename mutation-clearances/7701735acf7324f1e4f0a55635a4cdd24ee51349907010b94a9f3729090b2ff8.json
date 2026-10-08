@@ -1,0 +1,6 @@
+{
+  "hooks/context/swarm_pin.py:hooks.context.swarm_pin.x_nested__mutmut_11:5a7dc3df22dcf856f0f307f58e0aeba24bfc3c63c09daa4a54599feb56c5510a": {
+    "reader": "Standards",
+    "reason": "Stopping the walk at pid 2 instead of pid 1 changes no output: pid 2 is never claude or codex and never the launcher, so the session count and the final launcher comparison are identical."
+  }
+}

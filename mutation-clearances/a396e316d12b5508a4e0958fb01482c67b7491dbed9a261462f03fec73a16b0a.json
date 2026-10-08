@@ -1,0 +1,6 @@
+{
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__revision__mutmut_22:82c190432e4f89f407e8188a9a05bfa85256b6a656b175fc44e3a6eed1583e71": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize identically, preserving observation hashes."
+  }
+}

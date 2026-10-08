@@ -276,7 +276,9 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
         ]
 
 
-@pytest.mark.parametrize("changed,clearance,fails", [(2, False, True), (3, False, False), (2, True, False)])
+@pytest.mark.parametrize(
+    "changed,clearance,fails", [(2, False, True), (3, False, False), (2, True, False), (2, "folder", False)]
+)
 def test_gate_persists_full_mutation_evidence_and_respects_reader_clearance(
     tmp_path, monkeypatch, capsys, changed, clearance, fails
 ):
@@ -299,7 +301,14 @@ def test_gate_persists_full_mutation_evidence_and_respects_reader_clearance(
 
     monkeypatch.setattr("scripts.ci_mutation.runner.mutate_files", mutate)
     if clearance:
-        (tmp_path / "mutation-cleared.txt").write_text(
+        target = tmp_path / "mutation-cleared.txt"
+        if clearance == "folder":
+            import hashlib
+
+            key = "hooks/sample.py:hooks.sample.x_f__mutmut_1:abc"
+            target = tmp_path / "mutation-clearances" / f"{hashlib.sha256(key.encode()).hexdigest()}.json"
+            target.parent.mkdir()
+        target.write_text(
             json.dumps(
                 {
                     "hooks/sample.py:hooks.sample.x_f__mutmut_1:abc": {

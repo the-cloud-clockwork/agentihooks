@@ -38,7 +38,7 @@ ALL_SHORT = re.compile(r"^-[A-Za-z]*a[A-Za-z]*$")
 SHOWN = 5
 NO_VALUE = ""
 WHOLE_PROJECT = ""
-ALWAYS = (trace_plan.CLEARANCE.as_posix(),)
+ALWAYS = (trace_plan.CLEARANCE.as_posix(), trace_plan.CLEARANCE_FOLDER.as_posix())
 
 
 def _area(entry):
