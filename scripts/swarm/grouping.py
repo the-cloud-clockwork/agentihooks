@@ -143,7 +143,7 @@ def _near(lead, other):
 
 
 def _on_page(territory):
-    return bool(territory) and all(difficulty._on_page(str(area)) for area in territory)
+    return bool(territory) and all(difficulty.on_page(str(area)) for area in territory)
 
 
 def _named(group):
