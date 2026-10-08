@@ -69,7 +69,6 @@ def test_main_never_calls_github(tmp_path, monkeypatch):
     (tools / "gh").write_text(f"#!/bin/sh\ntouch {called}\nexit 1\n")
     (tools / "gh").chmod(0o755)
     monkeypatch.setenv("PATH", str(tools))
-    monkeypatch.setenv("GITHUB_RUN_ID", "42")
     (tmp_path / ".test_durations").write_text('{"t.py::a": 1.0}')
     restored = _restored(tmp_path / "restored", {"t.py::a": 2.0})
     monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)

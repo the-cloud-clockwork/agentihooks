@@ -74,7 +74,9 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
         "durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || github.sha }}"
     )
-    assert "gh " not in json.dumps(steps[: steps.index(adopt) + 1][1:])
+    assert "run" not in restore
+    assert adopt["run"] == "python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations"
+    assert "env" not in adopt
 
 
 @pytest.mark.parametrize("bump,expected", [("patch", "2.17.1"), ("minor", "2.18.0"), ("major", "3.0.0")])

@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> None:
             durations = _durations(committed)
             even = dict.fromkeys(collected, statistics.median(durations.values()))
             (_ROOT / ".test_durations").write_text(json.dumps({**even, **durations}, indent=4, sort_keys=True) + "\n")
-            print(f"Splitting tests without a committed duration evenly: {error}")
+            print(f"::warning::Splitting tests without a committed duration evenly: {error}")
             return
     if committed != _ROOT / ".test_durations":
         (_ROOT / ".test_durations").write_bytes(committed.read_bytes())

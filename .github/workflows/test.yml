@@ -139,9 +139,6 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
-      # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
-      # including every ownership-scope test guarding what uninstall and prune
-      # are allowed to delete — never ran in CI at all.
       - name: Restore latest dev durations
         if: steps.lookup.outputs.skip != 'true'
         uses: actions/cache/restore@v4
@@ -153,6 +150,9 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         run: python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations
 
+      # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
+      # including every ownership-scope test guarding what uninstall and prune
+      # are allowed to delete — never ran in CI at all.
       - name: Run tests
         if: steps.lookup.outputs.skip != 'true'
         env:
