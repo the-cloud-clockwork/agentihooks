@@ -40,6 +40,7 @@ class FakeRuntime:
             request.lane,
             request.task["id"],
             pane_id=f"{self.backend}:{request.name}",
+            execution_id=f"exe-{request.name}" if self.backend == REMOTE else "",
             runtime_backend=self.backend,
             runtime_target={"endpoint": PRIVATE} if self.backend == REMOTE else {},
         )
@@ -220,7 +221,7 @@ OPERATIONS = [
 def test_each_operation_needs_its_own_capability(operation, need, call):
     lacking = FakeRuntime(REMOTE, set(Capability) - {need})
     router = RuntimeRouter([lacking], REMOTE)
-    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", runtime_backend=REMOTE)
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", execution_id="exe-1", runtime_backend=REMOTE)
     assert call(router, agent) == Outcome(operation, Status.UNSUPPORTED, REMOTE, detail=f"kubernetes lacks {need}")
     assert lacking.calls == []
     assert router.failures == {(REMOTE, operation): 1}
@@ -230,7 +231,7 @@ def test_each_operation_needs_its_own_capability(operation, need, call):
 def test_each_operation_runs_on_a_backend_holding_its_capability(operation, need, call):
     full = FakeRuntime(REMOTE, set(Capability))
     router = RuntimeRouter([full], REMOTE)
-    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", runtime_backend=REMOTE)
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", execution_id="exe-1", runtime_backend=REMOTE)
     assert call(router, agent).status is Status.OK
     assert len(full.calls) == 1
     assert router.capability_failures_total() == 0
@@ -277,7 +278,7 @@ def test_foreign_passes_an_object_of_the_same_backend():
 
 def test_an_unregistered_backend_object_is_unavailable_and_no_runtime_acts():
     local, remote, router = pair()
-    stray = AgentRecord("engineer@a1b2c3-0002", "eng", "t2", runtime_backend="ssh")
+    stray = AgentRecord("engineer@a1b2c3-0002", "eng", "t2", execution_id="exe-2", runtime_backend="ssh")
     assert router.terminate(stray) == Outcome(
         "terminate", Status.UNAVAILABLE, "ssh", detail="no runtime registered for ssh"
     )

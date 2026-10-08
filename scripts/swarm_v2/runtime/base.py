@@ -31,6 +31,13 @@ class Status(StrEnum):
     REFUSED = "refused"
 
 
+class Unqualified(StrEnum):
+    NO_EXECUTION = "no execution identity"
+    NO_PROCESS = "runtime target names no process"
+    NO_NAMESPACE = "local process namespace is unreadable"
+    FOREIGN_NAMESPACE = "process belongs to another PID namespace"
+
+
 class Recovery(StrEnum):
     REATTACH = "reattach"
     RESUME = "resume"
@@ -82,11 +89,17 @@ def foreign(runtime: Runtime, operation: str, agent: AgentRecord) -> Outcome | N
     )
 
 
+def legacy(agent: AgentRecord) -> bool:
+    return (
+        agent.runtime_backend == LOCAL and not agent.execution_id and not agent.generation and not agent.runtime_target
+    )
+
+
 class RuntimeRouter:
     def __init__(self, runtimes: Iterable[Runtime], default: str = LOCAL, disabled: Iterable[str] = ()):
         self.runtimes = {runtime.backend: runtime for runtime in runtimes}
         self.default, self.disabled = default, frozenset(disabled)
-        self.failures = Counter()
+        self.failures, self.rejected = Counter(), Counter()
 
     @classmethod
     def from_environ(cls, runtimes: Iterable[Runtime], environ: Mapping[str, str]) -> "RuntimeRouter":
@@ -112,7 +125,15 @@ class RuntimeRouter:
         return self._own(agent, "drain", Capability.DRAIN, agent)
 
     def terminate(self, agent: AgentRecord, homes: tuple = ()) -> Outcome:
-        return self._own(agent, "terminate", Capability.TERMINATE, agent, homes)
+        backend = agent.runtime_backend
+        if agent.execution_id or legacy(agent):
+            outcome = self._own(agent, "terminate", Capability.TERMINATE, agent, homes)
+        else:
+            reason = Unqualified.NO_EXECUTION
+            outcome = Outcome("terminate", Status.REFUSED, backend, reason, reason.value)
+        if isinstance(outcome.value, Unqualified):
+            self.rejected[(backend, outcome.value)] += 1
+        return outcome
 
     def recover(self, agent: AgentRecord, mode: Recovery, config: Any = None, text: str = "") -> Outcome:
         need = Capability.NATIVE_RESUME if mode is Recovery.RESUME else Capability.RECOVER
@@ -120,6 +141,9 @@ class RuntimeRouter:
 
     def capability_failures_total(self) -> int:
         return sum(self.failures.values())
+
+    def unqualified_process_actions_rejected_total(self) -> int:
+        return sum(self.rejected.values())
 
     def _own(self, agent: AgentRecord, operation: str, need: Capability, *args) -> Outcome:
         backend = agent.runtime_backend

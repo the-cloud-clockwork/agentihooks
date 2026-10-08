@@ -1,12 +1,25 @@
 """The local herdr runtime behind the runtime protocol: each operation runs the existing HerdrRuntime call."""
 
 import subprocess
+from collections.abc import Callable, Mapping
 from typing import Any
 
+from hooks.proc import Process, processes
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord
 from scripts.swarm.tick import SpawnError
-from scripts.swarm_v2.runtime.base import LOCAL, Capability, Outcome, Recovery, SpawnRequest, Status, foreign
+from scripts.swarm_v2.runtime import process
+from scripts.swarm_v2.runtime.base import (
+    LOCAL,
+    Capability,
+    Outcome,
+    Recovery,
+    SpawnRequest,
+    Status,
+    Unqualified,
+    foreign,
+    legacy,
+)
 
 
 def _failed(operation: str, exc: SpawnError) -> Outcome:
@@ -27,8 +40,13 @@ class LocalHerdrRuntime:
         }
     )
 
-    def __init__(self, herdr: HerdrRuntime):
-        self.herdr = herdr
+    def __init__(
+        self,
+        herdr: HerdrRuntime,
+        namespace: Callable[[], str] = process.local_namespace,
+        table: Callable[[], Mapping[int, Process]] = processes,
+    ):
+        self.herdr, self.namespace, self.table = herdr, namespace, table
 
     def spawn(self, request: SpawnRequest) -> Outcome:
         try:
@@ -59,7 +77,14 @@ class LocalHerdrRuntime:
         refused = foreign(self, "terminate", agent)
         if refused:
             return refused
-        if self.herdr.retire(agent, homes=homes):
+        if legacy(agent):
+            retired = self.herdr.retire(agent, homes=homes)
+        else:
+            pid = process.resolve(agent, self.namespace(), self.table())
+            if isinstance(pid, Unqualified):
+                return Outcome("terminate", Status.REFUSED, LOCAL, pid, pid.value)
+            retired = self.herdr.retire_process(agent, pid, homes)
+        if retired:
             return Outcome("terminate", Status.OK, LOCAL)
         refusal = self.herdr.refusal(agent)
         return Outcome("terminate", Status.REFUSED, LOCAL, refusal, refusal["refusal"])
