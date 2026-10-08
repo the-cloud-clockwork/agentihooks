@@ -205,7 +205,7 @@ def test_agentihooks_serves_skill_eval_as_a_subcommand(agent, launch, monkeypatc
     assert capsys.readouterr().err == expected
 
 
-def test_skill_eval_subcommand_uses_no_return_value_from_the_evaluator(launch, monkeypatch):
+def test_skill_eval_subcommand_returns_none(launch, monkeypatch):
     _, _, _, execute = launch
     execute.side_effect = None
     monkeypatch.setattr(install.sys, "argv", ["agentihooks", "skill", "eval", "--agent", "codex", "--", "codex"])
