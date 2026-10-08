@@ -25,6 +25,7 @@ from hooks.context import injection_trace, profile_chain, quarantine, tool_match
 
 STEPS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop"}
 _RUNNERS = {".sh": ["bash"], ".bash": ["bash"], ".py": [sys.executable]}
+FILTER_SUFFIX = ".filter.yaml"
 _INDEX_VERSION = 1
 _FRESH_NS = 2_000_000_000
 _CODE_ROOT = Path(__file__).resolve().parents[2]
@@ -335,8 +336,29 @@ def _kill_group(proc: subprocess.Popen) -> None:
         pass
 
 
+def _run_filter(entry: dict, step: str, payload: dict, timeout: float) -> dict:
+    import threading
+
+    from hooks.filters import runner
+
+    box: dict = {}
+
+    def work() -> None:
+        try:
+            box["run"] = runner.run(entry, step, payload)
+        except Exception as error:
+            box["run"] = {"error": f"filter crashed: {error}"}
+
+    thread = threading.Thread(target=work, daemon=True, name=f"filter:{entry['file']}")
+    thread.start()
+    thread.join(timeout)
+    return box.get("run") or {"error": f"timed out after {timeout:g}s"}
+
+
 def execute(entry: dict, step: str, payload: dict, timeout: float) -> dict:
     """Run one condition; never raises."""
+    if entry["file"].lower().endswith(FILTER_SUFFIX):
+        return _run_filter(entry, step, payload, timeout)
     cmd = _command(entry)
     if cmd is None:
         return {"error": "no runner for the extension and the file is not executable"}
