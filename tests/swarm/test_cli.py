@@ -674,7 +674,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
             stderr="",
         )
 
-    rt = runtime.HerdrRuntime(home=tmp_path, run=fake_run, choose=lambda r, e: ("codex", "priority"))
+    rt = runtime.HerdrRuntime(home=tmp_path, run=fake_run, choose=lambda r, e: ("codex", "rotation"))
     config = cli.SwarmConfig("sw", "/repo", 1, 1)
     placed = rt.spawn(config, "ci", "ci@a1b2c3-0001", {"id": "t2", "title": "speed up the tests"})
     prompt_path = tmp_path / "sw" / "prompts" / "ci@a1b2c3-0001.md"
@@ -696,7 +696,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
         profile="cicd",
         model_source="lane-default",
         profile_decision={**decision, "validation": placed.profile_decision["validation"]},
-        choice="share",
+        choice="rotation",
         launched_at=7_000,
         launch_timings=placed.launch_timings,
     )
@@ -1719,44 +1719,6 @@ def test_say_refused_by_a_link_posts_nothing_and_names_why(env, capsys):
 
     assert "can only observe" in capsys.readouterr().err
     assert ledger.said == [] and InboxStore(store.redis).inbox("engineer@a1b2c3-0001") == []
-
-
-def test_set_codex_share_and_status_shows_the_share_against_the_target(env, capsys):
-    store, _, _ = env
-    run("sw", "create", "--repo", "/repo")
-    assert run("sw", "set", "codex-share=40", "codex-min-week-left=10") == 0
-    config = store.config("sw")
-    assert (config.codex_share, config.codex_min_week_left) == (40, 10)
-    for harness in ("codex", "claude", "claude", "claude"):
-        store.count_spawn("sw", harness)
-    capsys.readouterr()
-    run("sw", "status")
-    assert "codex 1/4 spawns 25%  target 40%  min week left 10%" in capsys.readouterr().out.splitlines()[0]
-
-
-def test_status_takes_the_codex_target_from_the_environment_without_a_swarm_setting(env, capsys, monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_SHARE", "50")
-    monkeypatch.delenv("AGENTIHOOKS_SWARM_CODEX_MIN_WEEK_LEFT", raising=False)
-    run("sw", "create", "--repo", "/repo")
-    capsys.readouterr()
-    run("sw", "status")
-    assert "codex 0/0 spawns 0%  target 50%  min week left 5%" in capsys.readouterr().out.splitlines()[0]
-
-
-@pytest.mark.parametrize("setting, expected", [(None, 30), (50, 50), (0, 0)])
-def test_status_json_reports_the_effective_codex_target(env, capsys, monkeypatch, setting, expected):
-    monkeypatch.delenv("AGENTIHOOKS_SWARM_CODEX_SHARE", raising=False)
-    if setting is not None:
-        monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_SHARE", str(setting))
-    run("sw", "create", "--repo", "/repo")
-    capsys.readouterr()
-    run("sw", "status", "--json")
-    assert json.loads(capsys.readouterr().out)["config"]["codex_share"] == expected
-
-
-def test_set_refuses_a_codex_share_over_one_hundred(env):
-    run("sw", "create", "--repo", "/repo")
-    assert run("sw", "set", "codex-share=101") == 1
 
 
 def test_status_shows_each_agent_conversation_id_or_a_dash(env, capsys):

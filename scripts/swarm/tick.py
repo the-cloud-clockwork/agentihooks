@@ -104,7 +104,7 @@ class Ledger(Protocol):
 
 class Runtime(Protocol):
     def has_capacity(self, config) -> bool: ...
-    def spawn(self, config, lane: str, name: str, task: dict, spawns: dict | None = None) -> Placed: ...
+    def spawn(self, config, lane: str, name: str, task: dict) -> Placed: ...
     def live_names(self) -> set[str]: ...
     def reported(self, agent: AgentRecord) -> bool: ...
     def bindings(self, agents: list[AgentRecord]) -> dict: ...
@@ -649,9 +649,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             store.record_launch(slug, record, "pending")
             store.seats.occupy(seat, name, now_ms)
             task["transfer"] = transfers.attach(store, slug, record)
-            placed = runtime.spawn(
-                config, lane, name, primed(store, slug, seat, task), spawns=store.share_picks(slug, now_ms)
-            )
+            placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
         except Exception as exc:
             transfers.failed(store, slug, record)
             store.note_launch_failure(slug, task["id"], str(exc))

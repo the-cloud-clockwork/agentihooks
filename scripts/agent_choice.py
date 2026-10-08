@@ -1,32 +1,9 @@
+import time
+
+from scripts import session_bands
+
 AGENTS = ("claude", "codex")
-DEFAULT_PRIORITY = "claude,codex"
-ALL_FULL = "every agent is at its session cap"
-SHARE_WINDOW_MS = 6 * 3_600_000
-
-
-def priority(environ: dict[str, str]) -> list[str]:
-    raw = environ.get("AGENTIHOOKS_AGENT_PRIORITY") or DEFAULT_PRIORITY
-    order = [name.strip() for name in raw.split(",") if name.strip() in AGENTS]
-    return order or DEFAULT_PRIORITY.split(",")
-
-
-def has_quota(agent: str, environ: dict[str, str]) -> bool | None:
-    """True or False from the last known quota; None when nothing is known."""
-    if agent == "codex":
-        from scripts import codex_router
-
-        pool = codex_router.routing_pool(environ)
-        seen = codex_router.quotas(pool, environ)
-        used = [quota.highest_used for quota in seen.values() if quota and quota.highest_used is not None]
-        if not used:
-            return None
-        threshold = float(environ.get("AGENTIHOOKS_HANDOFF_WEEK_PCT") or 98)
-        unknown = any(account.signed_in and seen.get(account.name) is None for account in pool)
-        return unknown or any(value < threshold for value in used)
-    from scripts.claude_quota_balancer import cached_observations, is_routable
-
-    results = [result for _, result in cached_observations()]
-    return any(is_routable(result) for result in results) if results else None
+ALL_FULL = "every account is at its session cap"
 
 
 def account_has_quota(agent: str, account: str, environ: dict[str, str]) -> bool | None:
@@ -36,109 +13,35 @@ def account_has_quota(agent: str, account: str, environ: dict[str, str]) -> bool
 
         pool = [found for found in codex_router.routing_pool(environ) if found.name == account]
         quota = codex_router.quotas(pool, environ).get(account) if pool else None
-        if quota is None or quota.highest_used is None:
-            return None
-        return quota.highest_used < float(environ.get("AGENTIHOOKS_HANDOFF_WEEK_PCT") or 98)
-    from scripts.claude_quota_balancer import cached_observations, is_routable
+        cap = codex_router.account_cap(quota, time.time())
+        return None if cap is None else bool(cap)
+    from scripts.claude_quota_balancer import account_cap, cached_observations
 
-    seen = [result for _, result in cached_observations() if _account(result) == account]
-    return is_routable(seen[-1]) if seen else None
+    now = time.time()
+    seen = [(at, result) for at, result in cached_observations() if _account(result) == account]
+    cap = account_cap(seen[-1][1]) if seen and session_bands.fresh(seen[-1][0], now) else None
+    return None if cap is None else bool(cap)
 
 
 def _account(result) -> str:
     return result.account
 
 
-def at_cap(agent: str, environ: dict[str, str]) -> bool:
-    """True when every account of this agent already runs the maximum number of sessions."""
-    from hooks.context import account_sessions
-    from scripts import session_caps
-
-    cap, caps = account_sessions.max_sessions(environ), session_caps.stored(agent)
-    if agent == "codex":
-        from scripts import codex_router
-
-        counts = account_sessions.codex_sessions_by_account()
-        pool = [account for account in codex_router.routing_pool(environ) if account.signed_in]
-        return all(counts.get(account.name, 0) >= caps.get(account.name, cap) for account in pool)
-    from scripts import claude_quota_balancer as balancer
-
-    accounts = {_account(result) for _, result in balancer.cached_observations() if balancer.is_routable(result)}
-    counts = account_sessions.sessions_by_account()
-    return bool(accounts) and all(counts.get(account, 0) >= caps.get(account, cap) for account in accounts)
-
-
 def choose(requested: str, environ: dict[str, str]) -> tuple[str, str]:
-    """(agent, reason): the requested agent, else the first in priority order with quota and a free session slot."""
+    """(agent, reason): the requested agent, else the harness of the account the session rotation picks next."""
     if requested:
         return requested, "requested"
-    order = priority(environ)
-    skipped: list[str] = []
-    for agent in order:
-        if has_quota(agent, environ) is False:
-            skipped.append(f"{agent} has no quota")
-        elif at_cap(agent, environ):
-            skipped.append(f"{agent} is at its session cap")
-        else:
-            return agent, "priority" if not skipped else f"fallthrough: {', '.join(skipped)}"
-    if any("session cap" in reason for reason in skipped):
-        return order[0], ALL_FULL
-    return order[0], "no agent has quota"
+    from scripts.swarm import capacity
 
-
-def codex_week_left(environ: dict[str, str]) -> float | None:
-    """The weekly quota left on the best signed-in Codex account; None when nothing is known."""
-    from scripts import codex_router
-
-    pool = [account for account in codex_router.routing_pool(environ) if account.signed_in]
-    seen = codex_router.quotas(pool, environ)
-    left = [100.0 - quota.seven_day.used for quota in seen.values() if quota and quota.seven_day.used is not None]
-    return max(left) if left else None
-
-
-def choose_shared(
-    requested: str,
-    environ: dict[str, str],
-    spawns: dict[str, int] | None,
-    share: int,
-    min_week_left: int,
-    choose=choose,
-) -> tuple[str, str]:
-    """Codex while its share of the swarm's recent share picks is below the target and its week has room, else the
-    priority choice; a zero share or a known week under the minimum turns an automatic Codex choice into Claude."""
-    if not requested and spawns is not None:
-        codex, total = spawns.get("codex", 0), sum(spawns.values())
-        if codex * 100 < share * max(total, 1) and not at_cap("codex", environ):
-            left = codex_week_left(environ)
-            if left is not None and left >= min_week_left:
-                return "codex", f"codex share {codex}/{total} below {share}%"
-    agent, reason = choose(requested, environ)
-    if not requested and agent == "codex" and not codex_open(environ, share, min_week_left):
-        return "claude", choose("", {**environ, "AGENTIHOOKS_AGENT_PRIORITY": "claude"})[1]
-    return agent, reason
-
-
-def codex_open(environ: dict[str, str], share: int, min_week_left: int) -> bool:
-    if share <= 0:
-        return False
-    left = codex_week_left(environ)
-    return left is None or left >= min_week_left
+    seat = session_bands.pick(capacity.seats(capacity.accounts(dict(environ), time.time())))
+    return (seat.harness, "rotation") if seat else ("claude", ALL_FULL)
 
 
 def choice_kind(reason: str) -> str:
     if reason == "requested":
         return "forced"
-    if reason == "priority" or reason.startswith("codex share "):
-        return "share"
+    if reason == "rotation":
+        return "rotation"
     if reason.startswith("fallthrough:"):
         return "overflow"
     return "other"
-
-
-def share_picks(rows: list[dict], since: int) -> dict[str, int]:
-    """Share picks by harness among spawn rows started at or after since; a later row of the same name wins."""
-    picks: dict[str, int] = {}
-    for row in {row["name"]: row for row in rows}.values():
-        if row.get("choice") == "share" and row.get("started_at", 0) >= since:
-            picks[row["harness"]] = picks.get(row["harness"], 0) + 1
-    return picks

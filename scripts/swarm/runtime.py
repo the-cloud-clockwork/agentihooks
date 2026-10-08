@@ -10,7 +10,7 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 
-from scripts import agent_choice
+from scripts import agent_choice, session_bands
 from scripts.handoff import envelope
 from scripts.init_agent import PREDECESSOR
 from scripts.profiles import binding, plugins
@@ -28,7 +28,7 @@ from scripts.swarm import (
     timing,
 )
 from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
-from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
+from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError
 
 SWARM_HOME = Path.home() / ".agentihooks" / "swarm"
@@ -159,11 +159,8 @@ class HerdrRuntime:
         if hasattr(self, "_quota_accounts"):
             from scripts.swarm.capacity import free_seats
 
-            return any(free_seats(row, self._quota_cap, self._quota_floor) for row in self._quota_accounts)
-        share, floor = codex_split(config, environ)
-        return (
-            agent_choice.choose_shared("", environ, None, share, floor, choose=self.choose)[1] != agent_choice.ALL_FULL
-        )
+            return any(free_seats(row) for row in self._quota_accounts)
+        return self.choose("", environ)[1] != agent_choice.ALL_FULL
 
     def quota_capacity(
         self,
@@ -173,36 +170,26 @@ class HerdrRuntime:
         demand: dict | None = None,
         requirements: dict | None = None,
     ) -> dict:
-        from hooks.context import account_sessions
         from scripts.swarm import capacity
 
-        environ = dict(os.environ)
-        self._quota_accounts = capacity.accounts(environ, now)
-        self._quota_cap = account_sessions.max_sessions(environ)
-        self._quota_share, self._quota_floor = codex_split(config, environ)
-        decision = capacity.calculate(
-            replace(config, codex_share=self._quota_share),
-            self._quota_accounts,
-            agents,
-            self._quota_cap,
-            self._quota_floor,
-            demand,
-            requirements,
-        )
+        placing = demand is None or any(demand.values())
+        self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing)
+        decision = capacity.calculate(config, self._quota_accounts, agents, demand, requirements)
         self._quota_allocations = decision["allocation"]
         if hasattr(self, "_quota_ready_ids"):
-            self._quota_tasks = {
-                self._quota_ready_ids[lane][slot["index"]]: slot["harness"]
-                for lane, slots in decision["placements"].items()
-                for slot in slots
+            slots = {
+                self._quota_ready_ids[lane][slot["index"]]: slot
+                for lane, placed in decision["placements"].items()
+                for slot in placed
             }
+            self._quota_tasks = {task: slot["harness"] for task, slot in slots.items()}
+            self._quota_task_accounts = {task: slot["account"] for task, slot in slots.items()}
             decision["tasks"] = dict(self._quota_tasks)
         return decision
 
     def quota_requirements(self, config: SwarmConfig, ready: dict) -> dict:
         from scripts.swarm.capacity import _harnesses
 
-        config = replace(config, codex_share=codex_split(config, dict(os.environ))[0])
         self._quota_ready_ids = {lane: [task["id"] for task in tasks] for lane, tasks in ready.items()}
         requirements = {}
         for lane, tasks in ready.items():
@@ -231,11 +218,7 @@ class HerdrRuntime:
     def _quota_eligible(self, harness):
         from scripts.swarm.capacity import free_seats
 
-        return [
-            row
-            for row in self._quota_accounts
-            if row.harness == harness and free_seats(row, self._quota_cap, self._quota_floor)
-        ]
+        return [row for row in self._quota_accounts if row.harness == harness and free_seats(row)]
 
     def _quota_choice(self, agent, reason, fixed, lane):
         if not hasattr(self, "_quota_accounts"):
@@ -244,13 +227,35 @@ class HerdrRuntime:
         eligible = [h for h in agent_choice.AGENTS if self._quota_eligible(h) and (allocation is None or allocation[h])]
         if agent in eligible:
             return agent, reason
-        if not fixed:
-            for harness in eligible:
-                if harness != "codex" or self._quota_share:
-                    return harness, f"fallthrough: {agent} has no placeable quota seats"
+        if not fixed and eligible:
+            return eligible[0], f"fallthrough: {agent} has no placeable quota seats"
         raise SpawnError(f"no {agent} account has placeable quota seats")
 
-    def spawn(self, config, lane, name, task, spawns=None):
+    def _rotation(self, requested, environ):
+        if requested or not hasattr(self, "_quota_accounts"):
+            return self.choose(requested, environ)
+        from scripts.swarm.capacity import seats
+
+        seat = session_bands.pick(seats(self._quota_accounts))
+        return (seat.harness, "rotation") if seat else ("claude", agent_choice.ALL_FULL)
+
+    def _planned_account(self, task_id, agent):
+        planned = getattr(self, "_quota_tasks", {}).get(task_id)
+        return getattr(self, "_quota_task_accounts", {}).get(task_id) if planned == agent else None
+
+    def _quota_account(self, agent, preferred):
+        from scripts.swarm.capacity import seats
+
+        eligible = self._quota_eligible(agent)
+        row = next((row for row in eligible if row.name == preferred), None)
+        if row is None:
+            seat = session_bands.pick(seats(eligible))
+            if seat is None:
+                raise SpawnError(f"no {agent} account has placeable quota seats")
+            row = next(row for row in eligible if row.name == seat.account)
+        return row
+
+    def spawn(self, config, lane, name, task):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
         saved = relaunch or _transfer(task)
@@ -285,8 +290,7 @@ class HerdrRuntime:
             requested = saved["harness"]
             agent, reason = self.choose(requested, environ)
         else:
-            share, floor = codex_split(config, environ)
-            agent, reason = agent_choice.choose_shared(requested, environ, spawns, share, floor, choose=self.choose)
+            agent, reason = self._rotation(requested, environ)
         if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts"):
             raise SpawnError(reason)
         planned = getattr(self, "_quota_tasks", {}).get(task["id"])
@@ -324,9 +328,7 @@ class HerdrRuntime:
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
         if hasattr(self, "_quota_accounts"):
-            eligible = self._quota_eligible(agent)
-            account = next((row for row in eligible if row.name == saved.get("account")), None)
-            account = account or max(eligible, key=lambda row: min(row.five_left, row.week_left))
+            account = self._quota_account(agent, saved.get("account") or self._planned_account(task["id"], agent))
             route = ["--route", account.name]
         placed = timing.call(
             self._launch,

@@ -5,11 +5,11 @@ import shutil
 import sys
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
-from scripts.claude_quota_balancer import _duration, _percent, _span
-from scripts.session_caps import SessionCaps
+from scripts import codex_router, session_bands
+from scripts.claude_quota_balancer import _duration, _percent, _span, account_cap
 
 PAGE_TTL_S = 60
 REFRESH_MIN_S = 60
@@ -30,6 +30,7 @@ class QuotaRow:
     source: str
     five_hour_resets_at: int | None = None
     observed_at: float | None = None
+    cap: int | None = None
 
 
 def _left(used: float | None) -> float | None:
@@ -37,8 +38,13 @@ def _left(used: float | None) -> float | None:
 
 
 def claude_rows(
-    results: list, sessions: dict[str, int], source: str, observed: dict[str, float] | None = None
+    results: list,
+    sessions: dict[str, int],
+    source: str,
+    observed: dict[str, float] | None = None,
+    now: float | None = None,
 ) -> list[QuotaRow]:
+    now = time.time() if now is None else now
     return [
         QuotaRow(
             agent="claude",
@@ -51,6 +57,7 @@ def claude_rows(
             source=source,
             five_hour_resets_at=result.five_hour.resets_at,
             observed_at=(observed or {}).get(result.account),
+            cap=account_cap(result, now) if session_bands.fresh((observed or {}).get(result.account), now) else None,
         )
         for result in results
     ]
@@ -73,19 +80,20 @@ def codex_rows(accounts: list, quotas: dict, sessions: dict[str, int], now: floa
                 source=f"session-log {_span(max(0, int(now - quota.observed_at)))} ago" if quota else "no session log",
                 five_hour_resets_at=quota.five_hour.resets_at if quota else None,
                 observed_at=quota.observed_at if quota else None,
+                cap=codex_router.account_cap(quota, now) if account.signed_in else None,
             )
         )
     return rows
 
 
-def render(rows: list[QuotaRow], now: int, caps: Mapping[str, SessionCaps] | None = None) -> str:
+def render(rows: list[QuotaRow], now: int) -> str:
     headers = ["AGENT", "ACCOUNT", "STATE", "SESSIONS", "5H LEFT", "5H RESET", "7D LEFT", "7D RESET", "SOURCE"]
     table = [
         [
             row.agent,
             row.account,
             row.state,
-            f"{row.sessions}/{caps[row.agent].of(row.account)}" if caps and row.agent in caps else str(row.sessions),
+            f"{row.sessions}/{'?' if row.cap is None else row.cap}",
             _percent(row.five_hour_left),
             _duration(row.five_hour_resets_at, now),
             _percent(row.seven_day_left),
@@ -112,8 +120,10 @@ def _claude(refresh: bool, timeout: float) -> list[QuotaRow]:
         results, source = collect_results(
             credentials, refresh=refresh, timeout=timeout, claude_bin=shutil.which("claude") or "claude"
         )
-        return claude_rows(results, sessions, source)
-    return claude_rows([result for _, result in cached_observations()], sessions, "cached")
+    else:
+        results, source = [result for _, result in cached_observations()], "cached"
+    observed = {result.account: at for at, result in cached_observations()}
+    return claude_rows(results, sessions, source, observed)
 
 
 def _codex(now: float) -> list[QuotaRow]:
@@ -125,11 +135,8 @@ def _codex(now: float) -> list[QuotaRow]:
 
 
 def codex_table() -> str:
-    from hooks.context.account_sessions import max_sessions
-    from scripts import session_caps
-
     now = time.time()
-    return render(_codex(now), int(now), {"codex": session_caps.caps(max_sessions(), "codex")})
+    return render(_codex(now), int(now))
 
 
 def _page_quota(now: float) -> dict:
@@ -139,27 +146,20 @@ def _page_quota(now: float) -> dict:
     cached = claude_quota_balancer.cached_observations()
     observed = {result.account: at for at, result in cached}
     pool = codex_router.routing_pool(os.environ)
-    claude = claude_rows([result for _, result in cached], account_sessions.sessions_by_account(), "cached", observed)
+    claude = claude_rows(
+        [result for _, result in cached], account_sessions.sessions_by_account(), "cached", observed, now
+    )
     rows = claude + codex_rows(
         pool, codex_router.quotas(pool, os.environ), account_sessions.codex_sessions_by_account(), now
     )
-    return {
-        "cap": account_sessions.max_sessions(),
-        "probed_at": max(observed.values(), default=None),
-        "rows": [asdict(row) for row in rows],
-    }
+    return {"probed_at": max(observed.values(), default=None), "rows": [asdict(row) for row in rows]}
 
 
 def page_quota(now: float | None = None) -> dict:
-    from scripts import session_caps
-
     now = time.time() if now is None else now
     if not _page_cache or now - _page_cache["at"] >= PAGE_TTL_S:
         _page_cache.update(at=now, quota=_page_quota(now))
-    quota = _page_cache["quota"]
-    caps = {harness: session_caps.stored(harness) for harness in session_caps.HARNESSES}
-    rows = [{**row, "cap": caps[row["agent"]].get(row["account"], quota["cap"])} for row in quota["rows"]]
-    return {**quota, "rows": rows}
+    return _page_cache["quota"]
 
 
 def refresh_page_quota(probe: Callable[[], str], now: float | None = None) -> str:

@@ -53,7 +53,7 @@ class FakeLedger:
 class FakeRuntime:
     def __init__(self, fail=False, full=False, crash=None):
         self.live, self.spawned, self.killed, self.closed, self.nudged = set(), [], [], [], []
-        self.tasks, self.masters, self.spawns_seen, self.harness = [], [], [], "claude"
+        self.tasks, self.masters, self.harness = [], [], "claude"
         self.fail, self.full, self.crash, self.statuses, self.stuck = fail, full, crash, {}, set()
         self.conversation_ids, self.named, self.closed_spaces, self.typed = {}, [], [], {}
         self.capacity_for = []
@@ -63,7 +63,7 @@ class FakeRuntime:
         self.capacity_for.append(config.slug)
         return not self.full
 
-    def spawn(self, config, lane, name, task, spawns=None):
+    def spawn(self, config, lane, name, task):
         if self.crash:
             raise self.crash
         if self.fail:
@@ -74,7 +74,6 @@ class FakeRuntime:
             return Placed(pane_id=f"w1:m{len(self.masters)}", harness="claude")
         self.spawned.append((lane, name, task["id"]))
         self.tasks.append(dict(task))
-        self.spawns_seen.append(dict(spawns or {}))
         return Placed(
             pane_id=f"w1:p{len(self.spawned)}",
             harness=self.harness,
@@ -269,12 +268,12 @@ class FailingFor(FakeRuntime):
         super().__init__()
         self.failing, self.tried = set(failing), []
 
-    def spawn(self, config, lane, name, task, spawns=None):
+    def spawn(self, config, lane, name, task):
         if lane != MASTER:
             self.tried.append(task["id"])
         if task["id"] in self.failing:
             raise SpawnError("MCP_KEY_GATEWAY is unset")
-        return super().spawn(config, lane, name, task, spawns)
+        return super().spawn(config, lane, name, task)
 
 
 def test_a_failing_launch_does_not_stop_the_spawns_behind_it(store):
@@ -351,9 +350,9 @@ def test_a_spawn_claims_its_task_for_one_lease_and_records_its_seat_at_launch_ti
     ledger, runtime, seen = tasks(("t1", "eng")), FakeRuntime(), []
     spawn = runtime.spawn
 
-    def watching(config, lane, name, task, spawns=None):
+    def watching(config, lane, name, task):
         seen.extend(a.state for a in store.agents("sw") if a.name == name and lane != MASTER)
-        return spawn(config, lane, name, task, spawns)
+        return spawn(config, lane, name, task)
 
     runtime.spawn = watching
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -1539,43 +1538,10 @@ def test_a_task_without_a_kind_takes_its_lane_default_kind_when_claimed(store):
 def test_work_lane_spawns_are_counted_by_harness_and_handed_to_the_runtime(store):
     rt = FakeRuntime()
     tick("sw", store, FakeLedger([{"id": "t1"}, {"id": "t2"}, {"id": "t3", "lane": "ci"}]), rt, 1000)
-    assert rt.spawns_seen == [{}, {"claude": 1}, {"claude": 2}]
     rt.harness = "codex"
     store.update("sw", max_eng=3)
     tick("sw", store, FakeLedger([{"id": "t4"}]), rt, 2000)
     assert store.spawns("sw") == {"claude": 3, "codex": 1}
-
-
-def test_a_master_spawn_is_not_counted_in_the_codex_share(store):
-    store.update("sw", max_eng=0, max_ci=0)
-    tick("sw", store, FakeLedger([]), FakeRuntime(), 1000)
-    assert store.spawns("sw") == {}
-
-
-def test_overflow_on_codex_in_the_window_leaves_the_next_free_spawn_to_the_share(store, monkeypatch):
-    from scripts import agent_choice
-
-    now = 10 * 3_600_000
-    rows = [
-        *[(f"s{i}", "claude", "share", now - i * 1000) for i in range(1, 3)],
-        *[(f"o{i}", "codex", "overflow", now - i * 1000) for i in range(1, 4)],
-        ("f1", "codex", "forced", now - 9000),
-        ("old", "codex", "share", now - 7 * 3_600_000),
-        *[(f"s{i}", "claude", "share", now - i * 1000) for i in range(3, 5)],
-    ]
-    for name, harness, choice, at in rows:
-        store.put_agent("sw", AgentRecord(name, "eng", f"x-{name}", harness=harness, started_at=at, choice=choice))
-        store.drop_agent("sw", name, at=at)
-        store.count_spawn("sw", harness)
-    rt = FakeRuntime()
-    tick("sw", store, FakeLedger([{"id": "t1"}]), rt, now)
-    assert rt.spawns_seen == [{"claude": 4}]
-    monkeypatch.setattr(agent_choice, "at_cap", lambda agent, environ: False)
-    monkeypatch.setattr(agent_choice, "codex_week_left", lambda environ: 90.0)
-    assert agent_choice.choose_shared("", {}, rt.spawns_seen[0], 20, 5, choose=lambda r, e: ("claude", "priority")) == (
-        "codex",
-        "codex share 0/4 below 20%",
-    )
 
 
 def _conversations(store):
