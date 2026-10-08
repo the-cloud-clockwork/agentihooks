@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from scripts.swarm_ledger import storage_migration
+from scripts.swarm_ledger import ledger_core, storage_migration
 from scripts.swarm_ledger.repository import repository
 from scripts.swarm_ledger.storage_migration import __main__ as command
 from tests.swarm_ledger.test_sqlite import document
@@ -51,7 +51,7 @@ def test_cutover_imports_every_file_left_in_the_ledger_folder(monkeypatch, capsy
     run(monkeypatch, "cutover")
     assert "cutover-a" in json.loads(capsys.readouterr().out)["stored"]
     assert not (ledger_dir / "cutover-a.json").exists()
-    assert repository.export_document("cutover-a") == document()
+    assert repository.export_document("cutover-a") == ledger_core.normalize(document())
 
 
 def test_export_of_an_unknown_ledger_names_it(monkeypatch):

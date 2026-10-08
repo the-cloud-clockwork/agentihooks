@@ -10,7 +10,6 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_alerts  # noqa: E402
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
-from scripts.swarm_ledger.repository.file import sync as file_sync  # noqa: E402
 
 from scripts.inbox.seats import seat_address  # noqa: E402
 from scripts.inbox.store import InboxStore  # noqa: E402
@@ -27,7 +26,7 @@ SIZE_TEXT = "phase {} description has 120 words, limit 100"
 
 
 def sync(ops=None):
-    return file_sync(SLUG, ops=ops, core=core)
+    return core.sync(SLUG, ops=ops)
 
 
 def make_ledger(description="d"):

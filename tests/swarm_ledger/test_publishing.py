@@ -5,8 +5,8 @@ class Store:
     def __init__(self):
         self.calls = []
 
-    def get_document(self, slug, reconcile=True):
-        self.calls.append(("get", slug, reconcile))
+    def get_document(self, slug):
+        self.calls.append(("get", slug))
         return {"_meta": {"rev": 1}, "read": slug}
 
     def apply_ops(self, slug, changes=None, ops=None, gate=None):
@@ -24,11 +24,9 @@ def wrapped():
 
 def test_a_read_returns_the_stored_document_and_publishes_it():
     store, published, repository = wrapped()
-    assert repository.get_document("s", reconcile=False) == {"_meta": {"rev": 1}, "read": "s"}
-    assert store.calls == [("get", "s", False)]
+    assert repository.get_document("s") == {"_meta": {"rev": 1}, "read": "s"}
+    assert store.calls == [("get", "s")]
     assert published == [("s", {"_meta": {"rev": 1}, "read": "s"})]
-    repository.get_document("t")
-    assert store.calls[-1] == ("get", "t", True)
 
 
 def test_a_write_returns_state_and_refusals_and_publishes_the_state():

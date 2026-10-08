@@ -28,7 +28,7 @@ def storage_lock(directory: Path):
 def load_state(json_path, seed, core=core):
     if json_path.exists():
         state = core.loads(json_path.read_text(encoding="utf-8"))
-        if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or "seeds" not in state["_meta"]:
+        if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or "rev" not in state["_meta"]:
             raise ValueError(f"{json_path} has no ledger _meta")
         meta = state.pop("_meta")
         meta.setdefault("events", [])
@@ -62,12 +62,11 @@ def backup(directory: Path, name: str, found: list) -> Path:
 def import_files(repository, slug: str, found: list) -> None:
     html_path, json_path = repository.directory / f"{slug}.html", repository.directory / f"{slug}.json"
     page = html_path.read_text(encoding="utf-8") if html_path in found else ""
-    token = core.read_token(page)
-    if json_path in found:
-        repository.import_document(slug, core.loads(json_path.read_text(encoding="utf-8")), token, replace=True)
+    doc, meta, created = load_state(json_path, core.parse_seed(page) if page else None, core)
+    if created:
+        repository.create_document(slug, doc, meta, core.read_token(page), replace=True)
     else:
-        doc, meta, _ = load_state(json_path, core.parse_seed(page), core)
-        repository.create_document(slug, doc, meta, token, replace=True)
+        repository.import_document(slug, {**doc, "_meta": meta}, core.read_token(page), replace=True)
 
 
 def adopt_registries(repository) -> None:

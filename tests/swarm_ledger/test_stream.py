@@ -88,7 +88,7 @@ def test_a_stream_starts_with_a_snapshot_then_sends_only_patches(live):
     assert ledger["notes"][-1]["text"] == "note 1"
     assert ledger == server.HUB.resource(SLUG, "ledger")
     assert cursor2 != cursor
-    reread = server.ledger_view(server.repository.get_document(SLUG, reconcile=False))
+    reread = server.ledger_view(server.repository.get_document(SLUG))
     if reread != ledger:
         _, same, _ = next_of(reader, {"ledger"})
         assert same["rev"] == change["rev"]

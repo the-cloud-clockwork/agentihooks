@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scripts.swarm_ledger import new_ledger
+from scripts.swarm_ledger import ledger_core, new_ledger
 from scripts.swarm_ledger.repository import legacy, sqlite
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 from tests.swarm_ledger.test_sqlite import document
@@ -35,13 +35,32 @@ def test_a_json_ledger_is_backed_up_imported_losslessly_and_set_aside(tmp_path):
     (directory / "old.html").write_text(page({"title": "x"}), encoding="utf-8")
     repo = stored(directory)
     assert repo.exists("old")
-    assert repo.export_document("old") == state
+    assert repo.export_document("old") == ledger_core.normalize(state)
     assert repo.token("old") == TOKEN
     assert not (directory / "old.json").exists() and not (directory / "old.html").exists()
     (backup,) = (directory / legacy.BACKUP).iterdir()
     assert backup.name.startswith("old-")
     assert (backup / "old.json").read_text(encoding="utf-8") == source
     assert (backup / "old.html").read_text(encoding="utf-8") == page({"title": "x"})
+
+
+def test_a_json_ledger_from_before_a_field_existed_imports_in_the_shape_the_server_reads(tmp_path):
+    directory = folder(tmp_path)
+    state = {
+        "title": "Old",
+        "overview": "o",
+        "phases": [],
+        "questions": [],
+        "followups": [],
+        "_meta": {"rev": 3, "stamps": {}, "events": [], "seeds": {}},
+    }
+    (directory / "old.json").write_text(json.dumps(state), encoding="utf-8")
+    repo = stored(directory)
+    written, rejected = repo.apply_ops("old", ops=[{"op": "add", "id": "m1", "thread": "chat", "text": "hello"}])
+    assert rejected == []
+    assert written["artifact_trash"] == [] and [m["id"] for m in written["chat"]] == ["m1"]
+    (backup,) = (directory / legacy.BACKUP).iterdir()
+    assert json.loads((backup / "old.json").read_text(encoding="utf-8")) == state
 
 
 def test_a_page_without_json_becomes_a_fresh_ledger_with_its_token(tmp_path):
@@ -64,7 +83,7 @@ def test_a_dropped_file_replaces_the_stored_ledger_once(tmp_path):
     (directory / "same.json").write_text(json.dumps(replaced), encoding="utf-8")
     assert repo.get_document("same")["title"] == "Replaced"
     assert not (directory / "same.json").exists()
-    assert repo.export_document("same") == replaced
+    assert repo.export_document("same") == ledger_core.normalize(replaced)
 
 
 def test_an_unreadable_file_is_kept_and_reported_on_a_sweep_but_refused_by_name(tmp_path, capsys):

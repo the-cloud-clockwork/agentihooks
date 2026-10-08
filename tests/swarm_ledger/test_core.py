@@ -5,10 +5,12 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
+import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
-from scripts.swarm_ledger.repository import file as storage
 from tests.swarm_ledger import legacy_page  # noqa: E402
+
+storage = core
 
 SLUG = "demo-2026-01-01"
 
@@ -60,8 +62,8 @@ class ChatOps(unittest.TestCase):
 
     def test_page_version_tracks_the_template(self):
         self.assertRegex(core.page_version(), r"^[0-9a-f]{12}$")
-        html = core.paths(SLUG)[0].read_text(encoding="utf-8")
-        self.assertEqual(core.PAGE_RE.search(html).group(1), core.page_version())
+        page = server.page_for(SLUG)
+        self.assertEqual(core.PAGE_RE.search(page).group(1), core.page_version())
 
 
 class Start(unittest.TestCase):
