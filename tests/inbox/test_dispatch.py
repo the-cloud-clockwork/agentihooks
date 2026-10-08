@@ -110,16 +110,48 @@ def clock(monkeypatch):
     return advance
 
 
-def test_own_holds_the_recipient_for_the_owner_expiry(store, dispatcher):
+def test_the_owner_expiry_defaults_to_thirty_seconds():
+    assert OWNER_TTL_ENV == "AGENTIHOOKS_INBOX_OWNER_TTL_S"
     assert owner_ttl_s({}) == 30
     assert owner_ttl_s({OWNER_TTL_ENV: "5"}) == 5
+
+
+def test_own_holds_the_recipient_for_the_owner_expiry(store, dispatcher):
     assert store.redis.ttl(owner_key("bob")) == 30
 
 
-def test_own_reads_the_expiry_from_the_environment(store, monkeypatch):
-    monkeypatch.setenv(OWNER_TTL_ENV, "7")
-    Dispatcher(store).own("bob", "bridge-1")
+def test_own_and_renew_read_the_expiry_from_the_environment(store, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_INBOX_OWNER_TTL_S", "7")
+    dispatcher = Dispatcher(store)
+    dispatcher.own("bob", "bridge-1")
     assert store.redis.ttl(owner_key("bob")) == 7
+    store.redis.expire(owner_key("bob"), 2)
+    assert dispatcher.renew("bob", "bridge-1") is True
+    assert store.redis.ttl(owner_key("bob")) == 7
+
+
+def test_renew_resolves_an_alias(store, dispatcher, clock):
+    store.redis.set(NameRegistry.key("alias", "old-name"), "bob")
+    clock(10)
+    assert dispatcher.renew("old-name", "bridge-1") is True
+    assert store.redis.ttl(owner_key("bob")) == 30
+
+
+def test_an_owner_taken_inside_the_renew_transaction_is_not_extended(store, dispatcher, monkeypatch):
+    import scripts.inbox.dispatch as dispatch
+
+    taken = []
+
+    def take_over_then_read():
+        if not taken:
+            taken.append(1)
+            store.redis.set(owner_key("bob"), "bridge-2", ex=5)
+        return 30
+
+    monkeypatch.setattr(dispatch, "owner_ttl_s", take_over_then_read)
+    assert dispatcher.renew("bob", "bridge-1") is False
+    assert dispatcher.owner("bob") == "bridge-2"
+    assert store.redis.ttl(owner_key("bob")) == 5
 
 
 def test_a_takeover_holds_the_recipient_for_the_owner_expiry(store, dispatcher, clock):
