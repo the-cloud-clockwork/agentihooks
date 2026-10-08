@@ -431,7 +431,7 @@ def new_item(name, seed_item, ctx):
 
 
 def refuse_seed_adds(doc, base_doc, seed, ctx):
-    """New tasks, follow ups and phases come only from the ledger add commands, where the duplicate check runs."""
+    """New tasks, follow ups and phases come only from the ledger add commands."""
     kept = {}
     for name, (noun, command, fields) in SEED_ADD_COMMANDS.items():
         known = {i["id"] for i in doc[name]} | {i["id"] for i in base_doc[name]}
