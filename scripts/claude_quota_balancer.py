@@ -634,6 +634,12 @@ def is_routable(result: ProbeResult, now: float | None = None, include_fable: bo
     return bool(account_cap(result, now, include_fable))
 
 
+def _spend_by(result: ProbeResult, now: float) -> float | None:
+    five = session_bands.left(result.five_hour.used, result.five_hour.resets_at, now)
+    week = session_bands.left(result.seven_day.used, result.seven_day.resets_at, now)
+    return session_bands.spend_by(five, week, result.seven_day.resets_at)
+
+
 def rank_results(results: list[ProbeResult], include_fable: bool = False) -> list[ProbeResult]:
     return sorted(
         results,
@@ -678,7 +684,9 @@ def select_credential(
     excluded = set(exclude)
     counts = sessions or {}
     seats = {
-        result.account: session_bands.Seat(HARNESS, result.account, cap, counts.get(result.account, 0))
+        result.account: session_bands.Seat(
+            HARNESS, result.account, cap, counts.get(result.account, 0), _spend_by(result, timestamp)
+        )
         for result in results
         if result.account not in excluded and (cap := account_cap(result, timestamp, include_fable)) is not None
     }

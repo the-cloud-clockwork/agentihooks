@@ -192,10 +192,15 @@ def seats(
     pool: list[CodexAccount], quotas: Mapping[str, CodexQuota | None], sessions: Mapping[str, int], now: float
 ) -> list[session_bands.Seat]:
     return [
-        session_bands.Seat("codex", account.name, cap, sessions.get(account.name, 0))
+        session_bands.Seat("codex", account.name, cap, sessions.get(account.name, 0), _spend_by(quota, now))
         for account in pool
-        if account.signed_in and (cap := account_cap(quotas.get(account.name), now)) is not None
+        if account.signed_in and (cap := account_cap(quota := quotas.get(account.name), now)) is not None
     ]
+
+
+def _spend_by(quota: CodexQuota, now: float) -> float | None:
+    week = session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now)
+    return session_bands.spend_by(None, week, quota.seven_day.resets_at)
 
 
 def child_environment(account: CodexAccount, environ: Mapping[str, str]) -> dict[str, str]:

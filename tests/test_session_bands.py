@@ -86,3 +86,30 @@ def test_ties_rotate_in_a_fixed_order_as_sessions_land():
 def test_a_seat_counts_its_free_places():
     assert Seat("claude", "a", 6, 4).free == 2
     assert Seat("claude", "a", 2, 3).free == 0
+
+
+def test_among_equal_sessions_the_soonest_week_reset_wins():
+    seats = [
+        Seat("claude", "a", 6, 1, NOW + 5 * 86400),
+        Seat("claude", "b", 6, 1, NOW + 3600),
+        Seat("codex", "c", 6, 1),
+        Seat("claude", "d", 6, 0, NOW + 6 * 86400),
+    ]
+    assert session_bands.pick(seats) == seats[3]
+    seats[3] = Seat("claude", "d", 6, 1, NOW + 6 * 86400)
+    assert session_bands.pick(seats) == seats[1]
+    seats[1] = Seat("claude", "b", 1, 1, NOW + 3600)
+    assert session_bands.pick(seats) == seats[0]
+    seats[0] = Seat("claude", "a", 1, 1, NOW)
+    assert session_bands.pick(seats) == seats[3]
+    assert session_bands.pick([Seat("claude", "z", 6, 1), Seat("codex", "y", 6, 1, NOW)]).account == "y"
+    assert session_bands.pick([Seat("codex", "c", 6, 1), Seat("claude", "z", 6, 1)]).account == "z"
+
+
+@pytest.mark.parametrize(
+    ("five_left", "week_left", "spend_by"),
+    [(5.1, 2.1, NOW), (None, 2.1, NOW), (5, 50, None), (50, 2, None), (50, None, None)],
+)
+def test_only_an_account_above_the_handoff_margin_spends_its_week_first(five_left, week_left, spend_by):
+    assert session_bands.spend_by(five_left, week_left, NOW) == spend_by
+    assert session_bands.spend_by(50, 50, None) is None

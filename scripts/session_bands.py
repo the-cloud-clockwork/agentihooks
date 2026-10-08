@@ -5,6 +5,8 @@ FRESH_SECONDS = 15 * 60
 WEEK_FLOOR = 5.0
 FIVE_HOUR_BANDS = ((60.0, 6), (40.0, 4), (10.0, 3), (5.0, 2))
 TOP_BAND = FIVE_HOUR_BANDS[0][1]
+HANDOFF_FIVE = 5.0
+HANDOFF_WEEK = 2.0
 
 
 @dataclass(frozen=True)
@@ -13,6 +15,7 @@ class Seat:
     account: str
     cap: int
     sessions: int
+    week_resets_at: float | None = None
 
     @property
     def free(self) -> int:
@@ -46,5 +49,15 @@ def cap(five_left: float | None, week_left: float | None) -> int | None:
     return None if week is None else min(week, five_hour_cap(five_left))
 
 
+def spend_by(five_left: float | None, week_left: float | None, resets_at: float | None) -> float | None:
+    above = week_left is not None and week_left > HANDOFF_WEEK and (five_left is None or five_left > HANDOFF_FIVE)
+    return resets_at if above else None
+
+
+def _order(seat: Seat) -> tuple:
+    reset = seat.week_resets_at
+    return (seat.sessions, reset is None, reset or 0, seat.harness, seat.account)
+
+
 def pick(seats: Iterable[Seat]) -> Seat | None:
-    return min((seat for seat in seats if seat.free), key=lambda s: (s.sessions, s.harness, s.account), default=None)
+    return min((seat for seat in seats if seat.free), key=_order, default=None)

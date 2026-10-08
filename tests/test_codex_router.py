@@ -78,6 +78,20 @@ def test_the_account_with_the_fewest_sessions_under_its_week_band_wins():
     assert (seat.cap, seat.sessions) == (6, 0)
 
 
+def test_equal_sessions_go_to_the_codex_account_whose_week_resets_soonest():
+    soon = CodexQuota(NOW, "team", seven_day=QuotaWindow(used=50, resets_at=NOW + 600))
+    late = CodexQuota(NOW, "team", seven_day=QuotaWindow(used=10, resets_at=NOW + 90000))
+    spent = CodexQuota(NOW, "team", seven_day=QuotaWindow(used=98, resets_at=NOW + 60))
+    quotas = {"default": late, "alpha": spent, "beta": soon}
+    assert router.select(_accounts(), quotas, {}, NOW)[0] == _accounts()[2]
+    assert router.select(_accounts(), quotas, {"beta": 1}, NOW)[0] == _accounts()[0]
+    assert [seat.week_resets_at for seat in router.seats(_accounts(), quotas, {}, NOW)] == [
+        NOW + 90000,
+        None,
+        NOW + 600,
+    ]
+
+
 def test_a_week_under_five_percent_or_a_full_band_takes_no_session():
     quotas = {"default": _quota(96.0), "alpha": _quota(20.0), "beta": _quota(30.0)}
     assert router.select(_accounts(), quotas, {"alpha": 6}, NOW)[0] == _accounts()[2]
