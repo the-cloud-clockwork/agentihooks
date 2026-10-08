@@ -75,7 +75,7 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
         run: git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
 
-      # The base revision's copy grades, so a pull request cannot loosen its own audit.
+      # The base revision's copy grades once the base has one, so a pull request cannot loosen its own audit.
       - name: Fail on known vulnerabilities new against the base
         run: |
           grader="$RUNNER_TEMP/base"
