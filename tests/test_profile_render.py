@@ -752,6 +752,42 @@ def test_copilot_render_keeps_an_empty_tool_allowlist_closed(world, copilot_gate
     assert entry["tools"] == []
 
 
+def test_copilot_render_writes_the_stamped_bundle_servers_as_indented_json(world, copilot_gateway):
+    from scripts.profiles import render
+
+    out = render.render_copilot("rb-role")
+
+    text = (out / "mcp-config.json").read_text()
+    assert text == json.dumps(json.loads(text), indent=2) + "\n"
+    assert "bundle-srv" in json.loads(text)["mcpServers"]
+    assert json.loads((out / render.STAMP).read_text()) == render.stamp("rb-role")
+
+
+def test_forced_copilot_render_starts_a_new_home_beside_a_fresh_claude_one(world, copilot_gateway):
+    from scripts.profiles import render
+
+    claude = render.render_claude("rb-role")
+
+    out = render.render_copilot("rb-role", force=True)
+
+    assert out.parent != claude.parent
+    assert out == render.profile_dir("rb-role") / "copilot"
+
+
+def test_copilot_renders_an_overlay_set_into_its_own_home(world, overlays, copilot_gateway):
+    from scripts.profiles import render
+
+    out = render.render_copilot("rb-eng", overlays=["ov-a"])
+
+    assert out.parent == render.profile_dir("rb-eng", ["ov-a"])
+    assert json.loads((out / render.STAMP).read_text())["overlays"] == ["ov-a"]
+    assert "OV-A RULE MARKER" in (out / "copilot-instructions.md").read_text()
+    assert render.render_copilot("rb-eng", overlays=["ov-a"]) is None
+    forced = render.render_copilot("rb-eng", force=True, overlays=["ov-a"])
+    assert forced == render.profile_dir("rb-eng", ["ov-a"]) / "copilot"
+    assert "OV-A RULE MARKER" in (forced / "copilot-instructions.md").read_text()
+
+
 def test_init_re_renders_each_copilot_role_home(world, copilot_gateway, monkeypatch):
     from scripts.profiles import render
 

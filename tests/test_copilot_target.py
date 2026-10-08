@@ -543,6 +543,31 @@ class TestMcp:
         doc = json.loads((copilot_home() / "mcp-config.json").read_text())
         assert set(doc["mcpServers"]) == {"a", "b"}
 
+    def test_register_writes_indented_json_and_names_the_servers(self, adapter, capsys):
+        adapter.register_mcp({"a": {"command": "/bin/a"}, "b": {"command": "/bin/b"}})
+        text = (copilot_home() / "mcp-config.json").read_text()
+        assert text == json.dumps(json.loads(text), indent=2) + "\n"
+        assert "\x1b[32m  [OK] Copilot MCP servers: a, b\x1b[0m\n" in capsys.readouterr().out
+
+    def test_entries_translate_without_writing_the_config(self, adapter):
+        entries = adapter.mcp_entries({"a": {"command": "/bin/a"}})
+        assert entries == {"a": {"type": "local", "command": "/bin/a", "auth": False, "oidc": False}}
+        assert not (copilot_home() / "mcp-config.json").exists()
+
+    def test_entries_carry_a_declared_allowlist_and_denylist(self, adapter):
+        entry = adapter.mcp_entries({"srv": {"command": "/bin/srv", "enabled_tools": ["r"], "disabled_tools": ["w"]}})
+        assert entry["srv"]["tools"] == ["r"]
+        assert entry["srv"]["excludeTools"] == ["w"]
+
+    def test_entries_keep_native_lists_over_declared_ones(self, adapter):
+        spec = {"command": "/bin/srv", "tools": ["n"], "enabled_tools": ["r"], "excludeTools": ["x"]}
+        entry = adapter.mcp_entries({"srv": {**spec, "disabled_tools": ["w"]}})
+        assert entry["srv"]["tools"] == ["n"]
+        assert entry["srv"]["excludeTools"] == ["x"]
+
+    def test_entries_keep_an_empty_allowlist_closed(self, adapter):
+        assert adapter.mcp_entries({"srv": {"command": "/bin/srv", "enabled_tools": []}})["srv"]["tools"] == []
+
     def test_unbraced_env_reference_header_dropped_when_unset(self, adapter, capsys, monkeypatch):
         monkeypatch.delenv("MY_TOKEN", raising=False)
         adapter.register_mcp(
