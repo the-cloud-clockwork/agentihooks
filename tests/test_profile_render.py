@@ -384,6 +384,32 @@ def test_a_plugin_installed_inside_a_home_survives_the_next_render(world, name, 
     assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {**rendered, "local@m": True}
 
 
+def test_init_carries_a_user_scope_install_into_the_rendered_home(world):
+    from scripts.profiles import render
+
+    render.render_claude("rb-role")
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"new@m": True}}))
+
+    world["install"]._rerender_profile_homes("claude")
+
+    out = render.profile_dir("rb-role") / "claude"
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"new@m": True}
+
+
+def test_a_home_without_a_plugin_record_keeps_what_is_enabled_inside_it(world):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    _install_in_home(out, "local@m")
+    stamp = json.loads((out / render.STAMP).read_text())
+    stamp.pop("enabled_plugins")
+    (out / render.STAMP).write_text(json.dumps({**stamp, "plugins": {}}))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"local@m": True}
+
+
 def test_a_profile_disable_beats_a_plugin_installed_inside_the_home(world):
     from scripts.profiles import render
 

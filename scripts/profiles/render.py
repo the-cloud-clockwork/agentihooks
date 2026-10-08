@@ -224,8 +224,7 @@ def _home_plugins(prior: Path | None) -> list[str]:
     if prior is None:
         return []
     home = (_read_json(prior / "claude" / "settings.json") or {}).get("enabledPlugins") or {}
-    written = (_read_json(prior / "claude" / STAMP) or {}).get("enabled_plugins")
-    return [] if written is None else plugins.kept(home, written)
+    return plugins.kept(home, (_read_json(prior / "claude" / STAMP) or {}).get("enabled_plugins") or {})
 
 
 def _channels(channels: str, dirs: list[tuple[str, Path]]) -> str:
