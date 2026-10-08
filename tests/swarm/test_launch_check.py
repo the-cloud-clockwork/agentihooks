@@ -336,6 +336,7 @@ def test_a_late_join_that_holds_its_seat_is_reported_and_kept(store, monkeypatch
     assert name not in runtime.killed
     assert len(runtime.spawned) == 1
     report = launch_check.report(store, "sw", "t1")
+    assert report["state"] == "reported"
     assert report["misses"]["late"]["actual"] == {"joined_after_ms": 71_000, "seat": "eng-1@sw"}
     assert launch_check.findings(store, "sw") == []
     assert name not in launch_check.pending(store, "sw")

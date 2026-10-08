@@ -68,13 +68,12 @@ def _read_route_report(path: Path) -> dict[str, str]:
     return fields
 
 
-def _take_route_report(path: Path) -> tuple[dict[str, str], str]:
-    """The route report and when it was written in epoch ms, the moment the launcher hands over to the harness."""
+def _take_route_report(path: Path) -> tuple[dict[str, str], int | None]:
     try:
-        written = str(int(path.stat().st_mtime * 1000))
+        written = int(path.stat().st_mtime * 1000)
         return _read_route_report(path), written
     except FileNotFoundError:
-        return {}, ""
+        return {}, None
     finally:
         path.unlink(missing_ok=True)
 
@@ -702,7 +701,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         time.sleep(0.25)
     route, harness_at = _take_route_report(route_path)
     report.append(f"route_status={route.get('status', 'pending')}")
-    report.append(f"harness_at={harness_at}")
+    report.append(f"harness_at={harness_at or ''}")
     if route.get("account"):
         report.append(f"account={route['account']}")
     if route.get("placement"):

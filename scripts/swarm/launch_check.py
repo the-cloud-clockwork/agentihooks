@@ -163,7 +163,7 @@ def record(
         "task": agent.task,
         "at": at,
         "elapsed_ms": elapsed_ms,
-        "state": "failed" if found else "passed",
+        "state": "passed" if not found else "reported" if set(found) <= REPORT_ONLY else "failed",
         "misses": found,
         "held": held,
     }
