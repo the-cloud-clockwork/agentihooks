@@ -25,7 +25,12 @@ def signature(path):
 
 def synced(html_path, json_path, reconcile):
     entry = SYNCED.get(json_path)
-    if entry is None or entry[1] != signature(json_path) or (reconcile and entry[0] != signature(html_path)):
+    if (
+        entry is None
+        or shadow.enabled()
+        or entry[1] != signature(json_path)
+        or (reconcile and entry[0] != signature(html_path))
+    ):
         return None
     return {**entry[2], "_meta": dict(entry[2]["_meta"])}
 
