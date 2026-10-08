@@ -66,7 +66,8 @@ Agent text is for the operator: plain words, what was done or why it was skipped
 clock times, dates, hashes, run ids, file names, code identifiers, capital labels, dashes, arrows,
 AI phrasing, more than one parenthesis or semicolon, and comments over 50 words (chat 100, items 40).
 
-Env: LEDGER_DIR, LEDGER_HOST (127.0.0.1), LEDGER_PORT (8765).
+Env: LEDGER_DIR, LEDGER_HOST (127.0.0.1), LEDGER_PORT (8765),
+LEDGER_AUTOSTART=0 (never start a server on a failed request).
 """
 
 import argparse
@@ -143,7 +144,10 @@ def call(slug, ops=None, service=False):
     except OSError:
         if not repository.exists(slug):
             raise Missing(f"ledger {slug} does not exist") from None
-        subprocess.run([sys.executable, str(HERE / "ledger_server.py"), "--ensure"], check=False, capture_output=True)
+        if os.environ.get("LEDGER_AUTOSTART") != "0":
+            subprocess.run(
+                [sys.executable, str(HERE / "ledger_server.py"), "--ensure"], check=False, capture_output=True
+            )
     try:
         return request(slug, ops, service)
     except urllib.error.HTTPError as exc:

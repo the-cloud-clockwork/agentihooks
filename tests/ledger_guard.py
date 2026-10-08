@@ -50,6 +50,7 @@ SUITE = Path(tempfile.mkdtemp(prefix="agentihooks-test-ledgers-"))
 os.environ["LEDGER_DIR"] = str(SUITE)
 os.environ["LEDGER_RUN_PID"] = str(os.getpid())
 os.environ.pop("LEDGER_RUN_START", None)
+os.environ["LEDGER_AUTOSTART"] = "0"
 HELD_PORT = reserve_port()
 os.environ["LEDGER_PORT"] = str(HELD_PORT.getsockname()[1])
 atexit.register(lambda pid=os.getpid(): os.getpid() == pid and shutil.rmtree(SUITE, ignore_errors=True))
