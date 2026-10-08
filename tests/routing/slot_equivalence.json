@@ -1,0 +1,1588 @@
+{
+  "capacity_calculate": {
+    "busy": {
+      "accounts": [
+        {
+          "cap": 6,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "ALPHA",
+          "sessions": 3,
+          "state": "OPEN",
+          "week_left": 80.0,
+          "week_resets_at": 1900003600
+        },
+        {
+          "cap": 4,
+          "five_left": 50.0,
+          "harness": "claude",
+          "name": "BRAVO",
+          "sessions": 1,
+          "state": "OPEN",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 0,
+          "five_left": 4.0,
+          "harness": "claude",
+          "name": "CHARLIE",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 6,
+          "five_left": 75.0,
+          "harness": "claude",
+          "name": "DELTA",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 65.0,
+          "week_resets_at": 1900006000
+        },
+        {
+          "cap": 0,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "ECHO",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": null,
+          "five_left": null,
+          "harness": "claude",
+          "name": "FOXTROT",
+          "sessions": 0,
+          "state": "UNKNOWN",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 6,
+          "five_left": 75.0,
+          "harness": "claude",
+          "name": "GOLF",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 65.0,
+          "week_resets_at": 1900006000
+        },
+        {
+          "cap": 0,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "HOTEL",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 4.0,
+          "week_resets_at": null
+        },
+        {
+          "cap": null,
+          "five_left": null,
+          "harness": "claude",
+          "name": "ZULU",
+          "sessions": 2,
+          "state": "UNKNOWN",
+          "week_left": null,
+          "week_resets_at": null
+        },
+        {
+          "cap": 6,
+          "five_left": 80.0,
+          "harness": "codex",
+          "name": "default",
+          "sessions": 1,
+          "state": "OPEN",
+          "week_left": 70.0,
+          "week_resets_at": 1900005000
+        },
+        {
+          "cap": 6,
+          "five_left": 3.0,
+          "harness": "codex",
+          "name": "alpha",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 90.0,
+          "week_resets_at": 1900004000
+        },
+        {
+          "cap": 6,
+          "five_left": null,
+          "harness": "codex",
+          "name": "beta",
+          "sessions": 2,
+          "state": "OPEN",
+          "week_left": 100.0,
+          "week_resets_at": null
+        },
+        {
+          "cap": 0,
+          "five_left": 60.0,
+          "harness": "codex",
+          "name": "delta",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 4.0,
+          "week_resets_at": 1900000100
+        },
+        {
+          "cap": null,
+          "five_left": 95.0,
+          "harness": "codex",
+          "name": "gamma",
+          "sessions": 0,
+          "state": "UNKNOWN",
+          "week_left": 95.0,
+          "week_resets_at": null
+        },
+        {
+          "cap": null,
+          "five_left": null,
+          "harness": "codex",
+          "name": "omega",
+          "sessions": 1,
+          "state": "UNKNOWN",
+          "week_left": null,
+          "week_resets_at": null
+        }
+      ],
+      "allocation": {
+        "ci": {
+          "claude": 0,
+          "codex": 1
+        },
+        "eng": {
+          "claude": 2,
+          "codex": 1
+        },
+        "plan": {
+          "claude": 1,
+          "codex": 0
+        }
+      },
+      "configured": {
+        "ci": 2,
+        "eng": 4,
+        "plan": 1
+      },
+      "effective": {
+        "ci": 2,
+        "eng": 4,
+        "plan": 1
+      },
+      "placeable": {
+        "claude": 18,
+        "codex": 15
+      },
+      "placements": {
+        "ci": [
+          {
+            "account": "alpha",
+            "harness": "codex",
+            "index": 0
+          }
+        ],
+        "eng": [
+          {
+            "account": "GOLF",
+            "harness": "claude",
+            "index": 0
+          },
+          {
+            "account": "default",
+            "harness": "codex",
+            "index": 1
+          },
+          {
+            "account": "DELTA",
+            "harness": "claude",
+            "index": 2
+          }
+        ],
+        "plan": [
+          {
+            "account": "DELTA",
+            "harness": "claude",
+            "index": 0
+          }
+        ]
+      },
+      "reason": "accounts are closed, unknown; Claude has 18 free seats and Codex has 15 free seats"
+    },
+    "claude_only": {
+      "accounts": [
+        {
+          "cap": 6,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "ALPHA",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 80.0,
+          "week_resets_at": 1900003600
+        },
+        {
+          "cap": 4,
+          "five_left": 50.0,
+          "harness": "claude",
+          "name": "BRAVO",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 0,
+          "five_left": 4.0,
+          "harness": "claude",
+          "name": "CHARLIE",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 6,
+          "five_left": 75.0,
+          "harness": "claude",
+          "name": "DELTA",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 65.0,
+          "week_resets_at": 1900006000
+        },
+        {
+          "cap": 0,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "ECHO",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": null,
+          "five_left": null,
+          "harness": "claude",
+          "name": "FOXTROT",
+          "sessions": 0,
+          "state": "UNKNOWN",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 6,
+          "five_left": 75.0,
+          "harness": "claude",
+          "name": "GOLF",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 65.0,
+          "week_resets_at": 1900006000
+        },
+        {
+          "cap": 0,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "HOTEL",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 4.0,
+          "week_resets_at": null
+        },
+        {
+          "cap": 6,
+          "five_left": 80.0,
+          "harness": "codex",
+          "name": "default",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 70.0,
+          "week_resets_at": 1900005000
+        }
+      ],
+      "allocation": {
+        "ci": {
+          "claude": 1,
+          "codex": 2
+        },
+        "eng": {
+          "claude": 7,
+          "codex": 1
+        },
+        "plan": {
+          "claude": 1,
+          "codex": 0
+        }
+      },
+      "configured": {
+        "ci": 3,
+        "eng": 8,
+        "plan": 1
+      },
+      "effective": {
+        "ci": 3,
+        "eng": 8,
+        "plan": 1
+      },
+      "placeable": {
+        "claude": 22,
+        "codex": 6
+      },
+      "placements": {
+        "ci": [
+          {
+            "account": "default",
+            "harness": "codex",
+            "index": 0
+          },
+          {
+            "account": "BRAVO",
+            "harness": "claude",
+            "index": 1
+          },
+          {
+            "account": "default",
+            "harness": "codex",
+            "index": 2
+          }
+        ],
+        "eng": [
+          {
+            "account": "ALPHA",
+            "harness": "claude",
+            "index": 0
+          },
+          {
+            "account": "GOLF",
+            "harness": "claude",
+            "index": 1
+          },
+          {
+            "account": "ALPHA",
+            "harness": "claude",
+            "index": 2
+          },
+          {
+            "account": "DELTA",
+            "harness": "claude",
+            "index": 3
+          },
+          {
+            "account": "GOLF",
+            "harness": "claude",
+            "index": 4
+          },
+          {
+            "account": "BRAVO",
+            "harness": "claude",
+            "index": 5
+          },
+          {
+            "account": "ALPHA",
+            "harness": "claude",
+            "index": 6
+          },
+          {
+            "account": "default",
+            "harness": "codex",
+            "index": 7
+          }
+        ],
+        "plan": [
+          {
+            "account": "DELTA",
+            "harness": "claude",
+            "index": 0
+          }
+        ]
+      },
+      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 6 free seats"
+    },
+    "demand": {
+      "accounts": [
+        {
+          "cap": 6,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "ALPHA",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 80.0,
+          "week_resets_at": 1900003600
+        },
+        {
+          "cap": 4,
+          "five_left": 50.0,
+          "harness": "claude",
+          "name": "BRAVO",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 0,
+          "five_left": 4.0,
+          "harness": "claude",
+          "name": "CHARLIE",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 6,
+          "five_left": 75.0,
+          "harness": "claude",
+          "name": "DELTA",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 65.0,
+          "week_resets_at": 1900006000
+        },
+        {
+          "cap": 0,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "ECHO",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": null,
+          "five_left": null,
+          "harness": "claude",
+          "name": "FOXTROT",
+          "sessions": 0,
+          "state": "UNKNOWN",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 6,
+          "five_left": 75.0,
+          "harness": "claude",
+          "name": "GOLF",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 65.0,
+          "week_resets_at": 1900006000
+        },
+        {
+          "cap": 0,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "HOTEL",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 4.0,
+          "week_resets_at": null
+        },
+        {
+          "cap": 6,
+          "five_left": 80.0,
+          "harness": "codex",
+          "name": "default",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 70.0,
+          "week_resets_at": 1900005000
+        },
+        {
+          "cap": 6,
+          "five_left": 3.0,
+          "harness": "codex",
+          "name": "alpha",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 90.0,
+          "week_resets_at": 1900004000
+        },
+        {
+          "cap": 6,
+          "five_left": null,
+          "harness": "codex",
+          "name": "beta",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 100.0,
+          "week_resets_at": null
+        },
+        {
+          "cap": 0,
+          "five_left": 60.0,
+          "harness": "codex",
+          "name": "delta",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 4.0,
+          "week_resets_at": 1900000100
+        },
+        {
+          "cap": null,
+          "five_left": 95.0,
+          "harness": "codex",
+          "name": "gamma",
+          "sessions": 0,
+          "state": "UNKNOWN",
+          "week_left": 95.0,
+          "week_resets_at": null
+        }
+      ],
+      "allocation": {
+        "ci": {
+          "claude": 0,
+          "codex": 1
+        },
+        "eng": {
+          "claude": 4,
+          "codex": 0
+        },
+        "plan": {
+          "claude": 0,
+          "codex": 0
+        }
+      },
+      "configured": {
+        "ci": 2,
+        "eng": 6,
+        "plan": 1
+      },
+      "effective": {
+        "ci": 1,
+        "eng": 4,
+        "plan": 0
+      },
+      "placeable": {
+        "claude": 22,
+        "codex": 18
+      },
+      "placements": {
+        "ci": [
+          {
+            "account": "default",
+            "harness": "codex",
+            "index": 0
+          }
+        ],
+        "eng": [
+          {
+            "account": "ALPHA",
+            "harness": "claude",
+            "index": 0
+          },
+          {
+            "account": "DELTA",
+            "harness": "claude",
+            "index": 1
+          },
+          {
+            "account": "GOLF",
+            "harness": "claude",
+            "index": 2
+          },
+          {
+            "account": "BRAVO",
+            "harness": "claude",
+            "index": 3
+          }
+        ],
+        "plan": []
+      },
+      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 18 free seats"
+    },
+    "lane_agent": {
+      "accounts": [
+        {
+          "cap": 6,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "ALPHA",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 80.0,
+          "week_resets_at": 1900003600
+        },
+        {
+          "cap": 4,
+          "five_left": 50.0,
+          "harness": "claude",
+          "name": "BRAVO",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 0,
+          "five_left": 4.0,
+          "harness": "claude",
+          "name": "CHARLIE",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 6,
+          "five_left": 75.0,
+          "harness": "claude",
+          "name": "DELTA",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 65.0,
+          "week_resets_at": 1900006000
+        },
+        {
+          "cap": 0,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "ECHO",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": null,
+          "five_left": null,
+          "harness": "claude",
+          "name": "FOXTROT",
+          "sessions": 0,
+          "state": "UNKNOWN",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 6,
+          "five_left": 75.0,
+          "harness": "claude",
+          "name": "GOLF",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 65.0,
+          "week_resets_at": 1900006000
+        },
+        {
+          "cap": 0,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "HOTEL",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 4.0,
+          "week_resets_at": null
+        },
+        {
+          "cap": 6,
+          "five_left": 80.0,
+          "harness": "codex",
+          "name": "default",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 70.0,
+          "week_resets_at": 1900005000
+        },
+        {
+          "cap": 6,
+          "five_left": 3.0,
+          "harness": "codex",
+          "name": "alpha",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 90.0,
+          "week_resets_at": 1900004000
+        },
+        {
+          "cap": 6,
+          "five_left": null,
+          "harness": "codex",
+          "name": "beta",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 100.0,
+          "week_resets_at": null
+        },
+        {
+          "cap": 0,
+          "five_left": 60.0,
+          "harness": "codex",
+          "name": "delta",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 4.0,
+          "week_resets_at": 1900000100
+        },
+        {
+          "cap": null,
+          "five_left": 95.0,
+          "harness": "codex",
+          "name": "gamma",
+          "sessions": 0,
+          "state": "UNKNOWN",
+          "week_left": 95.0,
+          "week_resets_at": null
+        }
+      ],
+      "allocation": {
+        "ci": {
+          "claude": 2,
+          "codex": 0
+        },
+        "eng": {
+          "claude": 0,
+          "codex": 6
+        },
+        "plan": {
+          "claude": 1,
+          "codex": 0
+        }
+      },
+      "configured": {
+        "ci": 2,
+        "eng": 6,
+        "plan": 1
+      },
+      "effective": {
+        "ci": 2,
+        "eng": 6,
+        "plan": 1
+      },
+      "placeable": {
+        "claude": 22,
+        "codex": 18
+      },
+      "placements": {
+        "ci": [
+          {
+            "account": "ALPHA",
+            "harness": "claude",
+            "index": 0
+          },
+          {
+            "account": "GOLF",
+            "harness": "claude",
+            "index": 1
+          }
+        ],
+        "eng": [
+          {
+            "account": "default",
+            "harness": "codex",
+            "index": 0
+          },
+          {
+            "account": "alpha",
+            "harness": "codex",
+            "index": 1
+          },
+          {
+            "account": "beta",
+            "harness": "codex",
+            "index": 2
+          },
+          {
+            "account": "default",
+            "harness": "codex",
+            "index": 3
+          },
+          {
+            "account": "alpha",
+            "harness": "codex",
+            "index": 4
+          },
+          {
+            "account": "beta",
+            "harness": "codex",
+            "index": 5
+          }
+        ],
+        "plan": [
+          {
+            "account": "DELTA",
+            "harness": "claude",
+            "index": 0
+          }
+        ]
+      },
+      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 18 free seats"
+    },
+    "no_refresh": {
+      "accounts": [
+        {
+          "cap": 6,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "ALPHA",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 80.0,
+          "week_resets_at": 1900003600
+        },
+        {
+          "cap": 4,
+          "five_left": 50.0,
+          "harness": "claude",
+          "name": "BRAVO",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 0,
+          "five_left": 4.0,
+          "harness": "claude",
+          "name": "CHARLIE",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 6,
+          "five_left": 75.0,
+          "harness": "claude",
+          "name": "DELTA",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 65.0,
+          "week_resets_at": 1900006000
+        },
+        {
+          "cap": 0,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "ECHO",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": null,
+          "five_left": null,
+          "harness": "claude",
+          "name": "FOXTROT",
+          "sessions": 0,
+          "state": "UNKNOWN",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 6,
+          "five_left": 75.0,
+          "harness": "claude",
+          "name": "GOLF",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 65.0,
+          "week_resets_at": 1900006000
+        },
+        {
+          "cap": 0,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "HOTEL",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 4.0,
+          "week_resets_at": null
+        },
+        {
+          "cap": 6,
+          "five_left": 80.0,
+          "harness": "codex",
+          "name": "default",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 70.0,
+          "week_resets_at": 1900005000
+        },
+        {
+          "cap": 6,
+          "five_left": 3.0,
+          "harness": "codex",
+          "name": "alpha",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 90.0,
+          "week_resets_at": 1900004000
+        },
+        {
+          "cap": 6,
+          "five_left": null,
+          "harness": "codex",
+          "name": "beta",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 100.0,
+          "week_resets_at": null
+        },
+        {
+          "cap": 0,
+          "five_left": 60.0,
+          "harness": "codex",
+          "name": "delta",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 4.0,
+          "week_resets_at": 1900000100
+        },
+        {
+          "cap": null,
+          "five_left": 95.0,
+          "harness": "codex",
+          "name": "gamma",
+          "sessions": 0,
+          "state": "UNKNOWN",
+          "week_left": 95.0,
+          "week_resets_at": null
+        }
+      ],
+      "allocation": {
+        "ci": {
+          "claude": 0,
+          "codex": 1
+        },
+        "eng": {
+          "claude": 3,
+          "codex": 0
+        },
+        "plan": {
+          "claude": 1,
+          "codex": 0
+        }
+      },
+      "configured": {
+        "ci": 1,
+        "eng": 3,
+        "plan": 1
+      },
+      "effective": {
+        "ci": 1,
+        "eng": 3,
+        "plan": 1
+      },
+      "placeable": {
+        "claude": 22,
+        "codex": 18
+      },
+      "placements": {
+        "ci": [
+          {
+            "account": "default",
+            "harness": "codex",
+            "index": 0
+          }
+        ],
+        "eng": [
+          {
+            "account": "ALPHA",
+            "harness": "claude",
+            "index": 0
+          },
+          {
+            "account": "GOLF",
+            "harness": "claude",
+            "index": 1
+          },
+          {
+            "account": "BRAVO",
+            "harness": "claude",
+            "index": 2
+          }
+        ],
+        "plan": [
+          {
+            "account": "DELTA",
+            "harness": "claude",
+            "index": 0
+          }
+        ]
+      },
+      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 18 free seats"
+    },
+    "open": {
+      "accounts": [
+        {
+          "cap": 6,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "ALPHA",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 80.0,
+          "week_resets_at": 1900003600
+        },
+        {
+          "cap": 4,
+          "five_left": 50.0,
+          "harness": "claude",
+          "name": "BRAVO",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 0,
+          "five_left": 4.0,
+          "harness": "claude",
+          "name": "CHARLIE",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 6,
+          "five_left": 75.0,
+          "harness": "claude",
+          "name": "DELTA",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 65.0,
+          "week_resets_at": 1900006000
+        },
+        {
+          "cap": 0,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "ECHO",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": null,
+          "five_left": null,
+          "harness": "claude",
+          "name": "FOXTROT",
+          "sessions": 0,
+          "state": "UNKNOWN",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 6,
+          "five_left": 75.0,
+          "harness": "claude",
+          "name": "GOLF",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 65.0,
+          "week_resets_at": 1900006000
+        },
+        {
+          "cap": 0,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "HOTEL",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 4.0,
+          "week_resets_at": null
+        },
+        {
+          "cap": 6,
+          "five_left": 80.0,
+          "harness": "codex",
+          "name": "default",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 70.0,
+          "week_resets_at": 1900005000
+        },
+        {
+          "cap": 6,
+          "five_left": 3.0,
+          "harness": "codex",
+          "name": "alpha",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 90.0,
+          "week_resets_at": 1900004000
+        },
+        {
+          "cap": 6,
+          "five_left": null,
+          "harness": "codex",
+          "name": "beta",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 100.0,
+          "week_resets_at": null
+        },
+        {
+          "cap": 0,
+          "five_left": 60.0,
+          "harness": "codex",
+          "name": "delta",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 4.0,
+          "week_resets_at": 1900000100
+        },
+        {
+          "cap": null,
+          "five_left": 95.0,
+          "harness": "codex",
+          "name": "gamma",
+          "sessions": 0,
+          "state": "UNKNOWN",
+          "week_left": 95.0,
+          "week_resets_at": null
+        }
+      ],
+      "allocation": {
+        "ci": {
+          "claude": 0,
+          "codex": 1
+        },
+        "eng": {
+          "claude": 3,
+          "codex": 0
+        },
+        "plan": {
+          "claude": 1,
+          "codex": 0
+        }
+      },
+      "configured": {
+        "ci": 1,
+        "eng": 3,
+        "plan": 1
+      },
+      "effective": {
+        "ci": 1,
+        "eng": 3,
+        "plan": 1
+      },
+      "placeable": {
+        "claude": 22,
+        "codex": 18
+      },
+      "placements": {
+        "ci": [
+          {
+            "account": "default",
+            "harness": "codex",
+            "index": 0
+          }
+        ],
+        "eng": [
+          {
+            "account": "ALPHA",
+            "harness": "claude",
+            "index": 0
+          },
+          {
+            "account": "GOLF",
+            "harness": "claude",
+            "index": 1
+          },
+          {
+            "account": "BRAVO",
+            "harness": "claude",
+            "index": 2
+          }
+        ],
+        "plan": [
+          {
+            "account": "DELTA",
+            "harness": "claude",
+            "index": 0
+          }
+        ]
+      },
+      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 18 free seats"
+    },
+    "requirements": {
+      "accounts": [
+        {
+          "cap": 6,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "ALPHA",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 80.0,
+          "week_resets_at": 1900003600
+        },
+        {
+          "cap": 4,
+          "five_left": 50.0,
+          "harness": "claude",
+          "name": "BRAVO",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 0,
+          "five_left": 4.0,
+          "harness": "claude",
+          "name": "CHARLIE",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 6,
+          "five_left": 75.0,
+          "harness": "claude",
+          "name": "DELTA",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 65.0,
+          "week_resets_at": 1900006000
+        },
+        {
+          "cap": 0,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "ECHO",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": null,
+          "five_left": null,
+          "harness": "claude",
+          "name": "FOXTROT",
+          "sessions": 0,
+          "state": "UNKNOWN",
+          "week_left": 90.0,
+          "week_resets_at": 1900007200
+        },
+        {
+          "cap": 6,
+          "five_left": 75.0,
+          "harness": "claude",
+          "name": "GOLF",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 65.0,
+          "week_resets_at": 1900006000
+        },
+        {
+          "cap": 0,
+          "five_left": 90.0,
+          "harness": "claude",
+          "name": "HOTEL",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 4.0,
+          "week_resets_at": null
+        },
+        {
+          "cap": 6,
+          "five_left": 80.0,
+          "harness": "codex",
+          "name": "default",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 70.0,
+          "week_resets_at": 1900005000
+        },
+        {
+          "cap": 6,
+          "five_left": 3.0,
+          "harness": "codex",
+          "name": "alpha",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 90.0,
+          "week_resets_at": 1900004000
+        },
+        {
+          "cap": 6,
+          "five_left": null,
+          "harness": "codex",
+          "name": "beta",
+          "sessions": 0,
+          "state": "OPEN",
+          "week_left": 100.0,
+          "week_resets_at": null
+        },
+        {
+          "cap": 0,
+          "five_left": 60.0,
+          "harness": "codex",
+          "name": "delta",
+          "sessions": 0,
+          "state": "CLOSED",
+          "week_left": 4.0,
+          "week_resets_at": 1900000100
+        },
+        {
+          "cap": null,
+          "five_left": 95.0,
+          "harness": "codex",
+          "name": "gamma",
+          "sessions": 0,
+          "state": "UNKNOWN",
+          "week_left": 95.0,
+          "week_resets_at": null
+        }
+      ],
+      "allocation": {
+        "ci": {
+          "claude": 1,
+          "codex": 1
+        },
+        "eng": {
+          "claude": 3,
+          "codex": 2
+        },
+        "plan": {
+          "claude": 1,
+          "codex": 0
+        }
+      },
+      "configured": {
+        "ci": 2,
+        "eng": 5,
+        "plan": 1
+      },
+      "effective": {
+        "ci": 2,
+        "eng": 5,
+        "plan": 1
+      },
+      "placeable": {
+        "claude": 22,
+        "codex": 18
+      },
+      "placements": {
+        "ci": [
+          {
+            "account": "default",
+            "harness": "codex",
+            "index": 0
+          },
+          {
+            "account": "GOLF",
+            "harness": "claude",
+            "index": 1
+          }
+        ],
+        "eng": [
+          {
+            "account": "ALPHA",
+            "harness": "claude",
+            "index": 0
+          },
+          {
+            "account": "alpha",
+            "harness": "codex",
+            "index": 1
+          },
+          {
+            "account": "BRAVO",
+            "harness": "claude",
+            "index": 2
+          },
+          {
+            "account": "beta",
+            "harness": "codex",
+            "index": 3
+          },
+          {
+            "account": "ALPHA",
+            "harness": "claude",
+            "index": 4
+          }
+        ],
+        "plan": [
+          {
+            "account": "DELTA",
+            "harness": "claude",
+            "index": 0
+          }
+        ]
+      },
+      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 18 free seats"
+    }
+  },
+  "codex_select": {
+    "forced": {
+      "account": "gamma",
+      "env_name": "AH_CX_TOKEN_gamma",
+      "placement": "forced",
+      "seat": null
+    },
+    "forced_unknown": {
+      "error": "Codex account 'zulu' not found; available: default, alpha, beta, gamma, delta"
+    },
+    "full": {
+      "error": "no signed in Codex account has a fresh reading and a free session under its quota band"
+    },
+    "open": {
+      "account": "default",
+      "env_name": "",
+      "placement": "open",
+      "seat": [
+        "codex",
+        "default",
+        6,
+        0,
+        1900005000
+      ]
+    },
+    "sessions": {
+      "account": "alpha",
+      "env_name": "AH_CX_TOKEN_alpha",
+      "placement": "open",
+      "seat": [
+        "codex",
+        "alpha",
+        6,
+        0,
+        null
+      ]
+    },
+    "signed_out": {
+      "account": "beta",
+      "env_name": "AH_CX_TOKEN_beta",
+      "placement": "open",
+      "seat": [
+        "codex",
+        "beta",
+        6,
+        0,
+        null
+      ]
+    },
+    "sparse": {
+      "account": "alpha",
+      "env_name": "AH_CX_TOKEN_alpha",
+      "placement": "open",
+      "seat": [
+        "codex",
+        "alpha",
+        6,
+        0,
+        null
+      ]
+    },
+    "tie": {
+      "account": "default",
+      "env_name": "",
+      "placement": "open",
+      "seat": [
+        "codex",
+        "default",
+        6,
+        1,
+        1900005000
+      ]
+    }
+  },
+  "select_credential": {
+    "exclude": {
+      "account": "ALPHA",
+      "env_name": "AH_CC_TOKEN_ALPHA",
+      "max_sessions": 6,
+      "sessions": 0,
+      "source": "cached"
+    },
+    "exclude_all": {
+      "error": "no Claude account has a free session under its quota band outside ALPHA",
+      "results": [
+        "ALPHA",
+        "ECHO"
+      ]
+    },
+    "fable": {
+      "account": "GOLF",
+      "env_name": "AH_CC_TOKEN_GOLF",
+      "max_sessions": 6,
+      "sessions": 0,
+      "source": "cached"
+    },
+    "full": {
+      "error": "no Claude account has a free session under its quota band",
+      "results": [
+        "ALPHA",
+        "BRAVO",
+        "CHARLIE",
+        "DELTA",
+        "ECHO",
+        "FOXTROT",
+        "GOLF",
+        "HOTEL"
+      ]
+    },
+    "none": {
+      "error": "no non-empty AH_CC_TOKEN_* variables found",
+      "results": []
+    },
+    "open": {
+      "account": "ALPHA",
+      "env_name": "AH_CC_TOKEN_ALPHA",
+      "max_sessions": 6,
+      "sessions": 0,
+      "source": "cached"
+    },
+    "rejected_only": {
+      "error": "no Claude account has a free session under its quota band",
+      "results": [
+        "CHARLIE",
+        "ECHO"
+      ]
+    },
+    "reserve": {
+      "account": "ALPHA",
+      "env_name": "AH_CC_TOKEN_ALPHA",
+      "max_sessions": 6,
+      "sessions": 0,
+      "source": "cached"
+    },
+    "reserve_fallback": {
+      "account": "DELTA",
+      "env_name": "AH_CC_TOKEN_DELTA",
+      "max_sessions": 6,
+      "sessions": 0,
+      "source": "cached"
+    },
+    "sessions": {
+      "account": "BRAVO",
+      "env_name": "AH_CC_TOKEN_BRAVO",
+      "max_sessions": 4,
+      "sessions": 0,
+      "source": "cached"
+    },
+    "subset": {
+      "account": "BRAVO",
+      "env_name": "AH_CC_TOKEN_BRAVO",
+      "max_sessions": 4,
+      "sessions": 3,
+      "source": "cached"
+    },
+    "tie": {
+      "account": "ALPHA",
+      "env_name": "AH_CC_TOKEN_ALPHA",
+      "max_sessions": 6,
+      "sessions": 1,
+      "source": "cached"
+    }
+  }
+}

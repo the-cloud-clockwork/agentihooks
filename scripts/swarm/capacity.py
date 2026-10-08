@@ -29,15 +29,14 @@ def _state(cap: int | None) -> str:
 
 
 def _claude(environ: dict, now: float) -> list[Account]:
-    credentials = balancer.discover_credentials(environ)
+    tokens = balancer.ClaudeTokenSource()
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
-    if credentials:
-        fresh, _ = balancer.collect_results(credentials, environ=environ, now=now)
-        observed.update({result.account: (now, result) for result in fresh})
+    fresh, _ = tokens.results(environ, now)
+    observed.update({result.account: (now, result) for result in fresh})
     counts = account_sessions.sessions_by_account()
     rows = []
     for at, result in observed.values():
-        cap = balancer.account_cap(result, now) if session_bands.fresh(at, now) else None
+        cap = tokens.cap(result, now) if session_bands.fresh(at, now) else None
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
         reset = session_bands.upcoming(result.seven_day.resets_at, now)
         rows.append(
@@ -50,9 +49,10 @@ def _claude(environ: dict, now: float) -> list[Account]:
 
 
 def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
-    pool = [account for account in codex_router.routing_pool(environ) if account.signed_in]
+    source = codex_router.CodexAccountSource(refresh=refresh)
+    pool = [account for account in source.pool(environ) if account.signed_in]
     counts = account_sessions.codex_sessions_by_account()
-    found = codex_router.fresh_quotas(pool, environ, now) if refresh else codex_router.quotas(pool, environ)
+    found = source.readings(pool, environ, now)
     known = {account.name for account in pool}
     live = [
         codex_router.CodexAccount(name, f"AH_CX_TOKEN_{name}")
