@@ -454,10 +454,12 @@ def test_status_command_prints_the_capacity_reason(monkeypatch, capsys):
     ledger = FakeLedger([])
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     store.redis.set(
-        store.key("sw", "quota-capacity"), '{"effective":{"eng":0,"ci":0,"plan":0},"reason":"accounts are closed"}'
+        store.key("sw", "quota-capacity"),
+        '{"configured":{"eng":2,"ci":1,"plan":1},"effective":{"eng":0,"ci":0,"plan":0},'
+        '"reason":"accounts are closed","accounts":[],"at":0}',
     )
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
-    assert "quota capacity eng 0 ci 0 plan 0 because accounts are closed\n" in capsys.readouterr().out
+    assert "quota capacity eng 0 of 2, ci 0 of 1, plan 0 of 1, changed " in capsys.readouterr().out
 
 
 def test_unplaceable_first_task_does_not_block_other_ready_work(monkeypatch, tmp_path):
