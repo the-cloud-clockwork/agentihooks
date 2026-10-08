@@ -1,9 +1,43 @@
+import hashlib
 import json
+import os
+import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterable, Mapping
 
 from hooks.context.project_identity import ProjectIdentity, resolve_project
 from scripts.claude_config import claude_home
+
+SCOPE_FIELDS = (
+    "project_id",
+    "project",
+    "repo",
+    "worktree",
+    "cwd",
+    "remote",
+    "branch",
+    "swarm",
+    "task",
+    "task_revision",
+    "lane",
+)
+FLEET = "fleet"
+_UNCLAIMED = ("", "unknown")
+_SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+
+
+class ScopeRefused(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class SessionGrant:
+    project_ids: frozenset[str]
+
+    def admits(self, project_id: str) -> bool:
+        return project_id in _UNCLAIMED or project_id in self.project_ids
 
 
 def _index_path() -> Path:
@@ -27,7 +61,11 @@ def _rows() -> dict[str, dict]:
 
 
 def record_session(session_id: str, identity: ProjectIdentity | None) -> None:
-    if not session_id or not identity:
+    if not session_id:
+        return
+    branch = _branch(identity.cwd) if identity else ""
+    _observe(session_id, _scope(identity, "", branch, os.environ), datetime.now(timezone.utc).isoformat())
+    if not identity:
         return
     from hooks.context.broadcast import _file_lock
 
@@ -78,3 +116,162 @@ def lookup(session_id: str) -> ProjectIdentity | None:
     if row:
         return ProjectIdentity(**{key: row.get(key, "") for key in ("project", "repo", "worktree", "cwd", "remote")})
     return _legacy_identity(session_id)
+
+
+def _scope_path(session_id: str) -> Path | None:
+    if not _SESSION_ID.fullmatch(session_id or ""):
+        return None
+    return _index_path().parent / "session-scopes" / f"{session_id}.jsonl"
+
+
+def _instant(value: object) -> datetime | None:
+    try:
+        moment = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def _read(path: Path | None) -> tuple[str, list[dict]]:
+    if not path or not path.exists():
+        return "", []
+    text = path.read_text()
+    rows = []
+    for line in text.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return text, rows
+
+
+def transitions(session_id: str) -> list[dict]:
+    return _read(_scope_path(session_id))[1]
+
+
+def _transition_id(session_id: str, at: str, scope: dict) -> str:
+    return hashlib.sha256(json.dumps([session_id, at, scope], sort_keys=True).encode()).hexdigest()
+
+
+def record_scope(
+    session_id: str, scope: Mapping[str, object], at: str, grant: SessionGrant | None = None
+) -> dict | None:
+    values = {name: str(scope.get(name) or "") for name in SCOPE_FIELDS}
+    if grant is not None and not grant.admits(values["project_id"]):
+        raise ScopeRefused("project is outside the session grant")
+    moment = _instant(at)
+    if moment is None:
+        raise ScopeRefused("transition time is not an ISO 8601 timestamp")
+    path = _scope_path(session_id)
+    if path is None:
+        return None
+    from hooks.context.broadcast import _file_lock
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _file_lock(path):
+        text, rows = _read(path)
+        transition_id = _transition_id(session_id, at, values)
+        if any(row.get("transition_id") == transition_id for row in rows):
+            return None
+        if rows:
+            latest = rows[-1]
+            if moment < (_instant(latest.get("at")) or moment):
+                raise ScopeRefused("transition is older than the latest accepted one")
+            if all(latest.get(name, "") == value for name, value in values.items()):
+                return None
+        row = {"session_id": session_id, "sequence": len(rows), "at": at, "transition_id": transition_id, **values}
+        with path.open("a") as stream:
+            stream.write(("\n" if text and not text.endswith("\n") else "") + json.dumps(row) + "\n")
+    return row
+
+
+def _scope_in(rows: list[dict], at: object) -> dict | None:
+    moment = _instant(at)
+    if moment is None:
+        return None
+    current = None
+    for row in rows:
+        stamp = _instant(row.get("at"))
+        if stamp is not None and stamp <= moment:
+            current = row
+    return {name: str(current.get(name) or "") for name in SCOPE_FIELDS} if current else None
+
+
+def scope_at(session_id: str, at: object) -> dict | None:
+    return _scope_in(transitions(session_id), at)
+
+
+def _attribution(rows: list[dict], event: Mapping, grant: SessionGrant | None) -> dict:
+    attrs = event.get("attrs") or {}
+    if attrs.get("share") == FLEET:
+        return {"attribution": FLEET}
+    scope = _scope_in(rows, event.get("at")) or {}
+    explicit = {name: str(attrs[name]) for name in SCOPE_FIELDS if attrs.get(name)}
+    if explicit.get("project_id", "") not in _UNCLAIMED:
+        if grant is not None and not grant.admits(explicit["project_id"]):
+            return {"attribution": "refused"}
+        scope, label = {**scope, **explicit}, "explicit"
+    else:
+        label = "unknown" if scope.get("project_id", "") in _UNCLAIMED else "scoped"
+    return {"attribution": label, **{name: value for name, value in scope.items() if value}}
+
+
+def attribute(session_id: str, events: Iterable[Mapping], grant: SessionGrant | None = None) -> list[dict]:
+    rows = transitions(session_id)
+    return [_attribution(rows, event, grant) for event in events]
+
+
+def unattributed_session_events_total(results: Iterable[Mapping]) -> int:
+    return sum(result.get("attribution") in ("unknown", "refused") for result in results)
+
+
+def _branch(cwd: str) -> str:
+    from hooks.context.project_identity import _git
+
+    return _git(Path(cwd), "rev-parse", "--abbrev-ref", "HEAD") if cwd else ""
+
+
+def _scope(identity: ProjectIdentity | None, cwd: str, branch: str, env: Mapping[str, str]) -> dict:
+    return {
+        **(identity.attributes() if identity else {"cwd": cwd}),
+        "branch": branch,
+        "swarm": env.get("AGENTIHOOKS_SWARM", ""),
+        "task": env.get("AGENTIHOOKS_SWARM_TASK", ""),
+        "lane": env.get("AGENTIHOOKS_SWARM_LANE", ""),
+    }
+
+
+def _observe(session_id: str, scope: dict, at: str) -> dict | None:
+    try:
+        return record_scope(session_id, scope, at)
+    except ScopeRefused:
+        return None
+
+
+def _entry_context(entry: object) -> tuple[str, str]:
+    if not isinstance(entry, dict):
+        return "", ""
+    payload = entry.get("payload") if entry.get("type") == "turn_context" else entry
+    cwd = payload.get("cwd") if isinstance(payload, dict) else ""
+    return str(cwd or ""), str(entry.get("timestamp") or "")
+
+
+def observe_transcript(session_id: str, transcript_path: str, environ: Mapping[str, str] | None = None) -> int:
+    from hooks.memory.transcript_reader import _load_entries
+
+    env = os.environ if environ is None else environ
+    rows = transitions(session_id)
+    after = _instant(rows[-1].get("at")) if rows else None
+    seen, recorded = None, 0
+    for entry in _load_entries(Path(transcript_path)):
+        cwd, at = _entry_context(entry)
+        moment = _instant(at)
+        if not cwd or cwd == seen or moment is None or (after and moment < after):
+            continue
+        seen = cwd
+        identity = resolve_project(cwd, env)
+        branch = entry.get("gitBranch") or (_branch(cwd) if identity else "")
+        recorded += _observe(session_id, _scope(identity, cwd, branch, env), at) is not None
+    return recorded

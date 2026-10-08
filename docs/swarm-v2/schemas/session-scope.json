@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:swarm-v2:session-scope",
+  "title": "Session scope transition and event-time attribution, version 2.0, without launch authority",
+  "anyOf": [{"$ref": "#/$defs/transition"}, {"$ref": "#/$defs/attribution"}],
+  "$defs": {
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id", "sequence", "at", "transition_id", "project_id", "project", "repo", "worktree", "cwd", "remote", "branch", "swarm", "task", "task_revision", "lane"],
+      "properties": {
+        "session_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+        "sequence": {"type": "integer", "minimum": 0},
+        "at": {"type": "string", "minLength": 1},
+        "transition_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "project_id": {"type": "string"},
+        "project": {"type": "string"},
+        "repo": {"type": "string"},
+        "worktree": {"type": "string"},
+        "cwd": {"type": "string"},
+        "remote": {"type": "string"},
+        "branch": {"type": "string"},
+        "swarm": {"type": "string"},
+        "task": {"type": "string"},
+        "task_revision": {"type": "string"},
+        "lane": {"type": "string"}
+      }
+    },
+    "attribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attribution"],
+      "properties": {
+        "attribution": {"enum": ["scoped", "explicit", "fleet", "unknown", "refused"]},
+        "project_id": {"type": "string", "minLength": 1},
+        "project": {"type": "string", "minLength": 1},
+        "repo": {"type": "string", "minLength": 1},
+        "worktree": {"type": "string", "minLength": 1},
+        "cwd": {"type": "string", "minLength": 1},
+        "remote": {"type": "string", "minLength": 1},
+        "branch": {"type": "string", "minLength": 1},
+        "swarm": {"type": "string", "minLength": 1},
+        "task": {"type": "string", "minLength": 1},
+        "task_revision": {"type": "string", "minLength": 1},
+        "lane": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {"if": {"properties": {"attribution": {"enum": ["fleet", "refused"]}}}, "then": {"maxProperties": 1}},
+        {"if": {"properties": {"attribution": {"enum": ["scoped", "explicit"]}}}, "then": {"required": ["project_id"]}}
+      ]
+    }
+  }
+}
