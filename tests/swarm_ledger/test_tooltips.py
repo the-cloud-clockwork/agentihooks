@@ -279,7 +279,7 @@ def test_ledger_row_buttons_carry_no_native_hover_text_and_keep_their_label(tab,
     found = buttons.evaluate_all("(els) => els.map((el) => [el.getAttribute('title'), el.getAttribute('aria-label')])")
     assert [title for title, _ in found] == [None] * len(found)
     selector, label, _ = ROW_BUTTONS[view]
-    assert page.locator(f"li.row {selector}").get_attribute("aria-label") == label
+    assert page.locator(f"li.row {selector}").first.get_attribute("aria-label") == label
 
 
 @pytest.mark.parametrize("view", ROW_BUTTONS)
