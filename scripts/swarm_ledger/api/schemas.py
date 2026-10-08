@@ -70,7 +70,7 @@ FIELDS = {
     "priority": "by item text",
     "priority_clear": "by target reason",
     "notification_clear": "target",
-    "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url rank gain difficulty difficulty_source difficulty_confidence not_duplicate",
+    "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate",
     "task_update": "by item fields if_state",
     "task_rank": "item rank",
     "task_group": "by item members",
@@ -82,7 +82,7 @@ FIELDS = {
     "reopen": "by",
     "size_set": "by size",
     "source_add": "by source",
-    "phase_add": "by phase title description depends_on planning release plan_url",
+    "phase_add": "by phase title description depends_on planning release plan_url plan_ref",
     "phase_update": "by item fields",
     "phase_review": "by item state note override rounds escalated",
     "phase_append": "by phases",
@@ -132,7 +132,12 @@ def operation_schema(kind: str) -> dict:
         "type": "object",
         "additionalProperties": False,
         "required": ["op", "id"],
-        "properties": {**properties, "op": {"const": kind}, "id": {"type": "string", "minLength": 1, "maxLength": 200}},
+        "properties": {
+            **properties,
+            "op": {"const": kind},
+            "id": {"type": "string", "minLength": 1, "maxLength": 200},
+            "controller_epoch": {"type": "integer", "minimum": 1},
+        },
     }
 
 
@@ -163,7 +168,9 @@ def check_operations(payload: dict, core: ModuleType, task_ids: tuple) -> list:
         if field is not None:
             raise APIError(400, "schema_invalid", f"Operation {kind} does not match its schema at field {field}")
     try:
-        core.check_body({"ops": operations}, task_ids)
+        core.check_body(
+            {"ops": [{k: v for k, v in op.items() if k != "controller_epoch"} for op in operations]}, task_ids
+        )
     except ValueError as exc:
         raise APIError(400, "schema_invalid", f"Operation does not match its domain schema: {exc}") from None
     if len({op["id"] for op in operations}) != len(operations):

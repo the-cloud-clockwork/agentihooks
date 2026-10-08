@@ -25,7 +25,7 @@ def test_c(n):
 ALL = ["test_suite.py::test_a", "test_suite.py::test_b", "test_suite.py::test_c[1]", "test_suite.py::test_c[2]"]
 
 
-def _check(tmp_path, *shards, suite=SUITE):
+def _check(tmp_path, *shards, suite=SUITE, hashes=None):
     tests = tmp_path / "suite"
     tests.mkdir(exist_ok=True)
     (tests / "test_suite.py").write_text(suite)
@@ -34,6 +34,9 @@ def _check(tmp_path, *shards, suite=SUITE):
         path = tmp_path / f"durations-3.12-{index}" / "durations.json"
         path.parent.mkdir()
         path.write_text(json.dumps(dict.fromkeys(nodeids, 0.1)))
+        digest = "a" * 64 if hashes is None else hashes[index - 1]
+        if digest is not None:
+            (path.parent / "durations.sha256").write_text(f"{digest}\n")
         paths.append(str(path))
     return subprocess.run(
         [sys.executable, "-m", "tests.shard_check", "--tests", str(tests), *paths],
@@ -66,6 +69,20 @@ def test_a_test_run_in_two_shards_is_red_and_named(tmp_path):
 def test_xdist_group_suffix_names_the_same_test(tmp_path):
     result = _check(tmp_path, [f"{ALL[0]}@serial", *ALL[1:2]], ALL[2:])
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_shards_split_on_different_stored_durations_are_red_and_named(tmp_path):
+    result = _check(tmp_path, ALL[:2], ALL[2:], hashes=["a" * 64, "b" * 64])
+    assert result.returncode == 1
+    assert "::error::Shards split on different stored durations" in result.stdout
+    assert f"durations-3.12-2: {'b' * 64}" in result.stdout
+
+
+def test_a_shard_that_recorded_no_durations_hash_is_red_and_named(tmp_path):
+    result = _check(tmp_path, ALL[:2], ALL[2:], hashes=["a" * 64, None])
+    assert result.returncode == 1
+    assert "::error::Shards split on different stored durations" in result.stdout
+    assert "durations-3.12-2: none" in result.stdout
 
 
 def test_a_collection_error_is_red(tmp_path):

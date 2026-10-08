@@ -56,7 +56,11 @@ def cli(monkeypatch, tmp_path):
     monkeypatch.setattr(ledger, "resource", lambda *a, **k: [])
     monkeypatch.setattr(ledger, "swarm_autonomy", lambda slug: "full")
     monkeypatch.setattr(ledger_relay, "verified", lambda name, quote: True)
-    monkeypatch.setattr(ledger.ledger_publish, "publish", lambda path, title, repo, artifact: ("https://x/1", "issue"))
+    monkeypatch.setattr(
+        ledger.ledger_publish,
+        "publish",
+        lambda path, title, repo, artifact, issue_title: (artifact(path, title) and "https://x/1", "issue"),
+    )
     monkeypatch.setattr(ledger_phase_cli, "append_phases", lambda plan, taken: [{"phase": "p9", "planning": "auto"}])
 
     def run(argv, reply):
@@ -66,7 +70,7 @@ def cli(monkeypatch, tmp_path):
             assert slug == "s"
             sent.extend(ops or [])
             ids = [op["id"] for op in ops or []]
-            return reply(ids)
+            return reply(ids) if ops else {**reply(ids), "phases": [{"id": "p1", "title": "Plan"}]}
 
         monkeypatch.setattr(ledger, "request", request)
         argv = [str(plan) if part == "PLAN" else part for part in argv]

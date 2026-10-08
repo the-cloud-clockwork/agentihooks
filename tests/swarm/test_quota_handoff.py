@@ -20,7 +20,7 @@ LAUNCH = {"profile": "engineer", "harness": "claude", "model": "opus", "effort":
 class QuotaRuntime(FakeRuntime):
     def __init__(self, home, pool, monkeypatch):
         super().__init__()
-        self.argv, self.chosen = [], []
+        self.argv, self.chosen, self.pool = [], [], pool
         monkeypatch.setattr(capacity, "accounts", lambda environ, now, refresh=True: list(pool))
         self.herdr = HerdrRuntime(home=home, run=self._run, choose=self._choose, herdr=self._herdr)
 
@@ -64,7 +64,10 @@ def _ledger():
 def _quota_handoff(store, ledger, runtime):  # noqa: F811
     for task in ledger.rows.values():
         task["title"] = "keep the seat"
+    warned = list(runtime.pool)
+    runtime.pool[:] = [replace(row, five_left=90) if row == OLD else row for row in warned]
     tick("sw", store, ledger, runtime, 1)
+    runtime.pool[:] = warned
     done, first = sorted(workers(store), key=lambda agent: agent.seat)
     assert (done.seat, first.seat) == ("eng-1@sw", "eng-2@sw")
     ledger.rows[done.task].update(state="done", done=True)
@@ -80,6 +83,9 @@ def _capacity(eng, claude, codex):
         f"quota capacity eng {eng} ci 0 plan 0 because accounts have quota; "
         f"Claude has {claude} free seats and Codex has {codex} free seats"
     )
+
+
+WARNED = "; claude old is at its five hour quota warning"
 
 
 def _held(task):
@@ -107,7 +113,7 @@ def test_a_quota_handoff_keeps_the_seat_and_launch_settings_on_another_account(s
     assert actions == [
         f"retired {done.name}",
         f"retired {first.name}",
-        _capacity(1, 7, 6),
+        _capacity(1, 5, 6) + WARNED,
         f"spawned {successor.name} for {first.task}",
     ]
     assert successor.seat == first.seat
@@ -135,7 +141,11 @@ def test_a_quota_handoff_waits_with_its_handoff_when_no_other_account_qualifies(
     ledger, runtime = _ledger(), QuotaRuntime(tmp_path, pool, monkeypatch)
     done, first, envelope = _quota_handoff(store, ledger, runtime)
     actions = tick("sw", store, ledger, runtime, 2)
-    assert actions == [f"retired {done.name}", f"retired {first.name}", _capacity(0, 2, 0) + _held(first.task)]
+    assert actions == [
+        f"retired {done.name}",
+        f"retired {first.name}",
+        _capacity(0, 0, 0) + WARNED + _held(first.task),
+    ]
     _waits_with_its_handoff(store, ledger, runtime, first, envelope)
     pool.append(FRESH)
     tick("sw", store, ledger, runtime, 3)
@@ -151,7 +161,11 @@ def test_a_quota_handoff_waits_with_its_handoff_while_every_account_is_full(stor
     done, first, envelope = _quota_handoff(store, ledger, runtime)
     pool[0] = replace(OLD, sessions=2)
     actions = tick("sw", store, ledger, runtime, 2)
-    assert actions == [f"retired {done.name}", f"retired {first.name}", _capacity(0, 0, 0) + _held(first.task)]
+    assert actions == [
+        f"retired {done.name}",
+        f"retired {first.name}",
+        _capacity(0, 0, 0) + WARNED + _held(first.task),
+    ]
     _waits_with_its_handoff(store, ledger, runtime, first, envelope)
 
 

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x_build_parser__mutmut_7:1e50f40de764b33e07e23cc1fbe3cc1108ecadd25d50939ed2ce5eed8de659a1": {
+    "reader": "standards_reader",
+    "reason": "The controller subparser uses normal argparse defaults and no action default override. Omitting explicit default=None preserves action=None when absent and action=release when supplied; an independent argparse contract probe confirmed both namespaces are equal."
+  }
+}
