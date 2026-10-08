@@ -296,6 +296,7 @@ class HerdrRuntime:
         )
         timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
+        argv += ["--bundle-revision", decision.bundle_revision] if decision.overlays else []
         if saved:
             picked = model_pick.ModelPick(
                 saved["model"],

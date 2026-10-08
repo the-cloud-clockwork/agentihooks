@@ -336,3 +336,25 @@ def test_status_carries_agent_overlays_and_the_overlays_a_bundle_offers(bundle, 
     assert report["config"]["overlays"] == {}
     assert {"name": "trader", "wears": ["engineer", "qa"]} in report["overlays_available"]
     assert [row["name"] for row in report["overlays_available"]] == ["extra", "planning", "scout", "trader", "tuner"]
+
+
+def _passed_revision(argv):
+    head = argv[: argv.index("--")]
+    return [head[i + 1] for i, arg in enumerate(head) if arg == "--bundle-revision"]
+
+
+def test_an_overlay_launch_pins_its_render_to_the_recorded_bundle_revision(bundle, tmp_path, monkeypatch):
+    _, argv = _spawned(tmp_path, monkeypatch, {}, {"engineer": ["tuner"]})
+    assert _passed_revision(argv) == ["abc123"]
+
+
+def test_an_overlay_relaunch_pins_its_render_to_the_revision_its_launch_recorded(bundle, tmp_path, monkeypatch):
+    saved = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high"}
+    saved |= {"overlays": ["scout"], "bundle_revision": "def456"}
+    _, argv = _spawned(tmp_path, monkeypatch, {"launch_assignment": saved}, {})
+    assert _passed_revision(argv) == ["def456"]
+
+
+def test_a_launch_without_overlays_leaves_its_render_unpinned(bundle, tmp_path, monkeypatch):
+    _, argv = _spawned(tmp_path, monkeypatch, {}, {})
+    assert _passed_revision(argv) == []

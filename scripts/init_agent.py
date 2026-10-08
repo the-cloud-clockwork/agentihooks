@@ -87,6 +87,7 @@ class AgentSpec:
     profile: str = ""
     channel: bool = False
     overlays: tuple = ()
+    bundle_revision: str = ""
 
 
 SPAWN = "AGENTIHOOKS_SWARM_SPAWN"
@@ -225,6 +226,7 @@ def _profile_command(command: list[str], spec: AgentSpec) -> list[str]:
     if not spec.profile:
         return command
     worn = [f"--overlay={overlay}" for overlay in spec.overlays]
+    worn += [f"--bundle-revision={spec.bundle_revision}"] if spec.bundle_revision else []
     return [command[0], "select-profile", spec.profile, *worn, "--agent", spec.agent, "--", *command[2:]]
 
 
@@ -337,7 +339,7 @@ def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], env
         return flags
     if args.handoff:
         flags = binding.continuation(flags, agent, environ)
-    profile_env, flags = prepare(args.profile, agent, "", "", flags, environ, args.overlay)
+    profile_env, flags = prepare(args.profile, agent, "", "", flags, environ, args.overlay, args.bundle_revision)
     environ.update(profile_env)
     return flags
 
@@ -507,6 +509,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--overlay", action="append", default=[], help="Overlay the profile wears; repeat for up to three"
     )
+    parser.add_argument("--bundle-revision", default="", help="Render the profile only from this bundle commit")
     parser.add_argument("--resume", default="", help="Reopen this conversation id (Claude --resume, Codex resume)")
     parser.add_argument(
         "--inbox-channel",
@@ -609,6 +612,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 profile=args.profile,
                 channel=channel,
                 overlays=tuple(args.overlay),
+                bundle_revision=args.bundle_revision,
             ),
         )
         host, explicit = _select_host(args.host, active_env)

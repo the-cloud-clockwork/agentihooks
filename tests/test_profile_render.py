@@ -2261,3 +2261,59 @@ def test_cli_renders_the_overlays_named(world, overlays, capsys):
     with pytest.raises(SystemExit):
         render.main(["render", "--help"])
     assert re.search(r"--overlay OVERLAY\s+Wear this overlay; repeat for up to three", capsys.readouterr().out)
+
+
+def test_an_overlay_render_refuses_a_bundle_at_another_commit_than_its_launch_recorded(world, overlays):
+    from scripts.profiles import render
+
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+    _commit(world["bundle"], "moved")
+    head = _git(world["bundle"], "rev-parse", "HEAD").strip()
+
+    with pytest.raises(ValueError) as refused:
+        render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    assert str(refused.value) == (
+        f"the launch recorded bundle commit {recorded}, but the bundle at {world['bundle']} is at commit {head}; "
+        f"check out {recorded} in the bundle before this launch renders"
+    )
+    assert render.profile_dir("rb-eng", ["ov-a"]) is None
+
+
+def test_an_overlay_render_refuses_a_bundle_with_uncommitted_changes(world, overlays):
+    from scripts.profiles import render
+
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+    _write(overlays / "ov-a" / ".claude" / "rules" / "ov-a.md", "EDITED RULE\n")
+
+    with pytest.raises(ValueError) as refused:
+        render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    assert str(refused.value) == (
+        f"the launch recorded bundle commit {recorded}, but the bundle at {world['bundle']} has uncommitted changes; "
+        f"check out {recorded} in the bundle before this launch renders"
+    )
+    assert render.profile_dir("rb-eng", ["ov-a"]) is None
+
+
+def test_an_overlay_render_refuses_a_recorded_commit_without_a_linked_bundle(world, overlays, monkeypatch):
+    from scripts.profiles import render
+
+    monkeypatch.setattr(render, "_bundle", lambda: None)
+
+    with pytest.raises(ValueError) as refused:
+        render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision="abc123")
+
+    assert str(refused.value) == "the launch recorded bundle commit abc123, but no bundle is linked"
+
+
+def test_an_overlay_render_from_the_recorded_commit_renders_and_stamps_it(world, overlays):
+    from scripts.profiles import render
+
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+
+    out = render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    assert "OV-A RULE MARKER" in (out / "CLAUDE.md").read_text()
+    assert json.loads((out / render.STAMP).read_text())["bundle_commit"] == recorded
+    assert render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded) is None
