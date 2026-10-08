@@ -170,6 +170,8 @@ def _near(lead, other):
     from scripts.swarm.tick import _overlaps
 
     mine, theirs = lead.get("territory") or [], other.get("territory") or []
+    if not mine and not theirs:
+        return lead.get("phase") and lead.get("phase") == other.get("phase")
     return _overlaps(mine, theirs) or (_on_page(mine) and _on_page(theirs))
 
 
