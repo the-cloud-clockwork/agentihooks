@@ -4,20 +4,14 @@ import hooks.context.inbox_delivery as delivery
 from hooks import hook_manager
 from hooks.targets.emitter import flush
 from scripts.inbox import channel, seen, wake
-from scripts.inbox.store import (
-    DEFAULT_REDELIVER_S,
-    NOTIFY,
-    REDELIVER_ENV,
-    REDELIVERED,
-    REDELIVERER,
-    InboxStore,
-    redelivery_ms,
-)
+from scripts.inbox.store import NOTIFY, InboxStore, redelivery_ms
 from scripts.swarm.store import MASTER, AgentRecord
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
-W = DEFAULT_REDELIVER_S * 1000
+W = 300_000
+ENV = "AGENTIHOOKS_INBOX_REDELIVER_S"
+REDELIVERED = "redelivered: never confirmed inside the redelivery window"
 
 
 @pytest.fixture
@@ -28,7 +22,7 @@ def store(monkeypatch):
     monkeypatch.setattr(delivery, "connect", lambda environ=None: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "bob")
     monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
-    monkeypatch.delenv(REDELIVER_ENV, raising=False)
+    monkeypatch.delenv(ENV, raising=False)
     return store
 
 
@@ -49,7 +43,7 @@ def _pre(capsys):
 
 def test_redelivery_window_defaults_to_five_minutes_and_reads_the_environment():
     assert redelivery_ms({}) == 300_000
-    assert redelivery_ms({REDELIVER_ENV: "7"}) == 7000
+    assert redelivery_ms({ENV: "7"}) == 7000
 
 
 def test_confirm_moves_a_delivered_or_read_item_to_confirmed(store):
@@ -72,7 +66,7 @@ def test_a_delivered_item_never_confirmed_returns_to_pending_after_the_window(st
     assert store.redeliver(item.updated_at + W - 1, W) == []
     [moved] = store.redeliver(item.updated_at + W, W)
     assert (moved.id, moved.state, moved.reason) == (item.id, "pending", REDELIVERED)
-    assert states(store, item.id)[-1] == ("pending", REDELIVERER, REDELIVERED)
+    assert states(store, item.id)[-1] == ("pending", "inbox", REDELIVERED)
     assert [i.id for i in store.pending_mail("bob")] == [item.id]
     assert item.id in {i.id for i in store.pending()}
 
@@ -105,7 +99,7 @@ def test_an_unconfirmed_item_is_redelivered_once_per_window(store):
 
 def test_redelivery_skips_an_item_delivered_again_after_the_cutoff(store):
     item = delivered(store)
-    assert store.requeue(item.id, REDELIVERER, REDELIVERED, before=item.updated_at - 1) is None
+    assert store.requeue(item.id, "inbox", REDELIVERED, before=item.updated_at - 1) is None
     assert store.get(item.id).state == "delivered"
 
 
@@ -187,6 +181,21 @@ def test_an_unconfirmed_item_is_shown_again_by_whichever_transport_claims_next(s
     assert [s for s, _, _ in states(store, item.id)] == ["pending", "delivered", "pending", "delivered"]
 
 
+def test_a_redelivered_ledger_write_is_shown_again_rather_than_closed_as_seen(store, monkeypatch):
+    item = store.send("operator", "bob", "a comment", ref="sw:3:c1")
+    assert [i.id for i in seen.claim(store, "bob")] == [item.id]
+    monkeypatch.setattr(seen, "now_ms", lambda: store.get(item.id).updated_at + W)
+    assert [i.id for i in seen.claim(store, "bob")] == [item.id]
+    assert store.get(item.id).state == "delivered"
+
+
+def test_a_ledger_write_the_ledger_already_showed_still_closes_as_seen(store):
+    seen.SeenMarks(store.redis).mark("bob", "sw:3:c1")
+    item = store.send("operator", "bob", "a comment", ref="sw:3:c1")
+    assert seen.claim(store, "bob") == []
+    assert states(store, item.id)[-1] == ("done", "bob", "done: already shown through the ledger")
+
+
 def test_the_hook_confirms_an_item_another_transport_delivered_instead_of_redelivering_it(store, capsys, monkeypatch):
     item = store.send("alice", "bob", "review my branch")
     seen.claim(store, "bob")
@@ -249,4 +258,4 @@ def test_a_failed_channel_write_puts_every_unsent_item_back_to_pending(store):
     finally:
         channel.SETTLE_S = saved
     assert (store.get(first.id).state, store.get(second.id).state) == ("pending", "pending")
-    assert states(store, first.id)[-1] == ("pending", "bob", channel.UNSHOWN)
+    assert states(store, first.id)[-1] == ("pending", "bob", "the inbox channel could not show it")
