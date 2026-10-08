@@ -154,8 +154,8 @@ def _new(store, slug, runtime, at):
         task = _filled(primed(store, slug, record.seat, task), config)
         master_start.begin(store, slug, name, task, at)
         affinity.handed_off(store, slug)
-        if quota := getattr(runtime, "quota_capacity", None):
-            quota(config, store.agents(slug), at / 1000)
+        if reader := getattr(runtime, "quota_capacity", None):
+            reader(config, store.agents(slug), at / 1000)
         placed = runtime.spawn(config, MASTER, name, task)
     except Exception as exc:
         transfers.failed(store, slug, record)

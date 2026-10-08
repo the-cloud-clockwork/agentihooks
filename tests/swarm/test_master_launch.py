@@ -741,7 +741,19 @@ def test_a_new_master_leaves_a_warned_account_or_refuses_naming_it(up, monkeypat
     direct(store, rt, master_launch.NEW)
     assert routes == ["ok"]
     rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5)])
-    refusal = "no claude account has placeable quota seats: claude w is at its week quota warning"
+    refusal = "no claude or codex account has placeable quota seats: claude w is at its week quota warning"
     with pytest.raises(SwarmError, match=f"^the new master could not start: {refusal}$"):
+        direct(store, rt, master_launch.NEW)
+    assert routes == []
+
+
+def test_a_new_master_free_to_pick_its_harness_refuses_naming_every_warned_account(up, monkeypatch, tmp_path):
+    store, _, _ = up
+    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5), account("cw", harness="codex", left=5)])
+    warned = "claude w is at its week quota warning; codex cw is at its week quota warning"
+    with pytest.raises(
+        SwarmError,
+        match=f"^the new master could not start: no claude or codex account has placeable quota seats: {warned}$",
+    ):
         direct(store, rt, master_launch.NEW)
     assert routes == []
