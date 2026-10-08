@@ -5,7 +5,7 @@ Whichever path shows a write first marks it; the others skip it, so each write r
 
 import os
 
-from scripts.inbox.store import MOVE_ATTEMPTS, now_ms, owner_key, redelivery_ms
+from scripts.inbox.store import MOVE_ATTEMPTS, InboxError, now_ms, owner_key, redelivery_ms
 from scripts.swarm.keyspace import ROOT
 
 PREFIX = f"{ROOT}:inbox:seen"
@@ -41,7 +41,7 @@ class SeenMarks:
                     return added == 1
                 except WatchError:
                     continue
-        return False
+        raise InboxError(f"the delivery owner of {name} changed meanwhile; run it again")
 
     def seen(self, name, ref):
         return bool(self.redis.sismember(self.key(name), ref))
