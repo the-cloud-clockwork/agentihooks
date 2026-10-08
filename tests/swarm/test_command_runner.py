@@ -232,3 +232,61 @@ def test_spawn_receiver_refuses_epoch_after_launch_preparation(store, monkeypatc
         receiver._launch(SimpleNamespace(slug="sw"), "eng", "t", "one", ["--agent", "claude"], controller_epoch=1)
     assert str(error.value) == "the controller lease is stale"
     assert calls == []
+
+
+def test_new_epoch_can_tick_while_the_old_tick_is_still_locked(store, monkeypatch):
+    from scripts.swarm import lease
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    held = lease.acquire(store, "sw", "home")
+    store.redis.set(store.key("sw", "tick-lock"), '{"epoch": 1, "token": "old tick"}', px=600000)
+    assert cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({})) == ["another tick is running"]
+    assert lease.release(store, "sw", held)
+    monkeypatch.setenv("SWARM_HIVE_ID", "other")
+    result = cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({}))
+    assert "another tick is running" not in result
+    assert lease.current(store, "sw").epoch == 2
+    assert lease.current(store, "sw").owner == "other"
+    assert store.redis.get(store.key("sw", "tick-lock")) is None
+
+
+def test_old_tick_cannot_release_a_new_epochs_lock(store):
+    import json
+
+    from scripts.swarm import controller, lease
+
+    first = lease.acquire(store, "sw", "home")
+    old = controller.take_tick_lock(store, "sw", first, 10000)
+    assert json.loads(old)["epoch"] == 1
+    assert store.redis.pttl(store.key("sw", "tick-lock")) > 9000
+    assert lease.release(store, "sw", first)
+    second = lease.acquire(store, "sw", "other")
+    new = controller.take_tick_lock(store, "sw", second, 10000)
+    assert json.loads(new)["epoch"] == 2
+    assert old != new
+    controller.release_tick_lock(store, "sw", old)
+    assert store.redis.get(store.key("sw", "tick-lock")) == new
+    controller.release_tick_lock(store, "sw", new)
+    assert store.redis.get(store.key("sw", "tick-lock")) is None
+
+
+def test_tick_lock_conflicts_fail_closed(store, monkeypatch):
+    from redis.exceptions import WatchError
+
+    from scripts.swarm import controller, lease
+
+    held = lease.acquire(store, "sw", "home")
+    token = controller.take_tick_lock(store, "sw", held, 10000)
+    pipeline = store.redis.pipeline
+
+    def conflicting_pipeline():
+        pipe = pipeline()
+        pipe.execute = lambda: (_ for _ in ()).throw(WatchError("conflict"))
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", conflicting_pipeline)
+    controller.release_tick_lock(store, "sw", token)
+    assert store.redis.get(store.key("sw", "tick-lock")) == token
+    assert lease.release(store, "sw", held) is False
+    store.redis.delete(store.key("sw", "tick-lock"))
+    assert controller.take_tick_lock(store, "sw", held, 10000) is None

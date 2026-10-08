@@ -43,7 +43,6 @@ import signal
 import subprocess
 import sys
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -131,16 +130,16 @@ def now_ms():
 
 @timing.instrument_tick
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
+    from scripts.swarm import command_runner, commands, controller, lease
+
     ledger = ledger or LedgerClient()
-    lock, token = store.key(slug, "tick-lock"), uuid.uuid4().hex
-    if not store.redis.set(lock, token, nx=True, px=TICK_LOCK_MS):
+    held = lease.acquire(store, slug, commands.hive_id())
+    if held is None:
+        return ["the swarm belongs to another hive"]
+    token = controller.take_tick_lock(store, slug, held, TICK_LOCK_MS)
+    if token is None:
         return ["another tick is running"]
     try:
-        from scripts.swarm import command_runner, commands, controller, lease
-
-        held = lease.acquire(store, slug, commands.hive_id())
-        if held is None:
-            return ["the swarm belongs to another hive"]
         ledger = controller.FencedLedger(store, slug, held, ledger)
         runtime = controller.FencedRuntime(
             store,
@@ -210,8 +209,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         timing.call(command_runner.publish, store, slug, timing.call(ledger.state, slug))
         return controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
-        if store.redis.get(lock) == token:
-            store.redis.delete(lock)
+        controller.release_tick_lock(store, slug, token)
 
 
 def cmd_list(store, args):

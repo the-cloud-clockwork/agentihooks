@@ -1,7 +1,9 @@
 import argparse
+import json
 import os
 import sys
 import time
+import uuid
 
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError, connect
@@ -41,6 +43,42 @@ class FencedRuntime:
         if not self.spawning:
             raise SwarmError("controller spawning is disabled in this deployment mode")
         return self.runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+
+
+def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int) -> str | None:
+    from redis.exceptions import WatchError
+
+    key = store.key(slug, "tick-lock")
+    token = json.dumps({"epoch": held.epoch, "token": uuid.uuid4().hex})
+    with store.redis.pipeline() as pipe:
+        try:
+            pipe.watch(key, store.key(slug, "control-owner"))
+            lease.require(store, slug, held)
+            raw = pipe.get(key)
+            if raw and (not raw.startswith("{") or json.loads(raw)["epoch"] == held.epoch):
+                return None
+            pipe.multi()
+            pipe.set(key, token, px=ttl_ms)
+            pipe.execute()
+            return token
+        except WatchError:
+            return None
+
+
+def release_tick_lock(store: RedisStore, slug: str, token: str) -> None:
+    from redis.exceptions import WatchError
+
+    key = store.key(slug, "tick-lock")
+    with store.redis.pipeline() as pipe:
+        try:
+            pipe.watch(key)
+            if pipe.get(key) != token:
+                return
+            pipe.multi()
+            pipe.delete(key)
+            pipe.execute()
+        except WatchError:
+            return
 
 
 def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None) -> dict:
