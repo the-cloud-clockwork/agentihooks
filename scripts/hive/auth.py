@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
-from redis.exceptions import RedisError
-
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -37,6 +35,8 @@ def invite(redis: "Redis", name: str) -> str:
 
 
 def exchange(redis: "Redis", code: str, redis_url: str) -> dict:
+    from redis.exceptions import RedisError
+
     name = redis.getdel(f"{PREFIX}:invite:{_digest(code)}")
     if name is None:
         raise HiveError("invite code is invalid, expired or already used")
@@ -62,6 +62,8 @@ def exchange(redis: "Redis", code: str, redis_url: str) -> dict:
 
 
 def _forget(redis: "Redis", member_id: str, records: tuple[str, ...]) -> None:
+    from redis.exceptions import RedisError
+
     try:
         redis.delete(*records)
         redis.execute_command("ACL", "DELUSER", f"hive-{member_id}")
