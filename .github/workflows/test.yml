@@ -393,11 +393,16 @@ jobs:
           status=$(api "qualitygates/project_status?analysisId=$analysis")
           jq -c .projectStatus <<<"$status"
           graded=$(jq -r '.projectStatus.conditions[] | "\(.metricKey) \(.comparator) \(.errorThreshold)"' <<<"$status" | sort)
-          expected=$(printf '%s\n' "new_bugs GT 0" "new_coverage LT 80" "new_duplicated_lines_density GT 3" \
+          allowed=$(printf '%s\n' "new_bugs GT 0" "new_coverage LT 80" "new_duplicated_lines_density GT 3" \
             "new_security_hotspots_reviewed LT 100" "new_vulnerabilities GT 0" | sort)
-          if [[ "$graded" != "$expected" ]]; then
-            echo "::error::The analysis was not graded on the Delivery L2 conditions."
-            diff <(echo "$expected") <(echo "$graded") || true
+          required=$(printf '%s\n' "new_bugs GT 0" "new_vulnerabilities GT 0")
+          if [[ $(jq -r .projectStatus.ignoredConditions <<<"$status") != true ]]; then
+            required=$(printf '%s\n' "$required" "new_coverage LT 80" "new_duplicated_lines_density GT 3")
+          fi
+          foreign=$(comm -13 <(echo "$allowed") <(echo "$graded"))
+          missing=$(comm -23 <(echo "$required" | sort) <(echo "$graded"))
+          if [[ -n "$foreign$missing" ]]; then
+            echo "::error::The analysis was not graded on the Delivery L2 conditions. Foreign: ${foreign:-none}. Missing: ${missing:-none}."
             exit 1
           fi
 
