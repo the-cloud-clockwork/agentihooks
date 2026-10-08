@@ -410,6 +410,17 @@ def _task_sizing_offline(monkeypatch):
     monkeypatch.setattr(difficulty, "decide", unavailable)
 
 
+@pytest.fixture(autouse=True)
+def _task_grouping_offline(monkeypatch):
+    from hooks.classifier import ClassifierUnavailable
+    from scripts.swarm import grouping
+
+    def unavailable(*args, **kwargs):
+        raise ClassifierUnavailable("classifier disabled in unit tests")
+
+    monkeypatch.setattr(grouping, "decide", unavailable)
+
+
 @pytest.fixture
 def mock_env():
     """Provide a clean environment for tests."""
