@@ -1,0 +1,6 @@
+{
+  "scripts/recall/ledger.py:scripts.recall.ledger.x__body__mutmut_18:f74808192b0c487c73f3b132b15725a279c113c6cf18fcecf9701028d340e5cf": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: json.dumps interprets ensure_ascii by truthiness. Both False and None select the non-ASCII-preserving encoder path with identical serialized text, including Unicode contract and proof values."
+  }
+}

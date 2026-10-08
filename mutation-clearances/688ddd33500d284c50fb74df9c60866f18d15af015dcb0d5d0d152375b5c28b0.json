@@ -1,0 +1,6 @@
+{
+  "scripts/recall/ledger.py:scripts.recall.ledger.x_extract_ledger__mutmut_14:bb80523669e53976e547269448898794bd4bb64fd098dc6ab119827d78749a83": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: the default changes only a missing root title. _body excludes both falsy values, and _entry resolves the root title using title or the absent-text default empty string. The synthetic root is omitted in both cases when its body is empty."
+  }
+}

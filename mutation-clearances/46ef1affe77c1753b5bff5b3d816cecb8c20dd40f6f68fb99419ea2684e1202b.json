@@ -1,0 +1,6 @@
+{
+  "scripts/recall/chunker.py:scripts.recall.chunker.x__sections__mutmut_3:84ca25cc537b2159fd3ccc5d599e0694dcaf1e1d2b23c88f16cc7f3e01f01d41": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: the initial fence sentinel is tested only with not fence. Its indexed comparisons are reached only after a matched marker replaces the sentinel. Both None and empty string are false, and fence is never returned."
+  }
+}

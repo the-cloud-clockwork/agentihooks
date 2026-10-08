@@ -71,6 +71,34 @@ def test_task_retains_all_searchable_fields(ledger):
         assert text in task.text
 
 
+def test_structured_fields_keep_unicode_and_stable_order(ledger):
+    ledger["tasks"][0]["contract"] = {"must": "Recuerda café", "check": "Verify", "judge": "Reader"}
+    first = records(ledger)["tasks/t1"].text
+    assert '## Contract\n\n{"check": "Verify", "judge": "Reader", "must": "Recuerda café"}' in first
+    assert '## Proof\n\n{"command": "pytest recall", "fix": "https://example.com/fix", "output": "passed"}' in first
+    ledger["tasks"][0]["contract"] = {"judge": "Reader", "check": "Verify", "must": "Recuerda café"}
+    assert records(ledger)["tasks/t1"].text == first
+
+
+def test_text_items_have_titles_and_standalone_artifacts_have_ledger_parent(ledger):
+    found = records(ledger)
+    assert found["questions/q1"].title == "How does recall work?"
+    assert found["tasks/t1/comments/tc"].title == found["tasks/t1/comments/tc"].text == "Task comment"
+    assert found["followups/f1"].title == "Add semantic search"
+    del ledger["artifacts"][0]["task"]
+    assert records(ledger)["artifacts/r1"].parent_ref == "ledger"
+
+
+def test_missing_comment_text_and_root_time_are_unknown():
+    ledger = {
+        "title": "No history",
+        "notes": [{"id": "n", "text": "Body", "comments": [{"id": "c", "attachments": [{"id": "image.png"}]}]}],
+    }
+    found = records(ledger)
+    assert (found["ledger"].time, found["ledger"].author) == (0, "")
+    assert (found["notes/n/comments/c"].title, found["notes/n/comments/c"].text) == ("", "")
+
+
 def test_first_event_provenance_overrides_item_and_claimant(ledger):
     found = records(ledger)
     for ref, author, time in [

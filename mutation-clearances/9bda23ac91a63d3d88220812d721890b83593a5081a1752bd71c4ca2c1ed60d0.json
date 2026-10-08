@@ -1,0 +1,6 @@
+{
+  "scripts/recall/ledger.py:scripts.recall.ledger.x_extract_ledger__mutmut_16:08b3d03b48bce7e2c11d0aa7f69af8f07bb17f090dd846049ed2c299b3d49b46": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: dict.get without an explicit default returns None, matching the preceding candidate. A missing root title is excluded by _body and normalized by _entry to the empty-string title; root presence depends on the unchanged remaining body."
+  }
+}
