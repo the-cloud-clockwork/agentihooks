@@ -75,11 +75,15 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
     """live_rows reads the ledger's tasks at sweep time: a task closed after the tick's own read settles as closed."""
     active = {agent.name for agent in store.agents(slug) if agent.state != "finished"}
     tasks = {row.get("claimed_by"): row for row in live_rows().values()}
-    for name, seat in store.seats.agent_seats(slug):
-        if name in active:
+    seats = store.seats.agent_seats(slug)
+    gone = [(name, seat) for name, seat in seats if name not in active]
+    outcomes = store.seats.exits([name for name, _ in gone])
+    quiet = inbox.quiet([name for name, _ in gone])
+    for name, seat in gone:
+        outcome = outcomes[name]
+        if outcome and name in quiet:
             continue
         state = tasks.get(name, {}).get("state")
-        outcome = store.seats.exit_of(name)
         if state in ("done", "blocked"):
             exit_text = "finished its task and exited" if state == "done" else "blocked its task and exited"
             settle(inbox, name, "", exit_text)
@@ -87,7 +91,7 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
             settle(inbox, name, outcome["seat"], outcome["reason"])
         else:
             settle(inbox, name, seat, "exited")
-    _settle_seat_notices(inbox, {seat for _, seat in store.seats.agent_seats(slug) if seat}, active)
+    _settle_seat_notices(inbox, {seat for _, seat in seats if seat}, active)
     _settle_peer_mail(inbox, slug, store, active)
 
 

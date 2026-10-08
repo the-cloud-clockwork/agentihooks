@@ -530,3 +530,30 @@ def test_unreceived_task_mail_is_not_cancelled_as_a_new_occupant_receives_it(red
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(item.id).state == "pending"
     assert inbox.inbox("sw-eng-3") == []
+
+
+def test_the_sweep_skips_a_settled_agent_until_mail_reaches_it_again(redis, monkeypatch):
+    store, inbox = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    settled, settle = [], exits.settle
+    monkeypatch.setattr(exits, "settle", lambda inbox, name, *rest: settled.append(name) or settle(inbox, name, *rest))
+    exits.sweep(inbox, "sw", store, dict)
+    exits.sweep(inbox, "sw", store, dict)
+    assert settled == ["sw-eng-1"]
+    assert store.seats.exit_of("sw-eng-1") == {"seat": "eng-1@sw", "reason": "exited"}
+    late = inbox.send("sender", "sw-eng-1", "late contract")
+    exits.sweep(inbox, "sw", store, dict)
+    exits.sweep(inbox, "sw", store, dict)
+    assert settled == ["sw-eng-1", "sw-eng-1"]
+    assert inbox.get(late.id).address == "eng-1@sw"
+
+
+def test_the_sweep_reads_the_swarms_seats_once(redis, monkeypatch):
+    store, inbox = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    reads, seated = [], store.seats.agent_seats
+    monkeypatch.setattr(store.seats, "agent_seats", lambda slug: reads.append(slug) or seated(slug))
+    exits.sweep(inbox, "sw", store, dict)
+    assert reads == ["sw"]

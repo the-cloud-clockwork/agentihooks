@@ -447,3 +447,17 @@ def test_open_index_names_a_missing_item(store):
     with pytest.raises(InboxError) as error:
         store.open_items("receiver")
     assert str(error.value) == f"no message {item.id}"
+
+
+def test_quiet_names_only_indexed_addresses_without_open_mail(store):
+    done = store.send("alice", "gone", "finished")
+    store.close(done.id, "gone", "done", "finished")
+    store.open_items("gone")
+    store.open_items("empty")
+    store.send("alice", "late", "contract")
+    store.open_items("late")
+    store.send("alice", "never-indexed", "contract")
+    assert store.quiet(["gone", "empty", "late", "never-indexed", "unknown"]) == {"gone", "empty"}
+    store.send("alice", "empty", "arrived after the index")
+    assert store.quiet(["empty"]) == set()
+    assert store.quiet([]) == set()

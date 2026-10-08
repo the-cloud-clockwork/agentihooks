@@ -133,6 +133,21 @@ class InboxStore:
             self.redis.zrem(self.key("open", address), *closed)
         return sorted((item for item in items if item.state not in CLOSED), key=_order)
 
+    def quiet(self, addresses: list[str]) -> set[str]:
+        """Addresses whose open index is current and holds nothing; any other needs open_items to tell."""
+        with self.redis.pipeline(transaction=False) as pipe:
+            for address in addresses:
+                pipe.sismember(self.key("open-indexed"), address)
+                pipe.get(self.key("open-size", address))
+                pipe.zcard(self.key("address", address))
+                pipe.zcard(self.key("open", address))
+            rows = pipe.execute()
+        return {
+            address
+            for address, (indexed, size, total, opened) in zip(addresses, zip(*[iter(rows)] * 4))
+            if indexed and int(size or -1) == total and not opened
+        }
+
     def _open_ids(self, address):
         from redis.exceptions import WatchError
 
