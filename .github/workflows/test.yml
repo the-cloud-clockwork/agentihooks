@@ -603,7 +603,8 @@ jobs:
         run: python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
 
   coverage-ratchet:
-    needs: [unit]
+    needs: [unit, queue-baseline]
+    if: ${{ !cancelled() && needs.unit.result == 'success' && (github.event_name != 'merge_group' || needs['queue-baseline'].result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -630,10 +631,10 @@ jobs:
         id: base
         env:
           DISPATCHED: ${{ inputs.base }}
-          QUEUE_BASE: ${{ github.event.merge_group.base_ref }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
         run: |
           if [[ -n "$QUEUE_BASE" ]]; then
-            base=$(git merge-base HEAD "origin/${QUEUE_BASE#refs/heads/}")
+            base="$QUEUE_BASE"
           else
             base=$(git rev-parse "${DISPATCHED:-HEAD^1}")
           fi
@@ -641,20 +642,24 @@ jobs:
           echo "tree=$(git rev-parse "$base^{tree}")" >> "$GITHUB_OUTPUT"
 
       - name: Restore the exact coverage baseline
+        if: github.event_name != 'merge_group'
         uses: actions/cache/restore@v4
         with:
           path: ~/coverage-baseline
           key: coverage-baseline-${{ steps.base.outputs.tree }}
 
+      - name: Download the queue base coverage baseline
+        if: github.event_name == 'merge_group'
+        uses: actions/download-artifact@v4
+        with:
+          name: queue-coverage-baseline
+          path: ~/coverage-baseline
+
       - name: Hold every line the base ran
         env:
           BASE: ${{ steps.base.outputs.commit }}
-          QUEUE_BASE: ${{ github.event.merge_group.base_ref }}
         run: |
           base="$BASE"
-          if [[ -n "$QUEUE_BASE" ]]; then
-            base=$(git merge-base HEAD "origin/${QUEUE_BASE#refs/heads/}")
-          fi
           git worktree add --detach "$RUNNER_TEMP/base" "$base"
           grader="$RUNNER_TEMP/base"
           [[ -f "$grader/tests/coverage_ratchet.py" ]] || grader="$GITHUB_WORKSPACE"
