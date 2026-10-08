@@ -734,9 +734,9 @@ def test_a_refused_ledger_write_is_skipped_and_spawning_still_runs(capsys):
     )
     actions = tick("sw", store, ledger, runtime, 1000)
     assert [task for _, _, task in runtime.spawned] == ["e"]
-    assert "skipped scripts.swarm.capacity.apply: the ledger refused its write" in actions
+    assert "skipped scripts.swarm.quota_notice.refresh: the ledger refused its write" in actions
     assert capsys.readouterr().err == (
-        "scripts.swarm.capacity.apply skipped, the ledger refused its write: "
+        "scripts.swarm.quota_notice.refresh skipped, the ledger refused its write: "
         "ledger sw: server refused: 400 by is allowed only on agent chat and comment entries\n"
     )
 

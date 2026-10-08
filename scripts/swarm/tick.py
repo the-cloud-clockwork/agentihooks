@@ -154,9 +154,9 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions.append("new tasks, running again")
     actions += skip_refused(_orphans, slug, store, ledger, rows)
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
-    from scripts.swarm import capacity
+    from scripts.swarm import quota_notice
 
-    actions += skip_refused(capacity.apply, slug, config, store, ledger, runtime, now_ms)
+    actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
     actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
     if not sleeping:
         actions += skip_refused(_codex_hook_order)
