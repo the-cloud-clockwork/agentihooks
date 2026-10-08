@@ -698,6 +698,7 @@ def on_user_prompt_submit(payload: dict) -> None:
 
     session_id = payload.get("session_id", "")
     log("User prompt submitted", {"session_id": session_id})
+    _confirm_inbox(session_id)
     _swarm_heartbeat("working", payload.get("prompt", ""))
     typed = _operator_words(payload)
     _operator_mode(payload, typed)
@@ -1006,6 +1007,15 @@ def _inject_inbox(session_id: str, cwd: str = "") -> None:
 
     for context in _inbox_blocks(session_id, cwd):
         inject_context(context, also_log=False, skip_compression=True)
+
+
+def _confirm_inbox(session_id: str) -> None:
+    try:
+        from hooks.context.inbox_delivery import confirm_shown
+
+        confirm_shown(session_id)
+    except Exception as e:
+        log("inbox confirmation failed", {"error": str(e)})
 
 
 def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None = None) -> None:
@@ -2056,6 +2066,7 @@ def on_stop(payload: dict) -> None:
 
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
+    _confirm_inbox(session_id)
 
     # Parse transcript to get metrics (Claude Code doesn't include these in hook payload)
     metrics = parse_transcript_metrics(transcript_path) if transcript_path else {}

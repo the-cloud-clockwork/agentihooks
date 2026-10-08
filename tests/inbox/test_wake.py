@@ -216,10 +216,11 @@ def test_counts_survive_a_fresh_store_connection(server, inbox):
     assert events(fresh(server), item.id)[-1] == "escalated_master"
 
 
-def test_a_delivered_or_closed_item_is_never_woken(inbox):
+def test_a_confirmed_or_closed_item_is_never_woken(inbox):
     delivered = inbox.send(MASTER_NAME, "sw-eng-1", "one")
     closed = inbox.send(MASTER_NAME, "sw-eng-1", "two")
     inbox.deliver(delivered.id, "sw-eng-1")
+    inbox.confirm(delivered.id, "sw-eng-1")
     inbox.close(closed.id, "sw-eng-1", "done", "handled the request")
     herdr, ledger = FakeHerdr({"p1": "idle"}), FakeLedger()
     for n in range(8):
