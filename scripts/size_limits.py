@@ -31,11 +31,20 @@ def _ruff_version() -> str:
     return result.stdout.split()[-1] if result.returncode == 0 else ""
 
 
+def _python(path: Path) -> bool:
+    if path.suffix in (".py", ".pyi"):
+        return True
+    with path.open("rb") as handle:
+        first = handle.readline()
+    return first.startswith(b"#!") and b"python" in first
+
+
 def files(tree: Path) -> list[Path]:
-    result = subprocess.run(["git", "-C", str(tree), "ls-files", "-z", "*.py", "*.pyi"], capture_output=True)
+    result = subprocess.run(["git", "-C", str(tree), "ls-files", "-z"], capture_output=True)
     if result.returncode != 0:
         raise GradeError(f"git ls-files failed in {tree}: {result.stderr.decode().strip()}")
-    found = sorted(tree / name for name in result.stdout.decode().split("\0") if name)
+    tracked = (tree / name for name in result.stdout.decode().split("\0") if name)
+    found = sorted(path for path in tracked if path.is_file() and not path.is_symlink() and _python(path))
     if not found:
         raise GradeError(f"no tracked Python files under {tree}")
     return found
@@ -152,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
         head = measure(args.head)
         recorded = load(args.head)
         base = _base(args, recorded)
-    except (GradeError, SyntaxError, ValueError) as exc:
+    except (GradeError, SyntaxError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
     errors = grade(base, head, recorded)

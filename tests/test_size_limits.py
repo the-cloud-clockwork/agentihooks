@@ -55,6 +55,11 @@ def test_offenders_in_excluded_or_ignored_folders_are_graded(tmp_path, folder):
     assert size_limits.measure(tree) == {f"{folder}/mod.py::planted": {"PLR0913": 8}}
 
 
+def test_a_python_script_without_an_extension_is_graded(tmp_path):
+    tree = _tree(tmp_path, {"bin/tool": f"#!/usr/bin/env python3\n{EIGHT_PARAMETERS}", "bin/run": "#!/bin/sh\n"})
+    assert size_limits.measure(tree) == {"bin/tool::planted": {"PLR0913": 8}}
+
+
 def test_config_and_noqa_in_the_graded_tree_hide_nothing(tmp_path):
     tree = _tree(
         tmp_path,
@@ -145,12 +150,15 @@ def test_size_runs_beside_unit_graded_by_the_base_with_the_pinned_ruff():
     job = jobs["size"]
     assert "needs" not in job
     assert "size" in jobs["gate-required"]["needs"]
-    install, base, grade = job["steps"][-3:]
+    install, base, grader, grade = job["steps"][-4:]
     assert install["run"] == f"python -m pip install ruff=={size_limits.RUFF_VERSION}"
     assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$BASE"'
+    assert grader["run"] == (
+        'git fetch --no-tags origin dev\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n'
+    )
     assert grade["run"] == (
-        'if [[ -f "$RUNNER_TEMP/base/scripts/size_limits.py" ]]; then\n'
-        '  cd "$RUNNER_TEMP/base"\n'
+        'if [[ -f "$RUNNER_TEMP/grader/scripts/size_limits.py" ]]; then\n'
+        '  cd "$RUNNER_TEMP/grader"\n'
         '  python -m scripts.size_limits --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
         "else\n"
         '  python -m scripts.size_limits --bootstrap --head "$GITHUB_WORKSPACE"\n'

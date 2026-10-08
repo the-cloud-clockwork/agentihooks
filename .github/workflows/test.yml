@@ -288,12 +288,19 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
         run: git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
 
-      # The base revision's copy grades, so a pull request cannot loosen its own limits or allowlist.
+      - name: Check out the protected grader
+        if: steps.lookup.outputs.skip != 'true'
+        run: |
+          git fetch --no-tags origin dev
+          git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
+
+      # dev's copy grades against the base's allowlist, so a pull request cannot loosen its own limits or allowlist.
+      # The bootstrap branch runs only until the grader first lands on dev.
       - name: Hold the size and complexity limits
         if: steps.lookup.outputs.skip != 'true'
         run: |
-          if [[ -f "$RUNNER_TEMP/base/scripts/size_limits.py" ]]; then
-            cd "$RUNNER_TEMP/base"
+          if [[ -f "$RUNNER_TEMP/grader/scripts/size_limits.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
             python -m scripts.size_limits --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
           else
             python -m scripts.size_limits --bootstrap --head "$GITHUB_WORKSPACE"
