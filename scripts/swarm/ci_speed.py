@@ -81,7 +81,7 @@ def read_runs(repo_dir: str, since_s: float, run: Callable = subprocess.run) -> 
             timeout=60,
         ).stdout
 
-    with ThreadPoolExecutor(len(FINISHED)) as pool:
+    with ThreadPoolExecutor() as pool:
         outputs = list(pool.map(read, sorted(FINISHED)))
     return [json.loads(line) for output in outputs for line in output.splitlines()]
 

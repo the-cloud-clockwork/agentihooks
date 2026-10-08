@@ -140,6 +140,15 @@ def test_runs_older_than_a_day_leave_the_window(swarm):
     }
 
 
+def test_a_run_that_started_exactly_a_day_ago_stays_in_the_window(swarm):
+    store, config = swarm
+    ci_speed.refresh("sw", config, store, NOW_MS, run=by_conclusion(RUNS, []))
+    edge_ms = (1791452123 + ci_speed.WINDOW_S) * 1000
+    ci_speed.refresh("sw", config, store, edge_ms, run=gh("", []))
+    cached = ci_speed.get(store.redis, "sw")
+    assert (cached["runs"], cached["minutes"]) == (1, 5.9)
+
+
 def test_a_cache_without_run_durations_reads_the_whole_day(swarm):
     store, config = swarm
     store.redis.set(ci_speed.key("sw"), json.dumps({"minutes": 9.0, "runs": 50, "at": NOW_MS, "tried_at": NOW_MS}))
