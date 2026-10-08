@@ -264,6 +264,12 @@ def unlinked_slice(task: dict, tasks: list[dict]) -> list[str]:
     return [item["id"] for item in tasks if item["id"] in ids and not item.get("plan_url")]
 
 
+def _update_fields(task: dict, fields: dict) -> dict:
+    if ledger_kinds.kind(task) == "plan" and fields.get("kind", "plan") != "plan" and "lane" not in fields:
+        return {**fields, "lane": "eng"}
+    return fields
+
+
 def _update(doc, op, ctx):
     task_id = op["item"].split("/")[1]
     task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
@@ -277,7 +283,8 @@ def _update(doc, op, ctx):
             ctx.refused.append(refusal)
             return False
         op = {**op, "fields": {**op["fields"], "rank": ledger_rank.canonical(op["fields"]["rank"])}}
-    after = {**task, **op["fields"]}
+    fields = _update_fields(task, op["fields"])
+    after = {**task, **fields}
     check_lane(after)
     if after.get("state") == "done" and ledger_kinds.unmet(after):
         ctx.refused.append(f"{op['item']} cannot be done without its proof: {', '.join(ledger_kinds.unmet(after))}")
@@ -290,7 +297,11 @@ def _update(doc, op, ctx):
         if unlinked := unlinked_slice(after, doc["tasks"]):
             ctx.refused.append(f"{op['item']} slice tasks carry no plan link: {', '.join(unlinked)}. {PUBLISH}")
             return False
-    changed = {k: v for k, v in op["fields"].items() if task.get(k) != v}
+    changed = {k: v for k, v in fields.items() if task.get(k) != v}
+    if "kind" in changed and after.get("workspace"):
+        from scripts.swarm_ledger import ledger_workspace
+
+        ledger_workspace.rewrite(after)
     task.update(changed)
     if "state" in changed:
         task["done"] = changed["state"] == "done"
