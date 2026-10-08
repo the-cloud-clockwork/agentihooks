@@ -45,7 +45,7 @@ def test_sonar_restores_downloads_before_every_scan():
     key = cache["with"]["key"]
     assert "${{ runner.os }}" in key
     assert "${{ runner.arch }}" in key
-    assert "hashFiles('.github/workflows/test.yml')" in key
+    assert "hashFiles(" not in key
     assert "if" not in cache
     assert "if" not in steps[scan_index]
     assert not cache.get("continue-on-error")
