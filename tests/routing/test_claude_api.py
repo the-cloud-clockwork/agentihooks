@@ -20,6 +20,7 @@ def test_a_token_route_child_carries_no_api_credentials():
         "ANTHROPIC_BEDROCK_BASE_URL": "https://bedrock.example",
         "ANTHROPIC_VERTEX_PROJECT_ID": "project",
         "ANTHROPIC_FOUNDRY_RESOURCE": SENTINEL,
+        "ANTHROPIC_CUSTOM_HEADERS": SENTINEL,
         "CLAUDE_CODE_USE_BEDROCK": "1",
         API_MARKER: "1",
     }
