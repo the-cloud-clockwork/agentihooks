@@ -42,11 +42,22 @@ def assign_files(
             seconds[path] += duration
     serial = {path: seconds[path] if grouped and path in grouped else 0.0 for path in files}
     collection = {path: sizes.get(path, 0) * SECONDS_PER_SOURCE_BYTE for path in files}
+    return _assign_work(seconds, serial, collection, shards, workers)
+
+
+def assign_nodes(durations: dict[str, float], shards: int, grouped: set[str], workers: int) -> list[list[str]]:
+    serial = {node: seconds if node.split("::", 1)[0] in grouped else 0.0 for node, seconds in durations.items()}
+    return _assign_work(durations, serial, dict.fromkeys(durations, 0.0), shards, workers)
+
+
+def _assign_work(
+    seconds: dict[str, float], serial: dict[str, float], collection: dict[str, float], shards: int, workers: int
+) -> list[list[str]]:
     loads = [0.0] * shards
     serial_loads = [0.0] * shards
     collection_loads = [0.0] * shards
     groups: list[list[str]] = [[] for _ in range(shards)]
-    for path in sorted(files, key=lambda f: (-max(seconds[f] / workers, serial[f]) - collection[f], f)):
+    for path in sorted(seconds, key=lambda f: (-max(seconds[f] / workers, serial[f]) - collection[f], f)):
         lightest = min(
             range(shards),
             key=lambda i: (

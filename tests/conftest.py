@@ -3,9 +3,11 @@
 import errno
 import json
 import os
+import re
 import socket
 import sys
 import time
+import zlib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,6 +16,7 @@ import pytest
 from tests import installer_isolation, ledger_guard, swarm_v2_isolation
 from tests.shards import (
     assign_files,
+    assign_nodes,
     discover_test_files,
     grouped_files,
     setup_nodes_in_parallel,
@@ -45,10 +48,20 @@ def _refuse_redis_connect_ex(sock, address):
 
 COLLECTED_NODEIDS = pytest.StashKey[list[str]]()
 SHARD_FILES = pytest.StashKey[frozenset[str]]()
+NODE_SHARDS = pytest.StashKey[dict[str, int]]()
 WARM_PIDS = pytest.StashKey[list[int]]()
 
 
 def pytest_collection_modifyitems(config, items):
+    if config.getoption("shard") and NODE_SHARDS in config.stash:
+        index, shards = (int(part) for part in config.getoption("shard").split("/"))
+        selected = []
+        for item in items:
+            node = re.sub(r"@[^\[\]]*$", "", item.nodeid)
+            shard = config.stash[NODE_SHARDS].get(node, zlib.crc32(node.encode()) % shards)
+            if shard == index - 1:
+                selected.append(item)
+        items[:] = selected
     if hasattr(config, "workerinput"):
         durations = json.loads((config.rootpath / ".test_durations").read_text())
         order = {nodeid: i for i, nodeid in enumerate(slowest_first([item.nodeid for item in items], durations, 0.1))}
@@ -72,14 +85,14 @@ def _shard_files(config) -> frozenset[str]:
         )
         if workers == "auto":
             workers = os.cpu_count() or 1
-        files = assign_files(
-            durations,
-            files,
-            shards,
-            source_sizes(config.rootpath, files),
-            grouped_files(config.rootpath, files),
-            workers,
-        )[index - 1]
+        if workers > 1:
+            measured = {node: seconds for node, seconds in durations.items() if node.split("::", 1)[0] in files}
+            parts = assign_nodes(measured, shards, grouped_files(config.rootpath, files), workers)
+            config.stash[NODE_SHARDS] = {node: shard for shard, part in enumerate(parts) for node in part}
+            known = {node.split("::", 1)[0] for node in measured}
+            files = {node.split("::", 1)[0] for node in parts[index - 1]} | (set(files) - known)
+        else:
+            files = assign_files(durations, files, shards, source_sizes(config.rootpath, files))[index - 1]
         config.stash[SHARD_FILES] = frozenset(files)
     return config.stash[SHARD_FILES]
 
