@@ -5,5 +5,5 @@
 - Follow ups: `agentihooks ledger --slug <slug> --as <name> followup add "<text>"`.
 - Waits and blockers: `agentihooks swarm <slug> wait <minutes> --reason "<what>"`, `agentihooks swarm <slug> block "<why>"`.
 - Inbox items: `agentihooks msg reply <id> "<text>"` or `agentihooks msg close <id> done|handoff <address>|blocked <what>|cancel`.
-- Merge: on a base branch with a merge queue, gh pr merge only queues the pull request, and GitHub refuses a push while it sits in the queue. To fix it, dequeue it first (the dequeuePullRequest command in the swarm-engineer skill), then push the fix, and once its checks pass queue it again.
+- Merge: on a base branch with a merge queue, a merge only queues the pull request; queue it with `agentihooks swarm <slug> merge queue <url>` and read its place with `agentihooks swarm <slug> merge state <url>`. GitHub refuses a push while it sits in the queue. To fix it, dequeue it first with `agentihooks swarm <slug> merge dequeue <url>`, then push the fix, and once its checks pass queue it again.
 - Close: `agentihooks ledger --slug <slug> --as <name> leave`, then `agentihooks swarm <slug> done --pr <url>`.

@@ -66,12 +66,15 @@ The swarm ends a checked wait when the thing resolves and tells you through the 
 ## Close with the proof
 
 Merge on green checks and closed review. On a base branch with a merge queue,
-`gh pr merge` only queues the pull request; it lands when the queue run passes,
-so wait with `agentihooks swarm <slug> wait --on merge <url>` and keep the
-worktree until it merges. GitHub refuses a push while the pull request sits in
-the queue. To fix a queued pull request, dequeue it first with
-`gh api graphql -f query='mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }' -f id="$(gh pr view <url> --json id --jq .id)"`,
-then push the fix, and once its checks pass queue it again with `gh pr merge`.
+a merge only queues the pull request; it lands when the queue run passes. Queue
+it with `agentihooks swarm <slug> merge queue <url>`, which goes through the
+GitHub API and works with any gh, then wait with
+`agentihooks swarm <slug> wait --on merge <url>` and keep the worktree until it
+merges. `agentihooks swarm <slug> merge state <url>` reports whether it sits in
+the queue. GitHub refuses a push while the pull request sits in the queue. To
+fix a queued pull request, dequeue it first with
+`agentihooks swarm <slug> merge dequeue <url>`, then push the fix, and once its
+checks pass queue it again with `agentihooks swarm <slug> merge queue <url>`.
 
 Once merged, remove the worktree, then
 `agentihooks ledger --slug <slug> --as <name> leave` and close with the proof
