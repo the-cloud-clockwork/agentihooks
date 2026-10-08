@@ -56,6 +56,9 @@ def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
     assert command[:3] == ["gh", "api", "graphql"]
     assert "enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head})" in command[4]
     assert command[5:] == ["-f", "id=PR_one", "-f", "head=abc"]
+    assert (
+        calls[2][0] == calls[0][0] == ["gh", "api", "graphql", "-f", f"query={merge_queue.STATE}", "-f", f"url={URL}"]
+    )
 
 
 def test_dequeue_removes_the_pull_request_then_reports_its_state():
@@ -74,6 +77,9 @@ def test_dequeue_removes_the_pull_request_then_reports_its_state():
     command, _ = calls[1]
     assert "dequeuePullRequest(input: {pullRequestId: $id})" in command[4]
     assert command[5:] == ["-f", "id=PR_one"]
+    assert (
+        calls[2][0] == calls[0][0] == ["gh", "api", "graphql", "-f", f"query={merge_queue.STATE}", "-f", f"url={URL}"]
+    )
 
 
 def swarm_of(lane):
@@ -132,6 +138,14 @@ def test_queue_mutations_refuse_release_branches(action, base):
     with pytest.raises(SwarmError) as exc:
         merge_queue.operate(action, URL, run)
     assert str(exc.value) == "swarm merge queue operations require a pull request into dev"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("base", ["main", "master", "v1"])
+def test_state_reports_a_pull_request_into_any_base(base):
+    run, calls = runner({"data": {"resource": {**OPEN, "baseRefName": base}}})
+
+    assert merge_queue.operate("state", URL, run)["state"] == "OPEN"
     assert len(calls) == 1
 
 
