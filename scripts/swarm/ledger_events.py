@@ -367,6 +367,7 @@ def _pull_requests(mail, tasks, now_ms, github):
             sent += mail.send(f"{url}:closed", mail.engineer(task), text)
         elif (
             found.red
+            and not found.gate_passed
             and (not found.unpassed_gate or found.failed)
             and red_window(found.pushed_at, found.red_at, now_ms) is not None
         ):

@@ -1,0 +1,43 @@
+{
+  "thread": "01a11cc5-b19b-7000-a898-fb9c27c51675",
+  "viewer_saw_live_item": true,
+  "turn_after_viewer_closed": "completed",
+  "agent_text": [
+    "I\u2019ll run `sleep 25` once and wait for it to finish.",
+    "GOLF"
+  ],
+  "reopen_resume_same_thread": true,
+  "loaded_threads": {
+    "data": [
+      "01a11cc5-b19b-7000-a898-fb9c27c51675"
+    ],
+    "nextCursor": null
+  },
+  "reopened_viewer_turn": {
+    "turn": "01a11cc6-2c7c-76b0-9c3a-bd325be3a76a",
+    "completed": true,
+    "status": "completed",
+    "agent_text": [
+      "HOTEL"
+    ],
+    "methods": [
+      "account/rateLimits/updated",
+      "account/updated",
+      "configWarning",
+      "deprecationNotice",
+      "hook/completed",
+      "hook/started",
+      "item/agentMessage/delta",
+      "item/completed",
+      "item/started",
+      "remoteControl/status/changed",
+      "thread/goal/cleared",
+      "thread/status/changed",
+      "thread/tokenUsage/updated",
+      "turn/completed",
+      "turn/started"
+    ]
+  },
+  "bridge_saw_viewer_turn": true,
+  "turns_in_history": 2
+}

@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from hooks.proc import Process
+from hooks.proc import Process, processes
 from scripts.swarm import naming, reaper
 
 NAME = "engineer@a1b2c3-0007"
@@ -128,6 +128,15 @@ def test_a_reused_launch_pid_carrying_another_name_is_left_alone(plant):
     assert reaper.targets(NAME, stranger.pid, []) == reaper.Targets()
     assert reaper.retire(NAME, stranger.pid, []) == reaper.Outcome()
     assert stranger.poll() is None
+
+
+def test_a_launch_pid_whose_start_time_changed_is_left_alone(plant):
+    launch = plant(name=NAME)
+    started = processes()[launch.pid].start_time
+    assert reaper.targets(NAME, launch.pid, [], started + 1) == reaper.Targets()
+    assert reaper.retire(NAME, launch.pid, [], started + 1) == reaper.Outcome()
+    assert launch.poll() is None
+    assert reaper.targets(NAME, launch.pid, [], started) == reaper.Targets(frozenset({launch.pid}))
 
 
 @pytest.mark.parametrize("pid", [999_999_999, 0, None])

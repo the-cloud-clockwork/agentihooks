@@ -22,10 +22,10 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     assert (
         required
         <= set(gate["needs"])
-        <= required | {"swarm-image", "shard-check", "brain-smoke", "wiring", "size", "dependency-audit"}
+        <= required | {"swarm-image", "shard-check", "brain-smoke", "wiring", "size", "dependency-audit", "durations"}
     )
     assert gate["if"] == "${{ always() }}"
-    assert "needs" not in jobs["unit"]
+    assert jobs["unit"]["needs"] == ["durations"]
     assert "needs" not in jobs["lint"]
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
@@ -90,6 +90,16 @@ def test_required_gate_rejects_every_non_success_result(unit, lint):
     assert (result.returncode == 0) == (unit == lint == "success"), result.stdout + result.stderr
     if result.returncode:
         assert "::error::" in result.stdout
+
+
+@pytest.mark.parametrize("durations", ["success", "failure", "skipped", "cancelled"])
+def test_required_gate_is_red_when_the_durations_lookup_did_not_succeed(durations):
+    gate = _workflow()["jobs"]["gate-required"]
+    assert "durations" in gate["needs"]
+    needs = {"durations": {"result": durations}, "unit": {"result": "skipped" if durations != "success" else "success"}}
+    env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="false")
+    result = subprocess.run(["bash", "-e", "-c", gate["steps"][0]["run"]], env=env, capture_output=True, text=True)
+    assert (result.returncode == 0) == (durations == "success"), result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("mutation", ["success", "failure", "skipped", "cancelled"])

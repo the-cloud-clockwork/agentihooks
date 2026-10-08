@@ -283,3 +283,50 @@ def test_a_proof_swarm_space_is_closed_and_renamed_by_its_slug(proof_store):
     assert ["workspace", "close", "w5"] in calls
     spaces[0]["label"] = "agentihooks-ffffff"
     assert runtime.close_space(proof_store.config(PROOF)) is False
+
+
+def test_resolve_many_reads_every_alias_in_one_round_trip(store, redis, monkeypatch):
+    new = store.next_name("sw", "eng")
+    store.names.alias("sw-eng-1", new)
+    reads = []
+    mget = redis.mget
+    monkeypatch.setattr(redis, "get", lambda key: reads.append(key))
+    monkeypatch.setattr(redis, "mget", lambda keys: reads.append(list(keys)) or mget(keys))
+    keys = [f"{naming.PREFIX}:alias:{name}" for name in ("sw-eng-1", new, "stranger")]
+    assert naming.NameRegistry(redis).resolve_many(["sw-eng-1", new, "stranger"]) == {
+        "sw-eng-1": new,
+        new: new,
+        "stranger": "stranger",
+    }
+    assert reads == [keys]
+    assert naming.NameRegistry(redis).resolve_many([]) == {}
+    assert reads == [keys]
+
+
+def test_resolve_many_keeps_every_name_when_redis_fails(redis, monkeypatch, caplog):
+    from redis.exceptions import RedisError
+
+    def down(keys):
+        raise RedisError("down")
+
+    monkeypatch.setattr(redis, "mget", down)
+    assert naming.NameRegistry(redis).resolve_many(["a", "b"]) == {"a": "a", "b": "b"}
+    assert [(r.name, r.levelname, r.getMessage()) for r in caplog.records] == [
+        ("scripts.swarm.naming", "WARNING", "alias lookup failed for 2 names: down")
+    ]
+
+
+def test_resolve_names_needs_no_redis(monkeypatch):
+    import hooks._redis
+
+    monkeypatch.setattr(hooks._redis, "get_redis", lambda: None)
+    assert naming.resolve_names(["a", "b"]) == {"a": "a", "b": "b"}
+
+
+def test_resolve_names_reads_aliases_through_the_registry(store, redis, monkeypatch):
+    import hooks._redis
+
+    new = store.next_name("sw", "eng")
+    store.names.alias("sw-eng-1", new)
+    monkeypatch.setattr(hooks._redis, "get_redis", lambda: redis)
+    assert naming.resolve_names(["sw-eng-1", "x"]) == {"sw-eng-1": new, "x": "x"}
