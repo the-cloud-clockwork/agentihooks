@@ -1,3 +1,4 @@
+import re
 import subprocess
 import tomllib
 from pathlib import Path
@@ -46,6 +47,7 @@ def test_a_planted_eight_parameter_function_is_red(tmp_path, capsys):
     head = _recorded(tmp_path / "head", {"pkg/mod.py": EIGHT_PARAMETERS})
     code, out = _grade(base, head, capsys)
     assert code == 1
+    assert "1 units over a limit, 0 on the base allowlist, 1 errors" in out
     assert "pkg/mod.py::planted breaks PLR0913 at 8; it is not on the base allowlist" in out
 
 
@@ -62,13 +64,17 @@ def test_a_python_script_without_an_extension_is_graded(tmp_path):
             "bin/tool": f"#!/usr/bin/env python3\n{EIGHT_PARAMETERS}",
             "bin/job": f"#!/usr/bin/env pypy3\n{EIGHT_PARAMETERS}",
             "gui.pyw": EIGHT_PARAMETERS,
+            "stub.pyi": "x: int\n" * (size_limits.FILE_LINES + 1),
             "bin/run": "#!/bin/sh\n",
+            "notes": "python notes\n",
+            "bin/far": f"#!{' ' * 249}python\n{EIGHT_PARAMETERS}",
         },
     )
     assert size_limits.measure(tree) == {
         "bin/tool::planted": {"PLR0913": 8},
         "bin/job::planted": {"PLR0913": 8},
         "gui.pyw::planted": {"PLR0913": 8},
+        "stub.pyi": {"file-lines": size_limits.FILE_LINES + 1},
     }
 
 
@@ -84,7 +90,10 @@ def test_config_and_noqa_in_the_graded_tree_hide_nothing(tmp_path):
         tmp_path,
         {
             "mod.py": "def planted(a, b, c, d, e, f, g, h):  # noqa: PLR0913\n    return a\n",
-            "pyproject.toml": '[tool.ruff]\nexclude = ["mod.py"]\n[tool.ruff.lint.pylint]\nmax-args = 20\n',
+            "pyproject.toml": (
+                '[tool.ruff]\nexclude = ["mod.py"]\n[tool.ruff.lint.pylint]\nmax-args = 20\n'
+                '[tool.ruff.lint.per-file-ignores]\n"mod.py" = ["PLR0913"]\n'
+            ),
         },
     )
     assert size_limits.measure(tree) == {"mod.py::planted": {"PLR0913": 8}}
@@ -142,26 +151,100 @@ def test_a_base_without_an_allowlist_is_red_unless_bootstrapping(tmp_path, capsy
     assert code == 1
     assert "the base has no tests/SIZE_ALLOWLIST.json" in out
     assert size_limits.main(["--bootstrap", "--head", str(head)]) == 0
+    assert "Bootstrap: the head's own tests/SIZE_ALLOWLIST.json stands in" in capsys.readouterr().out
 
 
-def test_function_and_file_lengths_are_measured(tmp_path):
-    statements = "".join(f"        x{i} = {i}\n" for i in range(size_limits.FUNCTION_LINES))
+def _function(name: str, lines: int) -> str:
+    return f"def {name}():\n" + "".join(f"    x{i} = {i}\n" for i in range(lines - 1))
+
+
+def test_function_and_file_lengths_over_the_limit_are_measured(tmp_path):
     tree = _tree(
         tmp_path,
         {
-            "long.py": f"class Holder:\n    def method(self):\n{statements}",
+            "long.py": "class Holder:\n"
+            + "".join(f"    {line}\n" for line in _function("method", size_limits.FUNCTION_LINES + 1).splitlines()),
+            "fits.py": _function("method", size_limits.FUNCTION_LINES),
             "big.py": "x = 1\n" * (size_limits.FILE_LINES + 1),
+            "full.py": "x = 1\n" * size_limits.FILE_LINES,
         },
     )
-    measured = size_limits.measure(tree)
-    assert measured["long.py::Holder.method"]["function-lines"] == size_limits.FUNCTION_LINES + 1
-    assert measured["big.py"] == {"file-lines": size_limits.FILE_LINES + 1}
+    assert size_limits.measure(tree) == {
+        "long.py::Holder.method": {"function-lines": size_limits.FUNCTION_LINES + 1},
+        "big.py": {"file-lines": size_limits.FILE_LINES + 1},
+    }
 
 
-def test_the_grader_refuses_another_ruff_version(tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr(size_limits, "_ruff_version", lambda: "0.0.1")
+def test_the_allowlist_is_written_sorted_one_space_indented(tmp_path):
+    tree = _recorded(tmp_path, {"big.py": "x = 1\n" * (size_limits.FILE_LINES + 1), "a.py": EIGHT_PARAMETERS})
+    assert (tree / size_limits.ALLOWLIST).read_text() == (
+        '{\n "a.py::planted": {\n  "PLR0913": 8\n },\n "big.py": {\n  "file-lines": 3001\n }\n}\n'
+    )
+
+
+def test_the_head_defaults_to_the_working_directory(tmp_path, monkeypatch):
+    tree = _tree(tmp_path, {"mod.py": EIGHT_PARAMETERS})
+    monkeypatch.chdir(tree)
+    assert size_limits.main(["--write"]) == 0
+    assert size_limits.load(tree) == {"mod.py::planted": {"PLR0913": 8}}
+
+
+def test_grading_without_a_base_or_bootstrap_is_refused(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        size_limits.main(["--head", str(tmp_path)])
+    assert "grading needs --base, or --bootstrap where the base predates the gate" in capsys.readouterr().err
+
+
+def test_a_tree_outside_git_or_without_python_cannot_be_graded(tmp_path):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    with pytest.raises(size_limits.GradeError, match=f"^git ls-files failed in {re.escape(str(plain))}: fatal"):
+        size_limits.files(plain)
+    empty = _tree(tmp_path / "empty", {"README.md": "text\n"})
+    with pytest.raises(size_limits.GradeError, match=f"^no tracked Python files under {re.escape(str(empty))}$"):
+        size_limits.files(empty)
+
+
+def _fake_ruff(tmp_path: Path, monkeypatch, script: str) -> None:
+    fake = tmp_path / "fake_ruff.py"
+    fake.write_text(script)
+    monkeypatch.setattr(size_limits, "_RUFF", (size_limits.sys.executable, str(fake)))
+
+
+def test_a_failing_ruff_cannot_grade(tmp_path, monkeypatch):
+    tree = _tree(tmp_path / "tree", {"mod.py": SEVEN_PARAMETERS})
+    _fake_ruff(tmp_path, monkeypatch, "import sys\nsys.stderr.write('boom\\n')\nsys.exit(3)\n")
+    with pytest.raises(size_limits.GradeError, match="^ruff exited 3: boom$"):
+        size_limits.measure(tree)
+
+
+@pytest.mark.parametrize(
+    ("name", "code", "row", "message"),
+    [
+        ("mod.py", "E999", 1, "unknown (8 > 7)"),
+        ("mod.py", "PLR0913", 1, "no measured value"),
+        ("mod.py", "PLR0913", 9, "Too many arguments (8 > 7)"),
+        ("other.py", "PLR0913", 1, "Too many arguments (8 > 7)"),
+    ],
+)
+def test_a_ruff_hit_off_a_known_function_cannot_grade(tmp_path, monkeypatch, name, code, row, message):
+    tree = _tree(tmp_path / "tree", {"mod.py": SEVEN_PARAMETERS}).resolve()
+    hit = {"code": code, "filename": str(tree / name), "location": {"row": row}, "message": message}
+    _fake_ruff(tmp_path, monkeypatch, f"import json\nprint(json.dumps([{hit!r}]))\n")
+    with pytest.raises(size_limits.GradeError) as raised:
+        size_limits.measure(tree)
+    assert str(raised.value) == f"cannot grade {tree / name}:{row}: {code} {message}"
+
+
+def test_the_grader_reads_the_installed_ruff_version():
+    assert size_limits._ruff_version() == size_limits.RUFF_VERSION
+
+
+@pytest.mark.parametrize(("version", "shown"), [("0.0.1", "0.0.1"), ("", "none")])
+def test_the_grader_refuses_another_ruff_version(tmp_path, capsys, monkeypatch, version, shown):
+    monkeypatch.setattr(size_limits, "_ruff_version", lambda: version)
     assert size_limits.main(["--write", "--head", str(_tree(tmp_path, {"mod.py": SEVEN_PARAMETERS}))]) == 1
-    assert f"needs ruff {size_limits.RUFF_VERSION}, found 0.0.1" in capsys.readouterr().out
+    assert f"needs ruff {size_limits.RUFF_VERSION}, found {shown}, so it cannot grade" in capsys.readouterr().out
 
 
 def test_size_runs_beside_unit_graded_by_the_base_with_the_pinned_ruff():

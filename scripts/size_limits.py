@@ -27,8 +27,7 @@ class GradeError(Exception):
 
 
 def _ruff_version() -> str:
-    result = subprocess.run([*_RUFF, "--version"], capture_output=True, text=True)
-    return result.stdout.split()[-1] if result.returncode == 0 else ""
+    return subprocess.run([*_RUFF, "--version"], capture_output=True, text=True).stdout.strip().removeprefix("ruff ")
 
 
 def _python(path: Path) -> bool:
@@ -86,10 +85,10 @@ def _lengths(tree: Path, defs: dict[Path, dict[int, tuple[str, int]]], measured:
 
 
 def _ruff_hits(tree: Path, defs: dict[Path, dict[int, tuple[str, int]]], measured: dict) -> None:
-    flags = ("--isolated", "--no-cache", "--no-respect-gitignore", "--ignore-noqa", "--exit-zero")
+    flags = ("--isolated", "--ignore-noqa", "--exit-zero")
     command = [*_RUFF, "check", *flags, "--output-format", "json", "--select", ",".join(RULES)]
     command += [f"--config={setting}" for setting in _SETTINGS] + [str(path) for path in defs]
-    result = subprocess.run(command, cwd=tree, capture_output=True, text=True)
+    result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
         raise GradeError(f"ruff exited {result.returncode}: {result.stderr.strip()}")
     for hit in json.loads(result.stdout):
@@ -143,11 +142,11 @@ def _base(args, recorded: dict | None) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="hold the size and complexity limits on a shrink only allowlist")
-    parser.add_argument("--base", type=Path, help="checkout of the base revision, whose allowlist grades the head")
-    parser.add_argument("--head", type=Path, default=Path.cwd(), help="checkout of the head revision")
-    parser.add_argument("--write", action="store_true", help="record the head's offenders as its allowlist")
-    parser.add_argument("--bootstrap", action="store_true", help="grade against the head's allowlist, once")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base")
+    parser.add_argument("--head", type=Path, default=Path.cwd())
+    parser.add_argument("--write", action="store_true")
+    parser.add_argument("--bootstrap", action="store_true")
     args = parser.parse_args(argv)
     if not (args.write or args.bootstrap or args.base):
         parser.error("grading needs --base, or --bootstrap where the base predates the gate")
