@@ -79,6 +79,7 @@ def case_b():
                 "classified": [{"state": seen.state, "failure": seen.failure} for seen in denied],
                 "deleted_pod_claimed": any(seen.state is State.LOST for seen in denied),
                 "protected_state_unchanged": unchanged,
+                "protected_scope": "every swarm key except the observations record the classification writes",
                 "corrected_by_new_read": corrected.state,
                 "execution_observation_age_seconds": observer.execution_observation_age_seconds("fixture", NOW + 14400),
             }
@@ -99,9 +100,12 @@ def case_c():
         restored = RedisStore(fakeredis.FakeRedis(decode_responses=True))
         restored.restore("fixture", store.export("fixture"))
         restarted = Observer(restored, "kubernetes", LIMITS)
+        executions = restored.key("fixture", "executions")
+        attempts_before = (restored.redis.hlen(executions), len(restored.spawns("fixture")))
         relisted = [beat(agent, -10.0), pod(agent, age=-10.0), signal(agent, Source.SUPERVISOR, value="confirmed")]
         recovered = restarted.observe("fixture", agent, relisted, NOW + 10)
         replayed = restarted.observe("fixture", agent, watch_lost, NOW + 20)
+        attempts_after = (restored.redis.hlen(executions), len(restored.spawns("fixture")))
         agents = [a.execution_id for a in restored.agents("fixture")]
         conservative = Observer(restored, "kubernetes", replace(LIMITS, mode=Mode.CONSERVATIVE))
         gone = [pod(agent, Reading.NOT_FOUND, "", age=-30.0)]
@@ -112,14 +116,16 @@ def case_c():
                 and uncertain.state is State.SUSPECT
                 and recovered.state is State.WORKING
                 and recovered.recovered
-                and replayed == recovered
+                and replayed.state is State.WORKING
+                and replayed.sources == recovered.sources
+                and attempts_before == attempts_after
                 and agents == [agent.execution_id]
                 and restored.execution("fixture", agent.execution_id).generation == agent.generation
                 and all(seen.state is State.SUSPECT and seen.needs_operator for seen in held),
                 "before_relist": uncertain.failure,
                 "after_relist": {"state": recovered.state, "confidence": recovered.confidence},
-                "agents_started": len(agents) - 1,
-                "stale_replay_overwrote": replayed != recovered,
+                "execution_attempts_and_spawns": {"before_relist": attempts_before, "after_relist": attempts_after},
+                "stale_replay_overwrote": replayed.sources != recovered.sources,
                 "conservative_rollback": [
                     {"state": seen.state, "needs_operator": seen.needs_operator} for seen in held
                 ],

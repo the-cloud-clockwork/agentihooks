@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import pytest
 
@@ -16,7 +16,6 @@ from scripts.swarm_v2.runtime.observe import (
     Terminal,
     Thresholds,
     classify,
-    projection,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -72,8 +71,16 @@ def ssh(agent, reading=Reading.OK, age=1.0):
     return signal(agent, Source.TERMINAL, reading, age=age)
 
 
+def handshake(agent, age=1.0):
+    return signal(agent, Source.SUPERVISOR, value="confirmed", age=age)
+
+
 def judge(agent, *signals, prior=None, limits=LIMITS, now=NOW):
     return classify(agent.execution_id, agent.generation, signals, prior, limits, now)
+
+
+def verdict(seen):
+    return seen.state, seen.failure, seen.confidence
 
 
 @pytest.mark.parametrize("independent", range(2))
@@ -93,42 +100,58 @@ def test_every_source_keeps_its_own_reading_and_time(fixture):
         "heartbeat": {"reading": "ok", "observed_at": NOW - 30.0, "value": "working"},
         "kubernetes": {"reading": "ok", "observed_at": NOW - 2.0, "value": "Running"},
     }
-    assert seen.observed_at == NOW - 2.0
+    assert (seen.observed_at, seen.confirmed_at, seen.classified_at) == (NOW - 2.0, NOW - 2.0, NOW)
     assert seen.terminal is Terminal.UNOBSERVED
     assert observer.execution_observation_age_seconds("fixture", NOW) == {agent.execution_id: 2.0}
+
+
+def test_age_follows_the_last_successful_read_not_failed_ones(fixture):
+    _, agent, observer = fixture
+    observer.observe("fixture", agent, [beat(agent, 30.0)], NOW)
+    for minute in range(1, 4):
+        later = pod(agent, Reading.FORBIDDEN, "", age=-60.0 * minute)
+        seen = observer.observe("fixture", agent, [later], NOW + 60 * minute)
+    assert (seen.observed_at, seen.confirmed_at) == (NOW + 180, NOW - 30.0)
+    assert observer.execution_observation_age_seconds("fixture", NOW + 180) == {agent.execution_id: 210.0}
+
+
+def test_age_is_unknown_before_any_successful_read(fixture):
+    _, agent, observer = fixture
+    observer.observe("fixture", agent, [pod(agent, Reading.FORBIDDEN, "")], NOW)
+    assert observer.execution_observation_age_seconds("fixture", NOW) == {agent.execution_id: None}
 
 
 def test_fresh_heartbeat_alone_is_partial(fixture):
     _, agent, _ = fixture
     seen = judge(agent, beat(agent), ssh(agent))
-    assert (seen.state, seen.terminal, seen.failure, seen.confidence) == (
-        State.WORKING,
-        Terminal.REACHABLE,
-        Failure.NONE,
-        Confidence.PARTIAL,
-    )
+    assert (seen.terminal, *verdict(seen)) == (Terminal.REACHABLE, State.WORKING, Failure.NONE, Confidence.PARTIAL)
 
 
 def test_supervisor_handshake_confirms_a_fresh_heartbeat(fixture):
     _, agent, _ = fixture
-    seen = judge(agent, beat(agent), signal(agent, Source.SUPERVISOR, value="confirmed"))
-    assert seen.confidence is Confidence.CONFIRMED
+    assert judge(agent, beat(agent), handshake(agent)).confidence is Confidence.CONFIRMED
 
 
 def test_heartbeat_older_than_the_threshold_is_stale(fixture):
     _, agent, _ = fixture
     assert judge(agent, beat(agent, 120.0), pod(agent)).state is State.WORKING
     stale = judge(agent, beat(agent, 120.5), pod(agent))
-    assert (stale.state, stale.failure, stale.confidence) == (State.SUSPECT, Failure.WORKER_LOSS, Confidence.UNCERTAIN)
-    assert stale.suspect_since == NOW
+    assert verdict(stale) == (State.SUSPECT, Failure.WORKER_LOSS, Confidence.UNCERTAIN)
+    assert (stale.suspect_since, stale.proof_since) == (NOW, 0.0)
 
 
 def test_stale_heartbeat_with_running_pod_never_becomes_lost_without_proof(fixture):
     _, agent, _ = fixture
     first = judge(agent, beat(agent, 900.0), pod(agent))
-    later = judge(agent, beat(agent, 900.0 + 3600), pod(agent), prior=first, now=NOW + 3600)
-    assert later.state is State.SUSPECT
-    assert later.suspect_since == NOW
+    later = judge(agent, prior=first, now=NOW + 3600)
+    assert (later.state, later.suspect_since) == (State.SUSPECT, NOW)
+
+
+def test_an_empty_batch_reclassifies_known_evidence_as_time_passes(fixture):
+    _, agent, observer = fixture
+    observer.observe("fixture", agent, [beat(agent), pod(agent)], NOW)
+    seen = observer.observe("fixture", agent, [], NOW + 600)
+    assert (seen.state, seen.classified_at, seen.confirmed_at) == (State.SUSPECT, NOW + 600, NOW - 1.0)
 
 
 def test_provider_wait_is_its_own_class(fixture):
@@ -139,35 +162,42 @@ def test_provider_wait_is_its_own_class(fixture):
 
 def test_unschedulable_pod_is_pending_scheduling(fixture):
     _, agent, _ = fixture
-    seen = judge(agent, pod(agent, value="Pending"))
-    assert (seen.state, seen.failure, seen.confidence) == (State.PENDING, Failure.POD_SCHEDULING, Confidence.PARTIAL)
+    assert verdict(judge(agent, pod(agent, value="Pending"))) == (
+        State.PENDING,
+        Failure.POD_SCHEDULING,
+        Confidence.PARTIAL,
+    )
 
 
-def test_running_pod_before_its_first_heartbeat_is_starting(fixture):
+def test_fresh_heartbeat_from_a_pending_pod_is_a_contradiction(fixture):
     _, agent, _ = fixture
-    seen = judge(agent, pod(agent))
-    assert (seen.state, seen.failure) == (State.STARTING, Failure.NONE)
-    assert judge(agent, pod(agent), signal(agent, Source.SUPERVISOR, value="confirmed")).state is State.SUSPECT
+    assert verdict(judge(agent, beat(agent), pod(agent, value="Pending"))) == (
+        State.SUSPECT,
+        Failure.POD_SCHEDULING,
+        Confidence.UNCERTAIN,
+    )
+
+
+def test_running_pod_is_starting_until_the_supervisor_confirms_the_agent(fixture):
+    _, agent, _ = fixture
+    assert verdict(judge(agent, pod(agent))) == (State.STARTING, Failure.NONE, Confidence.PARTIAL)
+    assert verdict(judge(agent, pod(agent), handshake(agent))) == (State.WORKING, Failure.NONE, Confidence.PARTIAL)
 
 
 @pytest.mark.parametrize("reading", [Reading.FORBIDDEN, Reading.UNAUTHENTICATED])
 def test_denied_pod_read_is_never_a_deleted_pod(fixture, reading):
     _, agent, _ = fixture
     first = judge(agent, beat(agent, 900.0), pod(agent, reading, ""))
-    later = judge(agent, beat(agent, 900.0 + 3600), pod(agent, reading, ""), prior=first, now=NOW + 3600)
+    later = judge(agent, pod(agent, reading, "", age=-3600.0), prior=first, now=NOW + 3600)
     for seen in (first, later):
-        assert (seen.state, seen.failure, seen.confidence) == (
-            State.SUSPECT,
-            Failure.OBSERVATION_DENIED,
-            Confidence.UNCERTAIN,
-        )
+        assert verdict(seen) == (State.SUSPECT, Failure.OBSERVATION_DENIED, Confidence.UNCERTAIN)
         assert seen.denied == ("kubernetes",)
 
 
 def test_denied_pod_read_beside_a_fresh_heartbeat_stays_working_and_names_the_denial(fixture):
     _, agent, _ = fixture
     seen = judge(agent, beat(agent), pod(agent, Reading.FORBIDDEN, ""))
-    assert (seen.state, seen.failure, seen.confidence, seen.denied) == (
+    assert (*verdict(seen), seen.denied) == (
         State.WORKING,
         Failure.OBSERVATION_DENIED,
         Confidence.PARTIAL,
@@ -179,8 +209,7 @@ def test_denied_pod_read_beside_a_fresh_heartbeat_stays_working_and_names_the_de
 def test_unreachable_or_missing_pod_view_is_unavailable(fixture, missing):
     _, agent, _ = fixture
     pods = [pod(agent, reading, "") for reading in missing]
-    seen = judge(agent, beat(agent, 900.0), *pods)
-    assert (seen.state, seen.failure, seen.confidence) == (
+    assert verdict(judge(agent, beat(agent, 900.0), *pods)) == (
         State.SUSPECT,
         Failure.OBSERVATION_UNAVAILABLE,
         Confidence.UNCERTAIN,
@@ -199,25 +228,34 @@ def test_unreachable_or_missing_pod_view_is_unavailable(fixture, missing):
 def test_worker_loss_proof_turns_suspect_into_lost_after_the_threshold(fixture, proof):
     _, agent, _ = fixture
     first = judge(agent, beat(agent, 900.0), proof(agent))
-    assert (first.state, first.failure, first.confidence) == (State.SUSPECT, Failure.WORKER_LOSS, Confidence.PARTIAL)
-    early = judge(agent, proof(agent), prior=first, now=NOW + 599.0)
-    assert early.state is State.SUSPECT
-    lost = judge(agent, proof(agent), prior=early, now=NOW + 600.0)
+    assert verdict(first) == (State.SUSPECT, Failure.WORKER_LOSS, Confidence.PARTIAL)
+    assert first.proof_since == NOW
+    early = judge(agent, prior=first, now=NOW + 599.0)
+    assert (early.state, early.proof_since) == (State.SUSPECT, NOW)
+    lost = judge(agent, prior=early, now=NOW + 600.0)
     assert (lost.state, lost.suspect_since, lost.needs_operator) == (State.LOST, NOW, False)
-    assert judge(agent, beat(agent), pod(agent), prior=lost, now=NOW + 601.0).state is State.LOST
+    assert judge(agent, beat(agent, -601.0), pod(agent, age=-601.0), prior=lost, now=NOW + 601.0) == lost
 
 
-def test_lost_needs_a_prior_suspect_observation(fixture):
+def test_the_lost_clock_starts_at_the_first_proof_not_at_an_earlier_suspicion(fixture):
+    _, agent, _ = fixture
+    denied = judge(agent, pod(agent, Reading.FORBIDDEN, ""))
+    proof = judge(agent, pod(agent, Reading.NOT_FOUND, "", age=-602.0), prior=denied, now=NOW + 602)
+    assert (proof.state, proof.suspect_since, proof.proof_since) == (State.SUSPECT, NOW, NOW + 602)
+
+
+def test_lost_needs_a_prior_proof_observation(fixture):
     _, agent, _ = fixture
     prior = judge(agent, beat(agent), pod(agent))
-    assert judge(agent, pod(agent, Reading.NOT_FOUND, ""), prior=prior, now=NOW + 5000).state is State.SUSPECT
+    gone = judge(agent, pod(agent, Reading.NOT_FOUND, ""), prior=prior, now=NOW + 5000)
+    assert (*verdict(gone), gone.proof_since) == (State.SUSPECT, Failure.WORKER_LOSS, Confidence.PARTIAL, NOW + 5000)
 
 
 def test_conservative_mode_never_declares_lost_and_asks_the_operator(fixture):
     _, agent, _ = fixture
     limits = replace(LIMITS, mode=Mode.CONSERVATIVE)
     first = judge(agent, pod(agent, Reading.NOT_FOUND, ""), limits=limits)
-    later = judge(agent, pod(agent, Reading.NOT_FOUND, ""), prior=first, limits=limits, now=NOW + 5000)
+    later = judge(agent, prior=first, limits=limits, now=NOW + 5000)
     assert (later.state, later.needs_operator) == (State.SUSPECT, True)
     assert judge(agent, beat(agent), limits=limits).needs_operator is False
 
@@ -225,14 +263,14 @@ def test_conservative_mode_never_declares_lost_and_asks_the_operator(fixture):
 def test_fresh_heartbeat_contradicted_by_a_deleted_pod_is_suspect(fixture):
     _, agent, _ = fixture
     seen = judge(agent, beat(agent), pod(agent, Reading.NOT_FOUND, ""))
-    assert (seen.state, seen.failure, seen.confidence) == (State.SUSPECT, Failure.WORKER_LOSS, Confidence.UNCERTAIN)
+    assert verdict(seen) == (State.SUSPECT, Failure.WORKER_LOSS, Confidence.UNCERTAIN)
 
 
 def test_relist_after_watch_failure_recovers_without_a_new_agent(fixture):
     store, agent, observer = fixture
     lost_watch = observer.observe("fixture", agent, [beat(agent, 300.0), pod(agent, Reading.UNREACHABLE, "")], NOW)
     assert lost_watch.state is State.SUSPECT
-    relisted = [beat(agent, -10.0), pod(agent, age=-10.0), signal(agent, Source.SUPERVISOR, value="confirmed")]
+    relisted = [beat(agent, -10.0), pod(agent, age=-10.0), handshake(agent, -10.0)]
     seen = observer.observe("fixture", agent, relisted, NOW + 10)
     assert (seen.state, seen.confidence, seen.recovered, seen.suspect_since) == (
         State.WORKING,
@@ -243,12 +281,19 @@ def test_relist_after_watch_failure_recovers_without_a_new_agent(fixture):
     assert [a.execution_id for a in store.agents("fixture")] == [agent.execution_id]
 
 
-def test_an_older_observation_cannot_overwrite_a_newer_one(fixture):
+def test_older_signals_cannot_overwrite_newer_evidence(fixture):
     _, agent, observer = fixture
     newer = observer.observe("fixture", agent, [beat(agent), pod(agent)], NOW)
     replayed = observer.observe("fixture", agent, [beat(agent, 900.0), pod(agent, Reading.UNREACHABLE, "", 900.0)], NOW)
     assert replayed == newer
     assert observer.get("fixture", agent.execution_id) == newer
+
+
+def test_an_earlier_classification_cannot_overwrite_a_later_one(fixture):
+    _, agent, observer = fixture
+    later = observer.observe("fixture", agent, [beat(agent)], NOW + 60)
+    assert observer.observe("fixture", agent, [pod(agent, Reading.NOT_FOUND, "", age=-90.0)], NOW) == later
+    assert observer.get("fixture", agent.execution_id) == later
 
 
 def test_signals_for_another_execution_or_generation_are_discarded(fixture):
@@ -262,19 +307,32 @@ def test_signals_for_another_execution_or_generation_are_discarded(fixture):
     assert observer.discarded == 2
 
 
+def test_lost_writes_one_audit_record(fixture):
+    _, agent, observer = fixture
+    gone = [pod(agent, Reading.NOT_FOUND, "")]
+    observer.observe("fixture", agent, gone, NOW)
+    assert observer.audit("fixture") == []
+    lost = observer.observe("fixture", agent, [], NOW + 600)
+    observer.observe("fixture", agent, [], NOW + 700)
+    assert lost.state is State.LOST
+    assert observer.audit("fixture") == [lost]
+
+
 def test_observer_refuses_another_backends_execution(fixture):
     store, agent, _ = fixture
     local = Observer(store, "local", LIMITS)
-    with pytest.raises(ObservationRefused, match="belongs to kubernetes"):
+    with pytest.raises(ObservationRefused, match="belongs to kubernetes") as refused:
         local.observe("fixture", agent, [beat(agent)], NOW)
+    assert (refused.value.error_class, refused.value.retryable) == ("forbidden_scope", False)
     assert local.get("fixture", agent.execution_id) is None
 
 
 @pytest.mark.parametrize("change", [{"execution_id": ""}, {"generation": 99}])
 def test_observer_refuses_an_execution_that_is_not_the_seat_occupant(fixture, change):
     _, agent, observer = fixture
-    with pytest.raises(ObservationRefused):
+    with pytest.raises(ObservationRefused, match="current occupant") as refused:
         observer.observe("fixture", replace(agent, **change), [beat(agent)], NOW)
+    assert (refused.value.error_class, refused.value.retryable) == ("stale_generation", False)
     assert observer.records("fixture") == []
 
 
@@ -283,39 +341,40 @@ def test_mode_comes_from_the_environment():
     assert Thresholds.from_environ({"AGENTIHOOKS_OBSERVATION_MODE": "conservative"}).mode is Mode.CONSERVATIVE
 
 
-def test_projection_carries_source_and_time_for_recorded_and_legacy_agents(fixture):
-    from scripts.swarm import idle
+def test_status_observation_carries_source_and_time_for_recorded_and_legacy_agents(fixture):
+    from scripts.swarm import idle, status
 
     store, agent, observer = fixture
     seen = observer.observe("fixture", agent, [beat(agent), pod(agent)], NOW)
-    assert projection(store, "fixture", agent) == {
+    assert status.observation(store, "fixture", agent) == {
         "state": "working",
         "terminal": "unobserved",
         "failure": "none",
         "confidence": "confirmed",
+        "needs_operator": False,
         "observed_at": seen.observed_at,
+        "confirmed_at": seen.confirmed_at,
         "sources": seen.sources,
     }
     legacy = AgentRecord("sw-eng-1", "eng", "t1")
-    assert projection(store, "fixture", legacy) == {"state": "unclassified", "observed_at": 0.0, "sources": {}}
+    assert status.observation(store, "fixture", legacy) == {"state": "unclassified", "observed_at": None, "sources": {}}
     idle.beat(store.redis, "fixture", "sw-eng-1", "working", 1_500)
-    assert projection(store, "fixture", legacy) == {
+    assert status.observation(store, "fixture", legacy) == {
         "state": "unclassified",
         "observed_at": 1.5,
         "sources": {"heartbeat": {"reading": "ok", "observed_at": 1.5, "value": "working"}},
     }
 
 
-def test_status_report_rows_carry_the_observation(monkeypatch):
+def test_status_report_rows_keep_their_fields_and_add_the_observation(monkeypatch):
     from scripts.swarm import status
 
     store, agent = fresh_store()
     Observer(store, "kubernetes", LIMITS).observe("fixture", agent, [beat(agent)], NOW)
     monkeypatch.setattr(status, "page_quota", lambda: {})
-    rows = status.status_report(store, "fixture", {"tasks": []})["agents"]
-    assert [(row["name"], row["observation"]["sources"]["heartbeat"]["observed_at"]) for row in rows] == [
-        (agent.name, NOW - 5.0)
-    ]
+    [row] = status.status_report(store, "fixture", {"tasks": []})["agents"]
+    assert set(row) == set(asdict(agent)) | {"status", "promoted", "state_since", "gates", "inbox", "observation"}
+    assert (row["name"], row["observation"]["sources"]["heartbeat"]["observed_at"]) == (agent.name, NOW - 5.0)
 
 
 class Contended:
@@ -348,6 +407,7 @@ def test_a_contended_record_retries_then_refuses(fixture, monkeypatch, failures)
     if failures < 5:
         assert observer.observe("fixture", agent, [beat(agent)], NOW).state is State.WORKING
         return
-    with pytest.raises(ObservationRefused, match="kept changing"):
+    with pytest.raises(ObservationRefused, match="kept changing") as refused:
         observer.observe("fixture", agent, [beat(agent)], NOW)
+    assert (refused.value.error_class, refused.value.retryable) == ("revision_conflict", True)
     assert observer.records("fixture") == []

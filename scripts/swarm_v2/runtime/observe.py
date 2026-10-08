@@ -1,8 +1,4 @@
-"""Observation confidence and failure classification for one execution attempt.
-
-Heartbeat freshness, the Kubernetes view, the supervisor handshake, terminal reachability and provider wait stay
-separate signals, each with its source and time; a denied or unreachable read is never evidence that a Pod is gone.
-"""
+"""A denied or unreachable read is never evidence that a Pod is gone."""
 
 import json
 from collections.abc import Iterable, Mapping
@@ -10,15 +6,13 @@ from dataclasses import asdict, dataclass
 from enum import StrEnum
 from typing import Any
 
-from scripts.swarm import idle
 from scripts.swarm.store import AgentRecord
+from scripts.swarm_v2.runtime.operations import WRITE_ATTEMPTS
 
 MODE_VARIABLE = "AGENTIHOOKS_OBSERVATION_MODE"
 RUNNING, PENDING = "Running", "Pending"
 ENDED = frozenset(("Succeeded", "Failed"))
 HANDSHAKE, EXITED, QUOTA_WAIT = "confirmed", "exited", "quota_wait"
-WRITE_ATTEMPTS = 5
-UNCLASSIFIED = "unclassified"
 
 
 class Source(StrEnum):
@@ -49,6 +43,9 @@ class State(StrEnum):
     LOST = "lost"
 
 
+ALIVE = frozenset((State.WORKING, State.WAITING_QUOTA))
+
+
 class Terminal(StrEnum):
     REACHABLE = "reachable"
     DEGRADED = "degraded"
@@ -77,7 +74,9 @@ class Mode(StrEnum):
 
 
 class ObservationRefused(ValueError):
-    pass
+    def __init__(self, message: str, error_class: str, retryable: bool = False):
+        super().__init__(message)
+        self.error_class, self.retryable = error_class, retryable
 
 
 @dataclass(frozen=True)
@@ -110,17 +109,37 @@ class Classification:
     failure: Failure
     confidence: Confidence
     observed_at: float
-    sources: dict
-    denied: tuple = ()
+    confirmed_at: float
+    classified_at: float
+    sources: dict[str, dict[str, Any]]
+    denied: tuple[str, ...] = ()
     suspect_since: float = 0.0
+    proof_since: float = 0.0
     needs_operator: bool = False
     recovered: bool = False
 
 
-def _latest(signals: Iterable[Signal]) -> dict[Source, Signal]:
-    latest = {}
+def _remembered(prior: Classification | None) -> dict[Source, Signal]:
+    if prior is None:
+        return {}
+    return {
+        Source(name): Signal(
+            Source(name),
+            Reading(entry["reading"]),
+            entry["observed_at"],
+            prior.execution_id,
+            prior.generation,
+            entry["value"],
+        )
+        for name, entry in prior.sources.items()
+    }
+
+
+def _latest(signals: Iterable[Signal], known: dict[Source, Signal]) -> dict[Source, Signal]:
+    latest = dict(known)
     for found in signals:
-        if found.source not in latest or found.observed_at > latest[found.source].observed_at:
+        held = latest.get(found.source)
+        if held is None or found.observed_at >= held.observed_at:
             latest[found.source] = found
     return latest
 
@@ -136,17 +155,24 @@ def _terminal(found: Signal | None) -> Terminal:
     return Terminal.REACHABLE if found.reading is Reading.OK else Terminal.DEGRADED
 
 
-def _judge(fresh: bool, beat: bool, pod: Reading, latest: dict[Source, Signal]) -> tuple[State, Failure, Confidence]:
-    """LOST here names failure proof only; classify decides whether the suspect threshold has passed."""
+def _alive(gone: bool, phase: str, supervisor: str, latest: dict[Source, Signal]) -> tuple[State, Failure, Confidence]:
+    if gone:
+        return State.SUSPECT, Failure.WORKER_LOSS, Confidence.UNCERTAIN
+    if phase == PENDING:
+        return State.SUSPECT, Failure.POD_SCHEDULING, Confidence.UNCERTAIN
+    agree = Confidence.CONFIRMED if phase == RUNNING or supervisor == HANDSHAKE else Confidence.PARTIAL
+    if _value(latest, Source.PROVIDER) == QUOTA_WAIT:
+        return State.WAITING_QUOTA, Failure.PROVIDER_WAIT, agree
+    return State.WORKING, Failure.NONE, agree
+
+
+def _judge(fresh: bool, beat: bool, latest: dict[Source, Signal]) -> tuple[State, Failure, Confidence]:
+    """LOST here names failure proof only; classify decides whether the proof has held long enough."""
+    pod = latest[Source.KUBERNETES].reading if Source.KUBERNETES in latest else Reading.UNREACHABLE
     phase, supervisor = _value(latest, Source.KUBERNETES), _value(latest, Source.SUPERVISOR)
     gone = pod is Reading.NOT_FOUND or phase in ENDED or supervisor == EXITED
-    if fresh and gone:
-        return State.SUSPECT, Failure.WORKER_LOSS, Confidence.UNCERTAIN
     if fresh:
-        agree = Confidence.CONFIRMED if phase == RUNNING or supervisor == HANDSHAKE else Confidence.PARTIAL
-        if _value(latest, Source.PROVIDER) == QUOTA_WAIT:
-            return State.WAITING_QUOTA, Failure.PROVIDER_WAIT, agree
-        return State.WORKING, Failure.NONE, agree
+        return _alive(gone, phase, supervisor, latest)
     if gone:
         return State.LOST, Failure.WORKER_LOSS, Confidence.PARTIAL
     if phase == PENDING:
@@ -155,9 +181,27 @@ def _judge(fresh: bool, beat: bool, pod: Reading, latest: dict[Source, Signal]) 
         return State.SUSPECT, Failure.OBSERVATION_DENIED, Confidence.UNCERTAIN
     if pod is not Reading.OK:
         return State.SUSPECT, Failure.OBSERVATION_UNAVAILABLE, Confidence.UNCERTAIN
-    if not beat and supervisor != HANDSHAKE:
-        return State.STARTING, Failure.NONE, Confidence.PARTIAL
-    return State.SUSPECT, Failure.WORKER_LOSS, Confidence.UNCERTAIN
+    if beat:
+        return State.SUSPECT, Failure.WORKER_LOSS, Confidence.UNCERTAIN
+    if supervisor == HANDSHAKE:
+        return State.WORKING, Failure.NONE, Confidence.PARTIAL
+    return State.STARTING, Failure.NONE, Confidence.PARTIAL
+
+
+def _qualified(failure: Failure, terminal: Terminal, denied: tuple[str, ...]) -> Failure:
+    if failure is Failure.NONE and terminal is Terminal.DEGRADED:
+        return Failure.TERMINAL_LOSS
+    if failure is Failure.NONE and denied:
+        return Failure.OBSERVATION_DENIED
+    return failure
+
+
+def _settled(state: State, kept: Classification | None, thresholds: Thresholds, now: float) -> State:
+    proven_since = kept.proof_since if kept else 0.0
+    held = proven_since and now - proven_since >= thresholds.lost_after_s
+    if state is State.LOST and (thresholds.mode is Mode.CONSERVATIVE or not held):
+        return State.SUSPECT
+    return state
 
 
 def classify(
@@ -171,40 +215,35 @@ def classify(
     kept = prior if prior and prior.generation == generation else None
     if kept and kept.state is State.LOST:
         return kept
-    latest = _latest(signals)
+    latest = _latest(signals, _remembered(kept))
     beat = latest.get(Source.HEARTBEAT)
     fresh = beat is not None and beat.reading is Reading.OK and now - beat.observed_at <= thresholds.fresh_s
-    pod = latest[Source.KUBERNETES].reading if Source.KUBERNETES in latest else Reading.UNREACHABLE
-    state, failure, confidence = _judge(fresh, beat is not None, pod, latest)
+    state, failure, confidence = _judge(fresh, beat is not None, latest)
     denied = tuple(sorted(found.source.value for found in latest.values() if found.reading in DENIED))
     terminal = _terminal(latest.get(Source.TERMINAL))
-    if failure is Failure.NONE and terminal is Terminal.DEGRADED:
-        failure = Failure.TERMINAL_LOSS
-    elif failure is Failure.NONE and denied:
-        failure = Failure.OBSERVATION_DENIED
+    proof_since = (kept and kept.proof_since or now) if state is State.LOST else 0.0
+    state = _settled(state, kept, thresholds, now)
     was_suspect = kept is not None and kept.state is State.SUSPECT
-    since = 0.0
-    if state in (State.SUSPECT, State.LOST):
-        since = kept.suspect_since if was_suspect else now
-    conservative = thresholds.mode is Mode.CONSERVATIVE
-    if state is State.LOST and (conservative or not was_suspect or now - since < thresholds.lost_after_s):
-        state = State.SUSPECT
+    confirmed = [found.observed_at for found in latest.values() if found.reading is Reading.OK]
     return Classification(
         execution_id,
         generation,
         state,
         terminal,
-        failure,
+        _qualified(failure, terminal, denied),
         confidence,
         max((found.observed_at for found in latest.values()), default=0.0),
+        max([kept.confirmed_at if kept else 0.0, *confirmed]),
+        now,
         {
             found.source.value: {"reading": found.reading.value, "observed_at": found.observed_at, "value": found.value}
             for found in latest.values()
         },
         denied,
-        since,
-        conservative and state is State.SUSPECT,
-        was_suspect and state in (State.WORKING, State.WAITING_QUOTA),
+        (kept.suspect_since if was_suspect else now) if state in (State.SUSPECT, State.LOST) else 0.0,
+        proof_since,
+        thresholds.mode is Mode.CONSERVATIVE and state is State.SUSPECT,
+        was_suspect and state in ALIVE,
     )
 
 
@@ -224,8 +263,8 @@ def _decode(raw: str | None) -> Classification | None:
     )
 
 
-def _key(store: Any, slug: str) -> str:
-    return store.key(slug, "observations")
+def _key(store: Any, slug: str, kind: str = "observations") -> str:
+    return store.key(slug, kind)
 
 
 def stored(store: Any, slug: str, execution_id: str) -> Classification | None:
@@ -239,11 +278,11 @@ class Observer:
 
     def observe(self, slug: str, agent: AgentRecord, signals: Iterable[Signal], now: float) -> Classification:
         if agent.runtime_backend != self.backend:
-            raise ObservationRefused(f"runtime object belongs to {agent.runtime_backend}")
+            raise ObservationRefused(f"runtime object belongs to {agent.runtime_backend}", "forbidden_scope")
         occupant = self.store.execution_registry.occupants(slug).get(agent.seat)
         identity = (agent.execution_id, agent.generation)
         if not agent.execution_id or occupant is None or (occupant.execution_id, occupant.generation) != identity:
-            raise ObservationRefused("execution is not the current occupant of its seat")
+            raise ObservationRefused("execution is not the current occupant of its seat", "stale_generation")
         signals = list(signals)
         own = [found for found in signals if (found.execution_id, found.generation) == identity]
         self.discarded += len(signals) - len(own)
@@ -255,8 +294,14 @@ class Observer:
     def records(self, slug: str) -> list[Classification]:
         return [_decode(raw) for raw in self.store.redis.hvals(_key(self.store, slug))]
 
-    def execution_observation_age_seconds(self, slug: str, now: float) -> dict[str, float]:
-        return {record.execution_id: now - record.observed_at for record in self.records(slug)}
+    def audit(self, slug: str) -> list[Classification]:
+        return [_decode(raw) for raw in self.store.redis.lrange(_key(self.store, slug, "observation-audit"), 0, -1)]
+
+    def execution_observation_age_seconds(self, slug: str, now: float) -> dict[str, float | None]:
+        return {
+            record.execution_id: now - record.confirmed_at if record.confirmed_at else None
+            for record in self.records(slug)
+        }
 
     def _record(self, slug: str, agent: AgentRecord, signals: list[Signal], now: float) -> Classification:
         from redis.exceptions import WatchError
@@ -267,32 +312,15 @@ class Observer:
                 try:
                     pipe.watch(key)
                     prior = _decode(pipe.hget(key, agent.execution_id))
-                    seen = classify(agent.execution_id, agent.generation, signals, prior, self.thresholds, now)
-                    if prior and (prior.generation, prior.observed_at) > (seen.generation, seen.observed_at):
+                    if prior and (prior.generation, prior.classified_at) > (agent.generation, now):
                         return prior
+                    seen = classify(agent.execution_id, agent.generation, signals, prior, self.thresholds, now)
                     pipe.multi()
                     pipe.hset(key, agent.execution_id, json.dumps(asdict(seen)))
+                    if seen.state is State.LOST and (prior is None or prior.state is not State.LOST):
+                        pipe.rpush(_key(self.store, slug, "observation-audit"), json.dumps(asdict(seen)))
                     pipe.execute()
                     return seen
                 except WatchError:
                     continue
-        raise ObservationRefused("observation record kept changing; nothing recorded")
-
-
-def projection(store: Any, slug: str, agent: AgentRecord) -> dict:
-    found = stored(store, slug, agent.execution_id) if agent.execution_id else None
-    if found:
-        return {
-            "state": found.state,
-            "terminal": found.terminal,
-            "failure": found.failure,
-            "confidence": found.confidence,
-            "observed_at": found.observed_at,
-            "sources": found.sources,
-        }
-    beat = idle.heartbeat(store.redis, slug, agent.name)
-    if not beat:
-        return {"state": UNCLASSIFIED, "observed_at": 0.0, "sources": {}}
-    at = beat["at"] / 1000
-    heartbeat = {"reading": Reading.OK, "observed_at": at, "value": beat["state"]}
-    return {"state": UNCLASSIFIED, "observed_at": at, "sources": {Source.HEARTBEAT: heartbeat}}
+        raise ObservationRefused("observation record kept changing; nothing recorded", "revision_conflict", True)
