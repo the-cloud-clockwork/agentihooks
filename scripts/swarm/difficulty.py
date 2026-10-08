@@ -40,16 +40,15 @@ INSTRUCTIONS = (
 
 def size_pass(slug: str, ledger, doc: dict) -> list[str]:
     unsized = [t for t in doc.get("tasks", []) if t.get("state") != "done" and not t.get("difficulty")][:PER_TICK]
-    with ThreadPoolExecutor(max_workers=PER_TICK) as pool:
-        sizes = list(pool.map(lambda task: rule(task) or classify(task, doc), unsized))
     actions = []
-    for task, fields in zip(unsized, sizes):
-        try:
-            ledger.update_task(slug, task["id"], fields)
-        except LedgerRefused:
-            actions.append(f"skipped sizing task {task['id']}: the ledger refused its write")
-            continue
-        actions.append(f"sized task {task['id']} {fields['difficulty']} by {fields['difficulty_source']}")
+    with ThreadPoolExecutor(max_workers=PER_TICK) as pool:
+        for task, fields in zip(unsized, pool.map(lambda task: rule(task) or classify(task, doc), unsized)):
+            try:
+                ledger.update_task(slug, task["id"], fields)
+            except LedgerRefused:
+                actions.append(f"skipped sizing task {task['id']}: the ledger refused its write")
+                continue
+            actions.append(f"sized task {task['id']} {fields['difficulty']} by {fields['difficulty_source']}")
     return actions
 
 
