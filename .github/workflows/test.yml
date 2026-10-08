@@ -174,11 +174,8 @@ jobs:
           key: ${{ needs.durations.outputs.key }}
           fail-on-cache-miss: true
 
-      # Every shard judges the restored cache by the same event time, so a cache a dev push saves mid run is refused by all of them.
       - name: Adopt latest dev durations
-        env:
-          RUN_TIME: ${{ github.event.pull_request.updated_at || github.event.merge_group.head_commit.timestamp || github.event.repository.pushed_at }}
-        run: python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations --run-time "$RUN_TIME" --hash durations.sha256
+        run: python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations --hash durations.sha256
 
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
@@ -605,7 +602,7 @@ jobs:
           overwrite: true
 
       - name: Stage merged durations for the cache
-        run: mkdir -p ~/dev-durations && cp .test_durations* ~/dev-durations/ && date +%s > ~/dev-durations/saved-at
+        run: mkdir -p ~/dev-durations && cp .test_durations* ~/dev-durations/
 
       - name: Save merged durations to the cache
         uses: actions/cache/save@v4

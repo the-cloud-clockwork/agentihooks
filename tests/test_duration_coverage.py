@@ -22,12 +22,11 @@ def test_download_checks_coverage_before_replacing_complete_durations(tmp_path, 
     restored = tmp_path / "restored"
     restored.mkdir()
     (restored / ".test_durations").write_text(json.dumps(candidate))
-    (restored / "saved-at").write_text("0\n")
 
     monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
     monkeypatch.setenv("PYTEST_ADDOPTS", "--shard 1/4")
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
-    dev_durations.main(["3.12", str(restored), "--run-time", "3600"])
+    dev_durations.main(["3.12", str(restored)])
     if missing == 10:
         assert json.loads((tmp_path / ".test_durations").read_text()) == candidate
     else:
@@ -86,10 +85,9 @@ def test_recorded_incomplete_durations_are_refused(tmp_path, monkeypatch, capsys
         restored = tmp_path / "restored"
         restored.mkdir()
         (restored / ".test_durations").write_text(json.dumps(incomplete))
-        (restored / "saved-at").write_text("0\n")
         monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
         monkeypatch.setattr(dev_durations, "collected_tests", lambda root: collected)
-        dev_durations.main(["3.12", str(restored), "--run-time", "3600"])
+        dev_durations.main(["3.12", str(restored)])
         assert "1440 of 12891 tests have no stored duration" in capsys.readouterr().out
     for suffix in ("", "-3.11", "-3.12"):
         assert (tmp_path / f".test_durations{suffix}").read_text() == saved
