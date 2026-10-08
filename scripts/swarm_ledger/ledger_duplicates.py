@@ -3,10 +3,12 @@
 Code shortlists candidates by word overlap; the classifier only confirms each new item and candidate pair.
 """
 
+import json
 import math
 import re
+import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from hooks.classifier import ClassifierError, YesNo, decide
 from scripts.swarm_ledger import ledger_rank
@@ -131,3 +133,13 @@ def _title(item):
 
 def _name(i, j):
     return f"new_{i}_existing_{j}"
+
+
+def main() -> None:
+    request = json.load(sys.stdin)
+    found = find(request["doc"], request["kind"], request["items"])
+    print(json.dumps([asdict(match) if isinstance(match, Match) else match for match in found]))
+
+
+if __name__ == "__main__":
+    main()

@@ -424,12 +424,14 @@ def _task_grouping_offline(monkeypatch):
 @pytest.fixture(autouse=True)
 def _ledger_duplicates_offline(monkeypatch):
     from hooks.classifier import ClassifierUnavailable
-    from scripts.swarm_ledger import ledger_duplicates
+    from scripts.swarm_ledger import ledger_duplicates, ledger_task_duplicates
 
     def unavailable(*args, **kwargs):
         raise ClassifierUnavailable("classifier disabled in unit tests")
 
     monkeypatch.setattr(ledger_duplicates, "decide", unavailable)
+    child = (sys.executable, "-m", "tests.swarm_ledger.duplicate_child", '[[], "unavailable", 0]')
+    monkeypatch.setattr(ledger_task_duplicates, "CHILD", child)
 
 
 @pytest.fixture
