@@ -613,7 +613,8 @@ class TestPlanChunk:
         quoted = ", ".join(f'line {n} "r{n}"' for n in range(1, fits + 2))
         assert (verdict, reason.split("; ")[-1]) == (
             "fail",
-            f"What would meet intent: Deliver what plan lines 1-{fits + 1} ask for and the change leaves out: {quoted}.",
+            f"What would meet intent: Deliver what plan lines 1-{fits + 1} ask for. No single line was named, so check "
+            f"each: {quoted}.",
         )
 
     def test_the_chunk_questions_are_asked_only_with_a_chunk(self):
@@ -646,8 +647,8 @@ class TestPlanChunk:
         assert intent.judge(CHUNK_STATE, decide=chunk_classifier(0.5, misses={"misses_line_17": 0.49})) == (
             "fail",
             "the phase can use this change at probability 0.90; the change may leave out something plan lines 15-17 "
-            "ask for, at probability 0.50; What would meet intent: Deliver what plan lines 15-17 ask for and the "
-            'change leaves out: line 15 "line 15", line 17 "line 17".',
+            "ask for, at probability 0.50; What would meet intent: Deliver what plan lines 15-17 ask for. No single "
+            'line was named, so check each: line 15 "line 15", line 17 "line 17".',
         )
 
     def test_overdelivery_at_one_half_fails_quoting_the_chunk_lines_exceeded(self):

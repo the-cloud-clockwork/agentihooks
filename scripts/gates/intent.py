@@ -260,17 +260,20 @@ def _chunk_reasons(state, answers):
 
 
 def _chunk_steps(state, answers):
-    rows, steps = _rows(state), []
+    rows, lines, steps = _rows(state), state.get("plan_lines"), []
     if not rows:
         return steps
     if answers["underdelivers"].noul >= CHUNK_LINE:
         named = [(n, row) for n, row in rows if f"misses_line_{n}" in answers]
-        missed = [(n, row) for n, row in named if answers[f"misses_line_{n}"].noul >= CHUNK_LINE] or rows
-        steps.append(
-            f"Deliver what plan lines {state['plan_lines']} ask for and the change leaves out: {_quoted(missed)}."
-        )
+        missed = [(n, row) for n, row in named if answers[f"misses_line_{n}"].noul >= CHUNK_LINE]
+        if missed:
+            steps.append(f"Deliver what plan lines {lines} ask for and the change leaves out: {_quoted(missed)}.")
+        else:
+            steps.append(
+                f"Deliver what plan lines {lines} ask for. No single line was named, so check each: {_quoted(rows)}."
+            )
     if answers["overdelivers"].noul >= CHUNK_LINE:
-        steps.append(f"Remove the scope beyond plan lines {state['plan_lines']}, which ask only for {_quoted(rows)}.")
+        steps.append(f"Remove the scope beyond plan lines {lines}, which ask only for {_quoted(rows)}.")
     return steps
 
 
