@@ -214,6 +214,35 @@ def test_a_home_row_shows_its_full_text_in_the_tip_exactly_one_second_after_the_
     assert tip_shown(page) is None
 
 
+@pytest.mark.parametrize("leave", ["click", "scroll"])
+def test_a_home_row_tip_hides_on_click_or_scroll(tab, leave):
+    page = tab(home_html("home"))
+    page.clock.install(time=0)
+    page.clock.pause_at(60_000)
+    page.locator("li.row span.ov").first.hover()
+    page.clock.run_for(1000)
+    assert tip_shown(page) == ROW_OVERVIEW
+    if leave == "click":
+        page.evaluate(
+            """document.querySelector("li.row span.ov").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))"""
+        )
+    else:
+        page.evaluate("window.dispatchEvent(new Event('scroll'))")
+    assert tip_shown(page) is None
+
+
+def test_an_empty_row_tip_leaves_the_enclosing_control_its_own_tip(tab):
+    page = tab(home_html("home"))
+    found = page.evaluate(
+        """() => { const fold = document.querySelector("li.row button.fold");
+          const empty = document.createElement("span");
+          empty.dataset.tip = "";
+          fold.append(empty);
+          return [ledgerTip(empty), ledgerTip(fold)]; }"""
+    )
+    assert found == ["Show this ledger's full title and overview, or fold it back to one line."] * 2
+
+
 @pytest.mark.parametrize("view", ["home", "bin"])
 def test_ledger_rows_carry_no_native_hover_text(view):
     page = home_html(view)
