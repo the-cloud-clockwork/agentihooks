@@ -63,3 +63,47 @@ def test_main_keeps_its_existing_branch_match_and_rules():
         "require_extra_approval_for_unattributed_changes": True,
         "allowed_merge_methods": ["merge", "squash", "rebase"],
     }
+
+
+def _environment(name):
+    return json.loads((ROOT / ".github" / "environments" / f"{name}.json").read_text())
+
+
+def _workflow_environments(name):
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / name).read_text())
+    return {job["environment"] for job in workflow["jobs"].values() if "environment" in job}
+
+
+@pytest.mark.parametrize(
+    ("name", "workflow", "policies"),
+    [
+        ("release", "release.yml", [{"name": "dev", "type": "branch"}]),
+        ("pypi", "publish-pypi.yml", [{"name": "main", "type": "branch"}, {"name": "v*", "type": "tag"}]),
+    ],
+)
+def test_environment_deploys_only_from_its_release_dance_refs(name, workflow, policies):
+    environment = _environment(name)
+
+    assert _workflow_environments(workflow) == {name}
+    assert environment["environment"]["deployment_branch_policy"] == {
+        "protected_branches": False,
+        "custom_branch_policies": True,
+    }
+    assert environment["deployment_branch_policies"] == policies
+
+
+def test_publish_keeps_the_operator_reviewer():
+    reviewers = _environment("pypi")["environment"]["reviewers"]
+
+    assert reviewers == [{"type": "User", "id": 31187725}]
+
+
+def test_version_tags_cannot_be_moved_or_deleted():
+    ruleset = json.loads((ROOT / ".github" / "rulesets" / "version-tags.json").read_text())
+
+    assert ruleset["name"] == "version-tags"
+    assert ruleset["target"] == "tag"
+    assert ruleset["enforcement"] == "active"
+    assert ruleset["conditions"] == {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}}
+    assert ruleset["bypass_actors"] == []
+    assert {rule["type"] for rule in ruleset["rules"]} == {"update", "deletion", "non_fast_forward"}
