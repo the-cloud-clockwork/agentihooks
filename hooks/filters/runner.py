@@ -10,7 +10,6 @@ from hooks.filters import extract, schema
 
 PURPOSE = "filter"
 YES_LINE = 0.5
-SHOWN_CHARS = 200
 TRUE = "yes, the finding goes against the intent"
 FALSE = "no, the finding is fine"
 
@@ -90,12 +89,8 @@ def confirm(entry: dict, spec: schema.FilterSpec, payload: dict, findings: list[
     return [f for i, f in enumerate(findings) if (result.answers[f"finding_{i}"].noul or 0) >= YES_LINE]
 
 
-def _shown(text: str) -> str:
-    return text if len(text) <= SHOWN_CHARS else text[:SHOWN_CHARS] + "…"
-
-
 def _listing(findings: list[Finding]) -> str:
-    return "\n".join(f'- "{_shown(finding.text)}": {finding.reason}' for finding in findings)
+    return "\n".join(f'- "{finding.text}": {finding.reason}' for finding in findings)
 
 
 def send_back(step: str, payload: dict, findings: list[Finding]) -> dict:

@@ -212,10 +212,9 @@ def test_overlapping_spans_are_cut_once():
     assert runner._cut("abcdefgh", [(4, 6), (1, 3), (2, 5)]) == "agh"
 
 
-def test_a_long_finding_is_shortened_in_the_reason():
-    exact = runner.Finding(("content",), 0, 200, "a" * 200, "r")
-    longer = runner.Finding(("content",), 0, 201, "b" * 201, "r")
-    assert runner._listing([exact, longer]) == f'- "{"a" * 200}": r\n- "{"b" * 200}…": r'
+def test_a_long_finding_is_listed_whole():
+    finding = runner.Finding(("content",), 0, 201, "b" * 201, "r")
+    assert runner._listing([finding]) == f'- "{"b" * 201}": r'
 
 
 def test_an_empty_match_is_no_finding():
