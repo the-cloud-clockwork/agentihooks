@@ -174,8 +174,10 @@ class HerdrRuntime:
 
         placing = demand is None or any(demand.values())
         self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing)
-        requirements = self._quota_successor_options(requirements)
-        decision = capacity.calculate(config, self._quota_accounts, agents, demand, requirements)
+        accounts = self._quota_successor_accounts(requirements) if requirements else None
+        decision = capacity.calculate(config, self._quota_accounts, agents, demand, requirements, accounts)
+        for task, reason in getattr(self, "_quota_held", {}).items():
+            decision["reason"] += f"; quota handoff {task} waits: {reason}"
         self._quota_allocations = decision["allocation"]
         if hasattr(self, "_quota_ready_ids"):
             slots = {
@@ -222,29 +224,25 @@ class HerdrRuntime:
             requirements[lane] = options
         return requirements
 
-    def _quota_successor_options(self, requirements):
+    def _quota_successor_accounts(self, requirements):
         from scripts.swarm import quota_handoff
 
-        handoffs = getattr(self, "_quota_handoffs", {})
-        if not requirements or not handoffs:
-            return requirements
         thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
+        accounts, self._quota_held = {}, {}
+        for (lane, index), predecessor in getattr(self, "_quota_handoffs", {}).items():
+            harnesses = requirements[lane][index]
+            rows = [row for row in self._quota_accounts if row.harness in harnesses]
 
-        def placeable(harness, predecessor):
-            return any(
-                row.harness == harness and not quota_handoff.excluded(row, thresholds, predecessor)
-                for row in self._quota_accounts
-            )
+            def reason(row, predecessor=predecessor):
+                return quota_handoff.exclusion(row, thresholds, predecessor)
 
-        return {
-            lane: [
-                tuple(h for h in options if placeable(h, handoffs[lane, index]))
-                if (lane, index) in handoffs
-                else options
-                for index, options in enumerate(choices)
-            ]
-            for lane, choices in requirements.items()
-        }
+            eligible = [row for row in rows if not reason(row)]
+            first = next((h for h in ("claude", "codex") if any(row.harness == h for row in eligible)), None)
+            accounts.setdefault(lane, {})[index] = {(row.harness, row.name) for row in eligible if row.harness == first}
+            if first is None:
+                task = self._quota_ready_ids[lane][index]
+                self._quota_held[task] = quota_handoff.refusal(predecessor, harnesses, rows, reason)
+        return accounts
 
     def _quota_eligible(self, harness):
         from scripts.swarm.capacity import free_seats
@@ -276,45 +274,30 @@ class HerdrRuntime:
         thresholds = quota_handoff.Thresholds.from_env(environ)
         allocation = getattr(self, "_quota_allocations", {}).get(lane)
         predecessor = (saved["harness"], saved.get("account"))
-        candidates = [
-            row
-            for row in self._quota_accounts
-            if (allocation is None or allocation[row.harness])
-            and (row.harness, row.name) != predecessor
-            and (not want or row.harness == want)
-        ]
-        allow_codex = not plugins.claude_only(profile)
+        harnesses = (want,) if want else ("claude", "codex") if not plugins.claude_only(profile) else ("claude",)
+
+        def blocked(row):
+            if row.harness not in harnesses:
+                return f"is not a {' or '.join(harnesses)} account"
+            if allocation is not None and not allocation[row.harness]:
+                return f"has no seat in the {lane} allocation"
+            return quota_handoff.exclusion(row, thresholds, predecessor)
+
+        candidates = [row for row in self._quota_accounts if not blocked(row)]
+        preferred = [row for row in candidates if planned and row.harness == planned[0]]
         account = (
-            planned
-            and quota_handoff.successor([r for r in candidates if r.harness == planned], allow_codex, thresholds)
-        ) or quota_handoff.successor(candidates, allow_codex, thresholds)
+            next((row for row in preferred if row.name == planned[1]), None)
+            or quota_handoff.successor(preferred, True, thresholds)
+            or quota_handoff.successor(candidates, "codex" in harnesses, thresholds)
+        )
         if account is None:
-            raise SpawnError(self._quota_refusal(predecessor, allow_codex, thresholds, lane, want))
+            raise SpawnError(quota_handoff.refusal(predecessor, harnesses, self._quota_accounts, blocked))
         return {
             **saved,
             "harness": account.harness,
             "account": account.name,
             **({"model": ""} if account.harness != saved["harness"] else {}),
         }
-
-    def _quota_refusal(self, predecessor, allow_codex, thresholds, lane, want):
-        from scripts.swarm import quota_handoff
-
-        allocation = getattr(self, "_quota_allocations", {}).get(lane)
-
-        def reason(row):
-            if want and row.harness != want:
-                return f"is not the {want} harness the {lane} lane needs"
-            if row.harness == "codex" and not allow_codex:
-                return "cannot mount the claude only profile"
-            if allocation is not None and not allocation[row.harness] and (row.harness, row.name) != predecessor:
-                return f"has no seat in the {lane} allocation"
-            return quota_handoff.excluded(row, thresholds, predecessor) or "has no placeable quota seat"
-
-        accounts = "; ".join(f"{row.harness} {row.name} {reason(row)}" for row in self._quota_accounts)
-        return f"no account can take the quota handoff from {predecessor[0]} account {predecessor[1]}: " + (
-            accounts or "no accounts were observed"
-        )
 
     def _saved_choice(self, saved, profile, quota_transfer, environ):
         if quota_transfer:
@@ -344,6 +327,10 @@ class HerdrRuntime:
     def _planned_account(self, task_id, agent):
         planned = getattr(self, "_quota_tasks", {}).get(task_id)
         return getattr(self, "_quota_task_accounts", {}).get(task_id) if planned == agent else None
+
+    def _planned_slot(self, task_id):
+        harness = getattr(self, "_quota_tasks", {}).get(task_id)
+        return (harness, getattr(self, "_quota_task_accounts", {}).get(task_id)) if harness else None
 
     def _quota_account(self, agent, preferred, excluded):
         from scripts.swarm.capacity import seats
@@ -378,7 +365,7 @@ class HerdrRuntime:
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}")
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
         saved = (
-            self._quota_transfer(saved, profile, environ, lane, want, getattr(self, "_quota_tasks", {}).get(task["id"]))
+            self._quota_transfer(saved, profile, environ, lane, want, self._planned_slot(task["id"]))
             if saved and quota_transfer
             else saved
         )

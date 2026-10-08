@@ -955,7 +955,7 @@ def test_quota_capacity_reads_this_environment_and_hands_demand_on(tmp_path, mon
     monkeypatch.setattr(
         capacity,
         "calculate",
-        lambda config, rows, agents, demand, requirements: (
+        lambda config, rows, agents, demand, requirements, accounts: (
             seen.update(demand=demand) or {"allocation": {}, "placements": {}}
         ),
     )
@@ -1091,7 +1091,9 @@ def test_quota_handoff_without_another_account_keeps_the_handoff(tmp_path, harne
         "handoff": "saved handoff",
         "handoff_envelope": {"reason": "quota", "seat": "eng-2@sw", "launch": saved},
     }
-    with pytest.raises(SpawnError, match=f"^no account can take the quota handoff from {harness} account old: "):
+    with pytest.raises(
+        SpawnError, match=f"^no claude or codex account can take the quota handoff from {harness} account old: "
+    ):
         runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task)
     assert task["handoff"] == "saved handoff"
     assert task["handoff_envelope"]["launch"] == saved

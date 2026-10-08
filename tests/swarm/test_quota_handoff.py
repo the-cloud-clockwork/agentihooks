@@ -82,6 +82,13 @@ def _capacity(eng, claude, codex):
     )
 
 
+def _held(task):
+    return (
+        f"; quota handoff {task} waits: no claude or codex account can take the quota handoff "
+        "from claude account old: claude old is the account handing off"
+    )
+
+
 def _option(argv, flag):
     return argv[argv.index(flag) + 1]
 
@@ -128,7 +135,7 @@ def test_a_quota_handoff_waits_with_its_handoff_when_no_other_account_qualifies(
     ledger, runtime = _ledger(), QuotaRuntime(tmp_path, pool, monkeypatch)
     done, first, envelope = _quota_handoff(store, ledger, runtime)
     actions = tick("sw", store, ledger, runtime, 2)
-    assert actions == [f"retired {done.name}", f"retired {first.name}", _capacity(0, 2, 0)]
+    assert actions == [f"retired {done.name}", f"retired {first.name}", _capacity(0, 2, 0) + _held(first.task)]
     _waits_with_its_handoff(store, ledger, runtime, first, envelope)
     pool.append(FRESH)
     tick("sw", store, ledger, runtime, 3)
@@ -144,7 +151,7 @@ def test_a_quota_handoff_waits_with_its_handoff_while_every_account_is_full(stor
     done, first, envelope = _quota_handoff(store, ledger, runtime)
     pool[0] = replace(OLD, sessions=2)
     actions = tick("sw", store, ledger, runtime, 2)
-    assert actions == [f"retired {done.name}", f"retired {first.name}", _capacity(0, 0, 0)]
+    assert actions == [f"retired {done.name}", f"retired {first.name}", _capacity(0, 0, 0) + _held(first.task)]
     _waits_with_its_handoff(store, ledger, runtime, first, envelope)
 
 
@@ -514,53 +521,85 @@ def test_quota_successor_uses_its_lane_reservation(tmp_path, monkeypatch, same_l
     }
 
 
-RC3_LAUNCH = {"profile": "engineer", "harness": "codex", "account": "default", "model": "gpt", "effort": "high"}
+CODEX_HANDING_OFF = {"profile": "engineer", "harness": "codex", "account": "default", "model": "gpt", "effort": "high"}
 
 
-def _rc3_rows(claude_week_used=20):
+def _codex_handing_off_rows(claude_week_used=20):
     return [
         capacity.Account("claude", "cc", "OPEN", 2, 90, 100 - claude_week_used, 6),
         capacity.Account("codex", "default", "OPEN", 0, None, 9, 6),
     ]
 
 
+def _quota_decision(tmp_path, monkeypatch, rows, launch, tasks, lanes=None):
+    monkeypatch.setattr(capacity, "accounts", lambda environ, now, refresh=True: list(rows))
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    rt = runtime.HerdrRuntime(home=tmp_path)
+    config = SwarmConfig("sw", str(tmp_path), max_eng=len(tasks), max_ci=0, max_plan=0, lanes=lanes or {})
+    envelope = {"reason": "quota", "launch": launch}
+    ready = {"eng": [{"id": task, "handoff_envelope": envelope} for task in tasks], "ci": [], "plan": []}
+    requirements = rt.quota_requirements(config, ready)
+    return rt.quota_capacity(config, [], 100, {"eng": len(tasks), "ci": 0, "plan": 0}, requirements)
+
+
 @pytest.mark.parametrize("claude_week_used,expected", [(20, {"q": "claude"}), (95, {})])
 def test_quota_capacity_places_a_quota_handoff_only_on_a_harness_with_an_eligible_successor(
     tmp_path, monkeypatch, claude_week_used, expected
 ):
-    rows = _rc3_rows(claude_week_used)
-    monkeypatch.setattr(capacity, "accounts", lambda environ, now, refresh=True: list(rows))
-    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
-    rt = runtime.HerdrRuntime(home=tmp_path)
-    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, max_plan=0)
-    ready = {"eng": [{"id": "q", "handoff_envelope": {"reason": "quota", "launch": RC3_LAUNCH}}], "ci": [], "plan": []}
-    requirements = rt.quota_requirements(config, ready)
-    decision = rt.quota_capacity(config, [], 100, {"eng": 1, "ci": 0, "plan": 0}, requirements)
+    rows = _codex_handing_off_rows(claude_week_used)
+    decision = _quota_decision(tmp_path, monkeypatch, rows, CODEX_HANDING_OFF, ["q"])
     assert decision["tasks"] == expected
+
+
+def test_quota_capacity_names_why_a_quota_handoff_waits(tmp_path, monkeypatch):
+    decision = _quota_decision(tmp_path, monkeypatch, _codex_handing_off_rows(95), CODEX_HANDING_OFF, ["q"])
+    assert decision["reason"].endswith(
+        "; quota handoff q waits: no claude or codex account can take the quota handoff from codex account default: "
+        "claude cc is at its week quota warning; codex default is the account handing off"
+    )
+
+
+def test_quota_capacity_reserves_each_quota_handoff_on_an_eligible_account(tmp_path, monkeypatch):
+    rows = [
+        capacity.Account("claude", "warn", "OPEN", 0, 90, 8, 6),
+        capacity.Account("claude", "ok", "OPEN", 5, 90, 80, 6),
+    ]
+    launch = {**CODEX_HANDING_OFF, "harness": "claude", "account": "gone"}
+    decision = _quota_decision(tmp_path, monkeypatch, rows, launch, ["q1", "q2"], {"eng": {"agent": "claude"}})
+    assert decision["tasks"] == {"q1": "claude"}
+    assert decision["placements"]["eng"] == [{"index": 0, "harness": "claude", "account": "ok"}]
 
 
 def test_quota_transfer_prefers_its_planned_harness_but_falls_back_to_an_eligible_one(tmp_path, monkeypatch):
     rt = runtime.HerdrRuntime(home=tmp_path)
-    rt._quota_accounts = _rc3_rows()
+    rt._quota_accounts = _codex_handing_off_rows()
     rt._quota_allocations = {"eng": {"claude": 1, "codex": 1}}
     monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
-    assert rt._quota_transfer(RC3_LAUNCH, "engineer", {}, "eng", "", "codex") == {
-        **RC3_LAUNCH,
+    assert rt._quota_transfer(CODEX_HANDING_OFF, "engineer", {}, "eng", "", ("codex", "default")) == {
+        **CODEX_HANDING_OFF,
         "harness": "claude",
         "account": "cc",
         "model": "",
     }
 
 
+def test_quota_transfer_takes_the_account_capacity_reserved(tmp_path, monkeypatch):
+    rt = runtime.HerdrRuntime(home=tmp_path)
+    rt._quota_accounts = [*_codex_handing_off_rows(), capacity.Account("claude", "reserved", "OPEN", 5, 50, 50, 6)]
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    chosen = rt._quota_transfer(CODEX_HANDING_OFF, "engineer", {}, "eng", "", ("claude", "reserved"))
+    assert (chosen["harness"], chosen["account"]) == ("claude", "reserved")
+
+
 def test_quota_transfer_refusal_names_the_predecessor_and_why_each_account_was_excluded(tmp_path, monkeypatch):
     rt = runtime.HerdrRuntime(home=tmp_path)
-    rt._quota_accounts = [*_rc3_rows(95), capacity.Account("claude", "full", "OPEN", 6, 90, 90, 6)]
+    rt._quota_accounts = [*_codex_handing_off_rows(95), capacity.Account("claude", "full", "OPEN", 6, 90, 90, 6)]
     rt._quota_allocations = {"eng": {"claude": 1, "codex": 1}}
     monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
     with pytest.raises(runtime.SpawnError) as refused:
-        rt._quota_transfer(RC3_LAUNCH, "engineer", {}, "eng", "", "codex")
+        rt._quota_transfer(CODEX_HANDING_OFF, "engineer", {}, "eng", "", ("codex", "default"))
     assert str(refused.value) == (
-        "no account can take the quota handoff from codex account default: "
+        "no claude or codex account can take the quota handoff from codex account default: "
         "claude cc is at its week quota warning; codex default is the account handing off; "
         "claude full has no free seats"
     )

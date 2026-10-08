@@ -64,7 +64,7 @@ def warn(slug: str, store: RedisStore, environ: dict) -> list[str]:
     return actions
 
 
-def excluded(account: capacity.Account, thresholds: Thresholds, predecessor: tuple | None = None) -> str:
+def exclusion(account: capacity.Account, thresholds: Thresholds, predecessor: tuple | None = None) -> str:
     if (account.harness, account.name) == predecessor:
         return "is the account handing off"
     if not capacity.free_seats(account):
@@ -76,9 +76,17 @@ def excluded(account: capacity.Account, thresholds: Thresholds, predecessor: tup
     return ""
 
 
+def refusal(predecessor: tuple, harnesses: tuple, accounts: list[capacity.Account], reason) -> str:
+    reasons = "; ".join(f"{row.harness} {row.name} {reason(row)}" for row in accounts)
+    return (
+        f"no {' or '.join(harnesses)} account can take the quota handoff from {predecessor[0]} account "
+        f"{predecessor[1]}: {reasons or 'no accounts were observed'}"
+    )
+
+
 def successor(accounts: list[capacity.Account], allow_codex: bool, thresholds: Thresholds) -> capacity.Account | None:
     for harness in ("claude", "codex") if allow_codex else ("claude",):
-        eligible = [row for row in accounts if row.harness == harness and not excluded(row, thresholds)]
+        eligible = [row for row in accounts if row.harness == harness and not exclusion(row, thresholds)]
         if eligible:
             return min(
                 eligible,
