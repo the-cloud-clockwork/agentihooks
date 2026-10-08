@@ -1,6 +1,10 @@
 """Swarm Redis stores in the suite write under the suite's key prefix, and a write to a production key name fails."""
 
-import fakeredis
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 from scripts import session_caps
@@ -14,9 +18,15 @@ from tests import redis_key_guard, swarm_v2_isolation
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
+def _client():
+    import fakeredis
+
+    return fakeredis.FakeRedis(decode_responses=True)
+
+
 @pytest.fixture
 def redis(monkeypatch):
-    client = fakeredis.FakeRedis(decode_responses=True)
+    client = _client()
     monkeypatch.setattr(swarm_store, "redis_client", lambda environ=None: client)
     return client
 
@@ -39,7 +49,7 @@ def test_every_swarm_store_writes_under_the_suite_prefix(redis):
 
 
 def test_a_production_key_write_fails_the_test():
-    client = fakeredis.FakeRedis(decode_responses=True)
+    client = _client()
     before = len(redis_key_guard.written)
 
     with pytest.raises(redis_key_guard.ProductionKey) as refused:
@@ -53,7 +63,7 @@ def test_a_production_key_write_fails_the_test():
 
 
 def test_a_queued_pipeline_write_to_a_production_key_fails_the_test():
-    client = fakeredis.FakeRedis(decode_responses=True)
+    client = _client()
     before = len(redis_key_guard.written)
 
     with pytest.raises(redis_key_guard.ProductionKey):
@@ -64,11 +74,74 @@ def test_a_queued_pipeline_write_to_a_production_key_fails_the_test():
     assert caught == ["agentihooks:inbox:item:1"]
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        ("XGROUP", "CREATE", "agentihooks:swarm:demo:events", "readers", "$", "MKSTREAM"),
+        ("EVAL", "return redis.call('SET', KEYS[1], 'x')", 1, "agentihooks:swarm:demo:config"),
+        ("SUNIONSTORE", "agentihooks:swarm:demo:all", "suite:a"),
+        ("SET", "agenticore:memory:x", "1"),
+    ],
+    ids=["xgroup", "eval", "sunionstore", "agenticore"],
+)
+def test_any_command_outside_the_reads_naming_a_production_key_fails(command):
+    client = _client()
+    before = len(redis_key_guard.written)
+
+    with pytest.raises(redis_key_guard.ProductionKey):
+        client.execute_command(*command)
+    caught = redis_key_guard.written[before:]
+    del redis_key_guard.written[before:]
+
+    assert caught == [next(arg for arg in command if str(arg).startswith(redis_key_guard.PRODUCTION))]
+
+
+def test_a_watched_pipeline_write_to_a_production_key_fails_the_test():
+    client = _client()
+    before = len(redis_key_guard.written)
+
+    with client.pipeline() as pipe:
+        pipe.watch("suite:watched")
+        with pytest.raises(redis_key_guard.ProductionKey):
+            pipe.set("agentihooks:swarm:demo:config", "1")
+    caught = redis_key_guard.written[before:]
+    del redis_key_guard.written[before:]
+
+    assert caught == ["agentihooks:swarm:demo:config"]
+
+
 def test_reads_and_suite_prefixed_writes_pass():
-    client = fakeredis.FakeRedis(decode_responses=True)
+    client = _client()
     before = len(redis_key_guard.written)
 
     client.get("agentihooks:swarm:demo:config")
-    client.set(f"{swarm_v2_isolation.RUN_PREFIX}:swarm:demo:config", "agentihooks:swarm:demo")
+    client.keys("agentihooks:*")
+    client.set(f"{swarm_v2_isolation.RUN_PREFIX}:swarm:demo:config", "demo")
 
     assert redis_key_guard.written[before:] == []
+
+
+def test_a_test_that_swallows_the_refusal_still_fails(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    (tmp_path / "conftest.py").write_text("from tests.conftest import _production_redis_key_guard  # noqa: F401\n")
+    (tmp_path / "test_planted.py").write_text(
+        "import fakeredis\n\n\n"
+        "def test_planted():\n"
+        "    try:\n"
+        "        fakeredis.FakeRedis().set('agentihooks:swarm:demo:config', '1')\n"
+        "    except Exception:\n"
+        "        pass\n"
+    )
+    environ = {**os.environ, "PYTHONPATH": str(root)}
+
+    run = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "no:randomly", "-n", "0", str(tmp_path)],
+        cwd=tmp_path,
+        env=environ,
+        capture_output=True,
+        text=True,
+    )
+
+    assert run.returncode == 1
+    assert "1 passed, 1 error" in run.stdout
+    assert "AssertionError: this test wrote a production swarm Redis key" in run.stdout

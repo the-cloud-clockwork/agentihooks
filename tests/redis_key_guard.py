@@ -1,31 +1,29 @@
 """Keep every test off the production swarm Redis key names.
 
-Imported by the root conftest before any test module, so each swarm store binds the suite's key prefix at import. A
-write to a key under a production name is refused and recorded, and the root conftest fails the test that made it.
+Imported by the root conftest before any test module: the key prefix must be set before a swarm store binds it at
+import. Any command outside the read list that names a production key is refused and recorded, and the root conftest
+fails the test that sent it.
 """
 
+import importlib.util
 import os
-
-import redis
-from redis.client import Pipeline
+import sys
 
 from tests.swarm_v2_isolation import RUN_PREFIX
 
-ENV = "AGENTIHOOKS_SWARM_KEY_PREFIX"
-PRODUCTION = "agentihooks:"
-WRITES = frozenset(
+os.environ["AGENTIHOOKS_SWARM_KEY_PREFIX"] = RUN_PREFIX
+
+from scripts.swarm import keyspace  # noqa: E402
+
+PRODUCTION = (f"{keyspace.PRODUCTION}:", "agenticore:")
+READS = frozenset(
     """
-    APPEND BLMOVE BLPOP BRPOP BRPOPLPUSH BZPOPMAX BZPOPMIN COPY DECR DECRBY DEL EXPIRE EXPIREAT GETDEL GETEX GETSET
-    HDEL HINCRBY HINCRBYFLOAT HMSET HSET HSETNX INCR INCRBY INCRBYFLOAT LINSERT LMOVE LPOP LPUSH LPUSHX LREM LSET
-    LTRIM MSET MSETNX PERSIST PEXPIRE PEXPIREAT PFADD PSETEX PUBLISH RENAME RENAMENX RESTORE RPOP RPOPLPUSH RPUSH
-    RPUSHX SADD SET SETBIT SETEX SETNX SETRANGE SMOVE SPOP SREM UNLINK XACK XADD XAUTOCLAIM XCLAIM XDEL XGROUP XTRIM
-    ZADD ZINCRBY ZPOPMAX ZPOPMIN ZREM ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE
+    BITCOUNT CLIENT DBSIZE DISCARD DUMP ECHO EXEC EXISTS GET GETRANGE HELLO HEXISTS HGET HGETALL HKEYS HLEN HMGET
+    HSCAN HSTRLEN HVALS INFO KEYS LINDEX LLEN LRANGE MGET MULTI OBJECT PING PSUBSCRIBE PTTL PUBSUB SCAN SCARD SELECT
+    SISMEMBER SMEMBERS SMISMEMBER SSCAN STRLEN SUBSCRIBE TTL TYPE UNWATCH WATCH XINFO XLEN XRANGE XREAD XREVRANGE
+    ZCARD ZCOUNT ZMSCORE ZRANGE ZRANGEBYSCORE ZRANK ZREVRANGE ZREVRANGEBYSCORE ZSCAN ZSCORE
     """.split()
 )
-ALL_KEYS = frozenset(("DEL", "UNLINK"))
-PAIRS = frozenset(("MSET", "MSETNX"))
-TWO_KEYS = frozenset(("BLMOVE", "BRPOPLPUSH", "COPY", "LMOVE", "RENAME", "RENAMENX", "RPOPLPUSH", "SMOVE"))
-BLOCKING = frozenset(("BLPOP", "BRPOP", "BZPOPMAX", "BZPOPMIN"))
 written: list[str] = []
 
 
@@ -33,24 +31,11 @@ class ProductionKey(RuntimeError):
     pass
 
 
-def _keys(args):
-    command = str(args[0]).upper()
-    if command in ALL_KEYS:
-        return args[1:]
-    if command in PAIRS:
-        return args[1::2]
-    if command in TWO_KEYS:
-        return args[1:3]
-    if command in BLOCKING:
-        return args[1:-1]
-    return args[1:2]
-
-
 def _check(args):
-    if not args or str(args[0]).upper() not in WRITES:
+    if not args or str(args[0]).upper() in READS:
         return
-    for key in _keys(args):
-        text = key.decode(errors="replace") if isinstance(key, bytes) else key
+    for arg in args[1:]:
+        text = arg.decode(errors="replace") if isinstance(arg, bytes) else arg
         if isinstance(text, str) and text.startswith(PRODUCTION):
             written.append(text)
             raise ProductionKey(f"a test wrote the production Redis key {text}")
@@ -64,6 +49,31 @@ def _guarded(method):
     return guarded
 
 
-os.environ[ENV] = RUN_PREFIX
-redis.Redis.execute_command = _guarded(redis.Redis.execute_command)
-Pipeline.pipeline_execute_command = _guarded(Pipeline.pipeline_execute_command)
+def _install(client):
+    client.Redis.execute_command = _guarded(client.Redis.execute_command)
+    for name in ("pipeline_execute_command", "immediate_execute_command"):
+        setattr(client.Pipeline, name, _guarded(getattr(client.Pipeline, name)))
+
+
+class GuardOnImport:
+    """Guards redis.client as it is first imported, so test modules that import redis lazily stay lazy."""
+
+    def find_spec(self, name, path, target=None):
+        if name != "redis.client":
+            return None
+        sys.meta_path.remove(self)
+        spec = importlib.util.find_spec(name)
+        run = spec.loader.exec_module
+
+        def exec_module(module):
+            run(module)
+            _install(module)
+
+        spec.loader.exec_module = exec_module
+        return spec
+
+
+if "redis.client" in sys.modules:
+    _install(sys.modules["redis.client"])
+else:
+    sys.meta_path.insert(0, GuardOnImport())

@@ -1,5 +1,4 @@
-"""Root of every swarm Redis key, read once at import. AGENTIHOOKS_SWARM_KEY_PREFIX moves the swarm stores off the
-production key names; the test suite sets it before any store is imported."""
+"""Root of every swarm Redis key. Read once at import, so a caller that moves it sets the variable first."""
 
 import os
 

@@ -360,7 +360,8 @@ def _real_ledger_folder_guard():
 
 @pytest.fixture(autouse=True)
 def _production_redis_key_guard(monkeypatch):
-    monkeypatch.setenv(redis_key_guard.ENV, swarm_v2_isolation.RUN_PREFIX)
+    # The isolation fixture above drops every AGENTIHOOKS_ variable; subprocesses need the prefix back.
+    monkeypatch.setenv(redis_key_guard.keyspace.ENV, redis_key_guard.keyspace.ROOT)
     before = len(redis_key_guard.written)
     yield
     assert redis_key_guard.written[before:] == [], "this test wrote a production swarm Redis key"
