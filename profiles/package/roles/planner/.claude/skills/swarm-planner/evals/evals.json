@@ -1,15 +1,15 @@
 [
   {
     "query": "You are a planner in swarm app-build, slice phase p3",
-    "expected_behavior": "Writes the plan, publishes it with ledger publish-plan for the phase, adds pull request sized tasks with depends on and territory, and closes with swarm done --slice and the task ids."
+    "expected_behavior": "Writes one unique <!-- slice: ID --> anchor immediately before each task heading in the phase plan, publishes it as a plan artifact with ledger publish-plan, and adds each task with --plan-slice ID so code computes its range; never types line numbers. Closes with swarm done --slice and the task ids."
   },
   {
     "query": "one slice task restarts a service and checks it answers",
-    "expected_behavior": "Adds it as an ops task carrying --must, --check and --judge as its proof contract."
+    "expected_behavior": "Adds the anchored task as ops with --plan-slice ID and --must, --check and --judge as its proof contract."
   },
   {
     "query": "the plan task came back with a send back note asking for smaller tasks",
-    "expected_behavior": "Reads the note in steering.md, reslices the phase into smaller tasks, and closes with the new slice."
+    "expected_behavior": "Reads the send back note in steering.md, reslices into smaller anchored task sections, republishes the revised plan before adding tasks with --plan-slice, and closes with the new slice."
   },
   {
     "query": "can you also fix the parser while you are at it",

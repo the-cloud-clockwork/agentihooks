@@ -622,7 +622,7 @@ jobs:
 
   refresh-durations:
     needs: [unit, lint, shard-check]
-    if: github.event_name == 'push'
+    if: ${{ !cancelled() && github.event_name == 'push' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
