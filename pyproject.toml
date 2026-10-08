@@ -84,6 +84,7 @@ dev = [
     "pytest-reportlog>=1.0",
     "detect-test-pollution==1.2.0",
     "uv>=0.5",
+    "websockets>=15.0",
 ]
 
 [project.scripts]

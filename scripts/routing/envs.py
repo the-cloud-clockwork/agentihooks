@@ -1,9 +1,11 @@
 from collections.abc import Mapping
 from urllib.parse import urlsplit
 
-from hooks.context.account_sessions import API_MARKER, TOKEN_PREFIX
+from hooks.context.account_sessions import API_MARKER, CODEX_TOKEN_PREFIX, TOKEN_PREFIX
 
 ANTHROPIC_HOST = "api.anthropic.com"
+CODEX_TOKEN_ENV = "CODEX_ACCESS_TOKEN"
+_CODEX_API_NAMES = frozenset({"CODEX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", API_MARKER})
 _API_NAMES = frozenset(
     {
         "ANTHROPIC_AUTH_TOKEN",
@@ -40,5 +42,23 @@ def api_child(environ: Mapping[str, str]) -> dict[str, str]:
         for name, value in environ.items()
         if name != "CLAUDE_CODE_OAUTH_TOKEN" and not name.startswith(TOKEN_PREFIX)
     }
+    child[API_MARKER] = "1"
+    return child
+
+
+def _codex_without_tokens(environ: Mapping[str, str]) -> dict[str, str]:
+    return {
+        name: value
+        for name, value in environ.items()
+        if name != CODEX_TOKEN_ENV and not name.startswith((CODEX_TOKEN_PREFIX, TOKEN_PREFIX))
+    }
+
+
+def codex_subscription_child(environ: Mapping[str, str]) -> dict[str, str]:
+    return {name: value for name, value in _codex_without_tokens(environ).items() if name not in _CODEX_API_NAMES}
+
+
+def codex_api_child(environ: Mapping[str, str]) -> dict[str, str]:
+    child = _codex_without_tokens(environ)
     child[API_MARKER] = "1"
     return child

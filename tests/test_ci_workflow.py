@@ -306,10 +306,10 @@ def _workflow() -> dict:
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def test_no_separate_gate_job_delays_the_shards():
+def test_shards_wait_only_on_the_durations_lookup():
     jobs = _workflow()["jobs"]
     assert "already-tested" not in jobs
-    assert "needs" not in jobs["unit"]
+    assert jobs["unit"]["needs"] == ["durations"]
     assert "needs" not in jobs["lint"]
 
 
@@ -356,7 +356,7 @@ def test_stored_durations_allow_new_tests_concentrated_in_one_shard(tmp_path, mo
 
 def test_dev_push_refreshes_stored_durations_after_tests_pass():
     job = _workflow()["jobs"]["refresh-durations"]
-    assert job["needs"] == ["unit", "lint"]
+    assert job["needs"] == ["unit", "lint", "shard-check"]
     assert job["if"] == "github.event_name == 'push'"
     assert job["permissions"] == {"contents": "read"}
     steps = job["steps"]
@@ -462,7 +462,12 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
     assert "if" not in upload
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "durations-${{ matrix.python-version }}-${{ matrix.shard }}"
-    assert upload["with"]["path"] == "durations.json"
+    assert upload["with"]["path"].split() == ["durations.json", "durations.sha256"]
+
+
+def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
+    _, adopt = _unit_step_index(lambda s: s.get("name") == "Adopt latest dev durations")
+    assert adopt["run"].endswith(" --hash durations.sha256")
 
 
 def test_ci_samples_are_one_per_shard_file_without_the_xdist_group_suffix(tmp_path):

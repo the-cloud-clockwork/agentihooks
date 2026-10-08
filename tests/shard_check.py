@@ -28,6 +28,11 @@ def run_counts(paths: list[Path]) -> Counter[str]:
     return counts
 
 
+def _durations_hash(path: Path) -> str | None:
+    recorded = path.parent / "durations.sha256"
+    return recorded.read_text().strip() if recorded.is_file() else None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="fail unless every collected test ran in exactly one shard")
     parser.add_argument("durations", type=Path, nargs="+", help="the durations.json each shard stored")
@@ -40,6 +45,11 @@ def main(argv: list[str] | None = None) -> int:
     unread = [str(path) for path in args.durations if not path.is_file()]
     if unread:
         print(f"::error::No shard durations at {', '.join(unread)}, so those shards cannot be graded.")
+        return 1
+    hashes = {path: _durations_hash(path) for path in args.durations}
+    if len(set(hashes.values())) != 1 or None in hashes.values():
+        named = ", ".join(f"{path.parent.name}: {digest or 'none'}" for path, digest in hashes.items())
+        print(f"::error::Shards split on different stored durations, so their test sets overlap or leave gaps: {named}")
         return 1
     counts = run_counts(args.durations)
     wrong = sorted(nodeid for nodeid in collected if counts[nodeid] != 1)

@@ -94,6 +94,10 @@ def free_seats(account: Account) -> int:
     return max(0, (account.cap or 0) - account.sessions)
 
 
+def warning(window: str) -> str:
+    return f"is at its {window} quota warning"
+
+
 def _harnesses(config, lane: str) -> tuple[str, ...]:
     requested = config.lanes.get(lane, {}).get("agent")
     if requested in {"claude", "codex"}:
@@ -166,6 +170,7 @@ def calculate(
     demand: dict | None = None,
     requirements: dict | None = None,
     accounts: dict | None = None,
+    warned: dict | None = None,
 ) -> dict:
     configured = dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan), strict=True))
     busy = {lane: sum(a.lane == lane and a.state != "finished" for a in agents) for lane in LANES}
@@ -174,11 +179,14 @@ def calculate(
         lane: min(configured[lane], busy[lane] + demand[lane]) if demand is not None else configured[lane]
         for lane in LANES
     }
-    placeable = {h: sum(free_seats(row) for row in observations if row.harness == h) for h in ("claude", "codex")}
-    allocation, placements = _allocate(config, effective, limits, seats(observations), requirements, accounts)
+    warned = warned or {}
+    open_rows = [row for row in observations if (row.harness, row.name) not in warned]
+    placeable = {h: sum(free_seats(row) for row in open_rows if row.harness == h) for h in ("claude", "codex")}
+    allocation, placements = _allocate(config, effective, limits, seats(open_rows), requirements, accounts)
     restricted = sorted({row.state.lower() for row in observations if row.state != "OPEN"})
     reason = "accounts have quota" if not restricted else "accounts are " + ", ".join(restricted)
     reason += f"; Claude has {placeable['claude']} free seats and Codex has {placeable['codex']} free seats"
+    reason += "".join(f"; {harness} {name} {warning(window)}" for (harness, name), window in warned.items())
     return {
         "configured": configured,
         "effective": effective,

@@ -93,6 +93,7 @@ import yaml
 
 from scripts.claude_config import claude_home
 from scripts.claude_config import claude_json as claude_json_path
+from scripts.cli_delegates import delegated_cli
 from scripts.cli_parser import ArgumentParser
 from scripts.targets import DEFAULT_TARGET, SUPPORTED_TARGETS, get_adapter, resolve_target
 from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
@@ -6425,22 +6426,17 @@ def main() -> None:
         from scripts.swarm_ledger import run as ledger_run
 
         raise SystemExit(ledger_run(_argv[1:]))
-    if _argv and _argv[0] == "swarm":
-        from scripts.swarm.cli import main as swarm_main
+    if _argv and _argv[0] in ("swarm", "controller"):
+        from scripts.swarm import cli, controller
 
-        raise SystemExit(swarm_main(_argv[1:]))
+        raise SystemExit({"swarm": cli.main, "controller": controller.main}[_argv[0]](_argv[1:]))
     if _crew_doctor(_argv):
         from scripts.doctor.cli import main as doctor_main
 
         raise SystemExit(doctor_main(_argv[1:]))
-    if _argv and _argv[0] == "msg":
-        from scripts.inbox.cli import main as msg_main
-
-        raise SystemExit(msg_main(_argv[1:]))
-    if _argv and _argv[0] == "trace":
-        from scripts.trace_cli import main as trace_main
-
-        raise SystemExit(trace_main(_argv[1:]))
+    _delegated = delegated_cli(_argv)
+    if _delegated:
+        raise SystemExit(_delegated(_argv[1:]))
     if _argv and _argv[0] == "classify":
         from hooks.classifier import cli as classifier_cli
 
@@ -6453,21 +6449,13 @@ def main() -> None:
         from scripts.select_profile import dispatch
 
         raise SystemExit(dispatch(_argv))
-    if _argv and _argv[0] == "deps":
-        from scripts.deps_preflight import main as deps_main
-
-        raise SystemExit(deps_main(_argv[1:]))
-    if _argv and _argv[0] == "quota":
-        from scripts.agents_quota import main as quota_main
-
-        raise SystemExit(quota_main(_argv[1:]))
     if _argv and _argv[0] == "skill":
         from scripts.skill_eval import main as skill_eval_main
 
         if _argv[1:2] != ["eval"]:
             raise SystemExit("usage: agentihooks skill eval [--agent {claude,codex}] -- <command>")
-
-        raise SystemExit(skill_eval_main(_argv[2:]))
+        skill_eval_main(_argv[2:])
+        return
     if _argv and _argv[0] == "manifestos":
         from scripts.profiles.manifestos import main as manifestos_main
 
@@ -6630,6 +6618,8 @@ def main() -> None:
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",
     )
     sub.add_parser("msg", help="Durable messages between sessions: send|inbox|read|close")
+    sub.add_parser("recall", help="Recall archive of ledgers and swarms: reindex")
+    sub.add_parser("plan", help="Read only your task's plan chunk: read [--task ID] [--phase ID]")
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"
     )

@@ -1,7 +1,7 @@
-"""Route a Codex launch to one account: the default `codex login` or an AH_CX_TOKEN_<slug>.
+"""Route a Codex launch to one account: the default `codex login`, an AH_CX_TOKEN_<slug> or the api key.
 
-Token values only move from the environment into the child's CODEX_ACCESS_TOKEN;
-they are never printed or written anywhere.
+Token values only move from the environment into the child's CODEX_ACCESS_TOKEN, and an api
+key stays in the child's environment under its own name; neither is printed or written anywhere.
 """
 
 import contextlib
@@ -17,16 +17,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from hooks.context.account_sessions import (
+    API_ACCOUNT,
     CODEX_DEFAULT,
     CODEX_TOKEN_PREFIX,
-    TOKEN_PREFIX,
     codex_sessions_by_account,
 )
 from scripts import codex_quota, session_bands
 from scripts.codex_quota import CodexQuota
+from scripts.routing import codex_api, envs
 from scripts.routing.slots import INTERACTIVE, SUBSCRIPTION, Slot
 
-TOKEN_ENV = "CODEX_ACCESS_TOKEN"
+TOKEN_ENV = envs.CODEX_TOKEN_ENV
 PROBE_ARGS = ["exec", "--json", "--skip-git-repo-check", "Reply with the single word ok."]
 PROBE_TIMEOUT_S = 90
 CODEX_BIN = "codex"
@@ -40,10 +41,16 @@ class CodexAccount:
     name: str
     env_name: str = ""
     signed_in: bool = True
+    key_env: str = ""
+    base_url: str = ""
 
     @property
     def is_token(self) -> bool:
         return bool(self.env_name)
+
+    @property
+    def is_api(self) -> bool:
+        return bool(self.key_env)
 
 
 class RoutingError(RuntimeError):
@@ -54,16 +61,14 @@ def token_accounts(environ: Mapping[str, str]) -> list[CodexAccount]:
     return [
         CodexAccount(name.removeprefix(CODEX_TOKEN_PREFIX), name)
         for name in sorted(environ)
-        if name.startswith(CODEX_TOKEN_PREFIX) and name != CODEX_TOKEN_PREFIX and environ[name]
+        if name.startswith(CODEX_TOKEN_PREFIX)
+        and name.removeprefix(CODEX_TOKEN_PREFIX) not in ("", API_ACCOUNT)
+        and environ[name]
     ]
 
 
 def _without_tokens(environ: Mapping[str, str]) -> dict[str, str]:
-    return {
-        name: value
-        for name, value in environ.items()
-        if name != TOKEN_ENV and not name.startswith((CODEX_TOKEN_PREFIX, TOKEN_PREFIX))
-    }
+    return envs.codex_subscription_child(environ)
 
 
 def default_signed_in(environ: Mapping[str, str], run: Callable = subprocess.run) -> bool:
@@ -246,6 +251,8 @@ def _spend_by(quota: CodexQuota, now: float) -> float | None:
 
 
 def child_environment(account: CodexAccount, environ: Mapping[str, str]) -> dict[str, str]:
+    if account.is_api:
+        return envs.codex_api_child(environ)
     child = _without_tokens(environ)
     if account.is_token:
         child[account.env_name] = environ[account.env_name]
@@ -254,7 +261,19 @@ def child_environment(account: CodexAccount, environ: Mapping[str, str]) -> dict
 
 
 def command(account: CodexAccount, codex_bin: str, args: list[str]) -> list[str]:
+    if account.is_api:
+        return [codex_bin, NO_DAEMON, *codex_api.overrides(account.key_env, account.base_url), *args]
     return [codex_bin, *([NO_DAEMON] if account.is_token else []), *args]
+
+
+def api_account(environ: Mapping[str, str]) -> CodexAccount:
+    key_env = codex_api.key_name(environ)
+    if not key_env:
+        raise RoutingError(f"Codex account '{API_ACCOUNT}' needs {' or '.join(codex_api.KEY_NAMES)}")
+    base_url = codex_api.base_url(environ)
+    if codex_api.carries_credentials(base_url):
+        raise RoutingError(f"{codex_api.base_url_name(environ)} must not carry credentials, a query or a fragment")
+    return CodexAccount(API_ACCOUNT, key_env=key_env, base_url=base_url)
 
 
 def _take(args: list[str], flag: str) -> tuple[str, list[str]]:
@@ -280,6 +299,8 @@ def _report(path: str, **fields: str) -> None:
 
 def _route(environ: Mapping[str, str], route: str, run: Callable) -> tuple[CodexAccount, str, int, str]:
     sessions = codex_sessions_by_account()
+    if route == API_ACCOUNT:
+        return api_account(environ), "forced", sessions.get(API_ACCOUNT, 0), "?"
     source = CodexAccountSource(run, refresh=not route)
     pool = source.pool(environ)
     now = time.time()

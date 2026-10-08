@@ -8,6 +8,7 @@ import hashlib
 import hmac
 
 from scripts.swarm.naming import lane_of, resolve_name
+from scripts.swarm.store import connect
 
 
 def agent_token(admin, slug, name):
@@ -40,3 +41,9 @@ def refusal(name, op):
     if op["op"] == "join" and op.get("role", "member") != "member" and lane_of(resolve_name(name)) != "master":
         return f"{name} cannot join as {op['role']}"
     return ""
+
+
+def fence(slug: str, epoch: int) -> None:
+    from scripts.swarm import lease
+
+    lease.require_epoch(connect(), slug, epoch)

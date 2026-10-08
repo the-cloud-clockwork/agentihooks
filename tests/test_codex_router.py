@@ -342,3 +342,15 @@ def test_without_token_variables_the_default_login_is_judged_by_its_week(monkeyp
     assert rc == 3 and not seen
     monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"default": 5})
     assert router._route(environ, "", no_status) == (router.CodexAccount("default"), "open", 5, "6")
+
+
+def test_the_api_route_is_forced_with_its_own_live_count_and_no_cap(monkeypatch):
+    def no_status(argv, **kwargs):
+        raise AssertionError("no login status check on the api route")
+
+    environ = dict.fromkeys(["CODEX_API_KEY"], "1")
+    monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"api": 2, "default": 5})
+    expected = router.CodexAccount("api", key_env="CODEX_API_KEY")
+    assert router._route(environ, "api", no_status) == (expected, "forced", 2, "?")
+    monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"default": 5})
+    assert router._route(environ, "api", no_status) == (expected, "forced", 0, "?")

@@ -48,10 +48,9 @@
   "function-lines": 305
  },
  "hooks/hook_manager.py::on_pre_tool_use": {
-  "C901": 88,
-  "PLR0912": 93,
-  "PLR0915": 305,
-  "function-lines": 558
+  "C901": 82,
+  "PLR0912": 87,
+  "function-lines": 531
  },
  "hooks/hook_manager.py::on_session_end": {
   "C901": 19,
@@ -168,7 +167,7 @@
   "PLR0912": 28
  },
  "scripts/install.py": {
-  "file-lines": 7101
+  "file-lines": 7091
  },
  "scripts/install.py::_clean_state_dir": {
   "C901": 14,
@@ -232,10 +231,10 @@
   "PLR0912": 20
  },
  "scripts/install.py::main": {
-  "C901": 72,
-  "PLR0912": 75,
-  "PLR0915": 341,
-  "function-lines": 705
+  "C901": 69,
+  "PLR0912": 72,
+  "PLR0915": 334,
+  "function-lines": 694
  },
  "scripts/install.py::uninstall_global": {
   "C901": 35,
@@ -293,8 +292,7 @@
   "PLR0912": 20
  },
  "scripts/swarm_ledger/ledger_tasks.py::_update": {
-  "C901": 14,
-  "PLR0912": 13
+  "C901": 13
  },
  "scripts/targets/codex_target.py::CodexAdapter.teardown": {
   "C901": 20,
