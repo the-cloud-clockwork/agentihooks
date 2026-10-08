@@ -33,9 +33,11 @@ UPDATABLE = (
     "branch",
     "stacked_base",
     "parked_on",
+    "overlays",
 )
 BOOL_FIELDS = ("artifact",)
-LIST_FIELDS = ("depends_on", "territory", "parked_on")
+LIST_FIELDS = ("depends_on", "territory", "parked_on", "overlays")
+OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
 OBJECT_FIELDS = ("contract", "proof")
@@ -125,6 +127,8 @@ def check_lists(fields):
         value = fields.get(key, [])
         if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
             raise ValueError(f"{key} must be a list of nonempty strings")
+    if len(set(fields.get("overlays", []))) > OVERLAY_CAP:
+        raise ValueError(f"overlays lists at most {OVERLAY_CAP} overlay names")
 
 
 def check_bools(fields):
@@ -192,7 +196,7 @@ def _add(doc, op, ctx):
         "done": False,
         "comments": [],
     }
-    for key in ("gain", "contract", "workspace", "artifact", "profile"):
+    for key in ("gain", "contract", "workspace", "artifact", "profile", "overlays"):
         if key in op:
             task[key] = op[key]
     if "rank" in op:
