@@ -49,7 +49,7 @@ def _holds_token(step: dict) -> bool:
 
 
 def _offends(step: dict) -> bool:
-    on_app_quota = step.get("env") == {"GH_TOKEN": APP_TOKEN}
+    on_app_quota = (step.get("env") or {}).get("GH_TOKEN") == APP_TOKEN
     return _holds_token(step) or (bool(API_CALL.search(step.get("run", ""))) and not on_app_quota)
 
 
@@ -62,11 +62,18 @@ def test_no_step_on_any_event_holds_the_workflow_token_or_calls_the_api():
     ("step", "offends"),
     [
         ({"env": {"GH_TOKEN": APP_TOKEN}, "run": 'gh api "repos/$GITHUB_REPOSITORY/actions/runs"'}, False),
-        ({"env": {"GH_TOKEN": APP_TOKEN, "OTHER": "x"}, "run": "gh api rate_limit"}, True),
+        ({"env": {"GH_TOKEN": APP_TOKEN, "BASE_SHA": "x"}, "run": "gh api rate_limit"}, False),
+        ({"env": {"GH_TOKEN": APP_TOKEN, "OTHER": "${{ github.token }}"}, "run": "gh api rate_limit"}, True),
         ({"env": {"GH_TOKEN": "${{ github.token }}"}, "run": "gh api rate_limit"}, True),
         ({"env": {"GH_TOKEN": APP_TOKEN}, "run": "echo ${{ github.token }}"}, True),
     ],
-    ids=["app-token", "app-token-with-extra-env", "workflow-token", "app-token-beside-workflow-token"],
+    ids=[
+        "app-token",
+        "app-token-with-extra-env",
+        "app-token-with-workflow-token-env",
+        "workflow-token",
+        "app-token-beside-workflow-token",
+    ],
 )
 def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step, offends):
     assert _offends(step) is offends
