@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 import ledger_bin as domain
 import ledger_core as core
 import ledger_media
@@ -6,18 +8,16 @@ import ledger_media
 def _repository():
     from . import legacy, repository
 
-    legacy.adopt(repository, "")
+    legacy.adopt_bin(repository)
     return repository
 
 
-def _mark(name, entries_of, now=None):
+@contextmanager
+def _transaction():
     repository = _repository()
     with domain.LOCK, repository.connect() as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
-        found = repository.registry(name, connection)
-        result = entries_of(found, repository, connection)
-        repository.save_registry(connection, name, found)
-        return result
+        yield repository, connection
 
 
 def restored():
@@ -34,13 +34,14 @@ def registries():
 
 
 def delete(slug, now=None):
-    _mark("bin", lambda found, *_: found.setdefault(slug, core.now_ms() if now is None else now))
+    with _transaction() as (repository, connection):
+        found = repository.registry("bin", connection)
+        found.setdefault(slug, core.now_ms() if now is None else now)
+        repository.save_registry(connection, "bin", found)
 
 
 def restore(slug, now=None):
-    repository = _repository()
-    with domain.LOCK, repository.connect() as connection, connection:
-        connection.execute("BEGIN IMMEDIATE")
+    with _transaction() as (repository, connection):
         found = repository.registry("bin", connection)
         if found.pop(slug, None) is None:
             return False
@@ -52,9 +53,7 @@ def restore(slug, now=None):
 
 
 def bin_closed(slug, closed_at, now=None):
-    repository = _repository()
-    with domain.LOCK, repository.connect() as connection, connection:
-        connection.execute("BEGIN IMMEDIATE")
+    with _transaction() as (repository, connection):
         found, marks = repository.registry("bin", connection), repository.registry("restored", connection)
         if slug in found or (slug in marks and marks[slug] >= closed_at):
             return False
@@ -65,9 +64,7 @@ def bin_closed(slug, closed_at, now=None):
 
 def purge_expired(now=None):
     now = core.now_ms() if now is None else now
-    repository = _repository()
-    with domain.LOCK, repository.connect() as connection, connection:
-        connection.execute("BEGIN IMMEDIATE")
+    with _transaction() as (repository, connection):
         found = repository.registry("bin", connection)
         expired = sorted(
             slug for slug, at in found.items() if isinstance(at, int) and now - at > domain.KEEP_DAYS * domain.DAY_MS
@@ -84,14 +81,11 @@ def purge_expired(now=None):
 
 def auto_bin(now=None):
     now = core.now_ms() if now is None else now
-    repository = _repository()
-    summaries = repository.summaries()
-    with domain.LOCK, repository.connect() as connection, connection:
-        connection.execute("BEGIN IMMEDIATE")
+    with _transaction() as (repository, connection):
         found, marks = repository.registry("bin", connection), repository.registry("restored", connection)
         binned = [
             s["slug"]
-            for s in summaries
+            for s in repository.summaries(connection)
             if s["slug"] not in found
             and s["size"] == "small"
             and domain.idle_due(s["finished"], s["updated_at"] or s["created_at"] or 0, now, marks.get(s["slug"]))

@@ -79,15 +79,18 @@ def test_a_page_without_json_becomes_a_fresh_ledger_with_its_token(tmp_path):
     assert not (directory / "fresh.html").exists()
 
 
-def test_a_dropped_file_replaces_the_stored_ledger_once(tmp_path):
+def test_a_stray_file_for_a_stored_ledger_is_set_aside_without_replacing_it(tmp_path, capsys):
     directory = folder(tmp_path)
     repo = stored(directory)
     repo.import_document("same", document())
-    replaced = {**document(), "title": "Replaced"}
-    (directory / "same.json").write_text(json.dumps(replaced), encoding="utf-8")
-    assert repo.get_document("same")["title"] == "Replaced"
+    stray = json.dumps({**document(), "title": "Stray"})
+    (directory / "same.json").write_text(stray, encoding="utf-8")
+    assert repo.get_document("same")["title"] == "Café"
     assert not (directory / "same.json").exists()
-    assert repo.export_document("same") == ledger_core.normalize(replaced)
+    assert [path.read_text(encoding="utf-8") for path in (directory / legacy.BACKUP).glob("same-*/same.json")] == [
+        stray
+    ]
+    assert capsys.readouterr().err == "legacy ledger same is already stored; its files were set aside in .imported\n"
 
 
 def test_an_unreadable_file_is_kept_and_reported_on_a_sweep_but_refused_by_name(tmp_path, capsys):
@@ -226,7 +229,7 @@ def test_import_files_reads_the_html_page_as_utf8(tmp_path, monkeypatch):
     assert calls == ["utf-8"]
 
 
-def test_import_files_replaces_an_existing_document_when_adopting_fresh_html(tmp_path):
+def test_import_files_never_replaces_a_stored_ledger(tmp_path):
     directory = folder(tmp_path)
     repo = stored(directory)
     first = new_ledger.build_doc({"title": "First", "overview": "o", "phases": []})
@@ -236,7 +239,10 @@ def test_import_files_replaces_an_existing_document_when_adopting_fresh_html(tmp
     second = new_ledger.build_doc({"title": "Second", "overview": "o2", "phases": []})
     (directory / "dup.html").write_text(page(second), encoding="utf-8")
     legacy.import_files(repo, "dup", [directory / "dup.html"])
-    assert repo.get_document("dup")["title"] == "Second"
+    assert repo.get_document("dup")["title"] == "First"
+    (directory / "dup.json").write_text(json.dumps(document()), encoding="utf-8")
+    with pytest.raises(ValueError, match="exists"):
+        legacy.import_files(repo, "dup", [directory / "dup.json"])
 
 
 def test_adopt_registries_processes_restored_even_when_bin_file_is_absent(tmp_path):

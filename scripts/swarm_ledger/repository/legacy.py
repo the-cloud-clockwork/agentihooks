@@ -1,4 +1,4 @@
-"""Ledger JSON and HTML files from before SQLite: each is imported once, after a verified backup, then set aside."""
+"""Ledger JSON and HTML files left in the ledger folder: each is imported once, after a verified backup, then set aside."""
 
 import fcntl
 import json
@@ -65,9 +65,9 @@ def import_files(repository, slug: str, found: list) -> None:
     page = html_path.read_text(encoding="utf-8") if html_path in found else ""
     doc, meta, created = load_state(json_path, core.parse_seed(page) if page else None, core)
     if created:
-        repository.create_document(slug, doc, meta, core.read_token(page), replace=True)
+        repository.create_document(slug, doc, meta, core.read_token(page))
     else:
-        repository.import_document(slug, {**doc, "_meta": meta}, core.read_token(page), replace=True)
+        repository.import_document(slug, {**doc, "_meta": meta}, core.read_token(page))
 
 
 def adopt_registries(repository) -> None:
@@ -87,8 +87,20 @@ def adopt_registries(repository) -> None:
         path.unlink()
 
 
+def stored(repository, slug: str) -> bool:
+    with repository.connect() as connection:
+        return connection.execute("SELECT 1 FROM ledgers WHERE slug=?", (slug,)).fetchone() is not None
+
+
+def adopt_bin(repository) -> None:
+    """Import the bin and restore mark files left in the ledger folder."""
+    if any((repository.directory / filename).exists() for filename in REGISTRIES.values()):
+        with storage_lock(repository.directory):
+            adopt_registries(repository)
+
+
 def candidates(directory: Path, slug: str | None) -> list:
-    """Legacy ledgers to import: the one named, every one when None, none for an empty name."""
+    """Legacy ledgers to import: the one named, or every one when None."""
     if slug is not None:
         return [slug] if core.SLUG_RE.match(slug) and files(directory, slug) else []
     names = {path.stem for pattern in ("*.json", "*.html") for path in directory.glob(pattern)}
@@ -137,7 +149,10 @@ def import_once(repository, name: str, found: list) -> None:
         raise Repeated(FAILED[mark])
     try:
         backup(repository.directory, name, found)
-        import_files(repository, name, found)
+        if stored(repository, name):
+            sys.stderr.write(f"legacy ledger {name} is already stored; its files were set aside in {BACKUP}\n")
+        else:
+            import_files(repository, name, found)
     except (OSError, ValueError) as exc:
         FAILED[mark] = f"{name} was refused before: {exc}"
         raise

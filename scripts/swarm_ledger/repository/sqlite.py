@@ -370,14 +370,16 @@ class SQLiteLedgerRepository:
                 raise Missing(slug)
             return read_events(connection, slug, revision)
 
-    def summaries(self) -> list:
+    def summaries(self, connection=None) -> list:
         """Every stored ledger's summary with its bin facts, newest write first."""
-        self._adopt()
-        with self.connect() as connection:
-            return [
-                json.loads(summary)
-                for (summary,) in connection.execute("SELECT summary FROM ledgers ORDER BY touched_at DESC, slug")
-            ]
+        if connection is None:
+            self._adopt()
+            with self.connect() as connection:
+                return self.summaries(connection)
+        return [
+            json.loads(summary)
+            for (summary,) in connection.execute("SELECT summary FROM ledgers ORDER BY touched_at DESC, slug")
+        ]
 
     def list_summaries(self) -> list:
         return [{key: summary[key] for key in SUMMARY_KEYS} for summary in self.summaries()]

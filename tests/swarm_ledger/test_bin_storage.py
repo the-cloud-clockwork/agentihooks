@@ -28,18 +28,14 @@ def test_mark_merges_into_the_existing_registry_not_a_fresh_one():
     assert bin_storage.entries() == {"first": 1, "second": 2}
 
 
-def test_mark_passes_the_repository_and_connection_through_to_entries_of():
-    seen = {}
+def test_a_transaction_holds_the_write_lock_on_the_shared_repository():
+    from scripts.swarm_ledger.repository import repository
 
-    def capture(found, repository, connection):
-        seen["repository"] = repository
-        seen["connection"] = connection
-        return "result"
-
-    result = bin_storage._mark("bin", capture)
-    assert result == "result"
-    assert seen["repository"] is not None and hasattr(seen["repository"], "registry")
-    assert seen["connection"] is not None
+    with bin_storage._transaction() as (held, connection):
+        assert held is repository
+        assert connection.in_transaction
+        assert bin_storage.domain.LOCK.locked()
+    assert not bin_storage.domain.LOCK.locked()
 
 
 def test_restore_merges_into_the_existing_restored_registry():
@@ -68,9 +64,19 @@ def test_auto_bin_does_not_fall_back_to_zero_when_created_at_is_set(monkeypatch)
     monkeypatch.setattr(
         repository,
         "summaries",
-        lambda: [
-            {"slug": "x", "size": "small", "finished": False, "updated_at": None, "created_at": 1000, "closed_at": None}
-        ],
+        lambda connection: (
+            connection.in_transaction
+            and [
+                {
+                    "slug": "x",
+                    "size": "small",
+                    "finished": False,
+                    "updated_at": None,
+                    "created_at": 1000,
+                    "closed_at": None,
+                }
+            ]
+        ),
     )
     assert bin_storage.auto_bin(now=604800500) == []
 
@@ -79,8 +85,18 @@ def test_auto_bin_treats_a_never_touched_ledger_as_idle_from_time_zero(monkeypat
     monkeypatch.setattr(
         repository,
         "summaries",
-        lambda: [
-            {"slug": "y", "size": "small", "finished": False, "updated_at": None, "created_at": None, "closed_at": None}
-        ],
+        lambda connection: (
+            connection.in_transaction
+            and [
+                {
+                    "slug": "y",
+                    "size": "small",
+                    "finished": False,
+                    "updated_at": None,
+                    "created_at": None,
+                    "closed_at": None,
+                }
+            ]
+        ),
     )
     assert bin_storage.auto_bin(now=604800001) == ["y"]
