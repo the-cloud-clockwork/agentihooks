@@ -17,6 +17,10 @@ OVERLAP_LINE = (
     "Running tasks share areas with yours. Coordinate with each claimant through the inbox "
     '(agentihooks msg send <claimant> "<text>") and merge dev into your branch before your own merge:'
 )
+GROUP_LINE = (
+    "Your task leads a group: deliver these grouped tasks too, in the same worktree and one pull request, and name "
+    "each in its body. When it merges, swarm done on your task closes them all:"
+)
 PUBLISHED = "It opens a GitHub issue where the repo has issues, else a ledger artifact"
 THROUGH_CODE = (
     "Reach that state through code: any change to what runs goes through a worktree (wt.sh new {name}), a pull "
@@ -198,6 +202,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         lines.append(task["description"])
     lines += contract_lines(task.get("contract") or {})
     lines += workspace_lines(task)
+    lines += group_lines(task)
     lines += overlap_lines(task)
     if task.get("pr_url"):
         lines.append(f"An earlier agent already opened {task['pr_url']}: continue it instead of starting over.")
@@ -395,6 +400,13 @@ def overlap_lines(task):
     return [OVERLAP_LINE] + [
         f"Task {o['task']}, claimed by {o['claimant']}, shares {' and '.join(o['areas'])}." for o in overlaps
     ]
+
+
+def group_lines(task):
+    group = task.get("group") or []
+    if not group:
+        return []
+    return [GROUP_LINE] + [f"Task {m['id']}: {m['title']}. {m['description']}".rstrip() for m in group]
 
 
 def issue_step(me, what):

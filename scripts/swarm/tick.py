@@ -613,6 +613,11 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             store.put_reclaim(slug, name, task["reclaim"])
         task["stack_base"] = _stack_base(task, rows)
         task["overlaps"] = _sharing(task, rows)
+        task["group"] = [
+            {key: rows[m].get(key, "") for key in ("id", "title", "description")}
+            for m in task.get("group_members") or []
+            if m in rows
+        ]
         saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
         preferred = json.loads(saved)["seat"] if saved else store.handoff_seat(slug, task["id"])
         seat = _free_seat(slug, lane, taken, preferred)
