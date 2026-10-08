@@ -1,0 +1,61 @@
+{
+  "tested_commit": "48e9aa0c048c124ad869aaddcefdad8c61b0d428",
+  "evidence_class": "mocked signals and isolated fakeredis; no live Kubernetes, SSH or rollout proof",
+  "passed": true,
+  "independent_fixtures": [
+    {
+      "passed": true,
+      "classified": [
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        },
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        },
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        },
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        }
+      ],
+      "deleted_pod_claimed": false,
+      "protected_state_unchanged": true,
+      "corrected_by_new_read": "working",
+      "execution_observation_age_seconds": {
+        "exe-781648bdbc8b40ddb1ae88dc3681e9ad": -10700.0
+      }
+    },
+    {
+      "passed": true,
+      "classified": [
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        },
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        },
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        },
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        }
+      ],
+      "deleted_pod_claimed": false,
+      "protected_state_unchanged": true,
+      "corrected_by_new_read": "working",
+      "execution_observation_age_seconds": {
+        "exe-4e5fb5575aaf407ca18dae65e7aaa807": -10700.0
+      }
+    }
+  ]
+}

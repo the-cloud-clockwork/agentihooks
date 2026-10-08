@@ -1,0 +1,56 @@
+{
+  "package": "SV2-RUN-04",
+  "dependency": "SV2-RUN-03",
+  "integration_gate": "G1",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1874",
+  "pull_request": "",
+  "tested_commit": "48e9aa0c048c124ad869aaddcefdad8c61b0d428",
+  "status": "implemented-fixture-qualified-not-live",
+  "evidence_class": "mocked signals and isolated fakeredis; no live Kubernetes, SSH or rollout proof",
+  "interfaces": [
+    "Signal, Source, Reading, Thresholds and Mode",
+    "classify returning Classification with State, Terminal, Failure, Confidence, denied sources, suspect_since and needs_operator",
+    "Observer.observe, get, records and execution_observation_age_seconds",
+    "projection, carried as the observation field of every agent row in scripts.swarm.status.status_report"
+  ],
+  "supported_versions": {
+    "runtime_protocol": "SV2-RUN-01 to SV2-RUN-03 unchanged; observation classification introduced by SV2-RUN-04",
+    "record": "Redis hash observations keyed by execution id, fenced by generation and newest evidence time; retained by swarm snapshots"
+  },
+  "authority": "Observer acts only on executions of its own backend that are the current occupant of their seat by execution id and generation; signals naming another execution or generation are discarded and counted. No display label grants authority.",
+  "classification": {
+    "terminal_loss": "fresh heartbeat with unreachable terminal: working, terminal degraded",
+    "worker_loss": "stale heartbeat, or Pod ended, deleted or supervisor exited: suspect; lost only after a prior suspect observation, failure proof and lost_after_s",
+    "pod_scheduling": "pending Pod without a fresh heartbeat: pending",
+    "provider_wait": "fresh heartbeat with provider quota_wait: waiting_quota",
+    "observation_denied": "forbidden or unauthenticated read: never classified as a deleted Pod, never lost",
+    "observation_unavailable": "unreachable or missing Kubernetes view: suspect, never lost"
+  },
+  "thresholds": {
+    "fresh_s": 120.0,
+    "lost_after_s": 600.0,
+    "mode": "standard, or conservative through AGENTIHOOKS_OBSERVATION_MODE"
+  },
+  "states": {
+    "observed": "",
+    "accepted": "",
+    "committed": "Implementation and fixture inputs committed on tested_commit; generated case manifest identifies exact input hashes.",
+    "externally_verified": ""
+  },
+  "cases": {
+    "a": "evidence/SV2-RUN-04/a-result.json",
+    "b": "evidence/SV2-RUN-04/b-result.json",
+    "c": "evidence/SV2-RUN-04/c-result.json"
+  },
+  "migrations": [],
+  "rollback_rehearsal": {
+    "action": "Set AGENTIHOOKS_OBSERVATION_MODE to conservative: the observer never declares lost and marks every suspect attempt needs_operator for operator classification. The observations hash is retained; the local tick suspect path and RuntimeRouter are unchanged.",
+    "evidence": "Case C restores a snapshot into a new store, recovers by relist without a new agent, refuses a stale replay, then a conservative observer holds a deleted Pod as suspect needing the operator past the lost threshold."
+  },
+  "remaining_limitations": [
+    "No Kubernetes, SSH or supervisor signal producer exists at G1; signals are fixture built. Backend adapters in later packages produce them.",
+    "The tick still uses its existing remote suspect path; wiring the observer into tick decisions belongs to later runtime packages.",
+    "Legacy local agents without an execution record project their heartbeat only, as state unclassified."
+  ],
+  "next_action": "Produce signals from the Kubernetes adapter and route tick suspect and lost decisions through Observer."
+}

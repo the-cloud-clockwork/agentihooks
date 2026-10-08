@@ -1,0 +1,43 @@
+{
+  "tested_commit": "48e9aa0c048c124ad869aaddcefdad8c61b0d428",
+  "evidence_class": "mocked signals and isolated fakeredis; no live Kubernetes, SSH or rollout proof",
+  "passed": true,
+  "independent_fixtures": [
+    {
+      "passed": true,
+      "accepted": {
+        "state": "working",
+        "terminal": "degraded",
+        "failure": "terminal_loss"
+      },
+      "confidence": "confirmed",
+      "sources": [
+        "heartbeat",
+        "kubernetes",
+        "terminal"
+      ],
+      "other_backend_refused": true,
+      "execution_observation_age_seconds": {
+        "exe-cd256e1b196e4475a817ad41a4c74290": 1.0
+      }
+    },
+    {
+      "passed": true,
+      "accepted": {
+        "state": "working",
+        "terminal": "degraded",
+        "failure": "terminal_loss"
+      },
+      "confidence": "confirmed",
+      "sources": [
+        "heartbeat",
+        "kubernetes",
+        "terminal"
+      ],
+      "other_backend_refused": true,
+      "execution_observation_age_seconds": {
+        "exe-92c8a14c7eb44f1aacb751a43ba4ff03": 1.0
+      }
+    }
+  ]
+}
