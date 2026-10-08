@@ -223,6 +223,11 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         run: python -m tests.shard_check shard-durations/*/durations.json
 
+      # Summed test time runs about three times a shard's wall time, so this fires before the unit timeout.
+      - name: Check every shard's test time fits the fifteen minute budget
+        if: steps.lookup.outputs.skip != 'true'
+        run: python -m tests.shard_budget shard-durations/*/durations.json
+
   test-count:
     runs-on: ubuntu-latest
     timeout-minutes: 5
