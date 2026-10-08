@@ -89,7 +89,11 @@ def test_each_row_carries_title_kind_counts_swarm_state_and_last_activity(update
     assert '<span class="num open"><b>2</b> open</span><span class="num done"><b>1</b> done</span>' in found
     assert '<span class="state s-running">running</span>' in found
     assert re.search(r'<time class="when" datetime="[^"]+" data-tip="[^"]+">5m ago</time>', found)
-    assert re.search(r'<span class="ov" data-tip="A long overview[^"]*">A long overview', found)
+    assert re.search(
+        r'</a><span class="kind">swarm</span><span class="ov" data-tip="A long overview[^"]*">A long overview[^<]*</span>'
+        r'<span class="num open">',
+        found,
+    )
     assert '<span class="acts"><button class="act del" type="button" data-act="delete"' in found
     assert 'data-slug="rows-2026-01-03" title="Move to the bin" aria-label="Move Rows plan to the bin">' in found
     assert 'data-act="reopen"' not in found

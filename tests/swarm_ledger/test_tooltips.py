@@ -74,8 +74,15 @@ ROW_AT = 90_000_000
 
 
 def home_html(view):
-    row = {"slug": "s", "title": ROW_TITLE, "overview": ROW_OVERVIEW, "size": "swarm", "open": 1, "done": 0}
-    row["updated_at"] = ROW_AT
+    row = {
+        "slug": "s",
+        "title": ROW_TITLE,
+        "overview": ROW_OVERVIEW,
+        "size": "swarm",
+        "open": 1,
+        "done": 0,
+        "updated_at": ROW_AT,
+    }
     with (
         patch.object(server, "ledger_summaries", return_value=[{**row, "closed_at": 0}, {**row, "closed_at": 5}]),
         patch.object(server, "bin_summaries", return_value=[{**row, "deleted_at": 0, "days_left": 3}]),
