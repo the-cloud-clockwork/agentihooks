@@ -114,11 +114,15 @@ def test_the_coach_tick_reads_only_the_head_of_an_unchanged_pull_request(started
     store.update("sw", gates={"intent": "coach"})
     ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
     Verdicts("sw", "intent-coach").write("t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL)
-    heads, views = [], []
-    monkeypatch.setattr(intent, "pr_head", lambda url: heads.append(url) or "h1")
+    from scripts.swarm import ledger_events
+
+    reads, views = [], []
+    pull = ledger_events.PullRequest("OPEN", None, None, False, head="h1")
+    monkeypatch.setattr(ledger_events, "view", lambda url: reads.append(url) or pull)
+    monkeypatch.setattr(intent, "pr_head", lambda url: pytest.fail("a second head read"))
     monkeypatch.setattr(intent, "pr_view", lambda url: views.append(url))
     actions = cli.run_tick(store, "sw")
-    assert (heads, views) == ([URL], [])
+    assert (reads, views) == ([URL], [])
     assert not any("intent check" in action for action in actions)
     assert Verdicts("sw", "intent").read("t1")["head"] == "h1"
 
