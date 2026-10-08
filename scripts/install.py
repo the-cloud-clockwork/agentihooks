@@ -6462,7 +6462,6 @@ def main() -> None:
 
         if _argv[1:2] != ["eval"]:
             raise SystemExit("usage: agentihooks skill eval [--agent {claude,codex}] -- <command>")
-
         skill_eval_main(_argv[2:])
         return
     if _argv and _argv[0] == "manifestos":
