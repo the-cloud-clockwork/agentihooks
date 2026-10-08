@@ -105,6 +105,7 @@ def test_a_created_pane_carries_its_terminal_id(tmp_path, monkeypatch):
 
 
 def _launch(monkeypatch, tmp_path, *extra, **env_extra):
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     monkeypatch.setattr(herdr_host, "open_pane", lambda *a: Placement("w1", "w1:t3", "w1:p7", "term_7"))
     monkeypatch.setattr(herdr_host, "run", lambda pane, launcher, environ: launcher.with_suffix(".started").touch())
     monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
