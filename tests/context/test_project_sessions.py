@@ -18,8 +18,9 @@ def test_lookup_returns_the_stored_project_id(monkeypatch, tmp_path):
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path)
     record_session("scoped", ProjectIdentity("alpha", "org/alpha", project_id="github:org/alpha"))
     assert lookup("scoped").project_id == "github:org/alpha"
-    record_session("unscoped", ProjectIdentity("beta", "org/beta"))
-    assert lookup("unscoped").project_id == "unknown"
+    index = tmp_path / "brain" / "project-sessions.jsonl"
+    index.write_text(index.read_text() + '{"session_id": "legacy", "project": "beta", "repo": "org/beta"}\n')
+    assert lookup("legacy").project_id == "unknown"
 
 
 def test_old_session_uses_transcript_folder(monkeypatch, tmp_path):
