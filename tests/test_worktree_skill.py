@@ -201,7 +201,6 @@ class Done(WtBase):
         self.assertTrue(dest.is_dir())
         self.assertTrue(self.branch_exists("queue-unknown"))
 
-
     def test_done_keeps_a_published_worktree_when_github_cli_is_missing_even_with_force(self):
         dest = self._new("queue-no-gh")
         _git(dest, "push", "--quiet", "-u", "origin", "queue-no-gh", env=self.gitenv)
