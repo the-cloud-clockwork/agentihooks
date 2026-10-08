@@ -41,8 +41,10 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
     assert {"p/ci", "p/secrets", "p/python"} == {command[i + 1] for i, a in enumerate(command) if a == "--config"}
     assert command[command.index("--baseline-commit") + 1] == '"$BASE"'
     assert "--error" in command
-    assert "|| true" not in scan["steps"][-1]["run"]
-    assert "continue-on-error" not in scan["steps"][-1]
+    assert command[:2] == ["semgrep", "scan"]
+    assert not {"||", "set", "--exclude", "--include"} & set(command)
+    assert all("if" not in step and "continue-on-error" not in step for step in scan["steps"])
+    assert "continue-on-error" not in scan and "if" not in scan and "if" not in job
 
 
 def test_unit_matrix_does_not_fail_fast():
