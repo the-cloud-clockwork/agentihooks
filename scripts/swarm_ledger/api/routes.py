@@ -1,4 +1,5 @@
 import json
+import logging
 from types import ModuleType
 from urllib.parse import parse_qs, urlsplit
 
@@ -112,6 +113,7 @@ def handle(handler: object, server: ModuleType) -> None:
     except APIError as exc:
         status, result = exc.status, exc.envelope()
     except (OSError, ValueError):
+        logging.getLogger(__name__).exception("Ledger API storage failure")
         status, result = 500, APIError(500, "storage_error", "Resource could not be read or written").envelope()
     return handler.send(status, json.dumps(result, ensure_ascii=False), "application/json")
 

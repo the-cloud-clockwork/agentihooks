@@ -148,3 +148,66 @@ def test_ordinary_tasks_can_still_finish(plan_ledger):
     state, rejected = update(plan_ledger, state="done")
     assert rejected == []
     assert state["tasks"][0]["state"] == "done"
+
+
+@pytest.mark.parametrize("destination", ["research", "code"])
+def test_plan_kind_change_updates_lane_and_workspace(plan_ledger, tmp_path, destination):
+    from scripts.swarm_ledger import ledger_workspace
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    add(plan_ledger, "plan", kind="plan", lane="plan", workspace=str(workspace))
+    before = core.sync(plan_ledger)[0]
+    task = before["tasks"][0]
+    (workspace / "steering.md").write_text(ledger_workspace.steering(task, before), encoding="utf-8")
+    (workspace / "progress.md").write_text("Progress preserved\n", encoding="utf-8")
+    (workspace / "proof.md").write_text("Proof preserved\n", encoding="utf-8")
+    assert "Plan evidence" in (workspace / "steering.md").read_text()
+
+    state, rejected = update(plan_ledger, kind=destination)
+    assert rejected == []
+    task = state["tasks"][0]
+    assert task["kind"] == destination
+    assert task["lane"] == "eng"
+    assert (workspace / "steering.md").read_text() == "# plan: Build a feature\n"
+    assert (workspace / "progress.md").read_text() == "Progress preserved\n"
+    assert (workspace / "proof.md").read_text() == "Proof preserved\n"
+    assert core.sync(plan_ledger)[0]["tasks"][0] == task
+
+
+@pytest.mark.parametrize(
+    ("task", "fields", "expected"),
+    [
+        ({"kind": "plan", "lane": "plan"}, {"kind": "research"}, {"kind": "research", "lane": "eng"}),
+        ({"kind": "plan", "lane": "plan"}, {"kind": "code", "lane": "ci"}, {"kind": "code", "lane": "ci"}),
+        ({"kind": "plan", "lane": "plan"}, {"kind": "plan"}, {"kind": "plan"}),
+        ({"kind": "plan", "lane": "plan"}, {"title": "Revised"}, {"title": "Revised"}),
+        ({"kind": "code", "lane": "ci"}, {"kind": "research"}, {"kind": "research"}),
+    ],
+)
+def test_kind_update_preserves_explicit_and_unrelated_fields(task, fields, expected):
+    original = dict(fields)
+    assert ledger_tasks._update_fields(task, fields) == expected
+    assert fields == original
+
+
+def test_plan_kind_change_without_workspace_and_same_kind(plan_ledger):
+    add(plan_ledger, "plan", kind="plan", lane="plan")
+    state, rejected = update(plan_ledger, kind="plan")
+    assert rejected == []
+    assert state["tasks"][0]["lane"] == "plan"
+    state, rejected = core.sync(
+        plan_ledger,
+        ops=[
+            {
+                "op": "task_update",
+                "id": "convert",
+                "by": "planner",
+                "item": "tasks/plan",
+                "fields": {"kind": "research"},
+            }
+        ],
+    )
+    assert rejected == []
+    assert state["tasks"][0]["kind"] == "research"
+    assert state["tasks"][0]["lane"] == "eng"
