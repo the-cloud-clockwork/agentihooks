@@ -144,13 +144,18 @@ def _marker_request(marker: dict, session_id: str, cwd: str | None = None) -> tu
     outbox dedupes server-side against its original (possibly partial) POST.
     """
     from hooks.context.project_identity import resolve_project
-    from hooks.context.project_sessions import FLEET, attribute, lookup, scope_at
+    from hooks.context.project_sessions import PROJECT_FIELDS, SCOPE_FIELDS, lookup, marker_scope
 
     attrs = dict(marker.get("attrs") or {})
     folder = os.getenv("CLAUDE_PROJECT_DIR", str(Path.cwd())) if cwd is None else cwd
-    if attrs.get("share") == FLEET or scope_at(session_id, marker.get("at")) is not None:
-        [event] = attribute(session_id, [{"at": marker.get("at"), "attrs": attrs}])
-        for name, value in event.items():
+    scope = marker_scope(session_id, marker)
+    if scope is not None:
+        dropped = {"scoped": PROJECT_FIELDS, "unknown": PROJECT_FIELDS, "explicit": ()}.get(
+            scope["attribution"], SCOPE_FIELDS
+        )
+        for name in dropped:
+            attrs.pop(name, None)
+        for name, value in scope.items():
             attrs.setdefault(name, value)
     else:
         identity = lookup(session_id) or resolve_project(attrs.get("cwd") or folder, {} if cwd is not None else None)
@@ -314,10 +319,16 @@ def write_markers(session_id: str, transcript_path: str, last_message: str = "")
 
         # Fallback: if transcript had no markers but last_message does, parse that
         if not markers and last_message:
-            markers = _find_markers(last_message)[:BRAIN_WRITER_MAX_MARKERS]
+            now = datetime.now(timezone.utc).isoformat()
+            markers = [{**m, "at": now} for m in _find_markers(last_message)[:BRAIN_WRITER_MAX_MARKERS]]
         if not markers:
             span.set_attrs({"markers_found": 0, "outbox_drained": drained})
             return {"markers": 0, "drained": drained}
+
+        from hooks.context.project_sessions import marker_scope, unattributed_session_events_total
+
+        scopes = [marker_scope(session_id, m) or {"attribution": "unknown"} for m in markers]
+        span.set_attrs({"unattributed_session_events_total": unattributed_session_events_total(scopes)})
 
         # HTTP is the only transport — any marker we fail to POST buffers in
         # the outbox for the retry-drain above.

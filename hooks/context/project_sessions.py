@@ -23,6 +23,7 @@ SCOPE_FIELDS = (
     "task_revision",
     "lane",
 )
+PROJECT_FIELDS = ("project_id", "project", "repo", "remote")
 FLEET = "fleet"
 _UNCLAIMED = ("", "unknown")
 _SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
@@ -63,8 +64,9 @@ def _rows() -> dict[str, dict]:
 def record_session(session_id: str, identity: ProjectIdentity | None) -> None:
     if not session_id:
         return
-    branch = _branch(identity.cwd) if identity else ""
-    _observe(session_id, _scope(identity, "", branch, os.environ), datetime.now(timezone.utc).isoformat())
+    if enabled():
+        branch = _branch(identity.cwd) if identity else ""
+        _observe(session_id, _scope(identity, "", branch, os.environ), datetime.now(timezone.utc).isoformat())
     if not identity:
         return
     from hooks.context.broadcast import _file_lock
@@ -133,9 +135,10 @@ def _instant(value: object) -> datetime | None:
 
 
 def _read(path: Path | None) -> tuple[str, list[dict]]:
-    if not path or not path.exists():
+    try:
+        text = path.read_text(errors="replace") if path else ""
+    except OSError:
         return "", []
-    text = path.read_text()
     rows = []
     for line in text.splitlines():
         try:
@@ -175,16 +178,22 @@ def record_scope(
         transition_id = _transition_id(session_id, at, values)
         if any(row.get("transition_id") == transition_id for row in rows):
             return None
-        if rows:
-            latest = rows[-1]
-            if moment < (_instant(latest.get("at")) or moment):
-                raise ScopeRefused("transition is older than the latest accepted one")
-            if all(latest.get(name, "") == value for name, value in values.items()):
-                return None
+        if rows and not _supersedes(rows[-1], values, moment):
+            return None
         row = {"session_id": session_id, "sequence": len(rows), "at": at, "transition_id": transition_id, **values}
         with path.open("a") as stream:
             stream.write(("\n" if text and not text.endswith("\n") else "") + json.dumps(row) + "\n")
     return row
+
+
+def _supersedes(latest: dict, values: dict, moment: datetime) -> bool:
+    if moment < (_instant(latest.get("at")) or moment):
+        raise ScopeRefused("transition is older than the latest accepted one")
+    revision, accepted = values["task_revision"], str(latest.get("task_revision") or "")
+    same_task = values["task"] and (latest.get("swarm"), latest.get("task")) == (values["swarm"], values["task"])
+    if same_task and revision.isdigit() and accepted.isdigit() and int(revision) < int(accepted):
+        raise ScopeRefused("task revision is older than the latest accepted one")
+    return any(latest.get(name, "") != value for name, value in values.items())
 
 
 def _scope_in(rows: list[dict], at: object) -> dict | None:
@@ -208,14 +217,29 @@ def _attribution(rows: list[dict], event: Mapping, grant: SessionGrant | None) -
     if attrs.get("share") == FLEET:
         return {"attribution": FLEET}
     scope = _scope_in(rows, event.get("at")) or {}
-    explicit = {name: str(attrs[name]) for name in SCOPE_FIELDS if attrs.get(name)}
+    explicit = {name: str(attrs[name]) for name in PROJECT_FIELDS if attrs.get(name)}
     if explicit.get("project_id", "") not in _UNCLAIMED:
         if grant is not None and not grant.admits(explicit["project_id"]):
             return {"attribution": "refused"}
-        scope, label = {**scope, **explicit}, "explicit"
+        scope = {**{name: value for name, value in scope.items() if name not in PROJECT_FIELDS}, **explicit}
+        label = "explicit"
     else:
         label = "unknown" if scope.get("project_id", "") in _UNCLAIMED else "scoped"
     return {"attribution": label, **{name: value for name, value in scope.items() if value}}
+
+
+def enabled(environ: Mapping[str, str] | None = None) -> bool:
+    return (os.environ if environ is None else environ).get("AGENTIHOOKS_SESSION_SCOPE", "1") != "0"
+
+
+def marker_scope(session_id: str, marker: Mapping, grant: SessionGrant | None = None) -> dict | None:
+    if not enabled():
+        return None
+    attrs = marker.get("attrs") or {}
+    rows = transitions(session_id)
+    if not rows and attrs.get("share") != FLEET:
+        return None
+    return _attribution(rows, {"at": marker.get("at"), "attrs": attrs}, grant)
 
 
 def attribute(session_id: str, events: Iterable[Mapping], grant: SessionGrant | None = None) -> list[dict]:
@@ -246,7 +270,7 @@ def _scope(identity: ProjectIdentity | None, cwd: str, branch: str, env: Mapping
 def _observe(session_id: str, scope: dict, at: str) -> dict | None:
     try:
         return record_scope(session_id, scope, at)
-    except ScopeRefused:
+    except (OSError, ValueError):
         return None
 
 
@@ -262,16 +286,17 @@ def observe_transcript(session_id: str, transcript_path: str, environ: Mapping[s
     from hooks.memory.transcript_reader import _load_entries
 
     env = os.environ if environ is None else environ
+    if not enabled(env):
+        return 0
     rows = transitions(session_id)
     after = _instant(rows[-1].get("at")) if rows else None
     seen, recorded = None, 0
     for entry in _load_entries(Path(transcript_path)):
         cwd, at = _entry_context(entry)
+        branch = str(entry.get("gitBranch") or "") if cwd else ""
         moment = _instant(at)
-        if not cwd or cwd == seen or moment is None or (after and moment < after):
+        if not cwd or (cwd, branch) == seen or moment is None or (after and moment < after):
             continue
-        seen = cwd
-        identity = resolve_project(cwd, env)
-        branch = entry.get("gitBranch") or (_branch(cwd) if identity else "")
-        recorded += _observe(session_id, _scope(identity, cwd, branch, env), at) is not None
+        seen = (cwd, branch)
+        recorded += _observe(session_id, _scope(resolve_project(cwd, env), cwd, branch, env), at) is not None
     return recorded

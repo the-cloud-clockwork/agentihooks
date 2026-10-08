@@ -167,21 +167,23 @@ def test_unsafe_session_ids_are_never_stored(home):
     assert not (home / "state").exists()
 
 
+IDENTITIES = {
+    "/work/alpha/one": ProjectIdentity(
+        "alpha", "fixture/alpha", "one", "/work/alpha/one", "", "github.com/fixture/alpha"
+    ),
+    "/work/alpha/two": ProjectIdentity(
+        "alpha", "fixture/alpha", "two", "/work/alpha/two", "", "github.com/fixture/alpha"
+    ),
+    "/work/beta": ProjectIdentity("beta", "fixture/beta", "beta", "/work/beta", "", "github.com/fixture/beta"),
+}
+
+
 def test_transcript_observation_records_the_worktree_switch(home, monkeypatch):
-    identities = {
-        "/work/alpha/one": ProjectIdentity(
-            "alpha", "fixture/alpha", "one", "/work/alpha/one", "", "github.com/fixture/alpha"
-        ),
-        "/work/alpha/two": ProjectIdentity(
-            "alpha", "fixture/alpha", "two", "/work/alpha/two", "", "github.com/fixture/alpha"
-        ),
-        "/work/beta": ProjectIdentity("beta", "fixture/beta", "beta", "/work/beta", "", "github.com/fixture/beta"),
-    }
     calls = []
 
     def resolve(cwd, env=None):
         calls.append(cwd)
-        return identities.get(cwd)
+        return IDENTITIES.get(cwd)
 
     monkeypatch.setattr(project_sessions, "resolve_project", resolve)
     env = {"AGENTIHOOKS_SWARM": "fixture", "AGENTIHOOKS_SWARM_TASK": "first", "AGENTIHOOKS_SWARM_LANE": "eng"}
@@ -218,6 +220,168 @@ def test_session_start_records_the_launch_scope(home, monkeypatch):
     )
     record_session("live", None)
     assert transitions("live")[-1]["project_id"] == ""
+
+
+def _variant():
+    text = json.dumps(FIXTURE).replace("2026-10-08", "2026-10-09")
+    for old, new in (
+        ("alpha", "@swap@"),
+        ("beta", "alpha"),
+        ("@swap@", "beta"),
+        ("first", "@one@"),
+        ("third", "first"),
+    ):
+        text = text.replace(old, new)
+    return json.loads(text.replace("@one@", "third"))
+
+
+def test_a_second_fixture_with_other_times_and_projects_attributes_independently(home, monkeypatch):
+    monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", home / "second-state")
+    variant = _variant()
+    for item in variant["transitions"]:
+        record_scope("variant", item["scope"], item["at"], SessionGrant(frozenset(variant["grant"]["project_ids"])))
+    path = home / "variant.jsonl"
+    path.write_text("\n".join(json.dumps(entry) for entry in variant["transcript"]) + "\n")
+    markers = _parse_transcript_for_markers(str(path), 20)
+    results = attribute("variant", [{"at": m.get("at", ""), "attrs": m["attrs"]} for m in markers])
+    assert _projected(results) == variant["expected"]
+    assert variant["expected"][1]["project_id"] == "github.com/fixture/beta"
+    assert variant["expected"][1]["task"] == "third"
+    assert not (home / "state").exists()
+
+
+def test_fleet_markers_shed_every_scope_attribute(home):
+    _record_all("first")
+    marker = {"type": "signal", "content": "shared", "at": "2026-10-08T10:05:00Z"}
+    marker["attrs"] = {"share": "fleet", "project_id": "github.com/fixture/gamma", "task": "first", "cwd": "/work"}
+    body, _ = _marker_request(marker, "first")
+    assert body["attrs"]["attribution"] == "fleet"
+    assert not set(body["attrs"]) & set(project_sessions.SCOPE_FIELDS)
+
+
+def test_explicit_identity_covers_only_the_project(home):
+    _record_all("first")
+    attrs = {"project_id": "github.com/fixture/beta", "task": "second", "task_revision": "9", "worktree": "x"}
+    [result] = attribute("first", [{"at": "2026-10-08T10:05:00Z", "attrs": attrs}], GRANT)
+    assert (result["project_id"], result["task"], result["task_revision"], result["worktree"]) == (
+        "github.com/fixture/beta",
+        "first",
+        "1",
+        "one",
+    )
+    assert "repo" not in result
+
+
+def test_a_display_label_never_overrides_the_event_time_project(home):
+    _record_all("first")
+    marker = {"type": "lesson", "content": "label", "at": "2026-10-08T10:05:00Z", "attrs": {"project": "gamma"}}
+    body, _ = _marker_request(marker, "first")
+    assert (body["attrs"]["project"], body["attrs"]["project_id"]) == ("alpha", "github.com/fixture/alpha")
+
+
+def test_markers_outside_recorded_scope_stay_unknown_instead_of_taking_the_latest_project(home, monkeypatch):
+    monkeypatch.setattr(project_sessions, "_branch", lambda cwd: "")
+    latest = ProjectIdentity("beta", "fixture/beta", "beta", "/work/beta", "", "github.com/fixture/beta")
+    _record_all("first")
+    record_session("first", latest)
+    assert project_sessions.lookup("first").project == "beta"
+    for at in ("2026-10-08T09:59:00Z", None):
+        marker = {"type": "lesson", "content": "early", "at": at, "attrs": {"project": "beta"}}
+        body, _ = _marker_request(marker, "first")
+        assert body["attrs"]["attribution"] == "unknown"
+        assert "project_id" not in body["attrs"]
+        assert "project" not in body["attrs"]
+
+
+def test_an_older_task_revision_cannot_replace_a_newer_one(home):
+    _record_all("first")
+    current = FIXTURE["transitions"][-1]["scope"]
+    with pytest.raises(ScopeRefused):
+        record_scope("first", {**current, "task_revision": "1"}, "2026-10-08T11:00:00+00:00")
+    assert record_scope("first", {**current, "task_revision": "3"}, "2026-10-08T11:00:00+00:00")["sequence"] == 4
+    assert record_scope("first", {**current, "task": "fourth", "task_revision": "1"}, "2026-10-08T11:01:00+00:00")
+
+
+def test_switching_the_scope_path_off_restores_the_preceding_behavior(home, monkeypatch):
+    monkeypatch.setattr(project_sessions, "_branch", lambda cwd: "")
+    identity = ProjectIdentity("beta", "fixture/beta", "beta", "/work/beta", "", "github.com/fixture/beta")
+    marker = {"type": "lesson", "content": "legacy", "at": "2026-10-08T10:05:00Z", "attrs": {}}
+    monkeypatch.setenv("AGENTIHOOKS_SESSION_SCOPE", "0")
+    record_session("off", identity)
+    assert transitions("off") == []
+    assert observe_transcript("off", str(_transcript(home))) == 0
+    body, _ = _marker_request(marker, "off")
+    legacy = ("project", "repo", "worktree", "cwd")
+    assert [body["attrs"][key] for key in legacy] == [identity.attributes()[key] for key in legacy]
+    assert "attribution" not in body["attrs"]
+    _record_all("off")
+    assert _marker_request(marker, "off")[0] == body
+    monkeypatch.setenv("AGENTIHOOKS_SESSION_SCOPE", "1")
+    assert _marker_request(marker, "off")[0]["attrs"]["project_id"] == "github.com/fixture/alpha"
+
+
+def test_stop_reports_unattributed_markers(home, monkeypatch):
+    from contextlib import contextmanager
+
+    from hooks.context import brain_writer_hook
+
+    recorded = {}
+
+    class Span:
+        def set_attrs(self, attrs):
+            recorded.update(attrs)
+
+    @contextmanager
+    def span_ctx(name, attrs):
+        yield Span()
+
+    monkeypatch.setattr("hooks.config.BRAIN_WRITER_ENABLED", True)
+    monkeypatch.setattr("hooks.config.BRAIN_WRITER_MAX_MARKERS", 20)
+    monkeypatch.setattr("hooks.config.BRAIN_WRITER_OUTBOX", str(home / "outbox"))
+    monkeypatch.setattr("hooks.telemetry.span_ctx", span_ctx)
+    monkeypatch.setattr(brain_writer_hook, "_drain_outbox", lambda outbox: 0)
+    monkeypatch.setattr(brain_writer_hook, "_publish_to_http", lambda markers, sid: (len(markers), []))
+    monkeypatch.setattr(project_sessions, "resolve_project", lambda cwd, env=None: IDENTITIES.get(cwd))
+    _record_all("stop")
+    assert brain_writer_hook.write_markers("stop", str(_transcript(home)))["markers"] == 6
+    assert recorded["unattributed_session_events_total"] == 1
+    late = "<!-- @lesson -->Late.<!-- @/lesson -->"
+    record_scope("late", FIXTURE["transitions"][0]["scope"], "2000-01-01T00:00:00+00:00")
+    assert brain_writer_hook.write_markers("late", str(home / "none.jsonl"), late)["markers"] == 1
+    assert recorded["unattributed_session_events_total"] == 0
+
+
+def test_an_unwritable_scope_log_never_stops_session_start_or_stop(home):
+    blocked = home / "state" / "brain" / "session-scopes"
+    blocked.parent.mkdir(parents=True)
+    blocked.write_text("not a folder")
+    identity = ProjectIdentity("alpha", "fixture/alpha", "one", "/work/alpha/one", "", "github.com/fixture/alpha")
+    record_session("live", identity)
+    assert project_sessions.lookup("live").project == "alpha"
+    assert observe_transcript("live", str(_transcript(home))) == 0
+
+
+def test_an_undecodable_scope_log_stays_readable(home):
+    first = FIXTURE["transitions"][0]
+    record_scope("first", first["scope"], first["at"])
+    with project_sessions._scope_path("first").open("ab") as stream:
+        stream.write(b"\xff\xfe\n")
+    assert [row["worktree"] for row in transitions("first")] == ["one"]
+
+
+def test_transcript_branch_changes_are_recorded_and_never_read_from_live_git(home, monkeypatch):
+    identity = ProjectIdentity("alpha", "fixture/alpha", "one", "/work/alpha/one", "", "github.com/fixture/alpha")
+    monkeypatch.setattr(project_sessions, "resolve_project", lambda cwd, env=None: identity)
+    monkeypatch.setattr(project_sessions, "_branch", lambda cwd: pytest.fail("live branch read for a past entry"))
+    entries = [
+        {"type": "assistant", "timestamp": "2026-10-08T10:00:00Z", "cwd": "/work/alpha/one", "gitBranch": "main"},
+        {"type": "assistant", "timestamp": "2026-10-08T10:05:00Z", "cwd": "/work/alpha/one", "gitBranch": "feat"},
+        {"type": "turn_context", "timestamp": "2026-10-08T10:10:00Z", "payload": {"cwd": "/work/alpha/one"}},
+    ]
+    path = home / "branches.jsonl"
+    path.write_text("\n".join(json.dumps(entry) for entry in entries) + "\n")
+    assert observe_transcript("branches", str(path), {}) == 3
+    assert [row["branch"] for row in transitions("branches")] == ["main", "feat", ""]
 
 
 def test_transitions_and_attributions_match_the_schema(home):

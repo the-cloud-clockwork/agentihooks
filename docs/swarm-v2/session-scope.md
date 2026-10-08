@@ -14,15 +14,19 @@ time and scope). The schema is `urn:swarm-v2:session-scope`.
 - A transition is written only when the scope differs from the latest accepted one.
 - A replay with the same identity is a no-op, so replaying metadata after a restart adds no duplicate entry.
 - A transition older than the latest accepted one, or one without an ISO 8601 time, is refused
-  (`ScopeRefused`); an older attempt cannot overwrite a newer result.
+  (`ScopeRefused`). For the same swarm and task, a numeric `task_revision` lower than the accepted one is
+  refused too, so an older attempt cannot overwrite a newer result.
 - A session ID outside `[A-Za-z0-9][A-Za-z0-9._-]{0,127}` is never stored.
-- A partially written last line is skipped on read, and the next write starts on a fresh line.
+- A partially written or undecodable line is skipped on read, and the next write starts on a fresh line.
 
-Live sources: session start records the launch scope (resolved project, Git branch and the `AGENTIHOOKS_SWARM`,
-`AGENTIHOOKS_SWARM_TASK` and `AGENTIHOOKS_SWARM_LANE` variables). At Stop, `observe_transcript` records a
-transition at the time of each transcript entry whose working directory changed (Claude `cwd` and `gitBranch`,
-Codex `turn_context`), so a worktree switch is placed where it happened. Task revision is filled only by callers
-that know it; the live hooks leave it empty.
+Live sources:
+
+- Session start records the launch scope: resolved project, current Git branch, and the `AGENTIHOOKS_SWARM`,
+  `AGENTIHOOKS_SWARM_TASK` and `AGENTIHOOKS_SWARM_LANE` variables.
+- At Stop, `observe_transcript` records a transition at the time of each transcript entry whose working directory
+  or branch changed (Claude `cwd` and `gitBranch`, Codex `turn_context` `cwd`). The branch comes only from the
+  transcript; an entry without one records an empty branch rather than today's checkout.
+- A failure to read or write the scope log never stops session start or Stop.
 
 ## Attribution
 
@@ -32,27 +36,45 @@ labels each event:
 | Label | Meaning |
 |---|---|
 | `scoped` | the transition in force names a project |
-| `explicit` | the event names its own `project_id`, admitted by the grant; other fields come from the event time |
-| `fleet` | the event says `share=fleet`; it carries no project fields |
+| `explicit` | the event names its own `project_id`, admitted by the grant; it replaces `project_id`, `project`, `repo` and `remote`, and every other field comes from the event time |
+| `fleet` | the event says `share=fleet`; it carries no scope fields |
 | `unknown` | no transition was in force, or it named no project; a path or basename is never promoted to a project |
-| `refused` | the event names a project outside the grant |
+| `refused` | the event names a project outside the grant; it carries no scope fields |
 
-`unattributed_session_events_total(results)` counts `unknown` and `refused` results.
+`unattributed_session_events_total(results)` counts `unknown` and `refused` results; Stop reports it on the
+`brain.marker_write` span.
 
-Brain markers take the time of the transcript record that holds them. A marker whose time falls under a
-recorded transition gets that scope's fields and its `attribution`; explicit marker attributes win. A marker
-marked `share=fleet` gets no project attributes. A marker with no recorded transition keeps the preceding
-lookup by session.
+Brain markers take the time of the transcript record that holds them; a marker read from the Stop payload's last
+message takes the Stop time. Once a session has a scope log, every marker is attributed through it:
+
+- the body takes the scope fields in force, plus `attribution`;
+- a `project`, `repo`, `remote` or `project_id` the model wrote without a valid `project_id` claim is replaced
+  by the event-time project, so a display label never stands beside a different project ID;
+- a `share=fleet` marker loses every scope field;
+- a marker before the first transition, or without a time, is `unknown` and carries no project.
+
+A session with no scope log keeps the preceding lookup by session.
 
 ## Grant
 
-A `SessionGrant` lists the project IDs a session may claim. With a grant, a transition or explicit marker
-project outside it is refused before anything is written, even when the folder exists locally. A scope with no
-project (`""` or `unknown`) makes no claim and is admitted as unknown. Signed launch grants belong to
-SV2-IDN-04; until then the live hooks pass no grant, and this package grants no authority from any label.
+A `SessionGrant` lists the project IDs a session may claim. With a grant, a transition or explicit marker project
+outside it is refused before anything is written, even when the folder exists locally. A scope with no project
+(`""` or `unknown`) makes no claim and is admitted as unknown.
+
+## Limitations
+
+- Signed launch grants belong to SV2-IDN-04. Until then the live hooks pass no grant, so an explicit marker
+  `project_id` is accepted as written; this package grants no authority from any label.
+- The live hooks see a task change only when a session starts under new swarm variables; a mid-session task
+  change and `task_revision` are recorded by callers of `record_scope`.
+- When a session resumes before its last Stop ran, transcript entries older than the resume are not recorded,
+  and their markers are `unknown`.
+- The marker idempotency key is unchanged (session, type and content), so identical marker text written under
+  two tasks of one session still deduplicates to the first.
+- Scope logs are kept like `project-sessions.jsonl`, with no retention sweep.
 
 ## Rollback
 
-The scope log is authoritative history and is never rewritten to a default project. Rolling back the code
-stops writing transitions and returns markers to the session lookup; `project-sessions.jsonl` and its
-`lookup` are unchanged by this package, so earlier readers keep working.
+`AGENTIHOOKS_SESSION_SCOPE=0` disables the new path: no transitions are written and markers use the preceding
+lookup by session, with the preceding body. The scope log is authoritative history and is never rewritten to a
+default project; reverting the code leaves it in place, and `project-sessions.jsonl` and `lookup` are unchanged.
