@@ -32,7 +32,7 @@ def test_ci_creates_no_commits_or_bot_pull_requests():
 def test_dev_push_publishes_merged_durations_with_read_permissions():
     job = _workflow("test.yml")["jobs"]["refresh-durations"]
     assert job["needs"] == ["unit", "lint", "shard-check"]
-    assert job["if"] == "github.event_name == 'push'"
+    assert job["if"] == "${{ !cancelled() && github.event_name == 'push' }}"
     assert job["permissions"] == {"contents": "read"}
     upload = next(s for s in job["steps"] if s.get("uses") == "actions/upload-artifact@v4")
     assert upload["with"]["name"] == "durations-merged"
@@ -70,7 +70,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     refresh = jobs["refresh-durations"]
     save = next(s for s in refresh["steps"] if s.get("uses") == "actions/cache/save@v4")
     stage = next(s for s in refresh["steps"] if s.get("name") == "Stage merged durations for the cache")
-    assert refresh["if"] == "github.event_name == 'push'"
+    assert refresh["if"] == "${{ !cancelled() && github.event_name == 'push' }}"
     assert refresh["steps"].index(stage) == refresh["steps"].index(save) - 1
     assert restore["uses"] == "actions/cache/restore@v4"
     assert steps.index(restore) == steps.index(adopt) - 1
