@@ -3,6 +3,7 @@
 import json
 import time
 from dataclasses import asdict, dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
@@ -10,6 +11,9 @@ from scripts.swarm import effort_range
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
+
+if TYPE_CHECKING:
+    from scripts.swarm_v2.runtime.operations import OperationJournal
 
 PREFIX = f"{ROOT}:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
@@ -89,6 +93,12 @@ class RedisStore:
 
     def key(self, slug, *parts):
         return ":".join((PREFIX, slug, *parts))
+
+    @property
+    def operation_journal(self) -> "OperationJournal":
+        from scripts.swarm_v2.runtime.operations import OperationJournal
+
+        return OperationJournal(self)
 
     def slugs(self):
         return sorted(self.redis.smembers(f"{PREFIX}:index"))
@@ -396,6 +406,8 @@ def _dump(redis, keys):
 
 
 def redis_url(environ):
+    if environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local" and environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
+        return environ["AGENTIHOOKS_HIVE_REDIS_URL"]
     return environ.get("AGENTIHOOKS_SWARM_REDIS_URL") or DEFAULT_URL
 
 

@@ -70,6 +70,19 @@ def test_chunk_keeps_the_plan_lines_verbatim():
     assert plan_read.chunk("a\nb\nc\n", "2-2") == "a\nb\nc\n"
 
 
+def test_exact_is_the_range_without_margin_and_refuses_an_empty_one(slug):
+    doc = json.loads(core.paths(slug)[1].read_text())
+    ref = doc["phases"][0]["plan_ref"]
+    assert plan_read.exact(doc, ref, "15-17") == numbered(15, 17)
+    with pytest.raises(ValueError) as caught:
+        plan_read.exact(doc, ref, "45-46")
+    assert str(caught.value) == "plan lines 45-46 hold no text"
+
+
+def test_numbered_keeps_the_plan_line_numbers_and_skips_blank_rows():
+    assert plan_read.numbered(" a \n\n  \nd\n", "7-10") == [(7, "a"), (10, "d")]
+
+
 @pytest.mark.parametrize(
     ("argv", "message"),
     [

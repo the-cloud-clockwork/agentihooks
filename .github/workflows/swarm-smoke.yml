@@ -15,3 +15,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Prove a clean local Compose install
         run: bash scripts/packaging/swarm-smoke.sh
+  hive-join:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Join a member container to a hive container over Redis ACL
+        run: bash scripts/packaging/hive-join-smoke.sh

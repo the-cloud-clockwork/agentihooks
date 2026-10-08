@@ -44,4 +44,7 @@ def bounded(value: object, limit: int) -> object:
 
 def prepare(state: dict) -> dict:
     safe = masked(state)
-    return {key: bounded(value, 32768 if key == "reviewer_findings" else 8192) for key, value in safe.items()}
+    return {
+        key: bounded(value, 32768 if key in ("reviewer_findings", "plan_chunk") else 8192)
+        for key, value in safe.items()
+    }

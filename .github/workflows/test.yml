@@ -121,7 +121,7 @@ jobs:
         run: |
           run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&status=success&per_page=1" --jq '.workflow_runs[0].id // empty')
           if [[ -z "$run" ]]; then
-            echo "::error::No dev push Tests run passed, so the queue run has no dev durations or coverage baseline."
+            echo "::error::No dev push Tests run passed, so the queue run has no dev durations."
             exit 1
           fi
           kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
@@ -129,11 +129,8 @@ jobs:
             echo "::error::Dev push run $run kept no live durations-merged artifact."
             exit 1
           fi
-          baseline=false
-          [[ "$kept" == *" coverage-baseline "* ]] && baseline=true
-          echo "Restoring dev durations from dev push run $run; coverage baseline kept: $baseline"
+          echo "Restoring dev durations from dev push run $run"
           echo "id=$run" >> "$GITHUB_OUTPUT"
-          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
 
       - name: Download the dev durations
         if: github.event_name == 'merge_group'
@@ -145,16 +142,6 @@ jobs:
           repository: ${{ github.repository }}
           github-token: ${{ steps.app-token.outputs.token }}
 
-      - name: Download the dev coverage baseline
-        if: steps.dev-run.outputs.baseline == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage-baseline
-          path: ~/coverage-baseline
-          run-id: ${{ steps.dev-run.outputs.id }}
-          repository: ${{ github.repository }}
-          github-token: ${{ steps.app-token.outputs.token }}
-
       - name: Republish the dev durations
         if: github.event_name == 'merge_group'
         uses: actions/upload-artifact@v4
@@ -162,16 +149,6 @@ jobs:
           name: dev-durations
           path: ~/dev-durations/
           include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-          overwrite: true
-
-      - name: Republish the dev coverage baseline
-        if: steps.dev-run.outputs.baseline == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: dev-coverage-baseline
-          path: ~/coverage-baseline/
           if-no-files-found: error
           retention-days: 7
           overwrite: true
@@ -835,6 +812,109 @@ jobs:
           path: ~/coverage-baseline
           if-no-files-found: error
           retention-days: 14
+          overwrite: true
+
+  # A later queue entry's base is the earlier entry's merge commit, so the run that measured it may still be finishing.
+  queue-baseline:
+    needs: [unit]
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 13
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install coverage
+        run: python -m pip install "coverage>=7.4"
+
+      - name: Download this run's shard coverage
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-3.12-*
+          path: .coverage-shards
+
+      # Later queue entries wait on this upload, so it runs before Sonar and the gate rather than after them.
+      - name: Record this run's coverage baseline
+        run: python -m tests.coverage_baseline --shards 8 --head-shards .coverage-shards --out "$RUNNER_TEMP/own-baseline/baseline.json"
+
+      - name: Publish this run's coverage baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-baseline
+          path: ${{ runner.temp }}/own-baseline/
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+      - name: Mint the tcc main ci App token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-contents: read
+
+      - name: Find the run that measured the base tree
+        id: base-run
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          tree=$(gh api "repos/$GITHUB_REPOSITORY/commits/$BASE_SHA" --jq '.commit.tree.sha')
+          wait="${WAIT_SECONDS:-600}"
+          deadline=$((SECONDS + wait))
+          while true; do
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE_SHA&per_page=20" --jq '.workflow_runs[].id')
+            for run in $runs; do
+              kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
+              if [[ "$kept" -gt 0 ]]; then
+                echo "Restoring the coverage baseline of base $BASE_SHA tree $tree from run $run"
+                echo "id=$run" >> "$GITHUB_OUTPUT"
+                echo "tree=$tree" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            done
+            if (( SECONDS >= deadline )); then
+              echo "::error::No run kept a coverage baseline for base $BASE_SHA within $wait seconds."
+              exit 1
+            fi
+            sleep "${POLL_SECONDS:-30}"
+          done
+
+      - name: Download the base tree's coverage baseline
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-baseline
+          path: ~/coverage-baseline
+          run-id: ${{ steps.base-run.outputs.id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Hold the base tree
+        env:
+          BASE_TREE: ${{ steps.base-run.outputs.tree }}
+        run: |
+          tree=$(jq -r .tree ~/coverage-baseline/baseline.json)
+          if [[ "$tree" != "$BASE_TREE" ]]; then
+            echo "::error::The restored coverage baseline measured tree $tree, not the base tree $BASE_TREE."
+            exit 1
+          fi
+          echo "Restored the coverage baseline of base tree $tree"
+
+      - name: Publish the base tree's coverage baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: queue-coverage-baseline
+          path: ~/coverage-baseline/
+          if-no-files-found: error
+          retention-days: 7
           overwrite: true
 
   mutation:
