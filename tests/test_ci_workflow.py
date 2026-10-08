@@ -309,7 +309,8 @@ def _workflow() -> dict:
 def test_no_separate_gate_job_delays_the_shards():
     jobs = _workflow()["jobs"]
     assert "already-tested" not in jobs
-    assert "needs" not in jobs["unit"]
+    assert jobs["unit"]["needs"] == ["durations"]
+    assert len(jobs["durations"]["steps"]) == 1
     assert "needs" not in jobs["lint"]
 
 

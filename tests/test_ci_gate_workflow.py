@@ -22,10 +22,10 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     assert (
         required
         <= set(gate["needs"])
-        <= required | {"swarm-image", "shard-check", "brain-smoke", "wiring", "size", "dependency-audit"}
+        <= required | {"swarm-image", "shard-check", "brain-smoke", "wiring", "size", "dependency-audit", "durations"}
     )
     assert gate["if"] == "${{ always() }}"
-    assert "needs" not in jobs["unit"]
+    assert jobs["unit"]["needs"] == ["durations"]
     assert "needs" not in jobs["lint"]
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"

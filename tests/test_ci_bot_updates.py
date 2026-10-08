@@ -74,10 +74,21 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert "restore-keys" not in restore["with"]
     assert restore["with"]["path"] == save["with"]["path"] == "~/dev-durations"
     assert save["with"]["key"] == "durations-merged-${{ github.sha }}"
-    assert restore["with"]["key"] == (
-        "durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
-        " || github.event.before || github.sha }}"
-    )
+    assert restore["with"]["key"] == "${{ needs.durations.outputs.key }}"
+    assert restore["if"] == "needs.durations.outputs.key != ''"
+    assert restore["with"]["fail-on-cache-miss"] is True
+    assert jobs["unit"]["needs"] == ["durations"]
+    lookup = jobs["durations"]["steps"][0]
+    assert jobs["durations"]["outputs"] == {"key": "${{ steps.stored.outputs.cache-matched-key }}"}
+    assert lookup["id"] == "stored"
+    assert lookup["uses"] == "actions/cache/restore@v4"
+    assert lookup["with"] == {
+        "path": "~/dev-durations",
+        "key": "durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+        " || github.event.before || github.sha }}",
+        "lookup-only": True,
+    }
+    assert "durations" in jobs["gate-required"]["needs"]
     assert "run" not in restore
     assert adopt["run"] == "python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations"
     assert "env" not in adopt

@@ -83,7 +83,23 @@ jobs:
           cd "$grader"
           python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
+  # A dev push run can save the base's durations while shards start, so one job names the key every shard restores.
+  durations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      key: ${{ steps.stored.outputs.cache-matched-key }}
+    steps:
+      - name: Look up the base revision's dev durations
+        id: stored
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/dev-durations
+          key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
+          lookup-only: true
+
   unit:
+    needs: [durations]
     runs-on: ubuntu-latest
     timeout-minutes: 7
     permissions:
@@ -151,10 +167,12 @@ jobs:
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
       - name: Restore latest dev durations
+        if: needs.durations.outputs.key != ''
         uses: actions/cache/restore@v4
         with:
           path: ~/dev-durations
-          key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
+          key: ${{ needs.durations.outputs.key }}
+          fail-on-cache-miss: true
 
       - name: Adopt latest dev durations
         run: python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations
@@ -511,7 +529,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, brain-smoke, wiring, semgrep, dependency-audit]
+    needs: [durations, unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, brain-smoke, wiring, semgrep, dependency-audit]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
