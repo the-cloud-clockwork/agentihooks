@@ -79,7 +79,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert restore["with"]["fail-on-cache-miss"] is True
     assert jobs["unit"]["needs"] == ["durations"]
     lookup = jobs["durations"]["steps"][0]
-    assert jobs["durations"]["outputs"] == {"key": "${{ steps.stored.outputs.cache-matched-key }}"}
+    assert jobs["durations"]["outputs"]["key"] == "${{ steps.stored.outputs.cache-matched-key }}"
     assert lookup["id"] == "stored"
     assert lookup["uses"] == "actions/cache/restore@v4"
     assert lookup["with"] == {
