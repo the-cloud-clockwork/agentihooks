@@ -10,10 +10,12 @@ from pathlib import Path, PurePosixPath
 from typing import Callable
 
 from hooks.classifier import ClassifierError, YesNo, decide
+from hooks.classifier.questions import MAX_QUESTIONS
 from scripts.gates import intent_history, log
 from scripts.gates.base import Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.verdicts import Verdicts
+from scripts.swarm_ledger import plan_read
 
 NAME = "intent"
 PURPOSE = "intent-check"
@@ -24,6 +26,7 @@ RUNNING = "intent check running"
 FAIL_LINE = 0.3
 REASON_LINE = 0.5
 WEAKEN_LINE = 0.5
+CHUNK_LINE = 0.5
 GRACE_MS = 2 * 60_000
 GH_TIMEOUT_SEC = 20
 PROOF_CHARS = 4000
@@ -55,7 +58,18 @@ QUESTIONS = {
         true="the change weakens what the phase builds",
         false="the change weakens nothing the phase builds",
     ),
+    "underdelivers": YesNo(
+        "Does the change leave out anything the plan chunk asks for?",
+        true="the change leaves out part of the plan chunk",
+        false="the change delivers every item of the plan chunk",
+    ),
+    "overdelivers": YesNo(
+        "Does the change add scope the plan chunk does not ask for?",
+        true="the change adds scope beyond the plan chunk",
+        false="the change stays within the plan chunk",
+    ),
 }
+CHUNK_QUESTIONS = ("underdelivers", "overdelivers")
 REASONS = {
     "delivers": "the change may not deliver what the task text asks",
     "reachable": "nothing in the change may let the phase reach it",
@@ -179,6 +193,16 @@ def _proof_notes(task, proof_chars):
         return ""
 
 
+def _plan_chunk(doc, task):
+    if not task.get("plan_lines"):
+        return {}
+    try:
+        text = plan_read.exact(doc, _phase(doc, task).get("plan_ref"), task["plan_lines"])
+    except (ValueError, OSError):
+        text = None
+    return {"plan_lines": task["plan_lines"], "plan_chunk": text}
+
+
 def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
     phase = _phase(doc, task)
     return {
@@ -193,36 +217,100 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
         "proof": task.get("proof") or {},
         "proof_notes": _proof_notes(task, proof_chars),
         "reviewer_findings": pr.get("reviewer_findings", {}),
+        **_plan_chunk(doc, task),
     }
 
 
+def _rows(state):
+    text = state.get("plan_chunk")
+    return plan_read.numbered(text, state["plan_lines"]) if isinstance(text, str) else []
+
+
+def _missed(number, row):
+    return YesNo(
+        f'Does the change leave out what plan line {number} asks for: "{row}"?',
+        true="the change leaves out what this line asks for",
+        false="the change delivers what this line asks for, or the line asks for nothing",
+    )
+
+
+def questions_for(state):
+    rows = _rows(state)
+    if not rows:
+        return {key: question for key, question in QUESTIONS.items() if key not in CHUNK_QUESTIONS}
+    if len(QUESTIONS) + len(rows) > MAX_QUESTIONS:
+        return QUESTIONS
+    return {**QUESTIONS, **{f"misses_line_{number}": _missed(number, row) for number, row in rows}}
+
+
+def _quoted(rows):
+    return ", ".join(f'line {number} "{row}"' for number, row in rows)
+
+
+def _chunk_reasons(state, answers):
+    if not _rows(state):
+        return []
+    lines, under, over = state["plan_lines"], answers["underdelivers"].noul, answers["overdelivers"].noul
+    reasons = []
+    if under >= CHUNK_LINE:
+        reasons.append(f"the change may leave out something plan lines {lines} ask for, at probability {under:.2f}")
+    if over >= CHUNK_LINE:
+        reasons.append(f"the change may add scope plan lines {lines} do not ask for, at probability {over:.2f}")
+    return reasons
+
+
+def _chunk_steps(state, answers):
+    rows, lines, steps = _rows(state), state.get("plan_lines"), []
+    if not rows:
+        return steps
+    if answers["underdelivers"].noul >= CHUNK_LINE:
+        named = [(n, row) for n, row in rows if f"misses_line_{n}" in answers]
+        missed = [(n, row) for n, row in named if answers[f"misses_line_{n}"].noul >= CHUNK_LINE]
+        if missed:
+            steps.append(f"Deliver what plan lines {lines} ask for and the change leaves out: {_quoted(missed)}.")
+        else:
+            steps.append(
+                f"Deliver what plan lines {lines} ask for. No single line was named, so check each: {_quoted(rows)}."
+            )
+    if answers["overdelivers"].noul >= CHUNK_LINE:
+        steps.append(f"Remove the scope beyond plan lines {lines}, which ask only for {_quoted(rows)}.")
+    return steps
+
+
 def remediation(state: dict, answers: dict) -> str:
-    if not state.get("task_text"):
-        return ""
-    task = f"{state['task']}: {state['task_text']}"
-    phase = f"{state['phase']}: {state['phase_intent']}"
-    steps = [f"Deliver {task}. The phase must be able to use it for {phase}."]
-    if answers["delivers"].noul < REASON_LINE:
-        steps.append(f"Implement the missing acceptance behavior described by {task}.")
-    if answers["reachable"].noul < REASON_LINE:
-        steps.append(f"Wire the production entrypoint for {state['task']} and prove an invocation delivers {phase}.")
-    if answers["weakens"].noul >= WEAKEN_LINE:
-        steps.append(f"Preserve {phase} while implementing {task}.")
-    return "What would meet intent: " + " ".join(steps)
+    steps = []
+    if state.get("task_text"):
+        task = f"{state['task']}: {state['task_text']}"
+        phase = f"{state['phase']}: {state['phase_intent']}"
+        steps.append(f"Deliver {task}. The phase must be able to use it for {phase}.")
+        if answers["delivers"].noul < REASON_LINE:
+            steps.append(f"Implement the missing acceptance behavior described by {task}.")
+        if answers["reachable"].noul < REASON_LINE:
+            steps.append(
+                f"Wire the production entrypoint for {state['task']} and prove an invocation delivers {phase}."
+            )
+        if answers["weakens"].noul >= WEAKEN_LINE:
+            steps.append(f"Preserve {phase} while implementing {task}.")
+    steps += _chunk_steps(state, answers)
+    return "What would meet intent: " + " ".join(steps) if steps else ""
 
 
 def judge(state, decide=decide):
+    if state.get("plan_lines") and not isinstance(state.get("plan_chunk"), str):
+        return UNCHECKED, f"the plan chunk for lines {state['plan_lines']} could not be read"
     try:
-        answers = decide(state, QUESTIONS, purpose=PURPOSE).answers
+        answers = decide(state, questions_for(state), purpose=PURPOSE).answers
     except ClassifierError:
         return UNCHECKED, "the classifier did not answer"
     usable, weakens = answers["usable"].noul, answers["weakens"].noul
-    if usable >= FAIL_LINE and weakens < WEAKEN_LINE:
+    chunk = _chunk_reasons(state, answers)
+    if usable >= FAIL_LINE and weakens < WEAKEN_LINE and not chunk:
         return PASS, f"the phase can use it as delivered at probability {usable:.2f}"
     lead = f"the phase can use this change at probability {usable:.2f}"
     reasons = [text for key, text in REASONS.items() if answers[key].noul < REASON_LINE]
     if weakens >= WEAKEN_LINE:
         reasons.append(f"the change may weaken what the phase builds, at probability {weakens:.2f}")
+    reasons += chunk
     guidance = remediation(state, answers)
     if guidance:
         reasons.append(guidance)
@@ -288,7 +376,7 @@ class Check:
                 "purpose": PURPOSE,
                 "verdict": verdict,
                 "reason": reason,
-                "classifier_input": intent_history.request(state, QUESTIONS),
+                "classifier_input": intent_history.request(state, questions_for(state)),
             },
             self.home,
         )
