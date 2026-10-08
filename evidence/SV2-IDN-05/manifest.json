@@ -1,0 +1,14 @@
+{
+  "tested_commit": "4d9446e061dc1fbe0696882cfdda44fdd7b3bcde",
+  "evidence_class": "local isolated fixture on temporary homes with a fixed installation time; not live rollout proof",
+  "inputs": {
+    "tests/fixtures/swarm_v2/keyspace.json": "90dedbc199fbe0d0adb28a7430f42c583c8e68d966f92295cff0bb9debb2927b",
+    "scripts/swarm_v2/keyspace.py": "43b10faa02a86a176b3e3212fee4652d9e582190de559e4aa9a8e6f367b9f673",
+    "hooks/context/project_cache.py": "0542abc6687be5012cf626d3ec80f5c5ca59786b8f1badf1ab70ab74d47610a4",
+    "hooks/context/brain_adapter.py": "cae44be389b4c4e4a993a6374a50df718ae74463bd362a8613db226c3266b810",
+    "hooks/context/brain_writer_hook.py": "35fe8ee470ed7f1bc121d331b1c75038c1408bf42c7ea8960e8560fef9052da3",
+    "hooks/context/project_sessions.py": "9a105e84751410e78de8ced4fe674583d3e9fa24d5529e6200d682aa321deb89",
+    "tests/test_swarm_v2_keyspace.py": "51336d1a4552101cf3e9b103170df60ab7554d0be88562dcb09140e25a8622ef",
+    "evidence/SV2-IDN-05/generate_case_results.py": "cd832e10da0fa14a6dcdaa78e95d2a0a1b3ccb867a14e80f9e71a44f46ba1d34"
+  }
+}
