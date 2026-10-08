@@ -33,14 +33,15 @@ def test_queue_runs_mint_a_read_only_app_token_and_skip_the_dev_cache_lookup():
     job = _jobs()["durations"]
     lookup = job["steps"][0]
     mint = _step(job["steps"], "Mint the tcc main ci App token")
-    assert lookup["if"] == "github.event_name != 'merge_group'"
-    assert mint["if"] == _QUEUE
+    assert not _runs_on(lookup, "merge_group")
+    assert _runs_on(mint, "merge_group")
     assert mint["uses"] == "actions/create-github-app-token@v3.2.0"
     assert mint["with"] == {
         "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
         "repositories": "${{ github.event.repository.name }}",
         "permission-actions": "read",
+        "permission-contents": "read",
     }
     assert job["permissions"] == {"contents": "read"}
 
@@ -54,11 +55,12 @@ def test_queue_runs_restore_the_latest_dev_durations_on_the_app_token():
     upload = _step(steps, "Republish the dev durations")
     assert find["env"] == {"GH_TOKEN": "${{ steps.app-token.outputs.token }}"}
     assert mint["id"] == "app-token"
-    assert download["if"] == upload["if"] == find["if"] == _QUEUE
+    assert find["if"] == _QUEUE
+    assert _runs_on(download, "merge_group") and _runs_on(upload, "merge_group")
     assert download["with"] == {
         "name": "durations-merged",
         "path": "~/dev-durations",
-        "run-id": "${{ steps.dev-run.outputs.id }}",
+        "run-id": "${{ steps.dev-run.outputs.id || steps.base-run.outputs.id }}",
         "repository": "${{ github.repository }}",
         "github-token": "${{ steps.app-token.outputs.token }}",
     }
@@ -72,7 +74,8 @@ def test_queue_runs_restore_the_latest_dev_durations_on_the_app_token():
 
 def test_no_queue_run_carries_a_baseline_from_the_latest_dev_run():
     jobs = _jobs()
-    assert not [s for s in jobs["durations"]["steps"] if "baseline" in s.get("name", "")]
+    baselines = [s for s in jobs["durations"]["steps"] if "baseline" in s.get("name", "")]
+    assert baselines and not [s for s in baselines if _runs_on(s, "merge_group")]
     assert "dev-coverage-baseline" not in (_ROOT / ".github/workflows/test.yml").read_text()
 
 
@@ -294,3 +297,137 @@ def test_the_lookup_is_red_when_no_dev_push_run_passed(lookup):
     assert result.returncode != 0
     assert "::error::" in result.stdout
     assert output == ""
+
+
+def _runs_on(step, event):
+    condition = step.get("if", "true").removeprefix("${{").removesuffix("}}").strip()
+    if condition == "true":
+        return True
+    for clause in condition.split("||"):
+        held = True
+        for atom in clause.split("&&"):
+            name, op, value = atom.strip().strip("()").split()
+            assert name == "github.event_name", atom
+            held = held and ((value.strip("'") == event) == (op == "=="))
+        if held:
+            return True
+    return False
+
+
+def test_dispatch_runs_restore_durations_and_the_base_baseline_on_the_app_token():
+    steps = _jobs()["durations"]["steps"]
+    restored = [s for s in steps if _runs_on(s, "workflow_dispatch")]
+    names = [s.get("name") for s in restored]
+    assert "Look up the base revision's dev durations" not in names
+    assert names == [
+        "Mint the tcc main ci App token",
+        "Find the dev push run of the dispatched base",
+        "Download the dev durations",
+        "Download the dispatched base's coverage baseline",
+        "Republish the dev durations",
+        "Republish the dispatched base's coverage baseline",
+        "Mark the dev artifacts restored",
+    ]
+    find = _step(steps, "Find the dev push run of the dispatched base")
+    assert find["env"] == {"GH_TOKEN": "${{ steps.app-token.outputs.token }}", "BASE": "${{ inputs.base }}"}
+    assert _step(steps, "Download the dev durations")["with"]["run-id"] == (
+        "${{ steps.dev-run.outputs.id || steps.base-run.outputs.id }}"
+    )
+    assert _step(steps, "Download the dispatched base's coverage baseline")["with"] == {
+        "name": "coverage-baseline",
+        "path": "~/coverage-baseline",
+        "run-id": "${{ steps.base-run.outputs.id }}",
+        "repository": "${{ github.repository }}",
+        "github-token": "${{ steps.app-token.outputs.token }}",
+    }
+    upload = _step(steps, "Republish the dispatched base's coverage baseline")
+    assert upload["with"]["name"] == "queue-coverage-baseline"
+    assert upload["with"]["path"] == "~/coverage-baseline/"
+    assert upload["with"]["if-no-files-found"] == "error"
+
+
+@pytest.mark.parametrize("event", ["pull_request", "push"])
+def test_pull_request_and_push_runs_keep_the_dev_cache_lookup(event):
+    steps = _jobs()["durations"]["steps"]
+    assert [s.get("name") for s in steps if _runs_on(s, event)] == ["Look up the base revision's dev durations"]
+
+
+@pytest.fixture
+def dispatch_lookup(tmp_path):
+    find = _step(_jobs()["durations"]["steps"], "Find the dev push run of the dispatched base")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    (tools / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$@" >> "$ARGS"\n'
+        'case "$2" in\n'
+        '  */commits/*) [[ -z "$FAIL_COMMIT" ]] || exit 1; printf "%s" "$FAKE_SHA" ;;\n'
+        '  */runs\\?*) printf "%s\\n" $FAKE_RUNS ;;\n'
+        '  */runs/*/artifacts*) run="${2#*/runs/}"; run="${run%%/*}"; v="KEPT_$run"; printf "%s" "${!v}" ;;\n'
+        "esac\n"
+    )
+    (tools / "gh").chmod(0o755)
+
+    def run(base="origin/dev", sha="c" * 40, runs="111 222", fail_commit="", **kept):
+        output = tmp_path / "output"
+        output.write_text("")
+        env = dict(
+            os.environ,
+            PATH=f"{tools}:{os.environ['PATH']}",
+            ARGS=str(tmp_path / "args"),
+            BASE=base,
+            FAKE_SHA=sha,
+            FAKE_RUNS=runs,
+            FAIL_COMMIT=fail_commit,
+            GITHUB_OUTPUT=str(output),
+            GITHUB_REPOSITORY="the-cloud-clockwork/agentihooks",
+            **{f"KEPT_{k.removeprefix('run')}": v for k, v in kept.items()},
+        )
+        result = subprocess.run(["bash", "-e", "-c", find["run"]], env=env, capture_output=True, text=True)
+        args = (tmp_path / "args").read_text().splitlines() if (tmp_path / "args").exists() else []
+        return result, output.read_text(), args
+
+    return run
+
+
+def test_dispatch_restores_from_the_dev_push_run_on_the_pinned_base(dispatch_lookup):
+    result, output, args = dispatch_lookup(
+        run111="durations-merged", run222="sonar-report durations-merged coverage-baseline"
+    )
+    assert result.returncode == 0, result.stderr
+    assert output == "id=222\n"
+    assert "repos/the-cloud-clockwork/agentihooks/commits/dev" in args
+    assert (
+        "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs"
+        "?branch=dev&event=push&head_sha=" + "c" * 40 + "&per_page=20"
+    ) in args
+    assert "c" * 40 in result.stdout
+
+
+def test_dispatch_resolves_a_pinned_commit_as_given(dispatch_lookup):
+    result, _, args = dispatch_lookup(base="d" * 40, run111="durations-merged coverage-baseline")
+    assert result.returncode == 0, result.stderr
+    assert "repos/the-cloud-clockwork/agentihooks/commits/" + "d" * 40 in args
+
+
+@pytest.mark.parametrize(
+    ("runs", "kept"),
+    [
+        ("", {}),
+        ("111", {"run111": "durations-merged"}),
+        ("111", {"run111": "coverage-baseline durations-merged-old"}),
+    ],
+)
+def test_dispatch_is_red_when_no_dev_push_run_on_the_base_kept_both(dispatch_lookup, runs, kept):
+    result, output, _ = dispatch_lookup(runs=runs, **kept)
+    assert result.returncode != 0
+    assert "::error::" in result.stdout
+    assert "origin/dev" in result.stdout
+    assert output == ""
+
+
+def test_dispatch_is_red_when_the_base_does_not_resolve(dispatch_lookup):
+    result, output, args = dispatch_lookup(fail_commit="1")
+    assert result.returncode != 0
+    assert output == ""
+    assert not [arg for arg in args if "/runs" in arg]
