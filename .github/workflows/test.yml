@@ -292,10 +292,12 @@ jobs:
       - name: Hold the size and complexity limits
         if: steps.lookup.outputs.skip != 'true'
         run: |
-          grader="$RUNNER_TEMP/base"
-          [[ -f "$grader/scripts/size_limits.py" ]] || grader="$GITHUB_WORKSPACE"
-          cd "$grader"
-          python -m scripts.size_limits --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+          if [[ -f "$RUNNER_TEMP/base/scripts/size_limits.py" ]]; then
+            cd "$RUNNER_TEMP/base"
+            python -m scripts.size_limits --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+          else
+            python -m scripts.size_limits --bootstrap --head "$GITHUB_WORKSPACE"
+          fi
 
   sonar:
     runs-on: ubuntu-latest
