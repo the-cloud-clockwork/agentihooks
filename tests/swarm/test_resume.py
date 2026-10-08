@@ -111,7 +111,7 @@ def test_a_resumed_agent_is_told_it_was_restored_and_must_reread_its_task_folder
     text = rt.resumed[0][2]
     assert "restored" in text
     assert "/.agentihooks/swarm/sw/tasks/t1" in text
-    assert str(snapshot.ledger_path("sw")) in text
+    assert snapshot.ledger_source("sw") in text
     assert "Before acting, re-read" in text
 
 

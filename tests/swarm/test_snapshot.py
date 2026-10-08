@@ -1,5 +1,7 @@
 import json
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -8,6 +10,10 @@ from scripts.swarm import cli, resume, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
+from tests.swarm_ledger import legacy_page
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
+import ledger_core as core  # noqa: E402
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -85,8 +91,8 @@ def test_export_leaves_out_another_swarms_seats_and_inbox(store):
 
 def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_path, monkeypatch):
     seed(store, "sw")
-    monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
-    (tmp_path / "sw.json").write_text(json.dumps({"tasks": [{"id": "t1"}]}))
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    legacy_page.store(tmp_path, "sw", {"tasks": [{"id": "t1"}]})
     listing = "worktree /repo\nbranch refs/heads/dev\n\nworktree /wt/engineer-a1b2c3-0001\nbranch refs/heads/engineer-a1b2c3-0001\n"
 
     def git(argv, **kw):
@@ -95,7 +101,7 @@ def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_p
     path = snapshot.take(store, "sw", 99, run=git)
     doc = json.loads(path.read_text())
     assert path == snapshot.path("sw") and path.parent.name == "sw"
-    assert doc["ledger"] == {"tasks": [{"id": "t1"}]}
+    assert doc["ledger"] == {"tasks": [{"id": "t1"}], "_meta": {"rev": 1}}
     assert doc["worktrees"] == {"engineer@a1b2c3-0001": "/wt/engineer-a1b2c3-0001", "master@a1b2c3-0001": ""}
     assert _values(doc["state"]) == _values(json.loads(json.dumps(store.export("sw"))))
 

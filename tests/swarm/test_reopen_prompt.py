@@ -1,12 +1,11 @@
-import json
-
 from scripts.swarm import prompt
+from tests.swarm_ledger import legacy_page
 
 
 def test_master_reads_the_previous_summary_before_its_first_chat_line(monkeypatch, tmp_path):
     monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
     summary = "Summary\nWe stopped with the parser finished.\nTasks still open:\n- none"
-    (tmp_path / "sw.json").write_text(json.dumps({"overview": f"Intent.\n\n{summary}"}))
+    legacy_page.store(tmp_path, "sw", {"overview": f"Intent.\n\n{summary}"})
     text = prompt.build_master("sw", "/repo", "sw-master-2", {"seat": "master@sw", "culture": "Keep records"})
     assert summary in text
     assert "first ledger chat line" in text

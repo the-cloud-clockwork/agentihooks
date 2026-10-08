@@ -125,7 +125,9 @@ def rig(tmp_path, monkeypatch):
         )
 
     def ledger_task():
-        return next(t for t in json.loads((ledgers / f"{SLUG}.json").read_text())["tasks"] if t["id"] == task)
+        from scripts.swarm_ledger.repository import repository
+
+        return next(t for t in repository.get_document(SLUG)["tasks"] if t["id"] == task)
 
     def cli(*argv):
         done = subprocess.run(
