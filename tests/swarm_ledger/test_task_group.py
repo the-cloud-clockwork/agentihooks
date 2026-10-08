@@ -73,7 +73,7 @@ def test_the_lead_lists_its_members_and_each_member_points_at_the_lead():
 
 
 def test_a_group_holds_at_most_five_tasks():
-    with pytest.raises(ValueError, match="at most 5 tasks"):
+    with pytest.raises(ValueError) as refused:
         core.check_op(
             {
                 "op": "task_group",
@@ -83,6 +83,7 @@ def test_a_group_holds_at_most_five_tasks():
                 "members": ["t2", "t3", "t4", "t5", "t6"],
             }
         )
+    assert str(refused.value) == "a group holds at most 5 tasks"
     state, rejected = group("t1", ["t2", "t3", "t4", "t5"])
     assert rejected == [] and len(rows(state)["t1"]["group_members"]) == 4
 
@@ -121,6 +122,12 @@ def test_an_l_task_never_joins_a_group():
 def test_the_refusal_names_why_tasks_cannot_group(tasks, reason):
     known = {t["id"]: t for t in tasks} | {"x": task("x", depends_on=["b"])}
     assert reason in ledger_groups.refusal(tasks, known)
+
+
+def test_a_task_waiting_on_an_open_task_outside_the_group_is_refused():
+    tasks = [task("a"), task("b", depends_on=["y"])]
+    known = {t["id"]: t for t in tasks} | {"y": task("y")}
+    assert ledger_groups.refusal(tasks, known) == "task b waits on task y"
 
 
 def test_tasks_that_qualify_have_no_refusal():

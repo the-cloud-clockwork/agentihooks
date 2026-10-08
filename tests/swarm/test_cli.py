@@ -122,8 +122,9 @@ def test_done_on_a_group_lead_closes_its_members_with_the_lead_pull_request(env,
     ledger.update_task = lambda slug, task_id, fields, **kw: (
         ledger.updates.append(task_id) or original(slug, task_id, fields, **kw)
     )
-    assert run("sw", "done", "--pr", url) == 0
+    assert run("sw", "done", "--pr", url, "--finding", "one pull request") == 0
     assert (ledger.rows["t3"]["state"], ledger.rows["t3"]["pr_url"]) == ("done", url)
+    assert ledger.rows["t3"]["proof"] == {"finding": "one pull request"}
     assert ledger.updates == ["t1", "t3"]
 
 

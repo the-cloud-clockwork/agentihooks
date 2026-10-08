@@ -240,6 +240,7 @@ def test_a_refused_group_write_goes_on_to_the_next_set(asked, store):
     actions = grouping.group_pass("sw", store.config("sw"), store, ledger, tasks)
     assert ledger.groups == [("c", ["d"])]
     assert actions[0] == "skipped grouping under task a: the ledger refused its write"
+    assert store.redis.hget(store.key("sw", grouping.SEEN), "a,b") == "refused"
 
 
 def test_nothing_to_group_asks_nothing(asked, store):
@@ -289,6 +290,16 @@ def test_a_prompt_without_a_group_says_nothing_about_members():
 def test_the_tick_gives_the_lead_agent_its_member_specs(store):
     store.update("sw", max_eng=1)
     ledger = GroupLedger([task("a", group_members=["b"]), task("b", merged_into="a")])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [t["id"] for t in runtime.tasks] == ["a"]
+    assert runtime.tasks[0]["group"] == [{"id": "b", "title": "title b", "description": "spec b"}]
+
+
+def test_a_group_applied_in_a_tick_spawns_only_its_lead_with_member_specs(asked, store):
+    asked(0.9)
+    store.update("sw", max_eng=2)
+    ledger = GroupLedger([task("a"), task("b")])
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert [t["id"] for t in runtime.tasks] == ["a"]

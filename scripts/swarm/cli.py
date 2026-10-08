@@ -832,17 +832,17 @@ def cmd_done(store, args):
         raise SwarmError(refused)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
-    _close_members(ledger, args.slug, agent, row, args.pr or row.get("pr_url"))
+    _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
     print(json.dumps({"task": agent.task, "state": "done", "next": "stop now; the swarm closes this session"}))
 
 
-def _close_members(ledger, slug, agent, lead, url):
+def _close_members(ledger, slug, agent, lead, fields):
     rows = {t["id"]: t for t in ledger.tasks(slug)} if lead.get("group_members") else {}
     for member in lead.get("group_members") or []:
         if rows.get(member, {}).get("state") != "done":
-            ledger.update_task(slug, member, {"state": "done", "pr_url": url}, by=agent.name)
+            ledger.update_task(slug, member, fields, by=agent.name)
 
 
 def cmd_block(store, args):

@@ -1,8 +1,4 @@
-"""The tick step that groups small open tasks so one agent delivers them in one pull request.
-
-Code finds the candidate sets; the classifier confirms each is one change surface, one review and one browser check.
-At delegate or full autonomy the tick writes the group and tells the master; otherwise it raises a priority.
-"""
+"""The tick step that groups small open tasks so one agent delivers them in one pull request."""
 
 import math
 
@@ -48,6 +44,7 @@ def group_pass(slug, config, store, ledger, doc):
             )
         except LedgerRefused:
             actions.append(f"skipped grouping under task {group[0]['id']}: the ledger refused its write")
+            store.redis.hset(seen, key(group), "refused")
             continue
         store.redis.hset(seen, key(group), "applied" if config.autonomy in APPLIES else "proposed")
     return actions
@@ -111,6 +108,9 @@ def key(group):
 def _apply(slug, ledger, mail, group):
     lead, members = group[0]["id"], [t["id"] for t in group[1:]]
     ledger.group_tasks(slug, lead, members)
+    group[0]["group_members"] = members
+    for member in group[1:]:
+        member["merged_into"] = lead
     mail.send(f"grouped:{lead}", mail.master, TOLD.format(lead=lead, members=", ".join(members)), fyi=True)
     return [f"grouped tasks {', '.join(members)} under {lead}"]
 

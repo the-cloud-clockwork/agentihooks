@@ -54,6 +54,8 @@ def refusal(tasks: list[dict], known: dict) -> str:
     for t in tasks:
         if reached := _upstream(t, known) & ids:
             return f"task {t['id']} depends on task {sorted(reached)[0]}"
+        if waiting := sorted(d for d in t.get("depends_on") or [] if known.get(d, {}).get("state") != "done"):
+            return f"task {t['id']} waits on task {waiting[0]}"
     if len(tasks) > MAX_TASKS:
         return f"a group holds at most {MAX_TASKS} tasks"
     sizes = [t["difficulty"] for t in tasks]
