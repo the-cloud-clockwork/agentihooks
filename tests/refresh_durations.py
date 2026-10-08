@@ -22,7 +22,11 @@ def _gh(args: list[str]) -> str:
 
 
 def ci_run_ids(limit: int, gh=_gh) -> list[str]:
-    jq = ".artifacts[] | select(.expired | not) | .workflow_run.id"
+    jq = (
+        "[.artifacts[] | select(.expired | not)"
+        " | select(.workflow_run.head_repository_id == .workflow_run.repository_id)]"
+        " | sort_by(.created_at) | reverse | .[].workflow_run.id"
+    )
     return list(dict.fromkeys(gh(["api", ARTIFACTS, "--jq", jq]).split()))[:limit]
 
 
@@ -44,6 +48,8 @@ def ci_medians(folder: Path, version: str, source: str | None) -> dict[str, floa
     if not source:
         return measured
     current = set().union(*ci_samples(folder, version, source))
+    if not current:
+        raise SystemExit(f"run {source} kept no durations for Python {version}")
     return {nodeid: seconds for nodeid, seconds in measured.items() if nodeid in current}
 
 

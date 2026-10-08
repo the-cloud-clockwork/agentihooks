@@ -562,6 +562,33 @@ def test_ci_refresh_reads_the_newest_distinct_runs_that_kept_durations():
     assert "actions/artifacts?name=durations-3.12-1" in calls[0][1]
 
 
+def test_ci_refresh_lists_same_repository_runs_newest_first():
+    def artifact(run, created, head_repository=1, expired=False):
+        return {
+            "expired": expired,
+            "created_at": created,
+            "workflow_run": {"id": run, "repository_id": 1, "head_repository_id": head_repository},
+        }
+
+    listing = {
+        "artifacts": [
+            artifact(3, "2026-10-08T01:00:00Z"),
+            artifact(9, "2026-10-08T09:00:00Z"),
+            artifact(7, "2026-10-08T08:00:00Z", head_repository=2),
+            artifact(8, "2026-10-08T08:30:00Z", expired=True),
+            artifact(5, "2026-10-08T05:00:00Z"),
+        ]
+    }
+
+    def gh(args):
+        jq = args[args.index("--jq") + 1]
+        return subprocess.run(
+            ["jq", "-r", jq], input=json.dumps(listing), capture_output=True, text=True, check=True
+        ).stdout
+
+    assert ci_run_ids(5, gh) == ["9", "5", "3"]
+
+
 def test_ci_refresh_stores_the_median_of_the_downloaded_shard_files(tmp_path, monkeypatch):
     def download(run_ids, folder):
         for run, seconds in zip(run_ids, (1.0, 5.0, 2.0)):
@@ -621,14 +648,28 @@ def test_ci_refresh_counts_the_passed_run_within_its_run_limit(tmp_path, monkeyp
     def download(run_ids, folder):
         downloads.extend(run_ids)
         for run in run_ids:
-            (folder / run / "durations-3.12-1").mkdir(parents=True)
-            (folder / run / "durations-3.12-1" / "durations.json").write_text(json.dumps({"t.py::a": 1.0}))
+            for version in ("3.11", "3.12"):
+                (folder / run / f"durations-{version}-1").mkdir(parents=True)
+                (folder / run / f"durations-{version}-1" / "durations.json").write_text(json.dumps({"t.py::a": 1.0}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
     monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["42", "41", "40"][:limit])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci-run", "39", "--ci", "3"])
     assert downloads == ["39", "42", "41"]
+
+
+def test_ci_refresh_refuses_a_passed_run_that_kept_no_durations(tmp_path, monkeypatch):
+    def download(run_ids, folder):
+        (folder / "41" / "durations-3.11-1").mkdir(parents=True)
+        (folder / "41" / "durations-3.11-1" / "durations.json").write_text(json.dumps({"t.py::a": 1.0}))
+
+    monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["41"][:limit])
+    monkeypatch.setattr(refresh_durations, "ci_download", download)
+    with pytest.raises(SystemExit, match="run 42 kept no durations"):
+        refresh_durations.main(["--ci-run", "42", "--ci", "2"])
+    assert not (tmp_path / ".test_durations").exists()
 
 
 def test_credential_parameters_have_readable_timing_identifiers():
