@@ -3,8 +3,8 @@
   "dependency": "SV2-RUN-02",
   "integration_gate": "G1",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1838",
-  "pull_request": null,
-  "tested_commit": "f32bdb8f01bf325e2650ce6dcddf804e521528b8",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1843",
+  "tested_commit": "615a95eb42289dced3ca8cf9b1a41468554ec475",
   "plan_revision": "3bd4f4a6b01057b447cad15fa48c85802d3f78ee",
   "status": "implemented-not-live-qualified",
   "evidence_class": "mocked transport and isolated fakeredis; no live runtime or rollout proof",
@@ -19,10 +19,10 @@
   },
   "authority": "Controller-side service operates on previously admitted immutable execution identity and canonical seat generation. No display label grants authority. Worker-facing launch grant verification remains at the authenticated registration boundary; this service is not a public unauthenticated endpoint.",
   "states": {
-    "observed": "Lost acknowledgement transport fixture and persisted Redis journal agree; 195 focused tests passed. Operations line coverage: 100 percent. Ruff check and format passed.",
-    "accepted": "Acceptance cases A, B and C each pass twice with independent fakeredis and transport fixtures.",
+    "observed": "196 focused operations, preceding runtime, execution identity and store tests passed. Operations line coverage 100 percent before recovery isolation addition; its new exception path is covered by the stale and current recovery regression. Ruff check and format clean; exact committed base size gate zero errors.",
+    "accepted": "Acceptance A, B and C each pass twice on independent fixtures. Original Standards and Spec readers closed recovery isolation finding on 9305448c; no open findings.",
     "committed": "Implementation and fixture inputs committed on tested_commit; generated case manifests identify exact input hashes.",
-    "externally_verified": "Pending independent reviews and CI."
+    "externally_verified": "CI run 37846250223 exposed collection speed, fakeredis group and imported folder reload regressions; local regression suites now pass after deferred imports. Final CI pending."
   },
   "cases": {
     "a": "evidence/SV2-RUN-03/a-result.json",
@@ -37,7 +37,7 @@
   "remaining_limitations": [
     "The new journal service requires an OperationTransport implementing authoritative absence, atomic operation and execution deduplication, and backend generation fencing. No real remote backend exists at G1. The preceding local RuntimeRouter path is unchanged and the new service is exercised by mocked transport fixtures; worker adapter integration is supplied by later runtime packages.",
     "The journal is Redis coordination state, retained by existing swarm snapshots; it is not a durable transcript archive. Dispatch_enabled is an explicit service construction option and must remain false while unresolved operations are reconciled during rollback.",
-    "The service stores payload digests rather than prompts. Recovery classifies unresolved operations by observation; an absent operation requires the original request payload for explicit dispatch. A stale generation raises conflict and preserves its journal entry."
+    "The service stores payload digests rather than prompts. Recovery classifies unresolved operations by observation; an absent operation requires the original request payload for explicit dispatch. Stale conflicts are returned as refused without changing old persisted entries; other entries continue recovery."
   ],
   "next_action": "Close independent reviews, qualify CI and merge into dev."
 }
