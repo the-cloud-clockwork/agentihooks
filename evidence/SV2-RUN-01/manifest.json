@@ -1,5 +1,5 @@
 {
-  "tested_commit": "dacc772c5d1a6a432b85edd70f98992db203718f",
+  "tested_commit": "ae414338b9a3fccf4d9b973b661ad0e975851151",
   "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI, the init-agent launch and the process reaper behind HerdrRuntime, and the remote backend is an in-memory fake; not live rollout proof",
   "inputs": {
     "scripts/swarm_v2/runtime/base.py": "2a23cdeff79d0c1a8b96114272317add371432ac439537d2ff0f4769ef16a5f4",
@@ -7,7 +7,7 @@
     "scripts/swarm_v2/runtime/routed.py": "93c50d1264e0a07a45dae77f717138c872bf077f649f8998a9db3e47a9aba06e",
     "scripts/swarm/runtime.py": "646a0485fcc041be42f24220707f24e74b2f244809c55567b2d662aa6b637c81",
     "scripts/swarm/tick.py": "ac4b0cdd4694e328d5810c4be489c9775e7054f9f702edab7d5f4999a3a0a38c",
-    "scripts/swarm/cli.py": "28106bffedc2738ff35ed7bfd3a1d844096eab2751e9dc92676a3453ce6c9394",
+    "scripts/swarm/cli.py": "0977914ae55c672d51d8da76f1977b1358bc895161b2f323c38e483495e0dea5",
     "scripts/swarm/store.py": "81bbfd55b79138b9c1de93a5dd32e1d4fa2624544317cb2932df55743bae7d67",
     "scripts/swarm/pane.py": "83d5ffa05165e15f6fc0edbef4227efda04f06541392879bb3d929c42dd6f2bf",
     "scripts/swarm/reaper.py": "6d4c1d3c05c4cd90e2ff66d4671053b9f6704b39568534a92b84e6fea14dd4ff",
