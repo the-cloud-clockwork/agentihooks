@@ -223,30 +223,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
-          read_api() {
-            local body
-            for attempt in 1 2 3; do
-              if body=$(gh api "$1"); then
-                printf '%s\n' "$body"
-                return 0
-              fi
-              sleep 5
-            done
-            return 1
-          }
           for poll in {1..36}; do
-            runs=$(read_api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?event=push&branch=dev&per_page=100" \
-              | jq -r --argjson number "$RUN_NUMBER" '.workflow_runs[] | select(.run_number < $number and .status != "completed") | .id')
             waiting=""
-            for run in $runs; do
-              sonar=$(read_api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" \
-                | jq -r '[.jobs[] | select(.name == "sonar") | .status][0] // "absent"')
-              if [[ "$sonar" != "completed" ]]; then waiting="$waiting $run"; fi
-            done
-            if [[ -z "$waiting" ]]; then exit 0; fi
-            echo "Waiting for the Sonar analysis of older dev runs:$waiting"
+            unread=""
+            if runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?event=push&branch=dev&per_page=100" \
+              | jq -r --argjson number "$RUN_NUMBER" '.workflow_runs[] | select(.run_number < $number and .status != "completed") | .id'); then
+              for run in $runs; do
+                sonar=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" \
+                  | jq -r '[.jobs[] | select(.name == "sonar") | .status][0] // "absent"') || unread=yes
+                if [[ "$sonar" != "completed" ]]; then waiting="$waiting $run"; fi
+              done
+            else
+              unread=yes
+            fi
+            if [[ -z "$waiting" && -z "$unread" ]]; then exit 0; fi
+            echo "Waiting for the Sonar analysis of older dev runs:$waiting${unread:+ (runs API unreadable)}"
             sleep 30
           done
+          if [[ -n "$unread" ]]; then
+            echo "::error::The runs API stayed unreadable for 18 minutes."
+            exit 1
+          fi
           echo "::warning::Older dev runs still hold Sonar after 18 minutes:$waiting; scanning anyway."
 
       - name: SonarQube Scan

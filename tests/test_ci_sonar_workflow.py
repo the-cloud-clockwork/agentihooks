@@ -90,7 +90,7 @@ url = sys.argv[2]
 made = len((state / "calls").read_text().split())
 with (state / "calls").open("a") as calls:
     calls.write(url + "\\n")
-if spec.get("fail") or made < spec.get("fail_calls", 0):
+if spec.get("fail") or made < spec.get("fail_calls", 0) or (spec.get("fail_jobs") and "/jobs" in url):
     print('{"message": "Server Error"}')
     sys.exit(1)
 if "/workflows/test.yml/runs?" in url:
@@ -200,21 +200,30 @@ def test_wait_gives_up_with_a_warning_when_an_older_run_never_finishes(tmp_path)
     assert " 5;" in result.stdout
 
 
-def test_wait_is_red_when_the_runs_cannot_be_read(tmp_path):
-    result, _, calls = _run_wait(tmp_path, {"fail": True, "runs": [], "jobs": {}})
+def test_wait_is_red_when_the_runs_stay_unreadable(tmp_path):
+    result, ticks, _ = _run_wait(tmp_path, {"fail": True, "runs": [], "jobs": {}})
     assert result.returncode != 0
-    assert len(calls) == 3
+    assert ticks == 36
+    assert "::error::" in result.stdout
 
 
-def test_wait_retries_a_failed_read(tmp_path):
+def test_wait_keeps_polling_through_a_read_outage(tmp_path):
     spec = {
-        "fail_calls": 2,
+        "fail_calls": 3,
         "runs": [{"id": 5, "run_number": 5, "status": "in_progress"}],
         "jobs": {"5": [_sonar("completed")]},
     }
-    result, _, calls = _run_wait(tmp_path, spec)
+    result, ticks, _ = _run_wait(tmp_path, spec)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert len(calls) == 4
+    assert ticks == 3
+    assert "unreadable" in result.stdout
+
+
+def test_wait_does_not_pass_on_an_unreadable_jobs_list(tmp_path):
+    spec = {"fail_jobs": True, "runs": [{"id": 5, "run_number": 5, "status": "in_progress"}], "jobs": {"5": [[]]}}
+    result, ticks, _ = _run_wait(tmp_path, spec)
+    assert result.returncode != 0
+    assert ticks == 36
 
 
 def test_secret_detection_includes_all_tracked_text_and_hidden_configuration():
