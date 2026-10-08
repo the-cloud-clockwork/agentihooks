@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.swarm import prompt
+from scripts.swarm import cli, prompt
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -72,7 +72,7 @@ def test_research_done_refusal_explains_the_single_artifact_link(env, monkeypatc
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     capsys.readouterr()
 
-    assert run("sw", "done", "--finding", finding) == 1
+    assert cli.main(["sw", "done", "--finding", finding]) == 1
 
     assert capsys.readouterr().err == (
         "swarm: a research task is done only with its proof: "
