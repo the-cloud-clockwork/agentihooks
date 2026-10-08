@@ -517,6 +517,7 @@ jobs:
           name: sonar-report
           path: |
             coverage.xml
+            .coverage-shards/
             .scannerwork/report-task.txt
           include-hidden-files: true
           if-no-files-found: error
@@ -615,44 +616,26 @@ jobs:
       contents: read
       actions: read
     steps:
-      # Skips only when unit skipped: the passed run of this tree was graded already.
-      - name: Look up whether unit skipped a passed tree
-        id: lookup
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          ran=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
-            --jq '[.artifacts[].name | select(startswith("coverage-3.12-"))] | length')
-          if [ "$ran" -eq 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
-
       - uses: actions/checkout@v4
-        if: steps.lookup.outputs.skip != 'true'
         with:
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
-        if: steps.lookup.outputs.skip != 'true'
         with:
           python-version: "3.12"
 
       - name: Install coverage
-        if: steps.lookup.outputs.skip != 'true'
         run: python -m pip install "coverage>=7.4"
 
       - name: Download shard coverage
-        if: steps.lookup.outputs.skip != 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: coverage-3.12-*
           path: head-coverage
 
-      # The tested commit's first parent is the exact base, except in a merge group, whose first
-      # parent can be the group queued ahead of it, which no Tests run has measured yet.
-      - name: Hold every line the base ran
-        if: steps.lookup.outputs.skip != 'true'
+      - name: Resolve the measured base tree
+        id: base
         env:
-          GH_TOKEN: ${{ github.token }}
           DISPATCHED: ${{ inputs.base }}
           QUEUE_BASE: ${{ github.event.merge_group.base_ref }}
         run: |
@@ -661,15 +644,34 @@ jobs:
           else
             base=$(git rev-parse "${DISPATCHED:-HEAD^1}")
           fi
+          echo "commit=$base" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse "$base^{tree}")" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the exact coverage baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/coverage-baseline
+          key: coverage-baseline-${{ steps.base.outputs.tree }}
+
+      - name: Hold every line the base ran
+        env:
+          BASE: ${{ steps.base.outputs.commit }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_ref }}
+        run: |
+          base="$BASE"
+          if [[ -n "$QUEUE_BASE" ]]; then
+            base=$(git merge-base HEAD "origin/${QUEUE_BASE#refs/heads/}")
+          fi
           git worktree add --detach "$RUNNER_TEMP/base" "$base"
           grader="$RUNNER_TEMP/base"
           [[ -f "$grader/tests/coverage_ratchet.py" ]] || grader="$GITHUB_WORKSPACE"
           cd "$grader"
           python -m tests.coverage_ratchet --base "$base" --head "$GITHUB_WORKSPACE" --shards 8 \
-            --head-shards "$GITHUB_WORKSPACE/head-coverage" --out "$GITHUB_WORKSPACE/coverage-ratchet"
+            --head-shards "$GITHUB_WORKSPACE/head-coverage" --out "$GITHUB_WORKSPACE/coverage-ratchet" \
+            --base-baseline "$HOME/coverage-baseline/baseline.json"
 
       - name: Upload the coverage ratchet report
-        if: always() && steps.lookup.outputs.skip != 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-ratchet
@@ -746,6 +748,56 @@ jobs:
         with:
           path: ~/dev-durations
           key: durations-merged-${{ github.sha }}
+
+  coverage-baseline:
+    needs: [gate-required, sonar]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install coverage
+        run: python -m pip install "coverage>=7.4"
+
+      - name: Resolve baseline trees
+        id: tree
+        env:
+          PREVIOUS: ${{ github.event.before }}
+        run: |
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+          echo "previous=$(git rev-parse "$PREVIOUS^{tree}")" >> "$GITHUB_OUTPUT"
+
+      - name: Restore measured coverage history
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/coverage-baseline
+          key: coverage-baseline-${{ steps.tree.outputs.previous }}
+
+      - name: Download this run's measured coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: sonar-report
+          path: baseline-coverage
+
+      - name: Compute the coverage baseline
+        run: |
+          python -m tests.coverage_baseline --shards 8 \
+            --head-shards baseline-coverage/.coverage-shards \
+            --out "$HOME/coverage-baseline/baseline.json" \
+            --previous "$HOME/coverage-baseline/baseline.json"
+
+      - name: Save the passed dev coverage baseline
+        uses: actions/cache/save@v4
+        with:
+          path: ~/coverage-baseline
+          key: coverage-baseline-${{ steps.tree.outputs.tree }}
 
   record-pass:
     needs: [unit, lint, shard-check, test-count]
