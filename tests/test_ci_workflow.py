@@ -306,10 +306,10 @@ def _workflow() -> dict:
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def test_no_separate_gate_job_delays_the_shards():
+def test_shards_wait_only_on_the_durations_lookup():
     jobs = _workflow()["jobs"]
     assert "already-tested" not in jobs
-    assert "needs" not in jobs["unit"]
+    assert jobs["unit"]["needs"] == ["durations"]
     assert "needs" not in jobs["lint"]
 
 
@@ -356,7 +356,7 @@ def test_stored_durations_allow_new_tests_concentrated_in_one_shard(tmp_path, mo
 
 def test_dev_push_refreshes_stored_durations_after_tests_pass():
     job = _workflow()["jobs"]["refresh-durations"]
-    assert job["needs"] == ["unit", "lint"]
+    assert job["needs"] == ["unit", "lint", "shard-check"]
     assert job["if"] == "github.event_name == 'push'"
     assert job["permissions"] == {"contents": "read"}
     steps = job["steps"]
