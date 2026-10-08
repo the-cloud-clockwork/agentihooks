@@ -1902,3 +1902,42 @@ def test_trace_plan_without_a_plan_names_the_file_and_format(env, capsys, monkey
         f"swarm: write the plan first: {tmp_path}/_home/.agentihooks/swarm/sw/tasks/t1/plan.md, "
         "one piece per line: - what | area, area | why"
     )
+
+
+def _tick_all(monkeypatch, run_tick, slugs):
+    import types
+
+    from scripts import herdr_gc, operator_env
+
+    monkeypatch.setattr(timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(operator_env, "fill", lambda environ: None)
+    monkeypatch.setattr(herdr_gc, "run", lambda environ, now, apply: ["swept"])
+    monkeypatch.setattr(cli, "run_tick", run_tick)
+    cli.cmd_tick(types.SimpleNamespace(slugs=lambda: slugs), None)
+
+
+def test_the_tick_runs_every_swarm_at_the_same_time(monkeypatch, capsys):
+    import threading
+
+    both = threading.Barrier(2, timeout=5)
+
+    def run_tick(store, slug):
+        both.wait()
+        return [f"ticked with {threading.current_thread() is not threading.main_thread()}"]
+
+    _tick_all(monkeypatch, run_tick, ["a", "b"])
+    out = capsys.readouterr().out.splitlines()
+    assert sorted(out[:2]) == ["a: ticked with True", "b: ticked with True"]
+    assert out[2:] == ["herdr: swept"]
+
+
+def test_a_failing_swarm_tick_leaves_the_others_and_the_sweep_running(monkeypatch, capsys):
+    def run_tick(store, slug):
+        if slug == "a":
+            raise ValueError("ledger down")
+        return ["ok"]
+
+    _tick_all(monkeypatch, run_tick, ["a", "b"])
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == ["b: ok", "herdr: swept"]
+    assert captured.err == "a: ValueError: ledger down\n"

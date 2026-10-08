@@ -28,7 +28,7 @@ def step(name: str) -> Iterator[None]:
         yield
         return
     started = time.monotonic()
-    own = resource.getrusage(resource.RUSAGE_SELF)
+    own = resource.getrusage(resource.RUSAGE_THREAD)
     child = resource.getrusage(resource.RUSAGE_CHILDREN)
     record = {
         "event": "swarm_tick_step",
@@ -47,7 +47,7 @@ def step(name: str) -> Iterator[None]:
         raise
     finally:
         ended = time.monotonic()
-        own_end = resource.getrusage(resource.RUSAGE_SELF)
+        own_end = resource.getrusage(resource.RUSAGE_THREAD)
         child_end = resource.getrusage(resource.RUSAGE_CHILDREN)
         record.update(
             phase="finished",

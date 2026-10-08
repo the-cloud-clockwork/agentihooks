@@ -44,6 +44,7 @@ import subprocess
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -209,18 +210,23 @@ def cmd_list(store, args):
         )
 
 
+def _tick_one(store, slug):
+    try:
+        for action in run_tick(store, slug):
+            print(f"{slug}: {action}", flush=True)
+    except Exception as exc:
+        print(f"{slug}: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+
+
 def cmd_tick(store, args):
     from scripts import operator_env
 
     if why := timer.installed_refusal():
         raise SwarmError(f"the tick refused to run: {why}")
     operator_env.fill(os.environ)
-    for slug in store.slugs():
-        try:
-            for action in run_tick(store, slug):
-                print(f"{slug}: {action}")
-        except Exception as exc:
-            print(f"{slug}: {type(exc).__name__}: {exc}", file=sys.stderr)
+    slugs = store.slugs()
+    with ThreadPoolExecutor(max_workers=max(len(slugs), 1)) as pool:
+        list(pool.map(lambda slug: _tick_one(store, slug), slugs))
     from scripts import herdr_gc
 
     try:
