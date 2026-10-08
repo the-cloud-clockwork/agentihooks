@@ -75,20 +75,30 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
     """live_rows reads the ledger's tasks at sweep time: a task closed after the tick's own read settles as closed."""
     active = {agent.name for agent in store.agents(slug) if agent.state != "finished"}
     tasks = {row.get("claimed_by"): row for row in live_rows().values()}
-    for name, seat in store.seats.agent_seats(slug):
-        if name in active:
-            continue
-        state = tasks.get(name, {}).get("state")
-        outcome = store.seats.exit_of(name)
-        if state in ("done", "blocked"):
-            exit_text = "finished its task and exited" if state == "done" else "blocked its task and exited"
-            settle(inbox, name, "", exit_text)
-        elif outcome:
-            settle(inbox, name, outcome["seat"], outcome["reason"])
-        else:
-            settle(inbox, name, seat, "exited")
-    _settle_seat_notices(inbox, {seat for _, seat in store.seats.agent_seats(slug) if seat}, active)
+    seats = store.seats.agent_seats(slug)
+    gone = [(name, seat) for name, seat in seats if name not in active]
+    outcomes = store.seats.exits([name for name, _ in gone])
+    pending = gone
+    for _ in range(len(gone)):
+        quiet = inbox.quiet([name for name, _ in pending])
+        due = [(name, seat) for name, seat in pending if not (outcomes[name] and name in quiet)]
+        if not due:
+            break
+        pending = [entry for entry in pending if entry not in due]
+        for name, seat in due:
+            _settle_gone(inbox, name, seat, tasks.get(name, {}).get("state"), outcomes[name])
+    _settle_seat_notices(inbox, {seat for _, seat in seats if seat}, active)
     _settle_peer_mail(inbox, slug, store, active)
+
+
+def _settle_gone(inbox: "InboxStore", name: str, seat: str, state: str | None, outcome: dict) -> None:
+    if state in ("done", "blocked"):
+        exit_text = "finished its task and exited" if state == "done" else "blocked its task and exited"
+        settle(inbox, name, "", exit_text)
+    elif outcome:
+        settle(inbox, name, outcome["seat"], outcome["reason"])
+    else:
+        settle(inbox, name, seat, "exited")
 
 
 def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
