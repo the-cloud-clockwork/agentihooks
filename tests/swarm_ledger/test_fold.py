@@ -214,8 +214,8 @@ return [phases.fold.open, phases.boxes.map((b) => b.open), follow.boxes[0].open,
 class FakeDom:
     SCRIPT = """
 class El {
-  constructor(tag) { this.tag = tag; this.attrs = {}; this.kids = []; this.on = {}; this.textContent = ""; }
-  setAttribute(k, v) { this.attrs[k] = String(v); }
+  constructor(tag) { this.tag = tag; this.attrs = {}; this.kids = []; this.on = {}; this.textContent = ""; this.open = false; }
+  setAttribute(k, v) { this.attrs[k] = String(v); if (k === "open") this.open = true; }
   addEventListener(ev, fn) { this.on[ev] = fn; }
   append(...kids) { this.kids.push(...kids); }
 }
@@ -250,7 +250,24 @@ class OutlineFolds(unittest.TestCase):
     def build(self):
         script = (
             FakeDom.SCRIPT
-            + "".join(function_source(n) + "\n" for n in ("h", "itemState", "outlineOf", "outlineGroup"))
+            + "const PAGE_SIZE = 50; const shown = {}; const wanted = { id: null };"
+            + "".join(
+                function_source(n) + "\n"
+                for n in (
+                    "h",
+                    "itemState",
+                    "outlineOf",
+                    "outlineLink",
+                    "outlineAgain",
+                    "limit",
+                    "include",
+                    "wantedIn",
+                    "firstPage",
+                    "moreButton",
+                    "lazy",
+                    "outlineGroup",
+                )
+            )
             + f"const tree = outlineOf({json.dumps(self.DOC)}, {json.dumps(self.HEADS)});"
             + "process.stdout.write(JSON.stringify({ groups: tree.map((s) => shape(outlineGroup(s))), wired, tree }));"
         )
@@ -289,7 +306,7 @@ class OutlineFolds(unittest.TestCase):
         self.assertIn("ev.preventDefault();", page().split('$("outline").addEventListener("click"', 1)[1])
 
     def test_every_listed_item_has_a_jump_target_on_the_page(self):
-        self.assertIn("id: `item-sources-${n}`", function_source("render"))
+        self.assertIn("id: `item-sources-${s.id}`", function_source("render"))
         self.assertIn("id: `item-priorities-${p.id}`", function_source("renderPriorities"))
         self.assertIn('id: path === "notes" ? `item-notes-${entry.id}` : false', function_source("entryView"))
         self.assertIn("id: `item-${list}-${item.id}`", function_source("checkRow"))

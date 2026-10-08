@@ -1,9 +1,8 @@
-import json
 from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import serve_modules
+from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
@@ -39,12 +38,12 @@ def browser():
 @pytest.fixture
 def tab(browser):
     context = browser.new_context(viewport={"width": 1600, "height": 900})
-    html = TEMPLATE.read_text(encoding="utf-8").replace("__LEDGER_DATA__", json.dumps(DOC))
+    html = shell_html()
     context.route(
         "**/*",
         lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
     )
-    serve_modules(context)
+    serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     page.goto(URL)
     yield page
@@ -81,9 +80,10 @@ def test_every_comment_section_shows_one_control_and_the_outline_one(tab):
 
 def test_notes_show_replies_under_the_note_and_remember_the_comments_toggle(tab):
     note = tab.locator("#item-notes-n1")
+    note.locator("details[data-key] > summary").click()
     assert note.locator(".entry-body").all_text_contents() == ["Keep replies here", COMMENT["text"]]
     assert tab.locator("#item-notes-n2 details[data-key]").count() == 1
-    assert comments(tab, "sec-notes") == {"labels": ["Show all comments"], "open": [False, False]}
+    assert comments(tab, "sec-notes") == {"labels": ["Show all comments"], "open": [True, False]}
     tab.click("#sec-notes button[data-comments]")
     settle(tab)
     assert comments(tab, "sec-notes") == {"labels": ["Hide all comments"], "open": [True, True]}
@@ -133,12 +133,12 @@ def test_comments_stored_by_the_old_open_by_default_rule_start_collapsed(browser
           localStorage.setItem("plan-ledger:swarm-buildout:toggles", JSON.stringify({ "sec-phases": true, "sec-followups": true, "all-comments": true }));
         }"""
     )
-    html = TEMPLATE.read_text(encoding="utf-8").replace("__LEDGER_DATA__", json.dumps(DOC))
+    html = shell_html()
     context.route(
         "**/*",
         lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
     )
-    serve_modules(context)
+    serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     try:
         page.goto(URL)
@@ -211,13 +211,13 @@ def test_outline_control_label_flips_with_state_and_survives_a_reload(tab):
 
 def test_page_renders_both_controls_when_storage_is_unavailable(browser):
     context = browser.new_context()
-    html = TEMPLATE.read_text(encoding="utf-8").replace("__LEDGER_DATA__", json.dumps(DOC))
+    html = shell_html()
     context.add_init_script(BLOCKED_STORAGE)
     context.route(
         "**/*",
         lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
     )
-    serve_modules(context)
+    serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     errors = []
     page.on("pageerror", lambda exc: errors.append(str(exc)))

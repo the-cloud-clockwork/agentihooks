@@ -4,6 +4,7 @@ export function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
     if (k === "text") el.textContent = v;
+    else if (k === "style") el.style.cssText = v;
     else if (k === "on") for (const [ev, fn] of Object.entries(v)) el.addEventListener(ev, fn);
     else if (v !== false && v !== undefined) el.setAttribute(k, v);
   }

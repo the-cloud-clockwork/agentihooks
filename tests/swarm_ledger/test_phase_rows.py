@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import page_source, serve_modules
+from tests.swarm_ledger.ledger_page import ledger_state, page_source, serve_modules, shell_html
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "scripts" / "swarm_ledger" / "template.html"
@@ -63,12 +63,12 @@ def browser():
 @pytest.fixture
 def context(browser):
     context = browser.new_context(viewport={"width": 1600, "height": 900})
-    html = TEMPLATE.read_text(encoding="utf-8").replace("__LEDGER_DATA__", json.dumps(DOC))
+    html = shell_html()
     context.route(
         "**/*",
         lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
     )
-    serve_modules(context)
+    serve_modules(context, ledger_state(DOC))
     yield context
     context.close()
 
@@ -117,7 +117,7 @@ REVIEW_DOC = {
 @pytest.fixture
 def review_page(browser):
     context = browser.new_context(viewport={"width": 1600, "height": 900})
-    html = TEMPLATE.read_text(encoding="utf-8").replace("__LEDGER_DATA__", json.dumps(REVIEW_DOC))
+    html = shell_html()
     sent = []
 
     def answer(route):
@@ -128,7 +128,7 @@ def review_page(browser):
         return route.abort()
 
     context.route("**/*", answer)
-    serve_modules(context)
+    serve_modules(context, ledger_state(REVIEW_DOC))
     page = context.new_page()
     page.goto(URL)
     yield page, sent
@@ -184,12 +184,12 @@ def test_a_sent_back_phase_shows_the_buttons_only_once_escalated(browser, escala
     review = {"state": "sent_back", "rounds": 3, "escalated": escalated}
     doc = {**REVIEW_DOC, "phases": [{**REVIEW_DOC["phases"][0], "review": review}, *REVIEW_DOC["phases"][1:]]}
     context = browser.new_context(viewport={"width": 1600, "height": 900})
-    html = TEMPLATE.read_text(encoding="utf-8").replace("__LEDGER_DATA__", json.dumps(doc))
+    html = shell_html()
     context.route(
         "**/*",
         lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
     )
-    serve_modules(context)
+    serve_modules(context, ledger_state(doc))
     page = context.new_page()
     page.goto(URL)
     assert page.locator("#item-phases-p1 .phase-review").count() == shown

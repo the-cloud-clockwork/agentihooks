@@ -17,12 +17,16 @@ def function_source(name):
     return f"function {name}(" + page().split(f"  function {name}(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
 
 
-def render(task):
+def render(task, tail=None):
     stubs = (
         "const openComments = new Set(); const closedComments = new Set();"
-        "const h = (tag, attrs, ...kids) => ({ tag, attrs: attrs || {}, kids: kids.filter(Boolean), addEventListener() {} });"
+        "const h = (tag, attrs, ...kids) => ({ tag, attrs: attrs || {}, kids: kids.filter(Boolean), addEventListener() {},"
+        " replaceWith(node) { Object.assign(this, node); } });"
         "const itemActions = () => null; const commentsView = (key) => ({ tag: 'comments', attrs: { key }, kids: [] });"
         "const ser = (n) => (n && typeof n === 'object' ? [n.tag, n.attrs.class || '', n.attrs.text || '', n.kids.map(ser)] : n);"
+        "const lazy = (box, fill) => { box.kids.push(...[fill()].flat().filter(Boolean)); return box; };"
+        f"const readWorkspace = () => Promise.resolve({{ ok: {json.dumps(tail is not None)},"
+        f" json: () => Promise.resolve({{ data: {json.dumps(tail or {})} }}) }});"
     )
     script = (
         stubs
@@ -31,6 +35,9 @@ def render(task):
             for n in (
                 "itemClass",
                 "taskBlockers",
+                "proofRows",
+                "proofList",
+                "proofBody",
                 "taskProof",
                 "taskLink",
                 "taskRanks",
@@ -40,9 +47,11 @@ def render(task):
             )
         )
         + f"const t = {json.dumps(task)}; const el = taskRow(t, [t]);"
-        + "const proof = (function find(n) { if (!n || typeof n !== 'object') return null;"
+        + "setTimeout(() => {"
+        + " const proof = (function find(n) { if (!n || typeof n !== 'object') return null;"
         + " if (n.tag === 'details') return n; for (const k of n.kids) { const f = find(k); if (f) return f; } return null; })(el);"
-        + "process.stdout.write(JSON.stringify({ tree: ser(el), proof: proof && { comments_key: proof.attrs['data-key'] || null, open: !!proof.open } }));"
+        + " process.stdout.write(JSON.stringify({ tree: ser(el), proof: proof && { comments_key: proof.attrs['data-key'] || null, open: !!proof.open } }));"
+        + " }, 0);"
     )
     return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
 

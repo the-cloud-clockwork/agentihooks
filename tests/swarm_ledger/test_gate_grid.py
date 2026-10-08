@@ -1,7 +1,7 @@
 import pytest
 
 from scripts.gates.catalog import defaults
-from tests.swarm_ledger.test_swarm_layout import ROOT, browser, open_page, status
+from tests.swarm_ledger.test_swarm_layout import browser, open_page, status
 
 __all__ = ["browser", "open_page"]
 
@@ -64,7 +64,6 @@ def test_gates_sit_five_per_row_with_choices_in_fixed_columns_at_1920(open_page)
 
 def test_every_gate_name_has_a_short_shared_tooltip(open_page):
     page = open_page(status(gate_modes=defaults()))
-    page.tab.add_script_tag(path=str(ROOT / "scripts/swarm_ledger/tooltips.js"))
     tips = page.tab.eval_on_selector_all(
         ".sw-gate .sw-cap-name", "names => names.map(name => [name.textContent, window.ledgerTip(name)])"
     )
