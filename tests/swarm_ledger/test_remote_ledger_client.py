@@ -1,10 +1,13 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
+import urllib.error
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -12,6 +15,8 @@ import pytest
 from scripts.hive import auth
 from scripts.swarm_ledger import ledger, ledger_hook, ledger_link
 from scripts.swarm_ledger import ledger_authority as authority
+from scripts.swarm_ledger.api import routes
+from scripts.swarm_ledger.api.errors import APIError
 from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER, send
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
@@ -165,3 +170,65 @@ def test_a_remote_session_start_starts_no_ledger_server(tmp_path, monkeypatch):
     monkeypatch.setattr(ledger_hook.subprocess, "Popen", Mock())
     ledger_hook.serve_ledgers()
     ledger_hook.subprocess.Popen.assert_not_called()
+
+
+def exits(message):
+    return pytest.raises(SystemExit, match=f"^{re.escape(message)}$")
+
+
+def test_remote_refusals_name_what_is_missing():
+    with exits("a remote ledger client needs LEDGER_URL, the address of the hive ledger server"):
+        ledger_link.base({"AGENTIHOOKS_DEPLOYMENT": "compose"})
+    assert ledger_link.base({"AGENTIHOOKS_DEPLOYMENT": "compose", "LEDGER_URL": "https://hub.example/X/"}) == (
+        "https://hub.example/X"
+    )
+    with patch.dict(os.environ, REMOTE):
+        os.environ.pop("AGENTIHOOKS_LEDGER_AGENT_TOKEN", None)
+        os.environ.pop("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL", None)
+        with exits("a remote ledger client cannot make service writes; the operator credential stays on its host"):
+            ledger.credentials(SLUG, service=True)
+        with exits(
+            "a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential "
+            "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive join"
+        ):
+            ledger.credentials(SLUG)
+        os.environ.pop("AGENTIHOOKS_AGENT_NAME")
+        with exits("a remote ledger client needs a pinned agent identity; the operator credential stays on its host"):
+            ledger.credentials(SLUG)
+
+
+def test_a_refused_launch_token_fetch_sends_both_headers_and_names_the_status():
+    client = Mock()
+    client.return_value.request.side_effect = urllib.error.HTTPError("u", 403, "Forbidden", {}, None)
+    with (
+        patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": CREDENTIAL}),
+        patch.object(ledger, "BASE", ""),
+        patch("scripts.swarm_ledger.api.client.ResourceClient", client),
+        exits("the ledger server refused the hive credential: 403"),
+    ):
+        ledger.launch_token(SLUG, WORKER)
+    client.assert_called_once_with("https://hub.example", {"X-Hive-Credential": CREDENTIAL, "X-Ledger-Agent": WORKER})
+    client.return_value.request.assert_called_once_with(SLUG, "agent-token", {})
+
+
+def test_the_agent_token_route_answers_or_names_what_is_missing():
+    server = SimpleNamespace(
+        authority=SimpleNamespace(
+            hive_member=lambda credential: "member-1" if credential == CREDENTIAL else None,
+            agent_token=authority.agent_token,
+        ),
+        core=SimpleNamespace(read_token=lambda page: f"admin-of-{page}"),
+        repository=SimpleNamespace(read_page=lambda slug: slug),
+    )
+    for headers, message in (
+        ({"X-Hive-Credential": CREDENTIAL}, "An agent token names its agent in X-Ledger-Agent"),
+        ({"X-Hive-Credential": "wrong", "X-Ledger-Agent": WORKER}, "Missing or wrong hive credential"),
+        ({"X-Ledger-Agent": WORKER}, "Missing or wrong hive credential"),
+    ):
+        with pytest.raises(APIError) as refused:
+            routes.agent_token(SimpleNamespace(headers=headers), server, SLUG)
+        assert (refused.value.status, refused.value.code, str(refused.value)) == (403, "forbidden", message)
+    granted = SimpleNamespace(headers={"X-Hive-Credential": CREDENTIAL, "X-Ledger-Agent": WORKER})
+    assert routes.agent_token(granted, server, SLUG) == {
+        "data": {"agent": WORKER, "token": authority.agent_token(f"admin-of-{SLUG}", SLUG, WORKER)}
+    }
