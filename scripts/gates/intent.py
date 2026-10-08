@@ -324,10 +324,11 @@ class Check:
         text = f"The intent check failed: {reason}. {fix_steps(self.slug)}"
         if self.mode == "coach":
             text += f" Run fix round {rounds + 1} of 2; after two unsuccessful fix rounds merge with the shortfall recorded."
+        key, ref = f"intent-fail:{task['id']}:{self.now_ms}", f"tasks/{task['id']}"
+        told = self.mail.send(key, self.mail.engineer(task), text, ref=ref)
         self.ledger.update_task(self.slug, task["id"], {"state": "claimed"})
         self.ledger.comment(self.slug, task["id"], FAIL_COMMENT, by="swarm")
-        key, ref = f"intent-fail:{task['id']}:{self.now_ms}", f"tasks/{task['id']}"
-        return self.mail.send(key, self.mail.engineer(task), text, ref=ref)
+        return told
 
 
 def _gated(words):

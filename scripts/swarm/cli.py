@@ -158,7 +158,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
         if actions:
             doc = timing.call(ledger.state, slug)
-        ticked = timing.call(phases.phase_pass, inbox, store, slug, doc, ledger)
+        ticked = skip_refused(phases.phase_pass, inbox, store, slug, doc, ledger)
         actions += ticked
         if ticked:
             actions += skip_refused(
