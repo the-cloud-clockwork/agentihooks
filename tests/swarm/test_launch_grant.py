@@ -637,6 +637,7 @@ def test_signing_keys_and_lifetimes_are_bounded(store, clock):
         with pytest.raises(ValueError, match="lifetime"):
             LaunchAuthority(store, KEY, FIXTURE["issuer"], FIXTURE["audience"], clock, ttl)
     assert LaunchAuthority(store, KEY, FIXTURE["issuer"], FIXTURE["audience"], clock, MAX_TTL_SECONDS).ttl == 900
+    assert LaunchAuthority(store, KEY, FIXTURE["issuer"], FIXTURE["audience"], clock, 1).ttl == 1
     assert LaunchAuthority(store, KEY, FIXTURE["issuer"], FIXTURE["audience"], clock).ttl == 300
     assert LaunchAuthority(store, KEY, FIXTURE["issuer"], FIXTURE["audience"]).clock is time.time
 
@@ -694,8 +695,16 @@ def test_writes_retry_a_concurrent_change_then_give_up(store, authority, executi
     execution = admit(store, "eng-2@fixture")
     token = issue(authority, execution)
     _real, calls = hook_pipelines(store, monkeypatch, conflicting(5))
-    with pytest.raises(GrantRefused, match="kept changing") as error:
+    with pytest.raises(GrantRefused) as error:
         run()
+    assert (
+        str(error.value)
+        == {
+            "register": "launch registrations kept changing; registration was not committed",
+            "issue": "launch grants kept changing; the grant was not issued",
+            "disable": "launch grants kept changing; revocation was not committed",
+        }[operation]
+    )
     assert (error.value.error_class, error.value.retry) == ("dependency_unavailable", "same_request")
     assert launch_grant_rejections(store, "fixture") == {"dependency_unavailable": 1}
     assert len(calls) == 5
@@ -733,6 +742,58 @@ def test_a_grant_issued_while_its_execution_is_replaced_is_refused(store, author
         issue(authority, execution)
     assert error.value.error_class == "stale_generation"
     assert not store.redis.hgetall(store.key("fixture", "launch-grants"))
+
+
+def race_replace(ctx):
+    admit(ctx.store, FIXTURE["seat"], ctx.execution.execution_id)
+
+
+def race_register(ctx):
+    other = {**json.loads(ctx.store.redis.hget(ctx.grants, ctx.grant_id)), "grant_id": f"lgr-{'1' * 32}"}
+    row = {**body(ctx.execution), "grant_id": other["grant_id"], "issuer": "controller@fixture"}
+    row.update(audience="registry@fixture", key_id="fixture-key-1", registered_at=ISSUED_AT)
+    ctx.store.redis.hset(ctx.store.key("fixture", "launch-registrations"), ctx.execution.execution_id, json.dumps(row))
+
+
+def race_revoke(ctx):
+    audit = json.loads(ctx.store.redis.hget(ctx.grants, ctx.grant_id))
+    ctx.store.redis.hset(ctx.grants, ctx.grant_id, json.dumps({**audit, "state": "revoked"}))
+
+
+def race_disable(ctx):
+    ctx.store.redis.set(ctx.store.key("fixture", "launch-grants-disabled"), ISSUED_AT)
+
+
+RACES = {
+    "executions": (race_replace, "launch grant is for a superseded execution"),
+    "registrations": (race_register, "execution is already registered under another launch grant"),
+    "grants": (race_revoke, "launch grant was revoked"),
+    "disabled": (race_disable, "launch grants are disabled for this swarm"),
+}
+
+
+@pytest.mark.parametrize("race", RACES)
+def test_a_registration_retries_when_a_watched_key_changes_first(store, authority, execution, monkeypatch, race):
+    token = issue(authority, execution)
+    ctx = SimpleNamespace(
+        store=store,
+        execution=execution,
+        grants=store.key("fixture", "launch-grants"),
+        grant_id=claims_of(token)["grant_id"],
+    )
+    write, message = RACES[race]
+    raced = []
+
+    def race_first(pipe):
+        if not raced:
+            raced.append(True)
+            write(ctx)
+        return pipe.execute()
+
+    hook_pipelines(store, monkeypatch, race_first)
+    with pytest.raises(GrantRefused) as error:
+        authority.register("fixture", token, body(execution))
+    assert str(error.value) == message
 
 
 def test_disabling_lists_every_outstanding_grant_in_order(store, authority, execution):

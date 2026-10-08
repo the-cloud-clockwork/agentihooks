@@ -115,7 +115,7 @@ class LaunchAuthority:
         self.ttl = ttl
 
     def refuse(self, slug: str, error_class: str, message: str) -> NoReturn:
-        self.redis.hincrby(self.store.key(slug, "launch-grant-rejections"), error_class, 1)
+        self.redis.hincrby(self.store.key(slug, "launch-grant-rejections"), error_class)
         raise GrantRefused(error_class, message)
 
     def issue(self, slug: str, execution_id: str, *, project_ids: list[str], brain_id: str, account: str) -> str:
@@ -162,8 +162,8 @@ class LaunchAuthority:
                     pipe.watch(disabled, self.store.key(slug, "executions"))
                     if pipe.exists(disabled):
                         self.refuse(slug, "forbidden_scope", "launch grants are disabled for this swarm")
-                    occupant = self.store.execution_registry.occupants(slug, pipe).get(execution.seat)
-                    if not occupant or occupant.execution_id != execution.execution_id:
+                    occupants = self.store.execution_registry.occupants(slug, pipe).values()
+                    if execution.execution_id not in {occupant.execution_id for occupant in occupants}:
                         self.refuse(slug, "stale_generation", "execution is not the current attempt of its seat")
                     pipe.multi()
                     pipe.hset(self.store.key(slug, "launch-grants"), audit["grant_id"], json.dumps(audit))
@@ -255,8 +255,8 @@ class LaunchAuthority:
         audit = json.loads(raw)
         if audit["state"] == "revoked":
             self.refuse(slug, "unauthenticated", "launch grant was revoked")
-        current = self.store.execution_registry.occupants(slug, pipe).get(claims["seat_id"])
-        if not current or (current.execution_id, current.generation) != (claims["execution_id"], claims["generation"]):
+        occupants = self.store.execution_registry.occupants(slug, pipe).values()
+        if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
             self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
         existing = pipe.hget(registrations, claims["execution_id"])
         if existing:
