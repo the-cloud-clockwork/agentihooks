@@ -52,6 +52,37 @@ jobs:
       - name: Check every pull request job is a need of Gate Required
         run: python -m scripts.ci_wiring
 
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          enable-cache: false
+
+      - name: Check out the base revision
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+        run: git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
+
+      # The base revision's copy grades, so a pull request cannot loosen its own audit.
+      - name: Fail on known vulnerabilities new against the base
+        run: |
+          grader="$RUNNER_TEMP/base"
+          [[ -f "$grader/scripts/ci_dependency_audit.py" ]] || grader="$GITHUB_WORKSPACE"
+          cd "$grader"
+          python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
   unit:
     runs-on: ubuntu-latest
     timeout-minutes: 7
@@ -472,7 +503,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, shard-check, test-count, lint, sonar, mutation, swarm-image, brain-smoke, wiring, semgrep]
+    needs: [unit, shard-check, test-count, lint, sonar, mutation, swarm-image, brain-smoke, wiring, semgrep, dependency-audit]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
