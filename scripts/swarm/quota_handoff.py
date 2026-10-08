@@ -64,17 +64,21 @@ def warn(slug: str, store: RedisStore, environ: dict) -> list[str]:
     return actions
 
 
+def excluded(account: capacity.Account, thresholds: Thresholds, predecessor: tuple | None = None) -> str:
+    if (account.harness, account.name) == predecessor:
+        return "is the account handing off"
+    if not capacity.free_seats(account):
+        return "has no free seats"
+    if account.state == "UNKNOWN" or (account.five_left is None and account.week_left is None):
+        return "has no quota reading"
+    if window := trigger(account, thresholds):
+        return f"is at its {window} quota warning"
+    return ""
+
+
 def successor(accounts: list[capacity.Account], allow_codex: bool, thresholds: Thresholds) -> capacity.Account | None:
     for harness in ("claude", "codex") if allow_codex else ("claude",):
-        eligible = [
-            row
-            for row in accounts
-            if row.harness == harness
-            and capacity.free_seats(row)
-            and row.state != "UNKNOWN"
-            and (row.five_left is not None or row.week_left is not None)
-            and not trigger(row, thresholds)
-        ]
+        eligible = [row for row in accounts if row.harness == harness and not excluded(row, thresholds)]
         if eligible:
             return min(
                 eligible,

@@ -174,6 +174,7 @@ class HerdrRuntime:
 
         placing = demand is None or any(demand.values())
         self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing)
+        requirements = self._quota_successor_options(requirements)
         decision = capacity.calculate(config, self._quota_accounts, agents, demand, requirements)
         self._quota_allocations = decision["allocation"]
         if hasattr(self, "_quota_ready_ids"):
@@ -191,12 +192,15 @@ class HerdrRuntime:
         from scripts.swarm.capacity import _harnesses
 
         self._quota_ready_ids = {lane: [task["id"] for task in tasks] for lane, tasks in ready.items()}
+        self._quota_handoffs = {}
         requirements = {}
         for lane, tasks in ready.items():
             options = []
             for task in tasks:
                 chosen = config.lanes.get(lane, {})
                 saved = task.get("launch_assignment") or (task.get("handoff_envelope") or {}).get("launch") or {}
+                if (task.get("handoff_envelope") or {}).get("reason") == "quota" and saved.get("harness"):
+                    self._quota_handoffs[lane, len(options)] = (saved["harness"], saved.get("account"))
                 profile = (
                     saved.get("profile")
                     or task.get("profile")
@@ -217,6 +221,30 @@ class HerdrRuntime:
                     options.append(_harnesses(config, lane))
             requirements[lane] = options
         return requirements
+
+    def _quota_successor_options(self, requirements):
+        from scripts.swarm import quota_handoff
+
+        handoffs = getattr(self, "_quota_handoffs", {})
+        if not requirements or not handoffs:
+            return requirements
+        thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
+
+        def placeable(harness, predecessor):
+            return any(
+                row.harness == harness and not quota_handoff.excluded(row, thresholds, predecessor)
+                for row in self._quota_accounts
+            )
+
+        return {
+            lane: [
+                tuple(h for h in options if placeable(h, handoffs[lane, index]))
+                if (lane, index) in handoffs
+                else options
+                for index, options in enumerate(choices)
+            ]
+            for lane, choices in requirements.items()
+        }
 
     def _quota_eligible(self, harness):
         from scripts.swarm.capacity import free_seats
@@ -242,29 +270,51 @@ class HerdrRuntime:
         seat = session_bands.pick(seats(self._quota_accounts))
         return (seat.harness, "rotation") if seat else ("claude", agent_choice.ALL_FULL)
 
-    def _quota_transfer(self, saved, profile, environ, lane, want):
+    def _quota_transfer(self, saved, profile, environ, lane, want, planned=None):
         from scripts.swarm import quota_handoff
 
+        thresholds = quota_handoff.Thresholds.from_env(environ)
         allocation = getattr(self, "_quota_allocations", {}).get(lane)
-        account = quota_handoff.successor(
-            [
-                row
-                for row in self._quota_accounts
-                if (allocation is None or allocation[row.harness])
-                and (row.harness, row.name) != (saved["harness"], saved.get("account"))
-                and (not want or row.harness == want)
-            ],
-            not plugins.claude_only(profile),
-            quota_handoff.Thresholds.from_env(environ),
-        )
+        predecessor = (saved["harness"], saved.get("account"))
+        candidates = [
+            row
+            for row in self._quota_accounts
+            if (allocation is None or allocation[row.harness])
+            and (row.harness, row.name) != predecessor
+            and (not want or row.harness == want)
+        ]
+        allow_codex = not plugins.claude_only(profile)
+        account = (
+            planned
+            and quota_handoff.successor([r for r in candidates if r.harness == planned], allow_codex, thresholds)
+        ) or quota_handoff.successor(candidates, allow_codex, thresholds)
         if account is None:
-            raise SpawnError(f"no {saved['harness']} account has placeable quota seats")
+            raise SpawnError(self._quota_refusal(predecessor, allow_codex, thresholds, lane, want))
         return {
             **saved,
             "harness": account.harness,
             "account": account.name,
             **({"model": ""} if account.harness != saved["harness"] else {}),
         }
+
+    def _quota_refusal(self, predecessor, allow_codex, thresholds, lane, want):
+        from scripts.swarm import quota_handoff
+
+        allocation = getattr(self, "_quota_allocations", {}).get(lane)
+
+        def reason(row):
+            if want and row.harness != want:
+                return f"is not the {want} harness the {lane} lane needs"
+            if row.harness == "codex" and not allow_codex:
+                return "cannot mount the claude only profile"
+            if allocation is not None and not allocation[row.harness] and (row.harness, row.name) != predecessor:
+                return f"has no seat in the {lane} allocation"
+            return quota_handoff.excluded(row, thresholds, predecessor) or "has no placeable quota seat"
+
+        accounts = "; ".join(f"{row.harness} {row.name} {reason(row)}" for row in self._quota_accounts)
+        return f"no account can take the quota handoff from {predecessor[0]} account {predecessor[1]}: " + (
+            accounts or "no accounts were observed"
+        )
 
     def _saved_choice(self, saved, profile, quota_transfer, environ):
         if quota_transfer:
@@ -328,9 +378,7 @@ class HerdrRuntime:
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}")
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
         saved = (
-            self._quota_transfer(
-                saved, profile, environ, lane, want or getattr(self, "_quota_tasks", {}).get(task["id"])
-            )
+            self._quota_transfer(saved, profile, environ, lane, want, getattr(self, "_quota_tasks", {}).get(task["id"]))
             if saved and quota_transfer
             else saved
         )

@@ -1091,7 +1091,7 @@ def test_quota_handoff_without_another_account_keeps_the_handoff(tmp_path, harne
         "handoff": "saved handoff",
         "handoff_envelope": {"reason": "quota", "seat": "eng-2@sw", "launch": saved},
     }
-    with pytest.raises(SpawnError, match="no .* account has placeable quota seats"):
+    with pytest.raises(SpawnError, match=f"^no account can take the quota handoff from {harness} account old: "):
         runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task)
     assert task["handoff"] == "saved handoff"
     assert task["handoff_envelope"]["launch"] == saved
