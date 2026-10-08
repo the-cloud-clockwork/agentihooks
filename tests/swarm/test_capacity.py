@@ -335,6 +335,29 @@ def test_failed_capacity_comment_is_retried_without_losing_the_decision():
     assert len(comments) == 1
 
 
+def test_refused_capacity_comment_keeps_the_fresh_decision():
+    from scripts.swarm.ledger_client import LedgerRefused
+
+    store = _store()
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    store.create(config)
+    ledger = FakeLedger([{"id": "e"}])
+    runtime = FakeRuntime()
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
+        cfg, [account()], agents, demand
+    )
+
+    def refuse(slug, task, text, now_ms):
+        assert (slug, task, now_ms) == ("sw", "e", 1000)
+        raise LedgerRefused("plain words refused")
+
+    ledger.capacity_comment = refuse
+    with pytest.raises(LedgerRefused, match="plain words refused"):
+        capacity.apply("sw", config, store, ledger, runtime, 1000)
+    assert capacity.read(store, "sw")["tasks"] == {"e": "claude"}
+    assert capacity.read(store, "sw")["at"] == 1000
+
+
 def test_codex_accounts_with_live_sessions_keep_their_own_quotas(monkeypatch):
     from scripts.codex_quota import CodexQuota
 
@@ -757,6 +780,36 @@ def test_the_capacity_comment_passes_the_ledger_schema(monkeypatch):
     ledger_core.check_op(op)
 
 
+def test_warned_capacity_comment_passes_the_ledger_schema(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm import ledger_client
+
+    ledger_client._ledger()
+    import ledger_core
+
+    sent = []
+    monkeypatch.setattr(
+        ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops, service: sent.extend(ops) or {})
+    )
+    store = _store()
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    store.create(config)
+    runtime = FakeRuntime()
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
+        cfg,
+        [account("a"), account("b", harness="codex")],
+        agents,
+        demand,
+        warned={("claude", "a"): "weekly", ("codex", "b"): "weekly"},
+    )
+    ledger = FakeLedger([{"id": "e"}])
+    ledger.capacity_comment = ledger_client.LedgerClient().capacity_comment
+    capacity.apply("sw", config, store, ledger, runtime, 1000)
+    (op,) = sent
+    ledger_core.check_op(op)
+
+
 def test_a_refused_ledger_write_is_skipped_and_spawning_still_runs(capsys):
     from scripts.swarm.ledger_client import LedgerRefused
 
@@ -1014,7 +1067,7 @@ def test_a_warned_account_gets_no_placeable_seat_and_the_reason_names_it():
     ]
     assert result["accounts"][0]["sessions"] == 0 and result["accounts"][0]["cap"] == 3
     assert result["reason"].endswith(
-        "free seats; claude w is at its week quota warning; claude v is at its five hour quota warning"
+        "free seats, claude w is at its week quota warning, claude v is at its five hour quota warning"
     )
 
 

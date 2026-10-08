@@ -186,7 +186,7 @@ def calculate(
     restricted = sorted({row.state.lower() for row in observations if row.state != "OPEN"})
     reason = "accounts have quota" if not restricted else "accounts are " + ", ".join(restricted)
     reason += f"; Claude has {placeable['claude']} free seats and Codex has {placeable['codex']} free seats"
-    reason += "".join(f"; {harness} {name} {warning(window)}" for (harness, name), window in warned.items())
+    reason += "".join(f", {harness} {name} {warning(window)}" for (harness, name), window in warned.items())
     return {
         "configured": configured,
         "effective": effective,
@@ -223,6 +223,7 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     reader = getattr(runtime, "quota_capacity", None)
     if reader is None:
         return []
+    from scripts.swarm.ledger_client import LedgerRefused
     from scripts.swarm.tick import _claimable, _ended, _launch_order
 
     doc = ledger.state(slug)
@@ -246,9 +247,13 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     text = status_line(decision)
     if changed and rows:
         task = next((row for row in rows.values() if not row.get("done")), next(iter(rows.values())))
-        if hasattr(ledger, "capacity_comment"):
-            ledger.capacity_comment(slug, task["id"], text, now_ms)
-        else:
-            ledger.comment(slug, task["id"], text, by="swarm")
+        try:
+            if hasattr(ledger, "capacity_comment"):
+                ledger.capacity_comment(slug, task["id"], text, now_ms)
+            else:
+                ledger.comment(slug, task["id"], text, by="swarm")
+        except LedgerRefused:
+            store.redis.set(store.key(slug, "quota-capacity"), json.dumps(decision))
+            raise
     store.redis.set(store.key(slug, "quota-capacity"), json.dumps(decision))
     return [text] if changed else []
