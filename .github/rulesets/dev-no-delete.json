@@ -38,7 +38,7 @@
       "parameters": {
         "required_status_checks": [
           {
-            "context": "Gate \u2014 Required"
+            "context": "Absent planted gate"
           }
         ],
         "strict_required_status_checks_policy": true,
