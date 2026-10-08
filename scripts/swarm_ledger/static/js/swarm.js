@@ -106,8 +106,14 @@ function agentRows(sw, now) {
   return agents.map((a) => {
     const master = a.lane === "master";
     return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
-      state: master && (a.status || "working") === "working" ? "live" : a.status || "working", promoted: !!a.promoted, age: a.started_at ? span(now - a.started_at) : "—" };
+      state: master && (a.status || "working") === "working" ? "live" : a.status || "working", promoted: !!a.promoted, age: a.started_at ? span(now - a.started_at) : "—",
+      finished: a.status === "finished", since: a.state_since || 0 };
   });
+}
+
+function agentRow(a) {
+  return withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
+    a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state), a.age, a.finished ? h("span") : agentActions(a)), `agent-${a.name}`);
 }
 
 function agentActions(a) {
@@ -215,10 +221,7 @@ export function renderSwarm(sw) {
   $("alert-count").textContent = `${open.length} ${open.length === 1 ? "finding" : "findings"} open`;
   $("alert-kinds").textContent = [...new Set(open.map((f) => f.kind))].join(" · ");
   $("alert-live").replaceChildren(...liveCaps(sw).map((text) => h("span", { text })));
-  const agents = agentRows(sw, now);
-  $("agents-count").textContent = `${agents.length} live`;
-  $("swarm-agents").replaceChildren(...(agents.length ? agents.map((a) => cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model,
-    a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—", a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state), a.age, agentActions(a))) : [emptyRow(9, "No agents running. Start the swarm to work the open tasks.")]));
+  renderAgents(sw, now);
   renderOverlays(sw);
   const quota = quotaRows(sw, now);
   $("quota-count").textContent = quotaCount(sw, quota.length, now);
@@ -232,6 +235,13 @@ export function renderSwarm(sw) {
   if (wanted.id || !$("health").contains(document.activeElement)) renderHealth(sw.findings, now);
   renderHandoffs(sw.handoffs || []);
   renderStats();
+}
+
+function renderAgents(sw, now = Date.now()) {
+  const agents = agentRows(sw, now), live = agents.filter((a) => !a.finished), finished = agents.filter((a) => a.finished).sort((x, y) => y.since - x.since);
+  $("agents-count").textContent = finished.length ? `${live.length} live · ${finished.length} finished` : `${live.length} live`;
+  $("swarm-agents").replaceChildren(...(live.length ? live.map(agentRow) : [emptyRow(9, "No agents running. Start the swarm to work the open tasks.")]),
+    ...firstPage("agents", finished, (a) => `agent-${a.name}`).map(agentRow), moreRow("agents", finished.length, "more finished agents", 9, () => renderAgents(swarm)) || "");
 }
 
 function renderHealth(findings, now = Date.now()) {
