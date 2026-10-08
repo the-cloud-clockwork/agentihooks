@@ -206,7 +206,7 @@ def base_run(tmp_path):
         'printf "%s\\n" "$@" >> "$ARGS"\n'
         'case "$2" in\n'
         '  */commits/*) printf "tree-of-base" ;;\n'
-        '  */runs\\?head_sha=*) printf "%s\\n" $FAKE_RUNS ;;\n'
+        '  */runs\\?head_sha=*) [[ -z "$FAIL_RUNS" ]] || exit 1; printf "%s\\n" $FAKE_RUNS ;;\n'
         '  */artifacts*) n=$(cat "$POLLS"); echo $((n + 1)) > "$POLLS"; '
         '[[ "$2" == *"/$FAKE_KEPT_BY/"* && $n -ge $FAKE_AFTER ]] && printf 1 || printf 0 ;;\n'
         "esac\n"
@@ -215,7 +215,7 @@ def base_run(tmp_path):
     (tools / "sleep").write_text("#!/usr/bin/env bash\ntrue\n")
     (tools / "sleep").chmod(0o755)
 
-    def run(runs="111 222", kept_by="222", after=0, wait="600"):
+    def run(runs="111 222", kept_by="222", after=0, wait="600", fail_runs=""):
         output = tmp_path / "output"
         output.write_text("")
         polls = tmp_path / "polls"
@@ -228,6 +228,7 @@ def base_run(tmp_path):
             FAKE_RUNS=runs,
             FAKE_KEPT_BY=kept_by,
             FAKE_AFTER=str(after),
+            FAIL_RUNS=fail_runs,
             WAIT_SECONDS=wait,
             BASE_SHA="b" * 40,
             GITHUB_OUTPUT=str(output),
@@ -256,6 +257,13 @@ def test_the_base_run_waits_for_an_earlier_queue_entry_to_publish(base_run):
     result, output, _ = base_run(after=5)
     assert result.returncode == 0, result.stderr
     assert output == "id=222\ntree=tree-of-base\n"
+
+
+def test_a_failed_runs_listing_is_red_at_once_instead_of_waiting(base_run):
+    result, output, args = base_run(fail_runs="1")
+    assert result.returncode != 0
+    assert output == ""
+    assert not [arg for arg in args if "/artifacts" in arg]
 
 
 @pytest.mark.parametrize("runs", ["111 222", ""])

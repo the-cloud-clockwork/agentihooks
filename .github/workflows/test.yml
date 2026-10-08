@@ -775,7 +775,8 @@ jobs:
           wait="${WAIT_SECONDS:-600}"
           deadline=$((SECONDS + wait))
           while true; do
-            for run in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE_SHA&per_page=20" --jq '.workflow_runs[].id'); do
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE_SHA&per_page=20" --jq '.workflow_runs[].id')
+            for run in $runs; do
               kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
               if [[ "$kept" -gt 0 ]]; then
                 echo "Restoring the coverage baseline of base $BASE_SHA tree $tree from run $run"
