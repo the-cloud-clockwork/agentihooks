@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/store.py:scripts.inbox.store.x\u01c1InboxStore\u01c1_try_redirect__mutmut_22:45eded107fd651c7cbb04e20060f23ca387b722bae1d61a7988d6a75820d5fa6": {
+    "reader": "Independent Standards reader for Doctor task t53",
+    "reason": "The branch runs only for a truthy expected receiver. Missing receipt defaults of empty string and None both mismatch that receiver and refuse cancellation without changing the message."
+  }
+}
