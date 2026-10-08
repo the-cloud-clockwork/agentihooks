@@ -129,6 +129,10 @@ def test_an_unreadable_stored_field_is_refused_by_name(redis, field, value):
     assert str(error.value) == f"hive box holds an unreadable {field}: {value!r}"
 
 
+def test_a_value_may_hold_an_equals_sign(redis):
+    assert registry.update(redis, "box", ["name=a=b"])["name"] == "a=b"
+
+
 def test_repeated_roles_are_kept_once(redis):
     assert registry.update(redis, "box", ["roles=eng,ci,eng"])["roles"] == ["eng", "ci"]
 
@@ -155,6 +159,7 @@ def test_a_record_written_by_another_writer_shows_with_defaults(redis):
         (["max-agents=²"], "max-agents must be a positive whole number, not '²'"),
         (["roles=eng", "prefer=eng"], "prefer takes role:rank, not 'eng'"),
         (["roles=eng", "prefer=eng:0"], "the rank of eng must be a positive whole number, not '0'"),
+        (["roles=eng", "prefer=eng:1:2"], "the rank of eng must be a positive whole number, not '1:2'"),
         (["roles=eng", "prefer=ci:1"], "prefer names ci, a role this hive does not take"),
     ],
 )
@@ -199,6 +204,7 @@ def test_liveness_follows_the_heartbeat_window():
     assert registry.live(beat, 1_000 + registry.LIVE_MS) is True
     assert registry.live(beat, 1_001 + registry.LIVE_MS) is False
     assert registry.live({"heartbeat_at": 0}, 5) is False
+    assert registry.live({"heartbeat_at": 1}, 5) is True
     assert registry.LIVE_MS == 90_000
 
 
@@ -236,8 +242,25 @@ def test_cli_refusals_exit_one_with_the_reason(redis, monkeypatch, capsys):
 
 
 def test_cli_now_ms_reads_the_wall_clock(monkeypatch):
-    monkeypatch.setattr(cli.time, "time_ns", lambda: 7_000_999_999)
-    assert cli.now_ms() == 7_000
+    monkeypatch.setattr(cli.time, "time_ns", lambda: 7_000_000_999_999)
+    assert cli.now_ms() == 7_000_000
+
+
+def test_cli_set_takes_any_number_of_key_value_settings(redis, monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "300")
+    usage = cli._parser()._subparsers._group_actions[0].choices["set"].format_usage()
+    assert usage == "usage: agentihooks hive set [-h] id [key=value ...]\n"
+    monkeypatch.setattr(cli, "redis_client", lambda: redis)
+    assert cli.main(["set", "box"]) == 1
+    assert capsys.readouterr().err == "hive set refused: hive set needs at least one setting\n"
+
+
+def test_cli_list_joins_roles_with_commas(redis, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "redis_client", lambda: redis)
+    monkeypatch.setattr(cli, "now_ms", lambda: 0)
+    registry.update(redis, "box", ["roles=eng,ci"])
+    assert cli.main(["list"]) == 0
+    assert capsys.readouterr().out == "box\tstale\tui=no\troles=eng,ci\tmax-agents=1\n"
 
 
 @pytest.fixture
