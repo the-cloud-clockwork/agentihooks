@@ -73,7 +73,8 @@ def test_the_grant_sizes_and_member_record(admin, redis_lib):
     grant = auth.exchange(admin, code, PUBLIC)
     password = redis_lib.connection.parse_url(grant["redis_url"])["password"]
 
-    assert len(code) == 22
+    assert len(code) == 32
+    int(code, 16)
     assert len(grant["id"]) == 16
     int(grant["id"], 16)
     assert len(password) == 43
@@ -218,6 +219,17 @@ def test_join_over_http_writes_the_env_file_and_prints_no_secret(admin, hive, tm
     assert env["AGENTIHOOKS_HIVE_REDIS_URL"].startswith(f"redis://hive-{member_id}:")
     assert env["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"] not in out
     assert env["AGENTIHOOKS_HIVE_REDIS_URL"] not in out
+
+
+def test_an_invite_code_never_reads_as_a_join_option(admin, hive, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    with monkeypatch.context() as m:
+        m.setattr(auth.secrets, "token_bytes", lambda n=None: b"\xf8" * (n or 32))
+        code = auth.invite(admin, "laptop")
+
+    assert not code.startswith("-")
+    assert cli.main(["join", hive, code]) == 0
+    assert (tmp_path / "hive.env").exists()
 
 
 def test_join_over_http_with_a_used_code_is_refused(admin, hive, tmp_path, monkeypatch, capsys):
