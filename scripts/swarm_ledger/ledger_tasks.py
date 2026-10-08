@@ -109,9 +109,7 @@ def check(op):
         )
     if "state" in fields and fields["state"] not in STATES:
         raise ValueError(f"state must be one of {STATES}")
-    guard = op.get("if_state", [])
-    if not isinstance(guard, list) or not all(state in STATES for state in guard):
-        raise ValueError(f"if_state must be a list of states from {STATES}")
+    check_guards(op)
     check_lists(fields)
     check_stack(fields)
     check_bools(fields)
@@ -119,6 +117,14 @@ def check(op):
     check_urls(fields)
     check_rank(fields)
     ledger_kinds.check(fields)
+
+
+def check_guards(op: dict) -> None:
+    if not isinstance(op.get("if_plan_lines_missing", False), bool):
+        raise ValueError("if_plan_lines_missing must be a boolean")
+    guard = op.get("if_state", [])
+    if not isinstance(guard, list) or not all(state in STATES for state in guard):
+        raise ValueError(f"if_state must be a list of states from {STATES}")
 
 
 def check_stack(fields):
@@ -399,6 +405,10 @@ def _set_slice(doc: dict, op: dict, ctx) -> bool:
 def apply(doc, op, ctx):
     if op["op"] == "task_add":
         return _add(doc, op, ctx)
+    if op.get("if_plan_lines_missing") and any(
+        t["id"] == op["item"].split("/")[1] and t.get("plan_lines") for t in doc.get("tasks", [])
+    ):
+        return True
     if not _set_slice(doc, op, ctx):
         return False
     return _update(doc, op, ctx)

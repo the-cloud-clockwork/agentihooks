@@ -83,6 +83,8 @@ def _headings(entries: list[tuple[int, int, str]], phase: dict) -> list[tuple[in
 
 
 def slice_lines(text: str, name: str, phase_range: str) -> str:
+    if not name:
+        raise ValueError(f"slice anchor {name} is missing or repeated in its phase")
     lines = text.splitlines()
     start, end = bounds(phase_range)
     end = min(end, len(lines))
@@ -138,6 +140,11 @@ def check_phase_ref(doc: dict, phase: dict) -> None:
 
 
 def task_slice(doc: dict, phase: dict, name: str, plan_url: str = "") -> str:
+    from scripts.swarm_ledger import plan_packages
+
+    if plan_packages.PACKAGE.fullmatch(name):
+        text = plan_packages.text()
+        return slice_lines(text, name, f"1-{len(text.splitlines())}")
     ref = phase.get("plan_ref")
     if ref is not None:
         return slice_lines(stored_text(ref, doc), name, ref["lines"])

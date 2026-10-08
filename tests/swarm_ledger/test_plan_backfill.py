@@ -55,6 +55,15 @@ def test_task_set_legacy_heading_and_task_add_share_the_resolver(legacy, monkeyp
     assert plan_read.read(doc, legacy, "old", None) == LEGACY
 
 
+def test_task_set_using_only_its_phase_link_is_readable(legacy, monkeypatch):
+    add(legacy, "old")
+    cli(monkeypatch, legacy, "task", "set", "old", "plan_url=")
+    cli(monkeypatch, legacy, "task", "set", "old", "plan_slice=bal6")
+    doc = core.sync(legacy)[0]
+    assert task(doc, "old")["plan_lines"] == "3-4"
+    assert plan_read.read(doc, legacy, "old", None) == LEGACY
+
+
 def test_slice_heading_never_matches_a_prefix_or_fenced_example():
     text = "# Plan\n### bal60 — Other\nOther\n```md\n### bal6 — Example\n```\n### bal6 — Real\nReal\n### bal7 — Next\nNext\n"
     assert plan_ranges.slice_lines(text, "bal6", "1-10") == "7-8"
@@ -66,6 +75,12 @@ def test_slice_heading_is_unique_and_respects_phase_bounds():
     with pytest.raises(ValueError) as exc:
         plan_ranges.slice_lines(text, "bal6", "1-7")
     assert str(exc.value) == "slice anchor bal6 is missing or repeated in its phase"
+
+
+def test_legacy_heading_cannot_assign_an_empty_slice():
+    with pytest.raises(ValueError) as exc:
+        plan_ranges.slice_lines("# Phase\n## bal6: Do work\nOne\n", "", "2-3")
+    assert str(exc.value) == "slice anchor  is missing or repeated in its phase"
 
 
 def test_task_set_missing_slice_refuses_the_whole_update(published, monkeypatch):
@@ -110,7 +125,13 @@ def test_backfill_uses_an_existing_slice_name(published, monkeypatch, capsys):
     task(doc, "renamed")["plan_slice"] = "third"
     monkeypatch.setattr(ledger, "call", lambda slug, ops=None: doc)
     sent = []
-    monkeypatch.setattr(ledger, "send", lambda args, kind, **fields: sent.append((kind, fields)))
+
+    def send(args, kind, **fields):
+        sent.append((kind, fields))
+        task(doc, "renamed").update(plan_slice="third", plan_lines="10-12")
+        return doc
+
+    monkeypatch.setattr(ledger, "send", send)
     args = ledger.build_parser().parse_args(["--slug", published, "--as", "planner", "plan-backfill"])
     ledger.cmd_plan_backfill(args)
     assert sent == [
@@ -120,6 +141,7 @@ def test_backfill_uses_an_existing_slice_name(published, monkeypatch, capsys):
                 "item": "tasks/renamed",
                 "fields": {"plan_slice": "third"},
                 "if_state": ["open", "claimed", "blocked", "pr"],
+                "if_plan_lines_missing": True,
             },
         )
     ]
@@ -132,6 +154,14 @@ def test_task_slice_field_is_validated_but_lines_remain_computed():
     for fields in ({"plan_slice": 6}, {"plan_lines": "1-6"}):
         with pytest.raises(ValueError):
             ledger_tasks.check({**op, "fields": fields})
+
+
+def test_missing_plan_lines_guard_is_boolean():
+    op = {"op": "task_update", "by": "planner", "item": "tasks/old", "fields": {"plan_slice": "bal6"}}
+    ledger_tasks.check({**op, "if_plan_lines_missing": True})
+    with pytest.raises(ValueError) as exc:
+        ledger_tasks.check({**op, "if_plan_lines_missing": "yes"})
+    assert str(exc.value) == "if_plan_lines_missing must be a boolean"
 
 
 def test_slice_update_respects_missing_task_and_state_guard(published):
@@ -162,6 +192,8 @@ def test_backfill_continues_after_a_write_refusal(legacy, monkeypatch, capsys):
         sent.append(fields["item"])
         if fields["item"] == "tasks/bal6":
             raise SystemExit("refused by ledger")
+        task(doc, "hiv2").update(plan_slice="hiv2", plan_lines="9-10")
+        return doc
 
     monkeypatch.setattr(ledger, "send", send)
     args = ledger.build_parser().parse_args(["--slug", legacy, "--as", "planner", "plan-backfill"])
@@ -171,3 +203,95 @@ def test_backfill_continues_after_a_write_refusal(legacy, monkeypatch, capsys):
         "updated": ["hiv2"],
         "missing": [{"task": "bal6", "reason": "refused by ledger"}],
     }
+
+
+def test_backfill_does_not_report_a_guarded_noop_as_updated(legacy, monkeypatch, capsys):
+    add(legacy, "bal6")
+    snapshot = core.sync(legacy)[0]
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: snapshot)
+    monkeypatch.setattr(ledger, "send", lambda args, kind, **fields: {"tasks": [{"id": "bal6", "state": "done"}]})
+    args = ledger.build_parser().parse_args(["--slug", legacy, "--as", "planner", "plan-backfill"])
+    ledger.cmd_plan_backfill(args)
+    assert json.loads(capsys.readouterr().out) == {
+        "updated": [],
+        "missing": [{"task": "bal6", "reason": "task changed before its plan lines were saved"}],
+    }
+
+
+def test_backfill_maps_repository_packages_and_reads_shared_sections(plan_ledger, monkeypatch, capsys, tmp_path):
+    from scripts.swarm_ledger import plan_packages
+
+    path = tmp_path / "plan.md"
+    text = "# Swarm v2\n## 1. Architecture\nShared one\n## 2. Baseline\nShared two\n## 3. Boundaries\nShared three\n## 4. Packages\n#### SV2-RUN-05: Runtime\nRuntime seam\n#### SV2-RUN-06: Other\nOther seam\n"
+    path.write_text(text, encoding="utf-8")
+    monkeypatch.setattr(plan_packages, "PLAN", path)
+    add(
+        plan_ledger,
+        "vrun5",
+        plan_url="https://github.com/org/repo/issues/1371",
+        description="Swarm v2 work package SV2-RUN-05. Read section SV2-RUN-05 plus sections 1 to 3.",
+    )
+    cli(monkeypatch, plan_ledger, "plan-backfill")
+    assert json.loads(capsys.readouterr().out) == {"updated": ["vrun5"], "missing": []}
+    doc = core.sync(plan_ledger)[0]
+    row = task(doc, "vrun5")
+    assert row["plan_slice"] == "SV2-RUN-05"
+    assert row["plan_lines"] == "9-10"
+    output = plan_read.read(doc, plan_ledger, "vrun5", None)
+    assert (
+        output
+        == "## 1. Architecture\nShared one\n## 2. Baseline\nShared two\n## 3. Boundaries\nShared three\n\n#### SV2-RUN-05: Runtime\nRuntime seam\n"
+    )
+    assert "Other seam" not in output
+
+
+def test_backfill_preserves_a_range_assigned_after_its_snapshot(published, monkeypatch, capsys):
+    add(published, "first")
+    snapshot = core.sync(published)[0]
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: snapshot)
+
+    def send(args, kind, **fields):
+        competing = {
+            "op": "task_update",
+            "id": "competing",
+            "by": "planner",
+            "item": "tasks/first",
+            "fields": {"plan_slice": "second"},
+        }
+        core.sync(published, ops=[competing])
+        op = {"op": kind, "id": "backfill", "by": "planner", **fields}
+        return core.sync(published, ops=[op])[0]
+
+    monkeypatch.setattr(ledger, "send", send)
+    args = ledger.build_parser().parse_args(["--slug", published, "--as", "planner", "plan-backfill"])
+    ledger.cmd_plan_backfill(args)
+    row = task(core.sync(published)[0], "first")
+    assert row["plan_slice"] == "second"
+    assert row["plan_lines"] == "7-9"
+    assert json.loads(capsys.readouterr().out) == {
+        "updated": [],
+        "missing": [{"task": "first", "reason": "task changed before its plan lines were saved"}],
+    }
+
+
+def test_package_names_and_shared_section_validation(tmp_path, monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    assert plan_packages.name({"id": "old", "description": "SV2-RUN-05 and SV2-RUN-05"}) == "SV2-RUN-05"
+    assert plan_packages.name({"id": "old", "description": "SV2-RUN-05", "plan_slice": "explicit"}) == "explicit"
+    assert plan_packages.name({"id": "old"}) == "old"
+    with pytest.raises(ValueError) as exc:
+        plan_packages.name({"id": "old", "description": "SV2-RUN-05 and SV2-RUN-06"})
+    assert str(exc.value) == "task description names more than one Swarm v2 package"
+    with pytest.raises(ValueError) as exc:
+        plan_packages.shared_lines("# Plan\n## 3. Third\n## 2. Second\n## 1. First\n")
+    assert str(exc.value) == "Swarm v2 plan needs ordered shared sections 1 to 3"
+    path = tmp_path / "plan.md"
+    path.write_text(
+        "# Plan\n## 1. Shared\nAccénts\n## 2. Shared\nTwo\n## 3. Shared\nThree\n## 4. Tasks\n#### SV2-RUN-05: Task\nTask\n#### T-SV2-RUN-05-A: Test\nFixture\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(plan_packages, "PLAN", path)
+    assert plan_packages.text() == path.read_text(encoding="utf-8")
+    assert plan_ranges.task_slice({}, {}, "SV2-RUN-05") == "9-10"
+    assert plan_packages.shared_lines(plan_packages.text()) == "2-7"
