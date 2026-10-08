@@ -42,7 +42,7 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
     assert command[command.index("--baseline-commit") + 1] == '"$BASE"'
     assert "--error" in command
     assert command[:2] == ["semgrep", "scan"]
-    assert "||" not in scan["steps"][-1]["run"]
+    assert not [s for s in ("||", "&&", ";", "exit") if s in scan["steps"][-1]["run"]]
     assert not {"set", "--exclude", "--include"} & set(command)
     assert [command[i + 1] for i, a in enumerate(command) if a == "--exclude-rule"] == [
         "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag"
