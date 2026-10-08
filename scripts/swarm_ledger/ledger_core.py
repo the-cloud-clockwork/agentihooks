@@ -579,4 +579,4 @@ def gated(gate, doc, op, ctx):
 def sync(slug, changes=None, ops=None, gate=None):
     from scripts.swarm_ledger.repository import repository
 
-    return repository.apply_ops(slug, changes=changes, ops=ops, gate=gate)
+    return repository.bound(sys.modules[__name__]).apply_ops(slug, changes=changes, ops=ops, gate=gate)

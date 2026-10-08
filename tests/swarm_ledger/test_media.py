@@ -17,8 +17,8 @@ import ledger_core as core  # noqa: E402
 import ledger_media as media  # noqa: E402
 import ledger_server as server  # noqa: E402
 
-from tests.swarm_ledger.test_bin import DAY_MS, make_ledger  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.test_bin import DAY_MS, make_ledger  # noqa: E402
 
 
 def png(width=3, height=2):

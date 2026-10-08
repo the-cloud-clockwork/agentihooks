@@ -10,8 +10,8 @@ import pytest
 
 from scripts.swarm_ledger import ledger_artifacts as artifacts
 from scripts.swarm_ledger import ledger_server as server
-from tests.swarm_ledger.test_bin import make_ledger
 from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.test_bin import make_ledger
 
 MASTER = "master@abcdef-0001"
 WORKER = "engineer@abcdef-0002"

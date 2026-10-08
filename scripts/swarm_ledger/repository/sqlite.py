@@ -171,6 +171,14 @@ class SQLiteLedgerRepository:
     def directory(self) -> Path:
         return self.path.parent
 
+    def bound(self, domain) -> "SQLiteLedgerRepository":
+        """This repository, or one sharing its cache that reads its folder and rules from another copy of the domain."""
+        if domain is self.domain or self._path is not None:
+            return self
+        twin = SQLiteLedgerRepository(domain=domain)
+        twin._cache, twin._ready = self._cache, self._ready
+        return twin
+
     @contextmanager
     def connect(self):
         path = self.path

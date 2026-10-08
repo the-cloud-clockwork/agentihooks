@@ -17,8 +17,8 @@ import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
-from tests.swarm_ledger.test_swarm_panel import STATUS, function_source  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.test_swarm_panel import STATUS, function_source  # noqa: E402
 
 SLUG = "doctor-controls"
 
