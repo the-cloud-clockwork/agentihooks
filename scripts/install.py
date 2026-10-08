@@ -84,7 +84,7 @@ import textwrap
 from collections.abc import Callable, Sequence
 from copy import deepcopy
 from datetime import datetime, timezone
-from importlib import metadata
+from importlib import import_module, metadata
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import url2pathname
@@ -6390,6 +6390,15 @@ def _crew_doctor(argv: list[str]) -> bool:
     return argv[2] in COMMANDS
 
 
+_PASSTHROUGH = {
+    "msg": "scripts.inbox.cli",
+    "trace": "scripts.trace_cli",
+    "deps": "scripts.deps_preflight",
+    "quota": "scripts.agents_quota",
+    "plan": "scripts.swarm_ledger.plan_read",
+}
+
+
 def main() -> None:
     _argv = sys.argv[1:]
     if _argv[:1] == ["enforcement"] and "--local" in _argv[2:]:
@@ -6433,14 +6442,8 @@ def main() -> None:
         from scripts.doctor.cli import main as doctor_main
 
         raise SystemExit(doctor_main(_argv[1:]))
-    if _argv and _argv[0] == "msg":
-        from scripts.inbox.cli import main as msg_main
-
-        raise SystemExit(msg_main(_argv[1:]))
-    if _argv and _argv[0] == "trace":
-        from scripts.trace_cli import main as trace_main
-
-        raise SystemExit(trace_main(_argv[1:]))
+    if _argv and _argv[0] in _PASSTHROUGH:
+        raise SystemExit(import_module(_PASSTHROUGH[_argv[0]]).main(_argv[1:]))
     if _argv and _argv[0] == "classify":
         from hooks.classifier import cli as classifier_cli
 
@@ -6453,14 +6456,6 @@ def main() -> None:
         from scripts.select_profile import dispatch
 
         raise SystemExit(dispatch(_argv))
-    if _argv and _argv[0] == "deps":
-        from scripts.deps_preflight import main as deps_main
-
-        raise SystemExit(deps_main(_argv[1:]))
-    if _argv and _argv[0] == "quota":
-        from scripts.agents_quota import main as quota_main
-
-        raise SystemExit(quota_main(_argv[1:]))
     if _argv and _argv[0] == "skill":
         from scripts.skill_eval import main as skill_eval_main
 
@@ -6630,6 +6625,7 @@ def main() -> None:
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",
     )
     sub.add_parser("msg", help="Durable messages between sessions: send|inbox|read|close")
+    sub.add_parser("plan", help="Read only your task's plan chunk: read [--task ID] [--phase ID]")
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"
     )

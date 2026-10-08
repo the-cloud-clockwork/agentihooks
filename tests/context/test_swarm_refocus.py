@@ -5,6 +5,7 @@ import pytest
 import hooks.context.swarm_refocus as refocus
 from hooks import hook_manager
 from hooks.targets.emitter import flush
+from scripts.swarm_ledger import plan_read
 
 OBLIGATIONS = (
     "Master obligations: Troubleshoot with read only diagnostics, plan with the operator, "
@@ -99,6 +100,17 @@ def test_the_block_carries_overview_phase_and_task_intent():
 
 def test_an_unknown_task_builds_nothing():
     assert refocus.build_block(LEDGER, "zz", 1500) == ""
+
+
+def test_the_block_names_the_plan_read_command_for_a_sliced_task_within_the_cap():
+    task = {"id": "s1", "phase": "p1", "title": "Slice", "plan_lines": "4-9", "description": "x" * 3000}
+    block = refocus.build_block({**LEDGER, "tasks": [task]}, "s1", 1500)
+    assert plan_read.pointer(task) in block.splitlines()
+    assert len(block) <= 1500
+
+
+def test_the_block_of_a_task_without_plan_lines_says_nothing_about_plan_read():
+    assert plan_read.COMMAND not in refocus.build_block(LEDGER, "i1", 1500)
 
 
 def test_the_block_stays_under_the_cap_with_a_long_description():
