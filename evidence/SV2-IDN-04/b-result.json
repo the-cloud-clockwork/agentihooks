@@ -1,5 +1,5 @@
 {
-  "tested_commit": "5700e3252b9665b3c4a9c23ea964b84bde4d44f1",
+  "tested_commit": "a1fd5937638e411c367e9591ca9b230edabfb293",
   "evidence_class": "local isolated fixture on an in-memory Redis with a fake clock; not live rollout proof",
   "then": "changing a body field to another task or brain fails authorization before any registry write",
   "results": {
