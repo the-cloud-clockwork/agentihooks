@@ -1,6 +1,6 @@
 import { OFFLINE, PAGE, SYNC_COOLDOWN_MS } from "./config.js";
 import { $, banner, newId, span, status } from "./dom.js";
-import { writeLedger } from "./api.js";
+import { readMetadata, writeLedger } from "./api.js";
 import { applyChecks, applyOp, itemOf, lsRead, lsWrite, setState, withDefaults } from "./state.js";
 import { attaching } from "./media.js";
 import { composing, editing } from "./threads.js";
@@ -15,9 +15,9 @@ let rev = -1;
 export let ops = [];
 export let checks = {};
 let inflight = false;
-let seedBroken = false;
 let streamed = null;
-let tails = {};
+let firstState;
+export const loaded = new Promise((done) => { firstState = done; });
 
 function lastSync(kind) {
   return [...(meta.events || [])].reverse().find((e) => e.kind === kind);
@@ -102,9 +102,10 @@ function applyServer(server) {
   doc = withDefaults(server);
   for (const op of ops) applyOp(doc, op);
   applyChecks(doc);
-  banner([seedBroken && "This page's embedded copy was unreadable; showing the server's copy.", meta.seed_error]);
+  banner([meta.seed_error]);
   render();
   lsWrite();
+  firstState();
 }
 
 export async function flush(unloading) {
@@ -131,7 +132,7 @@ export async function flush(unloading) {
   } finally {
     inflight = false;
   }
-  if (streamed && streamed._meta.rev >= rev) applyServer(withTails(streamed));
+  if (streamed && streamed._meta.rev >= rev) applyServer(streamed);
   if (!unloading && (ops.length || Object.keys(checks).length) && $("status").className === "status") flush(false);
 }
 
@@ -144,10 +145,6 @@ function staleAndIdle(version) {
     sessionStorage.setItem("ledger-reloaded", version);
   } catch (e) { /* storage blocked: reload once per load below */ }
   return true;
-}
-
-function withTails(state) {
-  return { ...state, tasks: (state.tasks || []).map((t) => (t.workspace ? { ...t, workspace_tail: tails[t.id] || {} } : t)) };
 }
 
 export function resume() {
@@ -163,25 +160,28 @@ export function receiveLedger(state) {
   streamed = state;
   if (inflight) return;
   if (staleAndIdle(state._meta.page_version)) return location.reload();
-  applyServer(withTails(state));
+  applyServer(state);
   resume();
 }
 
-export function receiveTails(next) {
-  tails = next || {};
-  if (streamed && !inflight && streamed._meta.rev >= rev) applyServer(withTails(streamed));
-}
-
-export function loadSeed() {
-  let seed = null;
-  try { seed = JSON.parse(document.getElementById("ledger-data").textContent); } catch (e) { seedBroken = true; }
+export function loadSaved() {
   const saved = lsRead();
-  doc = withDefaults(seed || (saved && saved.doc));
+  doc = withDefaults(saved && saved.doc);
   if (saved) {
     ops = Array.isArray(saved.ops) ? saved.ops : [];
     checks = saved.checks && typeof saved.checks === "object" ? saved.checks : {};
     for (const op of ops) applyOp(doc, op);
     applyChecks(doc);
   }
-  if (seedBroken) banner(["This page's embedded copy was unreadable; loading the server's copy."]);
+}
+
+export async function loadMetadata() {
+  try {
+    const resp = await readMetadata();
+    if (!resp.ok || rev >= 0) return;
+    const { data } = await resp.json();
+    if (rev >= 0) return;
+    Object.assign(doc, { title: data.title || doc.title, overview: data.overview || doc.overview });
+    render();
+  } catch (e) { return; }
 }

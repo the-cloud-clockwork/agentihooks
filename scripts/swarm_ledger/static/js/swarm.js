@@ -170,6 +170,7 @@ export function renderSwarm(sw) {
     sw && (openFindings(sw).length || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null].filter(Boolean));
   renderGates(sw);
   renderControls();
+  if ($("swarm").hidden) return renderStats();
   if (!sw) {
     $("swarm-agents").replaceChildren(emptyRow(8, "No agents running. Start the swarm to work the open tasks."));
     return;

@@ -1,6 +1,7 @@
 import argparse
 
 import pytest
+from playwright.sync_api import expect
 
 from scripts.swarm import cli, command_runner
 from tests.inbox.test_wake import FakeHerdr
@@ -25,14 +26,12 @@ def test_page_keeps_pending_and_acknowledged_control_states(remote_server, monke
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(url + "/sw#swarm")
         page.locator('[data-swarm="pause"]').click()
-        page.wait_for_function(
-            "document.querySelector('#swarm-note').textContent === 'Pause: pending, waiting for the hive tick'"
-        )
+        expect(page.locator("#swarm-note")).to_have_text("Pause: pending, waiting for the hive tick")
         page.locator("#command-log summary").click()
         page.screenshot(path=str(tmp_path / "pending.png"))
         assert request("GET")["commands"][0]["state"] == "pending"
         cli.run_tick(saved, "sw", ledger, FakeRuntime(), FakeHerdr({}))
         page.reload()
-        page.wait_for_function("document.querySelector('#swarm-note').textContent === 'Pause: acknowledged'")
+        expect(page.locator("#swarm-note")).to_have_text("Pause: acknowledged")
         page.screenshot(path=str(tmp_path / "acknowledged.png"))
         assert errors == []
