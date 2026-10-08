@@ -18,13 +18,14 @@ STAMP = ".agentihooks-render.json"
 SETTINGS = ("hooks", "model", "effort")
 WORDS = {
     "joined": "joining the ledger and holding its seat",
+    "late": "joining the ledger within a minute of its session start",
     "profile": "its profile",
     "settings": "its hooks, model and effort",
     "base": "its role on the package base role",
     "overlay": "every overlay its profile declares",
     "name": "its name",
 }
-REPORT_ONLY = frozenset()
+REPORT_ONLY = frozenset({"late"})
 OUTCOMES = {
     "relaunch": "It is being retired and relaunched once.",
     "spent": "Its one automatic relaunch is spent; operator action is required.",
@@ -86,6 +87,10 @@ def launched_at(agent: AgentRecord) -> int:
     return agent.launched_at or agent.started_at
 
 
+def session_started_at(agent: AgentRecord) -> int:
+    return max(launched_at(agent), agent.launch_timings.get("harness_at", launched_at(agent)))
+
+
 def _joined(store, agent, doc, started_at):
     joined = joined_at(agent, doc)
     seated = bool(agent.seat) and store.seats.seat_of(agent.name) == agent.seat
@@ -95,7 +100,8 @@ def _joined(store, agent, doc, started_at):
         "joined_after_ms": None if joined is None else joined - started_at,
         "seat": store.seats.seat_of(agent.name),
     }
-    return {"joined": {"expected": {"joined_within_ms": DEADLINE_MS, "seat": agent.seat}, "actual": actual}}
+    field = "late" if joined is not None and seated else "joined"
+    return {field: {"expected": {"joined_within_ms": DEADLINE_MS, "seat": agent.seat}, "actual": actual}}
 
 
 def _process(agent, facts):
@@ -141,7 +147,7 @@ def misses(
     store: RedisStore, slug: str, agent: AgentRecord, facts: dict, doc: dict, on_bundle: bool, declared: list[str]
 ) -> dict:
     return {
-        **_joined(store, agent, doc, launched_at(agent)),
+        **_joined(store, agent, doc, session_started_at(agent)),
         **_process(agent, facts),
         **_base(agent, facts, on_bundle),
         **_overlays(facts, declared),
@@ -157,7 +163,7 @@ def record(
         "task": agent.task,
         "at": at,
         "elapsed_ms": elapsed_ms,
-        "state": "failed" if found else "passed",
+        "state": "passed" if not found else "reported" if set(found) <= REPORT_ONLY else "failed",
         "misses": found,
         "held": held,
     }

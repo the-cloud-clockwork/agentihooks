@@ -601,7 +601,9 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
         profile_decision={**decision, "validation": placed.profile_decision["validation"]},
         choice="share",
         launched_at=7_000,
+        launch_timings=placed.launch_timings,
     )
+    assert (placed.launch_timings["launched_at"], placed.launch_timings["returned_at"]) == (7_000, 7_000)
     assert placed.profile_decision["validation"]["state"] == "validated"
     assert seen[0][1:4] == ["init-agent", "--host", "herdr"]
     assert seen[0][seen[0].index("--name") + 1 : seen[0].index("--name") + 4] == ["ci@a1b2c3-0001", "--agent", "codex"]
