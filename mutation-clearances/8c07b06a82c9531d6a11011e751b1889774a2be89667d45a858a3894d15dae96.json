@@ -1,0 +1,6 @@
+{
+  "80f04a0eb5b71773029790296ad5558d42709528f7ef55052bcb2a727d4153a2": {
+    "reader": "Standards reader of pull request 1740",
+    "reason": "EQUIVALENT. The mutant changes ensure_ascii=False to ensure_ascii=None in the ledger sync dump. JSONEncoder tests ensure_ascii only for truthiness, so None and False give identical bytes. Probe: a document with non-ASCII text, a line separator, a tab and a quote was dumped under False, None and 0; False and None produced identical bytes, True escaped the text."
+  }
+}

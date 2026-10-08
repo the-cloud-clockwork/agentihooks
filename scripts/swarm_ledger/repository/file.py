@@ -26,12 +26,15 @@ class Synced(NamedTuple):
 SYNCED: dict[Path, Synced] = {}
 
 
+def stamp(stat):
+    return stat.st_ino, stat.st_mtime_ns, stat.st_size
+
+
 def signature(path):
     try:
-        stat = path.stat()
+        return stamp(path.stat())
     except FileNotFoundError:
         return None
-    return stat.st_ino, stat.st_mtime_ns, stat.st_size
 
 
 def cached_text(html_path, json_path, reconcile, core=core):
@@ -118,8 +121,9 @@ def sync(slug, changes=None, ops=None, gate=None, core=core):
         text = json.dumps(state, indent=2, ensure_ascii=False) + "\n"
         core.write_if_changed(json_path, text)
         stored = signature(json_path)
-        if seed is not None and core.rewrite_seed(html_path, html, doc, meta["rev"]):
-            page = signature(html_path)
+        written = None if seed is None else core.rewrite_seed(html_path, html, doc, meta["rev"])
+        if written is not None:
+            page = stamp(written)
         shadow.persist(core.LEDGER_DIR, slug, state)
         SYNCED[json_path] = Synced(page, stored, ctx.at // SWEEP_MS, text)
         return state, rejected

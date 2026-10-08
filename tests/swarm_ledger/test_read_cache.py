@@ -108,6 +108,22 @@ def test_a_page_edit_landing_while_a_sync_runs_is_folded_in_on_the_next_read(rep
     assert repo.get_document(SLUG)["title"] == "Racing"
 
 
+def test_a_page_edit_landing_right_after_the_seed_rewrite_is_folded_in_on_the_next_read(repo, monkeypatch):
+    html_path = core.paths(SLUG)[0]
+    atomic_write = core.atomic_write
+
+    def edit_after_rewrite(path, text):
+        written = atomic_write(path, text)
+        if path == html_path:
+            html_path.write_text(text.replace('"title": "Cached"', '"title": "Racer"', 1), encoding="utf-8")
+        return written
+
+    monkeypatch.setattr(core, "atomic_write", edit_after_rewrite)
+    repo.apply_ops(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m4", "text": "fourth"}])
+    monkeypatch.setattr(core, "atomic_write", atomic_write)
+    assert repo.get_document(SLUG)["title"] == "Racer"
+
+
 def test_a_read_without_reconcile_does_not_fold_a_page_edit(repo, loads):
     html_path = core.paths(SLUG)[0]
     html = html_path.read_text(encoding="utf-8")
