@@ -15,7 +15,7 @@ def ledger_dir(environ: Mapping[str, str]) -> Path:
 
 def binned(folder: Path) -> set[str]:
     try:
-        found = json.loads((folder / ".bin.json").read_text(encoding="utf-8"))
+        found = json.loads((folder / ".bin.json").read_bytes())
     except (OSError, ValueError):
         return set()
     return {slug for slug, at in found.items() if isinstance(at, int)} if isinstance(found, dict) else set()
@@ -50,7 +50,7 @@ def reindex(store: RecallStore, folder: Path, home: Path, slugs: list[str], incl
             continue
         swarm_slug = slug if (home / "swarm" / slug).is_dir() else ""
         try:
-            document = json.loads((folder / f"{slug}.json").read_text(encoding="utf-8"))
+            document = json.loads((folder / f"{slug}.json").read_bytes())
             records = extract_ledger(slug, document, swarm_slug=swarm_slug)
             deleted = deleted_refs(document)
         except (OSError, ValueError, AttributeError, KeyError, TypeError):

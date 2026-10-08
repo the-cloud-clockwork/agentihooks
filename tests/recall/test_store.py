@@ -104,6 +104,17 @@ def test_a_record_dropped_by_retention_stays_archived_and_searchable(store):
     assert store.sync("ledger/demo", [record("chat/m2", kind="chat")]) == SyncCounts(unchanged=1)
 
 
+def test_every_record_missing_from_a_read_is_counted_archived(store):
+    store.sync("ledger/demo", [record("chat/m1", kind="chat"), record("chat/m2", kind="chat")])
+    assert store.sync("ledger/demo", []) == SyncCounts(archived=2)
+
+
+def test_the_store_creates_its_missing_folders(tmp_path):
+    path = tmp_path / "home" / "recall" / "recall.sqlite3"
+    SQLiteRecallStore(path)
+    assert path.is_file()
+
+
 def test_an_archived_record_seen_again_is_present(store):
     store.sync("ledger/demo", [record("chat/m1")])
     store.sync("ledger/demo", [])

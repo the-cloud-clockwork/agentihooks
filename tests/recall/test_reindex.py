@@ -1,4 +1,5 @@
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -170,6 +171,40 @@ def test_agentihooks_dispatches_recall(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         install.main()
     assert (exc.value.code, seen) == (0, [["reindex", "--all"]])
+
+
+def test_agentihooks_help_lists_recall(monkeypatch, capsys):
+    import scripts.install as install
+
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr("sys.argv", ["agentihooks", "--help"])
+    with pytest.raises(SystemExit):
+        install.main()
+    assert re.search(r"\n +recall +Recall archive of ledgers and swarms: reindex\n", capsys.readouterr().out)
+
+
+def test_help_names_the_command_and_its_options(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "200")
+    with pytest.raises(SystemExit):
+        main(["--help"], {})
+    top = capsys.readouterr().out
+    assert top.startswith("usage: agentihooks recall [-h] {reindex} ...\n")
+    assert "\nRecall archive of ledgers and swarms\n" in top
+    assert re.search(r"\n +reindex +Backfill the recall archive from ledger files\n", top)
+    with pytest.raises(SystemExit):
+        main(["reindex", "--help"], {})
+    sub = capsys.readouterr().out
+    assert sub.startswith("usage: agentihooks recall reindex [-h] (--ledger SLUG | --all) [--include-binned]\n")
+    assert re.search(r"\n  --ledger SLUG +Index one ledger\n", sub)
+    assert re.search(r"\n  --all +Index every ledger file\n", sub)
+    assert re.search(r"\n  --include-binned +Also index ledgers in the bin\n", sub)
+
+
+def test_a_command_is_required(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main([], {})
+    assert exc.value.code == 2
+    assert "the following arguments are required: command" in capsys.readouterr().err
 
 
 def test_reindex_requires_a_target(capsys):
