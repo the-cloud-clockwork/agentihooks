@@ -290,3 +290,141 @@ def test_tick_lock_conflicts_fail_closed(store, monkeypatch):
     assert lease.release(store, "sw", held) is False
     store.redis.delete(store.key("sw", "tick-lock"))
     assert controller.take_tick_lock(store, "sw", held, 10000) is None
+
+
+def test_bind_and_explicit_command_epoch_and_unbound_command(store):
+    from scripts.swarm import lease
+
+    unbound = commands.submit(store, "sw", "swarm", ["pause"])
+    assert unbound["epoch"] == 0
+    assert commands.bind(store, "sw", "home") is True
+    assert commands.bind(store, "sw", "other") is False
+    held = lease.current(store, "sw")
+    sent = commands.submit(store, "sw", "swarm", ["pause"], epoch=held.epoch)
+    assert sent["epoch"] == 1
+
+
+def test_legacy_queued_command_is_stamped_with_current_epoch(store):
+    import json
+
+    from scripts.swarm import lease
+
+    held = lease.acquire(store, "sw", "home")
+    sent = commands.submit(store, "sw", "swarm", ["pause"])
+    row = dict(sent)
+    del row["epoch"]
+    store.redis.hset(store.key("sw", "commands"), sent["id"], json.dumps(row))
+    assert lease.release(store, "sw", held)
+    current = lease.acquire(store, "sw", "home")
+    assert current.epoch == 2
+    seen = []
+    assert commands.consume(store, "sw", "home", lambda record: seen.append(dict(record)) or "") == [
+        "control swarm acknowledged"
+    ]
+    assert seen[0]["epoch"] == 2
+    assert seen[0]["state"] == "accepted"
+
+
+def test_fenced_adapters_preserve_arguments_and_refuse_disabled_spawn(store):
+    from types import SimpleNamespace
+
+    from scripts.swarm import controller, lease
+    from scripts.swarm.store import SwarmError
+
+    held = lease.acquire(store, "sw", "home")
+    calls = []
+    ledger = SimpleNamespace(update_task=lambda *args, **kwargs: calls.append((args, kwargs)) or "accepted")
+    guarded = controller.FencedLedger(store, "sw", held, ledger)
+    assert guarded.update_task("sw", "t", {"state": "claimed"}, if_state=("open",)) == "accepted"
+    assert calls == [(("sw", "t", {"state": "claimed"}), {"if_state": ("open",)})]
+    config = store.config("sw")
+    receiver = SimpleNamespace(
+        has_capacity=lambda saved: False,
+        spawn=lambda *args: calls.append(args) or "placed",
+    )
+    enabled = controller.FencedRuntime(store, "sw", held, receiver, True)
+    assert enabled.has_capacity(config) is False
+    assert enabled.spawn(config, "eng", "one", {"id": "t"}) == "placed"
+    assert calls[-1] == (config, "eng", "one", {"id": "t", "controller_epoch": 1})
+    disabled = controller.FencedRuntime(store, "sw", held, receiver, False)
+    with pytest.raises(SwarmError) as error:
+        disabled.spawn(config, "eng", "one", {"id": "t"})
+    assert str(error.value) == "controller spawning is disabled in this deployment mode"
+
+
+@pytest.mark.parametrize("operand", ["tick-lock", "control-owner"])
+def test_tick_lock_detects_writes_interleaved_with_acquisition(store, monkeypatch, operand):
+    import json
+
+    from scripts.swarm import controller, lease
+
+    held = lease.acquire(store, "sw", "home")
+    pipeline = store.redis.pipeline
+    value = json.dumps(
+        {"epoch": 1, "token": "other tick"}
+        if operand == "tick-lock"
+        else {"owner": "other", "epoch": 2, "expires_at": held.expires_at}
+    )
+
+    def interleaved_pipeline():
+        pipe = pipeline()
+        execute = pipe.execute
+
+        def commit():
+            store.redis.set(store.key("sw", operand), value, px=180000)
+            return execute()
+
+        pipe.execute = commit
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", interleaved_pipeline)
+    assert controller.take_tick_lock(store, "sw", held, 10000) is None
+    assert store.redis.get(store.key("sw", operand)) == value
+
+
+def test_run_once_passes_the_supplied_tick_interfaces(store, monkeypatch):
+    from scripts.swarm import controller
+
+    ledger, runtime, messenger = object(), object(), object()
+    calls = []
+    monkeypatch.setattr(cli, "run_tick", lambda *args: calls.append(args) or ["done"])
+    assert controller.run_once(store, ledger, runtime, messenger) == {"sw": ["done"]}
+    assert calls == [(store, "sw", ledger, runtime, messenger)]
+
+
+def test_runtime_spawn_carries_epoch_to_launch_receiver(store, monkeypatch, tmp_path):
+    from scripts.swarm import runtime
+    from scripts.swarm.store import SwarmError
+
+    receiver = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "open"))
+    config = store.update("sw", repo=str(tmp_path))
+    captured = []
+
+    def launch(*args, **kwargs):
+        captured.append(kwargs)
+        raise SwarmError("launch reached")
+
+    monkeypatch.setattr(receiver, "_launch", launch)
+    with pytest.raises(SwarmError) as error:
+        receiver.spawn(config, "eng", "one", {"id": "t", "title": "Work", "controller_epoch": 7})
+    assert str(error.value) == "launch reached"
+    assert captured[0]["controller_epoch"] == 7
+
+
+def test_launch_receiver_accepts_the_current_epoch(store, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from scripts.swarm import lease, runtime
+    from scripts.swarm.store import SwarmError
+
+    held = lease.acquire(store, "sw", "home")
+    monkeypatch.setattr(runtime, "connect", lambda: store)
+
+    def launch(*args, **kwargs):
+        raise SwarmError("launch reached")
+
+    receiver = runtime.HerdrRuntime(home=tmp_path, run=launch)
+    config = SimpleNamespace(slug="sw", autonomy="delegate", compact_limit=0)
+    with pytest.raises(SwarmError) as error:
+        receiver._launch(config, "eng", "t", "one", ["--agent", "claude"], controller_epoch=held.epoch)
+    assert str(error.value) == "launch reached"

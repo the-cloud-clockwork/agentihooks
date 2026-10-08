@@ -115,7 +115,7 @@ def test_clock_skew_does_not_expire_the_redis_lease(store, monkeypatch):
 
 
 def test_redis_time_is_converted_to_milliseconds(store, monkeypatch):
-    monkeypatch.setattr(store.redis, "time", lambda: (2, 234567))
+    monkeypatch.setattr(store.redis, "time", lambda: (2, 234000))
     assert lease.now_ms(store) == 2234
 
 
@@ -217,3 +217,97 @@ def test_epoch_scope_resets_after_failure():
             assert lease.EPOCH.get() == 17
             raise SwarmError("failed")
     assert lease.EPOCH.get() is None
+
+
+def test_epoch_counter_uses_the_existing_swarm_key(store):
+    store.redis.set(store.key("sw", "control-epoch"), 7)
+    held = lease.acquire(store, "sw", "home")
+    assert held.epoch == 8
+    assert store.redis.get(store.key("sw", "control-epoch")) == "8"
+    other = lease.acquire(store, "other", "home")
+    assert other.epoch == 1
+
+
+def test_require_epoch_accepts_current_and_refuses_absent(store):
+    held = lease.acquire(store, "sw", "home")
+    assert lease.require_epoch(store, "sw", held.epoch) is None
+    with pytest.raises(SwarmError) as error:
+        lease.require_epoch(store, "absent", held.epoch)
+    assert str(error.value) == "the controller lease is stale"
+
+
+@pytest.mark.parametrize("operand", ["control-owner", "control-epoch"])
+def test_takeover_transaction_watches_both_lease_keys(store, monkeypatch, operand):
+    pipeline = store.redis.pipeline
+    raced = []
+
+    def interleaved_pipeline():
+        pipe = pipeline()
+        execute = pipe.execute
+
+        def commit():
+            if not raced:
+                raced.append(True)
+                value = (
+                    7
+                    if operand == "control-epoch"
+                    else json.dumps({"owner": "other", "epoch": 7, "expires_at": lease.now_ms(store) + 180000})
+                )
+                store.redis.set(store.key("sw", operand), value, px=180000)
+            return execute()
+
+        pipe.execute = commit
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", interleaved_pipeline)
+    held = lease.acquire(store, "sw", "home")
+    if operand == "control-epoch":
+        assert held.epoch == 8
+    else:
+        assert held is None
+        assert lease.current(store, "sw").owner == "other"
+
+
+def test_controller_without_a_lease_prints_empty_status(store, monkeypatch, capsys):
+    from scripts.swarm import cli
+    from scripts.swarm.store import SwarmConfig
+
+    store.create(SwarmConfig("sw", ".", 0, 0))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "operator")
+    assert cli.main(["sw", "controller"]) == 0
+    assert capsys.readouterr().out == '{"owner": "", "epoch": 0, "expires_at": 0}\n'
+    with pytest.raises(SystemExit) as error:
+        cli.build_parser().parse_args(["sw", "controller", "invalid"])
+    assert error.value.code == 2
+
+
+def test_controller_rejects_unknown_actions_with_its_own_usage(capsys, monkeypatch):
+    from scripts.swarm import controller
+
+    monkeypatch.setattr(controller, "connect", lambda: pytest.fail("unknown action must refuse before connecting"))
+    with pytest.raises(SystemExit) as error:
+        controller.main(["invalid"])
+    assert error.value.code == 2
+    text = capsys.readouterr().err
+    assert text in (
+        "usage: agentihooks controller [-h] [--once] {run}\n"
+        "agentihooks controller: error: argument action: invalid choice: 'invalid' (choose from 'run')\n",
+        "usage: agentihooks controller [-h] [--once] {run}\n"
+        "agentihooks controller: error: argument action: invalid choice: 'invalid' (choose from run)\n",
+    )
+
+
+def test_controller_loads_the_environment_and_flushes_actions(store, monkeypatch):
+    from scripts import operator_env
+    from scripts.swarm import controller
+
+    calls = []
+    monkeypatch.setattr(operator_env, "fill", lambda env: calls.append(env))
+    monkeypatch.setattr(controller, "connect", lambda: store)
+    monkeypatch.setattr(controller, "run_once", lambda saved: {"sw": ["worked"]})
+    printed = []
+    monkeypatch.setattr("builtins.print", lambda *args, **kwargs: printed.append((args, kwargs)))
+    assert controller.main(["run", "--once"]) == 0
+    assert calls == [controller.os.environ]
+    assert printed == [(("sw: worked",), {"flush": True})]

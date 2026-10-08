@@ -365,3 +365,113 @@ def test_takeover_before_repository_write_refuses_stale_controller(crew, monkeyp
         controller.FencedLedger(saved, SLUG, held, LedgerClient()).say(SLUG, "Stale controller write", by="swarm")
     assert "the controller lease is stale" in str(error.value)
     assert all(row["text"] != "Stale controller write" for row in LedgerClient().chat(SLUG))
+
+
+def test_epoch_authority_accepts_current_and_refuses_stale(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import lease
+    from scripts.swarm.store import RedisStore
+
+    saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    held = lease.acquire(saved, SLUG, "home")
+    monkeypatch.setattr(authority, "connect", lambda: saved)
+    assert authority.fence(SLUG, held.epoch) is None
+    with pytest.raises(SwarmError) as error:
+        authority.fence(SLUG, held.epoch + 1)
+    assert str(error.value) == "the controller lease is stale"
+
+
+@pytest.mark.parametrize("epoch", [0, -1, None, "1", 1.5, True])
+def test_controller_epoch_schema_rejects_invalid_epochs(epoch):
+    from scripts.swarm_ledger.api import schemas
+    from scripts.swarm_ledger.api.errors import APIError
+
+    op = {"op": "add", "id": "one", "thread": "chat", "text": "Write", "controller_epoch": epoch}
+    with pytest.raises(APIError) as error:
+        schemas.validate(schemas.operation_schema("add"), op)
+    assert error.value.status == 400
+    assert error.value.code == "schema_invalid"
+
+
+def test_controller_epoch_schema_accepts_one_and_binds_operation_kind():
+    from scripts.swarm_ledger.api import schemas
+    from scripts.swarm_ledger.api.errors import APIError
+
+    op = {"op": "add", "id": "one", "thread": "chat", "text": "Write", "controller_epoch": 1}
+    assert schemas.validate(schemas.operation_schema("add"), op) is None
+    op["op"] = "clear"
+    with pytest.raises(APIError) as error:
+        schemas.validate(schemas.operation_schema("add"), op)
+    assert error.value.status == 400
+
+
+def test_domain_validation_receives_operations_without_controller_metadata():
+    from types import SimpleNamespace
+
+    from scripts.swarm_ledger.api import schemas
+
+    seen = []
+    op = {"op": "add", "id": "one", "thread": "chat", "text": "Write", "controller_epoch": 1}
+    payload = {"operation_id": "one", "ops": [op], "guards": {"chat": "0" * 64}}
+    core = SimpleNamespace(check_body=lambda body, task_ids: seen.append((body, task_ids)))
+    assert schemas.check_operations(payload, core, ()) == [op]
+    assert seen == [({"ops": [{"op": "add", "id": "one", "thread": "chat", "text": "Write"}]}, ())]
+
+
+def _epoch_mutation_server(rejected):
+    from types import SimpleNamespace
+
+    from scripts.swarm_ledger.api import resources
+
+    doc = {"chat": [], "tasks": [], "_meta": {"rev": 1, "warnings": []}}
+    ctx = SimpleNamespace(meta={}, dirty=False)
+    seen = []
+
+    def fence(slug, epoch):
+        assert slug == "sw"
+        assert epoch == 1
+        seen.append((slug, epoch))
+        if rejected:
+            raise SwarmError("the controller lease is stale")
+
+    def apply_ops(slug, ops, gate):
+        assert slug == "sw"
+        refused = [op["id"] for op in ops if not gate.apply(doc, op, ctx, None)]
+        return doc, refused
+
+    server = SimpleNamespace(
+        repository=SimpleNamespace(get_document=lambda *args, **kwargs: doc, apply_ops=apply_ops),
+        authority=SimpleNamespace(refusal=lambda *args: "", fence=fence),
+        core=SimpleNamespace(check_body=lambda *args: None),
+        talk=SimpleNamespace(Budget=lambda slug: SimpleNamespace(apply=lambda *args: True)),
+        ledger_media=SimpleNamespace(resolve=lambda *args: None),
+        ledger_artifacts=SimpleNamespace(resolve=lambda *args: None),
+        relay_to_inbox=lambda *args: None,
+        doctor_phrase=lambda *args: None,
+    )
+    op = {"op": "add", "id": "one", "by": "swarm", "thread": "chat", "text": "Write", "controller_epoch": 1}
+    payload = {"operation_id": "one", "ops": [op], "guards": {"chat": resources.resource_revision(doc, "chat")}}
+    return server, payload, seen
+
+
+def test_mutation_receiver_checks_epoch_before_and_after_domain_apply():
+    from scripts.swarm_ledger.api import mutations
+
+    server, payload, seen = _epoch_mutation_server(False)
+    reply = mutations.apply(server, "sw", "", payload)
+    assert seen == [("sw", 1), ("sw", 1)]
+    assert reply == {"applied": ["one"], "rejected": [], "_meta": {"rev": 1, "warnings": []}}
+
+
+def test_mutation_receiver_returns_exact_stale_epoch_error():
+    from scripts.swarm_ledger.api import mutations
+    from scripts.swarm_ledger.api.errors import APIError
+
+    server, payload, seen = _epoch_mutation_server(True)
+    with pytest.raises(APIError) as error:
+        mutations.apply(server, "sw", "", payload)
+    assert seen == [("sw", 1)]
+    assert error.value.status == 409
+    assert error.value.code == "stale_controller"
+    assert error.value.envelope() == {"error": {"code": "stale_controller", "message": "the controller lease is stale"}}
