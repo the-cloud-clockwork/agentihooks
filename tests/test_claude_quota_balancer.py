@@ -244,6 +244,7 @@ def test_selection_fails_closed_when_every_account_is_draining(monkeypatch, tmp_
         balancer.select_credential(
             {"AH_CC_TOKEN_ALPHA": "secret"},
             cache_file=tmp_path / "cache.json",
+            now=1000,
         )
     except balancer.RoutingError as exc:
         assert exc.results == [result]
@@ -259,11 +260,12 @@ def test_selection_floor_is_five_percent_routing_left(monkeypatch, tmp_path):
     decision = balancer.select_credential(
         {"AH_CC_TOKEN_FLOOR": "floor-secret", "AH_CC_TOKEN_UNDER": "under-secret"},
         cache_file=tmp_path / "cache.json",
+        now=1000,
     )
 
     assert decision.credential.env_name == "AH_CC_TOKEN_FLOOR"
     assert decision.result.state == "DRAIN"
-    assert not balancer.is_routable(under)
+    assert not balancer.is_routable(under, now=1000)
 
 
 def test_selection_returns_highest_routing_left(monkeypatch, tmp_path):
@@ -529,3 +531,56 @@ def test_reserve_account_below_the_cap_is_chosen_before_overflow(monkeypatch, tm
     assert pick({"BEST": 4, "MID": 2, "LOW": 0}).result.account == "MID"
     full = pick({"BEST": 4, "MID": 3, "LOW": 3})
     assert (full.result.account, full.placement) == ("MID", "overflow")
+
+
+NOW = 1_800_000_000
+
+
+def _today(account: str, five_used: float, week_left: float, week_hours: float) -> balancer.ProbeResult:
+    five = balancer.QuotaWindow(used=five_used, resets_at=NOW + 2 * 3600)
+    week = balancer.QuotaWindow(used=100 - week_left, resets_at=NOW + int(week_hours * 3600))
+    state, margin = balancer._state("allowed", five, week)
+    return balancer.ProbeResult(account, "allowed", state, margin, five, week)
+
+
+TODAY = [
+    _today("nchotma", 5, 8, 34.9),
+    _today("ncsmgma", 0, 4, 4.9),
+    _today("nctcc", 0, 12, 71.9),
+    _today("tccgma", 20, 19, 89.9),
+    _today("ncgma", 25, 93, 159.9),
+]
+
+
+def test_todays_accounts_rank_by_spendable_rate(monkeypatch, tmp_path):
+    ranked = [result.account for result in balancer.rank_results(TODAY, now=NOW)]
+    assert ranked == ["ncsmgma", "ncgma", "nchotma", "tccgma", "nctcc"]
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: (TODAY, "cached"))
+    environ = {f"AH_CC_TOKEN_{result.account}": "secret" for result in TODAY}
+    decision = balancer.select_credential(environ, cache_file=tmp_path / "cache.json", now=NOW)
+    assert decision.result.account == "ncsmgma"
+    full = balancer.select_credential(environ, cache_file=tmp_path / "cache.json", now=NOW, sessions={"ncsmgma": 3})
+    assert full.result.account == "ncgma"
+
+
+def test_a_long_spent_week_ranks_below_a_fresh_one():
+    fresh = _today("fresh", 0, 100, 168)
+    spent = _today("spent", 0, 19, 96)
+    assert [r.account for r in balancer.rank_results([spent, fresh], now=NOW)] == ["fresh", "spent"]
+
+
+def test_a_rejected_account_never_routes_and_spends_nothing():
+    rejected = balancer.ProbeResult("x", "rejected", "BLOCKED", 0.0, TODAY[1].five_hour, TODAY[1].seven_day)
+    assert balancer.spendable_rate(rejected, now=NOW) == 0.0
+    assert not balancer.is_routable(rejected, now=NOW)
+    assert balancer.window_state("rejected", rejected.five_hour, [rejected.seven_day], NOW) == "BLOCKED"
+
+
+def test_the_table_shows_each_accounts_pace_state_and_spend_rate():
+    table = balancer.render_table(TODAY, now=NOW)
+    rows = {line.split()[1]: line.split() for line in table.splitlines()[2:]}
+    assert table.splitlines()[0].split()[3:6] == ["ROUTING", "LEFT", "SPEND/H"]
+    assert rows["ncsmgma"][:5] == ["1", "ncsmgma", "NORMAL", "4%", "0.82%"]
+    assert rows["tccgma"][2] == "REDUCE"
+    error = balancer._error_result("broken", "probe failed")
+    assert "ERROR" in balancer.render_table([error], now=NOW)

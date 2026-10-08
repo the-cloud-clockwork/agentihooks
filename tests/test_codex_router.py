@@ -181,3 +181,29 @@ def test_without_token_variables_codex_launches_as_today(monkeypatch, tmp_path):
     assert seen["cmd"] == ["/usr/bin/codex", "-m", "o3", "do it"]
     assert "CODEX_ACCESS_TOKEN" not in seen["env"]
     assert report.read_text() == "status=routed\naccount=default\nplacement=open\n"
+
+
+def test_codex_ranks_by_spendable_rate_and_admits_a_week_about_to_reset():
+    now, hour = 1_800_000_000, 3600
+
+    def quota(left, hours):
+        return CodexQuota(
+            observed_at=now,
+            plan_type="team",
+            five_hour=QuotaWindow(used=10, resets_at=now + hour),
+            seven_day=QuotaWindow(used=100 - left, resets_at=now + hours * hour),
+        )
+
+    pool = router.accounts(ENV, run=lambda *a, **k: subprocess.CompletedProcess(a, 0, "Logged in", ""))
+    quotas = {"default": quota(19, 96), "alpha": quota(100, 168), "beta": quota(4, 5)}
+    assert router.select(pool, quotas, {}, cap=3, now=now)[0].name == "beta"
+    assert router.select(pool, quotas, {"beta": 3}, cap=3, now=now)[0].name == "alpha"
+    assert router.select(pool, quotas, {"beta": 3, "alpha": 3}, cap=3, now=now)[0].name == "default"
+    quotas["beta"] = quota(4, 10)
+    assert [a.name for a in pool if router._admits(quotas[a.name], now)] == ["default", "alpha"]
+
+
+def test_a_codex_week_without_a_five_hour_reading_is_guarded_by_the_week():
+    weekly = CodexQuota(observed_at=0, plan_type="team", seven_day=QuotaWindow(used=16))
+    assert router.spendable_rate(weekly, 0) == pytest.approx(84 / 168)
+    assert router.spendable_rate(None, 0) is None

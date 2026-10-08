@@ -35,7 +35,7 @@ def accounts(environ: dict, now: float) -> list[Account]:
     results = []
     for result in observed.values():
         five, week = _window(result.five_hour, now), _window(result.seven_day, now)
-        state, _ = balancer._state(result.provider_status, five, week)
+        state = balancer.window_state(result.provider_status, five, [week], now)
         results.append(
             Account(
                 "claude",
@@ -66,7 +66,7 @@ def accounts(environ: dict, now: float) -> list[Account]:
         quota = quotas.get(account.name)
         five = _window(quota.five_hour, now) if quota else balancer.QuotaWindow()
         week = _window(quota.seven_day, now) if quota else balancer.QuotaWindow()
-        state, _ = balancer._state("allowed", five, week)
+        state = balancer.window_state("allowed", five, [week], now)
         results.append(
             Account(
                 "codex",
@@ -88,7 +88,7 @@ def free_seats(account: Account, cap: int, week_floor: float) -> int:
         return 0
     if account.state not in {"NORMAL", "REDUCE", "DRAIN_SOON"}:
         return 0
-    if account.state == "DRAIN_SOON" and min(account.five_left, account.week_left) < 20:
+    if account.state == "DRAIN_SOON" and account.five_left < 20:
         return 0
     cap = cap if account.cap is None else account.cap
     limit = cap // 2 if account.state == "REDUCE" else cap

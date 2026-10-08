@@ -975,3 +975,36 @@ def test_master_affinity_cannot_fall_back_when_its_account_has_no_quota(tmp_path
     with pytest.raises(SpawnError, match="^no codex account has placeable quota seats$"):
         runtime.spawn(config, "master", "master@a1b2c3-0001", {"id": "p", "title": "Master", "profile": "master"})
     assert seen == []
+
+
+def test_todays_accounts_get_seats_by_spendable_rate(monkeypatch):
+    now, hour = 1_800_000_000, 3600
+
+    def observed(name, five_used, week_left, week_hours):
+        five = balancer.QuotaWindow(used=five_used, resets_at=now + 2 * hour)
+        week = balancer.QuotaWindow(used=100 - week_left, resets_at=now + int(week_hours * hour))
+        return now, balancer.ProbeResult(name, "allowed_warning", "DRAIN", week_left, five, week)
+
+    today = [
+        observed("ncsmgma", 0, 4, 4.9),
+        observed("tccgma", 20, 19, 96),
+        observed("nctcc", 0, 10, 96),
+        observed("ncgma", 0, 100, 168),
+    ]
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: today)
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"ncgma": 1})
+    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    rows = {row.name: row for row in capacity.accounts({}, now)}
+    assert {name: row.state for name, row in rows.items()} == {
+        "ncsmgma": "NORMAL",
+        "tccgma": "REDUCE",
+        "nctcc": "DRAIN",
+        "ncgma": "NORMAL",
+    }
+    seats = {name: capacity.free_seats(row, 4, 5) for name, row in rows.items()}
+    assert seats == {"ncsmgma": 4, "tccgma": 2, "nctcc": 0, "ncgma": 3}
+
+
+def test_drain_soon_is_guarded_by_the_five_hour_window_only():
+    assert capacity.free_seats(capacity.Account("claude", "a", "DRAIN_SOON", 0, 20, 4), 3, 5) == 3
+    assert capacity.free_seats(capacity.Account("claude", "a", "DRAIN_SOON", 0, 19, 90), 3, 5) == 0
