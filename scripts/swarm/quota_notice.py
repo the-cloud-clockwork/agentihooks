@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import InboxStore, Item
 from scripts.swarm import capacity
 
 if TYPE_CHECKING:
@@ -11,8 +11,9 @@ if TYPE_CHECKING:
     from scripts.swarm.tick import Ledger, Runtime
 
 HURRY = "Your account has fifteen percent or less quota left. Finish the current step and push."
-HANDOFF = (
-    "Your account is at the quota handoff threshold. Commit, push, write the Handoff v2 document, "
+HANDOFF_OPENING = "Your account is at the quota handoff threshold."
+HANDOFF = HANDOFF_OPENING + (
+    " Commit, push, write the Handoff v2 document, "
     "then run agentihooks swarm {slug} handoff <doc> --reason quota and stop. "
     "A successor on another account will take your seat."
 )
@@ -25,6 +26,10 @@ def level(account: dict) -> str:
     if (five is not None and five <= 15) or (week is not None and week <= 15):
         return "hurry"
     return ""
+
+
+def is_notice(item: Item) -> bool:
+    return item.sender == "swarm" and (item.text == HURRY or item.text.startswith(HANDOFF_OPENING))
 
 
 def apply(slug: str, store: RedisStore, decision: dict) -> list[str]:

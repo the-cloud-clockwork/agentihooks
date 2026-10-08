@@ -83,7 +83,23 @@ jobs:
           cd "$grader"
           python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
+  # Every shard restores this one key, or nothing when the lookup found none, so all shards of a run split alike.
+  durations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      key: ${{ steps.stored.outputs.cache-matched-key }}
+    steps:
+      - name: Look up the base revision's dev durations
+        id: stored
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/dev-durations
+          key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
+          lookup-only: true
+
   unit:
+    needs: [durations]
     runs-on: ubuntu-latest
     timeout-minutes: 7
     permissions:
@@ -151,10 +167,12 @@ jobs:
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
       - name: Restore latest dev durations
+        if: needs.durations.outputs.key != ''
         uses: actions/cache/restore@v4
         with:
           path: ~/dev-durations
-          key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
+          key: ${{ needs.durations.outputs.key }}
+          fail-on-cache-miss: true
 
       # Every shard judges the restored cache by the same event time, so a cache a dev push saves mid run is refused by all of them.
       - name: Adopt latest dev durations
@@ -520,7 +538,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, brain-smoke, wiring, semgrep, dependency-audit]
+    needs: [durations, unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, brain-smoke, wiring, semgrep, dependency-audit]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -537,7 +555,7 @@ jobs:
           fi
 
   refresh-durations:
-    needs: [unit, lint]
+    needs: [unit, lint, shard-check]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:

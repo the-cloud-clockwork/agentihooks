@@ -31,7 +31,7 @@ def test_ci_creates_no_commits_or_bot_pull_requests():
 
 def test_dev_push_publishes_merged_durations_with_read_permissions():
     job = _workflow("test.yml")["jobs"]["refresh-durations"]
-    assert job["needs"] == ["unit", "lint"]
+    assert job["needs"] == ["unit", "lint", "shard-check"]
     assert job["if"] == "github.event_name == 'push'"
     assert job["permissions"] == {"contents": "read"}
     upload = next(s for s in job["steps"] if s.get("uses") == "actions/upload-artifact@v4")
@@ -79,10 +79,21 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert "restore-keys" not in restore["with"]
     assert restore["with"]["path"] == save["with"]["path"] == "~/dev-durations"
     assert save["with"]["key"] == "durations-merged-${{ github.sha }}"
-    assert restore["with"]["key"] == (
-        "durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
-        " || github.event.before || github.sha }}"
-    )
+    assert restore["with"]["key"] == "${{ needs.durations.outputs.key }}"
+    assert restore["if"] == "needs.durations.outputs.key != ''"
+    assert restore["with"]["fail-on-cache-miss"] is True
+    assert jobs["unit"]["needs"] == ["durations"]
+    lookup = jobs["durations"]["steps"][0]
+    assert jobs["durations"]["outputs"] == {"key": "${{ steps.stored.outputs.cache-matched-key }}"}
+    assert lookup["id"] == "stored"
+    assert lookup["uses"] == "actions/cache/restore@v4"
+    assert lookup["with"] == {
+        "path": "~/dev-durations",
+        "key": "durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+        " || github.event.before || github.sha }}",
+        "lookup-only": True,
+    }
+    assert "durations" in jobs["gate-required"]["needs"]
     assert "run" not in restore
     assert adopt["run"] == ADOPT
 
