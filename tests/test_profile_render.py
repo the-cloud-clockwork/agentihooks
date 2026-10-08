@@ -2340,6 +2340,23 @@ def test_an_overlay_render_refuses_a_bundle_git_does_not_answer(world, overlays,
     )
 
 
+def test_the_bundle_pin_reads_head_and_status_as_text_within_ten_seconds(world, overlays, monkeypatch):
+    from scripts.profiles import render
+
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv[3:], kwargs))
+        return subprocess.CompletedProcess(argv, 0, stdout="abc123\n" if argv[3] == "rev-parse" else "", stderr="")
+
+    monkeypatch.setattr(render.subprocess, "run", run)
+
+    render._pin(world["bundle"], "abc123")
+
+    options = {"capture_output": True, "text": True, "timeout": 10}
+    assert calls == [(["rev-parse", "HEAD"], options), (["status", "--porcelain"], options)]
+
+
 def test_an_overlay_render_from_the_recorded_commit_renders_and_stamps_it(world, overlays):
     from scripts.profiles import render
 

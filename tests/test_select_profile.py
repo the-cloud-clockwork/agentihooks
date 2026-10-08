@@ -590,3 +590,14 @@ def test_the_selector_ignores_a_bundle_commit_its_caller_carries(profile, monkey
     assert select_profile.main(["engineer", "--dry-run"]) == 0
     renderer.assert_called_once_with("claude", "engineer", overlays=[], bundle_revision="")
     assert "AGENTIHOOKS_BUNDLE_REVISION=\n" in capsys.readouterr().out
+
+
+def test_both_launch_commands_document_the_bundle_commit_flag(capsys):
+    with pytest.raises(SystemExit):
+        init_agent.main(["--help"])
+    shown = " ".join(capsys.readouterr().out.split())
+    assert "--bundle-revision BUNDLE_REVISION Render the profile only from this bundle commit" in shown
+    with pytest.raises(SystemExit):
+        select_profile.main(["--help"])
+    shown = " ".join(capsys.readouterr().out.split())
+    assert "--bundle-revision BUNDLE_REVISION Render only from this bundle commit" in shown

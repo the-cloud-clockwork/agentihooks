@@ -129,7 +129,7 @@ def _transfer(task):
 
 
 def _recorded_revision(saved):
-    return saved.get("bundle_revision") or saved.get("profile_decision", {}).get("bundle_revision", "")
+    return saved.get("bundle_revision") or saved.get("profile_decision", {}).get("bundle_revision")
 
 
 def _pinned(worn, revision):
@@ -260,7 +260,6 @@ class HerdrRuntime:
                 "handoff",
                 "original seat profile",
                 overlays=tuple(saved.get("overlays", ())),
-                bundle_revision=_recorded_revision(saved),
             )
             if saved and (relaunch or not task.get("profile"))
             else timing.call(
@@ -372,7 +371,7 @@ class HerdrRuntime:
             agent.profile,
             agent.overlays,
         )
-        argv += _pinned(agent.overlays, agent.profile_decision.get("bundle_revision", ""))
+        argv += _pinned(agent.overlays, agent.profile_decision.get("bundle_revision"))
         defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}))
         picked = model_pick.ModelPick(
             agent.model or defaults.model,

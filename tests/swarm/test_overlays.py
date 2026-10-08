@@ -437,3 +437,31 @@ def test_a_resumed_agent_without_overlays_leaves_its_render_unpinned(tmp_path):
         profile_decision={"bundle_revision": "abc123"},
     )
     assert _passed_revision(_resumed(tmp_path, agent)) == []
+
+
+def test_a_resumed_overlay_agent_without_a_recorded_revision_is_refused(tmp_path):
+    agent = store.AgentRecord(
+        "engineer@a1b2c3-0001",
+        "eng",
+        "t1",
+        harness="claude",
+        profile="engineer",
+        conversation_id="conv-1",
+        overlays=["tuner"],
+    )
+    with pytest.raises(tick.SpawnError) as refused:
+        _resumed(tmp_path, agent)
+    assert str(refused.value) == "an overlay launch needs the bundle commit it renders from, and none was recorded"
+
+
+@pytest.mark.parametrize(
+    ("saved", "recorded"),
+    [
+        ({"bundle_revision": "abc123", "profile_decision": {"bundle_revision": "def456"}}, "abc123"),
+        ({"profile_decision": {"bundle_revision": "def456"}}, "def456"),
+        ({"profile_decision": {}}, None),
+        ({}, None),
+    ],
+)
+def test_the_recorded_revision_prefers_the_launch_field_over_the_profile_decision(saved, recorded):
+    assert runtime._recorded_revision(saved) == recorded
