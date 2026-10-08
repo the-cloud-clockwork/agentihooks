@@ -44,7 +44,12 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
         " || github.event.before || inputs.base }}"
     )
     assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$BASE"'
-    assert floor["run"] == 'python -m tests.count_floor --base "$RUNNER_TEMP/base"'
+    assert floor["run"] == (
+        'grader="$RUNNER_TEMP/base"\n'
+        '[[ -f "$grader/tests/count_floor.py" ]] || grader="$GITHUB_WORKSPACE"\n'
+        'cd "$grader"\n'
+        'python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
+    )
 
 
 @pytest.mark.parametrize("unit", ["success", "failure", "skipped", "cancelled", "pending"])

@@ -72,6 +72,7 @@ def test_a_renamed_test_keeps_the_floor(tmp_path):
     renamed = SUITE.replace("def test_a", "def test_renamed")
     result = _floor(tmp_path, {"test_a.py": SUITE}, {"test_a.py": renamed})
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "not in the head" not in result.stdout
 
 
 @pytest.mark.parametrize("side", ["base", "head"])

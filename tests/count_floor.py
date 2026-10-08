@@ -49,10 +49,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     base, head = collected["base"], collected["head"]
     print(f"head collects {len(head)} tests, base floor {len(base)}")
-    lost = sorted(set(base) - set(head))
-    for nodeid in lost:
-        print(f"{nodeid} is in the base and not in the head")
     if len(head) < len(base):
+        for nodeid in sorted(set(base) - set(head)):
+            print(f"{nodeid} is in the base and not in the head")
         print(f"::error::The head collects {len(base) - len(head)} fewer tests than the base floor of {len(base)}.")
         return 1
     return 0
