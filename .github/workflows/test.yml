@@ -165,6 +165,8 @@ jobs:
     needs: [unit]
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      SONAR_SCANNER_VERSION: 7.2.0.5079
     permissions:
       contents: read
       actions: read
@@ -195,10 +197,23 @@ jobs:
           python .github/coverage/proxy.py > sonar-proxy.log 2>&1 &
           echo "pid=$!" >> "$GITHUB_OUTPUT"
           for attempt in {1..5}; do
-            if curl --fail --silent --show-error --max-time 10 http://127.0.0.1:9000/api/system/status; then exit 0; fi
+            if curl --fail --silent --show-error --max-time 10 http://127.0.0.1:9000/api/system/status; then
+              version=$(curl --fail --silent --show-error --max-time 10 http://127.0.0.1:9000/api/server/version)
+              test -n "$version"
+              echo "version=$version" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             sleep 1
           done
           exit 1
+
+      - name: Restore Sonar downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.sonar/cache
+            ${{ runner.tool_cache }}/sonar-scanner-cli
+          key: sonar-${{ runner.os }}-${{ runner.arch }}-${{ env.SONAR_SCANNER_VERSION }}-${{ steps.proxy.outputs.version }}-${{ hashFiles('.github/workflows/test.yml') }}
 
       # Sonar refuses an analysis dated before the project's latest one, so dev push scans run one at a time in push order.
       - name: Wait for older dev analyses
@@ -236,6 +251,8 @@ jobs:
 
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@v6
+        with:
+          scannerVersion: ${{ env.SONAR_SCANNER_VERSION }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://127.0.0.1:9000
