@@ -5,7 +5,7 @@ record. No normal read or write opens a ledger JSON document or HTML page; the o
 the one time legacy import in the repository's `legacy` module.
 
 Evidence: reproduce with
-`rg -n 'read_ledger\(|read_ids\(|read_registry\(|repository\.[a-z_]+\(' hooks scripts --glob '*.py'` for the call
+`rg -n 'read_ledgers?\(|read_document\(|read_slugs\(|read_ids\(|read_registry\(|repository\.[a-z_]+\(' hooks scripts --glob '*.py'` for the call
 sites below, and `rg -n 'core\.paths|load_state|parse_seed|read_token|\{slug\}\.(json|html)' hooks scripts --glob
 '*.py'`, which finds no ledger document reader outside the repository's `legacy` module (the remaining hits are
 session, telemetry and install state files).
@@ -26,6 +26,8 @@ session, telemetry and install state files).
 | ledger_hook.serve_ledgers | whether any ledger exists | database file or a legacy JSON waiting for import |
 | watch_ledger.main | existence, event stream | repository.exists, then the v1 event stream |
 | swarm_refocus._read_ledger | title, overview, phases, task or priorities | read_ledger, read only |
+| plan_read_guard._plans | artifacts, phases and task of this ledger, artifacts of every ledger | read_ledger, read_ledgers, read only |
+| recall.reindex.reindex, binned, all_slugs; recall.cli.main | whole ledger with events, bin registry, stored slugs | read_document, read_registry, read_slugs, read only; explicit backfill command |
 | ledger_request._ledger | members, task | read_ledger, read only |
 | project_cache._swarm_overview | overview | read_ledger, read only |
 | ledger_decision._bound | bound ledger still live | read_registry(bin), read_ledger(title) |
