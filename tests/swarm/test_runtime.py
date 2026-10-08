@@ -845,6 +845,36 @@ def test_spawn_records_launch_preparation_and_waited_subprocess_cost(tmp_path, m
     assert all(row["outcome"] == "success" for row in rows if row["phase"] == "finished")
 
 
+def test_spawn_preserves_profile_and_prompt_boundary_arguments(tmp_path, monkeypatch):
+    from scripts.swarm import profile_choice, prompt
+
+    observed = []
+
+    def choose(slug, lane, chosen, task, environ, overlays):
+        assert slug == "sw"
+        assert lane == "eng"
+        assert overlays == {}
+        assert task == {"id": "t1", "title": "x"}
+        observed.append("profile")
+        return profile_choice.ProfileDecision("engineer", "task", "engineering work")
+
+    def build(slug, repo, lane, name, task, *, role, autonomy):
+        assert slug == "sw"
+        assert repo == str(tmp_path)
+        assert lane == "eng"
+        assert name == "agent@a1b2c3-0001"
+        assert task == {"id": "t1", "title": "x", "harness": "claude"}
+        assert role == ""
+        assert autonomy == "delegate"
+        observed.append("prompt")
+        return "fixture prompt"
+
+    monkeypatch.setattr(profile_choice, "choose", choose)
+    monkeypatch.setattr(prompt, "build", build)
+    _launched(tmp_path, monkeypatch, "eng", {"id": "t1", "title": "x"})
+    assert observed == ["profile", "prompt"]
+
+
 SEAT_TASKS = {
     "eng": {"id": "t1", "title": "x"},
     "ci": {"id": "t1", "title": "x"},

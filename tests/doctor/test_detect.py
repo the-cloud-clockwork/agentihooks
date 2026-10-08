@@ -28,8 +28,8 @@ def test_detector_records_its_own_stage_and_keeps_running_after_failure(capsys):
         raise RuntimeError("journal unreadable")
 
     with timing.tick("doctor"):
-        assert detect.collect({"spawn": broken, "health": lambda: [STALE]}) == (
-            [STALE],
+        assert detect.collect({"spawn": broken, "health": lambda: [STALE], "trace": lambda: [STALE]}) == (
+            [STALE, STALE],
             ["the spawn detector failed: RuntimeError: journal unreadable"],
         )
     import json
@@ -40,6 +40,8 @@ def test_detector_records_its_own_stage_and_keeps_running_after_failure(capsys):
         ("doctor.spawn", "finished", "error"),
         ("doctor.health", "started", None),
         ("doctor.health", "finished", "success"),
+        ("doctor.trace", "started", None),
+        ("doctor.trace", "finished", "success"),
     ]
     assert all(row["slug"] == "doctor" for row in rows)
     assert all(
