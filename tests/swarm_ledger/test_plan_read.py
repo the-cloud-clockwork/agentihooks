@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 
@@ -130,7 +131,6 @@ def test_installer_delegates_plan_deps_and_quota():
 
 
 def test_installer_help_lists_the_plan_command(monkeypatch, capsys):
-    import re
     import sys
 
     from scripts import install
@@ -150,16 +150,16 @@ def test_help_names_the_command_and_its_options(monkeypatch, capsys):
     top = capsys.readouterr().out
     assert top.startswith("usage: agentihooks plan [-h] {read} ...\n")
     assert "agentihooks plan read: the task's plan chunk with ten lines of margin on each side." in top
-    assert "print the task's plan chunk with ten lines of margin on each side" in top
+    assert re.search(r"^ +read +print the task's plan chunk with ten lines of margin on each side$", top, re.M)
     with pytest.raises(SystemExit):
         plan_read.main(["read", "--help"], {})
     reader = capsys.readouterr().out
-    for text in (
-        "task id; defaults to AGENTIHOOKS_SWARM_TASK",
-        "print this phase's whole plan range instead",
-        "ledger slug; defaults to AGENTIHOOKS_SWARM",
+    for line in (
+        r"--task TASK +task id; defaults to AGENTIHOOKS_SWARM_TASK",
+        r"--phase PHASE +print this phase's whole plan range instead",
+        r"--slug SLUG +ledger slug; defaults to AGENTIHOOKS_SWARM",
     ):
-        assert text in reader
+        assert re.search(rf"^ +{line}$", reader, re.M)
 
 
 def test_a_subcommand_is_required(capsys):

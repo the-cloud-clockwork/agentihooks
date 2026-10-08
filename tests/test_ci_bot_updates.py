@@ -51,10 +51,13 @@ def test_a_newer_dev_push_never_cancels_a_running_dev_push_run():
     }
 
 
+ADOPT = "python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations --hash durations.sha256"
+
+
 def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run():
     steps = _workflow("test.yml")["jobs"]["unit"]["steps"]
     step = next(s for s in steps if s.get("name") == "Adopt latest dev durations")
-    assert step["run"].strip() == "python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations"
+    assert step["run"].strip() == ADOPT
     assert "env" not in step
     assert steps.index(step) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
 
@@ -79,7 +82,11 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert restore["with"]["fail-on-cache-miss"] is True
     assert jobs["unit"]["needs"] == ["durations"]
     lookup = jobs["durations"]["steps"][0]
-    assert jobs["durations"]["outputs"] == {"key": "${{ steps.stored.outputs.cache-matched-key }}"}
+    assert jobs["durations"]["outputs"] == {
+        "key": "${{ steps.stored.outputs.cache-matched-key }}",
+        "queued": "${{ steps.republished.outputs.queued }}",
+    }
+    assert jobs["durations"]["timeout-minutes"] == "${{ github.event_name == 'merge_group' && 4 || 2 }}"
     assert lookup["id"] == "stored"
     assert lookup["uses"] == "actions/cache/restore@v4"
     assert lookup["with"] == {
@@ -90,7 +97,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     }
     assert "durations" in jobs["gate-required"]["needs"]
     assert "run" not in restore
-    assert adopt["run"] == "python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations"
+    assert adopt["run"] == ADOPT
     assert "env" not in adopt
 
 

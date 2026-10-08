@@ -53,8 +53,8 @@ def test_the_route_marker_attributes_an_api_session():
     assert acc.account_from_names([acc.API_MARKER, "AH_CC_TOKEN_alpha"]) == "api"
     assert acc.environment_account({acc.API_MARKER: "1", "HOME": "/home/u"}) == "api"
     assert acc.environment_account({acc.API_MARKER: "", "AH_CC_TOKEN_alpha": "a"}) == "alpha"
-    assert acc.codex_account_from_names([acc.API_MARKER]) == acc.CODEX_DEFAULT
-    assert acc.codex_account_from_names([acc.API_MARKER, "AH_CX_TOKEN_one"]) == "one"
+    assert acc.codex_account_from_names([acc.API_MARKER]) == "api"
+    assert acc.codex_account_from_names([acc.API_MARKER, "AH_CX_TOKEN_one"]) == "api"
 
 
 def test_live_api_sessions_count_under_the_api_account(tmp_path):
