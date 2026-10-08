@@ -13,6 +13,7 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 @pytest.fixture(autouse=True)
 def isolated_accounts(monkeypatch):
+    monkeypatch.setattr(capacity.session_caps, "stored", lambda harness: {})
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {})
 
 
@@ -843,3 +844,37 @@ def test_legacy_effective_caps_still_limit_spawns_when_task_mapping_is_absent():
     ledger = FakeLedger([{"id": "e"}])
     store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"effective": {"eng": 0, "ci": 0, "plan": 0}}))
     assert _spawn_order("sw", config, store, [], ledger.rows, ledger.state("sw")) == []
+
+
+def test_live_account_caps_feed_quota_limits(monkeypatch):
+    from scripts import session_caps
+    from scripts.codex_quota import CodexQuota
+
+    windows = balancer.QuotaWindow(used=10)
+    row = balancer.ProbeResult("a", "allowed", "NORMAL", 90, windows, windows)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, row)])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"a": 1, "unknown": 0})
+    monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"cx": 1})
+    monkeypatch.setattr(
+        capacity.codex_router, "routing_pool", lambda env: [capacity.codex_router.CodexAccount("cx", "AH_CX_TOKEN_cx")]
+    )
+    monkeypatch.setattr(
+        capacity.codex_router, "quotas", lambda pool, env: {"cx": CodexQuota(100, "pro", windows, windows)}
+    )
+    monkeypatch.setattr(
+        session_caps, "stored", lambda harness: {"a": 2, "unknown": 0} if harness == "claude" else {"cx": 5}
+    )
+    observed = capacity.accounts({}, 100)
+    assert [(row.harness, row.name, row.cap) for row in observed] == [
+        ("claude", "a", 2),
+        ("claude", "unknown", 0),
+        ("codex", "cx", 5),
+    ]
+    assert [capacity.free_seats(row, 7, 5) for row in observed] == [1, 0, 4]
+
+
+def test_closed_or_reduced_account_caps_never_use_the_global_default():
+    closed = capacity.Account("claude", "a", "NORMAL", 0, 90, 90, cap=0)
+    reduced = capacity.Account("codex", "cx", "REDUCE", 1, 30, 30, cap=5)
+    assert capacity.free_seats(closed, 7, 5) == 0
+    assert capacity.free_seats(reduced, 7, 5) == 1

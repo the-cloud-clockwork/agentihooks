@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
-from scripts import codex_router
+from scripts import codex_router, session_caps
 
 LANES = ("eng", "ci", "plan")
 
@@ -16,6 +16,7 @@ class Account:
     sessions: int
     five_left: float | None
     week_left: float | None
+    cap: int | None = None
 
 
 def _window(window: balancer.QuotaWindow, now: float) -> balancer.QuotaWindow:
@@ -29,17 +30,28 @@ def accounts(environ: dict, now: float) -> list[Account]:
         fresh, _ = balancer.collect_results(credentials, environ=environ, now=now)
     observed = {result.account: result for _, result in balancer.cached_observations(environ=environ)}
     observed.update({result.account: result for result in fresh})
+    limits = {harness: session_caps.stored(harness) for harness in ("claude", "codex")}
     counts = account_sessions.sessions_by_account()
     results = []
     for result in observed.values():
         five, week = _window(result.five_hour, now), _window(result.seven_day, now)
         state, _ = balancer._state(result.provider_status, five, week)
         results.append(
-            Account("claude", result.account, state, counts.get(result.account, 0), five.remaining, week.remaining)
+            Account(
+                "claude",
+                result.account,
+                state,
+                counts.get(result.account, 0),
+                five.remaining,
+                week.remaining,
+                limits["claude"].get(result.account),
+            )
         )
     known = {row.name for row in results}
     results += [
-        Account("claude", name, "UNKNOWN", count, None, None) for name, count in counts.items() if name not in known
+        Account("claude", name, "UNKNOWN", count, None, None, limits["claude"].get(name))
+        for name, count in counts.items()
+        if name not in known
     ]
     pool = [account for account in codex_router.routing_pool(environ) if account.signed_in]
     counts = account_sessions.codex_sessions_by_account()
@@ -56,7 +68,15 @@ def accounts(environ: dict, now: float) -> list[Account]:
         week = _window(quota.seven_day, now) if quota else balancer.QuotaWindow()
         state, _ = balancer._state("allowed", five, week)
         results.append(
-            Account("codex", account.name, state, counts.get(account.name, 0), five.remaining, week.remaining)
+            Account(
+                "codex",
+                account.name,
+                state,
+                counts.get(account.name, 0),
+                five.remaining,
+                week.remaining,
+                limits["codex"].get(account.name),
+            )
         )
     return results
 
@@ -70,6 +90,7 @@ def free_seats(account: Account, cap: int, week_floor: float) -> int:
         return 0
     if account.state == "DRAIN_SOON" and min(account.five_left, account.week_left) < 20:
         return 0
+    cap = cap if account.cap is None else account.cap
     limit = cap // 2 if account.state == "REDUCE" else cap
     return max(0, limit - account.sessions)
 
