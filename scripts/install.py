@@ -6461,11 +6461,13 @@ def main() -> None:
         from scripts.agents_quota import main as quota_main
 
         raise SystemExit(quota_main(_argv[1:]))
-    if _argv[:2] == ["skill", "eval"]:
+    if _argv and _argv[0] == "skill":
         from scripts.skill_eval import main as skill_eval_main
 
-        skill_eval_main(_argv[2:])
-        return
+        if _argv[1:2] != ["eval"]:
+            raise SystemExit("usage: agentihooks skill eval [--agent {claude,codex}] -- <command>")
+
+        raise SystemExit(skill_eval_main(_argv[2:]))
     if _argv and _argv[0] == "herdr":
         from scripts.herdr_setup import main as herdr_main
 

@@ -60,6 +60,21 @@ def test_values_follow_the_shell_where_a_later_file_wins(tmp_path):
     assert not operator_env.SHELL_NAMES & loaded.keys()
 
 
+def test_accounts_are_the_interactive_shell_account_variables_only(tmp_path):
+    (tmp_path / ".profile").write_text(
+        "echo AH_CC_TOKEN_noise=printed\n"
+        "export AH_CC_TOKEN_alpha=first\n"
+        "export AH_CC_TOKEN_beta='second value'\n"
+        "export UNRELATED=other\n"
+    )
+    environ = {"HOME": str(tmp_path), "PATH": os.environ["PATH"], "AH_CC_TOKEN_beta": "stale"}
+    assert operator_env.accounts(environ) == {"AH_CC_TOKEN_alpha": "first", "AH_CC_TOKEN_beta": "second value"}
+
+
+def test_accounts_are_empty_when_the_shell_exports_none(tmp_path):
+    assert operator_env.accounts({"HOME": str(tmp_path), "PATH": os.environ["PATH"]}) == {}
+
+
 def test_the_files_see_home_path_and_agentihooks_home_and_nothing_else(tmp_path, monkeypatch):
     state = tmp_path / "state"
     tools = tmp_path / "tools"

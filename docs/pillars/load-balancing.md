@@ -61,10 +61,10 @@ free slot.
 
 Run Claude skill evaluations through `agentihooks skill eval` from the evaluation
 runner's directory. It loads the full account set the way launches do: the launch
-credentials, then every variable the operator's shell loads through the agentienv
-block, so a Codex engineer with no account variables and a Claude session holding
-only its own token route across every account. Values pass by variable and are never
-printed. It then selects an account using the same quota and session cap rules as
+credentials, then every `AH_CC_TOKEN_<slug>` variable the operator's interactive
+login shell (`bash -lic`) exports, so a Codex engineer with no account variables and
+a Claude session holding only its own token route across every account. Values pass
+by variable and are never printed. It then selects an account using the same quota and session cap rules as
 launches, and exports its OAuth token through the child environment. It exits with
 status 3 when no account can route. `agentihooks-skill-eval` remains as an alias
 console script with the same arguments.
@@ -81,7 +81,7 @@ agentihooks skill eval \
   --num-workers 1
 ```
 
-The wrapper writes `[skill-eval] account=<slug>` to stderr as the account proof;
+`agentihooks skill eval` writes `[skill-eval] account=<slug>` to stderr as the account proof;
 the runner's stdout and arguments stay intact. Every Claude subprocess started
 by that runner inherits the selected account. The default Claude login is unused.
 Use `--agent codex` to execute a Codex evaluation command with its arguments and

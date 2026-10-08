@@ -7,6 +7,8 @@ from pathlib import Path
 
 SHELL_NAMES = frozenset({"PWD", "OLDPWD", "SHLVL", "_"})
 SOURCE = 'set -a; for f in "$@"; do . "$f" 2>/dev/null; done; set +a'
+ACCOUNT_PREFIX = "AH_CC_TOKEN_"
+ACCOUNTS_MARK = "agentihooks-accounts"
 
 
 def files(environ: Mapping[str, str]) -> list[Path]:
@@ -41,3 +43,11 @@ def fill(environ: MutableMapping[str, str]) -> list[str]:
 def source_line(environ: Mapping[str, str]) -> str:
     paths = files(environ)
     return f"set -- {shlex.join(map(str, paths))}; {SOURCE}; set --\n" if paths else ""
+
+
+def accounts(environ: Mapping[str, str]) -> dict[str, str]:
+    script = f"printf '\\0{ACCOUNTS_MARK}\\0'; env -0"
+    done = subprocess.run(["bash", "-lic", script], env=dict(environ), stdin=subprocess.DEVNULL, capture_output=True)
+    listing = done.stdout.rpartition(f"\0{ACCOUNTS_MARK}\0".encode())[2]
+    pairs = (item.decode(errors="surrogateescape").partition("=") for item in listing.split(b"\0") if item)
+    return {key: value for key, _, value in pairs if key.startswith(ACCOUNT_PREFIX)}

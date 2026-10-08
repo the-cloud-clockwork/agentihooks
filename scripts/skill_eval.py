@@ -11,7 +11,7 @@ def claude_environment(command: list[str]) -> dict[str, str]:
     from scripts.install import _load_claude_runtime_env
 
     _load_claude_runtime_env()
-    operator_env.fill(os.environ)
+    os.environ.update(operator_env.accounts(os.environ))
     try:
         decision = select_credential(
             os.environ,
