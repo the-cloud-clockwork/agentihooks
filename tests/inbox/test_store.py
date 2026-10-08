@@ -242,7 +242,7 @@ def test_open_index_backfills_old_mail_and_preserves_closed_history(store):
     store.deliver(second.id, "receiver")
     store.read(third.id, "receiver")
     store.close(fourth.id, "receiver", "done", "finished")
-    store.redis.delete(store.key("open", "receiver"))
+    store.redis.zadd(store.key("open", "receiver"), {fourth.id: fourth.created_at})
     store.redis.srem(store.key("open-indexed"), "receiver")
     assert [i.id for i in store.open_items("receiver")] == [first.id, second.id, third.id]
     assert len(store.inbox("receiver")) == 4
@@ -297,3 +297,34 @@ def test_open_index_cleanup_keeps_empty_addresses_and_redirected_mail(store):
     keys, memberships = store.keys_for(lambda address: address == "old")
     assert set(keys) == {store.key(kind, "old") for kind in ("address", "pending", "open", "sequence")}
     assert memberships == {store.key("open-indexed"): ["old"]}
+
+
+@pytest.mark.parametrize("change", ["send", "close"])
+def test_open_index_rebuild_observes_concurrent_mail_changes(store, monkeypatch, change):
+    first = store.send("sender", "receiver", "first")
+    pipeline_type = type(store.redis.pipeline())
+    hgetall = pipeline_type.hgetall
+    changed = []
+    calls = []
+    index = store._index_open
+
+    def rebuild(address):
+        calls.append(address)
+        return index(address)
+
+    def read_then_change(pipe, key):
+        data = hgetall(pipe, key)
+        if key == store.key("item", first.id) and not changed:
+            changed.append(True)
+            if change == "send":
+                store.send("sender", "receiver", "second")
+            else:
+                store.close(first.id, "receiver", "done", "finished")
+        return data
+
+    monkeypatch.setattr(store, "_index_open", rebuild)
+    monkeypatch.setattr(pipeline_type, "hgetall", read_then_change)
+    opened = store.open_items("receiver")
+    assert calls == ["receiver", "receiver"]
+    assert [item.text for item in opened] == (["first", "second"] if change == "send" else [])
+    assert all(item.state not in ("done", "blocked", "handed_off", "cancelled") for item in opened)

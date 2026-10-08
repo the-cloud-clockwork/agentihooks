@@ -3,6 +3,8 @@ import re
 import subprocess
 from collections.abc import Callable
 
+from redis import Redis
+
 from scripts.swarm.keyspace import ROOT
 
 TEST = re.compile(
@@ -66,7 +68,7 @@ def _attempt(repo, workflow, number, run, cache):
     return attempt
 
 
-def pull_request(repo: str, number: int, run: Callable = subprocess.run, cache=None) -> dict:
+def pull_request(repo: str, number: int, run: Callable = subprocess.run, cache: Redis | None = None) -> dict:
     root = f"repos/{repo}"
     pr = json.loads(_gh(["api", f"{root}/pulls/{number}"], run))
     sha = pr["head"]["sha"]

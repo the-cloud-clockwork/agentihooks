@@ -105,7 +105,7 @@ class InboxStore:
         items = [self.get(item_id) for item_id in self.redis.zrange(self.key("address", address), 0, -1)]
         return sorted(items, key=_order)
 
-    def open_items(self, address):
+    def open_items(self, address: str) -> list[Item]:
         items = [self.get(item_id) for item_id in self._open_ids(address)]
         return sorted(items, key=_order)
 
