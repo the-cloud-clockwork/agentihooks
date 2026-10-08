@@ -18,8 +18,13 @@ class QuotaRuntime(FakeRuntime):
     def __init__(self, home, accounts):
         super().__init__()
         self.argv = []
-        self.herdr = HerdrRuntime(home=home, run=self._run, choose=lambda requested, environ: (requested, "requested"))
+        self.herdr = HerdrRuntime(
+            home=home, run=self._run, choose=lambda requested, environ: (requested, "requested"), herdr=self._herdr
+        )
         self.herdr._quota_accounts = accounts
+
+    def _herdr(self, args):
+        raise AssertionError(f"unexpected herdr call {args}")
 
     def _run(self, argv, **kwargs):
         self.argv.append(argv)
@@ -46,7 +51,7 @@ def _quota_handoff(store, ledger, runtime):  # noqa: F811
     store.put_handoff("sw", first.task, "handoff document", seat=first.seat, envelope=envelope)
     for agent in (done, first):
         store.put_agent("sw", replace(agent, state="finished"))
-    return first, envelope
+    return done, first, envelope
 
 
 def _option(argv, flag):
@@ -59,11 +64,11 @@ def test_a_quota_handoff_keeps_the_seat_and_launch_settings_on_another_account(s
         capacity.Account("claude", "fresh", "OPEN", 1, 90, 90, 6),
     ]
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), QuotaRuntime(tmp_path, accounts)
-    first, envelope = _quota_handoff(store, ledger, runtime)
+    done, first, envelope = _quota_handoff(store, ledger, runtime)
     actions = tick("sw", store, ledger, runtime, 2)
     (argv,) = runtime.argv
     successor = next(a for a in workers(store) if a.name != first.name)
-    assert f"spawned {successor.name} for {first.task}" in actions
+    assert actions == [f"retired {done.name}", f"retired {first.name}", f"spawned {successor.name} for {first.task}"]
     assert successor.seat == first.seat
     assert runtime.tasks[-1]["seat"] == first.seat
     assert runtime.tasks[-1]["handoff_envelope"] == envelope
@@ -80,12 +85,13 @@ def test_a_quota_handoff_keeps_the_seat_and_launch_settings_on_another_account(s
 def test_a_quota_handoff_waits_with_its_handoff_when_no_other_account_qualifies(store, tmp_path):  # noqa: F811
     accounts = [capacity.Account("claude", "old", "OPEN", 0, 5, 90, 2)]
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), QuotaRuntime(tmp_path, accounts)
-    first, envelope = _quota_handoff(store, ledger, runtime)
+    done, first, envelope = _quota_handoff(store, ledger, runtime)
     actions = tick("sw", store, ledger, runtime, 2)
-    assert any(
-        a.startswith(f"spawn failed for {first.task}") and "no claude account has placeable quota seats" in a
-        for a in actions
-    )
+    assert actions == [
+        f"retired {done.name}",
+        f"retired {first.name}",
+        f"spawn failed for {first.task}, task {first.task} reopened: no claude account has placeable quota seats",
+    ]
     assert runtime.argv == []
     assert ledger.rows[first.task]["state"] == "open"
     assert (store.handoff("sw", first.task), store.handoff_seat("sw", first.task)) == ("handoff document", first.seat)
