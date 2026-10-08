@@ -449,7 +449,7 @@ jobs:
           defined=$(api "qualitygates/show?name=Delivery%20L2" | jq -er '.conditions[] | "\(.metric) \(.op) \(.error)"' | sort)
           if [[ "$defined" != "$expected" ]]; then
             echo "::error::The Delivery L2 gate on the server differs from its antoncore definition."
-            diff <(echo "$expected") <(echo "$defined") || true
+            printf 'Expected:\n%s\nDefined:\n%s\n' "$expected" "$defined"
             exit 1
           fi
           task=$(sed -n 's/^ceTaskId=//p' .scannerwork/report-task.txt)
