@@ -72,3 +72,37 @@ def test_a_seat_that_keeps_changing_refuses_after_bounded_attempts(seats):
     with pytest.raises(SeatError):
         seats.occupy("eng-1@rig", "rig-eng-1", at=1)
     assert len(calls) == OCCUPY_ATTEMPTS and seats.history("eng-1@rig") == []
+
+
+def test_agent_seats_read_every_seat_at_once_and_page_the_legacy_scan(seats, monkeypatch):
+    from scripts.inbox.seats import PREFIX
+    from scripts.swarm.naming import NameRegistry
+
+    names = NameRegistry(seats.redis)
+    names.mint_code("rig", "rig", "/repo")
+    minted = [names.next("rig", "eng") for _ in range(3)]
+    seats.occupy("eng-1@rig", minted[0], at=1)
+    seats.occupy("eng-2@rig", minted[2], at=2)
+    seats.occupy("eng-3@rig", "rig-eng-9", at=3)
+    scans, scan = [], seats.redis.scan_iter
+    monkeypatch.setattr(seats.redis, "scan_iter", lambda **kw: scans.append(kw) or scan(**kw))
+    get, mget, reads = seats.redis.get, seats.redis.mget, []
+    monkeypatch.setattr(seats.redis, "get", lambda key: pytest.fail(key) if f"{PREFIX}-of:" in key else get(key))
+    monkeypatch.setattr(seats.redis, "mget", lambda keys: reads.append(len(keys)) or mget(keys))
+    assert seats.agent_seats("rig") == [("rig-eng-9", "eng-3@rig"), (minted[0], "eng-1@rig"), (minted[2], "eng-2@rig")]
+    assert reads == [4]
+    assert seats.agent_names("rig") == ["rig-eng-9", minted[0], minted[2]]
+    assert scans == [{"match": f"{PREFIX}-of:rig-*", "count": 1000}] * 2
+
+
+def test_exits_reads_every_recorded_exit_at_once(seats, monkeypatch):
+    seats.record_exit("rig-eng-1", "eng-1@rig", "exited")
+    mget = seats.redis.mget
+    monkeypatch.setattr(seats.redis, "get", lambda key: pytest.fail(f"a read per exit: {key}"))
+    monkeypatch.setattr(seats.redis, "mget", lambda keys: mget(keys) if keys else pytest.fail("an empty MGET"))
+    assert seats.exits(["rig-eng-1", "rig-eng-2"]) == {
+        "rig-eng-1": {"seat": "eng-1@rig", "reason": "exited"},
+        "rig-eng-2": {},
+    }
+    assert seats.exits([]) == {}
+    assert seats.agent_seats("nobody") == []
