@@ -35,6 +35,7 @@ import ledger_tasks
 import ledger_time_left
 import ledger_title
 import ledger_verdict
+import orjson
 
 from scripts.swarm_ledger import ledger_groups, ledger_phases, ledger_rank
 
@@ -136,6 +137,13 @@ def _reject_constant(name):
 
 def loads(text):
     return json.loads(text, parse_constant=_reject_constant)
+
+
+def pretty(value):
+    try:
+        return orjson.dumps(value, option=orjson.OPT_INDENT_2).decode()
+    except TypeError:
+        return json.dumps(value, indent=2, ensure_ascii=False)
 
 
 def legacy_entries(text, prefix, by_default, split):
@@ -330,7 +338,7 @@ def read_token(html):
 
 def seed_text(doc, rev=None):
     body = doc if rev is None else {"_rev": rev, **doc}
-    return "\n" + json.dumps(body, indent=2, ensure_ascii=False).replace("<", "\\u003c") + "\n"
+    return "\n" + pretty(body).replace("<", "\\u003c") + "\n"
 
 
 def rotate_if_full(path, limit=LOG_MAX_BYTES):
