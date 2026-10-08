@@ -407,6 +407,33 @@ def test_an_agents_table_without_agents_spans_all_nine_columns(open_page):
     assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 9
 
 
+def test_agents_table_lists_live_agents_first_and_pages_the_finished_ones_newest_first(open_page):
+    payload = status()
+    finished = [
+        {
+            "name": f"done-{i}",
+            "lane": "eng",
+            "task": f"t{i}",
+            "state": "finished",
+            "status": "finished",
+            "started_at": NOW_MS - 9_000_000,
+            "state_since": NOW_MS - 8_000_000 + i,
+            "inbox": [],
+        }
+        for i in range(120)
+    ]
+    payload["agents"] = finished[:60] + payload["agents"] + finished[60:]
+    page = open_page(payload, width=1920)
+    rows = page.table("swarm-agents")
+    assert [row[0] for row in rows[:2]] == ["master-1", "eng-58"]
+    assert [row[0] for row in rows[2:52]] == [f"done-{i}" for i in range(119, 69, -1)]
+    assert all(row[6] == "FINISHED" and row[8] == "" for row in rows[2:52])
+    assert [cell.lower() for cell in rows[52]] == ["show 50 more finished agents · 70 left"]
+    assert page.text("#agents-count").lower() == "2 live · 120 finished"
+    page.tab.locator("#swarm-agents .page-more button").click()
+    assert len(page.table("swarm-agents")) == 2 + 100 + 1
+
+
 OFFERED = [
     {"name": "qitp-tuner", "wears": ["engineer", "qa"]},
     {"name": "trader", "wears": ["engineer"]},
