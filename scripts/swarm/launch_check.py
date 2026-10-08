@@ -73,7 +73,13 @@ def declared(profile: str, overlays: Sequence[str] = ()) -> list[str]:
 
 
 def joined_at(agent: AgentRecord, doc: dict) -> int | None:
-    return doc.get("_meta", {}).get("members", {}).get(agent.name, {}).get("joined_at")
+    meta = doc.get("_meta", {})
+    current = meta.get("members", {}).get(agent.name, {}).get("joined_at")
+    recorded = [e["at"] for e in meta.get("events", []) if e.get("kind") == "joined" and e.get("by") == agent.name]
+    recorded.extend(meta.get("join_history", {}).get(agent.name, []))
+    if current is not None:
+        recorded.append(current)
+    return min((at for at in recorded if at >= launched_at(agent)), default=None)
 
 
 def launched_at(agent: AgentRecord) -> int:
