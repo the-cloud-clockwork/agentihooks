@@ -15,7 +15,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - The SessionStart switch from `main`/`master` to `dev` runs only when
   `AGENTIHOOKS_FORCE_DEV_BRANCH` is true (default false).
-  `AUTO_DEV_SWITCH_ENABLED` is removed.
+
+### Removed
+
+- `AUTO_DEV_SWITCH_ENABLED`. It has no alias: an env file that still sets it
+  no longer switches branches; set `AGENTIHOOKS_FORCE_DEV_BRANCH=true` instead.
 
 ### Fixed
 

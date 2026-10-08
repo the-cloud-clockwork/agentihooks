@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,8 @@ def repo_on_main(tmp_path):
 
 def _session_start(repo: Path, home: Path, setting: str | None) -> subprocess.CompletedProcess:
     env = {k: v for k, v in os.environ.items() if k != "AGENTIHOOKS_FORCE_DEV_BRANCH"}
+    home.mkdir()
+    (home / "deps.stamp").write_text(json.dumps({"ok_at": time.time()}))
     env.update(AGENTIHOOKS_HOME=str(home), AGENTIHOOKS_DISABLE_BYPASS_LOOKUP="1")
     if setting is not None:
         env["AGENTIHOOKS_FORCE_DEV_BRANCH"] = setting
