@@ -92,6 +92,7 @@ class InboxStore:
             pipe.zadd(self.key("address", address), {item.id: at})
             pipe.zadd(self.key("pending", address), {item.id: at})
             pipe.zadd(self.key("open", address), {item.id: at})
+            pipe.incr(self.key("open-size", address))
             pipe.sadd(self.key("waiting"), address)
             pipe.rpush(self.key("history", item.id), _entry("pending", sender, "", at))
             pipe.publish(NOTIFY, address)
@@ -107,12 +108,17 @@ class InboxStore:
 
     def open_items(self, address: str) -> list[Item]:
         items = [self.get(item_id) for item_id in self._open_ids(address)]
-        return sorted(items, key=_order)
+        closed = [item.id for item in items if item.state in CLOSED]
+        if closed:
+            self.redis.zrem(self.key("open", address), *closed)
+        return sorted((item for item in items if item.state not in CLOSED), key=_order)
 
     def _open_ids(self, address):
         from redis.exceptions import WatchError
 
-        if self.redis.sismember(self.key("open-indexed"), address):
+        if self.redis.sismember(self.key("open-indexed"), address) and int(
+            self.redis.get(self.key("open-size", address)) or -1
+        ) == self.redis.zcard(self.key("address", address)):
             return self.redis.zrange(self.key("open", address), 0, -1)
         for _ in range(MOVE_ATTEMPTS):
             try:
@@ -134,6 +140,7 @@ class InboxStore:
             if opened:
                 pipe.zadd(self.key("open", address), opened)
             pipe.sadd(self.key("open-indexed"), address)
+            pipe.set(self.key("open-size", address), len(ids))
             pipe.execute()
         return list(opened)
 
@@ -184,11 +191,13 @@ class InboxStore:
         prefix = self.key("address", "")
         seen = {key[len(prefix) :] for key in self.redis.scan_iter(match=prefix + "*")}
         seen.update(self.redis.smembers(self.key("open-indexed")))
+        size_prefix = self.key("open-size", "")
+        seen.update(key[len(size_prefix) :] for key in self.redis.scan_iter(match=size_prefix + "*"))
         addresses = sorted(a for a in seen if belongs(a))
         keys = []
         for address in addresses:
             ids = self.redis.zrange(self.key("address", address), 0, -1)
-            keys += [self.key(kind, address) for kind in ("address", "pending", "open", "sequence")]
+            keys += [self.key(kind, address) for kind in ("address", "pending", "open", "open-size", "sequence")]
             keys += [self.key(kind, item_id) for item_id in ids for kind in ("item", "history")]
         members = {
             self.key(shared): [a for a in addresses if self.redis.sismember(self.key(shared), a)]
@@ -252,6 +261,9 @@ class InboxStore:
                 pipe.zadd(self.key("address", address), {item_id: item.created_at})
                 pipe.zadd(self.key("pending", address), {item_id: item.created_at})
                 pipe.zadd(self.key("open", address), {item_id: item.created_at})
+                if address != item.address:
+                    pipe.decr(self.key("open-size", item.address))
+                    pipe.incr(self.key("open-size", address))
                 pipe.sadd(self.key("waiting"), address)
                 pipe.publish(NOTIFY, address)
             pipe.rpush(self.key("history", item_id), _entry(moved.state, by, reason, moved.updated_at))

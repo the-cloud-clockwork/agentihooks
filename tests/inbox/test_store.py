@@ -223,6 +223,13 @@ def test_open_index_keeps_delivered_and_read_until_closed(store, monkeypatch):
         return original(item_id)
 
     monkeypatch.setattr(store, "get", get)
+    index = store._index_open
+
+    def rebuild(address):
+        assert address != "receiver", "unchanged mailbox was rebuilt"
+        return index(address)
+
+    monkeypatch.setattr(store, "_index_open", rebuild)
     assert [i.id for i in store.open_items("receiver")] == [second.id, third.id]
     assert sorted(seen) == sorted([second.id, third.id])
     store.redirect(second.id, "swarm", "seat", "receiver exited", "receiver")
@@ -279,6 +286,7 @@ def test_open_index_cleanup_lists_all_owned_keys(store):
         store.key("address", "receiver"),
         store.key("pending", "receiver"),
         store.key("open", "receiver"),
+        store.key("open-size", "receiver"),
         store.key("sequence", "receiver"),
         store.key("item", first.id),
         store.key("history", first.id),
@@ -289,13 +297,13 @@ def test_open_index_cleanup_lists_all_owned_keys(store):
 def test_open_index_cleanup_keeps_empty_addresses_and_redirected_mail(store):
     assert store.open_items("empty") == []
     keys, memberships = store.keys_for(lambda address: address == "empty")
-    assert set(keys) == {store.key(kind, "empty") for kind in ("address", "pending", "open", "sequence")}
+    assert set(keys) == {store.key(kind, "empty") for kind in ("address", "pending", "open", "open-size", "sequence")}
     assert memberships == {store.key("open-indexed"): ["empty"]}
     item = store.send("sender", "old", "work")
     store.open_items("old")
     store.redirect(item.id, "swarm", "new", "moved", "old")
     keys, memberships = store.keys_for(lambda address: address == "old")
-    assert set(keys) == {store.key(kind, "old") for kind in ("address", "pending", "open", "sequence")}
+    assert set(keys) == {store.key(kind, "old") for kind in ("address", "pending", "open", "open-size", "sequence")}
     assert memberships == {store.key("open-indexed"): ["old"]}
 
 
@@ -328,3 +336,24 @@ def test_open_index_rebuild_observes_concurrent_mail_changes(store, monkeypatch,
     assert calls == ["receiver", "receiver"]
     assert [item.text for item in opened] == (["first", "second"] if change == "send" else [])
     assert all(item.state not in ("done", "blocked", "handed_off", "cancelled") for item in opened)
+
+
+def test_open_index_observes_writes_from_a_channel_using_the_previous_protocol(store):
+    first = store.send("sender", "receiver", "first")
+    assert [item.id for item in store.open_items("receiver")] == [first.id]
+    second = store.send("sender", "receiver", "second")
+    store.redis.zrem(store.key("open", "receiver"), second.id)
+    store.redis.decr(store.key("open-size", "receiver"))
+    assert [item.id for item in store.open_items("receiver")] == [first.id, second.id]
+    store.close(first.id, "receiver", "done", "finished")
+    store.redis.zadd(store.key("open", "receiver"), {first.id: first.created_at})
+    assert [item.id for item in store.open_items("receiver")] == [second.id]
+    assert store.redis.zscore(store.key("open", "receiver"), first.id) is None
+
+
+def test_open_index_cleanup_finds_a_redirected_address_before_first_read(store):
+    item = store.send("sender", "old", "work")
+    store.redirect(item.id, "swarm", "new", "moved", "old")
+    keys, memberships = store.keys_for(lambda address: address == "old")
+    assert set(keys) == {store.key(kind, "old") for kind in ("address", "pending", "open", "open-size", "sequence")}
+    assert memberships == {}
