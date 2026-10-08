@@ -101,7 +101,7 @@ def test_ruling_follows_the_pull_request_then_the_wait():
 
 
 @pytest.mark.parametrize("queued", [False, True])
-def test_a_red_job_outside_a_passed_required_gate_does_not_hold_the_stop(queued):
+def test_a_red_job_outside_a_passed_required_gate_rules_as_green_and_a_red_gate_as_red(queued):
     task = {"id": "t1", "pr_url": URL}
     pull = PullRequest("OPEN", None, 1, True, True, ("record pass",), gate_passed=True, queued=queued)
     assert ruling(task, pull, {"until": 1, "on": {"kind": "merge", "target": URL}}) == ("", "")
