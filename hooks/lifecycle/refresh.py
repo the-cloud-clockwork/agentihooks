@@ -3,7 +3,8 @@
 A session launched by `agentihooks init-agent` that started before an install
 affecting sessions (a plugin, an MCP registration) is restarted once its turn ends:
 killed, then resumed with the same id, name, account and directory. A swarm
-session is skipped: the tick binds each agent to its process and replaces it instead.
+session is skipped, since a restart moves it off the process its seat is bound to;
+it picks up the change only when the swarm spawns its successor.
 """
 
 from __future__ import annotations
