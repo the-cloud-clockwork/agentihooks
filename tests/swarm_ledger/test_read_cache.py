@@ -245,6 +245,19 @@ def test_a_write_after_its_own_sync_stores_through_the_repository_domain(repo):
     assert domain.written == [core.paths(SLUG)[1]]
 
 
+class RejectingDomain(RecordingDomain):
+    def validate(self, doc):
+        raise ValueError("rejected by this domain")
+
+
+def test_reusing_a_written_page_follows_the_repository_domain_checks(repo, seed_parses):
+    repository = FileLedgerRepository(RejectingDomain())
+    repository.apply_ops(SLUG, ops=[chat("m2", "second")])
+    seed_parses.clear()
+    repository.apply_ops(SLUG, ops=[chat("m3", "third")])
+    assert len(seed_parses) == 1
+
+
 def test_a_page_edit_after_the_last_write_is_folded_into_the_next_write(repo, seed_parses):
     html_path = core.paths(SLUG)[0]
     html_path.write_text(
