@@ -26,8 +26,6 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.parse
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -44,7 +42,7 @@ import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
-from scripts.swarm_ledger import page_policy, server_lifetime  # noqa: E402
+from scripts.swarm_ledger import ledger_task_duplicates, page_policy, server_lifetime  # noqa: E402
 from scripts.swarm_ledger.events import Hub  # noqa: E402
 from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
 from scripts.swarm_ledger.repository import legacy  # noqa: E402
@@ -553,12 +551,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(403, "missing or wrong ledger token", "text/plain") or True
         return False
 
-    def reply_state(self, slug, changes=None, ops=None, refusals=None):
+    def reply_state(self, slug, changes=None, ops=None, refusals=None, screen=None):
         """Apply a page save and answer with a bounded acknowledgment; the page takes state from the event stream."""
         refusals = refusals or {}
+        screen = screen or ledger_task_duplicates.Screen()
+        gate = talk.Budget(slug) if ops else None
         try:
             state, rejected = repository.apply_ops(
-                slug, changes=changes, ops=ops, gate=talk.Budget(slug) if ops else None
+                slug,
+                changes=changes,
+                ops=ops,
+                gate=ledger_task_duplicates.Gate(screen, gate) if screen.refused else gate,
             )
         except (ValueError, OSError) as exc:
             return self.send(500, f"ledger unreadable: {exc}", "text/plain")
@@ -566,7 +569,7 @@ class Handler(BaseHTTPRequestHandler):
             relay_to_inbox(slug, state)
             doctor_phrase(slug, state)
         deliver_alerts(slug, state)
-        warnings = [*state["_meta"].get("warnings", []), *refusals.values()]
+        warnings = [*state["_meta"].get("warnings", []), *refusals.values(), *screen.warnings.values()]
         reply = {
             "applied": [op["id"] for op in ops or [] if op["id"] not in rejected],
             "rejected": [*rejected, *refusals],
@@ -821,7 +824,8 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 <= length <= MAX_BODY:
                 raise ValueError("body size out of range")
             body = core.loads(self.rfile.read(length) or b"{}")
-            task_ids = tuple(task["id"] for task in repository.get_document(slug).get("tasks", []))
+            state = repository.get_document(slug)
+            task_ids = tuple(task["id"] for task in state.get("tasks", []))
             changes, ops = core.check_body(body, task_ids)
             ledger_media.resolve(slug, ops)
             ledger_artifacts.resolve(slug, ops)
@@ -831,7 +835,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403, "page changes need the operator", "text/plain")
         refusals = {op["id"]: text for op in ops if (text := authority.refusal(self.principal, op))}
         allowed = [op for op in ops if op["id"] not in refusals]
-        return self.reply_state(slug, changes, allowed, refusals)
+        return self.reply_state(slug, changes, allowed, refusals, ledger_task_duplicates.screen(state, allowed))
 
 
 def code_stamp(code_dirs=CODE_DIRS):
@@ -866,14 +870,6 @@ def watch_ledgers(interval=2.0):
             bin_closed_without_swarm()
         sample_streams()
         time.sleep(interval)
-
-
-def serving_dir(timeout: float = 1):
-    try:
-        with urllib.request.urlopen(f"{BASE}/healthz", timeout=timeout) as resp:
-            return json.loads(resp.read()).get("dir")
-    except (OSError, ValueError):
-        return None
 
 
 def serve():
@@ -921,8 +917,8 @@ def server_process_alive() -> bool:
 def ensure():
     deadline = time.monotonic() + SERVER_WAIT
     started = False
-    running = serving_dir()
-    while not running:
+    running = ledger_link.serving(url=BASE)
+    while running is None:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             sys.exit(f"ledger server did not answer on {BASE}; see {LOGFILE}")
@@ -943,9 +939,11 @@ def ensure():
                 )
             started = True
         time.sleep(min(0.1, remaining))
-        running = serving_dir(timeout=min(1, remaining))
+        running = ledger_link.serving(timeout=min(1, remaining), url=BASE)
     if running != str(core.LEDGER_DIR):
-        sys.exit(f"{BASE} already serves {running}, not {core.LEDGER_DIR}; stop that ledger server first")
+        sys.exit(
+            f"{BASE} already serves {running or 'no ledger folder'}, not {core.LEDGER_DIR}; stop that ledger server first"
+        )
     print(BASE)
 
 

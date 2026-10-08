@@ -9,7 +9,7 @@ from scripts.inbox.seats import MATURITIES
 from scripts.swarm import naming, plan_review
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.store import ASSIST, DELEGATE, FULL, MANUAL, MASTER
-from scripts.swarm_ledger import ledger_close, ledger_kinds
+from scripts.swarm_ledger import ledger_close, ledger_kinds, plan_read
 
 CLOSES = "The swarm then closes this session; stop working."
 OVERLAP_LINE = (
@@ -197,6 +197,8 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
     ]
     if task.get("description"):
         lines.append(task["description"])
+    if task.get("plan_lines"):
+        lines.append(plan_read.pointer(task))
     lines += contract_lines(task.get("contract") or {})
     lines += workspace_lines(task)
     lines += group_lines(task)

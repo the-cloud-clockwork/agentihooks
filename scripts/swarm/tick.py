@@ -47,10 +47,11 @@ from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig
-from scripts.swarm_ledger import ledger_workspace
+from scripts.swarm_ledger import ledger_rank, ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
+SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
 # Swarms tick in threads; two placing from one live session count overfill an account.
@@ -75,7 +76,9 @@ NUDGE = (
 
 
 class SpawnError(RuntimeError):
-    pass
+    def __init__(self, message: str, status: str = "refused"):
+        super().__init__(message)
+        self.status = status
 
 
 @dataclass(frozen=True)
@@ -281,6 +284,10 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
             continue
         if agent.name not in facts and agent.state != "retiring":
             continue
+        agent, followed = _follow(slug, store, runtime, agent, facts.get(agent.name, {}).get("rebound"))
+        actions.extend(followed)
+        if agent is None:
+            continue
         filled = live_binding.fill(agent, facts.get(agent.name, {}))
         if filled != agent:
             store.put_agent(slug, filled)
@@ -307,6 +314,24 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
         store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
         actions.append(f"retired {agent.name} after mismatched {fields}" + _drop(slug, store, ledger, rows, agent))
     return actions
+
+
+def _follow(slug, store, runtime, agent, pid):
+    if pid is None:
+        return agent, []
+    if (rebound := _rebind(slug, store, runtime, agent, pid)) is None:
+        return None, [f"held {agent.name} until one pane holds its resumed process {pid}"]
+    return rebound, [f"rebound {agent.name} to its resumed process {pid} in pane {rebound.pane_id}"]
+
+
+def _rebind(slug, store, runtime, agent, pid):
+    panes = [p for p, c in (runtime.conversations() or {}).items() if c and c == agent.conversation_id]
+    if len(panes) != 1:
+        return None
+    validation = {**agent.profile_decision.get("validation", {}), "pid": pid}
+    rebound = replace(agent, pane_id=panes[0], profile_decision={**agent.profile_decision, "validation": validation})
+    store.put_agent(slug, rebound)
+    return rebound
 
 
 def _ended(agent, rows):
@@ -400,6 +425,8 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             else:
                 retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
                 actions.append(f"could not retire {agent.name}, retrying next tick")
+        elif agent.runtime_backend != "local":
+            actions += _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live and agent.lane == MASTER:
             runtime.name_pane(agent)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
@@ -410,6 +437,21 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
             actions.append(f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent))
     return actions
+
+
+def _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms):
+    """A remote agent is judged by its own runtime, never by this host's process table: no answer keeps it suspect,
+    holding its claim, neither retired nor dropped."""
+    store.refresh(slug, agent.task, agent.name, LEASE_MS)
+    if runtime.observe(agent).state == "unknown":
+        if agent.state == SUSPECT:
+            return []
+        store.put_agent(slug, replace(agent, state=SUSPECT))
+        return [f"suspect {agent.name}: its runtime did not answer"]
+    if agent.state == SUSPECT:
+        agent = replace(agent, state="working")
+        store.put_agent(slug, agent)
+    return _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
 
 
 def _strays(slug, config, store, runtime):
@@ -540,7 +582,7 @@ def _claimable(slug, store, rows, doc, lane):
 
 
 def _launch_order(slug, store, tasks):
-    return sorted(tasks, key=lambda task: bool(store.launch_failure(slug, task["id"])))
+    return sorted(tasks, key=lambda task: (ledger_rank.order(task), bool(store.launch_failure(slug, task["id"]))))
 
 
 def _unblocked(task, rows):
@@ -596,6 +638,13 @@ def _held_for_master(slug, store, now_ms):
     waiting = store.redis.hgetall(MASTER_WAITING)
     others = sorted(s for s, at in waiting.items() if s != slug and now_ms - int(at) < MASTER_WAIT_MS)
     return [f"holding spawns: swarm {s} waits on a session slot for its master" for s in others[:1]]
+
+
+def _record_spawn_failure(slug, store, record, error):
+    transfers.failed(store, slug, record)
+    if not isinstance(error, SpawnError) or error.status != "unavailable":
+        store.note_launch_failure(slug, record.task, str(error))
+    store.record_launch(slug, record, "failed", str(error))
 
 
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
@@ -655,9 +704,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             task["transfer"] = transfers.attach(store, slug, record)
             placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
         except Exception as exc:
-            transfers.failed(store, slug, record)
-            store.note_launch_failure(slug, task["id"], str(exc))
-            store.record_launch(slug, record, "failed", str(exc))
+            _record_spawn_failure(slug, store, record, exc)
             actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
             if isinstance(exc, ProfileUnresolved):
                 actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))

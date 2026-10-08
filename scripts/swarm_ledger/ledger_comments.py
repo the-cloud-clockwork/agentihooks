@@ -115,6 +115,8 @@ def agent_thread_op(thread, op, ctx, target, noun):
     if op["op"] == "add":
         if not any(e["id"] == op["id"] for e in thread):
             thread.append({"id": op["id"], "by": by, "at": ctx.at, "text": text})
+            if op["thread"] == "notes":
+                thread[-1]["comments"] = []
             if op.get("attachments"):
                 thread[-1]["attachments"] = op["attachments"]
             ctx.record(by, f"{noun} added", target, id=op["id"], text=text)

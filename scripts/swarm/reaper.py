@@ -76,10 +76,10 @@ def _split(found: list[Process], launch: Process | None, table: dict[int, Proces
     return Targets(frozenset(whole), frozenset(singles))
 
 
-def targets(name: str, pid: int | str | None, homes: list[Path]) -> Targets:
+def targets(name: str, pid: int | str | None, homes: list[Path], start: int = 0) -> Targets:
     table = processes()
     launch = table.get(int(pid)) if pid else None
-    if launch is not None and not carries(launch, name):
+    if launch is not None and (not carries(launch, name) or start and launch.start_time != start):
         launch = None
     loose = [p for p in table.values() if homes and _from(p, homes)]
     return _split(loose, launch, table)
@@ -130,8 +130,8 @@ def end(found: Targets) -> Outcome:
     return Outcome(tuple(sorted(set(members) - set(left))), left[0], refused or f"survived SIGKILL: {survivors}")
 
 
-def retire(name: str, pid: int | None, homes: list[Path]) -> Outcome:
-    return end(targets(name, pid, homes))
+def retire(name: str, pid: int | None, homes: list[Path], start: int = 0) -> Outcome:
+    return end(targets(name, pid, homes, start))
 
 
 def reap(pids: list[int]) -> Outcome:

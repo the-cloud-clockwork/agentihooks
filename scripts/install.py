@@ -93,6 +93,7 @@ import yaml
 
 from scripts.claude_config import claude_home
 from scripts.claude_config import claude_json as claude_json_path
+from scripts.cli_delegates import delegated_cli
 from scripts.cli_parser import ArgumentParser
 from scripts.targets import DEFAULT_TARGET, SUPPORTED_TARGETS, get_adapter, resolve_target
 from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
@@ -3299,7 +3300,7 @@ def _install_claude_persona(
     _prepend_bundle_claude_md(bundle_dir)
 
     # --- 5b. Append CI manifesto to ~/.claude/CLAUDE.md (memory channel) ---
-    _append_ci_manifesto_to_claude_md(bundle_dir)
+    _append_ci_manifesto_to_claude_md(bundle_dir, profile_dirs)
 
 
 # ---------------------------------------------------------------------------
@@ -4326,7 +4327,9 @@ def _symlink_dir_contents(
     _state_record_links(records)
 
 
-def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
+def _append_ci_manifesto_to_claude_md(
+    bundle_dir: Path | None = None, profile_dirs: list[tuple[str, Path]] | None = None
+) -> None:
     """Append every enabled bundle manifesto to ~/.claude/CLAUDE.md as a fenced block.
 
     The manifesto used to be injected at SessionStart via stdout, but Claude
@@ -4345,7 +4348,9 @@ def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
         return
     if not getattr(_cfg, "CI_MANIFESTO_ENABLED", True):
         return
-    manifesto_paths = [Path(path) for path in _cfg._resolve_manifesto_paths(bundle_dir)]
+    from scripts.profiles import manifestos
+
+    manifesto_paths = manifestos.paths(bundle_dir, profile_dirs or [])
     if not manifesto_paths:
         _cprint("  [--] No enabled manifestos found — skipping CLAUDE.md append.")
         return
@@ -4354,7 +4359,9 @@ def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
         # Nothing to append to — install_system_prompt handles its own write
         return
     bodies = [
-        f"<!-- manifesto: {path.name} -->\n{path.read_text().rstrip()}" for path in manifesto_paths if path.is_file()
+        f"<!-- manifesto: {path.name} -->\n{_cfg.manifesto_body(path).rstrip()}"
+        for path in manifesto_paths
+        if path.is_file()
     ]
     if not bodies:
         _cprint("  [--] No enabled manifestos found — skipping CLAUDE.md append.")
@@ -5579,6 +5586,7 @@ def cmd_claude(extra_args: list[str]) -> None:
     from scripts.claude_quota_balancer import (
         RoutingError,
         _cache_path,
+        _child_environment,
         credential_for_slug,
         discover_credentials,
         format_selection,
@@ -5645,10 +5653,9 @@ def cmd_claude(extra_args: list[str]) -> None:
         placement="forced" if route else "open",
     )
 
-    os.environ.pop("ANTHROPIC_API_KEY", None)
-    for name in [name for name in os.environ if name.startswith("AH_CC_TOKEN_")]:
-        if name != selected_credential.env_name:
-            os.environ.pop(name, None)
+    kept = _child_environment(selected_credential, os.environ)
+    for name in [name for name in os.environ if name not in kept and name != selected_credential.env_name]:
+        del os.environ[name]
     os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = selected_credential.token
     os.environ["AGENTIHOOKS_ROUTE_ACCOUNT"] = selected_credential.account
     print(
@@ -6419,22 +6426,17 @@ def main() -> None:
         from scripts.swarm_ledger import run as ledger_run
 
         raise SystemExit(ledger_run(_argv[1:]))
-    if _argv and _argv[0] == "swarm":
-        from scripts.swarm.cli import main as swarm_main
+    if _argv and _argv[0] in ("swarm", "controller"):
+        from scripts.swarm import cli, controller
 
-        raise SystemExit(swarm_main(_argv[1:]))
+        raise SystemExit({"swarm": cli.main, "controller": controller.main}[_argv[0]](_argv[1:]))
     if _crew_doctor(_argv):
         from scripts.doctor.cli import main as doctor_main
 
         raise SystemExit(doctor_main(_argv[1:]))
-    if _argv and _argv[0] == "msg":
-        from scripts.inbox.cli import main as msg_main
-
-        raise SystemExit(msg_main(_argv[1:]))
-    if _argv and _argv[0] == "trace":
-        from scripts.trace_cli import main as trace_main
-
-        raise SystemExit(trace_main(_argv[1:]))
+    _delegated = delegated_cli(_argv)
+    if _delegated:
+        raise SystemExit(_delegated(_argv[1:]))
     if _argv and _argv[0] == "classify":
         from hooks.classifier import cli as classifier_cli
 
@@ -6447,21 +6449,17 @@ def main() -> None:
         from scripts.select_profile import dispatch
 
         raise SystemExit(dispatch(_argv))
-    if _argv and _argv[0] == "deps":
-        from scripts.deps_preflight import main as deps_main
-
-        raise SystemExit(deps_main(_argv[1:]))
-    if _argv and _argv[0] == "quota":
-        from scripts.agents_quota import main as quota_main
-
-        raise SystemExit(quota_main(_argv[1:]))
     if _argv and _argv[0] == "skill":
         from scripts.skill_eval import main as skill_eval_main
 
         if _argv[1:2] != ["eval"]:
             raise SystemExit("usage: agentihooks skill eval [--agent {claude,codex}] -- <command>")
+        skill_eval_main(_argv[2:])
+        return
+    if _argv and _argv[0] == "manifestos":
+        from scripts.profiles.manifestos import main as manifestos_main
 
-        raise SystemExit(skill_eval_main(_argv[2:]))
+        raise SystemExit(manifestos_main(_argv[1:]))
     if _argv and _argv[0] == "herdr":
         from scripts.herdr_setup import main as herdr_main
 
@@ -6620,6 +6618,8 @@ def main() -> None:
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",
     )
     sub.add_parser("msg", help="Durable messages between sessions: send|inbox|read|close")
+    sub.add_parser("recall", help="Recall archive of ledgers and swarms: reindex")
+    sub.add_parser("plan", help="Read only your task's plan chunk: read [--task ID] [--phase ID]")
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"
     )

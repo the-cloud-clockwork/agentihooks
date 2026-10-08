@@ -34,6 +34,7 @@ import ledger_tasks
 import ledger_time_left
 import ledger_title
 import ledger_verdict
+import orjson
 
 from scripts.swarm_ledger import ledger_groups, ledger_phases, ledger_rank
 
@@ -131,6 +132,16 @@ def _reject_constant(name):
 
 def loads(text):
     return json.loads(text, parse_constant=_reject_constant)
+
+
+PRETTY = orjson.OPT_INDENT_2 | orjson.OPT_PASSTHROUGH_DATETIME | orjson.OPT_PASSTHROUGH_DATACLASS
+
+
+def pretty(value):
+    try:
+        return orjson.dumps(value, option=PRETTY).decode()
+    except orjson.JSONEncodeError:
+        return json.dumps(value, indent=2, ensure_ascii=False)
 
 
 def legacy_entries(text, prefix, by_default, split):
@@ -311,7 +322,7 @@ def read_token(html):
 
 def seed_text(doc, rev=None):
     body = doc if rev is None else {"_rev": rev, **doc}
-    return "\n" + json.dumps(body, indent=2, ensure_ascii=False).replace("<", "\\u003c") + "\n"
+    return "\n" + pretty(body).replace("<", "\\u003c") + "\n"
 
 
 def rotate_if_full(path, limit=LOG_MAX_BYTES):
@@ -484,6 +495,8 @@ def apply_op(doc, op, ctx):
             return entry is not None
         by = op.get("by", "operator")
         thread.append({"id": op["id"], "by": by, "at": ctx.at, "text": text})
+        if op["thread"] == "notes":
+            thread[-1]["comments"] = []
         if op.get("attachments"):
             thread[-1]["attachments"] = op["attachments"]
         if by != "operator" and by in ctx.meta["members"]:
@@ -504,6 +517,15 @@ def apply_op(doc, op, ctx):
         ctx.events[-1]["note_text"] = note["text"]
     ctx.stamp(op["thread"], "operator")
     return True
+
+
+def _screened(op):
+    if not op["thread"].endswith("/comments"):
+        return op["text"]
+    from hooks.context.conditions import LEDGER_WRITE
+    from hooks.filters import check as filters
+
+    return filters.screen(LEDGER_WRITE, op["text"])
 
 
 def check_op(op, task_ids=()):
@@ -553,6 +575,7 @@ def check_op(op, task_ids=()):
         if not talks or not AUTHOR_RE.match(str(op["by"])) or op["by"] == "operator":
             raise ValueError("by is allowed only on agent chat and comment entries, as an agent name")
         if op["op"] in ("add", "edit"):
+            op["text"] = _screened(op)
             ledger_comments.check(op["text"], kind_of(op["thread"]), op.get("long") is True, task_ids)
 
 

@@ -40,8 +40,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   alert list | claim ID | close ID OUTCOME
                                       list open alerts, claim one, or close it done saying what was done
   relay ITEM TEXT --quote WORDS       post the operator's decision from this pane as his answer to questions/<id>
-                                      or his comment on another item; WORDS must be in an operator prompt or
-                                      AskUserQuestion answer this session recorded in the last hour
+                                      or his comment on another item; WORDS, of any length, must be in an operator
+                                      prompt or AskUserQuestion answer any master or planner of this swarm recorded
   answer ITEM TEXT                    the master answers questions/<id> as itself at delegate or full autonomy,
                                       which clears it from Priorities; members cannot answer
   time-left DURATION                 record remaining time, e.g. "3h 20m"
@@ -96,7 +96,7 @@ import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
 from scripts.gates.base import Who
-from scripts.swarm_ledger import ledger_phases
+from scripts.swarm_ledger import ledger_phases, ledger_task_duplicates
 from scripts.swarm_ledger.repository import repository
 
 BASE = ledger_link.base()
@@ -188,6 +188,9 @@ def send(args, kind, /, **fields):
     ops = [op(kind, args, **fields)]
     state = call(args.slug, ops)
     refused(state, ops)
+    for warning in state.get("_meta", {}).get("warnings", []):
+        if warning.startswith(ledger_task_duplicates.UNCHECKED_PREFIX):
+            print(warning, file=sys.stderr)
     return state
 
 
@@ -295,24 +298,39 @@ def cmd_artifact(args):
 
 
 def cmd_publish_plan(args):
+    from scripts.swarm_ledger import plan_ranges
+
     phases = comma_list(args.phase)
     if not phases:
         sys.exit("publish-plan needs --phase with the ids of the phases the plan fills")
-    title = args.title or ledger_publish.title_of(Path(args.path).read_text(encoding="utf-8"), phases)
+    text = Path(args.path).read_text(encoding="utf-8")
+    doc = call(args.slug)
+    selected = [phase for phase in doc["phases"] if phase["id"] in phases]
+    if {phase["id"] for phase in selected} != set(phases):
+        sys.exit("publish-plan names an unknown phase")
+    try:
+        ranges = plan_ranges.phase_lines(text, selected)
+    except ValueError as exc:
+        sys.exit(str(exc))
+    title = args.title or ledger_publish.title_of(text, phases)
+    stored = {}
 
     def artifact(path, title):
         task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
         file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
         send(args, "artifact_add", task=task, title=title, file=file, plan=True)
-        return f"{BASE}/artifacts/{args.slug}/{file['id']}"
+        stored["url"] = f"{BASE}/artifacts/{args.slug}/{file['id']}"
+        return stored["url"]
 
     try:
-        url, where = ledger_publish.publish(args.path, title, args.repo, artifact)
+        issue_title = ", ".join(phase["title"] for phase in selected)
+        url, where = ledger_publish.publish(args.path, title, args.repo, artifact, issue_title=issue_title)
     except ledger_publish.PublishError as exc:
         sys.exit(str(exc))
     ops = []
     for phase in phases:
-        ops.append(op("phase_update", args, item=f"phases/{phase}", fields={"plan_url": url}))
+        fields = {"plan_url": url, "plan_ref": {"artifact": stored["url"], "lines": ranges[phase]}}
+        ops.append(op("phase_update", args, item=f"phases/{phase}", fields=fields))
         text = (
             f"Plan published as a GitHub issue: {url}" if where == "issue" else f"Plan published on the ledger: {url}"
         )
@@ -421,7 +439,7 @@ def cmd_relay(args):
 
     if not ledger_relay.verified(args.name, args.quote):
         sys.exit(
-            "relay refused: the quote is not in an operator prompt or answer this session recorded in the last hour"
+            "relay refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded"
         )
     send(args, "relay", item=args.item, text=args.text, quote=args.quote)
     print(json.dumps({"relayed": True, "item": args.item}))
@@ -519,18 +537,18 @@ def cmd_task(args):
         contract = {k: getattr(args, k) for k in ("must", "check", "judge") if getattr(args, k)}
         if contract:
             lists["contract"] = contract
-        if args.kind:
-            lists["kind"] = args.kind
         if args.artifact:
             lists["artifact"] = True
-        if args.profile:
-            lists["profile"] = args.profile
-        if args.rank:
-            lists["rank"] = args.rank
-        if args.difficulty:
-            lists["difficulty"] = args.difficulty
-        if args.plan:
-            lists["plan_url"] = args.plan
+        options = (
+            ("kind", args.kind),
+            ("profile", args.profile),
+            ("rank", args.rank),
+            ("difficulty", args.difficulty),
+            ("plan_url", args.plan),
+            ("not_duplicate", args.not_duplicate),
+            ("plan_slice", args.plan_slice),
+        )
+        lists.update((key, value) for key, value in options if value)
         if args.scaffold:
             task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **lists}
             doc = call(args.slug) if args.kind == "plan" else None
@@ -704,8 +722,12 @@ def build_parser():
     task.add_argument("--profile")
     task.add_argument("--overlays", help="comma separated overlays this task's agent wears, at most three")
     task.add_argument("--rank", help="queue rank: urgent, high, normal (default) or low; next means urgent")
+    task.add_argument("--plan-slice", default="", help="task slice anchor; computes its plan lines")
     task.add_argument("--plan", default="", help="link to the published plan; default the phase's plan link")
     task.add_argument("--difficulty", choices=ledger_tasks.DIFFICULTIES, help="task size: S, M or L")
+    task.add_argument(
+        "--not-duplicate", default="", help="why the task differs from the one it resembles; skips the duplicate check"
+    )
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")
     publish.add_argument("--phase", required=True, help="comma separated ids of the phases the plan fills")

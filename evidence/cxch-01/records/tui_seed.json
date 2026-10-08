@@ -1,0 +1,28 @@
+{
+  "thread": "01a11cc9-945f-7132-92ad-73bd86efeeef",
+  "turn": {
+    "turn": "01a11cc9-9498-7641-83c9-d4fc63260d0a",
+    "completed": true,
+    "status": "completed",
+    "agent_text": [
+      "MIKE"
+    ],
+    "methods": [
+      "account/rateLimits/updated",
+      "account/updated",
+      "configWarning",
+      "hook/completed",
+      "hook/started",
+      "item/agentMessage/delta",
+      "item/completed",
+      "item/started",
+      "mcpServer/startupStatus/updated",
+      "remoteControl/status/changed",
+      "thread/started",
+      "thread/status/changed",
+      "thread/tokenUsage/updated",
+      "turn/completed",
+      "turn/started"
+    ]
+  }
+}

@@ -41,7 +41,7 @@ def ruling(task, pull, waiting):
     if pull is not None and pull.state == "OPEN":
         if not pull.resolved:
             return "", url
-        if pull.red:
+        if pull.red and not pull.gate_passed:
             return "red", ""
     if waiting:
         return "", ""

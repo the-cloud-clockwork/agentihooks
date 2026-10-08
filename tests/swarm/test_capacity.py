@@ -4,6 +4,7 @@ from dataclasses import replace
 import pytest
 
 from scripts import claude_quota_balancer as balancer
+from scripts import session_bands
 from scripts.swarm import capacity
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import SpawnError, tick
@@ -334,6 +335,29 @@ def test_failed_capacity_comment_is_retried_without_losing_the_decision():
     assert len(comments) == 1
 
 
+def test_refused_capacity_comment_keeps_the_fresh_decision():
+    from scripts.swarm.ledger_client import LedgerRefused
+
+    store = _store()
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    store.create(config)
+    ledger = FakeLedger([{"id": "e"}])
+    runtime = FakeRuntime()
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
+        cfg, [account()], agents, demand
+    )
+
+    def refuse(slug, task, text, now_ms):
+        assert (slug, task, now_ms) == ("sw", "e", 1000)
+        raise LedgerRefused("plain words refused")
+
+    ledger.capacity_comment = refuse
+    with pytest.raises(LedgerRefused, match="plain words refused"):
+        capacity.apply("sw", config, store, ledger, runtime, 1000)
+    assert capacity.read(store, "sw")["tasks"] == {"e": "claude"}
+    assert capacity.read(store, "sw")["at"] == 1000
+
+
 def test_codex_accounts_with_live_sessions_keep_their_own_quotas(monkeypatch):
     from scripts.codex_quota import CodexQuota
 
@@ -376,8 +400,9 @@ def test_runtime_refuses_an_account_when_its_harness_has_no_free_seat(tmp_path):
 
     runtime = HerdrRuntime(home=tmp_path)
     runtime._quota_accounts = [account(sessions=3), account("cx", harness="codex")]
-    with pytest.raises(SpawnError, match="no claude account has placeable quota seats"):
+    with pytest.raises(SpawnError, match="no claude account has placeable quota seats") as error:
         runtime._quota_account("claude", None, None)
+    assert error.value.status == "unavailable"
     assert runtime._quota_account("codex", None, None).name == "cx"
 
 
@@ -647,8 +672,9 @@ def test_a_fixed_claude_task_never_falls_through_to_codex(tmp_path, monkeypatch,
         task["handoff_envelope"] = {
             "launch": {"profile": "planner", "harness": "claude", "model": "fable", "effort": "high"}
         }
-    with pytest.raises(SpawnError, match="^no claude account has placeable quota seats$"):
+    with pytest.raises(SpawnError, match="^no claude account has placeable quota seats$") as error:
         runtime.spawn(config, "plan", "planner@a1b2c3-0001", task)
+    assert error.value.status == "unavailable"
     assert seen == []
 
 
@@ -746,6 +772,36 @@ def test_the_capacity_comment_passes_the_ledger_schema(monkeypatch):
     runtime = FakeRuntime()
     runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
         cfg, [account()], agents, demand
+    )
+    ledger = FakeLedger([{"id": "e"}])
+    ledger.capacity_comment = ledger_client.LedgerClient().capacity_comment
+    capacity.apply("sw", config, store, ledger, runtime, 1000)
+    (op,) = sent
+    ledger_core.check_op(op)
+
+
+def test_warned_capacity_comment_passes_the_ledger_schema(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm import ledger_client
+
+    ledger_client._ledger()
+    import ledger_core
+
+    sent = []
+    monkeypatch.setattr(
+        ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops, service: sent.extend(ops) or {})
+    )
+    store = _store()
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    store.create(config)
+    runtime = FakeRuntime()
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
+        cfg,
+        [account("a"), account("b", harness="codex")],
+        agents,
+        demand,
+        warned={("claude", "a"): "weekly", ("codex", "b"): "weekly"},
     )
     ledger = FakeLedger([{"id": "e"}])
     ledger.capacity_comment = ledger_client.LedgerClient().capacity_comment
@@ -959,8 +1015,9 @@ def test_master_affinity_cannot_fall_back_when_its_account_has_no_quota(tmp_path
     monkeypatch.setattr(module.affinity, "desired", lambda cfg: "codex")
     if planned:
         runtime._quota_tasks = {"p": "claude"}
-    with pytest.raises(SpawnError, match="^no codex account has placeable quota seats$"):
+    with pytest.raises(SpawnError, match="^no codex account has placeable quota seats$") as error:
         runtime.spawn(config, "master", "master@a1b2c3-0001", {"id": "p", "title": "Master", "profile": "master"})
+    assert error.value.status == "unavailable"
     assert seen == []
 
 
@@ -984,3 +1041,78 @@ def test_capacity_places_ready_tasks_in_the_claim_order():
     )
     capacity.apply("sw", config, store, ledger, runtime, 1000)
     assert capacity.read(store, "sw")["tasks"] == {"deep": "claude"}
+
+
+def test_allocation_skips_a_harness_whose_only_room_is_on_accounts_the_handoff_cannot_take():
+    seats = [session_bands.Seat("claude", "a", 1, 0), session_bands.Seat("codex", "x", 5, 0)]
+    allocation, placements = capacity._allocate(
+        None,
+        {"eng": 0, "ci": 0, "plan": 0},
+        {"eng": 1, "ci": 1, "plan": 0},
+        seats,
+        {"eng": [("claude", "codex")], "ci": [("claude",)], "plan": []},
+        {"eng": {0: {("claude", "a")}}},
+    )
+    assert placements == {"eng": [{"index": 0, "harness": "claude", "account": "a"}], "ci": [], "plan": []}
+
+
+def test_a_warned_account_gets_no_placeable_seat_and_the_reason_names_it():
+    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0)
+    observed = [account("w", left=5), account("v", left=5), account("cx", harness="codex")]
+    result = capacity.calculate(config, observed, [], warned={("claude", "w"): "week", ("claude", "v"): "five hour"})
+    assert result["placeable"] == {"claude": 0, "codex": 3}
+    assert result["placements"]["eng"] == [
+        {"index": 0, "harness": "codex", "account": "cx"},
+        {"index": 1, "harness": "codex", "account": "cx"},
+    ]
+    assert result["accounts"][0]["sessions"] == 0 and result["accounts"][0]["cap"] == 3
+    assert result["reason"].endswith(
+        "free seats, claude w is at its week quota warning, claude v is at its five hour quota warning"
+    )
+
+
+def test_runtime_capacity_passes_the_warned_accounts_to_the_calculation(tmp_path, monkeypatch):
+    from scripts.swarm import runtime as module
+
+    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [account("w", left=5), account("ok")])
+    rt = module.HerdrRuntime(home=tmp_path)
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    decision = rt.quota_capacity(config, [], 1, {"eng": 1, "ci": 0, "plan": 0})
+    assert decision["placements"]["eng"] == [{"index": 0, "harness": "claude", "account": "ok"}]
+    assert "claude w is at its week quota warning" in decision["reason"]
+
+
+def test_a_fresh_spawn_never_lands_on_a_warned_account_while_another_has_a_seat(tmp_path, monkeypatch):
+    runtime, config, seen = _runtime_probe(
+        tmp_path, monkeypatch, [account("w", left=5), account("cx", harness="codex")]
+    )
+    runtime.spawn(config, "plan", "planner@a1b2c3-0001", {"id": "p", "title": "Plan"})
+    assert seen == [("p", "codex", "cx")]
+    assert runtime._rotation("", {}) == ("codex", "rotation")
+    assert runtime.has_capacity(config)
+    runtime._quota_accounts = [account("w", left=5)]
+    assert not runtime.has_capacity(config)
+
+
+def test_a_claude_only_spawn_with_only_a_warned_account_refuses_naming_it(tmp_path, monkeypatch):
+    runtime, config, seen = _runtime_probe(
+        tmp_path, monkeypatch, [account("w", left=5), account("v", left=5), account("cx", harness="codex")]
+    )
+    task = {"id": "p", "title": "Plan", "profile": "frontend"}
+    refusal = "no claude account has placeable quota seats: claude w is at its week quota warning; claude v is at its"
+    with pytest.raises(SpawnError, match=f"^{refusal} week quota warning$") as error:
+        runtime.spawn(config, "plan", "planner@a1b2c3-0001", task)
+    assert error.value.status == "unavailable"
+    assert seen == []
+
+
+def test_a_recycle_successor_leaves_its_warned_saved_account_or_refuses_naming_it(tmp_path, monkeypatch):
+    saved = {"profile": "planner", "harness": "claude", "model": "fable", "effort": "high", "account": "w"}
+    task = {"id": "p", "title": "Continue", "handoff_envelope": {"reason": "recycle", "launch": saved}}
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account("w", left=5), account("b")])
+    runtime.spawn(config, "plan", "planner@a1b2c3-0001", task)
+    assert seen == [("p", "claude", "b")]
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account("w", left=5)])
+    with pytest.raises(SpawnError, match="^no claude account has placeable quota seats: claude w is at its week"):
+        runtime.spawn(config, "plan", "planner@a1b2c3-0002", task)
+    assert seen == []

@@ -10,7 +10,7 @@ QUEUE = """mutation($id: ID!, $head: GitObjectID!) {
 }"""
 
 DEQUEUE = """mutation($id: ID!) {
-    dequeuePullRequest(input: {pullRequestId: $id}) { mergeQueueEntry { id } }
+    dequeuePullRequest(input: {id: $id}) { mergeQueueEntry { id } }
 }"""
 
 

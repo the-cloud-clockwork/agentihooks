@@ -2221,6 +2221,8 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         rank="",
         difficulty=None,
         plan="",
+        plan_slice="",
+        not_duplicate="",
         scaffold=False,
         description="",
         phase="",

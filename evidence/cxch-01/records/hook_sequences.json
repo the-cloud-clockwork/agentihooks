@@ -1,0 +1,99 @@
+{
+  "source": "hook command logging stdin to a file in the scratch home; turn ids relabelled per file, prompts cut to their fixture name",
+  "steer_and_approvals_runs": [
+    {
+      "event": "SessionStart",
+      "turn": null
+    },
+    {
+      "event": "UserPromptSubmit",
+      "turn": "turn1",
+      "prompt_fixture": "Fixture three"
+    },
+    {
+      "event": "PreToolUse",
+      "turn": "turn1",
+      "tool_name": "Bash"
+    },
+    {
+      "event": "UserPromptSubmit",
+      "turn": "turn1",
+      "prompt_fixture": "Fixture four, steering"
+    },
+    {
+      "event": "UserPromptSubmit",
+      "turn": "turn1",
+      "prompt_fixture": "Fixture five"
+    },
+    {
+      "event": "PostToolUse",
+      "turn": "turn1",
+      "tool_name": "Bash"
+    },
+    {
+      "event": "Stop",
+      "turn": "turn1"
+    },
+    {
+      "event": "SessionStart",
+      "turn": null
+    },
+    {
+      "event": "UserPromptSubmit",
+      "turn": "turn2",
+      "prompt_fixture": "Fixture seven"
+    },
+    {
+      "event": "PreToolUse",
+      "turn": "turn2",
+      "tool_name": "Bash"
+    },
+    {
+      "event": "PermissionRequest",
+      "turn": "turn2",
+      "tool_name": "Bash"
+    },
+    {
+      "event": "Stop",
+      "turn": "turn2"
+    }
+  ],
+  "compaction_with_postcompact_registered": [
+    {
+      "event": "UserPromptSubmit",
+      "turn": "turn1",
+      "prompt_fixture": "Fixture nine"
+    },
+    {
+      "event": "Stop",
+      "turn": "turn1"
+    },
+    {
+      "event": "PreCompact",
+      "turn": "turn2",
+      "trigger": "manual"
+    },
+    {
+      "event": "PostCompact",
+      "turn": "turn2",
+      "trigger": "manual"
+    },
+    {
+      "event": "SessionStart",
+      "turn": null
+    },
+    {
+      "event": "UserPromptSubmit",
+      "turn": "turn3",
+      "prompt_fixture": "Fixture ten after compaction"
+    },
+    {
+      "event": "Stop",
+      "turn": "turn3"
+    },
+    {
+      "event": "SessionEnd",
+      "turn": null
+    }
+  ]
+}

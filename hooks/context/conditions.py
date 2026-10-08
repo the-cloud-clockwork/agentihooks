@@ -9,12 +9,14 @@ Reference: docs/hooks/conditions.md.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 import zlib
 from dataclasses import dataclass, field
@@ -25,6 +27,9 @@ from hooks.context import injection_trace, profile_chain, quarantine, tool_match
 
 STEPS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop"}
 _RUNNERS = {".sh": ["bash"], ".bash": ["bash"], ".py": [sys.executable]}
+FILTER_SUFFIX = ".filter.yaml"
+JUDGE, LEDGER_WRITE, INBOX_SEND = "judge", "ledger_write", "inbox_send"
+SYNTHETIC_TOOLS = (JUDGE, LEDGER_WRITE, INBOX_SEND)
 _INDEX_VERSION = 1
 _FRESH_NS = 2_000_000_000
 _CODE_ROOT = Path(__file__).resolve().parents[2]
@@ -335,8 +340,27 @@ def _kill_group(proc: subprocess.Popen) -> None:
         pass
 
 
+def _run_filter(entry: dict, step: str, payload: dict, timeout: float) -> dict:
+    from hooks.filters import runner
+
+    box: dict = {}
+
+    def work() -> None:
+        try:
+            box["run"] = runner.run(entry, step, payload)
+        except Exception as error:
+            box["run"] = {"error": f"filter crashed: {error}"}
+
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    return box.get("run") or {"error": f"timed out after {timeout:g}s"}
+
+
 def execute(entry: dict, step: str, payload: dict, timeout: float) -> dict:
     """Run one condition; never raises."""
+    if entry["file"].lower().endswith(FILTER_SUFFIX):
+        return _run_filter(entry, step, payload, timeout)
     cmd = _command(entry)
     if cmd is None:
         return {"error": "no runner for the extension and the file is not executable"}
@@ -908,11 +932,23 @@ _LANGUAGES = {"bash": (".sh", "#!/usr/bin/env bash\n"), "python": (".py", "#!/us
 _SCOPES = ("global", "profile", "directory")
 
 
+def misspelled(entry: dict) -> dict | None:
+    for alt in tool_matcher.parse(entry["matcher"]).alternatives:
+        if alt.kind != "tool" or alt.value in SYNTHETIC_TOOLS:
+            continue
+        close = difflib.get_close_matches(alt.value, SYNTHETIC_TOOLS, cutoff=0.8)
+        if close:
+            error = f"unknown tool {alt.value!r}: did you mean the synthetic tool {close[0]!r}?"
+            return {"path": entry["path"], "source": entry["source"], "error": error}
+    return None
+
+
 def inventory(cwd: str | Path | None = None) -> dict:
     state = profile_chain.read_state()
     layers, _probed = layer_dirs(state, cwd)
     _kept, untrusted = _trusted_layers(layers, state)
     entries, invalid = scan_layers([(s, d) for s, d in layers if str(d) not in untrusted])
+    invalid += [found for found in map(misspelled, entries) if found]
     described = []
     for source, directory in layers:
         described.append(
@@ -924,7 +960,7 @@ def inventory(cwd: str | Path | None = None) -> dict:
                 "untrusted_owner": untrusted.get(str(directory)),
             }
         )
-    return {"layers": described, "conditions": entries, "invalid": invalid}
+    return {"layers": described, "conditions": entries, "invalid": invalid, "synthetic_tools": list(SYNTHETIC_TOOLS)}
 
 
 def target_dir(scope: str, profile: str = "", cwd: str | Path | None = None) -> tuple[str, Path]:

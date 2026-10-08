@@ -49,6 +49,7 @@ def check(op, task_ids=()):
     if kind == "retext" and (not TEXT_ITEM_RE.match(str(op.get("item"))) or not _text(op.get("text"))):
         raise ValueError("retext needs item questions/<id> or followups/<id> and text")
     if kind in ("add_item", "retext"):
+        op["text"] = _screened(op["text"])
         ledger_comments.check(op["text"], "item", task_ids=task_ids)
     if kind == "gate_bypass" and not isinstance(op.get("unhandled"), int):
         raise ValueError("gate_bypass needs an integer unhandled")
@@ -57,7 +58,15 @@ def check(op, task_ids=()):
     if "status" in op:
         if not _text(op["status"]):
             raise ValueError(f"status must be text up to {MAX_TEXT} characters")
+        op["status"] = _screened(op["status"])
         ledger_comments.check(op["status"], "comment", task_ids=task_ids)
+
+
+def _screened(text):
+    from hooks.context.conditions import LEDGER_WRITE
+    from hooks.filters import check as filters
+
+    return filters.screen(LEDGER_WRITE, text)
 
 
 def _text(value):

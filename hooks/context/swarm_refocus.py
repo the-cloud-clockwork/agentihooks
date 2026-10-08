@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from hooks.config import AGENTIHOOKS_HOME
+from scripts.swarm_ledger import plan_read
 
 STATE_DIR = AGENTIHOOKS_HOME / "swarm-refocus"
 DEFAULT_EVERY = 40
@@ -25,6 +26,7 @@ def build_block(ledger, task_id, cap):
         f"Plan: {_clip(ledger.get('overview', ''), share)}\n"
         f"Phase: {phase.get('title', '')}: {_clip(phase.get('description', ''), share)}\n"
         f"Your task {task_id}: {task.get('title', '')}\n"
+        + (f"{plan_read.pointer(task)}\n" if task.get("plan_lines") else "")
     )
     return _clip(head + task.get("description", ""), cap)
 

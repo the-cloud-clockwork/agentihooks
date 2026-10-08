@@ -1,7 +1,7 @@
-"""Route a Codex launch to one account: the default `codex login` or an AH_CX_TOKEN_<slug>.
+"""Route a Codex launch to one account: the default `codex login`, an AH_CX_TOKEN_<slug> or the api key.
 
-Token values only move from the environment into the child's CODEX_ACCESS_TOKEN;
-they are never printed or written anywhere.
+Token values only move from the environment into the child's CODEX_ACCESS_TOKEN, and an api
+key stays in the child's environment under its own name; neither is printed or written anywhere.
 """
 
 import contextlib
@@ -13,19 +13,21 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from hooks.context.account_sessions import (
+    API_ACCOUNT,
     CODEX_DEFAULT,
     CODEX_TOKEN_PREFIX,
-    TOKEN_PREFIX,
     codex_sessions_by_account,
 )
 from scripts import codex_quota, session_bands
 from scripts.codex_quota import CodexQuota
+from scripts.routing import codex_api, envs
+from scripts.routing.slots import INTERACTIVE, SUBSCRIPTION, Slot
 
-TOKEN_ENV = "CODEX_ACCESS_TOKEN"
+TOKEN_ENV = envs.CODEX_TOKEN_ENV
 PROBE_ARGS = ["exec", "--json", "--skip-git-repo-check", "Reply with the single word ok."]
 PROBE_TIMEOUT_S = 90
 CODEX_BIN = "codex"
@@ -39,10 +41,16 @@ class CodexAccount:
     name: str
     env_name: str = ""
     signed_in: bool = True
+    key_env: str = ""
+    base_url: str = ""
 
     @property
     def is_token(self) -> bool:
         return bool(self.env_name)
+
+    @property
+    def is_api(self) -> bool:
+        return bool(self.key_env)
 
 
 class RoutingError(RuntimeError):
@@ -53,16 +61,14 @@ def token_accounts(environ: Mapping[str, str]) -> list[CodexAccount]:
     return [
         CodexAccount(name.removeprefix(CODEX_TOKEN_PREFIX), name)
         for name in sorted(environ)
-        if name.startswith(CODEX_TOKEN_PREFIX) and name != CODEX_TOKEN_PREFIX and environ[name]
+        if name.startswith(CODEX_TOKEN_PREFIX)
+        and name.removeprefix(CODEX_TOKEN_PREFIX) not in ("", API_ACCOUNT)
+        and environ[name]
     ]
 
 
 def _without_tokens(environ: Mapping[str, str]) -> dict[str, str]:
-    return {
-        name: value
-        for name, value in environ.items()
-        if name != TOKEN_ENV and not name.startswith((CODEX_TOKEN_PREFIX, TOKEN_PREFIX))
-    }
+    return envs.codex_subscription_child(environ)
 
 
 def default_signed_in(environ: Mapping[str, str], run: Callable = subprocess.run) -> bool:
@@ -167,6 +173,51 @@ def fresh_quotas(
     return found
 
 
+@dataclass(frozen=True)
+class CodexAccountSource:
+    run: Callable | None = None
+    sessions: Mapping[str, int] = field(default_factory=dict)
+    refresh: bool = True
+
+    def _run(self) -> tuple[Callable, ...]:
+        return () if self.run is None else (self.run,)
+
+    def pool(self, environ: Mapping[str, str]) -> list[CodexAccount]:
+        return routing_pool(environ, *self._run())
+
+    def readings(
+        self, pool: list[CodexAccount], environ: Mapping[str, str], now: float
+    ) -> dict[str, CodexQuota | None]:
+        return fresh_quotas(pool, environ, now, *self._run()) if self.refresh else quotas(pool, environ)
+
+    def offer(self, pool: list[CodexAccount], readings: Mapping[str, CodexQuota | None], now: float) -> list[Slot]:
+        return [
+            Slot(
+                "codex",
+                account.name,
+                cap,
+                self.sessions.get(account.name, 0),
+                _spend_by(quota, now),
+                kind=SUBSCRIPTION if account.is_token else INTERACTIVE,
+            )
+            for account in pool
+            if account.signed_in and (cap := account_cap(quota := readings.get(account.name), now)) is not None
+        ]
+
+    def slots(self, environ: Mapping[str, str], now: float) -> list[Slot]:
+        pool = self.pool(environ)
+        return self.offer(pool, self.readings(pool, environ, now), now)
+
+    def child_env(self, slot: Slot, environ: Mapping[str, str]) -> dict[str, str]:
+        if slot.kind == INTERACTIVE:
+            return child_environment(CodexAccount(CODEX_DEFAULT), environ)
+        tokens = {account.name: account for account in token_accounts(environ)}
+        if slot.account not in tokens:
+            available = ", ".join(tokens) or "none"
+            raise RoutingError(f"Codex account '{slot.account}' has no token; available: {available}")
+        return child_environment(tokens[slot.account], environ)
+
+
 def select(
     pool: list[CodexAccount],
     quotas: Mapping[str, CodexQuota | None],
@@ -182,7 +233,7 @@ def select(
         available = ", ".join(account.name for account in pool)
         raise RoutingError(f"Codex account '{route}' not found; available: {available}")
     by_name = {account.name: account for account in pool}
-    seat = session_bands.pick(seats(pool, quotas, sessions, now))
+    seat = session_bands.pick(CodexAccountSource(sessions=sessions).offer(pool, quotas, now))
     if seat is None:
         raise RoutingError("no signed in Codex account has a fresh reading and a free session under its quota band")
     return by_name[seat.account], "open", seat
@@ -191,11 +242,7 @@ def select(
 def seats(
     pool: list[CodexAccount], quotas: Mapping[str, CodexQuota | None], sessions: Mapping[str, int], now: float
 ) -> list[session_bands.Seat]:
-    return [
-        session_bands.Seat("codex", account.name, cap, sessions.get(account.name, 0), _spend_by(quota, now))
-        for account in pool
-        if account.signed_in and (cap := account_cap(quota := quotas.get(account.name), now)) is not None
-    ]
+    return CodexAccountSource(sessions=sessions).offer(pool, quotas, now)
 
 
 def _spend_by(quota: CodexQuota, now: float) -> float | None:
@@ -204,6 +251,8 @@ def _spend_by(quota: CodexQuota, now: float) -> float | None:
 
 
 def child_environment(account: CodexAccount, environ: Mapping[str, str]) -> dict[str, str]:
+    if account.is_api:
+        return envs.codex_api_child(environ)
     child = _without_tokens(environ)
     if account.is_token:
         child[account.env_name] = environ[account.env_name]
@@ -212,7 +261,19 @@ def child_environment(account: CodexAccount, environ: Mapping[str, str]) -> dict
 
 
 def command(account: CodexAccount, codex_bin: str, args: list[str]) -> list[str]:
+    if account.is_api:
+        return [codex_bin, NO_DAEMON, *codex_api.overrides(account.key_env, account.base_url), *args]
     return [codex_bin, *([NO_DAEMON] if account.is_token else []), *args]
+
+
+def api_account(environ: Mapping[str, str]) -> CodexAccount:
+    key_env = codex_api.key_name(environ)
+    if not key_env:
+        raise RoutingError(f"Codex account '{API_ACCOUNT}' needs {' or '.join(codex_api.KEY_NAMES)}")
+    base_url = codex_api.base_url(environ)
+    if codex_api.carries_credentials(base_url):
+        raise RoutingError(f"{codex_api.base_url_name(environ)} must not carry credentials, a query or a fragment")
+    return CodexAccount(API_ACCOUNT, key_env=key_env, base_url=base_url)
 
 
 def _take(args: list[str], flag: str) -> tuple[str, list[str]]:
@@ -238,9 +299,12 @@ def _report(path: str, **fields: str) -> None:
 
 def _route(environ: Mapping[str, str], route: str, run: Callable) -> tuple[CodexAccount, str, int, str]:
     sessions = codex_sessions_by_account()
-    pool = routing_pool(environ, run)
+    if route == API_ACCOUNT:
+        return api_account(environ), "forced", sessions.get(API_ACCOUNT, 0), "?"
+    source = CodexAccountSource(run, refresh=not route)
+    pool = source.pool(environ)
     now = time.time()
-    found = quotas(pool, environ) if route else fresh_quotas(pool, environ, now, run)
+    found = source.readings(pool, environ, now)
     account, placement, seat = select(pool, found, sessions, now, route)
     return account, placement, sessions.get(account.name, 0), str(seat.cap) if seat else "?"
 

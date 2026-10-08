@@ -115,10 +115,18 @@ def test_other_tools_empty_answers_and_unnamed_sessions_record_nothing():
 
 
 def test_only_the_latest_entries_are_kept():
-    for n in range(operator_words.KEPT + 1):
-        operator_words.heard_prompt(f"word{n} said", ENV, now=100 + n)
-    assert operator_words.matching("master@a1-1", "word0 said", now=200) == ""
-    assert operator_words.matching("master@a1-1", f"word{operator_words.KEPT} said", now=200)
+    for n in range(operator_words.ROWS_KEPT + 1):
+        operator_words.record("master@a1-1", f"word{n} said", now=100 + n)
+    assert operator_words.matching("master@a1-1", "word0 said", within=None) == ""
+    assert operator_words.matching("master@a1-1", f"word{operator_words.ROWS_KEPT} said", within=None)
+
+
+def test_words_outside_the_window_are_kept_and_found_with_no_window():
+    operator_words.heard_prompt("ship it", ENV, now=100)
+    operator_words.record("master@a1-1", "hold it", now=LATER)
+    assert operator_words.matching("master@a1-1", "ship it", now=LATER) == ""
+    assert operator_words.matching("master@a1-1", "ship it", now=LATER * 1000, within=None) == "ship it"
+    assert operator_words.recorded("master@*") == ["master@a1-1"]
 
 
 def test_the_hooks_record_a_typed_prompt_and_an_answer(monkeypatch):
