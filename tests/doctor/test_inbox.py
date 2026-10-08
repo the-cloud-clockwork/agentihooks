@@ -138,3 +138,13 @@ def test_delivered_seat_mail_is_backlog_once_the_agent_that_took_it_left_though_
     assert [f.subject for f in inbox.past_window([row], 20 * MIN, WINDOW, live)] == [row["id"]]
     taker = {**live, "engineer@a-0001": inbox.Receiver(live=True)}
     assert inbox.past_window([row], 20 * MIN, WINDOW, taker) == []
+
+
+def test_the_reader_is_the_latest_agent_that_took_delivery_or_read_the_item():
+    pending = {"state": "pending", "by": "swarm"}
+    took = {"state": "delivered", "by": "engineer@a-0001"}
+    assert inbox.reader({"history": [pending]}) == ""
+    assert inbox.reader({"history": [pending, {"state": "delivered"}]}) == ""
+    assert inbox.reader({"history": [pending, took, pending]}) == "engineer@a-0001"
+    assert inbox.reader({"history": [pending, took, {"state": "read", "by": "engineer@a-0002"}]}) == "engineer@a-0002"
+    assert inbox.reader({"history": [took, {"state": "delivered", "by": "engineer@a-0003"}]}) == "engineer@a-0003"

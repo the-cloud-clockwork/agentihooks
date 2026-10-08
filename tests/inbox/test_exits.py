@@ -219,3 +219,21 @@ def test_the_sweep_leaves_a_wait_ended_notice_open_while_its_agent_is_live(redis
     store.put_agent("sw", AgentRecord(name="sw-eng-1", lane="eng", task="t1", seat="eng-1@sw"))
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(notice.id).state == "pending"
+
+
+def test_the_sweep_closes_a_gone_agents_wait_notice_after_a_live_agents_on_the_same_seat(monkeypatch, redis):
+    from scripts.inbox import store as inbox_store
+    from scripts.swarm.store import AgentRecord
+
+    clock = iter(range(100, 200))
+    monkeypatch.setattr(inbox_store, "now_ms", lambda: next(clock))
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    live = inbox.send("swarm", "eng-1@sw", "Your wait on task t2, now done has ended. Pick task t1 back up: done")
+    store.seats.occupy("eng-1@sw", "sw-eng-2", live.created_at + 1)
+    gone = inbox.send("swarm", "eng-1@sw", "Your wait on task t3, now done has ended. Pick task t4 back up: done")
+    store.seats.occupy("eng-1@sw", "sw-eng-1", gone.created_at + 1)
+    store.put_agent("sw", AgentRecord(name="sw-eng-1", lane="eng", task="t1", seat="eng-1@sw"))
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(live.id).state == "pending"
+    assert inbox.get(gone.id).reason == "done: sw-eng-2 left its seat before picking task t4 back up"

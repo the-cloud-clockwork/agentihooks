@@ -467,6 +467,16 @@ def test_a_handoff_closes_its_wait_ended_notice_before_the_seat_passes_on(starte
     assert (closed.state, closed.reason) == ("done", f"done: {ME} recorded a handoff on task t1")
 
 
+def test_notice_task_names_the_task_only_a_swarm_wait_ended_notice_asks_back():
+    from scripts.inbox.store import Item
+
+    text = f"Your wait on checks on {URL}, now red has ended. Pick task t13 back up: agentihooks swarm sw done"
+    notice = Item(id="n", sender="swarm", address="eng-1@sw", text=text, state="delivered", created_at=1, updated_at=1)
+    assert waits.notice_task(notice) == "t13"
+    assert waits.notice_task(Item(**{**notice.__dict__, "sender": "master@sw"})) == ""
+    assert waits.notice_task(Item(**{**notice.__dict__, "text": "Pick task t13 back up: then"})) == ""
+
+
 def test_checks_declaration_records_the_remote_head(started, monkeypatch, capsys):
     from types import SimpleNamespace
 
