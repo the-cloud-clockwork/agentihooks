@@ -1,17 +1,17 @@
 {
-  "tested_commit": "bef5d3173c86e01e75df98fb36998fe085b99a9c",
+  "tested_commit": "3a23bb470ade8bc6c66ee90dc7f68d0008974ba3",
   "evidence_class": "local isolated fixture on temporary homes with a fixed installation time; mocked: the brain vault fetch, the background refresh fork and the brain HTTP post; not live rollout proof",
   "inputs": {
     "tests/fixtures/swarm_v2/keyspace-golden.json": "49a0b362923a4aaaaab5f87421266609336dc263954aa2bb42758d9bf0f83779",
     "hooks/_redis.py": "523c14f3c53a6cfe64f6b3b888f0d08b04ba47c7b7f5a835893090beff1a01d9",
     "hooks/context/controls_toggle.py": "2ee8dfe27df82e483d0420fea0fbac754ead2f3c092ec0ccdc8c2333189430d6",
     "tests/fixtures/swarm_v2/keyspace.json": "90dedbc199fbe0d0adb28a7430f42c583c8e68d966f92295cff0bb9debb2927b",
-    "scripts/swarm_v2/keyspace.py": "5dfb8c1a31dd7fe77b9ddb1589810542b89ea3367fffeabf0b92360c882e8360",
-    "hooks/context/project_cache.py": "0542abc6687be5012cf626d3ec80f5c5ca59786b8f1badf1ab70ab74d47610a4",
-    "hooks/context/brain_adapter.py": "c764cc9af7e356bdcc9ba104944d165bb200ef40ce7be35c57b2b68eb51b2761",
-    "hooks/context/brain_writer_hook.py": "25f19e9e4ef7905d69ac850635b8a53358ac6da04744e126f71d9cb963ac870a",
+    "scripts/swarm_v2/keyspace.py": "9ae33470b8a4c4e26c18c711c9c08377c123c66216edd3938779c2765e0505fc",
+    "hooks/context/project_cache.py": "62449d4316d9437c79f1d5f9a6b7ac70e044adba1b04bb4a8e11a144a9818bac",
+    "hooks/context/brain_adapter.py": "882f6feab5d70a19bea5f1bffbb5e46a7e90ddd568321d4d41fe17bdc98ecff5",
+    "hooks/context/brain_writer_hook.py": "9de0e4f8fe8cdd77d89dd41ed0e4d421d81180eb6a36d26b52ec7fdb2fa6a927",
     "hooks/context/project_sessions.py": "9a105e84751410e78de8ced4fe674583d3e9fa24d5529e6200d682aa321deb89",
-    "tests/test_swarm_v2_keyspace.py": "dfaba95d10469f7fbb6232114249dad1e6d7b9860a8c6db273e821b4c25dcdda",
+    "tests/test_swarm_v2_keyspace.py": "f715f59b8f39c5a22c48d1c789bedbd73a3d91fd2afba165fc4b59f880862a9d",
     "evidence/SV2-IDN-05/generate_case_results.py": "bc3155580b7a9535340d3b0264656813c82dbd6984f6f4637c9de3f0643b0255"
   }
 }
