@@ -33,7 +33,8 @@ def saved_before(folder: Path, run_time: str) -> bool:
     stamp = folder / "saved-at"
     if not run_time or not stamp.is_file():
         return False
-    return int(stamp.read_text()) <= datetime.fromisoformat(run_time).timestamp() - SAVE_MARGIN_SECONDS
+    started = int(run_time) if run_time.isdigit() else datetime.fromisoformat(run_time).timestamp()
+    return int(stamp.read_text()) <= started - SAVE_MARGIN_SECONDS
 
 
 def _choose(version: str, restored: Path, run_time: str) -> None:

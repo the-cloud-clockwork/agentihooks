@@ -469,15 +469,13 @@ def test_every_shard_of_a_run_judges_the_restored_durations_by_one_event_time_an
     _, adopt = _unit_step_index(lambda s: s.get("name") == "Adopt latest dev durations")
     assert adopt["env"]["RUN_TIME"] == (
         "${{ github.event.pull_request.updated_at || github.event.merge_group.head_commit.timestamp"
-        " || github.event.head_commit.timestamp }}"
+        " || github.event.repository.pushed_at }}"
     )
     assert '--run-time "$RUN_TIME" --hash durations.sha256' in adopt["run"]
-    stage = next(
-        step
-        for step in _workflow()["jobs"]["refresh-durations"]["steps"]
-        if step.get("name") == "Stage merged durations for the cache"
-    )
+    steps = [step.get("name") for step in _workflow()["jobs"]["refresh-durations"]["steps"]]
+    stage = _workflow()["jobs"]["refresh-durations"]["steps"][steps.index("Stage merged durations for the cache")]
     assert "date +%s > ~/dev-durations/saved-at" in stage["run"]
+    assert steps.index("Save merged durations to the cache") == steps.index(stage["name"]) + 1
 
 
 def test_ci_samples_are_one_per_shard_file_without_the_xdist_group_suffix(tmp_path):

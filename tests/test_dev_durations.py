@@ -80,6 +80,22 @@ def test_a_cache_with_no_save_time_or_a_run_with_no_event_time_keeps_the_committ
     assert json.loads((tmp_path / "shard" / ".test_durations").read_text()) == {"t.py::a": 1.0}
 
 
+@pytest.mark.parametrize(
+    ("saved_at", "run_time", "adopted"),
+    [
+        (3300, RUN, True),
+        (3301, RUN, False),
+        (3300, "1970-01-01T02:00:00+01:00", True),
+        (3301, "1970-01-01T02:00:00+01:00", False),
+        (3300, "3600", True),
+        (3301, "3600", False),
+    ],
+)
+def test_a_cache_is_adopted_only_when_saved_five_minutes_before_the_event_time(tmp_path, saved_at, run_time, adopted):
+    restored = _restored(tmp_path / "restored", {"t.py::a": 9.0}, saved_at=saved_at)
+    assert dev_durations.saved_before(restored, run_time) is adopted
+
+
 def test_main_keeps_the_committed_version_file_on_a_cache_miss(tmp_path, monkeypatch):
     (tmp_path / ".test_durations-3.12").write_text('{"t.py::a": 1.0}')
     monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
