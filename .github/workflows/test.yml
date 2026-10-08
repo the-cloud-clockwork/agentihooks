@@ -28,6 +28,10 @@ permissions:
 jobs:
   swarm-image:
     uses: ./.github/workflows/swarm-smoke.yml
+  semgrep:
+    uses: ./.github/workflows/semgrep.yml
+    with:
+      base: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
 
   brain-smoke:
     uses: ./.github/workflows/brain-smoke.yml
@@ -430,6 +434,22 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         run: python -m ruff format --check hooks/ scripts/ tests/
 
+      - name: Select docs build
+        id: docs
+        if: steps.lookup.outputs.skip != 'true'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+        run: |
+          git diff --name-only "$BASE" HEAD -- docs index.md _config.yml assets .github/workflows/test.yml > "$RUNNER_TEMP/docs-changes"
+          if [[ -s "$RUNNER_TEMP/docs-changes" ]]; then echo "build=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Build docs with Jekyll
+        if: steps.lookup.outputs.skip != 'true' && steps.docs.outputs.build == 'true'
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./
+          destination: ./_site
+
       - name: Select artifact browser checks
         id: artifacts
         if: steps.lookup.outputs.skip != 'true'
@@ -452,7 +472,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, shard-check, test-count, lint, sonar, mutation, swarm-image, brain-smoke, wiring]
+    needs: [unit, shard-check, test-count, lint, sonar, mutation, swarm-image, brain-smoke, wiring, semgrep]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

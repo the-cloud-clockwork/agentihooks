@@ -44,6 +44,7 @@ import subprocess
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -180,7 +181,9 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms())
         actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), ledger_events.view)
         mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
-        actions += skip_refused(intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge).run, doc)
+        actions += skip_refused(
+            intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge, head=intent.pr_head).run, doc
+        )
         actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
         rows = {t["id"]: t for t in doc["tasks"]}
         actions += skip_refused(waits.end_pass, store, slug, rows, inbox, ledger_events.view, now_ms())
@@ -209,18 +212,24 @@ def cmd_list(store, args):
         )
 
 
+def _tick_one(store, slug):
+    try:
+        for action in run_tick(store, slug):
+            timing.emit(sys.stdout, f"{slug}: {action}")
+    except Exception as exc:
+        timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
+
+
 def cmd_tick(store, args):
     from scripts import operator_env
 
     if why := timer.installed_refusal():
         raise SwarmError(f"the tick refused to run: {why}")
     operator_env.fill(os.environ)
-    for slug in store.slugs():
-        try:
-            for action in run_tick(store, slug):
-                print(f"{slug}: {action}")
-        except Exception as exc:
-            print(f"{slug}: {type(exc).__name__}: {exc}", file=sys.stderr)
+    slugs = store.slugs()
+    if slugs:
+        with ThreadPoolExecutor(max_workers=len(slugs)) as pool:
+            list(pool.map(lambda slug: _tick_one(store, slug), slugs))
     from scripts import herdr_gc
 
     try:
