@@ -99,7 +99,7 @@ from scripts.swarm.ledger_client import LedgerClient, LedgerGone
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
-from scripts.swarm.tick import agent_status, primed, tick
+from scripts.swarm.tick import agent_status, primed, skip_refused, tick
 from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
 
 SETTABLE = {
@@ -155,13 +155,13 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         except LedgerGone as exc:
             first = store.redis.set(store.key(slug, "ledger-gone"), 1, nx=True)
             return [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
-        actions = timing.call(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
+        actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
         if actions:
             doc = timing.call(ledger.state, slug)
         ticked = timing.call(phases.phase_pass, inbox, store, slug, doc, ledger)
         actions += ticked
         if ticked:
-            actions += timing.call(
+            actions += skip_refused(
                 phase_planning.planning_pass,
                 inbox,
                 store,
@@ -174,25 +174,25 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         if store.config(slug).template == "doctor":
             from scripts.doctor import cli as doctor
 
-            actions += timing.call(doctor.timer, store, slug, now_ms())
+            actions += skip_refused(doctor.timer, store, slug, now_ms())
         herdr = messenger or delivery.HerdrMessenger()
         timing.call(delivery.migrate_outbox, store, slug, inbox)
         agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
-        timing.call(delivery.relay_to_page, inbox, slug, agents, ledger)
+        skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
         doc, config = timing.call(ledger.state, slug), store.config(slug)
-        actions += timing.call(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms())
-        actions += timing.call(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), ledger_events.view)
+        actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms())
+        actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), ledger_events.view)
         mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
-        actions += timing.call(intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge).run, doc)
-        actions += timing.call(progress.checks_pass, store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
+        actions += skip_refused(intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge).run, doc)
+        actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
         rows = {t["id"]: t for t in doc["tasks"]}
-        actions += timing.call(waits.end_pass, store, slug, rows, inbox, ledger_events.view, now_ms())
-        actions += timing.call(quiet.quiet_pass, store, slug, rows, now_ms())
-        actions += timing.call(priority_sweep.priority_pass, store, slug, doc, ledger)
+        actions += skip_refused(waits.end_pass, store, slug, rows, inbox, ledger_events.view, now_ms())
+        actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
+        actions += skip_refused(priority_sweep.priority_pass, store, slug, doc, ledger)
         found = timing.call(findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
-        actions += timing.call(ledger_events.findings_pass, inbox, store, slug, found)
+        actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found)
         window = wake.window_ms(os.environ)
-        actions += timing.call(
+        actions += skip_refused(
             wake.wake_pass, inbox, slug, agents, herdr, ledger, now_ms(), window, wake.quiet_ms(os.environ)
         )
         taken = timing.call(snapshot.auto, store, slug, now_ms(), os.environ)
