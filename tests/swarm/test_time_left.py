@@ -128,6 +128,25 @@ def test_moved_compares_unknown_estimates_by_presence():
     assert time_left.MOVE_MINUTES == 5
 
 
+def test_the_estimate_counts_the_ledger_events_against_now(store):
+    observe(store)
+    ledger = Ledger()
+    doc = {
+        "tasks": [{"id": "a", "state": "claimed", "difficulty": "S"}],
+        "_meta": {"events": [{"kind": "task claimed", "target": "tasks/a", "at": NOW - 10 * 60_000}]},
+    }
+    doc["_meta"]["time_left"] = saved(4)
+    time_left.refresh("sw", store, ledger, OBSERVED, doc, NOW)
+    assert ledger.sent == []
+
+
+def test_a_state_without_meta_still_sends(store):
+    observe(store)
+    ledger = Ledger()
+    time_left.refresh("sw", store, ledger, OBSERVED, {"tasks": []}, NOW)
+    assert ledger.sent == [("sw", 2, 4)]
+
+
 def test_a_ledger_without_the_write_is_skipped(store):
     assert time_left.refresh("sw", store, object(), OBSERVED, ledger_doc(), NOW) == []
 

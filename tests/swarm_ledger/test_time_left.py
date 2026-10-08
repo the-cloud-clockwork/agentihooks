@@ -389,3 +389,44 @@ class TestPageInputs:
             "assert.equal(timeLeftInputs(undefined), undefined);\n"
             "assert.equal(timeLeftInputs({gap: 'x'}), undefined);\n"
         )
+
+
+class TestPrecision:
+    def test_measured_minutes_round_to_one_decimal(self):
+        rows, events = spans("S", [10.37] * 5)
+        assert ledger_stats.agent_minutes(doc(*rows), events, NOW)["S"] == {"minutes": 10.4, "samples": 5}
+
+    def test_work_chain_and_throughput_round_to_one_decimal(self):
+        result = ledger_stats.calculate(doc(task("a", "open", "S")), [], NOW, {"slots": 3, "ci_minutes": 5.37})
+        assert (result["work"], result["chain"], result["throughput"], result["minutes"]) == (15.4, 15.4, 5.1, 16)
+
+    def test_check_accepts_zero_and_fractional_ci_minutes(self):
+        op = {"op": "time_left", "id": "t1", "by": "swarm", "slots": 1}
+        assert ledger_time_left.check({**op, "ci_minutes": 0}) is None
+        assert ledger_time_left.check({**op, "ci_minutes": 0.5}) is None
+
+
+class TestClockUse:
+    def in_flight(self):
+        return doc(task("a", "claimed", "S"), time_left=30)
+
+    def claim(self):
+        return [event("task claimed", "a", NOW - 10 * MINUTE)]
+
+    def test_the_review_counts_in_flight_time_against_now(self):
+        meta = {"events": self.claim(), "time_left": {"inputs": {"slots": 1, "ci_minutes": 4}}}
+        assert "computed 0h 4m as the larger of a 4m chain" in ledger_stats.review(self.in_flight(), meta, NOW)
+
+    def test_the_stats_refresh_counts_in_flight_time_against_its_clock(self):
+        d = self.in_flight()
+        meta = {"rev": 0, "stamps": {}, "events": self.claim(), "members": {}}
+        meta["time_left"] = {"inputs": {"slots": 1, "ci_minutes": 4}}
+        ctx = ledger_core.Context(meta, NOW)
+        ledger_stats.refresh(d, ctx, "clock")
+        assert ctx.meta["stats_refresh"]["state"] == "refreshed"
+        assert d["time_left_minutes"] == 4
+
+    def test_a_finished_ledger_names_the_page_value(self):
+        assert ledger_stats.time_left_line(doc(task("a", "done"), time_left=30), [], NOW) == (
+            "the page shows 0h 30m, computed 0h 0m with no task remaining, stale"
+        )

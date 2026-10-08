@@ -670,6 +670,29 @@ def test_every_tick_sends_the_ledger_its_time_left_inputs(store):
     assert sent == [("sw", None, None), ("sw", None, None)]
 
 
+def test_the_tick_sends_quota_slots_and_counts_ledger_events_against_its_clock(store):
+    ledger, runtime = FakeLedger([{"id": "t0", "state": "done", "done": True}, {"id": "t1"}]), FakeRuntime()
+    ledger.log = [
+        {"kind": "task claimed", "target": "tasks/t0", "at": 1_000, "by": "eng", "rev": 1},
+        {"kind": "task pr", "target": "tasks/t0", "at": 61_000, "by": "eng", "rev": 2},
+    ]
+    ledger.comment = lambda slug, item, text, by: None
+    lanes = ("eng", "ci", "plan")
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: {
+        "configured": {"eng": 2, "ci": 1, "plan": 1},
+        "effective": dict.fromkeys(lanes, 0),
+        "placeable": {"claude": 3, "codex": 0},
+        "reason": "accounts have quota",
+        "accounts": [],
+        "allocation": {lane: {"claude": 0, "codex": 0} for lane in lanes},
+        "placements": {lane: [] for lane in lanes},
+    }
+    sent = []
+    ledger.time_left = lambda slug, slots, ci_minutes: sent.append((slug, slots, ci_minutes))
+    tick("sw", store, ledger, runtime, now_ms=120_000)
+    assert sent == [("sw", 3, None)]
+
+
 def test_a_finished_agent_whose_retire_fails_holds_no_lane_slot(store):
     store.update("sw", max_eng=1)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
