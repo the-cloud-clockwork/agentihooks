@@ -326,7 +326,8 @@ class TestBannerFormat:
 
 
 @pytest.mark.parametrize(
-    ("target", "home_var", "wrapped"), [("claude", "CLAUDE_CONFIG_DIR", False), ("codex", "CODEX_HOME", True)]
+    ("target", "home_var", "wrapped"),
+    [("claude", "CLAUDE_CONFIG_DIR", False), ("codex", "CODEX_HOME", True), ("copilot", "COPILOT_HOME", False)],
 )
 def test_stamped_overlay_enforcement_fires_at_tool_cadence(
     bundle_dir, tmp_path, monkeypatch, target, home_var, wrapped
