@@ -73,10 +73,13 @@ class ClaudeCliBackend:
             report = Path(directory) / "route"
             wire = Path(directory) / "request.json"
             wire.write_text(json.dumps(request.wire()))
-            # Interactive like init-agent launches, so ~/.bashrc exports the accounts; its startup may read stdin.
+            # Interactive like init-agent launches, so ~/.bashrc exports the accounts; its startup may read stdin
+            # and may start an ssh agent, which would outlive the exec and the caller.
+            outer_agent = shlex.quote(os.environ.get("SSH_AGENT_PID", ""))
             args = [
                 "bash",
                 "-lic",
+                f'[ "${{SSH_AGENT_PID:-}}" = {outer_agent} ] || kill "$SSH_AGENT_PID" 2>/dev/null; '
                 f'exec "$0" "$@" < {shlex.quote(str(wire))}',
                 shutil.which("agentihooks") or "agentihooks",
                 "claude",

@@ -1,6 +1,10 @@
 import json
 import os
+import shlex
+import signal
+import time
 from pathlib import Path
+from subprocess import Popen
 from subprocess import run as _real_run
 from types import SimpleNamespace
 
@@ -44,7 +48,9 @@ def test_haiku_launches_through_agentihooks_claude(monkeypatch, tmp_path, route,
     assert fallbacks.ClaudeCliBackend().decide(REQUEST).source == "haiku"
     args, kwargs = seen[0]
     wire = Path(kwargs["cwd"]) / "request.json"
-    assert args[:3] == ["bash", "-lic", f'exec "$0" "$@" < {wire}']
+    outer_agent = shlex.quote(os.environ.get("SSH_AGENT_PID", ""))
+    reap = f'[ "${{SSH_AGENT_PID:-}}" = {outer_agent} ] || kill "$SSH_AGENT_PID" 2>/dev/null; '
+    assert args[:3] == ["bash", "-lic", f'{reap}exec "$0" "$@" < {wire}']
     assert args[3:6] == [str(launcher), "claude", "--agentihooks-report"]
     assert args[6] == str(Path(kwargs["cwd"]) / "route")
     assert args[7 : args.index("-p")] == (["--route", route] if route else [])
@@ -91,6 +97,58 @@ def test_shell_startup_reading_stdin_leaves_the_request(monkeypatch, tmp_path):
     monkeypatch.setattr(fallbacks.subprocess, "run", _real_run)
     assert fallbacks.ClaudeCliBackend().decide(REQUEST).source == "haiku"
     assert json.loads((tmp_path / "stdin.json").read_text()) == REQUEST.wire()
+
+
+def _shell_home(monkeypatch, tmp_path, profile):
+    (tmp_path / ".bash_profile").write_text(profile)
+    launcher = tmp_path / "agentihooks"
+    launcher.write_text(f"#!/bin/sh\necho '{json.dumps({'structured_output': RAW})}'\n")
+    launcher.chmod(0o755)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    monkeypatch.setattr(fallbacks.subprocess, "run", _real_run)
+
+
+def _gone(pid, wait=5.0):
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            state = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[0]
+        except OSError:
+            return True
+        if state in {"Z", "X"}:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
+def test_shell_startup_agent_is_stopped_before_the_cli(monkeypatch, tmp_path):
+    monkeypatch.delenv("SSH_AGENT_PID", raising=False)
+    _shell_home(
+        monkeypatch,
+        tmp_path,
+        'sleep 300 >/dev/null 2>&1 &\nSSH_AGENT_PID=$!; export SSH_AGENT_PID\necho "$!" > "$HOME/agent.pid"\n',
+    )
+    assert fallbacks.ClaudeCliBackend().decide(REQUEST).source == "haiku"
+    pid = int((tmp_path / "agent.pid").read_text())
+    try:
+        assert _gone(pid)
+    finally:
+        if not _gone(pid, wait=0):
+            os.kill(pid, signal.SIGKILL)
+
+
+def test_inherited_agent_survives_the_cli(monkeypatch, tmp_path):
+    agent = Popen(["sleep", "300"])
+    try:
+        monkeypatch.setenv("SSH_AGENT_PID", str(agent.pid))
+        _shell_home(monkeypatch, tmp_path, "")
+        assert fallbacks.ClaudeCliBackend().decide(REQUEST).source == "haiku"
+        assert agent.poll() is None
+    finally:
+        agent.kill()
+        agent.wait()
 
 
 def test_codex_keeps_native_auth_environment(monkeypatch):
