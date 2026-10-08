@@ -50,6 +50,20 @@ def test_sonar_restores_downloads_before_every_scan():
     assert not cache.get("continue-on-error")
 
 
+def test_sonar_download_cache_tracks_scanner_and_server_versions():
+    sonar = _workflow()["jobs"]["sonar"]
+    steps = sonar["steps"]
+    cache = next(step for step in steps if step.get("name") == "Restore Sonar downloads")
+    scan = next(step for step in steps if step.get("name") == "SonarQube Scan")
+    proxy = next(step for step in steps if step.get("id") == "proxy")
+    assert sonar["env"]["SONAR_SCANNER_VERSION"]
+    assert scan["with"]["scannerVersion"] == "${{ env.SONAR_SCANNER_VERSION }}"
+    assert "${{ env.SONAR_SCANNER_VERSION }}" in cache["with"]["key"]
+    assert "${{ steps.proxy.outputs.version }}" in cache["with"]["key"]
+    assert "/api/server/version" in proxy["run"]
+    assert '>> "$GITHUB_OUTPUT"' in proxy["run"]
+
+
 @pytest.mark.parametrize("sonar", ["success", "failure", "skipped", "cancelled", "pending"])
 def test_required_gate_rejects_unsuccessful_sonar(sonar):
     step = _workflow()["jobs"]["gate-required"]["steps"][0]
