@@ -107,7 +107,7 @@ function agentRows(sw, now) {
     const master = a.lane === "master";
     return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
       state: master && (a.status || "working") === "working" ? "live" : a.status || "working", promoted: !!a.promoted, age: a.started_at ? span(now - a.started_at) : "—",
-      finished: a.status === "finished" || a.state === "finished", since: a.state_since || a.started_at || 0 };
+      finished: a.status === "finished", since: a.state_since || 0 };
   });
 }
 
