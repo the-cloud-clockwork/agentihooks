@@ -149,6 +149,8 @@ def shape_report(tasks: list[dict], max_eng: int) -> dict:
 
 
 def status_report(store, slug, state):
+    from scripts.swarm import capacity
+
     config = store.config(slug)
     tasks = state.get("tasks", [])
     events = state.get("_meta", {}).get("events", [])
@@ -192,6 +194,7 @@ def status_report(store, slug, state):
         "done_today": done_today(tasks, events, local_midnight_ms()),
         "doctor": doctor_report(store, slug),
         "quota": page_quota(),
+        "quota_capacity": capacity.read(store, slug),
         "gates": [{**row, "kind": modes.label(row["kind"])} for row in gate_log.decisions(slug)],
         "gate_modes": {name: modes.label(mode) for name, mode in catalog.current(config.gates).items()},
         "master_affinity": affinity.report(store, slug, config, store.agents(slug)),
