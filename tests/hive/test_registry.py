@@ -109,7 +109,19 @@ def test_a_setting_is_checked_again_against_a_concurrent_change(redis, monkeypat
     assert redis.hget(registry.key("box"), "roles") == "[]"
 
 
-@pytest.mark.parametrize(("field", "value"), [("roles", "eng"), ("max_agents", "many")])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("roles", "eng"),
+        ("max_agents", "many"),
+        ("roles", "5"),
+        ("prefer", "[]"),
+        ("harnesses", "{}"),
+        ("slots", '"a"'),
+        ("interactive", "[]"),
+        ("repos", "null"),
+    ],
+)
 def test_an_unreadable_stored_field_is_refused_by_name(redis, field, value):
     redis.hset(registry.key("box"), field, value)
     with pytest.raises(HiveError) as error:

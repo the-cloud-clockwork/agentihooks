@@ -19,7 +19,7 @@ UI_ROLES = ("master", "qa", "frontend")
 LIVE_MS = 90_000
 INDEX = f"{ROOT}:hives"
 HIVE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
-JSON_FIELDS = ("roles", "prefer", "harnesses", "slots", "interactive", "repos")
+JSON_FIELDS = {"roles": list, "prefer": dict, "harnesses": list, "slots": list, "interactive": dict, "repos": list}
 INT_FIELDS = ("max_agents", "heartbeat_at")
 
 
@@ -118,7 +118,10 @@ def _encode(field: str, value: object) -> str:
 def _decode(hive_id: str, field: str, value: str) -> object:
     try:
         if field in JSON_FIELDS:
-            return json.loads(value)
+            decoded = json.loads(value)
+            if not isinstance(decoded, JSON_FIELDS[field]):
+                raise ValueError
+            return decoded
         return int(value) if field in INT_FIELDS else value
     except ValueError as exc:
         raise HiveError(f"hive {hive_id} holds an unreadable {field}: {value!r}") from exc
