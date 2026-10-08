@@ -1,7 +1,7 @@
 from hooks import classifier
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
 from scripts.swarm_ledger import ledger_duplicates
-from scripts.swarm_ledger.ledger_duplicates import PURPOSE, SHORTLIST, UNCHECKED, Match, find
+from scripts.swarm_ledger.ledger_duplicates import PURPOSE, Match, find
 
 
 def ledger():
@@ -71,6 +71,8 @@ def test_a_reworded_repeat_is_found_with_its_rank_and_phase():
     assert questions["new_0_existing_0"].instructions == (
         "Does new item 0 ask for the same change as task t1 titled Publish the wheel to PyPI from main?"
     )
+    assert questions["new_0_existing_0"].true == "the new item asks for the same change as the existing item"
+    assert questions["new_0_existing_0"].false == "the new item asks for a different change"
 
 
 def test_a_distinct_item_passes():
@@ -107,7 +109,7 @@ def test_a_classifier_error_returns_unchecked():
     judge = Judge(error=ClassifierUnavailable("down"))
     items = [{"title": "Publish the wheel to PyPI"}, {"title": "Zebra xylophone"}]
 
-    assert find(ledger(), "task", items, judge=judge) == [UNCHECKED, None]
+    assert find(ledger(), "task", items, judge=judge) == ["unchecked", None]
 
 
 def test_the_shortlist_caps_what_is_sent():
@@ -124,15 +126,39 @@ def test_the_shortlist_caps_what_is_sent():
 
     state, questions, _ = judge.asked[0]
     assert len(judge.asked) == 1
-    assert len(questions) == 2 * SHORTLIST
-    assert [e["id"] for e in state["existing"][:SHORTLIST]] == [f"t{n}" for n in range(SHORTLIST)]
+    assert len(questions) == 8
+    assert [e["id"] for e in state["existing"][:4]] == ["t0", "t1", "t2", "t3"]
+
+
+def test_the_shortlist_ranks_by_shared_words_over_the_size_of_both_sets():
+    tasks = [
+        ("wide", "Publish wheel alpha bravo charlie delta echo foxtrot"),
+        ("pair", "Publish wheel"),
+        ("near", "Publish wheel pypi golf"),
+        ("none", "Unrelated hotel"),
+    ]
+    doc = {"tasks": [{"id": i, "title": t, "state": "open"} for i, t in tasks]}
+    judge = Judge()
+
+    find(doc, "task", [{"title": "Publish wheel pypi"}], judge=judge)
+
+    assert [e["id"] for e in judge.asked[0][0]["existing"]] == ["near", "pair", "wide"]
+
+
+def test_an_item_of_only_short_or_common_words_never_reaches_the_classifier():
+    judge = Judge(yes={"t1"})
+
+    assert find(ledger(), "task", [{"title": "Add the new task to it", "description": "for all"}], judge=judge) == [
+        None
+    ]
+    assert judge.asked == []
 
 
 def test_a_batch_past_the_classifier_question_limit_is_unchecked_not_an_error():
     doc = {"phases": [], "tasks": [{"id": f"t{n}", "title": f"Publish wheel {n}", "state": "open"} for n in range(4)]}
     items = [{"title": "Publish wheel"}] * 33
 
-    assert find(doc, "task", items, judge=classifier.decide) == [UNCHECKED] * 33
+    assert find(doc, "task", items, judge=classifier.decide) == ["unchecked"] * 33
 
 
 def test_the_best_confirmed_candidate_wins():
@@ -153,9 +179,9 @@ def test_a_probability_at_the_threshold_or_missing_is_no_match():
     assert find(
         ledger(), "task", [{"title": "Publish the wheel to PyPI"}], judge=Judge(yes={"t1"}, probability=0.6)
     ) == [None]
-    assert find(ledger(), "task", [{"title": "Publish the wheel to PyPI"}], judge=Judge(yes={"t1"}, probability=0.61))[
-        0
-    ]
+    assert find(
+        ledger(), "task", [{"title": "Publish the wheel to PyPI"}], judge=Judge(yes={"t1"}, probability=0.61)
+    ) == [Match("t1", "task", "Publish the wheel to PyPI from main", "open", "low", "p1", "Release automation", 0.61)]
     assert find(
         ledger(), "task", [{"title": "Publish the wheel to PyPI"}], judge=Judge(yes={"t1"}, probability=True)
     ) == [None]
@@ -166,7 +192,7 @@ def test_a_probability_at_the_threshold_or_missing_is_no_match():
 
 def test_a_follow_up_is_compared_with_follow_ups_and_open_tasks():
     judge = Judge(yes={"f1"})
-    new = {"text": "Seed Sonar caches from main for the queued scans and the wheel publish on PyPI"}
+    new = {"text": "Seed Sonar caches from main for the queued scans, the wheel publish on PyPI and the chat panel"}
 
     match = find(ledger(), "followup", [new], judge=judge)[0]
 
@@ -200,8 +226,10 @@ def test_the_default_judge_is_the_classifier(monkeypatch):
 
 
 def test_the_unit_suite_keeps_the_classifier_offline():
-    assert find(ledger(), "task", [{"title": "Publish the wheel to PyPI"}]) == [UNCHECKED]
+    assert find(ledger(), "task", [{"title": "Publish the wheel to PyPI"}]) == ["unchecked"]
 
 
 def test_words_drop_short_and_common_words():
-    assert ledger_duplicates.words({"title": "Add the new CI task", "description": "for PyPI", "text": "x"}) == {"pypi"}
+    item = {"title": "Add the new CI api task", "description": "for PyPI", "text": "x"}
+
+    assert ledger_duplicates.words(item) == {"api", "pypi"}

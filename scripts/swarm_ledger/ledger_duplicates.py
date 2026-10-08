@@ -5,6 +5,7 @@ Code shortlists candidates by word overlap; the classifier only confirms each ne
 
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from hooks.classifier import ClassifierError, YesNo, decide
@@ -41,7 +42,7 @@ class Match:
         return self.state == "done"
 
 
-def find(doc: dict, kind: str, items: list[dict], judge=None) -> list:
+def find(doc: dict, kind: str, items: list[dict], judge: Callable | None = None) -> list[Match | str | None]:
     pool = _pool(doc, kind)
     shortlists = [shortlist(item, pool) for item in items]
     if not any(shortlists):
@@ -99,11 +100,15 @@ def _state(items, shortlists):
 
 def _best(doc, i, found, answers):
     yes = [(answers[_name(i, j)].noul, c) for j, c in enumerate(found)]
-    yes = [(p, c) for p, c in yes if isinstance(p, (int, float)) and not isinstance(p, bool) and p > YES]
+    yes = [(p, c) for p, c in yes if _yes(p)]
     if not yes:
         return None
     probability, (kind, item) = max(yes, key=lambda y: y[0])
     return _match(doc, kind, item, probability)
+
+
+def _yes(noul):
+    return isinstance(noul, (int, float)) and not isinstance(noul, bool) and noul > YES
 
 
 def _match(doc, kind, item, probability):
