@@ -123,8 +123,9 @@ def test_separate_branch_additions_merge_without_a_shared_json_conflict(tmp_path
         assert json.loads(git("show", f"{merged}:mutation-clearances/{name}")) == {key: RULING}
 
 
-def test_migrated_repository_has_one_file_for_every_legacy_ruling():
+def test_repository_folder_records_match_the_combined_loader():
     root = Path(__file__).resolve().parents[1]
-    assert json.loads((root / "mutation-cleared.txt").read_text()) == {}
-    assert len(list((root / "mutation-clearances").glob("*.json"))) == len(load_clearances(root))
-    assert load_clearances(root)
+    cleared = load_clearances(root)
+    for path in (root / "mutation-clearances").glob("*.json"):
+        key, ruling = next(iter(json.loads(path.read_text()).items()))
+        assert cleared[key] == ruling
