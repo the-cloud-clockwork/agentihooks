@@ -281,6 +281,20 @@ def test_body_keeps_a_leading_x_after_the_front_matter(tmp_path):
     assert config.manifesto_body(path) == "Xray body\n"
 
 
+def test_manifestos_read_as_utf8_under_a_latin1_locale(monkeypatch, tmp_path):
+    import io
+
+    default = io.text_encoding
+    monkeypatch.setattr(
+        io, "text_encoding", lambda encoding, *args: "latin-1" if encoding is None else default(encoding)
+    )
+    path = tmp_path / "accents.md"
+    path.write_bytes("---\nroles: [équipe]\n---\ncafé\n".encode())
+
+    assert config.manifesto_roles(path) == ["équipe"]
+    assert config.manifesto_body(path) == "café\n"
+
+
 def test_matrix_pads_the_header_to_the_longest_manifesto_name(monkeypatch, tmp_path):
     roles = tmp_path / "roles"
     (roles / "qa").mkdir(parents=True)
