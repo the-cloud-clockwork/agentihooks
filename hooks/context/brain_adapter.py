@@ -112,10 +112,14 @@ def _normalize_severity_for_empty(title: str, body: str, severity: str) -> str:
 
 
 def _load_persisted_hash() -> str:
-    """Read last-published content hash from disk. Empty on miss."""
+    """Read last-published content hash from disk. Empty on miss or another brain's hash."""
     try:
+        from hooks.context.project_cache import namespace
+        from scripts.swarm_v2.keyspace import admits
+
         if _HASH_CACHE_FILE.exists():
-            return json.loads(_HASH_CACHE_FILE.read_text()).get("hash", "")
+            document = json.loads(_HASH_CACHE_FILE.read_text())
+            return document.get("hash", "") if admits(document, namespace(), "publish-hash") else ""
     except Exception:
         pass
     return ""
@@ -124,8 +128,11 @@ def _load_persisted_hash() -> str:
 def _save_persisted_hash(hash_val: str) -> None:
     """Persist last-published content hash so next hook process can dedup."""
     try:
+        from hooks.context.project_cache import namespace
+        from scripts.swarm_v2.keyspace import stamp
+
         _HASH_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _HASH_CACHE_FILE.write_text(json.dumps({"hash": hash_val}))
+        _HASH_CACHE_FILE.write_text(json.dumps(stamp(namespace(), "publish-hash", {"hash": hash_val})))
     except Exception:
         pass
 
@@ -300,6 +307,19 @@ def _get_source() -> BrainSource | None:
     if BRAIN_SOURCE_TYPE == "file":
         return FileBrainSource(BRAIN_SOURCE_PATH)
     return None
+
+
+def brain_id() -> str:
+    from hooks._brain_http import brain_http_enabled
+    from hooks.config import BRAIN_SOURCE_PATH, BRAIN_SOURCE_TYPE, BRAIN_URL
+    from scripts.swarm_v2.keyspace import brain_identity
+
+    try:
+        if brain_http_enabled():
+            return brain_identity(url=BRAIN_URL)
+    except ValueError:
+        return "invalid"
+    return brain_identity(path=BRAIN_SOURCE_PATH) if BRAIN_SOURCE_TYPE == "file" else "none"
 
 
 # ---------------------------------------------------------------------------
