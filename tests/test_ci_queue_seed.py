@@ -40,6 +40,7 @@ def test_queue_runs_mint_a_read_only_app_token_and_skip_the_dev_cache_lookup():
     assert mint["with"] == {
         "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+        "repositories": "${{ github.event.repository.name }}",
         "permission-actions": "read",
     }
     assert job["permissions"] == {"contents": "read"}
@@ -102,11 +103,11 @@ def lookup(tmp_path):
     gh = tools / "gh"
     gh.write_text(
         '#!/usr/bin/env bash\nprintf "%s\\n" "$@" >> "$ARGS"\n'
-        'if [[ "$2" == */artifacts* ]]; then printf "%s" "$FAKE_BASELINES"; else printf "%s" "$FAKE_RUN"; fi\n'
+        'if [[ "$2" == */artifacts* ]]; then printf "%s" "$FAKE_KEPT"; else printf "%s" "$FAKE_RUN"; fi\n'
     )
     gh.chmod(0o755)
 
-    def run(found, baselines="1"):
+    def run(found, kept="sonar-report durations-merged coverage-baseline"):
         output = tmp_path / "output"
         output.write_text("")
         env = dict(
@@ -114,7 +115,7 @@ def lookup(tmp_path):
             PATH=f"{tools}:{os.environ['PATH']}",
             ARGS=str(tmp_path / "args"),
             FAKE_RUN=found,
-            FAKE_BASELINES=baselines,
+            FAKE_KEPT=kept,
             GITHUB_OUTPUT=str(output),
             GITHUB_REPOSITORY="the-cloud-clockwork/agentihooks",
         )
@@ -134,13 +135,21 @@ def test_the_lookup_asks_for_successful_dev_push_runs_of_the_tests_workflow(look
         "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs"
         "?branch=dev&event=push&status=success&per_page=1",
     ]
-    assert "repos/the-cloud-clockwork/agentihooks/actions/runs/37847322607/artifacts?name=coverage-baseline" in args
+    assert "repos/the-cloud-clockwork/agentihooks/actions/runs/37847322607/artifacts?per_page=100" in args
+    assert '[.artifacts[] | select(.expired | not) | .name] | join(" ")' in args
 
 
 def test_a_dev_run_without_a_baseline_restores_durations_only(lookup):
-    result, output, _ = lookup("37847322607", baselines="0")
+    result, output, _ = lookup("37847322607", kept="durations-merged coverage-baseline-old")
     assert result.returncode == 0, result.stderr
     assert output == "id=37847322607\nbaseline=false\n"
+
+
+def test_the_lookup_is_red_when_the_dev_run_kept_no_live_durations(lookup):
+    result, output, _ = lookup("37847322607", kept="coverage-baseline durations-merged-old")
+    assert result.returncode != 0
+    assert "::error::" in result.stdout
+    assert output == ""
 
 
 def test_the_lookup_is_red_when_no_dev_push_run_passed(lookup):

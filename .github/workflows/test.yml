@@ -110,6 +110,7 @@ jobs:
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
           permission-actions: read
 
       - name: Find the latest passed dev push run
@@ -123,10 +124,16 @@ jobs:
             echo "::error::No dev push Tests run passed, so the queue run has no dev durations or coverage baseline."
             exit 1
           fi
-          baseline=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '.total_count')
-          echo "Restoring dev durations from dev push run $run, which kept $baseline coverage baseline artifacts"
+          kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+          if [[ "$kept" != *" durations-merged "* ]]; then
+            echo "::error::Dev push run $run kept no live durations-merged artifact."
+            exit 1
+          fi
+          baseline=false
+          [[ "$kept" == *" coverage-baseline "* ]] && baseline=true
+          echo "Restoring dev durations from dev push run $run; coverage baseline kept: $baseline"
           echo "id=$run" >> "$GITHUB_OUTPUT"
-          echo "baseline=$([[ "$baseline" -gt 0 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
 
       - name: Download the dev durations
         if: github.event_name == 'merge_group'
