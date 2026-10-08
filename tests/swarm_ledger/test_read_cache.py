@@ -69,20 +69,60 @@ def test_an_outside_edit_of_the_stored_document_is_read(repo):
     assert repo.get_document(SLUG, reconcile=False)["overview"] == "rewritten"
 
 
-def test_a_reader_reassigning_fields_cannot_change_the_next_read(repo):
+def test_a_reader_changing_the_document_cannot_change_the_next_read(repo):
     first = repo.get_document(SLUG)
     rev = first["_meta"]["rev"]
+    first["chat"].append({"id": "x", "text": "stray"})
+    first["_meta"]["seeds"].clear()
     first["title"] = "changed"
-    first["_meta"] = {}
     second = repo.get_document(SLUG)
-    second["_meta"]["seeds"] = {}
-    third = repo.get_document(SLUG)
-    assert third["title"] == "Cached"
-    assert third["_meta"]["rev"] == rev
-    assert third["_meta"]["seeds"]
+    assert second["title"] == "Cached"
+    assert [m["text"] for m in second["chat"]] == ["first"]
+    assert second["_meta"]["rev"] == rev
+    assert second["_meta"]["seeds"]
 
 
-def test_a_write_reply_reassigning_meta_cannot_change_the_next_read(repo):
+def test_a_write_reply_changed_by_its_caller_cannot_change_the_next_read(repo):
     state, _ = repo.apply_ops(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m3", "text": "third"}])
+    rev = state["_meta"]["rev"]
+    state["chat"].clear()
     state["_meta"] = {"rev": -1}
-    assert repo.get_document(SLUG)["_meta"]["rev"] > 0
+    after = repo.get_document(SLUG)
+    assert [m["text"] for m in after["chat"]] == ["first", "third"]
+    assert after["_meta"]["rev"] == rev
+
+
+def test_a_page_edit_landing_while_a_sync_runs_is_folded_in_on_the_next_read(repo, monkeypatch):
+    html_path = core.paths(SLUG)[0]
+    derive = file_repository.ledger_priorities.derive
+
+    def edit_mid_sync(doc, ctx):
+        html = html_path.read_text(encoding="utf-8")
+        html_path.write_text(html.replace('"title": "Cached"', '"title": "Racing"', 1), encoding="utf-8")
+        derive(doc, ctx)
+
+    monkeypatch.setattr(file_repository.ledger_priorities, "derive", edit_mid_sync)
+    file_repository.SYNCED.clear()
+    repo.get_document(SLUG)
+    monkeypatch.setattr(file_repository.ledger_priorities, "derive", derive)
+    assert repo.get_document(SLUG)["title"] == "Racing"
+
+
+def test_a_read_without_reconcile_does_not_fold_a_page_edit(repo):
+    html_path = core.paths(SLUG)[0]
+    html = html_path.read_text(encoding="utf-8")
+    html_path.write_text(html.replace('"title": "Cached"', '"title": "Edited"', 1), encoding="utf-8")
+    assert repo.get_document(SLUG, reconcile=False)["title"] == "Cached"
+
+
+def test_a_removed_stored_document_is_not_served_from_the_last_sync(repo):
+    core.paths(SLUG)[1].unlink()
+    with pytest.raises(ValueError):
+        repo.get_document(SLUG, reconcile=False)
+
+
+def test_a_read_syncs_again_once_an_hour_so_time_based_sweeps_still_run(repo, loads, monkeypatch):
+    now = core.now_ms()
+    monkeypatch.setattr(core, "now_ms", lambda: now + file_repository.SWEEP_MS)
+    repo.get_document(SLUG)
+    assert len(loads) == 1

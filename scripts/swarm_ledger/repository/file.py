@@ -2,6 +2,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import NamedTuple
 
 import ledger_alerts
 import ledger_close
@@ -12,7 +13,17 @@ import ledger_size
 
 from . import bin_storage, shadow
 
-SYNCED = {}
+SWEEP_MS = 60 * 60 * 1000
+
+
+class Synced(NamedTuple):
+    page: tuple | None
+    stored: tuple | None
+    sweep: int
+    text: str
+
+
+SYNCED: dict[Path, Synced] = {}
 
 
 def signature(path):
@@ -23,16 +34,17 @@ def signature(path):
     return stat.st_ino, stat.st_mtime_ns, stat.st_size
 
 
-def synced(html_path, json_path, reconcile):
+def cached_text(html_path, json_path, reconcile, core=core):
     entry = SYNCED.get(json_path)
     if (
         entry is None
         or shadow.enabled()
-        or entry[1] != signature(json_path)
-        or (reconcile and entry[0] != signature(html_path))
+        or entry.sweep != core.now_ms() // SWEEP_MS
+        or entry.stored != signature(json_path)
+        or (reconcile and entry.page != signature(html_path))
     ):
         return None
-    return {**entry[2], "_meta": dict(entry[2]["_meta"])}
+    return entry.text
 
 
 def load_state(json_path, seed, core=core):
@@ -59,6 +71,7 @@ def sync(slug, changes=None, ops=None, gate=None, core=core):
     """
     html_path, json_path = core.paths(slug)
     with core.LOCK, shadow.storage_lock(core.LEDGER_DIR):
+        page = signature(html_path)
         html = html_path.read_text(encoding="utf-8")
         try:
             seed, seed_error = core.parse_seed(html), None
@@ -102,11 +115,13 @@ def sync(slug, changes=None, ops=None, gate=None, core=core):
         meta["seeds"][str(meta["rev"])] = doc
         meta["seeds"] = {k: v for k, v in meta["seeds"].items() if int(k) > meta["rev"] - core.SEEDS_KEPT}
         state = {**doc, "_meta": meta}
-        core.write_if_changed(json_path, json.dumps(state, indent=2, ensure_ascii=False) + "\n")
-        if seed is not None:
-            core.rewrite_seed(html_path, html, doc, meta["rev"])
+        text = json.dumps(state, indent=2, ensure_ascii=False) + "\n"
+        core.write_if_changed(json_path, text)
+        stored = signature(json_path)
+        if seed is not None and core.rewrite_seed(html_path, html, doc, meta["rev"]):
+            page = signature(html_path)
         shadow.persist(core.LEDGER_DIR, slug, state)
-        SYNCED[json_path] = (signature(html_path), signature(json_path), {**doc, "_meta": dict(meta)})
+        SYNCED[json_path] = Synced(page, stored, ctx.at // SWEEP_MS, text)
         return state, rejected
 
 
@@ -165,9 +180,9 @@ class FileLedgerRepository:
 
     def get_document(self, slug: str, reconcile: bool = True) -> dict:
         with self.domain.LOCK:
-            state = synced(*self.domain.paths(slug), reconcile)
-        if state is not None:
-            return state
+            text = cached_text(*self.domain.paths(slug), reconcile, self.domain)
+        if text is not None:
+            return self.domain.loads(text)
         if reconcile:
             return sync(slug, core=self.domain)[0]
         with self.domain.LOCK:

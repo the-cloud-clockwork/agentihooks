@@ -716,6 +716,8 @@ def rewrite_seed(html_path, html, doc, rev):
     new = SEED_RE.sub(lambda m: m.group(1) + seed_text(doc, rev) + m.group(3), html, count=1)
     if new != html and html_path.read_text(encoding="utf-8") == html:
         atomic_write(html_path, new)
+        return True
+    return False
 
 
 def gated(gate, doc, op, ctx):
