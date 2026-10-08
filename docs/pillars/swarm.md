@@ -100,6 +100,9 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 |---|---|
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
 | `agentihooks swarm tick` | One reconcile pass over every swarm (the timer runs it). |
+| `agentihooks swarm <id> controller` | Show the controller owner, epoch and expiry. |
+| `agentihooks swarm <id> controller release` | Release this hive's lease so another controller can take over at a higher epoch. |
+| `agentihooks controller run [--once]` | Reconcile every registered swarm each minute; `--once` runs one pass. `AGENTIHOOKS_DEPLOYMENT=local` permits spawning; `compose` and `distributed` reconcile without spawning. |
 | `agentihooks swarm templates` | One line per swarm template, built-in or user: per lane its cap, agent, model, effort and default kind, then the compact limit. |
 | `agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N] [--max-plan-agents N]` | Register a swarm, paused. Defaults: 2 eng, 1 ci, 1 planner. `--template` takes the caps, compact limit and lane map from a template; a cap flag still wins. Ends with the `Ledger page: <link>` line. |
 | `agentihooks swarm <id> start` | Run: enable the timer and scale up at once. Ends with the `Ledger page: <link>` line. |
@@ -259,7 +262,9 @@ between ticks. `start` installs and enables it. Each tick, per swarm:
 11. Wake idle panes holding unread items, and climb the wake ladder for items nobody reads.
 12. Write the automatic snapshot when it is due.
 
-A lock keeps two ticks from running at once.
+Each tick renews the controller lease for three minutes. Redis server time determines expiry. The owner comes
+from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
+are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
 
 ### Ledger event pass
 
