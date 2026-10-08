@@ -160,6 +160,22 @@ def test_restore_without_a_snapshot_names_the_missing_document(store):
         snapshot.restore(store, "sw", live=set())
 
 
+def test_restore_writes_the_snapshot_ledger_back_only_where_none_is_stored(store, tmp_path, monkeypatch):
+    seed(store, "sw")
+    for name in ("taken", "empty", "kept"):
+        (tmp_path / name).mkdir()
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path / "taken")
+    legacy_page.store(tmp_path / "taken", "sw", {"tasks": [{"id": "t1"}]})
+    snapshot.take(store, "sw", 99, run=_no_git)
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path / "empty")
+    snapshot.restore(store, "sw", live=set())
+    assert snapshot.stored_ledger("sw") == {"tasks": [{"id": "t1"}], "_meta": {"rev": 1}}
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path / "kept")
+    legacy_page.store(tmp_path / "kept", "sw", {"tasks": [{"id": "t9"}]})
+    snapshot.restore(store, "sw", live=set())
+    assert snapshot.stored_ledger("sw") == {"tasks": [{"id": "t9"}], "_meta": {"rev": 1}}
+
+
 def test_each_agent_conversation_id_survives_a_snapshot_and_a_lost_redis(store):
     store.create(SwarmConfig("sw", "/repo", 2, 1))
     store.put_agent("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1", conversation_id="5c90d80c"))

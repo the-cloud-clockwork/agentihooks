@@ -2,7 +2,6 @@
 
 import os
 from dataclasses import asdict, dataclass, replace
-from pathlib import Path
 
 from hooks.classifier import Choice, ClassifierUnavailable, decide
 from scripts.swarm import overlays
@@ -136,10 +135,10 @@ def anchors(task: dict) -> tuple:
 
 
 def _ledger(slug: str) -> dict:
+    from scripts.swarm_ledger.repository.folder import ledger_folder
     from scripts.swarm_ledger.repository.sqlite import read_ledger
 
-    folder = Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
-    return read_ledger(folder, slug, "overview", "phases") or {}
+    return read_ledger(ledger_folder(os.environ), slug, "overview", "phases") or {}
 
 
 def _remedy(slug: str, task: dict) -> str:

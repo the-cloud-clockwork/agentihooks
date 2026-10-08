@@ -57,3 +57,31 @@ def test_cutover_imports_every_file_left_in_the_ledger_folder(monkeypatch, capsy
 def test_export_of_an_unknown_ledger_names_it(monkeypatch):
     with pytest.raises(SystemExit, match="unknown-ledger"):
         run(monkeypatch, "export", "unknown-ledger")
+
+
+def test_load_keeps_an_existing_ledger_unless_told_to_replace(tmp_path):
+    repository.import_document("interchange-d", document(), replace=True)
+    source = tmp_path / "interchange-d.json"
+    source.write_text(json.dumps({**document(), "title": "Café"}), encoding="utf-8")
+    with pytest.raises(ValueError, match="exists"):
+        storage_migration.load(source)
+    assert storage_migration.load(source, replace=True) == "interchange-d"
+    assert repository.export_document("interchange-d")["title"] == "Café"
+
+
+def test_the_command_names_itself_and_each_action_and_needs_one(monkeypatch, capsys):
+    with pytest.raises(SystemExit) as helped:
+        run(monkeypatch, "--help")
+    shown = capsys.readouterr().out
+    assert helped.value.code == 0
+    assert shown.startswith("usage: agentihooks ledger storage [-h] {export,import,cutover}")
+    for text in (
+        command.__doc__,
+        "print or write the complete stored document",
+        "store an exported document",
+        "import every ledger file left in the ledger folder",
+    ):
+        assert text in shown
+    with pytest.raises(SystemExit) as bare:
+        run(monkeypatch)
+    assert bare.value.code == 2

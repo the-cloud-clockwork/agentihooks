@@ -153,11 +153,10 @@ def _agent_record(slug: str, name: str) -> dict:
 
 
 def _ledger_task(slug: str, task: str) -> dict:
+    from scripts.swarm_ledger.repository.folder import ledger_folder
     from scripts.swarm_ledger.repository.sqlite import read_ledger
 
-    root = Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
-    rows = (read_ledger(root, slug, f"tasks/{task}") or {}).get("tasks", [])
-    return next((row for row in rows if isinstance(row, dict) and row.get("id") == task), {})
+    return ((read_ledger(ledger_folder(os.environ), slug, f"tasks/{task}") or {}).get("tasks") or [{}])[0]
 
 
 def _report(path: str) -> dict:

@@ -116,3 +116,13 @@ def test_the_ledger_folder_defaults_to_the_home_development_ledger(tmp_path, mon
     legacy_page.store(folder, "demo", {"tasks": tasks, "_meta": {"members": {}}})
     env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_SWARM_TASK": "t1"}
     assert find(env) == ("ledger", "c-1")
+
+
+def test_the_ledger_read_takes_members_and_the_bound_task_or_every_task(ledger):
+    env = ledger([])
+    members = {"_meta": {"members": {MASTER: {"role": "orchestrator"}, "eng-1@demo": {"role": "member"}}}}
+    assert ledger_request._ledger(env) == dict(members, tasks=[{"id": "t1", "comments": []}])
+    unbound = {key: value for key, value in env.items() if key != "AGENTIHOOKS_SWARM_TASK"}
+    assert ledger_request._ledger(unbound) == dict(
+        members, tasks=[{"id": "t0", "comments": []}, {"id": "t1", "comments": []}]
+    )

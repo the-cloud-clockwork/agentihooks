@@ -264,3 +264,10 @@ def test_master_sparse_ledger_keeps_obligations_without_invented_intent(ledger):
     assert refocus.build_block(ledger, "master", 1500) == (
         "=== SWARM REFOCUS:  ===\n" + OBLIGATIONS + f"Plan: \nPriorities: \nActive phases: {phases}"
     )
+
+
+def test_the_ledger_read_names_intent_and_the_focus_of_the_seat(tmp_path):
+    legacy_page.store(tmp_path, "rig", dict(LEDGER, priorities=[{"id": "x", "item": "tasks/i1"}]))
+    intent = {"title": LEDGER["title"], "overview": LEDGER["overview"], "phases": LEDGER["phases"]}
+    assert refocus._read_ledger(tmp_path, "rig", "i1") == dict(intent, tasks=[LEDGER["tasks"][1]])
+    assert refocus._read_ledger(tmp_path, "rig", "master") == dict(intent, priorities=[{"id": "x", "item": "tasks/i1"}])

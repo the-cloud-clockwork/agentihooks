@@ -267,8 +267,9 @@ def serve_ledgers():
     import ledger_link
 
     from scripts.swarm_ledger import server_lifetime
+    from scripts.swarm_ledger.repository.sqlite import DATABASE
 
-    if not (LEDGER_DIR / "ledgers.sqlite3").exists() and not any(LEDGER_DIR.glob("*.json")):
+    if not (LEDGER_DIR / DATABASE).exists() and not any(LEDGER_DIR.glob("*.json")):
         return
     try:
         address = ledger_link.address()

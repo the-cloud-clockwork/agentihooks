@@ -10,7 +10,7 @@ def export(slug: str, out: Path | None = None) -> dict:
     """The complete stored document; written to `out` when given, else returned."""
     state = repository.export_document(slug)
     if out is not None:
-        Path(out).write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        Path(out).write_text(json.dumps(state, indent=2) + "\n")
     return state
 
 
@@ -20,7 +20,7 @@ def load(path: Path, slug: str | None = None, replace: bool = False) -> str:
     slug = slug or path.stem
     if not legacy.core.SLUG_RE.match(slug):
         raise ValueError(f"invalid slug: {slug!r}")
-    state = legacy.core.loads(path.read_text(encoding="utf-8"))
+    state = legacy.core.loads(path.read_bytes())
     if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or "rev" not in state["_meta"]:
         raise ValueError(f"{path} is not an exported ledger document")
     repository.import_document(slug, state, replace=replace)

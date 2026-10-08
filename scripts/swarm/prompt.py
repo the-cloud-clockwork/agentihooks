@@ -2,7 +2,6 @@
 
 import json
 import os
-from pathlib import Path
 
 from scripts.doctor import priming
 from scripts.handoff.check import section
@@ -168,10 +167,10 @@ def peer_lines(peer):
 
 
 def summary_lines(slug):
+    from scripts.swarm_ledger.repository.folder import ledger_folder
     from scripts.swarm_ledger.repository.sqlite import read_ledger
 
-    folder = Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
-    overview = (read_ledger(folder, slug, "overview") or {}).get("overview", "")
+    overview = (read_ledger(ledger_folder(os.environ), slug, "overview") or {}).get("overview", "")
     _, marker, summary = overview.partition(ledger_close.MARK)
     if not marker:
         return []
