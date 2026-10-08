@@ -101,10 +101,12 @@ def test_serve_runs_the_ledger_watch_on_a_daemon_thread(monkeypatch, tmp_path):
     monkeypatch.setattr(server.threading, "Thread", Thread)
     monkeypatch.setattr(server, "ThreadingHTTPServer", Server)
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
-    monkeypatch.setattr(server, "repository", SimpleNamespace(list_summaries=list))
+    adopted = []
+    monkeypatch.setattr(server.legacy, "adopt", adopted.append)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     server.serve()
     assert threads == [{"target": server.watch_ledgers, "daemon": True}]
+    assert adopted == [server.stored]
 
 
 def test_the_ledger_watch_sleeps_two_seconds_between_passes(monkeypatch):

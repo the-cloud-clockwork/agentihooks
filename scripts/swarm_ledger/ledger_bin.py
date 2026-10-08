@@ -67,11 +67,6 @@ def finished(doc):
     )
 
 
-def due(state, now, restored_at=None):
-    meta = state.get("_meta", {})
-    return idle_due(finished(state), meta.get("updated_at") or meta.get("created_at") or 0, now, restored_at)
-
-
 def idle_due(done, changed, now, restored_at=None):
     if restored_at is not None and changed <= restored_at:
         return now - restored_at > IDLE_DAYS * DAY_MS

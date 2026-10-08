@@ -47,6 +47,7 @@ from scripts.gates import talk  # noqa: E402
 from scripts.swarm_ledger import page_policy, server_lifetime  # noqa: E402
 from scripts.swarm_ledger.events import Hub  # noqa: E402
 from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
+from scripts.swarm_ledger.repository import legacy  # noqa: E402
 from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
 
 HOST, PORT = ledger_link.address()
@@ -890,7 +891,7 @@ def serving_dir(timeout: float = 1):
 
 def serve():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    repository.list_summaries()
+    legacy.adopt(stored)
     threading.Thread(target=watch_ledgers, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)

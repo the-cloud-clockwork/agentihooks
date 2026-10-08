@@ -4,7 +4,7 @@
 A ledger is a document plus `_meta` (rev, per-path stamps, an event log, members) stored by
 the SQLite repository. Threads (comments, answers, notes) are lists of entries
 {id, by, at, text[, edited_at, deleted]}; the operator and agents add, edit and delete
-entries through ops. The seed parser reads ledger pages written before SQLite, once, when
+entries through ops. The seed parser reads ledger pages left in the ledger folder, once, when
 they are imported.
 """
 
