@@ -172,8 +172,7 @@ function resetIn(at, now) {
 
 function accountState(sw, r) {
   const seen = ((sw.quota_capacity || {}).accounts || []).find((a) => a.name === r.account && a.harness === r.agent);
-  const [five, week] = seen ? [seen.five_left, seen.week_left] : [r.five_hour_left, r.seven_day_left];
-  return { state: seen ? seen.state.toLowerCase().replace(/_/g, " ") : "—", routing: percent(five == null || week == null ? null : Math.min(five, week)) };
+  return seen ? { state: seen.state.toLowerCase().replace(/_/g, " "), routing: percent(seen.routing) } : { state: "—", routing: "—" };
 }
 
 function quotaRows(sw, now) {
@@ -185,7 +184,7 @@ function quotaRows(sw, now) {
 
 function capacityLine(cap, now) {
   if (!cap || !cap.effective) return null;
-  return { lanes: ["eng", "ci", "plan"].map((lane) => `${lane} ${cap.effective[lane]} of ${cap.configured[lane]}`).join(" · "),
+  return { lanes: cap.lanes.map((lane) => `${lane} ${cap.effective[lane]} of ${cap.configured[lane]}`).join(" · "),
     changed: `changed ${span(now - cap.at)} ago`, reason: `because ${cap.reason}` };
 }
 

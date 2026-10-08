@@ -159,8 +159,8 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   idle ticks on a claimed task; stale claim, `STALE_MINUTES` (30) with no change;
   over monitoring, over `WATCH_MIN` (20) watch calls since the last action and
   over `WATCH_RATIO` (5) per action, for the master `MASTER_WATCH_MIN` (60) and
-  `MASTER_WATCH_RATIO` (15), counted at each swarm agent's tool calls; working on
-  drain, an agent still working on a draining or blocked account `DRAIN_MINUTES`
+  `MASTER_WATCH_RATIO` (15), counted at each swarm agent's tool calls. Working
+  on drain fires when a busy agent stays on a closed account over `DRAIN_MINUTES`
   (10) after its early quota handoff warning. Ledger and swarm
   writes and `msg reply` count as actions, a re-armed ledger watch as one watch
   per 30 minutes, `status` and `verdict` as neither; idle ticks do not count

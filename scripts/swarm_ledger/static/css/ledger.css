@@ -557,9 +557,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .lbl.idle, .lbl.waiting, .lbl.pending, .lbl.awaiting-decision, .lbl.unknown { color: var(--warn); }
 .lbl.stalled, .lbl.absent { color: var(--destructive); }
 .lbl.promoted { color: var(--warn); }
-#quota-table .lbl.normal { color: var(--positive); }
-#quota-table .lbl.reduce, #quota-table .lbl.drain-soon { color: var(--warn); }
-#quota-table .lbl.drain, #quota-table .lbl.blocked { color: var(--destructive); }
+#quota-table .lbl.open { color: var(--positive); }
+#quota-table .lbl.closed { color: var(--destructive); }
 .sw-capline { display: flex; flex-wrap: wrap; gap: 4px var(--space-row); margin: 0; padding: var(--space-tight) 0 0; font-size: var(--fs-meta); color: var(--muted); }
 .sw-capline:empty { display: none; }
 .sw-caplanes { font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text); }

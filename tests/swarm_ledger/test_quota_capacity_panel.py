@@ -8,17 +8,27 @@ NOW = 1_800_000_000_000
 DECISION = {
     "configured": {"eng": 4, "ci": 1, "plan": 1},
     "effective": {"eng": 2, "ci": 1, "plan": 0},
-    "reason": "accounts are drain; Claude has 1 free seats and Codex has 0 free seats",
+    "reason": "accounts are closed; Claude has 1 free seats and Codex has 0 free seats",
+    "lanes": ["eng", "ci", "plan"],
     "accounts": [
         {
             "harness": "claude",
             "name": "alpha",
-            "state": "DRAIN_SOON",
+            "state": "CLOSED",
             "sessions": 2,
             "five_left": 40.4,
             "week_left": 7.6,
+            "routing": 7.6,
         },
-        {"harness": "codex", "name": "alpha", "state": "NORMAL", "sessions": 0, "five_left": 90, "week_left": 80},
+        {
+            "harness": "codex",
+            "name": "alpha",
+            "state": "OPEN",
+            "sessions": 0,
+            "five_left": 90,
+            "week_left": 80,
+            "routing": 80,
+        },
     ],
     "at": NOW - 5 * 60_000,
 }
@@ -37,7 +47,7 @@ def span(ms):
     return f"{round(ms / 60000)}m"
 
 
-def test_each_quota_row_carries_the_state_and_routing_left_the_tick_decided_on():
+def test_each_quota_row_carries_the_state_and_routing_left_the_tick_decided_on_and_dashes_without_one():
     sw = {
         "quota_capacity": DECISION,
         "quota": {
@@ -54,17 +64,17 @@ def test_each_quota_row_carries_the_state_and_routing_left_the_tick_decided_on()
         f"quotaRows({json.dumps(sw)}, {NOW}).map((q) => [q.account, q.harness, q.state, q.routing])",
     )
     assert out == [
-        ["alpha", "claude", "drain soon", "8%"],
-        ["alpha", "codex", "normal", "80%"],
-        ["gamma", "claude", "—", "30%"],
+        ["alpha", "claude", "closed", "8%"],
+        ["alpha", "codex", "open", "80%"],
+        ["gamma", "claude", "—", "—"],
     ]
 
 
 def test_routing_left_is_unknown_when_a_window_is_unknown():
     out = run_js(
         ["percent", "accountState"],
-        "[accountState({quota_capacity: {accounts: [{harness: 'claude', name: 'a', state: 'UNKNOWN', five_left: null,"
-        " week_left: 4}]}}, {account: 'a', agent: 'claude', five_hour_left: 50, seven_day_left: 40})]",
+        "[accountState({quota_capacity: {accounts: [{harness: 'claude', name: 'a', state: 'UNKNOWN', routing: null}]}},"
+        " {account: 'a', agent: 'claude', five_hour_left: 50, seven_day_left: 40})]",
     )
     assert out == [{"state": "unknown", "routing": "—"}]
 
@@ -78,7 +88,7 @@ def test_the_capacity_line_reads_each_lane_against_its_cap_the_change_age_and_th
         {
             "lanes": "eng 2 of 4 · ci 1 of 1 · plan 0 of 1",
             "changed": "changed 5m ago",
-            "reason": "because accounts are drain; Claude has 1 free seats and Codex has 0 free seats",
+            "reason": "because accounts are closed; Claude has 1 free seats and Codex has 0 free seats",
         },
         None,
         None,
@@ -107,6 +117,6 @@ def test_the_quota_table_heads_state_and_routing_and_the_box_holds_the_capacity_
 
 def test_account_states_take_their_role_colour():
     page = page_source()
-    assert "#quota-table .lbl.normal { color: var(--positive); }" in page
-    assert "#quota-table .lbl.reduce, #quota-table .lbl.drain-soon { color: var(--warn); }" in page
-    assert "#quota-table .lbl.drain, #quota-table .lbl.blocked { color: var(--destructive); }" in page
+    assert "#quota-table .lbl.open { color: var(--positive); }" in page
+    assert "#quota-table .lbl.closed { color: var(--destructive); }" in page
+    assert ".lbl.awaiting-decision, .lbl.unknown { color: var(--warn); }" in page

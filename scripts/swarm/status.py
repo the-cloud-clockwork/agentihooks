@@ -14,6 +14,7 @@ from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
 from scripts.swarm import (
     affinity,
+    drain_watch,
     launch_check,
     live_binding,
     overlays,
@@ -85,7 +86,7 @@ def findings(store, slug, config, tasks, events):
         )
         + live_binding.findings(store, slug)
         + retire_watch.findings(store, slug)
-        + quota_view.findings(store, slug, limits, now_ms())
+        + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug),
         now_ms(),
         limits.cooldown_minutes * 60_000,
@@ -203,7 +204,7 @@ def status_report(store, slug, state):
         "done_today": done_today(tasks, events, local_midnight_ms()),
         "doctor": doctor_report(store, slug),
         "quota": page_quota(),
-        "quota_capacity": capacity.read(store, slug),
+        "quota_capacity": quota_view.page(capacity.read(store, slug)),
         "gates": [{**row, "kind": modes.label(row["kind"])} for row in gate_log.decisions(slug)],
         "gate_modes": {name: modes.label(mode) for name, mode in catalog.current(config.gates).items()},
         "master_affinity": affinity.report(store, slug, config, store.agents(slug)),
