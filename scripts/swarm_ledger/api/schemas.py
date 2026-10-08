@@ -74,6 +74,7 @@ FIELDS = {
     "task_update": "by item fields if_state",
     "task_rank": "item rank",
     "task_group": "by item members",
+    "task_ungroup": "by item",
     "title_set": "text",
     "agent_rename": "by old new",
     "summary_set": "by note",
