@@ -86,7 +86,7 @@ jobs:
   # Every shard restores this one key, or nothing when the lookup found none, so all shards of a run split alike.
   durations:
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'merge_group' && 4 || 2 }}
+    timeout-minutes: ${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 4 || 2 }}
     permissions:
       contents: read
     outputs:
@@ -95,23 +95,24 @@ jobs:
     steps:
       - name: Look up the base revision's dev durations
         id: stored
-        if: github.event_name != 'merge_group'
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         uses: actions/cache/restore@v4
         with:
           path: ~/dev-durations
           key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
           lookup-only: true
 
-      # A queue ref cannot read caches saved on dev, so queue runs fetch dev's artifacts on the App's own API quota.
+      # Queue refs and dispatched branches cannot read caches saved on dev, so they fetch dev's artifacts on the App's own API quota.
       - name: Mint the tcc main ci App token
         id: app-token
-        if: github.event_name == 'merge_group'
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
+          permission-contents: read
 
       - name: Find the latest passed dev push run
         id: dev-run
@@ -132,18 +133,48 @@ jobs:
           echo "Restoring dev durations from dev push run $run"
           echo "id=$run" >> "$GITHUB_OUTPUT"
 
+      - name: Find the dev push run of the dispatched base
+        id: base-run
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BASE: ${{ inputs.base }}
+        run: |
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/${BASE#origin/}" --jq .sha)
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&head_sha=$sha&per_page=20" --jq '.workflow_runs[].id')
+          for run in $runs; do
+            kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+            if [[ "$kept" == *" durations-merged "* && "$kept" == *" coverage-baseline "* ]]; then
+              echo "Restoring dev durations and the coverage baseline of base $sha from dev push run $run"
+              echo "id=$run" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No dev push Tests run on base $BASE ($sha) kept live durations-merged and coverage-baseline artifacts; pin a base whose dev push run passed and finished."
+          exit 1
+
       - name: Download the dev durations
-        if: github.event_name == 'merge_group'
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@v4
         with:
           name: durations-merged
           path: ~/dev-durations
-          run-id: ${{ steps.dev-run.outputs.id }}
+          run-id: ${{ steps.dev-run.outputs.id || steps.base-run.outputs.id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Download the dispatched base's coverage baseline
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-baseline
+          path: ~/coverage-baseline
+          run-id: ${{ steps.base-run.outputs.id }}
           repository: ${{ github.repository }}
           github-token: ${{ steps.app-token.outputs.token }}
 
       - name: Republish the dev durations
-        if: github.event_name == 'merge_group'
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: dev-durations
@@ -153,9 +184,19 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      - name: Republish the dispatched base's coverage baseline
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: queue-coverage-baseline
+          path: ~/coverage-baseline/
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
       - name: Mark the dev artifacts restored
         id: republished
-        if: github.event_name == 'merge_group'
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         run: |
           ls -A ~/dev-durations
           echo "queued=true" >> "$GITHUB_OUTPUT"
