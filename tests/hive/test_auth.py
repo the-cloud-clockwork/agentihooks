@@ -229,7 +229,12 @@ def test_an_invite_code_never_reads_as_a_join_option(admin, hive, tmp_path, monk
 
     assert not code.startswith("-")
     assert cli.main(["join", hive, code]) == 0
-    assert (tmp_path / "hive.env").exists()
+
+    out = capsys.readouterr().out
+    env = dict(line.split("=", 1) for line in (tmp_path / "hive.env").read_text().splitlines())
+    assert out == f"joined the hive as {env['AGENTIHOOKS_HIVE_ID']}; credentials are in {tmp_path / 'hive.env'}\n"
+    assert env["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"] not in out
+    assert env["AGENTIHOOKS_HIVE_REDIS_URL"] not in out
 
 
 def test_join_over_http_with_a_used_code_is_refused(admin, hive, tmp_path, monkeypatch, capsys):
