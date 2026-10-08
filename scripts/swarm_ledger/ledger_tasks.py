@@ -121,7 +121,7 @@ def check(op):
 def check_stack(fields):
     if "branch" in fields and not (isinstance(fields["branch"], str) and BRANCH_RE.match(fields["branch"])):
         raise ValueError("branch must be a git branch name, or empty to clear it")
-    if not BRANCH_RE.match(fields.get("branch_repo", "")):
+    if "branch_repo" in fields and not BRANCH_RE.match(fields["branch_repo"]):
         raise ValueError("branch_repo must be a repository url or path, or empty to clear it")
     if not all(BRANCH_RE.match(repo) for repo in fields.get("parked_repos", [])):
         raise ValueError("parked_repos must list repository urls or paths")

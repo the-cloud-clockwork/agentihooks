@@ -72,9 +72,9 @@ def repo_key(url: str) -> str:
     scheme, sep, rest = url.partition("://")
     if not sep and ":" not in url.partition("/")[0]:
         return url.rstrip("/").removesuffix(".git")
-    host, slash, path = (rest if sep else url).lower().partition("/")
+    host, slash, path = (rest if sep else url).partition("/")
     rest = host.rpartition("@")[2].replace(":", "/", 1) + slash + path
-    return rest.rstrip("/").removesuffix(".git")
+    return rest.rstrip("/").lower().removesuffix(".git")
 
 
 def public_url(url: str) -> str:
@@ -89,7 +89,9 @@ def public_url(url: str) -> str:
 
 def _foreign(open_):
     marked = [b for b in open_ if b.get("branch") and b.get("branch_repo")]
-    home = repo_key(_out(["git", "remote", "get-url", "origin"], "cannot read the origin url")) if marked else ""
+    if not marked:
+        return []
+    home = repo_key(_out(["git", "remote", "get-url", "origin"], "cannot read the origin url"))
     return [b for b in marked if repo_key(b["branch_repo"]) != home]
 
 
