@@ -413,6 +413,7 @@ class HerdrRuntime:
     def _launch(self, config, lane, task_id, name, argv, predecessor=None):
         agent = argv[argv.index("--agent") + 1]
         launched_at = int(time.time() * 1000)
+        load_at_launch = list(os.getloadavg())
         try:
             proc = self.run(
                 argv,
@@ -434,7 +435,16 @@ class HerdrRuntime:
         except subprocess.TimeoutExpired as exc:
             self._terminate(name)
             raise SpawnError(f"init-agent timed out for {name}") from exc
+        timings = {
+            "launched_at": launched_at,
+            "returned_at": int(time.time() * 1000),
+            "load_at_launch": load_at_launch,
+            "load_at_return": list(os.getloadavg()),
+        }
         fields = parse_fields(proc.stdout)
+        for step in ("launcher_at", "harness_at"):
+            if step in fields and fields[step].isdigit():
+                timings[step] = int(fields[step])
         if proc.returncode or fields.get("status") != "started" or fields.get("route_status") not in STARTED_ROUTES:
             self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
@@ -454,6 +464,7 @@ class HerdrRuntime:
             validated["profile"],
             profile_decision={"validation": validated},
             launched_at=launched_at,
+            launch_timings=timings,
         )
 
     def recover(self, name: str) -> Placed:

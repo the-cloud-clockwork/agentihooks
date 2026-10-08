@@ -6,6 +6,7 @@ Each swarm keeps at most one master: an agent the operator talks to, which works
 
 import json
 import os
+import sys
 from dataclasses import dataclass, field, replace
 from itertools import count
 from typing import Protocol
@@ -35,6 +36,7 @@ from scripts.swarm import (
     timing,
 )
 from scripts.swarm import idle as idle_state
+from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
@@ -83,6 +85,7 @@ class Placed:
     choice: str = ""
     launched_at: int = 0
     overlays: list = field(default_factory=list)
+    launch_timings: dict = field(default_factory=dict)
 
 
 class Ledger(Protocol):
@@ -117,7 +120,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     config = store.ensure_code(slug)
     actions = []
     if config.state != "stopped" or _woken(slug, config, store, ledger):
-        actions = timing.call(_recover_master, slug, config, store, runtime, now_ms)
+        actions = _step(_recover_master, slug, config, store, runtime, now_ms)
     doc = timing.call(ledger.state, slug)
     rows = {t["id"]: t for t in doc["tasks"]}
     timing.call(
@@ -127,12 +130,12 @@ def tick(slug, store, ledger, runtime, now_ms):
         store,
         lambda: {t["id"]: t for t in timing.call(ledger.state, slug)["tasks"]},
     )
-    actions += timing.call(master_start.observe, slug, config, store, ledger, runtime, now_ms)
-    actions += timing.call(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
-    actions += timing.call(_verify, slug, store, ledger, runtime, rows, now_ms)
-    actions += timing.call(_reap, slug, store, ledger, runtime, rows, now_ms)
-    actions += timing.call(_strays, slug, config, store, runtime)
-    actions += timing.call(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
+    actions += _step(master_start.observe, slug, config, store, ledger, runtime, now_ms)
+    actions += _step(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
+    actions += _step(_verify, slug, store, ledger, runtime, rows, now_ms)
+    actions += _step(_reap, slug, store, ledger, runtime, rows, now_ms)
+    actions += _step(_strays, slug, config, store, runtime)
+    actions += _step(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
     if config.state == "stopped":
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
         if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
@@ -147,14 +150,14 @@ def tick(slug, store, ledger, runtime, now_ms):
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
-    actions += timing.call(_orphans, slug, store, ledger, rows)
+    actions += _step(_orphans, slug, store, ledger, rows)
     from scripts.swarm import capacity
 
-    actions += timing.call(capacity.apply, slug, config, store, ledger, runtime, now_ms)
+    actions += _step(capacity.apply, slug, config, store, ledger, runtime, now_ms)
     if not sleeping:
-        actions += timing.call(_codex_hook_order)
-        actions += timing.call(_master_down, slug, config, store, ledger, runtime, now_ms)
-        actions += timing.call(
+        actions += _step(_codex_hook_order)
+        actions += _step(_master_down, slug, config, store, ledger, runtime, now_ms)
+        actions += _step(
             tick_master.run,
             slug,
             config,
@@ -165,16 +168,25 @@ def tick(slug, store, ledger, runtime, now_ms):
             lambda: _master(slug, config, store, runtime, now_ms),
         )
         if config.state == "running":
-            actions += timing.call(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+            actions += _step(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
     timing.call(_conversations, slug, store, runtime)
     timing.call(_session_models, slug, store)
     starting = {a.name for a in store.agents(slug) if a.lane == MASTER and a.state == "starting"}
     timing.call(transfers.observe, store, slug, runtime.live_names() - starting)
     return (
         actions
-        + timing.call(_settle, slug, config, store, ledger, rows, doc)
+        + _step(_settle, slug, config, store, ledger, rows, doc)
         + timing.call(_close_space, slug, config, store, runtime)
     )
+
+
+def _step(function, *args):
+    try:
+        return timing.call(function, *args)
+    except LedgerRefused as exc:
+        name = f"{function.__module__}.{function.__qualname__}"
+        print(f"{name} skipped, the ledger refused its write: {exc}", file=sys.stderr)
+        return [f"skipped {name}: the ledger refused its write"]
 
 
 def _codex_hook_order():
@@ -307,13 +319,13 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
             launch_check.bundled(agent.profile),
             launch_check.declared(agent.profile, agent.overlays),
         )
-        if found and now_ms - launch_check.launched_at(agent) < launch_check.DEADLINE_MS:
+        if found and now_ms - launch_check.session_started_at(agent) < launch_check.DEADLINE_MS:
             continue
         if found:
             miss = launch_check.Miss(agent, found, waiting[agent.name]["relaunch"])
             actions.append(_failed_launch(slug, store, ledger, runtime, rows, miss, now_ms))
             continue
-        elapsed = launch_check.joined_at(agent, doc) - launch_check.launched_at(agent)
+        elapsed = launch_check.joined_at(agent, doc) - launch_check.session_started_at(agent)
         launch_check.record(store, slug, agent, found, now_ms, elapsed)
         launch_check.forget(store, slug, agent.name)
         launch_check.clear_relaunched(store, slug, agent.task)
@@ -323,7 +335,7 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
 
 def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
     agent, found = miss.agent, miss.found
-    fields, elapsed = ", ".join(found), now_ms - launch_check.launched_at(agent)
+    fields, elapsed = ", ".join(found), now_ms - launch_check.session_started_at(agent)
     if not miss.relaunch or set(found) <= launch_check.REPORT_ONLY:
         outcome, said = "report", f"{agent.name} failed its launch check on {fields}; reported only"
     elif launch_check.relaunched(store, slug, agent.task):
@@ -733,6 +745,7 @@ def placed_record(record, placed):
         choice=placed.choice,
         launched_at=placed.launched_at or record.started_at,
         overlays=placed.overlays,
+        launch_timings=placed.launch_timings,
         state="working",
     )
 

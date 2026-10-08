@@ -232,6 +232,6 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
         if hasattr(ledger, "capacity_comment"):
             ledger.capacity_comment(slug, task["id"], text, now_ms)
         else:
-            ledger.comment(slug, task["id"], text, by=f"quota capacity {now_ms}")
+            ledger.comment(slug, task["id"], text, by="swarm")
     store.redis.set(store.key(slug, "quota-capacity"), json.dumps(decision))
     return [text] if changed else []
