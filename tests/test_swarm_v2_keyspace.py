@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shutil
 import uuid
@@ -168,7 +169,7 @@ def test_the_session_index_keeps_the_canonical_project(world):
     assert lookup(SESSION) == IDENTITY
     with _index_path().open("a") as stream:
         stream.write(json.dumps({"session_id": "older", "project": "a", "repo": "a"}) + "\n")
-    assert lookup("older").project_id == "unknown"
+    assert lookup("older") == ProjectIdentity("a", "a", "", "", "", "unknown")
 
 
 def forge(home: Path, source: str, target: str, kind: str, monkeypatch) -> None:
@@ -255,10 +256,10 @@ def test_a_tampered_installation_record_is_refused(world):
     world.mkdir(parents=True)
     for record in ({"installation_id": "personal", "created_at": FIXTURE["installed_at"]}, {"x": 1}, []):
         (world / keyspace.INSTALLATION_FILE).write_text(json.dumps(record))
-        with pytest.raises(ValueError, match="Invalid installation record"):
+        with pytest.raises(ValueError, match="^Invalid installation record$"):
             keyspace.installation(world)
     (world / keyspace.INSTALLATION_FILE).write_text(json.dumps({"installation_id": "inst-" + "0" * 32}))
-    with pytest.raises(ValueError, match="Invalid installation record"):
+    with pytest.raises(ValueError, match="^Invalid installation record$"):
         keyspace.installation(world)
 
 
@@ -488,25 +489,44 @@ def test_different_brains_keep_different_identities(left, right):
     assert keyspace.brain_identity(url=left) != keyspace.brain_identity(url=right)
 
 
+def digest(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:32]
+
+
+@pytest.mark.parametrize(
+    ("url", "normalized"),
+    [
+        ("HTTPS://Brain.Example:443/api/", "https://brain.example/api"),
+        ("https://operator:fixture-secret@brain.example/api?token=fixture-token#feed", "https://brain.example/api"),
+        ("http://[::1]:8080/", "http://[::1]:8080"),
+        ("https://brain.example/indeX", "https://brain.example/indeX"),
+    ],
+)
+def test_brain_identities_hash_the_secret_free_normalized_url(url, normalized):
+    assert keyspace.brain_identity(url=url) == "url-" + digest(normalized)
+
+
 def test_brain_identities_carry_no_secret_and_name_their_source(tmp_path):
     found = keyspace.brain_identity(url="https://operator:fixture-secret@brain.example/?token=fixture-token")
-    assert found.startswith("url-") and len(found) == 36
     assert not any(secret in found for secret in SECRETS)
     path = keyspace.brain_identity(path=str(tmp_path / "a" / ".." / "feed"))
-    assert path == keyspace.brain_identity(path=str(tmp_path / "feed"))
-    assert path.startswith("file-") and len(path) == 37
+    assert path == "file-" + digest(str((tmp_path / "feed").resolve()))
     assert keyspace.brain_identity() == "none"
-    for url in ("ftp://brain.example", "https://", "brain.example", "https://brain.example:99999"):
-        with pytest.raises(ValueError):
+    for url in ("ftp://brain.example", "https://", "brain.example"):
+        with pytest.raises(ValueError, match="^Invalid brain URL$"):
             keyspace.brain_identity(url=url)
+    with pytest.raises(ValueError, match="out of range"):
+        keyspace.brain_identity(url="https://brain.example:99999")
 
 
 def test_keys_are_versioned_deterministic_and_scoped():
     scope = keyspace.Namespace("inst-" + "a" * 32, "url-" + "b" * 32, "github.com/o/r")
     found = keyspace.key(scope, "feed", "x", "y")
-    assert keyspace.NAMESPACED.fullmatch(found + ".json")
-    assert found.startswith("k2-feed-")
-    assert found == keyspace.key(scope, "feed", "x", "y")
+    canonical = (
+        '[{"brain":"url-' + "b" * 32 + '","format":"2","generation":"","installation":"inst-' + "a" * 32 + '",'
+        '"policy":"1","project":"github.com/o/r"},"feed",["x","y"]]'
+    )
+    assert found == "k2-feed-" + digest(canonical)
     variants = {
         keyspace.key(scope, "feed", "y", "x"),
         keyspace.key(scope, "pending", "x", "y"),
@@ -526,27 +546,101 @@ def test_keys_are_versioned_deterministic_and_scoped():
         "generation": "",
     }
     for kind in ("", "Feed", "feed/x", "-feed", "a" * 33):
-        with pytest.raises(ValueError, match="Invalid key kind"):
+        with pytest.raises(ValueError, match="^Invalid key kind$"):
             keyspace.key(scope, kind)
+
+
+def test_marker_keys_hash_the_canonical_namespace_task_and_text():
+    scope = keyspace.Namespace("inst-" + "a" * 32, "url-" + "b" * 32, "github.com/o/r")
+    raw = (
+        '[{"brain":"url-' + "b" * 32 + '","format":"2","generation":"","installation":"inst-' + "a" * 32 + '",'
+        '"policy":"1","project":"github.com/o/r"},"marker","s","lesson","t","text"]'
+    )
+    assert keyspace.marker_key(scope, "s", "lesson", "t", "text") == uuid.uuid5(uuid.NAMESPACE_URL, "k2:" + raw).hex
+    assert keyspace.legacy_marker_key("s", "lesson", "text") == uuid.uuid5(uuid.NAMESPACE_URL, "s-lesson-text").hex
 
 
 def test_admission_compares_the_whole_namespace_and_kind():
     scope = keyspace.Namespace("inst-" + "a" * 32, "url-" + "b" * 32)
     document = keyspace.stamp(scope, "feed", {"hash": "h", "namespace": "forged"})
-    assert document["namespace"] == scope.document()
+    assert document == {"hash": "h", "namespace": scope.document(), "kind": "feed"}
     assert keyspace.admits(document, scope, "feed")
     assert not keyspace.admits(document, scope, "pending")
-    assert keyspace.foreign(document, scope, "pending")
-    other = keyspace.Namespace(scope.installation, "url-" + "c" * 32)
-    assert not keyspace.admits(document, other, "feed") and keyspace.foreign(document, other, "feed")
-    assert not keyspace.foreign({"hash": "legacy"}, scope, "feed")
-    assert not keyspace.admits([], scope, "feed") and not keyspace.foreign([], scope, "feed")
+    assert not keyspace.admits(document, keyspace.Namespace(scope.installation, "url-" + "c" * 32), "feed")
+    assert not keyspace.admits([], scope, "feed")
 
 
-def test_the_cutover_is_inclusive_and_needs_a_time():
-    record = keyspace.Installation("inst-" + "a" * 32, "2026-10-08T12:00:00+00:00")
-    assert keyspace.current("2026-10-08T12:00:00Z", record)
-    assert keyspace.current("2026-10-08T12:00:00", record)
-    assert not keyspace.current("2026-10-08T11:59:59.999+00:00", record)
-    assert not keyspace.current("2026-10-08T13:00:00+02:00", record)
-    assert not keyspace.current(None, record) and not keyspace.current("", record)
+def test_live_marker_keys_use_the_installation_brain_and_event_time_scope(world, monkeypatch):
+    record = install(world)
+    use_brain(monkeypatch, "swarm")
+    content = FIXTURE["marker"]["content"]
+    namespace = keyspace.Namespace(record.installation_id, brain_adapter.brain_id(), IDENTITY.project_id)
+    expected = keyspace.marker_key(namespace, SESSION, "lesson", FIXTURE["task"], content)
+    assert _marker_request({**marker(), "scope": scope()}, SESSION)[1] == expected
+    bare = keyspace.Namespace(record.installation_id, brain_adapter.brain_id())
+    assert _marker_request({**marker(), "scope": {}}, SESSION)[1] == keyspace.marker_key(
+        bare, SESSION, "lesson", "", content
+    )
+    assert _marker_request({**marker(), "idempotency_key": "None", "scope": {}}, SESSION)[1] != "None"
+
+
+def test_cache_paths_hash_their_namespace_kind_and_identity(world, monkeypatch):
+    record = install(world)
+    use_brain(monkeypatch, "swarm")
+    state = world / "brain" / "project-memory"
+    brain = project_cache.namespace()
+    assert brain == keyspace.Namespace(record.installation_id, brain_adapter.brain_id())
+    scoped = keyspace.Namespace(brain.installation, brain.brain, IDENTITY.project_id)
+    assert project_cache._feed_path(brain) == state / f"{keyspace.key(brain, 'feed')}.json"
+    assert project_cache._pending_path(SESSION, brain) == state / f"{keyspace.key(brain, 'pending', SESSION)}.json"
+    assert project_cache._cache_path(IDENTITY, scoped) == state / (
+        keyspace.key(scoped, "project-memory", IDENTITY.remote) + ".json"
+    )
+    local = ProjectIdentity("alpha", "alpha")
+    assert project_cache._cache_path(local, scoped) == state / f"{keyspace.key(scoped, 'project-memory', 'alpha')}.json"
+
+
+def test_a_context_request_starts_one_scoped_background_refresh(world, monkeypatch):
+    record = install(world)
+    record_session(SESSION, IDENTITY)
+    use_brain(monkeypatch, "swarm")
+    project_cache.store_feed([BrainEntry("hot-arcs", "Arcs", "x")])
+    with patch("hooks._async.fork_and_call") as fork:
+        project_cache.project_context(SESSION)
+    feed = json.loads(project_cache._feed_path(project_cache.namespace()).read_text())
+    scoped = keyspace.Namespace(record.installation_id, brain_adapter.brain_id(), IDENTITY.project_id)
+    fork.assert_called_once_with(
+        project_cache.refresh_project_cache,
+        IDENTITY,
+        feed["entries"],
+        feed["hash"],
+        scoped,
+        timeout_sec=180,
+        task_name="brain_project",
+    )
+
+
+def test_each_refused_read_is_counted_by_kind_and_logged_without_the_brain(world, monkeypatch):
+    install(world)
+    use_brain(monkeypatch, "personal")
+    project_cache.defer_project_context(SESSION, "personal pending")
+    source = project_cache._pending_path(SESSION, project_cache.namespace())
+    use_brain(monkeypatch, "swarm")
+    target = project_cache._pending_path(SESSION, project_cache.namespace())
+    target.write_bytes(source.read_bytes())
+    assert project_cache.take_project_context(SESSION) is None
+    assert project_cache.take_project_context(SESSION) is None
+    state = world / "brain" / "project-memory"
+    assert json.loads((state / "cache-scope-mismatches.json").read_text()) == {"pending": 2}
+    assert (state / "cache-scope-mismatches.json.lock").exists()
+    entries = [json.loads(line) for line in (world.parents[1] / "hooks.log").read_text().splitlines()]
+    refused = [entry for entry in entries if entry["message"] == "brain_project: cache scope mismatch"]
+    assert [entry["payload"] for entry in refused] == [{"kind": "pending"}, {"kind": "pending"}]
+
+
+def test_a_fresh_installation_records_utc_and_the_usage_goes_to_stderr(tmp_path, capsys):
+    assert keyspace.installation(tmp_path).created_at.endswith("+00:00")
+    assert keyspace.main(["drop"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "usage: python -m scripts.swarm_v2.keyspace drop <cache directory>\n"

@@ -179,7 +179,7 @@ def _marker_key(marker: dict, session_id: str, scope: dict, content: str) -> str
     from hooks.context.brain_adapter import brain_id
     from scripts.swarm_v2 import keyspace
 
-    if keyspace.MARKER_KEY.fullmatch(str(marker.get("idempotency_key", ""))):
+    if keyspace.MARKER_KEY.fullmatch(str(marker.get("idempotency_key"))):
         return marker["idempotency_key"]
     record = keyspace.installation(Path(AGENTIHOOKS_HOME))
     if not keyspace.current(marker.get("at"), record):
@@ -247,7 +247,7 @@ def _drain_outbox(outbox_dir: str) -> int:
                 "type": payload["type"],
                 "content": payload["content"],
                 "attrs": attrs,
-                "idempotency_key": payload.get("idempotency_key", ""),
+                "idempotency_key": payload.get("idempotency_key"),
             }
         except (OSError, KeyError, TypeError, json.JSONDecodeError):
             try:

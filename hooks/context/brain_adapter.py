@@ -119,7 +119,7 @@ def _load_persisted_hash() -> str:
 
         if _HASH_CACHE_FILE.exists():
             document = json.loads(_HASH_CACHE_FILE.read_text())
-            return document.get("hash", "") if admits(document, namespace(), "publish-hash") else ""
+            return document["hash"] if admits(document, namespace(), "publish-hash") else ""
     except Exception:
         pass
     return ""

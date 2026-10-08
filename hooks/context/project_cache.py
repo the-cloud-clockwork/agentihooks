@@ -9,7 +9,7 @@ from hooks.context.project_identity import ProjectIdentity, resolve_project
 from hooks.context.project_memory import ProjectMemory, VaultProjectSource
 from hooks.context.project_render import render_project_block
 from hooks.context.project_sessions import lookup
-from scripts.swarm_v2.keyspace import Namespace, admits, foreign, installation, key, stamp, sweep_legacy
+from scripts.swarm_v2.keyspace import Namespace, admits, installation, key, stamp, sweep_legacy
 
 
 def _state_dir() -> Path:
@@ -32,11 +32,11 @@ def _write(path: Path, value: dict) -> None:
     temp.replace(path)
 
 
-def namespace(project: str = "") -> Namespace:
+def namespace() -> Namespace:
     from hooks.config import AGENTIHOOKS_HOME
     from hooks.context.brain_adapter import brain_id
 
-    return Namespace(installation(Path(AGENTIHOOKS_HOME)).installation_id, brain_id(), project)
+    return Namespace(installation(Path(AGENTIHOOKS_HOME)).installation_id, brain_id())
 
 
 def _mismatch_path() -> Path:
@@ -51,7 +51,7 @@ def _scoped(path: Path, scope: Namespace, kind: str) -> dict:
     document = _read(path)
     if admits(document, scope, kind):
         return document
-    if foreign(document, scope, kind):
+    if "namespace" in document:
         from hooks.common import log
         from hooks.context.broadcast import _file_lock
 

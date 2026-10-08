@@ -62,7 +62,7 @@ def installation(home: Path, now: datetime | None = None) -> Installation:
         path.parent.mkdir(parents=True, exist_ok=True)
         moment = now or datetime.now(timezone.utc)
         record = {"installation_id": f"inst-{secrets.token_hex(16)}", "created_at": moment.isoformat()}
-        temp = path.with_name(f".{INSTALLATION_FILE}.{os.getpid()}.{secrets.token_hex(4)}")
+        temp = path.with_name(f".{INSTALLATION_FILE}.{uuid.uuid4().hex}")
         temp.write_text(_canonical(record))
         try:
             os.link(temp, path)
@@ -114,22 +114,18 @@ def admits(document: object, namespace: Namespace, kind: str) -> bool:
     )
 
 
-def foreign(document: object, namespace: Namespace, kind: str) -> bool:
-    return isinstance(document, dict) and "namespace" in document and not admits(document, namespace, kind)
-
-
 def current(at: object, record: Installation) -> bool:
     moment = instant(at)
     return moment is not None and moment >= instant(record.created_at)
 
 
 def legacy_marker_key(session_id: str, marker_type: str, content: str) -> str:
-    return uuid.uuid5(uuid.NAMESPACE_URL, f"{session_id}-{marker_type}-{content}").hex[:32]
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"{session_id}-{marker_type}-{content}").hex
 
 
 def marker_key(namespace: Namespace, session_id: str, marker_type: str, task: str, content: str) -> str:
     raw = _canonical([namespace.document(), "marker", session_id, marker_type, task, content])
-    return uuid.uuid5(uuid.NAMESPACE_URL, f"k{KEY_FORMAT}:{raw}").hex[:32]
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"k{KEY_FORMAT}:{raw}").hex
 
 
 def _files(directory: Path, pattern: re.Pattern, limit: int | None) -> list[Path]:
@@ -140,14 +136,9 @@ def _files(directory: Path, pattern: re.Pattern, limit: int | None) -> list[Path
 
 
 def _remove(paths: list[Path]) -> int:
-    removed = 0
     for path in paths:
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            continue
-        removed += 1
-    return removed
+        path.unlink(missing_ok=True)
+    return len(paths)
 
 
 def sweep_legacy(directory: Path, limit: int = 32) -> int:
