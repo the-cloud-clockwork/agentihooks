@@ -418,6 +418,26 @@ def test_codex_quota_reset_and_signed_out_accounts(monkeypatch):
     assert capacity.accounts(environ, 200) == [capacity.Account("codex", "a", "NORMAL", 0, 100, 100)]
 
 
+def test_a_fresh_codex_reading_with_only_the_week_is_judged_on_the_week(monkeypatch):
+    from scripts.codex_quota import FIVE_HOUR_MINUTES, CodexQuota
+
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    pool = [capacity.codex_router.CodexAccount(name, f"AH_CX_TOKEN_{name}") for name in ("a", "b")]
+    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda _: pool)
+    weekly = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=74, resets_at=10**9))
+    monkeypatch.setattr(capacity.codex_router, "quotas", lambda pool, env: {"a": weekly})
+    stale_at = 100 + FIVE_HOUR_MINUTES * 60
+    unread = capacity.Account("codex", "b", "UNKNOWN", 0, None, None)
+    fresh = capacity.accounts({}, stale_at - 1)
+    assert fresh == [capacity.Account("codex", "a", "REDUCE", 0, 26, 26), unread]
+    assert capacity.free_seats(fresh[0], 4, 5) == 2
+    assert capacity.free_seats(fresh[0], 4, 27) == 0
+    stale = capacity.accounts({}, stale_at)
+    assert stale == [capacity.Account("codex", "a", "UNKNOWN", 0, None, 26), unread]
+    assert capacity.free_seats(stale[0], 4, 5) == 0
+
+
 def test_unplaceable_first_task_does_not_block_other_ready_work(monkeypatch, tmp_path):
     from scripts.swarm.runtime import HerdrRuntime
     from scripts.swarm.tick import _spawn_order
