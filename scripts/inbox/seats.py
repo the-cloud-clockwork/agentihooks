@@ -122,10 +122,17 @@ class SeatRegistry:
         return {name: json.loads(value or "{}") for name, value in zip(names, raw)}
 
     def record_exit(self, name: str, seat: str, reason: str) -> None:
-        self.redis.set(f"{PREFIX}-of:{name}:exit", json.dumps({"seat": seat, "reason": reason}), nx=True)
+        held = self.known_seat(name)
+        generation = self.occupant(held).generation if held else 0
+        record = {"seat": seat, "reason": reason, "generation": generation}
+        self.redis.set(f"{PREFIX}-of:{name}:exit", json.dumps(record), nx=True)
 
     def exit_of(self, name: str) -> dict[str, str]:
         return json.loads(self.redis.get(f"{PREFIX}-of:{name}:exit") or "{}")
+
+    def left(self, name: str, seat: str) -> bool:
+        """name exited while holding seat's current occupancy, so it takes no more of its mail."""
+        return self.exit_of(name).get("generation") == self.occupant(seat).generation
 
     def history(self, address):
         return [json.loads(entry) for entry in self.redis.lrange(f"{self.key(address)}:history", 0, -1)]

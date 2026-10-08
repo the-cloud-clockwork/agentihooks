@@ -1,7 +1,7 @@
 import pytest
 
 from scripts.inbox import exits
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -375,7 +375,11 @@ def test_the_sweep_keeps_peer_mail_that_still_belongs_to_the_seat(redis, retaine
         store.put_agent("sw", successor)
         store.seats.occupy(departed.seat, successor.name, item.created_at + 1)
     exits.sweep(inbox, "sw", store, dict)
-    assert inbox.get(item.id) == before
+    after = inbox.get(item.id)
+    if retained in ("live receiver", "unreceived", "closed"):
+        assert after == before
+    else:
+        assert (after.address, after.state) == (departed.seat, "pending")
     assert inbox.inbox(peer.name) == []
 
 
@@ -392,9 +396,9 @@ def test_the_sweep_preserves_general_peer_mail_received_by_a_departed_agent(redi
     store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw"))
     store.seats.occupy("eng-1@sw", "sw-eng-2", general.created_at + 1)
     exits.sweep(inbox, "sw", store, dict)
-    assert inbox.get(general.id).state == "delivered"
+    assert inbox.get(general.id).state == "pending"
     assert inbox.get(legacy.id).task == ""
-    assert inbox.get(legacy.id).state == "delivered"
+    assert inbox.get(legacy.id).state == "pending"
     assert inbox.inbox("sw-eng-3") == []
 
 
@@ -491,7 +495,7 @@ def test_task_mail_waits_until_a_live_successor_takes_the_seat(redis):
     store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw", state="finished"))
     store.seats.occupy("eng-1@sw", "sw-eng-2", item.created_at + 1)
     exits.sweep(inbox, "sw", store, dict)
-    assert inbox.get(item.id).state == "delivered"
+    assert inbox.get(item.id).state == "pending"
     assert inbox.inbox("sw-eng-3") == []
 
 
@@ -541,7 +545,7 @@ def test_the_sweep_skips_a_settled_agent_until_mail_reaches_it_again(redis, monk
     exits.sweep(inbox, "sw", store, dict)
     exits.sweep(inbox, "sw", store, dict)
     assert settled == ["sw-eng-1"]
-    assert store.seats.exit_of("sw-eng-1") == {"seat": "eng-1@sw", "reason": "exited"}
+    assert store.seats.exit_of("sw-eng-1") == {"seat": "eng-1@sw", "reason": "exited", "generation": 1}
     late = inbox.send("sender", "sw-eng-1", "late contract")
     exits.sweep(inbox, "sw", store, dict)
     exits.sweep(inbox, "sw", store, dict)
@@ -586,7 +590,7 @@ def test_the_sweep_settles_a_closed_tasks_agent_with_its_task_outcome(redis, sta
     store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
     item = inbox.send("sender", "sw-eng-1", "contract")
     exits.sweep(inbox, "sw", store, lambda: {"t1": {"claimed_by": "sw-eng-1", "state": state}})
-    assert store.seats.exit_of("sw-eng-1") == {"seat": "", "reason": exit_text}
+    assert store.seats.exit_of("sw-eng-1") == {"seat": "", "reason": exit_text, "generation": 1}
     assert inbox.get(item.id).state == "cancelled"
     assert inbox.get(item.id).reason == f"cancelled: sw-eng-1 {exit_text} before closing it"
 
@@ -612,3 +616,100 @@ def test_each_gone_agent_is_settled_once_per_sweep(redis, monkeypatch):
     monkeypatch.setattr(exits, "settle", lambda inbox, name, *rest: settled.append(name) or settle(inbox, name, *rest))
     exits.sweep(inbox, "sw", store, dict)
     assert sorted(settled) == ["sw-eng-1", "sw-eng-2", "sw-eng-3"]
+
+
+def seat_notice_taken(inbox, store, state):
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    item = inbox.send("swarm", "eng-1@sw", "intent check for task t1", ref="tasks/t1")
+    inbox.deliver(item.id, "sw-eng-1")
+    if state != "delivered":
+        getattr(inbox, {"confirmed": "confirm", "read": "read"}[state])(item.id, "sw-eng-1")
+    return item
+
+
+@pytest.mark.parametrize("state", ["delivered", "confirmed", "read"])
+@pytest.mark.parametrize("path", ["settle", "sweep"])
+def test_a_finished_agent_leaves_no_seat_mail_it_took_open(redis, state, path):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    item = seat_notice_taken(inbox, store, state)
+    if path == "settle":
+        exits.settle(inbox, "sw-eng-1", "", "finished its task and exited")
+    else:
+        exits.sweep(inbox, "sw", store, lambda: {"t1": {"claimed_by": "sw-eng-1", "state": "done"}})
+    settled = inbox.get(item.id)
+    assert settled.state in CLOSED
+    assert "sw-eng-1 finished its task and exited" in settled.reason
+    assert inbox.pending_items("swarm") == []
+
+
+@pytest.mark.parametrize("state", ["delivered", "confirmed", "read"])
+def test_a_handing_off_agent_returns_the_seat_mail_it_took_to_its_next_occupant(redis, state):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    item = seat_notice_taken(inbox, store, state)
+    exits.settle(inbox, "sw-eng-1", "eng-1@sw", "handed off its seat")
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("eng-1@sw", "pending")
+    assert inbox.pending_mail("sw-eng-1") == []
+    store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+    assert [mail.id for mail in inbox.pending_mail("sw-eng-2")] == [item.id]
+
+
+def test_seat_mail_another_life_took_stays_with_it_when_an_agent_exits(redis):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+    item = inbox.send("swarm", "eng-1@sw", "intent check for task t1", ref="tasks/t1")
+    inbox.deliver(item.id, "sw-eng-2")
+    exits.settle(inbox, "sw-eng-1", "", "finished its task and exited")
+    assert inbox.get(item.id).state == "delivered"
+
+
+def test_a_handing_off_agent_never_takes_its_own_mail_moved_to_its_seat(redis):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    item = inbox.send("sender", "sw-eng-1", "contract")
+    inbox.deliver(item.id, "sw-eng-1")
+    exits.settle(inbox, "sw-eng-1", "eng-1@sw", "handed off its seat")
+    assert inbox.pending_mail("sw-eng-1") == []
+    store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+    assert [mail.id for mail in inbox.pending_mail("sw-eng-2")] == [item.id]
+
+
+def test_a_life_resumed_into_its_seat_takes_seat_mail_again(redis):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    exits.settle(inbox, "sw-eng-1", "eng-1@sw", "stopped")
+    item = inbox.send("sender", "eng-1@sw", "contract")
+    assert inbox.pending_mail("sw-eng-1") == []
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 2)
+    assert [mail.id for mail in inbox.pending_mail("sw-eng-1")] == [item.id]
+
+
+@pytest.mark.parametrize("seat", ["", "eng-1@sw"])
+def test_a_quota_notice_ends_with_the_life_it_was_sent_to(redis, seat):
+    from scripts.swarm.quota_notice import HANDOFF, HURRY
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    hurry = inbox.send("swarm", "sw-eng-1", HURRY)
+    handoff = inbox.send("swarm", "sw-eng-1", HANDOFF.format(slug="sw"))
+    inbox.deliver(hurry.id, "sw-eng-1")
+    exits.settle(inbox, "sw-eng-1", seat, "handed off its seat")
+    for item in (hurry, handoff):
+        assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("sw-eng-1", "done")
+        assert "quota notice ended" in inbox.get(item.id).reason
+    store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+    assert inbox.pending_mail("sw-eng-2") == []
+
+
+@pytest.mark.parametrize(
+    ("outcome", "state"), [("", "cancelled"), ("eng-1@sw", "pending")], ids=["finished", "handed off"]
+)
+def test_the_sweep_settles_seat_mail_a_settled_life_was_left_holding(redis, outcome, state):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    item = seat_notice_taken(inbox, store, "delivered")
+    store.seats.record_exit("sw-eng-1", outcome, "finished its task and exited")
+    store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+    exits.sweep(inbox, "sw", store, dict)
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("eng-1@sw", state)
+    assert "sw-eng-1 finished its task and exited" in inbox.get(item.id).reason

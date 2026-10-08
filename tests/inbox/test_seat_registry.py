@@ -101,7 +101,7 @@ def test_exits_reads_every_recorded_exit_at_once(seats, monkeypatch):
     monkeypatch.setattr(seats.redis, "get", lambda key: pytest.fail(f"a read per exit: {key}"))
     monkeypatch.setattr(seats.redis, "mget", lambda keys: mget(keys) if keys else pytest.fail("an empty MGET"))
     assert seats.exits(["rig-eng-1", "rig-eng-2"]) == {
-        "rig-eng-1": {"seat": "eng-1@rig", "reason": "exited"},
+        "rig-eng-1": {"seat": "eng-1@rig", "reason": "exited", "generation": 0},
         "rig-eng-2": {},
     }
     assert seats.exits([]) == {}

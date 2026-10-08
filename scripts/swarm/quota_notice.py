@@ -27,6 +27,10 @@ def level(account: dict) -> str:
     return ""
 
 
+def is_notice(item) -> bool:
+    return item.sender == "swarm" and (item.text == HURRY or item.text.startswith(HANDOFF.split("{slug}", 1)[0]))
+
+
 def apply(slug: str, store: RedisStore, decision: dict) -> list[str]:
     accounts = {(row["harness"], row["name"]): row for row in decision.get("accounts", [])}
     key = store.key(slug, "quota-notices")
