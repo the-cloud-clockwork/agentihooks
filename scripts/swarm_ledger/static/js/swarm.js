@@ -4,6 +4,7 @@ import { writeSwarm } from "./api.js";
 import { renderStats } from "./render.js";
 import { renderChatTo } from "./chat.js";
 import { clearNoteError, renderControls, renderGates, showNote } from "./controls.js";
+import { firstPage, moreButton } from "./pages.js";
 
 const SESSION_CAP_MAX = 50;
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
@@ -70,6 +71,17 @@ function idCell(text) {
 
 function cells(...values) {
   return h("tr", {}, ...values.map((v) => (v && v.nodeType ? h("td", {}, v) : h("td", { text: v == null || v === "" ? "—" : String(v) }))));
+}
+
+function moreRow(key, total, noun, columns, again) {
+  const cell = moreButton(key, total, noun, again, "td");
+  if (cell) cell.colSpan = columns;
+  return cell && h("tr", { class: "page-more" }, cell);
+}
+
+function withId(row, id) {
+  row.id = id;
+  return row;
 }
 
 function emptyRow(columns, text) {
@@ -233,7 +245,8 @@ export function renderSwarm(sw) {
 function renderHealth(findings, now = Date.now()) {
   const list = findings || [];
   $("health-count").textContent = `${list.length} open`;
-  $("health").replaceChildren(...(list.length ? list.map((f) => healthRow(f, now)) : [emptyRow(7, "No health findings. The swarm checks every minute.")]));
+  $("health").replaceChildren(...(list.length ? firstPage("health", list, (f) => `finding-${f.id}`).map((f) => withId(healthRow(f, now), `finding-${f.id}`))
+    : [emptyRow(7, "No health findings. The swarm checks every minute.")]), moreRow("health", list.length, "more findings", 7, () => renderHealth(list, now)) || "");
 }
 
 function healthRow(f, now) {
@@ -248,9 +261,9 @@ function healthRow(f, now) {
 
 function renderHandoffs(rows) {
   $("handoff-count").textContent = `${rows.length} ${rows.length === 1 ? "seat" : "seats"}`;
-  $("swarm-handoffs").replaceChildren(...(rows.length ? rows.map((r) => cells(idCell(seatText(r.seat)), clock(r.at), r.reason,
+  $("swarm-handoffs").replaceChildren(...(rows.length ? firstPage("seats", rows, (r) => `seat-${r.seat}`).map((r) => withId(cells(idCell(seatText(r.seat)), clock(r.at), r.reason,
     r.continuity ? label(r.continuity) : "—", r.binding ? h("span", {}, label(r.binding), r.bound_at && ` ${clock(r.bound_at)}`) : "—",
     r.awaiting ? h("span", { class: "sw-ctl" }, ...["resume", "fresh"].map((choice) => h("button", { class: "sw-btn", type: "button",
-      "data-agent": r.awaiting, "data-restore-choice": choice, disabled: !!pending, text: choice }))) : r.successor ? idCell(r.successor) : "—"))
-    : [emptyRow(6, "No seats yet. Seats appear when agents start.")]));
+      "data-agent": r.awaiting, "data-restore-choice": choice, disabled: !!pending, text: choice }))) : r.successor ? idCell(r.successor) : "—"), `seat-${r.seat}`))
+    : [emptyRow(6, "No seats yet. Seats appear when agents start.")]), moreRow("seats", rows.length, "more seats", 6, () => renderHandoffs(rows)) || "");
 }
