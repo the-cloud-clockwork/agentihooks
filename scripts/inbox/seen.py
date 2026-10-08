@@ -7,6 +7,7 @@ import os
 
 from scripts.inbox.store import MOVE_ATTEMPTS, InboxError, now_ms, owner_key, redelivery_ms
 from scripts.swarm.keyspace import ROOT
+from scripts.swarm.naming import NameRegistry
 
 PREFIX = f"{ROOT}:inbox:seen"
 TTL_S = 30 * 24 * 3600
@@ -28,11 +29,12 @@ class SeenMarks:
         """True when this call is the first to show the write to name; False while a delivery owner holds name."""
         from redis.exceptions import WatchError
 
+        owner = owner_key(NameRegistry(self.redis).resolve(name))
         for _ in range(MOVE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(owner_key(name))
-                    if pipe.get(owner_key(name)) is not None:
+                    pipe.watch(owner)
+                    if pipe.get(owner) is not None:
                         return False
                     pipe.multi()
                     pipe.sadd(self.key(name), ref)

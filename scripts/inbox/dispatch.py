@@ -146,6 +146,7 @@ class Dispatcher:
         self.store.stage_move(
             pipe, item, replace(item, state="delivered", updated_at=now_ms(), reason=""), delivery.recipient, last
         )
+        pipe.zrem(self.key("delivered"), item.id)
         if delivery.ref:
             pipe.sadd(self.marks.key(delivery.recipient), delivery.ref)
             pipe.expire(self.marks.key(delivery.recipient), TTL_S)
