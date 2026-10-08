@@ -106,11 +106,11 @@ def case_b() -> dict:
         forge(home, "personal", "swarm", "feed", monkeypatch)
         forge(home, "personal", "swarm", "project-memory", monkeypatch)
         use_brain(monkeypatch, "swarm")
-        before = {name: body for name, body in files(home).items() if "/k2-" in f"/{name}"}
+        before = {name: body for name, body in files(home).items() if keyspace.NAMESPACED.fullmatch(Path(name).name)}
         with patch("hooks._async.fork_and_call") as fork:
             served = project_cache.project_context(SESSION) or ""
         pending = project_cache.take_project_context(SESSION)
-        after = {name: body for name, body in files(home).items() if "/k2-" in f"/{name}"}
+        after = {name: body for name, body in files(home).items() if keyspace.NAMESPACED.fullmatch(Path(name).name)}
         log = (Path(root) / "hooks.log").read_text() if (Path(root) / "hooks.log").exists() else ""
         result = {
             "other_brain_lesson_served": "personal lesson" in served,
