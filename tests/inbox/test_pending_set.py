@@ -71,6 +71,7 @@ def test_delivery_reads_only_the_pending_set_with_a_thousand_closed_items(redis,
     counting = CountingRedis(redis)
     store = InboxStore(counting)
     store.pending_items("bob")
+    store.redeliver(0, 0)
     monkeypatch.setattr(delivery, "connect", lambda environ=None: store)
     counting.calls.clear()
 

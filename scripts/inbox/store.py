@@ -379,8 +379,22 @@ class InboxStore:
     def redeliver(self, now, window):
         """Return each item delivered at least window ms ago and never confirmed to pending, for the next claim."""
         cutoff = now - window
-        stale = self.redis.zrangebyscore(self.key("delivered"), "-inf", cutoff)
+        with self.redis.pipeline(transaction=False) as pipe:
+            pipe.exists(self.key("delivered", "built"))
+            pipe.zrangebyscore(self.key("delivered"), "-inf", cutoff)
+            built, stale = pipe.execute()
+        if not built:
+            self._build_delivered(cutoff)
         return [item for item_id in stale if (item := self.requeue(item_id, REDELIVERER, REDELIVERED, cutoff))]
+
+    def _build_delivered(self, since):
+        """Index the items a store without the delivered index left delivered after since; older ones stay as they are."""
+        prefix = self.key("item", "")
+        for key in self.redis.scan_iter(match=prefix + "*"):
+            state, updated_at = self.redis.hmget(key, "state", "updated_at")
+            if state == "delivered" and int(updated_at) > since:
+                self.redis.zadd(self.key("delivered"), {key[len(prefix) :]: int(updated_at)}, nx=True)
+        self.redis.set(self.key("delivered", "built"), 1)
 
     def requeue(self, item_id, by, reason, before=None):
         """Return a delivered item to pending; None once it moved on, or was delivered again after before."""

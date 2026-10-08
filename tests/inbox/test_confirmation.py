@@ -103,6 +103,16 @@ def test_redelivery_skips_an_item_delivered_again_after_the_cutoff(store):
     assert store.get(item.id).state == "delivered"
 
 
+def test_the_first_redelivery_indexes_items_delivered_inside_the_window_before_the_index_existed(store):
+    recent, old = delivered(store), delivered(store, "older")
+    store.redis.hset(store.key("item", old.id), "updated_at", recent.updated_at - W)
+    store.redis.delete(store.key("delivered"), store.key("delivered", "built"))
+    assert store.redeliver(recent.updated_at, W) == []
+    assert store.redis.get(store.key("delivered", "built")) == "1"
+    assert [i.id for i in store.redeliver(recent.updated_at + W, W)] == [recent.id]
+    assert (store.get(recent.id).state, store.get(old.id).state) == ("pending", "delivered")
+
+
 def test_redelivery_drops_index_entries_of_items_gone_or_moved_on(store):
     item = delivered(store)
     store.redis.delete(store.key("item", item.id))
