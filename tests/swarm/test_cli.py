@@ -309,6 +309,7 @@ def test_a_refused_reopen_on_the_bin_stop_path_skips_that_task_and_still_stops(e
         return update(slug, task_id, fields, by)
 
     ledger.update_task = refuse_t1
+    assert (ledger.rows["t1"]["state"], ledger.rows["t2"]["state"]) == ("claimed", "claimed")
     ledger.bin = {"sw"}
     assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
     assert store.agents("sw") == [] and rt.live == set() and rt.closed_spaces == ["sw"]
