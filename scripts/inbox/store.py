@@ -557,13 +557,12 @@ class InboxStore:
         return pipe.get(key) is not None
 
     def last_pending(self, pipe, item):
-        """Watch item's pending index; True when item is the last pending item there."""
         pending = self.key("pending", item.address)
         pipe.watch(pending)
         return pipe.zscore(pending, item.id) is not None and pipe.zcard(pending) == 1
 
     def stage_move(self, pipe, item, moved, by, last):
-        """Queue on a pipeline in MULTI the writes that move item to moved."""
+        """pipe is already in MULTI."""
         pipe.hset(self.key("item", item.id), mapping=_fields(moved))
         if moved.state in CLOSED:
             pipe.zrem(self.key("open", item.address), item.id)

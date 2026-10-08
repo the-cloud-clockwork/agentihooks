@@ -69,10 +69,12 @@ def test_a_second_bridge_takes_over_and_the_first_loses_every_write(store, dispa
     with pytest.raises(DispatchError) as refused:
         dispatcher.submitting(delivery.id, "bridge-1")
     assert str(refused.value) == "bridge-1 does not deliver for bob; bridge-2 does"
-    with pytest.raises(DispatchError):
+    with pytest.raises(DispatchError) as refused:
         dispatcher.reserve("bob", "bridge-1")
-    with pytest.raises(DispatchError):
+    assert str(refused.value) == "bridge-1 does not deliver for bob; bridge-2 does"
+    with pytest.raises(DispatchError) as refused:
         dispatcher.recover("bob", "bridge-1")
+    assert str(refused.value) == "bridge-1 does not deliver for bob; bridge-2 does"
     assert dispatcher.get(delivery.id).state == "reserved"
 
 
@@ -105,8 +107,15 @@ def test_reserve_takes_pending_items_in_inbox_order_with_a_digest(store, dispatc
 
 def test_reserve_by_a_non_owner_is_refused(store, dispatcher):
     store.send("alice", "bob", "hi")
-    with pytest.raises(DispatchError):
+    with pytest.raises(DispatchError) as refused:
         dispatcher.reserve("bob", "bridge-2")
+    assert str(refused.value) == "bridge-2 does not deliver for bob; bridge-1 does"
+
+
+def test_recover_by_a_non_owner_names_nobody_once_released(store):
+    with pytest.raises(DispatchError) as refused:
+        Dispatcher(store).recover("bob", "bridge-1")
+    assert str(refused.value) == "bridge-1 does not deliver for bob; nobody does"
 
 
 def test_a_repeated_notify_reserves_nothing_new(store, dispatcher):
@@ -161,8 +170,9 @@ def test_a_repeated_accept_is_refused_and_delivers_once(store, dispatcher):
     item = store.send("alice", "bob", "hi")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
     send(dispatcher, "bridge-1", delivery)
-    with pytest.raises(DispatchError):
+    with pytest.raises(DispatchError) as refused:
         dispatcher.accept(delivery.id, "bridge-1", delivery.digest)
+    assert str(refused.value) == f"delivery {delivery.id} is accepted"
     assert states(store, item.id) == ["pending", "delivered"]
 
 
@@ -191,8 +201,77 @@ def test_reject_releases_the_item(store, dispatcher):
     rejected = dispatcher.reject(delivery.id, "bridge-1", "turn refused")
     assert (rejected.state, rejected.reason) == ("rejected", "turn refused")
     assert [d.item for d in dispatcher.reserve("bob", "bridge-1")] == [item.id]
-    with pytest.raises(DispatchError):
+    with pytest.raises(DispatchError) as refused:
         dispatcher.reject(delivery.id, "bridge-1", "again")
+    assert str(refused.value) == f"delivery {delivery.id} is rejected"
+
+
+def test_release_is_refused_while_a_delivery_is_open(store, dispatcher):
+    item = store.send("alice", "bob", "hi")
+    [delivery] = dispatcher.reserve("bob", "bridge-1")
+    dispatcher.submitting(delivery.id, "bridge-1")
+    with pytest.raises(DispatchError) as refused:
+        dispatcher.release("bob", "bridge-1")
+    assert str(refused.value) == "bob still has open deliveries; accept or reject them before releasing"
+    assert dispatcher.owner("bob") == "bridge-1"
+    assert claim(store, "bob") == []
+    assert dispatcher.release("bob", "bridge-2") is False
+    dispatcher.reject(delivery.id, "bridge-1", "turn refused")
+    assert dispatcher.release("bob", "bridge-1") is True
+    assert [shown.id for shown in claim(store, "bob")] == [item.id]
+
+
+def test_a_superseded_item_closed_meanwhile_still_returns_the_reservations(store, dispatcher, monkeypatch):
+    store.redis.sadd(SeenMarks(store.redis).key("bob"), "sw:3:c1")
+    shown = store.send("operator", "bob", "comment", ref="sw:3:c1")
+    fresh_item = store.send("alice", "bob", "hi")
+    real = store.close
+
+    def closed_meanwhile(item_id, *args):
+        real(item_id, "bob", "cancel")
+        return real(item_id, *args)
+
+    monkeypatch.setattr(store, "close", closed_meanwhile)
+    assert [d.item for d in dispatcher.reserve("bob", "bridge-1")] == [fresh_item.id]
+    assert store.get(shown.id).state == "cancelled"
+
+
+def test_a_seen_mark_retries_when_the_owner_changes_meanwhile(store, monkeypatch):
+    from redis.exceptions import WatchError
+
+    marks = SeenMarks(store.redis)
+    calls = []
+    real = store.redis.pipeline
+
+    def pipeline(*args, **kwargs):
+        pipe = real(*args, **kwargs)
+        calls.append(1)
+        if len(calls) == 1:
+            pipe.execute = lambda: (_ for _ in ()).throw(WatchError("changed"))
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    assert marks.mark("bob", "sw:3:c1") is True
+    assert len(calls) == 2
+
+
+def test_a_seen_mark_that_keeps_changing_is_refused(store, monkeypatch):
+    from redis.exceptions import WatchError
+
+    from scripts.inbox.store import InboxError
+
+    real = store.redis.pipeline
+
+    def pipeline(*args, **kwargs):
+        pipe = real(*args, **kwargs)
+        pipe.execute = lambda: (_ for _ in ()).throw(WatchError("changed"))
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    with pytest.raises(InboxError) as refused:
+        SeenMarks(store.redis).mark("bob", "sw:3:c1")
+    assert str(refused.value) == "the delivery owner of bob changed meanwhile; run it again"
+    assert SeenMarks(store.redis).seen("bob", "sw:3:c1") is False
 
 
 def test_crash_before_write_releases_the_reservation_on_recovery(store, dispatcher):

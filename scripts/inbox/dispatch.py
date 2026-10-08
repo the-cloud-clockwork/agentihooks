@@ -70,13 +70,15 @@ class Dispatcher:
 
         def drop(pipe):
             held = pipe.get(owner_key(recipient))
+            if held == owner and pipe.scard(self.key("deliveries", recipient)):
+                raise DispatchError(f"{recipient} still has open deliveries; accept or reject them before releasing")
             pipe.multi()
             if held != owner:
                 return False
             pipe.delete(owner_key(recipient))
             return True
 
-        return self._transact([owner_key(recipient)], drop)
+        return self._transact([owner_key(recipient), self.key("deliveries", recipient)], drop)
 
     def get(self, delivery_id):
         return _delivery(self.redis.hgetall(self.key("delivery", delivery_id)), delivery_id)
@@ -87,14 +89,16 @@ class Dispatcher:
         items = self.store.pending_mail(recipient)
         reserved, superseded = self._transact([], lambda pipe: self._reserve(pipe, recipient, owner, items))
         for item in superseded:
-            self.store.close(item.id, recipient, "done", SEEN_ON_LEDGER)
+            try:
+                self.store.close(item.id, recipient, "done", SEEN_ON_LEDGER)
+            except InboxError:
+                continue
         return reserved
 
     def submitting(self, delivery_id, owner):
         return self._transact([], lambda pipe: self._advance(pipe, delivery_id, owner, ("reserved",), "submitting"))
 
     def accept(self, delivery_id, owner, evidence):
-        """Accept a submission whose payload digest matches the reserved one, then commit it."""
         if evidence != self.get(delivery_id).digest:
             return self.reject(delivery_id, owner, MISMATCH)
         self._transact([], lambda pipe: self._advance(pipe, delivery_id, owner, ("submitting", "unknown"), "accepted"))
@@ -109,7 +113,6 @@ class Dispatcher:
         return self._transact([], close)
 
     def recover(self, recipient, owner):
-        """After a crash: release reserved items, mark a submission unknown, commit an accepted one."""
         recipient = self.store.names.resolve(recipient)
         if self.owner(recipient) != owner:
             raise DispatchError(f"{owner} does not deliver for {recipient}; {self.owner(recipient) or 'nobody'} does")
