@@ -114,8 +114,9 @@ def test_clock_skew_does_not_expire_the_redis_lease(store, monkeypatch):
     assert lease.acquire(store, "sw", "other") is None
 
 
-def test_redis_time_is_converted_to_milliseconds(store, monkeypatch):
-    monkeypatch.setattr(store.redis, "time", lambda: (2, 234000))
+@pytest.mark.parametrize("microseconds", [234567, 234000])
+def test_redis_time_is_converted_to_milliseconds(store, monkeypatch, microseconds):
+    monkeypatch.setattr(store.redis, "time", lambda: (2, microseconds))
     assert lease.now_ms(store) == 2234
 
 
