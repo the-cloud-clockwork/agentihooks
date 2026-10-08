@@ -5,7 +5,9 @@ Whichever path shows a write first marks it; the others skip it, so each write r
 
 import os
 
-PREFIX = "agentihooks:inbox:seen"
+from scripts.swarm.keyspace import ROOT
+
+PREFIX = f"{ROOT}:inbox:seen"
 TTL_S = 30 * 24 * 3600
 SEEN_ON_LEDGER = "already shown through the ledger"
 

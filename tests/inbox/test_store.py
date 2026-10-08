@@ -1,6 +1,7 @@
 import pytest
 
 from scripts.inbox.store import InboxError, InboxStore
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -136,7 +137,7 @@ def test_items_survive_a_fresh_store_connection(server, store):
 
 def test_items_carry_no_expiry(store):
     item = store.send("alice", "bob", "hi")
-    assert all(store.redis.ttl(key) == -1 for key in store.redis.keys("agentihooks:inbox:*"))
+    assert all(store.redis.ttl(key) == -1 for key in store.redis.keys(f"{KEY_ROOT}:inbox:*"))
     assert store.get(item.id)
 
 

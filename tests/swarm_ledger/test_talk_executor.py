@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -31,7 +33,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
     url = f"redis://127.0.0.1:{server.server_address[1]}/0"
     client = redis.Redis.from_url(url, decode_responses=True)
     client.hset(
-        f"agentihooks:swarm:{SLUG}:config",
+        f"{KEY_ROOT}:swarm:{SLUG}:config",
         mapping={"slug": SLUG, "repo": "/repo", "max_eng": 1, "max_ci": 0, "state": "running", "gates": "{}"},
     )
     ledgers = tmp_path / "ledgers"
@@ -80,7 +82,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         )
 
     def mode(chosen):
-        client.hset(f"agentihooks:swarm:{SLUG}:config", "gates", json.dumps({"talk": chosen}))
+        client.hset(f"{KEY_ROOT}:swarm:{SLUG}:config", "gates", json.dumps({"talk": chosen}))
 
     def rows():
         path = tmp_path / "home" / ".agentihooks" / "swarm" / SLUG / "gates" / "log.jsonl"
@@ -115,7 +117,7 @@ def test_the_write_past_the_budget_is_refused_until_a_push_lands(rig):
     assert [(r["gate"], r["kind"], r["agent"]) for r in rig.rows()] == [("talk", "deny", ENG)]
     pushed = rig.hook("git push -u origin feature")
     assert pushed.returncode == 0, pushed.stderr
-    assert rig.redis.hgetall(f"agentihooks:swarm:{SLUG}:progress:{ENG}").get("outcome") == "pushed"
+    assert rig.redis.hgetall(f"{KEY_ROOT}:swarm:{SLUG}:progress:{ENG}").get("outcome") == "pushed"
     passed = rig.cli("say", "one more line")
     assert passed.returncode == 0, passed.stderr
     assert json.loads(passed.stdout) == {"posted": True}

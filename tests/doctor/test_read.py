@@ -4,6 +4,7 @@ import pytest
 
 from scripts.doctor import handoffs, read
 from scripts.inbox.store import InboxStore
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.store import RedisStore
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -20,8 +21,8 @@ def redis():
 
 def test_health_records_are_read_from_the_swarm_findings(redis):
     record = {"seen_at": 5, "verdict": None, "returned": False, "evidence": ["e"], "measure": 3}
-    redis.hset(f"agentihooks:swarm:{SLUG}:findings", "stale-claim/t1", json.dumps(record))
-    redis.hset("agentihooks:swarm:other:findings", "stale-claim/t9", json.dumps(record))
+    redis.hset(f"{KEY_ROOT}:swarm:{SLUG}:findings", "stale-claim/t1", json.dumps(record))
+    redis.hset(f"{KEY_ROOT}:swarm:other:findings", "stale-claim/t9", json.dumps(record))
     assert read.health_records(redis, SLUG) == {"stale-claim/t1": record}
 
 

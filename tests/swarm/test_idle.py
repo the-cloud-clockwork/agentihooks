@@ -2,6 +2,7 @@ import pytest
 
 from hooks.context import swarm_heartbeat
 from scripts.swarm import idle
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.store import SwarmError
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -68,7 +69,7 @@ def test_a_session_model_is_reported_only_by_a_swarm_agent_that_names_one(redis)
     assert session_model.get(redis, "sw", "sw-eng-1") is None
     assert swarm_heartbeat.report("opus", "high", environ=swarm, redis=redis, now_ms=NOW) is True
     assert session_model.get(redis, "sw", "sw-eng-1") == {"model": "opus", "effort": "high", "at": NOW}
-    assert 0 < redis.ttl("agentihooks:swarm:sw:session-model:sw-eng-1") <= session_model.TTL_S
+    assert 0 < redis.ttl(f"{KEY_ROOT}:swarm:sw:session-model:sw-eng-1") <= session_model.TTL_S
 
 
 def test_a_codex_report_without_effort_reaches_the_swarm_redis_stamped_now(redis, monkeypatch):

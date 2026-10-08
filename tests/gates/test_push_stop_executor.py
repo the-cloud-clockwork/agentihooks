@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -99,7 +101,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         "AGENTIHOOKS_SWARM_TASK": task,
     }
     client.hset(
-        f"agentihooks:swarm:{SLUG}:config",
+        f"{KEY_ROOT}:swarm:{SLUG}:config",
         mapping={"slug": SLUG, "repo": "/repo", "max_eng": 1, "max_ci": 0, "state": "running", "gates": "{}"},
     )
 
@@ -163,8 +165,8 @@ def test_unpushed_commits_reach_origin_and_the_task_until_the_agent_records_prog
     assert [(c["by"], c["text"]) for c in comments] == [
         ("swarm", f"The stop hook pushed the task branch {BRANCH} to origin")
     ]
-    inbox = rig.redis.zrange(f"agentihooks:inbox:address:{ME}", 0, -1)
-    assert [rig.redis.hget(f"agentihooks:inbox:item:{item}", "text") for item in inbox] == [TEMPLATE]
+    inbox = rig.redis.zrange(f"{KEY_ROOT}:inbox:address:{ME}", 0, -1)
+    assert [rig.redis.hget(f"{KEY_ROOT}:inbox:item:{item}", "text") for item in inbox] == [TEMPLATE]
     rig.cli("comment", f"tasks/{rig.task}", "Pushed the first slice of the work.")
     second = rig.stop()
     assert second.returncode == 0, (second.stderr, rig.rows())
