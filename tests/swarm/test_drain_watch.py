@@ -111,6 +111,45 @@ def test_no_finding_without_a_warning_or_with_a_warning_item_gone():
     assert drain_watch.findings(store, SLUG, Limits(), 1_000_000 + 60 * MINUTE) == []
 
 
+def test_no_capacity_record_means_no_finding():
+    store = _drain_swarm()
+    store.redis.delete(store.key(SLUG, "quota-capacity"))
+    assert drain_watch.findings(store, SLUG, Limits(), 1_000_000 + 60 * MINUTE) == []
+
+
+def test_a_warning_sent_at_the_agent_start_counts():
+    found = drain_watch.findings(_drain_swarm(started_at=1_000_000), SLUG, Limits(), 1_000_000 + 11 * MINUTE)
+    assert [f.subject for f in found] == ["engineer@abc-0001"]
+
+
+@pytest.mark.parametrize("skip", ["idle", "open account", "warning gone"])
+def test_an_agent_skipped_first_does_not_hide_a_later_one(skip):
+    store = _drain_swarm()
+    decision = json.loads(store.redis.get(store.key(SLUG, "quota-capacity")))
+    decision["accounts"].append(row("beta", "OPEN", 1, 80.0, 60.0))
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(decision))
+    first = AgentRecord(
+        "engineer@aaa-0000",
+        "eng",
+        "t0",
+        harness="claude",
+        account="beta" if skip == "open account" else "alpha",
+        state="working",
+        idle_ticks=1 if skip == "idle" else 0,
+    )
+    agents = store.redis.hgetall(store.key(SLUG, "agents"))
+    store.redis.delete(store.key(SLUG, "agents"))
+    store.put_agent(SLUG, first)
+    for name, value in agents.items():
+        store.redis.hset(store.key(SLUG, "agents"), name, value)
+    store.redis.hset(store.key(SLUG, "quota-warnings"), first.name, "missing")
+    if skip != "warning gone":
+        item = InboxStore(store.redis).send("swarm", first.name, "QUOTA HANDOFF WARNING")
+        store.redis.hset(store.key(SLUG, "quota-warnings"), first.name, item.id)
+    found = drain_watch.findings(store, SLUG, Limits(), 1_000_000 + 12 * MINUTE)
+    assert [f.subject for f in found] == ["engineer@abc-0001"]
+
+
 def test_the_grace_follows_its_health_setting():
     assert Limits().drain_minutes == 10
     assert limits({"AGENTIHOOKS_HEALTH_DRAIN_MINUTES": "25"}).drain_minutes == 25
