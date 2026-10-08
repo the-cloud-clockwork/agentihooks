@@ -4,16 +4,25 @@ import math
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from tests.duration_coverage import IncompleteDurations, collected_tests, validate_coverage
 
 _ROOT = Path(__file__).parent.parent
 ARTIFACTS = "repos/{owner}/{repo}/actions/artifacts?name=durations-merged&per_page=100"
+ATTEMPTS = 4
 
 
-def _gh(args: list[str]) -> str:
-    return subprocess.run(["gh", *args], cwd=_ROOT, check=True, capture_output=True, text=True).stdout
+def _gh(args: list[str], sleep=time.sleep) -> str:
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            return subprocess.run(["gh", *args], cwd=_ROOT, check=True, capture_output=True, text=True).stdout
+        except subprocess.CalledProcessError as error:
+            print(f"gh {args[0]} failed, attempt {attempt} of {ATTEMPTS}: {error.stderr.strip()}", flush=True)
+            if attempt == ATTEMPTS:
+                raise
+            sleep(5 * attempt)
 
 
 def source_run(run_id: str, gh=_gh) -> str:

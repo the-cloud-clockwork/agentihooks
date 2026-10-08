@@ -51,6 +51,27 @@ def test_source_run_is_empty_without_an_earlier_dev_artifact():
     assert dev_durations.source_run("42", gh) == ""
 
 
+@pytest.mark.parametrize(("failures", "succeeds"), [(2, True), (99, False)])
+def test_gh_retries_a_failed_call_and_prints_the_github_response(monkeypatch, capsys, failures, succeeds):
+    calls, slept = [], []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if len(calls) <= failures:
+            raise subprocess.CalledProcessError(1, command, "", "HTTP 403: API rate limit exceeded for installation.")
+        return subprocess.CompletedProcess(command, 0, "2026-10-08T10:00:00Z\n", "")
+
+    monkeypatch.setattr(dev_durations.subprocess, "run", run)
+    if succeeds:
+        assert dev_durations._gh(["api", "x"], sleep=slept.append) == "2026-10-08T10:00:00Z\n"
+    else:
+        with pytest.raises(subprocess.CalledProcessError):
+            dev_durations._gh(["api", "x"], sleep=slept.append)
+    assert len(calls) == (failures + 1 if succeeds else dev_durations.ATTEMPTS)
+    assert len(slept) == len(calls) - 1
+    assert capsys.readouterr().out.count("API rate limit exceeded") == min(failures, dev_durations.ATTEMPTS)
+
+
 def test_adopt_fills_the_tests_the_version_file_lacks_from_the_merged_file(tmp_path):
     (tmp_path / ".test_durations").write_text(json.dumps({"t.py::a": 2.0, "t.py::b": 4.0}))
     (tmp_path / ".test_durations-3.12").write_text(json.dumps({"t.py::a": 3.0}))

@@ -116,6 +116,33 @@ def test_combine_collects_from_the_passed_run_on_push_and_this_run_otherwise(tmp
     assert not (tmp_path / "coverage.xml").exists()
 
 
+@pytest.mark.parametrize(("failures", "collected"), [(2, True), (99, False)])
+def test_combine_retries_the_passed_run_lookup_a_few_times(tmp_path, failures, collected):
+    script, env = _stub_combine(tmp_path, "sys.exit(3)")
+    bin_dir = tmp_path / "bin"
+    (bin_dir / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        f'n=$(( $(cat "{tmp_path}/calls" 2>/dev/null || echo 0) + 1 )); echo "$n" > "{tmp_path}/calls"\n'
+        f'if (( n <= {failures} )); then echo "HTTP 503: Egress is over the account limit." >&2; exit 1; fi\n'
+        "echo 555\n"
+    )
+    (bin_dir / "sleep").write_text(f'#!/usr/bin/env bash\necho "$1" >> "{tmp_path}/slept"\n')
+    (bin_dir / "sleep").chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(script), "42", "8"],
+        cwd=tmp_path,
+        env=dict(env, GITHUB_EVENT_NAME="push"),
+        capture_output=True,
+        text=True,
+    )
+    assert ("collect 555 8 .coverage-shards" in result.stdout) is collected
+    assert result.returncode != 0
+    assert "Egress is over the account limit." in result.stderr
+    calls = int((tmp_path / "calls").read_text())
+    assert calls == (failures + 1 if collected else 4)
+    assert len((tmp_path / "slept").read_text().split()) == calls - 1
+
+
 def test_combined_coverage_keeps_hits_from_every_shard_and_both_packages(tmp_path):
     for package in ("hooks", "scripts"):
         (tmp_path / package).mkdir()
