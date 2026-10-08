@@ -1,34 +1,12 @@
 import argparse
 import json
 import math
-import os
-import subprocess
-import tempfile
+import statistics
 from pathlib import Path
 
 from tests.duration_coverage import IncompleteDurations, collected_tests, validate_coverage
 
 _ROOT = Path(__file__).parent.parent
-ARTIFACTS = "repos/{owner}/{repo}/actions/artifacts?name=durations-merged&per_page=100"
-
-
-def _gh(args: list[str]) -> str:
-    return subprocess.run(["gh", *args], cwd=_ROOT, check=True, capture_output=True, text=True).stdout
-
-
-def source_run(run_id: str, gh=_gh) -> str:
-    # Every shard and re-run of one run must split on the same file, so a failure fails the shard, never falls back.
-    created = gh(["api", f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}", "--jq", ".created_at"]).strip()
-    jq = (
-        '.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == "dev")'
-        f' | select(.created_at < "{created}") | "\\(.created_at) \\(.workflow_run.id)"'
-    )
-    earlier = gh(["api", "--paginate", ARTIFACTS, "--jq", jq]).split("\n")
-    return max((line.split() for line in earlier if line), default=["", ""])[1]
-
-
-def download(run: str, folder: Path) -> None:
-    _gh(["run", "download", run, "--name", "durations-merged", "--dir", str(folder)])
 
 
 def _durations(path: Path) -> dict[str, float]:
@@ -50,29 +28,34 @@ def adopt(folder: Path, version: str) -> dict[str, float]:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("version", help="the Python version whose durations this shard splits on")
-    version = parser.parse_args(argv).version
-    committed = _ROOT / f".test_durations-{version}"
+    parser.add_argument("restored", type=Path, help="the folder the dev durations cache restored into")
+    args = parser.parse_args(argv)
+    committed = _ROOT / f".test_durations-{args.version}"
     if not committed.is_file():
         committed = _ROOT / ".test_durations"
     collected = collected_tests(_ROOT)
-    run = source_run(os.environ["GITHUB_RUN_ID"])
-    if run:
-        with tempfile.TemporaryDirectory() as tmp:
-            download(run, Path(tmp))
-            durations = adopt(Path(tmp), version)
+    if (args.restored / ".test_durations").is_file():
+        durations = adopt(args.restored, args.version)
         try:
             validate_coverage(durations, collected)
         except IncompleteDurations as error:
-            print(f"Refusing durations from dev run {run}: {error}")
+            print(f"Refusing the restored dev durations: {error}")
         else:
             (_ROOT / ".test_durations").write_text(json.dumps(durations, indent=4, sort_keys=True) + "\n")
-            print(f"Using {len(durations)} durations from green dev run {run}")
+            print(f"Using {len(durations)} restored dev durations")
             return
     try:
         validate_coverage(_durations(committed), collected)
     except IncompleteDurations:
         committed = _ROOT / ".test_durations"
-        validate_coverage(_durations(committed), collected)
+        try:
+            validate_coverage(_durations(committed), collected)
+        except IncompleteDurations as error:
+            durations = _durations(committed)
+            even = dict.fromkeys(collected, statistics.median(durations.values()))
+            (_ROOT / ".test_durations").write_text(json.dumps({**even, **durations}, indent=4, sort_keys=True) + "\n")
+            print(f"::warning::Splitting tests without a committed duration evenly: {error}")
+            return
     if committed != _ROOT / ".test_durations":
         (_ROOT / ".test_durations").write_bytes(committed.read_bytes())
     print("Using committed durations")
