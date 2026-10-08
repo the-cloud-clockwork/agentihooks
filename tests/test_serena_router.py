@@ -53,6 +53,17 @@ def _text(result) -> str:
     return "\n".join(c.text for c in result.content if getattr(c, "type", "") == "text")
 
 
+async def test_backend_starts_when_the_sdk_was_imported_under_captured_stderr(monkeypatch, capsys):
+    import io
+
+    from mcp.client import stdio
+
+    from hooks.serena_router.pool import BackendConfig, probe_tools
+
+    monkeypatch.setattr(stdio.stdio_client.__wrapped__, "__defaults__", (io.StringIO(),))
+    assert await probe_tools(BackendConfig(command=(sys.executable, str(FAKE)), start_timeout=30))
+
+
 async def test_each_session_edits_only_its_own_worktree(router, repo):
     async with connect(router) as a, connect(router) as b:
         await a.call_tool("activate_project", {"project": str(repo["a"])})
