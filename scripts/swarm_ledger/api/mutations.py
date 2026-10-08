@@ -1,5 +1,7 @@
 from types import ModuleType
 
+from scripts.swarm_ledger import ledger_task_duplicates
+
 from . import resources, schemas
 from .errors import APIError
 
@@ -80,8 +82,12 @@ def apply(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
         raise APIError(403, "forbidden", "Caller cannot perform this operation as its author", details)
     server.ledger_media.resolve(slug, operations)
     server.ledger_artifacts.resolve(slug, operations)
-    gate = GuardedOperations(
-        payload, server.talk.Budget(slug), server.core, lambda epoch: server.authority.fence(slug, epoch)
+    screen = ledger_task_duplicates.screen(doc, operations)
+    gate = ledger_task_duplicates.Gate(
+        screen,
+        GuardedOperations(
+            payload, server.talk.Budget(slug), server.core, lambda epoch: server.authority.fence(slug, epoch)
+        ),
     )
     state, rejected = server.repository.apply_ops(slug, ops=operations, gate=gate)
     server.relay_to_inbox(slug, state)
@@ -94,7 +100,9 @@ def apply(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
         "rejected": rejected,
         "_meta": {
             "rev": state["_meta"]["rev"],
-            "warnings": [warning[:1000] for warning in state["_meta"].get("warnings", [])[:20]],
+            "warnings": [
+                warning[:1000] for warning in [*state["_meta"].get("warnings", [])[:20], *screen.warnings.values()]
+            ],
         },
     }
     return bounded_ack(reply)

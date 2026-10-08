@@ -19,7 +19,11 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     gate = jobs["gate-required"]
     required = {"unit", "lint", "sonar", "mutation", "test-count", "semgrep"}
     assert gate["name"] == "Gate — Required"
-    assert required <= set(gate["needs"]) <= required | {"swarm-image", "shard-check", "brain-smoke", "wiring", "size"}
+    assert (
+        required
+        <= set(gate["needs"])
+        <= required | {"swarm-image", "shard-check", "brain-smoke", "wiring", "size", "dependency-audit"}
+    )
     assert gate["if"] == "${{ always() }}"
     assert "needs" not in jobs["unit"]
     assert "needs" not in jobs["lint"]
@@ -106,14 +110,12 @@ def test_required_gate_is_red_unless_mutation_passed_or_was_not_due(mutation, ex
         assert "::error::" in result.stdout
 
 
-def test_passed_tree_lookup_skips_steps_without_skipping_required_jobs():
+def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
     jobs = _workflow()["jobs"]
     for name in ("unit", "lint"):
         job = jobs[name]
         assert "if" not in job
-        lookup, *steps = job["steps"]
-        assert lookup["if"] == "github.event_name == 'push'"
-        assert all("steps.lookup.outputs.skip != 'true'" in step["if"] for step in steps)
+        assert all("steps.lookup" not in step.get("if", "") for step in job["steps"])
     step = jobs["gate-required"]["steps"][0]
     result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],
