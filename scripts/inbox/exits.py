@@ -106,10 +106,10 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
 
 
 def _owner(inbox, item, seat):
-    """The agent the notice was sent to: its first receiver, else the seat's occupant when it was sent."""
+    """The agent the notice was sent to: the seat's occupant when it was sent, else its first receiver."""
+    held = [entry["occupant"] for entry in inbox.seats.history(seat) if entry["at"] <= item.created_at]
     got = [entry["by"] for entry in inbox.history(item.id) if entry.get("state") == "delivered"]
-    held = [e["occupant"] for e in inbox.seats.history(seat) if "event" not in e and e["at"] <= item.created_at]
-    return (got or held[-1:] or [""])[0]
+    return (held[-1:] or got or [""])[0]
 
 
 def _told(item, name, exit_text):

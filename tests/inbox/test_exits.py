@@ -37,7 +37,7 @@ def test_late_message_keeps_the_exit_outcome_after_task_reassignment(redis, exit
     inbox, store = InboxStore(redis), RedisStore(redis)
     store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
     exits.settle(inbox, "sw-eng-1", "", exit_text)
-    store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+    store.seats.occupy("eng-1@sw", "sw-eng-2", item.created_at + 1)
     item = inbox.send("sender", "sw-eng-1", "late contract")
     rows = {"t1": {"claimed_by": "sw-eng-2", "state": "claimed"}}
     exits.sweep(inbox, "sw", store, lambda: rows)
@@ -104,7 +104,7 @@ def test_the_sweep_closes_a_push_stop_notice_left_on_a_seat_by_an_agent_that_lef
     inbox, store = InboxStore(redis), RedisStore(redis)
     item = notice_moved_to_the_seat(inbox, store)
     store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw"))
-    store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+    store.seats.occupy("eng-1@sw", "sw-eng-2", item.created_at + 1)
     exits.sweep(inbox, "sw", store, dict)
     closed = inbox.get(item.id)
     assert (closed.address, closed.state) == ("eng-1@sw", "done")
@@ -122,13 +122,31 @@ def test_the_sweep_closes_a_seat_notice_a_live_successor_already_received(monkey
     inbox, store = InboxStore(redis), RedisStore(redis)
     item = notice_moved_to_the_seat(inbox, store)
     store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw"))
-    store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+    store.seats.occupy("eng-1@sw", "sw-eng-2", item.created_at + 1)
     inbox.redirect(item.id, "swarm", "eng-1@sw", "moved again", "eng-1@sw")
     inbox.deliver(item.id, "sw-eng-2")
     exits.sweep(inbox, "sw", store, dict)
     assert (
         inbox.get(item.id).reason
         == "done: sw-eng-1 left its seat; its worktree was not found, so whether its branch was pushed is unknown"
+    )
+
+
+def test_the_sweep_closes_a_seat_notice_a_live_successor_received_first(monkeypatch, redis, tmp_path):
+    from scripts.gates.push_stop import TEMPLATE
+    from scripts.swarm.store import AgentRecord
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path))
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    item = inbox.send("swarm", "sw-eng-1", TEMPLATE)
+    inbox.redirect(item.id, "swarm", "eng-1@sw", "sw-eng-1 handed off its seat", "sw-eng-1")
+    store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw"))
+    store.seats.occupy("eng-1@sw", "sw-eng-2", item.created_at + 1)
+    inbox.deliver(item.id, "sw-eng-2")
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).reason == (
+        "done: sw-eng-1 left its seat; its worktree was not found, so whether its branch was pushed is unknown"
     )
 
 
@@ -154,9 +172,11 @@ def test_the_sweep_names_the_occupant_a_seat_notice_nobody_received_was_sent_to(
         subprocess.run(["git", "-C", str(tree), "-c", "user.name=t", "-c", "user.email=t@e", *args], check=True)
     monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path))
     inbox, store = InboxStore(redis), RedisStore(redis)
-    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    store.seats.occupy("eng-1@sw", "sw-eng-0", 1)
     other = inbox.send("sender", "eng-1@sw", "contract")
     item = inbox.send("swarm", "eng-1@sw", TEMPLATE)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", item.created_at)
+    store.seats.note("eng-1@sw", "woke", "", item.created_at)
     store.seats.occupy("eng-1@sw", "sw-eng-2", item.created_at + 1)
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(item.id).reason == "done: sw-eng-1 left its seat; its branch sw-eng-1 was not pushed"
