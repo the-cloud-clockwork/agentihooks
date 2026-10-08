@@ -1,5 +1,6 @@
 """The tick step that gives every open task without a difficulty its size: a code rule first, else the classifier."""
 
+import math
 import re
 
 from hooks.classifier import Choice, ClassifierError, decide
@@ -66,14 +67,14 @@ def classify(task: dict, doc: dict) -> dict:
     except ClassifierError:
         return sized(FALLBACK, "default", 0.0)
     raw = answer.confidence
-    confidence = min(max(raw, 0.0), 1.0) if isinstance(raw, (int, float)) else 0.0
+    confidence = min(max(raw, 0.0), 1.0) if isinstance(raw, (int, float)) and not math.isnan(raw) else 0.0
     if confidence < MIN_CONFIDENCE or answer.choice not in RUBRIC:
         return sized(FALLBACK, "default", confidence)
     return sized(answer.choice, "classifier", confidence)
 
 
 def state(task: dict, doc: dict) -> dict:
-    phase = {p.get("id"): p for p in doc.get("phases", [])}.get(task.get("phase"))
+    phase = {p["id"]: p for p in doc.get("phases", []) if p.get("id")}.get(task.get("phase"))
     return {
         "task": task.get("id", ""),
         "title": task.get("title", ""),

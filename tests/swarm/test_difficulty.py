@@ -176,6 +176,18 @@ def test_classifier_state_of_a_bare_phase_and_doc(asked):
     assert [call[0]["phase_intent"] for call in calls] == [": ", ""]
 
 
+def test_state_of_a_bare_task_matches_no_phase_without_an_id():
+    assert difficulty.state({}, {"phases": [{"title": "Loose"}]}) == {
+        "task": "",
+        "title": "",
+        "description": "",
+        "kind": "code",
+        "profile": "",
+        "territory": [],
+        "phase_intent": "",
+    }
+
+
 def test_a_task_without_territory_has_no_rule():
     task = {key: value for key, value in TASK.items() if key != "territory"}
     assert difficulty.rule(task) is None
@@ -198,7 +210,14 @@ def test_confidence_above_one_is_capped(asked):
 
 @pytest.mark.parametrize(
     ("choice", "confidence", "kept"),
-    [("S", 0.59, 0.59), ("L", None, 0.0), ("XL", 0.9, 0.9), ("S", -0.2, 0.0), ("S", "high", 0.0)],
+    [
+        ("S", 0.59, 0.59),
+        ("L", None, 0.0),
+        ("XL", 0.9, 0.9),
+        ("S", -0.2, 0.0),
+        ("S", "high", 0.0),
+        ("S", float("nan"), 0.0),
+    ],
 )
 def test_low_confidence_or_unknown_answer_falls_back_to_medium(asked, choice, confidence, kept):
     asked(choice, confidence)
