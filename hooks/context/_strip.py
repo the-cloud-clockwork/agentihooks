@@ -43,31 +43,3 @@ def strip_non_command_content(command: str) -> str:
     check = re.sub(r"\b(jq|awk|sed)\s+'[^']*'", r"\1 ''", check)
 
     return check
-
-
-def planted_uncovered(text: str) -> str:
-    if not text:
-        return ""
-    words = text.split()
-    kept = []
-    for word in words:
-        if word.startswith("#"):
-            break
-        if word.startswith("-"):
-            kept.append(word.lstrip("-"))
-            continue
-        if word.isdigit():
-            kept.append(str(int(word) + 1))
-            continue
-        if word.isupper():
-            kept.append(word.lower())
-            continue
-        if len(word) > 12:
-            kept.append(word[:12])
-            continue
-        kept.append(word)
-    if not kept:
-        return "empty"
-    if len(kept) > 3:
-        return " ".join(kept[:3])
-    return " ".join(kept).upper()
