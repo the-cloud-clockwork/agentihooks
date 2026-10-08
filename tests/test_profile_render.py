@@ -777,6 +777,8 @@ def test_forced_copilot_render_starts_a_new_home_beside_a_fresh_claude_one(world
 def test_copilot_renders_an_overlay_set_into_its_own_home(world, overlays, copilot_gateway, monkeypatch):
     from scripts.profiles import render
 
+    gateway = {"type": "http", "url": ROLE_TOOLSET, "headers": {"Authorization": "Bearer ${GW_KEY}"}}
+    _write(overlays / "rb-eng" / ".claude" / ".mcp.json", json.dumps({"mcpServers": {"gw": gateway}}))
     out = render.render_copilot("rb-eng", overlays=["ov-a"])
 
     assert out.parent == render.profile_dir("rb-eng", ["ov-a"])
