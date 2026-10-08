@@ -221,3 +221,36 @@ def test_hurry_is_tracked_separately_for_agents_sharing_an_account(store):
     assert quota_notice.apply("sw", RedisStore(store.redis), decision(90, 15)) == []
     assert [item.text for item in messages(store, first)] == [HURRY]
     assert [item.text for item in messages(store, second)] == [HURRY]
+
+
+def test_notice_state_survives_a_later_pass_in_its_swarm(store):
+    row = agent(store)
+    quota_notice.apply("sw", store, decision(15, 90))
+    life = f"{row.name}:{row.started_at}"
+    assert store.redis.hget(store.key("sw", "quota-notices"), life) == "hurry"
+    quota_notice.apply("sw", store, decision(5, 90))
+    assert store.redis.hget(store.key("sw", "quota-notices"), life) == "handoff"
+
+
+@pytest.mark.parametrize("skip", ["master", "missing", "unknown", "healthy", "hurry", "handoff"])
+def test_skipped_agent_does_not_prevent_the_next_agent_notice(store, monkeypatch, skip):
+    first = agent(store, account="skip", name="skip-agent")
+    last = agent(store, name="last-agent")
+    reading = decision(15, 90)
+    if skip == "master":
+        first = replace(first, lane="master")
+    elif skip != "missing":
+        skipped = {
+            "harness": "claude",
+            "name": "skip",
+            "state": "UNKNOWN" if skip == "unknown" else "OPEN",
+            "five_left": 90 if skip == "healthy" else 15,
+            "week_left": 90,
+        }
+        reading["accounts"].append(skipped)
+    if skip in ("hurry", "handoff"):
+        store.redis.hset(store.key("sw", "quota-notices"), f"{first.name}:{first.started_at}", skip)
+    monkeypatch.setattr(store, "agents", lambda slug: [first, last])
+    assert quota_notice.apply("sw", store, reading) == [f"sent {last.name} the quota hurry"]
+    assert messages(store, first) == []
+    assert len(messages(store, last)) == 1

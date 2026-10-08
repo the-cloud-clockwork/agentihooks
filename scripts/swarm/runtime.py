@@ -243,7 +243,7 @@ class HerdrRuntime:
         planned = getattr(self, "_quota_tasks", {}).get(task_id)
         return getattr(self, "_quota_task_accounts", {}).get(task_id) if planned == agent else None
 
-    def _quota_account(self, agent, preferred, excluded=""):
+    def _quota_account(self, agent, preferred, excluded):
         from scripts.swarm.capacity import seats
 
         eligible = [row for row in self._quota_eligible(agent) if row.name != excluded]
@@ -328,7 +328,7 @@ class HerdrRuntime:
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
         if hasattr(self, "_quota_accounts"):
-            excluded = saved.get("account", "") if (task.get("handoff_envelope") or {}).get("reason") == "quota" else ""
+            excluded = saved.get("account") if (task.get("handoff_envelope") or {}).get("reason") == "quota" else None
             account = self._quota_account(
                 agent, saved.get("account") or self._planned_account(task["id"], agent), excluded
             )
