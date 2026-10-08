@@ -198,6 +198,8 @@ def test_the_sweep_closes_a_wait_ended_notice_left_on_a_seat_by_an_agent_that_le
 
     inbox, store = InboxStore(redis), RedisStore(redis)
     store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    answered = inbox.send("master@sw", "eng-1@sw", "which branch?")
+    inbox.close(answered.id, "sw-eng-1", "done", "answered on the ledger")
     text = "Your wait on checks on https://x/pull/1, now red has ended. Pick task t1 back up: agentihooks swarm sw done"
     notice = inbox.send("swarm", "eng-1@sw", text)
     other = inbox.send("master@sw", "eng-1@sw", "Your wait on the master has ended. Pick task t1 back up: then?")
