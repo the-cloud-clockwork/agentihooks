@@ -179,3 +179,25 @@ def test_engineer_guidance_names_queue_state_and_dequeue_commands(autonomy):
     assert "dequeue first" in text
     assert "then push" in text
     assert "once checks pass" in text
+
+
+def test_state_runs_with_the_installed_gh_api_interface(tmp_path, monkeypatch):
+    import os
+
+    gh = tmp_path / "gh"
+    gh.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        '[[ "$1" == api && "$2" == graphql && "$3" == -f && "$5" == -f ]]\n'
+        '[[ "$6" == url=https://github.com/o/r/pull/7 ]]\n'
+        'printf \'%s\\n\' \'{"data":{"resource":{"id":"PR_one","state":"OPEN",'
+        '"headRefOid":"abc","baseRefName":"dev","mergeQueueEntry":null}}}\'\n'
+    )
+    gh.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    assert merge_queue.operate("state", URL) == {
+        "url": URL,
+        "state": "OPEN",
+        "head": "abc",
+        "queued": False,
+        "entry": None,
+    }
