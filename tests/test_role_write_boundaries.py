@@ -62,6 +62,24 @@ def test_task_symlink_cannot_escape(task_home):
     assert reason(task_home, task_root(task_home) / "linked" / "module.py")
 
 
+@pytest.mark.parametrize(
+    "prefix", [".agentihooks", ".agentihooks/swarm/test-swarm/tasks", ".agentihooks/swarm/test-swarm/tasks/task1"]
+)
+def test_task_root_symlink_never_opens_repository(task_home, prefix):
+    repo = task_home / "repo"
+    repo.mkdir()
+    link = task_home / prefix
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(repo, target_is_directory=True)
+    assert reason(task_home, repo / "module.py")
+    assert reason(task_home, task_root(task_home) / "progress.md")
+
+
+def test_master_marker_does_not_open_a_task_folder(task_home, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "master")
+    assert reason(task_home, task_root(task_home).parent / "master" / "progress.md")
+
+
 def patch_payload(home, headers, inputs=None):
     body = "*** Begin Patch\n" + "\n".join(headers) + "\n*** End Patch"
     args = {"patch": body, **(inputs or {})}

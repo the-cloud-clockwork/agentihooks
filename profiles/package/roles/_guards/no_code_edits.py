@@ -28,7 +28,9 @@ def _allowed_roots(role: str, home: Path) -> list[Path]:
     swarm = os.environ.get("AGENTIHOOKS_SWARM", "")
     task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
     if task != "master" and all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", value) for value in (swarm, task)):
-        roots.append((home / ".agentihooks" / "swarm" / swarm / "tasks" / task).resolve())
+        folder = home.resolve() / ".agentihooks" / "swarm" / swarm / "tasks" / task
+        if folder.resolve() == folder:
+            roots.append(folder)
     return roots
 
 
