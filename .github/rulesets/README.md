@@ -36,6 +36,8 @@ gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/16090886 --jq .bypass_acto
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/15122747 --jq .bypass_actors
 ```
 
+The dev `pull_request` rule must carry `require_code_owner_review` true, so a
+pull request touching a path in `.github/CODEOWNERS` waits for owner review.
 The dev response must include `pull_request`, `required_linear_history`,
 `merge_queue` and `required_status_checks` requiring `Gate — Required` with
 `strict_required_status_checks_policy` false; both bypass lists must be empty.
