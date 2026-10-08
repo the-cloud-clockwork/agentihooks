@@ -157,10 +157,10 @@ def index_page(view="home"):
     """The HOME or BIN shell; its rows load from the v1 ledger and bin collections."""
     if view == "bin":
         heading, total, watermark = "BIN", '<span class="total" id="total"></span>', ""
-        fab = f'<a class="fab" id="home-fab" href="/" title="HOME" aria-label="HOME">{HOME_ICON}</a>'
+        fab = f'<a class="fab" id="home-fab" href="/" aria-label="HOME">{HOME_ICON}</a>'
     else:
         heading, total, watermark = "HOME", FOLD_ALL, '<div class="watermark" aria-hidden="true"></div>'
-        fab = f'<a class="fab" id="bin-fab" href="/?view=bin" title="Bin" aria-label="Bin">{TRASH}</a>'
+        fab = f'<a class="fab" id="bin-fab" href="/?view=bin" aria-label="Bin">{TRASH}</a>'
     values = {
         "HEADING": heading,
         "PAGE": served_version(),
