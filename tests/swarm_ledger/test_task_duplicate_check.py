@@ -2,11 +2,10 @@ import inspect
 import io
 import json
 import os
+import select
 import subprocess
 import sys
-import time
 import uuid
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -327,31 +326,30 @@ def test_a_finder_that_dies_silently_is_named_as_such(live, monkeypatch):
     )
 
 
-def test_an_overrun_kills_every_process_the_finder_started(monkeypatch, tmp_path):
+@pytest.mark.parametrize("lifetime", [30, 0])
+def test_an_overrun_kills_every_process_the_finder_started(monkeypatch, tmp_path, lifetime):
     marker = tmp_path / "grandchild.pid"
     spawn = (
         "import subprocess, sys, time; "
-        "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+        f"g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep({lifetime})']); "
         f"open({str(marker)!r}, 'w').write(str(g.pid)); time.sleep(30)"
     )
     monkeypatch.setattr(ledger_task_duplicates, "CHILD", (sys.executable, "-c", spawn))
     monkeypatch.setattr(ledger_task_duplicates, "BUDGET_S", 2)
     with pytest.raises(subprocess.TimeoutExpired):
         ledger_task_duplicates.find({}, [])
-    grandchild = int(marker.read_text())
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and alive(grandchild):
-        time.sleep(0.05)
-    assert not alive(grandchild)
+    assert exited(int(marker.read_text()), timeout=5)
 
 
-def alive(pid):
+def exited(pid, timeout):
     try:
-        os.kill(pid, 0)
+        handle = os.pidfd_open(pid)
     except ProcessLookupError:
-        return False
-    status = Path(f"/proc/{pid}/status")
-    return not (status.exists() and "\nState:\tZ" in status.read_text())
+        return True
+    try:
+        return bool(select.select([handle], [], [], timeout)[0])
+    finally:
+        os.close(handle)
 
 
 def test_the_finder_receives_only_the_lists_it_reads(monkeypatch, tmp_path):
