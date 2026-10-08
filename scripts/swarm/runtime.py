@@ -174,6 +174,7 @@ class HerdrRuntime:
 
         placing = demand is None or any(demand.values())
         self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing)
+        self._quota_held = {}
         accounts = self._quota_successor_accounts(requirements) if requirements else None
         decision = capacity.calculate(config, self._quota_accounts, agents, demand, requirements, accounts)
         for task, reason in getattr(self, "_quota_held", {}).items():
@@ -228,12 +229,12 @@ class HerdrRuntime:
         from scripts.swarm import quota_handoff
 
         thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
-        accounts, self._quota_held = {}, {}
+        accounts = {}
         for (lane, index), predecessor in getattr(self, "_quota_handoffs", {}).items():
             harnesses = requirements[lane][index]
             rows = [row for row in self._quota_accounts if row.harness in harnesses]
 
-            def reason(row, predecessor=predecessor):
+            def reason(row):
                 return quota_handoff.exclusion(row, thresholds, predecessor)
 
             eligible = [row for row in rows if not reason(row)]

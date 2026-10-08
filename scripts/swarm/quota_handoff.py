@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from scripts.inbox.store import InboxStore
@@ -76,7 +77,9 @@ def exclusion(account: capacity.Account, thresholds: Thresholds, predecessor: tu
     return ""
 
 
-def refusal(predecessor: tuple, harnesses: tuple, accounts: list[capacity.Account], reason) -> str:
+def refusal(
+    predecessor: tuple, harnesses: tuple, accounts: list[capacity.Account], reason: Callable[[capacity.Account], str]
+) -> str:
     reasons = "; ".join(f"{row.harness} {row.name} {reason(row)}" for row in accounts)
     return (
         f"no {' or '.join(harnesses)} account can take the quota handoff from {predecessor[0]} account "
