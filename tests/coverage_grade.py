@@ -87,6 +87,12 @@ def _flaky(history: list[bool]) -> bool:
     return any(not newer and older for i, newer in enumerate(history) for older in history[i + 1 :])
 
 
+def _all_flaky(base: Measurement, lost: dict[str, list[int]], older: list[Measurement]) -> bool:
+    return all(
+        _flaky(history) for path, lines in lost.items() for history in _statuses(base, path, lines, older).values()
+    )
+
+
 def grade(
     head: dict[str, set[int]],
     head_source: Source,
@@ -99,7 +105,11 @@ def grade(
     lost = _lost(base, head, head_source, renamed or {})
     if not lost:
         return Result(base.commit, {})
-    older = list(itertools.islice(runs, HISTORY))
+    older: list[Measurement] = []
+    for run in itertools.islice(runs, HISTORY):
+        older.append(run)
+        if _all_flaky(base, lost, older):
+            break
     result = Result(base.commit, {})
     for path, lines in lost.items():
         statuses = _statuses(base, path, lines, older)

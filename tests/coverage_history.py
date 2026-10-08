@@ -5,9 +5,10 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
-from tests.coverage_grade import HISTORY, Measurement, Source, executed
+from tests.coverage_grade import Measurement, Source, executed
 
 SEARCH = 60
+BATCH = 4
 ATTEMPTS = 4
 
 
@@ -63,19 +64,18 @@ def _download(run: str, shards: int, into: Path) -> list[Path] | None:
 
 def dev_runs(repo: Path, base: str, shards: int, scratch: Path) -> Iterator[Measurement]:
     commits = git("rev-list", "--first-parent", f"--max-count={SEARCH}", base, cwd=repo).split()
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        runs = list(pool.map(lambda commit: _passed_run(repo, commit), commits))
-    measured = [(commit, run) for commit, run in zip(commits, runs) if run]
-    fetch = _fetcher(repo, shards, scratch, executed)
-    first = next(((i, found) for i, pair in enumerate(measured) if (found := fetch(pair))), None)
-    if first is None:
-        return
-    index, base_run = first
-    yield base_run
+    # Every lookup and download spends the repository's shared Actions API quota, so batches load only on demand.
     # Reading coverage data holds the GIL, so threads only download and processes read.
-    with ThreadPoolExecutor(max_workers=8) as pool, ProcessPoolExecutor() as readers:
+    with ThreadPoolExecutor(max_workers=BATCH) as pool, ProcessPoolExecutor(max_workers=BATCH) as readers:
         fetch = _fetcher(repo, shards, scratch, lambda files: readers.submit(executed, files).result())
-        yield from filter(None, pool.map(fetch, measured[index + 1 : index + 1 + HISTORY]))
+
+        def measure(commit: str) -> Measurement | None:
+            run = _passed_run(repo, commit)
+            return fetch((commit, run)) if run else None
+
+        yield from filter(None, [measure(commits[0])] if commits else [])
+        for start in range(1, len(commits), BATCH):
+            yield from filter(None, pool.map(measure, commits[start : start + BATCH]))
 
 
 def _fetcher(

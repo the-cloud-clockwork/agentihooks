@@ -100,6 +100,42 @@ def test_history_is_read_only_when_a_line_was_lost():
     assert ratchet.grade({"hooks/a.py": {1, 2}}, lambda path: SOURCE, runs()).lost == {}
 
 
+def test_history_stops_once_every_lost_line_is_cleared():
+    read = []
+
+    def runs():
+        for commit, ran in (("b1", {1, 2, 3}), ("b2", {1, 2}), ("b3", {1, 2, 3}), ("b4", {1, 2, 3})):
+            read.append(commit)
+            yield _measure(commit, {"hooks/a.py": ran}, {"hooks/a.py": SOURCE})
+
+    result = ratchet.grade({"hooks/a.py": {1, 2}}, lambda path: SOURCE, runs())
+    assert result.unstable == {"hooks/a.py": [3]}
+    assert read == ["b1", "b2", "b3"]
+
+
+def test_the_base_run_costs_one_github_lookup(monkeypatch, tmp_path):
+    from tests import coverage_history
+
+    commits = [f"c{n}" for n in range(coverage_history.SEARCH)]
+    looked_up = []
+
+    def passed_run(repo, commit):
+        looked_up.append(commit)
+        return f"run-{commit}"
+
+    def fetcher(repo, shards, scratch, read):
+        return lambda pair: _measure(pair[0], {}, {})
+
+    monkeypatch.setattr(coverage_history, "git", lambda *args, cwd: "\n".join(commits))
+    monkeypatch.setattr(coverage_history, "_passed_run", passed_run)
+    monkeypatch.setattr(coverage_history, "_fetcher", fetcher)
+    runs = coverage_history.dev_runs(tmp_path, "c0", 8, tmp_path)
+    assert next(runs).commit == "c0"
+    runs.close()
+    assert looked_up == ["c0"]
+    assert [run.commit for run in coverage_history.dev_runs(tmp_path, "c0", 8, tmp_path)] == commits
+
+
 def test_no_measured_base_cannot_be_graded():
     with pytest.raises(ratchet.Unmeasured, match="base"):
         ratchet.grade({"hooks/a.py": {1}}, lambda path: SOURCE, iter([]))
