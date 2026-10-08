@@ -175,7 +175,8 @@ def _other_accounts(sessions: dict[str, int]) -> list[Candidate]:
 
 
 def evaluate(session_id: str) -> Decision | None:
-    from hooks.context.account_sessions import agent_pid, max_sessions, session_account, sessions_by_account
+    from hooks.context.account_sessions import agent_pid, session_account, sessions_by_account
+    from scripts import session_bands
 
     windows = _session_windows(session_id)
     if windows is None:
@@ -191,7 +192,7 @@ def evaluate(session_id: str) -> Decision | None:
         five_reset=five_reset,
         week_reset=week_reset,
         others=_other_accounts(sessions),
-        max_sessions=max_sessions(),
+        max_sessions=session_bands.TOP_BAND,
         push=push_active(session_id),
     )
 

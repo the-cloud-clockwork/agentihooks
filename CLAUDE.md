@@ -136,7 +136,7 @@ File-based pub/sub at `~/.agentihooks/broadcast.json`. Sessions auto-register/de
 
 Each subscription is an `AH_CC_TOKEN_<slug>`; a routed session keeps exactly one,
 so the variable **name** identifies its account (never read the value out).
-`agenti` (`cmd_claude`) picks the most routing left among accounts below their
+`agenti` (`cmd_claude`) picks the fewest live sessions among accounts below their
 live session cap, computed from each account's five-hour window left (6 at
 60%+, 4 at 40-60%, 3 at 10-40%, 2 at 5-10%, none below 5%; no new session
 below 5% of the week either), counted from `/proc` by

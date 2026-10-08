@@ -289,13 +289,13 @@ Launch Claude Code on one of the `AH_CC_TOKEN_<slug>` accounts, with
 [Claude Account Load Balancing](../pillars/load-balancing.md).
 
 ```bash
-agenti                          # most routing left among accounts below the session cap
+agenti                          # fewest live sessions among accounts below their band cap
 agenti --route work             # force AH_CC_TOKEN_work, ignore the cap
 agenti --model fable            # Fable models also weigh the separate Fable quota
 ```
 
-The launch line reports `account`, `routing_left`, `sessions=n/cap`, and
-`placement=overflow` when every account was already at the cap.
+The launch line reports `account`, `routing_left` and `sessions=n/cap`; with
+every account at its cap the launch fails and names why.
 
 ---
 

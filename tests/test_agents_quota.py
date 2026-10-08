@@ -260,7 +260,6 @@ def test_page_quota_routes_the_environment_and_names_each_source(monkeypatch):
     monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: [(1.0, claude)])
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
-    monkeypatch.setattr(account_sessions, "max_sessions", lambda: 3)
     monkeypatch.setattr(codex_router, "routing_pool", lambda environ: seen.append(environ) or pool)
     monkeypatch.setattr(codex_router, "quotas", lambda p, environ: seen.append((p, environ)) or {"default": quota})
     rows = agents_quota.page_quota(now=quota.observed_at + 120)["rows"]

@@ -74,12 +74,11 @@ agentihooks init-agent \
 Omit any option the request does not supply. Add `--dry-run` before `--` to
 print the resolved launch without opening a terminal.
 
-The command selects the healthiest `AH_CC_TOKEN_*` account inside the new
-terminal, skipping any account that already runs
-`AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` (default 2) live sessions while another
-routable account has room; when every account is full the least-loaded one takes
-it (`placement=overflow`). `-- --route <slug>` forces one account and ignores the
-cap. Fable models include the separate Fable quota. With no configured or
+The command picks an `AH_CC_TOKEN_*` account inside the new terminal: each
+account's live session cap comes from its five hour window (6 at 60% or more
+left, 4 at 40 to 60, 3 at 10 to 40, 2 at 5 to 10, none below 5), an account under
+5% of its week gets none, and the account with room and the fewest live sessions
+takes it. `-- --route <slug>` forces one account and ignores the cap. Fable models include the separate Fable quota. With no configured or
 eligible account, the terminal launches bare Claude with its existing direct,
 keychain, or provider authentication.
 

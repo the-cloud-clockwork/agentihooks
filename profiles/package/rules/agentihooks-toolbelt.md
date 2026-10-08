@@ -254,14 +254,13 @@ repository's own conditions folder (trusted repositories only).
 
 Every `AH_CC_TOKEN_<slug>` is one Claude subscription.
 
-- **Launch:** `agenti` (and `agentihooks init-agent`) picks the account
-  with the most routing left (`min(5h left, 7d left)`) among accounts below
-  their live session cap: 6 live sessions at 60% or more of the five-hour
+- **Launch:** `agenti` (and `agentihooks init-agent`) picks among accounts
+  below their live session cap: 6 live sessions at 60% or more of the five-hour
   window left, 4 at 40-60%, 3 at 10-40%, 2 at 5-10%, none below 5% until that
   window resets; no new session on an account below 5% of its week either.
   The next session goes to the eligible account with the fewest live sessions.
-  When no account is eligible, the least-loaded one takes the session
-  (`placement=overflow`). `--route <slug>` forces one account and skips the cap.
+  When no account is eligible, no session starts. `--route <slug>` forces one
+  account and skips the cap.
 - **Status:** `agentihooks balance` shows `SESSIONS n/cap` per account from a
   live process scan; `agentihooks balance --current` names this session's
   account.
