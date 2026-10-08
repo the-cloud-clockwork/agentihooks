@@ -33,7 +33,7 @@ def test_dev_push_publishes_merged_durations_with_read_permissions():
     job = _workflow("test.yml")["jobs"]["refresh-durations"]
     assert job["needs"] == ["unit", "lint"]
     assert job["if"] == "github.event_name == 'push'"
-    assert job["permissions"] == {"contents": "read", "actions": "read"}
+    assert job["permissions"] == {"contents": "read"}
     upload = next(s for s in job["steps"] if s.get("uses") == "actions/upload-artifact@v4")
     assert upload["with"]["name"] == "durations-merged"
     assert upload["with"]["path"] == ".test_durations*"
