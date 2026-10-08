@@ -11,7 +11,7 @@ class _Collected:
     def __init__(self) -> None:
         self.nodeids: list[str] = []
 
-    def pytest_collection_finish(self, session) -> None:
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
         self.nodeids = [item.nodeid for item in session.items]
 
 
@@ -37,9 +37,13 @@ def main(argv: list[str] | None = None) -> int:
     if not collected:
         print(f"::error::Collecting {args.tests} failed or found no tests, so no shard can be graded.")
         return 1
+    unread = [str(path) for path in args.durations if not path.is_file()]
+    if unread:
+        print(f"::error::No shard durations at {', '.join(unread)}, so those shards cannot be graded.")
+        return 1
     counts = run_counts(args.durations)
-    wrong = sorted(nodeid for nodeid in set(collected) if counts[nodeid] != 1)
-    print(f"{len(set(collected))} collected tests, {len(wrong)} ran zero times or more than once")
+    wrong = sorted(nodeid for nodeid in collected if counts[nodeid] != 1)
+    print(f"{len(collected)} collected tests, {len(wrong)} ran zero times or more than once")
     for nodeid in wrong:
         print(f"{nodeid} ran {counts[nodeid]} times")
     if wrong:

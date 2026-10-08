@@ -183,7 +183,20 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - *lookup
+      # Skips only when unit skipped too: a passed record landing mid-run must not skip the check of shards that ran.
+      - name: Look up whether unit skipped a passed tree
+        id: lookup
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TREE: ${{ github.event.head_commit.tree_id }}
+          VERSION: ${{ matrix.python-version }}
+        run: |
+          passed=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tests-passed-$TREE" \
+            --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)] | length') || passed=0
+          ran=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --jq "[.artifacts[].name | select(startswith(\"durations-$VERSION-\"))] | length")
+          if [ "${passed:-0}" -gt 0 ] && [ "$ran" -eq 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
 
       - uses: actions/checkout@v4
         if: steps.lookup.outputs.skip != 'true'
