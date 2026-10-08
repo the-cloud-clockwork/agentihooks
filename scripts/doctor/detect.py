@@ -7,7 +7,7 @@ from dataclasses import asdict
 from scripts.doctor import ci, ci_read, handoffs, health, inbox, read, spawn_read, spawns, traces, traces_read
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
-from scripts.swarm import status
+from scripts.swarm import status, timing
 from scripts.swarm.health import activity
 from scripts.swarm.runtime import SWARM_HOME
 
@@ -61,7 +61,8 @@ def collect(found_by):
     found, failed = [], []
     for name, detect in found_by.items():
         try:
-            found += detect()
+            with timing.step(f"doctor.{name}"):
+                found += detect()
         except Exception as exc:
             failed.append(f"the {name} detector failed: {type(exc).__name__}: {exc}")
     return found, failed
