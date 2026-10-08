@@ -298,7 +298,7 @@ def cmd_rates(store, args):
 
 def cmd_intervene(store, args):
     slug, doctor = _pair_of(store, args.slug)
-    ctx = interventions.Context(store, swarm.LedgerClient(), slug, doctor, _name())
+    ctx = interventions.Context(store, swarm.LedgerClient(), slug, doctor)
     print(json.dumps({"intervention": args.action, "logged": interventions.apply(ctx, args.action, args)}))
 
 

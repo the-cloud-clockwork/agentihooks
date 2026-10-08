@@ -17,7 +17,7 @@ agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E 
 agentihooks swarm <id> set effort-min=E effort-max=E               every lane launch effort stays in this range (default medium, high)
 agentihooks swarm <id> set master-agent=claude|codex              master affinity; a change orders the live master to hand off to that harness
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
-agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
+agentihooks swarm <id> send-message TEXT                          message to every live agent's inbox
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
 agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number

@@ -47,9 +47,7 @@ def store():
 
 
 def context(store, run=None, **paths):
-    return interventions.Context(
-        store, FakeLedger(), WATCHED, DOCTOR, "doctor", run or FakeRun({"rev-parse": "dev\n"}), **paths
-    )
+    return interventions.Context(store, FakeLedger(), WATCHED, DOCTOR, run or FakeRun({"rev-parse": "dev\n"}), **paths)
 
 
 def args(to="", text="", file=""):

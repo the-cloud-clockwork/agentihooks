@@ -32,7 +32,6 @@ class Context:
     ledger: object
     watched: str
     doctor: str
-    by: str
     run: Callable = subprocess.run
     code: Path = LEDGER_DIR
     pidfile: Path = field(default_factory=_pidfile)

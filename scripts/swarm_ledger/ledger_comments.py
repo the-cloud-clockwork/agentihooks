@@ -110,7 +110,6 @@ def refused(text, kind, where, ctx):
 
 
 def addressed(thread, op):
-    """An agent chat line goes to the operator, or answers one of his lines."""
     if op.get("to") == "operator":
         return True
     return any(e["id"] == op.get("reply_to") and e.get("by") == "operator" and not e.get("deleted") for e in thread)
