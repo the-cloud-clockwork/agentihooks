@@ -160,7 +160,7 @@ def test_publish_goes_to_an_artifact_without_issues(issues):
         uploads.append((path, title))
         return "http://127.0.0.1:8765/artifacts/demo/x.md"
 
-    url, where = ledger_publish.publish("plan.md", "Slice plan", "", artifact, run)
+    url, where = ledger_publish.publish("plan.md", "Slice plan", "", artifact, run, issue_title="Slice plan")
     assert (url, where) == ("http://127.0.0.1:8765/artifacts/demo/x.md", "artifact")
     assert uploads == [("plan.md", "Slice plan")]
     assert len(calls) == 1
@@ -169,7 +169,9 @@ def test_publish_goes_to_an_artifact_without_issues(issues):
 def test_publish_opens_an_issue_where_the_repo_has_issues():
     run, calls = gh(True)
     stored = "http://127.0.0.1:8765/artifacts/demo/x.md"
-    url, where = ledger_publish.publish("plan.md", "Slice plan", "acme/app", lambda *a: stored, run)
+    url, where = ledger_publish.publish(
+        "plan.md", "Slice plan", "acme/app", lambda *a: stored, run, issue_title="Slice plan"
+    )
     assert (url, where) == (PLAN, "issue")
     assert calls[0] == ["gh", "repo", "view", "acme/app", "--json", "hasIssuesEnabled"]
     assert calls[1] == [
@@ -190,7 +192,9 @@ def test_publish_stops_when_gh_fails_for_another_reason_than_a_missing_repo():
         return subprocess.CompletedProcess(argv, 1, "", "HTTP 401: Bad credentials\n")
 
     with pytest.raises(ledger_publish.PublishError) as raised:
-        ledger_publish.publish("plan.md", "Slice plan", "", lambda *a: pytest.fail("no artifact"), run)
+        ledger_publish.publish(
+            "plan.md", "Slice plan", "", lambda *a: pytest.fail("no artifact"), run, issue_title="Slice plan"
+        )
     assert str(raised.value) == "gh repo view failed: HTTP 401: Bad credentials"
 
 
@@ -199,7 +203,10 @@ def test_a_folder_without_a_github_remote_publishes_an_artifact():
         message = "none of the git remotes configured for this repository point to a known GitHub host"
         return subprocess.CompletedProcess(argv, 1, "", message)
 
-    assert ledger_publish.publish("plan.md", "Slice plan", "", lambda *a: "link", run) == ("link", "artifact")
+    assert ledger_publish.publish("plan.md", "Slice plan", "", lambda *a: "link", run, issue_title="Slice plan") == (
+        "link",
+        "artifact",
+    )
 
 
 def test_publish_opens_an_issue_in_the_current_repo_without_a_repo_name():
@@ -219,7 +226,7 @@ def test_publish_stops_when_the_issue_cannot_be_opened():
         return subprocess.CompletedProcess(argv, 1, "", "HTTP 403")
 
     with pytest.raises(ledger_publish.PublishError, match="HTTP 403"):
-        ledger_publish.publish("plan.md", "Slice plan", "", lambda *a: "", run)
+        ledger_publish.publish("plan.md", "Slice plan", "", lambda *a: "", run, issue_title="Slice plan")
 
 
 def test_title_is_the_first_heading_or_names_the_phases():

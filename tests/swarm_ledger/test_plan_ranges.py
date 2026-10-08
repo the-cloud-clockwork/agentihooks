@@ -51,6 +51,7 @@ def test_issue_publication_always_stores_artifact():
         "acme/app",
         lambda *args: saved.append(args) or "http://localhost/artifacts/demo/file.md",
         run,
+        issue_title="Build",
     )
     assert saved == [("plan.md", "Build")]
     assert calls[1] == [
@@ -140,6 +141,12 @@ def test_a_fence_closes_only_on_a_bare_marker_and_heading_titles_keep_inner_hash
 
 def test_a_range_past_the_plan_end_is_clamped():
     assert lines_of("## Build\n<!-- slice: a -->\nmore\n", "a", "1-99") == "2-3"
+
+
+def test_a_shallower_heading_inside_the_phase_ends_a_deeper_task_section():
+    text = "# Build\n## Parser\n### First\n<!-- slice: first -->\nOne\n## Pages\nOther\n# Ship\n"
+    phase_range = "1-7"
+    assert lines_of(text, "first", phase_range) == "4-5"
 
 
 def test_repeated_anchor_is_refused():

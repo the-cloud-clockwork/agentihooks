@@ -45,9 +45,9 @@ def open_issue(path: str, title: str, repo: str, run=subprocess.run) -> str:
     return done.stdout.strip().splitlines()[-1]
 
 
-def publish(path: str, title: str, repo: str, artifact, run=subprocess.run, issue_title: str = "") -> tuple[str, str]:
+def publish(path: str, title: str, repo: str, artifact, run=subprocess.run, *, issue_title: str) -> tuple[str, str]:
     issues = has_issues(repo, run)
     url = artifact(path, title)
     if issues:
-        return open_issue(url, issue_title or title, repo, run), "issue"
+        return open_issue(url, issue_title, repo, run), "issue"
     return url, "artifact"
