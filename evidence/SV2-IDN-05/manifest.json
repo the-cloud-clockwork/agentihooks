@@ -1,0 +1,17 @@
+{
+  "tested_commit": "85327de7502f46bd9a88668ed64aeeb902ca9a0d",
+  "evidence_class": "local isolated fixture on temporary homes with a fixed installation time; mocked: the brain vault fetch, the background refresh fork and the brain HTTP post; not live rollout proof",
+  "inputs": {
+    "tests/fixtures/swarm_v2/keyspace-golden.json": "d2e3d07a666e2e6f188b636b84621df99b0e1ce751eed41e0995a6882763da98",
+    "hooks/_redis.py": "cf191e0c919ec9bac2751095b8973d0da923a08aaabd3b7d911e9d8cb4c2fdc1",
+    "hooks/context/controls_toggle.py": "2ee8dfe27df82e483d0420fea0fbac754ead2f3c092ec0ccdc8c2333189430d6",
+    "tests/fixtures/swarm_v2/keyspace.json": "90dedbc199fbe0d0adb28a7430f42c583c8e68d966f92295cff0bb9debb2927b",
+    "scripts/swarm_v2/keyspace.py": "dd99d109c3e8531536b1fd37cdcab97e59c14ae3b1890979dc03843b0c13e5ee",
+    "hooks/context/project_cache.py": "62449d4316d9437c79f1d5f9a6b7ac70e044adba1b04bb4a8e11a144a9818bac",
+    "hooks/context/brain_adapter.py": "882f6feab5d70a19bea5f1bffbb5e46a7e90ddd568321d4d41fe17bdc98ecff5",
+    "hooks/context/brain_writer_hook.py": "9de0e4f8fe8cdd77d89dd41ed0e4d421d81180eb6a36d26b52ec7fdb2fa6a927",
+    "hooks/context/project_sessions.py": "9a105e84751410e78de8ced4fe674583d3e9fa24d5529e6200d682aa321deb89",
+    "tests/test_swarm_v2_keyspace.py": "0a258329194da22ccac7ea6b9b9ebbd4504b3c225fb0f2593354b02ae07983c5",
+    "evidence/SV2-IDN-05/generate_case_results.py": "bc3155580b7a9535340d3b0264656813c82dbd6984f6f4637c9de3f0643b0255"
+  }
+}

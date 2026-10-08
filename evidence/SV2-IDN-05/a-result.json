@@ -1,0 +1,36 @@
+{
+  "tested_commit": "85327de7502f46bd9a88668ed64aeeb902ca9a0d",
+  "evidence_class": "local isolated fixture on temporary homes with a fixed installation time; mocked: the brain vault fetch, the background refresh fork and the brain HTTP post; not live rollout proof",
+  "then": "two installations with the same native session ID and path produce independent cache and archive identities",
+  "runs": [
+    {
+      "same_home_path": true,
+      "installations_differ": true,
+      "brains_differ": true,
+      "marker_keys_differ": true,
+      "cache_keys_shared": 0,
+      "each_reads_its_own_context": true,
+      "each_takes_its_own_pending": true,
+      "secret_free": true,
+      "cache_scope_mismatch_total": [
+        0,
+        0
+      ]
+    },
+    {
+      "same_home_path": true,
+      "installations_differ": true,
+      "brains_differ": true,
+      "marker_keys_differ": true,
+      "cache_keys_shared": 0,
+      "each_reads_its_own_context": true,
+      "each_takes_its_own_pending": true,
+      "secret_free": true,
+      "cache_scope_mismatch_total": [
+        0,
+        0
+      ]
+    }
+  ],
+  "passed": true
+}

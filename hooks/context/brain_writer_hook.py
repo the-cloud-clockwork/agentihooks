@@ -115,10 +115,12 @@ def _write_to_outbox(markers: list[dict], session_id: str, outbox_dir: str) -> i
         ts = now.strftime("%Y%m%dT%H%M%S")
         uid = uuid.uuid4().hex[:8]
         filename = f"{ts}-{marker['type']}-{uid}.json"
+        body, idem = _marker_request(marker, session_id)
         payload = {
             "type": marker["type"],
             "content": marker["content"],
-            "attrs": _marker_request(marker, session_id)[0]["attrs"],
+            "attrs": body["attrs"],
+            "idempotency_key": idem,
             "session_id": session_id,
             "agent_name": os.getenv("AGENTICORE_AGENT_NAME", os.getenv("USER", "unknown")),
             "project": os.getenv("CLAUDE_PROJECT_DIR", ""),
@@ -140,8 +142,9 @@ def _write_to_outbox(markers: list[dict], session_id: str, outbox_dir: str) -> i
 def _marker_request(marker: dict, session_id: str, cwd: str | None = None) -> tuple[dict, str]:
     """Build the /marker POST body + idempotency key for one marker.
 
-    The key hashes session_id + type + content, so a marker replayed from the
-    outbox dedupes server-side against its original (possibly partial) POST.
+    The key depends only on the session, the event-time scope and the marker,
+    never on the current folder, so every Stop and every outbox replay of one
+    marker send the same key.
     """
     from hooks.context.project_identity import resolve_project
     from hooks.context.project_sessions import SCOPE_FIELDS, lookup, marker_scope
@@ -168,9 +171,21 @@ def _marker_request(marker: dict, session_id: str, cwd: str | None = None) -> tu
         "content": content,
         "attrs": attrs,
     }
-    key_src = f"{session_id}-{marker['type']}-{content}"
-    idem = uuid.uuid5(uuid.NAMESPACE_URL, key_src).hex[:32]
-    return body, idem
+    return body, _marker_key(marker, session_id, scope or {}, content)
+
+
+def _marker_key(marker: dict, session_id: str, scope: dict, content: str) -> str:
+    from hooks.config import AGENTIHOOKS_HOME
+    from hooks.context.brain_adapter import brain_id
+    from scripts.swarm_v2 import keyspace
+
+    if keyspace.MARKER_KEY.fullmatch(str(marker.get("idempotency_key"))):
+        return marker["idempotency_key"]
+    record = keyspace.installation(Path(AGENTIHOOKS_HOME))
+    if not keyspace.current(marker.get("at"), record):
+        return keyspace.legacy_marker_key(session_id, marker["type"], content)
+    namespace = keyspace.Namespace(record.installation_id, brain_id(), str(scope.get("project_id", "")))
+    return keyspace.marker_key(namespace, session_id, marker["type"], str(scope.get("task", "")), content)
 
 
 def _publish_to_http(markers: list[dict], session_id: str) -> tuple[int, list[dict]]:
@@ -232,6 +247,7 @@ def _drain_outbox(outbox_dir: str) -> int:
                 "type": payload["type"],
                 "content": payload["content"],
                 "attrs": attrs,
+                "idempotency_key": payload.get("idempotency_key"),
             }
         except (OSError, KeyError, TypeError, json.JSONDecodeError):
             try:

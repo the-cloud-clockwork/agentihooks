@@ -116,7 +116,8 @@ def _legacy_identity(session_id: str) -> ProjectIdentity | None:
 def lookup(session_id: str) -> ProjectIdentity | None:
     row = _rows().get(session_id)
     if row:
-        return ProjectIdentity(**{key: row.get(key, "") for key in ("project", "repo", "worktree", "cwd", "remote")})
+        fields = {key: row.get(key, "") for key in ("project", "repo", "worktree", "cwd", "remote")}
+        return ProjectIdentity(**fields, project_id=row.get("project_id") or "unknown")
     return _legacy_identity(session_id)
 
 
