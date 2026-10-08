@@ -23,6 +23,7 @@ from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
     control_notifications,
+    difficulty,
     launch_check,
     lifetime,
     live_binding,
@@ -151,6 +152,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
     actions += _step(_orphans, slug, store, ledger, rows)
+    actions += _step(difficulty.size_pass, slug, ledger, doc, os.environ)
     from scripts.swarm import capacity
 
     actions += _step(capacity.apply, slug, config, store, ledger, runtime, now_ms)

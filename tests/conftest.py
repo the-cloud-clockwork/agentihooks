@@ -382,6 +382,17 @@ def _swarm_runs_as_installed(monkeypatch):
     monkeypatch.setattr(timer, "_roots", lambda: (Path("/installed"), Path("/installed")))
 
 
+@pytest.fixture(autouse=True)
+def _task_sizing_offline(monkeypatch):
+    from hooks.classifier import ClassifierUnavailable
+    from scripts.swarm import difficulty
+
+    def unavailable(*args, **kwargs):
+        raise ClassifierUnavailable("classifier disabled in unit tests")
+
+    monkeypatch.setattr(difficulty, "decide", unavailable)
+
+
 @pytest.fixture
 def mock_env():
     """Provide a clean environment for tests."""
