@@ -156,7 +156,9 @@ def test_reads_and_suite_prefixed_writes_pass():
     assert redis_key_guard.written[before:] == []
 
 
-def test_a_test_that_swallows_the_refusal_still_fails(tmp_path):
+@pytest.mark.parametrize("disable_plugin_autoload", ["", "1"])
+def test_a_test_that_swallows_the_refusal_still_fails(tmp_path, monkeypatch, disable_plugin_autoload):
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", disable_plugin_autoload)
     root = Path(__file__).resolve().parents[1]
     (tmp_path / "conftest.py").write_text("from tests.conftest import _production_redis_key_guard  # noqa: F401\n")
     (tmp_path / "test_planted.py").write_text(
@@ -170,7 +172,7 @@ def test_a_test_that_swallows_the_refusal_still_fails(tmp_path):
     environ = {**os.environ, "PYTHONPATH": str(root)}
 
     run = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "no:randomly", "-n", "0", str(tmp_path)],
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "no:randomly", str(tmp_path)],
         cwd=tmp_path,
         env=environ,
         capture_output=True,
