@@ -155,3 +155,14 @@ def test_a_waiting_handoff_whose_author_left_no_recap_is_raised_on_that_author(r
     [finding] = handoffs.missing_recap(read.handoffs(store, box, tmp_path, SLUG))
     assert finding.subject == f"{SLUG}-eng-2"
     assert finding.evidence[:2] == (f"task t2 on seat {seat}", f"handed off by {SLUG}-eng-2")
+
+
+def test_handoff_reader_reuses_supplied_empty_mail_snapshot(redis, tmp_path, monkeypatch):
+    store = RedisStore(redis)
+    inbox = InboxStore(redis)
+
+    def unread(*args):
+        pytest.fail("handoff reader rescanned mail")
+
+    monkeypatch.setattr(read, "inbox_items", unread)
+    assert read.handoffs(store, inbox, tmp_path, SLUG, []) == []

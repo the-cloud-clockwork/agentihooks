@@ -78,8 +78,9 @@ def _record(store, handoff, sent):
     }
 
 
-def handoffs(store, inbox, home, slug):
-    sent = [{**row, "at": row["created_at"]} for row in inbox_items(inbox, slug)]
+def handoffs(store, inbox, home, slug, items=None):
+    rows = inbox_items(inbox, slug) if items is None else items
+    sent = [{**row, "at": row["created_at"]} for row in rows]
     found = []
     for path in sorted((Path(home) / slug / "prompts").glob("*.md")):
         parsed = _handoff(path.read_text())

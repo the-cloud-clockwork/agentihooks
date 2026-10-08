@@ -23,7 +23,7 @@ def settle(inbox, name, seat, exit_text):
     inbox.seats.record_exit(name, seat, exit_text)
     names = NameRegistry(inbox.redis)
     successor = names.successor(name) if names.entry(name).get("type") == "master" else ""
-    for item in inbox.inbox(name):
+    for item in inbox.open_items(name):
         if item.state in CLOSED:
             continue
         if push_stop.is_notice(item):
@@ -49,7 +49,7 @@ def close_swarm(inbox: "InboxStore", slug: str) -> None:
         address = key[len(prefix) :]
         if not of_swarm(address, slug, inbox.names):
             continue
-        for item in inbox.inbox(address):
+        for item in inbox.open_items(address):
             if item.state not in CLOSED:
                 inbox.withdraw(item.id, BY, f"cancelled: swarm closed; {address} has no further work", address)
 
@@ -98,7 +98,7 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
     from scripts.swarm.waits import notice_task
 
     for seat in sorted(seats):
-        for item in inbox.inbox(seat):
+        for item in inbox.open_items(seat):
             if item.state in CLOSED:
                 continue
             task = notice_task(item)
@@ -122,7 +122,7 @@ def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", activ
     for agent in store.agents(slug):
         if agent.name not in active or not agent.seat:
             continue
-        for item in inbox.inbox(agent.seat):
+        for item in inbox.open_items(agent.seat):
             if item.state in CLOSED or item.fyi or not item.task or item.task == agent.task:
                 continue
             owner = next(

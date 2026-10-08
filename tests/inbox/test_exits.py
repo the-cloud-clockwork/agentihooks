@@ -241,6 +241,53 @@ def test_the_sweep_closes_a_gone_agents_wait_notice_after_a_live_agents_on_the_s
     assert inbox.get(gone.id).reason == "done: sw-eng-2 left its seat before picking task t4 back up"
 
 
+def test_exit_sweep_reads_only_unsettled_mail(redis, monkeypatch):
+    store, inbox = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    closed = inbox.send("sender", "sw-eng-1", "finished work")
+    inbox.close(closed.id, "sw-eng-1", "done", "finished")
+    pending = inbox.send("sender", "sw-eng-1", "work remains")
+    read = inbox.send("sender", "sw-eng-1", "read work remains")
+    inbox.read(read.id, "sw-eng-1")
+    seen = []
+    original = inbox.get
+
+    def get(item_id):
+        seen.append(item_id)
+        return original(item_id)
+
+    monkeypatch.setattr(inbox, "get", get)
+    exits.sweep(inbox, "sw", store, lambda: {})
+    assert closed.id not in seen
+    assert original(pending.id).address == "eng-1@sw"
+    assert original(read.id).address == "eng-1@sw"
+    assert original(read.id).state == "pending"
+
+
+def test_live_peer_mail_sweep_does_not_read_closed_history(redis, monkeypatch):
+    from scripts.swarm.store import AgentRecord
+
+    store, inbox = RedisStore(redis), InboxStore(redis)
+    store.put_agent("sw", AgentRecord(name="sw-eng-1", lane="eng", task="t1", seat="eng-1@sw"))
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    closed = inbox.send("sender", "eng-1@sw", "finished", task="old")
+    inbox.close(closed.id, "sw-eng-1", "done", "finished")
+    live = inbox.send("sender", "eng-1@sw", "work", task="t1")
+    inbox.deliver(live.id, "sw-eng-1")
+    seen = []
+    get = inbox.get
+
+    def read(item_id):
+        seen.append(item_id)
+        return get(item_id)
+
+    monkeypatch.setattr(inbox, "get", read)
+    exits.sweep(inbox, "sw", store, dict)
+    assert closed.id not in seen
+    assert get(live.id).state == "delivered"
+
+
 @pytest.mark.parametrize("state", ["delivered", "read", "redirected"])
 def test_the_sweep_settles_departed_peer_task_mail_after_seat_reassignment(redis, state):
     from scripts.swarm.store import AgentRecord
