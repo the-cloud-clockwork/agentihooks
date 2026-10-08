@@ -8,6 +8,8 @@ on:
   # untested and only a snapshot PR to main ever ran the suite.
   push:
     branches: [dev]
+  merge_group:
+    types: [checks_requested]
 
   workflow_dispatch:
     inputs:
@@ -120,29 +122,7 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          folder="$RUNNER_TEMP/dev-durations"
-          timings=".test_durations-${{ matrix.python-version }}"
-          if [[ -f "$timings" ]]; then cp "$timings" .test_durations; fi
-          # refresh-durations uploads only after unit and lint pass, so a later Sonar failure on that run does not void it.
-          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=durations-merged&per_page=20" --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == "dev")] | sort_by(.created_at) | last | .workflow_run.id // empty') || run=
-          if [[ -n "$run" ]] && gh run download "$run" --repo "$GITHUB_REPOSITORY" --name durations-merged --dir "$folder" &&
-             python - "$folder/$timings" <<'PYTHON'
-          import json
-          import math
-          import sys
-          from pathlib import Path
-          data = json.loads(Path(sys.argv[1]).read_text())
-          assert isinstance(data, dict) and data
-          assert all(isinstance(k, str) and isinstance(v, (int, float)) and math.isfinite(v) and v >= 0 for k, v in data.items())
-          print(f"Downloaded {len(data)} duration records")
-          PYTHON
-          then
-            cp "$folder/$timings" .test_durations
-            echo "Using durations from green dev run $run"
-          else
-            echo "Using committed durations"
-          fi
+        run: python -m tests.dev_durations ${{ matrix.python-version }}
 
       - name: Run tests
         if: steps.lookup.outputs.skip != 'true'
@@ -228,6 +208,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -273,6 +254,20 @@ jobs:
             ${{ runner.tool_cache }}/sonar-scanner-cli
           key: sonar-${{ runner.os }}-${{ runner.arch }}-${{ env.SONAR_SCANNER_VERSION }}-${{ steps.proxy.outputs.version }}
 
+      # Sonar names a branch analysis after the ref, so a queue run would open a throwaway gh-readonly-queue branch.
+      - name: Name the queued pull request
+        id: queued
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          BASE_REF: ${{ github.event.merge_group.base_ref }}
+        run: |
+          [[ "$HEAD_REF" =~ ^refs/heads/gh-readonly-queue/.+/pr-([0-9]+)-[0-9a-f]+$ ]]
+          number="${BASH_REMATCH[1]}"
+          branch=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$number" --jq .head.ref)
+          echo "args=-Dsonar.pullrequest.key=$number -Dsonar.pullrequest.branch=$branch -Dsonar.pullrequest.base=${BASE_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
+
       # Sonar refuses an analysis dated before the project's latest one, so dev push scans run one at a time in push order.
       - name: Wait for older dev analyses
         if: github.event_name == 'push'
@@ -308,6 +303,7 @@ jobs:
         uses: sonarsource/sonarqube-scan-action@v6
         with:
           scannerVersion: ${{ env.SONAR_SCANNER_VERSION }}
+          args: ${{ steps.queued.outputs.args }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://127.0.0.1:9000
@@ -377,7 +373,7 @@ jobs:
         id: artifacts
         if: steps.lookup.outputs.skip != 'true'
         env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before || inputs.base }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
         run: bash .github/actions/browser-cache/select-artifacts.sh
 
       - name: Install Playwright for artifact checks
@@ -448,7 +444,7 @@ jobs:
 
   record-pass:
     needs: [unit, lint, shard-check]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.unit.result == 'success' && needs.lint.result == 'success' && needs.shard-check.result == 'success' }}
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.unit.result == 'success' && needs.lint.result == 'success' && needs.shard-check.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Resolve the tested tree

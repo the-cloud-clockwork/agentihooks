@@ -24,6 +24,7 @@ from scripts.swarm import (
     affinity,
     ci_speed,
     control_notifications,
+    difficulty,
     launch_check,
     lifetime,
     live_binding,
@@ -152,6 +153,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
     actions += skip_refused(_orphans, slug, store, ledger, rows)
+    actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
     from scripts.swarm import capacity
 
     actions += skip_refused(capacity.apply, slug, config, store, ledger, runtime, now_ms)
