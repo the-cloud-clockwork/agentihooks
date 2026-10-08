@@ -60,6 +60,37 @@ def test_values_follow_the_shell_where_a_later_file_wins(tmp_path):
     assert not operator_env.SHELL_NAMES & loaded.keys()
 
 
+def test_accounts_are_the_interactive_shell_account_variables_only(tmp_path):
+    (tmp_path / ".profile").write_text(
+        "echo AH_CC_TOKEN_noise=printed\n"
+        "printf '\\0agentihooks-accounts\\0AH_CC_TOKEN_forged=early\\0'\n"
+        "export AH_CC_TOKEN_alpha=first=half\n"
+        "export AH_CC_TOKEN_beta='second value'\n"
+        "export UNRELATED=$'\\xff'\n"
+        'read -r line && export AH_CC_TOKEN_stdin="$line"\n'
+    )
+    environ = {"HOME": str(tmp_path), "PATH": os.environ["PATH"], "AH_CC_TOKEN_beta": "stale"}
+    (tmp_path / "stdin").write_text("typed\n")
+    saved = os.dup(0)
+    try:
+        with (tmp_path / "stdin").open() as stdin:
+            os.dup2(stdin.fileno(), 0)
+            loaded = operator_env.accounts(environ)
+    finally:
+        os.dup2(saved, 0)
+        os.close(saved)
+    assert loaded == {"AH_CC_TOKEN_alpha": "first=half", "AH_CC_TOKEN_beta": "second value"}
+
+
+def test_accounts_are_empty_when_the_shell_exports_none(tmp_path):
+    assert operator_env.accounts({"HOME": str(tmp_path), "PATH": os.environ["PATH"]}) == {}
+
+
+def test_accounts_are_empty_when_the_shell_exits_before_listing(tmp_path):
+    (tmp_path / ".profile").write_text("printf '\\0AH_CC_TOKEN_early=leaked\\0'\nexit 0\n")
+    assert operator_env.accounts({"HOME": str(tmp_path), "PATH": os.environ["PATH"]}) == {}
+
+
 def test_the_files_see_home_path_and_agentihooks_home_and_nothing_else(tmp_path, monkeypatch):
     state = tmp_path / "state"
     tools = tmp_path / "tools"
