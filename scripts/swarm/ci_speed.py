@@ -1,5 +1,4 @@
-"""CI speed: the median wall time of completed Tests runs on pull requests into dev over the last day, cached in Redis
-and read again once an hour."""
+"""The median minutes of Tests runs on pull requests into dev over the last day, cached in Redis and read hourly."""
 
 import json
 import statistics
@@ -14,24 +13,24 @@ WORKFLOW = "test.yml"
 WINDOW_S = 24 * 3600
 REFRESH_MS = 3600 * 1000
 FINISHED = {"success", "failure"}
+EMPTY = {"minutes": None, "runs": 0, "at": 0, "tried_at": 0}
 
 
-def key(slug):
+def key(slug: str) -> str:
     return ":".join((PREFIX, slug, "ci-speed"))
 
 
-def get(redis, slug) -> dict | None:
+def get(redis, slug: str) -> dict | None:
     raw = redis.get(key(slug))
     return json.loads(raw) if raw else None
 
 
 def _seconds(stamp):
-    return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+    return datetime.fromisoformat(stamp).timestamp()
 
 
 def finished(runs: list[dict]) -> list[dict]:
-    """Run payloads mostly drop their pull request link, so the base is read from the head: every pull request into
-    main comes from head dev and every other one goes into dev. A cancelled run never reached a verdict."""
+    """Head dev marks a pull request into main: run payloads mostly drop their pull request link and its base."""
     return [
         r
         for r in runs
@@ -64,9 +63,9 @@ def read_runs(repo_dir: str, now_ms: int, run: Callable = subprocess.run) -> lis
     return [json.loads(line) for line in output.splitlines()]
 
 
-def refresh(slug, config, store, now_ms, run: Callable = subprocess.run):
-    cached = get(store.redis, slug) or {}
-    if now_ms - cached.get("tried_at", 0) < REFRESH_MS:
+def refresh(slug: str, config, store, now_ms: int, run: Callable = subprocess.run) -> list[str]:
+    cached = {**EMPTY, **(get(store.redis, slug) or {})}
+    if now_ms - cached["tried_at"] < REFRESH_MS:
         return []
     try:
         runs = read_runs(config.repo, now_ms, run)

@@ -84,3 +84,19 @@ def test_a_malformed_run_record_keeps_the_last_value(swarm, capsys):
     cached = ci_speed.get(store.redis, "sw")
     assert (cached["minutes"], cached["at"]) == (pytest.approx(4.43, abs=0.01), NOW_MS)
     assert "ci speed kept its last value" in capsys.readouterr().err
+
+
+def test_a_first_read_failure_caches_an_unknown_speed(swarm):
+    store, config = swarm
+
+    def unavailable(argv, **kwargs):
+        raise subprocess.CalledProcessError(1, argv, stderr="API unavailable")
+
+    ci_speed.refresh("sw", config, store, NOW_MS, run=unavailable)
+    assert ci_speed.get(store.redis, "sw") == {
+        "minutes": None,
+        "runs": 0,
+        "at": 0,
+        "tried_at": NOW_MS,
+        "error": "API unavailable",
+    }
