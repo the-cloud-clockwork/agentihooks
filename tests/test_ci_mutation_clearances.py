@@ -10,6 +10,13 @@ KEY = "hooks/example.py:hooks.example.x_f__mutmut_1:fingerprint"
 RULING = {"reader": "Independent Standards", "reason": "Same output for every input"}
 
 
+def test_written_ruling_keeps_the_readable_json_format(tmp_path):
+    write_clearance(tmp_path, "identity", {"reader": "Standards", "reason": "Equivalent"})
+    assert clearance_path(tmp_path, "identity").read_text() == (
+        '{\n  "identity": {\n    "reader": "Standards",\n    "reason": "Equivalent"\n  }\n}\n'
+    )
+
+
 def test_folder_and_legacy_clearances_are_combined(tmp_path):
     (tmp_path / "mutation-cleared.txt").write_text(json.dumps({"legacy": RULING}))
     write_clearance(tmp_path, KEY, RULING)
@@ -48,7 +55,7 @@ def test_folder_file_requires_one_identity(tmp_path, data):
     target = clearance_path(tmp_path, KEY)
     target.parent.mkdir()
     target.write_text(json.dumps(data))
-    with pytest.raises(ValueError, match="one mutant identity"):
+    with pytest.raises(ValueError, match="^Mutation clearance file requires one mutant identity$"):
         load_clearances(tmp_path)
 
 
@@ -56,7 +63,7 @@ def test_folder_filename_is_bound_to_identity(tmp_path):
     target = clearance_path(tmp_path, KEY)
     target.parent.mkdir()
     target.write_text(json.dumps({"wrong identity": RULING}))
-    with pytest.raises(ValueError, match="filename"):
+    with pytest.raises(ValueError, match="^Mutation clearance filename does not match its identity$"):
         load_clearances(tmp_path)
 
 
