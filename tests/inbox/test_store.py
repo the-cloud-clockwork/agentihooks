@@ -466,3 +466,10 @@ def test_quiet_names_only_indexed_addresses_without_open_mail(store):
     store.send("alice", "empty", "arrived after the index")
     assert store.quiet(["empty"]) == set()
     assert store.quiet([]) == set()
+
+
+def test_quiet_reads_in_one_pipeline_without_a_transaction(store, monkeypatch):
+    opened, pipeline = [], store.redis.pipeline
+    monkeypatch.setattr(store.redis, "pipeline", lambda **kw: opened.append(kw) or pipeline(**kw))
+    store.quiet(["a", "b"])
+    assert opened == [{"transaction": False}]

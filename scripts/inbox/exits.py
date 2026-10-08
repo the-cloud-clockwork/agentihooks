@@ -78,10 +78,13 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
     seats = store.seats.agent_seats(slug)
     gone = [(name, seat) for name, seat in seats if name not in active]
     outcomes = store.seats.exits([name for name, _ in gone])
-    while gone:
-        quiet = inbox.quiet([name for name, _ in gone])
-        due = [(name, seat) for name, seat in gone if not (outcomes[name] and name in quiet)]
-        gone = [entry for entry in gone if entry not in due] if due else []
+    pending = gone
+    for _ in range(len(gone)):
+        quiet = inbox.quiet([name for name, _ in pending])
+        due = [(name, seat) for name, seat in pending if not (outcomes[name] and name in quiet)]
+        if not due:
+            break
+        pending = [entry for entry in pending if entry not in due]
         for name, seat in due:
             _settle_gone(inbox, name, seat, tasks.get(name, {}).get("state"), outcomes[name])
     _settle_seat_notices(inbox, {seat for _, seat in seats if seat}, active)

@@ -468,7 +468,7 @@ class InboxStore:
 
 
 def _index_current(indexed, size, total: int) -> bool:
-    return bool(indexed) and int(size or -1) == total
+    return bool(indexed) and size is not None and int(size) == total
 
 
 def _fields(item):

@@ -575,3 +575,40 @@ def test_mail_passed_to_a_gone_successor_master_reaches_the_live_one_in_the_same
     item = inbox.send("sender", first, "late")
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(item.id).address == live
+
+
+@pytest.mark.parametrize(
+    ("state", "exit_text"), [("done", "finished its task and exited"), ("blocked", "blocked its task and exited")]
+)
+def test_the_sweep_settles_a_closed_tasks_agent_with_its_task_outcome(redis, state, exit_text):
+    store, inbox = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    item = inbox.send("sender", "sw-eng-1", "contract")
+    exits.sweep(inbox, "sw", store, lambda: {"t1": {"claimed_by": "sw-eng-1", "state": state}})
+    assert store.seats.exit_of("sw-eng-1") == {"seat": "", "reason": exit_text}
+    assert inbox.get(item.id).state == "cancelled"
+    assert inbox.get(item.id).reason == f"cancelled: sw-eng-1 {exit_text} before closing it"
+
+
+def test_a_sweep_of_settled_agents_reads_the_open_index_once(redis, monkeypatch):
+    store, inbox = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    for n in (1, 2, 3):
+        store.seats.occupy(f"eng-{n}@sw", f"sw-eng-{n}", n)
+    exits.sweep(inbox, "sw", store, dict)
+    reads, quiet = [], inbox.quiet
+    monkeypatch.setattr(inbox, "quiet", lambda names: reads.append(sorted(names)) or quiet(names))
+    exits.sweep(inbox, "sw", store, dict)
+    assert reads == [["sw-eng-1", "sw-eng-2", "sw-eng-3"]]
+
+
+def test_each_gone_agent_is_settled_once_per_sweep(redis, monkeypatch):
+    store, inbox = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    for n in (1, 2, 3):
+        store.seats.occupy(f"eng-{n}@sw", f"sw-eng-{n}", n)
+    settled, settle = [], exits.settle
+    monkeypatch.setattr(exits, "settle", lambda inbox, name, *rest: settled.append(name) or settle(inbox, name, *rest))
+    exits.sweep(inbox, "sw", store, dict)
+    assert sorted(settled) == ["sw-eng-1", "sw-eng-2", "sw-eng-3"]
