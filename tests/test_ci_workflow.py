@@ -611,10 +611,13 @@ def test_ci_refresh_lists_same_repository_runs_newest_first():
 def test_ci_refresh_stores_the_median_of_the_downloaded_shard_files(tmp_path, monkeypatch):
     def download(run_ids, folder):
         for run, seconds in zip(run_ids, (1.0, 5.0, 2.0)):
-            (folder / run / "durations-3.12-1").mkdir(parents=True)
-            (folder / run / "durations-3.12-1" / "durations.json").write_text(json.dumps({"t.py::a@g": seconds}))
+            for version in ("3.11", "3.12"):
+                path = folder / run / f"durations-{version}-1"
+                path.mkdir(parents=True)
+                (path / "durations.json").write_text(json.dumps({"t.py::a@g": seconds}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["1", "2", "3"][:limit])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci", "3"])
@@ -630,6 +633,7 @@ def test_ci_refresh_can_use_the_exact_run_that_passed_the_dev_tree(tmp_path, mon
             (path / "durations.json").write_text(json.dumps({"t.py::a": seconds}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci-run", "42"])
     assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 2.0}
@@ -653,6 +657,7 @@ def test_ci_refresh_takes_the_median_over_recent_runs_for_the_tests_of_the_passe
                 (path / "durations.json").write_text(json.dumps({k: v * scale for k, v in measured[run].items()}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["42", "41", "40", "39"][:limit])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci-run", "42", "--ci", "3"])
@@ -672,6 +677,7 @@ def test_ci_refresh_counts_the_passed_run_within_its_run_limit(tmp_path, monkeyp
                 (folder / run / f"durations-{version}-1" / "durations.json").write_text(json.dumps({"t.py::a": 1.0}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["42", "41", "40"][:limit])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci-run", "39", "--ci", "3"])
@@ -684,6 +690,7 @@ def test_ci_refresh_refuses_a_passed_run_that_kept_no_durations(tmp_path, monkey
         (folder / "41" / "durations-3.11-1" / "durations.json").write_text(json.dumps({"t.py::a": 1.0}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["41"][:limit])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     with pytest.raises(SystemExit, match="run 42 kept no durations"):

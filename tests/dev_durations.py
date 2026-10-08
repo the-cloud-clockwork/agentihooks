@@ -6,6 +6,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from tests.duration_coverage import IncompleteDurations, collected_tests, validate_coverage
+
 _ROOT = Path(__file__).parent.parent
 ARTIFACTS = "repos/{owner}/{repo}/actions/artifacts?name=durations-merged&per_page=100"
 
@@ -50,17 +52,30 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("version", help="the Python version whose durations this shard splits on")
     version = parser.parse_args(argv).version
     committed = _ROOT / f".test_durations-{version}"
-    if committed.is_file():
-        (_ROOT / ".test_durations").write_bytes(committed.read_bytes())
+    if not committed.is_file():
+        committed = _ROOT / ".test_durations"
+    collected = collected_tests(_ROOT)
     run = source_run(os.environ["GITHUB_RUN_ID"])
-    if not run:
-        print("Using committed durations")
-        return
-    with tempfile.TemporaryDirectory() as tmp:
-        download(run, Path(tmp))
-        durations = adopt(Path(tmp), version)
-    (_ROOT / ".test_durations").write_text(json.dumps(durations, indent=4, sort_keys=True) + "\n")
-    print(f"Using {len(durations)} durations from green dev run {run}")
+    if run:
+        with tempfile.TemporaryDirectory() as tmp:
+            download(run, Path(tmp))
+            durations = adopt(Path(tmp), version)
+        try:
+            validate_coverage(durations, collected)
+        except IncompleteDurations as error:
+            print(f"Refusing durations from dev run {run}: {error}")
+        else:
+            (_ROOT / ".test_durations").write_text(json.dumps(durations, indent=4, sort_keys=True) + "\n")
+            print(f"Using {len(durations)} durations from green dev run {run}")
+            return
+    try:
+        validate_coverage(_durations(committed), collected)
+    except IncompleteDurations:
+        committed = _ROOT / ".test_durations"
+        validate_coverage(_durations(committed), collected)
+    if committed != _ROOT / ".test_durations":
+        (_ROOT / ".test_durations").write_bytes(committed.read_bytes())
+    print("Using committed durations")
 
 
 if __name__ == "__main__":
