@@ -462,7 +462,12 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
     assert "if" not in upload
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "durations-${{ matrix.python-version }}-${{ matrix.shard }}"
-    assert upload["with"]["path"] == "durations.json"
+    assert upload["with"]["path"].split() == ["durations.json", "durations.sha256"]
+
+
+def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
+    _, adopt = _unit_step_index(lambda s: s.get("name") == "Adopt latest dev durations")
+    assert adopt["run"].endswith(" --hash durations.sha256")
 
 
 def test_ci_samples_are_one_per_shard_file_without_the_xdist_group_suffix(tmp_path):
