@@ -86,6 +86,7 @@ def test_exercise_reaches_the_collector_without_the_suite_fixtures(tmp_path, col
 
 
 def test_suite_run_with_collector_settings_in_the_shell_makes_no_export_call(tmp_path, collector):
-    endpoint, requests, _ = collector
+    endpoint, requests, arrived = collector
     _run_suite(tmp_path, endpoint, "-p", "tests.conftest")
-    assert requests == []
+    with arrived:
+        assert requests == []
