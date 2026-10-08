@@ -130,6 +130,51 @@ def test_done_on_a_code_task_waits_for_its_pull_request_to_merge(env, monkeypatc
     assert ledger.rows["t1"]["state"] == "done"
 
 
+@pytest.mark.parametrize("kind", ["code", "ci"])
+def test_done_waits_on_a_queued_pull_request_and_accepts_only_after_it_lands(env, monkeypatch, capsys, kind):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    name = "engineer@a1b2c3-0001"
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    url = "https://github.com/o/r/pull/9"
+    ledger.rows["t1"].update(kind=kind, pr_url=url)
+    ledger.pulls[url] = PullRequest("OPEN", None, 1, False, resolved=True, head="first", queued=True)
+    monkeypatch.setattr(cli, "now_ms", lambda: 1000)
+    assert run("sw", "done") == 1
+    assert "merge queue" in capsys.readouterr().err
+    assert ledger.rows["t1"]["state"] != "done"
+    assert store.agents("sw")[0].state != "finished"
+    assert cli.idle.wait(store.redis, "sw", name) == {
+        "until": 43_201_000,
+        "reason": "merge queue",
+        "at": 1000,
+        "on": {"kind": "merge", "target": url},
+    }
+    assert cli.waits.end_pass(store, "sw", ledger.rows, InboxStore(store.redis), ledger.pulls.get, 1000) == []
+    ledger.pulls[url] = PullRequest("MERGED", 2, 1, False)
+    ended = cli.waits.end_pass(store, "sw", ledger.rows, InboxStore(store.redis), ledger.pulls.get, 2000)
+    assert ended == [f"ended the wait of {name}: pull request {url}, now merged"]
+    assert cli.idle.wait(store.redis, "sw", name) is None
+    assert run("sw", "done") == 0
+    assert ledger.rows["t1"]["state"] == "done"
+    assert next(a for a in store.agents("sw") if a.name == name).state == "finished"
+
+
+def test_an_ops_task_completes_with_its_proof_even_when_a_linked_pull_request_is_queued(env, monkeypatch):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    name = "engineer@a1b2c3-0001"
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    ledger.rows["t1"]["kind"] = "ops"
+    url = "https://github.com/o/r/pull/9"
+    ledger.pulls[url] = PullRequest("OPEN", None, 1, False, queued=True)
+    assert run("sw", "done", "--pr", url, "--command", "probe", "--output", "passed") == 0
+    assert ledger.rows["t1"]["state"] == "done"
+    assert cli.idle.wait(store.redis, "sw", name) is None
+
+
 def test_the_tick_reopens_a_done_task_whose_pull_request_closed_unmerged(env, monkeypatch):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
@@ -1112,7 +1157,9 @@ def test_agent_prompt_waits_on_checks_through_the_swarm():
     merge = next(line for line in text.splitlines() if line.startswith("6. "))
     assert merge == (
         "6. Wait on the checks with agentihooks swarm sw wait --on checks <pr url>: the tick ends the wait and tells "
-        "you when they resolve, so no Monitor is needed. Merge on green checks, then wt.sh done."
+        "you when they resolve, so no Monitor is needed. Merge on green checks, then "
+        "agentihooks swarm sw wait --on merge <pr url>. Keep the worktree until the tick confirms merged; "
+        "a red merge wait means fix the pull request and queue it again. After merged, run wt.sh done."
     )
 
 
@@ -1139,7 +1186,9 @@ def test_assist_asks_for_merge_approval_on_the_task_and_waits_through_the_swarm(
         'agentihooks ledger --slug sw --as engineer@a1b2c3-0001 comment tasks/t1 "<plain words: what the pull '
         'request does, checks green, waiting for your approval to merge>", then agentihooks swarm sw wait 60 '
         '--reason "operator merge approval"; his answer reaches you as an inbox message. Merge only after an '
-        "OPERATOR line on the ledger approves it, then wt.sh done. An OPERATOR line asking for changes: make them "
+        "OPERATOR line on the ledger approves it, then agentihooks swarm sw wait --on merge <pr url>. "
+        "Keep the worktree until the tick confirms merged; a red merge wait means fix the pull request and "
+        "queue it again. After merged, run wt.sh done. An OPERATOR line asking for changes: make them "
         "and ask again."
     )
     assert "ledger watch" not in text and "keep a Monitor" not in text
