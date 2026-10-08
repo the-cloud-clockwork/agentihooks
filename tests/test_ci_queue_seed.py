@@ -83,7 +83,7 @@ def test_queue_runs_publish_their_own_baseline_for_later_queue_entries():
     restore = _step(steps, "Restore measured coverage history")
     save = _step(steps, "Save the passed dev coverage baseline")
     upload = _step(steps, "Publish the passed dev coverage baseline")
-    assert job["if"] == "github.event_name == 'push' || github.event_name == 'merge_group'"
+    assert "(github.event_name == 'push' || github.event_name == 'merge_group')" in job["if"]
     assert trees["env"]["PREVIOUS"] == "${{ github.event.before || github.event.merge_group.base_sha }}"
     assert restore["if"] == save["if"] == "github.event_name == 'push'"
     assert "if" not in upload

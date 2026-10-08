@@ -687,7 +687,7 @@ jobs:
 
   coverage-baseline:
     needs: [gate-required, sonar]
-    if: github.event_name == 'push' || github.event_name == 'merge_group'
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'merge_group') && needs['gate-required'].result == 'success' && needs.sonar.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
