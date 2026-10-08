@@ -59,7 +59,7 @@ def _model_args(agent, chosen, environ, bounds, preserve=False):
     saved = _set(chosen.get("effort")) or effort
     effort = effort_range.clamp(agent, saved, bounds)
     if preserve and effort != saved:
-        raise SpawnError("unsupported transfer: saved effort is outside the current swarm range")
+        raise SpawnError("unsupported transfer: saved effort is outside the current swarm range", "unsupported")
     return model_flags(agent, _set(chosen.get("model")) or model, effort)
 
 
@@ -122,9 +122,9 @@ def _transfer(task):
     if not task.get("handoff") and not saved:
         return {}
     if not saved or not all(saved.get(key) for key in ("profile", "harness", "model", "effort")):
-        raise SpawnError("unsupported handoff: original profile and run options are missing")
+        raise SpawnError("unsupported handoff: original profile and run options are missing", "unsupported")
     if saved["harness"] not in ("claude", "codex"):
-        raise SpawnError(f"unsupported handoff harness: {saved['harness']}")
+        raise SpawnError(f"unsupported handoff harness: {saved['harness']}", "unsupported")
     return saved
 
 
@@ -259,7 +259,7 @@ class HerdrRuntime:
             return agent, reason
         if not fixed and eligible:
             return eligible[0], f"fallthrough: {agent} has no placeable quota seats"
-        raise SpawnError(f"no {agent} account has placeable quota seats")
+        raise SpawnError(f"no {agent} account has placeable quota seats", "unavailable")
 
     def _rotation(self, requested, environ):
         if requested or not hasattr(self, "_quota_accounts"):
@@ -292,7 +292,9 @@ class HerdrRuntime:
             or quota_handoff.successor(candidates, "codex" in harnesses, thresholds)
         )
         if account is None:
-            raise SpawnError(quota_handoff.refusal(predecessor, harnesses, self._quota_accounts, blocked))
+            raise SpawnError(
+                quota_handoff.refusal(predecessor, harnesses, self._quota_accounts, blocked), "unavailable"
+            )
         return {
             **saved,
             "harness": account.harness,
@@ -304,7 +306,9 @@ class HerdrRuntime:
         if quota_transfer:
             return saved["harness"], "quota handoff"
         if plugins.claude_only(profile) and saved["harness"] != "claude":
-            raise SpawnError("unsupported handoff: required profile cannot mount on the original harness")
+            raise SpawnError(
+                "unsupported handoff: required profile cannot mount on the original harness", "unsupported"
+            )
         return self.choose(saved["harness"], environ)
 
     def _profile_decision(self, config, lane, chosen, task, saved, relaunch, environ):
@@ -341,7 +345,7 @@ class HerdrRuntime:
         if row is None:
             seat = session_bands.pick(seats(eligible))
             if seat is None:
-                raise SpawnError(f"no {agent} account has placeable quota seats")
+                raise SpawnError(f"no {agent} account has placeable quota seats", "unavailable")
             row = next(row for row in eligible if row.name == seat.account)
         return row
 
@@ -363,7 +367,7 @@ class HerdrRuntime:
         want = affinity.desired(config) if lane == MASTER else _set(chosen.get("agent"))
         if want and plugins.claude_only(profile) and want != "claude":
             kind = "master affinity" if lane == MASTER else "lane harness"
-            raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}")
+            raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
         saved = (
             self._quota_transfer(saved, profile, environ, lane, want, self._planned_slot(task["id"]))
@@ -380,13 +384,13 @@ class HerdrRuntime:
         else:
             agent, reason = self._rotation(requested, environ)
         if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts"):
-            raise SpawnError(reason)
+            raise SpawnError(reason, "unavailable")
         planned = getattr(self, "_quota_tasks", {}).get(task["id"])
         if planned and not (requested or saved or want):
             agent, reason = planned, "fallthrough: quota reservation"
         agent, reason = self._quota_choice(agent, reason, bool(requested or saved or want), lane)
         if saved and agent != saved["harness"]:
-            raise SpawnError("unsupported handoff: router substituted the original harness")
+            raise SpawnError("unsupported handoff: router substituted the original harness", "unsupported")
         task = {**task, "harness": agent}
         text = timing.call(
             prompt.build,
@@ -446,7 +450,7 @@ class HerdrRuntime:
     def resume(self, config, agent, text):
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
         if not agent.profile:
-            raise SpawnError("unsupported resume: original profile is missing")
+            raise SpawnError("unsupported resume: original profile is missing", "unsupported")
         argv = self._argv(
             config,
             agent.name,
@@ -474,7 +478,9 @@ class HerdrRuntime:
                 replace(agent, pane_id=placed.pane_id, profile_decision=placed.profile_decision),
                 homes=reaper.scratch_homes(config.slug, agent.task),
             )
-            raise SpawnError(f"herdr never showed conversation {agent.conversation_id} on pane {placed.pane_id}")
+            raise SpawnError(
+                f"herdr never showed conversation {agent.conversation_id} on pane {placed.pane_id}", "ambiguous"
+            )
         return replace(
             placed,
             model_source=picked.source,
@@ -533,7 +539,7 @@ class HerdrRuntime:
             )
         except subprocess.TimeoutExpired as exc:
             self._terminate(name)
-            raise SpawnError(f"init-agent timed out for {name}") from exc
+            raise SpawnError(f"init-agent timed out for {name}", "ambiguous") from exc
         timings = {
             "launched_at": launched_at,
             "returned_at": int(time.time() * 1000),
