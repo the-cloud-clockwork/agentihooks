@@ -263,12 +263,6 @@ jobs:
           branch=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$number" --jq .head.ref)
           echo "args=-Dsonar.pullrequest.key=$number -Dsonar.pullrequest.branch=$branch -Dsonar.pullrequest.base=${BASE_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
 
-      # Everything above overlaps the unit shards; this waits for each 3.12 shard's coverage as it lands.
-      - name: Merge shard coverage
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/coverage/combine.sh "$GITHUB_RUN_ID" 8
-
       # Sonar refuses an analysis dated before the project's latest one, so dev push scans run one at a time in push order.
       - name: Wait for older dev analyses
         if: github.event_name == 'push'
@@ -299,6 +293,12 @@ jobs:
             exit 1
           fi
           echo "::warning::Older dev runs still hold Sonar after 18 minutes:$waiting; scanning anyway."
+
+      # Placed after every step that needs no coverage, so those overlap the unit shards.
+      - name: Merge shard coverage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/coverage/combine.sh "$GITHUB_RUN_ID" 8
 
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@v6

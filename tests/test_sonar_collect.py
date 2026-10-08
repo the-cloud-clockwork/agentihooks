@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import io
 import json
@@ -22,12 +23,14 @@ def _module():
 class FakeGitHub:
     """Serves one run whose artifacts and jobs change at the ticks the spec names."""
 
-    def __init__(self, landed, jobs=None, outage=()):
+    def __init__(self, landed, jobs=None, outage=(), expired=()):
         self.landed = landed
+        self.expired = set(expired)
         self.jobs = jobs or {}
         self.outage = set(outage)
         self.tick = 0
         self.calls = []
+        self.etags = []
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -37,15 +40,21 @@ class FakeGitHub:
                     self.reply(502, b"{}")
                 elif self.path.startswith("/repos/owner/repo/actions/runs/7/artifacts"):
                     names = sorted(name for name, tick in fake.landed.items() if tick <= fake.tick)
-                    etag = f'W/"{len(names)}"'
+                    artifacts = [
+                        {
+                            "name": name,
+                            "expired": name in fake.expired,
+                            "archive_download_url": fake.url(f"/zip/{name}"),
+                        }
+                        for name in names
+                    ]
+                    body = json.dumps({"artifacts": artifacts}).encode()
+                    etag = fake.etag(body)
                     if self.headers.get("If-None-Match") == etag:
                         self.reply(304, b"")
                         return
-                    artifacts = [
-                        {"name": name, "expired": False, "archive_download_url": fake.url(f"/zip/{name}")}
-                        for name in names
-                    ]
-                    self.reply(200, json.dumps({"artifacts": artifacts}).encode(), {"ETag": etag})
+                    fake.etags.append(etag)
+                    self.reply(200, body, {"ETag": etag})
                 elif self.path.startswith("/repos/owner/repo/actions/runs/7/jobs"):
                     jobs = [
                         {"name": name, "status": "completed" if state else "in_progress", "conclusion": state}
@@ -75,6 +84,10 @@ class FakeGitHub:
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
 
+    @staticmethod
+    def etag(body):
+        return f'W/"{hashlib.sha256(body).hexdigest()}"'
+
     def url(self, path):
         return f"http://127.0.0.1:{self.server.server_port}{path}"
 
@@ -103,9 +116,7 @@ class FakeGitHub:
 def _collect(fake, tmp_path, shards=3):
     module = _module()
     return module.collect(
-        fake.url(""),
-        "owner/repo",
-        "7",
+        fake.url("/repos/owner/repo/actions/runs/7"),
         shards,
         tmp_path,
         "fixture",
@@ -128,12 +139,14 @@ def test_each_shard_downloads_as_soon_as_its_artifact_lands(tmp_path):
 
 
 def test_unchanged_listings_are_conditional_requests(tmp_path):
-    with FakeGitHub({"coverage-3.12-1": 4}) as fake:
+    with FakeGitHub({"durations-3.12-1": 1, "coverage-3.12-1": 4}) as fake:
         assert _collect(fake, tmp_path, shards=1) is None
     listings = [headers for _, path, headers in fake.calls if "/artifacts" in path]
     assert len(listings) == 5
+    assert len(fake.etags) == 3
     assert "If-None-Match" not in listings[0]
-    assert all(headers["If-None-Match"] == 'W/"0"' for headers in listings[1:])
+    assert listings[1]["If-None-Match"] == fake.etags[0]
+    assert [headers["If-None-Match"] for headers in listings[2:]] == [fake.etags[1]] * 3
 
 
 def test_the_token_never_follows_the_download_redirect(tmp_path):
@@ -160,6 +173,20 @@ def test_a_passed_shard_without_coverage_is_red(tmp_path):
     assert "unit (3.12, 1)" in error
     assert "without coverage" in error
     assert fake.tick < 3 * _module().JOB_CHECK_POLLS
+
+
+def test_a_passed_shard_whose_coverage_trails_the_job_check_is_collected(tmp_path):
+    module = _module()
+    jobs = {"unit (3.12, 1)": [(1, "success")]}
+    with FakeGitHub({"coverage-3.12-1": module.JOB_CHECK_POLLS + 1}, jobs) as fake:
+        assert _collect(fake, tmp_path, shards=1) is None
+
+
+def test_an_expired_artifact_is_never_downloaded(tmp_path):
+    with FakeGitHub({"coverage-3.12-1": 0}, expired={"coverage-3.12-1"}) as fake:
+        error = _collect(fake, tmp_path, shards=1)
+    assert "coverage-3.12-1" in error
+    assert not any(path.startswith("/zip/") for _, path, _ in fake.calls)
 
 
 def test_missing_coverage_is_red_at_the_deadline(tmp_path):

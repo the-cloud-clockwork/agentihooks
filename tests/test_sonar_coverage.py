@@ -79,6 +79,43 @@ def test_missing_shard_coverage_is_red(tmp_path):
     assert "Missing coverage for shard 4" in result.stdout
 
 
+def _stub_combine(tmp_path, collect_body):
+    folder = tmp_path / ".github/coverage"
+    folder.mkdir(parents=True)
+    for name in ("combine.sh", "coverage.ini"):
+        (folder / name).write_text((ROOT / ".github/coverage" / name).read_text())
+    (folder / "collect.py").write_text(f"import sys\nprint('collect', *sys.argv[1:])\n{collect_body}\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gh").write_text("#!/usr/bin/env bash\necho 555\n")
+    (bin_dir / "gh").chmod(0o755)
+    (bin_dir / "python").symlink_to(sys.executable)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "t"],
+        cwd=tmp_path,
+        check=True,
+    )
+    return folder / "combine.sh", dict(
+        os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", GITHUB_REPOSITORY="owner/repo"
+    )
+
+
+@pytest.mark.parametrize(("event", "source"), [("push", "555"), ("pull_request", "42")])
+def test_combine_collects_from_the_passed_run_on_push_and_this_run_otherwise(tmp_path, event, source):
+    script, env = _stub_combine(tmp_path, "sys.exit(3)")
+    result = subprocess.run(
+        ["bash", str(script), "42", "8"],
+        cwd=tmp_path,
+        env=dict(env, GITHUB_EVENT_NAME=event),
+        capture_output=True,
+        text=True,
+    )
+    assert f"collect {source} 8 .coverage-shards" in result.stdout
+    assert result.returncode != 0
+    assert not (tmp_path / "coverage.xml").exists()
+
+
 def test_combined_coverage_keeps_hits_from_every_shard_and_both_packages(tmp_path):
     for package in ("hooks", "scripts"):
         (tmp_path / package).mkdir()
