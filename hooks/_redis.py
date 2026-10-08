@@ -23,6 +23,7 @@ _redis_checked = False
 SESSION_TTL: int = int(os.getenv("REDIS_SESSION_TTL", "86400"))  # 24h
 POSITION_TTL: int = int(os.getenv("REDIS_POSITION_TTL", "3600"))  # 1h
 _KEY_PREFIX: str = os.getenv("REDIS_KEY_PREFIX", "agenticore")
+_installations: dict[str, str] = {}
 
 
 def get_redis():
@@ -73,4 +74,7 @@ def redis_key(type_name: str, id_value: str) -> str:
     from hooks.config import AGENTIHOOKS_HOME
     from scripts.swarm_v2.keyspace import installation
 
-    return f"{_KEY_PREFIX}:{installation(Path(AGENTIHOOKS_HOME)).installation_id}:{type_name}:{id_value}"
+    home = str(AGENTIHOOKS_HOME)
+    if home not in _installations:
+        _installations[home] = installation(Path(home)).installation_id
+    return f"{_KEY_PREFIX}:{_installations[home]}:{type_name}:{id_value}"

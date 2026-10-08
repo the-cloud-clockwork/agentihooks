@@ -5,6 +5,7 @@ import re
 import secrets
 import sys
 import uuid
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -136,9 +137,12 @@ def _files(directory: Path, pattern: re.Pattern, limit: int | None) -> list[Path
 
 
 def _remove(paths: list[Path]) -> int:
+    removed = 0
     for path in paths:
-        path.unlink(missing_ok=True)
-    return len(paths)
+        with suppress(FileNotFoundError):
+            path.unlink()
+            removed += 1
+    return removed
 
 
 def sweep_legacy(directory: Path, limit: int = 32) -> int:

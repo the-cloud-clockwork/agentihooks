@@ -58,12 +58,18 @@ whichever brain is configured at replay; an outbox file without one replays with
   state once: retry counts, file read cache, branch and PR signals and the controls switch reset to their safe
   defaults, and the transcript logger re-logs that session's transcript from its first line.
 - The first feed store after the upgrade removes undelivered legacy deferred contexts, one per session at most.
+- The controls switch (`disable controls`) becomes per installation. Before, every installation on one Redis and
+  one prefix shared it; now a pod's switch never reaches the operator's workstation or another pod, and a switch
+  set before the upgrade lapses until set again.
 - Rollback: revert the change, then `python -m scripts.swarm_v2.keyspace drop <agentihooks home>/brain/project-memory`
   removes only the rebuildable `k2-feed-` and `k2-project-memory-` files. It never touches deferred contexts,
   the session index, scope logs, the outbox, the installation record or legacy files; the preceding code rebuilds
   its own caches and reads its own Redis keys again. The preceding code sends every marker under its legacy key, so a
   marker posted under a namespaced key in the brain's last idempotency hour can be written again, subject to the
   brain's own lesson and signal content checks.
+- The installation record must live on persistent storage. A worker whose agentihooks home is rebuilt on each
+  start is a new installation each time: its Redis hook state starts empty and its markers re-key from the new
+  creation time. Readers outside hooks, such as the status checker, see hook Redis state only under the same home.
 - Deleting `installation.json` creates a new installation: its later creation time moves markers stamped
   between the two times back to legacy keys, and the brain can receive them again inside its window.
 
@@ -73,6 +79,8 @@ whichever brain is configured at replay; an outbox file without one replays with
   authoritative data or shared contracts, not caches.
 - Kernel outbox drains (`agentibrain sync`, brain-ops `outbox_drain`) send the recorded key from the matching
   agentibrain-kernel change; a kernel release before it recomputes the legacy key.
+- A session without a scope log (no SV2-IDN-03 transitions) gives its markers an empty project and task in the
+  key, so the same text under two tasks of such a session still deduplicates to the first.
 - Markers from a transcript record without a time keep the legacy key permanently. A marker read from the Stop
   payload's last message takes the Stop time.
 - The archive clause of the output contract is unmet: no session transcript archive exists yet. Its identities

@@ -306,6 +306,13 @@ def test_the_legacy_sweep_is_bounded_and_keeps_everything_else(tmp_path):
     assert keyspace.sweep_legacy(tmp_path / "missing") == 0
 
 
+def test_removal_counts_only_files_it_removed(tmp_path):
+    present = tmp_path / "present"
+    present.write_text("x")
+    assert keyspace._remove([tmp_path / "gone", present, tmp_path / "gone-too"]) == 1
+    assert not present.exists()
+
+
 def test_markers_before_the_cutover_keep_the_legacy_key(world, monkeypatch):
     install(world)
     use_brain(monkeypatch, "swarm")
@@ -568,6 +575,16 @@ def test_admission_compares_the_whole_namespace_and_kind():
     assert not keyspace.admits(document, scope, "pending")
     assert not keyspace.admits(document, keyspace.Namespace(scope.installation, "url-" + "c" * 32), "feed")
     assert not keyspace.admits([], scope, "feed")
+
+
+def test_the_cutover_is_inclusive_and_needs_a_time():
+    record = keyspace.Installation("inst-" + "a" * 32, "2026-10-08T12:00:00+00:00")
+    assert keyspace.current("2026-10-08T12:00:00Z", record)
+    assert keyspace.current("2026-10-08T12:00:00", record)
+    assert not keyspace.current("2026-10-08T11:59:59.999+00:00", record)
+    assert not keyspace.current("2026-10-08T13:00:00+02:00", record)
+    assert keyspace.current("2026-10-08T14:00:00+02:00", record)
+    assert not keyspace.current(None, record) and not keyspace.current("", record)
 
 
 def test_live_marker_keys_use_the_installation_brain_and_event_time_scope(world, monkeypatch):
