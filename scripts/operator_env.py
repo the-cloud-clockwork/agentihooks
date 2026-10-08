@@ -48,6 +48,8 @@ def source_line(environ: Mapping[str, str]) -> str:
 def accounts(environ: Mapping[str, str]) -> dict[str, str]:
     script = f"printf '\\0{ACCOUNTS_MARK}\\0'; env -0"
     done = subprocess.run(["bash", "-lic", script], env=dict(environ), stdin=subprocess.DEVNULL, capture_output=True)
-    listing = done.stdout.rpartition(f"\0{ACCOUNTS_MARK}\0".encode())[2]
+    _, marked, listing = done.stdout.rpartition(f"\0{ACCOUNTS_MARK}\0".encode())
+    if not marked:
+        return {}
     pairs = (item.decode(errors="surrogateescape").partition("=") for item in listing.split(b"\0") if item)
     return {key: value for key, _, value in pairs if key.startswith(ACCOUNT_PREFIX)}
