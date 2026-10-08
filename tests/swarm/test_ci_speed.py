@@ -66,14 +66,15 @@ def endpoint(conclusion, since):
 
 def read_call(conclusion, since):
     return (
-        ["gh", "api", endpoint(conclusion, since), "--paginate", "--jq", ci_speed.JQ],
+        [
+            "gh",
+            "api",
+            endpoint(conclusion, since),
+            "--paginate",
+            "--jq",
+            ".workflow_runs[] | {id, event, status, conclusion, head_branch, run_started_at, updated_at} | @json",
+        ],
         {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60},
-    )
-
-
-def test_the_read_keeps_only_the_fields_the_median_needs():
-    assert ci_speed.JQ == (
-        ".workflow_runs[] | {id, event, status, conclusion, head_branch, run_started_at, updated_at} | @json"
     )
 
 
