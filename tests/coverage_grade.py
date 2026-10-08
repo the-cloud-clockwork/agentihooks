@@ -70,27 +70,30 @@ def _lost(
     return lost
 
 
-def _statuses(base: Measurement, path: str, lines: list[int], older: list[Measurement]) -> dict[int, list[bool]]:
-    statuses: dict[int, list[bool]] = {line: [] for line in lines}
-    for run in older:
-        old = run.source(path)
-        if old is None or path not in run.executed:
-            continue
-        mapped = line_map(base.source(path), old)
-        for line in lines:
-            if line in mapped:
-                statuses[line].append(mapped[line] in run.executed[path])
-    return statuses
+def _statuses(base_source: str, path: str, lines: list[int], run: Measurement) -> dict[int, bool]:
+    old = run.source(path)
+    if old is None or path not in run.executed:
+        return {}
+    mapped = line_map(base_source, old)
+    return {line: mapped[line] in run.executed[path] for line in lines if line in mapped}
 
 
 def _flaky(history: list[bool]) -> bool:
     return any(not newer and older for i, newer in enumerate(history) for older in history[i + 1 :])
 
 
-def _all_flaky(base: Measurement, lost: dict[str, list[int]], older: list[Measurement]) -> bool:
-    return all(
-        _flaky(history) for path, lines in lost.items() for history in _statuses(base, path, lines, older).values()
-    )
+def _histories(
+    base: Measurement, lost: dict[str, list[int]], runs: Iterator[Measurement]
+) -> dict[str, dict[int, list[bool]]]:
+    histories = {path: {line: [] for line in lines} for path, lines in lost.items()}
+    sources = {path: base.source(path) for path in lost}
+    for run in itertools.islice(runs, HISTORY):
+        for path, lines in lost.items():
+            for line, ran in _statuses(sources[path], path, lines, run).items():
+                histories[path][line].append(ran)
+        if all(_flaky(history) for by_line in histories.values() for history in by_line.values()):
+            break
+    return histories
 
 
 def grade(
@@ -105,15 +108,9 @@ def grade(
     lost = _lost(base, head, head_source, renamed or {})
     if not lost:
         return Result(base.commit, {})
-    older: list[Measurement] = []
-    for run in itertools.islice(runs, HISTORY):
-        older.append(run)
-        if _all_flaky(base, lost, older):
-            break
     result = Result(base.commit, {})
-    for path, lines in lost.items():
-        statuses = _statuses(base, path, lines, older)
-        for line in lines:
-            bucket = result.unstable if _flaky(statuses[line]) else result.lost
+    for path, by_line in _histories(base, lost, runs).items():
+        for line, history in by_line.items():
+            bucket = result.unstable if _flaky(history) else result.lost
             bucket.setdefault(path, []).append(line)
     return result

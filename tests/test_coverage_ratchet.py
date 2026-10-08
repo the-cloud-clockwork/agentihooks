@@ -4,6 +4,7 @@ import pytest
 from coverage import CoverageData
 
 from tests import coverage_ratchet as ratchet
+from tests.coverage_grade import HISTORY
 
 pytestmark = pytest.mark.unit
 
@@ -113,7 +114,7 @@ def test_history_stops_once_every_lost_line_is_cleared():
     assert read == ["b1", "b2", "b3"]
 
 
-def test_the_base_run_costs_one_github_lookup(monkeypatch, tmp_path):
+def _history(monkeypatch, passed=lambda commit: True, downloaded=lambda commit: True):
     from tests import coverage_history
 
     commits = [f"c{n}" for n in range(coverage_history.SEARCH)]
@@ -121,19 +122,46 @@ def test_the_base_run_costs_one_github_lookup(monkeypatch, tmp_path):
 
     def passed_run(repo, commit):
         looked_up.append(commit)
-        return f"run-{commit}"
+        return f"run-{commit}" if passed(commit) else None
 
     def fetcher(repo, shards, scratch, read):
-        return lambda pair: _measure(pair[0], {}, {})
+        return lambda pair: _measure(pair[0], {}, {}) if downloaded(pair[0]) else None
 
     monkeypatch.setattr(coverage_history, "git", lambda *args, cwd: "\n".join(commits))
     monkeypatch.setattr(coverage_history, "_passed_run", passed_run)
     monkeypatch.setattr(coverage_history, "_fetcher", fetcher)
-    runs = coverage_history.dev_runs(tmp_path, "c0", 8, tmp_path)
+    return coverage_history.dev_runs(Path("."), "c0", 8, Path(".")), looked_up
+
+
+def test_the_base_run_costs_one_github_lookup(monkeypatch):
+    runs, looked_up = _history(monkeypatch)
     assert next(runs).commit == "c0"
-    runs.close()
     assert looked_up == ["c0"]
-    assert [run.commit for run in coverage_history.dev_runs(tmp_path, "c0", 8, tmp_path)] == commits
+    runs.close()
+
+
+def test_a_base_without_a_passed_run_reads_nothing_older(monkeypatch):
+    runs, looked_up = _history(monkeypatch, passed=lambda commit: commit != "c0")
+    assert list(runs) == []
+    assert looked_up == ["c0"]
+
+
+def test_history_counts_every_passed_run_it_tried_to_download(monkeypatch):
+    failed = {f"c{n}" for n in range(1, 6)}
+    runs, _ = _history(monkeypatch, downloaded=lambda commit: commit not in failed)
+    assert [run.commit for run in runs] == ["c0"] + [f"c{n}" for n in range(6, HISTORY + 1)]
+
+
+def test_a_line_no_older_run_clears_reads_the_whole_history():
+    read = []
+
+    def runs():
+        for n in range(HISTORY + 10):
+            read.append(n)
+            yield _measure(f"b{n}", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE})
+
+    assert ratchet.grade({"hooks/a.py": {1, 2}}, lambda path: SOURCE, runs()).lost == {"hooks/a.py": [3]}
+    assert len(read) == HISTORY + 1
 
 
 def test_no_measured_base_cannot_be_graded():

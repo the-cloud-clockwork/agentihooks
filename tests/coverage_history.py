@@ -1,14 +1,15 @@
 import os
 import subprocess
 import time
+from collections import deque
 from collections.abc import Callable, Iterator
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
-from tests.coverage_grade import Measurement, Source, executed
+from tests.coverage_grade import HISTORY, Measurement, Source, executed
 
 SEARCH = 60
-BATCH = 4
+WINDOW = 4
 ATTEMPTS = 4
 
 
@@ -64,18 +65,35 @@ def _download(run: str, shards: int, into: Path) -> list[Path] | None:
 
 def dev_runs(repo: Path, base: str, shards: int, scratch: Path) -> Iterator[Measurement]:
     commits = git("rev-list", "--first-parent", f"--max-count={SEARCH}", base, cwd=repo).split()
-    # Every lookup and download spends the repository's shared Actions API quota, so batches load only on demand.
     # Reading coverage data holds the GIL, so threads only download and processes read.
-    with ThreadPoolExecutor(max_workers=BATCH) as pool, ProcessPoolExecutor(max_workers=BATCH) as readers:
+    with ThreadPoolExecutor(max_workers=WINDOW) as pool, ProcessPoolExecutor(max_workers=WINDOW) as readers:
         fetch = _fetcher(repo, shards, scratch, lambda files: readers.submit(executed, files).result())
 
-        def measure(commit: str) -> Measurement | None:
+        def measure(commit: str) -> tuple[bool, Measurement | None]:
             run = _passed_run(repo, commit)
-            return fetch((commit, run)) if run else None
+            return run is not None, fetch((commit, run)) if run else None
 
-        yield from filter(None, [measure(commits[0])] if commits else [])
-        for start in range(1, len(commits), BATCH):
-            yield from filter(None, pool.map(measure, commits[start : start + BATCH]))
+        _, first = measure(commits[0])
+        if first is None:
+            return
+        yield first
+        yield from _older(pool, measure, commits[1:])
+
+
+def _older(
+    pool: ThreadPoolExecutor, measure: Callable[[str], tuple[bool, Measurement | None]], commits: list[str]
+) -> Iterator[Measurement]:
+    # Each lookup and download spends the repository's shared Actions API quota: at most WINDOW run past the last pull.
+    pending = deque(pool.submit(measure, commit) for commit in commits[:WINDOW])
+    queued = iter(commits[WINDOW:])
+    attempted = 0
+    while pending and attempted < HISTORY:
+        found, measurement = pending.popleft().result()
+        if (commit := next(queued, None)) is not None:
+            pending.append(pool.submit(measure, commit))
+        attempted += found
+        if measurement:
+            yield measurement
 
 
 def _fetcher(
