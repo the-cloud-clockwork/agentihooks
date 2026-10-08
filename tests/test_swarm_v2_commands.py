@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm_v2.runtime.commands import Action, Commands, Principal, Request
+from scripts.swarm_v2.runtime.commands import Action, Commands, Principal, Request, Role
 from scripts.swarm_v2.runtime.operations import Observation, Phase
 
 
@@ -67,7 +67,11 @@ def fixture():
         agent,
         remote,
         local,
-        Commands(store, [remote, local], lambda slug, credential: Principal("") if credential == "" else None),
+        Commands(
+            store,
+            [remote, local],
+            lambda slug, credential: Principal("fixture-operator", Role.OPERATOR) if credential == "" else None,
+        ),
     )
 
 
@@ -115,7 +119,11 @@ def test_ui_reopen_reads_current_controls_without_replaying_old_commands(fixture
     store, agent, remote, local, service = fixture
     old = request(agent, Action.DETACH)
     assert service.execute("fixture", old, "").status == "ok"
-    restarted = Commands(store, [remote, local], lambda slug, credential: Principal("") if credential == "" else None)
+    restarted = Commands(
+        store,
+        [remote, local],
+        lambda slug, credential: Principal("fixture-operator", Role.OPERATOR) if credential == "" else None,
+    )
     controls = restarted.controls("fixture", agent.seat, "")
     assert controls.execution_id == agent.execution_id
     assert controls.generation == agent.generation
@@ -161,7 +169,9 @@ def test_master_control_requires_the_current_admitted_incarnation(fixture):
             runtime_target={"pod_namespace": "workers", "pod_name": "master"},
         ),
     )
-    service.authenticate = lambda slug, credential: Principal(master.name, master.execution_id, master.generation)
+    service.authenticate = lambda slug, credential: Principal(
+        master.name, Role.MASTER, master.execution_id, master.generation
+    )
     assert service.execute("fixture", request(agent, Action.CANCEL), "master-grant").status == "ok"
     replaced = store.start_execution(
         "fixture",
@@ -198,7 +208,7 @@ def test_each_command_has_its_own_typed_payload_and_operation(action, canonical,
     assert local.calls == []
     assert service.audit("fixture") == [
         {
-            "actor": {"name": "", "execution_id": "", "generation": 0},
+            "actor": {"name": "fixture-operator", "role": "operator", "execution_id": "", "generation": 0},
             "execution_id": agent.execution_id,
             "generation": 1,
             "command": action.value,
@@ -221,7 +231,7 @@ def test_changed_action_with_same_key_is_refused_without_replay(fixture):
 
 def test_missing_backend_never_falls_back_to_local(fixture):
     store, agent, remote, local, _ = fixture
-    service = Commands(store, [local], lambda slug, credential: Principal(""))
+    service = Commands(store, [local], lambda slug, credential: Principal("fixture-operator", Role.OPERATOR))
     result = service.execute("fixture", request(agent, Action.FORCE_STOP), "")
     assert result.status == "unavailable"
     assert result.detail == "selected backend is unavailable"
@@ -232,7 +242,9 @@ def test_missing_backend_never_falls_back_to_local(fixture):
 
 def test_rollback_hides_new_controls_and_keeps_authoritative_status(fixture):
     store, agent, remote, local, _ = fixture
-    service = Commands(store, [remote, local], lambda slug, credential: Principal(""), enabled=False)
+    service = Commands(
+        store, [remote, local], lambda slug, credential: Principal("fixture-operator", Role.OPERATOR), enabled=False
+    )
     before = store.execution_registry.records("fixture")
     controls = service.controls("fixture", agent.seat, "")
     assert controls.actions == ()
@@ -281,7 +293,9 @@ def test_unauthenticated_or_absent_controls_are_hidden(fixture):
 
 def test_answer_and_credential_are_not_written_to_audit_or_journal(fixture):
     store, agent, remote, local, service = fixture
-    service.authenticate = lambda slug, credential: Principal("") if credential == "fixture-grant" else None
+    service.authenticate = lambda slug, credential: (
+        Principal("fixture-operator", Role.OPERATOR) if credential == "fixture-grant" else None
+    )
     assert (
         service.execute("fixture", request(agent, Action.ANSWER, text="private fixture answer"), "fixture-grant").status
         == "ok"
@@ -345,7 +359,9 @@ def test_master_replaced_during_observation_cannot_dispatch(fixture, monkeypatch
             runtime_target={"pod_namespace": "workers", "pod_name": "master"},
         ),
     )
-    service.authenticate = lambda slug, credential: Principal(master.name, master.execution_id, master.generation)
+    service.authenticate = lambda slug, credential: Principal(
+        master.name, Role.MASTER, master.execution_id, master.generation
+    )
 
     def observe(operation):
         store.start_execution("fixture", replace(master, execution_id="", generation=0), master.execution_id)
@@ -364,3 +380,31 @@ def test_package_cases_pass_on_the_isolated_fixture():
     assert case_a()["passed"]
     assert case_b()["passed"]
     assert case_c()["passed"]
+
+
+def test_each_authenticated_operator_is_identified_in_audit(fixture):
+    store, agent, remote, local, service = fixture
+    service.authenticate = lambda slug, credential: Principal(credential, Role.OPERATOR)
+    for subject in ("operator-one", "operator-two"):
+        result = service.execute("fixture", request(agent, Action.DETACH, subject), subject)
+        assert result.status == "ok"
+    assert [row["actor"]["name"] for row in service.audit("fixture")] == ["operator-one", "operator-two"]
+
+
+@pytest.mark.parametrize(
+    "principal",
+    [
+        Principal("", Role.OPERATOR),
+        Principal("operator", "operator"),
+        Principal("operator", "unknown"),
+        Principal("operator", Role.MASTER),
+        Principal("display-label", Role.MASTER, "exe-wrong", 1),
+    ],
+)
+def test_authenticator_must_return_an_explicit_typed_role_and_identity(fixture, principal):
+    store, agent, remote, local, service = fixture
+    service.authenticate = lambda slug, credential: principal
+    result = service.execute("fixture", request(agent, Action.FORCE_STOP), "fixture-grant")
+    assert result.status == "refused"
+    assert result.detail == "authenticated operator or current master required"
+    assert remote.calls == local.calls == []

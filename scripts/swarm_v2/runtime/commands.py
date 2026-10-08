@@ -37,9 +37,15 @@ OPERATIONS = {
 STATUSES = {Phase.APPLIED: Status.OK, Phase.REFUSED: Status.REFUSED}
 
 
+class Role(StrEnum):
+    OPERATOR = "operator"
+    MASTER = "master"
+
+
 @dataclass(frozen=True)
 class Principal:
     name: str
+    role: Role
     execution_id: str = ""
     generation: int = 0
 
@@ -136,10 +142,12 @@ class Commands:
 
     def _actor(self, slug: str, credential: str) -> Principal | None:
         principal = self.authenticate(slug, credential)
-        if not isinstance(principal, Principal):
+        if not isinstance(principal, Principal) or not isinstance(principal.name, str) or not principal.name:
             return None
-        if principal == Principal(""):
+        if principal.role is Role.OPERATOR:
             return principal
+        if principal.role is not Role.MASTER or type(principal.generation) is not int:
+            return None
         masters = self.store.execution_registry.occupants(slug).values()
         if any(
             a.name == principal.name
