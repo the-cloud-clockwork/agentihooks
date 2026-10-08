@@ -119,65 +119,63 @@ class Classification:
     recovered: bool = False
 
 
-def _remembered(prior: Classification | None) -> dict[Source, Signal]:
+@dataclass(frozen=True)
+class Seen:
+    reading: Reading
+    observed_at: float
+    value: str
+
+
+def _remembered(prior: Classification | None) -> dict[Source, Seen]:
     if prior is None:
         return {}
     return {
-        Source(name): Signal(
-            Source(name),
-            Reading(entry["reading"]),
-            entry["observed_at"],
-            prior.execution_id,
-            prior.generation,
-            entry["value"],
-        )
+        Source(name): Seen(Reading(entry["reading"]), entry["observed_at"], entry["value"])
         for name, entry in prior.sources.items()
     }
 
 
-def _latest(signals: Iterable[Signal], known: dict[Source, Signal]) -> dict[Source, Signal]:
+def _latest(signals: Iterable[Signal], known: dict[Source, Seen]) -> dict[Source, Seen]:
     latest = dict(known)
     for found in signals:
         held = latest.get(found.source)
         if held is None or found.observed_at >= held.observed_at:
-            latest[found.source] = found
+            latest[found.source] = Seen(found.reading, found.observed_at, found.value)
     return latest
 
 
-def _value(latest: dict[Source, Signal], source: Source) -> str:
-    found = latest.get(source)
-    return found.value if found and found.reading is Reading.OK else ""
+def _values(seen: dict[Source, Seen]) -> dict[Source, str]:
+    return {source: entry.value for source, entry in seen.items() if entry.reading is Reading.OK}
 
 
-def _terminal(found: Signal | None) -> Terminal:
+def _terminal(found: Seen | None) -> Terminal:
     if found is None:
         return Terminal.UNOBSERVED
     return Terminal.REACHABLE if found.reading is Reading.OK else Terminal.DEGRADED
 
 
-def _alive(
-    gone: bool, phase: str, latest: dict[Source, Signal], current: dict[Source, Signal]
-) -> tuple[State, Failure, Confidence]:
+def _alive(gone: bool, values: dict[Source, str], current: dict[Source, str]) -> tuple[State, Failure, Confidence]:
     if gone:
         return State.SUSPECT, Failure.WORKER_LOSS, Confidence.UNCERTAIN
-    if phase == PENDING:
+    if values.get(Source.KUBERNETES) == PENDING:
         return State.SUSPECT, Failure.POD_SCHEDULING, Confidence.UNCERTAIN
-    agrees = _value(current, Source.KUBERNETES) == RUNNING or _value(current, Source.SUPERVISOR) == HANDSHAKE
+    agrees = current.get(Source.KUBERNETES) == RUNNING or current.get(Source.SUPERVISOR) == HANDSHAKE
     agree = Confidence.CONFIRMED if agrees else Confidence.PARTIAL
-    if _value(latest, Source.PROVIDER) == QUOTA_WAIT:
+    if values.get(Source.PROVIDER) == QUOTA_WAIT:
         return State.WAITING_QUOTA, Failure.PROVIDER_WAIT, agree
     return State.WORKING, Failure.NONE, agree
 
 
 def _judge(
-    fresh: bool, beat: bool, latest: dict[Source, Signal], current: dict[Source, Signal]
+    fresh: bool, beat: bool, latest: dict[Source, Seen], current: dict[Source, Seen]
 ) -> tuple[State, Failure, Confidence]:
     """LOST here names failure proof only; classify decides whether the proof has held long enough."""
     pod = latest[Source.KUBERNETES].reading if Source.KUBERNETES in latest else Reading.UNREACHABLE
-    phase, supervisor = _value(latest, Source.KUBERNETES), _value(latest, Source.SUPERVISOR)
+    values = _values(latest)
+    phase, supervisor = values.get(Source.KUBERNETES), values.get(Source.SUPERVISOR)
     gone = pod is Reading.NOT_FOUND or phase in ENDED or supervisor == EXITED
     if fresh:
-        return _alive(gone, phase, latest, current)
+        return _alive(gone, values, _values(current))
     if gone:
         return State.LOST, Failure.WORKER_LOSS, Confidence.PARTIAL
     if phase == PENDING:
@@ -225,7 +223,7 @@ def classify(
     fresh = beat is not None and beat.reading is Reading.OK and now - beat.observed_at <= thresholds.fresh_s
     current = {source: found for source, found in latest.items() if now - found.observed_at <= thresholds.fresh_s}
     state, failure, confidence = _judge(fresh, beat is not None, latest, current)
-    denied = tuple(sorted(found.source.value for found in latest.values() if found.reading in DENIED))
+    denied = tuple(sorted(source.value for source, found in latest.items() if found.reading in DENIED))
     terminal = _terminal(latest.get(Source.TERMINAL))
     proof_since = 0.0
     if state is State.LOST:
@@ -244,8 +242,8 @@ def classify(
         max([kept.confirmed_at if kept else 0.0, *confirmed]),
         now,
         {
-            found.source.value: {"reading": found.reading.value, "observed_at": found.observed_at, "value": found.value}
-            for found in latest.values()
+            source.value: {"reading": found.reading.value, "observed_at": found.observed_at, "value": found.value}
+            for source, found in latest.items()
         },
         denied,
         (kept.suspect_since if was_suspect else now) if state in (State.SUSPECT, State.LOST) else 0.0,

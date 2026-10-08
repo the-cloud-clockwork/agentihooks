@@ -419,3 +419,80 @@ def test_a_contended_record_retries_then_refuses(fixture, monkeypatch, failures)
         observer.observe("fixture", agent, [beat(agent)], NOW)
     assert (refused.value.error_class, refused.value.retryable) == ("revision_conflict", True)
     assert observer.records("fixture") == []
+
+
+def test_a_reading_exactly_at_the_freshness_limit_still_confirms(fixture):
+    _, agent, _ = fixture
+    assert judge(agent, beat(agent), pod(agent, age=120.0)).confidence is Confidence.CONFIRMED
+
+
+def test_no_evidence_has_no_observation_time(fixture):
+    _, agent, _ = fixture
+    seen = judge(agent)
+    assert (seen.observed_at, seen.confirmed_at, seen.sources) == (0.0, 0.0, {})
+
+
+def test_recovered_marks_only_a_suspect_to_alive_change(fixture):
+    _, agent, _ = fixture
+    working = judge(agent, beat(agent), pod(agent))
+    stale = judge(agent, beat(agent, 900.0), pod(agent))
+    still = judge(agent, prior=stale, now=NOW + 60)
+    assert (working.recovered, stale.recovered, still.recovered) == (False, False, False)
+
+
+def test_records_live_under_the_swarm_observation_keys(fixture):
+    store, agent, observer = fixture
+    observer.observe("fixture", agent, [pod(agent, Reading.NOT_FOUND, "")], NOW)
+    observer.observe("fixture", agent, [], NOW + 600)
+    assert store.redis.hexists(store.key("fixture", "observations"), agent.execution_id)
+    assert store.redis.llen(store.key("fixture", "observation-audit")) == 1
+
+
+def test_an_unoccupied_seat_is_refused(fixture):
+    _, agent, observer = fixture
+    with pytest.raises(ObservationRefused, match=r"^execution is not the current occupant of its seat$"):
+        observer.observe("fixture", replace(agent, seat="eng-9@fixture"), [beat(agent)], NOW)
+
+
+def test_discarded_signals_accumulate_across_observations(fixture):
+    _, agent, observer = fixture
+    foreign = replace(beat(agent), execution_id="other")
+    for at in (NOW, NOW + 1):
+        observer.observe("fixture", agent, [foreign, foreign], at)
+    assert observer.discarded == 4
+
+
+def test_audit_lists_every_lost_execution(fixture):
+    store, agent, observer = fixture
+    agents = [agent]
+    for seat in ("eng-2@fixture", "eng-3@fixture"):
+        record = replace(agent, name=store.next_name("fixture", "eng"), seat=seat, execution_id="", generation=0)
+        agents.append(store.start_execution("fixture", record))
+    for each in agents:
+        observer.observe("fixture", each, [pod(each, Reading.NOT_FOUND, "")], NOW)
+        observer.observe("fixture", each, [], NOW + 600)
+    assert sorted(record.execution_id for record in observer.audit("fixture")) == sorted(
+        each.execution_id for each in agents
+    )
+
+
+def test_a_classification_at_the_same_time_takes_new_evidence(fixture):
+    _, agent, observer = fixture
+    observer.observe("fixture", agent, [beat(agent), ssh(agent)], NOW)
+    seen = observer.observe("fixture", agent, [ssh(agent, Reading.UNREACHABLE, age=0.5)], NOW)
+    assert (seen.terminal, seen.failure) == (Terminal.DEGRADED, Failure.TERMINAL_LOSS)
+
+
+def test_the_audit_entry_is_written_at_the_lost_transition(fixture):
+    _, agent, observer = fixture
+    observer.observe("fixture", agent, [pod(agent, Reading.NOT_FOUND, "")], NOW)
+    lost = observer.observe("fixture", agent, [], NOW + 600)
+    assert observer.audit("fixture") == [lost]
+
+
+def test_contention_refusal_names_its_failure(fixture, monkeypatch):
+    store, agent, observer = fixture
+    real, left = store.redis.pipeline, [None] * 5
+    monkeypatch.setattr(store.redis, "pipeline", lambda: Contended(real(), left))
+    with pytest.raises(ObservationRefused, match=r"^observation record kept changing; nothing recorded$"):
+        observer.observe("fixture", agent, [beat(agent)], NOW)
