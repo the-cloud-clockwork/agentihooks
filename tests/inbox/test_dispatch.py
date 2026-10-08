@@ -1,6 +1,7 @@
 import pytest
 
-from scripts.inbox.dispatch import REASSIGNED, RELEASED, Dispatcher, DispatchError, digest
+from scripts.inbox.dispatch import Dispatcher, digest
+from scripts.inbox.receipts import REASSIGNED, RELEASED, DispatchError, Receipts
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks, claim, first_showing, write_ref
 from scripts.inbox.store import InboxStore, now_ms, owner_key
 
@@ -33,8 +34,8 @@ def dispatcher(store):
 
 
 def send(dispatcher, bridge, delivery):
-    dispatcher.submitting(delivery.id, bridge)
-    return dispatcher.accept(delivery.id, bridge, delivery.digest)
+    dispatcher.receipts.submitting(delivery.id, bridge)
+    return dispatcher.receipts.accept(delivery.id, bridge, delivery.digest)
 
 
 def states(store, item_id):
@@ -67,15 +68,15 @@ def test_a_second_bridge_takes_over_and_the_first_loses_every_write(store, dispa
     dispatcher.own("bob", "bridge-2", takeover=True)
     assert dispatcher.owner("bob") == "bridge-2"
     with pytest.raises(DispatchError) as refused:
-        dispatcher.submitting(delivery.id, "bridge-1")
+        dispatcher.receipts.submitting(delivery.id, "bridge-1")
     assert str(refused.value) == "bridge-1 does not deliver for bob; bridge-2 does"
     with pytest.raises(DispatchError) as refused:
         dispatcher.reserve("bob", "bridge-1")
     assert str(refused.value) == "bridge-1 does not deliver for bob; bridge-2 does"
     with pytest.raises(DispatchError) as refused:
-        dispatcher.recover("bob", "bridge-1")
+        dispatcher.receipts.recover("bob", "bridge-1")
     assert str(refused.value) == "bridge-1 does not deliver for bob; bridge-2 does"
-    assert dispatcher.get(delivery.id).state == "reserved"
+    assert dispatcher.receipts.get(delivery.id).state == "reserved"
 
 
 def test_release_by_another_owner_keeps_the_owner(dispatcher):
@@ -101,7 +102,7 @@ def test_reserve_takes_pending_items_in_inbox_order_with_a_digest(store, dispatc
     ]
     assert [d.digest for d in reserved] == [digest(first), digest(second)]
     assert len({d.id for d in reserved}) == 2
-    assert dispatcher.get(reserved[0].id) == reserved[0]
+    assert dispatcher.receipts.get(reserved[0].id) == reserved[0]
     assert store.get(first.id).state == "pending"
 
 
@@ -114,7 +115,7 @@ def test_reserve_by_a_non_owner_is_refused(store, dispatcher):
 
 def test_recover_by_a_non_owner_names_nobody_once_released(store):
     with pytest.raises(DispatchError) as refused:
-        Dispatcher(store).recover("bob", "bridge-1")
+        Receipts(store).recover("bob", "bridge-1")
     assert str(refused.value) == "bridge-1 does not deliver for bob; nobody does"
 
 
@@ -137,10 +138,10 @@ def test_digest_covers_the_payload(store):
 def test_accept_commits_delivered_and_the_seen_mark(store, dispatcher):
     item = store.send("alice", "bob", "hi", ref="sw:3:c1")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
-    submitting = dispatcher.submitting(delivery.id, "bridge-1")
+    submitting = dispatcher.receipts.submitting(delivery.id, "bridge-1")
     assert submitting.state == "submitting"
     assert SeenMarks(store.redis).seen("bob", "sw:3:c1") is False
-    committed = dispatcher.accept(delivery.id, "bridge-1", delivery.digest)
+    committed = dispatcher.receipts.accept(delivery.id, "bridge-1", delivery.digest)
     assert (committed.state, committed.committed) == ("accepted", True)
     assert store.get(item.id).state == "delivered"
     assert states(store, item.id) == ["pending", "delivered"]
@@ -162,7 +163,7 @@ def test_accept_needs_a_submission(store, dispatcher):
     store.send("alice", "bob", "hi")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
     with pytest.raises(DispatchError) as refused:
-        dispatcher.accept(delivery.id, "bridge-1", delivery.digest)
+        dispatcher.receipts.accept(delivery.id, "bridge-1", delivery.digest)
     assert str(refused.value) == f"delivery {delivery.id} is reserved"
 
 
@@ -171,22 +172,22 @@ def test_a_repeated_accept_is_refused_and_delivers_once(store, dispatcher):
     [delivery] = dispatcher.reserve("bob", "bridge-1")
     send(dispatcher, "bridge-1", delivery)
     with pytest.raises(DispatchError) as refused:
-        dispatcher.accept(delivery.id, "bridge-1", delivery.digest)
+        dispatcher.receipts.accept(delivery.id, "bridge-1", delivery.digest)
     assert str(refused.value) == f"delivery {delivery.id} is accepted"
     assert states(store, item.id) == ["pending", "delivered"]
 
 
 def test_an_unknown_delivery_is_refused(dispatcher):
     with pytest.raises(DispatchError) as refused:
-        dispatcher.submitting("nope", "bridge-1")
+        dispatcher.receipts.submitting("nope", "bridge-1")
     assert str(refused.value) == "no delivery nope"
 
 
 def test_an_invalid_payload_is_rejected_and_released(store, dispatcher):
     item = store.send("alice", "bob", "hi", ref="sw:3:c1")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
-    dispatcher.submitting(delivery.id, "bridge-1")
-    rejected = dispatcher.accept(delivery.id, "bridge-1", "0" * 64)
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    rejected = dispatcher.receipts.accept(delivery.id, "bridge-1", "0" * 64)
     assert (rejected.state, rejected.reason) == ("rejected", "the accepted payload does not match the reserved one")
     assert store.get(item.id).state == "pending"
     assert SeenMarks(store.redis).seen("bob", "sw:3:c1") is False
@@ -198,25 +199,25 @@ def test_an_invalid_payload_is_rejected_and_released(store, dispatcher):
 def test_reject_releases_the_item(store, dispatcher):
     item = store.send("alice", "bob", "hi")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
-    rejected = dispatcher.reject(delivery.id, "bridge-1", "turn refused")
+    rejected = dispatcher.receipts.reject(delivery.id, "bridge-1", "turn refused")
     assert (rejected.state, rejected.reason) == ("rejected", "turn refused")
     assert [d.item for d in dispatcher.reserve("bob", "bridge-1")] == [item.id]
     with pytest.raises(DispatchError) as refused:
-        dispatcher.reject(delivery.id, "bridge-1", "again")
+        dispatcher.receipts.reject(delivery.id, "bridge-1", "again")
     assert str(refused.value) == f"delivery {delivery.id} is rejected"
 
 
 def test_release_is_refused_while_a_delivery_is_open(store, dispatcher):
     item = store.send("alice", "bob", "hi")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
-    dispatcher.submitting(delivery.id, "bridge-1")
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
     with pytest.raises(DispatchError) as refused:
         dispatcher.release("bob", "bridge-1")
     assert str(refused.value) == "bob still has open deliveries; accept or reject them before releasing"
     assert dispatcher.owner("bob") == "bridge-1"
     assert claim(store, "bob") == []
     assert dispatcher.release("bob", "bridge-2") is False
-    dispatcher.reject(delivery.id, "bridge-1", "turn refused")
+    dispatcher.receipts.reject(delivery.id, "bridge-1", "turn refused")
     assert dispatcher.release("bob", "bridge-1") is True
     assert [shown.id for shown in claim(store, "bob")] == [item.id]
 
@@ -230,6 +231,14 @@ def test_a_superseded_item_closes_in_the_reserve_transaction(store, dispatcher):
     assert (closed.state, closed.reason) == ("done", f"done: {SEEN_ON_LEDGER}")
     assert store.history(shown.id)[-1]["by"] == "bob"
     assert [item.id for item in store.pending_items("bob")] == [fresh_item.id]
+
+
+def test_every_item_with_a_shown_ref_closes_in_one_pass(store, dispatcher):
+    store.redis.sadd(SeenMarks(store.redis).key("bob"), "sw:3:c1")
+    first = store.send("operator", "bob", "comment", ref="sw:3:c1")
+    second = store.send("operator", "bob", "comment again", ref="sw:3:c1")
+    assert dispatcher.reserve("bob", "bridge-1") == []
+    assert [store.get(item.id).state for item in (first, second)] == ["done", "done"]
 
 
 def test_the_last_superseded_item_leaves_the_waiting_set(store, dispatcher):
@@ -322,22 +331,22 @@ def test_a_seen_mark_that_keeps_changing_is_refused(store, monkeypatch):
 def test_crash_before_write_releases_the_reservation_on_recovery(store, dispatcher):
     item = store.send("alice", "bob", "hi")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
-    [recovered] = dispatcher.recover("bob", "bridge-1")
+    [recovered] = dispatcher.receipts.recover("bob", "bridge-1")
     assert (recovered.id, recovered.state, recovered.reason) == (delivery.id, "rejected", RELEASED)
     [again] = dispatcher.reserve("bob", "bridge-1")
     assert again.item == item.id
-    assert dispatcher.recover("bob", "bridge-1") == [dispatcher.get(again.id)]
+    assert dispatcher.receipts.recover("bob", "bridge-1") == [dispatcher.receipts.get(again.id)]
 
 
 def test_crash_after_write_turns_unknown_and_never_sends_twice(store, dispatcher):
     item = store.send("alice", "bob", "hi")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
-    dispatcher.submitting(delivery.id, "bridge-1")
-    [recovered] = dispatcher.recover("bob", "bridge-1")
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    [recovered] = dispatcher.receipts.recover("bob", "bridge-1")
     assert recovered.state == "unknown"
     assert dispatcher.reserve("bob", "bridge-1") == []
-    assert dispatcher.recover("bob", "bridge-1") == [recovered]
-    committed = dispatcher.accept(delivery.id, "bridge-1", delivery.digest)
+    assert dispatcher.receipts.recover("bob", "bridge-1") == [recovered]
+    committed = dispatcher.receipts.accept(delivery.id, "bridge-1", delivery.digest)
     assert committed.committed is True
     assert store.get(item.id).state == "delivered"
 
@@ -345,40 +354,43 @@ def test_crash_after_write_turns_unknown_and_never_sends_twice(store, dispatcher
 def test_crash_after_acceptance_is_committed_on_recovery(store, dispatcher, monkeypatch):
     item = store.send("alice", "bob", "hi", ref="sw:3:c1")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
-    dispatcher.submitting(delivery.id, "bridge-1")
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
 
     def crash(*_):
         raise SystemExit("crashed")
 
-    monkeypatch.setattr(dispatcher, "_commit", crash)
+    monkeypatch.setattr(dispatcher.receipts, "_commit", crash)
     with pytest.raises(SystemExit):
-        dispatcher.accept(delivery.id, "bridge-1", delivery.digest)
+        dispatcher.receipts.accept(delivery.id, "bridge-1", delivery.digest)
     monkeypatch.undo()
-    assert (dispatcher.get(delivery.id).state, dispatcher.get(delivery.id).committed) == ("accepted", False)
+    assert (dispatcher.receipts.get(delivery.id).state, dispatcher.receipts.get(delivery.id).committed) == (
+        "accepted",
+        False,
+    )
     assert store.get(item.id).state == "pending"
-    [recovered] = Dispatcher(store).recover("bob", "bridge-1")
+    [recovered] = Receipts(store).recover("bob", "bridge-1")
     assert (recovered.state, recovered.committed) == ("accepted", True)
     assert states(store, item.id) == ["pending", "delivered"]
     assert SeenMarks(store.redis).seen("bob", "sw:3:c1") is True
-    assert dispatcher.recover("bob", "bridge-1") == []
+    assert dispatcher.receipts.recover("bob", "bridge-1") == []
 
 
 def test_crash_before_commit_writes_nothing_and_recovery_commits_once(store, dispatcher, monkeypatch):
     item = store.send("alice", "bob", "hi", ref="sw:3:c1")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
-    dispatcher.submitting(delivery.id, "bridge-1")
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
     real = store.stage_move
 
-    def crash(*_):
+    def crash(*_, **__):
         raise SystemExit("crashed")
 
     monkeypatch.setattr(store, "stage_move", crash)
     with pytest.raises(SystemExit):
-        dispatcher.accept(delivery.id, "bridge-1", delivery.digest)
+        dispatcher.receipts.accept(delivery.id, "bridge-1", delivery.digest)
     assert store.get(item.id).state == "pending"
     assert SeenMarks(store.redis).seen("bob", "sw:3:c1") is False
     monkeypatch.setattr(store, "stage_move", real)
-    dispatcher.recover("bob", "bridge-1")
+    dispatcher.receipts.recover("bob", "bridge-1")
     assert states(store, item.id) == ["pending", "delivered"]
     assert SeenMarks(store.redis).seen("bob", "sw:3:c1") is True
 
@@ -387,13 +399,13 @@ def test_a_takeover_recovers_the_previous_owners_deliveries(store, dispatcher):
     reserved_item = store.send("alice", "bob", "one")
     sent_item = store.send("alice", "bob", "two")
     reserved, sent = dispatcher.reserve("bob", "bridge-1")
-    dispatcher.submitting(sent.id, "bridge-1")
+    dispatcher.receipts.submitting(sent.id, "bridge-1")
     dispatcher.own("bob", "bridge-2", takeover=True)
-    recovered = {d.item: d.state for d in dispatcher.recover("bob", "bridge-2")}
+    recovered = {d.item: d.state for d in dispatcher.receipts.recover("bob", "bridge-2")}
     assert recovered == {reserved_item.id: "rejected", sent_item.id: "unknown"}
     [again] = dispatcher.reserve("bob", "bridge-2")
     assert (again.item, again.owner) == (reserved_item.id, "bridge-2")
-    assert dispatcher.accept(sent.id, "bridge-2", sent.digest).committed is True
+    assert dispatcher.receipts.accept(sent.id, "bridge-2", sent.digest).committed is True
 
 
 def test_hook_delivery_is_refused_while_an_owner_holds_the_recipient(store, dispatcher):
@@ -486,8 +498,8 @@ def test_a_committed_delivery_is_never_redelivered(store, dispatcher):
 def test_a_malformed_payload_is_rejected(store, dispatcher, evidence):
     item = store.send("alice", "bob", "hi")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
-    dispatcher.submitting(delivery.id, "bridge-1")
-    assert dispatcher.accept(delivery.id, "bridge-1", evidence).state == "rejected"
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    assert dispatcher.receipts.accept(delivery.id, "bridge-1", evidence).state == "rejected"
     assert store.get(item.id).state == "pending"
 
 
@@ -521,9 +533,9 @@ def test_a_repeated_ref_waits_then_is_superseded(store, dispatcher):
 def test_a_ref_held_by_an_accepted_delivery_supersedes(store, dispatcher, monkeypatch):
     store.send("operator", "bob", "comment", ref="sw:3:c1")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
-    dispatcher.submitting(delivery.id, "bridge-1")
-    monkeypatch.setattr(dispatcher, "_commit", lambda *_: None)
-    dispatcher.accept(delivery.id, "bridge-1", delivery.digest)
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    monkeypatch.setattr(dispatcher.receipts, "_commit", lambda *_: None)
+    dispatcher.receipts.accept(delivery.id, "bridge-1", delivery.digest)
     monkeypatch.undo()
     second = store.send("operator", "bob", "comment again", ref="sw:3:c1")
     assert dispatcher.reserve("bob", "bridge-1") == []
@@ -534,7 +546,7 @@ def test_a_ref_rejected_frees_the_next_item(store, dispatcher):
     first = store.send("operator", "bob", "comment", ref="sw:3:c1")
     second = store.send("operator", "bob", "comment again", ref="sw:3:c1")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
-    dispatcher.reject(delivery.id, "bridge-1", "turn refused")
+    dispatcher.receipts.reject(delivery.id, "bridge-1", "turn refused")
     assert [d.item for d in dispatcher.reserve("bob", "bridge-1")] == [first.id]
     assert store.get(second.id).state == "pending"
 
@@ -564,22 +576,22 @@ def test_seat_reassignment_supersedes_and_releases(store):
     dispatcher = Dispatcher(store)
     dispatcher.own("bob", "bridge-1")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
-    dispatcher.submitting(delivery.id, "bridge-1")
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
     store.seats.occupy("eng-1@sw", "carol", 2)
-    superseded = dispatcher.accept(delivery.id, "bridge-1", delivery.digest)
+    superseded = dispatcher.receipts.accept(delivery.id, "bridge-1", delivery.digest)
     assert (superseded.state, superseded.reason) == ("superseded", REASSIGNED)
     assert store.get(item.id).state == "pending"
     assert SeenMarks(store.redis).seen("bob", "sw:3:c1") is False
-    assert dispatcher.recover("bob", "bridge-1") == []
+    assert dispatcher.receipts.recover("bob", "bridge-1") == []
     assert [shown.id for shown in claim(store, "carol")] == [item.id]
 
 
 def test_an_item_closed_while_reserved_is_superseded(store, dispatcher):
     item = store.send("alice", "bob", "hi")
     [delivery] = dispatcher.reserve("bob", "bridge-1")
-    dispatcher.submitting(delivery.id, "bridge-1")
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
     store.close(item.id, "bob", "cancel")
-    assert dispatcher.accept(delivery.id, "bridge-1", delivery.digest).state == "superseded"
+    assert dispatcher.receipts.accept(delivery.id, "bridge-1", delivery.digest).state == "superseded"
     assert store.get(item.id).state == "cancelled"
 
 
