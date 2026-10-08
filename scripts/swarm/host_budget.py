@@ -1,3 +1,4 @@
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,7 +39,7 @@ def load_room(sample: HostSample, thresholds: Thresholds) -> int | None:
     if sample.agents <= 0 or sample.load1 <= 0:
         return None
     per_agent = sample.load1 / sample.agents
-    return max(0, int((thresholds.load_high * sample.cpus - sample.load1) // per_agent))
+    return max(0, math.floor((thresholds.load_high * sample.cpus - sample.load1) / per_agent))
 
 
 def room(sample: HostSample, thresholds: Thresholds = Thresholds(), previous: int | None = None) -> Room:
