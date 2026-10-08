@@ -6,10 +6,6 @@ Phase order is never used; ledger order breaks the remaining ties.
 from scripts.swarm_ledger import ledger_rank
 
 
-def ordered(rows: dict) -> list[str]:
-    return [task["id"] for task in sorted(rows.values(), key=key(rows))]
-
-
 def key(rows: dict):
     waiting = _waiting(rows)
     depth = depths(rows)
@@ -45,7 +41,14 @@ def _waiting(rows):
 
 
 def _fast_clear(task, rows, waiting):
-    return task.get("difficulty") == "S" and (bool(waiting.get(task["id"])) or _last_of_phase(task, rows))
+    return task.get("difficulty") == "S" and (_unblocks(task, rows, waiting) or _last_of_phase(task, rows))
+
+
+def _unblocks(task, rows, waiting):
+    return any(
+        all(dep == task["id"] or rows.get(dep, {}).get("state") == "done" for dep in rows[w].get("depends_on") or [])
+        for w in waiting.get(task["id"], [])
+    )
 
 
 def _last_of_phase(task, rows):
