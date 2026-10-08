@@ -110,7 +110,7 @@ class FileSettings(SettingsStore):
             data["settings"][key] = value
         data["history"].append(entry)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temp = self.path.with_suffix(".tmp")
+        temp = self.path.with_name(f"{self.path.name}.tmp")
         temp.write_text(json.dumps(data))
         temp.replace(self.path)
 

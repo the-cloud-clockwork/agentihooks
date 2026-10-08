@@ -6,6 +6,8 @@ import pytest
 from scripts.routing import settings
 from scripts.swarm import keyspace
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 NOW = 1_900_000_000.0
 
 
