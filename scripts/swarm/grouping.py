@@ -73,7 +73,7 @@ def release_pass(slug, store, ledger, doc):
 
 
 def _stopped(slug, store, lead, doc):
-    state = lead.get("state", "open")
+    state = lead["state"]
     if lead.get("out_of_scope") or (state == "done" and not lead.get("pr_url")):
         return RELEASE_CLOSED
     if state == "blocked" and not (lead.get("claimed_by") and store.claimant(slug, lead["id"]) == lead["claimed_by"]):
@@ -85,8 +85,8 @@ def _stopped(slug, store, lead, doc):
 
 def _reopened(lead, doc):
     stamps, item = doc.get("_meta", {}).get("stamps", {}), f"tasks/{lead['id']}"
-    grouped_at = stamps.get(f"{item}/group_members")
-    return bool(grouped_at) and stamps.get(f"{item}/state", {}).get("rev", 0) > grouped_at.get("rev", 0)
+    grouped_at, changed_at = stamps.get(f"{item}/group_members"), stamps.get(f"{item}/state")
+    return bool(grouped_at and changed_at) and changed_at["rev"] > grouped_at["rev"]
 
 
 def candidates(doc: dict) -> list[list[dict]]:

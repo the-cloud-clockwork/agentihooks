@@ -88,7 +88,7 @@ def apply(doc, op, ctx):
 
 def _group(known, op, ctx):
     lead_id = op["item"].split("/")[1]
-    if not {lead_id, *op["members"]} <= set(known):
+    if any(task_id not in known for task_id in (lead_id, *op["members"])):
         return False
     group = [known[lead_id], *(known[m] for m in op["members"])]
     if reason := refusal(group, known):

@@ -243,15 +243,28 @@ def with_ungroup(monkeypatch):
 
 def test_ungroup_clears_the_lead_and_every_member_pointing_at_it(with_ungroup):
     group("t1", ["t2", "t3"])
-    state, rejected = ungroup("t1")
+    state, rejected = ungroup("t1", by=MASTER)
     found = rows(state)
     assert rejected == []
     assert "group_members" not in found["t1"]
     assert "merged_into" not in found["t2"] and "merged_into" not in found["t3"]
-    assert state["_meta"]["events"][-1]["kind"] == "ungrouped"
-    assert state["_meta"]["events"][-1]["text"] == "t2, t3"
-    assert state["_meta"]["stamps"]["tasks/t1/group_members"]["by"] == "swarm"
-    assert state["_meta"]["stamps"]["tasks/t2/merged_into"]["by"] == "swarm"
+    event = state["_meta"]["events"][-1]
+    assert (event["by"], event["kind"], event["target"], event["text"]) == (MASTER, "ungrouped", "tasks/t1", "t2, t3")
+    stamps = state["_meta"]["stamps"]
+    assert [stamps[f"tasks/{t}"]["by"] for t in ("t1/group_members", "t2/merged_into", "t3/merged_into")] == [
+        MASTER
+    ] * 3
+
+
+def test_ungroup_skips_a_member_missing_from_the_ledger(with_ungroup):
+    group("t1", ["t2"])
+    path = core.paths(SLUG)[1]
+    doc = json.loads(path.read_text())
+    next(t for t in doc["tasks"] if t["id"] == "t1")["group_members"].append("t9")
+    path.write_text(json.dumps(doc))
+    state, rejected = ungroup("t1")
+    assert rejected == [] and "merged_into" not in rows(state)["t2"]
+    assert state["_meta"]["events"][-1]["text"] == "t2"
 
 
 def test_ungroup_leaves_a_member_that_points_at_another_lead(with_ungroup):

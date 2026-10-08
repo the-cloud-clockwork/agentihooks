@@ -433,11 +433,36 @@ def test_a_working_lead_keeps_its_members(store, lead, state_rev, claim, handoff
     assert rows["a"]["group_members"] == ["b", "c"] and rows["b"]["merged_into"] == "a"
 
 
-def test_a_lead_without_stamps_is_not_taken_for_reopened(store):
-    found = grouped({"state": "open"})
-    found["_meta"] = {}
+@pytest.mark.parametrize("meta", [{}, None])
+def test_a_lead_without_stamps_is_not_taken_for_reopened(store, meta):
+    found = grouped({"state": "open"}, CHANGED_AFTER)
+    found.pop("_meta")
+    if meta is not None:
+        found["_meta"] = meta
     ledger, actions = release(store, found)
     assert (ledger.ungrouped, actions) == ([], [])
+
+
+def test_a_lead_without_a_state_stamp_is_not_taken_for_reopened(store):
+    found = grouped({"state": "open"}, CHANGED_AFTER)
+    del found["_meta"]["stamps"]["tasks/a/state"]
+    ledger, actions = release(store, found)
+    assert (ledger.ungrouped, actions) == ([], [])
+
+
+def test_a_working_lead_does_not_stop_the_release_of_a_later_one(store):
+    found = grouped({"state": "claimed", "claimed_by": ENGINEER}, CHANGED_AFTER)
+    found["tasks"] += [task("d", state="done", group_members=["e"]), task("e", merged_into="d")]
+    ledger, actions = release(store, found)
+    assert ledger.ungrouped == ["d"]
+    assert actions == ["released tasks e from task d: its lead closed without its pull request"]
+
+
+def test_a_member_missing_from_the_ledger_is_skipped(store):
+    found = grouped({"state": "done"}, CHANGED_AFTER)
+    found["tasks"][0]["group_members"].append("z")
+    ledger, actions = release(store, found)
+    assert actions == ["released tasks b, c from task a: its lead closed without its pull request"]
 
 
 def test_a_lead_without_a_grouping_stamp_is_not_taken_for_reopened(store):
@@ -484,8 +509,8 @@ def test_a_released_member_returns_to_the_claim_queue(store):
 
 
 def test_the_tick_releases_members_of_a_stopped_lead(store):
-    ledger = ReleaseLedger(grouped({"state": "done"}, CHANGED_AFTER)["tasks"])
+    ledger = ReleaseLedger(grouped({"state": "blocked", "claimed_by": ENGINEER}, CHANGED_AFTER)["tasks"])
     ledger.stamps = {"tasks/a/group_members": {"rev": GROUPED_AT}, "tasks/a/state": {"rev": CHANGED_AFTER}}
     actions = tick("sw", store, ledger, FakeRuntime(), now_ms=1_000)
     assert ledger.ungrouped == ["a"]
-    assert "released tasks b, c from task a: its lead closed without its pull request" in actions
+    assert "released tasks b, c from task a: its lead is blocked and its agent let it go" in actions
