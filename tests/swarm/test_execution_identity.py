@@ -68,7 +68,7 @@ def test_conflicts_refuse_without_changing_identity(store, agent, fault):
         "fixture", replace(agent, runtime_backend="kubernetes", runtime_target=target("pod-two")), first.execution_id
     )
     before = protected(store)
-    with pytest.raises(SwarmError):
+    with pytest.raises(SwarmError) as error:
         if fault == "uid":
             store.start_execution(
                 "fixture",
@@ -89,6 +89,13 @@ def test_conflicts_refuse_without_changing_identity(store, agent, fault):
     assert protected(store) == before
     assert store.execution_identity_conflicts_total("fixture") == 1
     assert store.agents("fixture") == [second]
+    messages = {
+        "uid": "Pod UID already belongs to another execution",
+        "label": "unknown execution identity; display labels cannot identify attempts",
+        "name": "execution requires a registered canonical agent name",
+        "runtime_backend": "unsupported runtime target identity field",
+    }
+    assert str(error.value) == messages.get(fault, "stale or changed execution identity")
 
 
 @pytest.mark.parametrize("repeat", range(2))
@@ -136,28 +143,35 @@ def test_execution_metadata_schema(store, agent):
 
 
 @pytest.mark.parametrize(
-    "changes",
+    "changes, message",
     [
-        {"runtime_backend": "unsupported"},
-        {"seat": "eng-1@other"},
-        {"seat": "label"},
-        {"runtime_target": "label"},
-        {"runtime_target": {"unexpected": "value"}},
-        {"runtime_backend": "kubernetes", "runtime_target": {}},
-        {"runtime_backend": "kubernetes", "runtime_target": {"pod_namespace": "", "pod_name": "pod"}},
-        {"runtime_backend": "kubernetes", "runtime_target": {"pod_namespace": "workers", "pod_name": 1}},
-        {"runtime_target": {"server_id": 1}},
-        {"runtime_target": {"pid": 0}},
-        {"runtime_target": {"pid": True}},
-        {"execution_id": "exe-forged"},
-        {"generation": 9},
-        {"name": "engineer@ffffff-9999"},
+        ({"runtime_backend": "unsupported"}, "unsupported runtime backend"),
+        ({"seat": "eng-1@other"}, "execution seat does not belong to the swarm"),
+        ({"seat": "label"}, "execution seat does not belong to the swarm"),
+        ({"runtime_target": "label"}, "runtime target must be a structured identity"),
+        ({"runtime_target": {"unexpected": "value"}}, "unsupported runtime target identity field"),
+        ({"runtime_backend": "kubernetes", "runtime_target": {}}, "Kubernetes target requires namespace and Pod name"),
+        (
+            {"runtime_backend": "kubernetes", "runtime_target": {"pod_namespace": "", "pod_name": "pod"}},
+            "Kubernetes target requires namespace and Pod name",
+        ),
+        (
+            {"runtime_backend": "kubernetes", "runtime_target": {"pod_namespace": "workers", "pod_name": 1}},
+            "Kubernetes target requires namespace and Pod name",
+        ),
+        ({"runtime_target": {"server_id": 1}}, "runtime target identity must be a string"),
+        ({"runtime_target": {"pid": 0}}, "runtime PID must be a positive integer"),
+        ({"runtime_target": {"pid": True}}, "runtime PID must be a positive integer"),
+        ({"execution_id": "exe-forged"}, "new execution identity and generation must be allocated by the store"),
+        ({"generation": 9}, "new execution identity and generation must be allocated by the store"),
+        ({"name": "engineer@ffffff-9999"}, "execution requires a registered canonical agent name"),
     ],
 )
-def test_invalid_admission_is_contained(store, agent, changes):
+def test_invalid_admission_is_contained(store, agent, changes, message):
     before = protected(store)
-    with pytest.raises(SwarmError):
+    with pytest.raises(SwarmError) as error:
         store.start_execution("fixture", replace(agent, **changes))
+    assert str(error.value) == message
     assert protected(store) == before
     assert store.execution_identity_conflicts_total("fixture") == 1
 
@@ -180,8 +194,13 @@ def test_bound_attempt_cannot_change_its_identity(store, agent, changes):
         "fixture", replace(agent, runtime_backend="kubernetes", runtime_target=target("pod-one"))
     )
     before = protected(store)
-    with pytest.raises(SwarmError):
+    with pytest.raises(SwarmError) as error:
         store.put_agent("fixture", replace(current, **changes))
+    assert str(error.value) == (
+        "runtime target identity is immutable after binding"
+        if "runtime_target" in changes
+        else "stale or changed execution identity"
+    )
     assert protected(store) == before
     assert store.execution("fixture", current.execution_id) == current
 
@@ -190,8 +209,9 @@ def test_new_attempt_requires_exact_predecessor(store, agent):
     current = store.start_execution("fixture", agent)
     for predecessor in ("", "label", "exe-forged"):
         before = protected(store)
-        with pytest.raises(SwarmError, match="current execution"):
+        with pytest.raises(SwarmError) as error:
             store.start_execution("fixture", agent, predecessor)
+        assert str(error.value) == "replacement does not match the current execution"
         assert protected(store) == before
     assert store.execution_occupants("fixture") == {agent.seat: current}
 
@@ -215,8 +235,9 @@ def test_replacement_name_keeps_seat_history_and_removes_old_projection(store, a
 def test_one_canonical_agent_cannot_occupy_two_execution_seats(store, agent):
     store.start_execution("fixture", agent)
     before = protected(store)
-    with pytest.raises(SwarmError):
+    with pytest.raises(SwarmError) as error:
         store.start_execution("fixture", replace(agent, seat="eng-2@fixture"))
+    assert str(error.value) == "canonical agent already belongs to another execution seat"
     assert protected(store) == before
 
 
@@ -252,8 +273,9 @@ def test_uuid_collision_preserves_all_attempts(store, agent, monkeypatch):
     monkeypatch.setattr(execution, "uuid4", lambda: SimpleNamespace(hex="a" * 32))
     first = store.start_execution("fixture", agent)
     before = protected(store)
-    with pytest.raises(SwarmError, match="already exists"):
+    with pytest.raises(SwarmError) as error:
         store.start_execution("fixture", agent, first.execution_id)
+    assert str(error.value) == "execution identity already exists"
     assert protected(store) == before
 
 
@@ -273,12 +295,13 @@ def test_updates_preserve_status_timestamp_until_status_changes(store, agent, mo
     assert store.execution("fixture", current.execution_id) == changed
 
 
-@pytest.mark.parametrize("operation", ["start", "update"])
+@pytest.mark.parametrize("operation", ["start", "update", "legacy"])
 @pytest.mark.parametrize("failures", [1, 5])
 def test_transaction_contention_is_bounded_and_never_partially_commits(store, agent, monkeypatch, operation, failures):
     from redis.exceptions import WatchError
 
     current = store.start_execution("fixture", agent)
+    legacy = replace(agent, name=store.next_name("fixture", "eng"))
     before = protected(store)
     original = store.redis.pipeline
     attempts = []
@@ -298,11 +321,19 @@ def test_transaction_contention_is_bounded_and_never_partially_commits(store, ag
 
     monkeypatch.setattr(store.redis, "pipeline", pipeline)
     if failures == 5:
-        with pytest.raises(SwarmError, match="not committed"):
+        with pytest.raises(SwarmError) as error:
             if operation == "start":
                 store.start_execution("fixture", agent, current.execution_id)
-            else:
+            elif operation == "update":
                 store.put_agent("fixture", replace(current, idle_ticks=2))
+            else:
+                store.put_agent("fixture", legacy)
+        messages = {
+            "start": "execution history kept changing; admission was not committed",
+            "update": "execution history kept changing; update was not committed",
+            "legacy": "agent registry kept changing; update was not committed",
+        }
+        assert str(error.value) == messages[operation]
         assert protected(store) == before
         assert len(attempts) == 5
     else:
@@ -310,9 +341,12 @@ def test_transaction_contention_is_bounded_and_never_partially_commits(store, ag
             result = store.start_execution("fixture", agent, current.execution_id)
             assert result.generation == 2
             assert len(store.executions("fixture", agent.seat)) == 2
-        else:
+        elif operation == "update":
             store.put_agent("fixture", replace(current, idle_ticks=2))
             assert store.execution("fixture", current.execution_id).idle_ticks == 2
+        else:
+            store.put_agent("fixture", legacy)
+            assert store.redis.hexists(store.key("fixture", "agents"), legacy.name)
         assert len(attempts) == 2
 
 
@@ -379,3 +413,147 @@ def test_agent_projection_is_compatible_with_the_preceding_strict_reader(store, 
     assert prior.seat == current.seat
     assert prior.state == current.state
     assert store.agents("fixture") == [current]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"execution_id": "exe-unadmitted"},
+        {"generation": 1},
+        {"runtime_target": {"pid": 1}},
+        {"runtime_backend": "unsupported"},
+    ],
+)
+def test_unadmitted_identity_fields_cannot_use_legacy_writer(store, agent, changes):
+    before = protected(store)
+    with pytest.raises(SwarmError):
+        store.put_agent("fixture", replace(agent, **changes))
+    assert protected(store) == before
+
+
+def test_legacy_status_timestamp_changes_only_with_observed_status(store, agent, monkeypatch):
+    from scripts.swarm import execution
+
+    monkeypatch.setattr(execution.time, "time", lambda: 1)
+    store.put_agent("fixture", agent)
+    key = store.key("fixture", "state-since")
+    assert store.redis.hget(key, agent.name) == "1000"
+    monkeypatch.setattr(execution.time, "time", lambda: 2)
+    store.put_agent("fixture", replace(agent, model="new-model"))
+    assert store.redis.hget(key, agent.name) == "1000"
+    store.put_agent("fixture", replace(agent, idle_ticks=1))
+    assert store.redis.hget(key, agent.name) == "2000"
+
+
+@pytest.mark.parametrize("uid", [None, 1, False])
+def test_pod_uid_requires_a_string(store, agent, uid):
+    before = protected(store)
+    with pytest.raises(SwarmError) as error:
+        store.start_execution("fixture", replace(agent, runtime_backend="kubernetes", runtime_target=target(uid)))
+    assert str(error.value) == "runtime target identity must be a string"
+    assert protected(store) == before
+
+
+def test_local_pid_one_and_scope_fields_survive_admission(store, agent):
+    target = {"server_id": "server", "process_namespace": "namespace", "pid": 1}
+    current = store.start_execution("fixture", replace(agent, runtime_target=target))
+    assert store.execution("fixture", current.execution_id).runtime_target == target
+
+
+def test_runtime_binding_refuses_removing_a_local_scope_field(store, agent):
+    current = store.start_execution("fixture", replace(agent, runtime_target={"server_id": "server"}))
+    before = protected(store)
+    with pytest.raises(SwarmError) as error:
+        store.put_agent("fixture", replace(current, runtime_target={}))
+    assert str(error.value) == "runtime target identity is immutable after binding"
+    assert protected(store) == before
+
+
+def test_separate_swarm_history_never_fills_another_projection(store, agent):
+    current = store.start_execution("fixture", agent)
+    store.create(SwarmConfig("another", "agentihooks", 1, 0))
+    assert store.execution_occupants("another") == {}
+    assert store.executions("another", agent.seat) == []
+    with pytest.raises(SwarmError):
+        store.execution("another", current.execution_id)
+    assert store.execution_identity_conflicts_total("fixture") == 0
+    assert store.execution_identity_conflicts_total("another") == 1
+
+
+def test_registered_agent_from_another_swarm_is_refused(store, agent):
+    store.create(SwarmConfig("another", "agentihooks", 1, 0))
+    foreign = store.next_name("another", "eng")
+    before = protected(store)
+    with pytest.raises(SwarmError) as error:
+        store.start_execution("fixture", replace(agent, name=foreign))
+    assert str(error.value) == "execution requires a registered canonical agent name"
+    assert protected(store) == before
+
+
+@pytest.mark.parametrize("field", ["pod_name", "pod_namespace"])
+def test_unbound_uid_never_hides_a_changed_runtime_target(store, agent, field):
+    current = store.start_execution("fixture", replace(agent, runtime_backend="kubernetes", runtime_target=target()))
+    before = protected(store)
+    with pytest.raises(SwarmError) as error:
+        store.put_agent("fixture", replace(current, runtime_target={**target("pod-one"), field: "other"}))
+    assert str(error.value) == "runtime target identity is immutable after binding"
+    assert protected(store) == before
+
+
+@pytest.mark.parametrize("changed_key", ["executions", "agents"])
+def test_legacy_write_retries_when_its_observed_state_changes(store, agent, monkeypatch, changed_key):
+    store.put_agent("fixture", agent)
+    key = store.key("fixture", changed_key)
+    watched = []
+    original = store.redis.pipeline
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        def competing_commit():
+            watched.append(True)
+            if len(watched) == 1:
+                if changed_key == "executions":
+                    admitted = replace(agent, execution_id="exe-" + "a" * 32, generation=1)
+                    store.redis.hset(key, admitted.execution_id, json.dumps(asdict(admitted)))
+                else:
+                    store.redis.hset(key, agent.name, json.dumps(asdict(replace(agent, idle_ticks=1))))
+            return execute()
+
+        monkeypatch.setattr(pipe, "execute", competing_commit)
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    if changed_key == "executions":
+        with pytest.raises(SwarmError) as error:
+            store.put_agent("fixture", replace(agent, model="new"))
+        assert str(error.value) == "stale or changed execution identity"
+        assert json.loads(store.redis.hget(store.key("fixture", "agents"), agent.name))["model"] == ""
+    else:
+        from scripts.swarm import execution
+
+        monkeypatch.setattr(execution.time, "time", lambda: 20)
+        store.put_agent("fixture", agent)
+        assert len(watched) == 2
+        assert store.redis.hget(store.key("fixture", "state-since"), agent.name) == "20000"
+
+
+def test_stale_update_cannot_overwrite_a_concurrent_replacement(store, agent, monkeypatch):
+    current = store.start_execution("fixture", agent)
+    check_uid = store.execution_registry.check_uid
+    replacements = []
+
+    def replace_after_read(slug, record, reader):
+        check_uid(slug, record, reader)
+        if not replacements:
+            replacements.append(True)
+            replacements[0] = store.start_execution(slug, agent, current.execution_id)
+
+    monkeypatch.setattr(store.execution_registry, "check_uid", replace_after_read)
+    with pytest.raises(SwarmError) as error:
+        store.put_agent("fixture", replace(current, idle_ticks=1))
+    assert str(error.value) == "stale or changed execution identity"
+    assert store.agents("fixture") == replacements
+    assert store.execution("fixture", current.execution_id) == current
+    assert store.executions("fixture", agent.seat) == [current, replacements[0]]

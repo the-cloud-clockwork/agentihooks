@@ -213,7 +213,7 @@ def _validate_target(backend, target, refuse):
 
 
 def _check_binding(previous, current, refuse):
-    for field in set(previous) | set(current):
+    for field in sorted(set(previous) | set(current)):
         if field == "pod_uid" and not previous.get(field):
             continue
         if previous.get(field) != current.get(field):

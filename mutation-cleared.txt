@@ -1966,5 +1966,73 @@
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_page_for__mutmut_39:9fb197a866645940aeeeadfc8a45d53d12c97717d4bfa0c78034bdcee2f839eb": {
     "reader": "Standards",
     "reason": "Python normalizes codec names before lookup: codecs.lookup('UTF-8') and codecs.lookup('utf-8') resolve to the same utf-8 codec, so read_text(encoding='UTF-8') decodes to the identical str as encoding='utf-8' for any bytes, independent of the file content, and page_for output is unchanged. Evidence: CI run 37704627823. Adversarial Standards ruling."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1occupants__mutmut_2:f85cf9c608dc84bc6d24d034c432d043e622b76f492bcfc6042f27651213b80e": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1occupants__mutmut_4:83986d628567bbfa701b4bcca3ae90f11542e6996b0d278111ae01b6d4d85da2": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1managed__mutmut_4:57939d4c7463f912c4270b563ebe1890895786dbadfc352ac1eda11e9d79477f": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1managed__mutmut_6:31149294f6cba10fcb0289f5a53715c3a133ed2b6800f4e71b6d80b8e634f141": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1agents__mutmut_25:ea5c6b4ef6b66c1873a7ee4bfd354110d2328bba5e4c298ef379069cd2c6a4ef": {
+    "reader": "Standards",
+    "reason": "Accepted generations for each canonical name are unique: admission monotonically allocates per seat under WATCH, names cannot span execution seats, and one hash field per immutable execution prevents a same name generation tie. Greater than or equal yields the same latest identity. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1put__mutmut_22:195c41307a78cdff7f396adb67778baf1196c144249ab4da8348d1939a43bed5": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1put__mutmut_25:0d40c173dbb6f4fc3b60071ccd17ce3456e409e30bb919ddbe41a80008ae96e5": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1start__mutmut_41:1f2f29b8ad8e265a6437adb493587ee113d2372d99aacc9edb320d9ae87722fb": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1start__mutmut_43:d974b7ab60726731ed1135a425eaea4b97deba58f86a12f3d4552d79db4e4fe4": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1start__mutmut_54:ef1cea8ff322b84e366fd9204e24f882941d7f30157f8c2965ee1b20be6a9b3c": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1start__mutmut_56:cb89c0d2d73ef0ef7a216a3d40d2b0e480d7cbe6a8045993e42e45b0ad306333": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1start__mutmut_69:74518a670a58d85bd25410d8e7963918413d56cb957e91a9d85a2f8be5e907d5": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1check_uid__mutmut_14:4c9c852f00ea5e17eeda8aadfdc5d1a8990673ec2e41f7c45f7ee3d36e096d9f": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1check_uid__mutmut_16:5fe994509f7e5c402122dfe7ec3fd018d91b648f3062e8df7525259933a0edc5": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1update__mutmut_17:69ab13bd40942635db1676ff0d46cb082704e613926fada4f0685e592152b3ea": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1update__mutmut_19:1bf5c8c5881a7a0cb8a969f7897546929f381792b54eff2ca70c82dbfb9ec8f3": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  },
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1update__mutmut_51:da5d7e32f586ec4d4ace53cc1abc4de83b80ea36dc52786d889bda0059619bfd": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
   }
 }
