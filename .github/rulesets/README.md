@@ -78,8 +78,16 @@ for env in release pypi; do
 done
 ```
 
-A live policy not in the file is removed with a `DELETE` to
-`deployment-branch-policies/<id>`. Verify:
+A live policy not in the file is removed by its id. The `main` policy the
+operator added to `release` for the old publish gate goes once this merges:
+
+```bash
+gh api \
+  --method DELETE \
+  repos/The-Cloud-Clockwork/agentihooks/environments/release/deployment-branch-policies/62304415
+```
+
+Verify:
 
 ```bash
 gh api repos/The-Cloud-Clockwork/agentihooks/environments/release/deployment-branch-policies --jq '.branch_policies[]|{name,type}'
