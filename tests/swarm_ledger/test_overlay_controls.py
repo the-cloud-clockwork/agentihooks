@@ -28,6 +28,11 @@ def test_page_sets_overlays_per_role_in_role_order():
     ]
 
 
+def test_page_sets_overlays_beside_other_settings_in_one_change():
+    body = {"action": "set", "autonomy": "full", "overlays": {"qa": ["qitp-tuner", "trader", "reviewer"]}}
+    assert ledger_server.control_argv(body) == ["set", "autonomy=full", "overlays-qa=qitp-tuner,trader,reviewer"]
+
+
 def test_page_sets_at_most_three_overlays_on_a_role():
     names = ["a", "b", "c"]
     assert ledger_server.control_argv({"action": "set", "overlays": {"qa": names}}) == ["set", "overlays-qa=a,b,c"]
