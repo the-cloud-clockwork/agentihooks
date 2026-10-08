@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import sys
 import tempfile
 import threading
@@ -69,6 +70,15 @@ LISTS = {
     ),
 }
 BOOL_FIELDS = ("done", "out_of_scope")
+SEED_ADD_COMMANDS = {
+    "tasks": (
+        "task",
+        "task add <id>",
+        ("phase", "lane", "description", "depends_on", "territory", "gain", "kind", "profile", "rank", "difficulty"),
+    ),
+    "followups": ("follow up", "followup add", ()),
+    "phases": ("phase", "phase add <id>", ("description", "depends_on", "planning", "release")),
+}
 STATE_EVENTS = {"done": ("checked", "unchecked"), "out_of_scope": ("out of scope", "back in scope")}
 THREADS = {
     "notes": ("comments",),
@@ -437,7 +447,36 @@ def new_item(name, seed_item, ctx):
     return item
 
 
+def refuse_seed_adds(doc, base_doc, seed, ctx):
+    """New tasks, follow ups and phases come only from the ledger add commands."""
+    kept = {}
+    for name, (noun, command, fields) in SEED_ADD_COMMANDS.items():
+        known = {i["id"] for i in doc[name]} | {i["id"] for i in base_doc[name]}
+        kept[name] = [i for i in seed[name] if i["id"] in known]
+        for item in seed[name]:
+            if item["id"] not in known:
+                label = item.get("text") or item.get("title")
+                ctx.refused.append(
+                    f'The page added the {noun} "{label}", which was not added. Add it with '
+                    f"{seed_add_command(command, label, item, fields)}"
+                )
+    return {**seed, **kept}
+
+
+def seed_add_command(command, label, item, fields):
+    flags = []
+    for field in fields:
+        value, flag = item.get(field), f"--{field.replace('_', '-')}"
+        if value is True:
+            flags.append(flag)
+        elif value is not None and value is not False and value not in ("", []):
+            value = ",".join(value) if isinstance(value, list) else str(value)
+            flags.append(f"{flag} {shlex.quote(value)}")
+    return " ".join(["agentihooks ledger --slug <slug> --as <name>", command, shlex.quote(label), *flags])
+
+
 def reconcile_fields(doc, base_doc, seed, ctx):
+    seed = refuse_seed_adds(doc, base_doc, seed, ctx)
     if not ledger_phases.seed_graph_valid(doc["phases"], base_doc["phases"], seed["phases"], ctx):
         seed = {**seed, "phases": base_doc["phases"]}
     base, new, flat = flatten(base_doc), flatten(seed), flatten(doc)
