@@ -206,7 +206,9 @@ def steer(sock: str, repo: str) -> dict:
     }
 
 
-APPROVAL_PROMPT = "Fixture seven. Run the shell command `touch approval-probe.txt` in the current folder, then reply FOXTROT."
+APPROVAL_PROMPT = (
+    "Fixture seven. Run the shell command `touch approval-probe.txt` in the current folder, then reply FOXTROT."
+)
 
 
 def approvals(sock: str, repo: str) -> dict:
@@ -262,7 +264,9 @@ def detach(sock: str, repo: str) -> dict:
     resumed = v2.request("thread/resume", {"threadId": thread})
     loaded = v2.request("thread/loaded/list", {})
     second = run_turn(v2, thread, "Fixture eight from the reopened viewer. Reply HOTEL.")
-    a_saw, _ = a.until(lambda m: m.get("method") == "turn/completed" and m["params"]["turn"]["id"] == second.get("turn"), 30)
+    a_saw, _ = a.until(
+        lambda m: m.get("method") == "turn/completed" and m["params"]["turn"]["id"] == second.get("turn"), 30
+    )
     hist = v2.request("thread/read", {"threadId": thread, "includeTurns": True})["result"]["thread"]
     a.close()
     v2.close()
@@ -368,6 +372,33 @@ def new_thread(sock: str, repo: str) -> dict:
     return {"thread": thread, "turn": turn}
 
 
+def list_hooks(c: Client, repo: str) -> list[dict]:
+    entries = c.request("hooks/list", {"cwds": [repo]})["result"]["data"]
+    return [h for e in entries for h in e["hooks"]]
+
+
+def trust_hooks(sock: str, repo: str) -> dict:
+    c = Client(sock, "probe-hook-trust")
+    before = list_hooks(c, repo)
+    edits = [
+        {
+            "keyPath": f"hooks.state.{json.dumps(h['key'])}.trusted_hash",
+            "value": h["currentHash"],
+            "mergeStrategy": "replace",
+        }
+        for h in before
+        if h["trustStatus"] != "trusted"
+    ]
+    written = c.request("config/batchWrite", {"edits": edits, "reloadUserConfig": True}) if edits else {}
+    after = list_hooks(c, repo)
+    c.close()
+    return {
+        "before": {h["eventName"]: h["trustStatus"] for h in before},
+        "write_error": written.get("error"),
+        "after": {h["eventName"]: h["trustStatus"] for h in after},
+    }
+
+
 SCENARIOS = {
     "conversation": conversation,
     "steer": steer,
@@ -377,6 +408,7 @@ SCENARIOS = {
     "sandbox": sandbox,
     "account": account,
     "new_thread": new_thread,
+    "trust_hooks": trust_hooks,
 }
 
 
