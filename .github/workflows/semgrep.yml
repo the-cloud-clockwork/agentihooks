@@ -1,0 +1,39 @@
+name: Semgrep
+
+on:
+  workflow_call:
+    inputs:
+      base:
+        description: Revision whose findings are already known
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: python -m pip install semgrep==1.177.0
+
+      # Actions are pinned to release tags by fleet policy, so the mutable tag rule only repeats it.
+      - name: Fail on findings new against the base
+        env:
+          BASE: ${{ inputs.base }}
+        run: >-
+          semgrep scan --error --metrics off
+          --config p/ci --config p/secrets --config p/python
+          --exclude-rule yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
+          --baseline-commit "$BASE"
