@@ -22,6 +22,9 @@ ASK = (
     "The swarm proposes one pull request for tasks {lead} and {members}, led by {lead}. If the operator agrees, apply "
     "it with agentihooks ledger --slug {slug} --as <your name> task group {lead} {members_args}."
 )
+RELEASE_CLOSED = "closed without its pull request"
+RELEASE_BLOCKED = "is blocked and its agent let it go"
+RELEASE_REOPENED = "was reopened"
 TOLD = "For your information: the swarm grouped tasks {members} under task {lead}, whose agent delivers all of them in one pull request."
 
 
@@ -48,6 +51,42 @@ def group_pass(slug, config, store, ledger, doc):
             continue
         store.redis.hset(seen, key(group), "applied" if config.autonomy in APPLIES else "proposed")
     return actions
+
+
+def release_pass(slug, store, ledger, doc):
+    known = {t["id"]: t for t in doc["tasks"]}
+    actions = []
+    for lead in [t for t in known.values() if t.get("group_members")]:
+        why = _stopped(slug, store, lead, doc)
+        if not why:
+            continue
+        try:
+            ledger.ungroup_tasks(slug, lead["id"])
+        except LedgerRefused:
+            actions.append(f"skipped releasing the group under task {lead['id']}: the ledger refused its write")
+            continue
+        released = [m for m in lead.pop("group_members") if known.get(m, {}).get("merged_into") == lead["id"]]
+        for member in released:
+            del known[member]["merged_into"]
+        actions.append(f"released tasks {', '.join(released)} from task {lead['id']}: its lead {why}")
+    return actions
+
+
+def _stopped(slug, store, lead, doc):
+    state = lead["state"]
+    if lead.get("out_of_scope") or (state == "done" and not lead.get("pr_url")):
+        return RELEASE_CLOSED
+    if state == "blocked" and not (lead.get("claimed_by") and store.claimant(slug, lead["id"]) == lead["claimed_by"]):
+        return RELEASE_BLOCKED
+    if state == "open" and _reopened(lead, doc) and not store.handoff(slug, lead["id"]):
+        return RELEASE_REOPENED
+    return ""
+
+
+def _reopened(lead, doc):
+    stamps, item = doc.get("_meta", {}).get("stamps", {}), f"tasks/{lead['id']}"
+    grouped_at, changed_at = stamps.get(f"{item}/group_members"), stamps.get(f"{item}/state")
+    return bool(grouped_at and changed_at) and changed_at["rev"] > grouped_at["rev"]
 
 
 def candidates(doc: dict) -> list[list[dict]]:

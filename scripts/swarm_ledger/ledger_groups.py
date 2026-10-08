@@ -7,7 +7,7 @@ import re
 
 from scripts.swarm_ledger import ledger_kinds
 
-OPS = ("task_group",)
+OPS = ("task_group", "task_ungroup")
 MAX_TASKS = 5
 CEILING = "M"
 MINUTES = {"S": 10, "M": 25, "L": 40}
@@ -21,7 +21,11 @@ ITEM_RE = re.compile(r"^tasks/[^/]+$")
 def check(op):
     by = op.get("by")
     if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
-        raise ValueError("task_group needs `by`, an agent name other than operator")
+        raise ValueError(f"{op['op']} needs `by`, an agent name other than operator")
+    if op["op"] == "task_ungroup":
+        if set(op) != {"op", "id", "by", "item"} or not ITEM_RE.match(str(op["item"])):
+            raise ValueError("task_ungroup takes only an id, by and an item tasks/<lead id>")
+        return
     if set(op) != {"op", "id", "by", "item", "members"} or not ITEM_RE.match(str(op["item"])):
         raise ValueError("task_group takes only an id, by, an item tasks/<lead id> and members")
     members, lead = op["members"], op["item"].split("/")[1]
@@ -74,12 +78,17 @@ def _upstream(task, known):
 def apply(doc, op, ctx):
     from scripts.swarm.naming import lane_of
 
-    lead_id = op["item"].split("/")[1]
-    known = {t["id"]: t for t in doc["tasks"]}
-    if any(task_id not in known for task_id in (lead_id, *op["members"])):
-        return False
     if lane_of(op["by"]) in WORKER_LANES:
-        ctx.refused.append(f"{op['by']} works in the {lane_of(op['by'])} lane and cannot set a task group")
+        verb = "release" if op["op"] == "task_ungroup" else "set"
+        ctx.refused.append(f"{op['by']} works in the {lane_of(op['by'])} lane and cannot {verb} a task group")
+        return False
+    known = {t["id"]: t for t in doc["tasks"]}
+    return (_ungroup if op["op"] == "task_ungroup" else _group)(known, op, ctx)
+
+
+def _group(known, op, ctx):
+    lead_id = op["item"].split("/")[1]
+    if any(task_id not in known for task_id in (lead_id, *op["members"])):
         return False
     group = [known[lead_id], *(known[m] for m in op["members"])]
     if reason := refusal(group, known):
@@ -91,4 +100,18 @@ def apply(doc, op, ctx):
         known[member]["merged_into"] = lead_id
         ctx.stamp(f"tasks/{member}/merged_into", op["by"])
     ctx.record(op["by"], "grouped", op["item"], text=", ".join(op["members"]))
+    return True
+
+
+def _ungroup(known, op, ctx):
+    lead_id = op["item"].split("/")[1]
+    if not known.get(lead_id, {}).get("group_members"):
+        ctx.refused.append(f"{op['item']} leads no group")
+        return False
+    released = [m for m in known[lead_id].pop("group_members") if known.get(m, {}).get("merged_into") == lead_id]
+    ctx.stamp(f"{op['item']}/group_members", op["by"])
+    for member in released:
+        del known[member]["merged_into"]
+        ctx.stamp(f"tasks/{member}/merged_into", op["by"])
+    ctx.record(op["by"], "ungrouped", op["item"], text=", ".join(released))
     return True

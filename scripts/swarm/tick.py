@@ -157,6 +157,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions.append("new tasks, running again")
     actions += skip_refused(_orphans, slug, store, ledger, rows)
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
+    actions += skip_refused(grouping.release_pass, slug, store, ledger, doc)
     actions += skip_refused(grouping.group_pass, slug, config, store, ledger, doc)
     from scripts.swarm import capacity
 
