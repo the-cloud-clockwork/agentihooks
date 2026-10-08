@@ -1,6 +1,6 @@
 """Live qualification probe for the Codex app-server over a Unix socket (CXCH-01).
 
-Usage: python probe.py <socket> <repo> <scenario> <out.json>
+Usage: python -m scripts.codex_app_server_probe <socket> <repo> <scenario> <out.json> [thread]
 Each scenario writes one sanitized record: methods, ids replaced by stable labels,
 agent text kept only when it is a fixture echo.
 """

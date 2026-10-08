@@ -1,7 +1,7 @@
 {
   "record": "CXCH-01",
   "observed_on": "2026-10-08",
-  "method": "live probe (probe.py) against `codex app-server --listen unix://<scratch>/app.sock` in a disposable CODEX_HOME (linked default auth, low effort, trusted fixture repo, hooks logging stdin); fixture prompts only",
+  "method": "live probe (python -m scripts.codex_app_server_probe) against `codex app-server --listen unix://<scratch>/app.sock` in a disposable CODEX_HOME (linked default auth, low effort, trusted fixture repo, hooks logging stdin); fixture prompts only",
   "cli": {
     "version": "codex-cli 0.160.0",
     "binary": "standalone release 0.160.0-x86_64-unknown-linux-musl",
@@ -88,8 +88,9 @@
       "observed": "account/read -> type chatgpt, plan present, no error; a turn completed. No values printed"
     },
     "token_account": {
-      "status": "unsupported on this host",
-      "observed": "agentihooks balance lists only the default Codex account; no AH_CX_TOKEN_<slug> account is configured, so a token-authenticated app-server could not be run"
+      "status": "gap: not proven",
+      "observed": "agentihooks balance lists only the default Codex account; no AH_CX_TOKEN_<slug> variable exists in the environment (name scan, no values), so a token-authenticated app-server could not be run",
+      "needs": "the operator adds one Codex token account (AH_CX_TOKEN_<slug>); then rerun the account scenario on an app-server launched with only that token and record it beside records/account.json"
     },
     "tui_remote_attach_unix_socket": {
       "status": "pass",
