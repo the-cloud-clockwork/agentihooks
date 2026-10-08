@@ -1,6 +1,7 @@
 import http.server
 import json
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,11 @@ def server(monkeypatch, tmp_path):
 
     class Health(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
+            time.sleep(served.get("delay", 0))
+            if self.path != "/healthz" or "status" in served:
+                self.send_response(served.get("status", 404))
+                self.end_headers()
+                return
             body = served["body"] if "body" in served else json.dumps({"dir": served["dir"]}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -79,9 +85,27 @@ def test_serving_names_the_folder_the_server_reports(server):
     assert ledger_link.serving() == "/srv/other"
 
 
-def test_serving_is_none_for_a_reply_that_is_not_json(server):
-    server["body"] = b"not json"
+@pytest.mark.parametrize(
+    "served",
+    [{"body": b"not json"}, {"body": b"[]"}, {"body": b"{}"}, {"body": b'{"dir": ""}'}, {"status": 404}],
+)
+def test_a_server_that_reports_no_folder_serves_an_empty_folder(server, served):
+    server.update(served)
+    assert ledger_link.serving() == ""
+
+
+def test_a_foreign_server_on_the_port_gets_no_link(server, tmp_path):
+    server["body"] = b"<html>another service</html>"
+    assert ledger_link.page_line("my-plan") == (
+        f"No ledger page link: {ledger_link.base()} serves no ledger folder, not {tmp_path / 'scratch-ledger'}. "
+        f"Set a spare LEDGER_PORT and start the ledger server with {ledger_link.START}"
+    )
+
+
+def test_serving_gives_up_after_its_timeout(server):
+    server.update({"dir": "/srv/other", "delay": 1.5})
     assert ledger_link.serving() is None
+    assert ledger_link.serving(timeout=3) == "/srv/other"
 
 
 def test_serving_is_none_when_nothing_listens(monkeypatch):

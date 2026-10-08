@@ -2,6 +2,7 @@
 
 import json
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -16,9 +17,7 @@ def base() -> str:
 
 
 def shared_directory(environ=os.environ) -> bool:
-    shared = Path.home() / "development-ledger"
-    selected = Path(environ.get("LEDGER_DIR", shared)).expanduser()
-    return selected.resolve() == shared.resolve()
+    return folder(environ).resolve() == (Path.home() / "development-ledger").resolve()
 
 
 def address(environ=os.environ) -> tuple[str, int]:
@@ -63,12 +62,17 @@ def folder(environ=os.environ) -> Path:
     return Path(environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 
 
-def serving():
+def serving(timeout: float = 1) -> str | None:
     try:
-        with urllib.request.urlopen(f"{base()}/healthz", timeout=1) as resp:
-            return json.loads(resp.read()).get("dir")
-    except (OSError, ValueError):
+        with urllib.request.urlopen(f"{base()}/healthz", timeout=timeout) as resp:
+            body = json.loads(resp.read())
+    except (urllib.error.HTTPError, ValueError):
+        return ""
+    except OSError:
         return None
+    if not isinstance(body, dict):
+        return ""
+    return body.get("dir") or ""
 
 
 def page_line(slug):
@@ -76,9 +80,9 @@ def page_line(slug):
     served = serving()
     if served is None:
         return f"{line}. The ledger server is not answering: start it with {START}"
-    if Path(served).resolve() != folder().resolve():
+    if not served or Path(served).resolve() != folder().resolve():
         return (
-            f"No ledger page link: {base()} serves {served}, not {folder()}. "
+            f"No ledger page link: {base()} serves {served or 'no ledger folder'}, not {folder()}. "
             f"Set a spare LEDGER_PORT and start the ledger server with {START}"
         )
     return line
