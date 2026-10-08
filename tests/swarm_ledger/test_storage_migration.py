@@ -72,11 +72,11 @@ def test_load_keeps_an_existing_ledger_unless_told_to_replace(tmp_path):
 def test_the_command_names_itself_and_each_action_and_needs_one(monkeypatch, capsys):
     with pytest.raises(SystemExit) as helped:
         run(monkeypatch, "--help")
-    shown = capsys.readouterr().out
+    shown = " ".join(capsys.readouterr().out.split())
     assert helped.value.code == 0
     assert shown.startswith("usage: agentihooks ledger storage [-h] {export,import,cutover}")
     for text in (
-        command.__doc__,
+        " ".join(command.__doc__.split()),
         "print or write the complete stored document",
         "store an exported document",
         "import every ledger file left in the ledger folder",

@@ -10,7 +10,7 @@ def export(slug: str, out: Path | None = None) -> dict:
     """The complete stored document; written to `out` when given, else returned."""
     state = repository.export_document(slug)
     if out is not None:
-        Path(out).write_text(json.dumps(state, indent=2) + "\n")
+        Path(out).write_bytes((json.dumps(state, indent=2, ensure_ascii=False) + "\n").encode())
     return state
 
 
