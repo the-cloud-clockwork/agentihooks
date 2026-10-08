@@ -94,6 +94,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         "AGENTIHOOKS_SWARM_REDIS_URL": url,
         "LEDGER_DIR": str(ledgers),
         "LEDGER_PORT": str(ledger_port),
+        "LEDGER_AUTOSTART": "1",
         "WORKTREE_ROOT": str(trees),
         "AGENTIHOOKS_SWARM": SLUG,
         "AGENTIHOOKS_AGENT_NAME": ME,
