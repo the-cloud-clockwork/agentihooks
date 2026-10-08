@@ -370,6 +370,7 @@ def test_a_codex_lane_pin_refuses_a_claude_only_profile(tmp_path, monkeypatch, l
     with pytest.raises(SpawnError) as error:
         _spawn_seen(tmp_path, {lane: {"agent": "codex", "profile": "engineer"}}, lane=lane)
     assert str(error.value) == f"{label} codex cannot mount the claude only profile engineer"
+    assert error.value.status == "unsupported"
 
 
 def _passed(argv):
@@ -621,8 +622,9 @@ def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_
     runtime, config, agent, seen = _resuming(tmp_path, "someone-else")
     ended = []
     runtime.end = lambda name, pid, homes: ended.append((name, pid, homes)) or Outcome()
-    with pytest.raises(SpawnError, match="conversation c0ffee"):
+    with pytest.raises(SpawnError, match="conversation c0ffee") as error:
         runtime.resume(config, agent, "you were restored")
+    assert error.value.status == "ambiguous"
     assert ended == [("engineer@a1b2c3-0001", 123, homes)]
     assert not any("terminate-agent" in argv for argv in seen["runs"])
     assert ["pane", "close", "w2:p9"] in seen["herdr"]
@@ -1091,8 +1093,9 @@ def test_quota_handoff_without_another_account_keeps_the_handoff(tmp_path, harne
         "handoff": "saved handoff",
         "handoff_envelope": {"reason": "quota", "seat": "eng-2@sw", "launch": saved},
     }
-    with pytest.raises(SpawnError, match="no .* account has placeable quota seats"):
+    with pytest.raises(SpawnError, match="no .* account has placeable quota seats") as error:
         runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task)
+    assert error.value.status == "unavailable"
     assert task["handoff"] == "saved handoff"
     assert task["handoff_envelope"]["launch"] == saved
     assert runtime._quota_accounts[0].sessions == 0
