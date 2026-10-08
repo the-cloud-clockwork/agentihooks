@@ -6,12 +6,13 @@ import time
 import uuid
 from collections.abc import Callable
 
+from scripts.hive import registry
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore
 
 
 def hive_id() -> str:
-    return os.environ.get("SWARM_HIVE_ID") or socket.gethostname()
+    return os.environ.get("SWARM_HIVE_ID") or registry.seeded_id() or socket.gethostname()
 
 
 def bind(store: RedisStore, slug: str, owner: str) -> bool:
