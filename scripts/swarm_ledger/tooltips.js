@@ -58,6 +58,8 @@
     ['[data-swarm="effort_max_down"]', "Lower the most effort a new agent may start with."],
     ['[data-swarm="effort_max_up"]', "Raise the most effort a new agent may start with."],
     ['[data-swarm="apply"]', "Send every changed capacity value to the swarm in one change."],
+    ["#overlays-apply", "Send the changed overlay choices for each role to the swarm in one change."],
+    ["[data-overlay]", "Add or remove this overlay for the role; a role wears at most three."],
     ['[data-swarm="doctor_start"]', "Start a Doctor that watches this swarm and rates each coordination failure."],
     ['[data-swarm="doctor_stop"]', "Stop the Doctor watching this swarm."],
     ["[data-message]", "Open the chat addressed to this agent."],

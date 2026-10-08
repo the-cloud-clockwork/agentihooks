@@ -137,6 +137,8 @@ const h = (tag, attrs, ...children) => attrs.text || children.filter(Boolean).jo
 const when = () => "";
 const inScope = list => list;
 const activeAgents = () => 0;
+const swarm = null;
+const inboxPending = () => 0;
 let meta = {created_at: Date.now() - 3600000};
 let doc = {phases: [{done: true}, {done: false}], followups: [], questions: [], tasks: [], time_left_minutes: 200};
 """
