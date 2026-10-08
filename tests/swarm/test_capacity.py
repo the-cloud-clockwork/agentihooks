@@ -4,6 +4,7 @@ from dataclasses import replace
 import pytest
 
 from scripts import claude_quota_balancer as balancer
+from scripts import session_bands
 from scripts.swarm import capacity
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import SpawnError, tick
@@ -984,3 +985,16 @@ def test_capacity_places_ready_tasks_in_the_claim_order():
     )
     capacity.apply("sw", config, store, ledger, runtime, 1000)
     assert capacity.read(store, "sw")["tasks"] == {"deep": "claude"}
+
+
+def test_allocation_skips_a_harness_whose_only_room_is_on_accounts_the_handoff_cannot_take():
+    seats = [session_bands.Seat("claude", "a", 1, 0), session_bands.Seat("codex", "x", 5, 0)]
+    allocation, placements = capacity._allocate(
+        None,
+        {"eng": 0, "ci": 0, "plan": 0},
+        {"eng": 1, "ci": 1, "plan": 0},
+        seats,
+        {"eng": [("claude", "codex")], "ci": [("claude",)], "plan": []},
+        {"eng": {0: {("claude", "a")}}},
+    )
+    assert placements == {"eng": [{"index": 0, "harness": "claude", "account": "a"}], "ci": [], "plan": []}

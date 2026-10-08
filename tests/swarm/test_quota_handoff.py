@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts import session_bands
 from scripts.inbox.store import InboxStore
 from scripts.swarm import capacity, quota_handoff, quota_notice, runtime
 from scripts.swarm.runtime import HerdrRuntime
@@ -604,19 +603,6 @@ def test_quota_transfer_refusal_names_the_predecessor_and_why_each_account_was_e
         "claude cc is at its week quota warning; codex default is the account handing off; "
         "claude full has no free seats"
     )
-
-
-def test_allocation_skips_a_harness_whose_only_room_is_on_accounts_the_handoff_cannot_take():
-    seats = [session_bands.Seat("claude", "a", 1, 0), session_bands.Seat("codex", "x", 5, 0)]
-    allocation, placements = capacity._allocate(
-        None,
-        {"eng": 0, "ci": 0, "plan": 0},
-        {"eng": 1, "ci": 1, "plan": 0},
-        seats,
-        {"eng": [("claude", "codex")], "ci": [("claude",)], "plan": []},
-        {"eng": {0: {("claude", "a")}}},
-    )
-    assert placements == {"eng": [{"index": 0, "harness": "claude", "account": "a"}], "ci": [], "plan": []}
 
 
 @pytest.mark.parametrize("state,five,week", [("UNKNOWN", 90, 90), ("OPEN", None, None)])
