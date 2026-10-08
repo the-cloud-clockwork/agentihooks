@@ -35,13 +35,13 @@ class TitleOp(unittest.TestCase):
         make_ledger()
 
     def test_stores_the_trimmed_title_and_keeps_the_slug(self):
+        from scripts.swarm_ledger.repository import repository
+
         state, rejected = rename("  Renamed plan  ")
         self.assertEqual(rejected, [])
         self.assertEqual(state["title"], "Renamed plan")
         self.assertEqual(core.sync(SLUG)[0]["title"], "Renamed plan")
-        html_path, json_path = core.paths(SLUG)
-        self.assertTrue(html_path.exists() and json_path.exists())
-        self.assertEqual(core.parse_seed(html_path.read_text(encoding="utf-8"))["title"], "Renamed plan")
+        self.assertEqual(repository.get_document(SLUG)["title"], "Renamed plan")
         self.assertEqual(state["_meta"]["events"][-1]["kind"], "title changed")
 
     def test_refuses_an_empty_or_whitespace_title(self):

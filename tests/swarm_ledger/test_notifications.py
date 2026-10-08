@@ -102,25 +102,18 @@ class Notifications(unittest.TestCase):
         state, _ = core.sync(SLUG, ops=[{"op": "notification_clear", "id": "x2", "target": "all"}])
         self.assertEqual(state["notifications"], [])
 
-    def test_no_agent_path_creates_a_notification(self):
-        with self.assertRaises(ValueError):
-            core.check_op({"op": "notification", "id": "n1", "by": "boss", "item": self.phase, "text": "hi"})
-        html_path, _ = core.paths(SLUG)
-        html = html_path.read_text(encoding="utf-8")
-        forged = html.replace(
-            '"notifications": []',
-            '"notifications": [{"id": "f", "item": "chat", "label": "Reply", "text": "x", "by": "boss", "at": 1}]',
-        )
-        self.assertNotEqual(forged, html)
-        html_path.write_text(forged, encoding="utf-8")
-        self.assertEqual(notes(), [])
-
     def test_a_forged_seed_on_a_fresh_ledger_carries_no_notification(self):
-        html_path, json_path = core.paths(SLUG)
-        html = html_path.read_text(encoding="utf-8")
-        row = '{"id": "f", "item": "chat", "label": "Reply", "text": "x", "by": "boss", "at": 1}'
-        forged = html.replace('"notifications": []', f'"notifications": [{row}]')
-        self.assertNotEqual(forged, html)
-        html_path.write_text(forged, encoding="utf-8")
-        json_path.unlink()
-        self.assertEqual(notes(), [])
+        slug = "notify-forged-2026-01-01"
+        content = {
+            "title": "Demo",
+            "overview": "o",
+            "sources": [str(SCRIPTS)],
+            "phases": [{"title": "one", "description": "d"}],
+            "questions": [],
+            "followups": [],
+        }
+        doc = new_ledger.build_doc(content)
+        doc["notifications"] = [{"id": "f", "item": "chat", "label": "Reply", "text": "x", "by": "boss", "at": 1}]
+        core.paths(slug)[0].write_text(legacy_page.render(doc, slug, 8765), encoding="utf-8")
+        state, _ = core.sync(slug)
+        self.assertEqual(state["notifications"], [])

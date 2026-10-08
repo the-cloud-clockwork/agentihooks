@@ -258,9 +258,16 @@ class Gate(unittest.TestCase):
         self.assertIsNone(hook("Stop"))
 
     def test_unreadable_ledger_fails_open(self):
+        from scripts.swarm_ledger.repository.sqlite import DATABASE
+
         ask("pending", 5)
-        core.paths(SLUG)[1].write_text("{not json", encoding="utf-8")
-        self.assertIsNone(hook("Stop"))
+        db = core.LEDGER_DIR / DATABASE
+        original = db.read_bytes()
+        db.write_bytes(b"not a database")
+        try:
+            self.assertIsNone(hook("Stop"))
+        finally:
+            db.write_bytes(original)
 
 
 if __name__ == "__main__":

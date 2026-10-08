@@ -15,6 +15,7 @@ import watch_ledger  # noqa: E402
 from scripts.inbox import seen  # noqa: E402
 from scripts.inbox.store import InboxStore  # noqa: E402
 from scripts.swarm.store import RedisStore, SwarmConfig  # noqa: E402
+from scripts.swarm_ledger.repository import repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -95,7 +96,7 @@ def test_the_ledger_hook_skips_a_write_the_inbox_already_showed(inbox, tmp_path,
 
 def test_the_ledger_watch_skips_a_write_already_shown_and_marks_what_it_prints(inbox, monkeypatch, capsys):
     phase = make_ledger()
-    start = json.loads(core.paths(SLUG)[1].read_text())["_meta"]["rev"]
+    start = repository.get_document(SLUG)["_meta"]["rev"]
     state, _ = core.sync(SLUG, ops=[comment(phase, "c-1"), comment(phase, "c-2")])
     first = next(e for e in state["_meta"]["events"] if e.get("id") == "c-1")
     marks = seen.SeenMarks(inbox.redis)

@@ -110,7 +110,7 @@ def test_pinned_worker_transport_cannot_create_a_task_as_master(crew):
     assert "t1" not in tasks(ledger.request(SLUG))
     assert reply["_meta"]["warnings"] == [
         "phase p1 description has 101 words, limit 100",
-        f'{WORKER} works in the eng lane and cannot add tasks: propose the work with agentihooks ledger followup '
+        f"{WORKER} works in the eng lane and cannot add tasks: propose the work with agentihooks ledger followup "
         'add "<plain words>" and the master decides',
         f"{WORKER} cannot write as {MASTER}",
     ]

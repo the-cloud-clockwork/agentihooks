@@ -1,4 +1,3 @@
-import json
 import os
 import signal
 import subprocess
@@ -66,12 +65,13 @@ class EventsCap(unittest.TestCase):
         make_ledger()
 
     def test_events_are_capped_and_the_start_time_does_not_move(self):
-        html_path, json_path = core.paths(SLUG)
-        state = core.loads(json_path.read_text(encoding="utf-8"))
+        from scripts.swarm_ledger.repository import repository
+
+        state = repository.get_document(SLUG)
         state["_meta"]["events"] = [
             {"rev": i, "at": 1000 + i, "by": "operator", "kind": "checked", "target": "x"} for i in range(2500)
         ]
-        core.atomic_write(json_path, json.dumps(state))
+        repository.import_document(SLUG, state, replace=True)
 
         state, _ = core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m-cap", "text": "hi"}])
         self.assertEqual(len(state["_meta"]["events"]), 2000)
