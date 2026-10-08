@@ -4,6 +4,7 @@
 /scripts/ci_wiring.py @nestorcolt
 /scripts/gates/ @nestorcolt
 /scripts/gate_* @nestorcolt
+/scripts/size_limits.py @nestorcolt
 /scripts/check_* @nestorcolt
 /scripts/swarm_ledger/artifact_sanity.py @nestorcolt
 /tests/registry/ @nestorcolt
@@ -23,6 +24,7 @@
 /tests/test_rulesets.py @nestorcolt
 /tests/test_shard_check.py @nestorcolt
 /tests/test_shards.py @nestorcolt
+/tests/test_size_limits.py @nestorcolt
 /mutation-cleared.txt @nestorcolt
 /mutation-clearances/ @nestorcolt
 /delivery.yaml @nestorcolt
