@@ -57,6 +57,26 @@ class ChatOps(unittest.TestCase):
         _, rejected = storage.sync(SLUG, ops=[{"op": "clear", "thread": "notes", "id": "c-3"}])
         self.assertEqual(rejected, ["c-3"])
 
+    def test_an_added_note_carries_an_empty_comments_thread(self):
+        state, rejected = storage.sync(SLUG, ops=[{"op": "add", "thread": "notes", "id": "n-1", "text": "Later"}])
+        self.assertEqual(rejected, [])
+        self.assertEqual(state["notes"][-1]["comments"], [])
+
+    def test_a_note_added_by_a_member_carries_an_empty_comments_thread(self):
+        storage.sync(SLUG, ops=[{"op": "join", "id": "j-1", "by": "eng"}])
+        state, rejected = storage.sync(
+            SLUG, ops=[{"op": "add", "thread": "notes", "id": "n-2", "by": "eng", "text": "Later"}]
+        )
+        self.assertEqual(rejected, [])
+        self.assertEqual(
+            state["notes"][-1],
+            {"id": "n-2", "by": "eng", "at": state["notes"][-1]["at"], "text": "Later", "comments": []},
+        )
+
+    def test_an_added_chat_line_has_no_comments_thread(self):
+        state, _ = storage.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m-9", "by": "eng", "text": "hi"}])
+        self.assertNotIn("comments", state["chat"][-1])
+
     def test_check_body_accepts_clear_without_text(self):
         core.check_body({"ops": [{"op": "clear", "thread": "chat", "id": "c-4"}]})
 
