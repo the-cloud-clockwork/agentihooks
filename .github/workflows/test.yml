@@ -86,17 +86,102 @@ jobs:
   # Every shard restores this one key, or nothing when the lookup found none, so all shards of a run split alike.
   durations:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: ${{ github.event_name == 'merge_group' && 4 || 2 }}
+    permissions:
+      contents: read
     outputs:
       key: ${{ steps.stored.outputs.cache-matched-key }}
+      queued: ${{ steps.republished.outputs.queued }}
     steps:
       - name: Look up the base revision's dev durations
         id: stored
+        if: github.event_name != 'merge_group'
         uses: actions/cache/restore@v4
         with:
           path: ~/dev-durations
           key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
           lookup-only: true
+
+      # A queue ref cannot read caches saved on dev, so queue runs fetch dev's artifacts on the App's own API quota.
+      - name: Mint the tcc main ci App token
+        id: app-token
+        if: github.event_name == 'merge_group'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      - name: Find the latest passed dev push run
+        id: dev-run
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&status=success&per_page=1" --jq '.workflow_runs[0].id // empty')
+          if [[ -z "$run" ]]; then
+            echo "::error::No dev push Tests run passed, so the queue run has no dev durations or coverage baseline."
+            exit 1
+          fi
+          kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+          if [[ "$kept" != *" durations-merged "* ]]; then
+            echo "::error::Dev push run $run kept no live durations-merged artifact."
+            exit 1
+          fi
+          baseline=false
+          [[ "$kept" == *" coverage-baseline "* ]] && baseline=true
+          echo "Restoring dev durations from dev push run $run; coverage baseline kept: $baseline"
+          echo "id=$run" >> "$GITHUB_OUTPUT"
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+
+      - name: Download the dev durations
+        if: github.event_name == 'merge_group'
+        uses: actions/download-artifact@v4
+        with:
+          name: durations-merged
+          path: ~/dev-durations
+          run-id: ${{ steps.dev-run.outputs.id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Download the dev coverage baseline
+        if: steps.dev-run.outputs.baseline == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-baseline
+          path: ~/coverage-baseline
+          run-id: ${{ steps.dev-run.outputs.id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Republish the dev durations
+        if: github.event_name == 'merge_group'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-durations
+          path: ~/dev-durations/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+      - name: Republish the dev coverage baseline
+        if: steps.dev-run.outputs.baseline == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-coverage-baseline
+          path: ~/coverage-baseline/
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+      - name: Mark the dev artifacts restored
+        id: republished
+        if: github.event_name == 'merge_group'
+        run: |
+          ls -A ~/dev-durations
+          echo "queued=true" >> "$GITHUB_OUTPUT"
 
   unit:
     needs: [durations]
@@ -165,6 +250,13 @@ jobs:
       - &use-venv
         name: Use the test environment
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+
+      - name: Download the queued run's dev durations
+        if: needs.durations.outputs.queued == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: dev-durations
+          path: ~/dev-durations
 
       - name: Restore latest dev durations
         if: needs.durations.outputs.key != ''
@@ -665,6 +757,15 @@ jobs:
         with:
           path: ~/coverage-baseline
           key: coverage-baseline-${{ steps.tree.outputs.tree }}
+
+      - name: Publish the passed dev coverage baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-baseline
+          path: ~/coverage-baseline
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
 
   mutation:
     if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
