@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from hooks.context.account_sessions import (
@@ -24,6 +24,7 @@ from hooks.context.account_sessions import (
 )
 from scripts import codex_quota, session_bands
 from scripts.codex_quota import CodexQuota
+from scripts.routing.slots import INTERACTIVE, SUBSCRIPTION, Slot
 
 TOKEN_ENV = "CODEX_ACCESS_TOKEN"
 PROBE_ARGS = ["exec", "--json", "--skip-git-repo-check", "Reply with the single word ok."]
@@ -167,6 +168,31 @@ def fresh_quotas(
     return found
 
 
+@dataclass(frozen=True)
+class CodexAccountSource:
+    run: Callable | None = None
+    sessions: Mapping[str, int] = field(default_factory=dict)
+    refresh: bool = True
+
+    def _run(self) -> tuple[Callable, ...]:
+        return () if self.run is None else (self.run,)
+
+    def pool(self, environ: Mapping[str, str]) -> list[CodexAccount]:
+        return routing_pool(environ, *self._run())
+
+    def readings(self, pool: list[CodexAccount], environ: Mapping[str, str], now: float) -> dict:
+        return fresh_quotas(pool, environ, now, *self._run()) if self.refresh else quotas(pool, environ)
+
+    def slots(self, environ: Mapping[str, str], now: float) -> list[Slot]:
+        pool = self.pool(environ)
+        return seats(pool, self.readings(pool, environ, now), self.sessions, now)
+
+    def child_env(self, slot: Slot, environ: Mapping[str, str]) -> dict[str, str]:
+        tokens = {account.name: account for account in token_accounts(environ)}
+        account = CodexAccount(CODEX_DEFAULT) if slot.kind == INTERACTIVE else tokens[slot.account]
+        return child_environment(account, environ)
+
+
 def select(
     pool: list[CodexAccount],
     quotas: Mapping[str, CodexQuota | None],
@@ -192,7 +218,14 @@ def seats(
     pool: list[CodexAccount], quotas: Mapping[str, CodexQuota | None], sessions: Mapping[str, int], now: float
 ) -> list[session_bands.Seat]:
     return [
-        session_bands.Seat("codex", account.name, cap, sessions.get(account.name, 0), _spend_by(quota, now))
+        Slot(
+            "codex",
+            account.name,
+            cap,
+            sessions.get(account.name, 0),
+            _spend_by(quota, now),
+            kind=SUBSCRIPTION if account.is_token else INTERACTIVE,
+        )
         for account in pool
         if account.signed_in and (cap := account_cap(quota := quotas.get(account.name), now)) is not None
     ]
@@ -238,9 +271,10 @@ def _report(path: str, **fields: str) -> None:
 
 def _route(environ: Mapping[str, str], route: str, run: Callable) -> tuple[CodexAccount, str, int, str]:
     sessions = codex_sessions_by_account()
-    pool = routing_pool(environ, run)
+    source = CodexAccountSource(run, sessions, refresh=not route)
+    pool = source.pool(environ)
     now = time.time()
-    found = quotas(pool, environ) if route else fresh_quotas(pool, environ, now, run)
+    found = source.readings(pool, environ, now)
     account, placement, seat = select(pool, found, sessions, now, route)
     return account, placement, sessions.get(account.name, 0), str(seat.cap) if seat else "?"
 
