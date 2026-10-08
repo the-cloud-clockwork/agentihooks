@@ -102,6 +102,37 @@ def test_worker_shards_select_each_measured_and_unknown_case_once(tmp_path):
     assert all(selections)
 
 
+def test_new_case_in_a_sparsely_measured_module_stays_on_a_collecting_shard(tmp_path):
+    import zlib
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_sparse.py").write_text("pass\n")
+    known = "tests/test_sparse.py::test_known"
+    unknown = next(
+        f"tests/test_sparse.py::test_new_{n}"
+        for n in range(100)
+        if zlib.crc32(f"tests/test_sparse.py::test_new_{n}".encode()) % 2 == 1
+    )
+    (tmp_path / ".test_durations").write_text(json.dumps({known: 1.0}))
+    selections = []
+    for shard in (1, 2):
+        config = SimpleNamespace(
+            getoption=lambda name, shard=shard: f"{shard}/2",
+            stash=pytest.Stash(),
+            rootpath=tmp_path,
+            option=SimpleNamespace(numprocesses=None),
+            workerinput={"workercount": 2},
+        )
+        items = (
+            []
+            if conftest.pytest_ignore_collect(tmp_path / "tests/test_sparse.py", config)
+            else [SimpleNamespace(nodeid=node) for node in (known, unknown)]
+        )
+        conftest.pytest_collection_modifyitems(config, items)
+        selections.append({item.nodeid for item in items})
+    assert selections == [{known, unknown}, set()]
+
+
 def test_grouped_files_reads_real_markers_and_ignores_fixture_strings(tmp_path):
     from tests.shards import grouped_files
 

@@ -49,6 +49,7 @@ def _refuse_redis_connect_ex(sock, address):
 COLLECTED_NODEIDS = pytest.StashKey[list[str]]()
 SHARD_FILES = pytest.StashKey[frozenset[str]]()
 NODE_SHARDS = pytest.StashKey[dict[str, int]]()
+FILE_SHARDS = pytest.StashKey[dict[str, list[int]]]()
 WARM_PIDS = pytest.StashKey[list[int]]()
 
 
@@ -58,7 +59,9 @@ def pytest_collection_modifyitems(config, items):
         selected = []
         for item in items:
             node = re.sub(r"@[^\[\]]*$", "", item.nodeid)
-            shard = config.stash[NODE_SHARDS].get(node, zlib.crc32(node.encode()) % shards)
+            owners = config.stash[FILE_SHARDS].get(node.split("::", 1)[0], range(shards))
+            fallback = owners[zlib.crc32(node.encode()) % len(owners)]
+            shard = config.stash[NODE_SHARDS].get(node, fallback)
             if shard == index - 1:
                 selected.append(item)
         items[:] = selected
@@ -89,6 +92,10 @@ def _shard_files(config) -> frozenset[str]:
             measured = {node: seconds for node, seconds in durations.items() if node.split("::", 1)[0] in files}
             parts = assign_nodes(measured, shards, grouped_files(config.rootpath, files), workers)
             config.stash[NODE_SHARDS] = {node: shard for shard, part in enumerate(parts) for node in part}
+            owners = {}
+            for node, shard in config.stash[NODE_SHARDS].items():
+                owners.setdefault(node.split("::", 1)[0], set()).add(shard)
+            config.stash[FILE_SHARDS] = {path: sorted(shards) for path, shards in owners.items()}
             known = {node.split("::", 1)[0] for node in measured}
             files = {node.split("::", 1)[0] for node in parts[index - 1]} | (set(files) - known)
         else:
