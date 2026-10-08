@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -22,8 +23,15 @@ MESSAGES = {
     "relay needs by": "relay needs by, the relaying agent's name",
     "relay needs item": "relay needs item <list>/<id>",
     "relay needs text": f"relay needs text up to {ledger_relay.MAX_TEXT} characters",
-    "relay needs quote": f"relay needs quote up to {ledger_relay.MAX_TEXT} characters",
+    "relay needs quote": "relay needs quote, the operator's words",
 }
+
+
+SPOKEN = (
+    " ".join(f"part {n} -- the filter runs first, then the classifier - reads each finding" for n in range(1, 20))
+    + " -- put my exact words in an open question"
+)
+DAY = 24 * 3600
 
 
 def make_ledger():
@@ -125,6 +133,7 @@ class Relay(unittest.TestCase):
             (relay(20, self.question, text=5), "relay needs text"),
             (relay(21, self.question, text="x" * (ledger_relay.MAX_TEXT + 1)), "relay needs text"),
             (relay(22, self.question, quote=""), "relay needs quote"),
+            (relay(24, self.question, quote=5), "relay needs quote"),
             ({k: v for k, v in relay(23, self.question).items() if k != "quote"}, "relay needs quote"),
         ):
             with self.subTest(op=op), self.assertRaises(ValueError) as refused:
@@ -136,13 +145,13 @@ class Relay(unittest.TestCase):
         self.assertEqual(ledger_relay.verified("master@a1-1", "the QUEUE"), WORDS)
 
 
-def _cli(monkeypatch, item, quote):
+def _cli(monkeypatch, item, quote, by="master@a1-1"):
     def call(slug, ops):
         state, rejected = core.sync(slug, ops=ops)
         return {**state, "rejected": rejected}
 
     monkeypatch.setattr(ledger, "call", call)
-    argv = ["--slug", SLUG, "--as", "master@a1-1", "relay", item, "Use the queue.", "--quote", quote]
+    argv = ["--slug", SLUG, "--as", by, "relay", item, "Use the queue.", "--quote", quote]
     ledger.cmd_relay(ledger.build_parser().parse_args(argv))
 
 
@@ -166,11 +175,47 @@ def test_cli_refuses_words_the_operator_never_said(monkeypatch):
     question = f"questions/{state['questions'][0]['id']}"
     with pytest.raises(SystemExit) as refused:
         _cli(monkeypatch, question, "use the queue")
-    assert refused.value.code == (
-        "relay refused: the quote is not in an operator prompt or answer this session recorded in the last hour"
-    )
+    assert refused.value.code == REFUSED
     state, _ = core.sync(SLUG)
     assert state["questions"][0]["answers"] == []
+
+
+REFUSED = "relay refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded"
+
+
+def test_a_long_quote_with_dashes_from_a_masters_prompt_history_of_yesterday_is_relayed_unchanged(monkeypatch):
+    assert len(SPOKEN.split()) >= 200
+    state = make_ledger()
+    question = f"questions/{state['questions'][0]['id']}"
+    core.sync(SLUG, ops=[{"op": "join", "id": "j3", "by": "master@abc123-0002", "role": "orchestrator"}])
+    operator_words.record("master@abc123-0001", SPOKEN, now=time.time() - DAY)
+    _cli(monkeypatch, question, SPOKEN, by="master@abc123-0002")
+    state, _ = core.sync(SLUG)
+    assert state["questions"][0]["answers"][-1]["quote"] == SPOKEN
+
+
+def test_a_planners_words_count_and_an_engineers_or_another_swarms_do_not():
+    operator_words.record("planner@abc123-0005", "slice the filters phase", now=time.time() - 3 * DAY)
+    operator_words.record("engineer@abc123-0006", "merge the filters work")
+    operator_words.record("master@def456-0001", "drop the filters idea")
+    assert ledger_relay.verified("master@abc123-0002", "slice the filters phase") == "slice the filters phase"
+    assert ledger_relay.verified("master@abc123-0002", "merge the filters work") == ""
+    assert ledger_relay.verified("master@abc123-0002", "drop the filters idea") == ""
+
+
+def test_cli_refuses_a_quote_in_no_operator_prompt_of_the_swarm(monkeypatch):
+    state = make_ledger()
+    question = f"questions/{state['questions'][0]['id']}"
+    operator_words.record("master@abc123-0001", SPOKEN, now=time.time() - DAY)
+    with pytest.raises(SystemExit) as refused:
+        _cli(monkeypatch, question, "the operator never said this", by="master@abc123-0002")
+    assert refused.value.code == REFUSED
+    _, rejected = core.sync(SLUG, ops=[relay(30, question, quote="never said this", by="master@abc123-0002")])
+    assert rejected == ["rl-30"]
+
+
+def test_a_quote_of_any_length_passes_the_check():
+    ledger_relay.check(relay(31, "questions/q", quote="word -- " * 20000))
 
 
 def test_cli_relay_needs_item_text_and_quote():
@@ -180,6 +225,19 @@ def test_cli_relay_needs_item_text_and_quote():
     assert (args.command, args.item, args.text, args.quote) == ("relay", "questions/q", "Yes.", "y")
     with pytest.raises(SystemExit):
         ledger.build_parser().parse_args(["--slug", SLUG, "--as", "m", "relay", "questions/q", "Yes."])
+
+
+def test_the_page_shows_the_relayed_quote_under_the_entry_as_his_words():
+    script = (
+        FAKE_DOM
+        + function_source("h")
+        + function_source("hisWords")
+        + f"\nconst e = hisWords({{by: 'operator', relayed_by: 'master@a1-1', quote: {json.dumps(SPOKEN)}}});"
+        + "\nprocess.stdout.write(JSON.stringify([e.attrs.class, e.kids.map((c) => c.text), hisWords({by: 'operator'})]));"
+    )
+    out = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
+    assert out == ["his-words", ["His words", SPOKEN], None]
+    assert "hisWords(entry)" in function_source("entryView")
 
 
 def test_the_page_marks_a_relayed_entry():

@@ -1,7 +1,8 @@
 """Relay: the master posts a decision the operator gave it in its own pane, as the operator's entry.
 
 A question takes it as an answer, any other item as a comment. Only the ledger's orchestrator may relay,
-and only words the hooks recorded from the operator in its session; the entry carries those words.
+and only words the hooks recorded from the operator in a master or planner session of its swarm, at any time;
+the entry carries those words, of any length and in any wording.
 """
 
 import re
@@ -19,18 +20,29 @@ def check(op):
         raise ValueError("relay needs by, the relaying agent's name")
     if not ITEM_RE.match(str(op.get("item"))):
         raise ValueError("relay needs item <list>/<id>")
-    for field in ("text", "quote"):
-        value = op.get(field)
-        if not isinstance(value, str) or not value.strip() or len(value) > MAX_TEXT:
-            raise ValueError(f"relay needs {field} up to {MAX_TEXT} characters")
+    text = op.get("text")
+    if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT:
+        raise ValueError(f"relay needs text up to {MAX_TEXT} characters")
+    if not isinstance(op.get("quote"), str) or not op["quote"].strip():
+        raise ValueError("relay needs quote, the operator's words")
+
+
+def speakers(by):
+    """Every address of the relaying agent, then every master and planner of its swarm with recorded words."""
+    from hooks.context import operator_words
+    from scripts.swarm.naming import addresses, parse
+
+    names = addresses(by)
+    codes = sorted({agent.code for agent in map(parse, names) if agent})
+    crew = [n for code in codes for kind in ("master", "planner") for n in operator_words.recorded(f"{kind}@{code}-*")]
+    return list(dict.fromkeys([*names, *crew]))
 
 
 def verified(by, quote):
-    """The operator's recorded words holding the quote, under any address of the relaying agent."""
+    """The operator's recorded words holding the quote, from any master or planner of the relaying agent's swarm."""
     from hooks.context import operator_words
-    from scripts.swarm.naming import addresses
 
-    return next((w for name in addresses(by) if (w := operator_words.matching(name, quote))), "")
+    return next((w for name in speakers(by) if (w := operator_words.matching(name, quote, within=None))), "")
 
 
 def apply(doc, op, ctx):

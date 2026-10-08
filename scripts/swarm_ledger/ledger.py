@@ -414,7 +414,7 @@ def cmd_relay(args):
 
     if not ledger_relay.verified(args.name, args.quote):
         sys.exit(
-            "relay refused: the quote is not in an operator prompt or answer this session recorded in the last hour"
+            "relay refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded"
         )
     send(args, "relay", item=args.item, text=args.text, quote=args.quote)
     print(json.dumps({"relayed": True, "item": args.item}))
