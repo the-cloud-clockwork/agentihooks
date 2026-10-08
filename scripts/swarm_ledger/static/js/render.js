@@ -257,6 +257,7 @@ export function renderStats() {
     row("Time left", leftText),
     row("Phases", `${done} / ${total} · ${pct}%`, h("div", { class: "bar" }, h("i", { style: `width:${pct}%` }))),
     row("Tasks", `${tasks.filter((t) => t.done || t.state === "done").length} / ${tasks.length}`),
+    row("Open", figure(counts.open)),
     row("Claimed", figure(counts.claimed)),
     row("In PR", figure(counts.pr)),
     row("Blocked", figure(counts.blocked)),

@@ -364,11 +364,21 @@ def test_compact_limit_steps_stop_at_100_and_1000(open_page, limit, down, up):
 
 def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_task_figures(open_page):
     payload = status()
-    payload["agents"][1]["overlays"] = ["qitp-tuner", "trader"]
+    payload["agents"][1]["overlays"] = ["qitp-tuner", "trader", "reviewer"]
     page = open_page(payload)
     assert page.table("swarm-agents") == [
         ["master-1", "—", "—", "—", "opus high", "—", "LIVE", "2h 0m", "message\nterminate"],
-        ["eng-58", "eng", "—", "qitp-tuner · trader", "opus high", "pb10", "IDLE", "1m", "message\nterminate"],
+        [
+            "eng-58",
+            "eng",
+            "—",
+            "qitp-tuner · trader · reviewer",
+            "opus high",
+            "pb10",
+            "IDLE",
+            "1m",
+            "message\nterminate",
+        ],
     ]
     assert page.text("#agents-count").lower() == "2 live"
     for gone in ("swarm-tasks-box", "swarm-tasks", "tasks-open"):
@@ -376,9 +386,10 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     pairs = page.tab.eval_on_selector_all(
         "#stats .stat", "rows => rows.map(r => [r.children[0].innerText, r.children[1].innerText])"
     )
-    figures = [[label.lower(), value] for label, value in pairs[4:11]]
+    figures = [[label.lower(), value] for label, value in pairs[4:12]]
     assert figures == [
         ["tasks", "0 / 1"],
+        ["open", "9"],
         ["claimed", "3"],
         ["in pr", "1"],
         ["blocked", "1"],
