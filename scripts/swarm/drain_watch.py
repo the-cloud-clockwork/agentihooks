@@ -6,12 +6,11 @@ from scripts.swarm.health.findings import MINUTE_MS, Finding, Limits
 from scripts.swarm.store import RedisStore
 
 CLOSED = "CLOSED"
-DRAIN_LEFT = 10
 
 
-def draining(account: dict) -> bool:
+def draining(account: dict, limits: Limits) -> bool:
     left = quota_view.routing_left(account)
-    return account["state"] == CLOSED or (left is not None and left <= DRAIN_LEFT)
+    return account["state"] == CLOSED or (left is not None and left <= limits.drain_left)
 
 
 def _finding(agent, account: dict, minutes: int, limits: Limits) -> Finding:
@@ -34,7 +33,7 @@ def findings(store: RedisStore, slug: str, limits: Limits, now_ms: int) -> list[
         account = accounts.get((agent.harness, agent.account))
         if agent.state != "working" or agent.idle_ticks or agent.name not in warned:
             continue
-        if account is None or not draining(account):
+        if account is None or not draining(account, limits):
             continue
         try:
             warned_at = inbox.get(warned[agent.name]).created_at
