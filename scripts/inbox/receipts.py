@@ -57,7 +57,6 @@ class Receipts:
     def __init__(self, store):
         self.store = store
         self.redis = store.redis
-        self.marks = SeenMarks(store.redis)
 
     def key(self, *parts):
         return self.store.key(*parts)
@@ -119,8 +118,8 @@ class Receipts:
         delivered = replace(item, state="delivered", updated_at=now_ms(), reason="")
         self.store.stage_move(pipe, item, delivered, delivery.recipient, last, indexed=False)
         if delivery.ref:
-            pipe.sadd(self.marks.key(delivery.recipient), delivery.ref)
-            pipe.expire(self.marks.key(delivery.recipient), TTL_S)
+            pipe.sadd(SeenMarks.key(delivery.recipient), delivery.ref)
+            pipe.expire(SeenMarks.key(delivery.recipient), TTL_S)
         return self._stage_close(pipe, delivery, "accepted", "", committed=True)
 
     def _advance(self, pipe, delivery_id, owner, before, state):

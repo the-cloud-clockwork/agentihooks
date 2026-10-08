@@ -1,9 +1,13 @@
+import hashlib
+import json
+
 import pytest
 
-from scripts.inbox.dispatch import Dispatcher, digest
+from scripts.inbox.dispatch import SHOWN, Dispatcher, digest
 from scripts.inbox.receipts import REASSIGNED, RELEASED, DispatchError, Receipts
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks, claim, first_showing, write_ref
 from scripts.inbox.store import InboxStore, now_ms, owner_key
+from scripts.swarm.naming import NameRegistry
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -633,3 +637,198 @@ def test_a_transaction_that_keeps_changing_is_refused(store, dispatcher, monkeyp
     with pytest.raises(DispatchError) as refused:
         dispatcher.reserve("bob", "bridge-1")
     assert str(refused.value) == "the inbox changed meanwhile; run it again"
+
+
+@pytest.fixture
+def watched(monkeypatch):
+    from redis.client import Pipeline
+
+    keys = []
+    real = Pipeline.watch
+
+    def watch(self, *names):
+        keys.extend(names)
+        return real(self, *names)
+
+    monkeypatch.setattr(Pipeline, "watch", watch)
+    return keys
+
+
+def journal(store, item_id):
+    prefix = store.key("delivery", "")
+    found = [Receipts(store).get(key[len(prefix) :]) for key in store.redis.scan_iter(match=prefix + "*")]
+    return [delivery for delivery in found if delivery.item == item_id]
+
+
+def test_own_and_release_watch_the_owner_and_open_deliveries(store, watched):
+    dispatcher = Dispatcher(store)
+    dispatcher.own("bob", "bridge-1")
+    assert watched == [owner_key("bob")]
+    watched.clear()
+    dispatcher.release("bob", "bridge-1")
+    assert watched == [owner_key("bob"), store.key("deliveries", "bob")]
+
+
+def test_reserve_watches_every_key_it_reads(store, dispatcher, watched):
+    first = store.send("operator", "bob", "comment", ref="sw:3:c1")
+    [held] = dispatcher.reserve("bob", "bridge-1")
+    second = store.send("operator", "bob", "comment again", ref="sw:3:c1")
+    watched.clear()
+    assert dispatcher.reserve("bob", "bridge-1") == []
+    assert {
+        owner_key("bob"),
+        store.key("item", first.id),
+        store.key("reservation", first.id),
+        store.key("item", second.id),
+        store.key("reservation", second.id),
+        SeenMarks.key("bob"),
+        store.key("ref-reservation", "bob", "sw:3:c1"),
+        store.key("delivery", held.id),
+    } <= set(watched)
+
+
+def test_reserve_and_commit_watch_the_seat_of_a_seat_item(store, watched):
+    store.seats.occupy("eng-1@sw", "bob", 1)
+    item = store.send("alice", "eng-1@sw", "hi")
+    dispatcher = Dispatcher(store)
+    dispatcher.own("bob", "bridge-1")
+    watched.clear()
+    [delivery] = dispatcher.reserve("bob", "bridge-1")
+    assert store.seats.key("eng-1@sw") in watched
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    watched.clear()
+    dispatcher.receipts.accept(delivery.id, "bridge-1", delivery.digest)
+    assert {store.key("item", item.id), store.seats.key("eng-1@sw"), store.key("pending", "eng-1@sw")} <= set(watched)
+
+
+def test_a_seen_mark_watches_the_alias_and_the_resolved_owner(store, watched):
+    store.redis.set(NameRegistry.key("alias", "old-name"), "bob")
+    assert SeenMarks(store.redis).mark("old-name", "sw:3:c1") is True
+    assert watched == [NameRegistry.key("alias", "old-name"), owner_key("bob")]
+
+
+def test_a_seen_mark_expires(store):
+    SeenMarks(store.redis).mark("bob", "sw:3:c1")
+    assert 0 < store.redis.ttl(SeenMarks.key("bob")) <= 30 * 24 * 3600
+
+
+def test_digest_is_the_sha256_of_the_payload_with_sorted_keys(store):
+    item = store.send("alice", "bob", "hi", ref="sw:3:c1")
+    payload = {"address": "bob", "id": item.id, "ref": "sw:3:c1", "sender": "alice", "task": item.task, "text": "hi"}
+    assert digest(item) == hashlib.sha256(json.dumps(payload).encode()).hexdigest()
+
+
+def test_delivery_ids_are_twelve_hex_characters(store, dispatcher):
+    store.send("alice", "bob", "hi")
+    [delivery] = dispatcher.reserve("bob", "bridge-1")
+    assert len(delivery.id) == 12
+    int(delivery.id, 16)
+
+
+def test_an_item_without_a_ref_is_free(store, dispatcher):
+    with store.redis.pipeline() as pipe:
+        assert dispatcher._ref_state(pipe, "bob", "", set()) == "free"
+
+
+def test_a_superseded_item_journals_its_delivery_and_keeps_the_recipient_waiting(store, dispatcher, monkeypatch):
+    from scripts.inbox import dispatch
+
+    store.redis.sadd(SeenMarks.key("bob"), "sw:3:c1")
+    shown = store.send("operator", "bob", "comment", ref="sw:3:c1")
+    store.send("alice", "bob", "hi")
+    monkeypatch.setattr(dispatch, "now_ms", lambda: shown.updated_at + 5000)
+    dispatcher.reserve("bob", "bridge-1")
+    [superseded] = journal(store, shown.id)
+    assert (superseded.state, superseded.reason, superseded.owner, superseded.committed) == (
+        "superseded",
+        SHOWN,
+        "bridge-1",
+        False,
+    )
+    assert store.get(shown.id).updated_at == shown.updated_at + 5000
+    assert store.redis.sismember(store.key("waiting"), "bob")
+
+
+def test_an_item_for_another_address_does_not_stop_the_items_after_it(store, dispatcher, monkeypatch):
+    moved = store.send("alice", "bob", "hi")
+    later = store.send("alice", "bob", "again")
+    listed = store.pending_mail("bob")
+    store.redirect(moved.id, "swarm", "carol", "moved")
+    monkeypatch.setattr(store, "pending_mail", lambda _: listed)
+    assert [d.item for d in dispatcher.reserve("bob", "bridge-1")] == [later.id]
+
+
+def test_a_held_ref_does_not_stop_the_items_after_it(store, dispatcher):
+    first = store.send("operator", "bob", "comment", ref="sw:3:c1")
+    store.send("operator", "bob", "comment again", ref="sw:3:c1")
+    plain = store.send("alice", "bob", "hi")
+    assert [d.item for d in dispatcher.reserve("bob", "bridge-1")] == [first.id, plain.id]
+
+
+def test_reserve_after_release_names_nobody(store, dispatcher):
+    dispatcher.release("bob", "bridge-1")
+    with pytest.raises(DispatchError) as refused:
+        dispatcher.reserve("bob", "bridge-1")
+    assert str(refused.value) == "bridge-1 does not deliver for bob; nobody does"
+
+
+def test_get_of_an_unknown_delivery_names_it(store):
+    with pytest.raises(DispatchError) as refused:
+        Receipts(store).get("nope")
+    assert str(refused.value) == "no delivery nope"
+
+
+def test_a_commit_stamps_the_item_and_the_journal(store, monkeypatch):
+    from scripts.inbox import receipts
+
+    item = store.send("alice", "bob", "hi")
+    store.deliver(item.id, "bob")
+    store.requeue(item.id, "bob", "turned back")
+    dispatcher = Dispatcher(store)
+    dispatcher.own("bob", "bridge-1")
+    [delivery] = dispatcher.reserve("bob", "bridge-1")
+    at = item.updated_at + 5000
+    monkeypatch.setattr(receipts, "now_ms", lambda: at)
+    assert dispatcher.receipts.submitting(delivery.id, "bridge-1").at == at
+    committed = dispatcher.receipts.accept(delivery.id, "bridge-1", delivery.digest)
+    assert (committed.state, committed.reason, committed.committed, committed.at) == ("accepted", "", True, at)
+    assert dispatcher.receipts.get(delivery.id) == committed
+    delivered = store.get(item.id)
+    assert (delivered.state, delivered.reason, delivered.updated_at) == ("delivered", "", at)
+    assert not store.redis.sismember(store.key("waiting"), "bob")
+
+
+def test_a_rejection_is_stamped_and_never_committed(store, dispatcher, monkeypatch):
+    from scripts.inbox import receipts
+
+    item = store.send("alice", "bob", "hi")
+    [delivery] = dispatcher.reserve("bob", "bridge-1")
+    at = item.updated_at + 5000
+    monkeypatch.setattr(receipts, "now_ms", lambda: at)
+    rejected = dispatcher.receipts.reject(delivery.id, "bridge-1", "turn refused")
+    assert (rejected.committed, rejected.at) == (False, at)
+    assert dispatcher.receipts.get(delivery.id) == rejected
+
+
+def test_a_takeover_moves_recovered_deliveries_to_the_new_owner(store, dispatcher):
+    store.send("alice", "bob", "hi")
+    [delivery] = dispatcher.reserve("bob", "bridge-1")
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    dispatcher.own("bob", "bridge-2", takeover=True)
+    [recovered] = dispatcher.receipts.recover("bob", "bridge-2")
+    assert (recovered.state, recovered.owner) == ("unknown", "bridge-2")
+    assert dispatcher.receipts.get(delivery.id).owner == "bridge-2"
+
+
+def test_claim_names_the_recipient_when_it_returns_an_item(store, monkeypatch):
+    from scripts.inbox import seen
+    from scripts.inbox.store import InboxError
+
+    raced = store.send("operator", "bob", "comment", ref="sw:3:c1")
+
+    def contended(self, name, ref):
+        raise InboxError("changed")
+
+    monkeypatch.setattr(seen.SeenMarks, "mark", contended)
+    assert claim(store, "bob") == []
+    assert store.history(raced.id)[-1]["by"] == "bob"

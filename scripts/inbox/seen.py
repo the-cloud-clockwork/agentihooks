@@ -23,19 +23,19 @@ class SeenMarks:
     def __init__(self, redis):
         self.redis = redis
 
-    def key(self, name):
+    @staticmethod
+    def key(name):
         return f"{PREFIX}:{name}"
 
     def mark(self, name, ref):
         """True when this call is the first to show the write to name; False while a delivery owner holds name."""
         from redis.exceptions import WatchError
 
-        names = NameRegistry(self.redis)
         for _ in range(MOVE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(names.key("alias", name))
-                    resolved = names.resolve(name, pipe)
+                    pipe.watch(NameRegistry.key("alias", name))
+                    resolved = NameRegistry(pipe).resolve(name)
                     pipe.watch(owner_key(resolved))
                     if pipe.get(owner_key(resolved)) is not None:
                         return False

@@ -24,7 +24,6 @@ class Dispatcher:
     def __init__(self, store):
         self.store = store
         self.redis = store.redis
-        self.marks = SeenMarks(store.redis)
         self.receipts = Receipts(store)
 
     def key(self, *parts):
@@ -116,8 +115,8 @@ class Dispatcher:
         if ref in taken:
             return "held"
         holder_key = self.key("ref-reservation", recipient, ref)
-        pipe.watch(self.marks.key(recipient), holder_key)
-        if pipe.sismember(self.marks.key(recipient), ref):
+        pipe.watch(SeenMarks.key(recipient), holder_key)
+        if pipe.sismember(SeenMarks.key(recipient), ref):
             return "shown"
         holder = pipe.get(holder_key)
         if not holder:

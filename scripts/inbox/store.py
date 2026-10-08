@@ -552,7 +552,7 @@ class InboxStore:
             return moved
 
     def _owned(self, pipe, by):
-        key = owner_key(self.names.resolve(by, pipe))
+        key = owner_key(NameRegistry(pipe).resolve(by))
         pipe.watch(key)
         return pipe.get(key) is not None
 
