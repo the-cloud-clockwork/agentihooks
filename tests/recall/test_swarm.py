@@ -47,6 +47,14 @@ def test_transfers_split_short_handoffs_and_keep_metadata(source):
         "Next",
         "Read first",
     }
+    assert {record.ref for record in records} == {
+        "transfers/transfer-one/intent",
+        "transfers/transfer-one/done",
+        "transfers/transfer-one/stopped-at",
+        "transfers/transfer-one/decisions-and-promises",
+        "transfers/transfer-one/next",
+        "transfers/transfer-one/read-first",
+    }
     for record in records:
         assert record.kind == "handoff"
         assert record.ledger_slug == record.swarm_slug == "sample"
