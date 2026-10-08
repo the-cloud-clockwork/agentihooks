@@ -71,6 +71,7 @@ LEDGER_AUTOSTART=0 (never start a server on a failed request).
 """
 
 import argparse
+import functools
 import json
 import os
 import subprocess
@@ -105,11 +106,30 @@ OBJECT_FORMS = {
 
 
 def credentials(slug, service=False):
-    token = core.read_token(repository.read_page(slug)) or ""
     who = Who.from_env()
+    if ledger_link.remote():
+        if service or not who.pinned:
+            sys.exit("a remote ledger client writes only as a pinned agent; service writes need the local ledger page")
+        token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or launch_token(slug, who.name)
+        return {"X-Ledger-Token": token, "X-Ledger-Agent": who.name}
+    token = core.read_token(repository.read_page(slug)) or ""
     if service or not who.pinned:
         return {"X-Ledger-Token": token}
     return {"X-Ledger-Token": authority.agent_token(token, slug, who.name), "X-Ledger-Agent": who.name}
+
+
+@functools.cache
+def launch_token(slug, name):
+    from scripts.swarm_ledger.api.client import ResourceClient
+
+    credential = os.environ.get("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL")
+    if not credential:
+        sys.exit(
+            "a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential "
+            "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive join"
+        )
+    client = ResourceClient(BASE, {"X-Hive-Credential": credential, "X-Ledger-Agent": name})
+    return client.request(slug, "agent-token", {})["data"]["token"]
 
 
 def request(slug, ops=None, service=False, timeout=10):

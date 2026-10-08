@@ -12,9 +12,14 @@ START = "agentihooks ledger serve --ensure"
 LOOPBACK = ("127.0.0.1", "localhost")
 
 
-def base() -> str:
-    host, port = address()
-    return f"http://{host}:{port}"
+def base(environ=os.environ) -> str:
+    host, port = address(environ)
+    url = environ.get("LEDGER_URL", "").rstrip("/") if remote(environ) else ""
+    return url or f"http://{host}:{port}"
+
+
+def remote(environ=os.environ) -> bool:
+    return environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local"
 
 
 def shared_directory(environ=os.environ) -> bool:

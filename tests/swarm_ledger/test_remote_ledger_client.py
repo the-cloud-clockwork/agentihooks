@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 import uuid
 from unittest.mock import patch
 
@@ -33,6 +34,14 @@ def token_reply(live, **headers):
     return status, json.loads(data)
 
 
+def server_only(read_token):
+    def read(page):
+        assert threading.current_thread() is not threading.main_thread(), "the remote client read the page token"
+        return read_token(page)
+
+    return read
+
+
 def test_local_mode_reads_the_page_token_and_ignores_ledger_url(live):
     env = {"AGENTIHOOKS_SWARM": "rig-grade-swarm", "AGENTIHOOKS_AGENT_NAME": WORKER, "LEDGER_URL": "https://far:1"}
     with patch.dict(os.environ, env):
@@ -42,9 +51,8 @@ def test_local_mode_reads_the_page_token_and_ignores_ledger_url(live):
             "X-Ledger-Agent": WORKER,
         }
         assert ledger.credentials(SLUG, service=True) == {"X-Ledger-Token": live["admin"]}
-    assert ledger_link.base({"LEDGER_URL": "https://far:1", "LEDGER_HOST": "127.0.0.1", "LEDGER_PORT": "9"}) == (
-        "http://127.0.0.1:9"
-    )
+    local = {"LEDGER_URL": "https://far:1", "LEDGER_DIR": "/elsewhere", "LEDGER_HOST": "127.0.0.1", "LEDGER_PORT": "9"}
+    assert ledger_link.base(local) == "http://127.0.0.1:9"
 
 
 def test_non_local_mode_reaches_the_ledger_at_ledger_url():
@@ -85,12 +93,14 @@ def test_a_remote_client_with_a_hive_credential_joins_and_comments(live, hive):
     ledger.launch_token.cache_clear()
     with patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": CREDENTIAL}):
         os.environ.pop("AGENTIHOOKS_LEDGER_AGENT_TOKEN", None)
-        with patch.object(ledger.core, "read_token", side_effect=AssertionError("page token read")):
+        with patch.object(ledger.core, "read_token", server_only(ledger.core.read_token)):
             join = {"op": "join", "id": uuid.uuid4().hex, "by": WORKER}
             say = {"op": "add", "id": uuid.uuid4().hex, "by": WORKER, "thread": "chat", "text": "Remote hello"}
             reply = ledger.request(SLUG, [join, say])
-    assert not {join["id"], say["id"]} & set(reply.get("rejected") or [])
-    assert any(entry.get("text") == "Remote hello" for entry in reply["chat"])
+            state = ledger.request(SLUG)
+    assert not {join["id"], say["id"]} & set(reply["rejected"])
+    assert WORKER in state["_meta"]["members"]
+    assert any(entry.get("text") == "Remote hello" for entry in state["chat"])
 
 
 def test_a_remote_client_without_a_credential_is_refused(live, hive):

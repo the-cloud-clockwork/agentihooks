@@ -30,6 +30,13 @@ def principal(admin, slug, token, agent):
     return None
 
 
+def hive_member(credential):
+    from scripts.hive import auth
+    from scripts.swarm import store
+
+    return auth.ledger_member(store.redis_client(), credential) if credential else None
+
+
 def refusal(name, op):
     if not name:
         return ""
