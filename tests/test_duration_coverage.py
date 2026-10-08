@@ -19,17 +19,14 @@ def test_download_checks_coverage_before_replacing_complete_durations(tmp_path, 
     committed = json.dumps(complete) + "\n"
     (tmp_path / ".test_durations-3.12").write_text(committed)
     candidate = dict(list(complete.items())[:-missing])
-
-    def download(run, folder):
-        (folder / ".test_durations").write_text(json.dumps(candidate))
+    restored = tmp_path / "restored"
+    restored.mkdir()
+    (restored / ".test_durations").write_text(json.dumps(candidate))
 
     monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
-    monkeypatch.setattr(dev_durations, "source_run", lambda run: "9")
-    monkeypatch.setattr(dev_durations, "download", download)
-    monkeypatch.setenv("GITHUB_RUN_ID", "42")
     monkeypatch.setenv("PYTEST_ADDOPTS", "--shard 1/4")
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
-    dev_durations.main(["3.12"])
+    dev_durations.main(["3.12", str(restored)])
     if missing == 10:
         assert json.loads((tmp_path / ".test_durations").read_text()) == candidate
     else:
@@ -85,16 +82,12 @@ def test_recorded_incomplete_durations_are_refused(tmp_path, monkeypatch, capsys
         with pytest.raises(ValueError, match="1440 of 12891 tests have no stored duration"):
             refresh_durations.main(["--ci-run", str(record["producer_run"])])
     else:
-
-        def download(run, folder):
-            (folder / ".test_durations").write_text(json.dumps(incomplete))
-
+        restored = tmp_path / "restored"
+        restored.mkdir()
+        (restored / ".test_durations").write_text(json.dumps(incomplete))
         monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
         monkeypatch.setattr(dev_durations, "collected_tests", lambda root: collected)
-        monkeypatch.setattr(dev_durations, "source_run", lambda run: str(record["producer_run"]))
-        monkeypatch.setattr(dev_durations, "download", download)
-        monkeypatch.setenv("GITHUB_RUN_ID", "42")
-        dev_durations.main(["3.12"])
+        dev_durations.main(["3.12", str(restored)])
         assert "1440 of 12891 tests have no stored duration" in capsys.readouterr().out
     for suffix in ("", "-3.11", "-3.12"):
         assert (tmp_path / f".test_durations{suffix}").read_text() == saved
@@ -106,9 +99,7 @@ def test_download_keeps_complete_merged_fallback_when_committed_version_is_incom
     (tmp_path / ".test_durations").write_text(saved)
     (tmp_path / ".test_durations-3.12").write_text(json.dumps(dict(list(complete.items())[:89])))
     monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
-    monkeypatch.setattr(dev_durations, "source_run", lambda run: "")
-    monkeypatch.setenv("GITHUB_RUN_ID", "42")
-    dev_durations.main(["3.12"])
+    dev_durations.main(["3.12", str(tmp_path / "missing")])
     assert (tmp_path / ".test_durations").read_text() == saved
 
 
@@ -121,7 +112,7 @@ def test_failed_collection_never_replaces_durations(tmp_path, monkeypatch, seam)
     if seam == "download":
         monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
         with pytest.raises(RuntimeError, match="collection failed"):
-            dev_durations.main(["3.12"])
+            dev_durations.main(["3.12", str(tmp_path / "missing")])
     else:
         monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
         monkeypatch.setattr(refresh_durations, "ci_download", lambda runs, folder: None)
