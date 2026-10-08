@@ -24,6 +24,10 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     assert "needs" not in jobs["lint"]
 
 
+def test_one_red_unit_shard_leaves_the_others_running():
+    assert _workflow()["jobs"]["unit"]["strategy"]["fail-fast"] is False
+
+
 @pytest.mark.parametrize("unit", ["success", "failure", "skipped", "cancelled", "pending"])
 @pytest.mark.parametrize("lint", ["success", "failure", "skipped", "cancelled", "pending"])
 def test_required_gate_rejects_every_non_success_result(unit, lint):
