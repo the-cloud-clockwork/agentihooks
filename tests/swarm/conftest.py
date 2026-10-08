@@ -20,6 +20,7 @@ def isolate_classifier(monkeypatch):
     monkeypatch.setattr(trace_plan, "decide", unavailable)
     monkeypatch.setattr(priority_sweep, "decide", unavailable)
     monkeypatch.setattr(priority_sweep.ledger_events, "view", lambda url: None)
+    monkeypatch.setattr(priority_sweep.ledger_events, "views", lambda urls, cache=None: {})
     monkeypatch.setattr(intent, "decide", unavailable)
     monkeypatch.setattr(intent, "stamp_body", lambda url, doc, task, run=None: False)
     monkeypatch.setattr(intent, "pr_view", lambda url, run=None: None)

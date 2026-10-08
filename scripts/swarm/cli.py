@@ -36,7 +36,6 @@ done carries the proof its task's kind needs: ops and tune --command C --output 
 """
 
 import argparse
-import functools
 import json
 import os
 import re
@@ -192,7 +191,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
         skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
         doc, config = timing.call(ledger.state, slug), store.config(slug)
-        view = functools.cache(ledger_events.view)
+        view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
         actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
         actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
         mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
