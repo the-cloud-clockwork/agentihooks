@@ -8,3 +8,4 @@
 - Follow ups: `agentihooks ledger --slug <slug> --as <name> followup done <id>` once decided, `agentihooks ledger --slug <slug> --as <name> followup flag <id>` when the operator decides.
 - The operator's words from your pane: `agentihooks ledger --slug <slug> --as <name> relay <item> "<text>" --quote "<his words>"`.
 - Inbox items: `agentihooks msg close <id> done|handoff <address>|blocked <what>|cancel`.
+- Secrets, credentials, sensitive parameters and operator commands: the prompt-user-parameter skill in a herdr pane watched by a Monitor, never a value in chat or a long line handed to the operator; only with operator on, otherwise Priorities: `agentihooks ledger --slug <slug> --as <name> priority add <item> "<the ask>"`.
