@@ -38,19 +38,27 @@ first: the project intent, the phase intent and any send back note.
 
 ## Slice
 
-1. Write the slice as a markdown plan in the work folder.
+1. Write the slice as a markdown plan in the work folder. Use the phase title
+   as its heading and put one unique `<!-- slice: <id> -->` anchor immediately
+   before each task heading. The section ends at the next slice anchor or
+   heading of the same or higher level. Done when every task has an anchor
+   and a section stating its complete scope and proof.
 2. Publish it before adding tasks:
    `agentihooks ledger --slug <slug> --as <name> publish-plan <file> --phase <phase>`.
-   Every task you then add in the phase carries the plan link.
+   Publication stores a plan artifact and computes the phase range. Done when
+   the phase carries its plan artifact and computed range.
 3. One task per pull request, at most twelve tasks and six territory areas each:
-   `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --phase <phase> --lane eng --kind code --description "<seams and done when>" --depends-on <ids> --territory <areas>`.
+   `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --phase <phase> --plan-slice <id> --lane eng --kind code --description "<seams and done when>" --depends-on <ids> --territory <areas>`.
    Depends on names the tasks that finish first; territory names the files or
    areas a task touches. Work across two repositories is two tasks, one
-   depending on the other.
+   depending on the other. Code computes each task's line range from its
+   anchor; never type line numbers. Done when every task carries the plan
+   reference and computed range matching its section.
 4. Work beyond code carries its proof contract, what must be true, how it is
    checked and who judges it:
-   `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --phase <phase> --lane eng --kind ops --description "<scope>" --must "<what must be true>" --check "<how it is checked>" --judge "<who judges>"`.
-   Kinds: code, ci, ops, tune, troubleshoot, research.
+   `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --phase <phase> --plan-slice <id> --lane eng --kind ops --description "<scope>" --must "<what must be true>" --check "<how it is checked>" --judge "<who judges>"`.
+   Kinds: code, ci, ops, tune, troubleshoot, research. Done when each task has
+   both its computed plan range and proof contract.
 5. Work outside the phase is a follow up:
    `agentihooks ledger --slug <slug> --as <name> followup add "<text>"`.
 
@@ -65,8 +73,9 @@ first: the project intent, the phase intent and any send back note.
 `agentihooks ledger --slug <slug> --as <name> leave`, then
 `agentihooks swarm <slug> done --slice <ids>` with the comma separated ids of
 the tasks you added. The ledger refuses unknown ids and tasks without the plan
-link. A review approves the slice or sends the plan task back with a note; a
-send back starts the loop again from that note. Stop after `done`.
+reference, computed range and unique anchor. A review approves the slice or
+sends the plan task back with a note; a send back starts the loop again from
+that note. Stop after `done`.
 
 ## Block
 
@@ -81,4 +90,5 @@ stop. As the successor, confirm with
 `agentihooks swarm <slug> confirm-handoff <transfer> --next "<first Next action>"`.
 
 Completion criterion: the phase holds the published plan and every sliced task
-with its dependencies and territory, and the plan task shows done with its slice.
+with its computed plan range, dependencies and territory, and the plan task
+shows done with its slice.
