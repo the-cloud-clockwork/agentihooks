@@ -319,7 +319,7 @@ class Done(WtBase):
     def test_done_refuses_an_open_or_queued_pull_request_even_with_force(self):
         pulls = {
             "open": '[{"state": "OPEN", "url": "https://github.com/o/r/pull/8"}]',
-            "queued": '[{"state": "OPEN", "url": "https://github.com/o/r/pull/8"},'
+            "queued-reads-open": '[{"state": "OPEN", "url": "https://github.com/o/r/pull/8"},'
             ' {"state": "CLOSED", "url": "https://github.com/o/r/pull/6"}]',
         }
         for kind, listing in pulls.items():
