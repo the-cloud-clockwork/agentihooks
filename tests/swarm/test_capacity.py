@@ -623,7 +623,7 @@ def test_capacity_evidence_has_the_swarm_task_actor_and_stable_time():
     runtime.quota_capacity = quota
     expected = "quota capacity eng 1 ci 0 plan 0 because accounts have quota; Claude has 3 free seats and Codex has 0 free seats"
     assert capacity.apply("sw", config, store, ledger, runtime, 1000) == [expected]
-    assert comments == [(("sw", "e", expected), {"by": "quota capacity 1000"})]
+    assert comments == [(("sw", "e", expected), {"by": "swarm"})]
     assert capacity.read(store, "sw")["at"] == 1000
     assert capacity.read(store, "sw")["tasks"] == {"e": "claude"}
     assert capacity.apply("sw", config, store, ledger, runtime, 2000) == []
@@ -645,7 +645,7 @@ def test_capacity_can_comment_after_every_task_has_closed():
     )
     text = "quota capacity eng 0 ci 0 plan 0 because accounts have quota; Claude has 0 free seats and Codex has 0 free seats"
     assert capacity.apply("sw", config, store, ledger, runtime, 1000) == [text]
-    assert comments == [(("sw", "done", text), {"by": "quota capacity 1000"})]
+    assert comments == [(("sw", "done", text), {"by": "swarm"})]
 
 
 def test_capacity_comment_uses_controller_authority(monkeypatch):
@@ -666,8 +666,55 @@ def test_capacity_comment_uses_controller_authority(monkeypatch):
     slug, ops, service = calls[0]
     assert slug == "sw" and service is True
     assert ops[0]["thread"] == "tasks/e/comments"
-    assert ops[0]["by"] == "quota capacity 1000"
+    assert ops[0]["by"] == "swarm"
     assert ops[0]["text"] == "quota capacity changed"
+
+
+def test_the_capacity_comment_passes_the_ledger_schema(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm import ledger_client
+
+    ledger_client._ledger()
+    import ledger_core
+
+    sent = []
+    monkeypatch.setattr(
+        ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops, service: sent.extend(ops) or {})
+    )
+    store = _store()
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    store.create(config)
+    runtime = FakeRuntime()
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
+        cfg, [account()], agents, 3, 5, demand
+    )
+    ledger = FakeLedger([{"id": "e"}])
+    ledger.capacity_comment = ledger_client.LedgerClient().capacity_comment
+    capacity.apply("sw", config, store, ledger, runtime, 1000)
+    (op,) = sent
+    ledger_core.check_op(op)
+
+
+def test_a_refused_ledger_write_is_skipped_and_spawning_still_runs():
+    from scripts.swarm.ledger_client import LedgerRefused
+
+    store = _store()
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, state="running")
+    store.create(config)
+    ledger = FakeLedger([{"id": "e"}])
+
+    def refuse(*args, **kwargs):
+        raise LedgerRefused("ledger sw: server refused: 400 by is allowed only on agent chat and comment entries")
+
+    ledger.comment = refuse
+    runtime = FakeRuntime()
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
+        cfg, [account()], agents, 3, 5, demand
+    )
+    actions = tick("sw", store, ledger, runtime, 1000)
+    assert [task for _, _, task in runtime.spawned] == ["e"]
+    assert "skipped scripts.swarm.capacity.apply: the ledger refused its write" in actions
 
 
 def test_inherited_zero_codex_share_is_respected_when_planning_ready_tasks(tmp_path, monkeypatch):
@@ -825,7 +872,7 @@ def test_capacity_apply_preserves_saved_options_and_controller_evidence(tmp_path
     assert capacity.read(store, "sw")["tasks"] == {"fixed": "claude", "saved": "codex"}
     assert capacity.read(store, "sw")["effective"] == {"eng": 2, "ci": 0, "plan": 0}
     assert len(result) == len(calls) == 1
-    assert calls[0]["by"] == "quota capacity 1234567"
+    assert calls[0]["by"] == "swarm"
     assert calls[0]["text"] == result[0] and calls[0]["thread"] == "tasks/fixed/comments"
 
 
