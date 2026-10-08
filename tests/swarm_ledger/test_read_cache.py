@@ -92,6 +92,21 @@ def test_a_write_reply_changed_by_its_caller_cannot_change_the_next_read(repo):
     assert after["_meta"]["rev"] == rev
 
 
+def test_a_read_after_a_refused_write_clears_the_refusal_like_a_sync_does(repo, monkeypatch):
+    derive = file_repository.ledger_priorities.derive
+
+    def refuse(doc, ctx):
+        ctx.refused.append("comment refused")
+        derive(doc, ctx)
+
+    monkeypatch.setattr(file_repository.ledger_priorities, "derive", refuse)
+    state, _ = repo.apply_ops(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m5", "text": "fifth"}])
+    monkeypatch.setattr(file_repository.ledger_priorities, "derive", derive)
+    assert "comment refused" in state["_meta"]["warnings"]
+    assert "comment refused" not in repo.get_document(SLUG)["_meta"]["warnings"]
+    assert "comment refused" not in repo.get_document(SLUG, reconcile=False)["_meta"]["warnings"]
+
+
 def test_a_page_edit_landing_while_a_sync_runs_is_folded_in_on_the_next_read(repo, monkeypatch):
     html_path = core.paths(SLUG)[0]
     derive = file_repository.ledger_priorities.derive
