@@ -50,14 +50,16 @@ def warn(slug: str, store: RedisStore, environ: dict) -> list[str]:
         (row["harness"], row["name"]): capacity.Account(**row) for row in capacity.read(store, slug).get("accounts", [])
     }
     key, actions = store.key(slug, "quota-warnings"), []
+    lives = store.key(slug, "quota-warning-lives")
     for agent in store.agents(slug):
-        if agent.state == "finished" or store.redis.hexists(key, agent.name):
+        if agent.state == "finished" or store.redis.hget(lives, agent.name) == str(agent.started_at):
             continue
         account = accounts.get((agent.harness, agent.account))
         if account is None or not (window := trigger(account, thresholds)):
             continue
         item = InboxStore(store.redis).send("swarm", agent.name, directive(slug, account, window))
         store.redis.hset(key, agent.name, item.id)
+        store.redis.hset(lives, agent.name, agent.started_at)
         actions.append(f"early quota handoff warning sent to {agent.name}")
     return actions
 

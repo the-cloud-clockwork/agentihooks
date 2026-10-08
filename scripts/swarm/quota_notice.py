@@ -44,7 +44,7 @@ def apply(slug: str, store: RedisStore, decision: dict) -> list[str]:
             not kind
             or previous == kind
             or previous == "handoff"
-            or store.redis.hexists(store.key(slug, "quota-warnings"), agent.name)
+            or store.redis.hget(store.key(slug, "quota-warning-lives"), agent.name) == str(agent.started_at)
         ):
             continue
         text = HANDOFF.format(slug=slug) if kind == "handoff" else HURRY

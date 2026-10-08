@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import capacity, quota_handoff, runtime
+from scripts.swarm import capacity, quota_handoff, quota_notice, runtime
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
@@ -240,6 +240,35 @@ def test_a_new_agent_gets_its_own_warning_after_a_reset():
     assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to second"]
     assert len(InboxStore(storage.redis).pending_items("first")) == 1
     assert len(InboxStore(storage.redis).pending_items("second")) == 1
+
+
+def test_a_restarted_agent_gets_a_new_warning_for_its_new_life():
+    import fakeredis
+
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    row = AgentRecord("same", "eng", "a", harness="claude", account="spent", started_at=1)
+    storage.put_agent("sw", row)
+    storage.redis.set(storage.key("sw", "quota-capacity"), json.dumps({"accounts": [account().__dict__]}))
+    assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to same"]
+    assert quota_handoff.warn("sw", storage, {}) == []
+    storage.put_agent("sw", replace(row, started_at=2))
+    assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to same"]
+    assert quota_handoff.warn("sw", storage, {}) == []
+    assert len(InboxStore(storage.redis).pending_items("same")) == 2
+
+
+def test_an_old_warning_does_not_suppress_a_new_lifes_quota_notice():
+    import fakeredis
+
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    row = AgentRecord("same", "eng", "a", harness="claude", account="spent", state="working", started_at=1)
+    storage.put_agent("sw", row)
+    storage.redis.set(storage.key("sw", "quota-capacity"), json.dumps({"accounts": [account().__dict__]}))
+    assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to same"]
+    assert quota_notice.apply("sw", storage, {"accounts": [account().__dict__]}) == []
+    storage.put_agent("sw", replace(row, started_at=2))
+    observation = account(five=85, week=50).__dict__
+    assert quota_notice.apply("sw", storage, {"accounts": [observation]}) == ["sent same the quota hurry"]
 
 
 @pytest.mark.parametrize("field", ["five_left", "week_left"])
