@@ -78,10 +78,12 @@ jobs:
       - name: Install the version clean and check what it reports
         run: |
           python -m venv "$RUNNER_TEMP/clean"
+          installed=""
           for _ in $(seq 10); do
-            "$RUNNER_TEMP/clean/bin/pip" install --no-cache-dir "agentihooks==$VERSION" && break
+            "$RUNNER_TEMP/clean/bin/pip" install --no-cache-dir "agentihooks==$VERSION" && { installed=1; break; }
             sleep 15
           done
+          [[ -n "$installed" ]] || { echo "::error::pip could not install agentihooks==$VERSION"; exit 1; }
           reported=$("$RUNNER_TEMP/clean/bin/agentihooks" --version)
           echo "reported: $reported"
           test "$reported" = "agentihooks $VERSION"
