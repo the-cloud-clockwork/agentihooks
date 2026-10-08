@@ -165,7 +165,7 @@ keeps the seat and task for the successor.
 ### Successor account selection
 
 For a quota handoff, the tick excludes the predecessor's account and considers
-accounts allowed in the successor's lane and by its required harness. A candidate
+accounts allowed by the successor's lane, task reservation and required harness. A candidate
 must have a free session slot, known quota for both windows, and usage below both
 warning thresholds. Accounts already at a warning threshold are excluded even
 when their normal launch cap still has room.
@@ -185,8 +185,9 @@ an early warning while still below the hard weekly threshold of 98% used. It
 finishes the current step, writes its Handoff v2 and submits it with `--reason
 quota`.
 
-Assume the lane permits both harnesses, the profile has no required Claude only
-plugin, and every candidate below has a free session slot and fresh readings:
+Assume the lane permits both harnesses, no task reservation fixes the harness,
+the profile has no required Claude only plugin, and every candidate below has a
+free session slot and fresh readings:
 
 | Account | Harness | Five hour left | Weekly left | Selection |
 |---|---|---|---|---|
