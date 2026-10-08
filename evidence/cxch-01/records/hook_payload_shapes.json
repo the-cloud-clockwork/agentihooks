@@ -120,5 +120,19 @@
       "transcript_path",
       "turn_id"
     ]
+  },
+  {
+    "event": "PostCompact",
+    "tool_name": null,
+    "trigger": "manual",
+    "keys": [
+      "cwd",
+      "hook_event_name",
+      "model",
+      "session_id",
+      "transcript_path",
+      "trigger",
+      "turn_id"
+    ]
   }
 ]

@@ -830,14 +830,14 @@ def test_client_waits_a_minute_by_default(monkeypatch):
     assert seen == [("m", {"p": 1})]
 
 
-def test_transport_shows_a_websocket_upgrade_and_silence_for_raw_json():
+def test_transport_shows_a_websocket_upgrade_and_a_closed_raw_json_stream():
     folder, path, server = serve(lambda ws: None)
     try:
         link = f"{folder.name}/link"
         Path(link).symlink_to(path)
         assert probe.transport(link, "REPO") == {
             "socket_is_symlink": True,
-            "raw_json_line_reply": "",
+            "raw_json_line_reply": "closed",
             "websocket_upgrade_status": "HTTP/1.1 101 Switching Protocols",
         }
         assert probe.transport(path, "REPO")["socket_is_symlink"] is False
@@ -869,7 +869,7 @@ def test_first_reply_is_empty_when_the_server_stays_silent():
         listener.bind(path)
         listener.listen(1)
         threading.Thread(target=lambda: held.append(listener.accept()[0]), daemon=True).start()
-        assert probe.first_reply(path, probe.RAW_LINE, 0.2) == ""
+        assert probe.first_reply(path, probe.RAW_LINE, 0.2) == "no reply"
     for conn in held:
         conn.close()
     folder.cleanup()

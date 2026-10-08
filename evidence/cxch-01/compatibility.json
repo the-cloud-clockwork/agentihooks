@@ -40,7 +40,7 @@
   "transport": {
     "status": "observed",
     "evidence": "records/transport.json",
-    "finding": "unix:// listen serves WebSocket over the Unix socket: a raw JSON line got no reply within 3 s, an HTTP upgrade answered 'HTTP/1.1 101 Switching Protocols'. The given path is a symlink (to /tmp/codex-daemon-<uid>/<hash>)."
+    "finding": "unix:// listen serves WebSocket over the Unix socket: a raw JSON-RPC line gets no reply and the server closes the stream; an HTTP upgrade answers 'HTTP/1.1 101 Switching Protocols'. The given path is a symlink (to /tmp/codex-daemon-<uid>/<hash>)."
   },
   "items": {
     "full_conversation": {
@@ -75,7 +75,7 @@
     },
     "hook_payloads": {
       "status": "pass after trust",
-      "evidence": "records/trust_hooks.json, records/trust_hooks_postcompact.json, records/hook_payload_shapes.json, records/hook_sequences.json",
+      "evidence": "records/trust_hooks.json, records/trust_hooks_postcompact.json, records/hook_payload_shapes.json, records/hook_sequences.json (PostCompact key set in records/hook_payload_shapes.json)",
       "observed": "hooks in a fresh home are listed untrusted by hooks/list (records/trust_hooks.json before); the CLI flag --dangerously-bypass-hook-trust is not an app-server flag (records/cli.json); hooks/list then config/batchWrite of hooks.state.<key>.trusted_hash = currentHash trusts them live. Then SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse, Stop, PreCompact, PostCompact (trigger manual) and SessionEnd payloads were logged; the client also receives hook/started and hook/completed notifications",
       "constraint": "a hook added later starts untrusted and needs the same trust write (records/trust_hooks_postcompact.json: postCompact untrusted, then trusted)"
     },

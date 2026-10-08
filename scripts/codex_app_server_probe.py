@@ -68,7 +68,7 @@ class Client:
     def answer(self, rid: int | str, result: dict) -> None:
         self.ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}))
 
-    def until(self, pred, timeout: float = TURN_TIMEOUT_S) -> tuple[dict | None, list[dict]]:
+    def until(self, pred: Callable[[dict], bool], timeout: float = TURN_TIMEOUT_S) -> tuple[dict | None, list[dict]]:
         seen = []
         end = time.monotonic() + timeout
         while time.monotonic() < end:
@@ -418,9 +418,10 @@ def first_reply(sock_path: str, payload: bytes, wait_s: float) -> str:
         s.connect(sock_path)
         s.sendall(payload)
         try:
-            return s.recv(4096).decode("latin-1").split("\r\n", 1)[0]
+            data = s.recv(4096)
         except TimeoutError:
-            return ""
+            return "no reply"
+        return data.decode("latin-1").split("\r\n", 1)[0] if data else "closed"
 
 
 def transport(sock: str, repo: str) -> dict:
