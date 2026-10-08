@@ -1886,5 +1886,21 @@
   "scripts/profiles/scaffold.py:scripts.profiles.scaffold.x_overlay_new__mutmut_38:8143335d4bf42677f71b9ed3a94c80c65c7cd1c576e964ad4c5abbec46ecf000": {
     "reader": "Standards ov3 reader",
     "reason": "Equivalent mutant. sort_keys has one reader in PyYAML 6.0.3, BaseRepresenter.represent_mapping, which tests if self.sort_keys; the Dumper and CDumper classes only forward the value, and the serializer, emitter, constructor and nodes never read it. None and False are both falsy, so both keep insertion order: safe_dump of the overlay manifest is byte identical for sort_keys False and None, also for a nested mapping and CSafeDumper. sort_keys True gives description, kind, name, wears, which the exact profile.yml text test kills. Evidence: CI run 37703337103 at 2df7d0a2. Adversarial Standards ruling."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_34:0218fd3c8879d332906b0c9f657eff071d5df0f589e99aa45c713f72eb1c7fb3": {
+    "reader": "Standards",
+    "reason": "On Python 3.12 Path.read_text(encoding=None) decodes with the locale encoding, and every POSIX locale charmap is an ASCII compatible byte table, so a charset such as UTF-16 can never be the active locale charset. core.HOME is pure ASCII at the byte level and test_page_shells_are_plain_ascii_so_any_ascii_locale_reads_them_alike pins that on core.HOME. Decoding all ASCII bytes under explicit utf-8 or any ASCII compatible locale codec yields the same str with no decode error, so index_page returns identical HTML for every request. Evidence: CI run 37704627823. Adversarial Standards ruling."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_36:7b95e86bbcd65030c2d17c9e47bbe46cbe4fd628ceadabfee79bf833b799f006": {
+    "reader": "Standards",
+    "reason": "Python normalizes codec names before lookup: codecs.lookup('UTF-8') and codecs.lookup('utf-8') resolve to the same utf-8 codec, so read_text(encoding='UTF-8') decodes to the identical str as encoding='utf-8' for any bytes, independent of the file content, and index_page output is unchanged. Evidence: CI run 37704627823. Adversarial Standards ruling."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_page_for__mutmut_37:1a189e76956aa505c6c8f60bd305c771f03d533048c842db2e9d310d0fb02d72": {
+    "reader": "Standards",
+    "reason": "Same locale fallback argument applied to core.SHELL. shell.html carries its middle dot and ellipsis as HTML entities so the file is pure ASCII at the byte level, and test_page_shells_are_plain_ascii_so_any_ascii_locale_reads_them_alike locks core.SHELL to that. The locale derived decode, always an ASCII compatible POSIX charmap, and the explicit utf-8 decode yield the same str for every byte, so page_for renders the same shell for any slug. Evidence: CI run 37704627823. Adversarial Standards ruling."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_page_for__mutmut_39:9fb197a866645940aeeeadfc8a45d53d12c97717d4bfa0c78034bdcee2f839eb": {
+    "reader": "Standards",
+    "reason": "Python normalizes codec names before lookup: codecs.lookup('UTF-8') and codecs.lookup('utf-8') resolve to the same utf-8 codec, so read_text(encoding='UTF-8') decodes to the identical str as encoding='utf-8' for any bytes, independent of the file content, and page_for output is unchanged. Evidence: CI run 37704627823. Adversarial Standards ruling."
   }
 }
