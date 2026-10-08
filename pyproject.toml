@@ -46,10 +46,13 @@ dependencies = [
     # The swarm keeps its claims and agent registry in Redis (scripts/swarm/store.py).
     "redis>=5.0.0",
     "jsonschema>=4.23",
+    # The ledger repository writes a multi-megabyte indented document on every sync;
+    # the stdlib encoder takes the pure Python path whenever indent is set.
+    "orjson>=3.10",
 ]
 
 [project.optional-dependencies]
-ledger = ["redis>=5.0.0", "jsonschema>=4.23"]
+ledger = ["redis>=5.0.0", "jsonschema>=4.23", "orjson>=3.10"]
 postgres = ["psycopg2-binary>=2.9.9"]
 otel = [
     "opentelemetry-api>=1.20.0",

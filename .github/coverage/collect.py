@@ -15,6 +15,7 @@ VERSION = "3.12"
 POLL_SECONDS = 3
 JOB_CHECK_POLLS = 10
 DEADLINE_SECONDS = 1200
+ATTEMPTS = 5
 
 
 def _get(url: str, token: str, etag: str | None = None) -> tuple[int, str | None, bytes]:
@@ -30,6 +31,16 @@ def _get(url: str, token: str, etag: str | None = None) -> tuple[int, str | None
         if error.code == 304:
             return 304, etag, b""
         raise
+
+
+def _describe(error: Exception) -> str:
+    if not isinstance(error, HTTPError):
+        return str(error)
+    try:
+        body = error.read().decode(errors="replace")[:1000]
+    except (OSError, HTTPException):
+        body = ""
+    return f"HTTP {error.code} {error.reason}: {body}"
 
 
 def _shard_states(runs_url: str, token: str) -> dict[str, str | None]:
@@ -63,7 +74,7 @@ def collect(
 ) -> str | None:
     pending = {f"coverage-{VERSION}-{shard}": f"unit ({VERSION}, {shard})" for shard in range(1, shards + 1)}
     deadline = clock() + DEADLINE_SECONDS
-    etag, artifacts, passed_before = None, [], set()
+    etag, artifacts, passed_before, failures = None, [], set(), 0
     for poll in itertools.count():
         try:
             status, new_etag, body = _get(f"{runs_url}/artifacts?per_page=100", token, etag)
@@ -81,11 +92,15 @@ def collect(
                 error, passed_before = _check_shards(runs_url, token, set(pending.values()), passed_before)
                 if error:
                     return error
+            failures = 0
         except (OSError, ValueError, KeyError, zipfile.BadZipFile, HTTPException) as error:
-            print(f"::warning::GitHub API unreadable, retrying: {error}", flush=True)
+            failures += 1
+            if failures >= ATTEMPTS:
+                return f"GitHub API failed {failures} times in a row: {_describe(error)}"
+            print(f"::warning::GitHub API unreadable, retrying: {_describe(error)}", flush=True)
         if clock() >= deadline:
             return f"No coverage after {DEADLINE_SECONDS} seconds for {', '.join(sorted(pending))}"
-        sleep(POLL_SECONDS)
+        sleep(POLL_SECONDS * (failures + 1))
 
 
 def main() -> int:
