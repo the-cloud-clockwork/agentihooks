@@ -97,6 +97,21 @@ def test_an_unreadable_file_is_kept_and_reported_on_a_sweep_but_refused_by_name(
         repo.get_document("broken")
 
 
+def test_an_unreadable_file_is_backed_up_and_reported_once_until_it_changes(tmp_path, capsys):
+    directory = folder(tmp_path)
+    broken = directory / "broken.json"
+    broken.write_text("{not json", encoding="utf-8")
+    repo = stored(directory)
+    for _ in range(3):
+        repo.list_summaries()
+    assert len(list((directory / legacy.BACKUP).iterdir())) == 1
+    assert capsys.readouterr().err.count("legacy ledger broken not imported") == 1
+    with pytest.raises(ValueError):
+        repo.get_document("broken")
+    broken.write_text(json.dumps(document()), encoding="utf-8")
+    assert repo.get_document("broken")["title"] == "Café"
+
+
 def test_bin_indexes_merge_into_the_registry_and_are_set_aside(tmp_path):
     directory = folder(tmp_path)
     (directory / ".bin.json").write_text(json.dumps({"gone": 5}), encoding="utf-8")

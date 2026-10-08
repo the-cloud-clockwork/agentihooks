@@ -12,6 +12,7 @@ import ledger_core as core
 
 BACKUP = ".imported"
 REGISTRIES = {"bin": ".bin.json", "restored": ".bin-restored.json"}
+FAILED = {}
 
 
 @contextmanager
@@ -111,8 +112,11 @@ def adopt(repository, slug: str | None = None) -> None:
             if not found:
                 continue
             try:
-                backup(directory, name, found)
-                import_files(repository, name, found)
+                import_once(repository, name, found)
+            except Repeated:
+                if slug is not None:
+                    raise
+                continue
             except (OSError, ValueError) as exc:
                 if slug is not None:
                     raise
@@ -120,6 +124,23 @@ def adopt(repository, slug: str | None = None) -> None:
                 continue
             for path in found:
                 path.unlink()
+
+
+class Repeated(ValueError):
+    pass
+
+
+def import_once(repository, name: str, found: list) -> None:
+    """Back up and import one ledger's files; files that failed once are refused until they change."""
+    mark = tuple((str(path), path.stat().st_mtime_ns, path.stat().st_size) for path in found)
+    if mark in FAILED:
+        raise Repeated(FAILED[mark])
+    try:
+        backup(repository.directory, name, found)
+        import_files(repository, name, found)
+    except (OSError, ValueError) as exc:
+        FAILED[mark] = f"{name} was refused before: {exc}"
+        raise
 
 
 def create(repository, slug: str, content: dict, size: str = "small") -> bool:
