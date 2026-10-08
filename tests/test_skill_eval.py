@@ -18,6 +18,8 @@ def launch(monkeypatch):
         "CLAUDECODE": "nested",
         "PATH": "/usr/bin",
     }
+    if "MUTANT_UNDER_TEST" in skill_eval.os.environ:
+        environ["MUTANT_UNDER_TEST"] = skill_eval.os.environ["MUTANT_UNDER_TEST"]
     monkeypatch.setattr(skill_eval.os, "environ", environ)
     loader = Mock()
     monkeypatch.setattr(install, "_load_claude_runtime_env", loader)
@@ -69,6 +71,7 @@ def test_claude_evaluation_routes_without_default_login(launch, monkeypatch, tmp
     assert executable == "python3"
     assert argv == command
     assert child == {
+        **{name: value for name, value in environ.items() if name == "MUTANT_UNDER_TEST"},
         "AH_CC_TOKEN_winner": "test",
         "CLAUDE_CODE_OAUTH_TOKEN": "test",
         "AGENTIHOOKS_ROUTE_ACCOUNT": "winner",
