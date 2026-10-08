@@ -1,0 +1,56 @@
+import argparse
+import json
+import re
+from collections import Counter
+from pathlib import Path
+
+import pytest
+
+
+class _Collected:
+    def __init__(self) -> None:
+        self.nodeids: list[str] = []
+
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
+        self.nodeids = [item.nodeid for item in session.items]
+
+
+def collect(tests: str) -> list[str] | None:
+    recorder = _Collected()
+    code = pytest.main(["--collect-only", "-qq", "-p", "no:cacheprovider", tests], plugins=[recorder])
+    return recorder.nodeids if code == 0 else None
+
+
+def run_counts(paths: list[Path]) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    for path in paths:
+        counts.update({re.sub(r"@[^\[\]]*$", "", nodeid) for nodeid in json.loads(path.read_text())})
+    return counts
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="fail unless every collected test ran in exactly one shard")
+    parser.add_argument("durations", type=Path, nargs="+", help="the durations.json each shard stored")
+    parser.add_argument("--tests", default="tests/")
+    args = parser.parse_args(argv)
+    collected = collect(args.tests)
+    if not collected:
+        print(f"::error::Collecting {args.tests} failed or found no tests, so no shard can be graded.")
+        return 1
+    unread = [str(path) for path in args.durations if not path.is_file()]
+    if unread:
+        print(f"::error::No shard durations at {', '.join(unread)}, so those shards cannot be graded.")
+        return 1
+    counts = run_counts(args.durations)
+    wrong = sorted(nodeid for nodeid in collected if counts[nodeid] != 1)
+    print(f"{len(collected)} collected tests, {len(wrong)} ran zero times or more than once")
+    for nodeid in wrong:
+        print(f"{nodeid} ran {counts[nodeid]} times")
+    if wrong:
+        print(f"::error::{len(wrong)} collected tests did not run in exactly one of {len(args.durations)} shards.")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
