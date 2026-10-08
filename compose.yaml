@@ -62,7 +62,10 @@ services:
     volumes:
       - ${SWARM_TLS_DIR:-./deploy/compose/tls}:/tls:ro
     healthcheck:
-      disable: true
+      test: [CMD, python, -c, "import socket; socket.create_connection(('127.0.0.1', 8770), 2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     depends_on:
       redis:
         condition: service_healthy
