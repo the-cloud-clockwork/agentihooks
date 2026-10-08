@@ -68,6 +68,11 @@ LISTS = {
     ),
 }
 BOOL_FIELDS = ("done", "out_of_scope")
+SEED_ADD_COMMANDS = {
+    "tasks": ("task", "task add <id>"),
+    "followups": ("follow up", "followup add"),
+    "phases": ("phase", "phase add <id>"),
+}
 STATE_EVENTS = {"done": ("checked", "unchecked"), "out_of_scope": ("out of scope", "back in scope")}
 THREADS = {
     "notes": ("comments",),
@@ -424,7 +429,24 @@ def new_item(name, seed_item, ctx):
     return item
 
 
+def refuse_seed_adds(doc, base_doc, seed, ctx):
+    """New tasks, follow ups and phases come only from the ledger commands, which check them for duplicates."""
+    kept = {}
+    for name, (noun, command) in SEED_ADD_COMMANDS.items():
+        known = {i["id"] for i in doc[name]} | {i["id"] for i in base_doc[name]}
+        kept[name] = [i for i in seed[name] if i["id"] in known]
+        for item in seed[name]:
+            if item["id"] not in known:
+                label = item.get("text") or item.get("title", "")
+                ctx.refused.append(
+                    f'The page added the {noun} "{label}", which was not added. Add it with '
+                    f'agentihooks ledger --slug <slug> --as <name> {command} "{label}", which checks it for duplicates.'
+                )
+    return {**seed, **kept}
+
+
 def reconcile_fields(doc, base_doc, seed, ctx):
+    seed = refuse_seed_adds(doc, base_doc, seed, ctx)
     if not ledger_phases.seed_graph_valid(doc["phases"], base_doc["phases"], seed["phases"], ctx):
         seed = {**seed, "phases": base_doc["phases"]}
     base, new, flat = flatten(base_doc), flatten(seed), flatten(doc)

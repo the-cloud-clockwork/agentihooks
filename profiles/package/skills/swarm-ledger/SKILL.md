@@ -206,7 +206,10 @@ Writing for the operator (the server enforces it):
 Each command is attributed to your name. Titles, descriptions, overview and sources are edited in
 the HTML seed: the `<script id="ledger-data" type="application/json">` block of
 `~/development-ledger/<slug>.html`, with Edit, keeping its `_rev`; the server merges within
-2 seconds. Items are closed by checking them, never deleted. Done when `status` shows your change.
+2 seconds. Items are closed by checking them, never deleted. Tasks, follow-ups and phases are added
+only through `task add`, `followup add` and `phase add`, which check them for duplicates: a new one
+written into the seed is refused with a `WARNING` naming its title and that command. Done when
+`status` shows your change.
 
 ### B4. The gate
 
