@@ -77,6 +77,33 @@ def test_the_tick_returns_a_failed_task_to_its_agent_under_enforce(started, monk
     assert any(item.text.startswith("The intent check failed") and item.ref == "tasks/t1" for item in items)
 
 
+def test_the_tick_reads_each_pull_request_once_for_all_its_passes(started, monkeypatch):
+    from scripts.gates import progress
+    from scripts.swarm import done_gate, ledger_events, priority_sweep, waits
+
+    store, _, _ = started
+    seen = {}
+
+    def capture(name, index):
+        def run(*args):
+            seen[name] = args[index]
+            args[index](URL)
+            return []
+
+        return run
+
+    monkeypatch.setattr(ledger_events, "event_pass", capture("events", 6))
+    monkeypatch.setattr(done_gate, "recheck_pass", capture("recheck", 5))
+    monkeypatch.setattr(progress, "checks_pass", capture("checks", 3))
+    monkeypatch.setattr(waits, "end_pass", capture("waits", 4))
+    monkeypatch.setattr(priority_sweep, "priority_pass", capture("priority", 5))
+    reads = []
+    monkeypatch.setattr(ledger_events, "view", lambda url: reads.append(url))
+    cli.run_tick(store, "sw")
+    assert sorted(seen) == ["checks", "events", "priority", "recheck", "waits"]
+    assert reads == [URL]
+
+
 def test_the_coach_tick_reads_only_the_head_of_an_unchanged_pull_request(started, monkeypatch):
     from scripts.gates.verdicts import Verdicts
 
