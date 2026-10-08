@@ -83,7 +83,7 @@ def seats(rows: list[Account]) -> list[session_bands.Seat]:
             row.name,
             row.cap,
             row.sessions,
-            session_bands.spend_by(row.five_left, row.week_left, row.week_resets_at),
+            session_bands.spend_by(row.five_left, row.week_resets_at),
         )
         for row in rows
         if row.cap is not None

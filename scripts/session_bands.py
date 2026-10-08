@@ -6,7 +6,6 @@ WEEK_FLOOR = 5.0
 FIVE_HOUR_BANDS = ((60.0, 6), (40.0, 4), (10.0, 3), (5.0, 2))
 TOP_BAND = FIVE_HOUR_BANDS[0][1]
 HANDOFF_FIVE = 5.0
-HANDOFF_WEEK = 2.0
 
 
 @dataclass(frozen=True)
@@ -53,9 +52,8 @@ def upcoming(resets_at: float | None, now: float) -> float | None:
     return resets_at if resets_at is not None and resets_at > now else None
 
 
-def spend_by(five_left: float | None, week_left: float | None, resets_at: float | None) -> float | None:
-    above = week_left is not None and week_left > HANDOFF_WEEK and (five_left is None or five_left > HANDOFF_FIVE)
-    return resets_at if above else None
+def spend_by(five_left: float | None, resets_at: float | None) -> float | None:
+    return resets_at if five_left is None or five_left > HANDOFF_FIVE else None
 
 
 def _order(seat: Seat) -> tuple:

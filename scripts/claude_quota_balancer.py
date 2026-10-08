@@ -636,8 +636,7 @@ def is_routable(result: ProbeResult, now: float | None = None, include_fable: bo
 
 def _spend_by(result: ProbeResult, now: float) -> float | None:
     five = session_bands.left(result.five_hour.used, result.five_hour.resets_at, now)
-    week = session_bands.left(result.seven_day.used, result.seven_day.resets_at, now)
-    return session_bands.spend_by(five, week, session_bands.upcoming(result.seven_day.resets_at, now))
+    return session_bands.spend_by(five, session_bands.upcoming(result.seven_day.resets_at, now))
 
 
 def rank_results(results: list[ProbeResult], include_fable: bool = False) -> list[ProbeResult]:

@@ -88,10 +88,12 @@ def test_equal_sessions_go_to_the_codex_account_whose_week_resets_soonest():
     passed = CodexQuota(NOW, "team", seven_day=QuotaWindow(used=50, resets_at=NOW - 1))
     for other in (tired, passed):
         assert router.select(_accounts(), {**quotas, "beta": other}, {}, NOW)[0] == _accounts()[0]
+    rested = CodexQuota(NOW, "team", QuotaWindow(used=97, resets_at=NOW - 1), soon.seven_day)
+    assert router.select(_accounts(), {**quotas, "beta": rested}, {}, NOW)[0] == _accounts()[2]
     assert router.select(_accounts(), quotas, {"beta": 1}, NOW)[0] == _accounts()[0]
     assert [seat.spend_before for seat in router.seats(_accounts(), quotas, {}, NOW)] == [
         NOW + 90000,
-        None,
+        NOW + 60,
         NOW + 600,
     ]
 

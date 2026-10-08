@@ -117,11 +117,11 @@ def test_a_fresh_codex_reading_with_only_the_week_gets_the_top_band(monkeypatch)
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
     pool = [capacity.codex_router.CodexAccount("a", "AH_CX_TOKEN_a")]
     monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: pool)
-    weekly = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10))
+    weekly = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=500))
     monkeypatch.setattr(capacity.codex_router, "quotas", lambda accounts, env: {"a": weekly})
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: pytest.fail("reached the real codex probe"))
     seen = capacity.accounts({}, 100)
-    assert seen == [capacity.Account("codex", "a", "OPEN", 0, None, 90, 6)]
+    assert seen == [capacity.Account("codex", "a", "OPEN", 0, None, 90, 6, 500)]
 
 
 def test_accounts_judge_every_window_at_the_given_time_and_pass_the_environment(monkeypatch):

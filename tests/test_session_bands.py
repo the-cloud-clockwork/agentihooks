@@ -106,12 +106,9 @@ def test_among_equal_sessions_the_soonest_week_reset_wins():
     assert session_bands.pick([Seat("codex", "c", 6, 1), Seat("claude", "z", 6, 1)]).account == "z"
 
 
-@pytest.mark.parametrize(
-    ("five_left", "week_left", "spend_by"),
-    [(5.1, 2.1, NOW), (None, 2.1, NOW), (5, 50, None), (50, 2, None), (50, None, None)],
-)
-def test_only_an_account_above_the_handoff_margin_spends_its_week_first(five_left, week_left, spend_by):
-    assert session_bands.spend_by(five_left, week_left, NOW) == spend_by
+@pytest.mark.parametrize(("five_left", "spend_by"), [(5.1, NOW), (None, NOW), (5, None), (0, None)])
+def test_only_an_account_above_the_five_hour_handoff_margin_spends_its_week_first(five_left, spend_by):
+    assert session_bands.spend_by(five_left, NOW) == spend_by
 
 
 def test_only_a_reset_still_ahead_counts_as_upcoming():
