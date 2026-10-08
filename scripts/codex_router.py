@@ -61,7 +61,9 @@ def token_accounts(environ: Mapping[str, str]) -> list[CodexAccount]:
     return [
         CodexAccount(name.removeprefix(CODEX_TOKEN_PREFIX), name)
         for name in sorted(environ)
-        if name.startswith(CODEX_TOKEN_PREFIX) and name != CODEX_TOKEN_PREFIX and environ[name]
+        if name.startswith(CODEX_TOKEN_PREFIX)
+        and name.removeprefix(CODEX_TOKEN_PREFIX) not in ("", API_ACCOUNT)
+        and environ[name]
     ]
 
 

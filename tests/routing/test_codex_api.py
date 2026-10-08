@@ -142,6 +142,11 @@ def test_an_api_route_refuses_a_base_url_that_would_put_credentials_in_argv():
     assert codex_api.base_url_name({}) == ""
 
 
+def test_the_api_slug_is_reserved_from_token_accounts():
+    environ = {"AH_CX_TOKEN_api": "cx-api", "AH_CX_TOKEN_alpha": "cx-a", "AH_CX_TOKEN_": "bare", "AH_CX_TOKEN_beta": ""}
+    assert router.token_accounts(environ) == [router.CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
+
+
 def test_an_api_child_carries_no_subscription_token_and_the_route_marker():
     environ = {**SUBSCRIPTION, "AH_CX_TOKEN_": "bare", "CODEX_API_KEY": SENTINEL, "OPENAI_BASE_URL": "https://g/v1"}
     expected = {"HOME": "/home/u", "CODEX_API_KEY": SENTINEL, "OPENAI_BASE_URL": "https://g/v1", API_MARKER: "1"}
