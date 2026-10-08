@@ -804,6 +804,11 @@ def cmd_done(store, args):
     proof = {key: getattr(args, f"proof_{key}") for key in ledger_kinds.PROOF_KEYS if getattr(args, f"proof_{key}")}
     missing = ledger_kinds.unmet({**row, "proof": {**(row.get("proof") or {}), **proof}})
     if missing:
+        if ledger_kinds.kind(row) == "research":
+            raise SwarmError(
+                "a research task is done only with its proof: "
+                "--finding must be a single link to the artifact; put prose in a task comment"
+            )
         flags = ", ".join("--" + key.replace("_", "-").replace(" or ", " or --") for key in missing)
         raise SwarmError(f"a {ledger_kinds.kind(row)} task is done only with its proof: give {flags}")
     url = args.pr or row.get("pr_url")
