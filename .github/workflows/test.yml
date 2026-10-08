@@ -202,7 +202,8 @@ jobs:
 
   sonar:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Covers the 18 minute dev push wait, the 20 minute coverage deadline, the scan and the gate.
+    timeout-minutes: 45
     env:
       SONAR_SCANNER_VERSION: 7.2.0.5079
     permissions:
