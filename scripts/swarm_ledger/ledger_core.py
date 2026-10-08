@@ -741,6 +741,10 @@ def check_op(op, task_ids=()):
             raise ValueError("by is allowed only on agent chat and comment entries, as an agent name")
         if op["op"] in ("add", "edit"):
             ledger_comments.check(op["text"], kind_of(op["thread"]), op.get("long") is True, task_ids)
+            if op["thread"].endswith("/comments"):
+                from hooks.filters import check
+
+                check.refuse("ledger_write", op["text"])
 
 
 def check_body(body, task_ids=()):

@@ -17,6 +17,7 @@ import os
 import sys
 from dataclasses import asdict
 
+from hooks.filters import check
 from scripts.inbox import links
 from scripts.inbox.store import InboxError, InboxStore, connect
 from scripts.swarm_ledger import ledger_comments
@@ -71,6 +72,10 @@ def cmd_send(store, me, args):
     links.check_send(store, me, args.address)
     fyi, words = informational(args.text)
     check_for_operator(args.address, " ".join(words))
+    try:
+        check.refuse("inbox_send", " ".join(words))
+    except ValueError as exc:
+        raise InboxError(str(exc)) from exc
     item = store.send(me, args.address, " ".join(words), fyi=fyi, task=store.receiver_task(args.address))
     print(json.dumps({"id": item.id, "from": item.sender, "to": item.address, "state": item.state}))
 

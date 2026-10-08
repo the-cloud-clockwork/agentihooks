@@ -9,6 +9,7 @@ Reference: docs/hooks/conditions.md.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
@@ -27,6 +28,7 @@ from hooks.context import injection_trace, profile_chain, quarantine, tool_match
 STEPS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop"}
 _RUNNERS = {".sh": ["bash"], ".bash": ["bash"], ".py": [sys.executable]}
 FILTER_SUFFIX = ".filter.yaml"
+SYNTHETIC_TOOLS = ("judge", "ledger_write", "inbox_send")
 _INDEX_VERSION = 1
 _FRESH_NS = 2_000_000_000
 _CODE_ROOT = Path(__file__).resolve().parents[2]
@@ -929,11 +931,23 @@ _LANGUAGES = {"bash": (".sh", "#!/usr/bin/env bash\n"), "python": (".py", "#!/us
 _SCOPES = ("global", "profile", "directory")
 
 
+def misspelled(entry: dict) -> dict | None:
+    for alt in tool_matcher.parse(entry["matcher"]).alternatives:
+        if alt.kind != "tool" or alt.value in SYNTHETIC_TOOLS:
+            continue
+        close = difflib.get_close_matches(alt.value, SYNTHETIC_TOOLS, cutoff=0.8)
+        if close:
+            error = f"unknown tool {alt.value!r}: did you mean the synthetic tool {close[0]!r}?"
+            return {"path": entry["path"], "source": entry["source"], "error": error}
+    return None
+
+
 def inventory(cwd: str | Path | None = None) -> dict:
     state = profile_chain.read_state()
     layers, _probed = layer_dirs(state, cwd)
     _kept, untrusted = _trusted_layers(layers, state)
     entries, invalid = scan_layers([(s, d) for s, d in layers if str(d) not in untrusted])
+    invalid += [found for found in map(misspelled, entries) if found]
     described = []
     for source, directory in layers:
         described.append(
@@ -945,7 +959,7 @@ def inventory(cwd: str | Path | None = None) -> dict:
                 "untrusted_owner": untrusted.get(str(directory)),
             }
         )
-    return {"layers": described, "conditions": entries, "invalid": invalid}
+    return {"layers": described, "conditions": entries, "invalid": invalid, "synthetic_tools": list(SYNTHETIC_TOOLS)}
 
 
 def target_dir(scope: str, profile: str = "", cwd: str | Path | None = None) -> tuple[str, Path]:

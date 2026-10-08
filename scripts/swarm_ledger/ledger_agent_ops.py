@@ -50,6 +50,9 @@ def check(op, task_ids=()):
         raise ValueError("retext needs item questions/<id> or followups/<id> and text")
     if kind in ("add_item", "retext"):
         ledger_comments.check(op["text"], "item", task_ids=task_ids)
+        from hooks.filters import check
+
+        check.refuse("ledger_write", op["text"])
     if kind == "gate_bypass" and not isinstance(op.get("unhandled"), int):
         raise ValueError("gate_bypass needs an integer unhandled")
     if kind == "gate_lift" and not GATE_RE.match(str(op.get("gate"))):
