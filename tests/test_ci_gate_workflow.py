@@ -90,6 +90,13 @@ def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
     assert report["with"]["path"] == "coverage-ratchet/report.txt"
 
 
+def test_coverage_ratchet_grades_a_merge_group_against_the_branch_it_queues_onto():
+    job = _workflow()["jobs"]["coverage-ratchet"]
+    grade = next(step for step in job["steps"] if step.get("name") == "Hold every line the base ran")
+    assert grade["env"]["QUEUE_BASE"] == "${{ github.event.merge_group.base_ref }}"
+    assert 'base=$(git merge-base HEAD "origin/${QUEUE_BASE#refs/heads/}")' in grade["run"]
+
+
 @pytest.mark.parametrize("unit", ["success", "failure", "skipped", "cancelled", "pending"])
 @pytest.mark.parametrize("lint", ["success", "failure", "skipped", "cancelled", "pending"])
 def test_required_gate_rejects_every_non_success_result(unit, lint):

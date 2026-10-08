@@ -494,14 +494,20 @@ jobs:
           pattern: coverage-3.12-*
           path: head-coverage
 
-      # The tested commit's first parent is the exact base.
+      # The tested commit's first parent is the exact base, except in a merge group, whose first
+      # parent can be the group queued ahead of it, which no Tests run has measured yet.
       - name: Hold every line the base ran
         if: steps.lookup.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           DISPATCHED: ${{ inputs.base }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_ref }}
         run: |
-          base=$(git rev-parse "${DISPATCHED:-HEAD^1}")
+          if [[ -n "$QUEUE_BASE" ]]; then
+            base=$(git merge-base HEAD "origin/${QUEUE_BASE#refs/heads/}")
+          else
+            base=$(git rev-parse "${DISPATCHED:-HEAD^1}")
+          fi
           git worktree add --detach "$RUNNER_TEMP/base" "$base"
           grader="$RUNNER_TEMP/base"
           [[ -f "$grader/tests/coverage_ratchet.py" ]] || grader="$GITHUB_WORKSPACE"
