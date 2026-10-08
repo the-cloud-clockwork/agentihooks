@@ -1,18 +1,19 @@
 """Ledger interchange: lossless JSON export and import, and the one time import of pre SQLite ledger files."""
 
+import functools
 import json
 from pathlib import Path
 
 from scripts.swarm_ledger.repository import legacy, repository
 
-ESCAPE_NON_ASCII = False
+EXPORT_JSON = functools.partial(json.dumps, indent=2, ensure_ascii=False)
 
 
 def export(slug: str, out: Path | None = None) -> dict:
     """The complete stored document; written to `out` when given, else returned."""
     state = repository.export_document(slug)
     if out is not None:
-        Path(out).write_bytes((json.dumps(state, indent=2, ensure_ascii=ESCAPE_NON_ASCII) + "\n").encode())
+        Path(out).write_bytes((EXPORT_JSON(state) + "\n").encode())
     return state
 
 

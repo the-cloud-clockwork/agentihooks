@@ -133,5 +133,9 @@ def test_sync_through_the_full_module_reads_and_writes_that_modules_folder(tmp_p
 
     monkeypatch.setattr(full, "LEDGER_DIR", tmp_path)
     assert repository.bound(full).create("full", CONTENT) is True
+    bound = []
+    real = repository.bound
+    monkeypatch.setattr(repository, "bound", lambda domain: bound.append(domain) or real(domain))
     state, rejected = full.sync("full", ops=[chat(1)])
+    assert bound == [full]
     assert (rejected, [message["id"] for message in state["chat"]]) == ([], ["m1"])
