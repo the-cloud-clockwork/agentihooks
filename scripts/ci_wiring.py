@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 from pathlib import Path
 
 import yaml
@@ -8,8 +9,9 @@ GATE = "Gate — Required"
 PULL_REQUEST_EVENTS = ("pull_request", "pull_request_target", "merge_group")
 GATE_EVENTS = ("pull_request", "merge_group")
 FILTERED_EVENTS = ("pull_request", "push")
-PATH_FILTERS = ("paths", "paths-ignore")
+FILTERS = ("paths", "paths-ignore", "types")
 CONFIG = ".github/gate-wiring.json"
+EVENT_ONLY = re.compile(r"(?:\$\{\{\s*)?github\.event_name == '(\w+)'(?:\s*\}\})?")
 
 
 def triggers(workflow: dict) -> dict[str, dict]:
@@ -26,6 +28,11 @@ def needs_of(job: dict) -> set[str]:
     return {needs} if isinstance(needs, str) else set(needs)
 
 
+def on_pull_requests(job: dict) -> bool:
+    only = EVENT_ONLY.fullmatch(str(job.get("if", "")).strip())
+    return only is None or only.group(1) in PULL_REQUEST_EVENTS
+
+
 def load(root: Path) -> dict[str, dict]:
     folder = root / ".github/workflows"
     paths = sorted([*folder.glob("*.yml"), *folder.glob("*.yaml")])
@@ -36,7 +43,7 @@ def _gate_problems(file: str, workflow: dict) -> list[str]:
     on = triggers(workflow)
     problems = [f"{file} holds {GATE} but does not run on {event}." for event in GATE_EVENTS if event not in on]
     for event in FILTERED_EVENTS:
-        for key in PATH_FILTERS:
+        for key in FILTERS:
             if key in on.get(event, {}):
                 problems.append(f"{file} filters its {event} trigger by {key}, so a core gate skips some changes.")
     return problems
@@ -44,33 +51,37 @@ def _gate_problems(file: str, workflow: dict) -> list[str]:
 
 def _job_problems(file: str, gate_id: str, jobs: dict, not_gates: dict) -> list[str]:
     needs = needs_of(jobs[gate_id])
-    problems = []
-    for job_id in jobs:
-        key = f"{file}/{job_id}"
-        if job_id == gate_id:
-            continue
-        if job_id in needs and key in not_gates:
-            problems.append(f"{key} is a need of {GATE} and also declared a non gate.")
-        elif job_id not in needs and key not in not_gates:
-            problems.append(f"{key} runs on pull requests but is not a need of {GATE}.")
-    for key in not_gates:
-        if key.rpartition("/")[0] != file or key.rpartition("/")[2] not in jobs:
-            problems.append(f"{key} is declared a non gate but is no job of {file}.")
-    return problems
+    outside = [
+        f"{file}/{job_id}"
+        for job_id, job in jobs.items()
+        if job_id != gate_id and job_id not in needs and on_pull_requests(job)
+    ]
+    problems = [f"{key} runs on pull requests but is not a need of {GATE}." for key in outside if key not in not_gates]
+    return problems + [
+        f"{key} is declared a non gate but names no pull request job of {file} outside the needs of {GATE}."
+        for key in not_gates
+        if key not in outside
+    ]
 
 
 def _outside_problems(workflows: dict[str, dict], gate_file: str, outside: dict) -> list[str]:
-    problems = []
-    for file, workflow in workflows.items():
-        on_pull_requests = any(event in triggers(workflow) for event in PULL_REQUEST_EVENTS)
-        if file != gate_file and on_pull_requests and file not in outside:
-            problems.append(f"{file} runs on pull requests outside {gate_file}, so its jobs cannot be needs of {GATE}.")
-        if file in outside and not on_pull_requests:
-            problems.append(f"{file} is declared outside the gate but no longer runs on pull requests.")
-    problems += [
-        f"{file} is declared outside the gate but does not exist." for file in outside if file not in workflows
+    jobs = [
+        f"{file}/{job_id}"
+        for file, workflow in workflows.items()
+        if file != gate_file and any(event in triggers(workflow) for event in PULL_REQUEST_EVENTS)
+        for job_id, job in (workflow.get("jobs") or {}).items()
+        if on_pull_requests(job)
     ]
-    return problems
+    problems = [
+        f"{key} runs on pull requests outside {gate_file}, so it cannot be a need of {GATE}."
+        for key in jobs
+        if key not in outside
+    ]
+    return problems + [
+        f"{key} is declared outside the gate but names no pull request job outside {gate_file}."
+        for key in outside
+        if key not in jobs
+    ]
 
 
 def check(workflows: dict[str, dict], config: dict) -> list[str]:
