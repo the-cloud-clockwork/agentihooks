@@ -123,7 +123,9 @@ def case_c():
                 "conservative_rollback": [
                     {"state": seen.state, "needs_operator": seen.needs_operator} for seen in held
                 ],
-                "execution_observation_age_seconds": restarted.execution_observation_age_seconds("fixture", NOW + 10),
+                "execution_observation_age_seconds": restarted.execution_observation_age_seconds(
+                    "fixture", NOW + 30 + 3600
+                ),
             }
         )
     return {"passed": all(run["passed"] for run in runs), "independent_fixtures": runs}
