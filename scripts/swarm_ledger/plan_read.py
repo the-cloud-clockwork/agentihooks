@@ -68,6 +68,8 @@ def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str
     if phase is None:
         raise ValueError(f"no phase {phase_id} in ledger {slug}")
     ref = phase.get("plan_ref")
+    if not ref and task.get("plan_url"):
+        ref = {"artifact": task["plan_url"], "lines": task["plan_lines"]}
     if not ref:
         raise ValueError(f"phase {phase_id} has no plan range")
     return chunk(_ledger("plan_ranges").stored_text(ref, doc), task.get("plan_lines") or ref["lines"])

@@ -29,6 +29,7 @@ UPDATABLE = (
     "artifact",
     "profile",
     "plan_url",
+    "plan_slice",
     "rank",
     "branch",
     "branch_repo",
@@ -248,7 +249,7 @@ def _add(doc, op, ctx):
         from scripts.swarm_ledger import plan_ranges
 
         try:
-            task["plan_lines"] = plan_ranges.task_slice(doc, phase, op["plan_slice"])
+            task["plan_lines"] = plan_ranges.task_slice(doc, phase, op["plan_slice"], task.get("plan_url", ""))
         except ValueError as exc:
             ctx.refused.append(str(exc))
             return False
@@ -374,5 +375,30 @@ def _update(doc, op, ctx):
     return True
 
 
+def _set_slice(doc: dict, op: dict, ctx) -> bool:
+    fields = op["fields"]
+    if "plan_slice" not in fields:
+        return True
+    task_id = op["item"].split("/")[1]
+    task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
+    if task is None or (op.get("if_state") and task.get("state", "open") not in op["if_state"]):
+        return True
+    from scripts.swarm_ledger import plan_ranges
+
+    phase = next((p for p in doc.get("phases", []) if p["id"] == task.get("phase")), {})
+    try:
+        fields["plan_lines"] = plan_ranges.task_slice(
+            doc, phase, fields["plan_slice"], fields.get("plan_url", task.get("plan_url", ""))
+        )
+    except ValueError as exc:
+        ctx.refused.append(str(exc))
+        return False
+    return True
+
+
 def apply(doc, op, ctx):
-    return _add(doc, op, ctx) if op["op"] == "task_add" else _update(doc, op, ctx)
+    if op["op"] == "task_add":
+        return _add(doc, op, ctx)
+    if not _set_slice(doc, op, ctx):
+        return False
+    return _update(doc, op, ctx)
