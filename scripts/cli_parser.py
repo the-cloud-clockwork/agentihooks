@@ -35,7 +35,7 @@ class ArgumentParser(argparse.ArgumentParser):
 
     def unknown(self, kind: str, value: str, choices: Iterable[str]) -> NoReturn:
         message = f"unknown {kind} {value}"
-        matches = get_close_matches(value, choices, n=1)
+        matches = get_close_matches(value, choices)
         if matches:
             message += f"; did you mean {matches[0]}?"
         self.error(message)

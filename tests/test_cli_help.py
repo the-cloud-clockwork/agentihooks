@@ -115,3 +115,16 @@ def test_plain_parser_errors_have_a_single_retry_hint(monkeypatch, capsys):
     assert code == 2
     assert out == ""
     assert err == "unknown argument extra, run agentihooks -h and try again\n"
+
+
+def test_unknown_flag_when_abbreviations_are_disabled(capsys):
+    from scripts.cli_parser import ArgumentParser
+
+    parser = ArgumentParser(prog="agentihooks", allow_abbrev=False)
+    parser.add_argument("--number")
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["--num"])
+    assert exc.value.code == 2
+    assert capsys.readouterr().err == (
+        "unknown option --num; did you mean --number?, run agentihooks -h and try again\n"
+    )
