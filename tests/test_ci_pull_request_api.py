@@ -10,31 +10,65 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 PUSH_ONLY = "github.event_name == 'push'"
 PUSH_TOKEN = "${{ github.event_name == 'push' && github.token || '' }}"
-API_CALL = re.compile(r"\bgh\s+(api|run|pr|release|issue)\b|api\.github\.com|collect\.py")
+API_CALL = re.compile(r"\bgh\b(?!-)|api\.github\.com|GITHUB_API_URL|collect\.py")
+TOKEN = re.compile(r"github\.token|secrets\.github_token", re.IGNORECASE)
+
+
+def _workflow(name: str) -> dict:
+    return yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
 
 
 def _jobs() -> dict:
-    return yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    return _workflow("test.yml")["jobs"]
+
+
+def _pull_request_jobs():
+    for name, job in _jobs().items():
+        if job.get("if") == PUSH_ONLY:
+            continue
+        called = job.get("uses", "")
+        if called.startswith("./.github/workflows/"):
+            for inner, inner_job in _workflow(Path(called).name)["jobs"].items():
+                yield f"{name}/{inner}", inner_job
+        else:
+            yield name, job
 
 
 def _pull_request_steps():
-    for name, job in _jobs().items():
-        if "steps" not in job or job.get("if") == PUSH_ONLY:
-            continue
-        for step in job["steps"]:
+    for name, job in _pull_request_jobs():
+        if TOKEN.search(str(job.get("env", {}))):
+            yield name, {"name": "job env", "env": job["env"]}
+        for step in job.get("steps", []):
             if step.get("if") != PUSH_ONLY:
                 yield name, step
+
+
+def _holds_token(step: dict) -> bool:
+    env = {key: value for key, value in step.get("env", {}).items() if value != PUSH_TOKEN}
+    return bool(TOKEN.search(str(env)) or TOKEN.search(str(step.get("with", {}))))
 
 
 def test_no_pull_request_step_holds_the_workflow_token_or_calls_the_api():
     offenders = [
         f"{job}: {step.get('name') or step.get('uses')}"
         for job, step in _pull_request_steps()
-        if step.get("env", {}).get("GH_TOKEN", PUSH_TOKEN) != PUSH_TOKEN
-        or "github.token" in str(step.get("with", {}))
-        or API_CALL.search(step.get("run", ""))
+        if _holds_token(step) or API_CALL.search(step.get("run", ""))
     ]
     assert offenders == []
+
+
+@pytest.mark.parametrize(
+    "plant",
+    [
+        {"run": "gh --repo o/r api rate_limit"},
+        {"run": 'curl "$GITHUB_API_URL/rate_limit"'},
+        {"env": {"GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}},
+        {"uses": "actions/github-script@v7", "with": {"github-token": "${{ github.token }}"}},
+    ],
+    ids=["gh-with-flags", "api-url", "github-token-env", "action-input"],
+)
+def test_each_way_of_reaching_the_api_is_an_offender(plant):
+    assert _holds_token(plant) or API_CALL.search(plant.get("run", ""))
 
 
 def test_sonar_downloads_this_runs_coverage_after_the_shards():

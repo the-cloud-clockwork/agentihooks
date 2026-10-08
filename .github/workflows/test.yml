@@ -319,7 +319,7 @@ jobs:
           fi
 
   sonar:
-    # Waiting on the shards here, not by polling the API, keeps pull request runs off the workflow token's hourly quota.
+    # Polling for shard coverage instead spends the workflow token's hourly API quota, which every run shares.
     needs: [unit]
     runs-on: ubuntu-latest
     # Covers the 18 minute dev push wait, the 20 minute coverage deadline, the scan and the gate.
@@ -379,9 +379,12 @@ jobs:
         run: |
           [[ "$HEAD_REF" =~ ^refs/heads/gh-readonly-queue/.+/pr-([0-9]+)-[0-9a-f]+$ ]]
           number="${BASH_REMATCH[1]}"
-          head=$(git ls-remote origin "refs/pull/$number/head" | cut -f1)
-          branch=$(git ls-remote --heads origin | awk -v head="$head" '$1 == head { sub("refs/heads/", "", $2); print $2; exit }')
-          branch="${branch:-pr-$number}"
+          pull=$(git ls-remote origin "refs/pull/$number/head")
+          head="${pull%%[[:space:]]*}"
+          [[ -n "$head" ]]
+          heads=$(git ls-remote --heads origin)
+          branch=$(awk -v head="$head" '$1 == head { sub("refs/heads/", "", $2); print $2 }' <<< "$heads")
+          [[ -n "$branch" && "$branch" != *$'\n'* ]] || branch="pr-$number"
           echo "args=-Dsonar.pullrequest.key=$number -Dsonar.pullrequest.branch=$branch -Dsonar.pullrequest.base=${BASE_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
 
       # Sonar refuses an analysis dated before the project's latest one, so dev push scans run one at a time in push order.
