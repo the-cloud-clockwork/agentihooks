@@ -949,10 +949,12 @@ def test_tick_holds_a_resumed_agent_until_one_pane_holds_its_conversation(tickin
     tick("sw", store, ledger, runtime, 100)
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     old = replace(old, conversation_id="conv", profile_decision={"validation": {"pid": 99}})
+    twin = replace(old, name=f"{old.name}-twin")
     store.put_agent("sw", old)
+    store.put_agent("sw", twin)
     runtime.conversation_ids = panes
     runtime.bindings = lambda agents: {
-        a.name: {**live_binding.assignment(a), "hooks": True, **({"rebound": 1234} if a.name == old.name else {})}
+        a.name: {**live_binding.assignment(a), "hooks": True, **({"rebound": 1234} if a.lane == "eng" else {})}
         for a in agents
     }
     actions = tick("sw", store, ledger, runtime, 200)
@@ -960,7 +962,40 @@ def test_tick_holds_a_resumed_agent_until_one_pane_holds_its_conversation(tickin
     assert now.profile_decision["validation"]["pid"] == 99
     assert now.pane_id == old.pane_id
     assert not runtime.killed
-    assert f"held {old.name} until one pane holds its resumed process 1234" in actions
+    assert {f"held {a.name} until one pane holds its resumed process 1234" for a in (old, twin)} <= set(actions)
+
+
+@pytest.mark.parametrize(
+    "decision, expected",
+    [
+        ({"profile": "engineer"}, {"profile": "engineer", "validation": {"pid": 7}}),
+        ({"validation": {"pid": 1, "canary": "c"}}, {"validation": {"pid": 7, "canary": "c"}}),
+    ],
+)
+def test_rebind_keeps_the_launch_decision_and_moves_only_the_validated_process(ticking, decision, expected):
+    from scripts.swarm.tick import _rebind
+
+    store, runtime, _ = ticking
+    runtime.conversation_ids = {"w1:p9": "conv", "w1:p8": "other"}
+    agent = AgentRecord("engineer", "eng", "one", conversation_id="conv", profile_decision=decision)
+    rebound = _rebind("sw", store, runtime, agent, 7)
+    assert (rebound.pane_id, rebound.profile_decision) == ("w1:p9", expected)
+
+
+def test_a_validated_agent_rebinds_to_its_earliest_resumed_session():
+    from types import SimpleNamespace
+
+    def session(pid, start):
+        return SimpleNamespace(
+            name="engineer",
+            target="claude",
+            status="alive",
+            session_id="conv",
+            process=SimpleNamespace(pid=pid, start_time=start),
+        )
+
+    agent = AgentRecord("engineer", "eng", "one", conversation_id="conv", profile_decision={"validation": {"pid": 99}})
+    assert live_binding.bound_session(agent, [session(31, 9), session(32, 4), session(33, 6)]).process.pid == 32
 
 
 def test_tick_keeps_a_resumed_agent_and_records_its_new_process_and_pane(ticking):
