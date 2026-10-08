@@ -1,14 +1,17 @@
 {
-  "tested_commit": "4d9446e061dc1fbe0696882cfdda44fdd7b3bcde",
-  "evidence_class": "local isolated fixture on temporary homes with a fixed installation time; not live rollout proof",
+  "tested_commit": "bef5d3173c86e01e75df98fb36998fe085b99a9c",
+  "evidence_class": "local isolated fixture on temporary homes with a fixed installation time; mocked: the brain vault fetch, the background refresh fork and the brain HTTP post; not live rollout proof",
   "inputs": {
+    "tests/fixtures/swarm_v2/keyspace-golden.json": "49a0b362923a4aaaaab5f87421266609336dc263954aa2bb42758d9bf0f83779",
+    "hooks/_redis.py": "523c14f3c53a6cfe64f6b3b888f0d08b04ba47c7b7f5a835893090beff1a01d9",
+    "hooks/context/controls_toggle.py": "2ee8dfe27df82e483d0420fea0fbac754ead2f3c092ec0ccdc8c2333189430d6",
     "tests/fixtures/swarm_v2/keyspace.json": "90dedbc199fbe0d0adb28a7430f42c583c8e68d966f92295cff0bb9debb2927b",
-    "scripts/swarm_v2/keyspace.py": "43b10faa02a86a176b3e3212fee4652d9e582190de559e4aa9a8e6f367b9f673",
+    "scripts/swarm_v2/keyspace.py": "5dfb8c1a31dd7fe77b9ddb1589810542b89ea3367fffeabf0b92360c882e8360",
     "hooks/context/project_cache.py": "0542abc6687be5012cf626d3ec80f5c5ca59786b8f1badf1ab70ab74d47610a4",
-    "hooks/context/brain_adapter.py": "cae44be389b4c4e4a993a6374a50df718ae74463bd362a8613db226c3266b810",
-    "hooks/context/brain_writer_hook.py": "35fe8ee470ed7f1bc121d331b1c75038c1408bf42c7ea8960e8560fef9052da3",
+    "hooks/context/brain_adapter.py": "c764cc9af7e356bdcc9ba104944d165bb200ef40ce7be35c57b2b68eb51b2761",
+    "hooks/context/brain_writer_hook.py": "25f19e9e4ef7905d69ac850635b8a53358ac6da04744e126f71d9cb963ac870a",
     "hooks/context/project_sessions.py": "9a105e84751410e78de8ced4fe674583d3e9fa24d5529e6200d682aa321deb89",
-    "tests/test_swarm_v2_keyspace.py": "51336d1a4552101cf3e9b103170df60ab7554d0be88562dcb09140e25a8622ef",
-    "evidence/SV2-IDN-05/generate_case_results.py": "cd832e10da0fa14a6dcdaa78e95d2a0a1b3ccb867a14e80f9e71a44f46ba1d34"
+    "tests/test_swarm_v2_keyspace.py": "dfaba95d10469f7fbb6232114249dad1e6d7b9860a8c6db273e821b4c25dcdda",
+    "evidence/SV2-IDN-05/generate_case_results.py": "bc3155580b7a9535340d3b0264656813c82dbd6984f6f4637c9de3f0643b0255"
   }
 }

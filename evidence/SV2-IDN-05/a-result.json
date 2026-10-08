@@ -1,6 +1,6 @@
 {
-  "tested_commit": "4d9446e061dc1fbe0696882cfdda44fdd7b3bcde",
-  "evidence_class": "local isolated fixture on temporary homes with a fixed installation time; not live rollout proof",
+  "tested_commit": "bef5d3173c86e01e75df98fb36998fe085b99a9c",
+  "evidence_class": "local isolated fixture on temporary homes with a fixed installation time; mocked: the brain vault fetch, the background refresh fork and the brain HTTP post; not live rollout proof",
   "then": "two installations with the same native session ID and path produce independent cache and archive identities",
   "runs": [
     {
