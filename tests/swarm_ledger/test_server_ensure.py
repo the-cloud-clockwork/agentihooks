@@ -122,17 +122,20 @@ def test_occupied_unresponsive_port_times_out_without_starting(isolated_server, 
 
 
 def test_a_listening_silent_port_waits_out_the_deadline_without_starting(isolated_server, monkeypatch):
-    monkeypatch.setattr(server, "SERVER_WAIT", 0.15)
+    monkeypatch.setattr(server, "SERVER_WAIT", 1.3)
     with socket.socket() as silent:
         silent.bind(("127.0.0.1", 0))
         silent.listen()
-        monkeypatch.setattr(server, "BASE", f"http://127.0.0.1:{silent.getsockname()[1]}")
+        monkeypatch.setattr(server, "PORT", silent.getsockname()[1])
+        monkeypatch.setattr(server, "BASE", f"http://127.0.0.1:{server.PORT}")
         with (
+            patch.object(server, "port_held", wraps=server.port_held) as held,
             patch.object(server.subprocess, "Popen") as start,
             pytest.raises(SystemExit) as refused,
         ):
             server.ensure()
     assert str(refused.value) == f"ledger server did not answer on {server.BASE}; see {server.LOGFILE}"
+    assert held.call_count >= 1
     start.assert_not_called()
 
 
