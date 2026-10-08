@@ -77,6 +77,22 @@ def test_the_tick_returns_a_failed_task_to_its_agent_under_enforce(started, monk
     assert any(item.text.startswith("The intent check failed") and item.ref == "tasks/t1" for item in items)
 
 
+def test_the_coach_tick_reads_only_the_head_of_an_unchanged_pull_request(started, monkeypatch):
+    from scripts.gates.verdicts import Verdicts
+
+    store, ledger, _ = started
+    store.update("sw", gates={"intent": "coach"})
+    ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
+    Verdicts("sw", "intent-coach").write("t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL)
+    heads, views = [], []
+    monkeypatch.setattr(intent, "pr_head", lambda url: heads.append(url) or "h1")
+    monkeypatch.setattr(intent, "pr_view", lambda url: views.append(url))
+    actions = cli.run_tick(store, "sw")
+    assert (heads, views) == ([URL], [])
+    assert not any("intent check" in action for action in actions)
+    assert Verdicts("sw", "intent").read("t1")["head"] == "h1"
+
+
 def test_a_refused_ledger_write_after_the_tick_step_leaves_the_rest_running(started, monkeypatch, capsys):
     from scripts.swarm import priority_sweep
     from scripts.swarm.ledger_client import LedgerRefused
