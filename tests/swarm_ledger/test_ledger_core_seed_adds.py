@@ -126,6 +126,15 @@ def test_a_new_phase_in_the_seed_page_is_refused_with_its_add_command():
     assert state["_meta"]["seed_error"] is None
 
 
+def test_empty_and_false_fields_leave_no_flag_in_the_add_command():
+    make_ledger()
+    phase = {"id": "p2", "title": "Second", "description": "", "depends_on": [], "release": False}
+    state = edit_seed(lambda seed: seed["phases"].append(phase))
+    assert state["_meta"]["warnings"] == [
+        f'The page added the phase "Second", which was not added. Add it with {PREFIX}phase add <id> Second'
+    ]
+
+
 def test_an_existing_phase_cannot_depend_on_a_refused_new_phase():
     before = make_ledger()
 

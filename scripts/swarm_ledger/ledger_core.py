@@ -442,7 +442,7 @@ def refuse_seed_adds(doc, base_doc, seed, ctx):
         kept[name] = [i for i in seed[name] if i["id"] in known]
         for item in seed[name]:
             if item["id"] not in known:
-                label = item.get("text") or item.get("title", "")
+                label = item.get("text") or item.get("title")
                 ctx.refused.append(
                     f'The page added the {noun} "{label}", which was not added. Add it with '
                     f"{seed_add_command(command, label, item, fields)}"
