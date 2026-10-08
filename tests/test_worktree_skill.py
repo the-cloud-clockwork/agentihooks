@@ -268,9 +268,14 @@ class Done(WtBase):
         gh = self.bin / "gh"
         gh.write_text(
             f"#!{BASH}\nset -euo pipefail\n"
-            'query=""\n'
-            'while (($#)); do if [[ "$1" == --jq ]]; then query="$2"; shift; fi; shift; done\n'
-            f'"{jq}" -r "$query" < "{listing}"\n'
+            'query=""; state=all\n'
+            "while (($#)); do\n"
+            '  case "$1" in --jq) query="$2"; shift ;; --state) state="$2"; shift ;; esac\n'
+            "  shift\n"
+            "done\n"
+            f'"{jq}" -r --arg s "$state" '
+            '"map(select(\\$s == \\"all\\" or .state == (\\$s | ascii_upcase))) | ($query) | values"'
+            f' < "{listing}"\n'
         )
         gh.chmod(0o755)
         return dest
@@ -293,7 +298,8 @@ class Done(WtBase):
         self.assertFalse(dest.exists())
         self.assertFalse(self.branch_exists("closed-probe"))
         self.assertTrue(self.remote_branch_exists("closed-probe"))
-        self.assertIn("and branch closed-probe", result.stdout)
+        self.assertIn(f"wt: removed {dest} and branch closed-probe\n", result.stdout)
+        self.assertNotIn("kept", result.stderr)
 
     def test_done_without_force_keeps_a_worktree_whose_pull_request_closed_unmerged(self):
         dest = self._published_with_pull_requests(
@@ -313,7 +319,7 @@ class Done(WtBase):
     def test_done_refuses_an_open_or_queued_pull_request_even_with_force(self):
         pulls = {
             "open": '[{"state": "OPEN", "url": "https://github.com/o/r/pull/8"}]',
-            "queued": '[{"state": "OPEN", "isInMergeQueue": true, "url": "https://github.com/o/r/pull/8"},'
+            "queued": '[{"state": "OPEN", "url": "https://github.com/o/r/pull/8"},'
             ' {"state": "CLOSED", "url": "https://github.com/o/r/pull/6"}]',
         }
         for kind, listing in pulls.items():
