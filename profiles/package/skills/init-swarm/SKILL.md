@@ -32,7 +32,8 @@ positions: `[1]` waits for the first phase; the ledger resolves it to `p1`.
 Existing phase ids such as `p1` are also accepted. Record only dependencies the
 plan names; independent phases have no dependencies. Set `planning` to `auto`
 for phases the planner will slice when they open, or `manual` for phases whose
-tasks the accepted plan already specifies. Omitted `planning` means manual.
+tasks the accepted plan already specifies. In this content file omitted
+`planning` means manual; a phase added later defaults to auto.
 Leave automatic phases without tasks.
 
 Done when every plan phase, dependency and planning mode is present and every

@@ -20,7 +20,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       ledger artifact; links it on each phase, comments the phase, and every task
                                       added to those phases carries the link
   plan phases PATH                    append a plan's phases (JSON, the init-swarm content phases shape) to the
-                                      ledger, planned manually and in review; a taken phase id refuses them all
+                                      ledger, planned automatically unless a phase names manual, which waits in
+                                      review; a taken phase id refuses them all
   phase ID done|open [--status T]     set a phase state, T becomes your status comment
   followup add TEXT | done|open ID    add a follow-up, close one, or reopen one
   followup add TEXT --needs-operator  add a follow-up that waits on the operator's decision; it shows in Priorities
@@ -91,6 +92,7 @@ import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
 from scripts.gates.base import Who
+from scripts.swarm_ledger import ledger_phases
 from scripts.swarm_ledger.repository import repository
 
 BASE = ledger_link.base()
@@ -615,7 +617,7 @@ def build_parser():
     phase.add_argument("--status")
     phase.add_argument("--description", default="")
     phase.add_argument("--depends-on", default="")
-    phase.add_argument("--planning", choices=["manual", "auto"], default="auto")
+    phase.add_argument("--planning", choices=["manual", "auto"], default=ledger_phases.PLANNING_DEFAULT)
     phase.add_argument("--release", action="store_true")
     followup = sub.add_parser("followup")
     followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])
