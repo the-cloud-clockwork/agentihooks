@@ -1,23 +1,17 @@
 """The local herdr runtime behind the runtime protocol: each operation runs the existing HerdrRuntime call."""
 
 import subprocess
+from typing import Any
 
-from scripts.agent_choice import ALL_FULL
+from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.store import AgentRecord
 from scripts.swarm.tick import SpawnError
 from scripts.swarm_v2.runtime.base import LOCAL, Capability, Outcome, Recovery, SpawnRequest, Status, foreign
 
 
 def _failed(operation: str, exc: SpawnError) -> Outcome:
-    text = str(exc)
-    if isinstance(exc.__cause__, subprocess.TimeoutExpired):
-        status = Status.AMBIGUOUS
-    elif text.startswith("unsupported"):
-        status = Status.UNSUPPORTED
-    elif text == ALL_FULL:
-        status = Status.UNAVAILABLE
-    else:
-        status = Status.REFUSED
-    return Outcome(operation, status, LOCAL, detail=text)
+    status = Status.AMBIGUOUS if isinstance(exc.__cause__, subprocess.TimeoutExpired) else Status(exc.status)
+    return Outcome(operation, status, LOCAL, detail=str(exc))
 
 
 class LocalHerdrRuntime:
@@ -33,7 +27,7 @@ class LocalHerdrRuntime:
         }
     )
 
-    def __init__(self, herdr):
+    def __init__(self, herdr: HerdrRuntime):
         self.herdr = herdr
 
     def spawn(self, request: SpawnRequest) -> Outcome:
@@ -43,7 +37,7 @@ class LocalHerdrRuntime:
             return _failed("spawn", exc)
         return Outcome("spawn", Status.OK, LOCAL, placed)
 
-    def observe(self, agent) -> Outcome:
+    def observe(self, agent: AgentRecord) -> Outcome:
         refused = foreign(self, "observe", agent)
         if refused:
             return refused
@@ -51,17 +45,17 @@ class LocalHerdrRuntime:
         status = Status.AMBIGUOUS if observed.state == "unknown" else Status.OK
         return Outcome("observe", status, LOCAL, observed)
 
-    def command(self, agent, text: str) -> Outcome:
+    def command(self, agent: AgentRecord, text: str) -> Outcome:
         refused = foreign(self, "command", agent)
         if refused:
             return refused
         self.herdr.nudge(agent, text)
         return Outcome("command", Status.OK, LOCAL, "accepted")
 
-    def drain(self, agent) -> Outcome:
+    def drain(self, agent: AgentRecord) -> Outcome:
         return Outcome("drain", Status.UNSUPPORTED, LOCAL, detail="local herdr has no drain")
 
-    def terminate(self, agent, homes: tuple = ()) -> Outcome:
+    def terminate(self, agent: AgentRecord, homes: tuple = ()) -> Outcome:
         refused = foreign(self, "terminate", agent)
         if refused:
             return refused
@@ -70,7 +64,7 @@ class LocalHerdrRuntime:
         refusal = self.herdr.refusal(agent)
         return Outcome("terminate", Status.REFUSED, LOCAL, refusal, refusal["refusal"])
 
-    def recover(self, agent, mode: Recovery, config=None, text: str = "") -> Outcome:
+    def recover(self, agent: AgentRecord, mode: Recovery, config: Any = None, text: str = "") -> Outcome:
         refused = foreign(self, "recover", agent)
         if refused:
             return refused

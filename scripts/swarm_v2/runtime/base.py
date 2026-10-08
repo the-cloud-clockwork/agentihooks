@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
 
+from scripts.swarm.store import AgentRecord
+
 LOCAL = "local"
 BACKEND_VARIABLE = "AGENTIHOOKS_RUNTIME_BACKEND"
 DISABLED_VARIABLE = "AGENTIHOOKS_RUNTIME_DISABLED"
@@ -61,18 +63,18 @@ class Runtime(Protocol):
 
     def spawn(self, request: SpawnRequest) -> Outcome: ...
 
-    def observe(self, agent) -> Outcome: ...
+    def observe(self, agent: AgentRecord) -> Outcome: ...
 
-    def command(self, agent, text: str) -> Outcome: ...
+    def command(self, agent: AgentRecord, text: str) -> Outcome: ...
 
-    def drain(self, agent) -> Outcome: ...
+    def drain(self, agent: AgentRecord) -> Outcome: ...
 
-    def terminate(self, agent, homes: tuple = ()) -> Outcome: ...
+    def terminate(self, agent: AgentRecord, homes: tuple = ()) -> Outcome: ...
 
-    def recover(self, agent, mode: Recovery, config=None, text: str = "") -> Outcome: ...
+    def recover(self, agent: AgentRecord, mode: Recovery, config: Any = None, text: str = "") -> Outcome: ...
 
 
-def foreign(runtime: Runtime, operation: str, agent) -> Outcome | None:
+def foreign(runtime: Runtime, operation: str, agent: AgentRecord) -> Outcome | None:
     if agent.runtime_backend == runtime.backend:
         return None
     return Outcome(
@@ -92,9 +94,7 @@ class RuntimeRouter:
         return cls(runtimes, environ.get(BACKEND_VARIABLE) or LOCAL, disabled)
 
     def spawn_backend(self) -> str:
-        if self.default in self.runtimes and self.default not in self.disabled:
-            return self.default
-        return LOCAL
+        return LOCAL if self.default in self.disabled else self.default
 
     def spawn(self, request: SpawnRequest, needs: Iterable[Capability] = ()) -> Outcome:
         backend = self.spawn_backend()
@@ -102,26 +102,28 @@ class RuntimeRouter:
             return Outcome("spawn", Status.UNAVAILABLE, backend, detail=f"no enabled runtime for {backend}")
         return self._call(backend, "spawn", (Capability.SPAWN, *needs), request)
 
-    def observe(self, agent) -> Outcome:
+    def observe(self, agent: AgentRecord) -> Outcome:
         return self._own(agent, "observe", Capability.OBSERVE, agent)
 
-    def command(self, agent, text: str) -> Outcome:
+    def command(self, agent: AgentRecord, text: str) -> Outcome:
         return self._own(agent, "command", Capability.COMMAND, agent, text)
 
-    def drain(self, agent) -> Outcome:
+    def drain(self, agent: AgentRecord) -> Outcome:
         return self._own(agent, "drain", Capability.DRAIN, agent)
 
-    def terminate(self, agent, homes: tuple = ()) -> Outcome:
+    def terminate(self, agent: AgentRecord, homes: tuple = ()) -> Outcome:
         return self._own(agent, "terminate", Capability.TERMINATE, agent, homes)
 
-    def recover(self, agent, mode: Recovery = Recovery.REATTACH, config=None, text: str = "") -> Outcome:
+    def recover(
+        self, agent: AgentRecord, mode: Recovery = Recovery.REATTACH, config: Any = None, text: str = ""
+    ) -> Outcome:
         need = Capability.NATIVE_RESUME if mode is Recovery.RESUME else Capability.RECOVER
         return self._own(agent, "recover", need, agent, mode, config, text)
 
     def capability_failures_total(self) -> int:
         return sum(self.failures.values())
 
-    def _own(self, agent, operation: str, need: Capability, *args) -> Outcome:
+    def _own(self, agent: AgentRecord, operation: str, need: Capability, *args) -> Outcome:
         backend = agent.runtime_backend
         if backend not in self.runtimes:
             return Outcome(operation, Status.UNAVAILABLE, backend, detail=f"no runtime registered for {backend}")

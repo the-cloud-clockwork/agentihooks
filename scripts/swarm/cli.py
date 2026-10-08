@@ -100,6 +100,7 @@ from scripts.swarm.status import auto_snapshot, findings, status_report, task_co
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
 from scripts.swarm.tick import agent_status, primed, skip_refused, tick
 from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
+from scripts.swarm_v2.runtime.routed import routed
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -140,7 +141,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
             return ["the swarm belongs to another hive"]
         controls = timing.call(command_runner.consume, store, slug)
         if timing.call(ledger.binned, slug):
-            _, left = stop_now(store, slug, runtime or HerdrRuntime(), ledger)
+            _, left = stop_now(store, slug, runtime or routed(herdr=HerdrRuntime()), ledger)
             return [
                 f"the ledger is in the bin, still retiring {', '.join(left)}"
                 if left
@@ -167,7 +168,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
                 ledger,
                 store.config(slug),
             )
-        actions += timing.call(tick, slug, store, ledger, runtime or HerdrRuntime(), now_ms())
+        actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
         if store.config(slug).template == "doctor":
             from scripts.doctor import cli as doctor
 
@@ -304,7 +305,7 @@ def cmd_stop(store, args):
     if not args.now:
         _state(store, args, "stopping")
         return
-    config, left = stop_now(store, args.slug, HerdrRuntime(), LedgerClient())
+    config, left = stop_now(store, args.slug, routed(herdr=HerdrRuntime()), LedgerClient())
     print(json.dumps({"swarm": args.slug, "state": config.state, "still_running": left}))
 
 

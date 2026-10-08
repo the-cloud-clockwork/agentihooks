@@ -11,8 +11,6 @@ from scripts.swarm.runtime import HerdrRuntime, herdr_target
 from scripts.swarm.store import AgentRecord
 from scripts.swarm.tick import Placed, SpawnError
 from scripts.swarm_v2.runtime.base import (
-    BACKEND_VARIABLE,
-    DISABLED_VARIABLE,
     LOCAL,
     Capability,
     Outcome,
@@ -23,6 +21,7 @@ from scripts.swarm_v2.runtime.base import (
     foreign,
 )
 from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+from scripts.swarm_v2.runtime.routed import RoutedRuntime, routed
 from tests.swarm.profile_fixture import validated
 
 REMOTE = "kubernetes"
@@ -117,9 +116,6 @@ def herdr_runtime(tmp_path, monkeypatch, panes=None, run=None):
     return runtime, calls
 
 
-# T-SV2-RUN-01-A
-
-
 @pytest.mark.parametrize("fixture", ["first", "second"])
 def test_the_local_swarm_spawns_observes_and_retires_through_the_protocol(tmp_path, monkeypatch, fixture):
     home = tmp_path / fixture
@@ -175,7 +171,18 @@ def test_an_outcome_is_ok_only_for_the_ok_status():
     assert not any(Outcome("spawn", status, LOCAL).ok for status in Status if status is not Status.OK)
 
 
-# T-SV2-RUN-01-B
+def test_the_enum_values_are_the_wire_names():
+    assert [str(status) for status in Status] == ["ok", "ambiguous", "unavailable", "unsupported", "refused"]
+    assert [str(mode) for mode in Recovery] == ["reattach", "resume"]
+    assert [str(capability) for capability in Capability] == [
+        "spawn",
+        "observe",
+        "command",
+        "drain",
+        "terminate",
+        "recover",
+        "native_resume",
+    ]
 
 
 def test_a_backend_without_native_resume_reports_unsupported_and_starts_nothing():
@@ -189,6 +196,37 @@ def test_a_backend_without_native_resume_reports_unsupported_and_starts_nothing(
     assert local.calls == []
     assert router.failures == {(REMOTE, "recover"): 1}
     assert router.capability_failures_total() == 1
+
+
+OPERATIONS = [
+    ("spawn", Capability.SPAWN, lambda router, agent: router.spawn(request(agent.name))),
+    ("observe", Capability.OBSERVE, lambda router, agent: router.observe(agent)),
+    ("command", Capability.COMMAND, lambda router, agent: router.command(agent, "wake")),
+    ("drain", Capability.DRAIN, lambda router, agent: router.drain(agent)),
+    ("terminate", Capability.TERMINATE, lambda router, agent: router.terminate(agent)),
+    ("recover", Capability.RECOVER, lambda router, agent: router.recover(agent, Recovery.REATTACH)),
+    ("recover", Capability.NATIVE_RESUME, lambda router, agent: router.recover(agent, Recovery.RESUME)),
+]
+
+
+@pytest.mark.parametrize(("operation", "need", "call"), OPERATIONS)
+def test_each_operation_needs_its_own_capability(operation, need, call):
+    lacking = FakeRuntime(REMOTE, set(Capability) - {need})
+    router = RuntimeRouter([lacking], REMOTE)
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", runtime_backend=REMOTE)
+    assert call(router, agent) == Outcome(operation, Status.UNSUPPORTED, REMOTE, detail=f"kubernetes lacks {need}")
+    assert lacking.calls == []
+    assert router.failures == {(REMOTE, operation): 1}
+
+
+@pytest.mark.parametrize(("operation", "need", "call"), OPERATIONS)
+def test_each_operation_runs_on_a_backend_holding_its_capability(operation, need, call):
+    full = FakeRuntime(REMOTE, set(Capability))
+    router = RuntimeRouter([full], REMOTE)
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", runtime_backend=REMOTE)
+    assert call(router, agent).status is Status.OK
+    assert len(full.calls) == 1
+    assert router.capability_failures_total() == 0
 
 
 def test_each_missing_capability_is_unsupported_and_counted_per_backend_and_operation():
@@ -240,7 +278,11 @@ def test_an_unregistered_backend_object_is_unavailable_and_no_runtime_acts():
     assert router.capability_failures_total() == 0
 
 
-# T-SV2-RUN-01-C
+def test_an_unregistered_default_backend_spawns_nothing_and_never_falls_back_to_local():
+    local, remote = local_fake(), remote_fake()
+    router = RuntimeRouter([local, remote], "ssh")
+    assert router.spawn(request()) == Outcome("spawn", Status.UNAVAILABLE, "ssh", detail="no enabled runtime for ssh")
+    assert local.calls == remote.calls == []
 
 
 def test_disabling_the_remote_adapter_routes_new_spawns_local_and_keeps_its_records():
@@ -261,22 +303,18 @@ def test_disabling_the_remote_adapter_routes_new_spawns_local_and_keeps_its_reco
     assert restored.observe(attempt).value == PaneObservation("working")
     assert restored.spawn(request(task="t1")).value is remote.objects[attempt.name]
     assert len(remote.objects) == 1
+    assert [call for call in local.calls if call[0] == "spawn"] == [("spawn", fresh.name)]
 
 
 def test_from_environ_reads_the_default_and_disabled_backends():
     local, remote = local_fake(), remote_fake()
     router = RuntimeRouter.from_environ(
-        [local, remote], {BACKEND_VARIABLE: REMOTE, DISABLED_VARIABLE: f" {REMOTE} , ,other"}
+        [local, remote], {"AGENTIHOOKS_RUNTIME_BACKEND": REMOTE, "AGENTIHOOKS_RUNTIME_DISABLED": f" {REMOTE} , ,other"}
     )
     assert (router.default, router.disabled) == (REMOTE, frozenset({REMOTE, "other"}))
     assert router.spawn_backend() == LOCAL
-    assert RuntimeRouter.from_environ([local], {BACKEND_VARIABLE: ""}).default == LOCAL
+    assert RuntimeRouter.from_environ([local], {"AGENTIHOOKS_RUNTIME_BACKEND": ""}).default == LOCAL
     assert RuntimeRouter.from_environ([local], {}).disabled == frozenset()
-
-
-def test_a_default_without_an_adapter_spawns_local():
-    router = RuntimeRouter([local_fake(), remote_fake()], "ssh")
-    assert router.spawn(request()).backend == LOCAL
 
 
 def test_spawn_is_unavailable_when_local_itself_is_disabled_or_missing():
@@ -284,9 +322,6 @@ def test_spawn_is_unavailable_when_local_itself_is_disabled_or_missing():
     assert router.spawn(request()) == Outcome("spawn", Status.UNAVAILABLE, LOCAL, detail="no enabled runtime for local")
     assert RuntimeRouter([remote_fake()], LOCAL).spawn(request()).status is Status.UNAVAILABLE
     assert remote.calls == []
-
-
-# Local herdr adapter
 
 
 def test_a_timed_out_spawn_is_ambiguous(tmp_path, monkeypatch):
@@ -302,27 +337,43 @@ def test_a_timed_out_spawn_is_ambiguous(tmp_path, monkeypatch):
     assert outcome == Outcome("spawn", Status.AMBIGUOUS, LOCAL, detail="init-agent timed out for engineer@x-1")
 
 
-@pytest.mark.parametrize(
-    ("message", "status"),
-    [
-        ("unsupported resume: original profile is missing", Status.UNSUPPORTED),
-        (ALL_FULL, Status.UNAVAILABLE),
-        ("init-agent exit 1", Status.REFUSED),
-    ],
-)
-def test_a_failed_spawn_maps_its_error_to_a_typed_status(message, status):
+@pytest.mark.parametrize("status", ["unsupported", "unavailable", "refused"])
+def test_a_failed_spawn_carries_its_typed_status(status):
     def spawn(*args):
-        raise SpawnError(message)
+        raise SpawnError("launch failed", status)
 
     outcome = LocalHerdrRuntime(SimpleNamespace(spawn=spawn)).spawn(request())
-    assert outcome == Outcome("spawn", status, LOCAL, detail=message)
+    assert outcome == Outcome("spawn", Status(status), LOCAL, detail="launch failed")
 
 
-def test_a_timeout_cause_on_any_message_is_ambiguous():
+def test_an_untyped_spawn_error_is_refused():
+    assert SpawnError("x").status == "refused"
+    assert str(SpawnError("x", "unavailable")) == "x"
+
+
+def test_a_timeout_cause_on_any_status_is_ambiguous():
     def spawn(*args):
-        raise SpawnError("unsupported") from subprocess.TimeoutExpired("init-agent", 1)
+        raise SpawnError("x", "unsupported") from subprocess.TimeoutExpired("init-agent", 1)
 
     assert LocalHerdrRuntime(SimpleNamespace(spawn=spawn)).spawn(request()).status is Status.AMBIGUOUS
+
+
+def test_full_accounts_are_unavailable(tmp_path, monkeypatch):
+    herdr, _ = herdr_runtime(tmp_path, monkeypatch)
+    herdr.choose = lambda *_: ("claude", ALL_FULL)
+    outcome = LocalHerdrRuntime(herdr).spawn(
+        SpawnRequest(config(tmp_path), "eng", "engineer@x-1", {"id": "t1", "title": "x", "profile": "engineer"})
+    )
+    assert outcome == Outcome("spawn", Status.UNAVAILABLE, LOCAL, detail=ALL_FULL)
+
+
+def test_a_resume_without_profile_is_unsupported(tmp_path, monkeypatch):
+    herdr, _ = herdr_runtime(tmp_path, monkeypatch)
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1")
+    outcome = LocalHerdrRuntime(herdr).recover(agent, Recovery.RESUME, config(tmp_path), "back")
+    assert outcome == Outcome(
+        "recover", Status.UNSUPPORTED, LOCAL, detail="unsupported resume: original profile is missing"
+    )
 
 
 def test_an_unknown_observation_is_ambiguous_not_dead(tmp_path, monkeypatch):
@@ -380,7 +431,7 @@ def test_resume_reopens_through_the_herdr_resume_and_types_its_refusal():
     def resume(config, agent, text):
         seen.append((config, agent.name, text))
         if agent.task == "bad":
-            raise SpawnError("unsupported resume: original profile is missing")
+            raise SpawnError("unsupported resume: original profile is missing", "unsupported")
         return Placed("w1:p2", "claude")
 
     adapter = LocalHerdrRuntime(SimpleNamespace(resume=resume))
@@ -397,3 +448,122 @@ def test_resume_reopens_through_the_herdr_resume_and_types_its_refusal():
 def test_the_local_adapter_declares_every_capability_but_drain_unlike_the_remote_fixture():
     assert LocalHerdrRuntime(None).capabilities == frozenset(Capability) - {Capability.DRAIN}
     assert remote_fake().capabilities != local_fake().capabilities
+
+
+class FakeHerdr:
+    def __init__(self, pane_id="w1:p1", retired=True, observed=PaneObservation("working"), fail=None):
+        self.pane_id, self.retired, self.observed, self.fail = pane_id, retired, observed, fail
+        self.calls = []
+
+    def spawn(self, config, lane, name, task):
+        self.calls.append(("spawn", config, lane, name, task["id"]))
+        if self.fail:
+            raise self.fail
+        return Placed(self.pane_id, "claude")
+
+    def observe(self, agent):
+        self.calls.append(("observe", agent.name))
+        return self.observed
+
+    def nudge(self, agent, text):
+        self.calls.append(("nudge", agent.name, text))
+
+    def retire(self, agent, homes=()):
+        self.calls.append(("retire", agent.name, homes))
+        return self.retired
+
+    def refusal(self, agent):
+        return {"process": 7, "refusal": "kept"}
+
+    def resume(self, config, agent, text):
+        self.calls.append(("resume", config, agent.name, text))
+        if self.fail:
+            raise self.fail
+        return Placed("w1:p9", "claude")
+
+    def live_names(self):
+        return {"engineer@a1b2c3-0001"}
+
+
+def tick_runtime(herdr, environ=None):
+    return routed(environ or {}, herdr=herdr)
+
+
+def test_the_tick_runtime_spawns_observes_commands_retires_and_resumes_through_the_router():
+    herdr = FakeHerdr()
+    runtime = tick_runtime(herdr)
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1")
+    assert runtime.spawn("cfg", "eng", agent.name, {"id": "t1"}) == Placed("w1:p1", "claude")
+    assert runtime.observe(agent) == PaneObservation("working")
+    assert runtime.nudge(agent, "wake") is None
+    assert runtime.retire(agent, homes=["/s"]) is True
+    assert runtime.resume("cfg", agent, "back") == Placed("w1:p9", "claude")
+    assert herdr.calls == [
+        ("spawn", "cfg", "eng", agent.name, "t1"),
+        ("observe", agent.name),
+        ("nudge", agent.name, "wake"),
+        ("retire", agent.name, ("/s",)),
+        ("resume", "cfg", agent.name, "back"),
+    ]
+
+
+def test_the_tick_runtime_hands_every_other_call_to_the_herdr_runtime():
+    herdr = FakeHerdr()
+    runtime = tick_runtime(herdr)
+    assert runtime.live_names() == {"engineer@a1b2c3-0001"}
+    assert runtime.refusal(AgentRecord("a", "eng", "t")) == {"process": 7, "refusal": "kept"}
+    assert runtime.herdr_runtime is herdr
+
+
+def test_a_refused_tick_retirement_is_false():
+    assert tick_runtime(FakeHerdr(retired=False)).retire(AgentRecord("a", "eng", "t")) is False
+
+
+@pytest.mark.parametrize("status", ["unsupported", "unavailable", "refused"])
+def test_a_failed_tick_spawn_or_resume_raises_its_typed_spawn_error(status):
+    runtime = tick_runtime(FakeHerdr(fail=SpawnError("no seat", status)))
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1")
+    for call in (
+        lambda: runtime.spawn("cfg", "eng", agent.name, {"id": "t1"}),
+        lambda: runtime.resume("cfg", agent, ""),
+    ):
+        with pytest.raises(SpawnError) as raised:
+            call()
+        assert (str(raised.value), raised.value.status) == ("no seat", status)
+
+
+def test_a_tick_observation_of_another_backend_is_unknown_and_touches_nothing():
+    herdr = FakeHerdr()
+    runtime = tick_runtime(herdr)
+    remote = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", runtime_backend=REMOTE)
+    assert runtime.observe(remote) == PaneObservation("unknown")
+    assert runtime.retire(remote) is False
+    assert herdr.calls == []
+
+
+def test_disabling_local_stops_tick_spawns_without_touching_herdr():
+    herdr = FakeHerdr()
+    runtime = tick_runtime(herdr, {"AGENTIHOOKS_RUNTIME_DISABLED": LOCAL})
+    with pytest.raises(SpawnError) as raised:
+        runtime.spawn("cfg", "eng", "engineer@a1b2c3-0001", {"id": "t1"})
+    assert (str(raised.value), raised.value.status) == ("no enabled runtime for local", "unavailable")
+    assert herdr.calls == []
+
+
+def test_an_unregistered_tick_backend_spawns_nothing():
+    herdr = FakeHerdr()
+    with pytest.raises(SpawnError) as raised:
+        tick_runtime(herdr, {"AGENTIHOOKS_RUNTIME_BACKEND": REMOTE}).spawn("cfg", "eng", "e", {"id": "t1"})
+    assert raised.value.status == "unavailable"
+    assert herdr.calls == []
+
+
+def test_routed_reads_the_process_environment_and_builds_a_herdr_runtime(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_RUNTIME_DISABLED", LOCAL)
+    monkeypatch.setattr("scripts.swarm_v2.runtime.routed.HerdrRuntime", FakeHerdr)
+    runtime = routed()
+    assert isinstance(runtime, RoutedRuntime)
+    assert isinstance(runtime.herdr_runtime, FakeHerdr)
+    assert runtime.router.disabled == frozenset({LOCAL})
+    assert isinstance(runtime.router.runtimes[LOCAL], LocalHerdrRuntime)
+    assert runtime.router.runtimes[LOCAL].herdr is runtime.herdr_runtime

@@ -72,7 +72,9 @@ NUDGE = (
 
 
 class SpawnError(RuntimeError):
-    pass
+    def __init__(self, message: str = "", status: str = "refused"):
+        super().__init__(message)
+        self.status = status
 
 
 @dataclass(frozen=True)

@@ -10,8 +10,8 @@ import pytest
 
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.store import AgentRecord
-from scripts.swarm_v2.runtime.base import LOCAL, Recovery, RuntimeRouter, SpawnRequest, Status
-from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+from scripts.swarm_v2.runtime.base import LOCAL, Recovery, RuntimeRouter, Status
+from scripts.swarm_v2.runtime.routed import routed
 from tests.test_swarm_v2_runtime import PRIVATE, REMOTE, config, herdr_runtime, local_fake, remote_fake, request
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,8 +24,15 @@ EVIDENCE_CLASS = (
 INPUTS = (
     "scripts/swarm_v2/runtime/base.py",
     "scripts/swarm_v2/runtime/local.py",
+    "scripts/swarm_v2/runtime/routed.py",
     "scripts/swarm/runtime.py",
+    "scripts/swarm/tick.py",
+    "scripts/swarm/cli.py",
     "scripts/swarm/store.py",
+    "scripts/swarm/pane.py",
+    "scripts/swarm/reaper.py",
+    "scripts/agent_choice.py",
+    "tests/swarm/profile_fixture.py",
     "tests/test_swarm_v2_runtime.py",
     "evidence/SV2-RUN-01/generate_case_results.py",
 )
@@ -35,21 +42,18 @@ def local_swarm(root: Path) -> dict:
     with pytest.MonkeyPatch.context() as monkeypatch:
         pane = {"pane_id": "w1:p1", "name": NAME, "agent_status": "working"}
         herdr, calls = herdr_runtime(root, monkeypatch, panes={"w1:p1": pane})
-        remote = remote_fake()
-        router = RuntimeRouter([LocalHerdrRuntime(herdr), remote])
-        spawned = router.spawn(
-            SpawnRequest(config(root), "eng", NAME, {"id": "t1", "title": "x", "profile": "engineer"})
-        )
-        agent = AgentRecord(NAME, "eng", "t1", pane_id=spawned.value.pane_id)
-        observed = router.observe(agent)
-        retired = router.terminate(agent)
+        runtime = routed({}, herdr=herdr)
+        placed = runtime.spawn(config(root), "eng", NAME, {"id": "t1", "title": "x", "profile": "engineer"})
+        agent = AgentRecord(NAME, "eng", "t1", pane_id=placed.pane_id)
+        observed = runtime.observe(agent)
+        retired = runtime.retire(agent)
     return {
-        "spawn": [spawned.status, spawned.backend, spawned.value.pane_id],
-        "observe": [observed.status, observed.value.state],
-        "terminate": [retired.status, retired.backend],
+        "spawn_pane": placed.pane_id,
+        "observe": observed.state,
+        "retired": retired,
         "pane_closed": ["pane", "close", "w1:p1"] in calls,
-        "remote_calls": len(remote.calls),
-        "runtime_capability_failures_total": router.capability_failures_total(),
+        "routed_backend": runtime.router.spawn_backend(),
+        "runtime_capability_failures_total": runtime.router.capability_failures_total(),
     }
 
 
@@ -61,7 +65,7 @@ def case_a() -> dict:
     local, remote = local_fake(), remote_fake()
     router = RuntimeRouter([local, remote], REMOTE)
     placed = router.spawn(request()).value
-    routed = {
+    routed_remote = {
         "spawned_on": placed.runtime_backend,
         "observe": router.observe(placed).status,
         "drain": router.drain(placed).status,
@@ -71,14 +75,17 @@ def case_a() -> dict:
         "runtime_capability_failures_total": router.capability_failures_total(),
     }
     passed = all(
-        run["spawn"] == [Status.OK, LOCAL, "w1:p1"]
-        and run["observe"] == [Status.OK, "working"]
-        and run["terminate"] == [Status.OK, LOCAL]
-        and run["pane_closed"]
-        and run["remote_calls"] == 0
-        and run["runtime_capability_failures_total"] == 0
+        run
+        == {
+            "spawn_pane": "w1:p1",
+            "observe": "working",
+            "retired": True,
+            "pane_closed": True,
+            "routed_backend": LOCAL,
+            "runtime_capability_failures_total": 0,
+        }
         for run in runs
-    ) and routed == {
+    ) and routed_remote == {
         "spawned_on": REMOTE,
         "observe": Status.OK,
         "drain": Status.OK,
@@ -90,7 +97,7 @@ def case_a() -> dict:
     return {
         "then": "the existing local swarm completes its original spawn, observe and retire tests through the new interface",
         "runs": runs,
-        "remote_routing": routed,
+        "remote_routing": routed_remote,
         "passed": passed,
     }
 
@@ -101,6 +108,7 @@ def case_b() -> dict:
     agent = router.spawn(request()).value
     before = {name: asdict(row) for name, row in remote.objects.items()}
     outcome = router.recover(agent, Recovery.RESUME, text="you were restored")
+    unregistered = RuntimeRouter([local, remote], "ssh").spawn(request("engineer@a1b2c3-0003", "t3"))
     result = {
         "status": outcome.status,
         "detail": outcome.detail,
@@ -108,6 +116,7 @@ def case_b() -> dict:
         "remote_calls_after_spawn": len(remote.calls) - 1,
         "local_calls": len(local.calls),
         "discloses_runtime_target": PRIVATE in repr(outcome),
+        "unregistered_default_spawn": [unregistered.status, unregistered.backend],
         "runtime_capability_failures_total": {f"{b}/{op}": n for (b, op), n in router.failures.items()},
     }
     passed = result == {
@@ -117,6 +126,7 @@ def case_b() -> dict:
         "remote_calls_after_spawn": 0,
         "local_calls": 0,
         "discloses_runtime_target": False,
+        "unregistered_default_spawn": [Status.UNAVAILABLE, "ssh"],
         "runtime_capability_failures_total": {f"{REMOTE}/recover": 1},
     }
     return {
@@ -143,7 +153,9 @@ def case_c() -> dict:
         "remote_object_kept": attempt.name in remote.objects,
         "observe_after_reenable": [observed.status, observed.value == PaneObservation("working")],
         "replay_returns_first_object": replayed is remote.objects[attempt.name],
+        "replay_requests_reaching_remote": sum(1 for call in remote.calls if call == ("spawn", attempt.name)),
         "remote_objects": len(remote.objects),
+        "local_spawns": [name for operation, name in local.calls if operation == "spawn"],
         "runtime_capability_failures_total": rolled.capability_failures_total() + restored.capability_failures_total(),
     }
     passed = result == {
@@ -153,7 +165,9 @@ def case_c() -> dict:
         "remote_object_kept": True,
         "observe_after_reenable": [Status.OK, True],
         "replay_returns_first_object": True,
+        "replay_requests_reaching_remote": 2,
         "remote_objects": 1,
+        "local_spawns": [fresh.name],
         "runtime_capability_failures_total": 0,
     }
     return {
