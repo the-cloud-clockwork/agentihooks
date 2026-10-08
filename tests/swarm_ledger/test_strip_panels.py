@@ -1,9 +1,8 @@
-import json
 from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import serve_modules
+from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -45,8 +44,7 @@ DOC = {
 def tab(browser, request):
     width, height = request.param
     context = browser.new_context(viewport={"width": width, "height": height})
-    html = (ROOT / "scripts/swarm_ledger/template.html").read_text().replace("__LEDGER_DATA__", json.dumps(DOC))
-    html = html.replace("__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text())
+    html = shell_html()
     context.route(
         "**/*",
         lambda route: (
@@ -57,7 +55,7 @@ def tab(browser, request):
             else route.fulfill(body=html, content_type="text/html")
         ),
     )
-    serve_modules(context)
+    serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     page.goto(URL)
     page.set_default_timeout(1500)

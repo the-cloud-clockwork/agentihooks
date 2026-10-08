@@ -9,6 +9,12 @@ from tests.swarm_ledger.ledger_page import page_source
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 STUB_H = "function h(tag, attrs, ...kids) { return { tag, attrs: attrs || {}, kids: kids.filter(Boolean) }; }\n"
 STUB_FOLD = "function collapsible() {}\n"
+STUB_PAGES = (
+    "function lazy(box, fill) { box.kids.push(...[fill()].flat().filter(Boolean)); return box; }\n"
+    "function firstPage(key, items) { return items; }\n"
+    "function moreButton() { return null; }\n"
+    "function outlineAgain() {}\n"
+)
 
 
 def page():
@@ -99,7 +105,10 @@ class OutlineDotsByState(unittest.TestCase):
   const items = group.kids[0].kids[1].kids.map((li) => li.kids[0].attrs.class || "");
   return { items, head: group.kids[0].kids[0].kids[0].attrs.class || "" };
 })()"""
-        self.assertEqual(run_js(["outlineGroup"], expr, STUB_H + STUB_FOLD), {"items": ["st-done", ""], "head": ""})
+        self.assertEqual(
+            run_js(["outlineLink", "outlineGroup"], expr, STUB_H + STUB_FOLD + STUB_PAGES),
+            {"items": ["st-done", ""], "head": ""},
+        )
 
     def test_each_state_paints_its_palette_token_above_the_active_highlight(self):
         for state, token in (("open", "--signal"), ("done", "--positive"), ("out", "--warn")):

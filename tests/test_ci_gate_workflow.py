@@ -24,6 +24,10 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     assert "needs" not in jobs["lint"]
 
 
+def test_unit_matrix_does_not_fail_fast():
+    assert _workflow()["jobs"]["unit"]["strategy"]["fail-fast"] is False
+
+
 @pytest.mark.parametrize("unit", ["success", "failure", "skipped", "cancelled", "pending"])
 @pytest.mark.parametrize("lint", ["success", "failure", "skipped", "cancelled", "pending"])
 def test_required_gate_rejects_every_non_success_result(unit, lint):

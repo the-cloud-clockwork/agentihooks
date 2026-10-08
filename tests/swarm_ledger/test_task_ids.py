@@ -1,10 +1,9 @@
-import json
 import re
 from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import serve_modules
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, page_source, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -24,10 +23,6 @@ DOC = {
 SWARM = {"config": {"state": "running"}, "tasks": {}, "agents": [], "findings": [], "spawns": {}}
 
 
-def page_source():
-    return (ROOT / "scripts/swarm_ledger/template.html").read_text()
-
-
 def css_rule(selector):
     match = re.search(rf"(?m)^{re.escape(selector)}\s*\{{([^}}]*)\}}", page_source())
     return match and match.group(1)
@@ -36,26 +31,25 @@ def css_rule(selector):
 @pytest.fixture
 def tab(browser):
     context = browser.new_context(viewport={"width": 1440, "height": 900})
-    html = page_source().replace("__LEDGER_DATA__", json.dumps(DOC))
-    html = html.replace("__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text())
+    html = shell_html()
 
     def route(request):
-        if "/api/swarm/" in request.request.url:
-            request.fulfill(json=SWARM)
-        elif request.request.url.startswith(URL):
-            request.fulfill(body=html, content_type="text/html")
-        else:
-            request.abort()
+        if request.request.url.startswith(URL):
+            return request.fulfill(body=html, content_type="text/html")
+        return request.abort()
 
     context.route("**/*", route)
-    serve_modules(context)
+    serve_modules(context, ledger_state(DOC), SWARM)
     page = context.new_page()
-    page.goto(URL + "#ledger")
+    page.goto(URL)
+    loaded(page)
     yield page
     context.close()
 
 
 def test_every_task_card_leads_its_title_with_its_id_as_a_link_to_itself(tab):
+    tab.locator("#tasks-box > summary").click()
+    tab.locator("#tasks-done > summary").click()
     for task in DOC["tasks"]:
         title = tab.locator(f"#item-tasks-{task['id']} .item-title")
         label = title.locator(".task-id")
@@ -68,6 +62,7 @@ def test_every_task_card_leads_its_title_with_its_id_as_a_link_to_itself(tab):
 
 def test_the_id_label_is_bare_flat_red_text_in_the_priorities_red(tab):
     tab.locator("#tasks-box > summary").click()
+    tab.locator("#tasks-done > summary").click()
     label = tab.locator("#item-tasks-rb3c .task-id")
     prio = tab.locator("#priorities .prio-link")
     style = (
@@ -109,6 +104,7 @@ def test_a_priorities_link_opens_the_folded_tasks_and_scrolls_to_the_card(tab):
 
 
 def test_a_task_id_in_chat_links_to_its_card(tab):
+    tab.locator("#chat-fab").click()
     links = tab.locator("#chat-log a.task-id")
     assert links.evaluate_all("els => els.map(a => [a.textContent, a.getAttribute('href')])") == [
         ["rb3c", "#item-tasks-rb3c"],
@@ -116,7 +112,6 @@ def test_a_task_id_in_chat_links_to_its_card(tab):
     ]
     assert "merged, " in tab.locator("#chat-log .entry-body").text_content()
     assert not tab.locator("#item-tasks-rb3c").is_visible()
-    tab.locator("#chat-fab").click()
     links.first.click()
     tab.locator("#item-tasks-rb3c").wait_for(state="visible")
     tab.wait_for_function(

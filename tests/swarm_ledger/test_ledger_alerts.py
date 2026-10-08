@@ -16,6 +16,7 @@ from scripts.inbox.store import InboxStore  # noqa: E402
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig  # noqa: E402
 from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
 from scripts.swarm_ledger.repository.file import sync as file_sync  # noqa: E402
+from tests.swarm_ledger.ledger_page import page_source  # noqa: E402
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -146,7 +147,7 @@ def test_an_operator_alert_reaches_the_operator_inbox(inbox):
 
 
 def test_the_page_header_renders_no_ledger_warnings():
-    page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+    page = page_source()
     assert "meta.warnings" not in page
 
 

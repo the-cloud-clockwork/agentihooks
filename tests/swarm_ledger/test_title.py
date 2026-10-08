@@ -2,7 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 
-from tests.swarm_ledger.ledger_page import page_source
+from tests.swarm_ledger.ledger_page import browser_home, page_source
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -57,8 +57,8 @@ class TitleOp(unittest.TestCase):
         rename("Fresh name")
         found = {s["slug"]: s for s in server.ledger_summaries()}
         self.assertEqual(found[SLUG]["title"], "Fresh name")
-        self.assertIn("Fresh name", server.index_page())
-        self.assertIn(f'href="/{SLUG}"', server.index_page())
+        self.assertIn("Fresh name", browser_home(server))
+        self.assertIn(f'href="/{SLUG}"', browser_home(server))
 
 
 class TitleHeader(unittest.TestCase):
