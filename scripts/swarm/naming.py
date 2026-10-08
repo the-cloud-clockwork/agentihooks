@@ -204,6 +204,13 @@ def resolve_name(name):
     return NameRegistry(redis).resolve(name) if redis is not None else name
 
 
+def resolve_names(names):
+    from hooks._redis import get_redis
+
+    redis = get_redis()
+    return NameRegistry(redis).resolve_many(names) if redis is not None else {name: name for name in names}
+
+
 def addresses(name):
     from hooks._redis import get_redis
 
@@ -233,6 +240,18 @@ class NameRegistry:
         except RedisError as exc:
             logging.getLogger(__name__).warning("alias lookup failed for %s: %s", name, exc)
             return name
+
+    def resolve_many(self, names):
+        from redis.exceptions import RedisError
+
+        if not names:
+            return {}
+        try:
+            found = self.redis.mget([self.key("alias", name) for name in names])
+        except RedisError as exc:
+            logging.getLogger(__name__).warning("alias lookup failed for %d names: %s", len(names), exc)
+            return {name: name for name in names}
+        return {name: alias or name for name, alias in zip(names, found)}
 
     def alias(self, old, new):
         from redis.exceptions import WatchError
