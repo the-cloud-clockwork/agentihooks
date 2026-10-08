@@ -381,6 +381,17 @@ def test_a_red_pull_request_does_not_hold_back_the_notices_after_it(store):
     assert (inbox.get(item.id).state, inbox.get(second.id).state) == ("pending", "done")
 
 
+def test_a_gone_notice_does_not_hold_back_the_notices_after_it(store):
+    inbox = InboxStore(store.redis)
+    run(store, recorded())
+    store.redis.hset(store.key("sw", "red-notices"), "gone", URL)
+    after = inbox.send("swarm", ENG_SEAT, "Your pull request was red.")
+    store.redis.hset(store.key("sw", "red-notices"), after.id, URL)
+    run(store, done_task(), github=lambda url: answer("merged"))
+    assert inbox.get(after.id).state == "done"
+    assert red_index(store) == {}
+
+
 def test_one_pass_asks_github_once_per_pull_request(store):
     red, item = red_notice(store)
     asked = []
