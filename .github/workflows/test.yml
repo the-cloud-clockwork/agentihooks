@@ -376,7 +376,7 @@ jobs:
         run: |
           source_run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tests-passed-$TREE" \
             --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)][0].workflow_run.id // empty')
-          python -m tests.refresh_durations --ci-run "${source_run:-$GITHUB_RUN_ID}"
+          python -m tests.refresh_durations --ci-run "${source_run:-$GITHUB_RUN_ID}" --ci 5
           test -s .test_durations
 
       - name: Publish merged durations
