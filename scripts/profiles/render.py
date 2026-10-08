@@ -148,7 +148,7 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
         "profiles": _profiles_digest(dirs),
         "chain": chain,
         "overlays": _overlays(dirs),
-        "plugins": plugins.role_defaults(chain),
+        "enabled_plugins": _plugins(chain, _settings("claude", bundle, dirs).get("enabledPlugins") or {}),
         **({"browser": browser.spec()} if browser.enabled(chain) else {}),
         "corrections": quarantine.digest(),
     }
@@ -186,7 +186,7 @@ def _settings(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) ->
     return doc
 
 
-def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
+def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]], kept: Sequence[str] = ()) -> dict:
     from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
 
     _i = _install_module()
@@ -204,7 +204,7 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     excludes = [str(default_home / "CLAUDE.md"), str(default_home / "rules" / "**")]
     settings = settings_document(doc)
     chain = [n for n, _ in dirs]
-    enabled_plugins = plugins.allowed(chain, settings.get("enabledPlugins") or {})
+    enabled_plugins = _plugins(chain, settings.get("enabledPlugins") or {}, kept)
     if browser.enabled(chain):
         enabled_plugins.pop(plugins.PLAYWRIGHT, None)
     return {
@@ -213,6 +213,19 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
         "enabledPlugins": enabled_plugins,
         "claudeMdExcludes": excludes,
     }
+
+
+def _plugins(chain: list[str], layered: dict, kept: Sequence[str] = ()) -> dict[str, bool]:
+    operator = _read_json(claude_home(_global_env()) / "settings.json") or {}
+    return plugins.allowed(plugins.carried(chain, operator.get("enabledPlugins") or {}), layered, kept)
+
+
+def _home_plugins(prior: Path | None) -> list[str]:
+    if prior is None:
+        return []
+    home = (_read_json(prior / "claude" / "settings.json") or {}).get("enabledPlugins") or {}
+    written = (_read_json(prior / "claude" / STAMP) or {}).get("enabled_plugins")
+    return [] if written is None else plugins.kept(home, written)
 
 
 def _channels(channels: str, dirs: list[tuple[str, Path]]) -> str:
@@ -351,6 +364,7 @@ def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) 
     prior = profile_dir(name, overlays)
     if not force and prior is not None and _claude_fresh(prior, current, required):
         return None
+    kept = _home_plugins(prior)
     root = homes.fresh(rendered_root(), key, current)
     out = root / "claude"
     out.mkdir()
@@ -358,7 +372,7 @@ def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) 
         shutil.copy2(prior / "claude" / ".claude.json", out / ".claude.json")
     servers, deny, mounts = connectors.claude(declared, str(out / ".claude.json"))
     connectors.write(connectors.path(root.name, "claude", root.parent), mounts, name, "claude")
-    settings = _claude_settings(bundle, dirs)
+    settings = _claude_settings(bundle, dirs, kept)
     if deny:
         permissions = settings["permissions"]
         permissions["deny"] = [*permissions.get("deny", []), *deny]

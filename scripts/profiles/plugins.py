@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from hooks.context.profile_chain import PACKAGE_PREFIX
+from collections.abc import Iterable
+
+from hooks.context.profile_chain import PACKAGE_PREFIX, PACKAGE_ROLES
 
 MATTPOCOCK = "mattpocock-skills@claude-plugins-official"
 PLAYWRIGHT = "playwright@claude-plugins-official"
@@ -19,8 +21,23 @@ def role_defaults(chain: list[str]) -> dict[str, bool]:
     return defaults
 
 
-def allowed(chain: list[str], layered: dict) -> dict[str, bool]:
-    return {plugin: True for plugin, on in {**role_defaults(chain), **layered}.items() if on}
+def role_home(chain: list[str]) -> bool:
+    return any((PACKAGE_ROLES / name.removeprefix(PACKAGE_PREFIX)).is_dir() for name in chain)
+
+
+def carried(chain: list[str], operator: dict) -> dict[str, bool]:
+    """Role defaults, plus the operator's user scope plugins in a home no swarm role wears."""
+    own = {} if role_home(chain) else {plugin: True for plugin, on in operator.items() if on}
+    return {**own, **role_defaults(chain)}
+
+
+def allowed(carried: dict, layered: dict, kept: Iterable[str] = ()) -> dict[str, bool]:
+    return {plugin: True for plugin, on in {**dict.fromkeys(kept, True), **carried, **layered}.items() if on}
+
+
+def kept(home: dict, written: dict) -> list[str]:
+    """Plugins enabled inside a home that its last render did not write."""
+    return [plugin for plugin, on in home.items() if on and plugin not in written]
 
 
 def claude_only(name: str) -> bool:
