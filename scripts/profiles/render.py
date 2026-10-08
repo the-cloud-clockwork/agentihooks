@@ -75,7 +75,10 @@ def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
         raise ValueError(f"Profile '{name}' not found")
     always = [name, *declared(name)]
     worn = profile_chain.worn(_i._resolve_profile_chain(",".join(always)), list(overlays), _i._resolve_profile_dir)
-    return _i._resolve_profile_chain(",".join([*always, *worn]))
+    dirs = _i._resolve_profile_chain(",".join([*always, *worn]))
+    capabilities = {value.strip() for value in os.environ.get("AGENTIHOOKS_HIVE_CAPABILITIES", "").split(",")}
+    profile_chain.require_capabilities(dirs, capabilities)
+    return dirs
 
 
 def _bundle() -> Path | None:
