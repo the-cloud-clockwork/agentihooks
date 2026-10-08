@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from pathlib import Path
 
 import ledger_core
@@ -145,14 +146,14 @@ def test_exists_is_false_before_creation_and_true_after(tmp_path):
 
 
 def test_entry_reads_fresh_when_nothing_is_cached_and_traces_the_select(tmp_path, monkeypatch):
-    monkeypatch.setattr(sqlite.secrets, "randbits", lambda bits: 1000)
     r = store(tmp_path)
+    monkeypatch.setattr(r.domain, "now_ms", lambda: 1000)
     r.create("ledger", CONTENT)
     statements = []
     r.trace = statements.append
     with r.connect() as connection:
         entry = r._entry(connection, "ledger")
-    assert entry.generation == 1000
+    assert entry.generation == 1000 << 20
     assert entry.state["title"] == CONTENT["title"]
     assert statements[0].startswith("SELECT generation FROM ledgers WHERE slug=")
     assert r._cache[r._key("ledger")] is entry
@@ -267,7 +268,6 @@ def test_write_advances_the_generation_updates_the_row_and_appends_events(tmp_pa
 
 def test_insert_writes_the_row_seeds_and_events_then_overwrites_and_drops_the_cache(tmp_path, monkeypatch):
     r = store(tmp_path)
-    monkeypatch.setattr(sqlite.secrets, "randbits", lambda bits: 555)
     monkeypatch.setattr(r.domain, "now_ms", lambda: 123456)
     state = document()
     seeds = state["_meta"]["seeds"]
@@ -278,7 +278,7 @@ def test_insert_writes_the_row_seeds_and_events_then_overwrites_and_drops_the_ca
         row = connection.execute(
             "SELECT revision, generation, token, touched_at FROM ledgers WHERE slug=?", ("ledger",)
         ).fetchone()
-    assert row == (state["_meta"]["rev"], 555, "token-a", 123456)
+    assert row == (state["_meta"]["rev"], 123456 << 20, "token-a", 123456)
     assert r.events_since("ledger", -1) == state["_meta"]["events"]
     assert r.export_document("ledger")["_meta"]["seeds"] == seeds
 
@@ -291,6 +291,33 @@ def test_insert_writes_the_row_seeds_and_events_then_overwrites_and_drops_the_ca
     with r.connect() as connection:
         count = connection.execute("SELECT COUNT(*) FROM ledgers WHERE slug=?", ("ledger",)).fetchone()[0]
     assert count == 1
+
+
+def test_a_reinsert_takes_a_generation_above_the_one_it_replaces_even_when_the_clock_is_behind(tmp_path, monkeypatch):
+    r = store(tmp_path)
+    monkeypatch.setattr(r.domain, "now_ms", lambda: 50)
+    r.create("ledger", CONTENT)
+    with r.connect() as connection:
+        first = connection.execute("SELECT generation FROM ledgers").fetchone()[0]
+    assert first == 50 << 20
+    monkeypatch.setattr(r.domain, "now_ms", lambda: 10)
+    r.import_document("ledger", document(), replace=True)
+    with r.connect() as connection:
+        assert connection.execute("SELECT generation FROM ledgers").fetchone()[0] == first + 1
+    monkeypatch.setattr(r.domain, "now_ms", lambda: 60)
+    r.import_document("ledger", document(), replace=True)
+    with r.connect() as connection:
+        assert connection.execute("SELECT generation FROM ledgers").fetchone()[0] == 60 << 20
+
+
+def test_read_only_yields_none_without_a_database_and_a_connection_that_refuses_writes(tmp_path):
+    with sqlite.read_only(tmp_path) as connection:
+        assert connection is None
+    store(tmp_path).create("ledger", CONTENT)
+    with sqlite.read_only(tmp_path / "ledgers") as connection:
+        assert connection.execute("SELECT slug FROM ledgers").fetchall() == [("ledger",)]
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            connection.execute("DELETE FROM ledgers")
 
 
 def test_import_document_clears_seeds_before_flattening_then_restores_them_on_export(tmp_path, monkeypatch):
