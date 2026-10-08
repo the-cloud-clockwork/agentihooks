@@ -18,7 +18,12 @@ def provider(environ: Mapping[str, str]) -> str:
     for name, label in _PLATFORMS:
         if environ.get(name, "").strip().lower() in _ON:
             return label
-    if environ.get("ANTHROPIC_BASE_URL") and (environ.get("ANTHROPIC_AUTH_TOKEN") or environ.get("ANTHROPIC_API_KEY")):
+    base = environ.get("ANTHROPIC_BASE_URL")
+    if (
+        base
+        and envs.foreign_base_url(base)
+        and (environ.get("ANTHROPIC_AUTH_TOKEN") or environ.get("ANTHROPIC_API_KEY"))
+    ):
         return "gateway"
     if environ.get("ANTHROPIC_API_KEY"):
         return "anthropic-key"

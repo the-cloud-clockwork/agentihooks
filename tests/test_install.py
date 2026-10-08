@@ -94,6 +94,7 @@ class TestClaudeRouting:
         assert observed["environ"]["CLAUDE_CODE_OAUTH_TOKEN"] == "winner-token"
         assert observed["environ"]["AGENTIHOOKS_ROUTE_ACCOUNT"] == "WINNER"
         assert not set(api) & set(observed["environ"])
+        assert observed["environ"]["HOME"] == install.os.environ["HOME"]
         captured = capsys.readouterr()
         assert "gateway-token" not in captured.out + captured.err
 

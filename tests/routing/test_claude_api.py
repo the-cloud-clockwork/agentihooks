@@ -32,6 +32,9 @@ def test_a_subscription_child_keeps_the_anthropic_base_url_only():
     assert envs.subscription_child({**kept, "CLAUDE_CODE_USE_VERTEX": "1"}) == kept
     assert envs.subscription_child({"ANTHROPIC_BASE_URL": "https://api.anthropic.com.example"}) == {}
     assert envs.subscription_child({"ANTHROPIC_BASE_URL": ""}) == {}
+    assert envs.subscription_child({"ANTHROPIC_BASE_URL": "http://[bad", "AWS_BEARER_TOKEN_BEDROCK": SENTINEL}) == {}
+    assert envs.foreign_base_url("https://api.anthropic.com") is False
+    assert envs.foreign_base_url("http://[bad") is True
 
 
 def test_an_api_child_has_no_oauth_token_and_carries_the_route_marker():
@@ -63,6 +66,9 @@ def test_an_api_child_has_no_oauth_token_and_carries_the_route_marker():
         ({"ANTHROPIC_BASE_URL": "https://gateway.example", "ANTHROPIC_API_KEY": SENTINEL}, "gateway"),
         ({"ANTHROPIC_API_KEY": SENTINEL}, "anthropic-key"),
         ({"ANTHROPIC_BASE_URL": "", "ANTHROPIC_API_KEY": SENTINEL}, "anthropic-key"),
+        ({"ANTHROPIC_BASE_URL": "https://api.anthropic.com", "ANTHROPIC_API_KEY": SENTINEL}, "anthropic-key"),
+        ({"ANTHROPIC_BASE_URL": "https://api.anthropic.com", "ANTHROPIC_AUTH_TOKEN": SENTINEL}, ""),
+        ({"ANTHROPIC_BASE_URL": "http://[bad", "ANTHROPIC_AUTH_TOKEN": SENTINEL}, "gateway"),
         ({"ANTHROPIC_BASE_URL": "https://gateway.example"}, ""),
         ({"ANTHROPIC_AUTH_TOKEN": SENTINEL}, ""),
         ({"ANTHROPIC_API_KEY": ""}, ""),
