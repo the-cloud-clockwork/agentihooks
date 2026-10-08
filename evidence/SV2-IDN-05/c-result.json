@@ -1,5 +1,5 @@
 {
-  "tested_commit": "4029456581c522805ed8e9e17d6ebd94a6aa4e9a",
+  "tested_commit": "85327de7502f46bd9a88668ed64aeeb902ca9a0d",
   "evidence_class": "local isolated fixture on temporary homes with a fixed installation time; mocked: the brain vault fetch, the background refresh fork and the brain HTTP post; not live rollout proof",
   "then": "old and new cache namespaces coexist during rollout without reading stale data as current authority",
   "result": {
