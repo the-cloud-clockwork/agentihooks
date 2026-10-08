@@ -1,9 +1,12 @@
 import argparse
-import hashlib
 import json
 import sys
 from collections import Counter
+from functools import partial
 from pathlib import Path
+
+from scripts.swarm_v2.records import _replayed as _replay
+from scripts.swarm_v2.records import _write, digest
 
 SCHEMA = "swarm-v2-architecture/1"
 INVENTORY_SCHEMA = "swarm-v2-design-inventory/1"
@@ -22,6 +25,9 @@ MARKDOWN = "docs/swarm-v2/decisions.md"
 
 class ArchitectureError(ValueError):
     pass
+
+
+_replayed = partial(_replay, error=ArchitectureError)
 
 
 def _load(path: Path | str, schema: str) -> dict:
@@ -161,27 +167,6 @@ def check(record: dict) -> list[str]:
     if count != 1:
         errors.append(f"expected one coding-task authority, found {count}")
     return errors
-
-
-def digest(document: dict) -> str:
-    return hashlib.sha256(json.dumps(document, sort_keys=True).encode()).hexdigest()
-
-
-def _write(path: Path | str, record: dict) -> None:
-    path = Path(path)
-    tmp = path.with_name(path.name + ".tmp")
-    try:
-        tmp.write_text(json.dumps(record, indent=2) + "\n")
-        tmp.replace(path)
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
-def _replayed(record: dict, operation: str, sha256: str) -> dict | None:
-    done = next((o for o in record["operations"] if o["id"] == operation), None)
-    if done and done["sha256"] != sha256:
-        raise ArchitectureError(f"operation {operation} was already recorded with different content")
-    return done
 
 
 def _commit(path: Path | str, record: dict, operation: str, sha256: str, result: dict) -> dict:
