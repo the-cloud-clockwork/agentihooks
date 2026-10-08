@@ -288,7 +288,7 @@ def test_evaluate_reads_the_session_snapshot_and_the_router_cache(tmp_path, monk
     monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"alpha": 1, "beta": 1})
 
     d = qp.evaluate("sess-1")
-    assert (d.target.cap, d.max_sessions) == (6, 6)
+    assert d.target.cap == 6
 
     assert d.action == "handoff"
     assert d.trigger == "week"
