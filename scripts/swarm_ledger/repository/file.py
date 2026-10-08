@@ -12,6 +12,23 @@ import ledger_size
 
 from . import bin_storage, shadow
 
+SYNCED = {}
+
+
+def signature(path):
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return stat.st_ino, stat.st_mtime_ns, stat.st_size
+
+
+def synced(html_path, json_path, reconcile):
+    entry = SYNCED.get(json_path)
+    if entry is None or entry[1] != signature(json_path) or (reconcile and entry[0] != signature(html_path)):
+        return None
+    return {**entry[2], "_meta": dict(entry[2]["_meta"])}
+
 
 def load_state(json_path, seed, core=core):
     if json_path.exists():
@@ -84,6 +101,7 @@ def sync(slug, changes=None, ops=None, gate=None, core=core):
         if seed is not None:
             core.rewrite_seed(html_path, html, doc, meta["rev"])
         shadow.persist(core.LEDGER_DIR, slug, state)
+        SYNCED[json_path] = (signature(html_path), signature(json_path), {**doc, "_meta": dict(meta)})
         return state, rejected
 
 
@@ -141,6 +159,10 @@ class FileLedgerRepository:
         self.domain = domain
 
     def get_document(self, slug: str, reconcile: bool = True) -> dict:
+        with self.domain.LOCK:
+            state = synced(*self.domain.paths(slug), reconcile)
+        if state is not None:
+            return state
         if reconcile:
             return sync(slug, core=self.domain)[0]
         with self.domain.LOCK:
