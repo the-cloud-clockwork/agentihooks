@@ -355,7 +355,10 @@ def test_environment_and_catalog_accept_intent_coach():
 
 
 def test_an_unmoved_head_is_read_once_and_skips_the_full_view(tmp_path):
-    run_check(tmp_path, "original")
+    url = DOC["tasks"][0]["pr_url"]
+    Verdicts(SLUG, "intent-coach", tmp_path).write(
+        TASK, "fail", "missing behavior", 5, coach_rounds=1, head="original", url="old"
+    )
     heads, views = [], []
     check = intent.Check(
         SLUG,
@@ -369,29 +372,53 @@ def test_an_unmoved_head_is_read_once_and_skips_the_full_view(tmp_path):
         head=lambda url: heads.append(url) or "original",
     )
     assert check.run(DOC) == []
-    assert (heads, views) == ([DOC["tasks"][0]["pr_url"]], [])
-    record = Verdicts(SLUG, "intent", tmp_path).read(TASK)
-    assert (record["verdict"], record["reason"], record["head"]) == ("fail", "missing behavior", "original")
+    assert (heads, views) == ([url], [])
+    assert Verdicts(SLUG, "intent", tmp_path).read(TASK) == {
+        "verdict": "fail",
+        "reason": "missing behavior",
+        "at": 5,
+        "coach_rounds": 1,
+        "head": "original",
+        "url": url,
+    }
 
 
-def test_a_moved_or_unreadable_head_still_takes_the_full_view(tmp_path):
+@pytest.mark.parametrize(("current", "result"), [("fixed", [f"task {TASK} intent check pass"]), (None, [])])
+def test_a_moved_or_unreadable_head_still_takes_the_full_view(tmp_path, current, result):
     run_check(tmp_path, "original")
-    for current in ("fixed", None):
-        views = []
-        check = intent.Check(
-            SLUG,
-            "coach",
-            NOW + 1,
-            Ledger(),
-            Mail(),
-            lambda url: views.append(url) or {**PR, "head": "fixed"},
-            lambda state: ("pass", "ok"),
-            home=tmp_path,
-            head=lambda url: current,
-        )
-        check.run(DOC)
-        assert views == [DOC["tasks"][0]["pr_url"]]
-    assert Verdicts(SLUG, "intent", tmp_path).read(TASK)["verdict"] == "pass"
+    views = []
+    check = intent.Check(
+        SLUG,
+        "coach",
+        NOW + 1,
+        Ledger(),
+        Mail(),
+        lambda url: views.append(url) or {**PR, "head": "fixed" if current else "original"},
+        lambda state: ("pass", "ok"),
+        home=tmp_path,
+        head=lambda url: current,
+    )
+    assert check.run(DOC) == result
+    assert views == [DOC["tasks"][0]["pr_url"]]
+    assert Verdicts(SLUG, "intent", tmp_path).read(TASK)["verdict"] == ("pass" if current else "fail")
+
+
+@pytest.mark.parametrize("mode", ["enforce", "observe"])
+def test_other_modes_never_read_the_head_alone(tmp_path, mode):
+    Verdicts(SLUG, "intent-coach", tmp_path).write(TASK, "pass", "ok", 5, coach_rounds=0, head="original", url="u")
+    heads, views = [], []
+    actions = intent.Check(
+        SLUG,
+        mode,
+        NOW,
+        Ledger(),
+        Mail(),
+        lambda url: views.append(url) or {**PR, "head": "original"},
+        lambda state: ("pass", "ok"),
+        home=tmp_path,
+        head=lambda url: heads.append(url) or "original",
+    ).run(DOC)
+    assert (heads, views, actions) == ([], [DOC["tasks"][0]["pr_url"]], [f"task {TASK} intent check pass"])
 
 
 def test_a_first_check_never_reads_the_head_alone(tmp_path):

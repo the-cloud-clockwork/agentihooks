@@ -260,7 +260,7 @@ class Check:
             record = verdicts.read(task["id"]) or verdicts.write(task["id"], PENDING, RUNNING, self.now_ms)
             if self.mode != "coach" and record["verdict"] != PENDING:
                 continue
-            if self._unmoved(task, verdicts):
+            if self._keep_if_unmoved(task, verdicts):
                 continue
             pr = self.view(task["pr_url"])
             if pr is not None:
@@ -268,7 +268,7 @@ class Check:
         return actions
 
     def _check(self, doc, task, pr, verdicts):
-        coaching = Verdicts(self.slug, "intent-coach", self.home)
+        coaching = self._coaching()
         previous = coaching.read(task["id"]) if self.mode == "coach" else None
         head = pr.get("head")
         if self.mode == "coach" and not head:
@@ -306,10 +306,13 @@ class Check:
             self.ledger.update_task(self.slug, task["id"], {"state": "pr"})
         return actions
 
-    def _unmoved(self, task, verdicts):
+    def _coaching(self):
+        return Verdicts(self.slug, "intent-coach", self.home)
+
+    def _keep_if_unmoved(self, task, verdicts):
         if self.mode != "coach" or self.head is None:
             return False
-        previous = Verdicts(self.slug, "intent-coach", self.home).read(task["id"])
+        previous = self._coaching().read(task["id"])
         if not previous or not previous.get("head") or previous["head"] != self.head(task["pr_url"]):
             return False
         self._keep(task, previous, verdicts)
