@@ -1,4 +1,7 @@
+from pathlib import Path
+
 import pytest
+import yaml
 from coverage import CoverageData
 
 from tests import coverage_baseline as cache
@@ -70,3 +73,14 @@ def test_history_is_bounded_to_thirty_measurements(measured):
         state.update(commit=str(index), tree=str(index))
         cache.record(root, shards, target, target)
     assert [item["commit"] for item in cache.read(target)["history"]] == [str(index) for index in range(33, 3, -1)]
+
+
+def test_publisher_checks_parent_results_without_inheriting_skips():
+    workflow = Path(__file__).parents[1] / ".github/workflows/test.yml"
+    job = yaml.safe_load(workflow.read_text())["jobs"]["coverage-baseline"]
+    assert job["needs"] == ["gate-required", "sonar"]
+    condition = job["if"]
+    assert "!cancelled()" in condition
+    assert "github.event_name == 'push'" in condition
+    assert "needs['gate-required'].result == 'success'" in condition
+    assert "needs.sonar.result == 'success'" in condition
