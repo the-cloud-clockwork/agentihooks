@@ -10,7 +10,7 @@
 #   wt.sh new  [name] [--repo DIR] [--from REF]  # worktree + branch <name> off fresh origin/<base> (or REF); prints the path
 #   wt.sh tmp  [name] [--repo DIR] [--from REF]  # throwaway detached worktree under <repo>/_tmp/; prints the path
 #   wt.sh ls   [--repo DIR | --all]           # branch, dirty, ahead/behind origin/<base>
-#   wt.sh done <name> [--repo DIR] [--force]  # remove a worktree + its local branch, pull origin/<base> into the primary checkout
+#   wt.sh done <name> [--repo DIR] [--force]  # remove a worktree + its local branch, fast-forward the primary checkout to origin/<base>
 #                                             # (<name> may be a _tmp path printed by 'tmp'; those are removed even if dirty)
 #   wt.sh root                                # print the worktree root
 #

@@ -60,7 +60,7 @@ Commit only the files this cycle touched, push `<name>`, open the PR with `--bas
 "$WT" done <name> --repo <repo-dir>
 ```
 
-Whoever merges the PR runs `done` for its worktree in the same turn as the merge. Refuses a dirty worktree. Then pulls the base branch into the primary checkout (`--ff-only`) when it is on a clean base branch, and names the blocker otherwise. Deletes the local branch when it is on the remote base branch or its PR into it merged; otherwise keeps it and says so. `--force` overrides both.
+Whoever merges the PR runs `done` for its worktree in the same turn as the merge. Refuses a dirty worktree. Then fetches the base branch and fast-forwards the primary checkout to `origin/<base>` when it is on a clean base branch, and names the blocker otherwise. Deletes the local branch when it is on the remote base branch or its PR into it merged; otherwise keeps it and says so. `--force` overrides both.
 
 ## Base-direct
 
