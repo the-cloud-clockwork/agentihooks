@@ -26,7 +26,7 @@ export function verdictButton(item, verdict, cls, text) {
 }
 
 function itemActions(key, item) {
-  if (item.done) return h("div", { class: "item-actions" }, scopeDot(key, item));
+  if (item.done || item.out_of_scope) return h("div", { class: "item-actions" }, scopeDot(key, item));
   return h("div", { class: "item-actions" }, verdictButton(key, "approved", "approve", "Approve"), verdictButton(key, "denied", "deny", "Deny"), scopeDot(key, item));
 }
 
