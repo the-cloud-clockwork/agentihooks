@@ -83,7 +83,7 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
 def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
     jobs = _workflow()["jobs"]
     job = jobs["coverage-ratchet"]
-    assert job["needs"] == ["unit"]
+    assert job["needs"] == ["unit", "queue-baseline"]
     download = next(step for step in job["steps"] if step.get("name") == "Download shard coverage")
     assert download["with"]["pattern"] == "coverage-3.12-*"
     grade = next(step for step in job["steps"] if step.get("name") == "Hold every line the base ran")
@@ -96,9 +96,9 @@ def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
 
 def test_coverage_ratchet_grades_a_merge_group_against_the_branch_it_queues_onto():
     job = _workflow()["jobs"]["coverage-ratchet"]
-    grade = next(step for step in job["steps"] if step.get("name") == "Hold every line the base ran")
-    assert grade["env"]["QUEUE_BASE"] == "${{ github.event.merge_group.base_ref }}"
-    assert 'base=$(git merge-base HEAD "origin/${QUEUE_BASE#refs/heads/}")' in grade["run"]
+    base = next(step for step in job["steps"] if step.get("name") == "Resolve the measured base tree")
+    assert base["env"]["QUEUE_BASE"] == "${{ github.event.merge_group.base_sha }}"
+    assert 'base="$QUEUE_BASE"' in base["run"]
 
 
 @pytest.mark.parametrize("unit", ["success", "failure", "skipped", "cancelled", "pending"])
