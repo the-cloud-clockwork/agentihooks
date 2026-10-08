@@ -900,7 +900,7 @@ def test_capacity_places_ready_tasks_in_the_claim_order():
     ledger.comment = lambda *args, **kwargs: None
     runtime = FakeRuntime()
     runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
-        cfg, [account()], agents, 3, 5, demand
+        cfg, [account()], agents, demand
     )
     capacity.apply("sw", config, store, ledger, runtime, 1000)
     assert capacity.read(store, "sw")["tasks"] == {"deep": "claude"}
