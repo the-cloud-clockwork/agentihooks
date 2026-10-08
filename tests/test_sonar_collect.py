@@ -23,11 +23,12 @@ def _module():
 class FakeGitHub:
     """Serves one run whose artifacts and jobs change at the ticks the spec names."""
 
-    def __init__(self, landed, jobs=None, outage=(), expired=()):
+    def __init__(self, landed, jobs=None, outage=(), expired=(), blob_outage=()):
         self.landed = landed
         self.expired = set(expired)
         self.jobs = jobs or {}
         self.outage = set(outage)
+        self.blob_outage = set(blob_outage)
         self.tick = 0
         self.calls = []
         self.etags = []
@@ -63,6 +64,8 @@ class FakeGitHub:
                     self.reply(200, json.dumps({"jobs": jobs}).encode())
                 elif self.path.startswith("/zip/"):
                     self.reply(302, b"", {"Location": fake.url(self.path.replace("/zip/", "/blob/"))})
+                elif self.path.startswith("/blob/") and fake.tick in fake.blob_outage:
+                    self.reply(503, b"503 Egress is over the account limit.")
                 elif self.path.startswith("/blob/"):
                     archive = io.BytesIO()
                     with zipfile.ZipFile(archive, "w") as handle:
@@ -201,3 +204,27 @@ def test_an_api_outage_keeps_polling(tmp_path):
     with FakeGitHub({"coverage-3.12-1": 0}, outage={0, 1, 2}) as fake:
         assert _collect(fake, tmp_path, shards=1) is None
     assert fake.tick == 3
+
+
+def test_a_temporary_artifact_download_failure_is_retried(tmp_path):
+    with FakeGitHub({"coverage-3.12-1": 0}, blob_outage={0, 1}) as fake:
+        assert _collect(fake, tmp_path, shards=1) is None
+    assert (tmp_path / "coverage-3.12-1" / ".coverage").read_text() == "coverage-3.12-1"
+    assert fake.tick == 2
+
+
+def test_a_download_that_keeps_failing_is_red_with_the_github_response(tmp_path, capsys):
+    module = _module()
+    with FakeGitHub({"coverage-3.12-1": 0}, blob_outage=range(1000)) as fake:
+        error = _collect(fake, tmp_path, shards=1)
+    assert "503 Egress is over the account limit." in error
+    assert len([path for _, path, _ in fake.calls if path.startswith("/blob/")]) == module.ATTEMPTS
+    assert capsys.readouterr().out.count("503 Egress is over the account limit.") == module.ATTEMPTS - 1
+
+
+def test_an_api_outage_that_outlasts_the_retries_is_red_with_the_github_response(tmp_path):
+    module = _module()
+    with FakeGitHub({"coverage-3.12-1": 0}, outage=range(1000)) as fake:
+        error = _collect(fake, tmp_path, shards=1)
+    assert "502" in error
+    assert fake.tick == module.ATTEMPTS - 1

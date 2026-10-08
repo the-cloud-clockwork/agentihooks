@@ -1,4 +1,4 @@
-"""The systemd user timer that runs `agentihooks swarm tick` every minute; nothing runs between ticks."""
+"""The systemd user timer that runs `agentihooks swarm tick` every minute."""
 
 import shutil
 import subprocess

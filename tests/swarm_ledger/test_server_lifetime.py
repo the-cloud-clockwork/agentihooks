@@ -131,7 +131,7 @@ def test_unreadable_process_is_gone(tmp_path, stat):
     assert server_lifetime.process(7, tmp_path) is None
 
 
-@pytest.mark.parametrize("state,start,expected", [("S", 99, False), ("Z", 99, True), ("S", 100, True)])
+@pytest.mark.parametrize("state,start,expected", [("S", 99, False), ("Z", 99, True), ("X", 99, True), ("S", 100, True)])
 def test_owner_identity_rejects_zombies_and_reused_pids(tmp_path, state, start, expected):
     fake_process(tmp_path, start=start, state=state)
     assert server_lifetime.ended((7, 99), tmp_path) is expected
@@ -391,7 +391,7 @@ def test_ensure_passes_its_effective_folder_and_port_to_the_lifetime_owner(tmp_p
 
     monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(ledger_server, "LOGFILE", tmp_path / ".server.log")
-    monkeypatch.setattr(ledger_server, "serving_dir", Mock(side_effect=[None, str(tmp_path)]))
+    monkeypatch.setattr(ledger_server.ledger_link, "serving", Mock(side_effect=[None, str(tmp_path)]))
     monkeypatch.setattr(ledger_server, "port_held", lambda: False)
     monkeypatch.setattr(ledger_server, "server_process_alive", lambda: False)
     monkeypatch.setattr(ledger_server.subprocess, "Popen", Mock())

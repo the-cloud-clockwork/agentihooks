@@ -10,6 +10,7 @@ from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
@@ -38,7 +39,7 @@ def env(monkeypatch, tmp_path):
     ledger.chat = lambda slug: [{"id": "old", "by": "operator", "at": 50, "text": "old talk"}]
     monkeypatch.setattr(cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
     ledger.pulls = {}
-    monkeypatch.setattr(cli, "pull_branch", lambda url: "")
+    monkeypatch.setattr(cli, "pull_branch", lambda url: ("", ""))
     monkeypatch.setattr(
         cli.ledger_events, "view", lambda url: ledger.pulls.get(url, PullRequest("MERGED", 1, 1, False))
     )
@@ -1313,46 +1314,90 @@ def test_a_git_call_that_cannot_run_is_a_clean_refusal(failure, step):
     assert str(refused.value) == f"git {step} could not run: {failure}"
 
 
-def test_the_pull_request_head_branch_is_read_from_github():
+HEAD_JSON = (
+    '{"headRefName": "engineer-a1b2c3-0001", "headRepository": {"name": "bundle"}, '
+    '"headRepositoryOwner": {"login": "fork-owner"}}'
+)
+
+
+def test_the_pull_request_head_branch_and_repository_are_read_from_github():
     calls = []
 
     def fake(argv, **kwargs):
         calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 0, '{"headRefName": "engineer-a1b2c3-0001"}', "")
+        return subprocess.CompletedProcess(argv, 0, HEAD_JSON, "")
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == "engineer-a1b2c3-0001"
-    assert calls == [(["gh", "pr", "view", "https://github.com/o/r/pull/3", "--json", "headRefName"], GIT_OPTS)]
+    head = cli.pull_branch("https://github.com/o/r/pull/3", run=fake)
+    assert head == ("engineer-a1b2c3-0001", "https://github.com/fork-owner/bundle")
+    fields = "headRefName,headRepository,headRepositoryOwner"
+    assert calls == [(["gh", "pr", "view", "https://github.com/o/r/pull/3", "--json", fields], GIT_OPTS)]
 
 
-@pytest.mark.parametrize("answer", [(1, '{"headRefName": "x"}'), (0, "not json"), (0, "{}")])
+@pytest.mark.parametrize(
+    "answer",
+    [
+        '{"headRefName": "x"}',
+        '{"headRefName": "x", "headRepository": null, "headRepositoryOwner": {"login": "o"}}',
+        '{"headRefName": "x", "headRepository": {"name": "r"}, "headRepositoryOwner": {"login": ""}}',
+        '{"headRefName": "x", "headRepository": {"name": ""}, "headRepositoryOwner": {"login": "o"}}',
+    ],
+)
+def test_a_pull_request_without_a_head_repository_gives_the_branch_alone(answer):
+    def fake(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, answer, "")
+
+    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("x", "")
+
+
+@pytest.mark.parametrize("answer", [(1, HEAD_JSON), (0, "not json"), (0, "{}")])
 def test_an_unreadable_pull_request_gives_no_branch(answer):
     def fake(argv, **kwargs):
         return subprocess.CompletedProcess(argv, answer[0], answer[1], "")
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ""
+    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("", "")
 
 
 def test_a_failing_github_call_gives_no_branch():
     def fake(argv, **kwargs):
         raise subprocess.TimeoutExpired(argv, 20)
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ""
+    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("", "")
 
 
-def test_swarm_branch_records_the_worktree_branch_on_the_agent_task(env, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    ("repo", "recorded"),
+    [("git@github.com:o/r.git", {"branch_repo": "git@github.com:o/r.git"}), ("", {"branch_repo": ""})],
+)
+def test_swarm_branch_records_the_worktree_branch_on_the_agent_task(env, monkeypatch, capsys, repo, recorded):
     _, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setattr(cli, "worktree_branch", lambda: "engineer-a1b2c3-0001")
+    monkeypatch.setattr(cli, "origin_repo", lambda: repo)
     writes, update = [], ledger.update_task
     ledger.update_task = lambda slug, task, fields, by="swarm": (
         writes.append((task, fields, by)) or update(slug, task, fields)
     )
     capsys.readouterr()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "branch") == 0
-    assert writes == [("t1", {"branch": "engineer-a1b2c3-0001"}, "engineer@a1b2c3-0001")]
+    assert writes == [("t1", {"branch": "engineer-a1b2c3-0001", **recorded}, "engineer@a1b2c3-0001")]
     assert ledger.rows["t1"]["branch"] == "engineer-a1b2c3-0001"
-    assert json.loads(capsys.readouterr().out) == {"task": "t1", "branch": "engineer-a1b2c3-0001"}
+    assert ledger.rows["t1"].get("branch_repo") == recorded.get("branch_repo")
+    assert json.loads(capsys.readouterr().out) == {"task": "t1", "branch": "engineer-a1b2c3-0001", **recorded}
+
+
+@pytest.mark.parametrize(
+    ("answer", "repo"),
+    [
+        ((0, "git@github.com:o/r.git\n"), "git@github.com:o/r.git"),
+        ((0, "https://user:token@github.com/o/r.git\n"), "https://github.com/o/r.git"),
+        ((2, "error: No such remote 'origin'\n"), ""),
+    ],
+)
+def test_the_origin_repository_is_read_without_credentials(answer, repo):
+    calls, fake = git_answers({"remote": answer})
+    assert cli.origin_repo(run=fake) == repo
+    assert calls == [(["git", "remote", "get-url", "origin"], GIT_OPTS)]
 
 
 def test_swarm_branch_writes_nothing_when_the_branch_is_refused(env, monkeypatch, capsys):
@@ -1368,15 +1413,26 @@ def test_swarm_branch_writes_nothing_when_the_branch_is_refused(env, monkeypatch
     assert "branch x is not on origin" in capsys.readouterr().err and "branch" not in ledger.rows["t1"]
 
 
-@pytest.mark.parametrize(("head", "fields"), [("engineer-a1b2c3-0001", {"branch": "engineer-a1b2c3-0001"}), ("", {})])
+@pytest.mark.parametrize(
+    ("head", "fields"),
+    [
+        (
+            ("engineer-a1b2c3-0001", "https://github.com/f/r"),
+            {"branch": "engineer-a1b2c3-0001", "branch_repo": "https://github.com/f/r"},
+        ),
+        (("engineer-a1b2c3-0001", ""), {"branch": "engineer-a1b2c3-0001", "branch_repo": ""}),
+        (("", ""), {}),
+    ],
+)
 def test_swarm_pr_records_the_pull_request_head_branch(env, monkeypatch, capsys, head, fields):
     _, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    monkeypatch.setattr(cli, "pull_branch", lambda url: head if url == URL3 else "wrong")
+    monkeypatch.setattr(cli, "pull_branch", lambda url: head if url == URL3 else ("wrong", "wrong"))
     capsys.readouterr()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL3) == 0
     assert ledger.rows["t1"].get("branch") == fields.get("branch")
+    assert ledger.rows["t1"].get("branch_repo") == fields.get("branch_repo")
     out = json.loads(capsys.readouterr().out)
     assert {key: out[key] for key in out if key != "intent"} == {"task": "t1", "pr_url": URL3, **fields}
 
@@ -1768,7 +1824,7 @@ def test_restore_hands_the_runtime_to_restore_and_prints_every_agent_outcome(env
     seen = {}
 
     def restore(store, slug, live, source, runtime):
-        seen["runtime"] = runtime
+        seen["runtime"], seen["source"] = runtime, source
         return [Outcome("engineer@a1b2c3-0001", "eng", "t1", "fresh", "no conversation id")]
 
     run("sw", "create", "--repo", "/repo")
@@ -1779,7 +1835,35 @@ def test_restore_hands_the_runtime_to_restore_and_prints_every_agent_outcome(env
     assert [(r["name"], r["outcome"], r["reason"]) for r in printed["restored"]] == [
         ("engineer@a1b2c3-0001", "fresh", "no conversation id")
     ]
-    assert seen["runtime"] is rt
+    assert isinstance(seen["runtime"], RoutedRuntime)
+    assert seen["runtime"].herdr_runtime is rt
+    assert seen["source"] == "/snap.json"
+
+
+def test_restore_decision_hands_resume_the_routed_runtime_the_clock_and_the_ledger(env, monkeypatch, capsys):
+    store, ledger, rt = env
+    seen = []
+
+    def decide(*args):
+        seen.append(args)
+        return Outcome("engineer@a1b2c3-0001", "eng", "t1", "fresh", "chosen")
+
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    monkeypatch.setattr("scripts.swarm.resume.decide", decide)
+    monkeypatch.setattr(cli, "now_ms", lambda: 4242)
+    run("sw", "create", "--repo", "/repo")
+    assert run("sw", "restore-decision", "engineer@a1b2c3-0001", "fresh") == 0
+    [(got_store, slug, agent, choice, runtime, now, got_ledger)] = seen
+    assert (got_store, slug, agent, choice, now, got_ledger) == (
+        store,
+        "sw",
+        "engineer@a1b2c3-0001",
+        "fresh",
+        4242,
+        ledger,
+    )
+    assert isinstance(runtime, RoutedRuntime) and runtime.herdr_runtime is rt
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["reason"] == "chosen"
 
 
 @pytest.mark.parametrize("command", ["create", "start", "url"])
@@ -1904,7 +1988,7 @@ def test_trace_plan_without_a_plan_names_the_file_and_format(env, capsys, monkey
     )
 
 
-def _tick_all(monkeypatch, run_tick, slugs):
+def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
     import os
     import types
 
@@ -1915,7 +1999,16 @@ def _tick_all(monkeypatch, run_tick, slugs):
     monkeypatch.setattr(operator_env, "fill", lambda environ: filled.append(environ))
     monkeypatch.setattr(cli, "now_ms", lambda: 77)
     monkeypatch.setattr(herdr_gc, "run", lambda environ, now, apply: swept.append((environ, now, apply)) or ["swept"])
-    monkeypatch.setattr(cli, "run_tick", run_tick)
+    counts = {}
+
+    def bounded(store, slug):
+        counts[slug] = counts.get(slug, 0) + 1
+        if counts[slug] > 10:
+            pytest.fail(f"{slug} ticked more than ten times in one pass")
+        return run_tick(store, slug)
+
+    monkeypatch.setattr(cli, "TICK_SECONDS", tick_seconds)
+    monkeypatch.setattr(cli, "run_tick", bounded)
     store = types.SimpleNamespace(slugs=lambda: slugs)
     cli.cmd_tick(store, None)
     assert filled == [os.environ]
@@ -1972,3 +2065,88 @@ def test_every_swarm_gets_its_own_thread_however_many_there_are(monkeypatch, cap
 def test_no_swarms_still_sweeps_herdr(monkeypatch, capsys):
     _tick_all(monkeypatch, lambda store, slug: pytest.fail("no swarm to tick"), [])
     assert capsys.readouterr().out.splitlines() == ["herdr: swept"]
+
+
+def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsys):
+    import threading
+    import time
+
+    release, ticks, starts = threading.Event(), {"fast": 0, "slow": 0}, []
+
+    def run_tick(store, slug):
+        assert store.slugs() == ["slow", "fast"]
+        ticks[slug] += 1
+        if slug == "slow":
+            release.wait(2)
+        else:
+            starts.append(time.monotonic())
+            if ticks["fast"] > 3:
+                pytest.fail("extra ticks went on after every first tick ended")
+            if ticks["fast"] == 3:
+                release.set()
+        return [f"tick {ticks[slug]}"]
+
+    _tick_all(monkeypatch, run_tick, ["slow", "fast"], tick_seconds=0.5)
+    assert ticks == {"fast": 3, "slow": 1}
+    assert all(0.45 <= later - earlier < 0.9 for earlier, later in zip(starts, starts[1:]))
+    out = capsys.readouterr().out.splitlines()
+    assert sorted(out[:-1]) == ["fast: tick 1", "fast: tick 2", "fast: tick 3", "slow: tick 1"]
+    assert out[-1] == "herdr: swept"
+
+
+def test_swarms_that_finish_together_tick_once(monkeypatch, capsys):
+    ticks = []
+    _tick_all(monkeypatch, lambda store, slug: ticks.append(slug) or ["ok"], ["a", "b", "c"])
+    assert sorted(ticks) == ["a", "b", "c"]
+
+
+def test_a_quick_swarm_stops_its_extra_ticks_at_the_pass_deadline(monkeypatch, capsys):
+    import time
+
+    monkeypatch.setattr(cli, "EXTRA_TICKS_UNTIL", 1.5)
+    ticks = {"fast": 0, "slow": 0}
+
+    def run_tick(store, slug):
+        ticks[slug] += 1
+        if slug == "slow":
+            time.sleep(3.0)
+        return []
+
+    _tick_all(monkeypatch, run_tick, ["slow", "fast"], tick_seconds=1.0)
+    assert ticks == {"fast": 2, "slow": 1}
+
+
+def test_an_extra_tick_starting_exactly_at_the_deadline_still_runs(monkeypatch, capsys):
+    import threading
+    import time
+    import types
+
+    monkeypatch.setattr(cli, "time", types.SimpleNamespace(monotonic=lambda: 100.0, time=time.time, sleep=time.sleep))
+    monkeypatch.setattr(cli, "EXTRA_TICKS_UNTIL", 0)
+    release, ticks = threading.Event(), {"fast": 0, "slow": 0}
+
+    def run_tick(store, slug):
+        ticks[slug] += 1
+        if slug == "slow":
+            release.wait(2)
+        elif ticks["fast"] == 2:
+            release.set()
+        return []
+
+    _tick_all(monkeypatch, run_tick, ["slow", "fast"])
+    assert ticks["slow"] == 1 and ticks["fast"] >= 2
+
+
+def test_a_first_tick_that_dies_still_ends_the_extra_ticks(monkeypatch, capsys):
+    ticks = {"fast": 0}
+
+    def run_tick(store, slug):
+        if slug == "slow":
+            raise SystemExit(3)
+        ticks["fast"] += 1
+        if ticks["fast"] > 3:
+            pytest.fail("extra ticks went on after every first tick ended")
+        return []
+
+    with pytest.raises(SystemExit):
+        _tick_all(monkeypatch, run_tick, ["fast", "slow"])

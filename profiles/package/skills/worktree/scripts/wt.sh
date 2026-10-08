@@ -11,6 +11,7 @@
 #   wt.sh tmp  [name] [--repo DIR] [--from REF]  # throwaway detached worktree under <repo>/_tmp/; prints the path
 #   wt.sh ls   [--repo DIR | --all]           # branch, dirty, ahead/behind origin/<base>
 #   wt.sh done <name> [--repo DIR] [--force]  # remove a worktree + its local branch, fast-forward the primary checkout to origin/<base>
+#              [--pushed]                    # parked work: drop a clean worktree and its local branch once origin holds its head; keep the remote branch
 #                                             # (<name> may be a _tmp path printed by 'tmp'; those are removed even if dirty)
 #   wt.sh root                                # print the worktree root
 #
@@ -31,17 +32,19 @@ WT_MAX_PER_REPO="${WT_MAX_PER_REPO:-60}"
 BASE="${WT_BASE_BRANCH:-dev}"
 
 cmd="${1:-ls}"; shift || true
-NAME=""; BUILT=0; REPO_ARG=""; FORCE=0; ALL=0; FROM_REF="origin/${BASE}"
+NAME=""; BUILT=0; REPO_ARG=""; FORCE=0; PUSHED=0; ALL=0; FROM_REF="origin/${BASE}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) REPO_ARG="${2:-}"; shift 2 ;;
     --from) FROM_REF="${2:-}"; shift 2 ;;
     --force) FORCE=1; shift ;;
+    --pushed) PUSHED=1; shift ;;
     --all) ALL=1; shift ;;
     -*) die "unknown flag '$1'" ;;
     *) [[ -z "${NAME}" ]] || die "unexpected argument '$1'"; NAME="$1"; shift ;;
   esac
 done
+[[ "${FORCE}" -eq 1 && "${PUSHED}" -eq 1 ]] && die "--pushed and --force do not combine"
 
 primary_of() {
   local dir="$1" common
@@ -203,7 +206,12 @@ case "${cmd}" in
       git -C "${TARGET}" status -s | sed 's/^/  /' >&2
       exit 1
     fi
-    if [[ "${NAME}" != _tmp/* ]]; then
+    if [[ "${PUSHED}" -eq 1 && "${NAME}" != _tmp/* ]]; then
+      REMOTE_HEAD="$(git -C "${REPO}" ls-remote --heads origin "refs/heads/${BR}")" \
+        || die "cannot read remote branch '${BR}' — worktree kept"
+      [[ -n "${REMOTE_HEAD}" && "${REMOTE_HEAD%%[[:space:]]*}" == "$(git -C "${TARGET}" rev-parse HEAD)" ]] \
+        || die "branch '${BR}' is not on origin at the worktree head — worktree kept"
+    elif [[ "${NAME}" != _tmp/* ]]; then
       if command -v gh >/dev/null 2>&1; then
         PR_STATE="$(cd "${REPO}" && gh pr list --head "${BR}" --base "${BASE}" --state all --json state,url --jq '.[0] | if .state == "MERGED" then .state elif .state == "CLOSED" then "CLOSED " + .url else .url end')" \
           || die "cannot read pull requests for '${BR}' — worktree kept"
@@ -257,7 +265,7 @@ case "${cmd}" in
       if [[ "${MERGED}" -eq 0 ]] && command -v gh >/dev/null 2>&1; then
         [[ -n "$(cd "${REPO}" && gh pr list --head "${BR}" --base "${BASE}" --state merged --json number --jq '.[0].number' 2>/dev/null)" ]] && MERGED=1
       fi
-      if [[ "${MERGED}" -eq 1 || "${FORCE}" -eq 1 ]]; then
+      if [[ "${MERGED}" -eq 1 || "${FORCE}" -eq 1 || "${PUSHED}" -eq 1 ]]; then
         git -C "${REPO}" branch -D "${BR}" >/dev/null && echo "wt: removed ${TARGET} and branch ${BR}"
       else
         echo "wt: removed ${TARGET}; branch ${BR} has commits not on origin/${BASE} and no merged PR — kept (--force drops it)" >&2
@@ -272,7 +280,7 @@ case "${cmd}" in
     ;;
 
   -h|--help|help)
-    sed -n '2,19p' "${BASH_SOURCE[0]}"
+    sed -n '2,20p' "${BASH_SOURCE[0]}"
     ;;
 
   *)
