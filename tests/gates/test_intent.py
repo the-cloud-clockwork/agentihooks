@@ -377,6 +377,8 @@ class Ledger:
 
 
 class Mail:
+    master = "master-seat"
+
     def __init__(self):
         self.sent = []
 
@@ -443,6 +445,7 @@ class TestCheckPass:
         verdicts(tmp_path).write(TASK, "pending", "intent check running", NOW - 5)
         [(_, _, text, _)] = run_pass(tmp_path).ledger.comments
         assert problems(text, "comment") == []
+        assert problems(intent.SHORTFALL_COMMENT, "comment") == []
 
     def test_a_fail_under_observe_is_only_logged(self, tmp_path):
         got = run_pass(tmp_path, mode="observe")

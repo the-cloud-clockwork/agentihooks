@@ -60,6 +60,14 @@ def test_two_failed_fix_rounds_allow_merge_and_done_and_record_shortfall(tmp_pat
     ledger, mail = run_check(tmp_path, "fix-two")
     assert gate(tmp_path, command).allowed
     assert ledger.updates == []
+    assert mail.sent == [
+        (
+            f"intent-shortfall:{TASK}:{NOW}",
+            "master-seat",
+            "Intent remains unmet after two fix rounds: missing behavior. The master must review this shortfall.",
+            f"tasks/{TASK}",
+        )
+    ]
     assert ledger.comments == [
         (
             SLUG,

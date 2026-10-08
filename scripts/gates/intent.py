@@ -315,10 +315,13 @@ class Check:
         kind = "deny" if self.mode == "enforce" else "observe"
         log.append(self.slug, log.Row.of(NAME, kind, who, reason=reason), self.home)
         if self.mode == "coach" and rounds >= 2:
+            text = f"Intent remains unmet after two fix rounds: {reason}. The master must review this shortfall."
+            key, ref = f"intent-shortfall:{task['id']}:{self.now_ms}", f"tasks/{task['id']}"
+            told = self.mail.send(key, self.mail.master, text, ref=ref)
             self.ledger.comment(self.slug, task["id"], SHORTFALL_COMMENT, by="swarm")
             if task.get("state") == "claimed":
                 self.ledger.update_task(self.slug, task["id"], {"state": "pr"})
-            return []
+            return told
         if self.mode not in ("enforce", "coach"):
             return []
         text = f"The intent check failed: {reason}. {fix_steps(self.slug)}"
