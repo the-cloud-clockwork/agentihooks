@@ -193,13 +193,12 @@ def _proof_notes(task, proof_chars):
 
 
 def _plan_chunk(doc, task):
-    ref = _phase(doc, task).get("plan_ref")
-    if not (ref and task.get("plan_lines")):
+    if not task.get("plan_lines"):
         return {}
     try:
-        text = plan_read.exact(doc, ref, task["plan_lines"])
+        text = plan_read.exact(doc, _phase(doc, task).get("plan_ref"), task["plan_lines"])
     except (ValueError, OSError):
-        return {}
+        text = None
     return {"plan_lines": task["plan_lines"], "plan_chunk": text}
 
 
@@ -221,20 +220,32 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
     }
 
 
+def _rows(state):
+    text = state.get("plan_chunk")
+    return plan_read.numbered(text, state["plan_lines"]) if isinstance(text, str) else []
+
+
+def _missed(number, row):
+    return YesNo(
+        f'Does the change leave out what plan line {number} asks for: "{row}"?',
+        true="the change leaves out what this line asks for",
+        false="the change delivers what this line asks for, or the line asks for nothing",
+    )
+
+
 def questions_for(state):
-    if "plan_chunk" in state:
-        return QUESTIONS
-    return {key: question for key, question in QUESTIONS.items() if key not in CHUNK_QUESTIONS}
+    rows = _rows(state)
+    if not rows:
+        return {key: question for key, question in QUESTIONS.items() if key not in CHUNK_QUESTIONS}
+    return {**QUESTIONS, **{f"misses_line_{number}": _missed(number, row) for number, row in rows}}
 
 
-def _quoted(state):
-    start = int(state["plan_lines"].split("-")[0])
-    rows = enumerate(state["plan_chunk"].splitlines(), start)
-    return ", ".join(f'line {number} "{row.strip()}"' for number, row in rows if row.strip())
+def _quoted(rows):
+    return ", ".join(f'line {number} "{row}"' for number, row in rows)
 
 
 def _chunk_reasons(state, answers):
-    if "plan_chunk" not in state:
+    if not _rows(state):
         return []
     lines, under, over = state["plan_lines"], answers["underdelivers"].noul, answers["overdelivers"].noul
     reasons = []
@@ -246,13 +257,16 @@ def _chunk_reasons(state, answers):
 
 
 def _chunk_steps(state, answers):
-    if "plan_chunk" not in state:
-        return []
-    lines, quoted, steps = state["plan_lines"], _quoted(state), []
+    rows, steps = _rows(state), []
+    if not rows:
+        return steps
     if answers["underdelivers"].noul >= CHUNK_LINE:
-        steps.append(f"Deliver every item of plan lines {lines}: {quoted}.")
+        missed = [(n, row) for n, row in rows if answers[f"misses_line_{n}"].noul >= CHUNK_LINE] or rows
+        steps.append(
+            f"Deliver what plan lines {state['plan_lines']} ask for and the change leaves out: {_quoted(missed)}."
+        )
     if answers["overdelivers"].noul >= CHUNK_LINE:
-        steps.append(f"Remove the scope beyond plan lines {lines}, which ask only for {quoted}.")
+        steps.append(f"Remove the scope beyond plan lines {state['plan_lines']}, which ask only for {_quoted(rows)}.")
     return steps
 
 
@@ -275,6 +289,8 @@ def remediation(state: dict, answers: dict) -> str:
 
 
 def judge(state, decide=decide):
+    if state.get("plan_lines") and state.get("plan_chunk") is None:
+        return UNCHECKED, f"the plan chunk for lines {state['plan_lines']} could not be read"
     try:
         answers = decide(state, questions_for(state), purpose=PURPOSE).answers
     except ClassifierError:

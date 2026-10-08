@@ -7,6 +7,14 @@ from hooks.classifier.decision_log import state_digest
 from scripts.gates import intent, intent_calibration
 
 CORPUS = Path(__file__).parents[1] / "fixtures" / "intent_calibration.json"
+PHASE = (
+    "Plan chunks: agents read only their slice of the plan: Operator top priority. Every planner plan is stored as a "
+    "ledger artifact. Each phase points at its plan and each task at a line range computed by code from slice "
+    "anchors. Agents read only their range, ten lines of margin each side, through one command, and a hook refuses "
+    "whole plan reads from engineer and ci agents. The intent check judges every pull request against its exact "
+    "chunk and fails both underdelivery and overdelivery. Done when a proof swarm shows the refused whole read, the "
+    "chunk read, and a failed intent verdict on an overreaching pull request."
+)
 CONTROLS_BEFORE = ["dq1-no-callsite", "dq1-off", "g18-draft", "g18-off", "pn1-off"]
 
 
@@ -80,9 +88,14 @@ def test_the_chunk_failures_quote_the_lines_missed_or_exceeded(corpus):
     missed = intent.judge(cases["chunk-missing"]["state"], decide=intent_calibration.recorded(first))[1]
     first = cases["chunk-added"]["samples"]["after"][0]["answers"]
     exceeded = intent.judge(cases["chunk-added"]["state"], decide=intent_calibration.recorded(first))[1]
-    line = 'line 52 "- It refuses any Read, Grep, Bash or fetch that targets a `plan: true` artifact'
-    assert "Deliver every item of plan lines 50-56: " in missed and line in missed
-    assert "Remove the scope beyond plan lines 50-56, which ask only for " in exceeded and line in exceeded
+    rows = cases["chunk-added"]["state"]["plan_chunk"].splitlines()
+    every = ", ".join(f'line {number} "{row}"' for number, row in enumerate(rows, 50))
+    remove = f"Remove the scope beyond plan lines 50-56, which ask only for {every}."
+    deliver = (
+        f'Deliver what plan lines 50-56 ask for and the change leaves out: line 52 "{rows[2]}", line 56 "{rows[6]}".'
+    )
+    assert missed.endswith(f". {deliver} {remove}")
+    assert exceeded.endswith(f"the pull request merges.. The phase must be able to use it for {PHASE}. {remove}")
 
 
 def test_losing_a_control_is_not_a_calibration(corpus):

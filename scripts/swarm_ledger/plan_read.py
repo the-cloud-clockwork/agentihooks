@@ -32,7 +32,15 @@ def chunk(text: str, lines: str, margin: int = MARGIN) -> str:
 
 
 def exact(doc: dict, ref: dict, lines: str) -> str:
-    return chunk(_ledger("plan_ranges").stored_text(ref, doc), lines, margin=0)
+    text = chunk(_ledger("plan_ranges").stored_text(ref, doc), lines, margin=0)
+    if not text.strip():
+        raise ValueError(f"plan lines {lines} hold no text")
+    return text
+
+
+def numbered(text: str, lines: str) -> list[tuple[int, str]]:
+    start = _ledger("plan_ranges").bounds(lines)[0]
+    return [(number, row.strip()) for number, row in enumerate(text.splitlines(), start) if row.strip()]
 
 
 def pointer(task: dict) -> str:

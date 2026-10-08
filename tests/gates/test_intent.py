@@ -535,15 +535,17 @@ class TestModeOf:
 
 PLAN = "".join(f"line {n}\n" for n in range(1, 41))
 CHUNK_STATE = {"task_text": "", "plan_lines": "15-17", "plan_chunk": "line 15\n\nline 17\n"}
+BASE_QUESTIONS = ["usable", "delivers", "reachable", "weakens"]
+CHUNK_QUESTIONS = [*BASE_QUESTIONS, "underdelivers", "overdelivers", "misses_line_15", "misses_line_17"]
 
 
-def chunk_classifier(underdelivers=0.1, overdelivers=0.1, seen=None):
+def chunk_classifier(underdelivers=0.1, overdelivers=0.1, misses=None, seen=None):
     def decide(state, questions, purpose):
         if seen is not None:
             seen.append(list(questions))
         found = {"usable": 0.9, "delivers": 0.9, "reachable": 0.9, "weakens": 0.1}
-        found |= {"underdelivers": underdelivers, "overdelivers": overdelivers}
-        return SimpleNamespace(answers={name: answer(found[name]) for name in questions})
+        found |= {"underdelivers": underdelivers, "overdelivers": overdelivers, **(misses or {})}
+        return SimpleNamespace(answers={name: answer(found.get(name, 0.1)) for name in questions})
 
     return decide
 
@@ -554,9 +556,8 @@ def planned(tmp_path, monkeypatch):
 
     monkeypatch.syspath_prepend(str(HERE))
     from scripts.swarm_ledger import ledger_artifacts
-    from scripts.swarm_ledger import ledger_core as core
 
-    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(ledger_artifacts.core, "LEDGER_DIR", tmp_path)
     file = ledger_artifacts.store("chunks", "plan.md", PLAN.encode())
     ref = {"artifact": f"http://127.0.0.1:8765/artifacts/chunks/{file['id']}", "lines": "12-35"}
     phase = {**DOC["phases"][1], "plan_ref": ref}
@@ -569,35 +570,62 @@ class TestPlanChunk:
         state = intent.state_of(planned, planned["tasks"][0], PR)
         assert (state["plan_lines"], state["plan_chunk"]) == ("15-17", "line 15\nline 16\nline 17\n")
 
+    def test_a_task_without_plan_lines_carries_no_plan_fields(self, planned):
+        planned["tasks"][0].pop("plan_lines")
+        assert intent.state_of(planned, planned["tasks"][0], PR) == intent.state_of(DOC, DOC["tasks"][0], PR)
+
     @pytest.mark.parametrize(
         "change",
         [
-            lambda doc: doc["tasks"][0].pop("plan_lines"),
             lambda doc: doc["phases"][0].pop("plan_ref"),
             lambda doc: doc.update(artifacts=[]),
+            lambda doc: doc["tasks"][0].update(plan_lines="45-46"),
         ],
     )
-    def test_a_task_with_no_readable_chunk_carries_no_plan_fields(self, planned, change):
+    def test_an_unreadable_chunk_is_unchecked_without_asking_the_classifier(self, planned, change):
         change(planned)
         state = intent.state_of(planned, planned["tasks"][0], PR)
-        assert state == intent.state_of(DOC, DOC["tasks"][0], PR)
+        lines = planned["tasks"][0]["plan_lines"]
+        assert state == {**intent.state_of(DOC, DOC["tasks"][0], PR), "plan_lines": lines, "plan_chunk": None}
+        seen = []
+        assert intent.judge(state, decide=chunk_classifier(seen=seen)) == (
+            "unchecked",
+            f"the plan chunk for lines {lines} could not be read",
+        )
+        assert seen == []
 
     def test_the_chunk_questions_are_asked_only_with_a_chunk(self):
-        assert list(intent.QUESTIONS) == ["usable", "delivers", "reachable", "weakens", "underdelivers", "overdelivers"]
-        assert list(intent.questions_for({})) == ["usable", "delivers", "reachable", "weakens"]
-        assert intent.questions_for(CHUNK_STATE) == intent.QUESTIONS
+        assert list(intent.QUESTIONS) == [*BASE_QUESTIONS, "underdelivers", "overdelivers"]
+        assert list(intent.questions_for({})) == BASE_QUESTIONS
+        assert list(intent.questions_for(CHUNK_STATE)) == CHUNK_QUESTIONS
+        line = intent.questions_for(CHUNK_STATE)["misses_line_17"]
+        assert (line.instructions, line.criteria()) == (
+            'Does the change leave out what plan line 17 asks for: "line 17"?',
+            {
+                "true": "the change leaves out what this line asks for",
+                "false": "the change delivers what this line asks for, or the line asks for nothing",
+            },
+        )
         seen = []
-        assert intent.judge({}, decide=chunk_classifier(0.9, 0.9, seen))[0] == "pass"
+        assert intent.judge({}, decide=chunk_classifier(0.9, 0.9, seen=seen))[0] == "pass"
         assert intent.judge(CHUNK_STATE, decide=chunk_classifier(seen=seen))[0] == "pass"
-        assert seen == [list(intent.questions_for({})), list(intent.QUESTIONS)]
+        assert seen == [BASE_QUESTIONS, CHUNK_QUESTIONS]
 
     def test_underdelivery_at_one_half_fails_quoting_the_chunk_lines_missed(self):
         assert intent.judge(CHUNK_STATE, decide=chunk_classifier(underdelivers=0.49))[0] == "pass"
-        assert intent.judge(CHUNK_STATE, decide=chunk_classifier(underdelivers=0.5)) == (
+        assert intent.judge(CHUNK_STATE, decide=chunk_classifier(0.5, misses={"misses_line_17": 0.5})) == (
             "fail",
             "the phase can use this change at probability 0.90; the change may leave out something plan lines 15-17 "
-            "ask for, at probability 0.50; What would meet intent: Deliver every item of plan lines 15-17: "
-            'line 15 "line 15", line 17 "line 17".',
+            "ask for, at probability 0.50; What would meet intent: Deliver what plan lines 15-17 ask for and the "
+            'change leaves out: line 17 "line 17".',
+        )
+
+    def test_underdelivery_with_no_line_named_quotes_the_whole_chunk(self):
+        assert intent.judge(CHUNK_STATE, decide=chunk_classifier(0.5, misses={"misses_line_17": 0.49})) == (
+            "fail",
+            "the phase can use this change at probability 0.90; the change may leave out something plan lines 15-17 "
+            "ask for, at probability 0.50; What would meet intent: Deliver what plan lines 15-17 ask for and the "
+            'change leaves out: line 15 "line 15", line 17 "line 17".',
         )
 
     def test_overdelivery_at_one_half_fails_quoting_the_chunk_lines_exceeded(self):
@@ -611,13 +639,13 @@ class TestPlanChunk:
 
     def test_the_task_remediation_comes_before_the_chunk_steps(self):
         state = {**CHUNK_STATE, "task": "T", "task_text": "Do it.", "phase": "P", "phase_intent": "Goal."}
-        reason = intent.judge(state, decide=chunk_classifier(0.7, 0.8))[1]
+        reason = intent.judge(state, decide=chunk_classifier(0.7, 0.8, misses={"misses_line_15": 0.9}))[1]
         assert reason.split("; ")[1:] == [
             "the change may leave out something plan lines 15-17 ask for, at probability 0.70",
             "the change may add scope plan lines 15-17 do not ask for, at probability 0.80",
-            "What would meet intent: Deliver T: Do it.. The phase must be able to use it for P: Goal.. Deliver every "
-            'item of plan lines 15-17: line 15 "line 15", line 17 "line 17". Remove the scope beyond plan lines '
-            '15-17, which ask only for line 15 "line 15", line 17 "line 17".',
+            "What would meet intent: Deliver T: Do it.. The phase must be able to use it for P: Goal.. Deliver what "
+            'plan lines 15-17 ask for and the change leaves out: line 15 "line 15". Remove the scope beyond plan '
+            'lines 15-17, which ask only for line 15 "line 15", line 17 "line 17".',
         ]
 
     def test_the_tick_records_the_chunk_questions_it_asked(self, tmp_path, planned):
@@ -626,4 +654,11 @@ class TestPlanChunk:
 
         check(tmp_path, "observe", ask=ask).run(planned)
         [record] = [json.loads(line) for line in (tmp_path / SLUG / "gates" / "intent" / "history.jsonl").open()]
-        assert list(json.loads(record["classifier_input"])["questions"]) == list(intent.QUESTIONS)
+        assert list(json.loads(record["classifier_input"])["questions"]) == [
+            *BASE_QUESTIONS,
+            "underdelivers",
+            "overdelivers",
+            "misses_line_15",
+            "misses_line_16",
+            "misses_line_17",
+        ]
