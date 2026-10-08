@@ -92,6 +92,12 @@ def test_refused_for_a_missing_ledger(slug):
     assert refusal(["--task", "mid"], {"AGENTIHOOKS_SWARM": "nowhere"}) == "no ledger nowhere"
 
 
+def test_refused_for_an_invalid_slug_or_a_corrupt_ledger(slug):
+    assert refusal(["--task", "mid", "--slug", "../x"], {}) == "no ledger ../x"
+    core.paths(slug)[1].write_text("{")
+    assert refusal(["--task", "mid"], {"AGENTIHOOKS_SWARM": slug}) == "no ledger chunks"
+
+
 def test_pointer_names_the_command_only_for_a_sliced_task():
     assert plan_read.pointer({"plan_lines": "15-17", "phase": "p1"}) == (
         "Plan: run agentihooks plan read to read only your slice of the plan, lines 15-17 "

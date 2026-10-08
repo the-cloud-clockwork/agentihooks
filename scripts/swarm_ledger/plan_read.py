@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import sys
+from importlib import import_module
 
 from scripts.swarm_ledger import HERE
 
@@ -17,16 +18,15 @@ COMMAND = "agentihooks plan read"
 MARGIN = 10
 
 
-def _ledger():
+def _ledger(name: str):
+    # ledger_core imports its siblings by bare name; loading it lazily keeps it out of hook processes.
     if str(HERE) not in sys.path:
         sys.path.insert(0, str(HERE))
-    from scripts.swarm_ledger import ledger_core, plan_ranges
-
-    return ledger_core, plan_ranges
+    return import_module(f"scripts.swarm_ledger.{name}")
 
 
 def chunk(text: str, lines: str) -> str:
-    start, end = _ledger()[1].bounds(lines)
+    start, end = _ledger("plan_ranges").bounds(lines)
     rows = text.splitlines()
     return "".join(f"{row}\n" for row in rows[max(1, start - MARGIN) - 1 : min(len(rows), end + MARGIN)])
 
@@ -55,7 +55,7 @@ def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str
     ref = phase.get("plan_ref")
     if not ref:
         raise ValueError(f"phase {phase_id} has no plan range")
-    return chunk(_ledger()[1].stored_text(ref, doc), lines or ref["lines"])
+    return chunk(_ledger("plan_ranges").stored_text(ref, doc), lines or ref["lines"])
 
 
 def main(argv=None, environ=None) -> int:
@@ -74,8 +74,8 @@ def main(argv=None, environ=None) -> int:
     if task_id == "":
         raise SystemExit("plan read needs a task: pass --task or run it inside a swarm task session")
     try:
-        doc = json.loads(_ledger()[0].paths(slug)[1].read_text(encoding="utf-8"))
-    except OSError:
+        doc = json.loads(_ledger("ledger_core").paths(slug)[1].read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         raise SystemExit(f"no ledger {slug}") from None
     try:
         sys.stdout.write(read(doc, slug, task_id, args.phase))
