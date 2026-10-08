@@ -311,7 +311,9 @@ def test_resolve_many_keeps_every_name_when_redis_fails(redis, monkeypatch, capl
 
     monkeypatch.setattr(redis, "mget", down)
     assert naming.NameRegistry(redis).resolve_many(["a", "b"]) == {"a": "a", "b": "b"}
-    assert "alias lookup failed for 2 names: down" in caplog.text
+    assert [(r.name, r.levelname, r.getMessage()) for r in caplog.records] == [
+        ("scripts.swarm.naming", "WARNING", "alias lookup failed for 2 names: down")
+    ]
 
 
 def test_resolve_names_needs_no_redis(monkeypatch):
