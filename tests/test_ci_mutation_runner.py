@@ -1,4 +1,6 @@
+import subprocess
 import sys
+import time
 
 import pytest
 
@@ -24,9 +26,17 @@ def test_missing_tests_fails_closed(tmp_path):
     assert report["not_mutated"] == [{"path": "hooks/unknown.py", "reason": "no matching or importing test modules"}]
 
 
-def test_process_timeout_returns_no_status_and_records_output(tmp_path):
+def test_process_timeout_returns_no_status_and_records_output(tmp_path, monkeypatch):
     log = tmp_path / "process.log"
-    code = "import time; print('started', flush=True); time.sleep(10)"
+    wait = subprocess.Popen.wait
+
+    def wait_for_output(process, timeout=None):
+        while timeout is not None and not log.read_text() and process.poll() is None:
+            time.sleep(0.01)
+        return wait(process, timeout)
+
+    monkeypatch.setattr(subprocess.Popen, "wait", wait_for_output)
+    code = "import time; time.sleep(0.5); print('started', flush=True); time.sleep(60)"
     assert run_process([sys.executable, "-c", code], tmp_path, 0.2, log) is None
     assert log.read_text() == "started\n"
 
