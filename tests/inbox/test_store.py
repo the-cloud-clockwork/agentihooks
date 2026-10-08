@@ -357,3 +357,26 @@ def test_open_index_cleanup_finds_a_redirected_address_before_first_read(store):
     keys, memberships = store.keys_for(lambda address: address == "old")
     assert set(keys) == {store.key(kind, "old") for kind in ("address", "pending", "open", "open-size", "sequence")}
     assert memberships == {}
+
+
+@pytest.mark.parametrize("change", ["send", "redirect", "same_address"])
+def test_new_writers_keep_warm_mailbox_indexes_current(store, monkeypatch, change):
+    first = store.send("sender", "a", "first")
+    assert [item.id for item in store.open_items("a")] == [first.id]
+    assert store.open_items("b") == []
+
+    def rebuild(address):
+        pytest.fail(f"new writer invalidated warm index at {address}")
+
+    monkeypatch.setattr(store, "_index_open", rebuild)
+    if change == "send":
+        second = store.send("sender", "a", "second")
+        expected = ([first.id, second.id], [])
+    else:
+        destination = "b" if change == "redirect" else "a"
+        store.redirect(first.id, "swarm", destination, "moved", "a")
+        expected = ([], [first.id]) if destination == "b" else ([first.id], [])
+    assert [item.id for item in store.open_items("a")] == expected[0]
+    assert [item.id for item in store.open_items("b")] == expected[1]
+    for address in ("a", "b"):
+        assert int(store.redis.get(store.key("open-size", address))) == store.redis.zcard(store.key("address", address))
