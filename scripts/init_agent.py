@@ -68,6 +68,17 @@ def _read_route_report(path: Path) -> dict[str, str]:
     return fields
 
 
+def _take_route_report(path: Path) -> tuple[dict[str, str], str]:
+    """The route report and when it was written in epoch ms, the moment the launcher hands over to the harness."""
+    try:
+        written = str(int(path.stat().st_mtime * 1000))
+        return _read_route_report(path), written
+    except FileNotFoundError:
+        return {}, ""
+    finally:
+        path.unlink(missing_ok=True)
+
+
 @dataclass(frozen=True)
 class AgentSpec:
     agent: str = "claude"
@@ -680,7 +691,8 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         time.sleep(0.25)
     launcher_at = int(marker.stat().st_mtime * 1000)
     marker.unlink(missing_ok=True)
-    report += ["status=started", f"launcher_at={launcher_at}"]
+    report.append("status=started")
+    report.append(f"launcher_at={launcher_at}")
 
     route_path = _route_report(launcher)
     deadline = time.monotonic() + args.route_timeout
@@ -688,12 +700,9 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         if _selection_refused(active_env):
             break
         time.sleep(0.25)
-    harness_at = int(route_path.stat().st_mtime * 1000) if route_path.exists() else None
-    route = _read_route_report(route_path) if harness_at else {}
-    route_path.unlink(missing_ok=True)
+    route, harness_at = _take_route_report(route_path)
     report.append(f"route_status={route.get('status', 'pending')}")
-    if harness_at:
-        report.append(f"harness_at={harness_at}")
+    report.append(f"harness_at={harness_at}")
     if route.get("account"):
         report.append(f"account={route['account']}")
     if route.get("placement"):

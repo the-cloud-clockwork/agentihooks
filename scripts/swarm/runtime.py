@@ -296,7 +296,8 @@ class HerdrRuntime:
 
     def _launch(self, config, lane, task_id, name, argv, predecessor=None):
         agent = argv[argv.index("--agent") + 1]
-        launched_at, load_at_launch = int(time.time() * 1000), list(os.getloadavg())
+        launched_at = int(time.time() * 1000)
+        load_at_launch = list(os.getloadavg())
         try:
             proc = self.run(
                 argv,

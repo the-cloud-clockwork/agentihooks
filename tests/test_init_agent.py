@@ -171,6 +171,10 @@ def test_launch_reports_when_the_launcher_and_the_harness_started(monkeypatch, t
     assert "harness_at=1791000009250" in out.splitlines()
 
 
+def test_a_route_report_removed_before_it_is_read_reads_as_no_route(tmp_path):
+    assert init_agent._take_route_report(tmp_path / "gone.route") == ({}, "")
+
+
 def test_terminal_that_never_starts_the_launcher_fails_and_discards_it(monkeypatch, tmp_path, capsys):
     rc = _launch(monkeypatch, tmp_path, lambda command, **kwargs: None)
 
