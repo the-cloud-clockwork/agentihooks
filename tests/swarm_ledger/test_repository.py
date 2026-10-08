@@ -1,7 +1,7 @@
 import pytest
+from scripts.swarm_ledger.repository.file import FileLedgerRepository
 
 from scripts.swarm_ledger.repository.__init__ import LedgerRepository
-from scripts.swarm_ledger.repository.file import FileLedgerRepository
 
 
 def test_file_repository_exposes_storage_contract():

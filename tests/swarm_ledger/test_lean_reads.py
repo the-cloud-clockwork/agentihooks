@@ -7,6 +7,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger, ledger_server, ledger_workspace, new_ledger
 from scripts.swarm_ledger import ledger_core as core
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "lean-reads-2026-01-01"
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -28,7 +29,7 @@ def make_ledger():
         }
     )
     html_path, json_path = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(doc, SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(doc, SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     return core.sync(SLUG)[0]
 
@@ -118,7 +119,7 @@ def test_the_page_read_leaves_published_work_folder_lines_to_the_task_read(serve
     store.create(SwarmConfig(SLUG, "/hive", 0, 0))
     commands.publish(store, SLUG, {}, {"t1": {"latest_progress": "red test seen"}})
     monkeypatch.setattr(ledger_server, "swarm_store", lambda: store)
-    token = core.read_token(core.paths(SLUG)[0].read_text(encoding="utf-8"))
+    token = legacy_page.stored_token(core.paths(SLUG)[0])
     request = urllib.request.Request(f"{served}/api/{SLUG}", headers={"X-Ledger-Token": token})
     with urllib.request.urlopen(request) as response:
         state = json.load(response)
@@ -157,7 +158,7 @@ def test_an_agent_write_returns_the_agent_view_with_its_result(served):
 
 def test_the_agent_view_is_read_from_any_position_in_the_query(served):
     with_work_folder()
-    token = core.read_token(core.paths(SLUG)[0].read_text(encoding="utf-8"))
+    token = legacy_page.stored_token(core.paths(SLUG)[0])
     request = urllib.request.Request(f"{served}/api/{SLUG}?x=1&view=agent", headers={"X-Ledger-Token": token})
     with urllib.request.urlopen(request) as response:
         assert "workspace_tail" not in json.load(response)["tasks"][0]

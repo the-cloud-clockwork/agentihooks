@@ -31,6 +31,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   edit chat|ITEM ENTRY TEXT           rewrite an entry (yours; the orchestrator: any agent's)
   delete chat|ITEM ENTRY...           delete entries (yours; the orchestrator: any agent's)
   audit                               list every agent text the filter refuses, the cleanup worklist
+  show                                print the whole ledger as JSON: every task, note, answer and comment (no --as needed)
   priority add ITEM TEXT              ask the operator: only what blocks on his answer, at most 20 words; ITEM may
                                       be phases/<id>, questions/<id>, followups/<id> or tasks/<id>. Unanswered
                                       questions, blocked tasks, merge approvals and flagged follow-ups show on their own
@@ -101,7 +102,7 @@ OBJECT_FORMS = {
 
 
 def credentials(slug, service=False):
-    token = core.read_token(repository.read_page(slug)) or ""
+    token = repository.token(slug) or ""
     who = Who.from_env()
     if service or not who.pinned:
         return {"X-Ledger-Token": token}
@@ -198,6 +199,10 @@ def cmd_leave(args):
 def cmd_events(args):
     for event in mine(call(args.slug), args.name):
         print(watch_ledger.line(event))
+
+
+def cmd_show(args):
+    print(json.dumps(call(args.slug), indent=1, ensure_ascii=False))
 
 
 def cmd_status(args):
@@ -632,6 +637,7 @@ def build_parser():
     delete.add_argument("target")
     delete.add_argument("entries", nargs="+")
     sub.add_parser("audit")
+    sub.add_parser("show")
     priority = sub.add_parser("priority")
     priority.add_argument("action", choices=["add", "clear"])
     priority.add_argument("values", nargs="*")
@@ -695,7 +701,7 @@ def main():
     if text := refusal(args.name, Who.from_env()):
         sys.exit(f"agentihooks ledger: {text}")
     args.name = resolve_name(args.name) if args.name else args.name
-    if not args.slug or not (args.name or args.command == "url"):
+    if not args.slug or not (args.name or args.command in ("url", "show")):
         sys.exit("--slug and --as are required")
     globals()[f"cmd_{args.command.replace('-', '_')}"](args)
 

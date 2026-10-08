@@ -2,8 +2,8 @@ import json
 
 import ledger_core as core
 import pytest
-
 from scripts.swarm_ledger.repository.file import FileLedgerRepository
+
 from tests.swarm_ledger.test_repository_files import content
 
 

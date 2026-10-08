@@ -47,10 +47,8 @@ LANE_ROLE = {
 }
 
 
-def ledger_path(slug: str) -> Path:
-    directory = os.environ.get("LEDGER_DIR")
-    root = Path(directory).expanduser() if directory else Path("~/development-ledger")
-    return root / f"{slug}.json"
+def ledger_read(slug: str) -> str:
+    return f"agentihooks ledger --slug {slug} show"
 
 
 def build_master(slug, repo, name, task, autonomy=DELEGATE):
@@ -73,7 +71,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         *priming_lines(task),
         *summary,
         "",
-        f"Before anything else, read the ledger {ledger_path(slug)} in full: every task and its state, "
+        f"Before anything else, read the ledger in full with {ledger_read(slug)}: every task and its state, "
         "the operator's notes, answers, comments and chat.",
         f"Run once: {led} join --role orchestrator. {INBOX_LINE} Act on every OPERATOR line, then run {led} ack.",
         "",
@@ -170,10 +168,10 @@ def peer_lines(peer):
 
 
 def summary_lines(slug):
-    path = ledger_path(slug).expanduser()
-    if not path.exists():
-        return []
-    overview = json.loads(path.read_text(encoding="utf-8")).get("overview", "")
+    from scripts.swarm_ledger.repository.sqlite import read_ledger
+
+    folder = Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
+    overview = (read_ledger(folder, slug, "overview") or {}).get("overview", "")
     _, marker, summary = overview.partition(ledger_close.MARK)
     if not marker:
         return []
@@ -213,7 +211,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f"You are a member of the ledger crew. Before anything else, run once: {led} join. {INBOX_LINE} "
         f"Act on every OPERATOR line about your work, then run {led} ack.",
         "",
-        f"Then read the ledger {ledger_path(slug)} in full: every task and its state, "
+        f"Then read the ledger in full with {ledger_read(slug)}: every task and its state, "
         "the operator's notes, answers and comments. It is your starting point; take only your own task.",
         "Page chat is for the master: act on a chat line only when it starts with @ and your name.",
         f'Keep the ledger current as you go: {led} comment phases/{phase} "<what you did>" when your work lands, '

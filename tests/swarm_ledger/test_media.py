@@ -18,6 +18,7 @@ import ledger_media as media  # noqa: E402
 import ledger_server as server  # noqa: E402
 
 from tests.swarm_ledger.test_bin import DAY_MS, make_ledger  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 
 def png(width=3, height=2):
@@ -104,7 +105,7 @@ class Endpoint(unittest.TestCase):
     def setUpClass(cls):
         core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
         html_path, _ = make_ledger("via-media")
-        cls.token = core.read_token(html_path.read_text(encoding="utf-8"))
+        cls.token = legacy_page.stored_token(html_path)
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever, args=(0.01,), daemon=True).start()

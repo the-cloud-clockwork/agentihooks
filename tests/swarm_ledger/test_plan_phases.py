@@ -4,6 +4,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger, ledger_phase_cli, ledger_phases, new_ledger
 from scripts.swarm_ledger import ledger_core as core
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "plan-phases-proof"
 
@@ -16,7 +17,7 @@ def phase_ledger_dir(ledger_dir, monkeypatch):
 def make_ledger():
     content = {"title": "Demo", "phases": [{"title": "First"}]}
     html, state = core.paths(SLUG)
-    html.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765))
+    html.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765))
     state.unlink(missing_ok=True)
     return core.sync(SLUG)[0]
 

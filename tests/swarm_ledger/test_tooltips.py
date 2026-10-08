@@ -18,6 +18,7 @@ import ledger_core  # noqa: E402
 from scripts.swarm_ledger import ledger_core as core  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from scripts.swarm_ledger import new_ledger  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 URL = "http://ledger.test/tips"
 CONTROLS = 'button, [role="tab"], [role="button"], [role="switch"], a.sync, a.fab'
@@ -323,7 +324,7 @@ def test_upgrading_a_ledger_page_inlines_the_tip_module():
     }
     html_path, json_path = ledger_core.paths("tips-upgrade")
     ledger_core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), "tips-upgrade", 8765))
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), "tips-upgrade", 8765))
     json_path.unlink(missing_ok=True)
     ledger_core.sync("tips-upgrade")
     new_ledger.upgrade_page("tips-upgrade")

@@ -12,8 +12,8 @@ class Publishing:
         for publisher in self.publishers:
             publisher(slug, state)
 
-    def get_document(self, slug: str, reconcile: bool = True) -> dict:
-        state = self.inner.get_document(slug, reconcile)
+    def get_document(self, slug: str) -> dict:
+        state = self.inner.get_document(slug)
         self.publish(slug, state)
         return state
 

@@ -15,6 +15,8 @@ import ledger_layout as layout  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
+
 browser = chromium_browser
 SLUGS = ("resize-one-2026-10-06", "resize-two-2026-10-06")
 HEIGHT_ROWS = ("capacity-box", "swarm-row-work", "swarm-row-accounts", "health-box", "handoff-box")
@@ -38,7 +40,7 @@ def base(ledger_dir):
     for slug in SLUGS:
         content = {"title": slug, "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
         html_path, _ = core.paths(slug)
-        html_path.write_text(new_ledger.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
+        html_path.write_text(legacy_page.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
         core.sync(slug)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     port = httpd.server_address[1]

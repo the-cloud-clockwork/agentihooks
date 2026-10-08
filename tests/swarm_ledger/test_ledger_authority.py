@@ -19,6 +19,7 @@ from scripts.swarm.ledger_client import LedgerClient  # noqa: E402
 from scripts.swarm.store import SwarmError  # noqa: E402
 from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
 from scripts.swarm_ledger import ledger_authority as authority  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 server = ledger_server
 from tests.swarm_ledger.test_media import png  # noqa: E402
@@ -44,7 +45,7 @@ def live():
     port = httpd.server_address[1]
     host = f"127.0.0.1:{port}"
     content = {"title": "Authority", "phases": [{"title": "Proof", "description": "word " * 101}]}
-    page = new_ledger.render(new_ledger.build_doc(content), SLUG, port)
+    page = legacy_page.render(new_ledger.build_doc(content), SLUG, port)
     core.paths(SLUG)[0].write_text(page)
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     with (

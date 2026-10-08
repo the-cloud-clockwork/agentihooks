@@ -3,10 +3,10 @@ import json
 
 import ledger_core as legacy_core
 import pytest
+from scripts.swarm_ledger.repository.file import FileLedgerRepository
 
 from scripts.swarm_ledger import ledger, ledger_bin, ledger_core, ledger_server, new_ledger
 from scripts.swarm_ledger.repository import bin_storage
-from scripts.swarm_ledger.repository.file import FileLedgerRepository
 
 
 @pytest.fixture

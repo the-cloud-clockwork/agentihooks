@@ -5,12 +5,12 @@ from unittest.mock import patch
 
 import ledger_media as media
 import pytest
+from scripts.swarm_ledger.repository.file import FileLedgerRepository
 
 from scripts.swarm import prompt
 from scripts.swarm_ledger import ledger, ledger_gate, ledger_tasks
 from scripts.swarm_ledger import ledger_artifacts as artifacts
 from scripts.swarm_ledger import ledger_core as core
-from scripts.swarm_ledger.repository.file import FileLedgerRepository
 from tests.swarm_ledger.test_artifacts import MARKDOWN
 from tests.swarm_ledger.test_bin import DAY_MS, make_ledger
 from tests.swarm_ledger.test_media import png

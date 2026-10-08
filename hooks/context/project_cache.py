@@ -76,7 +76,10 @@ def _swarm_overview() -> str:
     swarm = os.getenv("AGENTIHOOKS_SWARM", "")
     if not swarm:
         return ""
-    ledger = _read(Path.home() / "development-ledger" / f"{swarm}.json")
+    from scripts.swarm_ledger.repository.sqlite import read_ledger
+
+    folder = Path(os.getenv("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
+    ledger = read_ledger(folder, swarm, "overview") or {}
     return str(ledger.get("overview", ""))
 
 

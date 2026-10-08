@@ -18,6 +18,8 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
+
 SLUG, ME, SID = "stopexec-2026-01-01", "engineer@abcdef-0001", "sid-stop"
 URL = "https://github.com/o/r/pull/7"
 PACKAGE = ".".join(("scripts", "gates"))
@@ -66,7 +68,7 @@ def rig(tmp_path, monkeypatch):
     doc = new_ledger.build_doc(content)
     doc["tasks"][0].update(state="claimed", claimed_by=ME)
     html_path, _ = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(doc, SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(doc, SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     task = doc["tasks"][0]["id"]
     home, bundle, bin_dir = tmp_path / "ahome", tmp_path / "bundle", tmp_path / "bin"

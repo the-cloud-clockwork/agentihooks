@@ -5,6 +5,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger, ledger_tasks, new_ledger
 from scripts.swarm_ledger import ledger_core as core
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "taskadd-2026-01-01"
 PLANNER = "planner@abcdef-0003"
@@ -26,7 +27,7 @@ def make_ledger(claims=()):
         "phases": [{"title": "one", "description": "d"}, {"title": "two", "description": "d"}],
     }
     html_path, _ = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     for n, (lane, state, by) in enumerate(claims):
         kind = {"kind": "plan"} if lane == "plan" else {}

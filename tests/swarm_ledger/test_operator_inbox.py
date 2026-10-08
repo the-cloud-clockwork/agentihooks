@@ -15,6 +15,7 @@ import watch_ledger  # noqa: E402
 from scripts.inbox import seen  # noqa: E402
 from scripts.inbox.store import InboxStore  # noqa: E402
 from scripts.swarm.store import RedisStore, SwarmConfig  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -35,7 +36,7 @@ def inbox(monkeypatch):
 def make_ledger():
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
     html_path, json_path = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     state, _ = core.sync(SLUG)
     return state["phases"][0]["id"]

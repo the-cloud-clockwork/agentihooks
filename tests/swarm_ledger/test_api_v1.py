@@ -22,10 +22,11 @@ _talk_init = server.talk.Budget.__init__
 
 @pytest.fixture
 def live(authority_live):
+    from tests.swarm_ledger import legacy_page
     from tests.swarm_ledger.test_ledger_authority import core, new_ledger
 
     content = {"title": "Authority", "phases": [{"title": "Proof", "description": "word " * 101}]}
-    page = new_ledger.render(new_ledger.build_doc(content), SLUG, authority_live["port"])
+    page = legacy_page.render(new_ledger.build_doc(content), SLUG, authority_live["port"])
     html, document = core.paths(SLUG)
     html.write_text(page)
     document.unlink(missing_ok=True)

@@ -9,6 +9,7 @@ import pytest
 from scripts.swarm_ledger import ledger_agent_ops, ledger_comments, new_ledger
 from scripts.swarm_ledger import ledger_core as validation
 from scripts.swarm_ledger import ledger_server as server
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 core = server.core
 
@@ -19,9 +20,9 @@ def ledger_page(monkeypatch):
     doc["tasks"] = [{"id": "fx-8be892c4-code", "title": "Inbox fix", "phase": "p1", "comments": []}]
     html_path, _ = core.paths("demo")
     html_path.parent.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(doc, "demo", server.PORT))
+    html_path.write_text(legacy_page.render(doc, "demo", server.PORT))
     core.sync("demo", ops=[{"op": "join", "id": "join", "by": "engineer"}])
-    token = core.read_token(html_path.read_text())
+    token = legacy_page.stored_token(html_path)
     monkeypatch.setattr(server, "relay_to_inbox", lambda *args: None)
     monkeypatch.setattr(server, "doctor_phrase", lambda *args: None)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)

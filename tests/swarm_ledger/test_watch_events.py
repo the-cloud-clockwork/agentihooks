@@ -15,6 +15,7 @@ import new_ledger  # noqa: E402
 from scripts.swarm_ledger import watch_ledger  # noqa: E402
 from scripts.swarm_ledger.events import Expired, stream  # noqa: E402
 from scripts.swarm_ledger.events.patch import diff  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "watchevents-2026-01-01"
 MEMBERS = {"me": {"claims": ["phases/p1"]}, "boss": {"role": "orchestrator"}, "other": {}}
@@ -176,7 +177,7 @@ def test_alive_creates_the_beat_folder_and_touches_the_file(tmp_path):
 def ledger_file():
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
     html_path, json_path = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)
     return json_path

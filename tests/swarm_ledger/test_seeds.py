@@ -4,8 +4,8 @@ from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 from tests.swarm_ledger.test_sqlite import document
 
 
-def test_retained_seeds_replay_after_checkpoint_advances(tmp_path):
-    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+def test_retained_seeds_export_through_their_deltas(tmp_path):
+    repo = SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
     state = document()
     for revision in range(2, 12):
         state["title"] = f"Title {revision}"
@@ -14,25 +14,19 @@ def test_retained_seeds_replay_after_checkpoint_advances(tmp_path):
         state["_meta"]["seeds"] = {
             key: value for key, value in state["_meta"]["seeds"].items() if int(key) > revision - 5
         }
-        repo.import_document("seeds", state)
-        assert repo.get_document("seeds") == state
-        trace = []
-        repo.trace = trace.append
-        repo.import_document("seeds", state)
-        assert not [sql for sql in trace if sql.startswith(("INSERT", "UPDATE", "DELETE"))]
-        repo.trace = None
-        for key, expected in state["_meta"]["seeds"].items():
-            assert repo.get_seed("seeds", key) == expected
+        repo.import_document("seeds", state, replace=True)
+        assert repo.export_document("seeds") == state
+        assert repo.get_document("seeds")["_meta"]["seeds"] == {}
     with repo.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM revisions").fetchone()[0] == 5
         assert connection.execute("SELECT COUNT(*) FROM seed_deltas").fetchone()[0] == 4
     state["_meta"]["seeds"] = {}
-    repo.import_document("seeds", state)
-    assert repo.get_document("seeds") == state
+    repo.import_document("seeds", state, replace=True)
+    assert repo.export_document("seeds") == state
 
 
 def test_seed_delta_removes_fields_and_threads(tmp_path):
-    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+    repo = SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
     state = document()
     current = copy.deepcopy(state["_meta"]["seeds"]["1"])
     current["tasks"][1].pop("unknown")
@@ -41,8 +35,16 @@ def test_seed_delta_removes_fields_and_threads(tmp_path):
     state["_meta"]["seeds"]["2"] = current
     state["_meta"]["rev"] = 2
     repo.import_document("seeds", state)
-    assert repo.get_document("seeds") == state
-    assert repo.get_seed("seeds", "2") == current
+    assert repo.export_document("seeds") == state
     state["_meta"]["seeds"]["2"]["tasks"] = []
-    repo.import_document("seeds", state)
-    assert repo.get_document("seeds") == state
+    repo.import_document("seeds", state, replace=True)
+    assert repo.export_document("seeds") == state
+
+
+def test_a_document_without_seeds_exports_without_them(tmp_path):
+    repo = SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
+    state = document()
+    state["_meta"].pop("seeds")
+    repo.import_document("bare", state)
+    assert repo.export_document("bare") == state
+    assert "seeds" not in repo.get_document("bare")["_meta"]

@@ -3,9 +3,9 @@ import os
 
 import ledger_core as core
 import pytest
+from scripts.swarm_ledger.repository.file import FileLedgerRepository
 
 from scripts.swarm_ledger.repository import bin_storage
-from scripts.swarm_ledger.repository.file import FileLedgerRepository
 
 
 @pytest.fixture

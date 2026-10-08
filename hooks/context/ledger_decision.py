@@ -138,13 +138,12 @@ def _ledger_dir(env):
 
 
 def _named_ledger(payload, env):
+    from scripts.swarm_ledger.repository.sqlite import read_ledger, read_registry
+
     ledgers = _ledger_dir(env)
-    try:
-        binned = dict(json.loads((ledgers / ".bin.json").read_bytes()))
-    except (OSError, ValueError, TypeError):
-        binned = {}
+    binned = read_registry(ledgers, "bin")
     for slug in TOKEN_RE.findall(_plan_text(payload).lower()):
-        if slug not in binned and (ledgers / f"{slug}.json").is_file():
+        if slug not in binned and read_ledger(ledgers, slug, "title") is not None:
             return slug
     return ""
 

@@ -34,7 +34,7 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
     if not server.core.SLUG_RE.fullmatch(slug) or not handler.exists(slug):
         raise APIError(404, "ledger_missing", "No such ledger")
     principal = server.authority.principal(
-        server.core.read_token(server.repository.read_page(slug)),
+        server.repository.token(slug),
         slug,
         handler.headers.get("X-Ledger-Token"),
         handler.headers.get("X-Ledger-Agent"),

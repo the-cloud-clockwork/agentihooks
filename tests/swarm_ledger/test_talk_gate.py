@@ -6,6 +6,7 @@ from scripts.gates import progress, talk
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import new_ledger
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -23,7 +24,7 @@ def redis(tmp_path, monkeypatch):
     RedisStore(client).create(SwarmConfig(SLUG, "repo", 1, 1))
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
     html_path, _ = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     return client
 

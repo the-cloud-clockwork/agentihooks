@@ -40,3 +40,21 @@ def write_events(connection, slug: str, events: list) -> None:
                 "INSERT INTO events VALUES (?, ?, ?, ?, ?)",
                 (slug, key, *row),
             )
+
+
+def append_events(connection, slug: str, events: list, kept: int) -> None:
+    """Add a mutation's events after the newest one and drop the oldest past `kept`; older rows stay untouched."""
+    if not events:
+        return
+    (last,) = connection.execute("SELECT MAX(position) FROM events WHERE slug=?", (slug,)).fetchone()
+    start = -1 if last is None else last
+    for offset, event in enumerate(events, 1):
+        connection.execute(
+            "INSERT INTO events VALUES (?, ?, ?, ?, ?)",
+            (slug, f"p{start + offset}", event.get("rev"), start + offset, encode(event)),
+        )
+    connection.execute(
+        "DELETE FROM events WHERE slug=? AND position NOT IN "
+        "(SELECT position FROM events WHERE slug=? ORDER BY position DESC LIMIT ?)",
+        (slug, slug, kept),
+    )
