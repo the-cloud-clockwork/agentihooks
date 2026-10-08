@@ -47,7 +47,7 @@ from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig
-from scripts.swarm_ledger import ledger_workspace
+from scripts.swarm_ledger import ledger_rank, ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
@@ -542,7 +542,7 @@ def _claimable(slug, store, rows, doc, lane):
 
 
 def _launch_order(slug, store, tasks):
-    return sorted(tasks, key=lambda task: bool(store.launch_failure(slug, task["id"])))
+    return sorted(tasks, key=lambda task: (ledger_rank.order(task), bool(store.launch_failure(slug, task["id"]))))
 
 
 def _unblocked(task, rows):
@@ -658,7 +658,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
         except Exception as exc:
             transfers.failed(store, slug, record)
-            store.note_launch_failure(slug, task["id"], str(exc))
+            if not isinstance(exc, SpawnError) or exc.status != "unavailable":
+                store.note_launch_failure(slug, task["id"], str(exc))
             store.record_launch(slug, record, "failed", str(exc))
             actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
             if isinstance(exc, ProfileUnresolved):
