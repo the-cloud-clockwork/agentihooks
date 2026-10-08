@@ -557,3 +557,21 @@ def test_the_sweep_reads_the_swarms_seats_once(redis, monkeypatch):
     monkeypatch.setattr(store.seats, "agent_seats", lambda slug: reads.append(slug) or seated(slug))
     exits.sweep(inbox, "sw", store, dict)
     assert reads == ["sw"]
+
+
+def test_mail_passed_to_a_gone_successor_master_reaches_the_live_one_in_the_same_sweep(redis):
+    from scripts.swarm.naming import NameRegistry
+    from scripts.swarm.store import AgentRecord
+
+    store, inbox = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    names = NameRegistry(redis)
+    names.mint_code("sw", "sw", "/repo")
+    first, second, live = (names.next("sw", "master") for _ in range(3))
+    for at, name in enumerate((first, second, live), 1):
+        store.seats.occupy("master@sw", name, at)
+    store.put_agent("sw", AgentRecord(name=live, lane="master", task="master", seat="master@sw"))
+    exits.sweep(inbox, "sw", store, dict)
+    item = inbox.send("sender", first, "late")
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).address == live

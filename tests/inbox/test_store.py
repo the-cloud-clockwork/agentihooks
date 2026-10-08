@@ -457,7 +457,12 @@ def test_quiet_names_only_indexed_addresses_without_open_mail(store):
     store.send("alice", "late", "contract")
     store.open_items("late")
     store.send("alice", "never-indexed", "contract")
-    assert store.quiet(["gone", "empty", "late", "never-indexed", "unknown"]) == {"gone", "empty"}
+    unflagged = store.send("alice", "unflagged", "finished")
+    store.close(unflagged.id, "unflagged", "done", "finished")
+    store.open_items("sizeless")
+    store.redis.delete(store.key("open-size", "sizeless"))
+    addresses = ["gone", "empty", "late", "never-indexed", "unknown", "unflagged", "sizeless"]
+    assert store.quiet(addresses) == {"gone", "empty"}
     store.send("alice", "empty", "arrived after the index")
     assert store.quiet(["empty"]) == set()
     assert store.quiet([]) == set()

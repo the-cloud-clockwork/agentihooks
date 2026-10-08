@@ -78,21 +78,24 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
     seats = store.seats.agent_seats(slug)
     gone = [(name, seat) for name, seat in seats if name not in active]
     outcomes = store.seats.exits([name for name, _ in gone])
-    quiet = inbox.quiet([name for name, _ in gone])
-    for name, seat in gone:
-        outcome = outcomes[name]
-        if outcome and name in quiet:
-            continue
-        state = tasks.get(name, {}).get("state")
-        if state in ("done", "blocked"):
-            exit_text = "finished its task and exited" if state == "done" else "blocked its task and exited"
-            settle(inbox, name, "", exit_text)
-        elif outcome:
-            settle(inbox, name, outcome["seat"], outcome["reason"])
-        else:
-            settle(inbox, name, seat, "exited")
+    while gone:
+        quiet = inbox.quiet([name for name, _ in gone])
+        due = [(name, seat) for name, seat in gone if not (outcomes[name] and name in quiet)]
+        gone = [entry for entry in gone if entry not in due] if due else []
+        for name, seat in due:
+            _settle_gone(inbox, name, seat, tasks.get(name, {}).get("state"), outcomes[name])
     _settle_seat_notices(inbox, {seat for _, seat in seats if seat}, active)
     _settle_peer_mail(inbox, slug, store, active)
+
+
+def _settle_gone(inbox: "InboxStore", name: str, seat: str, state: str | None, outcome: dict) -> None:
+    if state in ("done", "blocked"):
+        exit_text = "finished its task and exited" if state == "done" else "blocked its task and exited"
+        settle(inbox, name, "", exit_text)
+    elif outcome:
+        settle(inbox, name, outcome["seat"], outcome["reason"])
+    else:
+        settle(inbox, name, seat, "exited")
 
 
 def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:

@@ -145,15 +145,17 @@ class InboxStore:
         return {
             address
             for address, (indexed, size, total, opened) in zip(addresses, zip(*[iter(rows)] * 4))
-            if indexed and int(size or -1) == total and not opened
+            if _index_current(indexed, size, total) and not opened
         }
 
     def _open_ids(self, address):
         from redis.exceptions import WatchError
 
-        if self.redis.sismember(self.key("open-indexed"), address) and int(
-            self.redis.get(self.key("open-size", address)) or -1
-        ) == self.redis.zcard(self.key("address", address)):
+        if _index_current(
+            self.redis.sismember(self.key("open-indexed"), address),
+            self.redis.get(self.key("open-size", address)),
+            self.redis.zcard(self.key("address", address)),
+        ):
             return self.redis.zrange(self.key("open", address), 0, -1)
         for _ in range(MOVE_ATTEMPTS):
             try:
@@ -463,6 +465,10 @@ class InboxStore:
             pipe.rpush(self.key("history", item_id), _entry(state, by, reason, moved.updated_at))
             pipe.execute()
             return moved
+
+
+def _index_current(indexed, size, total: int) -> bool:
+    return bool(indexed) and int(size or -1) == total
 
 
 def _fields(item):
