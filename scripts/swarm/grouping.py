@@ -171,7 +171,7 @@ def _near(lead, other):
 
     mine, theirs = lead.get("territory") or [], other.get("territory") or []
     if not mine and not theirs:
-        return bool(lead.get("phase")) and lead.get("phase") == other.get("phase")
+        return lead.get("phase") and lead.get("phase") == other.get("phase")
     return _overlaps(mine, theirs) or (_on_page(mine) and _on_page(theirs))
 
 
