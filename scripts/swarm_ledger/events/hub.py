@@ -4,6 +4,7 @@ import collections
 import secrets
 import threading
 import time
+from collections.abc import Callable
 
 from . import patch
 
@@ -29,8 +30,9 @@ def revision(value):
 
 
 class Hub:
-    def __init__(self, retained=RETAINED):
+    def __init__(self, retained: int = RETAINED, *, clock: Callable[[], float] | None = None) -> None:
         self.retained = retained
+        self.clock = time.monotonic if clock is None else clock
         self.changed = threading.Condition()
         self.channels = {}
 
@@ -92,7 +94,7 @@ class Hub:
             channel = self.channels.get(slug)
             if channel:
                 channel.subscribers -= 1
-                channel.idle_since = time.monotonic()
+                channel.idle_since = self.clock()
 
     def publish(self, slug, name, value):
         """Record value as the latest copy of a resource and log the patch from the previous copy."""
@@ -126,7 +128,7 @@ class Hub:
             return [entry for entry in channel.log if entry[0] > seq]
 
     def evict(self, now=None, idle=IDLE_EVICT_S):
-        now = time.monotonic() if now is None else now
+        now = self.clock() if now is None else now
         with self.changed:
-            for slug in [s for s, c in self.channels.items() if not c.subscribers and now - c.idle_since >= idle]:
+            for slug in [s for s, c in self.channels.items() if not c.subscribers and now >= c.idle_since + idle]:
                 del self.channels[slug]

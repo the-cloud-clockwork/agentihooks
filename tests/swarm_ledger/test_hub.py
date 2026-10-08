@@ -258,38 +258,58 @@ def test_wait_raises_expired_when_a_slow_reader_fell_out_of_retention():
     assert [at for at, *_ in hub.wait(SLUG, 3, 0.01)] == [4]
 
 
-def test_closing_the_last_stream_stops_sampling_and_eviction_waits_for_the_grace_period():
-    hub = Hub()
+@pytest.mark.parametrize("closed_at", [250.3 + offset for offset in range(20)])
+def test_closing_the_last_stream_stops_sampling_and_eviction_waits_for_the_grace_period(closed_at):
+    now = [closed_at - 10]
+    hub = Hub(clock=lambda: now[0])
     opened(hub)
     opened(hub)
     hub.close(SLUG)
     assert hub.watched() == [SLUG]
+    now[0] = closed_at
     hub.close(SLUG)
     assert hub.watched() == []
-    closed = hub.channels[SLUG].idle_since
-    hub.evict(now=closed + events_hub.IDLE_EVICT_S - 1)
+    deadline = closed_at + events_hub.IDLE_EVICT_S
+    now[0] = deadline - 1
+    hub.evict()
     assert hub.has(SLUG)
-    hub.evict(now=closed + events_hub.IDLE_EVICT_S)
+    now[0] = deadline
+    hub.evict()
     assert not hub.has(SLUG)
     assert hub.resource(SLUG, "ledger") is None
 
 
-def test_eviction_defaults_to_now_and_the_grace_period():
+def test_eviction_defaults_to_now_and_the_grace_period(monkeypatch):
+    now = [250.3]
+    monkeypatch.setattr(events_hub.time, "monotonic", lambda: now[0])
     hub = Hub()
     opened(hub)
     hub.close(SLUG)
     hub.evict()
     assert hub.has(SLUG)
-    hub.channels[SLUG].idle_since -= events_hub.IDLE_EVICT_S
+    now[0] += events_hub.IDLE_EVICT_S
     hub.evict()
     assert not hub.has(SLUG)
 
 
-def test_a_watched_ledger_is_never_evicted():
-    hub = Hub()
+@pytest.mark.parametrize("reconnect", [False, True])
+def test_a_watched_ledger_is_never_evicted(reconnect):
+    now = [250.3]
+    hub = Hub(clock=lambda: now[0])
     opened(hub)
-    hub.evict(now=time.monotonic() + 10 * events_hub.IDLE_EVICT_S)
+    if reconnect:
+        hub.close(SLUG)
+        now[0] += events_hub.IDLE_EVICT_S - 1
+        opened(hub)
+    now[0] += 10 * events_hub.IDLE_EVICT_S
+    hub.evict()
     assert hub.has(SLUG)
+    hub.close(SLUG)
+    hub.evict()
+    assert hub.has(SLUG)
+    now[0] += events_hub.IDLE_EVICT_S
+    hub.evict()
+    assert not hub.has(SLUG)
 
 
 def test_a_failed_load_unsubscribes_and_raises():
