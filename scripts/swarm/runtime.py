@@ -20,6 +20,7 @@ from scripts.swarm import (
     live_binding,
     model_pick,
     naming,
+    overlays,
     priming_trace,
     profile_choice,
     prompt,
@@ -234,10 +235,18 @@ class HerdrRuntime:
         relaunch = live_binding.complete(task.get("launch_assignment"))
         saved = relaunch or _transfer(task)
         decision = (
-            profile_choice.ProfileDecision(saved["profile"], "handoff", "original seat profile")
+            profile_choice.ProfileDecision(
+                saved["profile"],
+                "handoff",
+                "original seat profile",
+                overlays=tuple(saved.get("overlays", ())),
+                bundle_revision=saved.get("bundle_revision")
+                or saved.get("profile_decision", {}).get("bundle_revision", ""),
+            )
             if saved and (relaunch or not task.get("profile"))
-            else profile_choice.choose(config.slug, lane, chosen, task, environ)
+            else profile_choice.choose(config.slug, lane, chosen, task, environ, getattr(config, "overlays", {}))
         )
+        decision = decision if decision.bundle_revision else replace(decision, bundle_revision=overlays.revision())
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
         want = affinity.desired(config) if lane == MASTER else _set(chosen.get("agent"))
@@ -269,7 +278,7 @@ class HerdrRuntime:
             config.slug, config.repo, lane, name, task, role=chosen.get("role", ""), autonomy=config.autonomy
         )
         priming_trace.write(self.home, config.slug, name, task)
-        argv = self._argv(config, name, agent, text, f"{name}.md", profile)
+        argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
         if saved:
             picked = model_pick.ModelPick(
                 saved["model"],
@@ -315,6 +324,7 @@ class HerdrRuntime:
             model_confidence=picked.confidence,
             profile_decision={**decision.record(), **placed.profile_decision},
             choice=agent_choice.choice_kind(reason),
+            overlays=list(decision.overlays),
         )
 
     def resume(self, config, agent, text):
@@ -328,6 +338,7 @@ class HerdrRuntime:
             text,
             f"{agent.name}-restored.md",
             agent.profile,
+            agent.overlays,
         )
         defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}))
         picked = model_pick.ModelPick(
@@ -348,7 +359,10 @@ class HerdrRuntime:
             )
             raise SpawnError(f"herdr never showed conversation {agent.conversation_id} on pane {placed.pane_id}")
         return replace(
-            placed, model_source=picked.source, profile_decision={**agent.profile_decision, **placed.profile_decision}
+            placed,
+            model_source=picked.source,
+            profile_decision={**agent.profile_decision, **placed.profile_decision},
+            overlays=agent.overlays,
         )
 
     def _holds(self, pane_id, conversation_id):
@@ -358,7 +372,7 @@ class HerdrRuntime:
             self.sleep(RESUME_CHECK_S)
         return False
 
-    def _argv(self, config, name, agent, text, prompt_name, profile):
+    def _argv(self, config, name, agent, text, prompt_name, profile, worn=()):
         path = self.home / config.slug / "prompts" / prompt_name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
@@ -375,6 +389,7 @@ class HerdrRuntime:
         ]
         argv += ["--name", name, "--agent", agent, "--start-timeout", "30", "--route-timeout", "90"]
         argv += ["--inbox-channel"] if agent == "claude" else []
+        argv += [arg for overlay in worn for arg in ("--overlay", overlay)]
         return [*argv, "--profile", profile, "--prompt-file", str(path)]
 
     def _launch(self, config, lane, task_id, name, argv, predecessor=None):

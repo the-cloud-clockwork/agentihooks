@@ -120,6 +120,7 @@ def test_the_envelope_carries_every_fact_the_runtime_holds(store):
             "model_source": "",
             "model_confidence": None,
             "profile_decision": {},
+            "overlays": [],
         },
     }
 

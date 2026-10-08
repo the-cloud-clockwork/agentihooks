@@ -1,9 +1,10 @@
 """The typed profile decision made before every swarm launch: explicit task profile, fixed lane, else the classifier."""
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 from hooks.classifier import Choice, ClassifierUnavailable, decide
+from scripts.swarm import overlays
 from scripts.swarm.prompt import ledger_path
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm_ledger import ledger_close
@@ -44,9 +45,11 @@ class ProfileDecision:
     confidence: float | None = None
     calibrated: bool | None = None
     anchors: tuple = ()
+    overlays: tuple = ()
+    bundle_revision: str = ""
 
     def record(self) -> dict:
-        return {**asdict(self), "anchors": list(self.anchors)}
+        return {**asdict(self), "anchors": list(self.anchors), "overlays": list(self.overlays)}
 
 
 def installed(name: str) -> bool:
@@ -55,7 +58,9 @@ def installed(name: str) -> bool:
     return _install_module()._resolve_profile_dir(name) is not None
 
 
-def choose(slug: str, lane: str, lane_config: dict, task: dict, environ: dict) -> ProfileDecision:
+def choose(
+    slug: str, lane: str, lane_config: dict, task: dict, environ: dict, role_overlays: dict | None = None
+) -> ProfileDecision:
     pinned = lane_config.get("profile") or DEFAULT_PROFILES[lane]
     if task.get("profile"):
         decision = ProfileDecision(task["profile"], "task", "explicit task profile")
@@ -68,7 +73,10 @@ def choose(slug: str, lane: str, lane_config: dict, task: dict, environ: dict) -
             f"task {task.get('id')} needs profile {decision.profile}, which is not installed: install it with "
             f"agentihooks init or {_remedy(slug, task)}"
         )
-    return decision
+    try:
+        return replace(decision, overlays=overlays.chosen(decision.profile, task, role_overlays or {}))
+    except ValueError as exc:
+        raise ProfileUnresolved(f"task {task.get('id')} overlays are refused: {exc}") from exc
 
 
 def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:

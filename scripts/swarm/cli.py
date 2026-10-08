@@ -74,6 +74,7 @@ from scripts.swarm import (
     ledger_events,
     master_launch,
     naming,
+    overlays,
     phase_planning,
     phase_state,
     phases,
@@ -490,6 +491,14 @@ def cmd_set(store, args):
         if key in GATE_KEYS:
             changes["gates"] = {**store.config(args.slug).gates, **gate_mode(key, value)}
             continue
+        if key.startswith(overlays.KEY):
+            try:
+                changes["overlays"] = overlays.setting(
+                    key, value, changes.get("overlays", store.config(args.slug).overlays), overlays.available()
+                )
+            except ValueError as exc:
+                raise SwarmError(str(exc)) from exc
+            continue
         if key not in SETTABLE or not value.isdigit():
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, autonomy={'|'.join(AUTONOMY)}, "
@@ -517,6 +526,7 @@ def cmd_set(store, args):
                 "effort_min": config.effort_min,
                 "effort_max": config.effort_max,
                 "lanes": config.lanes,
+                "overlays": config.overlays,
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
             }
         )

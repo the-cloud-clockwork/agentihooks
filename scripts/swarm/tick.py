@@ -81,6 +81,7 @@ class Placed:
     profile_decision: dict = field(default_factory=dict)
     choice: str = ""
     launched_at: int = 0
+    overlays: list = field(default_factory=list)
 
 
 class Ledger(Protocol):
@@ -282,7 +283,7 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
             facts.get(agent.name, {}),
             doc,
             launch_check.bundled(agent.profile),
-            launch_check.declared(agent.profile),
+            launch_check.declared(agent.profile, agent.overlays),
         )
         if found and now_ms - launch_check.launched_at(agent) < launch_check.DEADLINE_MS:
             continue
@@ -709,6 +710,7 @@ def placed_record(record, placed):
         profile_decision=placed.profile_decision,
         choice=placed.choice,
         launched_at=placed.launched_at or record.started_at,
+        overlays=placed.overlays,
         state="working",
     )
 
