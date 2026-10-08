@@ -177,7 +177,7 @@ class HerdrRuntime:
         self._quota_held = {}
         accounts = self._quota_successor_accounts(requirements) if requirements else None
         decision = capacity.calculate(config, self._quota_accounts, agents, demand, requirements, accounts)
-        for task, reason in getattr(self, "_quota_held", {}).items():
+        for task, reason in self._quota_held.items():
             decision["reason"] += f"; quota handoff {task} waits: {reason}"
         self._quota_allocations = decision["allocation"]
         if hasattr(self, "_quota_ready_ids"):
@@ -279,7 +279,7 @@ class HerdrRuntime:
 
         def blocked(row):
             if row.harness not in harnesses:
-                return f"is not a {' or '.join(harnesses)} account"
+                return f"is not a {harnesses[0]} account"
             if allocation is not None and not allocation[row.harness]:
                 return f"has no seat in the {lane} allocation"
             return quota_handoff.exclusion(row, thresholds, predecessor)
