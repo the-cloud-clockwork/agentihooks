@@ -47,11 +47,15 @@ def _join(url: str, code: str) -> dict:
         raise auth.HiveError(reason) from exc
     except (urllib.error.URLError, OSError) as exc:
         raise auth.HiveError(f"the hive at {url} is unreachable ({exc})") from exc
+    except ValueError as exc:
+        raise auth.HiveError(f"the hive at {url} answered with a body that is not JSON") from exc
 
 
 def _serve(args: argparse.Namespace) -> int:
     from scripts.swarm.store import redis_url
 
+    if bool(args.tls_cert) != bool(args.tls_key):
+        raise auth.HiveError("--tls-cert and --tls-key go together")
     tls = (args.tls_cert, args.tls_key) if args.tls_cert else None
     httpd = server.make_server(redis_client(), args.redis_url or redis_url(os.environ), args.host, args.port, tls)
     scheme = "https" if tls else "http"

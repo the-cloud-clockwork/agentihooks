@@ -1,6 +1,10 @@
 import hashlib
+import io
 import json
+import socket
+import ssl
 import stat
+import subprocess
 import threading
 import time
 import urllib.error
@@ -85,6 +89,22 @@ def test_an_expired_code_is_refused(admin):
 
     with pytest.raises(auth.HiveError, match="^invite code is invalid, expired or already used$"):
         auth.exchange(admin, code, PUBLIC)
+
+
+def test_a_refused_acl_user_leaves_no_member_records(admin, monkeypatch):
+    code = auth.invite(admin, "laptop")
+    real = redis_lib.client.Pipeline.execute
+
+    def refuse(pipe, raise_on_error=True):
+        real(pipe, raise_on_error)
+        raise redis_lib.exceptions.ResponseError("ERR Error in ACL SETUSER modifier")
+
+    monkeypatch.setattr(redis_lib.client.Pipeline, "execute", refuse)
+
+    with pytest.raises(auth.HiveError, match=r"^Redis refused the member's ACL user \(ERR Error in ACL SETUSER"):
+        auth.exchange(admin, code, PUBLIC)
+
+    assert [key for key in admin.keys("*") if key.startswith(f"{auth.PREFIX}:")] == []
 
 
 def test_revoke_cuts_both_credentials(admin, fake):
@@ -222,17 +242,23 @@ def test_a_join_endpoint_off_loopback_needs_tls(admin):
     ("url", "error"),
     [
         ("http://hive.example:8770", "a join off loopback carries credentials, so the hive URL must be https"),
-        ("http://127.0.0.1:9", "the hive at http://127.0.0.1:9 is unreachable"),
+        (
+            "http://127.0.0.1:{port}",
+            "the hive at http://127.0.0.1:{port} is unreachable (<urlopen error [Errno 111] Connection refused>)",
+        ),
     ],
 )
 def test_join_refuses_plain_http_off_loopback_and_reports_an_unreachable_hive(
     tmp_path, monkeypatch, capsys, url, error
 ):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    with socket.socket() as closed:
+        closed.bind(("127.0.0.1", 0))
+        port = closed.getsockname()[1]
 
-    assert cli.main(["join", url, "code"]) == 1
+    assert cli.main(["join", url.format(port=port), "code"]) == 1
 
-    assert capsys.readouterr().err.startswith(f"hive join refused: {error}")
+    assert capsys.readouterr().err == f"hive join refused: {error.format(port=port)}\n"
     assert not (tmp_path / "hive.env").exists()
 
 
@@ -241,6 +267,82 @@ def test_join_refuses_plain_http_off_loopback_and_reports_an_unreachable_hive(
 )
 def test_is_loopback(host, loopback):
     assert server.is_loopback(host) is loopback
+
+
+@pytest.fixture
+def cert(tmp_path):
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=localhost",
+            "-addext",
+            "subjectAltName=DNS:localhost",
+            "-keyout",
+            tmp_path / "key.pem",
+            "-out",
+            tmp_path / "cert.pem",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return str(tmp_path / "cert.pem"), str(tmp_path / "key.pem")
+
+
+def test_a_stalled_tls_client_does_not_block_an_https_join(admin, cert, tmp_path, monkeypatch, capsys):
+    httpd = server.make_server(admin, PUBLIC, "localhost", 0, cert)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    stalled = socket.create_connection(("localhost", httpd.server_address[1]))
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    trusting = ssl.create_default_context(cafile=cert[0])
+    real = urllib.request.urlopen
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda request, timeout: real(request, timeout=timeout, context=trusting)
+    )
+    try:
+        assert cli.main(["join", f"https://localhost:{httpd.server_address[1]}", auth.invite(admin, "laptop")]) == 0
+    finally:
+        stalled.close()
+        httpd.shutdown()
+        httpd.server_close()
+
+    assert capsys.readouterr().out.startswith("joined the hive as ")
+    assert (tmp_path / "home" / "hive.env").exists()
+
+
+@pytest.mark.parametrize(
+    ("flags", "error"),
+    [
+        (["--tls-cert", "/c.pem"], "--tls-cert and --tls-key go together"),
+        (["--tls-key", "/k.pem"], "--tls-cert and --tls-key go together"),
+        (["--tls-cert", "/missing.pem", "--tls-key", "/missing.pem"], "the TLS certificate or key cannot be loaded"),
+    ],
+)
+def test_serve_refuses_incomplete_or_unreadable_tls(admin, monkeypatch, capsys, flags, error):
+    monkeypatch.setattr(cli, "redis_client", lambda: admin)
+
+    assert cli.main(["serve", "--port", "0", *flags]) == 1
+
+    assert capsys.readouterr().err.startswith(f"hive serve refused: {error}")
+
+
+def test_join_reports_a_body_that_is_not_json(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: io.BytesIO(b"<html>"))
+
+    assert cli.main(["join", "http://127.0.0.1:1", "code"]) == 1
+
+    assert (
+        capsys.readouterr().err
+        == "hive join refused: the hive at http://127.0.0.1:1 answered with a body that is not JSON\n"
+    )
 
 
 @pytest.mark.parametrize(

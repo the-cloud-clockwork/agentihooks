@@ -14,11 +14,14 @@ if TYPE_CHECKING:
 
 JOIN_PATH = "/hive/join"
 MAX_BODY = 4096
+REQUEST_TIMEOUT_S = 10
 BAD_BODY = "the body must be a JSON object with a string code"
 
 
 def _handler(redis: "Redis", redis_url: str) -> type[BaseHTTPRequestHandler]:
     class Join(BaseHTTPRequestHandler):
+        timeout = REQUEST_TIMEOUT_S
+
         def do_POST(self):
             if self.path != JOIN_PATH:
                 return self._answer(404, {"error": "not found"})
@@ -66,9 +69,14 @@ def make_server(
 ) -> ThreadingHTTPServer:
     if tls is None and not is_loopback(host):
         raise auth.HiveError("a join endpoint off loopback hands out credentials, so it needs --tls-cert and --tls-key")
-    httpd = ThreadingHTTPServer((host, port), _handler(redis, redis_url))
+    context = None
     if tls is not None:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(*tls)
-        httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+        try:
+            context.load_cert_chain(*tls)
+        except (OSError, ssl.SSLError) as exc:
+            raise auth.HiveError(f"the TLS certificate or key cannot be loaded ({exc})") from exc
+    httpd = ThreadingHTTPServer((host, port), _handler(redis, redis_url))
+    if context is not None:
+        httpd.socket = context.wrap_socket(httpd.socket, server_side=True, do_handshake_on_connect=False)
     return httpd

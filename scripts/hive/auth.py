@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
+from redis.exceptions import ResponseError
+
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -40,11 +42,16 @@ def exchange(redis: "Redis", code: str, redis_url: str) -> dict:
     member_id = secrets.token_hex(8)
     password = secrets.token_urlsafe(32)
     ledger = secrets.token_urlsafe(32)
+    records = (f"{PREFIX}:member:{member_id}", f"{PREFIX}:ledger:{_digest(ledger)}")
     with redis.pipeline(transaction=True) as pipe:
-        pipe.hset(f"{PREFIX}:member:{member_id}", mapping={"name": name, "ledger": _digest(ledger)})
-        pipe.set(f"{PREFIX}:ledger:{_digest(ledger)}", member_id)
+        pipe.hset(records[0], mapping={"name": name, "ledger": _digest(ledger)})
+        pipe.set(records[1], member_id)
         pipe.execute_command("ACL", "SETUSER", f"hive-{member_id}", "reset", "on", f"#{_digest(password)}", *ACL_RULES)
-        pipe.execute()
+        try:
+            pipe.execute()
+        except ResponseError as exc:
+            redis.delete(*records)
+            raise HiveError(f"Redis refused the member's ACL user ({exc})") from exc
     return {
         "id": member_id,
         "name": name,
