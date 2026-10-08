@@ -44,10 +44,10 @@ def test_terminal_notice_has_no_retired_master_recipient(setup, action):
     history = inbox.history(old.id)
     store.drop_agent("proof", master.name)
     store.update("proof", state="stopped")
-    said = []
-    ledger = SimpleNamespace(say=lambda *args, **kwargs: said.append(args))
+    noted = []
+    ledger = SimpleNamespace(notify=lambda *args: noted.append(args))
     notify(store, Namespace(slug="proof", name="operator", now=True), ledger, master, action)
-    assert len(said) == 1
+    assert len(noted) == 1
     assert [item.id for item in inbox.inbox(master.seat)] == [old.id]
     assert inbox.history(old.id) == history
 
@@ -207,7 +207,7 @@ def test_wake_rejects_a_session_whose_process_died(setup, monkeypatch):
 
 def test_control_notices_have_unique_nonempty_references(setup):
     store, inbox, master = setup
-    ledger = SimpleNamespace(say=lambda *args, **kwargs: None)
+    ledger = SimpleNamespace(notify=lambda *args: None)
     args = Namespace(slug="proof", name="operator", now=True)
     notify(store, args, ledger, master, "pause")
     notify(store, args, ledger, master, "pause")

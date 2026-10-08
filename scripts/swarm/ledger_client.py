@@ -97,16 +97,17 @@ class LedgerClient:
         self._call(slug, [_op("phase_review", by, **fields)])
 
     def say(self, slug, text, by=None):
-        op = _op("add", by, thread="chat", text=text)
+        op = _op("add", by, thread="chat", text=text, to="operator")
         if by is None:
             op.pop("by")
+            op.pop("to")
         self._call(slug, [op])
 
     def relay(self, slug, text, by):
-        LedgerClient(service=True)._call(slug, [_op("add", by, thread="chat", text=text)])
+        LedgerClient(service=True)._call(slug, [_op("add", by, thread="chat", text=text, to="operator")])
 
     def notify(self, slug, text):
-        self.say(slug, text, by="swarm")
+        self._call(slug, [_op("notice", "swarm", text=text)])
 
     def followup(self, slug, text):
         self._call(slug, [_op("add_item", "swarm", list="followups", text=text)])

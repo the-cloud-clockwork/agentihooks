@@ -105,7 +105,7 @@ def _link(ledger, slug, doctor):
     ledger.add_source(doctor, _path(slug), BY)
     if _path(doctor) not in ledger.state(slug).get("sources", []):
         ledger.add_source(slug, _path(doctor), BY)
-        ledger.say(slug, POINTER, by="swarm")
+        ledger.notify(slug, POINTER)
 
 
 def _pair(store, slug, doctor):

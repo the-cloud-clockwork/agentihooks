@@ -19,4 +19,5 @@ def test_relay_posts_the_senders_chat_line_with_the_service_credential(monkeypat
         "by": "master@a1b2c3-0002",
         "thread": "chat",
         "text": "the docs are merged",
+        "to": "operator",
     }

@@ -799,8 +799,8 @@ def cmd_lift(store, args):
 
 def cmd_send_message(store, args):
     store.config(args.slug)
-    LedgerClient().say(args.slug, args.text)
-    print(json.dumps({"posted": True}))
+    sender = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or delivery.OPERATOR
+    print(json.dumps({"sent": delivery.send(store, args.slug, args.text, sender=sender, to="all")}))
 
 
 def _me(store, args):
@@ -1232,11 +1232,12 @@ def _retire(store, slug, agent, exit_text):
 
 def cmd_say(store, args):
     agent = _me(store, args)
-    text = f"@{args.to} {args.text}" if args.to in ("eng", "ci") else args.text
-    if args.to:
-        delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to, fyi=args.fyi)
-    LedgerClient().say(args.slug, text, by=agent.name)
-    print(json.dumps({"posted": True}))
+    if args.to in ("", delivery.OPERATOR):
+        LedgerClient().say(args.slug, args.text, by=agent.name)
+        print(json.dumps({"posted": True}))
+        return
+    sent = delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to, fyi=args.fyi)
+    print(json.dumps({"sent": sent}))
 
 
 def build_parser():

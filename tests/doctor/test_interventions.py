@@ -26,10 +26,13 @@ class FakeRun:
 
 class FakeLedger:
     def __init__(self):
-        self.said = []
+        self.said, self.noted = [], []
 
     def say(self, slug, text, by=None):
         self.said.append((slug, text, by))
+
+    def notify(self, slug, text):
+        self.noted.append((slug, text))
 
 
 @pytest.fixture
@@ -54,7 +57,9 @@ def args(to="", text="", file=""):
 
 
 def logged_on_both(ctx):
-    return sorted(slug for slug, _, _ in ctx.ledger.said) == sorted([WATCHED, DOCTOR])
+    told = [i.text for i in InboxStore(ctx.store.redis).inbox(f"master@{WATCHED}")]
+    noted = sorted(slug for slug, _ in ctx.ledger.noted)
+    return ctx.ledger.said == [] and noted == sorted([WATCHED, DOCTOR]) and told == [ctx.ledger.noted[0][1]]
 
 
 @pytest.mark.parametrize("action", ["task-set", "task-reopen", "retire", "kill", "terminate-agent", "release", "close"])
@@ -63,7 +68,7 @@ def test_the_allow_list_refuses_every_other_action_and_touches_nothing(store, ac
     with pytest.raises(SwarmError, match="not an allowed intervention") as refused:
         interventions.apply(ctx, action, args(to=ENGINEER, text="x"))
     assert "tasks" in str(refused.value) and "kills" in str(refused.value)
-    assert ctx.run.calls == [] and ctx.ledger.said == []
+    assert ctx.run.calls == [] and ctx.ledger.noted == []
     assert InboxStore(store.redis).inbox(f"eng-1@{WATCHED}") == []
     assert [a.name for a in store.agents(WATCHED)] == [ENGINEER]
 
@@ -79,14 +84,14 @@ def test_pull_dev_refuses_a_checkout_that_is_not_on_dev(store):
     ctx = context(store, FakeRun({"rev-parse": "feature\n"}))
     with pytest.raises(SwarmError, match="not dev"):
         interventions.apply(ctx, "pull-dev", args())
-    assert not any("pull" in call for call in ctx.run.calls) and ctx.ledger.said == []
+    assert not any("pull" in call for call in ctx.run.calls) and ctx.ledger.noted == []
 
 
 def test_a_failed_command_is_reported_and_not_logged(store):
     ctx = context(store, FakeRun({"rev-parse": "dev\n"}, failing=("pull",)))
     with pytest.raises(SwarmError, match="refused"):
         interventions.apply(ctx, "pull-dev", args())
-    assert ctx.ledger.said == []
+    assert ctx.ledger.noted == []
 
 
 REFUSED = "the ledger server already runs its current code; the Doctor restarts it only after a change"
@@ -171,7 +176,7 @@ def test_no_change_since_the_server_started_still_refuses(store, tmp_path, touch
     ctx = context(store, code=code, pidfile=pidfile)
     with pytest.raises(SwarmError) as refused:
         interventions.apply(ctx, "restart-ledger-server", args())
-    assert str(refused.value) == REFUSED and ctx.run.calls == [] and ctx.ledger.said == []
+    assert str(refused.value) == REFUSED and ctx.run.calls == [] and ctx.ledger.noted == []
 
 
 def test_a_server_without_a_pidfile_is_restarted(store, tmp_path):
@@ -209,10 +214,11 @@ def test_handoff_at_stop_asks_a_live_agent_of_the_watched_swarm(store):
 def test_message_reaches_the_watched_master_or_an_agent_and_nobody_else(store):
     ctx = context(store)
     interventions.apply(ctx, "message", args(to=f"master@{WATCHED}", text="The fix is merged."))
-    [item] = InboxStore(store.redis).inbox(f"master@{WATCHED}")
+    item, told = InboxStore(store.redis).inbox(f"master@{WATCHED}")
     assert item.sender == f"master@{DOCTOR}" and item.text == "The fix is merged."
+    assert told.text == "The Doctor sent a message to the watched swarm's master."
     interventions.apply(ctx, "message", args(to=ENGINEER, text="Pull dev before your next commit."))
-    assert len(ctx.ledger.said) == 4
+    assert len(ctx.ledger.noted) == 4
     for outside in ("master@other", "operator", "other-eng-1"):
         with pytest.raises(SwarmError, match="watched swarm"):
             interventions.apply(ctx, "message", args(to=outside, text="x"))

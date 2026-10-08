@@ -233,7 +233,14 @@ def cmd_ack(args):
 
 def cmd_say(args):
     text = (sys.stdin.read() if args.text == "-" else args.text).strip()
-    op = {"op": "add", "thread": "chat", "id": f"m-{uuid.uuid4().hex[:10]}", "text": text, "by": args.name}
+    op = {
+        "op": "add",
+        "thread": "chat",
+        "id": f"m-{uuid.uuid4().hex[:10]}",
+        "text": text,
+        "by": args.name,
+        "to": "operator",
+    }
     if args.long:
         op["long"] = True
     posted(call(args.slug, [op]), [op])

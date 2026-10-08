@@ -293,7 +293,7 @@ def test_say_addresses_and_strangers_are_refused(env, capsys):
     run("sw", "start")
     ledger.said.clear()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "the docs task is merged", "--to", "ci") == 0
-    assert ledger.said == [("@ci the docs task is merged", "engineer@a1b2c3-0001")]
+    assert ledger.said == []
     [item] = InboxStore(store.redis).inbox("ci@a1b2c3-0001")
     assert (item.sender, item.text, item.state) == ("engineer@a1b2c3-0001", "the docs task is merged", "pending")
     assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "status for the page only") == 0
@@ -302,6 +302,44 @@ def test_say_addresses_and_strangers_are_refused(env, capsys):
 
     assert run("sw", "--as", "stranger", "say", "hello") == 1
     assert "not an agent" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("to", ["engineer@a1b2c3-0001", "eng", "all"])
+def test_say_to_an_agent_a_lane_or_everyone_never_posts_to_chat(env, to):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.said.clear()
+    assert run("sw", "--as", "ci@a1b2c3-0001", "say", "the docs task is merged", "--to", to) == 0
+    assert ledger.said == []
+    assert [i.text for i in InboxStore(store.redis).inbox("engineer@a1b2c3-0001")] == ["the docs task is merged"]
+
+
+def test_say_to_the_operator_posts_to_chat_and_reaches_no_inbox(env):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.said.clear()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "phase one is done", "--to", "operator") == 0
+    assert ledger.said == [("phase one is done", "engineer@a1b2c3-0001")]
+    assert InboxStore(store.redis).inbox("ci@a1b2c3-0001") == []
+
+
+def test_send_message_reaches_every_live_agent_through_the_inbox_and_never_chat(env, capsys, monkeypatch):
+    store, ledger, _ = env
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.said.clear()
+    capsys.readouterr()
+    assert run("sw", "send-message", "pause new work for a moment") == 0
+    assert ledger.said == []
+    live = sorted(a.name for a in store.agents("sw"))
+    inbox = InboxStore(store.redis)
+    for name in live:
+        [item] = inbox.inbox(name)
+        assert (item.sender, item.text) == ("operator", "pause new work for a moment")
+    assert sorted(json.loads(capsys.readouterr().out)["sent"]) == live and len(live) == 3
 
 
 def test_say_with_fyi_marks_each_item_as_needing_no_work(env):

@@ -7,6 +7,10 @@ Agent text is for the operator: plain words saying what was done or why it was s
 import re
 
 LIMITS = {"comment": 50, "chat": 100, "item": 40, "priority": 20}
+UNADDRESSED = (
+    "chat is the operator's conversation: send it to the operator or answer his line, "
+    "and talk to agents through the inbox"
+)
 RULES = (
     ("clock time", re.compile(r"\b\d{1,2}:[\dx]{2}(?::\d{2})?(?:\.\d+)?\s?(?:Z|UTC)?\b", re.I)),
     ("date", re.compile(r"\b\d{4}-\d{2}-\d{2}\b")),
@@ -105,6 +109,13 @@ def refused(text, kind, where, ctx):
     return bool(found)
 
 
+def addressed(thread, op):
+    """An agent chat line goes to the operator, or answers one of his lines."""
+    if op.get("to") == "operator":
+        return True
+    return any(e["id"] == op.get("reply_to") and e.get("by") == "operator" and not e.get("deleted") for e in thread)
+
+
 def agent_thread_op(thread, op, ctx, target, noun):
     by, text = op["by"], op.get("text", "")
     if op.get("attachments") and by not in ctx.meta.get("members", {}):
@@ -113,6 +124,9 @@ def agent_thread_op(thread, op, ctx, target, noun):
         post_status(thread, by, op["id"], text, ctx, target, op.get("attachments"))
         return True
     if op["op"] == "add":
+        if not addressed(thread, op):
+            ctx.refused.append(f"{by} message refused: {UNADDRESSED}")
+            return False
         if not any(e["id"] == op["id"] for e in thread):
             thread.append({"id": op["id"], "by": by, "at": ctx.at, "text": text})
             if op.get("attachments"):
