@@ -447,8 +447,8 @@ jobs:
           overwrite: true
 
   record-pass:
-    needs: [unit, lint]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.unit.result == 'success' && needs.lint.result == 'success' }}
+    needs: [unit, lint, shard-check]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.unit.result == 'success' && needs.lint.result == 'success' && needs.shard-check.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Resolve the tested tree
