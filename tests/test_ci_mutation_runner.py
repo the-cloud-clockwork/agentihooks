@@ -1,3 +1,4 @@
+import signal
 import subprocess
 import sys
 import time
@@ -29,9 +30,12 @@ def test_missing_tests_fails_closed(tmp_path):
 def test_process_timeout_returns_no_status_and_records_output(tmp_path, monkeypatch):
     log = tmp_path / "process.log"
     wait = subprocess.Popen.wait
+    started = []
 
     def wait_for_output(process, timeout=None):
-        while timeout is not None and not log.read_text() and process.poll() is None:
+        started.append(process)
+        deadline = time.monotonic() + 10
+        while timeout is not None and not log.read_text() and process.poll() is None and time.monotonic() < deadline:
             time.sleep(0.01)
         return wait(process, timeout)
 
@@ -39,6 +43,7 @@ def test_process_timeout_returns_no_status_and_records_output(tmp_path, monkeypa
     code = "import time; time.sleep(0.5); print('started', flush=True); time.sleep(60)"
     assert run_process([sys.executable, "-c", code], tmp_path, 0.2, log) is None
     assert log.read_text() == "started\n"
+    assert started[0].returncode == -signal.SIGKILL
 
 
 def test_process_exit_status_is_preserved(tmp_path):
