@@ -91,6 +91,7 @@ class InboxStore:
             pipe.hset(self.key("item", item.id), mapping=_fields(item))
             pipe.zadd(self.key("address", address), {item.id: at})
             pipe.zadd(self.key("pending", address), {item.id: at})
+            pipe.zadd(self.key("open", address), {item.id: at})
             pipe.sadd(self.key("waiting"), address)
             pipe.rpush(self.key("history", item.id), _entry("pending", sender, "", at))
             pipe.publish(NOTIFY, address)
@@ -103,6 +104,38 @@ class InboxStore:
     def inbox(self, address):
         items = [self.get(item_id) for item_id in self.redis.zrange(self.key("address", address), 0, -1)]
         return sorted(items, key=_order)
+
+    def open_items(self, address):
+        items = [self.get(item_id) for item_id in self._open_ids(address)]
+        return sorted(items, key=_order)
+
+    def _open_ids(self, address):
+        from redis.exceptions import WatchError
+
+        if self.redis.sismember(self.key("open-indexed"), address):
+            return self.redis.zrange(self.key("open", address), 0, -1)
+        for _ in range(MOVE_ATTEMPTS):
+            try:
+                return self._index_open(address)
+            except WatchError:
+                continue
+        return [item.id for item in self.inbox(address) if item.state not in CLOSED]
+
+    def _index_open(self, address):
+        with self.redis.pipeline() as pipe:
+            pipe.watch(self.key("address", address))
+            ids = pipe.zrange(self.key("address", address), 0, -1)
+            if ids:
+                pipe.watch(*(self.key("item", item_id) for item_id in ids))
+            items = [_item(pipe.hgetall(self.key("item", item_id)), item_id) for item_id in ids]
+            opened = {item.id: item.created_at for item in items if item.state not in CLOSED}
+            pipe.multi()
+            pipe.delete(self.key("open", address))
+            if opened:
+                pipe.zadd(self.key("open", address), opened)
+            pipe.sadd(self.key("open-indexed"), address)
+            pipe.execute()
+        return list(opened)
 
     def mailbox(self, me):
         return self._with_seat(me, self.inbox)
@@ -153,11 +186,11 @@ class InboxStore:
         keys = []
         for address in addresses:
             ids = self.redis.zrange(self.key("address", address), 0, -1)
-            keys += [self.key("address", address), self.key("pending", address), self.key("sequence", address)]
+            keys += [self.key(kind, address) for kind in ("address", "pending", "open", "sequence")]
             keys += [self.key(kind, item_id) for item_id in ids for kind in ("item", "history")]
         members = {
             self.key(shared): [a for a in addresses if self.redis.sismember(self.key(shared), a)]
-            for shared in ("waiting", "indexed")
+            for shared in ("waiting", "indexed", "open-indexed")
         }
         return keys, {key: found for key, found in members.items() if found}
 
@@ -207,6 +240,8 @@ class InboxStore:
             )
             pipe.multi()
             pipe.hset(key, mapping=_fields(moved))
+            if moved.state in CLOSED or moved.address != item.address:
+                pipe.zrem(self.key("open", item.address), item_id)
             pipe.zrem(pending, item_id)
             if last:
                 pipe.srem(self.key("waiting"), item.address)
@@ -214,6 +249,7 @@ class InboxStore:
                 pipe.zrem(self.key("address", item.address), item_id)
                 pipe.zadd(self.key("address", address), {item_id: item.created_at})
                 pipe.zadd(self.key("pending", address), {item_id: item.created_at})
+                pipe.zadd(self.key("open", address), {item_id: item.created_at})
                 pipe.sadd(self.key("waiting"), address)
                 pipe.publish(NOTIFY, address)
             pipe.rpush(self.key("history", item_id), _entry(moved.state, by, reason, moved.updated_at))
@@ -351,6 +387,8 @@ class InboxStore:
             last = pipe.zscore(pending, item_id) is not None and pipe.zcard(pending) == 1
             pipe.multi()
             pipe.hset(key, mapping=_fields(moved))
+            if moved.state in CLOSED:
+                pipe.zrem(self.key("open", item.address), item_id)
             pipe.zrem(pending, item_id)
             if last:
                 pipe.srem(self.key("waiting"), item.address)

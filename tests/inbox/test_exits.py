@@ -239,3 +239,27 @@ def test_the_sweep_closes_a_gone_agents_wait_notice_after_a_live_agents_on_the_s
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(live.id).state == "pending"
     assert inbox.get(gone.id).reason == "done: sw-eng-2 left its seat before picking task t4 back up"
+
+
+def test_exit_sweep_reads_only_unsettled_mail(redis, monkeypatch):
+    store, inbox = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    closed = inbox.send("sender", "sw-eng-1", "finished work")
+    inbox.close(closed.id, "sw-eng-1", "done", "finished")
+    pending = inbox.send("sender", "sw-eng-1", "work remains")
+    read = inbox.send("sender", "sw-eng-1", "read work remains")
+    inbox.read(read.id, "sw-eng-1")
+    seen = []
+    original = inbox.get
+
+    def get(item_id):
+        seen.append(item_id)
+        return original(item_id)
+
+    monkeypatch.setattr(inbox, "get", get)
+    exits.sweep(inbox, "sw", store, lambda: {})
+    assert closed.id not in seen
+    assert original(pending.id).address == "eng-1@sw"
+    assert original(read.id).address == "eng-1@sw"
+    assert original(read.id).state == "pending"

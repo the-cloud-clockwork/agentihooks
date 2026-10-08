@@ -205,3 +205,82 @@ def test_only_the_addressee_can_reply(store):
     with pytest.raises(InboxError):
         store.reply(item.id, "mallory", "me too")
     assert store.inbox("alice") == []
+
+
+def test_open_index_keeps_delivered_and_read_until_closed(store, monkeypatch):
+    first = store.send("sender", "receiver", "first")
+    second = store.send("sender", "receiver", "second")
+    third = store.send("sender", "receiver", "third")
+    store.deliver(second.id, "receiver")
+    store.read(third.id, "receiver")
+    assert [i.id for i in store.open_items("receiver")] == [first.id, second.id, third.id]
+    store.close(first.id, "receiver", "done", "finished")
+    seen = []
+    original = store.get
+
+    def get(item_id):
+        seen.append(item_id)
+        return original(item_id)
+
+    monkeypatch.setattr(store, "get", get)
+    assert [i.id for i in store.open_items("receiver")] == [second.id, third.id]
+    assert sorted(seen) == sorted([second.id, third.id])
+    store.redirect(second.id, "swarm", "seat", "receiver exited", "receiver")
+    assert [i.id for i in store.open_items("receiver")] == [third.id]
+    assert [i.id for i in store.open_items("seat")] == [second.id]
+    store.close(third.id, "receiver", "blocked", "missing decision")
+    store.close(second.id, "seat", "cancel", "obsolete")
+    assert store.open_items("receiver") == []
+    assert store.open_items("seat") == []
+
+
+def test_open_index_backfills_old_mail_and_preserves_closed_history(store):
+    first = store.send("sender", "receiver", "pending")
+    second = store.send("sender", "receiver", "delivered")
+    third = store.send("sender", "receiver", "read")
+    fourth = store.send("sender", "receiver", "closed")
+    store.deliver(second.id, "receiver")
+    store.read(third.id, "receiver")
+    store.close(fourth.id, "receiver", "done", "finished")
+    store.redis.delete(store.key("open", "receiver"))
+    store.redis.srem(store.key("open-indexed"), "receiver")
+    assert [i.id for i in store.open_items("receiver")] == [first.id, second.id, third.id]
+    assert len(store.inbox("receiver")) == 4
+    assert store.redis.sismember(store.key("open-indexed"), "receiver")
+
+
+@pytest.mark.parametrize("conflicts", [1, 3])
+def test_open_index_retries_concurrent_mail_changes(store, monkeypatch, conflicts):
+    from redis.exceptions import WatchError
+
+    item = store.send("sender", "receiver", "open work")
+    closed = store.send("sender", "receiver", "closed work")
+    store.close(closed.id, "receiver", "done", "finished")
+    index = store._index_open
+    calls = []
+
+    def racing(address):
+        calls.append(address)
+        if len(calls) <= conflicts:
+            raise WatchError()
+        return index(address)
+
+    monkeypatch.setattr(store, "_index_open", racing)
+    assert [i.id for i in store.open_items("receiver")] == [item.id]
+    assert calls == ["receiver"] * min(conflicts + 1, 3)
+    assert bool(store.redis.sismember(store.key("open-indexed"), "receiver")) == (conflicts < 3)
+
+
+def test_open_index_cleanup_lists_all_owned_keys(store):
+    first = store.send("sender", "receiver", "work")
+    store.open_items("receiver")
+    keys, memberships = store.keys_for(lambda address: address == "receiver")
+    assert set(keys) == {
+        store.key("address", "receiver"),
+        store.key("pending", "receiver"),
+        store.key("open", "receiver"),
+        store.key("sequence", "receiver"),
+        store.key("item", first.id),
+        store.key("history", first.id),
+    }
+    assert memberships == {store.key("waiting"): ["receiver"], store.key("open-indexed"): ["receiver"]}
