@@ -208,12 +208,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
+          read_api() {
+            local body
+            for attempt in 1 2 3; do
+              if body=$(gh api "$1"); then
+                printf '%s\n' "$body"
+                return 0
+              fi
+              sleep 5
+            done
+            return 1
+          }
           for poll in {1..36}; do
-            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?event=push&branch=dev&per_page=100" \
+            runs=$(read_api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?event=push&branch=dev&per_page=100" \
               | jq -r --argjson number "$RUN_NUMBER" '.workflow_runs[] | select(.run_number < $number and .status != "completed") | .id')
             waiting=""
             for run in $runs; do
-              sonar=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" \
+              sonar=$(read_api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" \
                 | jq -r '[.jobs[] | select(.name == "sonar") | .status][0] // "absent"')
               if [[ "$sonar" != "completed" ]]; then waiting="$waiting $run"; fi
             done

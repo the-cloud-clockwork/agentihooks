@@ -56,9 +56,11 @@ state = Path(os.environ["FAKE_STATE"])
 spec = json.loads((state / "spec.json").read_text())
 tick = int((state / "tick").read_text())
 url = sys.argv[2]
+made = len((state / "calls").read_text().split())
 with (state / "calls").open("a") as calls:
     calls.write(url + "\\n")
-if spec.get("fail"):
+if spec.get("fail") or made < spec.get("fail_calls", 0):
+    print('{"message": "Server Error"}')
     sys.exit(1)
 if "/workflows/test.yml/runs?" in url:
     print(json.dumps({"workflow_runs": spec["runs"]}))
@@ -168,8 +170,20 @@ def test_wait_gives_up_with_a_warning_when_an_older_run_never_finishes(tmp_path)
 
 
 def test_wait_is_red_when_the_runs_cannot_be_read(tmp_path):
-    result, _, _ = _run_wait(tmp_path, {"fail": True, "runs": [], "jobs": {}})
+    result, _, calls = _run_wait(tmp_path, {"fail": True, "runs": [], "jobs": {}})
     assert result.returncode != 0
+    assert len(calls) == 3
+
+
+def test_wait_retries_a_failed_read(tmp_path):
+    spec = {
+        "fail_calls": 2,
+        "runs": [{"id": 5, "run_number": 5, "status": "in_progress"}],
+        "jobs": {"5": [_sonar("completed")]},
+    }
+    result, _, calls = _run_wait(tmp_path, spec)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(calls) == 4
 
 
 def test_secret_detection_includes_all_tracked_text_and_hidden_configuration():
