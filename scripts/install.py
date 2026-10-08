@@ -6462,8 +6462,8 @@ def main() -> None:
 
         if _argv[1:2] != ["eval"]:
             raise SystemExit("usage: agentihooks skill eval [--agent {claude,codex}] -- <command>")
-
-        raise SystemExit(skill_eval_main(_argv[2:]))
+        skill_eval_main(_argv[2:])
+        return
     if _argv and _argv[0] == "manifestos":
         from scripts.profiles.manifestos import main as manifestos_main
 
