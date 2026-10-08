@@ -1,7 +1,7 @@
 from dataclasses import replace
 
 from scripts.swarm.store import RedisStore
-from scripts.swarm_v2.runtime.commands import Action, Commands, Principal
+from scripts.swarm_v2.runtime.commands import Action, Commands, Principal, Role
 from tests.test_swarm_v2_commands import fixture, request
 
 
@@ -79,7 +79,9 @@ def case_c():
     audit_survived = reopened.audit("fixture")[0] == service.audit("fixture")[0]
     remote.commands = frozenset((Action.DRAIN, Action.CANCEL, Action.FORCE_STOP))
     unavailable_terminal = reopened.execute("fixture", request(agent, Action.ATTACH, "attach"), "")
-    rollback = Commands(restored, [remote, local], lambda slug, credential: Principal(""), enabled=False)
+    rollback = Commands(
+        restored, [remote, local], lambda slug, credential: Principal("fixture-operator", Role.OPERATOR), enabled=False
+    )
     rollback_controls = rollback.controls("fixture", agent.seat, "")
     return {
         "passed": accepted.ok
