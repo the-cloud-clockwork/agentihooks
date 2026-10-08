@@ -170,11 +170,22 @@ function resetIn(at, now) {
   return s < 3600 ? `${m}m` : s < 86400 ? `${hr}h${pad(m)}m` : `${d}d${pad(hr)}h`;
 }
 
+function accountState(sw, r) {
+  const seen = ((sw.quota_capacity || {}).accounts || []).find((a) => a.name === r.account && a.harness === r.agent);
+  return seen ? { state: seen.state.toLowerCase(), routing: percent(seen.routing) } : { state: "—", routing: "—" };
+}
+
 function quotaRows(sw, now) {
   const quota = sw.quota || {}, master = (sw.agents || []).find((a) => a.lane === "master") || {};
-  return (quota.rows || []).map((r) => ({ account: r.account, harness: r.agent, five: percent(r.five_hour_left), fiveReset: resetIn(r.five_hour_resets_at, now),
+  return (quota.rows || []).map((r) => ({ account: r.account, harness: r.agent, ...accountState(sw, r), five: percent(r.five_hour_left), fiveReset: resetIn(r.five_hour_resets_at, now),
     seven: percent(r.seven_day_left), sevenReset: resetIn(r.seven_day_resets_at, now), sessions: r.sessions, cap: r.cap,
     master: !!master.account && r.account === master.account && r.agent === (master.harness || "claude") }));
+}
+
+function capacityLine(cap, now) {
+  if (!cap || !cap.effective) return null;
+  return { lanes: cap.lanes.map((lane) => `${lane} ${cap.effective[lane]} of ${cap.configured[lane]}`).join(" · "),
+    changed: `changed ${span(now - cap.at)} ago`, reason: `because ${cap.reason}` };
 }
 
 function sessionCell(q) {
@@ -225,8 +236,10 @@ export function renderSwarm(sw) {
   renderOverlays(sw);
   const quota = quotaRows(sw, now);
   $("quota-count").textContent = quotaCount(sw, quota.length, now);
-  $("swarm-quota").replaceChildren(...(quota.length ? quota.map((q) => cells(idCell(q.account), q.harness, q.five, q.fiveReset, q.seven, q.sevenReset, sessionCell(q), q.master ? label("master", "master") : h("span")))
-    : [emptyRow(8, "No quota observed yet. Run agentihooks balance.")]));
+  $("swarm-quota").replaceChildren(...(quota.length ? quota.map((q) => cells(idCell(q.account), q.harness, q.state === "—" ? q.state : label(q.state), q.five, q.fiveReset, q.seven, q.sevenReset, q.routing, sessionCell(q), q.master ? label("master", "master") : h("span")))
+    : [emptyRow(10, "No quota observed yet. Run agentihooks balance.")]));
+  const capacity = capacityLine(sw.quota_capacity, now);
+  $("quota-capacity").replaceChildren(...(capacity ? [h("span", { class: "sw-caplanes", text: capacity.lanes }), h("span", { text: capacity.changed }), h("span", { text: capacity.reason })] : []));
   const doctor = sw.doctor || {};
   $("doctor-state").replaceChildren(label(doctorOn(sw) ? "on" : "off", doctorOn(sw) ? "on" : "off"));
   const figures = doctorFigures(doctor, now);
