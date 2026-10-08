@@ -32,6 +32,7 @@ from scripts.swarm import (
     retire_watch,
     session_model,
     tick_master,
+    timing,
 )
 from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
@@ -117,40 +118,64 @@ def tick(slug, store, ledger, runtime, now_ms):
     config = store.ensure_code(slug)
     actions = []
     if config.state != "stopped" or _woken(slug, config, store, ledger):
-        actions = _recover_master(slug, config, store, runtime, now_ms)
-    doc = ledger.state(slug)
+        actions = timing.call(_recover_master, slug, config, store, runtime, now_ms)
+    doc = timing.call(ledger.state, slug)
     rows = {t["id"]: t for t in doc["tasks"]}
-    exits.sweep(InboxStore(store.redis), slug, store, lambda: {t["id"]: t for t in ledger.state(slug)["tasks"]})
-    actions += master_start.observe(slug, config, store, ledger, runtime, now_ms)
-    actions += _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms)
-    actions += _verify(slug, store, ledger, runtime, rows, now_ms)
-    actions += _reap(slug, store, ledger, runtime, rows, now_ms)
-    actions += _strays(slug, config, store, runtime)
-    actions += lifetime.retire_idle_master(slug, store, ledger, runtime, rows, now_ms)
+    timing.call(
+        exits.sweep,
+        InboxStore(store.redis),
+        slug,
+        store,
+        lambda: {t["id"]: t for t in timing.call(ledger.state, slug)["tasks"]},
+    )
+    actions += timing.call(master_start.observe, slug, config, store, ledger, runtime, now_ms)
+    actions += timing.call(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
+    actions += timing.call(_verify, slug, store, ledger, runtime, rows, now_ms)
+    actions += timing.call(_reap, slug, store, ledger, runtime, rows, now_ms)
+    actions += timing.call(_strays, slug, config, store, runtime)
+    actions += timing.call(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
     if config.state == "stopped":
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
         if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
-            return actions + _close_space(slug, config, store, runtime) + _bin_closed(slug, store, ledger, doc)
+            return (
+                actions
+                + timing.call(_close_space, slug, config, store, runtime)
+                + _bin_closed(slug, store, ledger, doc)
+            )
         config = store.update(slug, state="paused")
         actions.append("the operator wrote on the ledger, paused to start the master")
     sleeping = lifetime.sleeping(slug, store, rows)
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
-    actions += _orphans(slug, store, ledger, rows)
+    actions += timing.call(_orphans, slug, store, ledger, rows)
+    from scripts.swarm import capacity
+
+    actions += timing.call(capacity.apply, slug, config, store, ledger, runtime, now_ms)
     if not sleeping:
-        actions += _codex_hook_order()
-        actions += _master_down(slug, config, store, ledger, runtime, now_ms)
-        actions += tick_master.run(
-            slug, config, store, ledger, runtime, now_ms, lambda: _master(slug, config, store, runtime, now_ms)
+        actions += timing.call(_codex_hook_order)
+        actions += timing.call(_master_down, slug, config, store, ledger, runtime, now_ms)
+        actions += timing.call(
+            tick_master.run,
+            slug,
+            config,
+            store,
+            ledger,
+            runtime,
+            now_ms,
+            lambda: _master(slug, config, store, runtime, now_ms),
         )
         if config.state == "running":
-            actions += _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms)
-    _conversations(slug, store, runtime)
-    _session_models(slug, store)
+            actions += timing.call(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+    timing.call(_conversations, slug, store, runtime)
+    timing.call(_session_models, slug, store)
     starting = {a.name for a in store.agents(slug) if a.lane == MASTER and a.state == "starting"}
-    transfers.observe(store, slug, runtime.live_names() - starting)
-    return actions + _settle(slug, config, store, ledger, rows, doc) + _close_space(slug, config, store, runtime)
+    timing.call(transfers.observe, store, slug, runtime.live_names() - starting)
+    return (
+        actions
+        + timing.call(_settle, slug, config, store, ledger, rows, doc)
+        + timing.call(_close_space, slug, config, store, runtime)
+    )
 
 
 def _codex_hook_order():
@@ -620,10 +645,17 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
 
 
 def _spawn_order(slug, config, store, agents, rows, doc):
+    from scripts.swarm import capacity
+
+    decision = capacity.read(store, slug)
+    caps = decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
     queue = []
-    for lane, cap in (("eng", config.max_eng), ("ci", config.max_ci), ("plan", config.max_plan)):
+    for lane, cap in caps.items():
         busy = sum(1 for a in agents if a.lane == lane and not _ended(a, rows))
-        ready = _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))[: max(cap - busy, 0)]
+        ready = _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))
+        if "tasks" in decision:
+            ready = [task for task in ready if task["id"] in decision["tasks"]]
+        ready = ready[: max(cap - busy, 0)]
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
     return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])]
 

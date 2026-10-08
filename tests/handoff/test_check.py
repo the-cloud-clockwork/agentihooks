@@ -98,6 +98,7 @@ def test_a_read_first_entry_without_an_address_is_refused():
 @pytest.mark.parametrize(
     "secret",
     ["ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8", "AKIA" + "IOSFODNN7EXAMPLE"],
+    ids=["github", "aws"],
 )
 def test_a_credential_value_is_refused(secret):
     found = problems(_swap("Seam two test written", f"Seam two test written with {secret}"), lambda a: True)

@@ -396,6 +396,59 @@ def test_a_concurrent_tick_is_skipped(env):
     assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["another tick is running"]
 
 
+def test_tick_reports_its_cost_even_when_a_lock_skips_work(env, capsys):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    store.redis.set(store.key("sw", "tick-lock"), "1")
+    capsys.readouterr()
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["another tick is running"]
+    rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if '"swarm_tick_step"' in line]
+    assert [row["phase"] for row in rows] == ["started", "finished"]
+    assert [row["step"] for row in rows] == ["run_tick", "run_tick"]
+    assert all(row["slug"] == "sw" for row in rows)
+    assert rows[1]["outcome"] == "success"
+    assert all(rows[1][key] >= 0 for key in ("wall_s", "own_cpu_s", "reaped_child_cpu_s"))
+
+
+def test_tick_reports_spawn_intent_and_store_stages(env, capsys):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    store.update("sw", state="running")
+    capsys.readouterr()
+    actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert any(action.startswith("spawned engineer") for action in actions)
+    rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if '"swarm_tick_step"' in line]
+    finished = {row["step"] for row in rows if row["phase"] == "finished"}
+    assert {
+        "scripts.swarm.tick._spawn",
+        "scripts.gates.intent.Check.run",
+        "scripts.swarm.store.RedisStore.agents",
+    } <= finished
+    assert rows[0]["step"] == rows[-1]["step"] == "run_tick"
+    assert rows[-1]["outcome"] == "success"
+    assert all(row["slug"] == "sw" for row in rows)
+
+
+def test_tick_records_failed_stage_and_releases_its_lock(env, monkeypatch, capsys):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    capsys.readouterr()
+    error = ValueError("a failed stage")
+
+    def failing(*args):
+        raise error
+
+    monkeypatch.setattr(cli.phase_planning, "planning_pass", failing)
+    with pytest.raises(ValueError) as caught:
+        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert caught.value is error
+    rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if '"swarm_tick_step"' in line]
+    assert [row["outcome"] for row in rows if row.get("outcome") == "error"] == ["error", "error"]
+    assert rows[-1]["step"] == "run_tick"
+    assert not store.redis.exists(store.key("sw", "tick-lock"))
+    assert cli.timing.SWARM.get() is None
+
+
 def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(env, monkeypatch):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")

@@ -1,0 +1,6 @@
+{
+  "94a7b9ceb60ad060b8129d66ee091384a2e80d127c91150a53bb0948d02f67d9": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only the first result of str.split is observed. Removing maxsplit or raising it from one to two cannot change the substring preceding the first question mark for any path. Exhaustive probe of 127 strings over a and question mark agreed; separator order and output are unchanged."
+  }
+}

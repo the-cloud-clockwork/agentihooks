@@ -1,0 +1,6 @@
+{
+  "scripts/deps_preflight.py:scripts.deps_preflight.x_unsatisfied__mutmut_4:3c279b2b1c55719f14a873a27f130ab523419d59f4d9d174e56e4fc199ea3634": {
+    "reader": "standards_reader",
+    "reason": "The synthetic skill dependency check field is unused by its sole consumer, which reads only id, kind and hint; CLI output and exit status are identical."
+  }
+}

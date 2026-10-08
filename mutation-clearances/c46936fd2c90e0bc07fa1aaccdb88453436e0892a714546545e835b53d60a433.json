@@ -1,0 +1,6 @@
+{
+  "718ddf4243d775165e2a8b02946f6fb9973d301881c80a430b087b7c77e87070": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs all three required keys length, type and name unconditionally, including when headers are missing. Their value constraints remain unchanged. Removing required cannot admit any new constructed value or change delegation. Thirty-header-case extracted-function equivalence probe passed."
+  }
+}

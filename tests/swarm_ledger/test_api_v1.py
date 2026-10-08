@@ -1156,9 +1156,10 @@ def test_upload_refusals_remain_json_and_do_not_mutate(live):
     assert request(live, "GET", "metadata") == before
 
 
-def test_storage_errors_have_a_stable_bounded_envelope(live, monkeypatch):
+@pytest.mark.parametrize("error", [OSError("Backend failure"), ValueError("Invalid stored task")])
+def test_storage_errors_have_a_stable_bounded_envelope(live, monkeypatch, caplog, error):
     def unreadable(slug, **kwargs):
-        raise OSError("Backend failure")
+        raise error
 
     monkeypatch.setattr(server.repository, "get_document", unreadable)
     assert request(live, "GET", "metadata") == (
@@ -1167,6 +1168,11 @@ def test_storage_errors_have_a_stable_bounded_envelope(live, monkeypatch):
             "error": {"code": "storage_error", "message": "Resource could not be read or written"},
         },
     )
+    record = caplog.records[-1]
+    assert record.name == "scripts.swarm_ledger.api.routes"
+    assert record.levelname == "ERROR"
+    assert record.getMessage() == "Ledger API storage failure"
+    assert record.exc_info[1] is error
 
 
 def test_worker_checkbox_refusal_preserves_the_resource(live):

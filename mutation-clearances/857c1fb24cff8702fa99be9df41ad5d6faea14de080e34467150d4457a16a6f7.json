@@ -1,0 +1,6 @@
+{
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_28:117cb0adedb7e2ba99e15e8948e79dc66b212bac25190d65e20f679e3e8c341e": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The config-read exception fallback repo is used only as a truth operand. Empty string and None both select identity None and return None; no path operation consumes the changed value."
+  }
+}

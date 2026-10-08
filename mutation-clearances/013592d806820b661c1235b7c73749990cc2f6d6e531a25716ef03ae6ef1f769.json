@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_proof_slug__mutmut_42:ebfc1495213a90b5992410dd5ab704e473860d5a6ee8858a94e57b7954d01a74": {
+    "reader": "Standards",
+    "reason": "One extra candidate past the taken count never changes which first free name is picked."
+  }
+}

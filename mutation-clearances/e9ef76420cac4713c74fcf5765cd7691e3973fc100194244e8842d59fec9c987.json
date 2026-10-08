@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_7:b236342b0227b49ca801ecc70cad325efd4519a4eb9998cf3954b53f396594d8": {
+    "reader": "Standards",
+    "reason": "A second split point leaves the same first piece, so the route match is unchanged."
+  }
+}

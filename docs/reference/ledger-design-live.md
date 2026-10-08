@@ -29,13 +29,14 @@ In a terminal, one command per line:
 cd ~/dev/worktrees/agentihooks/<your-worktree>
 export LEDGER_DIR=$HOME/scratchpad/agentihooks/ledger-design
 export LEDGER_PORT=8790
+export LEDGER_IMPECCABLE_LIVE=1
 mkdir -p "$LEDGER_DIR"
 cp ~/development-ledger/<slug>.json "$LEDGER_DIR/design-copy.json"
 cp ~/development-ledger/<slug>.html "$LEDGER_DIR/design-copy.html"
 ~/dev/tcc-ecosystem/.venv/bin/python scripts/swarm_ledger/ledger_server.py --serve
 ```
 
-`LEDGER_PORT` takes effect only because `LEDGER_DIR` is not `~/development-ledger`. The server reloads itself when a `.py` or `.html` file under `scripts/swarm_ledger` changes.
+`LEDGER_PORT` takes effect only because `LEDGER_DIR` is not `~/development-ledger`. `LEDGER_IMPECCABLE_LIVE=1` adds `http://localhost:8400`, the Impeccable live server, to the page policy's `script-src` and `connect-src`; without it the policy blocks the injected script. Impeccable takes the next free port when 8400 is busy, and the policy blocks that port, so free 8400 before starting live mode. The server ignores the setting when `LEDGER_DIR` is `~/development-ledger` or the port is 8765. The server reloads itself when a `.py` or `.html` file under `scripts/swarm_ledger` changes.
 
 In a second terminal, start Claude Code in the same worktree and type:
 

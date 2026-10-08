@@ -857,6 +857,56 @@ def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", e
     return passed[:-2] if passed[-2:] == PLAN_MODE else passed
 
 
+def test_spawn_records_launch_preparation_and_waited_subprocess_cost(tmp_path, monkeypatch, capsys):
+    import json
+
+    from scripts.swarm import timing
+
+    with timing.tick("sw"):
+        _launched(tmp_path, monkeypatch, "eng", {"id": "t1", "title": "x"})
+    rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if '"swarm_tick_step"' in line]
+    finished = {row["step"] for row in rows if row["phase"] == "finished"}
+    assert {
+        "scripts.swarm.profile_choice.choose",
+        "scripts.swarm.prompt.build",
+        "scripts.swarm.priming_trace.write",
+        "scripts.swarm.model_pick.pick",
+        "scripts.swarm.runtime.HerdrRuntime._launch",
+    } <= finished
+    assert all(row["slug"] == "sw" for row in rows)
+    assert all(row["outcome"] == "success" for row in rows if row["phase"] == "finished")
+
+
+def test_spawn_preserves_profile_and_prompt_boundary_arguments(tmp_path, monkeypatch):
+    from scripts.swarm import profile_choice, prompt
+
+    observed = []
+
+    def choose(slug, lane, chosen, task, environ, overlays):
+        assert slug == "sw"
+        assert lane == "eng"
+        assert overlays == {}
+        assert task == {"id": "t1", "title": "x"}
+        observed.append("profile")
+        return profile_choice.ProfileDecision("engineer", "task", "engineering work")
+
+    def build(slug, repo, lane, name, task, *, role, autonomy):
+        assert slug == "sw"
+        assert repo == str(tmp_path)
+        assert lane == "eng"
+        assert name == "agent@a1b2c3-0001"
+        assert task == {"id": "t1", "title": "x", "harness": "claude"}
+        assert role == ""
+        assert autonomy == "delegate"
+        observed.append("prompt")
+        return "fixture prompt"
+
+    monkeypatch.setattr(profile_choice, "choose", choose)
+    monkeypatch.setattr(prompt, "build", build)
+    _launched(tmp_path, monkeypatch, "eng", {"id": "t1", "title": "x"})
+    assert observed == ["profile", "prompt"]
+
+
 SEAT_TASKS = {
     "eng": {"id": "t1", "title": "x"},
     "ci": {"id": "t1", "title": "x"},

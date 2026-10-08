@@ -1,0 +1,6 @@
+{
+  "hooks/context/trace_sweep.py:hooks.context.trace_sweep.x__needle__mutmut_10:5083d173913ca57a7cde46ad75ea8759760b5a2af928d3aaad4acedd7b7e3300": {
+    "reader": "standards_reader",
+    "reason": "Missing text or no received rows defaults to None or XXXX; normalization yields four characters, below the twenty character needle minimum, so every output is unchanged."
+  }
+}

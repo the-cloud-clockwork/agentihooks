@@ -313,6 +313,10 @@ def test_oversized_source_plan_still_fails_with_all_source_areas_visible(monkeyp
     [
         (("mutation-cleared.txt",), True),
         (("./mutation-cleared.txt",), True),
+        (("mutation-clearances",), True),
+        (("./mutation-clearances/ruling.json",), True),
+        (("mutation-clearances.bak/ruling.json",), False),
+        (("scripts/mutation-clearances/ruling.json",), False),
         (("mutation-cleared.txt", "power/generator"), False),
         (("scripts/mutation-cleared.txt",), False),
         (("power/generator",), False),

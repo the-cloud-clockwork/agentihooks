@@ -21,6 +21,37 @@ def test_a_failing_detector_is_named_and_the_others_still_report():
     assert failed == ["the spawn detector failed: RuntimeError: journal unreadable"]
 
 
+def test_detector_records_its_own_stage_and_keeps_running_after_failure(capsys):
+    from scripts.swarm import timing
+
+    def broken():
+        raise RuntimeError("journal unreadable")
+
+    with timing.tick("doctor"):
+        assert detect.collect({"spawn": broken, "health": lambda: [STALE], "trace": lambda: [STALE]}) == (
+            [STALE, STALE],
+            ["the spawn detector failed: RuntimeError: journal unreadable"],
+        )
+    import json
+
+    rows = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    assert [(row["step"], row["phase"], row.get("outcome")) for row in rows] == [
+        ("doctor.spawn", "started", None),
+        ("doctor.spawn", "finished", "error"),
+        ("doctor.health", "started", None),
+        ("doctor.health", "finished", "success"),
+        ("doctor.trace", "started", None),
+        ("doctor.trace", "finished", "success"),
+    ]
+    assert all(row["slug"] == "doctor" for row in rows)
+    assert all(
+        row[key] >= 0
+        for row in rows
+        if row["phase"] == "finished"
+        for key in ("wall_s", "own_cpu_s", "reaped_child_cpu_s")
+    )
+
+
 def test_the_spawn_reader_reads_the_watched_swarm_at_the_pass_time(monkeypatch):
     from scripts.doctor import spawn_read, spawns
 

@@ -370,6 +370,63 @@ def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
     assert upload["with"]["name"] == "tests-passed-${{ steps.tree.outputs.sha }}"
 
 
+def _fake_github(tmp_path, tested_tree, artifact):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    store = tmp_path / "artifacts"
+    store.mkdir()
+    listing = tmp_path / "listing.json"
+    listing.write_text(json.dumps({"artifacts": [artifact]}))
+    commit = tmp_path / "commit.json"
+    commit.write_text(json.dumps({"sha": "merge-sha", "tree": {"sha": tested_tree}}))
+    (bin_dir / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        'path="$2"; while [ $# -gt 0 ]; do [ "$1" = --jq ] && f="$2"; shift; done\n'
+        'case "$path" in\n'
+        f'  */git/commits/merge-sha) jq -r "$f" "{commit}" ;;\n'
+        f'  *artifacts\\?name=*) [ -e "{store}/${{path#*name=}}" ] || exit 1; jq -r "$f" "{listing}" ;;\n'
+        "  *) exit 1 ;;\n"
+        "esac\n"
+    )
+    (bin_dir / "gh").chmod(0o755)
+    return {"PATH": f"{bin_dir}:{os.environ['PATH']}", "GITHUB_REPOSITORY": "o/r", "STORE": str(store)}
+
+
+def _record_pass(tmp_path, env):
+    tree, upload = _workflow()["jobs"]["record-pass"]["steps"]
+    out = tmp_path / "record-out"
+    subprocess.run(
+        ["bash", "-e", "-c", tree["run"]],
+        env={**env, "GITHUB_SHA": "merge-sha", "GITHUB_OUTPUT": str(out)},
+        cwd=tmp_path,
+        check=True,
+    )
+    sha = dict(line.split("=", 1) for line in out.read_text().split())["sha"]
+    name = upload["with"]["name"].replace("${{ steps.tree.outputs.sha }}", sha)
+    (Path(env["STORE"]) / name).touch()
+
+
+def _dev_push_lookup(tmp_path, env, pushed_tree):
+    out = tmp_path / "lookup-out"
+    subprocess.run(
+        ["bash", "-e", "-c", _lookup_step()["run"]],
+        env={**env, "TREE": pushed_tree, "GH_TOKEN": "t", "GITHUB_OUTPUT": str(out)},
+        check=True,
+    )
+    return out.read_text()
+
+
+@pytest.mark.parametrize(
+    ("pushed_tree", "artifact", "skip"),
+    [("a1b2c3", _artifact(), "true"), ("d4e5f6", _artifact(), "false"), ("a1b2c3", _artifact(fork=True), "false")],
+    ids=["tree-the-pull-request-tested", "tree-after-dev-moved", "tree-a-fork-tested"],
+)
+def test_dev_push_reuses_only_the_tree_its_pull_request_recorded(tmp_path, pushed_tree, artifact, skip):
+    env = _fake_github(tmp_path, "a1b2c3", artifact)
+    _record_pass(tmp_path, env)
+    assert _dev_push_lookup(tmp_path, env, pushed_tree) == f"skip={skip}\n"
+
+
 def test_unit_pins_an_exact_uv_version():
     _, uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
     assert re.fullmatch(r"\d+\.\d+\.\d+", uv["with"]["version"])
@@ -530,6 +587,35 @@ def test_ci_refresh_can_use_the_exact_run_that_passed_the_dev_tree(tmp_path, mon
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci-run", "42"])
     assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 2.0}
+    assert json.loads((tmp_path / ".test_durations-3.11").read_text()) == {"t.py::a": 1.0}
+    assert json.loads((tmp_path / ".test_durations-3.12").read_text()) == {"t.py::a": 3.0}
+
+
+def test_credential_parameters_have_readable_timing_identifiers():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/handoff/test_check.py",
+            "--collect-only",
+            "-q",
+            "-n",
+            "0",
+            "-o",
+            "addopts=",
+        ],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "PYTEST_ADDOPTS": "", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": ""},
+    )
+    identifiers = [line for line in result.stdout.splitlines() if "::test_a_credential_value_is_refused[" in line]
+    assert identifiers == [
+        "tests/handoff/test_check.py::test_a_credential_value_is_refused[github]",
+        "tests/handoff/test_check.py::test_a_credential_value_is_refused[aws]",
+    ]
 
 
 def test_mutation_job_runs_independently_and_keeps_its_evidence():

@@ -1,0 +1,6 @@
+{
+  "scripts/targets/claude_target.py:scripts.targets.claude_target.x_settings_document__mutmut_7:6ef10d40716dffe816d0047f12c2c6aa17de202e1bc4f34b60cab5f6bdf66508": {
+    "reader": "Standards",
+    "reason": "settings_document reads profile_env only through a truthiness check, so a missing env key yields a falsy value with or without the empty-dict default."
+  }
+}

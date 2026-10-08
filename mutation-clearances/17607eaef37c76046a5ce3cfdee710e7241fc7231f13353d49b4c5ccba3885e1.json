@@ -1,0 +1,6 @@
+{
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_record_id__mutmut_44:3a8b5646d8a1577bded2a7472b025da730d578e0a45d7836f79da0dd06b2d6da": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize identically, preserving source identity hashes."
+  }
+}
