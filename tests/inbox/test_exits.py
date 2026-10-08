@@ -109,8 +109,28 @@ def test_the_sweep_closes_a_push_stop_notice_left_on_a_seat_by_an_agent_that_lef
     exits.sweep(inbox, "sw", store, dict)
     closed = inbox.get(item.id)
     assert (closed.address, closed.state) == ("eng-1@sw", "done")
-    assert closed.reason == "done: sw-eng-1 left its seat; no branch of its own was found"
+    assert (
+        closed.reason
+        == "done: sw-eng-1 left its seat; its worktree was not found, so whether its branch was pushed is unknown"
+    )
     assert [item.id for item in inbox.mailbox("sw-eng-2") if item.state != "done"] == []
+
+
+def test_the_sweep_closes_a_seat_notice_a_live_successor_already_received(monkeypatch, redis, tmp_path):
+    from scripts.swarm.store import AgentRecord
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path))
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    item = notice_moved_to_the_seat(inbox, store)
+    store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw"))
+    store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+    inbox.redirect(item.id, "swarm", "eng-1@sw", "moved again", "eng-1@sw")
+    inbox.deliver(item.id, "sw-eng-2")
+    exits.sweep(inbox, "sw", store, dict)
+    assert (
+        inbox.get(item.id).reason
+        == "done: sw-eng-1 left its seat; its worktree was not found, so whether its branch was pushed is unknown"
+    )
 
 
 def test_the_sweep_leaves_a_seat_notice_open_while_its_agent_is_live(monkeypatch, redis, tmp_path):
@@ -122,3 +142,19 @@ def test_the_sweep_leaves_a_seat_notice_open_while_its_agent_is_live(monkeypatch
     store.put_agent("sw", AgentRecord(name="sw-eng-1", lane="eng", task="t1", seat="eng-1@sw"))
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(item.id).state == "delivered"
+
+
+def test_the_sweep_closes_a_seat_notice_no_agent_received_behind_other_seat_mail(monkeypatch, redis, tmp_path):
+    from scripts.gates.push_stop import TEMPLATE
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path))
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    other = inbox.send("sender", "eng-1@sw", "contract")
+    item = inbox.send("swarm", "eng-1@sw", TEMPLATE)
+    exits.sweep(inbox, "sw", store, dict)
+    assert (
+        inbox.get(item.id).reason
+        == "done: an earlier occupant left its seat; its worktree was not found, so whether its branch was pushed is unknown"
+    )
+    assert inbox.get(other.id).state == "pending"

@@ -219,7 +219,23 @@ def test_an_agent_leaving_with_no_branch_of_its_own_closes_its_notice_saying_so(
     monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "empty"))
     inbox = InboxStore(rig.store.redis)
     exits.settle(inbox, ME, SEAT, "exited")
-    assert inbox.get(item.id).reason == f"done: {ME} exited; no branch of its own was found"
+    assert (
+        inbox.get(item.id).reason
+        == f"done: {ME} exited; its worktree was not found, so whether its branch was pushed is unknown"
+    )
+
+
+def test_an_agent_leaving_names_every_branch_it_left_off_origin(monkeypatch, rig):
+    from scripts.inbox import exits
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(rig.root))
+    item = refused_once(rig)
+    second = rig.root / "repo" / f"{BRANCH}-2"
+    git(rig.seed, "worktree", "add", "-b", f"{BRANCH}-2", str(second), "origin/dev")
+    (second / "more").write_text("more\n")
+    inbox = InboxStore(rig.store.redis)
+    exits.settle(inbox, ME, SEAT, "exited")
+    assert inbox.get(item.id).reason == f"done: {ME} exited; its branch {BRANCH}, {BRANCH}-2 was not pushed"
 
 
 def test_other_mail_of_a_leaving_agent_still_moves_to_its_seat(monkeypatch, rig):

@@ -100,7 +100,7 @@ def left(name, exit_text):
     """The close reason of a notice whose agent has gone, naming whether its branch reached origin."""
     found = trees(default_root(), name)
     if not found:
-        return f"{name} {exit_text}; no branch of its own was found"
+        return f"{name} {exit_text}; its worktree was not found, so whether its branch was pushed is unknown"
     held = [tree.branch for tree in found if tree.dirty or tree.unpushed]
     branches = ", ".join(held or [tree.branch for tree in found])
     return f"{name} {exit_text}; its branch {branches} was {'not ' if held else ''}pushed"

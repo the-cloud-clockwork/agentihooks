@@ -98,9 +98,11 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
         for item in inbox.inbox(seat):
             if item.state in CLOSED or not push_stop.is_notice(item):
                 continue
-            got = next((entry["by"] for entry in inbox.history(item.id) if entry.get("state") == "delivered"), "")
-            if got and got not in active:
-                inbox.close(item.id, BY, "done", push_stop.left(got, "left its seat"))
+            got = [entry["by"] for entry in inbox.history(item.id) if entry.get("state") == "delivered"]
+            if not got or got[0] not in active:
+                inbox.close(
+                    item.id, BY, "done", push_stop.left(got[0] if got else "an earlier occupant", "left its seat")
+                )
 
 
 def _told(item, name, exit_text):
