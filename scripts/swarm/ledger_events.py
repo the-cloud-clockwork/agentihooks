@@ -9,6 +9,7 @@ import functools
 import json
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -145,7 +146,14 @@ def view(url, run=subprocess.run):
         )
         if done.returncode != 0:
             return None
-        raw = json.loads(done.stdout)["data"]["resource"]
+        return _view_resource(json.loads(done.stdout)["data"]["resource"])
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _view_resource(raw, gated=None):
+    try:
+        raw = dict(raw)
         commits = [node["commit"] for node in raw["commits"]["nodes"]]
         rollup = (commits[-1].get("statusCheckRollup") or {}) if commits else {}
         contexts = rollup.get("contexts") or {}
@@ -155,10 +163,102 @@ def view(url, run=subprocess.run):
         raw["commits"] = commits
         raw["statusCheckRollup"] = contexts.get("nodes") or []
         raw["checkSuites"] = list(suites["nodes"])
-        raw["gated"] = bool(commits) and declares_gate(commits[-1].get("file"))
+        raw["gated"] = gated if gated is not None else bool(commits) and declares_gate(commits[-1].get("file"))
         return pull_request(raw)
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError):
         return None
+
+
+def views(
+    urls: list[str], run: Callable = subprocess.run, cache: object | None = None
+) -> dict[str, PullRequest | None]:
+    urls = list(dict.fromkeys(urls))
+    found = dict.fromkeys(urls)
+    selection = PULL_QUERY.partition("{")[2][:-1].replace(
+        'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}}',
+        'file(path:".github/workflows"){object{id}}',
+    )
+    for start in range(0, len(urls), 20):
+        batch = urls[start : start + 20]
+        fields = [f"p{i}:" + selection.replace("$url", json.dumps(url)) for i, url in enumerate(batch)]
+        data = _graphql("{" + " ".join(fields) + "}", run)
+        gates = _workflow_gates(data, run, cache)
+        for i, url in enumerate(batch):
+            raw = data.get(f"p{i}")
+            gated = gates.get(_workflow_id(raw))
+            found[url] = _view_resource(raw, gated) if gated is not None else None
+    return found
+
+
+def _graphql(query, run):
+    try:
+        done = run(
+            ["gh", "api", "graphql", "-f", f"query={query}"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        result = json.loads(done.stdout)
+        errors = result.get("errors", [])
+        if done.returncode and not errors:
+            return {}
+        data = result["data"]
+        if not isinstance(data, dict):
+            return {}
+        for error in errors:
+            path = error.get("path")
+            if not path:
+                return {}
+            data[path[0]] = None
+        return data
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def _workflow_id(raw):
+    try:
+        commits = raw["commits"]["nodes"]
+        tree = commits[-1]["commit"]["file"] if commits else None
+        return tree["object"]["id"] if tree is not None else None
+    except (KeyError, TypeError):
+        return ""
+
+
+def _workflow_gates(data, run, cache):
+    trees = {_workflow_id(raw) for raw in data.values()} - {None, ""}
+    gates = {None: False, "": None, **dict.fromkeys(trees)}
+    pending = []
+    for tree in sorted(trees):
+        saved = cache.get(f"swarm:workflow-gate:{tree}") if cache is not None else None
+        if saved in ("0", "1"):
+            gates[tree] = saved == "1"
+        else:
+            pending.append(tree)
+    if pending:
+        query = "{nodes(ids:" + json.dumps(pending) + "){id ...on Tree{entries{object{...on Blob{text}}}}}}"
+        for node in _graphql(query, run).get("nodes") or []:
+            if node is None or "entries" not in node:
+                continue
+            tree = node["id"]
+            gates[tree] = declares_gate({"object": node})
+            if cache is not None:
+                cache.set(f"swarm:workflow-gate:{tree}", int(gates[tree]), ex=SENT_TTL_S)
+    return gates
+
+
+def tick_view(inbox: object, store: object, slug: str, doc: dict) -> Callable[[str], PullRequest | None]:
+    urls = [
+        task["pr_url"] for task in doc.get("tasks", []) if task.get("state") in ("pr", "claimed") and task.get("pr_url")
+    ]
+    notices = store.redis.hgetall(store.key(slug, "red-notices"))
+    urls += [url for item_id, url in notices.items() if _open(inbox, item_id)]
+    snapshots = views(urls, cache=store.redis)
+
+    @functools.cache
+    def lookup(url):
+        return snapshots[url] if url in snapshots else view(url)
+
+    return lookup
 
 
 class Mail:
