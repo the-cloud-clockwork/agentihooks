@@ -436,6 +436,7 @@ jobs:
           name: sonar-report
           path: |
             coverage.xml
+            .coverage-shards/
             .scannerwork/report-task.txt
           include-hidden-files: true
           if-no-files-found: error
