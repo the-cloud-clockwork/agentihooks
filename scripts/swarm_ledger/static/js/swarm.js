@@ -4,7 +4,7 @@ import { writeSwarm } from "./api.js";
 import { renderStats } from "./render.js";
 import { renderChatTo } from "./chat.js";
 import { clearNoteError, renderControls, renderGates, showNote } from "./controls.js";
-import { firstPage, moreButton } from "./pages.js";
+import { firstPage, moreButton, wanted } from "./pages.js";
 
 const SESSION_CAP_MAX = 50;
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
@@ -237,7 +237,7 @@ export function renderSwarm(sw) {
   const figures = doctorFigures(doctor, now);
   if (doctorOn(sw)) figures[0][1] = h("a", { href: "/" + doctor.slug, text: doctor.state });
   kv("swarm-doctor", figures);
-  if (!$("health").contains(document.activeElement)) renderHealth(sw.findings, now);
+  if (wanted.id || !$("health").contains(document.activeElement)) renderHealth(sw.findings, now);
   renderHandoffs(sw.handoffs || []);
   renderStats();
 }

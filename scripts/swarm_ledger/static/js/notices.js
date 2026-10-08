@@ -4,7 +4,7 @@ import { verdictButton } from "./render.js";
 import { jumpTo } from "./outline.js";
 import { foldSaved } from "./folds.js";
 import { showChat } from "./chat.js";
-import { firstPage, moreButton } from "./pages.js";
+import { firstPage, moreButton, wanted } from "./pages.js";
 
 export function anchorPanel(panel, icon) {
   panel.style.setProperty("--anchor-top", `${icon.getBoundingClientRect().top}px`);
@@ -110,7 +110,7 @@ export function renderAlerts() {
   $("alert-badge").hidden = !list.length;
   $("alert-badge").textContent = String(list.length);
   if ($("alert-panel").hidden) return $("alerts").replaceChildren();
-  if (document.activeElement.matches("#alerts input")) return;
+  if (!wanted.id && document.activeElement.matches("#alerts input")) return;
   $("alerts").replaceChildren(...firstPage("alerts", list, (a) => `alert-${a.id}`).map(alertRow), moreButton("alerts", list.length, "more alerts", renderAlerts) || "");
   if (!list.length) $("alerts").append(h("li", { class: "empty", text: "No open alerts." }));
 }

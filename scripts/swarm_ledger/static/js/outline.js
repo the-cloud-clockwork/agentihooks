@@ -25,9 +25,9 @@ function fetchTarget(id) {
   if (kind === "item") {
     const section = document.querySelector(`section[data-outline="${id.split("-")[1]}"] > details.fold`);
     if (section) section.open = true;
-  } else if (!PANEL_ROWS[kind]) return;
+  } else if (!Object.hasOwn(PANEL_ROWS, kind)) return;
   wanted.id = id;
-  (PANEL_ROWS[kind] || render)();
+  (kind === "item" ? render : PANEL_ROWS[kind])();
   setTimeout(() => { wanted.id = null; }, 0);
 }
 

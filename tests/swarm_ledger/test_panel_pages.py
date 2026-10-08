@@ -103,3 +103,14 @@ def test_a_deep_link_past_the_first_page_opens_its_panel_and_reveals_the_row(pag
     row = page.locator(f"[id='{target}']")
     row.wait_for()
     assert row.is_visible()
+
+
+def test_a_deep_link_reveals_its_alert_while_an_alert_outcome_has_focus(page):
+    show(page, shell_html(), ledger=ledger_state(panels_doc()), swarm=SWARM)
+    page.click("#alert-fab")
+    page.locator("#alerts .alert-done").first.click()
+    assert page.evaluate("() => document.activeElement.matches('#alerts input')")
+    page.evaluate("() => { location.hash = 'alert-a0'; }")
+    row = page.locator("[id='alert-a0']")
+    row.wait_for(timeout=5000)
+    assert row.is_visible()
