@@ -47,7 +47,7 @@ def _entry(origin: _Origin, item: dict, ref: str, kind: str, parent_ref: str) ->
             text=chunk,
             chunk_index=index,
         )
-        for index, chunk in enumerate(chunk_body(_body(item)))
+        for index, chunk in enumerate(chunk_body(_body(item)) or [""])
     ]
     for thread, child_kind in (("comments", "comment"), ("answers", "answer")):
         for child in item.get(thread, []):
@@ -70,7 +70,7 @@ def extract_ledger(slug: str, document: dict, *, swarm_slug: str = "") -> list[R
         "overview": document.get("overview", ""),
         "at": document.get("_meta", {}).get("created_at", 0),
     }
-    result = _entry(origin, root, "ledger", "ledger", "")
+    result = _entry(origin, root, "ledger", "ledger", "") if _body(root) else []
     for collection, kind in (
         ("phases", "phase"),
         ("tasks", "task"),

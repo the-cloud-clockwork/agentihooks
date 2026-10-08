@@ -109,6 +109,20 @@ def test_deleted_answer_hides_its_comment(ledger):
     assert not any("/answers/" in r.ref for r in records(ledger).values())
 
 
+def test_attachment_only_comment_is_still_a_record(ledger):
+    ledger["tasks"][0]["comments"].append(
+        {"id": "image", "by": "operator", "at": 23, "text": "", "attachments": [{"id": "image.png"}]}
+    )
+    comment = records(ledger)["tasks/t1/comments/image"]
+    assert (comment.kind, comment.author, comment.time, comment.title, comment.text) == (
+        "comment",
+        "operator",
+        23,
+        "",
+        "",
+    )
+
+
 def test_no_event_never_attributes_to_claimant_or_snapshot(ledger):
     ledger["_meta"]["events"] = []
     found = records(ledger)

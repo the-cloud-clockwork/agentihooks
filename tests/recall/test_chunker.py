@@ -39,6 +39,13 @@ def test_custom_window_size():
     assert chunk_body("abcdefghijk", window=4) == ["abcd", "efgh", "ijk"]
 
 
+@pytest.mark.parametrize("marker", ["```", "~~~~"])
+def test_fenced_heading_is_not_a_section_boundary(marker):
+    fenced = f"{marker}python\n# comment\n" + "b" * 100 + f"\n{marker}"
+    body = "a" * 1100 + "\n\n" + fenced
+    assert chunk_body(body) == ["a" * 1100, fenced]
+
+
 @pytest.mark.parametrize("window", [0, -1])
 def test_window_must_be_positive(window):
     with pytest.raises(ValueError, match="window must be positive"):
