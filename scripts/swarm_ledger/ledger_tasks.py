@@ -80,6 +80,8 @@ def check(op):
             raise ValueError(f"lane must be one of {LANES}")
         if not all(isinstance(op.get(key, ""), str) for key in ("phase", "description", "workspace")):
             raise ValueError("phase, description and workspace must be strings")
+        if "not_duplicate" in op and not (isinstance(op["not_duplicate"], str) and op["not_duplicate"].strip()):
+            raise ValueError("not_duplicate must say in plain words why the task differs from the one it resembles")
         check_lists(op)
         check_bools(op)
         check_profile(op)
@@ -227,7 +229,7 @@ def _add(doc, op, ctx):
         "done": False,
         "comments": [],
     }
-    for key in ("gain", "contract", "workspace", "artifact", "profile", "overlays"):
+    for key in ("gain", "contract", "workspace", "artifact", "profile", "overlays", "not_duplicate"):
         if key in op:
             task[key] = op[key]
     if "rank" in op:
