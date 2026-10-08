@@ -124,6 +124,33 @@ def test_two_findings_ask_one_classifier_call_with_two_questions(filters_dir, st
     )
 
 
+TAIL_FILTER = """intent: user facing text states facts without explaining them
+finders:
+  - regex: '(?:because|since|so that|which means) [^"]*'
+    reason: explanation tail
+"""
+WITH_TAIL = 'line = f"{free} free seats because accounts have quota"'
+WITHOUT_TAIL = 'line = f"{free} free seats"'
+
+
+def test_the_phase_case_an_explanation_tail_is_sent_back_and_the_bare_line_passes(filters_dir, stub):
+    (filters_dir / "pre-edit+write+multiedit-explanation_tail.filter.yaml").write_text(TAIL_FILTER)
+    stub(yes=True)
+    sent_back = conditions.pre_effect(_write_call(WITH_TAIL)).block
+    assert sent_back == (
+        "[condition pre-edit+write+multiedit-explanation_tail.filter.yaml] filter sent the text back:\n"
+        '- "because accounts have quota": explanation tail'
+    )
+    assert conditions.pre_effect(_write_call(WITHOUT_TAIL)).block is None
+
+
+def test_the_phase_case_both_lines_pass_with_the_classifier_down(filters_dir, monkeypatch):
+    (filters_dir / "pre-edit+write+multiedit-explanation_tail.filter.yaml").write_text(TAIL_FILTER)
+    monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_URL", raising=False)
+    assert conditions.pre_effect(_write_call(WITH_TAIL)).block is None
+    assert conditions.pre_effect(_write_call(WITHOUT_TAIL)).block is None
+
+
 def test_only_the_findings_the_classifier_confirms_are_sent_back(filters_dir, monkeypatch):
     (filters_dir / "pre-write-ids.filter.yaml").write_text(FILTER)
     answers = {"finding_0": Answer(type="noul", noul=0.2), "finding_1": Answer(type="noul", noul=0.5)}
