@@ -193,3 +193,82 @@ def test_typed_phase_lines_are_refused(published):
     assert rejected == ["typed"]
     assert state["_meta"]["warnings"][0] == "plan_ref lines for phase p1 must be the range computed from its plan"
     assert state["phases"][0]["plan_ref"] == ref
+
+
+def refusal(call, *args):
+    with pytest.raises(ValueError) as raised:
+        call(*args)
+    return str(raised.value)
+
+
+def test_plan_range_checks_name_each_rule():
+    from scripts.swarm_ledger import plan_ranges
+
+    assert plan_ranges.bounds("3-3") == (3, 3)
+    assert refusal(plan_ranges.bounds, "4-3") == "plan lines must be an ordered inclusive range"
+    good = {"artifact": "https://h/artifacts/s/x.md", "lines": "1-2"}
+    plan_ranges.check_ref(good)
+    plan_ranges.check_ref({**good, "artifact": "http://h/artifacts/s/x.md"})
+    assert refusal(plan_ranges.check_ref, {"artifact": good["artifact"]}) == "plan_ref needs artifact and lines"
+    for link in (5, "ftp://h/x", "http:///x"):
+        assert (
+            refusal(plan_ranges.check_ref, {**good, "artifact": link}) == "plan artifact must be an http or https link"
+        )
+
+
+def test_phase_ranges_without_headings():
+    from scripts.swarm_ledger import plan_ranges
+
+    one, two = {"id": "p1", "title": "Build"}, {"id": "p2", "title": "Ship"}
+    assert plan_ranges.phase_lines("intro\nmore\n", [one]) == {"p1": "1-2"}
+    assert refusal(plan_ranges.phase_lines, "", [one]) == "plan needs one heading for phase Build"
+    assert refusal(plan_ranges.phase_lines, "# Build\n", [one, two]) == "plan needs one heading for phase Ship"
+    assert refusal(plan_ranges.phase_lines, "# Build\n# Build\n", [one]) == "plan needs one heading for phase Build"
+
+
+def test_an_indented_fence_hides_its_headings():
+    from scripts.swarm_ledger import plan_ranges
+
+    text = "  ```\n## Inside\n  ```\n## Out\n"
+    assert [(n, level) for n, level, _ in plan_ranges.sections(text) if level] == [(4, 2)]
+
+
+def test_headings_and_fences_follow_markdown():
+    from scripts.swarm_ledger import plan_ranges
+
+    lines = ["####### seven", "#tight", "##", "## Ship ##", "# a #b", "# #", "  ### Indented"]
+    text = "\n".join([*lines, "``", "## After two ticks", "~~~ text", "## Hidden", "~~~", "## Shown"]) + "\n"
+    assert [(n, level, title) for n, level, title in plan_ranges.sections(text) if level] == [
+        (4, 2, "Ship"),
+        (5, 1, "a #b"),
+        (6, 1, ""),
+        (9, 2, "After two ticks"),
+        (13, 2, "Shown"),
+    ]
+
+
+def test_a_level_one_heading_ends_a_slice_and_a_deeper_heading_does_not_set_its_level():
+    assert lines_of("<!-- slice: a -->\nx\n# Next\ny\n", "a") == "1-2"
+    assert lines_of("## Build\n<!-- slice: a -->\nAlpha\n### Detail\nmore\n", "a") == "2-5"
+
+
+def test_stored_text_names_each_refusal(published):
+    from scripts.swarm_ledger import plan_ranges
+
+    state = core.sync(published)[0]
+    ref = state["phases"][0]["plan_ref"]
+    assert plan_ranges.stored_text(ref, state) == PLAN
+    base, file_id = ref["artifact"].rsplit("/", 1)
+    for link in (f"{base}/{file_id}/extra", ref["artifact"].replace("/artifacts/", "/media/")):
+        message = refusal(plan_ranges.stored_text, {**ref, "artifact": link}, state)
+        assert message == "plan artifact must name a stored ledger artifact"
+    unmarked = {"artifacts": [{**state["artifacts"][0], "plan": False}]}
+    for doc in ({}, unmarked):
+        assert refusal(plan_ranges.stored_text, ref, doc) == "plan artifact is missing or is not marked as a plan"
+
+
+def test_slice_tasks_of_a_missing_phase_or_without_a_slice_are_invalid():
+    from scripts.swarm_ledger import plan_ranges
+
+    doc = {"phases": [], "artifacts": [], "tasks": [{"id": "a", "plan_slice": "a"}, {"id": "b"}, {"id": "c"}]}
+    assert plan_ranges.invalid_tasks({"phase": "gone"}, doc, ["a", "b"]) == ["a", "b"]

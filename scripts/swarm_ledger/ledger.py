@@ -512,6 +512,9 @@ def cmd_claim(args):
     print(json.dumps({"claimed": args.item}))
 
 
+TASK_OPTIONS = ("kind", "profile", "rank", "difficulty", "plan_slice")
+
+
 def cmd_task(args):
     if args.action == "add":
         if args.id == "-":
@@ -527,18 +530,9 @@ def cmd_task(args):
         contract = {k: getattr(args, k) for k in ("must", "check", "judge") if getattr(args, k)}
         if contract:
             lists["contract"] = contract
-        if args.kind:
-            lists["kind"] = args.kind
+        lists.update({k: getattr(args, k) for k in TASK_OPTIONS if getattr(args, k)})
         if args.artifact:
             lists["artifact"] = True
-        if args.profile:
-            lists["profile"] = args.profile
-        if args.rank:
-            lists["rank"] = args.rank
-        if args.difficulty:
-            lists["difficulty"] = args.difficulty
-        if args.plan_slice:
-            lists["plan_slice"] = args.plan_slice
         if args.plan:
             lists["plan_url"] = args.plan
         if args.scaffold:

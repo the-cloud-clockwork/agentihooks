@@ -448,6 +448,29 @@ def test_task_cli_passes_an_explicit_plan_link(monkeypatch, capsys):
     assert "plan_url" in ledger_tasks.UPDATABLE
 
 
+def test_task_cli_forwards_each_set_option_and_names_the_plan_slice(monkeypatch):
+    sent = []
+    monkeypatch.setattr(ledger, "send", lambda *args, **fields: sent.append(fields))
+    base = ["ledger", "--slug", "demo", "--as", "master", "task", "add", "t9", "Build"]
+    options = ["--kind", "ops", "--profile", "frontend", "--rank", "high", "--difficulty", "S", "--plan-slice", "t9"]
+    monkeypatch.setattr("sys.argv", [*base, *options])
+    ledger.main()
+    assert {k: sent[0][k] for k in ledger.TASK_OPTIONS} == {
+        "kind": "ops",
+        "profile": "frontend",
+        "rank": "high",
+        "difficulty": "S",
+        "plan_slice": "t9",
+    }
+    monkeypatch.setattr("sys.argv", base)
+    ledger.main()
+    assert not set(ledger.TASK_OPTIONS) & set(sent[1])
+    parser = ledger.build_parser()
+    commands = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices
+    option = next(a for a in commands["task"]._actions if a.dest == "plan_slice")
+    assert (option.default, option.help) == ("", "task slice anchor; computes its plan lines")
+
+
 def test_ledger_page_shows_the_plan_link_on_a_task():
     page = page_source()
     assert '"pr_url", "plan_url", "done"' in page

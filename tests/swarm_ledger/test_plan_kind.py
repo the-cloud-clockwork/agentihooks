@@ -146,6 +146,21 @@ def test_a_plan_accepts_multiple_phase_tasks_and_open_updates(plan_ledger):
     assert state["tasks"][0]["state"] == "done"
 
 
+def test_a_slice_without_its_anchor_or_range_is_refused_by_name(plan_ledger):
+    anchored(plan_ledger, "first")
+    state, rejected = add(plan_ledger, "lost", plan_slice="lost")
+    assert rejected == ["add-lost"]
+    assert state["_meta"]["warnings"] == ["slice anchor lost is missing or repeated in its phase"]
+    assert [t["id"] for t in state["tasks"]] == []
+    add(plan_ledger, "plan", lane="plan", kind="plan")
+    add(plan_ledger, "first", plan_url=PLAN, plan_slice="first")
+    add(plan_ledger, "second", plan_url=PLAN)
+    state, rejected = update(plan_ledger, state="done", proof={"slice": "first, second"})
+    assert rejected == ["finish-plan"]
+    assert state["tasks"][0]["state"] == "open"
+    assert state["_meta"]["warnings"] == ["tasks/plan slice tasks lack valid plan ranges or anchors: second"]
+
+
 def test_ordinary_tasks_can_still_finish(plan_ledger):
     add(plan_ledger, "plan")
     state, rejected = update(plan_ledger, state="done")
