@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import InboxStore, Item
 from scripts.swarm import capacity
 
 if TYPE_CHECKING:
@@ -27,7 +27,7 @@ def level(account: dict) -> str:
     return ""
 
 
-def is_notice(item) -> bool:
+def is_notice(item: Item) -> bool:
     return item.sender == "swarm" and (item.text == HURRY or item.text.startswith(HANDOFF.split("{slug}", 1)[0]))
 
 

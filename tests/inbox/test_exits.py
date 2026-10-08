@@ -383,7 +383,7 @@ def test_the_sweep_keeps_peer_mail_that_still_belongs_to_the_seat(redis, retaine
     assert inbox.inbox(peer.name) == []
 
 
-def test_the_sweep_preserves_general_peer_mail_received_by_a_departed_agent(redis):
+def test_the_sweep_returns_general_peer_mail_a_departed_agent_took_to_its_seat(redis):
     from scripts.swarm.store import AgentRecord
 
     inbox, store = InboxStore(redis), RedisStore(redis)
@@ -623,8 +623,10 @@ def seat_notice_taken(inbox, store, state):
     store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
     item = inbox.send("swarm", "eng-1@sw", "intent check for task t1", ref="tasks/t1")
     inbox.deliver(item.id, "sw-eng-1")
-    if state != "delivered":
-        getattr(inbox, {"confirmed": "confirm", "read": "read"}[state])(item.id, "sw-eng-1")
+    if state == "confirmed":
+        inbox.confirm(item.id, "sw-eng-1")
+    elif state == "read":
+        inbox.read(item.id, "sw-eng-1")
     return item
 
 
@@ -683,6 +685,32 @@ def test_a_life_resumed_into_its_seat_takes_seat_mail_again(redis):
     assert inbox.pending_mail("sw-eng-1") == []
     store.seats.occupy("eng-1@sw", "sw-eng-1", 2)
     assert [mail.id for mail in inbox.pending_mail("sw-eng-1")] == [item.id]
+
+
+def test_a_resumed_life_that_hands_off_again_never_takes_its_moved_mail(redis):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    exits.settle(inbox, "sw-eng-1", "eng-1@sw", "stopped")
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 2)
+    item = inbox.send("sender", "sw-eng-1", "contract")
+    exits.settle(inbox, "sw-eng-1", "eng-1@sw", "handed off its seat")
+    assert inbox.pending_mail("sw-eng-1") == []
+    assert store.seats.exit_of("sw-eng-1")["reason"] == "handed off its seat"
+    store.seats.occupy("eng-1@sw", "sw-eng-2", 3)
+    assert [mail.id for mail in inbox.pending_mail("sw-eng-2")] == [item.id]
+
+
+def test_swarm_done_settles_the_seat_mail_its_agent_took(redis):
+    from scripts.swarm import cli
+    from scripts.swarm.store import AgentRecord
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    item = seat_notice_taken(inbox, store, "confirmed")
+    agent = AgentRecord(name="sw-eng-1", lane="eng", task="t1", seat="eng-1@sw")
+    store.put_agent("sw", agent)
+    cli._retire(store, "sw", agent, "finished its task and exited")
+    assert inbox.get(item.id).state == "cancelled"
+    assert "sw-eng-1 finished its task and exited" in inbox.get(item.id).reason
 
 
 @pytest.mark.parametrize("seat", ["", "eng-1@sw"])
