@@ -227,11 +227,17 @@ class Operations:
             return Observation(Phase.UNKNOWN)
 
     def _qualified(self, operation: Operation, observation: Observation) -> Observation:
+        if not isinstance(observation.phase, Phase):
+            return Observation(Phase.REFUSED)
         if observation.phase is Phase.APPLIED and (
-            observation.execution_id,
-            observation.generation,
-            observation.backend,
-            observation.payload_digest,
-        ) != (operation.execution_id, operation.generation, operation.backend, operation.payload_digest):
+            type(observation.generation) is not int
+            or (
+                observation.execution_id,
+                observation.generation,
+                observation.backend,
+                observation.payload_digest,
+            )
+            != (operation.execution_id, operation.generation, operation.backend, operation.payload_digest)
+        ):
             return Observation(Phase.REFUSED)
         return observation

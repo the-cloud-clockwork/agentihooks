@@ -461,3 +461,28 @@ def test_runtime_journal_uses_one_redis_connection_per_transaction(fixture):
     assert applied.phase is Phase.APPLIED
     assert applied.result == {"uid": "object-1"}
     assert transport.creations == 1
+
+
+@pytest.mark.parametrize("phase", ["applied", "unsupported"])
+def test_untyped_observation_state_cannot_bypass_ownership(fixture, phase):
+    store, agent, transport, operations = fixture
+    first = operations.execute("fixture", request(agent))
+    transport.effects[first.operation_id] = replace(
+        transport.effects[first.operation_id], phase=phase, execution_id="foreign"
+    )
+    rejected = operations.execute("fixture", request(agent))
+    assert rejected.phase is Phase.REFUSED
+    assert rejected.result == {}
+    assert store.operation_journal.get("fixture", first.operation_id).phase is Phase.REFUSED
+    assert transport.creations == 1
+
+
+@pytest.mark.parametrize("generation", [True, 1.0])
+def test_untyped_observation_generation_cannot_prove_applied_state(fixture, generation):
+    store, agent, transport, operations = fixture
+    first = operations.execute("fixture", request(agent))
+    transport.effects[first.operation_id] = replace(transport.effects[first.operation_id], generation=generation)
+    rejected = operations.execute("fixture", request(agent))
+    assert rejected.phase is Phase.REFUSED
+    assert rejected.result == {}
+    assert transport.creations == 1
