@@ -100,6 +100,32 @@ def test_ruling_follows_the_pull_request_then_the_wait():
     assert ruling(task, CLOSED, {"until": 1}) == ("", "")
 
 
+GATE_GREEN_JOB_RED = PullRequest("OPEN", None, 1, True, True, ("record pass",), gate_passed=True)
+
+
+@pytest.mark.parametrize("queued", [False, True])
+def test_a_red_job_outside_a_passed_required_gate_does_not_hold_the_stop(queued):
+    task = {"id": "t1", "pr_url": URL}
+    pull = PullRequest("OPEN", None, 1, True, True, ("record pass",), gate_passed=True, queued=queued)
+    assert ruling(task, pull, {"until": 1, "on": {"kind": "merge", "target": URL}}) == ("", "")
+    assert ruling(task, pull, None) == ("green", "")
+    gate_red = PullRequest("OPEN", None, 1, True, True, ("Gate — Required",), queued=queued)
+    assert ruling(task, gate_red, {"until": 1, "on": {"kind": "merge", "target": URL}}) == ("red", "")
+
+
+@pytest.mark.parametrize("queued", [False, True])
+def test_a_stop_with_the_required_gate_green_and_another_job_red_passes_on_its_wait(rig, queued):
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL] = PullRequest("OPEN", None, 1, True, True, ("record pass",), gate_passed=True, queued=queued)
+    on = {"kind": "merge", "target": URL}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"merge of {URL}", rig.clock[0], on=on)
+    assert rig.stop().allowed
+    rig.pulls[URL] = PullRequest("OPEN", None, 1, True, True, ("Gate — Required",), queued=queued)
+    decision = rig.stop()
+    assert not decision.allowed
+    assert decision.reason.startswith(f"checks failed on {URL}: Gate — Required. Fix")
+
+
 def test_each_refusal_names_the_one_command_that_clears_it():
     task, block = {"id": "t1", "pr_url": URL}, f'agentihooks swarm {SLUG} block "<why>"'
     assert refusal("merged", SLUG, task, MERGED) == (

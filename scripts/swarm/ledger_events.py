@@ -58,6 +58,7 @@ class PullRequest:
     red_at: int | None = None
     unpassed_gate: str = ""
     queued: bool = False
+    gate_passed: bool = False
 
 
 def iso_ms(text):
@@ -97,6 +98,7 @@ def pull_request(raw):
         min(reds, default=None),
         unpassed_gate,
         raw.get("mergeQueueEntry") is not None,
+        bool(raw.get("gated")) and _gate(checks, results) == ["SUCCESS"],
     )
 
 
@@ -121,6 +123,10 @@ def _resolved(gated, checks, results, running):
     if any(result in FINAL_RED for result in gate):
         return True
     return "SUCCESS" in gate and not running and not any(result in PENDING for result in results)
+
+
+def _gate(checks, results):
+    return [result for check, result in zip(checks, results) if (check.get("name") or check.get("context")) == GATE]
 
 
 def declares_gate(tree):
