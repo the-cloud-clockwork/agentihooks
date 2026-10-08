@@ -70,9 +70,8 @@ def serving(timeout: float = 1) -> str | None:
         return ""
     except OSError:
         return None
-    if not isinstance(body, dict):
-        return ""
-    return body.get("dir") or ""
+    served = body.get("dir") if isinstance(body, dict) else None
+    return served if isinstance(served, str) else ""
 
 
 def page_line(slug):

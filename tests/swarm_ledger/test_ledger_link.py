@@ -87,7 +87,14 @@ def test_serving_names_the_folder_the_server_reports(server):
 
 @pytest.mark.parametrize(
     "served",
-    [{"body": b"not json"}, {"body": b"[]"}, {"body": b"{}"}, {"body": b'{"dir": ""}'}, {"status": 404}],
+    [
+        {"body": b"not json"},
+        {"body": b"[]"},
+        {"body": b"{}"},
+        {"body": b'{"dir": ""}'},
+        {"body": b'{"dir": 5}'},
+        {"status": 404},
+    ],
 )
 def test_a_server_that_reports_no_folder_serves_an_empty_folder(server, served):
     server.update(served)
