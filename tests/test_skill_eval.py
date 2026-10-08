@@ -1,3 +1,4 @@
+from io import BytesIO, TextIOWrapper
 from unittest.mock import Mock
 
 import pytest
@@ -23,11 +24,11 @@ def launch(monkeypatch):
     monkeypatch.setattr(skill_eval.os, "environ", environ)
     loader = Mock()
     monkeypatch.setattr(install, "_load_claude_runtime_env", loader)
-    monkeypatch.setattr(skill_eval.shutil, "which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr(skill_eval.shutil, "which", Mock(return_value="/usr/bin/claude"))
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"winner": 1, "peer": 3})
-    monkeypatch.setattr(account_sessions, "max_sessions", lambda env: 3)
+    monkeypatch.setattr(account_sessions, "max_sessions", Mock(return_value=3))
     caps = SessionCaps(3, {"winner": 2})
-    monkeypatch.setattr(session_caps, "caps", lambda default: caps)
+    monkeypatch.setattr(session_caps, "caps", Mock(return_value=caps))
     result = balancer.ProbeResult(
         account="winner",
         provider_status="allowed",
@@ -60,6 +61,9 @@ def test_claude_evaluation_routes_without_default_login(launch, monkeypatch, tmp
         skill_eval.main(["--", *command])
 
     loader.assert_called_once_with()
+    skill_eval.shutil.which.assert_called_once_with("claude")
+    account_sessions.max_sessions.assert_called_once_with(environ)
+    session_caps.caps.assert_called_once_with(3)
     selector.assert_called_once_with(
         environ,
         include_fable=False,
@@ -122,7 +126,45 @@ def test_evaluation_requires_a_command(args, launch, capsys):
     with pytest.raises(SystemExit) as error:
         skill_eval.main(args)
     assert error.value.code == 2
-    assert "an evaluation command is required after --" in capsys.readouterr().err
+    assert capsys.readouterr().err.endswith(": error: an evaluation command is required after --\n")
     loader.assert_not_called()
     selector.assert_not_called()
     execute.assert_not_called()
+
+
+def test_claude_evaluation_uses_binary_name_when_lookup_is_missing(launch):
+    _, _, selector, _, _ = launch
+    skill_eval.shutil.which.return_value = None
+    with pytest.raises(RuntimeError, match="exec intercepted"):
+        skill_eval.main(["claude", "-p", "evaluate"])
+    assert selector.call_args.kwargs["claude_bin"] == "claude"
+
+
+def test_evaluation_refuses_unknown_agent(launch, capsys):
+    _, loader, selector, execute, _ = launch
+    with pytest.raises(SystemExit) as error:
+        skill_eval.main(["--agent", "unknown", "--", "python3", "evaluate.py"])
+    assert error.value.code == 2
+    assert "invalid choice: 'unknown' (choose from 'claude', 'codex')" in capsys.readouterr().err
+    loader.assert_not_called()
+    selector.assert_not_called()
+    execute.assert_not_called()
+
+
+def test_evaluation_help_explains_routed_authentication(launch, capsys):
+    with pytest.raises(SystemExit) as error:
+        skill_eval.main(["--help"])
+    assert error.value.code == 0
+    output = capsys.readouterr()
+    assert "\nRun skill evaluations with quota routed Claude authentication\n" in output.out
+    assert "--agent {claude,codex}" in output.out
+    assert output.err == ""
+
+
+def test_account_proof_is_flushed_before_process_replacement(launch, monkeypatch):
+    buffer = BytesIO()
+    stream = TextIOWrapper(buffer, encoding="utf-8")
+    monkeypatch.setattr(skill_eval.sys, "stderr", stream)
+    with pytest.raises(RuntimeError, match="exec intercepted"):
+        skill_eval.main(["claude", "-p", "evaluate"])
+    assert buffer.getvalue() == b"[skill-eval] account=winner\n"
