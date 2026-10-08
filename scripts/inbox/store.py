@@ -19,6 +19,8 @@ MOVE_ATTEMPTS = 3
 STATES = ("pending", "delivered", "confirmed", "read", "done", "blocked", "handed_off", "cancelled")
 REDELIVER_ENV = "AGENTIHOOKS_INBOX_REDELIVER_S"
 DEFAULT_REDELIVER_S = 300
+OWNER_TTL_ENV = "AGENTIHOOKS_INBOX_OWNER_TTL_S"
+DEFAULT_OWNER_TTL_S = 30
 REDELIVERED = "redelivered: never confirmed inside the redelivery window"
 REDELIVERER = "inbox"
 CLOSED = ("done", "blocked", "handed_off", "cancelled")
@@ -52,6 +54,11 @@ def now_ms():
 
 def owner_key(recipient):
     return f"{PREFIX}:owner:{recipient}"
+
+
+def owner_ttl_s(environ=None):
+    env = os.environ if environ is None else environ
+    return int(env.get(OWNER_TTL_ENV) or DEFAULT_OWNER_TTL_S)
 
 
 def redelivery_ms(environ=None):

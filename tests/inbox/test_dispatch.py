@@ -6,7 +6,7 @@ import pytest
 from scripts.inbox.dispatch import SHOWN, Dispatcher, digest
 from scripts.inbox.receipts import REASSIGNED, RELEASED, DispatchError, Receipts
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks, claim, first_showing, write_ref
-from scripts.inbox.store import InboxStore, now_ms, owner_key
+from scripts.inbox.store import OWNER_TTL_ENV, InboxStore, now_ms, owner_key, owner_ttl_s
 from scripts.swarm.naming import NameRegistry
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -94,6 +94,90 @@ def test_released_recipient_takes_legacy_claim_again(store, dispatcher):
     item = store.send("alice", "bob", "hi")
     dispatcher.release("bob", "bridge-1")
     assert [shown.id for shown in claim(store, "bob")] == [item.id]
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    import time
+
+    real = time.time
+    offset = [0.0]
+    monkeypatch.setattr(time, "time", lambda: real() + offset[0])
+
+    def advance(seconds):
+        offset[0] += seconds
+
+    return advance
+
+
+def test_own_holds_the_recipient_for_the_owner_expiry(store, dispatcher):
+    assert owner_ttl_s({}) == 30
+    assert owner_ttl_s({OWNER_TTL_ENV: "5"}) == 5
+    assert store.redis.ttl(owner_key("bob")) == 30
+
+
+def test_own_reads_the_expiry_from_the_environment(store, monkeypatch):
+    monkeypatch.setenv(OWNER_TTL_ENV, "7")
+    Dispatcher(store).own("bob", "bridge-1")
+    assert store.redis.ttl(owner_key("bob")) == 7
+
+
+def test_a_takeover_holds_the_recipient_for_the_owner_expiry(store, dispatcher, clock):
+    clock(20)
+    dispatcher.own("bob", "bridge-2", takeover=True)
+    assert store.redis.ttl(owner_key("bob")) == 30
+
+
+def test_a_killed_bridge_releases_its_recipient_within_the_expiry_window(store, dispatcher, clock):
+    store.send("alice", "bob", "before")
+    assert claim(store, "bob") == []
+    clock(29)
+    assert dispatcher.owner("bob") == "bridge-1"
+    clock(2)
+    after = store.send("alice", "bob", "after")
+    assert dispatcher.owner("bob") == ""
+    assert after.id in [shown.id for shown in claim(store, "bob")]
+    successor = Dispatcher(store)
+    successor.own("bob", "bridge-2")
+    assert successor.owner("bob") == "bridge-2"
+
+
+def test_a_killed_bridge_lets_the_ledger_marks_through_again(store, dispatcher, clock):
+    marks = SeenMarks(store.redis)
+    event = {"rev": 3, "id": "c1"}
+    assert first_showing(marks, "bob", "sw", [event]) == []
+    clock(31)
+    assert first_showing(marks, "bob", "sw", [event]) == [event]
+
+
+def test_a_renewing_bridge_keeps_its_recipient_past_the_first_expiry(store, dispatcher, clock):
+    clock(20)
+    assert dispatcher.renew("bob", "bridge-1") is True
+    assert store.redis.ttl(owner_key("bob")) == 30
+    clock(20)
+    store.send("alice", "bob", "hi")
+    assert dispatcher.owner("bob") == "bridge-1"
+    assert claim(store, "bob") == []
+
+
+def test_renew_by_another_bridge_changes_nothing(store, dispatcher, clock):
+    clock(10)
+    assert dispatcher.renew("bob", "bridge-2") is False
+    assert dispatcher.owner("bob") == "bridge-1"
+    assert store.redis.ttl(owner_key("bob")) == 20
+
+
+def test_renew_after_the_expiry_never_brings_the_owner_back(store, dispatcher, clock):
+    clock(31)
+    assert dispatcher.renew("bob", "bridge-1") is False
+    assert store.redis.exists(owner_key("bob")) == 0
+    assert dispatcher.owner("bob") == ""
+
+
+def test_renew_watches_the_owner(store, dispatcher, watched):
+    watched.clear()
+    dispatcher.renew("bob", "bridge-1")
+    assert set(watched) == {owner_key("bob")}
 
 
 def test_reserve_takes_pending_items_in_inbox_order_with_a_digest(store, dispatcher):
