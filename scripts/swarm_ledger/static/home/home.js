@@ -59,8 +59,8 @@ function activity(at, now) {
     "data-tip": `${stamp(at)} ${pad(d.getHours())}:${pad(d.getMinutes())}`, text: ago(at, now) });
 }
 
-function act(cls, act, slug, label, title, ...kids) {
-  return h("button", { class: `act ${cls}`, type: "button", "data-act": act, "data-slug": slug, title, "aria-label": label }, ...kids);
+function act(cls, act, slug, label, ...kids) {
+  return h("button", { class: `act ${cls}`, type: "button", "data-act": act, "data-slug": slug, "aria-label": label }, ...kids);
 }
 
 function ledgerRow(s, cells, controls, lead, attrs) {
@@ -75,8 +75,8 @@ function homeRow(s, now) {
   const cells = [h("span", { class: "num open" }, h("b", { text: String(s.open) }), " open"),
     h("span", { class: "num done" }, h("b", { text: String(s.done) }), " done"),
     h("span", { class: `state s-${state || "none"}`, text: state || "no swarm" }), activity(s.updated_at, now)];
-  const controls = [s.closed_at ? act("reopen", "reopen", s.slug, `Reopen ${s.title}`, undefined, "Reopen") : null,
-    act("del", "delete", s.slug, `Move ${s.title} to the bin`, "Move to the bin", icon("trash"))];
+  const controls = [s.closed_at ? act("reopen", "reopen", s.slug, `Reopen ${s.title}`, "Reopen") : null,
+    act("del", "delete", s.slug, `Move ${s.title} to the bin`, icon("trash"))];
   const lead = h("button", { class: "fold", type: "button", "aria-expanded": "false", "aria-label": `Show all of ${s.title}`, text: "▸" });
   return ledgerRow(s, cells, controls, lead, { "data-slug": s.slug, "data-kind": s.size, "data-open": s.open, "data-done": s.done,
     "data-swarm": SWARM_RANK[state] ?? 4, "data-at": s.updated_at || 0 });
@@ -85,7 +85,7 @@ function homeRow(s, now) {
 function binRow(s) {
   const cells = [h("span", { class: "deleted", text: stamp(s.deleted_at) }),
     h("span", { class: "left", text: `${s.days_left} day${s.days_left === 1 ? "" : "s"} left` })];
-  return ledgerRow(s, cells, [act("restore", "restore", s.slug, `Restore ${s.title} to HOME`, "Restore to HOME", icon("restore"), "Restore")], null, {});
+  return ledgerRow(s, cells, [act("restore", "restore", s.slug, `Restore ${s.title} to HOME`, icon("restore"), "Restore")], null, {});
 }
 
 async function reopenLedger(b) {
