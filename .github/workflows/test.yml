@@ -114,29 +114,7 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          folder="$RUNNER_TEMP/dev-durations"
-          timings=".test_durations-${{ matrix.python-version }}"
-          if [[ -f "$timings" ]]; then cp "$timings" .test_durations; fi
-          # refresh-durations uploads only after unit and lint pass, so a later Sonar failure on that run does not void it.
-          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=durations-merged&per_page=20" --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == "dev")] | sort_by(.created_at) | last | .workflow_run.id // empty') || run=
-          if [[ -n "$run" ]] && gh run download "$run" --repo "$GITHUB_REPOSITORY" --name durations-merged --dir "$folder" &&
-             python - "$folder/$timings" <<'PYTHON'
-          import json
-          import math
-          import sys
-          from pathlib import Path
-          data = json.loads(Path(sys.argv[1]).read_text())
-          assert isinstance(data, dict) and data
-          assert all(isinstance(k, str) and isinstance(v, (int, float)) and math.isfinite(v) and v >= 0 for k, v in data.items())
-          print(f"Downloaded {len(data)} duration records")
-          PYTHON
-          then
-            cp "$folder/$timings" .test_durations
-            echo "Using durations from green dev run $run"
-          else
-            echo "Using committed durations"
-          fi
+        run: python -m tests.dev_durations ${{ matrix.python-version }}
 
       - name: Run tests
         if: steps.lookup.outputs.skip != 'true'
