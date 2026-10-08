@@ -941,6 +941,28 @@ def test_a_paused_or_drained_swarm_keeps_its_master_and_a_stopped_one_has_none(s
     assert tick("sw", store, tasks(), runtime, 3) == [] and len(runtime.masters) == 1
 
 
+def test_account_reads_and_spawns_hold_the_placement_lock_and_the_rest_does_not(store, monkeypatch):
+    from scripts.inbox import exits
+    from scripts.swarm import quota_notice
+    from scripts.swarm import tick as tick_module
+
+    held, runtime, spawn = [], FakeRuntime(), FakeRuntime.spawn
+    monkeypatch.setattr(exits, "sweep", lambda *args: held.append(("sweep", tick_module.PLACING.locked())))
+    monkeypatch.setattr(
+        quota_notice, "refresh", lambda *args: held.append(("quota", tick_module.PLACING.locked())) or []
+    )
+    monkeypatch.setattr(
+        runtime,
+        "spawn",
+        lambda config, lane, name, task: (
+            held.append((lane, tick_module.PLACING.locked())) or spawn(runtime, config, lane, name, task)
+        ),
+    )
+    tick("sw", store, tasks(("t1", "eng")), runtime, 1)
+    assert held == [("sweep", False), ("quota", True), ("master", True), ("eng", True)]
+    assert not tick_module.PLACING.locked()
+
+
 def test_an_operator_write_to_a_stopped_swarm_starts_its_master_and_no_engineers(store):
     from scripts.inbox.store import InboxStore
 

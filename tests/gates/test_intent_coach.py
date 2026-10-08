@@ -352,3 +352,109 @@ def test_environment_and_catalog_accept_intent_coach():
     with pytest.raises(SwarmError) as caught:
         gate_mode("intent-gate", "bad")
     assert str(caught.value) == "intent-gate takes deny, log only, skip, coach"
+
+
+def test_an_unmoved_head_is_read_once_and_skips_the_full_view(tmp_path):
+    url = DOC["tasks"][0]["pr_url"]
+    Verdicts(SLUG, "intent-coach", tmp_path).write(
+        TASK, "fail", "missing behavior", 5, coach_rounds=1, head="original", url="old"
+    )
+    heads, views = [], []
+    check = intent.Check(
+        SLUG,
+        "coach",
+        NOW + 1,
+        Ledger(),
+        Mail(),
+        lambda url: views.append(url) or {**PR, "head": "original"},
+        lambda state: ("pass", "ok"),
+        home=tmp_path,
+        head=lambda url: heads.append(url) or "original",
+    )
+    assert check.run(DOC) == []
+    assert (heads, views) == ([url], [])
+    assert Verdicts(SLUG, "intent", tmp_path).read(TASK) == {
+        "verdict": "fail",
+        "reason": "missing behavior",
+        "at": 5,
+        "coach_rounds": 1,
+        "head": "original",
+        "url": url,
+    }
+
+
+@pytest.mark.parametrize(("current", "result"), [("fixed", [f"task {TASK} intent check pass"]), (None, [])])
+def test_a_moved_or_unreadable_head_still_takes_the_full_view(tmp_path, current, result):
+    run_check(tmp_path, "original")
+    views = []
+    check = intent.Check(
+        SLUG,
+        "coach",
+        NOW + 1,
+        Ledger(),
+        Mail(),
+        lambda url: views.append(url) or {**PR, "head": "fixed" if current else "original"},
+        lambda state: ("pass", "ok"),
+        home=tmp_path,
+        head=lambda url: current,
+    )
+    assert check.run(DOC) == result
+    assert views == [DOC["tasks"][0]["pr_url"]]
+    assert Verdicts(SLUG, "intent", tmp_path).read(TASK)["verdict"] == ("pass" if current else "fail")
+
+
+@pytest.mark.parametrize("mode", ["enforce", "observe"])
+def test_other_modes_never_read_the_head_alone(tmp_path, mode):
+    Verdicts(SLUG, "intent-coach", tmp_path).write(TASK, "pass", "ok", 5, coach_rounds=0, head="original", url="u")
+    heads, views = [], []
+    actions = intent.Check(
+        SLUG,
+        mode,
+        NOW,
+        Ledger(),
+        Mail(),
+        lambda url: views.append(url) or {**PR, "head": "original"},
+        lambda state: ("pass", "ok"),
+        home=tmp_path,
+        head=lambda url: heads.append(url) or "original",
+    ).run(DOC)
+    assert (heads, views, actions) == ([], [DOC["tasks"][0]["pr_url"]], [f"task {TASK} intent check pass"])
+
+
+def test_a_rearmed_unmoved_head_keeps_its_verdict_even_when_the_full_view_fails(tmp_path, monkeypatch):
+    run_check(tmp_path, "original")
+    monkeypatch.setattr(intent, "stamp_body", lambda *args: True)
+    intent.stamp(SLUG, TASK, "url", DOC, "coach", NOW, tmp_path)
+    assert Verdicts(SLUG, "intent", tmp_path).read(TASK)["verdict"] == "pending"
+    actions = intent.Check(
+        SLUG,
+        "coach",
+        NOW + 1,
+        Ledger(),
+        Mail(),
+        lambda url: None,
+        lambda state: pytest.fail("an unmoved head is not judged again"),
+        home=tmp_path,
+        head=lambda url: "original",
+    ).run(DOC)
+    assert actions == []
+    record = Verdicts(SLUG, "intent", tmp_path).read(TASK)
+    assert (record["verdict"], record["reason"], record["head"]) == ("fail", "missing behavior", "original")
+    assert not gate(tmp_path).allowed
+
+
+def test_a_first_check_never_reads_the_head_alone(tmp_path):
+    heads = []
+    intent.Check(
+        SLUG,
+        "coach",
+        NOW,
+        Ledger(),
+        Mail(),
+        lambda url: {**PR, "head": "first"},
+        lambda state: ("pass", "ok"),
+        home=tmp_path,
+        head=lambda url: heads.append(url) or "first",
+    ).run(DOC)
+    assert heads == []
+    assert Verdicts(SLUG, "intent", tmp_path).read(TASK)["verdict"] == "pass"

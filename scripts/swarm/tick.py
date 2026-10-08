@@ -7,6 +7,7 @@ Each swarm keeps at most one master: an agent the operator talks to, which works
 import json
 import os
 import sys
+import threading
 from dataclasses import dataclass, field, replace
 from itertools import count
 from typing import Protocol
@@ -52,6 +53,8 @@ LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
 MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
+# Swarms tick in threads; two placing from one live session count overfill an account.
+PLACING = threading.Lock()
 DOWN_TOLD = "master down told"
 REDELIVERED = "the master went down before closing it; kept for the next master"
 MASTER_DOWN = (
@@ -72,7 +75,9 @@ NUDGE = (
 
 
 class SpawnError(RuntimeError):
-    pass
+    def __init__(self, message: str, status: str = "refused"):
+        super().__init__(message)
+        self.status = status
 
 
 @dataclass(frozen=True)
@@ -161,24 +166,25 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(grouping.group_pass, slug, config, store, ledger, doc)
     from scripts.swarm import quota_notice
 
-    actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
-    actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
-    actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, doc, now_ms)
-    if not sleeping:
-        actions += skip_refused(_codex_hook_order)
-        actions += skip_refused(_master_down, slug, config, store, ledger, runtime, now_ms)
-        actions += skip_refused(
-            tick_master.run,
-            slug,
-            config,
-            store,
-            ledger,
-            runtime,
-            now_ms,
-            lambda: _master(slug, config, store, runtime, now_ms),
-        )
-        if config.state == "running":
-            actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+    with PLACING:
+        actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
+        actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
+        actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, doc, now_ms)
+        if not sleeping:
+            actions += skip_refused(_codex_hook_order)
+            actions += skip_refused(_master_down, slug, config, store, ledger, runtime, now_ms)
+            actions += skip_refused(
+                tick_master.run,
+                slug,
+                config,
+                store,
+                ledger,
+                runtime,
+                now_ms,
+                lambda: _master(slug, config, store, runtime, now_ms),
+            )
+            if config.state == "running":
+                actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
     timing.call(_conversations, slug, store, runtime)
     timing.call(_session_models, slug, store)
     starting = {a.name for a in store.agents(slug) if a.lane == MASTER and a.state == "starting"}

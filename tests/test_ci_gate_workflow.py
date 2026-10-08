@@ -19,7 +19,11 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     gate = jobs["gate-required"]
     required = {"unit", "lint", "sonar", "mutation", "test-count", "coverage-ratchet", "semgrep"}
     assert gate["name"] == "Gate — Required"
-    assert required <= set(gate["needs"]) <= required | {"swarm-image", "shard-check", "brain-smoke", "wiring", "size"}
+    assert (
+        required
+        <= set(gate["needs"])
+        <= required | {"swarm-image", "shard-check", "brain-smoke", "wiring", "size", "dependency-audit"}
+    )
     assert gate["if"] == "${{ always() }}"
     assert "needs" not in jobs["unit"]
     assert "needs" not in jobs["lint"]
