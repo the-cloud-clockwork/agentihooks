@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -192,6 +193,44 @@ def test_quoted_sed_path_in_range_allowed(ledger):
     assert check(bash(f"sed -n '35,65p' \"{stored(ledger)}\""), env(ledger)) is None
 
 
+def test_range_edges_allowed(ledger):
+    assert check(read(stored(ledger), limit=18), env(ledger, task="t3")) is None
+    assert check(read(stored(ledger), offset=45, limit=1), env(ledger)) is None
+    assert check(bash(f"sed -n 45,45p {stored(ledger)}"), env(ledger)) is None
+
+
+def test_plan_id_inside_another_name_refused(ledger):
+    assert check(read(stored(ledger) + ".bak", offset=45, limit=5), env(ledger))
+
+
+def test_swarm_unset_allowed_and_default_ledger_under_home(ledger):
+    unset = {k: v for k, v in env(ledger).items() if k != "AGENTIHOOKS_SWARM"}
+    assert check(read(stored(ledger)), unset) is None
+    home = Path.home()
+    (home / "development-ledger").mkdir(parents=True)
+    (ledger / f"{SLUG}.json").rename(home / "development-ledger" / f"{SLUG}.json")
+    path = str(home / "development-ledger" / f"{SLUG}.media" / PLAN)
+    assert check(read(path, offset=45, limit=5), {k: v for k, v in env(ledger).items() if k != "LEDGER_DIR"}) is None
+
+
+def test_dollar_or_letters_alone_do_not_refuse(ledger):
+    assert check(bash("echo $HOME"), env(ledger)) is None
+    assert check(bash(f"ls {ledger}/XY"), env(ledger)) is None
+
+
+def test_other_ledger_plans_add_to_this_one(ledger):
+    (ledger / "other.json").write_text(json.dumps({"artifacts": [{"file": {"id": "d" * 64 + ".md"}, "plan": True}]}))
+    assert check(read(stored(ledger)), env(ledger))
+
+
+def test_range_without_a_phase_plan_gets_no_window(ledger):
+    doc = json.loads((ledger / f"{SLUG}.json").read_text())
+    doc["tasks"].append({"id": "t4", "phase": "p2", "plan_lines": "40-60"})
+    (ledger / f"{SLUG}.json").write_text(json.dumps(doc))
+    assert check(read(stored(ledger, LOOSE)), env(ledger, task="t4")) is None
+    assert "Your chunk" not in check(read(stored(ledger)), env(ledger, task="t4"))
+
+
 @pytest.mark.parametrize(
     "command",
     [
@@ -226,3 +265,73 @@ def test_hook_manager_blocks_whole_read(ledger, monkeypatch):
         monkeypatch.setenv(key, value)
     with pytest.raises(BlockAction, match="agentihooks plan read"):
         hook_manager.on_pre_tool_use({"tool_name": "Read", "tool_input": {"file_path": stored(ledger)}})
+
+
+def test_hook_manager_reports_the_tool_and_session(ledger, monkeypatch):
+    from unittest.mock import patch
+
+    from hooks import hook_manager
+    from hooks.hook_manager import BlockAction
+
+    for key, value in env(ledger).items():
+        monkeypatch.setenv(key, value)
+    with patch.object(hook_manager.otel, "emit_event") as emit, pytest.raises(BlockAction):
+        hook_manager.on_pre_tool_use({"tool_name": "Read", "tool_input": {"file_path": stored(ledger)}})
+    emit.assert_called_with("agentihooks.guardrail.plan_read_blocked", {"session.id": "", "tool_name": "Read"})
+    with patch.object(hook_manager.otel, "emit_event") as emit, pytest.raises(BlockAction):
+        hook_manager._plan_read_guard({"session_id": "s1", **read(stored(ledger))}, "Read")
+    emit.assert_called_with("agentihooks.guardrail.plan_read_blocked", {"session.id": "s1", "tool_name": "Read"})
+
+
+def test_hook_manager_logs_a_guard_crash(monkeypatch):
+    from unittest.mock import patch
+
+    from hooks import hook_manager
+
+    with (
+        patch.object(plan_read_guard, "check", side_effect=RuntimeError("boom")),
+        patch.object(hook_manager, "log") as log,
+    ):
+        assert hook_manager._plan_read_guard(read("x"), "Read") is None
+    log.assert_called_once_with("plan_read_guard failed", {"error": "boom"})
+
+
+def test_credential_guard_helper_blocks_rewrites_and_logs(monkeypatch):
+    from unittest.mock import patch
+
+    from hooks import hook_manager
+    from hooks.context import credential_guard
+    from hooks.hook_manager import BlockAction
+
+    monkeypatch.setattr("hooks.config.CREDENTIAL_GUARD_ENABLED", True)
+    verdict = credential_guard.Verdict
+    with patch.object(credential_guard, "evaluate", return_value=verdict()):
+        assert hook_manager._credential_guard(read("x"), "Read") is None
+    with patch.object(credential_guard, "evaluate", return_value=verdict(rewrite={"a": 1})):
+        assert hook_manager._credential_guard(read("x"), "Read") == ({"a": 1}, "")
+    with patch.object(credential_guard, "evaluate", return_value=verdict(rewrite={"a": 1}, note="n")):
+        assert hook_manager._credential_guard(read("x"), "Read") == ({"a": 1}, "n")
+    with (
+        patch.object(credential_guard, "evaluate", return_value=verdict(block="no")),
+        patch.object(hook_manager.otel, "emit_event") as emit,
+        pytest.raises(BlockAction, match="^no$"),
+    ):
+        hook_manager._credential_guard(read("x"), "Read")
+    emit.assert_called_once_with(
+        "agentihooks.guardrail.credential_read_blocked", {"session.id": "", "tool_name": "Read"}
+    )
+    with (
+        patch.object(credential_guard, "evaluate", return_value=verdict(block="no")),
+        patch.object(hook_manager.otel, "emit_event") as emit,
+        pytest.raises(BlockAction),
+    ):
+        hook_manager.on_pre_tool_use({"session_id": "s1", **read("x")})
+    emit.assert_called_once_with(
+        "agentihooks.guardrail.credential_read_blocked", {"session.id": "s1", "tool_name": "Read"}
+    )
+    with (
+        patch.object(credential_guard, "evaluate", side_effect=RuntimeError("boom")),
+        patch.object(hook_manager, "log") as log,
+    ):
+        assert hook_manager._credential_guard(read("x"), "Read") is None
+    log.assert_called_once_with("credential_guard failed", {"error": "boom"})

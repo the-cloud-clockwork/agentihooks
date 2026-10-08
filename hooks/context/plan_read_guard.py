@@ -15,12 +15,12 @@ COMMAND = "agentihooks plan read"
 
 
 def enabled(env: Mapping[str, str]) -> bool:
-    return env.get("PLAN_READ_GUARD_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+    return str(env.get("PLAN_READ_GUARD_ENABLED")).strip().lower() not in {"0", "false", "no", "off"}
 
 
 def check(payload: dict, environ: Mapping[str, str] | None = None) -> str | None:
     env = os.environ if environ is None else environ
-    slug = env.get("AGENTIHOOKS_SWARM", "")
+    slug = env.get("AGENTIHOOKS_SWARM")
     if not (enabled(env) and slug and env.get("AGENTIHOOKS_SWARM_LANE") in LANES):
         return None
     tool_name, tool_input = payload.get("tool_name"), payload.get("tool_input")
@@ -62,7 +62,7 @@ def _read(tool_input: dict, window) -> bool:
     limit, offset = tool_input.get("limit"), tool_input.get("offset") or 1
     if type(limit) is not int or limit < 1 or type(offset) is not int:
         return False
-    if PurePath(tool_input.get("file_path") or "").name != window[0]:
+    if PurePath(tool_input["file_path"]).name != window[0]:
         return False
     start = max(offset, 1)
     return window[1] <= start and start + limit - 1 <= window[2]
@@ -85,7 +85,7 @@ DISPATCH = {"Read": _read, "Grep": _never, "Bash": _bash, "WebFetch": _never}
 
 
 def _text(tool_name: str, tool_input: dict) -> str:
-    text = " ".join(str(tool_input.get(field) or "") for field in FIELDS[tool_name])
+    text = " ".join(str(tool_input[field]) for field in FIELDS[tool_name] if tool_input.get(field))
     if tool_name != "Bash":
         return text
     try:
@@ -120,22 +120,22 @@ def _plans(env, slug: str):
                 plans |= _plan_ids(_load(path))
             except (OSError, ValueError, KeyError, TypeError, AttributeError):
                 continue
-    return plans, _window(doc, env.get("AGENTIHOOKS_SWARM_TASK", ""))
+    return plans, _window(doc, env.get("AGENTIHOOKS_SWARM_TASK"))
 
 
 def _load(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_bytes())
 
 
 def _plan_ids(doc: dict) -> set[str]:
     return {row["file"]["id"] for row in doc.get("artifacts", []) if row.get("plan") is True}
 
 
-def _window(doc: dict, task_id: str):
+def _window(doc: dict, task_id: str | None):
     task = next((t for t in doc.get("tasks", []) if t.get("id") == task_id), {})
     phase = next((p for p in doc.get("phases", []) if p.get("id") == task.get("phase")), {})
-    ref, lines = phase.get("plan_ref"), task.get("plan_lines")
-    match = re.fullmatch(r"([1-9][0-9]*)-([1-9][0-9]*)", lines) if isinstance(lines, str) and ref else None
-    if match is None:
+    ref = phase.get("plan_ref")
+    match = re.fullmatch(r"([1-9][0-9]*)-([1-9][0-9]*)", str(task.get("plan_lines")))
+    if match is None or not ref:
         return None
-    return ref["artifact"].rsplit("/", 1)[-1], max(int(match[1]) - MARGIN, 1), int(match[2]) + MARGIN
+    return PurePath(ref["artifact"]).name, max(int(match[1]) - MARGIN, 1), int(match[2]) + MARGIN
