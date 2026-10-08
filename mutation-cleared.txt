@@ -1934,5 +1934,9 @@
   "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_28:117cb0adedb7e2ba99e15e8948e79dc66b212bac25190d65e20f679e3e8c341e": {
     "reader": "Standards /root/standards_reader",
     "reason": "The config-read exception fallback repo is used only as a truth operand. Empty string and None both select identity None and return None; no path operation consumes the changed value."
+  },
+  "scripts/profiles/scaffold.py:scripts.profiles.scaffold.x_overlay_new__mutmut_38:8143335d4bf42677f71b9ed3a94c80c65c7cd1c576e964ad4c5abbec46ecf000": {
+    "reader": "Standards ov3 reader",
+    "reason": "Equivalent mutant. sort_keys has one reader in PyYAML 6.0.3, BaseRepresenter.represent_mapping, which tests if self.sort_keys; the Dumper and CDumper classes only forward the value, and the serializer, emitter, constructor and nodes never read it. None and False are both falsy, so both keep insertion order: safe_dump of the overlay manifest is byte identical for sort_keys False and None, also for a nested mapping and CSafeDumper. sort_keys True gives description, kind, name, wears, which the exact profile.yml text test kills. Evidence: CI run 37703337103 at 2df7d0a2. Adversarial Standards ruling."
   }
 }

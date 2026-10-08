@@ -60,7 +60,7 @@ def orphan(row: Process, info: dict, table: dict[int, Process]) -> str:
 
 
 def terminate(row: Process, proc: Path) -> None:
-    if _process(row.pid, proc) != row:
+    if (current := _process(row.pid, proc)) is None or current.start_time != row.start_time:
         raise ProcessLookupError("server identity changed")
     os.kill(row.pid, signal.SIGTERM)
     deadline = time.monotonic() + 1
