@@ -5575,6 +5575,7 @@ def cmd_claude(extra_args: list[str]) -> None:
     import fcntl
 
     from hooks.context.account_sessions import max_sessions, sessions_by_account
+    from scripts import session_caps
     from scripts.claude_quota_balancer import (
         RoutingError,
         _cache_path,
@@ -5623,7 +5624,7 @@ def cmd_claude(extra_args: list[str]) -> None:
                 include_fable=include_fable,
                 claude_bin=claude_bin,
                 sessions=sessions_by_account(),
-                max_sessions=cap,
+                caps=session_caps.caps(cap),
                 exclude=excluded,
             )
             selected_credential = decision.credential
@@ -5671,6 +5672,7 @@ def cmd_balance(
     current: bool = False,
 ) -> int:
     from hooks.context.account_sessions import max_sessions, sessions_by_account
+    from scripts import session_caps
     from scripts.agents_quota import codex_table
     from scripts.claude_quota_balancer import (
         RoutingError,
@@ -5690,6 +5692,7 @@ def cmd_balance(
     credentials = discover_credentials(os.environ)
     live = sessions_by_account()
     cap = max_sessions(os.environ)
+    caps = session_caps.caps(cap)
     if current:
         known = discover_credentials(session_env) + credentials
         session = identify_session_account(session_env, known, ancestor_oauth_token())
@@ -5716,7 +5719,7 @@ def cmd_balance(
                     current=session.account,
                     observed=observed,
                     sessions=live,
-                    max_sessions=cap,
+                    caps=caps,
                 )
             )
         return 0 if session.account else 1
@@ -5745,8 +5748,8 @@ def cmd_balance(
         timeout=timeout,
         claude_bin=shutil.which("claude") or "claude",
     )
-    print(render_table(results, include_fable=include_fable, sessions=live, max_sessions=cap))
-    print(f"\nsource={source} max_sessions_per_account={cap}")
+    print(render_table(results, include_fable=include_fable, sessions=live, caps=caps))
+    print(f"\nsource={source} default_max_sessions_per_account={cap}")
     print(f"\n{codex_table()}")
     return 0 if any(is_routable(result) for result in results) else 1
 
@@ -6470,6 +6473,10 @@ def main() -> None:
         from scripts.terminate_agent import main as terminate_agent_main
 
         raise SystemExit(terminate_agent_main(_argv[1:]))
+    if _argv[:2] == ["bundle", "new"] or _argv[:1] == ["overlay"]:
+        from scripts.profiles.scaffold import main as scaffold_main
+
+        raise SystemExit(scaffold_main(_argv))
     if _argv and _argv[0] in ("gc", "lease", "scratch", "name"):
         from scripts.gc_cli import main as gc_main
 
@@ -6555,11 +6562,11 @@ def main() -> None:
         help="Skip bundle auto-discovery hint when state has no bundle linked.",
     )
 
-    bundle_p = sub.add_parser("bundle", help="Manage the linked bundle (link, unlink, list, pull)")
+    bundle_p = sub.add_parser("bundle", help="Manage the linked bundle (new, link, unlink, list, pull)")
     bundle_p.add_argument(
         "action",
-        choices=["link", "unlink", "list", "pull"],
-        help="link <path> | unlink | list | pull",
+        choices=["new", "link", "unlink", "list", "pull"],
+        help="new <path> | link <path> | unlink | list | pull",
     )
     bundle_p.add_argument("bundle_path", nargs="?", default=None, help="Bundle directory path (for link)")
     bundle_p.add_argument("--rebase", action="store_true", help="Use --rebase when pulling")
@@ -6621,6 +6628,7 @@ def main() -> None:
         help="Render a profile into its own home: render NAME --target claude|codex [--force] [--out DIR [--bundle DIR]]",
     )
     sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")
+    sub.add_parser("overlay", help="Overlay profiles in the linked bundle: new NAME --wears ROLES | check NAME")
 
     balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
     balance_p.add_argument("--dry-run", action="store_true", help="Report routing state without launching Claude")

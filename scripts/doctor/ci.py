@@ -1,3 +1,4 @@
+from scripts.gates.reruns import RerunBudget
 from scripts.swarm import ledger_events
 from scripts.swarm.health.findings import Finding
 
@@ -5,7 +6,8 @@ from scripts.swarm.health.findings import Finding
 def reruns(record: dict) -> list[Finding]:
     runs = [r for r in record["runs"] if r["head_sha"] == record["pr"]["head"]["sha"] and r["run_attempt"] > 1]
     count = sum(r["run_attempt"] - 1 for r in runs)
-    if not count:
+    cap = RerunBudget().cap
+    if count <= cap:
         return []
     return [
         Finding(
@@ -13,7 +15,7 @@ def reruns(record: dict) -> list[Finding]:
             str(record["pr"]["number"]),
             f"{count} CI reruns on this pull request head",
             tuple(f"{r['id']} attempts {r['run_attempt']}" for r in runs),
-            "at least one rerun",
+            f"more than {cap} reruns per pull request head",
             count,
         )
     ]

@@ -85,6 +85,7 @@ def status(**changes):
                     "seven_day_left": 78,
                     "seven_day_resets_at": NOW_S + 4 * 86400 + 15 * 3600,
                     "sessions": 2,
+                    "cap": 7,
                 },
                 {
                     "agent": "claude",
@@ -436,11 +437,71 @@ def test_every_button_is_flat_at_rest(open_page):
 def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(open_page):
     page = open_page()
     assert page.table("swarm-quota") == [
-        ["tccgma", "claude", "92%", "53m", "78%", "4d15h", "2/3", ""],
-        ["luna", "claude", "64%", "2h05m", "51%", "6d00h", "1/3", "MASTER"],
-        ["default", "codex", "—", "—", "61%", "3d10h", "0/3", ""],
+        ["tccgma", "claude", "92%", "53m", "78%", "4d15h", "−\n2/7\n+", ""],
+        ["luna", "claude", "64%", "2h05m", "51%", "6d00h", "−\n1/3\n+", "MASTER"],
+        ["default", "codex", "—", "—", "61%", "3d10h", "−\n0/3\n+", ""],
     ]
     assert page.text("#quota-count").lower() == "3 accounts · probed 2m ago"
+
+
+def test_each_sessions_cell_reads_minus_value_plus_and_a_step_sets_that_account_cap(open_page):
+    page = open_page()
+    parts = page.tab.eval_on_selector_all(
+        "#swarm-quota tr:first-child .sw-sessions > *",
+        "els => els.map(e => [e.tagName, e.innerText, e.getAttribute('aria-label'), e.getBoundingClientRect().left])",
+    )
+    assert [(tag, text) for tag, text, _, _ in parts] == [("BUTTON", "−"), ("SPAN", "2/7"), ("BUTTON", "+")]
+    assert parts[0][2] == "Lower the claude session cap for tccgma"
+    assert parts[0][3] < parts[1][3] < parts[2][3]
+    page.tab.get_by_role("button", name="Raise the codex session cap for default").click()
+    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('hive tick')")
+    lower = page.tab.get_by_role("button", name="Lower the claude session cap for tccgma")
+    page.tab.wait_for_function("b => !b.disabled", arg=lower.element_handle())
+    lower.click()
+    for _ in range(50):
+        if len(page.puts) == 2:
+            break
+        page.tab.wait_for_timeout(100)
+    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('hive tick')")
+    assert page.puts == [
+        {"action": "session_cap", "account": "default", "harness": "codex", "cap": 4},
+        {"action": "session_cap", "account": "tccgma", "harness": "claude", "cap": 6},
+    ]
+
+
+def test_a_session_cap_of_one_cannot_step_lower(open_page):
+    payload = status()
+    payload["quota"]["rows"][0]["cap"] = 1
+    page = open_page(payload)
+    assert page.tab.get_by_role("button", name="Lower the claude session cap for tccgma").is_disabled()
+    assert page.tab.get_by_role("button", name="Raise the claude session cap for tccgma").is_enabled()
+
+
+def test_a_queued_session_cap_command_names_itself_in_the_note(open_page):
+    payload = status(
+        commands=[{"command": "swarm", "argv": ["session-cap", "luna", "5", "--harness", "claude"], "state": "pending"}]
+    )
+    page = open_page(payload)
+    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.length > 0")
+    assert page.text("#swarm-note") == "Set session cap: pending, waiting for the hive tick"
+
+
+def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_page):
+    page = open_page()
+    order = page.tab.eval_on_selector_all(
+        "#capacity-box .sw-cap:not(.sw-affinity)",
+        """caps => caps.map(c => [c.querySelector('.sw-cap-name').innerText,
+          [...c.children].slice(1).map(e => e.matches('.sw-field') ? e.querySelector('input').value + (e.querySelector('.sw-unit')?.innerText || '') : e.innerText)])""",
+    )
+    assert order == [
+        ["eng", ["−", "3", "+"]],
+        ["ci", ["−", "1", "+"]],
+        ["plan", ["−", "1", "+"]],
+        ["codex share", ["−", "20%", "+"]],
+        ["compact limit", ["−", "600k", "+"]],
+        ["effort min", ["−", "medium", "+"]],
+        ["effort max", ["−", "high", "+"]],
+    ]
 
 
 def test_the_refresh_icon_beside_the_title_probes_every_account_and_redraws(open_page):

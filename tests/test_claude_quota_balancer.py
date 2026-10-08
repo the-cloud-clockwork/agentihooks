@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from scripts import claude_quota_balancer as balancer
+from scripts.session_caps import SessionCaps
 
 
 def _stream(account_usage: float, weekly_usage: float, fable_usage: float | None = None) -> str:
@@ -451,7 +452,7 @@ def test_account_at_the_session_cap_yields_to_the_next_one(monkeypatch, tmp_path
     env = _three(monkeypatch)
 
     decision = balancer.select_credential(
-        env, cache_file=tmp_path / "c.json", sessions={"BEST": 2, "MID": 1}, max_sessions=2
+        env, cache_file=tmp_path / "c.json", sessions={"BEST": 2, "MID": 1}, caps=SessionCaps(2)
     )
 
     assert decision.result.account == "MID"
@@ -465,7 +466,7 @@ def test_cap_is_configurable(monkeypatch, tmp_path):
     env = _three(monkeypatch)
 
     decision = balancer.select_credential(
-        env, cache_file=tmp_path / "c.json", sessions={"BEST": 2, "MID": 1}, max_sessions=3
+        env, cache_file=tmp_path / "c.json", sessions={"BEST": 2, "MID": 1}, caps=SessionCaps(3)
     )
 
     assert decision.result.account == "BEST"
@@ -475,7 +476,7 @@ def test_every_account_at_cap_overflows_to_the_least_loaded(monkeypatch, tmp_pat
     env = _three(monkeypatch)
 
     decision = balancer.select_credential(
-        env, cache_file=tmp_path / "c.json", sessions={"BEST": 4, "MID": 2, "LOW": 2}, max_sessions=2
+        env, cache_file=tmp_path / "c.json", sessions={"BEST": 4, "MID": 2, "LOW": 2}, caps=SessionCaps(2)
     )
 
     assert decision.result.account == "MID"
@@ -496,7 +497,7 @@ def test_excluded_account_is_never_selected(monkeypatch, tmp_path):
 def test_table_shows_live_sessions_per_account():
     alpha = balancer.parse_probe("alpha", _stream(0.10, 0.20), 100)
 
-    table = balancer.render_table([alpha], now=0, sessions={"alpha": 1, "unrouted": 2}, max_sessions=2)
+    table = balancer.render_table([alpha], now=0, sessions={"alpha": 1, "unrouted": 2}, caps=SessionCaps(2))
 
     assert "SESSIONS" in table.splitlines()[0]
     assert "1/2" in table.splitlines()[2]
@@ -521,7 +522,7 @@ def test_reserve_account_below_the_cap_is_chosen_before_overflow(monkeypatch, tm
     env = {**_three(monkeypatch), "AGENTIHOOKS_RESERVE_ACCOUNTS": "LOW"}
 
     def pick(sessions):
-        return balancer.select_credential(env, cache_file=tmp_path / "c.json", sessions=sessions, max_sessions=3)
+        return balancer.select_credential(env, cache_file=tmp_path / "c.json", sessions=sessions, caps=SessionCaps(3))
 
     opened = pick({"BEST": 4, "MID": 3, "LOW": 0})
     assert (opened.result.account, opened.placement) == ("LOW", "open")
