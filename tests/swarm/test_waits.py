@@ -461,6 +461,7 @@ def test_a_handoff_closes_its_wait_ended_notice_before_the_seat_passes_on(starte
     ledger.rows["t2"].update(state="done")
     cli.run_tick(store, "sw", ledger, FakeRuntime(), FakeHerdr({}))
     [notice] = [item for item in inbox.inbox(agent.seat) if item.text.startswith("Your wait on")]
+    assert waits.notice_task(notice) == "t1"
     inbox.deliver(notice.id, ME)
     assert run("sw", "--as", ME, "handoff", str(_handoff_doc(tmp_path))) == 0
     closed = inbox.get(notice.id)

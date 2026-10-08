@@ -39,7 +39,7 @@ def _steps(item, event):
 
 
 def reader(item):
-    """The agent that took delivery of an item, '' while nobody has: a later seat occupant never received it."""
+    """The agent that took delivery of an item, '' while none has."""
     return next((e.get("by", "") for e in reversed(item["history"]) if e.get("state") in ("delivered", "read")), "")
 
 

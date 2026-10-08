@@ -98,8 +98,10 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
 
     for seat in sorted(seats):
         for item in inbox.inbox(seat):
+            if item.state in CLOSED:
+                continue
             task = notice_task(item)
-            if item.state in CLOSED or not (task or push_stop.is_notice(item)):
+            if not (task or push_stop.is_notice(item)):
                 continue
             owner = _owner(inbox, item, seat)
             if owner in active:
