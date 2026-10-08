@@ -1715,7 +1715,7 @@ def test_restore_hands_the_runtime_to_restore_and_prints_every_agent_outcome(env
 
 @pytest.mark.parametrize("command", ["create", "start", "url"])
 def test_create_start_and_url_end_with_the_ledger_page_line(env, capsys, monkeypatch, command):
-    monkeypatch.setattr(cli.ledger_link, "answering", lambda: True)
+    monkeypatch.setattr(cli.ledger_link, "serving", lambda: str(cli.ledger_link.folder()))
     if command != "create":
         run("sw", "create", "--repo", "/repo")
         capsys.readouterr()
