@@ -15,9 +15,24 @@
       "server_request_methods": 10
     },
     "flags": {
-      "app-server": ["--listen stdio://|unix://|unix://PATH|ws://IP:PORT|off", "--ws-auth capability-token|signed-bearer-token", "--ws-token-file", "--ws-token-sha256", "-c key=value", "--enable", "--disable", "--strict-config"],
-      "tui": ["--remote ws://|wss://|unix://|unix://PATH", "--remote-auth-token-env", "--dangerously-bypass-hook-trust"],
-      "features": {"hooks": "stable, enabled"}
+      "app-server": [
+        "--listen stdio://|unix://|unix://PATH|ws://IP:PORT|off",
+        "--ws-auth capability-token|signed-bearer-token",
+        "--ws-token-file",
+        "--ws-token-sha256",
+        "-c key=value",
+        "--enable",
+        "--disable",
+        "--strict-config"
+      ],
+      "tui": [
+        "--remote ws://|wss://|unix://|unix://PATH",
+        "--remote-auth-token-env",
+        "--dangerously-bypass-hook-trust"
+      ],
+      "features": {
+        "hooks": "stable, enabled"
+      }
     }
   },
   "transport": {
@@ -37,12 +52,12 @@
     },
     "busy_turn_steer_expected_turn_id": {
       "status": "pass",
-      "evidence": "records/steer.json",
+      "evidence": "records/steer.json, records/steer-rerun.json",
       "observed": "during a running command: stale expectedTurnId -> error -32600 naming the active turn; matching expectedTurnId -> {turnId: active}; steer after completion -> -32600 'no active turn to steer'; final text carried the steered word (DELTA)"
     },
     "active_turn_race": {
       "status": "pass",
-      "evidence": "records/steer.json",
+      "evidence": "records/steer.json, records/steer-rerun.json",
       "observed": "turn/start on a busy thread returns the SAME active turn (status inProgress) instead of an error or a second turn; its input is folded into that turn (final text CHARLIE DELTA ECHO); history holds one turn; UserPromptSubmit fires for the start, the steer and the racing start"
     },
     "thread_read_history": {
@@ -52,7 +67,7 @@
     },
     "approvals": {
       "status": "pass",
-      "evidence": "records/approvals.json",
+      "evidence": "records/approvals.json, records/approvals-rerun.json",
       "observed": "approvalPolicy untrusted: server request item/commandExecution/requestApproval; decline -> command not run, turn completed"
     },
     "hook_payloads": {
@@ -88,7 +103,7 @@
     },
     "two_client_approval_ownership": {
       "status": "pass",
-      "evidence": "records/approvals.json, records/approvals-run1.json",
+      "evidence": "records/approvals.json, records/approvals-run1.json, records/approvals-rerun.json",
       "observed": "the approval request reaches every client resumed on the thread with the same request id; the first answer wins (owner declined), the other client receives serverRequest/resolved and its later accept has no effect",
       "constraint": "thread/resume before the first turn fails with -32600 'no rollout found for thread id'; a viewer resumed that early never receives the request (run1)"
     },
