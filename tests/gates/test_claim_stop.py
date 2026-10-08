@@ -339,11 +339,13 @@ def test_a_task_its_claimant_parked_and_handed_off_lets_the_stop_through(rig, de
     rig.ledger.rows["d0"] = {"id": "d0", "state": dependency}
     rig.task.update(parked_on=["d0"])
     _finish(rig)
+    rig.store.put_agent(SLUG, AgentRecord(name="engineer@100001-0002", lane="eng", task="t2", state="working"))
     assert rig.stop() == Decision()
     assert rig.store.redis.get(rig.store.key(SLUG, "stop-blocks", ME)) is None
 
 
 def test_a_working_successor_on_a_parked_task_owes_its_stop(rig):
+    rig.ledger.rows["d0"] = {"id": "d0", "state": "done"}
     rig.task.update(parked_on=["d0"])
     decision = rig.stop()
     assert not decision.allowed and "you hold task t1 with no open pull request and no wait" in decision.reason
@@ -354,13 +356,13 @@ def test_a_handed_off_claimant_with_nothing_parked_owes_its_stop(rig):
     assert not rig.stop().allowed
 
 
-def test_only_the_stopping_agent_s_own_record_releases_a_parked_task(rig):
+def test_only_the_stopping_agents_own_record_releases_a_parked_task(rig):
     rig.task.update(parked_on=["d0"])
     _finish(rig, "engineer@100001-0002")
     assert not rig.stop().allowed
 
 
-def test_parked_by_reads_the_parked_list_and_the_caller_s_record(rig):
+def test_parked_by_reads_the_parked_list_and_the_callers_record(rig):
     _finish(rig)
     assert parked_by(rig.store, WHO, {"parked_on": ["d0"]})
     assert not parked_by(rig.store, WHO, {"depends_on": ["d0"]})
