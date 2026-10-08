@@ -192,7 +192,9 @@ def test_the_head_defaults_to_the_working_directory(tmp_path, monkeypatch):
 def test_grading_without_a_base_or_bootstrap_is_refused(tmp_path, capsys):
     with pytest.raises(SystemExit):
         size_limits.main(["--head", str(tmp_path)])
-    assert "grading needs --base, or --bootstrap where the base predates the gate" in capsys.readouterr().err
+    assert capsys.readouterr().err.endswith(
+        ": error: grading needs --base, or --bootstrap where the base predates the gate\n"
+    )
 
 
 def test_a_tree_outside_git_or_without_python_cannot_be_graded(tmp_path):
