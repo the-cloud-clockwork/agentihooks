@@ -175,7 +175,8 @@ def test_startup_process_that_is_no_agent_survives_the_cli(monkeypatch, tmp_path
     try:
         assert not _gone(pid, wait=0.3)
     finally:
-        os.kill(pid, signal.SIGKILL)
+        if not _gone(pid, wait=0):
+            os.kill(pid, signal.SIGKILL)
 
 
 def test_codex_keeps_native_auth_environment(monkeypatch):
