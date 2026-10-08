@@ -113,6 +113,10 @@ with every other account from the router cache. The result is one directive,
 computed by `hooks/context/quota_policy.py`; nothing is left to the model's
 judgment.
 
+Handoff targets use their quota band caps alone; the policy has no default
+sessions per account setting. A stale reading carries an unknown cap until the
+launcher refreshes it and applies the placement rule.
+
 | This session | Other accounts | Directive |
 |---|---|---|
 | 7d used ≥ 98% | one with ≥ 20% routing left | `QUOTA HANDOFF REQUIRED` to it (accounts below the session cap first) |
