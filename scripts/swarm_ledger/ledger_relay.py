@@ -7,7 +7,7 @@ the entry carries those words, of any length and in any wording.
 
 import re
 
-ITEM_RE = re.compile(r"^(phases|questions|followups|tasks)/[^/]+$")
+ITEM_RE = re.compile(r"^(phases|questions|followups|tasks|notes)/[^/]+$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 OPS = ("relay",)
 RELAYED_FROM = "master pane"
@@ -39,10 +39,16 @@ def speakers(by):
 
 
 def verified(by, quote):
-    """The operator's recorded words holding the quote, from any master or planner of the relaying agent's swarm."""
+    """The quoted span, as the operator wrote it, of recorded words from any master or planner of the relaying agent's swarm."""
     from hooks.context import operator_words
 
-    return next((w for name in speakers(by) if (w := operator_words.matching(name, quote, within=None))), "")
+    words = next((w for name in speakers(by) if (w := operator_words.matching(name, quote, within=None))), "")
+    return _span(words, quote) if words else ""
+
+
+def _span(words, quote):
+    found = re.search(r"\s+".join(map(re.escape, quote.split())), words, re.IGNORECASE)
+    return found.group(0) if found else words
 
 
 def apply(doc, op, ctx):

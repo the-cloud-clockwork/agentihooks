@@ -39,8 +39,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   alert list | claim ID | close ID OUTCOME
                                       list open alerts, claim one, or close it done saying what was done
   relay ITEM TEXT --quote WORDS       post the operator's decision from this pane as his answer to questions/<id>
-                                      or his comment on another item; WORDS must be in an operator prompt or
-                                      AskUserQuestion answer this session recorded in the last hour
+                                      or his comment on another item; WORDS, of any length, must be in an operator
+                                      prompt or AskUserQuestion answer any master or planner of this swarm recorded
   answer ITEM TEXT                    the master answers questions/<id> as itself at delegate or full autonomy,
                                       which clears it from Priorities; members cannot answer
   time-left DURATION                 record remaining time, e.g. "3h 20m"

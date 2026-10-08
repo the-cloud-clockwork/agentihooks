@@ -9,6 +9,7 @@ import pytest
 
 from hooks.context import operator_words
 from scripts.swarm_ledger import ledger
+from scripts.swarm_ledger.api import schemas
 from tests.swarm_ledger.test_one_line_ids import FAKE_DOM, function_source
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
@@ -28,7 +29,7 @@ MESSAGES = {
 
 
 SPOKEN = (
-    " ".join(f"part {n} -- the filter runs first, then the classifier - reads each finding" for n in range(1, 20))
+    " ".join(f"part {n} — the filter runs first, then the classifier – reads each finding" for n in range(1, 20))
     + " -- put my exact words in an open question"
 )
 DAY = 24 * 3600
@@ -67,7 +68,7 @@ class Relay(unittest.TestCase):
         state, rejected = core.sync(SLUG, ops=[relay(1, self.question, text="  Use the queue.  ")])
         self.assertEqual(rejected, [])
         answer = state["questions"][0]["answers"][-1]
-        marks = {"relayed_by": "master@a1-1", "relayed_from": "master pane", "quote": WORDS}
+        marks = {"relayed_by": "master@a1-1", "relayed_from": "master pane", "quote": "Use the queue"}
         self.assertEqual(
             answer, {"id": "rl-1", "by": "operator", "at": answer["at"], "text": "Use the queue.", **marks}
         )
@@ -127,7 +128,7 @@ class Relay(unittest.TestCase):
             (relay(14, self.question, by="operator"), "relay needs by"),
             ({k: v for k, v in relay(15, self.question).items() if k != "by"}, "relay needs by"),
             (relay(16, self.question, by="9bad"), "relay needs by"),
-            (relay(17, "notes/x"), "relay needs item"),
+            (relay(17, "chat/x"), "relay needs item"),
             ({k: v for k, v in relay(18, self.question).items() if k != "item"}, "relay needs item"),
             (relay(19, self.question, text="  "), "relay needs text"),
             (relay(20, self.question, text=5), "relay needs text"),
@@ -142,7 +143,7 @@ class Relay(unittest.TestCase):
 
     def test_verified_is_empty_without_recorded_words(self):
         self.assertEqual(ledger_relay.verified("nobody", "use the queue"), "")
-        self.assertEqual(ledger_relay.verified("master@a1-1", "the QUEUE"), WORDS)
+        self.assertEqual(ledger_relay.verified("master@a1-1", "the  QUEUE"), "the queue")
 
 
 def _cli(monkeypatch, item, quote, by="master@a1-1"):
@@ -166,7 +167,7 @@ def test_cli_relays_words_the_operator_said_in_the_pane(monkeypatch, capsys):
     assert (answer["text"], answer["relayed_by"], answer["quote"]) == (
         "Use the queue.",
         "master@a1-1",
-        "Use the queue for the broker",
+        "Use the queue",
     )
 
 
@@ -215,7 +216,19 @@ def test_cli_refuses_a_quote_in_no_operator_prompt_of_the_swarm(monkeypatch):
 
 
 def test_a_quote_of_any_length_passes_the_check():
-    ledger_relay.check(relay(31, "questions/q", quote="word -- " * 20000))
+    ledger_relay.check(relay(31, "questions/q", quote="word — " * 20000))
+    long = {"operation_id": "o1", "ops": [relay(32, "questions/q", quote="word — " * 20000)], "guards": {}}
+    assert schemas.check_operations(long, core, ()) == long["ops"]
+
+
+def test_a_relay_onto_a_note_is_his_comment_carrying_only_the_quoted_words():
+    make_ledger()
+    state, _ = core.sync(SLUG, ops=[{"op": "add", "thread": "notes", "id": "n1", "text": "Later note"}])
+    operator_words.record("master@a1-1", "First line.\nKeep the  Filters idea, and more after it")
+    state, rejected = core.sync(SLUG, ops=[relay(33, "notes/n1", quote="keep the filters idea")])
+    assert rejected == []
+    comment = state["notes"][0]["comments"][-1]
+    assert (comment["by"], comment["quote"]) == ("operator", "Keep the  Filters idea")
 
 
 def test_cli_relay_needs_item_text_and_quote():
