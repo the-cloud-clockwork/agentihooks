@@ -6633,7 +6633,7 @@ def main() -> None:
     sub.add_parser("classifier", help="Decision classifier records: stats [--purpose P]")
     sub.add_parser(
         "profile",
-        help="Render a profile into its own home: render NAME --target claude|codex [--force] [--out DIR [--bundle DIR]]",
+        help="Render a profile into its own home: render NAME --target claude|codex|copilot [--force] [--out DIR [--bundle DIR]]",
     )
     sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")
     sub.add_parser("overlay", help="Overlay profiles in the linked bundle: new NAME --wears ROLES | check NAME")

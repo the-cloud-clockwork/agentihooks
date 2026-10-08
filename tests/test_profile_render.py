@@ -668,6 +668,154 @@ def test_codex_render_links_into_the_claude_profile(world):
     assert os.readlink(sources) == str(render.sources.path(out.parent.name, "claude", out.parent.parent))
 
 
+ROLE_TOOLSET = "http://gw.example/toolset/rb-role/mcp"
+WHOLE_CATALOGUE = "http://gw.example/mcp/"
+
+
+@pytest.fixture
+def copilot_gateway(world, monkeypatch):
+    monkeypatch.setenv("GW_KEY", "k-test")
+    whole = {"mcpServers": {"gateway-tools": {"type": "http", "url": WHOLE_CATALOGUE}}}
+    _write(world["home"] / ".copilot" / "mcp-config.json", json.dumps(whole))
+    toolset = {"type": "http", "url": ROLE_TOOLSET, "headers": {"Authorization": "Bearer ${GW_KEY}"}}
+    _declare(world, **{"gateway-tools": {**toolset, "default_tools_approval_mode": "approve"}})
+
+
+def test_copilot_render_names_the_role_toolset_not_the_whole_catalogue(world, copilot_gateway):
+    from scripts.profiles import render
+
+    out = render.render_copilot("rb-role")
+
+    assert out == (render.rendered_root() / "rb-role" / "copilot").resolve()
+    text = (out / "mcp-config.json").read_text()
+    assert json.loads(text)["mcpServers"]["gateway-tools"] == {
+        "type": "http",
+        "url": ROLE_TOOLSET,
+        "headers": {"Authorization": "Bearer k-test"},
+        "auth": False,
+        "oidc": False,
+    }
+    assert WHOLE_CATALOGUE not in text
+    operator = json.loads((world["home"] / ".copilot" / "mcp-config.json").read_text())
+    assert operator["mcpServers"]["gateway-tools"]["url"] == WHOLE_CATALOGUE
+
+
+def test_copilot_render_links_the_role_persona_and_operator_state(world, copilot_gateway):
+    from scripts.profiles import render
+
+    out = render.render_copilot("rb-role")
+
+    assert os.readlink(out / "copilot-instructions.md") == str(out.parent / "claude" / "CLAUDE.md")
+    for item in render.COPILOT_STATE:
+        assert os.readlink(out / item) == str(world["home"] / ".copilot" / item)
+    assert render.render_copilot("rb-role") is None
+    assert render.rendered_profiles("copilot") == ["rb-role"]
+    forced = render.render_copilot("rb-role", force=True)
+    assert forced != out and ROLE_TOOLSET in (forced / "mcp-config.json").read_text()
+    assert os.readlink(forced / "copilot-instructions.md") == str(forced.parent / "claude" / "CLAUDE.md")
+
+
+def test_copilot_render_follows_a_rotated_gateway_key_into_a_private_file(world, copilot_gateway, monkeypatch):
+    from scripts.profiles import render
+
+    first = render.render_copilot("rb-role")
+    monkeypatch.setenv("GW_KEY", "k-rotated")
+
+    out = render.render_copilot("rb-role")
+
+    assert out != first and out == render.profile_dir("rb-role") / "copilot"
+    headers = json.loads((out / "mcp-config.json").read_text())["mcpServers"]["gateway-tools"]["headers"]
+    assert headers == {"Authorization": "Bearer k-rotated"}
+    assert (out / "mcp-config.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_copilot_render_keeps_a_declared_tool_allowlist(world, copilot_gateway):
+    from scripts.profiles import render
+
+    _declare(
+        world, lf={"type": "http", "url": "http://lf.example/mcp", "enabled_tools": READS, "disabled_tools": ["x"]}
+    )
+
+    entry = json.loads((render.render_copilot("rb-role") / "mcp-config.json").read_text())["mcpServers"]["lf"]
+
+    assert entry["tools"] == READS
+    assert entry["excludeTools"] == ["x"]
+
+
+def test_copilot_render_keeps_an_empty_tool_allowlist_closed(world, copilot_gateway):
+    from scripts.profiles import render
+
+    _declare(world, lf={"type": "http", "url": "http://lf.example/mcp", "enabled_tools": []})
+
+    entry = json.loads((render.render_copilot("rb-role") / "mcp-config.json").read_text())["mcpServers"]["lf"]
+
+    assert entry["tools"] == []
+
+
+def test_copilot_render_writes_the_stamped_bundle_servers_as_indented_json(world, copilot_gateway):
+    from scripts.profiles import render
+
+    out = render.render_copilot("rb-role")
+
+    text = (out / "mcp-config.json").read_text()
+    assert text == json.dumps(json.loads(text), indent=2) + "\n"
+    assert "bundle-srv" in json.loads(text)["mcpServers"]
+    assert json.loads((out / render.STAMP).read_text()) == render.stamp("rb-role")
+
+
+def test_forced_copilot_render_starts_a_new_home_beside_a_fresh_claude_one(world, copilot_gateway):
+    from scripts.profiles import render
+
+    claude = render.render_claude("rb-role")
+
+    out = render.render_copilot("rb-role", force=True)
+
+    assert out.parent != claude.parent
+    assert out == render.profile_dir("rb-role") / "copilot"
+
+
+def test_copilot_renders_an_overlay_set_into_its_own_home(world, overlays, copilot_gateway, monkeypatch):
+    from scripts.profiles import render
+
+    gateway = {"type": "http", "url": ROLE_TOOLSET, "headers": {"Authorization": "Bearer ${GW_KEY}"}}
+    _write(overlays / "rb-eng" / ".claude" / ".mcp.json", json.dumps({"mcpServers": {"gw": gateway}}))
+    out = render.render_copilot("rb-eng", overlays=["ov-a"])
+
+    assert out.parent == render.profile_dir("rb-eng", ["ov-a"])
+    assert json.loads((out / render.STAMP).read_text())["overlays"] == ["ov-a"]
+    assert "OV-A RULE MARKER" in (out / "copilot-instructions.md").read_text()
+    assert render.render_copilot("rb-eng", overlays=["ov-a"]) is None
+    forced = render.render_copilot("rb-eng", force=True, overlays=["ov-a"])
+    assert forced == render.profile_dir("rb-eng", ["ov-a"]) / "copilot"
+    assert "OV-A RULE MARKER" in (forced / "copilot-instructions.md").read_text()
+    monkeypatch.setenv("GW_KEY", "k-rotated")
+    stale = render.render_copilot("rb-eng", overlays=["ov-a"])
+    assert stale != forced and stale == render.profile_dir("rb-eng", ["ov-a"]) / "copilot"
+    assert "OV-A RULE MARKER" in (stale / "copilot-instructions.md").read_text()
+
+
+def test_init_re_renders_each_copilot_role_home(world, copilot_gateway, monkeypatch):
+    from scripts.profiles import render
+
+    first = render.render_copilot("rb-role")
+    monkeypatch.setenv("GW_KEY", "k-init")
+
+    world["install"]._rerender_profile_homes("copilot")
+
+    out = render.rendered_root() / "rb-role" / "copilot"
+    assert out.resolve() != first
+    assert "Bearer k-init" in (out / "mcp-config.json").read_text()
+
+
+def test_profile_render_cli_renders_a_copilot_home(world, copilot_gateway, capsys):
+    from scripts.profiles import render
+
+    assert render.main(["render", "rb-role", "--target", "copilot"]) == 0
+
+    assert ROLE_TOOLSET in (render.rendered_root() / "rb-role" / "copilot" / "mcp-config.json").read_text()
+    assert "Rendered rb-role (copilot)" in capsys.readouterr().out
+
+
 def test_codex_master_replaces_monitor_instructions_without_changing_claude(world):
     from scripts.profiles import render
 
@@ -1418,8 +1566,8 @@ def test_stamp_names_bundle_commit_and_chain(world):
 def test_render_refuses_other_targets(world):
     from scripts.profiles import render
 
-    with pytest.raises(ValueError, match="^copilot per-run profiles are not supported$"):
-        render.render("copilot", "rb-role")
+    with pytest.raises(ValueError, match="^gemini per-run profiles are not supported$"):
+        render.render("gemini", "rb-role")
 
 
 def test_cli_renders_and_refuses(world, capsys):
@@ -1432,8 +1580,6 @@ def test_cli_renders_and_refuses(world, capsys):
     assert capsys.readouterr().out == "rb-role (claude) is up to date\n"
     assert render.main(["render", "rb-role", "--force"]) == 0
     assert capsys.readouterr().out.endswith(f"\nRendered rb-role (claude) → {out.resolve()}\n")
-    assert render.main(["render", "rb-role", "--target", "copilot"]) == 2
-    assert capsys.readouterr().err == "copilot per-run profiles are not supported\n"
     assert render.main(["render", "rb-missing", "--target", "codex"]) == 1
     assert capsys.readouterr().err == "ERROR: Profile 'rb-missing' not found\n"
 
@@ -1456,14 +1602,15 @@ def test_cli_usage(world, capsys):
     )
 
 
-def test_agentihooks_profile_dispatches_to_render(monkeypatch, capsys):
+def test_agentihooks_profile_dispatches_to_render(world, copilot_gateway, monkeypatch, capsys):
     from scripts import install
+    from scripts.profiles import render
 
     monkeypatch.setattr("sys.argv", ["agentihooks", "profile", "render", "rb-role", "--target", "copilot"])
     with pytest.raises(SystemExit) as exc:
         install.main()
-    assert exc.value.code == 2
-    assert capsys.readouterr().err == "copilot per-run profiles are not supported\n"
+    assert exc.value.code == 0
+    assert ROLE_TOOLSET in (render.rendered_root() / "rb-role" / "copilot" / "mcp-config.json").read_text()
 
 
 def test_agentihooks_help_lists_profile(monkeypatch, capsys):
@@ -1472,7 +1619,7 @@ def test_agentihooks_help_lists_profile(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["agentihooks", "--help"])
     with pytest.raises(SystemExit):
         install.main()
-    line = r"(?<!\S)profile Render a profile into its own home: render NAME --target claude\|codex \[--force\] \[--out DIR \[--bundle DIR\]\](?!\S)"
+    line = r"(?<!\S)profile Render a profile into its own home: render NAME --target claude\|codex\|copilot \[--force\] \[--out DIR \[--bundle DIR\]\](?!\S)"
     assert re.search(line, _flat(capsys.readouterr().out))
 
 
