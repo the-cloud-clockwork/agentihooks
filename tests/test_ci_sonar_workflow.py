@@ -193,7 +193,7 @@ def test_dev_push_sonar_waits_for_older_runs_before_scanning():
     assert names.index("Wait for older dev analyses") < names.index("SonarQube Scan")
     step = _wait_step()
     assert step["if"] == "github.event_name == 'push'"
-    assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert step["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     assert step["env"]["RUN_NUMBER"] == "${{ github.run_number }}"
     assert "concurrency" not in sonar
     assert sonar["permissions"]["actions"] == "read"

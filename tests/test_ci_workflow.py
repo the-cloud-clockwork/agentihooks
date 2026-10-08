@@ -307,7 +307,7 @@ def _workflow() -> dict:
 
 
 def _lookup_step(job: str = "unit") -> dict:
-    return _workflow()["jobs"][job]["steps"][0]
+    return next(s for s in _workflow()["jobs"][job]["steps"] if s.get("id") == "lookup")
 
 
 def _artifact(expired=False, fork=False) -> dict:
@@ -375,7 +375,8 @@ def test_each_job_looks_up_the_pushed_tree_first(job):
 
 @pytest.mark.parametrize("job", ["unit", "lint"])
 def test_every_later_step_skips_when_the_tree_already_passed(job):
-    later = _workflow()["jobs"][job]["steps"][1:]
+    steps = _workflow()["jobs"][job]["steps"]
+    later = steps[steps.index(_lookup_step(job)) + 1 :]
     assert later
     assert all(s.get("if", "").startswith("steps.lookup.outputs.skip != 'true'") for s in later), later
 
@@ -388,8 +389,8 @@ def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
         " && needs.unit.result == 'success' && needs.lint.result == 'success'"
         " && needs.shard-check.result == 'success' && needs.test-count.result == 'success' }}"
     )
-    tree, upload = job["steps"]
-    assert tree["env"]["GH_TOKEN"] == "${{ github.token }}"
+    _, tree, upload = job["steps"]
+    assert tree["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     assert "git/commits/$GITHUB_SHA" in tree["run"]
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "tests-passed-${{ steps.tree.outputs.sha }}"
@@ -418,7 +419,7 @@ def _fake_github(tmp_path, tested_tree, artifact):
 
 
 def _record_pass(tmp_path, env):
-    tree, upload = _workflow()["jobs"]["record-pass"]["steps"]
+    _, tree, upload = _workflow()["jobs"]["record-pass"]["steps"]
     out = tmp_path / "record-out"
     subprocess.run(
         ["bash", "-e", "-c", tree["run"]],

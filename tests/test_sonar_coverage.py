@@ -25,7 +25,7 @@ def test_sonar_uses_all_shards_without_running_tests_again():
     merge = next(step for step in scan["steps"] if step.get("name") == "Merge shard coverage")
     assert "pytest" not in merge["run"]
     assert "combine.sh" in merge["run"]
-    assert merge["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert merge["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     assert "sonar" in jobs["gate-required"]["needs"]
     assert not (ROOT / ".github/workflows/sonar-scan.yml").exists()
 

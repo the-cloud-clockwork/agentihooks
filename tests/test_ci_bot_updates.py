@@ -55,7 +55,7 @@ def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run
     steps = _workflow("test.yml")["jobs"]["unit"]["steps"]
     step = next(s for s in steps if s.get("name") == "Download latest dev durations")
     assert step["run"].strip() == "python -m tests.dev_durations ${{ matrix.python-version }}"
-    assert step["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert step["env"] == {"GH_TOKEN": "${{ steps.app-token.outputs.token }}"}
     assert _workflow("test.yml")["jobs"]["unit"]["permissions"]["actions"] == "read"
     assert steps.index(step) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
 

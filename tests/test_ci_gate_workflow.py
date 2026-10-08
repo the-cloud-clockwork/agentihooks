@@ -111,7 +111,7 @@ def test_passed_tree_lookup_skips_steps_without_skipping_required_jobs():
     for name in ("unit", "lint"):
         job = jobs[name]
         assert "if" not in job
-        lookup, *steps = job["steps"]
+        _, lookup, *steps = job["steps"]
         assert lookup["if"] == "github.event_name == 'push'"
         assert all("steps.lookup.outputs.skip != 'true'" in step["if"] for step in steps)
     step = jobs["gate-required"]["steps"][0]
