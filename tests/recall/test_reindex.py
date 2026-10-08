@@ -8,6 +8,7 @@ import pytest
 from scripts.recall.cli import main
 from scripts.recall.reindex import binned, deleted_refs, ledger_dir
 from scripts.recall.store import SQLiteRecallStore
+from scripts.swarm_ledger.repository.rows import TABLES
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 from tests.swarm_ledger import legacy_page
 
@@ -104,9 +105,13 @@ def test_a_malformed_ledger_is_unreadable_and_the_rest_indexed(home, capsys):
     folder = Path(home["LEDGER_DIR"])
     write(folder, "idless", document("Idless", [{"title": "no id"}]))
     write(folder, "nameless", document("Nameless", [{"id": "t1", "comments": [{"text": "no id"}]}]))
+    write(folder, "rootless", document("Rootless"))
+    with sqlite3.connect(folder / DATABASE) as connection:
+        for table in TABLES:
+            connection.execute(f"DELETE FROM {table} WHERE slug='rootless' AND path='[]'")
     code, out = run(home, "--all", capsys=capsys)
     assert code == 0
-    assert out["unreadable"] == ["idless", "nameless"]
+    assert out["unreadable"] == ["idless", "nameless", "rootless"]
     assert list(out["indexed"]) == ["alpha"]
     assert store(home).match("Idless") == []
 

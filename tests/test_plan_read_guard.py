@@ -1,9 +1,11 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
 
 from hooks.context import plan_read_guard
 from hooks.context.plan_read_guard import check
+from scripts.swarm_ledger.repository.rows import TABLES
 from scripts.swarm_ledger.repository.sqlite import DATABASE, read_document
 from tests.swarm_ledger import legacy_page
 
@@ -153,9 +155,17 @@ def test_other_tools_and_bad_input_allowed(ledger):
 
 
 def test_missing_or_broken_ledger_refuses(ledger):
-    assert check(read(stored(ledger)), env(ledger, AGENTIHOOKS_SWARM="absent"))
+    assert check(read(stored(ledger)), env(ledger, AGENTIHOOKS_SWARM="absent")) == plan_read_guard.refusal(None)
     put(ledger, SLUG, {"artifacts": [{"plan": True}]})
-    assert check(read(stored(ledger)), env(ledger))
+    assert check(read(stored(ledger)), env(ledger)) == plan_read_guard.refusal(None)
+
+
+def test_a_rootless_other_ledger_is_skipped(ledger):
+    put(ledger, "other", {"artifacts": [{"file": {"id": "d" * 64 + ".md"}, "plan": True}]})
+    with sqlite3.connect(ledger / DATABASE) as connection:
+        for table in TABLES:
+            connection.execute(f"DELETE FROM {table} WHERE slug='other' AND path='[]'")
+    assert check(read(stored(ledger), offset=45, limit=5), env(ledger)) is None
 
 
 def test_ledger_without_plans_allows_media_reads(ledger):

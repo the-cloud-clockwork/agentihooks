@@ -2,7 +2,7 @@ import json
 import secrets
 import sqlite3
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from .events import append_events, read_events, write_events
@@ -173,18 +173,21 @@ def read_slugs(directory) -> list:
 
 
 def read_ledgers(directory, *keys: str) -> dict:
-    """Named parts of every stored ledger by slug, read in one snapshot."""
+    """One snapshot; a slug whose root row is missing is left out."""
     parts = tuple(key_parts(key) for key in keys)
     with read_only(directory) as connection:
         if connection is None:
             return {}
+        found = {}
         try:
             with connection:
                 connection.execute(BEGIN)
-                slugs = [slug for (slug,) in connection.execute(SLUGS)]
-                return {slug: read_partial(connection, slug, parts) for slug in slugs}
+                for (slug,) in connection.execute(SLUGS).fetchall():
+                    with suppress(Missing):
+                        found[slug] = read_partial(connection, slug, parts)
         except sqlite3.OperationalError:
             return {}
+        return found
 
 
 def read_document(directory, slug: str) -> dict | None:

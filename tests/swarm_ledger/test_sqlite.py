@@ -261,6 +261,11 @@ def test_whole_and_every_ledger_reads_need_no_writable_connection(tmp_path):
     assert read_document(folder, "zeta") == repo.get_document("zeta")
     assert read_document(folder, "zeta")["_meta"]["events"][-1]["kind"] == "message added"
     assert read_document(folder, "missing") is None
+    with repo.connect() as connection, connection:
+        for table in sqlite.TABLES:
+            connection.execute(f"DELETE FROM {table} WHERE slug='alpha' AND path=?", (sqlite.ROOT,))
+    assert read_ledgers(folder, "title") == {"zeta": {"title": "Store"}}
+    assert read_document(folder, "alpha") is None
     empty = tmp_path / "empty"
     empty.mkdir()
     (empty / sqlite.DATABASE).touch()

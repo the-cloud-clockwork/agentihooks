@@ -46,8 +46,11 @@ def reindex(store: RecallStore, folder: Path, home: Path, slugs: list[str], incl
             result["skipped_binned"].append(slug)
             continue
         swarm_slug = slug if (home / "swarm" / slug).is_dir() else ""
+        document = read_document(folder, slug)
+        if document is None:
+            result["unreadable"].append(slug)
+            continue
         try:
-            document = read_document(folder, slug)
             records = extract_ledger(slug, document, swarm_slug=swarm_slug)
             deleted = deleted_refs(document)
         except (ValueError, AttributeError, KeyError, TypeError):
