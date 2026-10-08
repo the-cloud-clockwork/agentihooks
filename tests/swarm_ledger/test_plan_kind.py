@@ -2,6 +2,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import ledger_kinds, ledger_tasks, new_ledger
+from tests.swarm_ledger.plan_slices import anchored
 
 PLAN = "https://github.com/acme/app/issues/1"
 
@@ -44,7 +45,8 @@ def update(slug, **fields):
 def test_plan_requires_slice_and_stores_valid_phase_tasks(plan_ledger):
     assert ledger_kinds.unmet({"kind": "plan"}) == ["slice"]
     add(plan_ledger, "plan", lane="plan", kind="plan")
-    add(plan_ledger, "build", plan_url=PLAN)
+    anchored(plan_ledger, "build")
+    add(plan_ledger, "build", plan_url=PLAN, plan_slice="build")
     state, _ = update(plan_ledger, state="done")
     assert state["tasks"][0]["state"] == "open"
     state, _ = update(plan_ledger, state="done", proof={"slice": " build "})
@@ -133,8 +135,9 @@ def test_task_command_lane_defaults_and_choices():
 
 def test_a_plan_accepts_multiple_phase_tasks_and_open_updates(plan_ledger):
     add(plan_ledger, "plan", lane="plan", kind="plan")
-    add(plan_ledger, "first", plan_url=PLAN)
-    add(plan_ledger, "second", lane="ci", kind="ci", plan_url=PLAN)
+    anchored(plan_ledger, "first", "second")
+    add(plan_ledger, "first", plan_url=PLAN, plan_slice="first")
+    add(plan_ledger, "second", lane="ci", kind="ci", plan_url=PLAN, plan_slice="second")
     state, rejected = update(plan_ledger, state="claimed")
     assert rejected == []
     assert state["tasks"][0]["state"] == "claimed"

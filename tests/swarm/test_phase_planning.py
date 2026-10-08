@@ -11,6 +11,7 @@ from scripts.swarm.store import RedisStore
 from tests.doctor.test_doctor_cli import FileLedger, core, new_ledger, state
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeRuntime
+from tests.swarm_ledger.plan_slices import anchored
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG = "planned"
@@ -64,11 +65,14 @@ def items(store, address):
     return InboxStore(store.redis).inbox(address)
 
 
-def slice_done(ledger, *build):
+def slice_done(ledger, *build, anchor=True):
+    if anchor:
+        anchored(SLUG, *[tid for tid, _ in build], core=core)
     ledger.update_task(SLUG, "plan-p1", {"state": "claimed", "claimed_by": "planner@a1b2c3-0001"})
     for tid, description in build:
         fields = {"task": tid, "title": f"Task {tid}", "lane": "eng", "phase": "p1", "territory": ["scripts/swarm"]}
         fields["plan_url"] = "https://github.com/acme/app/issues/1"
+        fields["plan_slice"] = tid
         ledger.add_task(SLUG, {**fields, "description": description}, "planner@a1b2c3-0001")
     ids = ",".join(tid for tid, _ in build)
     ledger.update_task(SLUG, "plan-p1", {"state": "done", "proof": {"slice": ids}})
@@ -475,6 +479,8 @@ def test_two_phases_are_queued_and_reviewed_in_the_same_pass(env):
     slice_done(ledger, ("t1", DONE_WHEN))
     fields = {"task": "t2", "title": "Task t2", "lane": "eng", "phase": "p2", "territory": ["scripts/swarm"]}
     fields["plan_url"] = "https://github.com/acme/app/issues/2"
+    fields["plan_slice"] = "t2"
+    anchored(SLUG, "t2", phase="p2", core=core)
     ledger.update_task(SLUG, "plan-p2", {"state": "claimed", "claimed_by": "planner@a1b2c3-0002"})
     ledger.add_task(SLUG, {**fields, "description": DONE_WHEN}, "planner@a1b2c3-0002")
     ledger.update_task(SLUG, "plan-p2", {"state": "done", "proof": {"slice": "t2"}})
@@ -488,9 +494,11 @@ def test_a_task_id_the_ledger_would_refuse_in_a_comment_is_left_to_the_review_it
     run(store, ledger)
     fields = {"task": "fix_parser", "title": "Fix the parser", "lane": "eng", "phase": "p1", "territory": ["scripts"]}
     fields["plan_url"] = "https://github.com/acme/app/issues/1"
+    fields["plan_slice"] = "fix_parser"
+    anchored(SLUG, "fix_parser", "t2", core=core)
     ledger.update_task(SLUG, "plan-p1", {"state": "claimed", "claimed_by": "planner@a1b2c3-0001"})
     ledger.add_task(SLUG, {**fields, "description": "Short."}, "planner@a1b2c3-0001")
-    slice_done(ledger, ("t2", "Short."))
+    slice_done(ledger, ("t2", "Short."), anchor=False)
     ledger.update_task(SLUG, "plan-p1", {"proof": {"slice": "fix_parser,t2"}})
     run(store, ledger)
     [comment] = [c for c in phase("p1")["comments"] if c["by"] == "swarm"]

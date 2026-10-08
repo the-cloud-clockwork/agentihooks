@@ -17,6 +17,7 @@ from scripts.swarm_ledger import (
 from scripts.swarm_ledger import ledger_core as core
 from tests.swarm_ledger import test_plan_kind
 from tests.swarm_ledger.ledger_page import page_source
+from tests.swarm_ledger.plan_slices import anchored
 from tests.swarm_ledger.test_plan_kind import add, update
 
 plan_ledger = test_plan_kind.plan_ledger
@@ -74,7 +75,8 @@ def test_slice_is_refused_while_a_slice_task_carries_no_plan_link(plan_ledger):
         f"tasks/plan slice tasks carry no plan link: build, check. {ledger_tasks.PUBLISH}"
     ]
     phase_plan(plan_ledger)
-    add(plan_ledger, "ship")
+    anchored(plan_ledger, "ship")
+    add(plan_ledger, "ship", plan_slice="ship")
     state, rejected = update(plan_ledger, state="done", proof={"slice": "ship"})
     assert rejected == []
     assert task(state, "plan")["state"] == "done"
@@ -166,7 +168,8 @@ def test_publish_goes_to_an_artifact_without_issues(issues):
 
 def test_publish_opens_an_issue_where_the_repo_has_issues():
     run, calls = gh(True)
-    url, where = ledger_publish.publish("plan.md", "Slice plan", "acme/app", lambda *a: pytest.fail("no artifact"), run)
+    stored = "http://127.0.0.1:8765/artifacts/demo/x.md"
+    url, where = ledger_publish.publish("plan.md", "Slice plan", "acme/app", lambda *a: stored, run)
     assert (url, where) == (PLAN, "issue")
     assert calls[0] == ["gh", "repo", "view", "acme/app", "--json", "hasIssuesEnabled"]
     assert calls[1] == [
@@ -175,8 +178,8 @@ def test_publish_opens_an_issue_where_the_repo_has_issues():
         "create",
         "--title",
         "Slice plan",
-        "--body-file",
-        "plan.md",
+        "--body",
+        f"Slice plan\n\n{stored}",
         "--repo",
         "acme/app",
     ]
@@ -201,10 +204,11 @@ def test_a_folder_without_a_github_remote_publishes_an_artifact():
 
 def test_publish_opens_an_issue_in_the_current_repo_without_a_repo_name():
     run, calls = gh(True)
-    assert ledger_publish.publish("plan.md", "Slice plan", "", lambda *a: "", run) == (PLAN, "issue")
+    published = ledger_publish.publish("plan.md", "Slice plan", "", lambda *a: "link", run, issue_title="Build")
+    assert published == (PLAN, "issue")
     assert calls == [
         ["gh", "repo", "view", "--json", "hasIssuesEnabled"],
-        ["gh", "issue", "create", "--title", "Slice plan", "--body-file", "plan.md"],
+        ["gh", "issue", "create", "--title", "Build", "--body", "Build\n\nlink"],
     ]
 
 
@@ -228,17 +232,27 @@ def test_publish_plan_command_links_each_phase_and_comments_it(plan_ledger, tmp_
     core.check_op(phase_two)
     core.sync(plan_ledger, ops=[phase_two])
     plan = tmp_path / "plan.md"
-    plan.write_text("intro\n# Build the page\n\nSteps\n", encoding="utf-8")
+    plan.write_text("intro\n# Build the page\n## Build\nSteps\n## Ship\nShip it\n", encoding="utf-8")
+    core.sync(plan_ledger, ops=[{"op": "join", "id": "join-planner", "by": "planner", "role": "member"}])
     seen = []
 
-    def publish(path, title, repo, artifact):
+    def publish(path, title, repo, artifact, issue_title):
         seen.append((path, title, repo))
+        assert issue_title == "Build, Ship"
+        artifact(path, title)
         return PLAN, "issue"
 
     monkeypatch.setattr(ledger.ledger_publish, "publish", publish)
+    file = ledger_artifacts.store(plan_ledger, "plan.md", plan.read_bytes())
+    monkeypatch.setattr(ledger, "upload_artifact", lambda *a: file)
     cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1, p2", "--repo", "acme/app")
     assert seen == [(str(plan), "Build the page", "acme/app")]
     state = core.sync(plan_ledger)[0]
+    stored = f"{ledger.BASE}/artifacts/{plan_ledger}/{file['id']}"
+    assert [phase["plan_ref"] for phase in state["phases"]] == [
+        {"artifact": stored, "lines": "3-4"},
+        {"artifact": stored, "lines": "5-6"},
+    ]
     for phase in state["phases"]:
         assert phase["plan_url"] == PLAN
         [comment] = phase["comments"]
@@ -304,10 +318,10 @@ def test_publish_plan_reads_the_plan_as_utf8(monkeypatch):
 
     titles = []
     monkeypatch.setattr(ledger, "Path", PlanFile)
+    stub_publish(monkeypatch, titles)
     monkeypatch.setattr(
-        ledger.ledger_publish, "publish", lambda path, title, *a: titles.append(title) or (PLAN, "issue")
+        ledger, "call", lambda slug, ops=None: {"rejected": ["x"]} if ops else {"phases": [{"id": "p1", "title": "A"}]}
     )
-    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: {"rejected": ["x"]})
     args = ledger.build_parser().parse_args(
         ["--slug", "s", "--as", "planner", "publish-plan", "plan.md", "--phase", "p1"]
     )
@@ -321,7 +335,7 @@ def test_publish_plan_exits_with_the_gh_failure(plan_ledger, tmp_path, monkeypat
     plan = tmp_path / "plan.md"
     plan.write_text("# Plan\n", encoding="utf-8")
 
-    def fail(*_):
+    def fail(*_, **__):
         raise ledger.ledger_publish.PublishError("gh issue create failed: HTTP 403")
 
     monkeypatch.setattr(ledger.ledger_publish, "publish", fail)
@@ -330,17 +344,35 @@ def test_publish_plan_exits_with_the_gh_failure(plan_ledger, tmp_path, monkeypat
     assert raised.value.code == "gh issue create failed: HTTP 403"
 
 
-def test_publish_plan_exits_when_the_ledger_refuses(plan_ledger, tmp_path, monkeypatch, capsys):
+def test_publish_plan_refuses_an_unknown_phase_before_publishing(plan_ledger, tmp_path, monkeypatch, capsys):
     plan = tmp_path / "plan.md"
     plan.write_text("# Plan\n", encoding="utf-8")
-    monkeypatch.setattr(ledger.ledger_publish, "publish", lambda *a: (PLAN, "issue"))
+    monkeypatch.setattr(ledger.ledger_publish, "publish", lambda *a, **k: pytest.fail("published"))
     with pytest.raises(SystemExit) as raised:
         cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "nope")
-    assert raised.value.code == "; ".join(
-        ledger.unexplained(sent)
-        for sent in ({"op": "phase_update", "item": "phases/nope"}, {"op": "add", "thread": "phases/nope/comments"})
-    )
+    assert raised.value.code == "publish-plan names an unknown phase"
     assert capsys.readouterr().out == ""
+
+
+def test_publish_plan_refuses_a_multi_phase_plan_without_phase_headings(plan_ledger, tmp_path, monkeypatch):
+    core.sync(plan_ledger, ops=[{"op": "phase_add", "id": "add-p2", "by": "planner", "phase": "p2", "title": "Ship"}])
+    plan = tmp_path / "plan.md"
+    plan.write_text("# Plan\n## Build\nSteps\n", encoding="utf-8")
+    monkeypatch.setattr(ledger.ledger_publish, "publish", lambda *a, **k: pytest.fail("published"))
+    with pytest.raises(SystemExit) as raised:
+        cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1,p2")
+    assert raised.value.code == "plan needs one heading for phase Ship"
+
+
+def stub_publish(monkeypatch, titles):
+    def publish(path, title, repo, artifact, issue_title):
+        titles.append(title)
+        artifact(path, title)
+        return PLAN, "issue"
+
+    monkeypatch.setattr(ledger.ledger_publish, "publish", publish)
+    monkeypatch.setattr(ledger, "upload_artifact", lambda *a: {"id": f"{'d' * 64}.md"})
+    monkeypatch.setattr(ledger, "send", lambda *a, **k: None)
 
 
 @pytest.mark.parametrize(
@@ -353,12 +385,11 @@ def test_publish_plan_exits_when_the_ledger_refuses(plan_ledger, tmp_path, monke
 )
 def test_publish_plan_exits_with_the_ledger_warnings(tmp_path, monkeypatch, state, message):
     plan = tmp_path / "plan.md"
-    plan.write_text("no heading\n", encoding="utf-8")
+    plan.write_text("no heading\n## One\nfirst\n## Two\nsecond\n", encoding="utf-8")
     titles = []
-    monkeypatch.setattr(
-        ledger.ledger_publish, "publish", lambda path, title, *a: titles.append(title) or (PLAN, "issue")
-    )
-    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: state)
+    stub_publish(monkeypatch, titles)
+    phases = {"phases": [{"id": "p1", "title": "One"}, {"id": "p2", "title": "Two"}]}
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: state if ops else phases)
     args = ledger.build_parser().parse_args(
         ["--slug", "s", "--as", "planner", "publish-plan", str(plan), "--phase", "p1,p2"]
     )

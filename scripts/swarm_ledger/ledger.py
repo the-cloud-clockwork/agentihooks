@@ -302,7 +302,7 @@ def cmd_publish_plan(args):
         ranges = plan_ranges.phase_lines(text, selected)
     except ValueError as exc:
         sys.exit(str(exc))
-    title = args.title or (selected[0]["title"] if len(selected) == 1 else ledger_publish.title_of(text, phases))
+    title = args.title or ledger_publish.title_of(text, phases)
     stored = {}
 
     def artifact(path, title):
@@ -313,7 +313,8 @@ def cmd_publish_plan(args):
         return stored["url"]
 
     try:
-        url, where = ledger_publish.publish(args.path, title, args.repo, artifact)
+        issue_title = ", ".join(phase["title"] for phase in selected)
+        url, where = ledger_publish.publish(args.path, title, args.repo, artifact, issue_title=issue_title)
     except ledger_publish.PublishError as exc:
         sys.exit(str(exc))
     ops = []
