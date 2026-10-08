@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from scripts.inbox.seats import seat_address
+from scripts.inbox.store import CLOSED
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER
@@ -31,6 +32,7 @@ FINAL_RED = RED - {"TIMED_OUT"}
 PASSED = {"SUCCESS", "SKIPPED"}
 PENDING = {None, "", "PENDING", "EXPECTED"}
 GATE = "Gate — Required"
+RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no push for twenty minutes\.")
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
@@ -173,7 +175,37 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
         _events(mail, new_events(store, slug, doc, "events-cursor"), tasks)
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github)
+        + _settle_red_notices(inbox, store, mail, github)
     )
+
+
+def _settle_red_notices(inbox, store, mail, github):
+    addresses = dict.fromkeys([*(agent.seat or agent.name for agent in store.agents(mail.slug)), mail.master])
+    notices = [
+        (item, found.group(1))
+        for address in addresses
+        for item in inbox.inbox(address)
+        if item.sender == SENDER and item.state not in CLOSED and (found := RED_NOTICE.match(item.text))
+    ]
+    views, settled = {}, []
+    for item, url in notices:
+        if url not in views:
+            views[url] = github(url)
+        how = _settled(views[url])
+        if how:
+            inbox.close(item.id, SENDER, "done", f"pull request {url} {how}")
+            settled.append(f"closed the red notice {item.id}: {url} {how}")
+    return settled
+
+
+def _settled(found):
+    if found is None:
+        return ""
+    if found.state == "MERGED":
+        return "merged"
+    if found.state == "CLOSED":
+        return "closed"
+    return "turned green" if found.resolved and not found.red else ""
 
 
 def findings_pass(inbox, store, slug, shown):
