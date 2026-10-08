@@ -13,7 +13,17 @@ import pytest
 
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 from scripts.swarm_ledger import ledger, ledger_duplicates, ledger_task_duplicates, ledger_tasks
-from tests.swarm_ledger.test_ledger_authority import MASTER, SLUG, admin_put, cli_ledger, core, new_ledger, send
+from tests.swarm_ledger.test_ledger_authority import (
+    MASTER,
+    SLUG,
+    WORKER,
+    admin_put,
+    agent_headers,
+    cli_ledger,
+    core,
+    new_ledger,
+    send,
+)
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -178,6 +188,19 @@ def test_the_page_transport_refuses_a_repeat_too(live, monkeypatch):
     assert status == 200 and len(reply["rejected"]) == 1
     assert OPEN_REFUSAL in reply["_meta"]["warnings"]
     assert stored("t9") is None
+
+
+def test_the_page_transport_reports_authority_and_duplicate_refusals_together(live, monkeypatch):
+    judged(monkeypatch, Judge(yes={"t1"}))
+    forged = {"op": "add", "id": uuid.uuid4().hex, "by": MASTER, "thread": "chat", "text": "Forged line"}
+    repeat = task("t9", REPEAT, live["phases"][0], by=WORKER)
+    headers = {"Content-Type": "application/json", **agent_headers(live, WORKER)}
+    status, data, _ = send(live, "PUT", f"/api/{SLUG}?view=agent", json.dumps({"ops": [forged, repeat]}), **headers)
+    reply = json.loads(data)
+    assert status == 200 and set(reply["rejected"]) == {forged["id"], repeat["id"]}
+    warnings = reply["_meta"]["warnings"]
+    assert any(f"{WORKER} cannot write as {MASTER}" in w for w in warnings)
+    assert any(w.startswith('task t9 repeats task t1 "Publish the wheel to PyPI from main"') for w in warnings)
 
 
 def test_the_tick_plan_and_release_tasks_are_never_checked(live, monkeypatch):
