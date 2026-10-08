@@ -64,6 +64,37 @@ class TestClaudeRouting:
         assert "AH_CC_TOKEN_PEER" not in observed["environ"]
         assert "ANTHROPIC_API_KEY" not in observed["environ"]
 
+    def test_a_routed_launch_drops_every_api_credential(self, monkeypatch):
+        from scripts import claude_quota_balancer as balancer
+
+        observed = {}
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(balancer, "route_requires_fable", lambda *args, **kwargs: False)
+        monkeypatch.setenv("AH_CC_TOKEN_WINNER", "winner-token")
+        api = {
+            "ANTHROPIC_AUTH_TOKEN": "gateway-token",
+            "ANTHROPIC_BASE_URL": "https://gateway.example",
+            "CLAUDE_CODE_USE_BEDROCK": "1",
+            "ANTHROPIC_VERTEX_PROJECT_ID": "project",
+            "AH_ROUTE_API": "1",
+        }
+        for name, value in api.items():
+            monkeypatch.setenv(name, value)
+
+        def execvpe(executable, command, environ):
+            observed.update(environ=dict(environ))
+            raise RuntimeError("exec intercepted")
+
+        monkeypatch.setattr(install.os, "execvpe", execvpe)
+
+        with pytest.raises(RuntimeError, match="exec intercepted"):
+            install.cmd_claude(["--route", "WINNER"])
+
+        assert observed["environ"]["CLAUDE_CODE_OAUTH_TOKEN"] == "winner-token"
+        assert observed["environ"]["AGENTIHOOKS_ROUTE_ACCOUNT"] == "WINNER"
+        assert not set(api) & set(observed["environ"])
+
     def test_cmd_claude_fails_closed_without_capacity(self, monkeypatch, capsys):
         from scripts import claude_quota_balancer as balancer
 

@@ -5592,6 +5592,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         route_requires_fable,
         select_credential,
     )
+    from scripts.routing.envs import subscription_child
 
     fallback_flag = "--agentihooks-fallback-bare"
     fallback_bare = fallback_flag in extra_args
@@ -5651,7 +5652,9 @@ def cmd_claude(extra_args: list[str]) -> None:
         placement="forced" if route else "open",
     )
 
-    os.environ.pop("ANTHROPIC_API_KEY", None)
+    kept = subscription_child(os.environ)
+    for name in [name for name in os.environ if name not in kept]:
+        os.environ.pop(name, None)
     for name in [name for name in os.environ if name.startswith("AH_CC_TOKEN_")]:
         if name != selected_credential.env_name:
             os.environ.pop(name, None)
