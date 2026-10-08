@@ -24,11 +24,11 @@ class Thresholds:
 
 
 def trigger(account: capacity.Account, thresholds: Thresholds) -> str:
-    if account.state == "UNKNOWN" or account.five_left is None or account.week_left is None:
+    if account.state == "UNKNOWN":
         return ""
-    if 100 - account.week_left >= thresholds.week:
+    if account.week_left is not None and 100 - account.week_left >= thresholds.week:
         return "week"
-    if 100 - account.five_left >= thresholds.five:
+    if account.five_left is not None and 100 - account.five_left >= thresholds.five:
         return "five hour"
     return ""
 
@@ -71,10 +71,16 @@ def successor(accounts: list[capacity.Account], allow_codex: bool, thresholds: T
             for row in accounts
             if row.harness == harness
             and capacity.free_seats(row)
-            and row.five_left is not None
-            and row.week_left is not None
+            and row.state != "UNKNOWN"
+            and (row.five_left is not None or row.week_left is not None)
             and not trigger(row, thresholds)
         ]
         if eligible:
-            return min(eligible, key=lambda row: (-min(row.five_left, row.week_left), row.name))
+            return min(
+                eligible,
+                key=lambda row: (
+                    -min(value for value in (row.five_left, row.week_left) if value is not None),
+                    row.name,
+                ),
+            )
     return None

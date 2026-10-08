@@ -277,9 +277,13 @@ def test_an_old_warning_does_not_suppress_a_new_lifes_quota_notice():
     assert quota_notice.apply("sw", storage, {"accounts": [observation]}) == ["sent same the quota hurry"]
 
 
-@pytest.mark.parametrize("field", ["five_left", "week_left"])
-def test_unknown_quota_does_not_warn(field):
-    assert quota_handoff.trigger(replace(account(), **{field: None}), quota_handoff.Thresholds()) == ""
+@pytest.mark.parametrize(
+    "five_left,week_left,expected",
+    [(None, 10, "week"), (5, None, "five hour"), (None, None, ""), (None, 50, ""), (50, None, "")],
+)
+def test_unknown_quota_does_not_hide_an_observed_warning_window(five_left, week_left, expected):
+    row = replace(account(), five_left=five_left, week_left=week_left)
+    assert quota_handoff.trigger(row, quota_handoff.Thresholds()) == expected
 
 
 def test_tick_warns_once_per_agent_without_retiring_it(monkeypatch):
@@ -364,6 +368,13 @@ def test_warning_ignores_unknown_state_and_handles_empty_observations():
 def test_required_claude_successor_uses_an_eligible_account():
     row = account("healthy", five=10, week=20)
     assert quota_handoff.successor([row], False, quota_handoff.Thresholds()) == row
+
+
+def test_an_eligible_weekly_only_codex_account_can_receive_the_successor():
+    row = replace(account("default", "codex", week=20), five_left=None)
+    assert quota_handoff.successor([row], True, quota_handoff.Thresholds()) == row
+    assert quota_handoff.successor([replace(row, week_left=None)], True, quota_handoff.Thresholds()) is None
+    assert quota_handoff.successor([replace(row, state="UNKNOWN")], True, quota_handoff.Thresholds()) is None
 
 
 def test_quota_transfer_obeys_its_allocation_without_a_task_pin(tmp_path, monkeypatch):
