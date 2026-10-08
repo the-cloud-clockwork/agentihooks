@@ -16,7 +16,7 @@ DOC = {
     "tasks": [{"id": "one", "title": "Build the first feature", "state": "claimed"}],
 }
 SWARM = {
-    "config": {"state": "running", "max_eng": 3, "max_ci": 1, "codex_share": 30},
+    "config": {"state": "running", "max_eng": 3, "max_ci": 1},
     "tasks": {"claimed": 1},
     "agents": [{"name": "master", "lane": "master"}, {"name": "engineer", "lane": "eng", "task": "one"}],
     "findings": [],
@@ -96,7 +96,6 @@ def test_swarm_contains_the_operational_blocks_and_nothing_overflows(tab, width)
     for gone in ["Needs you", "Crew history", "Last restore"]:
         assert tab.locator("#swarm").get_by_text(gone, exact=True).count() == 0, gone
     assert tab.locator("#swarm #cap-eng").input_value() == "3"
-    assert tab.locator("#swarm #cap-codex").input_value() == "30"
     assert tab.locator("#swarm-alert").is_hidden()
     assert tab.get_by_text("Needs you", exact=True).count() == 0
     assert tab.locator("#needs-you-box, #needs-you").count() == 0

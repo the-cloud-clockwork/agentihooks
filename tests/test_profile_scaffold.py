@@ -356,8 +356,4 @@ def test_install_refuses_an_unknown_bundle_action(monkeypatch, capsys):
         install.main()
 
     assert stop.value.code == 2
-    last = " ".join(capsys.readouterr().err.strip().splitlines()[-1].split()).replace("'", "")
-    assert last == (
-        "agentihooks bundle: error: argument action: invalid choice: frobnicate"
-        " (choose from new, link, unlink, list, pull)"
-    )
+    assert capsys.readouterr().err == "unknown command frobnicate, run agentihooks -h and try again\n"

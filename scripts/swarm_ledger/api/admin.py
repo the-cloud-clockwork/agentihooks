@@ -121,14 +121,11 @@ CONTROL = {
                 "restore-decision",
                 "lift",
                 "quota_refresh",
-                "session_cap",
                 "doctor_start",
                 "doctor_stop",
             ]
         },
-        **{
-            key: {"type": "integer"} for key in ("max_eng", "max_ci", "max_plan", "codex_share", "compact_limit", "cap")
-        },
+        **{key: {"type": "integer"} for key in ("max_eng", "max_ci", "max_plan", "compact_limit")},
         **{
             key: {"type": "string", "maxLength": 2000}
             for key in (
@@ -142,8 +139,6 @@ CONTROL = {
                 "effort_min",
                 "effort_max",
                 "autonomy",
-                "account",
-                "harness",
             )
         },
         "gates": {"type": "object", "additionalProperties": {"type": "string"}},

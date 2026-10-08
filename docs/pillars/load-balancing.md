@@ -33,28 +33,28 @@ account a session runs on. Token values are never printed or logged.
 ## Launch routing
 
 `agenti` probes every account (results cached 60 s in
-`~/.agentihooks/claude-router-cache.json`) and picks one:
+`~/.agentihooks/claude-router-cache.json`) and places the session by one rule,
+the same one the swarm uses for its seats:
 
-1. Drop accounts with less than 5% **routing left**, where routing left is
-   `100 − max(5h used, 7d used)`: the tighter of the two windows.
-2. Drop accounts already running `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` live
-   sessions (default 3; Codex counts as one account with the same cap), as long as another
-   account is still below the cap.
-   An account's own cap, stored in the shared Redis, replaces the default for that account. Set it
-   from the Quota panel on the ledger page (minus and plus beside each sessions count) or with
-   `agentihooks swarm <slug> session-cap <account> <n|default> [--harness claude|codex]`.
-   `agentihooks balance` shows each account against its own cap.
-3. Take the account with the most routing left.
+1. Each account's cap of live sessions comes from its five hour window alone:
+   6 at 60% or more left, 4 at 40 to 60%, 3 at 10 to 40%, 2 at 5 to 10%, none
+   below 5% until that window resets.
+2. An account with under 5% of its week left takes no new session until the week
+   resets.
+3. A reading that is missing or older than fifteen minutes is refreshed first; an
+   account still without a fresh reading takes no new session.
+4. The next session goes to the eligible account with the fewest live sessions
+   (ties in account order), counted from every live process on the machine.
 
-When every routable account is at the cap, the one with the fewest live sessions
-takes the new session and the launch line says `placement=overflow`. A lock held
-until Claude starts keeps two simultaneous launches from both taking the last
-free slot.
+When no account has a free place the launch fails. `agentihooks balance` and the
+Quota panel on the ledger page show each account's live sessions against its
+computed cap. A lock held until Claude starts keeps two simultaneous launches
+from both taking the last free place.
 
 `agenti --route <slug>` skips all of this and uses `AH_CC_TOKEN_<slug>`.
 
 ```text
-[agenti] account=work routing_left=62% 5h_left=80% 7d_left=62% sessions=1/2 source=cached
+[agenti] account=work routing_left=62% 5h_left=80% 7d_left=62% sessions=1/6 source=cached
 ```
 
 ## Skill evaluations
@@ -113,6 +113,10 @@ with every other account from the router cache. The result is one directive,
 computed by `hooks/context/quota_policy.py`; nothing is left to the model's
 judgment.
 
+Handoff targets use their quota band caps alone; the policy has no default
+sessions per account setting. A stale reading carries an unknown cap until the
+launcher refreshes it and applies the placement rule.
+
 | This session | Other accounts | Directive |
 |---|---|---|
 | 7d used ≥ 98% | one with ≥ 20% routing left | `QUOTA HANDOFF REQUIRED` to it (accounts below the session cap first) |
@@ -162,9 +166,10 @@ Codex routes the same way. Its accounts are the default `codex login` on this
 machine (named `default`, detected with `codex login status`) and one ChatGPT
 workspace access token per `AH_CX_TOKEN_<slug>`.
 
-- `agentihooks codex [--route <slug>] [codex args]` picks the account with the
-  most routing left below `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT`, the least
-  loaded when every account is full; `--route` forces one. `init-agent --agent
+- `agentihooks codex [--route <slug>] [codex args]` picks by the same rule, with
+  each Codex account judged on its week alone with the top band (6 sessions, none
+  under 5% of the week). A reading older than fifteen minutes is refreshed by one
+  tiny `codex exec` on that account before placing; `--route` forces one. `init-agent --agent
   codex` and the swarm tick launch through it, and the route report names the
   account for the swarm panel.
 - A token account's child keeps only its `AH_CX_TOKEN_<slug>`, loses every
@@ -186,7 +191,6 @@ workspace access token per `AH_CX_TOKEN_<slug>`.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` | `3` | Live sessions per account before launches move to the next account, for an account without its own stored cap |
 | `AGENTIHOOKS_HANDOFF_WEEK_PCT` | `98` | 7-day used % that triggers the policy |
 | `AGENTIHOOKS_HANDOFF_5H_PCT` | `99` | 5-hour used % that triggers the policy |
 | `AGENTIHOOKS_HANDOFF_MIN_LEFT` | `20` | Routing left % a handoff target needs |

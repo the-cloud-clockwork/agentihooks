@@ -43,6 +43,7 @@ def render(task, tail=None):
                 "taskRanks",
                 "taskRank",
                 "rankPick",
+                "difficultyLabel",
                 "taskRow",
             )
         )

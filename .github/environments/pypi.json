@@ -1,0 +1,25 @@
+{
+  "environment": {
+    "deployment_branch_policy": {
+      "protected_branches": false,
+      "custom_branch_policies": true
+    },
+    "prevent_self_review": false,
+    "reviewers": [
+      {
+        "type": "User",
+        "id": 31187725
+      }
+    ]
+  },
+  "deployment_branch_policies": [
+    {
+      "name": "main",
+      "type": "branch"
+    },
+    {
+      "name": "v*",
+      "type": "tag"
+    }
+  ]
+}

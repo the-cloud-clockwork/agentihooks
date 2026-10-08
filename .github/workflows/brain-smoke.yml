@@ -1,21 +1,8 @@
 name: brain-smoke
 
 on:
-  pull_request:
-    paths:
-      - 'hooks/telemetry.py'
-      - 'hooks/common.py'
-      - 'hooks/context/brain_adapter.py'
-      - 'hooks/context/brain_writer_hook.py'
-      - 'hooks/context/broadcast.py'
-      - 'scripts/brain-smoke'
-      - 'pyproject.toml'
-      - '.github/workflows/brain-smoke.yml'
+  workflow_call:
   workflow_dispatch:
-
-concurrency:
-  group: brain-smoke-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -23,6 +10,7 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     services:
       otel-collector:
         image: otel/opentelemetry-collector-contrib:0.96.0

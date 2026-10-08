@@ -133,8 +133,6 @@ def test_spawn_records_and_stores_classifier_choice(tmp_path, monkeypatch):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={"eng": {"model": "auto", "effort": "auto"}},
         autonomy="delegate",
     )
@@ -249,8 +247,6 @@ def test_spawn_timeout_names_and_retires_the_failed_agent(tmp_path):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
     )

@@ -38,21 +38,6 @@ def test_set_updates_caps_and_state(store):
     assert (store.config("smoke").max_eng, store.config("smoke").state) == (3, "paused")
 
 
-def test_share_target_period_is_preserved_until_the_target_changes(store, monkeypatch):
-    monkeypatch.setattr(time, "time", lambda: 10)
-    store.create(config(codex_share=20))
-    assert store.config("smoke").codex_share_changed_at == 10_000
-    monkeypatch.setattr(time, "time", lambda: 20)
-    assert store.update("smoke", max_eng=2).codex_share_changed_at == 10_000
-    assert store.update("smoke", codex_share=20).codex_share_changed_at == 10_000
-    assert store.update("smoke", codex_share=0).codex_share_changed_at == 20_000
-    monkeypatch.setattr(time, "time", lambda: 30)
-    assert store.update("smoke", codex_share=20).codex_share_changed_at == 30_000
-    store.redis.hdel(store.key("smoke", "config"), "codex_share_changed_at")
-    assert store.config("smoke").codex_share_changed_at == 0
-    assert store.update("smoke", codex_share=20).codex_share_changed_at == 30_000
-
-
 def test_a_task_claim_is_exclusive_until_released(store):
     store.create(config())
     assert store.claim("smoke", "t1", "engineer@a1b2c3-0001", lease_ms=60_000)

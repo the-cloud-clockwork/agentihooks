@@ -294,11 +294,11 @@ def test_claude_render_settings(world):
     assert {"type": "command", "command": f"bash {resolved}"} in settings["hooks"]["Stop"][-1]["hooks"]
 
 
-def test_claude_render_enables_only_the_chain_plugins(world):
+def test_an_operator_home_carries_the_operator_user_scope_plugins(world):
     from scripts.profiles import render
 
     home, bundle = world["home"], world["bundle"]
-    operator = {"model": "opus", "enabledPlugins": {"mine@m": True, "kit@m": False}}
+    operator = {"model": "opus", "enabledPlugins": {"mine@m": True, "kit@m": False, "muted@m": True, "off@m": False}}
     _write(home / ".claude" / "settings.json", json.dumps(operator))
     plugin = {"kind": "claude-plugin", "check": ["true"], "install": ["true"]}
     _write(bundle / "deps.json", json.dumps({"deps": [{**plugin, "id": "fleet@m"}]}))
@@ -307,7 +307,7 @@ def test_claude_render_enables_only_the_chain_plugins(world):
 
     out = render.render_claude("rb-role")
 
-    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"kit@m": True}
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"mine@m": True, "kit@m": True}
     assert json.loads((home / ".claude" / "settings.json").read_text()) == operator
 
 
@@ -363,6 +363,128 @@ def test_a_profile_extending_a_role_keeps_its_defaults(world):
         MATTPOCOCK: True,
         "frontend-design@claude-plugins-official": True,
     }
+
+
+def _install_in_home(out: Path, plugin: str) -> None:
+    settings = json.loads((out / "settings.json").read_text())
+    settings["enabledPlugins"] = {**settings["enabledPlugins"], plugin: True}
+    (out / "settings.json").write_text(json.dumps(settings))
+
+
+@pytest.mark.parametrize(("name", "rendered"), [("rb-role", {"mine@m": True}), ("engineer", {MATTPOCOCK: True})])
+def test_a_plugin_installed_inside_a_home_survives_the_next_render(world, name, rendered):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / "engineer" / "profile.yml", "name: engineer\nextends: [rb-base]\n")
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
+    _install_in_home(render.render_claude(name), "local@m")
+
+    out = render.render_claude(name, force=True)
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {**rendered, "local@m": True}
+
+
+def test_init_carries_a_user_scope_install_into_the_rendered_home(world):
+    from scripts.profiles import render
+
+    render.render_claude("rb-role")
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"new@m": True}}))
+
+    world["install"]._rerender_profile_homes("claude")
+
+    out = render.profile_dir("rb-role") / "claude"
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"new@m": True}
+
+
+def test_a_home_without_a_plugin_record_keeps_what_is_enabled_inside_it(world):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    _install_in_home(out, "local@m")
+    (out / render.PLUGINS).unlink()
+
+    out = render.render_claude("rb-role", force=True)
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"local@m": True}
+
+
+def test_a_home_without_a_stamp_still_drops_a_plugin_its_source_dropped(world):
+    from scripts.profiles import render
+
+    kit = world["bundle"] / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json"
+    _write(kit, json.dumps({"enabledPlugins": {"kit@m": True}}))
+    out = render.render_claude("rb-role")
+    _install_in_home(out, "local@m")
+    (out / render.STAMP).unlink()
+    _write(kit, json.dumps({}))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"local@m": True}
+
+
+def test_a_home_built_on_a_package_role_leaves_out_the_operator_plugins(world):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / "rb-front" / "profile.yml", "name: rb-front\nextends: [package:engineer]\n")
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
+
+    out = render.render_claude("rb-front")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {MATTPOCOCK: True}
+
+
+def test_a_plugin_the_bundle_layer_drops_leaves_the_home(world):
+    from scripts.profiles import render
+
+    layer = world["bundle"] / ".claude" / "settings.overrides.json"
+    _write(layer, json.dumps({"enabledPlugins": {"bundle@m": True}}))
+    render.render_claude("rb-role")
+    _write(layer, json.dumps({}))
+
+    out = render.render_claude("rb-role", force=True)
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
+
+
+def test_a_render_inside_a_profile_home_reads_the_operator_plugins(world, monkeypatch):
+    from scripts.profiles import render
+
+    inside = _write(world["home"] / "inside" / "settings.json", json.dumps({"enabledPlugins": {"inner@m": True}}))
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(inside.parent))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"mine@m": True}
+
+
+def test_a_profile_disable_beats_a_plugin_installed_inside_the_home(world):
+    from scripts.profiles import render
+
+    _install_in_home(render.render_claude("rb-role"), "local@m")
+    off = {"enabledPlugins": {"local@m": False}}
+    _write(world["bundle"] / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json", json.dumps(off))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
+
+
+def test_a_plugin_the_render_wrote_leaves_when_its_source_drops_it(world):
+    from scripts.profiles import render
+
+    kit = world["bundle"] / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json"
+    settings = world["home"] / ".claude" / "settings.json"
+    _write(settings, json.dumps({"enabledPlugins": {"mine@m": True}}))
+    _write(kit, json.dumps({"enabledPlugins": {"kit@m": True}}))
+    render.render_claude("rb-role")
+
+    _write(settings, json.dumps({"enabledPlugins": {}}))
+    _write(kit, json.dumps({}))
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
 
 
 def test_a_profile_whose_own_layers_enable_plugins_is_claude_only(world):
@@ -666,6 +788,154 @@ def test_codex_render_links_into_the_claude_profile(world):
     )
     sources = render.sources.path(out.parent.name, "codex", out.parent.parent)
     assert os.readlink(sources) == str(render.sources.path(out.parent.name, "claude", out.parent.parent))
+
+
+ROLE_TOOLSET = "http://gw.example/toolset/rb-role/mcp"
+WHOLE_CATALOGUE = "http://gw.example/mcp/"
+
+
+@pytest.fixture
+def copilot_gateway(world, monkeypatch):
+    monkeypatch.setenv("GW_KEY", "k-test")
+    whole = {"mcpServers": {"gateway-tools": {"type": "http", "url": WHOLE_CATALOGUE}}}
+    _write(world["home"] / ".copilot" / "mcp-config.json", json.dumps(whole))
+    toolset = {"type": "http", "url": ROLE_TOOLSET, "headers": {"Authorization": "Bearer ${GW_KEY}"}}
+    _declare(world, **{"gateway-tools": {**toolset, "default_tools_approval_mode": "approve"}})
+
+
+def test_copilot_render_names_the_role_toolset_not_the_whole_catalogue(world, copilot_gateway):
+    from scripts.profiles import render
+
+    out = render.render_copilot("rb-role")
+
+    assert out == (render.rendered_root() / "rb-role" / "copilot").resolve()
+    text = (out / "mcp-config.json").read_text()
+    assert json.loads(text)["mcpServers"]["gateway-tools"] == {
+        "type": "http",
+        "url": ROLE_TOOLSET,
+        "headers": {"Authorization": "Bearer k-test"},
+        "auth": False,
+        "oidc": False,
+    }
+    assert WHOLE_CATALOGUE not in text
+    operator = json.loads((world["home"] / ".copilot" / "mcp-config.json").read_text())
+    assert operator["mcpServers"]["gateway-tools"]["url"] == WHOLE_CATALOGUE
+
+
+def test_copilot_render_links_the_role_persona_and_operator_state(world, copilot_gateway):
+    from scripts.profiles import render
+
+    out = render.render_copilot("rb-role")
+
+    assert os.readlink(out / "copilot-instructions.md") == str(out.parent / "claude" / "CLAUDE.md")
+    for item in render.COPILOT_STATE:
+        assert os.readlink(out / item) == str(world["home"] / ".copilot" / item)
+    assert render.render_copilot("rb-role") is None
+    assert render.rendered_profiles("copilot") == ["rb-role"]
+    forced = render.render_copilot("rb-role", force=True)
+    assert forced != out and ROLE_TOOLSET in (forced / "mcp-config.json").read_text()
+    assert os.readlink(forced / "copilot-instructions.md") == str(forced.parent / "claude" / "CLAUDE.md")
+
+
+def test_copilot_render_follows_a_rotated_gateway_key_into_a_private_file(world, copilot_gateway, monkeypatch):
+    from scripts.profiles import render
+
+    first = render.render_copilot("rb-role")
+    monkeypatch.setenv("GW_KEY", "k-rotated")
+
+    out = render.render_copilot("rb-role")
+
+    assert out != first and out == render.profile_dir("rb-role") / "copilot"
+    headers = json.loads((out / "mcp-config.json").read_text())["mcpServers"]["gateway-tools"]["headers"]
+    assert headers == {"Authorization": "Bearer k-rotated"}
+    assert (out / "mcp-config.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_copilot_render_keeps_a_declared_tool_allowlist(world, copilot_gateway):
+    from scripts.profiles import render
+
+    _declare(
+        world, lf={"type": "http", "url": "http://lf.example/mcp", "enabled_tools": READS, "disabled_tools": ["x"]}
+    )
+
+    entry = json.loads((render.render_copilot("rb-role") / "mcp-config.json").read_text())["mcpServers"]["lf"]
+
+    assert entry["tools"] == READS
+    assert entry["excludeTools"] == ["x"]
+
+
+def test_copilot_render_keeps_an_empty_tool_allowlist_closed(world, copilot_gateway):
+    from scripts.profiles import render
+
+    _declare(world, lf={"type": "http", "url": "http://lf.example/mcp", "enabled_tools": []})
+
+    entry = json.loads((render.render_copilot("rb-role") / "mcp-config.json").read_text())["mcpServers"]["lf"]
+
+    assert entry["tools"] == []
+
+
+def test_copilot_render_writes_the_stamped_bundle_servers_as_indented_json(world, copilot_gateway):
+    from scripts.profiles import render
+
+    out = render.render_copilot("rb-role")
+
+    text = (out / "mcp-config.json").read_text()
+    assert text == json.dumps(json.loads(text), indent=2) + "\n"
+    assert "bundle-srv" in json.loads(text)["mcpServers"]
+    assert json.loads((out / render.STAMP).read_text()) == render.stamp("rb-role")
+
+
+def test_forced_copilot_render_starts_a_new_home_beside_a_fresh_claude_one(world, copilot_gateway):
+    from scripts.profiles import render
+
+    claude = render.render_claude("rb-role")
+
+    out = render.render_copilot("rb-role", force=True)
+
+    assert out.parent != claude.parent
+    assert out == render.profile_dir("rb-role") / "copilot"
+
+
+def test_copilot_renders_an_overlay_set_into_its_own_home(world, overlays, copilot_gateway, monkeypatch):
+    from scripts.profiles import render
+
+    gateway = {"type": "http", "url": ROLE_TOOLSET, "headers": {"Authorization": "Bearer ${GW_KEY}"}}
+    _write(overlays / "rb-eng" / ".claude" / ".mcp.json", json.dumps({"mcpServers": {"gw": gateway}}))
+    out = render.render_copilot("rb-eng", overlays=["ov-a"])
+
+    assert out.parent == render.profile_dir("rb-eng", ["ov-a"])
+    assert json.loads((out / render.STAMP).read_text())["overlays"] == ["ov-a"]
+    assert "OV-A RULE MARKER" in (out / "copilot-instructions.md").read_text()
+    assert render.render_copilot("rb-eng", overlays=["ov-a"]) is None
+    forced = render.render_copilot("rb-eng", force=True, overlays=["ov-a"])
+    assert forced == render.profile_dir("rb-eng", ["ov-a"]) / "copilot"
+    assert "OV-A RULE MARKER" in (forced / "copilot-instructions.md").read_text()
+    monkeypatch.setenv("GW_KEY", "k-rotated")
+    stale = render.render_copilot("rb-eng", overlays=["ov-a"])
+    assert stale != forced and stale == render.profile_dir("rb-eng", ["ov-a"]) / "copilot"
+    assert "OV-A RULE MARKER" in (stale / "copilot-instructions.md").read_text()
+
+
+def test_init_re_renders_each_copilot_role_home(world, copilot_gateway, monkeypatch):
+    from scripts.profiles import render
+
+    first = render.render_copilot("rb-role")
+    monkeypatch.setenv("GW_KEY", "k-init")
+
+    world["install"]._rerender_profile_homes("copilot")
+
+    out = render.rendered_root() / "rb-role" / "copilot"
+    assert out.resolve() != first
+    assert "Bearer k-init" in (out / "mcp-config.json").read_text()
+
+
+def test_profile_render_cli_renders_a_copilot_home(world, copilot_gateway, capsys):
+    from scripts.profiles import render
+
+    assert render.main(["render", "rb-role", "--target", "copilot"]) == 0
+
+    assert ROLE_TOOLSET in (render.rendered_root() / "rb-role" / "copilot" / "mcp-config.json").read_text()
+    assert "Rendered rb-role (copilot)" in capsys.readouterr().out
 
 
 def test_codex_master_replaces_monitor_instructions_without_changing_claude(world):
@@ -1190,15 +1460,21 @@ def test_stamp_skips_fresh_render_and_redoes_stale(world, target):
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_stamp_ignores_operator_plugins(world, target):
+def test_operator_plugins_redo_only_operator_homes(world, target):
     from scripts.profiles import render
 
+    _write(world["bundle"] / "profiles" / "engineer" / "profile.yml", "name: engineer\nextends: [rb-base]\n")
     settings = world["home"] / ".claude" / "settings.json"
     _write(settings, json.dumps({"enabledPlugins": {"mine@m": True}}))
     assert render.render(target, "rb-role") is not None
+    assert render.render(target, "engineer") is not None
 
     _write(settings, json.dumps({"enabledPlugins": {"mine@m": True, "later@m": True}}))
+    assert render.render(target, "engineer") is None
+    assert render.render(target, "rb-role") is not None
     assert render.render(target, "rb-role") is None
+    enabled = json.loads((render.profile_dir("rb-role") / "claude" / "settings.json").read_text())["enabledPlugins"]
+    assert enabled == {"mine@m": True, "later@m": True}
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -1289,12 +1565,12 @@ def test_stamp_names_the_chain_role_defaults(world, monkeypatch):
     from scripts.profiles import plugins, render
 
     _write(world["bundle"] / "profiles" / "master" / "profile.yml", "name: master\nextends: [rb-role]\n")
-    assert render.stamp("rb-role")["plugins"] == {}
-    assert render.stamp("master")["plugins"] == {PLAYWRIGHT: True}
+    assert render.stamp("rb-role")["enabled_plugins"] == {}
+    assert render.stamp("master")["enabled_plugins"] == {PLAYWRIGHT: True}
     assert render.render("claude", "master") is not None
 
     monkeypatch.setitem(plugins.ROLE_PLUGINS, "master", ("other@m",))
-    assert render.stamp("master")["plugins"] == {"other@m": True}
+    assert render.stamp("master")["enabled_plugins"] == {"other@m": True}
     assert render.render("claude", "master") is not None
 
 
@@ -1400,7 +1676,7 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "profiles": profiles,
         "chain": chain,
         "overlays": [],
-        "plugins": {},
+        "enabled_plugins": {},
         "corrections": "",
     }
     assert render._stamp(None, []) == {
@@ -1409,7 +1685,7 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "profiles": render._profiles_digest([]),
         "chain": [],
         "overlays": [],
-        "plugins": {},
+        "enabled_plugins": {},
         "corrections": "",
     }
     assert render._roots(None, [("rb-role", world["role"])]) == [world["role"]]
@@ -1418,8 +1694,8 @@ def test_stamp_names_bundle_commit_and_chain(world):
 def test_render_refuses_other_targets(world):
     from scripts.profiles import render
 
-    with pytest.raises(ValueError, match="^copilot per-run profiles are not supported$"):
-        render.render("copilot", "rb-role")
+    with pytest.raises(ValueError, match="^gemini per-run profiles are not supported$"):
+        render.render("gemini", "rb-role")
 
 
 def test_cli_renders_and_refuses(world, capsys):
@@ -1432,8 +1708,6 @@ def test_cli_renders_and_refuses(world, capsys):
     assert capsys.readouterr().out == "rb-role (claude) is up to date\n"
     assert render.main(["render", "rb-role", "--force"]) == 0
     assert capsys.readouterr().out.endswith(f"\nRendered rb-role (claude) → {out.resolve()}\n")
-    assert render.main(["render", "rb-role", "--target", "copilot"]) == 2
-    assert capsys.readouterr().err == "copilot per-run profiles are not supported\n"
     assert render.main(["render", "rb-missing", "--target", "codex"]) == 1
     assert capsys.readouterr().err == "ERROR: Profile 'rb-missing' not found\n"
 
@@ -1456,14 +1730,15 @@ def test_cli_usage(world, capsys):
     )
 
 
-def test_agentihooks_profile_dispatches_to_render(monkeypatch, capsys):
+def test_agentihooks_profile_dispatches_to_render(world, copilot_gateway, monkeypatch, capsys):
     from scripts import install
+    from scripts.profiles import render
 
     monkeypatch.setattr("sys.argv", ["agentihooks", "profile", "render", "rb-role", "--target", "copilot"])
     with pytest.raises(SystemExit) as exc:
         install.main()
-    assert exc.value.code == 2
-    assert capsys.readouterr().err == "copilot per-run profiles are not supported\n"
+    assert exc.value.code == 0
+    assert ROLE_TOOLSET in (render.rendered_root() / "rb-role" / "copilot" / "mcp-config.json").read_text()
 
 
 def test_agentihooks_help_lists_profile(monkeypatch, capsys):
@@ -1472,7 +1747,7 @@ def test_agentihooks_help_lists_profile(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["agentihooks", "--help"])
     with pytest.raises(SystemExit):
         install.main()
-    line = r"(?<!\S)profile Render a profile into its own home: render NAME --target claude\|codex \[--force\] \[--out DIR \[--bundle DIR\]\](?!\S)"
+    line = r"(?<!\S)profile Render a profile into its own home: render NAME --target claude\|codex\|copilot \[--force\] \[--out DIR \[--bundle DIR\]\](?!\S)"
     assert re.search(line, _flat(capsys.readouterr().out))
 
 
@@ -2114,3 +2389,109 @@ def test_cli_renders_the_overlays_named(world, overlays, capsys):
     with pytest.raises(SystemExit):
         render.main(["render", "--help"])
     assert re.search(r"--overlay OVERLAY\s+Wear this overlay; repeat for up to three", capsys.readouterr().out)
+
+
+def test_an_overlay_render_refuses_a_bundle_at_another_commit_than_its_launch_recorded(world, overlays):
+    from scripts.profiles import render
+
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+    _commit(world["bundle"], "moved")
+    head = _git(world["bundle"], "rev-parse", "HEAD").strip()
+
+    with pytest.raises(ValueError) as refused:
+        render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    assert str(refused.value) == (
+        f"the launch recorded bundle commit {recorded}, but the bundle at {world['bundle']} is at commit {head}; "
+        f"check out {recorded} in the bundle before this launch renders"
+    )
+    assert render.profile_dir("rb-eng", ["ov-a"]) is None
+
+
+def test_an_overlay_render_refuses_a_bundle_with_uncommitted_changes(world, overlays):
+    from scripts.profiles import render
+
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+    _write(overlays / "ov-a" / ".claude" / "rules" / "ov-a.md", "EDITED RULE\n")
+
+    with pytest.raises(ValueError) as refused:
+        render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    assert str(refused.value) == (
+        f"the launch recorded bundle commit {recorded}, but the bundle at {world['bundle']} has uncommitted changes; "
+        f"check out {recorded} in the bundle before this launch renders"
+    )
+    assert render.profile_dir("rb-eng", ["ov-a"]) is None
+
+
+def test_an_overlay_render_refuses_a_recorded_commit_without_a_linked_bundle(world, overlays, monkeypatch):
+    from scripts.profiles import render
+
+    monkeypatch.setattr(render, "_bundle", lambda: None)
+
+    with pytest.raises(ValueError) as refused:
+        render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision="abc123")
+
+    assert str(refused.value) == "the launch recorded bundle commit abc123, but no bundle is linked"
+
+
+def test_an_overlay_render_refuses_a_bundle_git_cannot_read(world, overlays, monkeypatch, tmp_path):
+    from scripts.profiles import render
+
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    monkeypatch.setattr(render, "_bundle", lambda: plain)
+
+    with pytest.raises(ValueError) as refused:
+        render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision="abc123")
+
+    assert str(refused.value).startswith(
+        f"the launch recorded bundle commit abc123, but git cannot read the bundle at {plain}: fatal: not a git repository"
+    )
+
+
+def test_an_overlay_render_refuses_a_bundle_git_does_not_answer(world, overlays, monkeypatch):
+    from scripts.profiles import render
+
+    def hang(argv, **kwargs):
+        assert kwargs["timeout"] == 10
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    monkeypatch.setattr(render.subprocess, "run", hang)
+
+    with pytest.raises(ValueError) as refused:
+        render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision="abc123")
+
+    assert str(refused.value) == (
+        f"the launch recorded bundle commit abc123, but git did not answer within 10 seconds for the bundle at "
+        f"{world['bundle']}"
+    )
+
+
+def test_the_bundle_pin_reads_head_and_status_as_text_within_ten_seconds(world, overlays, monkeypatch):
+    from scripts.profiles import render
+
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv[3:], kwargs))
+        return subprocess.CompletedProcess(argv, 0, stdout="abc123\n" if argv[3] == "rev-parse" else "", stderr="")
+
+    monkeypatch.setattr(render.subprocess, "run", run)
+
+    render._pin(world["bundle"], "abc123")
+
+    options = {"capture_output": True, "text": True, "timeout": 10}
+    assert calls == [(["rev-parse", "HEAD"], options), (["status", "--porcelain"], options)]
+
+
+def test_an_overlay_render_from_the_recorded_commit_renders_and_stamps_it(world, overlays):
+    from scripts.profiles import render
+
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+
+    out = render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    assert "OV-A RULE MARKER" in (out / "CLAUDE.md").read_text()
+    assert json.loads((out / render.STAMP).read_text())["bundle_commit"] == recorded
+    assert render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded) is None

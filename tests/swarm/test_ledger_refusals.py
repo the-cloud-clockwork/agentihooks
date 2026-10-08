@@ -27,7 +27,7 @@ def test_refused_plan_completion_names_invalid_slice(monkeypatch):
 )
 def test_refusal_keeps_diagnostics_or_operation_fallback(monkeypatch, response, expected):
     monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops, service: response))
-    with pytest.raises(SwarmError) as caught:
+    with pytest.raises(ledger_client.LedgerRefused) as caught:
         ledger_client.LedgerClient().update_task("demo", "plan", {"state": "done"})
     assert str(caught.value) == expected
 

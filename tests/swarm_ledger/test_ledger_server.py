@@ -113,7 +113,7 @@ def test_each_row_carries_title_kind_counts_swarm_state_and_last_activity(browse
         found,
     )
     assert '<span class="acts"><button class="act del" type="button" data-act="delete"' in found
-    assert 'data-slug="rows-2026-01-03" title="Move to the bin" aria-label="Move Rows plan to the bin">' in found
+    assert 'data-slug="rows-2026-01-03" aria-label="Move Rows plan to the bin">' in found
     assert 'data-act="reopen"' not in found
 
 

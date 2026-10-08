@@ -1,11 +1,8 @@
 import re
 
-from scripts.agent_choice import SHARE_WINDOW_MS, share_picks
 from scripts.swarm.health.findings import Finding
 
 TICK_MS = 60_000
-WINDOW_MS = SHARE_WINDOW_MS
-MIN_PICKS = 10
 FAILURE = re.compile(r"^(?:spawn failed for ([^\s,]+).*?|master spawn failed): (.+)$")
 
 
@@ -28,45 +25,6 @@ def failed(record: dict) -> list[Finding]:
             len(reasons),
         )
         for subject, reasons in sorted(failures.items())
-    ]
-
-
-def share_drift(record: dict) -> list[Finding]:
-    if not record.get("target_changed_at"):
-        return []
-    since = max(record["now"] - WINDOW_MS, record["target_changed_at"] + 1)
-    target = record["target"]
-    picks = share_picks([*record["history"], *record["agents"]], since)
-    total, codex = sum(picks.values()), picks.get("codex", 0)
-    if total < MIN_PICKS or abs(codex * 100 - total * target) <= 100:
-        return []
-    actual = codex * 100 / total
-    return [
-        Finding(
-            "codex share drift",
-            record["slug"],
-            f"Codex share {actual:.1f}% against target {target}%",
-            (
-                f"codex {codex}/{total} share picks in the last {WINDOW_MS // 3_600_000} hours, {actual:.1f}%, target {target}%",
-            ),
-            "more than one share pick from target",
-            round(abs(actual - target)),
-        )
-    ]
-
-
-def overflow(record: dict) -> list[Finding]:
-    return [
-        Finding(
-            "account overflow",
-            agent["name"],
-            "session placed on an account at its cap",
-            (f"account {agent['account']}", f"harness {agent['harness']}", "placement overflow"),
-            "launcher reported overflow",
-            1,
-        )
-        for agent in record["agents"]
-        if agent.get("placement") == "overflow"
     ]
 
 
@@ -113,4 +71,4 @@ def silent_starts(agents: list[dict], hooked: dict, now_ms: int) -> list[Finding
 
 
 def findings(record: dict) -> list[Finding]:
-    return [*failed(record), *share_drift(record), *overflow(record), *fresh_restores(record)]
+    return [*failed(record), *fresh_restores(record)]

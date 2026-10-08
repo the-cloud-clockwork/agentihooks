@@ -34,8 +34,15 @@ UPDATABLE = (
     "stacked_base",
     "parked_on",
     "overlays",
+    "difficulty",
+    "difficulty_source",
+    "difficulty_confidence",
 )
 BOOL_FIELDS = ("artifact",)
+DIFFICULTIES = ("S", "M", "L")
+DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
+DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
+NUMBER_FIELDS = ("difficulty_confidence",)
 LIST_FIELDS = ("depends_on", "territory", "parked_on", "overlays")
 OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^\S*$")
@@ -78,6 +85,7 @@ def check(op):
         check_profile(op)
         check_urls(op)
         check_rank(op)
+        check_difficulty(op)
         ledger_kinds.check(op)
         check_lane(op)
         gain = op.get("gain", 0)
@@ -88,7 +96,8 @@ def check(op):
     fields = op.get("fields")
     if not ITEM_RE.match(str(op.get("item"))) or not isinstance(fields, dict) or not fields:
         raise ValueError("task_update needs item tasks/<id> and fields")
-    strings = {k: v for k, v in fields.items() if k not in LIST_FIELDS + OBJECT_FIELDS + BOOL_FIELDS}
+    check_difficulty(fields)
+    strings = {k: v for k, v in fields.items() if k not in LIST_FIELDS + OBJECT_FIELDS + BOOL_FIELDS + NUMBER_FIELDS}
     if set(fields) - set(UPDATABLE) or not all(isinstance(v, str) for v in strings.values()):
         raise ValueError(
             f"task_update may set only {UPDATABLE}, as strings, {LIST_FIELDS} as lists or {OBJECT_FIELDS} as objects"
@@ -120,6 +129,27 @@ def check_stack(fields):
 def check_rank(fields):
     if "rank" in fields:
         ledger_rank.canonical(fields["rank"])
+
+
+def check_difficulty(fields):
+    if not set(DIFFICULTY_FIELDS) & set(fields):
+        return
+    if "difficulty" not in fields:
+        raise ValueError("difficulty_source and difficulty_confidence come with a difficulty")
+    fields = sized(fields)
+    if fields["difficulty"] not in DIFFICULTIES:
+        raise ValueError(f"difficulty must be one of {DIFFICULTIES}")
+    if fields["difficulty_source"] not in DIFFICULTY_SOURCES:
+        raise ValueError(f"difficulty_source must be one of {DIFFICULTY_SOURCES}")
+    confidence = fields["difficulty_confidence"]
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
+        raise ValueError("difficulty_confidence must be a number from 0 to 1")
+
+
+def sized(fields):
+    if "difficulty" not in fields:
+        return fields
+    return {"difficulty_source": "operator", "difficulty_confidence": 1.0, **fields}
 
 
 def check_lists(fields):
@@ -161,6 +191,7 @@ def check_task(task):
     check_urls(task)
     check_profile(task)
     check_rank(task)
+    check_difficulty(task)
     ledger_kinds.check(task)
     check_lane(task)
     if task.get("state") == "done" and ledger_kinds.unmet(task):
@@ -201,6 +232,7 @@ def _add(doc, op, ctx):
             task[key] = op[key]
     if "rank" in op:
         task["rank"] = ledger_rank.canonical(op["rank"])
+    task.update({k: v for k, v in sized(op).items() if k in DIFFICULTY_FIELDS})
     phase = next((p for p in doc.get("phases", []) if p["id"] == task["phase"]), {})
     if plan_url := op.get("plan_url") or phase.get("plan_url"):
         task["plan_url"] = plan_url
@@ -225,12 +257,12 @@ def add_refusal(tasks, op):
     return ""
 
 
-def rank_refusal(by):
+def rank_refusal(by, field="rank"):
     from scripts.swarm.naming import lane_of
 
     lane = lane_of(by)
     if lane in WORKER_LANES:
-        return f"{by} works in the {lane} lane and cannot set a task rank: {PROPOSE}"
+        return f"{by} works in the {lane} lane and cannot set a task {field}: {PROPOSE}"
     return ""
 
 
@@ -283,6 +315,11 @@ def _update(doc, op, ctx):
             ctx.refused.append(refusal)
             return False
         op = {**op, "fields": {**op["fields"], "rank": ledger_rank.canonical(op["fields"]["rank"])}}
+    if "difficulty" in op["fields"]:
+        if refusal := rank_refusal(op["by"], "difficulty"):
+            ctx.refused.append(refusal)
+            return False
+        op = {**op, "fields": sized(op["fields"])}
     fields = _update_fields(task, op["fields"])
     after = {**task, **fields}
     check_lane(after)

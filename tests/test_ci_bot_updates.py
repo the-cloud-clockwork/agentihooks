@@ -1,7 +1,6 @@
 import json
 import os
 import subprocess
-import sys
 import tomllib
 from pathlib import Path
 
@@ -52,72 +51,13 @@ def test_a_newer_dev_push_never_cancels_a_running_dev_push_run():
     }
 
 
-@pytest.mark.parametrize("version", ["3.11", "3.12"])
-@pytest.mark.parametrize("mode", ["download", "no_run", "missing", "invalid", "legacy"])
-def test_pr_shards_use_the_newest_dev_durations_artifact_or_the_committed_fallback(tmp_path, mode, version):
+def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run():
     steps = _workflow("test.yml")["jobs"]["unit"]["steps"]
     step = next(s for s in steps if s.get("name") == "Download latest dev durations")
-    assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert step["run"].strip() == "python -m tests.dev_durations ${{ matrix.python-version }}"
+    assert step["env"] == {"GH_TOKEN": "${{ github.token }}"}
     assert _workflow("test.yml")["jobs"]["unit"]["permissions"]["actions"] == "read"
     assert steps.index(step) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
-    tools = tmp_path / "bin"
-    tools.mkdir()
-    gh = tools / "gh"
-    gh.write_text(
-        f"#!{sys.executable}\n"
-        + """
-import json
-import os
-import sys
-from pathlib import Path
-args = sys.argv[1:]
-with Path("calls").open("a") as f:
-    f.write(json.dumps(args) + "\\n")
-if args[0] == "api":
-    print("" if os.environ["MODE"] == "no_run" else "42")
-elif os.environ["MODE"] == "missing":
-    sys.exit(1)
-else:
-    folder = Path(args[args.index("--dir") + 1])
-    folder.mkdir(parents=True, exist_ok=True)
-    value = {"tests/a.py::test_a": 90.0, "tests/b.py::test_b": 1.0}
-    if os.environ["MODE"] == "invalid":
-        value = {"bad": "seconds"}
-    filename = ".test_durations" if os.environ["MODE"] == "legacy" else ".test_durations-" + os.environ["VERSION"]
-    (folder / filename).write_text(json.dumps(value))
-"""
-    )
-    gh.chmod(0o755)
-    committed = '{"committed": 0.1}'
-    (tmp_path / ".test_durations").write_text('{"blended": 1.0}')
-    (tmp_path / f".test_durations-{version}").write_text(committed)
-    result = subprocess.run(
-        ["bash", "-euo", "pipefail", "-c", step["run"].replace("${{ matrix.python-version }}", version)],
-        cwd=tmp_path,
-        env={
-            **os.environ,
-            "PATH": f"{tools}:{os.environ['PATH']}",
-            "MODE": mode,
-            "VERSION": version,
-            "GITHUB_REPOSITORY": "owner/repo",
-            "RUNNER_TEMP": str(tmp_path),
-        },
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    calls = [json.loads(line) for line in (tmp_path / "calls").read_text().splitlines()]
-    assert "actions/artifacts?name=durations-merged" in calls[0][1]
-    assert 'head_branch == "dev"' in calls[0][-1]
-    if mode == "download":
-        assert json.loads((tmp_path / ".test_durations").read_text()) == {
-            "tests/a.py::test_a": 90.0,
-            "tests/b.py::test_b": 1.0,
-        }
-        assert "42" in result.stdout
-        assert "--name" in calls[1] and "durations-merged" in calls[1]
-    else:
-        assert (tmp_path / ".test_durations").read_text() == committed
 
 
 @pytest.mark.parametrize("bump,expected", [("patch", "2.17.1"), ("minor", "2.18.0"), ("major", "3.0.0")])

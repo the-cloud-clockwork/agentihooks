@@ -1,8 +1,6 @@
 import json
 import os
 
-import pytest
-
 from scripts import agents_quota, codex_quota
 from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
 from scripts.codex_router import CodexAccount
@@ -70,7 +68,7 @@ def test_rows_list_every_claude_account_and_codex():
         five_hour=QuotaWindow(used=5.0, resets_at=2000),
         seven_day=QuotaWindow(used=40.0, resets_at=9000),
     )
-    rows = agents_quota.claude_rows([claude], {"ncgma": 2}, "cached")
+    rows = agents_quota.claude_rows([claude], {"ncgma": 2}, "cached", {"ncgma": 1000.0}, now=1000)
     quota = codex_quota.parse_event(_event("2026-10-04T15:00:00Z", WEEK))
     accounts = [CodexAccount("default"), CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
     rows += agents_quota.codex_rows(accounts, {"default": quota}, {"default": 1}, now=quota.observed_at + 120)
@@ -90,10 +88,17 @@ def test_rows_list_every_claude_account_and_codex():
         "RESET",
         "SOURCE",
     ]
-    assert table[1].split()[:8] == ["claude", "ncgma", "NORMAL", "2", "95%", "16m", "60%", "2h13m"]
-    assert table[2].split()[:6] == ["codex", "default", "NORMAL", "1", "?", "?"]
+    assert table[1].split()[:8] == ["claude", "ncgma", "NORMAL", "2/6", "95%", "16m", "60%", "2h13m"]
+    assert table[2].split()[:6] == ["codex", "default", "NORMAL", "1/6", "?", "?"]
     assert table[2].endswith("session-log 2m ago")
-    assert table[3].split() == ["codex", "alpha", "UNKNOWN", "0", "?", "?", "?", "?", "no", "session", "log"]
+    assert table[3].split() == ["codex", "alpha", "UNKNOWN", "0/?", "?", "?", "?", "?", "no", "session", "log"]
+
+
+def test_a_claude_row_with_no_or_a_stale_reading_time_shows_no_cap():
+    claude = ProbeResult("ncgma", "allowed", "NORMAL", 60.0, QuotaWindow(5.0, 2000), QuotaWindow(40.0, 9000))
+    assert agents_quota.claude_rows([claude], {}, "cached", now=1000)[0].cap is None
+    assert agents_quota.claude_rows([claude], {}, "cached", {"ncgma": 99.0}, now=1000)[0].cap is None
+    assert agents_quota.claude_rows([claude], {}, "cached", {"ncgma": 100.0}, now=1000)[0].cap == 6
 
 
 def test_rows_carry_both_reset_times_and_when_each_was_observed():
@@ -175,6 +180,7 @@ def test_quota_json_lists_every_row(monkeypatch, capsys):
             "source": "cached",
             "five_hour_resets_at": None,
             "observed_at": None,
+            "cap": None,
         }
     ]
 
@@ -207,27 +213,18 @@ def test_page_quota_reads_the_balance_cache_and_codex_logs_without_probing(monke
     monkeypatch.setattr(claude_quota_balancer, "collect_results", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"tccgma": 2})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"default": 1})
-    monkeypatch.setattr(account_sessions, "max_sessions", lambda: 3)
     monkeypatch.setattr(codex_router, "routing_pool", lambda environ: [CodexAccount("default")])
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {"default": None})
     quota = agents_quota.page_quota(now=100.0)
-    assert quota["cap"] == 3
-    assert [(r["agent"], r["account"], r["sessions"]) for r in quota["rows"]] == [
-        ("claude", "tccgma", 2),
-        ("codex", "default", 1),
+    assert [(r["agent"], r["account"], r["sessions"], r["cap"]) for r in quota["rows"]] == [
+        ("claude", "tccgma", 2, 6),
+        ("codex", "default", 1, None),
     ]
     assert quota["rows"][0]["five_hour_left"] == 92.0
     assert quota["rows"][0]["seven_day_left"] == 78.0
     assert quota["rows"][1]["five_hour_left"] is None
     assert quota["rows"][0]["observed_at"] == 1.0
     assert quota["probed_at"] == 1.0
-
-
-@pytest.fixture(autouse=True)
-def no_stored_caps(monkeypatch):
-    from scripts import session_caps
-
-    monkeypatch.setattr(session_caps, "stored", lambda harness="claude": {})
 
 
 def test_page_quota_refresh_probes_once_a_minute_and_drops_the_page_cache(monkeypatch):
@@ -270,7 +267,6 @@ def test_page_quota_routes_the_environment_and_names_each_source(monkeypatch):
     monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: [(1.0, claude)])
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
-    monkeypatch.setattr(account_sessions, "max_sessions", lambda: 3)
     monkeypatch.setattr(codex_router, "routing_pool", lambda environ: seen.append(environ) or pool)
     monkeypatch.setattr(codex_router, "quotas", lambda p, environ: seen.append((p, environ)) or {"default": quota})
     rows = agents_quota.page_quota(now=quota.observed_at + 120)["rows"]
@@ -291,3 +287,48 @@ def test_page_quota_is_reused_for_a_minute(monkeypatch):
     assert agents_quota.page_quota(now=1059.0)["rows"][0]["at"] == 1000.0
     assert agents_quota.page_quota(now=1060.0)["rows"][0]["at"] == 1060.0
     assert calls == [1000.0, 1060.0]
+
+
+def test_a_claude_cap_reads_the_five_hour_window_at_the_given_time():
+    claude = ProbeResult("ncgma", "allowed", "NORMAL", 5.0, QuotaWindow(95.0, 2000), QuotaWindow(10.0, 9000))
+    [row] = agents_quota.claude_rows([claude], {}, "cached", {"ncgma": 1000.0}, now=1000)
+    assert row.cap == 2
+
+
+def test_the_cached_claude_table_carries_sessions_source_and_reading_time(monkeypatch):
+    import time
+
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer, install
+
+    at = time.time()
+    claude = ProbeResult("ncgma", "allowed", "NORMAL", 60.0, QuotaWindow(5.0), QuotaWindow(10.0))
+    monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+    monkeypatch.setattr(claude_quota_balancer, "discover_credentials", lambda environ: [])
+    monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: [(at, claude)])
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"ncgma": 2})
+    [row] = agents_quota._claude(False, 1.0)
+    assert (row.account, row.sessions, row.source, row.observed_at, row.cap) == ("ncgma", 2, "cached", at, 6)
+
+
+def test_the_codex_table_renders_at_the_current_time(monkeypatch):
+    seen = []
+    row = agents_quota.QuotaRow("codex", "default", "NORMAL", 0, 90.0, 80.0, 1_000_000 + 7200, "log", cap=6)
+    monkeypatch.setattr(agents_quota.time, "time", lambda: 1_000_000.5)
+    monkeypatch.setattr(agents_quota, "_codex", lambda now: seen.append(now) or [row])
+    table = agents_quota.codex_table()
+    assert seen == [1_000_000.5]
+    assert "2h00m" in table.splitlines()[1]
+
+
+def test_page_quota_without_a_cached_reading_has_no_probe_time(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer, codex_router
+
+    agents_quota._page_cache.clear()
+    monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: [])
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(codex_router, "routing_pool", lambda environ: [])
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
+    assert agents_quota.page_quota(now=100.0) == {"probed_at": None, "rows": []}

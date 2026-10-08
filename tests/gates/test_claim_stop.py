@@ -8,6 +8,7 @@ from scripts.gates.claim_stop import PLAIN, STREAK, ClaimStop, parked_by, refusa
 from scripts.gates.progress import Progress
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import idle
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import AgentRecord, RedisStore
 
@@ -255,7 +256,7 @@ def test_the_third_block_in_a_row_blocks_the_task_and_lets_the_stop_through(rig)
     assert rig.store.claimant(SLUG, "t1") is None
     assert [(a.state, a.pane_id) for a in rig.store.agents(SLUG)] == [("finished", "p1")]
     assert [(r["gate"], r["kind"], r["agent"], r["tool"]) for r in rig.rows()] == [("claim-stop", "blocked", ME, "")]
-    assert rig.store.redis.get(f"agentihooks:swarm:{SLUG}:stop-blocks:{ME}") is None
+    assert rig.store.redis.get(f"{KEY_ROOT}:swarm:{SLUG}:stop-blocks:{ME}") is None
 
 
 @pytest.mark.parametrize("owed", sorted(PLAIN))
@@ -391,7 +392,7 @@ def test_an_outcome_before_the_first_block_leaves_the_count_running(rig):
     assert not rig.stop().allowed
     second = rig.stop()
     assert second.reason.endswith("(stop block 2 of 2; the next one blocks the task)")
-    held = json.loads(rig.store.redis.get(f"agentihooks:swarm:{SLUG}:stop-blocks:{ME}"))
+    held = json.loads(rig.store.redis.get(f"{KEY_ROOT}:swarm:{SLUG}:stop-blocks:{ME}"))
     assert held == {"count": 2, "at": rig.clock[0]}
 
 

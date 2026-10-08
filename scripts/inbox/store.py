@@ -6,12 +6,13 @@ History entries are state transitions (a `state` key) or wake and escalation ste
 import json
 import time
 import uuid
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, fields, replace
 
 from scripts.inbox.seats import SeatRegistry, is_seat, master_of
+from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
 
-PREFIX = "agentihooks:inbox"
+PREFIX = f"{ROOT}:inbox"
 NOTIFY = f"{PREFIX}:notify"
 MOVE_ATTEMPTS = 3
 STATES = ("pending", "delivered", "read", "done", "blocked", "handed_off", "cancelled")
@@ -37,6 +38,7 @@ class Item:
     ref: str = ""
     sequence: int = 0
     fyi: bool = False
+    task: str = ""
 
 
 def now_ms():
@@ -67,7 +69,25 @@ class InboxStore:
     def key(self, *parts):
         return ":".join((PREFIX, *parts))
 
-    def send(self, sender, address, text, ref="", fyi=False):
+    def receiver_task(self, address: str) -> str:
+        from scripts.inbox.seats import is_seat, master_of
+        from scripts.swarm.store import MASTER, RedisStore
+
+        address = self.names.resolve(address)
+        master = master_of(address, self.names)
+        if not master:
+            return ""
+        receiver = self.seats.occupant(address).occupant if is_seat(address) else address
+        return next(
+            (
+                agent.task
+                for agent in RedisStore(self.redis).agents(master.split("@", 1)[1])
+                if agent.name == receiver and agent.state != "finished" and agent.task != MASTER
+            ),
+            "",
+        )
+
+    def send(self, sender, address, text, ref="", fyi=False, task=""):
         """ref names the ledger write an operator item carries, for the seen marks; fyi marks an item that needs no
         work, so a bare close names no outcome."""
         if not (sender and address and text.strip()):
@@ -85,11 +105,14 @@ class InboxStore:
             ref=ref,
             sequence=self.redis.incr(self.key("sequence", address)),
             fyi=fyi,
+            task=task,
         )
         with self.redis.pipeline() as pipe:
             pipe.hset(self.key("item", item.id), mapping=_fields(item))
             pipe.zadd(self.key("address", address), {item.id: at})
             pipe.zadd(self.key("pending", address), {item.id: at})
+            pipe.zadd(self.key("open", address), {item.id: at})
+            pipe.incr(self.key("open-size", address))
             pipe.sadd(self.key("waiting"), address)
             pipe.rpush(self.key("history", item.id), _entry("pending", sender, "", at))
             pipe.publish(NOTIFY, address)
@@ -102,6 +125,44 @@ class InboxStore:
     def inbox(self, address):
         items = [self.get(item_id) for item_id in self.redis.zrange(self.key("address", address), 0, -1)]
         return sorted(items, key=_order)
+
+    def open_items(self, address: str) -> list[Item]:
+        items = [self.get(item_id) for item_id in self._open_ids(address)]
+        closed = [item.id for item in items if item.state in CLOSED]
+        if closed:
+            self.redis.zrem(self.key("open", address), *closed)
+        return sorted((item for item in items if item.state not in CLOSED), key=_order)
+
+    def _open_ids(self, address):
+        from redis.exceptions import WatchError
+
+        if self.redis.sismember(self.key("open-indexed"), address) and int(
+            self.redis.get(self.key("open-size", address)) or -1
+        ) == self.redis.zcard(self.key("address", address)):
+            return self.redis.zrange(self.key("open", address), 0, -1)
+        for _ in range(MOVE_ATTEMPTS):
+            try:
+                return self._index_open(address)
+            except WatchError:
+                continue
+        return [item.id for item in self.inbox(address) if item.state not in CLOSED]
+
+    def _index_open(self, address):
+        with self.redis.pipeline() as pipe:
+            pipe.watch(self.key("address", address))
+            ids = pipe.zrange(self.key("address", address), 0, -1)
+            if ids:
+                pipe.watch(*(self.key("item", item_id) for item_id in ids))
+            items = [_item(pipe.hgetall(self.key("item", item_id)), item_id) for item_id in ids]
+            opened = {item.id: item.created_at for item in items if item.state not in CLOSED}
+            pipe.multi()
+            pipe.delete(self.key("open", address))
+            if opened:
+                pipe.zadd(self.key("open", address), opened)
+            pipe.sadd(self.key("open-indexed"), address)
+            pipe.set(self.key("open-size", address), len(ids))
+            pipe.execute()
+        return list(opened)
 
     def mailbox(self, me):
         return self._with_seat(me, self.inbox)
@@ -148,15 +209,19 @@ class InboxStore:
         """The keys of every address belongs() accepts, its items and their histories, and those
         addresses' memberships in the shared waiting and indexed sets."""
         prefix = self.key("address", "")
-        addresses = sorted(a for key in self.redis.scan_iter(match=prefix + "*") if belongs(a := key[len(prefix) :]))
+        seen = {key[len(prefix) :] for key in self.redis.scan_iter(match=prefix + "*")}
+        seen.update(self.redis.smembers(self.key("open-indexed")))
+        size_prefix = self.key("open-size", "")
+        seen.update(key[len(size_prefix) :] for key in self.redis.scan_iter(match=size_prefix + "*"))
+        addresses = sorted(a for a in seen if belongs(a))
         keys = []
         for address in addresses:
             ids = self.redis.zrange(self.key("address", address), 0, -1)
-            keys += [self.key("address", address), self.key("pending", address), self.key("sequence", address)]
+            keys += [self.key(kind, address) for kind in ("address", "pending", "open", "open-size", "sequence")]
             keys += [self.key(kind, item_id) for item_id in ids for kind in ("item", "history")]
         members = {
             self.key(shared): [a for a in addresses if self.redis.sismember(self.key(shared), a)]
-            for shared in ("waiting", "indexed")
+            for shared in ("waiting", "indexed", "open-indexed")
         }
         return keys, {key: found for key, found in members.items() if found}
 
@@ -173,27 +238,46 @@ class InboxStore:
             reason,
         )
 
-    def withdraw(self, item_id: str, by: str, reason: str, expected_address: str = "") -> Item | None:
-        return self.redirect(item_id, by, "", reason, expected_address)
+    def withdraw(
+        self, item_id: str, by: str, reason: str, expected_address: str = "", expected_receiver: str = ""
+    ) -> Item | None:
+        return self.redirect(item_id, by, "", reason, expected_address, expected_receiver)
 
-    def redirect(self, item_id: str, by: str, address: str, reason: str, expected_address: str = "") -> Item | None:
+    def redirect(
+        self,
+        item_id: str,
+        by: str,
+        address: str,
+        reason: str,
+        expected_address: str = "",
+        expected_receiver: str = "",
+    ) -> Item | None:
         """Return an open item to pending at another address; a swarm step, so no actor check."""
         from redis.exceptions import WatchError
 
         for _ in range(MOVE_ATTEMPTS):
             try:
-                return self._try_redirect(item_id, by, address, reason, expected_address)
+                return self._try_redirect(item_id, by, address, reason, expected_address, expected_receiver)
             except WatchError:
                 continue
         raise InboxError(f"message {item_id} changed meanwhile; run the command again")
 
-    def _try_redirect(self, item_id, by, address, reason, expected_address):
+    def _try_redirect(self, item_id, by, address, reason, expected_address, expected_receiver):
         key = self.key("item", item_id)
         with self.redis.pipeline() as pipe:
             pipe.watch(key)
             item = _item(pipe.hgetall(key), item_id)
             if item.state in CLOSED or (expected_address and item.address != expected_address):
                 return None
+            if expected_receiver:
+                history = self.key("history", item_id)
+                pipe.watch(history)
+                entries = [json.loads(entry) for entry in pipe.lrange(history, 0, -1)]
+                receiver = next(
+                    (entry["by"] for entry in reversed(entries) if entry["state"] in ("delivered", "read")), ""
+                )
+                if receiver != expected_receiver:
+                    return None
             pending = self.key("pending", item.address)
             pipe.watch(pending)
             last = pipe.zscore(pending, item_id) is not None and pipe.zcard(pending) == 1
@@ -206,6 +290,8 @@ class InboxStore:
             )
             pipe.multi()
             pipe.hset(key, mapping=_fields(moved))
+            if moved.state in CLOSED or moved.address != item.address:
+                pipe.zrem(self.key("open", item.address), item_id)
             pipe.zrem(pending, item_id)
             if last:
                 pipe.srem(self.key("waiting"), item.address)
@@ -213,6 +299,10 @@ class InboxStore:
                 pipe.zrem(self.key("address", item.address), item_id)
                 pipe.zadd(self.key("address", address), {item_id: item.created_at})
                 pipe.zadd(self.key("pending", address), {item_id: item.created_at})
+                pipe.zadd(self.key("open", address), {item_id: item.created_at})
+                if address != item.address:
+                    pipe.decr(self.key("open-size", item.address))
+                    pipe.incr(self.key("open-size", address))
                 pipe.sadd(self.key("waiting"), address)
                 pipe.publish(NOTIFY, address)
             pipe.rpush(self.key("history", item_id), _entry(moved.state, by, reason, moved.updated_at))
@@ -350,6 +440,8 @@ class InboxStore:
             last = pipe.zscore(pending, item_id) is not None and pipe.zcard(pending) == 1
             pipe.multi()
             pipe.hset(key, mapping=_fields(moved))
+            if moved.state in CLOSED:
+                pipe.zrem(self.key("open", item.address), item_id)
             pipe.zrem(pending, item_id)
             if last:
                 pipe.srem(self.key("waiting"), item.address)
@@ -369,9 +461,10 @@ def _order(item: Item) -> tuple[int, int, str]:
 def _item(raw, item_id):
     if not raw:
         raise InboxError(f"no message {item_id}")
+    known = {field.name for field in fields(Item)}
     return Item(
         **{
-            **raw,
+            **{key: value for key, value in raw.items() if key in known},
             "created_at": int(raw["created_at"]),
             "updated_at": int(raw["updated_at"]),
             "sequence": int(raw.get("sequence", 0)),

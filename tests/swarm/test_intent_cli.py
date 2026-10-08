@@ -72,9 +72,35 @@ def test_the_tick_returns_a_failed_task_to_its_agent_under_enforce(started, monk
     assert "task t1 intent check fail" in actions
     assert ledger.rows["t1"]["state"] == "claimed"
     task, text, by = [c for c in ledger.comments if c[0] == "t1"][-1]
-    assert (text.startswith("The intent check failed:"), by) == (True, "swarm")
+    assert (text, by) == (intent.FAIL_COMMENT, "swarm")
     items = InboxStore(store.redis).inbox(next(a.seat for a in store.agents("sw") if a.name == ME))
     assert any(item.text.startswith("The intent check failed") and item.ref == "tasks/t1" for item in items)
+
+
+def test_a_refused_ledger_write_after_the_tick_step_leaves_the_rest_running(started, monkeypatch, capsys):
+    from scripts.swarm import priority_sweep
+    from scripts.swarm.ledger_client import LedgerRefused
+
+    store, ledger, _ = started
+    store.update("sw", gates={"intent": "enforce"})
+    ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
+    monkeypatch.setattr(intent, "pr_view", lambda url: {"title": "T", "body": "", "files": ["a.py"]})
+    monkeypatch.setattr(intent, "judge", lambda state: ("fail", "the phase can use this change at probability 0.10"))
+
+    def refuse(*args, **kwargs):
+        raise LedgerRefused("ledger sw: server refused: 400 comment refused")
+
+    swept = []
+    monkeypatch.setattr(ledger, "comment", refuse)
+    monkeypatch.setattr(priority_sweep, "priority_pass", lambda *args: swept.append(args) or [])
+    store.redis.delete(store.key("sw", "last-tick"))
+    actions = cli.run_tick(store, "sw")
+    assert "skipped scripts.gates.intent.Check.run: the ledger refused its write" in actions
+    assert swept
+    assert store.redis.get(store.key("sw", "last-tick"))
+    assert "the ledger refused its write" in capsys.readouterr().err
+    items = InboxStore(store.redis).inbox(next(a.seat for a in store.agents("sw") if a.name == ME))
+    assert any(item.text.startswith("The intent check failed") for item in items)
 
 
 def test_the_tick_leaves_the_task_alone_under_the_default_observe(started, monkeypatch):

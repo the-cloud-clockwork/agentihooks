@@ -65,8 +65,8 @@ def test_swarm_does_not_confuse_equal_repository_basenames(monkeypatch, tmp_path
 @pytest.mark.parametrize(
     "remote",
     [
-        "https://user:fixture-password@github.com/first/common.git",
-        "ssh://user:fixture-password@github.com/first/common.git",
+        pytest.param("https://user:fixture-password@github.com/first/common.git", id="https-userinfo"),
+        pytest.param("ssh://user:fixture-password@github.com/first/common.git", id="ssh-userinfo"),
         "https://github.com/first/common.git?credential=fixture-value",
         "https://github.com/first/common#fragment",
         "file:///first/common",

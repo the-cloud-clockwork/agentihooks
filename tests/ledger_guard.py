@@ -23,10 +23,12 @@ class RealLedgerFolder(RuntimeError):
     pass
 
 
-def _spare_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+def reserve_port() -> socket.socket:
+    # Bound but never listening: bind 0 skips the port in every process, while a SO_REUSEADDR server still binds it.
+    hold = socket.socket()
+    hold.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    hold.bind(("127.0.0.1", 0))
+    return hold
 
 
 def _under(path) -> bool:
@@ -48,6 +50,8 @@ SUITE = Path(tempfile.mkdtemp(prefix="agentihooks-test-ledgers-"))
 os.environ["LEDGER_DIR"] = str(SUITE)
 os.environ["LEDGER_RUN_PID"] = str(os.getpid())
 os.environ.pop("LEDGER_RUN_START", None)
-os.environ["LEDGER_PORT"] = str(_spare_port())
+os.environ["LEDGER_AUTOSTART"] = "0"
+HELD_PORT = reserve_port()
+os.environ["LEDGER_PORT"] = str(HELD_PORT.getsockname()[1])
 atexit.register(lambda pid=os.getpid(): os.getpid() == pid and shutil.rmtree(SUITE, ignore_errors=True))
 sys.addaudithook(_audit)

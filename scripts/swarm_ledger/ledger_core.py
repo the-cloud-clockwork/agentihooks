@@ -31,10 +31,11 @@ import ledger_relay
 import ledger_size
 import ledger_sources
 import ledger_tasks
+import ledger_time_left
 import ledger_title
 import ledger_verdict
 
-from scripts.swarm_ledger import ledger_phases, ledger_rank
+from scripts.swarm_ledger import ledger_groups, ledger_phases, ledger_rank
 
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,120}$")
@@ -97,6 +98,7 @@ EXTENSION_OPS = {
         ledger_notifications,
         ledger_tasks,
         ledger_rank,
+        ledger_groups,
         ledger_title,
         ledger_names,
         ledger_close,
@@ -107,6 +109,7 @@ EXTENSION_OPS = {
         ledger_answer,
         ledger_verdict,
         ledger_alerts,
+        ledger_time_left,
     )
     for name in module.OPS
 }

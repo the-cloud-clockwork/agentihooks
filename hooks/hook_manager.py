@@ -448,9 +448,9 @@ def on_session_start(payload: dict) -> None:
 
     # --- Auto dev-switch: if on main/master, switch to dev (create if missing) ---
     try:
-        from hooks.config import AUTO_DEV_SWITCH_ENABLED
+        from hooks.config import AGENTIHOOKS_FORCE_DEV_BRANCH
 
-        if AUTO_DEV_SWITCH_ENABLED:
+        if AGENTIHOOKS_FORCE_DEV_BRANCH:
             from hooks.context.auto_dev_switch import (
                 inject_on_session_start as _auto_dev,
             )

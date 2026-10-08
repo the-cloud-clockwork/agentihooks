@@ -376,6 +376,7 @@ def test_sanitize_redacts_credential_assignments(key):
         ("version 1.2.3 ok", "version 1.2.3 ok"),
         ("plain text", "plain text"),
     ],
+    ids=["url", "ip", "bearer", "version", "plain"],
 )
 def test_sanitize_redacts_addresses_and_bearers(raw, clean):
     assert baseline.sanitize(raw) == clean

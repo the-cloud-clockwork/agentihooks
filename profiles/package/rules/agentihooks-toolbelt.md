@@ -100,10 +100,10 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 | Trigger | Action |
 |---|---|
 | Start a swarm from an accepted plan | `$init-swarm`; the swarm starts its master, `master@<code>-<n>`, which the operator talks to on the page chat or in its pane |
-| Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full codex-share=PCT codex-min-week-left=PCT effort-min=E effort-max=E`, `session-cap <account> <N\|default> [--harness claude\|codex]`; the ledger page swarm panel writes the same ops. An `auto` lane sends `codex-share` percent (default 30) of the swarm's spawns to Codex while Codex has `codex-min-week-left` percent (default 5) of its week left; `status` shows the share. Every lane agent starts inside the effort range (default medium to high) |
+| Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full effort-min=E effort-max=E`; the ledger page swarm panel writes the same ops. Codex is one more account in the session rotation, judged on its week alone with the top band. Every lane agent starts inside the effort range (default medium to high) |
 | Working a ledger | `agentihooks ledger --slug <slug> --as <name> join`, act on every OPERATOR line, then `ack`. In a swarm each operator write arrives as an inbox message at the next tool call and the tick wakes an idle pane, so no Monitor is needed; a ledger without a swarm wakes an idle session only through a `Monitor` on `agentihooks ledger watch <slug> --as <name>` |
 | Work lands, or a blocker appears | `ledger comment phases/<id> "<text>"`, `ledger followup add "<text>"`, `ledger say "<text>"`; plain words for the operator |
-| A question while the operator is away (the question tool is refused until he types `operator on` in the pane) | `ledger question add "<text>"`; the tick sends it to the master, who answers it or raises it to the operator |
+| A question while the operator is away (the question tool is refused unless he typed `operator on`, or typed a prompt in the pane within thirty minutes with no swarm or inbox prompt since) | `ledger question add "<text>"`; the tick sends it to the master, who answers it or raises it to the operator |
 | Publish an artifact only when the operator asked for that file: a plan, an image, a logo, an SVG, markdown or JSON he wants to review | `agentihooks ledger --slug <slug> --as <name> artifact <file> "<title in plain words>"` from a task marked artifact requested (`task add --artifact`, `task set <id> artifact=yes`) or with `--request <id of his message>`; anything else is refused. Never publish test runs, logs, review notes or proofs: proofs go on the task proof and the pull request |
 | A planner or the master has an accepted plan | `agentihooks ledger --slug <slug> --as <name> publish-plan <plan file> --phase <phase ids>` before adding its tasks: a GitHub issue where the repo has issues, else a ledger artifact (a plan counts as artifact requested); it links and comments each phase, every task added there carries the link, and a planner's slice is refused while a task lacks it |
 | A swarm agent's task moves | `agentihooks swarm <slug> issue <url>`, `pr <url>`, `block "<why>"`; `ledger leave`, then `swarm <slug> done --pr <url>` |
@@ -159,7 +159,10 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   idle ticks on a claimed task; stale claim, `STALE_MINUTES` (30) with no change;
   over monitoring, over `WATCH_MIN` (20) watch calls since the last action and
   over `WATCH_RATIO` (5) per action, for the master `MASTER_WATCH_MIN` (60) and
-  `MASTER_WATCH_RATIO` (15), counted at each swarm agent's tool calls. Ledger and swarm
+  `MASTER_WATCH_RATIO` (15), counted at each swarm agent's tool calls. Working
+  on drain fires when a working agent that is not idle stays on a closed account,
+  or one at or under `DRAIN_LEFT` (10) percent routing left, over `DRAIN_MINUTES` (10) after its early
+  quota handoff warning. Ledger and swarm
   writes and `msg reply` count as actions, a re-armed ledger watch as one watch
   per 30 minutes, `status` and `verdict` as neither; idle ticks do not count
   while the task's pull request waits on checks.
@@ -254,12 +257,13 @@ repository's own conditions folder (trusted repositories only).
 
 Every `AH_CC_TOKEN_<slug>` is one Claude subscription.
 
-- **Launch:** `agenti` (and `agentihooks init-agent`) picks the account
-  with the most routing left (`min(5h left, 7d left)`) among accounts running
-  fewer than their session cap: the account's own cap set with `swarm <slug> session-cap`
-  or the Quota panel, else `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` (default 3).
-  When every account is at the cap, the least-loaded one takes the session
-  (`placement=overflow`). `--route <slug>` forces one account and skips the cap.
+- **Launch:** `agenti` (and `agentihooks init-agent`) picks among accounts
+  below their live session cap: 6 live sessions at 60% or more of the five-hour
+  window left, 4 at 40-60%, 3 at 10-40%, 2 at 5-10%, none below 5% until that
+  window resets; no new session on an account below 5% of its week either.
+  The next session goes to the eligible account with the fewest live sessions.
+  When no account is eligible, no session starts. `--route <slug>` forces one
+  account and skips the cap.
 - **Status:** `agentihooks balance` shows `SESSIONS n/cap` per account from a
   live process scan; `agentihooks balance --current` names this session's
   account.

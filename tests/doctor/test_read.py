@@ -4,6 +4,7 @@ import pytest
 
 from scripts.doctor import handoffs, read
 from scripts.inbox.store import InboxStore
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.store import RedisStore
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -20,8 +21,8 @@ def redis():
 
 def test_health_records_are_read_from_the_swarm_findings(redis):
     record = {"seen_at": 5, "verdict": None, "returned": False, "evidence": ["e"], "measure": 3}
-    redis.hset(f"agentihooks:swarm:{SLUG}:findings", "stale-claim/t1", json.dumps(record))
-    redis.hset("agentihooks:swarm:other:findings", "stale-claim/t9", json.dumps(record))
+    redis.hset(f"{KEY_ROOT}:swarm:{SLUG}:findings", "stale-claim/t1", json.dumps(record))
+    redis.hset(f"{KEY_ROOT}:swarm:other:findings", "stale-claim/t9", json.dumps(record))
     assert read.health_records(redis, SLUG) == {"stale-claim/t1": record}
 
 
@@ -51,7 +52,7 @@ def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_th
     named = store.names.next(SLUG, "eng")
     store.put_agent(SLUG, AgentRecord(name=named, lane="eng", task="t6"))
     addresses = [seat, named, f"{SLUG}-eng-2", f"{SLUG}-eng-5", "engineer-100001-0001-tmp-1", "operator", doctor]
-    items = [{"address": address} for address in addresses]
+    items = [{"address": address, "history": []} for address in addresses]
     assert read.inbox_receivers(store, box, SLUG, items) == {
         seat: Receiver(live=True, quiet_ms=2 * 60_000),
         named: Receiver(live=True),
@@ -60,6 +61,23 @@ def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_th
         "engineer-100001-0001-tmp-1": Receiver(scoped=False),
         "operator": Receiver(),
         doctor: Receiver(),
+    }
+
+
+def test_inbox_receivers_name_the_agent_that_took_delivery_apart_from_the_seat_occupant(redis):
+    from scripts.doctor.inbox import Receiver
+    from scripts.swarm.store import AgentRecord
+
+    store, box = RedisStore(redis), InboxStore(redis)
+    seat = f"eng-1@{SLUG}"
+    store.seats.occupy(seat, f"{SLUG}-eng-2", 10)
+    store.put_agent(SLUG, AgentRecord(name=f"{SLUG}-eng-2", lane="eng", task="t2"))
+    store.put_agent(SLUG, AgentRecord(name=f"{SLUG}-eng-1", lane="eng", task="t1", state="finished"))
+    took = [{"state": "pending", "by": "swarm"}, {"state": "delivered", "by": f"{SLUG}-eng-1"}]
+    items = [{"address": seat, "history": took}, {"address": seat, "history": took[:1]}]
+    assert read.inbox_receivers(store, box, SLUG, items) == {
+        seat: Receiver(live=True),
+        f"{SLUG}-eng-1": Receiver(),
     }
 
 
@@ -137,3 +155,14 @@ def test_a_waiting_handoff_whose_author_left_no_recap_is_raised_on_that_author(r
     [finding] = handoffs.missing_recap(read.handoffs(store, box, tmp_path, SLUG))
     assert finding.subject == f"{SLUG}-eng-2"
     assert finding.evidence[:2] == (f"task t2 on seat {seat}", f"handed off by {SLUG}-eng-2")
+
+
+def test_handoff_reader_reuses_supplied_empty_mail_snapshot(redis, tmp_path, monkeypatch):
+    store = RedisStore(redis)
+    inbox = InboxStore(redis)
+
+    def unread(*args):
+        pytest.fail("handoff reader rescanned mail")
+
+    monkeypatch.setattr(read, "inbox_items", unread)
+    assert read.handoffs(store, inbox, tmp_path, SLUG, []) == []

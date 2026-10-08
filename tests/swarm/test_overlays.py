@@ -1,5 +1,6 @@
 import json
 import subprocess
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -207,9 +208,9 @@ def test_a_swarm_without_overlays_reads_an_empty_map(swarm):
     assert swarm.config("sw").overlays == {}
 
 
-def _spawned(tmp_path, monkeypatch, task, config_overlays, saved=None):
+def _spawned(tmp_path, monkeypatch, task, config_overlays, saved=None, revision="abc123"):
     seen = {}
-    monkeypatch.setattr(overlays, "revision", lambda: "abc123")
+    monkeypatch.setattr(overlays, "revision", lambda: revision)
     monkeypatch.setattr(profile_choice, "installed", lambda name: True)
 
     def run(argv, **kwargs):
@@ -323,6 +324,7 @@ def test_resume_wears_the_overlays_the_agent_was_launched_with(tmp_path, monkeyp
         conversation_id="conv-1",
         overlays=["tuner"],
     )
+    agent = replace(agent, profile_decision={"bundle_revision": "abc123"})
     placed = rt.resume(store.SwarmConfig("sw", str(tmp_path), 1, 0, code="a1b2c3"), agent, "resume")
     assert _passed_overlays(seen["argv"]) == ["tuner"]
     assert placed.overlays == ["tuner"]
@@ -336,3 +338,130 @@ def test_status_carries_agent_overlays_and_the_overlays_a_bundle_offers(bundle, 
     assert report["config"]["overlays"] == {}
     assert {"name": "trader", "wears": ["engineer", "qa"]} in report["overlays_available"]
     assert [row["name"] for row in report["overlays_available"]] == ["extra", "planning", "scout", "trader", "tuner"]
+
+
+def _passed_revision(argv):
+    head = argv[: argv.index("--")]
+    return [head[i + 1] for i, arg in enumerate(head) if arg == "--bundle-revision"]
+
+
+def test_an_overlay_launch_pins_its_render_to_the_recorded_bundle_revision(bundle, tmp_path, monkeypatch):
+    _, argv = _spawned(tmp_path, monkeypatch, {}, {"engineer": ["tuner"]})
+    assert _passed_revision(argv) == ["abc123"]
+
+
+def test_an_overlay_relaunch_pins_its_render_to_the_revision_its_launch_recorded(bundle, tmp_path, monkeypatch):
+    saved = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high"}
+    saved |= {"overlays": ["scout"], "bundle_revision": "def456"}
+    _, argv = _spawned(tmp_path, monkeypatch, {"launch_assignment": saved}, {})
+    assert _passed_revision(argv) == ["def456"]
+
+
+def test_a_launch_without_overlays_leaves_its_render_unpinned(bundle, tmp_path, monkeypatch):
+    _, argv = _spawned(tmp_path, monkeypatch, {}, {})
+    assert _passed_revision(argv) == []
+
+
+def test_a_handoff_pins_its_render_to_the_revision_its_launch_recorded(bundle, tmp_path, monkeypatch):
+    launch = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "overlays": ["scout"]}
+    task = {
+        "profile": "",
+        "handoff_envelope": {"launch": {**launch, "profile_decision": {"bundle_revision": "fed789"}}},
+    }
+    _, argv = _spawned(tmp_path, monkeypatch, task, {})
+    assert _passed_revision(argv) == ["fed789"]
+
+
+def test_a_handoff_on_a_task_profile_keeps_the_revision_its_launch_recorded(bundle, tmp_path, monkeypatch):
+    launch = {
+        "profile": "engineer",
+        "harness": "claude",
+        "model": "opus",
+        "effort": "high",
+        "bundle_revision": "fed789",
+    }
+    placed, argv = _spawned(tmp_path, monkeypatch, {"handoff_envelope": {"launch": launch}}, {"engineer": ["tuner"]})
+    assert placed.profile_decision["bundle_revision"] == "fed789"
+    assert _passed_revision(argv) == ["fed789"]
+
+
+def test_a_handoff_onto_another_task_profile_pins_the_current_revision(bundle, tmp_path, monkeypatch):
+    launch = {"profile": "qa", "harness": "claude", "model": "opus", "effort": "high", "bundle_revision": "fed789"}
+    placed, _ = _spawned(tmp_path, monkeypatch, {"handoff_envelope": {"launch": launch}}, {"engineer": ["tuner"]})
+    assert placed.profile_decision["bundle_revision"] == "abc123"
+
+
+def test_an_overlay_launch_without_a_bundle_revision_is_refused(bundle, tmp_path, monkeypatch):
+    with pytest.raises(tick.SpawnError) as refused:
+        _spawned(tmp_path, monkeypatch, {}, {"engineer": ["tuner"]}, revision="")
+    assert str(refused.value) == "an overlay launch needs the bundle commit it renders from, and none was recorded"
+
+
+def _resumed(tmp_path, agent):
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(
+            returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\npane_id=w1:p1\n"), stderr=""
+        )
+
+    rt = runtime.HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    rt.conversations = lambda: {"w1:p1": "conv-1"}
+    rt.resume(store.SwarmConfig("sw", str(tmp_path), 1, 0, code="a1b2c3"), agent, "resume")
+    return seen["argv"]
+
+
+def test_a_resumed_overlay_agent_pins_its_render_to_the_revision_its_launch_recorded(tmp_path):
+    agent = store.AgentRecord(
+        "engineer@a1b2c3-0001",
+        "eng",
+        "t1",
+        harness="claude",
+        profile="engineer",
+        conversation_id="conv-1",
+        overlays=["tuner"],
+        profile_decision={"bundle_revision": "abc123"},
+    )
+    assert _passed_revision(_resumed(tmp_path, agent)) == ["abc123"]
+
+
+def test_a_resumed_agent_without_overlays_leaves_its_render_unpinned(tmp_path):
+    agent = store.AgentRecord(
+        "engineer@a1b2c3-0001",
+        "eng",
+        "t1",
+        harness="claude",
+        profile="engineer",
+        conversation_id="conv-1",
+        profile_decision={"bundle_revision": "abc123"},
+    )
+    assert _passed_revision(_resumed(tmp_path, agent)) == []
+
+
+def test_a_resumed_overlay_agent_without_a_recorded_revision_is_refused(tmp_path):
+    agent = store.AgentRecord(
+        "engineer@a1b2c3-0001",
+        "eng",
+        "t1",
+        harness="claude",
+        profile="engineer",
+        conversation_id="conv-1",
+        overlays=["tuner"],
+    )
+    with pytest.raises(tick.SpawnError) as refused:
+        _resumed(tmp_path, agent)
+    assert str(refused.value) == "an overlay launch needs the bundle commit it renders from, and none was recorded"
+
+
+@pytest.mark.parametrize(
+    ("saved", "recorded"),
+    [
+        ({"bundle_revision": "abc123", "profile_decision": {"bundle_revision": "def456"}}, "abc123"),
+        ({"profile_decision": {"bundle_revision": "def456"}}, "def456"),
+        ({"profile_decision": {}}, None),
+        ({}, None),
+    ],
+)
+def test_the_recorded_revision_prefers_the_launch_field_over_the_profile_decision(saved, recorded):
+    assert runtime._recorded_revision(saved) == recorded

@@ -74,13 +74,6 @@ def test_handed_off_sessions_free_their_slot(tmp_path):
     assert counts == {"alpha": 1, "beta": 2, acc.UNROUTED: 1}
 
 
-def test_max_sessions_reads_the_env_var():
-    assert acc.max_sessions({}) == 3
-    assert acc.max_sessions({acc.MAX_SESSIONS_ENV: "2"}) == 2
-    assert acc.max_sessions({acc.MAX_SESSIONS_ENV: "0"}) == 1
-    assert acc.max_sessions({acc.MAX_SESSIONS_ENV: "many"}) == 3
-
-
 def test_session_account_reads_the_agent_process(tmp_path):
     root = _tree(tmp_path)
 

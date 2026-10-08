@@ -1,0 +1,18 @@
+[
+  {
+    "query": "the operator says he will give you the tailnet auth key for the hive",
+    "expected_behavior": "Writes a throwaway script in a scratch folder that calls read_secret and passes the key through the environment, opens it with open.sh, tells the operator to type it in the new pane, and watches the status file with a Monitor."
+  },
+  {
+    "query": "the operator pastes a token into the master pane chat",
+    "expected_behavior": "Does not use or repeat the value, flags that it reached the transcript and names the credential to rotate, then offers the pane flow for the replacement."
+  },
+  {
+    "query": "a database password is needed but operator on is not set",
+    "expected_behavior": "Opens no pane and adds the ask to Priorities with ledger priority add in plain words, then continues other work."
+  },
+  {
+    "query": "the status file reads ERROR 2",
+    "expected_behavior": "Reports the failure with its exit code, asks the operator what the pane showed, fixes the script and opens a new pane."
+  }
+]

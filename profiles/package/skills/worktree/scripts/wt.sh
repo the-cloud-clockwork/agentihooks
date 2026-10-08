@@ -10,7 +10,7 @@
 #   wt.sh new  [name] [--repo DIR] [--from REF]  # worktree + branch <name> off fresh origin/<base> (or REF); prints the path
 #   wt.sh tmp  [name] [--repo DIR] [--from REF]  # throwaway detached worktree under <repo>/_tmp/; prints the path
 #   wt.sh ls   [--repo DIR | --all]           # branch, dirty, ahead/behind origin/<base>
-#   wt.sh done <name> [--repo DIR] [--force]  # remove a worktree + its local branch, pull origin/<base> into the primary checkout
+#   wt.sh done <name> [--repo DIR] [--force]  # remove a worktree + its local branch, fast-forward the primary checkout to origin/<base>
 #                                             # (<name> may be a _tmp path printed by 'tmp'; those are removed even if dirty)
 #   wt.sh root                                # print the worktree root
 #
@@ -203,6 +203,32 @@ case "${cmd}" in
       git -C "${TARGET}" status -s | sed 's/^/  /' >&2
       exit 1
     fi
+    if [[ "${NAME}" != _tmp/* ]]; then
+      if command -v gh >/dev/null 2>&1; then
+        PR_STATE="$(cd "${REPO}" && gh pr list --head "${BR}" --base "${BASE}" --state all --json state,url --jq '.[0] | if .state == "MERGED" then .state elif .state == "CLOSED" then "CLOSED " + .url else .url end')" \
+          || die "cannot read pull requests for '${BR}' — worktree kept"
+        if [[ "${PR_STATE}" == "CLOSED "* ]]; then
+          [[ "${FORCE}" -eq 1 ]] \
+            || die "pull request ${PR_STATE#CLOSED } was closed without merging — pass --force to drop the worktree and branch ${BR}"
+        else
+          [[ -z "${PR_STATE}" || "${PR_STATE}" == MERGED ]] \
+            || die "pull request ${PR_STATE} is not merged — wait for it to land before worktree teardown"
+          REMOTE_BRANCH="$(git -C "${REPO}" ls-remote --heads origin "refs/heads/${BR}")" \
+            || die "cannot read remote branch '${BR}' — worktree kept"
+          if [[ -n "${REMOTE_BRANCH}" ]]; then
+            [[ "${PR_STATE}" == MERGED ]] \
+              || die "published branch '${BR}' has no confirmed merged pull request — worktree kept"
+            git -C "${REPO}" push origin --delete "${BR}" \
+              || die "cannot delete remote branch '${BR}' — worktree kept"
+          fi
+        fi
+      else
+        PUBLISHED=0
+        git -C "${REPO}" show-ref --verify --quiet "refs/remotes/origin/${BR}" || PUBLISHED=$?
+        [[ "${PUBLISHED}" -eq 1 ]] \
+          || die "cannot verify the published branch '${BR}' merged without gh — worktree kept"
+      fi
+    fi
     release "${TARGET}"
     if [[ "${FORCE}" -eq 1 ]]; then
       git -C "${REPO}" worktree remove --force "${TARGET}"
@@ -217,10 +243,12 @@ case "${cmd}" in
       echo "wt: primary checkout ${REPO} is on '${PRIMARY_BR}', not ${BASE} — local ${BASE} NOT synced" >&2
     elif [[ -n "$(git -C "${REPO}" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
       echo "wt: primary checkout ${REPO} has uncommitted changes — local ${BASE} NOT synced" >&2
-    elif git -C "${REPO}" pull --ff-only --quiet origin "${BASE}"; then
+    elif ! git -C "${REPO}" fetch --quiet origin "${BASE}"; then
+      echo "wt: 'git fetch origin ${BASE}' failed in ${REPO} — local ${BASE} NOT synced" >&2
+    elif git -C "${REPO}" merge --ff-only --quiet "origin/${BASE}"; then
       echo "wt: local ${BASE} synced to origin/${BASE} ($(git -C "${REPO}" rev-parse --short HEAD))"
     else
-      echo "wt: 'git pull --ff-only origin ${BASE}' failed in ${REPO} — local ${BASE} NOT synced" >&2
+      echo "wt: 'git merge --ff-only origin/${BASE}' failed in ${REPO} — local ${BASE} NOT synced" >&2
     fi
     if git -C "${REPO}" show-ref --verify --quiet "refs/heads/${BR}"; then
       git -C "${REPO}" fetch origin "${BASE}" --quiet 2>/dev/null || true

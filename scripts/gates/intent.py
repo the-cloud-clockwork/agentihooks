@@ -27,6 +27,8 @@ WEAKEN_LINE = 0.5
 GRACE_MS = 2 * 60_000
 GH_TIMEOUT_SEC = 20
 PROOF_CHARS = 4000
+FAIL_COMMENT = "The intent check failed. The engineer has the verdict and the fix steps in the inbox."
+SHORTFALL_COMMENT = "Intent remains unmet after two fix rounds. The master must review this shortfall in the gate log."
 START, END = "<!-- agentihooks intent -->", "<!-- /agentihooks intent -->"
 PULL = re.compile(r"github\.com/([^/]+)/([^/]+)/pull/(\d+)")
 SECTION = re.compile(f"{re.escape(START)}.*?{re.escape(END)}", re.S)
@@ -314,19 +316,22 @@ class Check:
         log.append(self.slug, log.Row.of(NAME, kind, who, reason=reason), self.home)
         if self.mode == "coach" and rounds >= 2:
             text = f"Intent remains unmet after two fix rounds: {reason}. The master must review this shortfall."
-            self.ledger.comment(self.slug, task["id"], text, by="swarm")
+            key, ref = f"intent-shortfall:{task['id']}:{self.now_ms}", f"tasks/{task['id']}"
+            told = self.mail.send(key, self.mail.master, text, ref=ref)
+            self.ledger.comment(self.slug, task["id"], SHORTFALL_COMMENT, by="swarm")
             if task.get("state") == "claimed":
                 self.ledger.update_task(self.slug, task["id"], {"state": "pr"})
-            return []
+            return told
         if self.mode not in ("enforce", "coach"):
             return []
         text = f"The intent check failed: {reason}. {fix_steps(self.slug)}"
         if self.mode == "coach":
             text += f" Run fix round {rounds + 1} of 2; after two unsuccessful fix rounds merge with the shortfall recorded."
-        self.ledger.update_task(self.slug, task["id"], {"state": "claimed"})
-        self.ledger.comment(self.slug, task["id"], text, by="swarm")
         key, ref = f"intent-fail:{task['id']}:{self.now_ms}", f"tasks/{task['id']}"
-        return self.mail.send(key, self.mail.engineer(task), text, ref=ref)
+        told = self.mail.send(key, self.mail.engineer(task), text, ref=ref)
+        self.ledger.update_task(self.slug, task["id"], {"state": "claimed"})
+        self.ledger.comment(self.slug, task["id"], FAIL_COMMENT, by="swarm")
+        return told
 
 
 def _gated(words):

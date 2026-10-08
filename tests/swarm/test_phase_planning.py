@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from hooks.classifier import Answer, DecisionResult
+from scripts.doctor import priming
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli as swarm_cli
 from scripts.swarm import ledger_client, phase_planning, phase_state, slice_screen
@@ -114,6 +115,71 @@ def test_manual_waiting_and_out_of_scope_phases_get_no_plan_task(env):
     core.sync(SLUG, ops=[{"op": "set", "id": "oos", "by": "engineer", "path": "phases/p1/out_of_scope", "value": True}])
     run(store, ledger)
     assert tasks("p1") == []
+
+
+def unplanned(store):
+    return [i for i in items(store, MASTER_SEAT) if i.sender == "swarm" and "has no tasks" in i.text]
+
+
+def test_a_manual_phase_without_tasks_raises_one_master_notice(env):
+    store, ledger = env
+    set_phase("p2", planning="auto", depends_on=["p1"])
+    run(store, ledger)
+    run(store, ledger)
+    [notice] = unplanned(store)
+    assert notice.text == (
+        "Phase p1 Build has no tasks and is planned manually, so nothing builds it: "
+        "add its tasks, or set its planning to auto so a planner slices it."
+    )
+    assert notice.fyi is False
+
+
+def test_a_manual_phase_with_a_task_and_an_auto_phase_raise_no_notice(env):
+    store, ledger = env
+    ledger.add_task(SLUG, {"task": "t1", "title": "Task one", "lane": "eng", "phase": "p1"}, "master")
+    set_phase("p2", planning="auto")
+    actions = phase_planning.planning_pass(
+        InboxStore(store.redis), store, SLUG, state(SLUG), ledger, store.config(SLUG)
+    )
+    assert actions == ["queued plan-p2 for phase p2"]
+    assert unplanned(store) == []
+
+
+def test_a_manual_phase_whose_only_task_is_out_of_scope_raises_the_notice(env):
+    store, ledger = env
+    ledger.add_task(SLUG, {"task": "t1", "title": "Task one", "lane": "eng", "phase": "p1"}, "master")
+    core.sync(SLUG, ops=[{"op": "set", "id": "oos", "by": "engineer", "path": "tasks/t1/out_of_scope", "value": True}])
+    set_phase("p2", planning="auto", depends_on=["p1"])
+    actions = phase_planning.planning_pass(
+        InboxStore(store.redis), store, SLUG, state(SLUG), ledger, store.config(SLUG)
+    )
+    assert actions == [f"told {MASTER_SEAT}: plan-unplanned:p1"]
+
+
+def test_a_doctor_swarm_raises_no_notice_for_its_standing_phases(env):
+    store, ledger = env
+    store.update(SLUG, template=priming.TEMPLATE)
+    actions = phase_planning.planning_pass(
+        InboxStore(store.redis), store, SLUG, state(SLUG), ledger, store.config(SLUG)
+    )
+    assert actions == []
+
+
+def test_an_approved_auto_phase_whose_slice_left_scope_raises_no_notice(env):
+    store, ledger = env
+    set_phase("p1", planning="auto")
+    set_phase("p2", planning="auto", depends_on=["p1"])
+    run(store, ledger)
+    slice_done(ledger, ("t1", DONE_WHEN))
+    for tid in ("plan-p1", "t1"):
+        out = {"op": "set", "id": f"oos-{tid}", "by": "engineer", "path": f"tasks/{tid}/out_of_scope", "value": True}
+        core.sync(SLUG, ops=[out])
+    ledger.review_phase(SLUG, "p1", "approved", by="operator")
+    assert phase_state.lifecycle(phase("p1"), state(SLUG)) == "building"
+    actions = phase_planning.planning_pass(
+        InboxStore(store.redis), store, SLUG, state(SLUG), ledger, store.config(SLUG)
+    )
+    assert actions == []
 
 
 def test_the_tick_that_adds_a_plan_task_does_not_tick_its_phase_done(env):
@@ -389,6 +455,7 @@ def test_an_escalated_review_is_not_reopened(env):
 def test_the_pass_returns_what_it_did(env):
     store, ledger = env
     set_phase("p1", planning="auto")
+    set_phase("p2", planning="auto", depends_on=["p1"])
     config = store.config(SLUG)
     actions = phase_planning.planning_pass(InboxStore(store.redis), store, SLUG, state(SLUG), ledger, config)
     assert actions == ["queued plan-p1 for phase p1"]

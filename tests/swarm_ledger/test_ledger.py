@@ -57,7 +57,7 @@ def cli(monkeypatch, tmp_path):
     monkeypatch.setattr(ledger, "swarm_autonomy", lambda slug: "full")
     monkeypatch.setattr(ledger_relay, "verified", lambda name, quote: True)
     monkeypatch.setattr(ledger.ledger_publish, "publish", lambda path, title, repo, artifact: ("https://x/1", "issue"))
-    monkeypatch.setattr(ledger_phase_cli, "append_phases", lambda plan, taken: [{"phase": "p9"}])
+    monkeypatch.setattr(ledger_phase_cli, "append_phases", lambda plan, taken: [{"phase": "p9", "planning": "auto"}])
 
     def run(argv, reply):
         sent = []

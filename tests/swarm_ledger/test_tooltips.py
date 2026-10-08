@@ -235,6 +235,7 @@ def test_a_home_row_tip_hides_on_click_or_scroll(tab, leave):
 
 def test_an_empty_row_tip_leaves_the_enclosing_control_its_own_tip(tab):
     page = tab(home_html("home"))
+    page.locator("li.row button.fold").wait_for()
     found = page.evaluate(
         """() => { const fold = document.querySelector("li.row button.fold");
           const empty = document.createElement("span");
@@ -256,6 +257,43 @@ def test_ledger_rows_carry_no_native_hover_text(tab, view):
     assert [title for _, title, _ in found] == [None] * len(found)
     assert ["title", None, ROW_TITLE] in found
     assert ["ov", None, ROW_OVERVIEW] in found
+
+
+ROW_BUTTONS = {
+    "home": (
+        ".act.del",
+        f"Move {ROW_TITLE} to the bin",
+        "Move this ledger to the bin. Its swarm stops; the bin keeps it thirty days.",
+    ),
+    "bin": (".act.restore", f"Restore {ROW_TITLE} to HOME", "Restore this ledger from the bin to HOME."),
+}
+
+
+@pytest.mark.parametrize("view", ROW_BUTTONS)
+def test_ledger_row_buttons_carry_no_native_hover_text_and_keep_their_label(tab, view):
+    page = tab(home_html(view), "?view=bin" if view == "bin" else "")
+    page.locator("li.row .act").first.wait_for()
+    buttons = page.locator("li.row .act, a.fab")
+    assert buttons.count() == 2
+    found = buttons.evaluate_all("(els) => els.map((el) => [el.getAttribute('title'), el.getAttribute('aria-label')])")
+    assert [title for title, _ in found] == [None] * len(found)
+    selector, label, _ = ROW_BUTTONS[view]
+    assert page.locator(f"li.row {selector}").first.get_attribute("aria-label") == label
+
+
+@pytest.mark.parametrize("view", ROW_BUTTONS)
+def test_a_ledger_row_button_shows_the_ledger_tip_exactly_one_second_after_the_pointer_rests(tab, view):
+    selector, _, tip = ROW_BUTTONS[view]
+    page = tab(home_html(view), "?view=bin" if view == "bin" else "")
+    page.clock.install(time=0)
+    page.clock.pause_at(60_000)
+    page.locator(f"li.row {selector}").first.hover()
+    page.clock.run_for(999)
+    assert tip_shown(page) is None
+    page.clock.run_for(1)
+    assert tip_shown(page) == tip
+    page.mouse.move(2, 890)
+    assert tip_shown(page) is None
 
 
 @pytest.mark.parametrize("leave", ["pointer", "click", "scroll"])

@@ -38,13 +38,19 @@ def _steps(item, event):
     return [e for e in item["history"] if e.get("event") == event]
 
 
+def reader(item):
+    """The agent that took delivery of an item, '' while none has."""
+    return next((e.get("by", "") for e in reversed(item["history"]) if e.get("state") in ("delivered", "read")), "")
+
+
 def past_window(items, now_ms, window_ms, receivers=None):
     found, receivers = [], receivers or {}
     for item in items:
         waited = now_ms - item["created_at"]
         if item["state"] in CLOSED or waited < window_ms:
             continue
-        if not _waiting(item, receivers.get(item["address"], Receiver()), window_ms):
+        receiver = receivers.get(reader(item)) or receivers.get(item["address"], Receiver())
+        if not _waiting(item, receiver, window_ms):
             continue
         minutes = waited // MINUTE_MS
         category = "unread delivery" if item["state"] == "pending" else "delivered backlog"

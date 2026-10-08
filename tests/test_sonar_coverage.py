@@ -21,13 +21,30 @@ def test_sonar_uses_all_shards_without_running_tests_again():
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     jobs = workflow["jobs"]
     scan = jobs["sonar"]
-    assert scan["needs"] == ["unit"]
+    assert "needs" not in scan
     merge = next(step for step in scan["steps"] if step.get("name") == "Merge shard coverage")
     assert "pytest" not in merge["run"]
     assert "combine.sh" in merge["run"]
     assert merge["env"]["GH_TOKEN"] == "${{ github.token }}"
     assert "sonar" in jobs["gate-required"]["needs"]
     assert not (ROOT / ".github/workflows/sonar-scan.yml").exists()
+
+
+def test_sonar_setup_overlaps_the_shards_and_only_the_analysis_waits_for_coverage():
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["sonar"]["steps"]
+    names = [step.get("name") or step.get("uses") for step in steps]
+    merge = names.index("Merge shard coverage")
+    for setup in (
+        "actions/checkout@v4",
+        "actions/setup-python@v5",
+        "Install coverage",
+        "Start Cloudflare Access proxy",
+    ):
+        assert names.index(setup) < merge
+    assert names.index("Restore Sonar downloads") < merge < names.index("SonarQube Scan")
+    combine = (ROOT / ".github/coverage/combine.sh").read_text()
+    assert "collect.py" in combine
+    assert "gh run download" not in combine
 
 
 def test_coverage_options_measure_hooks_and_scripts_on_one_interpreter():
@@ -60,6 +77,43 @@ def test_missing_shard_coverage_is_red(tmp_path):
     )
     assert result.returncode != 0
     assert "Missing coverage for shard 4" in result.stdout
+
+
+def _stub_combine(tmp_path, collect_body):
+    folder = tmp_path / ".github/coverage"
+    folder.mkdir(parents=True)
+    for name in ("combine.sh", "coverage.ini"):
+        (folder / name).write_text((ROOT / ".github/coverage" / name).read_text())
+    (folder / "collect.py").write_text(f"import sys\nprint('collect', *sys.argv[1:])\n{collect_body}\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gh").write_text("#!/usr/bin/env bash\necho 555\n")
+    (bin_dir / "gh").chmod(0o755)
+    (bin_dir / "python").symlink_to(sys.executable)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "t"],
+        cwd=tmp_path,
+        check=True,
+    )
+    return folder / "combine.sh", dict(
+        os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", GITHUB_REPOSITORY="owner/repo"
+    )
+
+
+@pytest.mark.parametrize(("event", "source"), [("push", "555"), ("pull_request", "42")])
+def test_combine_collects_from_the_passed_run_on_push_and_this_run_otherwise(tmp_path, event, source):
+    script, env = _stub_combine(tmp_path, "sys.exit(3)")
+    result = subprocess.run(
+        ["bash", str(script), "42", "8"],
+        cwd=tmp_path,
+        env=dict(env, GITHUB_EVENT_NAME=event),
+        capture_output=True,
+        text=True,
+    )
+    assert f"collect {source} 8 .coverage-shards" in result.stdout
+    assert result.returncode != 0
+    assert not (tmp_path / "coverage.xml").exists()
 
 
 def test_combined_coverage_keeps_hits_from_every_shard_and_both_packages(tmp_path):
@@ -95,6 +149,7 @@ for shard in range(1, 5):
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "TOTAL" in result.stdout
     report = ET.parse(tmp_path / "coverage.xml")
     classes = report.findall(".//class")
     assert {node.attrib["filename"] for node in classes} == {

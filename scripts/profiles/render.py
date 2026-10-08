@@ -23,7 +23,9 @@ from scripts.targets.codex_target import codex_home
 SHARED = ("projects", "sessions", "todos", "plugins", ".credentials.json")
 CODEX_STATE = ("auth.json", "sessions", "history.jsonl", "session_index.jsonl", "hooks.json")
 CODEX_INHERITED = ("model", "model_reasoning_effort", "service_tier", "notify", "projects")
+COPILOT_STATE = ("config.json", "settings.json", "agentihooks-hook.sh", "hooks", "session-state", "logs")
 STAMP = ".agentihooks-render.json"
+PLUGINS = ".agentihooks-plugins.json"
 KEY_SEPARATOR = "+"
 CHANNELS, BRAIN = "AGENTIHOOKS_BASE_CHANNELS", "brain"
 HEADER = "<!-- agentihooks rendered profile -->"
@@ -89,6 +91,30 @@ def _bundle() -> Path | None:
     return bundle
 
 
+def _pin(bundle: Path | None, revision: str) -> None:
+    recorded = f"the launch recorded bundle commit {revision}, but"
+    if bundle is None:
+        raise ValueError(f"{recorded} no bundle is linked")
+    git = ["git", "-C", str(bundle)]
+    try:
+        head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
+        status = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, timeout=10)
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(f"{recorded} git did not answer within 10 seconds for the bundle at {bundle}") from exc
+    for done in (head, status):
+        if done.returncode:
+            raise ValueError(f"{recorded} git cannot read the bundle at {bundle}: {done.stderr.strip()}")
+    if head.stdout.strip() != revision:
+        differs = f"is at commit {head.stdout.strip()}"
+    elif status.stdout.strip():
+        differs = "has uncommitted changes"
+    else:
+        return
+    raise ValueError(
+        f"{recorded} the bundle at {bundle} {differs}; check out {revision} in the bundle before this launch renders"
+    )
+
+
 def _base_digest() -> str:
     _i = _install_module()
     digest = hashlib.sha256()
@@ -123,7 +149,7 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
         "profiles": _profiles_digest(dirs),
         "chain": chain,
         "overlays": _overlays(dirs),
-        "plugins": plugins.role_defaults(chain),
+        "enabled_plugins": _plugins(chain, _settings("claude", bundle, dirs).get("enabledPlugins") or {}),
         **({"browser": browser.spec()} if browser.enabled(chain) else {}),
         "corrections": quarantine.digest(),
     }
@@ -161,7 +187,7 @@ def _settings(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) ->
     return doc
 
 
-def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
+def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]], kept: Sequence[str] = ()) -> dict:
     from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
 
     _i = _install_module()
@@ -179,7 +205,7 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     excludes = [str(default_home / "CLAUDE.md"), str(default_home / "rules" / "**")]
     settings = settings_document(doc)
     chain = [n for n, _ in dirs]
-    enabled_plugins = plugins.allowed(chain, settings.get("enabledPlugins") or {})
+    enabled_plugins = _plugins(chain, settings.get("enabledPlugins") or {}, kept)
     if browser.enabled(chain):
         enabled_plugins.pop(plugins.PLAYWRIGHT, None)
     return {
@@ -188,6 +214,19 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
         "enabledPlugins": enabled_plugins,
         "claudeMdExcludes": excludes,
     }
+
+
+def _plugins(chain: list[str], layered: dict, kept: Sequence[str] = ()) -> dict[str, bool]:
+    operator = _read_json(claude_home(_global_env()) / "settings.json") or {}
+    return plugins.allowed(plugins.carried(chain, operator.get("enabledPlugins") or {}), layered, kept)
+
+
+def _home_plugins(prior: Path | None, computed: dict) -> list[str]:
+    if prior is None:
+        return []
+    home = (_read_json(prior / "claude" / "settings.json") or {}).get("enabledPlugins") or {}
+    written = _read_json(prior / "claude" / PLUGINS)
+    return plugins.kept(home, computed if written is None else written)
 
 
 def _channels(channels: str, dirs: list[tuple[str, Path]]) -> str:
@@ -326,6 +365,7 @@ def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) 
     prior = profile_dir(name, overlays)
     if not force and prior is not None and _claude_fresh(prior, current, required):
         return None
+    kept = _home_plugins(prior, current["enabled_plugins"])
     root = homes.fresh(rendered_root(), key, current)
     out = root / "claude"
     out.mkdir()
@@ -333,11 +373,12 @@ def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) 
         shutil.copy2(prior / "claude" / ".claude.json", out / ".claude.json")
     servers, deny, mounts = connectors.claude(declared, str(out / ".claude.json"))
     connectors.write(connectors.path(root.name, "claude", root.parent), mounts, name, "claude")
-    settings = _claude_settings(bundle, dirs)
+    settings = _claude_settings(bundle, dirs, kept)
     if deny:
         permissions = settings["permissions"]
         permissions["deny"] = [*permissions.get("deny", []), *deny]
     _i.save_json(out / "settings.json", settings)
+    _i.save_json(out / PLUGINS, current["enabled_plugins"])
     for subdir, keep in FEATURES:
         _relink(out / subdir, _features(subdir, keep, bundle, dirs))
     _atomic_write(out / "CLAUDE.md", _persona(root, "claude", bundle, dirs, current["chain"]))
@@ -451,10 +492,45 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -
     return out
 
 
-def render(target: str, name: str, force: bool = False, overlays: Sequence[str] = ()) -> Path | None:
-    renderers = {"claude": render_claude, "codex": render_codex}
+def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ()) -> Path | None:
+    from scripts.targets.copilot_target import CopilotAdapter, copilot_home
+
+    bundle, dirs = _bundle(), _chain(name, overlays)
+    claude_fresh = render_claude(name, force=force, overlays=overlays) is None
+    current = _stamp(bundle, dirs)
+    config = {"mcpServers": CopilotAdapter().mcp_entries(_mcp_servers("copilot", bundle, dirs))}
+    root = profile_dir(name, overlays)
+    out = root / "copilot"
+    if (
+        not force
+        and claude_fresh
+        and _read_json(out / "mcp-config.json") == config
+        and _read_json(out / STAMP) == current
+    ):
+        return None
+    if out.exists():
+        root = render_claude(name, force=True, overlays=overlays).parent
+        out = root / "copilot"
+    out.mkdir()
+    _link(out / "copilot-instructions.md", root / "claude" / "CLAUDE.md")
+    operator = copilot_home()
+    for item in COPILOT_STATE:
+        _link(out / item, operator / item)
+    # Copilot sends header values literally, so this file holds the resolved gateway credential.
+    with os.fdopen(os.open(out / "mcp-config.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
+        f.write(json.dumps(config, indent=2) + "\n")
+    _install_module().save_json(out / STAMP, current)
+    return out
+
+
+def render(
+    target: str, name: str, force: bool = False, overlays: Sequence[str] = (), bundle_revision: str = ""
+) -> Path | None:
+    renderers = {"claude": render_claude, "codex": render_codex, "copilot": render_copilot}
     if target not in renderers:
         raise ValueError(f"{target} per-run profiles are not supported")
+    if bundle_revision:
+        _pin(_bundle(), bundle_revision)
     return renderers[target](name, force=force, overlays=overlays)
 
 
@@ -465,7 +541,7 @@ def rendered_profiles(target: str) -> list[str]:
         homes = {config.parent.parent.name for config in rendered_root().glob("*/codex/config.toml")}
         legacy = _operator_codex_home().glob("*.config.toml")
         return sorted(homes | {p.name.removesuffix(".config.toml") for p in legacy if _codex_stamp(p)})
-    return []
+    return sorted(config.parent.parent.name for config in rendered_root().glob(f"*/{target}/mcp-config.json"))
 
 
 def _seed_linked_profiles(out: Path) -> None:
@@ -520,9 +596,6 @@ def main(argv: list[str] | None = None) -> int:
         return measure.main(args)
     if args.bundle is not None and args.out is None:
         render_cmd.error("--bundle needs --out")
-    if args.target == "copilot":
-        print("copilot per-run profiles are not supported", file=sys.stderr)
-        return 2
     try:
         if args.out is not None:
             return _render_scratch(args)

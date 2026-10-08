@@ -63,7 +63,12 @@ class OneLineIds(unittest.TestCase):
         self.assertEqual(out["text"], "engineer@323133-0085")
 
     def test_agent_quota_health_and_seat_names_render_as_id_cells(self):
-        render = function_source("renderSwarm") + function_source("healthRow") + function_source("renderHandoffs")
+        render = (
+            function_source("agentRow")
+            + function_source("renderSwarm")
+            + function_source("healthRow")
+            + function_source("renderHandoffs")
+        )
         for value in ("a.name", "q.account", "f.subject", "seatText(r.seat)", "r.successor"):
             self.assertIn(f"idCell({value})", render, value)
 

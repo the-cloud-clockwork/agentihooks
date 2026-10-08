@@ -1,0 +1,11 @@
+{
+  "tested_commit": "f8b432655d9be6348e1e0528827aa79b658a9484",
+  "evidence_class": "local isolated fixture in a temporary agentihooks home; not live rollout proof",
+  "inputs": {
+    "tests/fixtures/swarm_v2/session-scope.json": "07cfc50e6b53e28315eaa695cdf3487ca1955e2b2e4b54709d785392a66de360",
+    "hooks/context/project_sessions.py": "6ecadcc3e64f30f41857569780cb234d788af57971154db26052cf1cb115d283",
+    "hooks/context/brain_writer_hook.py": "ca8e67e88b86500ef5ceead6fee5ec292991b86975eb2198717af2de3de3a29c",
+    "docs/swarm-v2/schemas/session-scope.json": "6db859446139ea991d05b5dc7f1f61c039a29cd3088feb971ac427ad3973c09f",
+    "tests/context/test_session_scope.py": "c2dd7d076d437d68f484ba891e5f137871eef488f15a04547d834342c3bb872d"
+  }
+}

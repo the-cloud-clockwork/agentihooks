@@ -1,6 +1,7 @@
 import pytest
 
 from scripts.gates import progress
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -35,7 +36,7 @@ def test_agents_and_swarms_keep_separate_marks(store):
     store.talk(ME)
     assert store.read("engineer@abcdef-0002").talk == 0
     assert progress.Progress(store.redis, "elsewhere").read(ME).talk == 0
-    assert store.key(ME) == f"agentihooks:swarm:{SLUG}:progress:{ME}"
+    assert store.key(ME) == f"{KEY_ROOT}:swarm:{SLUG}:progress:{ME}"
 
 
 def test_outcome_once_stamps_a_resolution_only_the_first_time(store):

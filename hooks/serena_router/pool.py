@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import time
 import weakref
 from dataclasses import dataclass, field
@@ -63,7 +64,7 @@ class Backend:
 
     async def _run(self) -> None:
         try:
-            async with stdio_client(self.config.params(self.root)) as (read, write):
+            async with stdio_client(self.config.params(self.root), errlog=sys.__stderr__) as (read, write):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     self.session = session

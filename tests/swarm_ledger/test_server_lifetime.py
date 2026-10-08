@@ -1,7 +1,6 @@
 import json
 import os
 import signal
-import socket
 import subprocess
 import sys
 import time
@@ -19,7 +18,7 @@ SERVER = ROOT / "scripts/swarm_ledger/ledger_server.py"
 
 def running(pid):
     try:
-        return (Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]) != "Z"
+        return (Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]) not in {"Z", "X"}
     except OSError:
         return False
 
@@ -32,13 +31,17 @@ def test_running_reads_a_process_reaped_mid_read_as_gone(monkeypatch):
     assert running(os.getpid()) is False
 
 
+@pytest.mark.parametrize("state,alive", [("S", True), ("R", True), ("Z", False), ("X", False)])
+def test_running_reads_a_zombie_or_a_process_being_reaped_as_gone(monkeypatch, state, alive):
+    monkeypatch.setattr(Path, "read_text", lambda self, *args, **kwargs: f"7 (python) {state} 1 7 7")
+    assert running(7) is alive
+
+
 @pytest.mark.parametrize("ending", ["exit", "terminate", "kill"])
 @pytest.mark.parametrize("explicit_owner", [True, False])
 @pytest.mark.parametrize("mode", ["--ensure", "--serve"])
-def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owner, mode):
-    with socket.socket() as spare:
-        spare.bind(("127.0.0.1", 0))
-        port = spare.getsockname()[1]
+def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owner, mode, ledger_port):
+    port = ledger_port
     env = {
         **os.environ,
         "LEDGER_DIR": str(tmp_path),
@@ -85,7 +88,7 @@ def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owne
                 pass
 
 
-def test_detached_server_cleanup_accepts_a_process_reaped_after_the_running_check(tmp_path, monkeypatch):
+def test_detached_server_cleanup_accepts_a_process_reaped_after_the_running_check(tmp_path, monkeypatch, ledger_port):
     (tmp_path / ".server.pid").write_text("42")
     run = Mock()
     run.poll.return_value = 0
@@ -94,7 +97,7 @@ def test_detached_server_cleanup_accepts_a_process_reaped_after_the_running_chec
     kill = Mock(side_effect=ProcessLookupError(3, "No such process"))
     monkeypatch.setattr(os, "kill", kill)
 
-    test_detached_server_stops_when_its_run_ends(tmp_path, "exit", True, "--ensure")
+    test_detached_server_stops_when_its_run_ends(tmp_path, "exit", True, "--ensure", ledger_port)
 
     kill.assert_called_once_with(42, signal.SIGTERM)
 
@@ -328,6 +331,7 @@ def test_hook_pins_the_run_before_detaching_the_ensure_process(tmp_path, monkeyp
     from scripts.swarm_ledger import ledger_hook
 
     (tmp_path / "sample.json").write_text("{}")
+    monkeypatch.setenv("LEDGER_AUTOSTART", "1")
     monkeypatch.setattr(ledger_hook, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(ledger_link, "address", lambda: ("127.0.0.1", 9999))
     monkeypatch.setattr(ledger_hook.socket, "create_connection", Mock(side_effect=OSError))

@@ -1,0 +1,28 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-IDN-03",
+  "grant": {"project_ids": ["github.com/fixture/alpha", "github.com/fixture/beta"]},
+  "outside_grant": {"project_id": "github.com/fixture/gamma", "project": "gamma", "repo": "fixture/gamma", "worktree": "gamma", "cwd": "gamma"},
+  "transitions": [
+    {"at": "2026-10-08T10:00:00+00:00", "scope": {"project_id": "github.com/fixture/alpha", "project": "alpha", "repo": "fixture/alpha", "worktree": "one", "cwd": "/work/alpha/one", "branch": "one", "swarm": "fixture", "task": "first", "task_revision": "1", "lane": "eng"}},
+    {"at": "2026-10-08T10:10:00+00:00", "scope": {"project_id": "github.com/fixture/alpha", "project": "alpha", "repo": "fixture/alpha", "worktree": "two", "cwd": "/work/alpha/two", "branch": "two", "swarm": "fixture", "task": "first", "task_revision": "1", "lane": "eng"}},
+    {"at": "2026-10-08T10:20:00+00:00", "scope": {"project_id": "github.com/fixture/alpha", "project": "alpha", "repo": "fixture/alpha", "worktree": "two", "cwd": "/work/alpha/two", "branch": "two", "swarm": "fixture", "task": "second", "task_revision": "3", "lane": "eng"}},
+    {"at": "2026-10-08T10:30:00+00:00", "scope": {"project_id": "github.com/fixture/beta", "project": "beta", "repo": "fixture/beta", "worktree": "beta", "cwd": "/work/beta", "branch": "main", "swarm": "fixture", "task": "third", "task_revision": "2", "lane": "ci"}}
+  ],
+  "transcript": [
+    {"type": "assistant", "timestamp": "2026-10-08T09:59:00Z", "cwd": "/scratch", "message": {"content": [{"type": "text", "text": "<!-- @lesson -->Before any scope.<!-- @/lesson -->"}]}},
+    {"type": "assistant", "timestamp": "2026-10-08T10:05:00Z", "cwd": "/work/alpha/one", "gitBranch": "one", "message": {"content": [{"type": "text", "text": "<!-- @lesson -->First task in worktree one.<!-- @/lesson -->"}]}},
+    {"type": "assistant", "timestamp": "2026-10-08T10:15:00Z", "cwd": "/work/alpha/two", "gitBranch": "two", "message": {"content": [{"type": "text", "text": "<!-- @lesson -->First task after the worktree switch.<!-- @/lesson -->"}]}},
+    {"type": "assistant", "timestamp": "2026-10-08T10:25:00Z", "cwd": "/work/alpha/two", "gitBranch": "two", "message": {"content": [{"type": "text", "text": "<!-- @lesson -->Second task.<!-- @/lesson -->"}]}},
+    {"type": "assistant", "timestamp": "2026-10-08T10:35:00Z", "cwd": "/work/beta", "gitBranch": "main", "message": {"content": [{"type": "text", "text": "<!-- @signal severity=warning share=fleet -->Shared warning for every swarm.<!-- @/signal -->"}]}},
+    {"type": "assistant", "timestamp": "2026-10-08T10:40:00Z", "cwd": "/work/beta", "gitBranch": "main", "message": {"content": [{"type": "text", "text": "<!-- @lesson -->Third task.<!-- @/lesson -->"}]}}
+  ],
+  "expected": [
+    {"attribution": "unknown"},
+    {"attribution": "scoped", "project_id": "github.com/fixture/alpha", "worktree": "one", "task": "first", "task_revision": "1", "lane": "eng"},
+    {"attribution": "scoped", "project_id": "github.com/fixture/alpha", "worktree": "two", "task": "first", "task_revision": "1", "lane": "eng"},
+    {"attribution": "scoped", "project_id": "github.com/fixture/alpha", "worktree": "two", "task": "second", "task_revision": "3", "lane": "eng"},
+    {"attribution": "fleet"},
+    {"attribution": "scoped", "project_id": "github.com/fixture/beta", "worktree": "beta", "task": "third", "task_revision": "2", "lane": "ci"}
+  ]
+}

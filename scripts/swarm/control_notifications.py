@@ -5,7 +5,7 @@ from argparse import Namespace
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.store import MASTER, AgentRecord, RedisStore, codex_split
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 
 CONTROL_REF = "swarm-control:"
 CONTROLS = {
@@ -42,7 +42,7 @@ def notify(
     config = store.config(args.slug)
     result = f"The swarm is {config.state}."
     if action == "set":
-        result += f" Engineer cap {config.max_eng}, CI cap {config.max_ci}, Planner cap {config.max_plan}, Codex share {codex_split(config, os.environ)[0]} percent."
+        result += f" Engineer cap {config.max_eng}, CI cap {config.max_ci}, Planner cap {config.max_plan}."
     if action == "verdict":
         result += f" The verdict is {args.verdict.replace('-', ' ')}."
     text = f"{actor} {verb} from the {source}. {result}" + (f" {detail}" if detail else "")

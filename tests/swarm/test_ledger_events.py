@@ -485,6 +485,12 @@ def test_a_pull_request_names_its_failed_checks():
     assert ledger_events.pull_request(raw).failed == ("ci/status", "a check")
 
 
+@pytest.mark.parametrize("entry, queued", [(None, False), ({"id": "queue-entry"}, True)])
+def test_a_pull_request_reports_merge_queue_membership(entry, queued):
+    raw = {"state": "OPEN", "mergeQueueEntry": entry}
+    assert ledger_events.pull_request(raw).queued is queued
+
+
 SKIPPED_ONLY = [{"name": "ledger-equivalence", "conclusion": "SKIPPED"}]
 QUEUED_TESTS = {"status": "QUEUED", "workflowRun": {"databaseId": 1}}
 FINISHED_RUN = {"status": "COMPLETED", "workflowRun": {"databaseId": 2}}

@@ -4,11 +4,12 @@ import pytest
 
 from scripts.swarm.health import verdicts
 from scripts.swarm.health.findings import Finding
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.store import SwarmError
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
-KEY = "agentihooks:swarm:sw:findings"
+KEY = f"{KEY_ROOT}:swarm:sw:findings"
 HOUR = 60 * 60_000
 T0 = 10_000_000_000
 

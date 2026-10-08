@@ -4,20 +4,19 @@ import json
 import time
 from dataclasses import asdict, dataclass, field, replace
 
-from scripts import agent_choice
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
 from scripts.swarm import effort_range
 from scripts.swarm.execution import ExecutionRegistry
+from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
 
-PREFIX = "agentihooks:swarm"
+PREFIX = f"{ROOT}:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
 DEFAULT_URL = "redis://127.0.0.1:6379/0"
 MASTER = "master"
 AUTONOMY = ("manual", "assist", "delegate", "full")
 MANUAL, ASSIST, DELEGATE, FULL = AUTONOMY
-CODEX_SHARE, CODEX_MIN_WEEK_LEFT = 30, 5
 
 
 class SwarmError(RuntimeError):
@@ -36,15 +35,12 @@ class SwarmConfig:
     lanes: dict = field(default_factory=dict)
     links: list = field(default_factory=list)
     autonomy: str = DELEGATE
-    codex_share: int | None = None
-    codex_min_week_left: int | None = None
     snapshot_minutes: int | None = None
     code: str = ""
     max_plan: int = 1
     gates: dict = field(default_factory=dict)
     effort_min: str = effort_range.DEFAULT[0]
     effort_max: str = effort_range.DEFAULT[1]
-    codex_share_changed_at: int = 0
     overlays: dict = field(default_factory=dict)
 
 
@@ -103,11 +99,7 @@ class RedisStore:
             raise SwarmError(refused)
         if not self.redis.hsetnx(self.key(config.slug, "config"), "slug", config.slug):
             raise SwarmError(f"swarm {config.slug} already exists")
-        config = replace(
-            config,
-            code=self.names.mint_code(config.slug, config.slug, config.repo),
-            codex_share_changed_at=int(time.time() * 1000) if config.codex_share is not None else 0,
-        )
+        config = replace(config, code=self.names.mint_code(config.slug, config.slug, config.repo))
         self.redis.hset(self.key(config.slug, "config"), mapping=_fields(config))
         self.redis.sadd(f"{PREFIX}:index", config.slug)
 
@@ -126,15 +118,12 @@ class RedisStore:
             json.loads(raw.get("lanes") or "{}"),
             json.loads(raw.get("links") or "[]"),
             raw.get("autonomy") or DELEGATE,
-            _whole(raw.get("codex_share")),
-            _whole(raw.get("codex_min_week_left")),
             _whole(raw.get("snapshot_minutes")),
             raw.get("code", ""),
             int(raw.get("max_plan", 1)),
             json.loads(raw.get("gates") or "{}"),
             raw.get("effort_min") or effort_range.DEFAULT[0],
             raw.get("effort_max") or effort_range.DEFAULT[1],
-            int(raw.get("codex_share_changed_at", 0)),
             json.loads(raw.get("overlays") or "{}"),
         )
 
@@ -143,14 +132,8 @@ class RedisStore:
             raise SwarmError(f"state must be one of {STATES}")
         if changes.get("autonomy", DELEGATE) not in AUTONOMY:
             raise SwarmError(f"autonomy must be one of {AUTONOMY}")
-        if not 0 <= changes.get("codex_share", 0) <= 100:
-            raise SwarmError("codex share is a percent from 0 to 100")
         previous = self.config(slug)
         config = replace(previous, **changes)
-        if "codex_share" in changes and (
-            config.codex_share != previous.codex_share or not previous.codex_share_changed_at
-        ):
-            config = replace(config, codex_share_changed_at=int(time.time() * 1000))
         if {"lanes", "effort_min", "effort_max"} & set(changes):
             refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes)
             if refused:
@@ -277,11 +260,6 @@ class RedisStore:
     def spawns(self, slug):
         return {harness: int(count) for harness, count in self.redis.hgetall(self.key(slug, "spawns")).items()}
 
-    def share_picks(self, slug, now_ms):
-        history = [json.loads(row) for row in self.redis.lrange(self.key(slug, "history"), 0, -1)]
-        rows = [*history, *(asdict(agent) for agent in self.agents(slug))]
-        return agent_choice.share_picks(rows, now_ms - agent_choice.SHARE_WINDOW_MS)
-
     def count_claim(self, slug, task):
         self.redis.hsetnx(self.key(slug, "started-lives"), task, self._started_lives(slug, task))
         return self.redis.hincrby(self.key(slug, "started-lives"), task)
@@ -390,17 +368,6 @@ def _fields(config):
 
 def _whole(raw):
     return int(raw) if raw else None
-
-
-def codex_split(config, environ):
-    """(target share, minimum week left) in percent: the swarm setting, else the environment, else the default."""
-    share = config.codex_share
-    if share is None:
-        share = int(environ.get("AGENTIHOOKS_SWARM_CODEX_SHARE") or CODEX_SHARE)
-    floor = config.codex_min_week_left
-    if floor is None:
-        floor = int(environ.get("AGENTIHOOKS_SWARM_CODEX_MIN_WEEK_LEFT") or CODEX_MIN_WEEK_LEFT)
-    return share, floor
 
 
 _READ = {

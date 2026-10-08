@@ -1,9 +1,9 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
-from scripts import codex_router, session_caps
+from scripts import codex_router, session_bands
 
 LANES = ("eng", "ci", "plan")
 
@@ -17,89 +17,88 @@ class Account:
     five_left: float | None
     week_left: float | None
     cap: int | None = None
+    week_resets_at: int | None = None
 
 
-def _window(window: balancer.QuotaWindow, now: float) -> balancer.QuotaWindow:
-    return balancer.QuotaWindow(used=0, resets_at=None) if window.resets_at and window.resets_at <= now else window
+def _left(window: balancer.QuotaWindow, now: float) -> float | None:
+    return session_bands.left(window.used, window.resets_at, now)
 
 
-def accounts(environ: dict, now: float) -> list[Account]:
+def _state(cap: int | None) -> str:
+    return "UNKNOWN" if cap is None else "CLOSED" if cap == 0 else "OPEN"
+
+
+def _claude(environ: dict, now: float) -> list[Account]:
     credentials = balancer.discover_credentials(environ)
-    fresh = []
+    observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     if credentials:
         fresh, _ = balancer.collect_results(credentials, environ=environ, now=now)
-    observed = {result.account: result for _, result in balancer.cached_observations(environ=environ)}
-    observed.update({result.account: result for result in fresh})
-    limits = {harness: session_caps.stored(harness) for harness in ("claude", "codex")}
+        observed.update({result.account: (now, result) for result in fresh})
     counts = account_sessions.sessions_by_account()
-    results = []
-    for result in observed.values():
-        five, week = _window(result.five_hour, now), _window(result.seven_day, now)
-        state, _ = balancer._state(result.provider_status, five, week)
-        results.append(
-            Account(
-                "claude",
-                result.account,
-                state,
-                counts.get(result.account, 0),
-                five.remaining,
-                week.remaining,
-                limits["claude"].get(result.account),
-            )
+    rows = []
+    for at, result in observed.values():
+        cap = balancer.account_cap(result, now) if session_bands.fresh(at, now) else None
+        five, week = _left(result.five_hour, now), _left(result.seven_day, now)
+        reset = session_bands.upcoming(result.seven_day.resets_at, now)
+        rows.append(
+            Account("claude", result.account, _state(cap), counts.get(result.account, 0), five, week, cap, reset)
         )
-    known = {row.name for row in results}
-    results += [
-        Account("claude", name, "UNKNOWN", count, None, None, limits["claude"].get(name))
-        for name, count in counts.items()
-        if name not in known
+    rows += [
+        Account("claude", name, "UNKNOWN", count, None, None) for name, count in counts.items() if name not in observed
     ]
+    return rows
+
+
+def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     pool = [account for account in codex_router.routing_pool(environ) if account.signed_in]
     counts = account_sessions.codex_sessions_by_account()
+    found = codex_router.fresh_quotas(pool, environ, now) if refresh else codex_router.quotas(pool, environ)
     known = {account.name for account in pool}
-    pool += [
+    live = [
         codex_router.CodexAccount(name, f"AH_CX_TOKEN_{name}")
         for name in counts
         if name not in known and name != "default"
     ]
-    quotas = codex_router.quotas(pool, environ)
-    for account in pool:
-        quota = quotas.get(account.name)
-        five = _window(quota.five_hour, now) if quota else balancer.QuotaWindow()
-        week = _window(quota.seven_day, now) if quota else balancer.QuotaWindow()
-        state, _ = balancer._state("allowed", five, week)
-        results.append(
-            Account(
-                "codex",
-                account.name,
-                state,
-                counts.get(account.name, 0),
-                five.remaining,
-                week.remaining,
-                limits["codex"].get(account.name),
-            )
+    found.update(codex_router.quotas(live, environ))
+    rows = []
+    for account in pool + live:
+        quota = found.get(account.name)
+        cap = codex_router.account_cap(quota, now) if account.name in known else None
+        five = _left(quota.five_hour, now) if quota else None
+        week = _left(quota.seven_day, now) if quota else None
+        reset = session_bands.upcoming(quota.seven_day.resets_at, now) if quota else None
+        rows.append(Account("codex", account.name, _state(cap), counts.get(account.name, 0), five, week, cap, reset))
+    return rows
+
+
+def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
+    """Every account with its band cap; ``refresh`` probes stale Codex readings, which costs a Codex request."""
+    return _claude(environ, now) + _codex(environ, now, refresh)
+
+
+def seats(rows: list[Account]) -> list[session_bands.Seat]:
+    return [
+        session_bands.Seat(
+            row.harness,
+            row.name,
+            row.cap,
+            row.sessions,
+            session_bands.spend_by(row.five_left, row.week_resets_at),
         )
-    return results
+        for row in rows
+        if row.cap is not None
+    ]
 
 
-def free_seats(account: Account, cap: int, week_floor: float) -> int:
-    if account.five_left is None or account.week_left is None:
-        return 0
-    if account.harness == "codex" and account.week_left < week_floor:
-        return 0
-    if account.state not in {"NORMAL", "REDUCE", "DRAIN_SOON"}:
-        return 0
-    if account.state == "DRAIN_SOON" and min(account.five_left, account.week_left) < 20:
-        return 0
-    cap = cap if account.cap is None else account.cap
-    limit = cap // 2 if account.state == "REDUCE" else cap
-    return max(0, limit - account.sessions)
+def free_seats(account: Account) -> int:
+    return max(0, (account.cap or 0) - account.sessions)
 
 
 def _harnesses(config, lane: str) -> tuple[str, ...]:
     requested = config.lanes.get(lane, {}).get("agent")
     if requested in {"claude", "codex"}:
         return (requested,)
-    return ("claude",) if config.codex_share == 0 else ("claude", "codex")
+    return ("claude", "codex")
 
 
 def _ready_indices(effective: dict, limits: dict, remaining: dict, options: dict, cursors: dict) -> dict:
@@ -124,12 +123,14 @@ def _reserved(limits: dict, effective: dict, options: dict, cursors: dict) -> di
     return result
 
 
-def _allocate(config, effective: dict, limits: dict, remaining: dict, requirements: dict | None) -> tuple:
+def _allocate(config, effective: dict, limits: dict, open_seats: list, requirements: dict | None) -> tuple:
     allocation = {lane: {"claude": 0, "codex": 0} for lane in LANES}
     placements = {lane: [] for lane in LANES}
     options = requirements or {lane: [_harnesses(config, lane)] * limits[lane] for lane in LANES}
     cursors = dict.fromkeys(LANES, 0)
+    held = {(seat.harness, seat.account): seat for seat in open_seats}
     while True:
+        remaining = {h: sum(s.free for s in held.values() if s.harness == h) for h in ("claude", "codex")}
         ready = _ready_indices(effective, limits, remaining, options, cursors)
         if not ready:
             return allocation, placements
@@ -138,10 +139,11 @@ def _allocate(config, effective: dict, limits: dict, remaining: dict, requiremen
         cursors[lane] = index
         reserved = _reserved(limits, effective, options, cursors)
         eligible = [h for h in options[lane][index] if remaining[h]]
-        harness = max(eligible, key=lambda h: remaining[h] - reserved[h])
-        remaining[harness] -= 1
-        allocation[lane][harness] += 1
-        placements[lane].append({"index": index, "harness": harness})
+        spare = [h for h in eligible if remaining[h] > reserved[h]] or eligible
+        seat = session_bands.pick(seat for seat in held.values() if seat.harness in spare)
+        held[(seat.harness, seat.account)] = replace(seat, sessions=seat.sessions + 1)
+        allocation[lane][seat.harness] += 1
+        placements[lane].append({"index": index, "harness": seat.harness, "account": seat.account})
         cursors[lane] += 1
         effective[lane] += 1
 
@@ -150,8 +152,6 @@ def calculate(
     config,
     observations: list[Account],
     agents: list,
-    cap: int,
-    week_floor: float,
     demand: dict | None = None,
     requirements: dict | None = None,
 ) -> dict:
@@ -162,12 +162,9 @@ def calculate(
         lane: min(configured[lane], busy[lane] + demand[lane]) if demand is not None else configured[lane]
         for lane in LANES
     }
-    placeable = {
-        h: sum(free_seats(row, cap, week_floor) for row in observations if row.harness == h)
-        for h in ("claude", "codex")
-    }
-    allocation, placements = _allocate(config, effective, limits, dict(placeable), requirements)
-    restricted = sorted({row.state.lower().replace("_", " ") for row in observations if row.state != "NORMAL"})
+    placeable = {h: sum(free_seats(row) for row in observations if row.harness == h) for h in ("claude", "codex")}
+    allocation, placements = _allocate(config, effective, limits, seats(observations), requirements)
+    restricted = sorted({row.state.lower() for row in observations if row.state != "OPEN"})
     reason = "accounts have quota" if not restricted else "accounts are " + ", ".join(restricted)
     reason += f"; Claude has {placeable['claude']} free seats and Codex has {placeable['codex']} free seats"
     return {

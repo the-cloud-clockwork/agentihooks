@@ -63,6 +63,16 @@ def test_phase_add_and_update_store_fields():
     assert state["phases"][1]["depends_on"] == []
 
 
+def test_a_phase_added_without_a_planning_value_is_planned_automatically():
+    make_ledger()
+    state, rejected = apply("phase_add", phase="p2", title="Second")
+    assert rejected == []
+    assert state["phases"][1]["planning"] == "auto"
+    state, rejected = apply("phase_add", phase="p3", title="Third", planning="manual")
+    assert rejected == []
+    assert state["phases"][2]["planning"] == "manual"
+
+
 @pytest.mark.parametrize(
     "field,value",
     [
@@ -287,7 +297,14 @@ def test_review_defaults_operator_and_escalation():
 def test_phase_add_retry_and_no_change_update_are_idempotent():
     make_ledger()
     state, _ = apply("phase_add", phase="p2", title="Second")
-    assert state["phases"][1] == {"id": "p2", "title": "Second", "description": "", "done": False, "comments": []}
+    assert state["phases"][1] == {
+        "id": "p2",
+        "title": "Second",
+        "description": "",
+        "done": False,
+        "comments": [],
+        "planning": "auto",
+    }
     events = state["_meta"]["events"]
     state, rejected = apply("phase_add", phase="p2", title="Another")
     assert rejected == []
@@ -349,11 +366,11 @@ def test_phase_cli_refusal_names_the_dependency_chain():
             ledger.cmd_phase(args)
 
 
-def test_cli_add_defaults_manual_planning_and_no_release():
+def test_cli_add_defaults_auto_planning_and_no_release():
     args = ledger.build_parser().parse_args(["phase", "add", "p2", "Second"])
     assert ledger_phase_cli.operation(args) == (
         "phase_add",
-        {"phase": "p2", "title": "Second", "description": "", "depends_on": [], "planning": "manual", "release": False},
+        {"phase": "p2", "title": "Second", "description": "", "depends_on": [], "planning": "auto", "release": False},
     )
     args = ledger.build_parser().parse_args(
         ["phase", "add", "p2", "Second", "--planning", "manual", "--description", "Intent"]
@@ -456,7 +473,7 @@ def test_phase_operations_record_actor_events_and_stamps():
         "target": "phases/p2",
         "text": "Second",
     }
-    state, _ = apply("phase_update", item="phases/p2", fields={"planning": "auto"})
+    state, _ = apply("phase_update", item="phases/p2", fields={"planning": "manual"})
     assert state["_meta"]["events"][-1] == {
         "rev": state["_meta"]["rev"],
         "at": state["_meta"]["updated_at"],
@@ -525,5 +542,5 @@ def test_new_phase_add_can_use_a_state_word_as_its_id():
     with patch.object(ledger, "send") as sent:
         ledger.cmd_phase(args)
     sent.assert_called_once_with(
-        args, "phase_add", phase="done", title="Final", description="", depends_on=[], planning="manual", release=False
+        args, "phase_add", phase="done", title="Final", description="", depends_on=[], planning="auto", release=False
     )

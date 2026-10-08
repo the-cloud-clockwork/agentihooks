@@ -195,28 +195,6 @@ class SwarmPanel(unittest.TestCase):
             ["swarm", SLUG, "set", "max-eng-agents=3", "max-ci-agents=0"],
         )
 
-    def test_set_passes_codex_share_with_caps_and_returns_fresh_status(self):
-        code, text, run = self.control({"action": "set", "max_eng": 3, "max_ci": 1, "codex_share": 45})
-        self.assertEqual(code, 200)
-        self.assertEqual(json.loads(text), STATUS)
-        self.assertEqual(
-            [run.call_args_list[0].args[2], SLUG, *run.call_args_list[0].args[3]],
-            ["swarm", SLUG, "set", "max-eng-agents=3", "max-ci-agents=1", "codex-share=45"],
-        )
-        for share in (0, 100):
-            code, _, run = self.control({"action": "set", "codex_share": share})
-            self.assertEqual(code, 200)
-            self.assertEqual(
-                [run.call_args_list[0].args[2], SLUG, *run.call_args_list[0].args[3]],
-                ["swarm", SLUG, "set", f"codex-share={share}"],
-            )
-
-    def test_invalid_codex_share_never_runs_the_cli_or_changes_caps(self):
-        for share in (-1, 101, 2.5, True, "30"):
-            code, _, run = self.control({"action": "set", "max_eng": 3, "codex_share": share})
-            self.assertEqual(code, 400, share)
-            run.assert_not_called()
-
     def test_set_writes_the_swarm_compact_limit(self):
         for limit in (100, 450, 1000):
             code, _, run = self.control({"action": "set", "compact_limit": limit})
@@ -364,13 +342,12 @@ class SwarmPanel(unittest.TestCase):
             "ci_up",
             "plan_down",
             "plan_up",
-            "codex_down",
-            "codex_up",
             "compact_down",
             "compact_up",
             "apply",
         ):
             self.assertIn(f'data-swarm="{control}"', page)
+        self.assertNotIn("codex_", page)
         for mode in ("manual", "assist", "delegate", "full"):
             self.assertIn(f'data-autonomy="{mode}"', page)
         self.assertIn('method: "PUT"', page)
@@ -442,13 +419,12 @@ class SwarmPanel(unittest.TestCase):
         )
 
     def test_a_cap_step_moves_one_setting_by_its_step_within_its_bounds(self):
-        values = {"max_eng": 2, "max_ci": 0, "max_plan": 50, "codex_share": 98, "compact_limit": 600}
+        values = {"max_eng": 2, "max_ci": 0, "max_plan": 50, "compact_limit": 600}
         steps = [
             ("eng", True),
             ("eng", False),
             ("ci", False),
             ("plan", True),
-            ("codex", True),
             ("compact", True),
             ("compact", False),
         ]
@@ -463,30 +439,28 @@ class SwarmPanel(unittest.TestCase):
                 {"max_eng": 1},
                 {"max_ci": 0},
                 {"max_plan": 50},
-                {"codex_share": 100},
                 {"compact_limit": 650},
                 {"compact_limit": 550},
             ],
         )
 
     def test_apply_sends_only_changed_values_and_refuses_invalid_ones(self):
-        values = {"max_eng": 2, "max_ci": 1, "max_plan": 1, "codex_share": 30, "compact_limit": 600}
+        values = {"max_eng": 2, "max_ci": 1, "max_plan": 1, "compact_limit": 600}
         drafts = [
-            {"max_eng": "4", "max_ci": " 1 ", "codex_share": 35, "compact_limit": "1000"},
-            {"max_eng": "-1", "max_plan": "", "codex_share": "101", "compact_limit": "650.5"},
+            {"max_eng": "4", "max_ci": " 1 ", "compact_limit": "1000"},
+            {"max_eng": "-1", "max_plan": "", "compact_limit": "650.5"},
             {},
         ]
         out = self.run_js(["capChanges"], f"{json.dumps(drafts)}.map((d) => capChanges({json.dumps(values)}, d))")
         self.assertEqual(
             out,
             [
-                {"body": {"action": "set", "max_eng": 4, "codex_share": 35, "compact_limit": 1000}, "bad": []},
+                {"body": {"action": "set", "max_eng": 4, "compact_limit": 1000}, "bad": []},
                 {
                     "body": {"action": "set"},
                     "bad": [
                         "eng must be a whole number from 0 to 50",
                         "plan must be a whole number from 0 to 50",
-                        "codex share must be a whole number from 0 to 100",
                         "compact limit must be a whole number from 100 to 1000",
                     ],
                 },
@@ -495,7 +469,7 @@ class SwarmPanel(unittest.TestCase):
         )
 
     def test_step_buttons_at_a_bound_are_disabled(self):
-        low = {"max_eng": 0, "max_ci": 50, "max_plan": 1, "codex_share": 100, "compact_limit": 100}
+        low = {"max_eng": 0, "max_ci": 50, "max_plan": 1, "compact_limit": 100}
         out = self.run_js(["capBounds"], f"capBounds({json.dumps(low)})")
         self.assertEqual(
             out,
@@ -506,8 +480,6 @@ class SwarmPanel(unittest.TestCase):
                 "ci_up": True,
                 "plan_down": False,
                 "plan_up": False,
-                "codex_down": False,
-                "codex_up": True,
                 "compact_down": True,
                 "compact_up": False,
                 "effort_min_down": True,

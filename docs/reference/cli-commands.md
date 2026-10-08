@@ -289,13 +289,13 @@ Launch Claude Code on one of the `AH_CC_TOKEN_<slug>` accounts, with
 [Claude Account Load Balancing](../pillars/load-balancing.md).
 
 ```bash
-agenti                          # most routing left among accounts below the session cap
+agenti                          # fewest live sessions among accounts below their band cap
 agenti --route work             # force AH_CC_TOKEN_work, ignore the cap
 agenti --model fable            # Fable models also weigh the separate Fable quota
 ```
 
-The launch line reports `account`, `routing_left`, `sessions=n/cap`, and
-`placement=overflow` when every account was already at the cap.
+The launch line reports `account`, `routing_left` and `sessions=n/cap`; with
+every account at its cap the launch fails and names why.
 
 ---
 
@@ -336,10 +336,9 @@ In herdr the session opens as a tab in the caller's workspace, in `--workspace
 <label>` (crew), or in the repository's workspace; `--placement split|workspace`
 changes that. The output adds `workspace_id`, `tab_id`, `pane_id` and `agent_name`.
 
-Agents: `--agent claude|codex`; without it, the first agent in
-`AGENTIHOOKS_AGENT_PRIORITY` (default `claude,codex`) with quota left (Claude: a
-routable account in the router cache; Codex: below `AGENTIHOOKS_HANDOFF_WEEK_PCT`
-in its session logs). Codex runs directly (`route_status=direct`).
+Agents: `--agent claude|codex`; without it, the harness of the account the session
+rotation picks: the eligible Claude or Codex account with the fewest live sessions
+under its band cap (see Load balancing). Codex runs directly (`route_status=direct`).
 
 ---
 

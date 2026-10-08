@@ -1,0 +1,6 @@
+{
+  "hooks/serena_router/pool.py:hooks.serena_router.pool.x\u01c1Backend\u01c1_run__mutmut_2:39f965c9e7562d39bd42ee5c7e454405de68026d7c8ba799e26723cbbdec73a8": {
+    "reader": "Standards reader, task sz23",
+    "reason": "On the Unix spawn path, stderr=None and stderr=sys.__stderr__ both leave the child writing to fd 2, and the probe shows identical output for both."
+  }
+}

@@ -70,9 +70,11 @@ FIELDS = {
     "priority": "by item text",
     "priority_clear": "by target reason",
     "notification_clear": "target",
-    "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url rank gain",
+    "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url rank gain difficulty difficulty_source difficulty_confidence",
     "task_update": "by item fields if_state",
     "task_rank": "item rank",
+    "task_group": "by item members",
+    "task_ungroup": "by item",
     "title_set": "text",
     "agent_rename": "by old new",
     "summary_set": "by note",
@@ -93,6 +95,7 @@ FIELDS = {
     "artifact_purge": "by",
     "alert_claim": "by target",
     "alert_close": "by target outcome",
+    "time_left": "by slots ci_minutes",
 }
 TYPES = {
     "long": {"type": "boolean"},
@@ -105,6 +108,9 @@ TYPES = {
     "rev": {"type": "integer", "minimum": 0},
     "unhandled": {"type": "integer", "minimum": 0},
     "gain": {"type": "number", "minimum": 0},
+    "difficulty_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "slots": {"type": ["integer", "null"], "minimum": 0},
+    "ci_minutes": {"type": ["number", "null"], "minimum": 0},
     "value": {"type": ["boolean", "integer"]},
     "fields": {"type": "object"},
     "contract": {"type": "object"},
@@ -115,7 +121,7 @@ TYPES = {
     "phases": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
     "attachments": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
 }
-for _field in ("depends_on", "territory", "if_state"):
+for _field in ("depends_on", "territory", "if_state", "members"):
     TYPES[_field] = {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 2000}}
 
 

@@ -377,6 +377,8 @@ class Ledger:
 
 
 class Mail:
+    master = "master-seat"
+
     def __init__(self):
         self.sent = []
 
@@ -415,6 +417,7 @@ FAIL_TEXT = (
     "add evidence that the phase can use it as delivered, commit and push the fix, "
     f"then run agentihooks swarm {SLUG} pr <url> for a new check."
 )
+FAIL_COMMENT = "The intent check failed. The engineer has the verdict and the fix steps in the inbox."
 
 
 class TestCheckPass:
@@ -424,7 +427,7 @@ class TestCheckPass:
         assert verdicts(tmp_path).read(TASK) == {"verdict": "fail", "reason": FAIL_REASON, "at": NOW}
         assert got.viewed == [URL]
         assert got.ledger.updates == [(SLUG, TASK, {"state": "claimed"}, "swarm")]
-        assert got.ledger.comments == [(SLUG, TASK, FAIL_TEXT, "swarm")]
+        assert got.ledger.comments == [(SLUG, TASK, FAIL_COMMENT, "swarm")]
         assert got.mail.sent == [(f"intent-fail:{TASK}:{NOW}", f"seat-of-{ME}", FAIL_TEXT, f"tasks/{TASK}")]
         [row] = rows(tmp_path)
         assert (row["gate"], row["kind"], row["agent"], row["task"], row["reason"]) == (
@@ -435,6 +438,14 @@ class TestCheckPass:
             FAIL_REASON,
         )
         assert got.actions == [f"task {TASK} intent check fail", f"told seat-of-{ME}: intent-fail:{TASK}:{NOW}"]
+
+    def test_the_fail_comment_is_plain_words_the_ledger_accepts(self, tmp_path):
+        from scripts.swarm_ledger.ledger_comments import problems
+
+        verdicts(tmp_path).write(TASK, "pending", "intent check running", NOW - 5)
+        [(_, _, text, _)] = run_pass(tmp_path).ledger.comments
+        assert problems(text, "comment") == []
+        assert problems(intent.SHORTFALL_COMMENT, "comment") == []
 
     def test_a_fail_under_observe_is_only_logged(self, tmp_path):
         got = run_pass(tmp_path, mode="observe")

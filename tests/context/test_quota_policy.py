@@ -8,11 +8,11 @@ import pytest
 from hooks.context import quota_policy as qp
 
 
-def _c(account, five, week, sessions=0):
-    return qp.Candidate(account, five, week, sessions, time.time())
+def _c(account, five, week, sessions=0, cap=2):
+    return qp.Candidate(account, five, week, sessions, time.time(), cap=cap)
 
 
-def _decide(five, week, others, push=False, cap=2):
+def _decide(five, week, others, push=False):
     return qp.decide(
         account="alpha",
         five_used=five,
@@ -20,7 +20,6 @@ def _decide(five, week, others, push=False, cap=2):
         five_reset=time.time() + 3600,
         week_reset=time.time() + 86400,
         others=others,
-        max_sessions=cap,
         push=push,
         five_pct=99,
         week_pct=98,
@@ -71,7 +70,7 @@ def test_accounts_below_the_session_cap_are_preferred():
     assert d.target.account == "gamma"
 
 
-def test_an_account_own_cap_replaces_the_default_for_the_handoff_target():
+def test_handoff_targets_are_judged_by_their_band_caps_alone():
     beta = qp.Candidate("beta", 10, 20, 2, time.time(), cap=4)
     gamma = qp.Candidate("gamma", 10, 60, 1, time.time(), cap=1)
     d = _decide(10, 98.5, [beta, gamma])
@@ -81,15 +80,47 @@ def test_an_account_own_cap_replaces_the_default_for_the_handoff_target():
     assert "1/1 sessions" in qp._others_text(d)
 
 
-def test_other_accounts_carry_their_stored_cap(monkeypatch):
+def test_other_accounts_carry_their_band_cap(monkeypatch):
     from scripts import claude_quota_balancer as balancer
 
-    beta = balancer.ProbeResult(
-        "beta", "allowed", "NORMAL", 70.0, balancer.QuotaWindow(10.0, None), balancer.QuotaWindow(30.0, None)
-    )
-    monkeypatch.setattr(balancer, "cached_observations", lambda: [(time.time(), beta)])
-    assert [c.cap for c in qp._other_accounts({"beta": 3}, {"beta": 5})] == [5]
-    assert [c.cap for c in qp._other_accounts({"beta": 3})] == [None]
+    def result(account, five_used, week_used):
+        return balancer.ProbeResult(
+            account,
+            "allowed",
+            "NORMAL",
+            70.0,
+            balancer.QuotaWindow(five_used, None),
+            balancer.QuotaWindow(week_used, None),
+        )
+
+    seen = [
+        result("beta", 10.0, 30.0),
+        result("gamma", 55.0, 30.0),
+        result("delta", 10.0, 96.0),
+        result("eps", 60.5, 30.0),
+    ]
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [(time.time(), found) for found in seen])
+    assert [(c.account, c.cap) for c in qp._other_accounts({"beta": 3})] == [
+        ("beta", 6),
+        ("gamma", 4),
+        ("delta", 0),
+        ("eps", 3),
+    ]
+
+
+@pytest.mark.parametrize("cap", [0, 2, 3, 4, 6])
+def test_only_the_band_cap_decides_whether_an_account_is_full(cap):
+    assert qp.Candidate("beta", 10, 30, cap, time.time(), cap=cap).full()
+    assert qp.Candidate("beta", 10, 30, cap + 1, time.time(), cap=cap).full()
+    if cap:
+        assert not qp.Candidate("beta", 10, 30, cap - 1, time.time(), cap=cap).full()
+
+
+def test_a_stale_target_has_no_session_cap_until_the_router_refreshes_it():
+    stale = qp.Candidate("beta", 10, 30, 100, time.time(), cap=None)
+    assert not stale.full()
+    d = _decide(10, 98.5, [stale])
+    assert d.target == stale
 
 
 def test_other_accounts_count_an_account_with_no_live_session_as_zero(monkeypatch):
@@ -98,14 +129,27 @@ def test_other_accounts_count_an_account_with_no_live_session_as_zero(monkeypatc
     beta = balancer.ProbeResult(
         "beta", "allowed", "NORMAL", 70.0, balancer.QuotaWindow(10.0, None), balancer.QuotaWindow(30.0, None)
     )
-    monkeypatch.setattr(balancer, "cached_observations", lambda: [(123.0, beta)])
+    observed = time.time()
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [(observed, beta), (observed - 901, beta)])
     [found] = qp._other_accounts({})
-    assert (found.sessions, found.observed_at) == (0, 123.0)
+    assert (found.sessions, found.observed_at) == (0, observed)
+
+
+def test_a_stale_reading_stays_a_target_with_no_band_cap_for_the_router_to_refresh(monkeypatch):
+    from scripts import claude_quota_balancer as balancer
+
+    beta = balancer.ProbeResult(
+        "beta", "allowed", "NORMAL", 70.0, balancer.QuotaWindow(10.0, None), balancer.QuotaWindow(30.0, None)
+    )
+    observed = time.time() - 901
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [(observed, beta)])
+    [found] = qp._other_accounts({})
+    assert (found.account, found.observed_at, found.cap) == ("beta", observed, None)
 
 
 def test_an_open_account_with_exactly_the_minimum_routing_left_wins_over_a_full_one():
-    edge = qp.Candidate("beta", 0, 100 - qp.MIN_ROUTING_LEFT, 0, time.time())
-    full = qp.Candidate("gamma", 10, 50, 5, time.time())
+    edge = qp.Candidate("beta", 0, 100 - qp.MIN_ROUTING_LEFT, 0, time.time(), cap=6)
+    full = qp.Candidate("gamma", 10, 50, 5, time.time(), cap=4)
     assert _decide(10, 98.5, [edge, full]).target.account == "beta"
 
 
@@ -113,10 +157,11 @@ def test_among_open_good_accounts_the_most_routing_left_wins():
     assert _decide(10, 98.5, [_c("beta", 10, 70), _c("gamma", 10, 30)]).target.account == "gamma"
 
 
-def test_an_account_without_its_own_cap_shows_the_default_in_the_texts():
-    d = _decide(10, 98.5, [_c("beta", 10, 40, sessions=1)])
-    assert "1/2 sessions" in qp._others_text(d)
-    assert "1/2 sessions" in qp.render(d, "sess-1", "/tmp")
+def test_a_stale_target_shows_an_unknown_cap_in_the_texts():
+    stale = qp.Candidate("beta", 10, 40, 1, time.time(), cap=None)
+    d = _decide(10, 98.5, [stale])
+    assert qp._others_text(d) == "beta 60% left (5h 10%, 7d 40% used, 1/unknown sessions)"
+    assert "1/unknown sessions" in qp.render(d, "sess-1", "/tmp")
 
 
 def test_operator_push_replaces_stop_and_wait():
@@ -241,7 +286,6 @@ def test_evaluate_reads_the_session_snapshot_and_the_router_cache(tmp_path, monk
     monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda start=None: 1)
     monkeypatch.setattr("hooks.context.account_sessions.session_account", lambda pid: "alpha")
     monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"alpha": 1, "beta": 1})
-    monkeypatch.setattr("scripts.session_caps.stored", lambda harness="claude": {"beta": 6})
 
     d = qp.evaluate("sess-1")
     assert d.target.cap == 6
@@ -274,7 +318,6 @@ def test_reserve_account_is_the_last_handoff_target():
             five_reset=None,
             week_reset=None,
             others=others,
-            max_sessions=2,
             push=False,
             week_pct=97,
             min_left=20,
@@ -291,7 +334,6 @@ def test_reserve_account_is_the_last_handoff_target():
             five_reset=None,
             week_reset=None,
             others=[_c("big", 0, 30), _c("tiny", 0, 96)],
-            max_sessions=2,
             push=False,
             week_pct=97,
             min_left=20,
@@ -310,7 +352,6 @@ def test_reserve_account_below_the_cap_takes_the_handoff_before_full_accounts():
             five_reset=None,
             week_reset=None,
             others=others,
-            max_sessions=3,
             push=False,
             week_pct=97,
             min_left=20,
@@ -318,4 +359,4 @@ def test_reserve_account_below_the_cap_takes_the_handoff_before_full_accounts():
         ).target.account
 
     assert pick([_c("big", 0, 12, 8), _c("mid", 0, 44, 7), _c("spare", 0, 62, 0)]) == "spare"
-    assert pick([_c("big", 0, 12, 8), _c("mid", 0, 44, 2), _c("spare", 0, 62, 0)]) == "mid"
+    assert pick([_c("big", 0, 12, 8), _c("mid", 0, 44, 2, cap=3), _c("spare", 0, 62, 0)]) == "mid"

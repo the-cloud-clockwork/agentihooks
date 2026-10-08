@@ -19,6 +19,7 @@ def refuse(*args, **kwargs):
 
 def test_a_folder_with_stored_ledgers_starts_the_server_and_an_empty_one_does_not(folder, monkeypatch):
     started = []
+    monkeypatch.delenv("LEDGER_AUTOSTART", raising=False)
     monkeypatch.setattr(ledger_hook.socket, "create_connection", refuse)
     monkeypatch.setattr(ledger_hook.subprocess, "Popen", lambda argv, **kwargs: started.append(argv[-1]))
     ledger_hook.serve_ledgers()

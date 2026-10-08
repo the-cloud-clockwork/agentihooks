@@ -1,5 +1,7 @@
 import json
 import os
+import re
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -8,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 from xdist.workermanage import NodeManager
 
+from hooks.secrets import scan
 from tests import conftest
 from tests.shards import (
     assign_files,
@@ -21,6 +24,7 @@ from tests.shards import (
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parent.parent
+_URL_CREDENTIAL = re.compile(r"://[^/\s@:]+:[^/\s@]+@")
 
 
 def test_every_test_file_lands_in_exactly_one_shard():
@@ -49,6 +53,33 @@ def test_shards_balance_the_stored_durations_per_file():
     ]
 
 
+def _committed(*args: str) -> str:
+    return subprocess.run(["git", *args], cwd=_ROOT, check=True, capture_output=True, text=True).stdout
+
+
+def _credential_shaped(nodeids):
+    return [nodeid for nodeid in nodeids if scan(nodeid, mode="strict") or _URL_CREDENTIAL.search(nodeid)]
+
+
+def test_the_credential_check_flags_token_and_url_password_names():
+    planted = [
+        "t.py::t[" + "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8]",
+        "t.py::t[https://user:fixture-" + "password@github.com/o/r.git]",
+    ]
+    assert _credential_shaped([*planted, "t.py::t[github]", "t.py::t[https-userinfo]"]) == planted
+
+
+def test_committed_durations_name_no_credential_shaped_case():
+    stored = _committed("ls-files", ".test_durations*").split()
+    assert stored
+    flagged = [
+        f"{path}: {nodeid}"
+        for path in stored
+        for nodeid in _credential_shaped(json.loads(_committed("show", f"HEAD:{path}")))
+    ]
+    assert flagged == []
+
+
 def test_serial_group_costs_are_not_divided_across_workers():
     durations = {f"tests/test_{name}.py::t": seconds for name, seconds in zip("abcd", (5, 9, 5, 8))}
     files = [f"tests/test_{name}.py" for name in "abcd"]
@@ -74,6 +105,23 @@ def test_measured_cases_from_one_module_balance_across_shards():
     durations = dict(zip(nodes, range(8, 0, -1)))
     parts = assign_nodes(durations, 4, {"tests/test_hot.py"}, 4)
     assert [sum(durations[node] for node in part) for part in parts] == [9, 9, 9, 9]
+    assert sorted(node for part in parts for node in part) == nodes
+
+
+def test_independent_worker_groups_balance_without_serializing_each_other():
+    from tests.shards import assign_nodes
+
+    nodes = [f"tests/test_{n}.py::test_x" for n in range(4)]
+    durations = dict(zip(nodes, (30, 30, 20, 20)))
+    grouped = {f"tests/test_{n}.py": "redis" if n % 2 == 0 else "sdk" for n in range(4)}
+    parts = assign_nodes(durations, 2, grouped, 4)
+    loads = [
+        max(
+            sum(durations[node] for node in part if grouped[node.split("::")[0]] == group) for group in ("redis", "sdk")
+        )
+        for part in parts
+    ]
+    assert loads == [30, 30]
     assert sorted(node for part in parts for node in part) == nodes
 
 
@@ -144,7 +192,10 @@ def test_grouped_files_reads_real_markers_and_ignores_fixture_strings(tmp_path):
     }
     for name, source in sources.items():
         (tmp_path / f"{name}.py").write_text(source)
-    assert grouped_files(tmp_path, [f"{name}.py" for name in sources]) == {"module.py", "function.py"}
+    assert grouped_files(tmp_path, [f"{name}.py" for name in sources]) == {
+        "module.py": "'redis'",
+        "function.py": "'sdk'",
+    }
 
 
 def test_shards_weigh_source_size_since_every_worker_collects_the_whole_shard():
@@ -318,6 +369,23 @@ def test_the_workers_of_a_shard_are_set_up_side_by_side():
     put = object()
     assert setup_nodes_in_parallel(manager, put) == [("gw0", put), ("gw1", put), ("gw2", put), ("gw3", put)]
     assert manager.events == [("setupnodes", ["gw0", "gw1", "gw2", "gw3"])]
+
+
+def test_the_base_temp_exists_once_before_any_worker_starts(tmp_path):
+    root = tmp_path / "basetemp"
+
+    class Factory:
+        def getbasetemp(self):
+            root.mkdir()
+            return root
+
+    manager = _Manager(["gw0", "gw1", "gw2", "gw3"])
+    manager.config._tmp_path_factory = Factory()
+    seen = []
+    setup = manager.setup_node
+    manager.setup_node = lambda spec, putevent: seen.append(root.is_dir()) or setup(spec, putevent)
+    setup_nodes_in_parallel(manager, object())
+    assert seen == [True, True, True, True]
 
 
 def test_the_controller_of_a_sharded_run_sets_up_its_workers_side_by_side(monkeypatch):

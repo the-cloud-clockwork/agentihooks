@@ -35,6 +35,55 @@ def test_send_then_inbox_shows_a_pending_item_from_the_session(store, monkeypatc
     assert run("inbox") == 0
     assert capsys.readouterr().out.split("\t")[:3] == [sent["id"], "pending", "alice"]
     assert store.get(sent["id"]).text == "review my branch"
+    assert store.get(sent["id"]).task == ""
+
+
+@pytest.mark.parametrize("address", ["sw-eng-1", "eng-1@sw"])
+def test_send_records_the_receivers_current_task(store, capsys, monkeypatch, address):
+    from scripts.swarm.store import AgentRecord, RedisStore
+
+    monkeypatch.setattr(
+        "scripts.inbox.addresses.get_active_sessions",
+        lambda **kwargs: {"sess-a": {"name": "alice"}, "sess-b": {"name": "sw-eng-1"}},
+    )
+    swarm = RedisStore(store.redis)
+    swarm.put_agent("sw", AgentRecord(name="sw-eng-1", lane="eng", task="t1", seat="eng-1@sw"))
+    swarm.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    assert run("send", address, "Tell me when your branch is pushed.") == 0
+    sent = json.loads(capsys.readouterr().out)
+    assert store.get(sent["id"]).task == "t1"
+
+
+@pytest.mark.parametrize("state, task", [("finished", "t1"), ("working", "master")])
+def test_a_receiver_without_a_live_worker_task_has_no_task_association(store, state, task):
+    from scripts.swarm.store import AgentRecord, RedisStore
+
+    swarm = RedisStore(store.redis)
+    swarm.put_agent("sw", AgentRecord(name="sw-eng-1", lane="eng", task=task, state=state))
+    swarm.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2"))
+    assert store.receiver_task("sw-eng-1") == ""
+    assert store.receiver_task("eng-1@sw") == ""
+    assert store.receiver_task("sw-eng-9") == ""
+
+
+def test_a_receivers_alias_records_the_current_task(store):
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    swarm = RedisStore(store.redis)
+    swarm.create(SwarmConfig("sw", "/repo", 2, 1))
+    name = swarm.next_name("sw", "eng")
+    swarm.put_agent("sw", AgentRecord(name=name, lane="eng", task="t1"))
+    store.names.alias("old-receiver", name)
+    assert store.receiver_task("old-receiver") == "t1"
+
+
+def test_task_lookup_preserves_the_whole_swarm_name_in_a_seat_address(store):
+    from scripts.swarm.store import AgentRecord, RedisStore
+
+    swarm = RedisStore(store.redis)
+    swarm.put_agent("sw@part", AgentRecord(name="sw-eng-1", lane="eng", task="t1"))
+    store.seats.occupy("eng-1@sw@part", "sw-eng-1", 1)
+    assert store.receiver_task("eng-1@sw@part") == "t1"
 
 
 def test_a_reply_to_the_operator_with_a_clock_time_is_refused_at_send(store, capsys):

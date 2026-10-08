@@ -13,11 +13,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import install  # noqa: I001
 
 
-@pytest.fixture(autouse=True)
-def _no_stored_caps(monkeypatch):
-    monkeypatch.setattr("scripts.session_caps.stored", lambda harness="claude": {})
-
-
 class TestClaudeRouting:
     def test_cmd_claude_exports_winner_for_process_tree(self, monkeypatch):
         from scripts import claude_quota_balancer as balancer
@@ -87,7 +82,7 @@ class TestClaudeRouting:
         assert exc.value.code == 3
         assert "no capacity" in capsys.readouterr().err
 
-    def test_cmd_claude_route_selects_exact_slug_without_probing(self, monkeypatch, capsys):
+    def test_cmd_claude_route_selects_exact_slug_without_probing(self, monkeypatch, capsys, tmp_path):
         from scripts import claude_quota_balancer as balancer
 
         observed = {}
@@ -107,9 +102,11 @@ class TestClaudeRouting:
 
         monkeypatch.setattr(install.os, "execvpe", execvpe)
 
+        report = tmp_path / "route.report"
         with pytest.raises(RuntimeError, match="exec intercepted"):
-            install.cmd_claude(["--route", "0", "--model", "sonnet"])
+            install.cmd_claude(["--route", "0", "--agentihooks-report", str(report), "--model", "sonnet"])
 
+        assert report.read_text() == "status=routed\naccount=0\nplacement=forced\n"
         assert observed["command"] == ["/usr/bin/claude", "--dangerously-skip-permissions", "--model", "sonnet"]
         assert observed["environ"]["CLAUDE_CODE_OAUTH_TOKEN"] == "selected-secret"
         assert observed["environ"]["AGENTIHOOKS_ROUTE_ACCOUNT"] == "0"
@@ -210,9 +207,13 @@ class TestClaudeRouting:
         monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [credential])
         monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([result], "cached"))
 
-        assert install.cmd_balance(include_fable=False, refresh=False, timeout=10) == 0
+        monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"ALPHA": 2})
+
+        assert install.cmd_balance(include_fable=True, refresh=False, timeout=10) == 0
         output = capsys.readouterr().out
         assert "ROUTING LEFT" in output
+        assert "FABLE LEFT" in output
+        assert " 2/? " in output
         assert "70%" in output
         assert "source=cached" in output
 
@@ -222,18 +223,16 @@ class TestClaudeRouting:
 
         rows = [
             agents_quota.QuotaRow("codex", "default", "SIGNED_OUT", 0, None, None, None, "no session log"),
-            agents_quota.QuotaRow("codex", "alpha", "NORMAL", 2, None, 60.0, None, "session-log 1m ago"),
+            agents_quota.QuotaRow("codex", "alpha", "NORMAL", 2, None, 60.0, None, "session-log 1m ago", cap=6),
         ]
         monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
         monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [])
         monkeypatch.setattr(agents_quota, "_codex", lambda now: rows)
-        monkeypatch.setattr("hooks.context.account_sessions.max_sessions", lambda environ=None: 3)
-        monkeypatch.setattr("scripts.session_caps.stored", lambda harness="claude": {"alpha": 5})
 
         assert install.cmd_balance(include_fable=False, refresh=False, timeout=10) == 2
         lines = capsys.readouterr().out.splitlines()
-        assert lines[1].split()[:4] == ["codex", "default", "SIGNED_OUT", "0/3"]
-        assert lines[2].split()[:4] == ["codex", "alpha", "NORMAL", "2/5"]
+        assert lines[1].split()[:4] == ["codex", "default", "SIGNED_OUT", "0/?"]
+        assert lines[2].split()[:4] == ["codex", "alpha", "NORMAL", "2/6"]
 
     def test_cmd_balance_can_print_raw_account_metadata(self, monkeypatch, capsys):
         from scripts import claude_quota_balancer as balancer

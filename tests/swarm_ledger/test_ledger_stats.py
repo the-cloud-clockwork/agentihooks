@@ -8,6 +8,7 @@ from scripts.swarm_ledger import ledger_core, ledger_stats  # noqa: E402
 HOUR = 3_600_000
 NOW = 10 * HOUR
 MINUTE = 60_000
+TIERS = {"S": {"minutes": 10, "samples": 0}, "M": {"minutes": 25, "samples": 0}, "L": {"minutes": 40, "samples": 0}}
 
 
 def task(tid, state, phase="p1", depends_on=(), **extra):
@@ -101,62 +102,8 @@ class TestRate:
         d = doc(tasks=[task("a", "done")])
         assert ledger_stats.closed_last_hour(d, [event("task done", "a", NOW - HOUR)], NOW) == ["a"]
 
-    def test_mean_minutes_runs_from_the_last_claim_to_the_last_done(self):
-        events = [
-            event("task claimed", "a", NOW - 90 * MINUTE),
-            event("task claimed", "a", NOW - 40 * MINUTE),
-            event("task done", "a", NOW - 10 * MINUTE),
-            event("task claimed", "b", NOW - 60 * MINUTE),
-            event("task done", "b", NOW - 50 * MINUTE),
-            event("task done", "c", NOW - 5 * MINUTE),
-        ]
-        assert ledger_stats.mean_minutes(events, ["a", "b", "c"]) == 20
-
-    def test_mean_minutes_is_none_without_a_claimed_close(self):
-        assert ledger_stats.mean_minutes([event("task done", "c", NOW)], ["c"]) is None
-
-    def test_mean_minutes_skips_a_task_with_no_events_and_keeps_the_rest(self):
-        events = [event("task claimed", "b", NOW - 30 * MINUTE), event("task done", "b", NOW)]
-        assert ledger_stats.mean_minutes(events, ["a", "b"]) == 30
-
-
-class TestChain:
-    def test_longest_chain_counts_unfinished_tasks_through_their_dependencies(self):
-        d = doc(
-            tasks=[
-                task("a", "done"),
-                task("b", "open", depends_on=["a"]),
-                task("c", "open", depends_on=["b"]),
-                task("d", "open", depends_on=["c", "missing"]),
-                task("e", "open"),
-                task("x", "open", depends_on=["d"], out_of_scope=True),
-            ]
-        )
-        assert ledger_stats.chain_length(d) == 3
-
-    def test_a_dependency_cycle_ends_the_chain(self):
-        d = doc(tasks=[task("a", "open", depends_on=["b"]), task("b", "open", depends_on=["a"])])
-        assert ledger_stats.chain_length(d) == 2
-
-    def test_a_task_without_dependencies_and_an_empty_ledger(self):
-        assert ledger_stats.chain_length(doc(tasks=[{"id": "a", "state": "open"}])) == 1
-        assert ledger_stats.chain_length(doc()) == 0
-
 
 class TestTimeLeft:
-    def test_throughput_bounds_time_left(self):
-        assert ledger_stats.time_left(remaining=10, rate=4, chain=1, mean=10) == 150
-
-    def test_the_chain_bounds_time_left_when_it_is_longer(self):
-        assert ledger_stats.time_left(remaining=4, rate=8, chain=3, mean=25) == 75
-
-    def test_nothing_remaining_is_zero_and_no_rate_is_unknown(self):
-        assert ledger_stats.time_left(remaining=0, rate=0, chain=0, mean=None) == 0
-        assert ledger_stats.time_left(remaining=3, rate=0, chain=1, mean=None) is None
-
-    def test_time_left_rounds_up(self):
-        assert ledger_stats.time_left(remaining=1, rate=7, chain=1, mean=None) == 9
-
     def test_stale_when_the_page_is_unset_or_off_by_more_than_a_quarter_and_fifteen_minutes(self):
         assert ledger_stats.is_stale(None, 60) is True
         assert ledger_stats.is_stale(180, 60) is True
@@ -191,7 +138,8 @@ class TestReview:
                 event("task done", "a", NOW - 30 * MINUTE),
                 event("task claimed", "b", NOW - 40 * MINUTE),
                 event("task done", "b", NOW - 20 * MINUTE),
-            ]
+            ],
+            "time_left": {"inputs": {"slots": 2, "ci_minutes": 5}},
         }
 
     def test_the_review_names_every_computed_finding(self):
@@ -201,8 +149,8 @@ class TestReview:
             "Undecided follow-ups: check disk. "
             "Tasks: 1 open, 1 claimed, 0 pr. "
             "Close rate: 2 tasks in the last hour. "
-            "Time left: the page shows 3h 0m, computed 1h 0m from 2 remaining at 2 an hour and a chain of 2 "
-            "at 20m a task, stale. "
+            "Time left: the page shows 3h 0m, computed 1h 0m as the larger of a 60m chain and 60m of work over 2 slots, "
+            "for 2 remaining tasks at S 10m, M 25m, L 40m and 5m of CI, stale. "
             "Judge stale phases and undecided follow-ups against the real work, then ack."
         )
 
@@ -216,15 +164,15 @@ class TestReview:
             "Undecided follow-ups: none. "
             "Tasks: 1 open, 1 claimed, 0 pr. "
             "Close rate: 2 tasks in the last hour. "
-            "Time left: the page shows 1h 0m, computed 1h 0m from 2 remaining at 2 an hour and a chain of 2 "
-            "at 20m a task, current. "
+            "Time left: the page shows 1h 0m, computed 1h 0m as the larger of a 60m chain and 60m of work over 2 slots, "
+            "for 2 remaining tasks at S 10m, M 25m, L 40m and 5m of CI, current. "
             "Judge stale phases and undecided follow-ups against the real work, then ack."
         )
 
     def test_no_close_in_the_last_hour_leaves_time_left_to_the_master(self):
         assert ledger_stats.review(self.ledger(None), {"events": []}, NOW).split(". ")[4:6] == [
             "Close rate: 0 tasks in the last hour",
-            "Time left: the page shows not set, no task closed in the last hour so code cannot compute it",
+            "Time left: the page shows not set, code cannot compute it: live capacity has not been observed",
         ]
 
 
@@ -235,7 +183,7 @@ class TestReviewBounds:
             if claimed:
                 events.append(event("task claimed", tid, NOW - (40 + n) * MINUTE))
             events.append(event("task done", tid, NOW - (10 + n) * MINUTE))
-        return {"events": events}
+        return {"events": events, "time_left": {"inputs": {"slots": 4, "ci_minutes": 5}}}
 
     def ledger(self, time_left):
         done = [task(tid, "done") for tid in ("a", "b", "c", "d")]
@@ -254,18 +202,13 @@ class TestReviewBounds:
             "Undecided follow-ups: check disk; rotate logs on host X",
             "Tasks: 2 open, 0 claimed, 0 pr",
             "Close rate: 4 tasks in the last hour",
-            "Time left: the page shows 1h 0m, computed 1h 0m from 2 remaining at 4 an hour and a chain of 2 "
-            "at 30m a task, current",
+            "Time left: the page shows 1h 0m, computed 1h 0m as the larger of a 60m chain and 60m of work over 4 "
+            "slots, for 2 remaining tasks at S 10m, M 25m, L 40m and 5m of CI, current",
         ]
-
-    def test_closes_without_claims_leave_only_the_throughput_bound(self):
-        assert ledger_stats.review(self.ledger(60), self.closes(False), NOW).split(". ")[5] == (
-            "Time left: the page shows 1h 0m, computed 0h 30m from 2 remaining at 4 an hour and a chain of 2, stale"
-        )
 
     def test_no_close_keeps_the_page_value_in_the_line(self):
         assert ledger_stats.review(self.ledger(120), {"events": []}, NOW).split(". ")[5] == (
-            "Time left: the page shows 2h 0m, no task closed in the last hour so code cannot compute it"
+            "Time left: the page shows 2h 0m, code cannot compute it: live capacity has not been observed"
         )
 
     def test_an_empty_ledger_reviews_to_nothing_left(self):
@@ -275,14 +218,17 @@ class TestReviewBounds:
             "Undecided follow-ups: none. "
             "Tasks: 0 open, 0 claimed, 0 pr. "
             "Close rate: 0 tasks in the last hour. "
-            "Time left: the page shows not set, computed 0h 0m from 0 remaining at 0 an hour and a chain of 0, stale. "
+            "Time left: the page shows not set, computed 0h 0m with no task remaining, stale. "
             "Judge stale phases and undecided follow-ups against the real work, then ack."
         )
 
 
 class TestStatsSyncEvent:
-    def ctx(self, events=()):
-        return ledger_core.Context({"rev": 0, "stamps": {}, "events": list(events), "members": {}}, NOW)
+    def ctx(self, events=(), slots=None):
+        meta = {"rev": 0, "stamps": {}, "events": list(events), "members": {}}
+        if slots is not None:
+            meta["time_left"] = {"inputs": {"slots": slots, "ci_minutes": 35}}
+        return ledger_core.Context(meta, NOW)
 
     def test_the_stats_sync_event_carries_the_computed_review(self):
         d = doc(phases=[{"id": "p1", "title": "One", "done": False}], tasks=[task("a", "done"), task("b", "open")])
@@ -309,7 +255,7 @@ class TestStatsSyncEvent:
             followups=[{"id": "f1", "text": "Judge this", "done": False}],
             time_left_minutes=400,
         )
-        ctx = self.ctx([event("task claimed", "a", NOW - 30 * MINUTE), event("task done", "a", NOW - 10 * MINUTE)])
+        ctx = self.ctx([event("task claimed", "a", NOW - 30 * MINUTE), event("task done", "a", NOW - 10 * MINUTE)], 1)
         assert ledger_core.record_sync(d, {"op": "stats_sync", "id": "busy"}, ctx)
         assert d["time_left_minutes"] == 60
         refresh = ctx.meta["stats_refresh"]
@@ -321,9 +267,12 @@ class TestStatsSyncEvent:
         assert refresh["calculation"] == {
             "minutes": 60,
             "remaining": 1,
-            "rate": 1,
-            "chain": 1,
-            "mean": 20,
+            "work": 60,
+            "chain": 60,
+            "throughput": 60,
+            "slots": 1,
+            "ci_minutes": 35,
+            "tiers": TIERS,
             "stale": True,
             "gap": "",
         }
@@ -389,7 +338,7 @@ class TestStatsSyncEvent:
         assert ledger_core.record_sync(d, {"op": "stats_sync", "id": "unknown"}, ctx)
         assert d["time_left_minutes"] == 400
         assert ctx.meta["stats_refresh"]["calculation"]["minutes"] is None
-        assert ctx.meta["stats_refresh"]["calculation"]["gap"] == "No task closed in the last hour"
+        assert ctx.meta["stats_refresh"]["calculation"]["gap"] == "live capacity has not been observed"
         assert ctx.meta["stats_refresh"]["state"] == "refreshed"
 
     def test_refresh_counts_scope_completed_phases_and_followups(self):
@@ -412,7 +361,7 @@ class TestStatsSyncEvent:
             tasks=[task("a", "done"), task("b", "open")],
             time_left_minutes=400,
         )
-        ctx = self.ctx([event("task claimed", "a", NOW - 30 * MINUTE), event("task done", "a", NOW - 10 * MINUTE)])
+        ctx = self.ctx([event("task claimed", "a", NOW - 30 * MINUTE), event("task done", "a", NOW - 10 * MINUTE)], 1)
         text = ledger_stats.refresh(d, ctx, "computed")
         assert ctx.meta["stats_refresh"] == {
             "id": "computed",
@@ -428,9 +377,12 @@ class TestStatsSyncEvent:
             "calculation": {
                 "minutes": 60,
                 "remaining": 1,
-                "rate": 1,
-                "chain": 1,
-                "mean": 20,
+                "work": 60,
+                "chain": 60,
+                "throughput": 60,
+                "slots": 1,
+                "ci_minutes": 35,
+                "tiers": TIERS,
                 "stale": True,
                 "gap": "",
             },
@@ -469,9 +421,9 @@ class TestStatsSyncEvent:
             == "Stats calculation failed: ValueError. Prior estimate retained; retry the refresh. Judge open follow-ups separately."
         )
 
-    def test_calculation_names_missing_close_history(self):
+    def test_calculation_names_unobserved_capacity(self):
         result = ledger_stats.calculate(doc(tasks=[task("a", "open")]), [], NOW)
-        assert result["gap"] == "No task closed in the last hour"
+        assert result["gap"] == "live capacity has not been observed"
         assert result["minutes"] is None
 
     def test_review_uses_the_supplied_calculation(self):
@@ -479,14 +431,20 @@ class TestStatsSyncEvent:
         result = {
             "minutes": 75,
             "remaining": 3,
-            "rate": 2,
-            "chain": 2,
-            "mean": 30,
+            "work": 150,
+            "chain": 75,
+            "throughput": 75,
+            "slots": 2,
+            "ci_minutes": 12.5,
+            "tiers": TIERS,
             "stale": False,
             "gap": "",
         }
         text = ledger_stats.review(d, {"events": []}, NOW, result)
-        assert "computed 1h 15m from 3 remaining at 2 an hour and a chain of 2 at 30m a task, current" in text
+        assert (
+            "computed 1h 15m as the larger of a 75m chain and 150m of work over 2 slots, for 3 remaining tasks "
+            "at S 10m, M 25m, L 40m and 12.5m of CI, current"
+        ) in text
 
     def test_successful_stats_refresh_keeps_its_cooldown(self):
         ctx = self.ctx([{"kind": "stats sync requested", "at": NOW - 1}])

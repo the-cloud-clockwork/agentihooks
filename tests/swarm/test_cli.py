@@ -108,6 +108,31 @@ def test_done_closes_the_task_and_marks_the_agent_finished(env, monkeypatch):
     assert store.claimant("sw", "t1") is None
 
 
+def test_done_on_a_group_lead_closes_its_members_with_the_lead_pull_request(env, monkeypatch):
+    store, ledger, _ = env
+    ledger.rows["t1"]["group_members"] = ["t3", "t4"]
+    member = {"lane": "eng", "title": "member", "description": "spec", "claimed_by": "", "merged_into": "t1"}
+    ledger.rows["t3"] = {"id": "t3", "state": "open", **member}
+    ledger.rows["t4"] = {"id": "t4", "state": "done", **member}
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    url = "https://github.com/o/r/pull/9"
+    ledger.rows["t1"]["pr_url"] = url
+    ledger.updates, slugs = [], []
+    original, listed = ledger.update_task, ledger.tasks
+    ledger.update_task = lambda slug, task_id, fields, **kw: (
+        ledger.updates.append((slug, task_id, kw["by"])) or original(slug, task_id, fields, **kw)
+    )
+    ledger.tasks = lambda slug: slugs.append(slug) or listed(slug)
+    assert run("sw", "done", "--finding", "one pull request") == 0
+    assert (ledger.rows["t3"]["state"], ledger.rows["t3"]["pr_url"]) == ("done", url)
+    assert ledger.rows["t3"]["proof"] == {"finding": "one pull request"}
+    agent = "engineer@a1b2c3-0001"
+    assert ledger.updates == [("sw", "t1", agent), ("sw", "t3", agent)]
+    assert set(slugs) == {"sw"}
+
+
 def test_done_on_a_code_task_waits_for_its_pull_request_to_merge(env, monkeypatch, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
@@ -128,6 +153,51 @@ def test_done_on_a_code_task_waits_for_its_pull_request_to_merge(env, monkeypatc
     ledger.pulls[url] = PullRequest("MERGED", 1, 1, False)
     assert run("sw", "done") == 0
     assert ledger.rows["t1"]["state"] == "done"
+
+
+@pytest.mark.parametrize("kind", ["code", "ci"])
+def test_done_waits_on_a_queued_pull_request_and_accepts_only_after_it_lands(env, monkeypatch, capsys, kind):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    name = "engineer@a1b2c3-0001"
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    url = "https://github.com/o/r/pull/9"
+    ledger.rows["t1"].update(kind=kind, pr_url=url)
+    ledger.pulls[url] = PullRequest("OPEN", None, 1, False, resolved=True, head="first", queued=True)
+    monkeypatch.setattr(cli, "now_ms", lambda: 1000)
+    assert run("sw", "done") == 1
+    assert "merge queue" in capsys.readouterr().err
+    assert ledger.rows["t1"]["state"] != "done"
+    assert store.agents("sw")[0].state != "finished"
+    assert cli.idle.wait(store.redis, "sw", name) == {
+        "until": 43_201_000,
+        "reason": "merge queue",
+        "at": 1000,
+        "on": {"kind": "merge", "target": url},
+    }
+    assert cli.waits.end_pass(store, "sw", ledger.rows, InboxStore(store.redis), ledger.pulls.get, 1000) == []
+    ledger.pulls[url] = PullRequest("MERGED", 2, 1, False)
+    ended = cli.waits.end_pass(store, "sw", ledger.rows, InboxStore(store.redis), ledger.pulls.get, 2000)
+    assert ended == [f"ended the wait of {name}: pull request {url}, now merged"]
+    assert cli.idle.wait(store.redis, "sw", name) is None
+    assert run("sw", "done") == 0
+    assert ledger.rows["t1"]["state"] == "done"
+    assert next(a for a in store.agents("sw") if a.name == name).state == "finished"
+
+
+def test_an_ops_task_completes_with_its_proof_even_when_a_linked_pull_request_is_queued(env, monkeypatch):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    name = "engineer@a1b2c3-0001"
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    ledger.rows["t1"]["kind"] = "ops"
+    url = "https://github.com/o/r/pull/9"
+    ledger.pulls[url] = PullRequest("OPEN", None, 1, False, queued=True)
+    assert run("sw", "done", "--pr", url, "--command", "probe", "--output", "passed") == 0
+    assert ledger.rows["t1"]["state"] == "done"
+    assert cli.idle.wait(store.redis, "sw", name) is None
 
 
 def test_the_tick_reopens_a_done_task_whose_pull_request_closed_unmerged(env, monkeypatch):
@@ -293,6 +363,33 @@ def test_one_tick_after_binning_leaves_no_agent_and_no_space(env, state):
     assert store.agents("sw") == [] and rt.live == set() and rt.closed_spaces == ["sw"]
     assert store.config("sw").state == "stopped"
     assert (ledger.rows["t1"]["state"], ledger.rows["t2"]["state"]) == ("open", "open")
+
+
+def test_a_refused_reopen_on_the_bin_stop_path_skips_that_task_and_still_stops(env, capsys):
+    from scripts.swarm.ledger_client import LedgerRefused
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    update = ledger.update_task
+
+    def refuse_t1(slug, task_id, fields, by="swarm"):
+        if task_id == "t1":
+            raise LedgerRefused("ledger sw: server refused: 400 the ledger is in the bin")
+        return update(slug, task_id, fields, by)
+
+    ledger.update_task = refuse_t1
+    assert (ledger.rows["t1"]["state"], ledger.rows["t2"]["state"]) == ("claimed", "claimed")
+    ledger.bin = {"sw"}
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
+    assert store.agents("sw") == [] and rt.live == set() and rt.closed_spaces == ["sw"]
+    assert store.config("sw").state == "stopped"
+    assert (ledger.rows["t1"]["state"], ledger.rows["t2"]["state"]) == ("claimed", "open")
+    err = capsys.readouterr().err
+    assert (
+        "task t1 not reopened, the ledger refused its write: ledger sw: server refused: 400 the ledger is in the bin"
+        in err
+    )
 
 
 def test_a_binned_ledger_keeps_retiring_until_no_agent_is_left(env):
@@ -577,7 +674,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
             stderr="",
         )
 
-    rt = runtime.HerdrRuntime(home=tmp_path, run=fake_run, choose=lambda r, e: ("codex", "priority"))
+    rt = runtime.HerdrRuntime(home=tmp_path, run=fake_run, choose=lambda r, e: ("codex", "rotation"))
     config = cli.SwarmConfig("sw", "/repo", 1, 1)
     placed = rt.spawn(config, "ci", "ci@a1b2c3-0001", {"id": "t2", "title": "speed up the tests"})
     prompt_path = tmp_path / "sw" / "prompts" / "ci@a1b2c3-0001.md"
@@ -599,7 +696,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
         profile="cicd",
         model_source="lane-default",
         profile_decision={**decision, "validation": placed.profile_decision["validation"]},
-        choice="share",
+        choice="rotation",
         launched_at=7_000,
         launch_timings=placed.launch_timings,
     )
@@ -1085,7 +1182,12 @@ def test_agent_prompt_waits_on_checks_through_the_swarm():
     merge = next(line for line in text.splitlines() if line.startswith("6. "))
     assert merge == (
         "6. Wait on the checks with agentihooks swarm sw wait --on checks <pr url>: the tick ends the wait and tells "
-        "you when they resolve, so no Monitor is needed. Merge on green checks, then wt.sh done."
+        "you when they resolve, so no Monitor is needed. Queue on green checks with agentihooks swarm sw merge "
+        "queue <pr url>, then agentihooks swarm sw wait --on merge <pr url>. Report queue state with "
+        "agentihooks swarm sw merge state <pr url>. Before fixing a queued pull request, dequeue first with "
+        "agentihooks swarm sw merge dequeue <pr url>, then push, then queue again with agentihooks swarm sw "
+        "merge queue <pr url> once checks pass. Keep the worktree until the tick confirms merged; "
+        "a red merge wait means fix the pull request and queue it again. After merged, run wt.sh done."
     )
 
 
@@ -1111,8 +1213,13 @@ def test_assist_asks_for_merge_approval_on_the_task_and_waits_through_the_swarm(
         "6. This swarm runs at assist autonomy. Once checks are green, ask the operator to approve the merge: "
         'agentihooks ledger --slug sw --as engineer@a1b2c3-0001 comment tasks/t1 "<plain words: what the pull '
         'request does, checks green, waiting for your approval to merge>", then agentihooks swarm sw wait 60 '
-        '--reason "operator merge approval"; his answer reaches you as an inbox message. Merge only after an '
-        "OPERATOR line on the ledger approves it, then wt.sh done. An OPERATOR line asking for changes: make them "
+        '--reason "operator merge approval"; his answer reaches you as an inbox message. Queue with agentihooks '
+        "swarm sw merge queue <pr url> only after an OPERATOR line on the ledger approves it, then agentihooks "
+        "swarm sw wait --on merge <pr url>. Report queue state with agentihooks swarm sw merge state <pr url>. "
+        "Before fixing a queued pull request, dequeue first with agentihooks swarm sw merge dequeue <pr url>, "
+        "then push, then queue again with agentihooks swarm sw merge queue <pr url> once checks pass and "
+        "approval still holds. Keep the worktree until the tick confirms merged; a red merge wait means fix the pull request and "
+        "queue it again. After merged, run wt.sh done. An OPERATOR line asking for changes: make them "
         "and ask again."
     )
     assert "ledger watch" not in text and "keep a Monitor" not in text
@@ -1124,7 +1231,7 @@ def test_agent_prompt_runs_gates_and_review_before_the_merge_and_ends_with_leave
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"})
     steps = [line for line in text.splitlines() if line[:1].isdigit() and line[1:3] == ". "]
     review = next(i for i, s in enumerate(steps) if "Gates green" in s and "review per the dev-cycle skill" in s)
-    merge = next(i for i, s in enumerate(steps) if "Merge on green checks" in s)
+    merge = next(i for i, s in enumerate(steps) if "Queue on green checks" in s)
     assert review < merge
     assert "Standards and Spec" in steps[review] and "three rounds" in steps[review]
     last = steps[-1]
@@ -1620,44 +1727,6 @@ def test_say_refused_by_a_link_posts_nothing_and_names_why(env, capsys):
     assert ledger.said == [] and InboxStore(store.redis).inbox("engineer@a1b2c3-0001") == []
 
 
-def test_set_codex_share_and_status_shows_the_share_against_the_target(env, capsys):
-    store, _, _ = env
-    run("sw", "create", "--repo", "/repo")
-    assert run("sw", "set", "codex-share=40", "codex-min-week-left=10") == 0
-    config = store.config("sw")
-    assert (config.codex_share, config.codex_min_week_left) == (40, 10)
-    for harness in ("codex", "claude", "claude", "claude"):
-        store.count_spawn("sw", harness)
-    capsys.readouterr()
-    run("sw", "status")
-    assert "codex 1/4 spawns 25%  target 40%  min week left 10%" in capsys.readouterr().out.splitlines()[0]
-
-
-def test_status_takes_the_codex_target_from_the_environment_without_a_swarm_setting(env, capsys, monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_SHARE", "50")
-    monkeypatch.delenv("AGENTIHOOKS_SWARM_CODEX_MIN_WEEK_LEFT", raising=False)
-    run("sw", "create", "--repo", "/repo")
-    capsys.readouterr()
-    run("sw", "status")
-    assert "codex 0/0 spawns 0%  target 50%  min week left 5%" in capsys.readouterr().out.splitlines()[0]
-
-
-@pytest.mark.parametrize("setting, expected", [(None, 30), (50, 50), (0, 0)])
-def test_status_json_reports_the_effective_codex_target(env, capsys, monkeypatch, setting, expected):
-    monkeypatch.delenv("AGENTIHOOKS_SWARM_CODEX_SHARE", raising=False)
-    if setting is not None:
-        monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_SHARE", str(setting))
-    run("sw", "create", "--repo", "/repo")
-    capsys.readouterr()
-    run("sw", "status", "--json")
-    assert json.loads(capsys.readouterr().out)["config"]["codex_share"] == expected
-
-
-def test_set_refuses_a_codex_share_over_one_hundred(env):
-    run("sw", "create", "--repo", "/repo")
-    assert run("sw", "set", "codex-share=101") == 1
-
-
 def test_status_shows_each_agent_conversation_id_or_a_dash(env, capsys):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
@@ -1715,7 +1784,7 @@ def test_restore_hands_the_runtime_to_restore_and_prints_every_agent_outcome(env
 
 @pytest.mark.parametrize("command", ["create", "start", "url"])
 def test_create_start_and_url_end_with_the_ledger_page_line(env, capsys, monkeypatch, command):
-    monkeypatch.setattr(cli.ledger_link, "answering", lambda: True)
+    monkeypatch.setattr(cli.ledger_link, "serving", lambda: str(cli.ledger_link.folder()))
     if command != "create":
         run("sw", "create", "--repo", "/repo")
         capsys.readouterr()

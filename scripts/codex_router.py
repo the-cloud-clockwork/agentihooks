@@ -4,11 +4,14 @@ Token values only move from the environment into the child's CODEX_ACCESS_TOKEN;
 they are never printed or written anywhere.
 """
 
+import contextlib
 import fcntl
+import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,13 +21,15 @@ from hooks.context.account_sessions import (
     CODEX_TOKEN_PREFIX,
     TOKEN_PREFIX,
     codex_sessions_by_account,
-    max_sessions,
 )
-from scripts import codex_quota, session_caps
+from scripts import codex_quota, session_bands
 from scripts.codex_quota import CodexQuota
 
 TOKEN_ENV = "CODEX_ACCESS_TOKEN"
-MIN_ROUTING_LEFT = 5.0
+PROBE_ARGS = ["exec", "--json", "--skip-git-repo-check", "Reply with the single word ok."]
+PROBE_TIMEOUT_S = 90
+CODEX_BIN = "codex"
+ATTEMPTS_FILE = "codex-probe-attempts.json"
 # A running app-server daemon answers account/read with its own auth, so a token session must not attach to it.
 NO_DAEMON = "--no-daemon"
 
@@ -101,45 +106,101 @@ def quotas(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, Co
     return {account.name: codex_quota.latest_codex_quota(dict(environ), keep(account)) for account in pool}
 
 
-def routing_left(quota: CodexQuota | None) -> float | None:
-    used = quota.highest_used if quota else None
-    return None if used is None else max(0.0, 100.0 - used)
+def account_cap(quota: CodexQuota | None, now: float) -> int | None:
+    """Live sessions under the session bands: the week alone sets it; None without a fresh reading."""
+    if quota is None or not session_bands.fresh(quota.observed_at, now):
+        return None
+    return session_bands.week_cap(session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now))
 
 
-def _rank(pool: list[CodexAccount], quotas: Mapping[str, CodexQuota | None]) -> list[CodexAccount]:
-    def key(account: CodexAccount):
-        left = routing_left(quotas.get(account.name))
-        return (left is None, -(left or 0.0), account.name)
+def _thread(stdout: str) -> str:
+    for line in stdout.splitlines():
+        with contextlib.suppress(ValueError):
+            event = json.loads(line)
+            if isinstance(event, dict) and event.get("type") == "thread.started":
+                return str(event.get("thread_id") or "")
+    return ""
 
-    return sorted(pool, key=key)
+
+def probe(account: CodexAccount, environ: Mapping[str, str], run: Callable = subprocess.run) -> CodexQuota | None:
+    """A fresh reading from one tiny exec on the account, read from the rollout it writes."""
+    codex_bin = shutil.which(CODEX_BIN) or CODEX_BIN
+    try:
+        done = run(
+            command(account, codex_bin, PROBE_ARGS),
+            env=child_environment(account, environ),
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=PROBE_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    thread = _thread(done.stdout) if done.stdout else ""
+    return codex_quota.session_quota(dict(environ), thread) if thread else None
+
+
+def _attempts_path() -> Path:
+    return Path.home() / ".agentihooks" / ATTEMPTS_FILE
+
+
+def _probe_attempts() -> dict[str, float]:
+    with contextlib.suppress(OSError, ValueError):
+        return json.loads(_attempts_path().read_text())
+    return {}
+
+
+def fresh_quotas(
+    pool: list[CodexAccount], environ: Mapping[str, str], now: float, run: Callable = subprocess.run
+) -> dict[str, CodexQuota | None]:
+    """Each account's newest reading, probed again when it is missing or stale, at most once per freshness window."""
+    found = quotas(pool, environ)
+    attempts = _probe_attempts()
+    for account in pool:
+        seen = found.get(account.name)
+        stale = not session_bands.fresh(seen.observed_at if seen else None, now)
+        if account.signed_in and stale and not session_bands.fresh(attempts.get(account.name), now):
+            attempts[account.name] = now
+            found[account.name] = probe(account, environ, run) or seen
+    with contextlib.suppress(OSError):
+        _attempts_path().write_text(json.dumps(attempts))
+    return found
 
 
 def select(
     pool: list[CodexAccount],
     quotas: Mapping[str, CodexQuota | None],
     sessions: Mapping[str, int],
-    cap: int,
+    now: float,
     route: str = "",
-    caps: Mapping[str, int] | None = None,
-) -> tuple[CodexAccount, str]:
-    """(account, placement): the most routing left below the cap, the least loaded when all are full."""
+) -> tuple[CodexAccount, str, session_bands.Seat | None]:
+    """The signed in account with a free place under its band and the fewest sessions."""
     if route:
         for account in pool:
             if account.name == route:
-                return account, "forced"
+                return account, "forced", None
         available = ", ".join(account.name for account in pool)
         raise RoutingError(f"Codex account '{route}' not found; available: {available}")
-    eligible = [
-        account
+    by_name = {account.name: account for account in pool}
+    seat = session_bands.pick(seats(pool, quotas, sessions, now))
+    if seat is None:
+        raise RoutingError("no signed in Codex account has a fresh reading and a free session under its quota band")
+    return by_name[seat.account], "open", seat
+
+
+def seats(
+    pool: list[CodexAccount], quotas: Mapping[str, CodexQuota | None], sessions: Mapping[str, int], now: float
+) -> list[session_bands.Seat]:
+    return [
+        session_bands.Seat("codex", account.name, cap, sessions.get(account.name, 0), _spend_by(quota, now))
         for account in pool
-        if account.signed_in and ((left := routing_left(quotas.get(account.name))) is None or left >= MIN_ROUTING_LEFT)
+        if account.signed_in and (cap := account_cap(quota := quotas.get(account.name), now)) is not None
     ]
-    if not eligible:
-        raise RoutingError("no Codex account is signed in with routing left")
-    below = [account for account in eligible if sessions.get(account.name, 0) < (caps or {}).get(account.name, cap)]
-    if below:
-        return _rank(below, quotas)[0], "open"
-    return min(_rank(eligible, quotas), key=lambda account: sessions.get(account.name, 0)), "overflow"
+
+
+def _spend_by(quota: CodexQuota, now: float) -> float | None:
+    five = session_bands.left(quota.five_hour.used, quota.five_hour.resets_at, now)
+    return session_bands.spend_by(five, session_bands.upcoming(quota.seven_day.resets_at, now))
 
 
 def child_environment(account: CodexAccount, environ: Mapping[str, str]) -> dict[str, str]:
@@ -175,15 +236,13 @@ def _report(path: str, **fields: str) -> None:
         _write_route_report(path, **fields)
 
 
-def _route(environ: Mapping[str, str], route: str, run: Callable) -> tuple[CodexAccount, str, int, int]:
-    cap = max_sessions(environ)
+def _route(environ: Mapping[str, str], route: str, run: Callable) -> tuple[CodexAccount, str, int, str]:
     sessions = codex_sessions_by_account()
-    caps = session_caps.stored("codex")
-    if not token_accounts(environ) and not route:
-        return CodexAccount(CODEX_DEFAULT), "open", sessions.get(CODEX_DEFAULT, 0), caps.get(CODEX_DEFAULT, cap)
     pool = routing_pool(environ, run)
-    account, placement = select(pool, quotas(pool, environ), sessions, cap, route, caps)
-    return account, placement, sessions.get(account.name, 0), caps.get(account.name, cap)
+    now = time.time()
+    found = quotas(pool, environ) if route else fresh_quotas(pool, environ, now, run)
+    account, placement, seat = select(pool, found, sessions, now, route)
+    return account, placement, sessions.get(account.name, 0), str(seat.cap) if seat else "?"
 
 
 def main(

@@ -158,10 +158,10 @@ def index_page(view="home"):
     """The HOME or BIN shell; its rows load from the v1 ledger and bin collections."""
     if view == "bin":
         heading, total, watermark = "BIN", '<span class="total" id="total"></span>', ""
-        fab = f'<a class="fab" id="home-fab" href="/" title="HOME" aria-label="HOME">{HOME_ICON}</a>'
+        fab = f'<a class="fab" id="home-fab" href="/" aria-label="HOME">{HOME_ICON}</a>'
     else:
         heading, total, watermark = "HOME", FOLD_ALL, '<div class="watermark" aria-hidden="true"></div>'
-        fab = f'<a class="fab" id="bin-fab" href="/?view=bin" title="Bin" aria-label="Bin">{TRASH}</a>'
+        fab = f'<a class="fab" id="bin-fab" href="/?view=bin" aria-label="Bin">{TRASH}</a>'
     values = {
         "HEADING": heading,
         "PAGE": served_version(),
@@ -261,16 +261,6 @@ MAX_NOTE = 500
 FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
 
 
-def session_cap_argv(body):
-    from scripts import session_caps
-
-    account, cap, harness = body.get("account"), body.get("cap"), body.get("harness", "claude")
-    if cap is None:
-        raise ValueError("session_cap needs a cap")
-    session_caps.check(account, cap, harness)
-    return ["session-cap", account, str(cap), "--harness", harness]
-
-
 def control_argv(body):
     action = body.get("action") if isinstance(body, dict) else None
     if action in CONTROLS:
@@ -286,8 +276,6 @@ def control_argv(body):
         return restore_decision_argv(body)
     if action == "lift":
         return lift_argv(body)
-    if action == "session_cap":
-        return session_cap_argv(body)
     if action != "set":
         raise ValueError("action must be start, pause, stop, stop_now, close, reopen, set or verdict")
     pairs = []
@@ -295,7 +283,6 @@ def control_argv(body):
         ("max_eng", "max-eng-agents", MAX_CAP),
         ("max_ci", "max-ci-agents", MAX_CAP),
         ("max_plan", "max-plan-agents", MAX_CAP),
-        ("codex_share", "codex-share", 100),
         ("compact_limit", "compact-limit", MAX_COMPACT),
     ):
         value = body.get(key)
@@ -324,7 +311,7 @@ def control_argv(body):
         pairs += overlay_pairs(body["overlays"])
     if not pairs:
         raise ValueError(
-            "set needs max_eng, max_ci, max_plan, codex_share, compact_limit, effort_min, effort_max, autonomy, "
+            "set needs max_eng, max_ci, max_plan, compact_limit, effort_min, effort_max, autonomy, "
             "master_agent, overlays or gates"
         )
     return ["set", *pairs]

@@ -215,7 +215,7 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AH_CC_TOKEN_<slug>` | — | One Claude subscription OAuth token per account |
-| `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` | `2` | Live sessions per account before `agenti` routes to the next account |
+| — | — | Each account's live session cap comes from its five-hour window alone: 6 at 60%+ left, 4 at 40-60%, 3 at 10-40%, 2 at 5-10%, none below 5% until reset; no new session below 5% of the week. The next session goes to the eligible account with the fewest live sessions. |
 | `QUOTA_POLICY_ENABLED` | `true` | Hand off / wait / stop when a session's own quota runs out |
 | `AGENTIHOOKS_HANDOFF_WEEK_PCT` | `98` | 7-day used % that triggers the quota policy |
 | `AGENTIHOOKS_HANDOFF_5H_PCT` | `99` | 5-hour used % that triggers the quota policy |

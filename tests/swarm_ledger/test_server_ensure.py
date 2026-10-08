@@ -24,10 +24,10 @@ def safe_process_signals(monkeypatch):
 
 
 @pytest.mark.parametrize("release_socket", [False, True])
-def test_client_waits_for_a_reloading_server_without_starting_another(tmp_path, monkeypatch, release_socket):
-    with socket.socket() as spare:
-        spare.bind(("127.0.0.1", 0))
-        port = spare.getsockname()[1]
+def test_client_waits_for_a_reloading_server_without_starting_another(
+    tmp_path, monkeypatch, release_socket, ledger_port
+):
+    port = ledger_port
     base = f"http://127.0.0.1:{port}"
     monkeypatch.setattr(server, "PORT", port)
     monkeypatch.setattr(server, "BASE", base)

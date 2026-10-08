@@ -10,14 +10,15 @@ import re
 from dataclasses import dataclass
 
 from scripts.swarm import naming
+from scripts.swarm.keyspace import ROOT
 
-PREFIX = "agentihooks:seat"
+PREFIX = f"{ROOT}:seat"
 OCCUPY_ATTEMPTS = 5
 MEMORY_KINDS = ("history", "recaps", "learned")
 MATURITIES = ("data", "note", "insight", "canon")
 DEFAULT_MATURITY = "note"
 CANON = "canon"
-CULTURE_PREFIX = "agentihooks:culture"
+CULTURE_PREFIX = f"{ROOT}:culture"
 
 
 class SeatError(RuntimeError):

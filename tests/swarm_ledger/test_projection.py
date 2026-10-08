@@ -100,7 +100,7 @@ const inboxPending = () => 0;
 let meta = {created_at: Date.now() - 3600000};
 let doc = {phases: [{done: true}, {done: false}], followups: [], questions: [], tasks: [], time_left_minutes: 200};
 """
-        script += function_source("span") + function_source("renderStats")
+        script += function_source("span") + function_source("timeLeftInputs") + function_source("renderStats")
         script += """
 const assert = require("node:assert/strict");
 const timeLeft = () => { renderStats(); return $("stats").textContent.split(" · ")[2]; };

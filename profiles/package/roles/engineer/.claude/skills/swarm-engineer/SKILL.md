@@ -56,6 +56,7 @@ call. `agentihooks msg inbox` lists them, `agentihooks msg read <id>` shows one.
 Name every wait so the swarm does not count you idle:
 
 - Checks on your pull request: `agentihooks swarm <slug> wait --on checks <url>`.
+- A queued pull request: `agentihooks swarm <slug> wait --on merge <url>`.
 - A reply to an inbox item: `agentihooks swarm <slug> wait --on reply <id>`.
 - Another task: `agentihooks swarm <slug> wait --on task <id>`.
 - Anything else, at most an hour: `agentihooks swarm <slug> wait 30 --reason "<what>"`.
@@ -64,7 +65,19 @@ The swarm ends a checked wait when the thing resolves and tells you through the 
 
 ## Close with the proof
 
-Merge on green checks and closed review, remove the worktree, then
+Merge on green checks and closed review. On a base branch with a merge queue,
+a merge only queues the pull request and it lands when the queue run passes, so
+do not merge there: queue it on green checks with
+`agentihooks swarm <slug> merge queue <url>`, which goes through the GitHub API
+and works with any gh, then wait with
+`agentihooks swarm <slug> wait --on merge <url>` and keep the worktree until it
+merges. `agentihooks swarm <slug> merge state <url>` reports whether it sits in
+the queue. GitHub refuses a push while the pull request sits in the queue. To
+fix a queued pull request, dequeue it first with
+`agentihooks swarm <slug> merge dequeue <url>`, then push the fix, and once its
+checks pass queue it again with `agentihooks swarm <slug> merge queue <url>`.
+
+Once merged, remove the worktree, then
 `agentihooks ledger --slug <slug> --as <name> leave` and close with the proof
 your task kind needs. The ledger refuses `done` without it.
 

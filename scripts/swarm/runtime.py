@@ -10,7 +10,7 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 
-from scripts import agent_choice
+from scripts import agent_choice, session_bands
 from scripts.handoff import envelope
 from scripts.init_agent import PREDECESSOR
 from scripts.profiles import binding, plugins
@@ -28,7 +28,7 @@ from scripts.swarm import (
     timing,
 )
 from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
-from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
+from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError
 
 SWARM_HOME = Path.home() / ".agentihooks" / "swarm"
@@ -128,6 +128,18 @@ def _transfer(task):
     return saved
 
 
+def _recorded_revision(saved):
+    return saved.get("bundle_revision") or saved.get("profile_decision", {}).get("bundle_revision")
+
+
+def _pinned(worn, revision):
+    if not worn:
+        return []
+    if not revision:
+        raise SpawnError("an overlay launch needs the bundle commit it renders from, and none was recorded")
+    return ["--bundle-revision", revision]
+
+
 def _predecessor(task):
     conversation = (task.get("handoff_envelope") or {}).get("conversation_id")
     return conversation if task.get("transfer") and conversation != envelope.UNKNOWN else None
@@ -147,11 +159,8 @@ class HerdrRuntime:
         if hasattr(self, "_quota_accounts"):
             from scripts.swarm.capacity import free_seats
 
-            return any(free_seats(row, self._quota_cap, self._quota_floor) for row in self._quota_accounts)
-        share, floor = codex_split(config, environ)
-        return (
-            agent_choice.choose_shared("", environ, None, share, floor, choose=self.choose)[1] != agent_choice.ALL_FULL
-        )
+            return any(free_seats(row) for row in self._quota_accounts)
+        return self.choose("", environ)[1] != agent_choice.ALL_FULL
 
     def quota_capacity(
         self,
@@ -161,36 +170,26 @@ class HerdrRuntime:
         demand: dict | None = None,
         requirements: dict | None = None,
     ) -> dict:
-        from hooks.context import account_sessions
         from scripts.swarm import capacity
 
-        environ = dict(os.environ)
-        self._quota_accounts = capacity.accounts(environ, now)
-        self._quota_cap = account_sessions.max_sessions(environ)
-        self._quota_share, self._quota_floor = codex_split(config, environ)
-        decision = capacity.calculate(
-            replace(config, codex_share=self._quota_share),
-            self._quota_accounts,
-            agents,
-            self._quota_cap,
-            self._quota_floor,
-            demand,
-            requirements,
-        )
+        placing = demand is None or any(demand.values())
+        self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing)
+        decision = capacity.calculate(config, self._quota_accounts, agents, demand, requirements)
         self._quota_allocations = decision["allocation"]
         if hasattr(self, "_quota_ready_ids"):
-            self._quota_tasks = {
-                self._quota_ready_ids[lane][slot["index"]]: slot["harness"]
-                for lane, slots in decision["placements"].items()
-                for slot in slots
+            slots = {
+                self._quota_ready_ids[lane][slot["index"]]: slot
+                for lane, placed in decision["placements"].items()
+                for slot in placed
             }
+            self._quota_tasks = {task: slot["harness"] for task, slot in slots.items()}
+            self._quota_task_accounts = {task: slot["account"] for task, slot in slots.items()}
             decision["tasks"] = dict(self._quota_tasks)
         return decision
 
     def quota_requirements(self, config: SwarmConfig, ready: dict) -> dict:
         from scripts.swarm.capacity import _harnesses
 
-        config = replace(config, codex_share=codex_split(config, dict(os.environ))[0])
         self._quota_ready_ids = {lane: [task["id"] for task in tasks] for lane, tasks in ready.items()}
         requirements = {}
         for lane, tasks in ready.items():
@@ -209,7 +208,10 @@ class HerdrRuntime:
                     options.append(("claude",))
                 elif requested:
                     options.append((requested,))
-                elif saved.get("harness") in agent_choice.AGENTS:
+                elif (
+                    saved.get("harness") in agent_choice.AGENTS
+                    and (task.get("handoff_envelope") or {}).get("reason") != "quota"
+                ):
                     options.append((saved["harness"],))
                 else:
                     options.append(_harnesses(config, lane))
@@ -219,11 +221,7 @@ class HerdrRuntime:
     def _quota_eligible(self, harness):
         from scripts.swarm.capacity import free_seats
 
-        return [
-            row
-            for row in self._quota_accounts
-            if row.harness == harness and free_seats(row, self._quota_cap, self._quota_floor)
-        ]
+        return [row for row in self._quota_accounts if row.harness == harness and free_seats(row)]
 
     def _quota_choice(self, agent, reason, fixed, lane):
         if not hasattr(self, "_quota_accounts"):
@@ -232,49 +230,119 @@ class HerdrRuntime:
         eligible = [h for h in agent_choice.AGENTS if self._quota_eligible(h) and (allocation is None or allocation[h])]
         if agent in eligible:
             return agent, reason
-        if not fixed:
-            for harness in eligible:
-                if harness != "codex" or self._quota_share:
-                    return harness, f"fallthrough: {agent} has no placeable quota seats"
+        if not fixed and eligible:
+            return eligible[0], f"fallthrough: {agent} has no placeable quota seats"
         raise SpawnError(f"no {agent} account has placeable quota seats")
 
-    def spawn(self, config, lane, name, task, spawns=None):
-        chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
-        relaunch = live_binding.complete(task.get("launch_assignment"))
-        saved = relaunch or _transfer(task)
+    def _rotation(self, requested, environ):
+        if requested or not hasattr(self, "_quota_accounts"):
+            return self.choose(requested, environ)
+        from scripts.swarm.capacity import seats
+
+        seat = session_bands.pick(seats(self._quota_accounts))
+        return (seat.harness, "rotation") if seat else ("claude", agent_choice.ALL_FULL)
+
+    def _quota_transfer(self, saved, profile, environ, lane, want):
+        from scripts.swarm import quota_handoff
+
+        allocation = getattr(self, "_quota_allocations", {}).get(lane)
+        account = quota_handoff.successor(
+            [
+                row
+                for row in self._quota_accounts
+                if (allocation is None or allocation[row.harness])
+                and (row.harness, row.name) != (saved["harness"], saved.get("account"))
+                and (not want or row.harness == want)
+            ],
+            not plugins.claude_only(profile),
+            quota_handoff.Thresholds.from_env(environ),
+        )
+        if account is None:
+            raise SpawnError(f"no {saved['harness']} account has placeable quota seats")
+        return {
+            **saved,
+            "harness": account.harness,
+            "account": account.name,
+            **({"model": ""} if account.harness != saved["harness"] else {}),
+        }
+
+    def _saved_choice(self, saved, profile, quota_transfer, environ):
+        if quota_transfer:
+            return saved["harness"], "quota handoff"
+        if plugins.claude_only(profile) and saved["harness"] != "claude":
+            raise SpawnError("unsupported handoff: required profile cannot mount on the original harness")
+        return self.choose(saved["harness"], environ)
+
+    def _profile_decision(self, config, lane, chosen, task, saved, relaunch, environ):
         decision = (
             profile_choice.ProfileDecision(
                 saved["profile"],
                 "handoff",
                 "original seat profile",
                 overlays=tuple(saved.get("overlays", ())),
-                bundle_revision=saved.get("bundle_revision")
-                or saved.get("profile_decision", {}).get("bundle_revision", ""),
             )
             if saved and (relaunch or not task.get("profile"))
             else timing.call(
                 profile_choice.choose, config.slug, lane, chosen, task, environ, getattr(config, "overlays", {})
             )
         )
-        decision = decision if decision.bundle_revision else replace(decision, bundle_revision=overlays.revision())
+        if not decision.bundle_revision:
+            kept = _recorded_revision(saved) if saved.get("profile") == decision.profile else ""
+            decision = replace(decision, bundle_revision=kept or overlays.revision())
+        return decision
+
+    def _planned_account(self, task_id, agent):
+        planned = getattr(self, "_quota_tasks", {}).get(task_id)
+        return getattr(self, "_quota_task_accounts", {}).get(task_id) if planned == agent else None
+
+    def _quota_account(self, agent, preferred, excluded):
+        from scripts.swarm.capacity import seats
+
+        eligible = [row for row in self._quota_eligible(agent) if row.name != excluded]
+        row = next((row for row in eligible if row.name == preferred), None)
+        if row is None:
+            seat = session_bands.pick(seats(eligible))
+            if seat is None:
+                raise SpawnError(f"no {agent} account has placeable quota seats")
+            row = next(row for row in eligible if row.name == seat.account)
+        return row
+
+    def _reserve_account(self, account, lane, agent):
+        if account is not None:
+            if lane in getattr(self, "_quota_allocations", {}):
+                self._quota_allocations[lane][agent] -= 1
+            self._quota_accounts = [
+                replace(row, sessions=row.sessions + 1) if row == account else row for row in self._quota_accounts
+            ]
+
+    def spawn(self, config, lane, name, task):
+        chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
+        relaunch = live_binding.complete(task.get("launch_assignment"))
+        saved = relaunch or _transfer(task)
+        decision = self._profile_decision(config, lane, chosen, task, saved, relaunch, environ)
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
         want = affinity.desired(config) if lane == MASTER else _set(chosen.get("agent"))
         if want and plugins.claude_only(profile) and want != "claude":
             kind = "master affinity" if lane == MASTER else "lane harness"
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}")
-        if saved and want and saved["harness"] != want:
+        quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
+        saved = (
+            self._quota_transfer(
+                saved, profile, environ, lane, want or getattr(self, "_quota_tasks", {}).get(task["id"])
+            )
+            if saved and quota_transfer
+            else saved
+        )
+        if saved and want and saved["harness"] != want and not quota_transfer:
             saved = {}
         if want and not saved:
             agent, reason = self.choose(want, environ)
         elif saved:
-            if plugins.claude_only(profile) and saved["harness"] != "claude":
-                raise SpawnError("unsupported handoff: required profile cannot mount on the original harness")
             requested = saved["harness"]
-            agent, reason = self.choose(requested, environ)
+            agent, reason = self._saved_choice(saved, profile, quota_transfer, environ)
         else:
-            share, floor = codex_split(config, environ)
-            agent, reason = agent_choice.choose_shared(requested, environ, spawns, share, floor, choose=self.choose)
+            agent, reason = self._rotation(requested, environ)
         if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts"):
             raise SpawnError(reason)
         planned = getattr(self, "_quota_tasks", {}).get(task["id"])
@@ -296,7 +364,8 @@ class HerdrRuntime:
         )
         timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
-        if saved:
+        argv += _pinned(decision.overlays, decision.bundle_revision)
+        if saved.get("model"):
             picked = model_pick.ModelPick(
                 saved["model"],
                 saved["effort"],
@@ -304,16 +373,14 @@ class HerdrRuntime:
                 confidence=saved.get("model_confidence"),
             )
         elif lane in PICKED_LANES:
-            picked = timing.call(model_pick.pick, agent, chosen, task, environ)
+            picked = timing.call(model_pick.pick, agent, {} if quota_transfer else chosen, task, environ)
         else:
-            picked = _lane_default(lane, agent, chosen)
+            picked = _lane_default(lane, agent, {} if quota_transfer else chosen)
         mode = PLAN_MODE if (lane, agent) == ("plan", "claude") else []
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
         if hasattr(self, "_quota_accounts"):
-            eligible = self._quota_eligible(agent)
-            account = next((row for row in eligible if row.name == saved.get("account")), None)
-            account = account or max(eligible, key=lambda row: min(row.five_left, row.week_left))
+            account = self._quota_account(agent, saved.get("account") or self._planned_account(task["id"], agent), None)
             route = ["--route", account.name]
         placed = timing.call(
             self._launch,
@@ -330,12 +397,7 @@ class HerdrRuntime:
             ],
             predecessor=_predecessor(task),
         )
-        if account is not None:
-            if lane in getattr(self, "_quota_allocations", {}):
-                self._quota_allocations[lane][agent] -= 1
-            self._quota_accounts = [
-                replace(row, sessions=row.sessions + 1) if row == account else row for row in self._quota_accounts
-            ]
+        self._reserve_account(account, lane, agent)
         return replace(
             placed,
             model_source=picked.source,
@@ -358,6 +420,7 @@ class HerdrRuntime:
             agent.profile,
             agent.overlays,
         )
+        argv += _pinned(agent.overlays, agent.profile_decision.get("bundle_revision"))
         defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}))
         picked = model_pick.ModelPick(
             agent.model or defaults.model,

@@ -46,11 +46,11 @@ def plan_file(tmp_path, phases):
     return str(path)
 
 
-def test_two_phase_plan_is_appended_manual_and_in_review():
+def test_a_plan_phase_is_appended_auto_unless_it_names_manual_and_only_manual_waits_in_review():
     make_ledger()
     state, rejected = append(
         [
-            {"phase": "p2", "title": "Second", "description": "Intent two"},
+            {"phase": "p2", "title": "Second", "description": "Intent two", "planning": "manual"},
             {"phase": "p3", "title": "Third", "depends_on": ["p2"], "release": True},
         ]
     )
@@ -63,12 +63,13 @@ def test_two_phase_plan_is_appended_manual_and_in_review():
         "Intent two",
         "manual",
     )
-    assert (third["id"], third["depends_on"], third["planning"], third["release"]) == ("p3", ["p2"], "manual", True)
+    assert (third["id"], third["depends_on"], third["planning"], third["release"]) == ("p3", ["p2"], "auto", True)
     assert third["description"] == ""
+    at = second["review"]["at"]
+    assert type(at) is int and at > 0
+    assert second["review"] == {"state": "pending", "by": "master", "at": at, "rounds": 0, "note": ""}
+    assert "review" not in third
     for phase in (second, third):
-        at = phase["review"]["at"]
-        assert type(at) is int and at > 0
-        assert phase["review"] == {"state": "pending", "by": "master", "at": at, "rounds": 0, "note": ""}
         assert phase["done"] is False and phase["comments"] == []
     assert [(e["by"], e["kind"], e["target"], e["text"]) for e in state["_meta"]["events"][-2:]] == [
         ("master", "added", "phases/p2", "Second"),
@@ -101,7 +102,7 @@ def test_an_invalid_graph_refuses_the_whole_plan():
         ([{"phase": "p2", "title": "A"}, {"phase": "p2", "title": "B"}], "phase p2 appears twice in the plan"),
         ([{"phase": "p2", "title": " "}], "phase_add needs a title"),
         ([{"phase": "2", "title": "A"}], "phase_add needs a phase id"),
-        ([{"phase": "p2", "title": "A", "planning": "auto"}], "appended phases are planned manually"),
+        ([{"phase": "p2", "title": "A", "planning": "automatic"}], "planning must be manual or auto"),
         ([{"phase": "p2", "title": "A", "extra": 1}], "phase fields may set only"),
         (["p2"], "each appended phase is an object"),
     ],
@@ -117,17 +118,17 @@ def test_plan_entries_take_the_next_free_ids_and_resolve_positions():
         "phases": [
             {"title": "Second", "description": "Two", "depends_on": [3]},
             {"id": "deploy", "title": "Deploy", "depends_on": [1, "p1"], "release": True},
-            {"title": "Third", "depends_on": [2]},
+            {"title": "Third", "depends_on": [2], "planning": "manual"},
         ]
     }
     assert ledger_phase_cli.append_phases(plan, ["p1", "p4", "deploy-old", "pilot"]) == [
-        {"phase": "p5", "title": "Second", "description": "Two", "depends_on": ["p6"], "planning": "manual"},
+        {"phase": "p5", "title": "Second", "description": "Two", "depends_on": ["p6"], "planning": "auto"},
         {
             "phase": "deploy",
             "title": "Deploy",
             "description": "",
             "depends_on": ["p5", "p1"],
-            "planning": "manual",
+            "planning": "auto",
             "release": True,
         },
         {"phase": "p6", "title": "Third", "description": "", "depends_on": ["deploy"], "planning": "manual"},
@@ -171,14 +172,14 @@ def test_plan_file_shape_is_refused_with_its_reason(plan, message):
 
 def test_plan_phases_command_appends_a_two_phase_plan_in_review(tmp_path, monkeypatch, capsys):
     make_ledger()
-    path = plan_file(tmp_path, [{"title": "Second"}, {"title": "Third", "depends_on": [1]}])
+    path = plan_file(tmp_path, [{"title": "Second", "planning": "manual"}, {"title": "Third", "depends_on": [1]}])
     cli(monkeypatch, "plan", "phases", path)
-    assert json.loads(capsys.readouterr().out) == {"appended": ["p2", "p3"], "planning": "manual", "review": "pending"}
+    assert json.loads(capsys.readouterr().out) == {"appended": ["p2", "p3"], "planning": {"p2": "manual", "p3": "auto"}}
     state = core.sync(SLUG)[0]
     assert [(p["id"], p.get("planning"), (p.get("review") or {}).get("state")) for p in state["phases"]] == [
         ("p1", None, None),
         ("p2", "manual", "pending"),
-        ("p3", "manual", "pending"),
+        ("p3", "auto", None),
     ]
     assert state["phases"][2]["depends_on"] == ["p2"]
 

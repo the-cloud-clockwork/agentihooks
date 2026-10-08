@@ -6,6 +6,7 @@ import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import affinity, cli
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import status_report
 from scripts.swarm.store import MASTER, SwarmConfig
@@ -30,9 +31,9 @@ class AffinityRuntime(FakeRuntime):
         super().__init__()
         self.fail_master, self.store, self.orders_at_spawn = fail_master, None, []
 
-    def spawn(self, config, lane, name, task, spawns=None):
+    def spawn(self, config, lane, name, task):
         if lane != MASTER:
-            return super().spawn(config, lane, name, task, spawns)
+            return super().spawn(config, lane, name, task)
         order = affinity.pending(self.store, config.slug)
         if order:
             pending = InboxStore(self.store.redis).pending_items(f"master@{config.slug}")
@@ -186,7 +187,7 @@ def test_swarm_set_master_agent_orders_the_live_master_once(env, capsys):
     assert store.config("sw").lanes[MASTER]["agent"] == "codex"
 
 
-def _spawn(tmp_path, monkeypatch, lanes, task, codex_share=None):
+def _spawn(tmp_path, monkeypatch, lanes, task):
     for key in ("MODEL", "EFFORT"):
         for agent in ("CLAUDE", "CODEX"):
             monkeypatch.delenv(f"AGENTIHOOKS_{agent}_{key}", raising=False)
@@ -209,8 +210,6 @@ def _spawn(tmp_path, monkeypatch, lanes, task, codex_share=None):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=codex_share,
-        codex_min_week_left=0,
         lanes=lanes,
         autonomy="delegate",
     )
@@ -243,7 +242,7 @@ def test_a_handoff_successor_launches_on_the_desired_harness_with_the_original_p
 
 
 def test_quota_share_routing_never_moves_a_master_off_its_affinity(tmp_path, monkeypatch):
-    argv, _ = _spawn(tmp_path, monkeypatch, {MASTER: {"agent": "codex"}}, {"id": MASTER, "peer": ""}, codex_share=0)
+    argv, _ = _spawn(tmp_path, monkeypatch, {MASTER: {"agent": "codex"}}, {"id": MASTER, "peer": ""})
     assert argv[argv.index("--agent") + 1] == "codex"
 
 
@@ -293,7 +292,7 @@ def test_the_order_is_one_record_under_the_swarm_key_with_every_field(store):
         "state": "ordered",
         "reason": "",
     }
-    assert store.redis.get("agentihooks:swarm:sw:master-affinity") is not None
+    assert store.redis.get(f"{KEY_ROOT}:swarm:sw:master-affinity") is not None
     assert "you run on claude." in item.text
 
 
@@ -312,7 +311,7 @@ def test_without_a_live_master_the_order_returns_what_is_pending_and_sends_nothi
     _master(store, lane="eng", name="engineer@a1b2c3-0002")
     assert affinity.order(store, "sw", 2) is None
     assert _orders(store) == []
-    store.redis.set("agentihooks:swarm:sw:master-affinity", '{"to": "codex", "state": "failed"}')
+    store.redis.set(f"{KEY_ROOT}:swarm:sw:master-affinity", '{"to": "codex", "state": "failed"}')
     assert affinity.order(store, "sw", 3) == {"to": "codex", "state": "failed"}
 
 

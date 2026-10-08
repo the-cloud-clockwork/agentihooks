@@ -24,8 +24,9 @@ def render(doc, slug, port, token=None):
     """The page text for `slug`; the stored ledger of that slug is dropped so the written page is imported fresh."""
     from scripts.swarm_ledger.repository import repository
 
-    with repository.connect() as connection, connection:
-        repository.purge(slug, connection)
+    for target in (repository, repository.bound(ledger_core)):
+        with target.connect() as connection, connection:
+            target.purge(slug, connection)
     values = {
         "TITLE": html.escape(doc["title"]),
         "SLUG": slug,

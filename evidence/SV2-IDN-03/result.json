@@ -1,0 +1,65 @@
+{
+  "package": "SV2-IDN-03",
+  "dependency": "SV2-IDN-02",
+  "integration_gate": "G1",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1569",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1578",
+  "tested_commit": "f8b432655d9be6348e1e0528827aa79b658a9484",
+  "evidence_class": "local isolated fixture in a temporary agentihooks home plus CI; no live rollout claim",
+  "supported_versions": {
+    "session_scope": "2.0",
+    "project_sessions_index": "preceding shape unchanged",
+    "marker_body": "preceding shape when AGENTIHOOKS_SESSION_SCOPE=0 or no scope log exists"
+  },
+  "interfaces": [
+    "project_sessions.record_scope",
+    "project_sessions.transitions",
+    "project_sessions.scope_at",
+    "project_sessions.attribute",
+    "project_sessions.marker_scope",
+    "project_sessions.observe_transcript",
+    "project_sessions.unattributed_session_events_total",
+    "project_sessions.SessionGrant and ScopeRefused",
+    "brain_writer_hook marker time and event-time attribution",
+    "urn:swarm-v2:session-scope"
+  ],
+  "states": {
+    "observed": "Focused affected tests passed locally (330 across the scope, marker, session, broadcast and contract files); ruff check and format clean.",
+    "accepted": "Cases A, B and C passed on the fixture with two task changes, one worktree switch and an explicitly shared warning; a second independent fixture with shifted day and swapped projects passed in its own home.",
+    "committed": "f8b432655d9be6348e1e0528827aa79b658a9484",
+    "externally_verified": "CI run 37757138131 at f8b43265: mutation passed with every changed-line mutant killed (project_sessions 463, brain_writer_hook 120, 0 survivors), lint and smoke passed; the unit shards complete on the pull request."
+  },
+  "measurements": {
+    "unattributed_session_events_total": {
+      "a": [1, 1],
+      "b": 1,
+      "c": 1
+    },
+    "note": "The one unattributed event in A and C is the fixture marker written before any scope was in force; B counts the refused explicit claim."
+  },
+  "cases": {
+    "a": "evidence/SV2-IDN-03/a-result.json",
+    "b": "evidence/SV2-IDN-03/b-result.json",
+    "c": "evidence/SV2-IDN-03/c-result.json",
+    "manifest": "evidence/SV2-IDN-03/manifest.json",
+    "generator": "evidence/SV2-IDN-03/generate_case_results.py"
+  },
+  "reviews": {
+    "standards": "Closed after three rounds; seven findings fixed (hook safety, branch tracking, single scope read, naming).",
+    "spec": "Three rounds; findings fixed with tests, the last (attributed outbox replays) fixed after round three. Open by ruling: live launch grants belong to SV2-IDN-04; the marker idempotency key trade-off is a ledger follow-up."
+  },
+  "rollback_rehearsal": {
+    "switch": "AGENTIHOOKS_SESSION_SCOPE=0",
+    "test": "test_switching_the_scope_path_off_restores_the_preceding_behavior",
+    "result": "no transitions written; marker body equals the preceding lookup body; scope logs left in place"
+  },
+  "rollback": "Set AGENTIHOOKS_SESSION_SCOPE=0 or revert the code; scope logs are authoritative history and are never rewritten to a default project.",
+  "limitations": [
+    "Live hooks pass no launch grant until SV2-IDN-04; an explicit marker project_id is accepted as written until then.",
+    "Live hooks see task changes only across session starts; mid-session task changes and task_revision come from record_scope callers.",
+    "Codex transcript entries carry no branch; a new folder records an empty branch.",
+    "A session resumed before its last Stop ran leaves those earlier transcript entries unrecorded; their markers are unknown.",
+    "The marker idempotency key still omits the record time.",
+    "Scope logs have no retention sweep."
+  ]
+}

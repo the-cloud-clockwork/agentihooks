@@ -90,7 +90,7 @@ def page(controls, monkeypatch):
         ({"action": "stop_now"}, "stopped the swarm immediately", "stopped"),
         ({"action": "close"}, "requested closing the ledger", "stopped"),
         ({"action": "reopen"}, "reopened the ledger", "running"),
-        ({"action": "set", "max_eng": 2, "max_ci": 1, "codex_share": 45}, "changed the swarm settings", "running"),
+        ({"action": "set", "max_eng": 2, "max_ci": 1}, "changed the swarm settings", "running"),
         (
             {"action": "verdict", "id": "idle/worker", "verdict": "resolved", "note": "Finished"},
             "gave a health finding a verdict",
@@ -110,7 +110,7 @@ def test_each_successful_page_control_notifies_once(page, body, verb, state):
     assert items[0].fyi
     assert items[0].text.startswith(f"The operator {verb} from the page. The swarm is {state}.")
     if body["action"] == "set":
-        assert "Engineer cap 2, CI cap 1, Planner cap 1, Codex share 45 percent." in items[0].text
+        assert "Engineer cap 2, CI cap 1, Planner cap 1." in items[0].text
     if body["action"] == "verdict":
         assert "The verdict is resolved." in items[0].text
     assert ledger.said == [(items[0].text, "swarm")]

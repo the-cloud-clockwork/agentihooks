@@ -1,0 +1,17 @@
+{
+  "case": "T-SV2-IDN-03-B",
+  "tested_commit": "f8b432655d9be6348e1e0528827aa79b658a9484",
+  "evidence_class": "local isolated fixture in a temporary agentihooks home; not live rollout proof",
+  "then": "a worker supplied project outside the launch grant is rejected even when the folder exists locally",
+  "folder_exists": true,
+  "refusal": "project is outside the session grant",
+  "refusal_discloses_project": false,
+  "scope_log_unchanged": true,
+  "explicit_marker": [
+    {
+      "attribution": "refused"
+    }
+  ],
+  "unattributed_session_events_total": 1,
+  "passed": true
+}

@@ -46,7 +46,6 @@ def status(**changes):
             "max_eng": 3,
             "max_ci": 1,
             "max_plan": 1,
-            "codex_share": 20,
             "autonomy": "delegate",
             "effort_min": "medium",
             "effort_max": "high",
@@ -81,7 +80,6 @@ def status(**changes):
         ],
         "findings": [],
         "quota": {
-            "cap": 3,
             "probed_at": NOW_S - 120,
             "rows": [
                 {
@@ -92,7 +90,7 @@ def status(**changes):
                     "seven_day_left": 78,
                     "seven_day_resets_at": NOW_S + 4 * 86400 + 15 * 3600,
                     "sessions": 2,
-                    "cap": 7,
+                    "cap": 6,
                 },
                 {
                     "agent": "claude",
@@ -102,6 +100,7 @@ def status(**changes):
                     "seven_day_left": 51,
                     "seven_day_resets_at": NOW_S + 6 * 86400,
                     "sessions": 1,
+                    "cap": 4,
                 },
                 {
                     "agent": "codex",
@@ -250,23 +249,21 @@ def test_alert_line_shows_only_while_a_finding_is_open_with_the_live_caps(open_p
 
 def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
     page = open_page()
-    fields = {lane: page.tab.locator(f"#cap-{lane}") for lane in ("eng", "ci", "plan", "codex", "compact")}
-    assert [f.input_value() for f in fields.values()] == ["3", "1", "1", "20", "600"]
+    fields = {lane: page.tab.locator(f"#cap-{lane}") for lane in ("eng", "ci", "plan", "compact")}
+    assert [f.input_value() for f in fields.values()] == ["3", "1", "1", "600"]
     apply = page.tab.get_by_role("button", name="Apply capacity")
     assert apply.is_disabled()
     fields["eng"].fill("5")
     fields["ci"].fill("2")
     fields["compact"].fill("700")
     page.tab.get_by_role("button", name="Raise compact limit").click()
-    page.tab.get_by_role("button", name="Lower codex share").click()
     assert fields["compact"].input_value() == "750"
-    assert fields["codex"].input_value() == "15"
     page.tab.wait_for_timeout(2500)
     assert page.puts == []
     assert fields["eng"].input_value() == "5"
     apply.click()
     page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('pending')")
-    assert page.puts == [{"action": "set", "max_eng": 5, "max_ci": 2, "codex_share": 15, "compact_limit": 750}]
+    assert page.puts == [{"action": "set", "max_eng": 5, "max_ci": 2, "compact_limit": 750}]
     assert apply.is_disabled()
 
 
@@ -323,7 +320,6 @@ def test_master_affinity_shows_the_pending_or_failed_order(open_page, order, tex
     [
         ("eng", "51", "eng must be a whole number from 0 to 50"),
         ("ci", "1.5", "ci must be a whole number from 0 to 50"),
-        ("codex", "abc", "codex share must be a whole number from 0 to 100"),
         ("compact", "90", "compact limit must be a whole number from 100 to 1000"),
     ],
 )
@@ -350,8 +346,8 @@ def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
           };
         }"""
     )
-    assert len(boxes["row"]) == 9
-    caps, (affinity, apply) = boxes["row"][:7], boxes["row"][7:]
+    assert len(boxes["row"]) == 8
+    caps, (affinity, apply) = boxes["row"][:6], boxes["row"][6:]
     middle = (caps[0][0] + caps[0][1]) / 2
     assert all(top <= middle <= bottom for top, bottom in caps)
     last = (affinity[0] + affinity[1]) / 2
@@ -409,6 +405,33 @@ def test_an_agents_table_without_agents_spans_all_nine_columns(open_page):
     page = open_page(status(agents=[]))
     assert page.tab.eval_on_selector("#swarm-agents td", "td => td.colSpan") == 9
     assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 9
+
+
+def test_agents_table_lists_live_agents_first_and_pages_the_finished_ones_newest_first(open_page):
+    payload = status()
+    finished = [
+        {
+            "name": f"done-{i}",
+            "lane": "eng",
+            "task": f"t{i}",
+            "state": "finished",
+            "status": "finished",
+            "started_at": NOW_MS - 9_000_000,
+            "state_since": NOW_MS - 8_000_000 + i,
+            "inbox": [],
+        }
+        for i in range(120)
+    ]
+    payload["agents"] = finished[:60] + payload["agents"] + finished[60:]
+    page = open_page(payload, width=1920)
+    rows = page.table("swarm-agents")
+    assert [row[0] for row in rows[:2]] == ["master-1", "eng-58"]
+    assert [row[0] for row in rows[2:52]] == [f"done-{i}" for i in range(119, 69, -1)]
+    assert all(row[6] == "FINISHED" and row[8] == "" for row in rows[2:52])
+    assert [cell.lower() for cell in rows[52]] == ["show 50 more finished agents · 70 left"]
+    assert page.text("#agents-count").lower() == "2 live · 120 finished"
+    page.tab.locator("#swarm-agents .page-more button").click()
+    assert len(page.table("swarm-agents")) == 2 + 100 + 1
 
 
 OFFERED = [
@@ -550,53 +573,53 @@ def test_every_button_is_flat_at_rest(open_page):
 def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(open_page):
     page = open_page()
     assert page.table("swarm-quota") == [
-        ["tccgma", "claude", "92%", "53m", "78%", "4d15h", "−\n2/7\n+", ""],
-        ["luna", "claude", "64%", "2h05m", "51%", "6d00h", "−\n1/3\n+", "MASTER"],
-        ["default", "codex", "—", "—", "61%", "3d10h", "−\n0/3\n+", ""],
+        ["tccgma", "claude", "—", "92%", "53m", "78%", "4d15h", "—", "2/6", ""],
+        ["luna", "claude", "—", "64%", "2h05m", "51%", "6d00h", "—", "1/4", "MASTER"],
+        ["default", "codex", "—", "—", "—", "61%", "3d10h", "—", "0/—", ""],
     ]
     assert page.text("#quota-count").lower() == "3 accounts · probed 2m ago"
 
 
-def test_each_sessions_cell_reads_minus_value_plus_and_a_step_sets_that_account_cap(open_page):
+def test_the_quota_table_with_its_capacity_line_fits_its_box_at_1920(open_page):
+    payload = status()
+    payload["quota_capacity"] = {
+        "configured": {"eng": 4, "ci": 1, "plan": 1},
+        "effective": {"eng": 2, "ci": 1, "plan": 0},
+        "reason": "accounts are closed; Claude has 1 free seats and Codex has 1 free seats",
+        "lanes": ["eng", "ci", "plan"],
+        "accounts": [
+            {
+                "harness": "claude",
+                "name": "tccgma",
+                "state": "CLOSED",
+                "sessions": 2,
+                "five_left": 92,
+                "week_left": 78,
+                "routing": 78,
+            }
+        ],
+        "at": NOW_MS - 7 * 60_000,
+    }
+    page = open_page(payload, 1920)
+    scroll = page.tab.eval_on_selector("#quota-box .sw-scroll", "s => [s.scrollWidth, s.clientWidth]")
+    assert scroll[0] == scroll[1]
+    assert page.table("swarm-quota")[0][2] == "CLOSED"
+    assert page.text("#quota-capacity").split("\n") == [
+        "ENG 2 OF 4 · CI 1 OF 1 · PLAN 0 OF 1",
+        "changed 7m ago",
+        "because accounts are closed; Claude has 1 free seats and Codex has 1 free seats",
+    ]
+    table, line = page.box("quota-table"), page.box("quota-capacity")
+    assert abs(table["x"] - line["x"]) < 1
+
+
+def test_the_sessions_cell_reads_plain_value_over_cap(open_page):
     page = open_page()
     parts = page.tab.eval_on_selector_all(
-        "#swarm-quota tr:first-child .sw-sessions > *",
-        "els => els.map(e => [e.tagName, e.innerText, e.getAttribute('aria-label'), e.getBoundingClientRect().left])",
+        "#swarm-quota tr:first-child .sw-sessions-value",
+        "els => els.map(e => [e.tagName, e.innerText])",
     )
-    assert [(tag, text) for tag, text, _, _ in parts] == [("BUTTON", "−"), ("SPAN", "2/7"), ("BUTTON", "+")]
-    assert parts[0][2] == "Lower the claude session cap for tccgma"
-    assert parts[0][3] < parts[1][3] < parts[2][3]
-    page.tab.get_by_role("button", name="Raise the codex session cap for default").click()
-    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('hive tick')")
-    lower = page.tab.get_by_role("button", name="Lower the claude session cap for tccgma")
-    page.tab.wait_for_function("b => !b.disabled", arg=lower.element_handle())
-    lower.click()
-    for _ in range(50):
-        if len(page.puts) == 2:
-            break
-        page.tab.wait_for_timeout(100)
-    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('hive tick')")
-    assert page.puts == [
-        {"action": "session_cap", "account": "default", "harness": "codex", "cap": 4},
-        {"action": "session_cap", "account": "tccgma", "harness": "claude", "cap": 6},
-    ]
-
-
-def test_a_session_cap_of_one_cannot_step_lower(open_page):
-    payload = status()
-    payload["quota"]["rows"][0]["cap"] = 1
-    page = open_page(payload)
-    assert page.tab.get_by_role("button", name="Lower the claude session cap for tccgma").is_disabled()
-    assert page.tab.get_by_role("button", name="Raise the claude session cap for tccgma").is_enabled()
-
-
-def test_a_queued_session_cap_command_names_itself_in_the_note(open_page):
-    payload = status(
-        commands=[{"command": "swarm", "argv": ["session-cap", "luna", "5", "--harness", "claude"], "state": "pending"}]
-    )
-    page = open_page(payload)
-    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.length > 0")
-    assert page.text("#swarm-note") == "Set session cap: pending, waiting for the hive tick"
+    assert parts == [["SPAN", "2/6"]]
 
 
 def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_page):
@@ -610,7 +633,6 @@ def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_
         ["eng", ["−", "3", "+"]],
         ["ci", ["−", "1", "+"]],
         ["plan", ["−", "1", "+"]],
-        ["codex share", ["−", "20%", "+"]],
         ["compact limit", ["−", "600k", "+"]],
         ["effort min", ["−", "medium", "+"]],
         ["effort max", ["−", "high", "+"]],

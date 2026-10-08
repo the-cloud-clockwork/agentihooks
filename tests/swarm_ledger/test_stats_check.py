@@ -122,6 +122,7 @@ def test_the_stats_card_has_no_stats_check_row():
         "const statsSent = null;\n"
         + function_source("statsCheck")
         + function_source("statsCheckText")
+        + function_source("timeLeftInputs")
         + function_source("renderStats")
         + "\nconst assert = require('node:assert/strict');\n"
         "renderStats();\n"

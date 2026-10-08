@@ -1,4 +1,4 @@
-"""Queue rank of a swarm task: the tick claims eligible tasks highest rank first, ledger order within a rank.
+"""Queue rank of a swarm task: the tick claims eligible tasks highest rank first (see scripts.swarm.claim_order).
 
 Distinct from the Priorities panel, which holds operator decisions. `next` is an alias that stores urgent.
 """

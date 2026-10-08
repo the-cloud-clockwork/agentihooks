@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.swarm import prompt
+from scripts.swarm import cli, prompt
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -61,6 +61,25 @@ def test_an_ops_task_cannot_be_marked_done_without_command_evidence(env, monkeyp
     assert run("sw", "done", "--command", "kubectl get pods", "--output", "cache-0 Running") == 0
     assert ledger.rows["t1"]["state"] == "done"
     assert ledger.rows["t1"]["proof"] == {"command": "kubectl get pods", "output": "cache-0 Running"}
+
+
+@pytest.mark.parametrize(
+    "finding",
+    ["my notes", "See https://example.com/artifact", "https://example.com/artifact explains the result", ""],
+)
+def test_research_done_refusal_explains_the_single_artifact_link(env, monkeypatch, capsys, finding):  # noqa: F811
+    store, ledger = _start(env, "research")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    capsys.readouterr()
+
+    assert cli.main(["sw", "done", "--finding", finding]) == 1
+
+    assert capsys.readouterr().err == (
+        "swarm: a research task is done only with its proof: "
+        "--finding must be a single link to the artifact; put prose in a task comment\n"
+    )
+    assert ledger.rows["t1"]["state"] == "claimed"
+    assert next(a for a in store.agents("sw") if a.name == "engineer@a1b2c3-0001").state != "finished"
 
 
 def test_troubleshoot_and_research_close_with_their_own_proof(env, monkeypatch):  # noqa: F811

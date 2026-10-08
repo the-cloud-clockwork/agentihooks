@@ -16,15 +16,21 @@ def source_sizes(root: Path, files: list[str]) -> dict[str, int]:
     return {path: (root / path).stat().st_size for path in files}
 
 
-def grouped_files(root: Path, files: list[str]) -> set[str]:
-    return {
-        path
-        for path in files
-        if any(
-            isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "xdist_group"
+def grouped_files(root: Path, files: list[str]) -> dict[str, str]:
+    grouped = {}
+    for path in files:
+        names = {
+            ast.unparse(
+                node.args[0]
+                if node.args
+                else next((kw.value for kw in node.keywords if kw.arg == "name"), ast.Constant("default"))
+            )
             for node in ast.walk(ast.parse((root / path).read_text()))
-        )
-    }
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "xdist_group"
+        }
+        if names:
+            grouped[path] = "_".join(sorted(names))
+    return grouped
 
 
 def assign_files(
@@ -45,30 +51,45 @@ def assign_files(
     return _assign_work(seconds, serial, collection, shards, workers)
 
 
-def assign_nodes(durations: dict[str, float], shards: int, grouped: set[str], workers: int) -> list[list[str]]:
+def assign_nodes(
+    durations: dict[str, float], shards: int, grouped: set[str] | dict[str, str], workers: int
+) -> list[list[str]]:
     serial = {node: seconds if node.split("::", 1)[0] in grouped else 0.0 for node, seconds in durations.items()}
-    return _assign_work(durations, serial, dict.fromkeys(durations, 0.0), shards, workers)
+    serial_groups = (
+        {node: grouped.get(node.split("::", 1)[0], "") for node in durations} if isinstance(grouped, dict) else None
+    )
+    return _assign_work(durations, serial, dict.fromkeys(durations, 0.0), shards, workers, serial_groups)
 
 
 def _assign_work(
-    seconds: dict[str, float], serial: dict[str, float], collection: dict[str, float], shards: int, workers: int
+    seconds: dict[str, float],
+    serial: dict[str, float],
+    collection: dict[str, float],
+    shards: int,
+    workers: int,
+    serial_groups: dict[str, str] | None = None,
 ) -> list[list[str]]:
     loads = [0.0] * shards
-    serial_loads = [0.0] * shards
+    serial_loads: list[dict[str, float]] = [{} for _ in range(shards)]
     collection_loads = [0.0] * shards
     groups: list[list[str]] = [[] for _ in range(shards)]
     for path in sorted(seconds, key=lambda f: (-max(seconds[f] / workers, serial[f]) - collection[f], f)):
+        group = serial_groups[path] if serial_groups is not None else ""
         lightest = min(
             range(shards),
             key=lambda i: (
-                max((loads[i] + seconds[path]) / workers, serial_loads[i] + serial[path])
+                max(
+                    (loads[i] + seconds[path]) / workers,
+                    max(serial_loads[i].values(), default=0.0),
+                    serial_loads[i].get(group, 0.0) + serial[path],
+                )
                 + collection_loads[i]
                 + collection[path],
                 loads[i],
             ),
         )
         loads[lightest] += seconds[path]
-        serial_loads[lightest] += serial[path]
+        serial_loads[lightest][group] = serial_loads[lightest].get(group, 0.0) + serial[path]
         collection_loads[lightest] += collection[path]
         groups[lightest].append(path)
     return groups
@@ -99,5 +120,7 @@ def warm_imports(modules: list[str], workers: int) -> list[int]:
 
 def setup_nodes_in_parallel(manager, putevent) -> list:
     manager.config.hook.pytest_xdist_setupnodes(config=manager.config, specs=manager.specs)
+    if hasattr(manager.config, "_tmp_path_factory"):
+        manager.config._tmp_path_factory.getbasetemp()
     with ThreadPoolExecutor(len(manager.specs)) as pool:
         return list(pool.map(lambda spec: manager.setup_node(spec, putevent), manager.specs))

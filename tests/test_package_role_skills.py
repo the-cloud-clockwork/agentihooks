@@ -113,3 +113,35 @@ def test_role_home_lists_its_own_role_skill_only(world, role):
     assert listed & set(ROLE_SKILLS.values()) == {ROLE_SKILLS[role]}
     assert (out / "skills" / ROLE_SKILLS[role]).resolve() == _skill(role).parent
     assert f"{ROLE_SKILLS[role]} skill" in (ROLES / role / "CLAUDE.md").read_text()
+
+
+@pytest.mark.parametrize(
+    "skill",
+    [
+        _skill("engineer"),
+        ROLES / "engineer" / ".claude" / "rules" / "engineer-role.md",
+        ROLES.parent / "skills" / "worktree" / "SKILL.md",
+    ],
+)
+def test_engineer_guidance_dequeues_a_queued_pull_request_before_pushing_a_fix(skill):
+    text = " ".join(skill.read_text().split())
+    steps = (
+        "only queues",
+        "agentihooks swarm <slug> merge queue",
+        "refuses a push",
+        "dequeue it first",
+        "agentihooks swarm <slug> merge dequeue",
+        "then push",
+        "checks pass",
+        "queue it again",
+    )
+
+    assert [step for step in steps if step not in text] == []
+    assert [text.index(step) for step in steps] == sorted(text.index(step) for step in steps)
+
+
+@pytest.mark.parametrize("skill", [_skill("engineer"), ROLES / "engineer" / ".claude" / "rules" / "engineer-role.md"])
+def test_swarm_engineer_guidance_names_no_raw_gh_merge_or_dequeue_mutation(skill):
+    text = skill.read_text()
+
+    assert [raw for raw in ("dequeuePullRequest", "gh pr merge") if raw in text] == []

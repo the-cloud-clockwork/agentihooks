@@ -163,6 +163,231 @@ class Done(WtBase):
         self.assertTrue(self.branch_exists("unmerged-one"))
         self.assertIn("kept", result.stderr)
 
+    def test_done_preserves_an_open_pull_request_worktree_until_the_queue_lands(self):
+        dest = self._new("queue-one")
+        state = Path(self.tmp) / "pr-state"
+        state.write_text("open")
+        gh = self.bin / "gh"
+        gh.write_text(
+            f"#!{BASH}\nset -euo pipefail\n"
+            f'current="$(<"{state}")"\n'
+            'if [[ "$current" != merged && ( "$*" == *"--state all"* || "$current" != closed ) ]]; then\n'
+            '  echo "https://github.com/o/r/pull/9"\n'
+            "fi\n"
+        )
+        gh.chmod(0o755)
+        for value in ("open", "dropped", "closed"):
+            state.write_text(value)
+            result = self.run_wt("done", "queue-one", "--repo", str(self.primary))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not merged", result.stderr)
+            self.assertTrue(dest.is_dir())
+            self.assertEqual(self.branch_of(dest), "queue-one")
+            self.assertTrue(self.branch_exists("queue-one"))
+        state.write_text("merged")
+        result = self.run_wt("done", "queue-one", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("queue-one"))
+
+    def test_done_deletes_the_remote_branch_only_after_the_pull_request_merges(self):
+        dest = self._new("remote-queue")
+        _git(dest, "push", "--quiet", "-u", "origin", "remote-queue", env=self.gitenv)
+        state = Path(self.tmp) / "remote-pr-state"
+        gh = self.bin / "gh"
+        gh.write_text(
+            f"#!{BASH}\nset -euo pipefail\n"
+            f'current="$(<"{state}")"\n'
+            'if [[ "$current" == missing ]]; then exit 0; fi\n'
+            'if [[ "$current" == merged ]]; then\n'
+            '  echo "MERGED"\n'
+            "else\n"
+            '  echo "https://github.com/o/r/pull/9"\n'
+            "fi\n"
+        )
+        gh.chmod(0o755)
+        for value in ("queued", "open", "closed", "missing"):
+            state.write_text(value)
+            result = self.run_wt("done", "remote-queue", "--repo", str(self.primary), "--force")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("merged", result.stderr)
+            self.assertTrue(dest.is_dir())
+            self.assertTrue(self.branch_exists("remote-queue"))
+            self.assertEqual(
+                subprocess.run(
+                    ["git", "-C", str(self.origin), "show-ref", "--verify", "--quiet", "refs/heads/remote-queue"],
+                    env=self.gitenv,
+                ).returncode,
+                0,
+            )
+        state.write_text("merged")
+        result = self.run_wt("done", "remote-queue", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("remote-queue"))
+        self.assertNotEqual(
+            subprocess.run(
+                ["git", "-C", str(self.origin), "show-ref", "--verify", "--quiet", "refs/heads/remote-queue"],
+                env=self.gitenv,
+            ).returncode,
+            0,
+        )
+
+    def test_done_keeps_the_worktree_when_github_cannot_read_its_pull_request(self):
+        dest = self._new("queue-unknown")
+        gh = self.bin / "gh"
+        gh.write_text(f"#!{BASH}\nset -euo pipefail\nexit 1\n")
+        gh.chmod(0o755)
+        result = self.run_wt("done", "queue-unknown", "--repo", str(self.primary))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot read", result.stderr)
+        self.assertTrue(dest.is_dir())
+        self.assertTrue(self.branch_exists("queue-unknown"))
+
+    def test_done_keeps_a_published_worktree_when_github_cli_is_missing_even_with_force(self):
+        dest = self._new("queue-no-gh")
+        _git(dest, "push", "--quiet", "-u", "origin", "queue-no-gh", env=self.gitenv)
+        for flags in ((), ("--force",)):
+            result = self.run_wt("done", "queue-no-gh", "--repo", str(self.primary), *flags)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("cannot verify", result.stderr)
+            self.assertTrue(dest.is_dir())
+            self.assertTrue(self.branch_exists("queue-no-gh"))
+
+    def _published_with_pull_requests(self, name, pulls):
+        jq = shutil.which("jq")
+        if not jq:
+            self.skipTest("jq is required to evaluate the gh query")
+        dest = self._new(name)
+        (dest / "probe.txt").write_text("probe\n")
+        _git(dest, "add", "probe.txt", env=self.gitenv)
+        _git(dest, "commit", "--quiet", "-m", "probe", env=self.gitenv)
+        _git(dest, "push", "--quiet", "-u", "origin", name, env=self.gitenv)
+        listing = Path(self.tmp) / f"{name}-pulls.json"
+        listing.write_text(pulls)
+        gh = self.bin / "gh"
+        gh.write_text(
+            f"#!{BASH}\nset -euo pipefail\n"
+            'query=""; state=all\n'
+            "while (($#)); do\n"
+            '  case "$1" in --jq) query="$2"; shift ;; --state) state="$2"; shift ;; esac\n'
+            "  shift\n"
+            "done\n"
+            f'"{jq}" -r --arg s "$state" '
+            '"map(select(\\$s == \\"all\\" or .state == (\\$s | ascii_upcase))) | ($query) | values"'
+            f' < "{listing}"\n'
+        )
+        gh.chmod(0o755)
+        return dest
+
+    def remote_branch_exists(self, name):
+        return (
+            subprocess.run(
+                ["git", "-C", str(self.origin), "show-ref", "--verify", "--quiet", f"refs/heads/{name}"],
+                env=self.gitenv,
+            ).returncode
+            == 0
+        )
+
+    def test_done_force_drops_a_worktree_whose_pull_request_closed_unmerged(self):
+        dest = self._published_with_pull_requests(
+            "closed-probe", '[{"state": "CLOSED", "url": "https://github.com/o/r/pull/7"}]'
+        )
+        result = self.run_wt("done", "closed-probe", "--repo", str(self.primary), "--force")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("closed-probe"))
+        self.assertTrue(self.remote_branch_exists("closed-probe"))
+        self.assertIn(f"wt: removed {dest} and branch closed-probe\n", result.stdout)
+        self.assertNotIn("kept", result.stderr)
+
+    def test_done_without_force_keeps_a_worktree_whose_pull_request_closed_unmerged(self):
+        dest = self._published_with_pull_requests(
+            "closed-kept", '[{"state": "CLOSED", "url": "https://github.com/o/r/pull/7"}]'
+        )
+        result = self.run_wt("done", "closed-kept", "--repo", str(self.primary))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(
+            result.stderr,
+            "wt: pull request https://github.com/o/r/pull/7 was closed without merging"
+            " — pass --force to drop the worktree and branch closed-kept\n",
+        )
+        self.assertTrue(dest.is_dir())
+        self.assertTrue(self.branch_exists("closed-kept"))
+        self.assertTrue(self.remote_branch_exists("closed-kept"))
+
+    def test_done_refuses_an_open_or_queued_pull_request_even_with_force(self):
+        pulls = {
+            "open": '[{"state": "OPEN", "url": "https://github.com/o/r/pull/8"}]',
+            "queued-reads-open": '[{"state": "OPEN", "url": "https://github.com/o/r/pull/8"},'
+            ' {"state": "CLOSED", "url": "https://github.com/o/r/pull/6"}]',
+        }
+        for kind, listing in pulls.items():
+            name = f"{kind}-pull"
+            dest = self._published_with_pull_requests(name, listing)
+            for flags in ((), ("--force",)):
+                result = self.run_wt("done", name, "--repo", str(self.primary), *flags)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(
+                    result.stderr,
+                    "wt: pull request https://github.com/o/r/pull/8 is not merged"
+                    " — wait for it to land before worktree teardown\n",
+                )
+                self.assertTrue(dest.is_dir())
+                self.assertTrue(self.branch_exists(name))
+                self.assertTrue(self.remote_branch_exists(name))
+
+
+CONCURRENT_GIT = """#!{bash}
+"{real}" "$@"
+rc=$?
+if [[ " $* " == *" fetch "* ]]; then
+  GIT_EXEC_PATH="{exec_path}" "{real}" -C "{primary}" fetch --quiet origin dev side
+fi
+exit $rc
+"""
+
+
+class DoneSync(WtBase):
+    def _advance(self, clone, branch, name):
+        _git(clone, "checkout", "--quiet", "-B", branch, "origin/dev", env=self.gitenv)
+        (clone / name).write_text(f"{name}\n")
+        _git(clone, "add", name, env=self.gitenv)
+        _git(clone, "commit", "--quiet", "-m", name, env=self.gitenv)
+        _git(clone, "push", "--quiet", "origin", branch, env=self.gitenv)
+
+    def _arm_concurrent_fetch(self):
+        real = shutil.which("git")
+        exec_path = subprocess.run([real, "--exec-path"], capture_output=True, text=True, check=True).stdout.strip()
+        shim = Path(self.tmp) / "git-exec"
+        shim.mkdir()
+        for entry in Path(exec_path).iterdir():
+            os.symlink(entry, shim / entry.name)
+        script = CONCURRENT_GIT.format(bash=BASH, real=real, exec_path=exec_path, primary=self.primary)
+        for path in (shim / "git", self.bin / "git"):
+            path.unlink(missing_ok=True)
+            path.write_text(script)
+            path.chmod(0o755)
+        self.env["GIT_EXEC_PATH"] = str(shim)
+
+    def test_done_syncs_dev_while_another_session_fetches_two_advanced_branches(self):
+        self.run_wt("new", "racing", "--repo", str(self.primary))
+        other = Path(self.tmp) / "other"
+        _git(Path(self.tmp), "clone", "--quiet", str(self.origin), str(other), env=self.gitenv)
+        self._advance(other, "dev", "dev-advance.txt")
+        self._advance(other, "side", "side-advance.txt")
+        dev_sha = subprocess.run(
+            ["git", "-C", str(self.origin), "rev-parse", "dev"], capture_output=True, text=True, env=self.gitenv
+        ).stdout.strip()
+        self._arm_concurrent_fetch()
+        result = self.run_wt("done", "racing", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("local dev synced to origin/dev", result.stdout, result.stderr)
+        head = subprocess.run(
+            ["git", "-C", str(self.primary), "rev-parse", "HEAD"], capture_output=True, text=True, env=self.gitenv
+        ).stdout.strip()
+        self.assertEqual(head, dev_sha)
+
 
 class Limits(WtBase):
     def test_new_refuses_below_the_free_space_floor(self):

@@ -754,7 +754,24 @@ class CopilotAdapter:
             _atomic_write(settings_path, json.dumps(settings, indent=2) + "\n")
 
     def register_mcp(self, servers: dict) -> None:
-        """Merge a layer of MCP servers into ~/.copilot/mcp-config.json.
+        """Merge a layer of MCP servers into ~/.copilot/mcp-config.json."""
+        _i = _install_module()
+        config_path = self.home() / "mcp-config.json"
+        doc = self._load_json(config_path)
+        table = doc.get("mcpServers")
+        table = dict(table) if isinstance(table, dict) else {}
+        entries = self.mcp_entries(servers)
+        table.update(entries)
+        added = list(entries)
+
+        doc["mcpServers"] = table
+        _atomic_write(config_path, json.dumps(doc, indent=2) + "\n")
+        if added:
+            record_managed_mcp(self.name, added)
+            _i._cprint(f"  [OK] Copilot MCP servers: {', '.join(added)}")
+
+    def mcp_entries(self, servers: dict) -> dict:
+        """Translate Claude ``.mcp.json`` entries to Copilot ones, writing nothing.
 
         Claude ``.mcp.json`` entries translate almost 1:1. Unlike codex,
         Copilot has an SSE client, so no transport is dropped. It has no
@@ -764,16 +781,15 @@ class CopilotAdapter:
         drop-and-warn.
         """
         _i = _install_module()
-        config_path = self.home() / "mcp-config.json"
-        doc = self._load_json(config_path)
-        table = doc.get("mcpServers")
-        table = dict(table) if isinstance(table, dict) else {}
-
         from hooks.secrets import scan as _scan_secrets
 
-        added: list[str] = []
+        table: dict = {}
         for name, spec in servers.items():
             spec = dict(spec)
+            if "enabled_tools" in spec:
+                spec.setdefault("tools", spec["enabled_tools"])
+            if "disabled_tools" in spec:
+                spec.setdefault("excludeTools", spec["disabled_tools"])
             if drop_if_credentialed(name, spec, "mcp-config.json"):
                 continue
             stype = spec.get("type") or ("local" if spec.get("command") else "http")
@@ -838,7 +854,7 @@ class CopilotAdapter:
                     entry["headers"] = clean_headers
             else:
                 continue
-            if spec.get("tools"):
+            if spec.get("tools") is not None:
                 clean_tools = []
                 for tool in spec["tools"]:
                     hits = _scan_secrets(scannable(str(tool)), mode="strict")
@@ -849,8 +865,7 @@ class CopilotAdapter:
                         )
                         continue
                     clean_tools.append(tool)
-                if clean_tools:
-                    entry["tools"] = clean_tools
+                entry["tools"] = clean_tools
             # Copilot-native fields a Claude .mcp.json cannot express. Passed
             # through when a native mcp-config layer supplies them:
             #   auth/oidc=false  — do NOT attempt OAuth for this server. Without
@@ -874,13 +889,7 @@ class CopilotAdapter:
             entry.setdefault("oidc", False)
 
             table[name] = entry
-            added.append(name)
-
-        doc["mcpServers"] = table
-        _atomic_write(config_path, json.dumps(doc, indent=2) + "\n")
-        if added:
-            record_managed_mcp(self.name, added)
-            _i._cprint(f"  [OK] Copilot MCP servers: {', '.join(added)}")
+        return table
 
     def teardown(self) -> None:
         _i = _install_module()

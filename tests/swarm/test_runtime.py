@@ -23,8 +23,6 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
     )
@@ -47,8 +45,6 @@ def test_spawn_stamps_the_launch_start_before_init_agent_runs(tmp_path, monkeypa
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
     )
@@ -72,8 +68,6 @@ def test_spawn_records_each_launch_step_and_the_host_load(tmp_path, monkeypatch)
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
     )
@@ -110,8 +104,6 @@ def test_a_task_profile_wins_over_the_lane_profile_at_spawn(tmp_path, lanes, tas
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes=lanes,
         autonomy="delegate",
     )
@@ -210,8 +202,6 @@ def test_spawn_records_the_model_and_effort_init_agent_launched_with(tmp_path):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
     )
@@ -231,8 +221,6 @@ def test_a_codex_spawn_records_the_model_and_effort_init_agent_launched_with(tmp
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
     )
@@ -255,7 +243,7 @@ def _spawn_env(tmp_path, monkeypatch, task=None, **config):
             repo=str(tmp_path),
             code="a1b2c3",
             lanes={},
-            **{"autonomy": "delegate", "codex_share": None, "codex_min_week_left": 0, **config},
+            **{"autonomy": "delegate", **config},
         ),
         "eng",
         "engineer@a1b2c3-0001",
@@ -313,8 +301,6 @@ def _spawn_seen(tmp_path, lanes, lane="eng"):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes=lanes,
         autonomy="delegate",
     )
@@ -325,7 +311,6 @@ def _spawn_seen(tmp_path, lanes, lane="eng"):
 @pytest.mark.parametrize("pin", ["claude", "codex"])
 @pytest.mark.parametrize("saved_kind", ["launch_assignment", "handoff_envelope", "none"])
 def test_a_lane_pin_wins_over_an_opposite_saved_harness(tmp_path, monkeypatch, pin, saved_kind):
-    from scripts import agent_choice
     from scripts.swarm import model_pick
 
     opposite = "codex" if pin == "claude" else "claude"
@@ -353,7 +338,6 @@ def test_a_lane_pin_wins_over_an_opposite_saved_harness(tmp_path, monkeypatch, p
         seen["classifier_harness"] = harness
         return model_pick.ModelPick("", "high", "classifier", 0.9)
 
-    monkeypatch.setattr(agent_choice, "codex_open", lambda *args: False)
     monkeypatch.setattr(model_pick, "pick", pick)
     runtime = HerdrRuntime(
         home=tmp_path,
@@ -365,12 +349,10 @@ def test_a_lane_pin_wins_over_an_opposite_saved_harness(tmp_path, monkeypatch, p
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=0,
-        codex_min_week_left=5,
         lanes={"eng": {"agent": pin, "effort": "auto"}},
         autonomy="delegate",
     )
-    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task, spawns={"claude": 20})
+    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task)
     argv = seen["argv"]
     assert argv[argv.index("--agent") + 1] == pin
     assert placed.harness == pin
@@ -438,51 +420,15 @@ def test_the_lane_role_replaces_the_default_role_in_the_prompt(tmp_path):
     assert text.startswith("You are engineer@a1b2c3-0001, a reviewer who only reads in swarm sw,")
 
 
-def test_an_auto_work_lane_spawn_asks_for_the_codex_share_with_the_swarm_settings(tmp_path, monkeypatch):
-    from scripts import agent_choice
-
-    seen = {}
-
-    def shared(requested, environ, spawns, share, min_week_left, choose):
-        seen.update(requested=requested, spawns=spawns, share=share, min_week_left=min_week_left)
-        return "codex", "codex share 0/2 below 30%"
-
-    def run(argv, **kwargs):
-        seen["argv"] = argv
-        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
-
-    monkeypatch.setattr(agent_choice, "choose_shared", shared)
-    monkeypatch.delenv("AGENTIHOOKS_SWARM_CODEX_SHARE", raising=False)
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_MIN_WEEK_LEFT", "7")
-    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "priority"))
-    config = SimpleNamespace(
-        slug="sw",
-        repo=str(tmp_path),
-        code="a1b2c3",
-        compact_limit=0,
-        lanes={"eng": {"agent": "auto"}},
-        autonomy="delegate",
-        codex_share=None,
-        codex_min_week_left=None,
-    )
-    runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"}, spawns={"claude": 2})
-    assert seen["requested"] == "" and seen["spawns"] == {"claude": 2}
-    assert (seen["share"], seen["min_week_left"]) == (30, 7)
-    assert seen["argv"][seen["argv"].index("--agent") + 1] == "codex"
-
-
 @pytest.mark.parametrize(
     ("reason", "choice"),
-    [("fallthrough: claude is at its session cap", "overflow"), ("codex share 0/2 below 30%", "share")],
+    [("priority", "other"), ("rotation", "rotation"), ("fallthrough: claude is at its session cap", "overflow")],
 )
-def test_a_spawn_carries_the_router_choice_kind(tmp_path, monkeypatch, reason, choice):
-    from scripts import agent_choice
-
+def test_a_spawn_carries_the_router_choice_kind(tmp_path, reason, choice):
     def run(argv, **kwargs):
         return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
-    monkeypatch.setattr(agent_choice, "choose_shared", lambda *args, **kwargs: ("codex", reason))
-    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "priority"))
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("codex", reason))
     config = SimpleNamespace(
         slug="sw",
         repo=str(tmp_path),
@@ -490,98 +436,9 @@ def test_a_spawn_carries_the_router_choice_kind(tmp_path, monkeypatch, reason, c
         compact_limit=0,
         lanes={"eng": {"agent": "auto"}},
         autonomy="delegate",
-        codex_share=20,
-        codex_min_week_left=5,
     )
-    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"}, spawns={})
+    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     assert placed.choice == choice
-
-
-@pytest.mark.parametrize(
-    ("profile", "lane_agent", "harness"),
-    [("frontend", "auto", "claude"), ("frontend", "claude", "claude"), ("engineer", "auto", "codex")],
-)
-def test_a_task_naming_a_claude_only_profile_spawns_on_claude_at_codex_share_one_hundred(
-    tmp_path, monkeypatch, profile, lane_agent, harness
-):
-    from scripts import agent_choice
-    from scripts.profiles import plugins
-
-    monkeypatch.setattr(plugins, "claude_only", lambda name: name == "frontend")
-    monkeypatch.setattr(agent_choice, "at_cap", lambda *_: False)
-    monkeypatch.setattr(agent_choice, "codex_week_left", lambda *_: 90.0)
-    seen = {}
-
-    def run(argv, **kwargs):
-        seen["argv"] = argv
-        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
-
-    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda requested, environ: (requested or "claude", "x"))
-    config = SimpleNamespace(
-        slug="sw",
-        repo=str(tmp_path),
-        code="a1b2c3",
-        compact_limit=0,
-        lanes={"eng": {"agent": lane_agent}},
-        autonomy="delegate",
-        codex_share=100,
-        codex_min_week_left=5,
-    )
-    task = {"id": "t1", "title": "x", "profile": profile}
-    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task, spawns={"claude": 3})
-    assert seen["argv"][seen["argv"].index("--agent") + 1] == harness
-    assert placed.harness == harness
-
-
-@pytest.mark.parametrize(("lane", "spawns"), [("eng", {"claude": 3}), ("ci", {}), ("plan", {}), ("master", None)])
-@pytest.mark.parametrize("lane_agent", ["auto", "codex"])
-def test_a_zero_codex_share_applies_only_to_auto_lanes(tmp_path, monkeypatch, lane, spawns, lane_agent):
-    from scripts import agent_choice
-
-    monkeypatch.setattr(agent_choice, "codex_week_left", lambda *_: 90.0)
-    seen = {}
-
-    def run(argv, **kwargs):
-        seen["argv"] = argv
-        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
-
-    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda requested, environ: ("codex", "priority"))
-    config = SimpleNamespace(
-        slug="sw",
-        repo=str(tmp_path),
-        code="a1b2c3",
-        compact_limit=0,
-        lanes={lane: {"agent": lane_agent}},
-        autonomy="delegate",
-        codex_share=0,
-        codex_min_week_left=5,
-    )
-    task = {**SEAT_TASKS[lane], "profile": "engineer"}
-    placed = runtime.spawn(config, lane, "engineer@a1b2c3-0001", task, spawns=spawns)
-    expected = "codex" if lane_agent == "codex" else "claude"
-    assert seen["argv"][seen["argv"].index("--agent") + 1] == expected
-    assert placed.harness == expected
-
-
-@pytest.mark.parametrize(("share", "swarm_share", "capacity"), [(0, "30", False), (30, "0", True), (None, "0", False)])
-def test_a_free_codex_slot_counts_only_while_the_codex_share_allows_codex(
-    tmp_path, monkeypatch, share, swarm_share, capacity
-):
-    from scripts import agent_choice
-
-    monkeypatch.setattr(agent_choice, "codex_week_left", lambda *_: 90.0)
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_SHARE", swarm_share)
-
-    def choose(requested, environ):
-        if requested:
-            return requested, "requested"
-        if environ.get("AGENTIHOOKS_AGENT_PRIORITY") == "claude":
-            return "claude", agent_choice.ALL_FULL
-        return "codex", "fallthrough: claude is at its session cap"
-
-    runtime = HerdrRuntime(home=tmp_path, choose=choose)
-    config = SimpleNamespace(codex_share=share, codex_min_week_left=5)
-    assert runtime.has_capacity(config) is capacity
 
 
 def test_a_claude_only_profile_asks_the_plain_choice_for_claude_with_the_environment(tmp_path, monkeypatch):
@@ -604,8 +461,6 @@ def test_a_claude_only_profile_asks_the_plain_choice_for_claude_with_the_environ
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={"eng": {"agent": "auto"}},
         autonomy="delegate",
     )
@@ -701,8 +556,6 @@ def _resuming(tmp_path, reported, harness="claude"):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
     )
@@ -833,8 +686,6 @@ def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", e
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes=lanes if lanes is not None else {name: auto for name in ("eng", "ci", "plan", "master")},
         autonomy="delegate",
     )
@@ -1025,8 +876,6 @@ def test_every_swarm_launch_subscribes_the_brain_overlay_its_profile_renders(
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="full",
     )
@@ -1078,3 +927,172 @@ def test_a_claude_resume_asks_init_agent_for_the_inbox_channel(tmp_path, harness
     runtime.resume(config, agent, "you were restored")
     argv = seen["runs"][0]
     assert ("--inbox-channel" in argv[: argv.index("--")]) is named
+
+
+def test_has_capacity_asks_the_rotation_with_this_environment(tmp_path):
+    import os
+
+    from scripts import agent_choice
+
+    seen, reasons = [], iter(["rotation", agent_choice.ALL_FULL])
+    runtime = HerdrRuntime(
+        home=tmp_path, choose=lambda requested, environ: seen.append((requested, environ)) or ("claude", next(reasons))
+    )
+    assert runtime.has_capacity(None) is True
+    assert runtime.has_capacity(None) is False
+    assert seen[0] == ("", dict(os.environ))
+
+
+def test_quota_capacity_reads_this_environment_and_hands_demand_on(tmp_path, monkeypatch):
+    import os
+
+    from scripts.swarm import capacity
+
+    seen = {}
+    monkeypatch.setattr(
+        capacity, "accounts", lambda environ, now, refresh: seen.update(environ=environ, now=now, refresh=refresh) or []
+    )
+    monkeypatch.setattr(
+        capacity,
+        "calculate",
+        lambda config, rows, agents, demand, requirements: (
+            seen.update(demand=demand) or {"allocation": {}, "placements": {}}
+        ),
+    )
+    runtime = HerdrRuntime(home=tmp_path)
+    runtime.quota_capacity(None, [], 5.0, {"eng": 1})
+    assert seen == {"environ": dict(os.environ), "now": 5.0, "refresh": True, "demand": {"eng": 1}}
+    runtime.quota_capacity(None, [], 5.0, {"eng": 0})
+    assert seen["refresh"] is False
+
+
+def test_rotation_picks_the_fewest_session_seat_or_asks_choose(tmp_path):
+    from scripts import agent_choice
+    from scripts.swarm import capacity
+
+    calls = []
+    runtime = HerdrRuntime(
+        home=tmp_path, choose=lambda requested, environ: calls.append(requested) or ("codex", "requested")
+    )
+    assert runtime._rotation("", {}) == ("codex", "requested")
+    runtime._quota_accounts = [
+        capacity.Account("claude", "a", "OPEN", 2, 90, 90, 6),
+        capacity.Account("codex", "cx", "OPEN", 0, 90, 90, 6),
+    ]
+    assert runtime._rotation("", {}) == ("codex", "rotation")
+    assert runtime._rotation("claude", {}) == ("codex", "requested")
+    runtime._quota_accounts = [capacity.Account("codex", "cx", "CLOSED", 0, 90, 90, 0)]
+    assert runtime._rotation("", {}) == ("claude", agent_choice.ALL_FULL)
+    assert calls == ["", "claude"]
+
+
+def test_a_saved_account_is_kept_while_it_has_a_seat(tmp_path):
+    from scripts.swarm import capacity
+
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    saved = {
+        "profile": "engineer",
+        "harness": "claude",
+        "model": "opus",
+        "effort": "high",
+        "account": "old",
+        "model_source": "handoff",
+    }
+    runtime = HerdrRuntime(
+        home=tmp_path, run=run, choose=lambda requested, environ: (requested or "claude", "requested")
+    )
+    runtime._quota_accounts = [
+        capacity.Account("claude", "fresh", "OPEN", 0, 90, 90, 6),
+        capacity.Account("claude", "old", "OPEN", 3, 90, 90, 6),
+    ]
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    task = {"id": "t1", "title": "x", "profile": "engineer", "launch_assignment": saved}
+    runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task)
+    argv = seen["argv"]
+    assert argv[argv.index("--route") + 1] == "old"
+
+
+@pytest.mark.parametrize("harness,model", [("claude", "opus"), ("codex", "gpt-6.1-sol")])
+@pytest.mark.parametrize("reason,expected", [("quota", "fresh"), ("recycle", "old")])
+def test_handoff_account_selection_preserves_run_options(tmp_path, harness, model, reason, expected):
+    from scripts.swarm import capacity
+
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    saved = {
+        "profile": "engineer",
+        "harness": harness,
+        "model": model,
+        "effort": "high",
+        "account": "old",
+        "overlays": ["brain"],
+        "profile_decision": {"bundle_revision": "a" * 40},
+    }
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda requested, environ: (requested, "requested"))
+    runtime._quota_accounts = [
+        capacity.Account(harness, "old", "OPEN", 0, 5, 90, 2),
+        capacity.Account(harness, "fresh", "OPEN", 1, 90, 90, 6),
+    ]
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    task = {
+        "id": "t1",
+        "title": "x",
+        "handoff": "saved handoff",
+        "handoff_envelope": {"reason": reason, "seat": "eng-2@sw", "launch": saved},
+        "launch_assignment": saved,
+    }
+    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task)
+    argv = seen["argv"]
+    assert argv[argv.index("--route") + 1] == expected
+    assert argv[argv.index("--profile") + 1] == "engineer"
+    assert argv[argv.index("--overlay") + 1] == "brain"
+    assert argv[argv.index("--agent") + 1] == harness
+    if harness == "claude":
+        assert argv[argv.index("--model") + 1] == model
+        assert argv[argv.index("--effort") + 1] == "high"
+    else:
+        assert argv[argv.index("-m") + 1] == model
+        assert 'model_reasoning_effort="high"' in argv
+    assert placed.overlays == ["brain"]
+    assert task["handoff_envelope"]["seat"] == "eng-2@sw"
+
+
+@pytest.mark.parametrize("harness,model", [("claude", "opus"), ("codex", "gpt-6.1-sol")])
+def test_quota_handoff_without_another_account_keeps_the_handoff(tmp_path, harness, model):
+    from scripts.swarm import capacity
+    from scripts.swarm.tick import SpawnError
+
+    saved = {"profile": "engineer", "harness": harness, "model": model, "effort": "high", "account": "old"}
+    runtime = HerdrRuntime(
+        home=tmp_path,
+        run=lambda *args, **kwargs: pytest.fail("must not launch on the depleted account"),
+        choose=lambda requested, environ: (requested, "requested"),
+    )
+    runtime._quota_accounts = [capacity.Account(harness, "old", "OPEN", 0, 5, 90, 2)]
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    task = {
+        "id": "t1",
+        "title": "x",
+        "handoff": "saved handoff",
+        "handoff_envelope": {"reason": "quota", "seat": "eng-2@sw", "launch": saved},
+    }
+    with pytest.raises(SpawnError, match="no .* account has placeable quota seats"):
+        runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task)
+    assert task["handoff"] == "saved handoff"
+    assert task["handoff_envelope"]["launch"] == saved
+    assert runtime._quota_accounts[0].sessions == 0

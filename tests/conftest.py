@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests import installer_isolation, ledger_guard, swarm_v2_isolation
+from tests import installer_isolation, ledger_guard, redis_key_guard, swarm_v2_isolation
 from tests.shards import (
     assign_files,
     assign_nodes,
@@ -323,15 +323,15 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     from targets.codex_target import codex_home
     from targets.copilot_target import CopilotAdapter, copilot_home
 
+    from hooks import config as hooks_config
     from hooks.config import _agentibrain_home
-    from hooks.context.codex_context_pin import catalog_path
     from scripts.claude_config import claude_home, claude_json
     from scripts.herdr_setup import config_path as herdr_config_path
 
     for label, value in (
         ("claude_home", claude_home()),
         ("claude_json", claude_json()),
-        ("codex model catalog", catalog_path()),
+        ("agentihooks home", hooks_config.AGENTIHOOKS_HOME),
         ("codex_home", codex_home()),
         ("copilot_home", copilot_home()),
         ("agents_skills_home", agents_skills_home()),
@@ -359,6 +359,21 @@ def _real_ledger_folder_guard():
 
 
 @pytest.fixture(autouse=True)
+def _production_redis_key_guard(monkeypatch):
+    # The isolation fixture above drops every AGENTIHOOKS_ variable; subprocesses need the prefix back.
+    monkeypatch.setenv(redis_key_guard.keyspace.ENV, redis_key_guard.keyspace.ROOT)
+    before = len(redis_key_guard.written)
+    yield
+    assert redis_key_guard.written[before:] == [], "this test wrote a production swarm Redis key"
+
+
+@pytest.fixture
+def ledger_port():
+    with ledger_guard.reserve_port() as hold:
+        yield hold.getsockname()[1]
+
+
+@pytest.fixture(autouse=True)
 def _swarm_codes_in_order(monkeypatch):
     """Each test's swarms get codes a1b2c3, a1b2c4, ... in creation order, so agent names are known in advance."""
     from itertools import count
@@ -374,6 +389,36 @@ def _swarm_runs_as_installed(monkeypatch):
     from scripts.swarm import timer
 
     monkeypatch.setattr(timer, "_roots", lambda: (Path("/installed"), Path("/installed")))
+
+
+@pytest.fixture(autouse=True)
+def _ci_speed_offline(request, monkeypatch):
+    from scripts.swarm import ci_speed
+
+    if not getattr(request.module, "CI_SPEED_READ", False):
+        monkeypatch.setattr(ci_speed, "read_runs", lambda *args, **kwargs: [])
+
+
+@pytest.fixture(autouse=True)
+def _task_sizing_offline(monkeypatch):
+    from hooks.classifier import ClassifierUnavailable
+    from scripts.swarm import difficulty
+
+    def unavailable(*args, **kwargs):
+        raise ClassifierUnavailable("classifier disabled in unit tests")
+
+    monkeypatch.setattr(difficulty, "decide", unavailable)
+
+
+@pytest.fixture(autouse=True)
+def _task_grouping_offline(monkeypatch):
+    from hooks.classifier import ClassifierUnavailable
+    from scripts.swarm import grouping
+
+    def unavailable(*args, **kwargs):
+        raise ClassifierUnavailable("classifier disabled in unit tests")
+
+    monkeypatch.setattr(grouping, "decide", unavailable)
 
 
 @pytest.fixture

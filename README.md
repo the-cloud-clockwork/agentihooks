@@ -171,7 +171,7 @@ agenti --route 0                             # force AH_CC_TOKEN_0 (ignores the 
 agentihooks balance                          # rank every AH_CC_TOKEN_* by quota left + live SESSIONS n/cap
 agentihooks balance --current                # account this session runs on + quota table
 agentihooks init-agent --handoff --prompt-file handoff.md   # quota handoff to another account
-# agenti skips accounts running AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT (default 3) live sessions;
+# agenti skips an account past its live session cap (from its five-hour window: 6 at 60%+ left, 4 at 40-60%, 3 at 10-40%, 2 at 5-10%, none below 5%);
 # the quota policy hands a session off at 98% weekly / 99% 5-hour use, waits for the 5h reset
 # or stops — see docs/pillars/load-balancing.md
 

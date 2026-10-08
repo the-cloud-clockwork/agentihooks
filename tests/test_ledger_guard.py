@@ -1,6 +1,9 @@
+import errno
 import os
+import socket
 import subprocess
 import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -69,3 +72,18 @@ def test_every_test_runs_on_the_suite_ledger_folder_and_a_spare_port():
     assert Path(os.environ["LEDGER_DIR"]) == ledger_guard.SUITE
     assert ledger_guard.REAL not in (ledger_guard.SUITE, *ledger_guard.SUITE.parents)
     assert os.environ["LEDGER_PORT"] != "8765"
+
+
+def bind_refusal(port):
+    with socket.socket() as other, pytest.raises(OSError) as taken:
+        other.bind(("127.0.0.1", port))
+    return taken.value.errno
+
+
+def test_the_suite_port_stays_held_so_no_other_worker_is_handed_it():
+    assert bind_refusal(int(os.environ["LEDGER_PORT"])) == errno.EADDRINUSE
+
+
+def test_a_reserved_port_refuses_other_binds_and_still_takes_its_own_server(ledger_port):
+    assert bind_refusal(ledger_port) == errno.EADDRINUSE
+    ThreadingHTTPServer(("127.0.0.1", ledger_port), BaseHTTPRequestHandler).server_close()

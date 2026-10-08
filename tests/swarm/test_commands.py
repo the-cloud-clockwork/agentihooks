@@ -197,6 +197,6 @@ def test_status_and_workspaces_before_the_first_hive_publication(store):
 
 
 def test_status_keeps_published_config_labels_with_current_control_state(store):
-    commands.publish(store, "sw", {"config": {"name": "swarm name", "state": "running", "codex_share": 25}}, {})
+    commands.publish(store, "sw", {"config": {"name": "swarm name", "state": "running", "snapshot_minutes": 25}}, {})
     view = commands.view(store, "sw")
-    assert view["config"] == {"name": "swarm name", "state": "paused", "codex_share": 25}
+    assert view["config"] == {"name": "swarm name", "state": "paused", "snapshot_minutes": 25}

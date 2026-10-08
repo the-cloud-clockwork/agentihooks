@@ -13,18 +13,8 @@ TOKEN_PREFIX = "AH_CC_TOKEN_"
 CODEX_TOKEN_PREFIX = "AH_CX_TOKEN_"
 CODEX_DEFAULT = "default"
 UNROUTED = "unrouted"
-MAX_SESSIONS_ENV = "AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT"
-DEFAULT_MAX_SESSIONS = 3
 _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "fish", "ksh"})
 _PROC = Path("/proc")
-
-
-def max_sessions(environ: Mapping[str, str] | None = None) -> int:
-    raw = (os.environ if environ is None else environ).get(MAX_SESSIONS_ENV, "")
-    try:
-        return max(1, int(raw)) if raw else DEFAULT_MAX_SESSIONS
-    except ValueError:
-        return DEFAULT_MAX_SESSIONS
 
 
 def account_from_names(names: Iterable[str], prefix: str = TOKEN_PREFIX) -> str:

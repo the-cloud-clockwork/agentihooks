@@ -13,7 +13,6 @@ agentihooks swarm <id> remove                                     drop a swarm w
 agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
 agentihooks swarm <id> set snapshot-minutes=N                      automatic snapshot interval while running (default 30, 0 off)
-agentihooks swarm <id> set codex-share=PCT codex-min-week-left=PCT   share of auto lane spawns sent to Codex (default 30, 5)
 agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E eng-kind=K eng-role=TEXT   (ci- likewise)
 agentihooks swarm <id> set effort-min=E effort-max=E               every lane launch effort stays in this range (default medium, high)
 agentihooks swarm <id> set master-agent=claude|codex              master affinity; a change orders the live master to hand off to that harness
@@ -50,7 +49,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.context import injection_trace, quarantine
-from scripts import session_caps
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, modes, progress, quiet
 from scripts.gates import log as gate_log
@@ -73,6 +71,7 @@ from scripts.swarm import (
     launch_check,
     ledger_events,
     master_launch,
+    merge_queue,
     naming,
     overlays,
     phase_planning,
@@ -95,11 +94,11 @@ from scripts.swarm import (
 )
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
-from scripts.swarm.ledger_client import LedgerClient, LedgerGone
+from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
-from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
-from scripts.swarm.tick import agent_status, primed, tick
+from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
+from scripts.swarm.tick import agent_status, primed, skip_refused, tick
 from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
 
 SETTABLE = {
@@ -107,8 +106,6 @@ SETTABLE = {
     "max-ci-agents": "max_ci",
     "max-plan-agents": "max_plan",
     "compact-limit": "compact_limit",
-    "codex-share": "codex_share",
-    "codex-min-week-left": "codex_min_week_left",
     "snapshot-minutes": "snapshot_minutes",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
@@ -155,13 +152,13 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         except LedgerGone as exc:
             first = store.redis.set(store.key(slug, "ledger-gone"), 1, nx=True)
             return [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
-        actions = timing.call(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
+        actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
         if actions:
             doc = timing.call(ledger.state, slug)
-        ticked = timing.call(phases.phase_pass, inbox, store, slug, doc, ledger)
+        ticked = skip_refused(phases.phase_pass, inbox, store, slug, doc, ledger)
         actions += ticked
         if ticked:
-            actions += timing.call(
+            actions += skip_refused(
                 phase_planning.planning_pass,
                 inbox,
                 store,
@@ -174,25 +171,25 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         if store.config(slug).template == "doctor":
             from scripts.doctor import cli as doctor
 
-            actions += timing.call(doctor.timer, store, slug, now_ms())
+            actions += skip_refused(doctor.timer, store, slug, now_ms())
         herdr = messenger or delivery.HerdrMessenger()
         timing.call(delivery.migrate_outbox, store, slug, inbox)
         agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
-        timing.call(delivery.relay_to_page, inbox, slug, agents, ledger)
+        skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
         doc, config = timing.call(ledger.state, slug), store.config(slug)
-        actions += timing.call(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms())
-        actions += timing.call(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), ledger_events.view)
+        actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms())
+        actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), ledger_events.view)
         mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
-        actions += timing.call(intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge).run, doc)
-        actions += timing.call(progress.checks_pass, store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
+        actions += skip_refused(intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge).run, doc)
+        actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
         rows = {t["id"]: t for t in doc["tasks"]}
-        actions += timing.call(waits.end_pass, store, slug, rows, inbox, ledger_events.view, now_ms())
-        actions += timing.call(quiet.quiet_pass, store, slug, rows, now_ms())
-        actions += timing.call(priority_sweep.priority_pass, store, slug, doc, ledger)
+        actions += skip_refused(waits.end_pass, store, slug, rows, inbox, ledger_events.view, now_ms())
+        actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
+        actions += skip_refused(priority_sweep.priority_pass, store, slug, doc, ledger)
         found = timing.call(findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
-        actions += timing.call(ledger_events.findings_pass, inbox, store, slug, found)
+        actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found)
         window = wake.window_ms(os.environ)
-        actions += timing.call(
+        actions += skip_refused(
             wake.wake_pass, inbox, slug, agents, herdr, ledger, now_ms(), window, wake.quiet_ms(os.environ)
         )
         taken = timing.call(snapshot.auto, store, slug, now_ms(), os.environ)
@@ -323,7 +320,10 @@ def stop_now(store, slug, runtime, ledger):
         store.drop_agent(slug, agent.name)
         row = rows.get(agent.task, {})
         if agent.state != "finished" and row.get("state") in ("claimed", "pr") and row.get("claimed_by") == agent.name:
-            ledger.update_task(slug, agent.task, {"state": "open", "claimed_by": ""})
+            try:
+                ledger.update_task(slug, agent.task, {"state": "open", "claimed_by": ""})
+            except LedgerRefused as exc:
+                print(f"task {agent.task} not reopened, the ledger refused its write: {exc}", file=sys.stderr)
     config = store.update(slug, state="stopping" if left else "stopped")
     if not left:
         runtime.close_space(config)
@@ -532,8 +532,6 @@ def cmd_set(store, args):
                 "max_plan": config.max_plan,
                 "compact_limit": config.compact_limit,
                 "autonomy": config.autonomy,
-                "codex_share": config.codex_share,
-                "codex_min_week_left": config.codex_min_week_left,
                 "snapshot_minutes": config.snapshot_minutes,
                 "effort_min": config.effort_min,
                 "effort_max": config.effort_max,
@@ -543,15 +541,6 @@ def cmd_set(store, args):
             }
         )
     )
-
-
-def cmd_session_cap(store, args):
-    try:
-        cap = None if args.cap == "default" else int(args.cap)
-        session_caps.set_cap(args.account, cap, harness=args.harness)
-    except ValueError as exc:
-        raise SwarmError(f"session-cap takes an account and a cap from 1 to {session_caps.MAX_CAP}, or default: {exc}")
-    print(json.dumps({"account": args.account, "harness": args.harness, "cap": "default" if cap is None else cap}))
 
 
 def cmd_templates(store, args):
@@ -595,15 +584,6 @@ def cmd_restore(store, args):
     print(json.dumps({"swarm": args.slug, "state": state, "snapshot": str(source), "restored": restored}))
 
 
-def _share(store, config):
-    spawns = store.spawns(config.slug)
-    codex, total = spawns.get("codex", 0), sum(spawns.values())
-    share, floor = codex_split(config, os.environ)
-    return (
-        f"codex {codex}/{total} spawns {codex * 100 // total if total else 0}%  target {share}%  min week left {floor}%"
-    )
-
-
 def _snapshot_line(auto):
     every = f"every {auto['every_minutes']} min" if auto["every_minutes"] > 0 else "automatic snapshots off"
     if auto["last"] is None:
@@ -634,7 +614,7 @@ def cmd_status(store, args):
     counts = task_counts(tasks)
     found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
-        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}  {_share(store, config)}"
+        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
     )
     print(
         "gate modes  "
@@ -644,9 +624,10 @@ def cmd_status(store, args):
     print(plan_shape.report(tasks, config.max_eng)["summary"])
     for phase_id, state, held in phase_state.report(doc):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))
-    from scripts.swarm import capacity
+    from scripts.swarm import capacity, quota_view
 
-    print(capacity.status_line(capacity.read(store, args.slug)))
+    for line in quota_view.lines(capacity.read(store, args.slug), now_ms()):
+        print(line)
     print(_snapshot_line(auto_snapshot(config)))
     print(_affinity_line(affinity.report(store, args.slug, config, agents)))
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
@@ -818,6 +799,12 @@ def cmd_pr(store, args):
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
 
 
+def cmd_merge(store, args):
+    if args.action != "state":
+        _worker(store, args)
+    print(json.dumps(merge_queue.operate(args.action, args.url)))
+
+
 def cmd_done(store, args):
     agent = _worker(store, args)
     ledger = LedgerClient()
@@ -825,16 +812,43 @@ def cmd_done(store, args):
     proof = {key: getattr(args, f"proof_{key}") for key in ledger_kinds.PROOF_KEYS if getattr(args, f"proof_{key}")}
     missing = ledger_kinds.unmet({**row, "proof": {**(row.get("proof") or {}), **proof}})
     if missing:
+        if ledger_kinds.kind(row) == "research":
+            raise SwarmError(
+                "a research task is done only with its proof: "
+                "--finding must be a single link to the artifact; put prose in a task comment"
+            )
         flags = ", ".join("--" + key.replace("_", "-").replace(" or ", " or --") for key in missing)
         raise SwarmError(f"a {ledger_kinds.kind(row)} task is done only with its proof: give {flags}")
-    refused = done_gate.refusal(row, args.pr or row.get("pr_url"), ledger_events.view)
+    url = args.pr or row.get("pr_url")
+    pull = ledger_events.view(url) if ledger_kinds.kind(row) in done_gate.GATED and url else None
+    if pull is not None and pull.state == "OPEN" and pull.queued:
+        at = now_ms()
+        idle.declare_wait(
+            store.redis,
+            args.slug,
+            agent.name,
+            at + waits.CHECKED_MINUTES * 60_000,
+            "merge queue",
+            at,
+            on=waits.on("merge", url),
+        )
+        raise SwarmError(f"pull request {url} is in the merge queue; waiting for it to land before swarm done")
+    refused = done_gate.refusal(row, url, lambda target: pull)
     if refused:
         raise SwarmError(refused)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
+    _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
     print(json.dumps({"task": agent.task, "state": "done", "next": "stop now; the swarm closes this session"}))
+
+
+def _close_members(ledger, slug, agent, lead, fields):
+    members = set(lead.get("group_members") or [])
+    for task in ledger.tasks(slug):
+        if task["id"] in members and task["state"] != "done":
+            ledger.update_task(slug, task["id"], fields, by=agent.name)
 
 
 def cmd_block(store, args):
@@ -967,6 +981,7 @@ def _hand_off(store, slug, agent, text, reason, ledger):
     recap = "\n\n".join(
         f"## {heading}\n{handoff_check.section(text, heading)}" for heading in ("Done", "Stopped at", "Next")
     )
+    waits.settle_notices(InboxStore(store.redis), agent, "a handoff")
     envelope = handoff_envelope.build(store, slug, agent, reason, _ledger_rows(ledger, slug), now_ms())
     store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=envelope)
@@ -1160,10 +1175,6 @@ def build_parser():
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
     sub.add_parser("set").add_argument("pairs", nargs="+")
-    session_cap = sub.add_parser("session-cap")
-    session_cap.add_argument("account")
-    session_cap.add_argument("cap")
-    session_cap.add_argument("--harness", choices=session_caps.HARNESSES, default="claude")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
     sub.add_parser("names").add_argument("--json", action="store_true")
@@ -1177,6 +1188,9 @@ def build_parser():
     lift.add_argument("gate")
     for name in ("issue", "pr"):
         sub.add_parser(name).add_argument("url")
+    merge = sub.add_parser("merge")
+    merge.add_argument("action", choices=("queue", "dequeue", "state"))
+    merge.add_argument("url")
     sub.add_parser("branch")
     done = sub.add_parser("done")
     done.add_argument("--pr", default="")

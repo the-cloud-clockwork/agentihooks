@@ -98,7 +98,11 @@ def test_ci_reads_only_the_pull_requests_of_tasks_waiting_in_review():
 def test_ci_reports_a_red_head_only_past_the_tick_red_window(monkeypatch):
     record = load("ci")
     record["checks"][0]["conclusion"] = "failure"
-    monkeypatch.setattr(detect.ci_read, "pull_request", lambda repo, number: {("o/r", 487): record}[(repo, number)])
+    monkeypatch.setattr(
+        detect.ci_read,
+        "pull_request",
+        lambda repo, number, cache: {("o/r", 487, store.redis): record}[(repo, number, cache)],
+    )
     ledger = SimpleNamespace(tasks=lambda slug: [{"state": "pr", "pr_url": "https://github.com/o/r/pull/487"}])
     window = ledger_events.RED_QUIET_MS
     import fakeredis
@@ -172,3 +176,26 @@ def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch, tm
     ]
     assert [f.id for f in found] == ["untraced-session/s-master-1", "telemetry-never-exported/s-master-1.1"]
     assert (tmp_path / "s" / traces_read.STATE_FILE).exists()
+
+
+def test_doctor_detectors_share_one_mail_snapshot_per_pass(monkeypatch, tmp_path):
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    reads = []
+
+    def items(mail, slug):
+        reads.append(slug)
+        return []
+
+    monkeypatch.setattr(detect.read, "inbox_items", items)
+    first = detect.readers(store, None, "sw", 1_000, environ={}, home=tmp_path)
+    assert first["inbox"]() == []
+    assert first["handoff"]() == []
+    assert reads == ["sw"]
+    second = detect.readers(store, None, "sw", 2_000, environ={}, home=tmp_path)
+    assert second["handoff"]() == []
+    assert second["inbox"]() == []
+    assert reads == ["sw", "sw"]

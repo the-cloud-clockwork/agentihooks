@@ -29,9 +29,9 @@ Commands:
         Create a .claudeignore in the current directory.
 
     agentihooks claude [--route SLUG] [extra flags]
-        Route to the healthiest OAuth account that runs fewer than
-        AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT (default 3) live sessions, and launch Claude.
-        --route SLUG selects AH_CC_TOKEN_<SLUG> directly, ignoring the cap.
+        Route to the OAuth account with a free place under its five hour session band
+        and the fewest live sessions, and launch Claude.
+        --route SLUG selects AH_CC_TOKEN_<SLUG> directly, ignoring the band.
         Alias: agenti (added to ~/.bashrc by init)
 
     agentihooks init-agent [launcher options] [--handoff] -- [claude flags]
@@ -93,6 +93,7 @@ import yaml
 
 from scripts.claude_config import claude_home
 from scripts.claude_config import claude_json as claude_json_path
+from scripts.cli_parser import ArgumentParser
 from scripts.targets import DEFAULT_TARGET, SUPPORTED_TARGETS, get_adapter, resolve_target
 from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
 
@@ -5569,13 +5570,12 @@ def _claude_command(claude_bin: str, extra_args: list[str]) -> list[str]:
 def cmd_claude(extra_args: list[str]) -> None:
     """Route to the healthiest Claude account, then replace this process with Claude.
 
-    Accounts already running AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT live sessions are
-    skipped while another routable account has room; --route forces one account.
+    The account with a free place under its session band and the fewest live sessions
+    wins; --route forces one account.
     """
     import fcntl
 
-    from hooks.context.account_sessions import max_sessions, sessions_by_account
-    from scripts import session_caps
+    from hooks.context.account_sessions import sessions_by_account
     from scripts.claude_quota_balancer import (
         RoutingError,
         _cache_path,
@@ -5614,7 +5614,6 @@ def cmd_claude(extra_args: list[str]) -> None:
     # process only once it already runs as claude.
     route_lock = route_lock_path.open("a+", encoding="utf-8")
     fcntl.flock(route_lock, fcntl.LOCK_EX)
-    cap = max_sessions(os.environ)
     try:
         if route:
             selected_credential = credential_for_slug(discover_credentials(os.environ), route)
@@ -5624,7 +5623,6 @@ def cmd_claude(extra_args: list[str]) -> None:
                 include_fable=include_fable,
                 claude_bin=claude_bin,
                 sessions=sessions_by_account(),
-                caps=session_caps.caps(cap),
                 exclude=excluded,
             )
             selected_credential = decision.credential
@@ -5644,7 +5642,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         report,
         status="routed",
         account=selected_credential.account,
-        placement="forced" if route else decision.placement,
+        placement="forced" if route else "open",
     )
 
     os.environ.pop("ANTHROPIC_API_KEY", None)
@@ -5671,8 +5669,7 @@ def cmd_balance(
     show_account_metadata: str = "",
     current: bool = False,
 ) -> int:
-    from hooks.context.account_sessions import max_sessions, sessions_by_account
-    from scripts import session_caps
+    from hooks.context.account_sessions import sessions_by_account
     from scripts.agents_quota import codex_table
     from scripts.claude_quota_balancer import (
         RoutingError,
@@ -5691,8 +5688,6 @@ def cmd_balance(
     _load_claude_runtime_env()
     credentials = discover_credentials(os.environ)
     live = sessions_by_account()
-    cap = max_sessions(os.environ)
-    caps = session_caps.caps(cap)
     if current:
         known = discover_credentials(session_env) + credentials
         session = identify_session_account(session_env, known, ancestor_oauth_token())
@@ -5719,7 +5714,6 @@ def cmd_balance(
                     current=session.account,
                     observed=observed,
                     sessions=live,
-                    caps=caps,
                 )
             )
         return 0 if session.account else 1
@@ -5748,8 +5742,8 @@ def cmd_balance(
         timeout=timeout,
         claude_bin=shutil.which("claude") or "claude",
     )
-    print(render_table(results, include_fable=include_fable, sessions=live, caps=caps))
-    print(f"\nsource={source} default_max_sessions_per_account={cap}")
+    print(render_table(results, include_fable=include_fable, sessions=live))
+    print(f"\nsource={source}")
     print(f"\n{codex_table()}")
     return 0 if any(is_routable(result) for result in results) else 1
 
@@ -6489,7 +6483,7 @@ def main() -> None:
 
         raise SystemExit(gc_main(_argv))
 
-    parser = argparse.ArgumentParser(
+    parser = ArgumentParser(
         description="agentihooks — Claude Code harness: hooks, profiles, skills, MCPs.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_USAGE_TEXT,
@@ -6633,7 +6627,7 @@ def main() -> None:
     sub.add_parser("classifier", help="Decision classifier records: stats [--purpose P]")
     sub.add_parser(
         "profile",
-        help="Render a profile into its own home: render NAME --target claude|codex [--force] [--out DIR [--bundle DIR]]",
+        help="Render a profile into its own home: render NAME --target claude|codex|copilot [--force] [--out DIR [--bundle DIR]]",
     )
     sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")
     sub.add_parser("overlay", help="Overlay profiles in the linked bundle: new NAME --wears ROLES | check NAME")

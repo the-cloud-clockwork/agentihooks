@@ -23,6 +23,7 @@ _redis_checked = False
 SESSION_TTL: int = int(os.getenv("REDIS_SESSION_TTL", "86400"))  # 24h
 POSITION_TTL: int = int(os.getenv("REDIS_POSITION_TTL", "3600"))  # 1h
 _KEY_PREFIX: str = os.getenv("REDIS_KEY_PREFIX", "agenticore")
+_installations: dict[str, str] = {}
 
 
 def get_redis():
@@ -62,10 +63,18 @@ def get_redis():
 
 
 def redis_key(type_name: str, id_value: str) -> str:
-    """Build a namespaced Redis key.
+    """Build a Redis key namespaced by prefix and installation.
 
     Example::
 
-        redis_key("pos:transcript", "abc") -> "agenticore:pos:transcript:abc"
+        redis_key("pos:transcript", "abc") -> "agenticore:inst-<32 hex>:pos:transcript:abc"
     """
-    return f"{_KEY_PREFIX}:{type_name}:{id_value}"
+    from pathlib import Path
+
+    from hooks.config import AGENTIHOOKS_HOME
+    from scripts.swarm_v2.keyspace import installation
+
+    home = str(AGENTIHOOKS_HOME)
+    if home not in _installations:
+        _installations[home] = installation(Path(home)).installation_id
+    return f"{_KEY_PREFIX}:{_installations[home]}:{type_name}:{id_value}"

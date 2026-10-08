@@ -45,7 +45,7 @@ Every scratch checkout — plant runs, proof runs, base trees, merge probes — 
 
 ## Ship
 
-Commit only the files this cycle touched, push `<name>`, open the PR with `--base` set to the base branch, wait for green checks, squash-merge without `--delete-branch` (older `gh` then switches the worktree off its branch and `done` refuses), `git push origin --delete <name>`, then `done`. A repo that ships its own ceremony (`scripts/ship.sh`) uses it from inside `$DEST`.
+Commit only the files this cycle touched, push `<name>`, open the PR with `--base` set to the base branch, wait for green checks, then submit the squash merge without `--delete-branch` (older `gh` then switches the worktree off its branch and `done` refuses). On a base branch with a merge queue, the merge only queues the PR; in a swarm, on a `dev` base, queue it instead with `agentihooks swarm <slug> merge queue <pr url>`, which uses the GitHub API and works with any `gh`. Confirm `gh pr view <pr> --json state --jq .state` reads `MERGED` before deleting the remote branch or running `done`. While queued or open, keep the branch and worktree. GitHub refuses a push to a branch whose PR sits in the queue. To fix a queued PR, dequeue it first (in a swarm, `agentihooks swarm <slug> merge dequeue <pr url>`), then push the fix, and once its checks pass queue it again the same way. A PR that leaves the queue without merging is fixed and queued the same way. After confirmed `MERGED`, run `done`, which deletes the remote branch itself. A repo that ships its own ceremony (`scripts/ship.sh`) uses it from inside `$DEST`.
 
 ## Inspect
 
@@ -60,7 +60,7 @@ Commit only the files this cycle touched, push `<name>`, open the PR with `--bas
 "$WT" done <name> --repo <repo-dir>
 ```
 
-Whoever merges the PR runs `done` for its worktree in the same turn as the merge. Refuses a dirty worktree. Then pulls the base branch into the primary checkout (`--ff-only`) when it is on a clean base branch, and names the blocker otherwise. Deletes the local branch when it is on the remote base branch or its PR into it merged; otherwise keeps it and says so. `--force` overrides both.
+Whoever submits the merge owns it until the PR state reads `MERGED`, or reads closed and is dropped with `done --force`, then runs `done` for its worktree in that turn. Refuses a dirty worktree. Queued, open or unreadable PRs retain the remote branch and worktree, even with `--force`. A PR closed without merge is refused unless `--force`, which drops the worktree and local branch and keeps the remote branch. A confirmed merged PR permits remote branch deletion before teardown. Then fetches the base branch and fast-forwards the primary checkout to `origin/<base>` when it is on a clean base branch, and names the blocker otherwise. Deletes the local branch when it is on the remote base branch or its PR into it merged; otherwise keeps it and says so. `--force` overrides the dirty, closed without merge and local branch checks only.
 
 ## Base-direct
 

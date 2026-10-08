@@ -2,13 +2,14 @@
 
 import json
 import os
-import socket
 import subprocess
 import sys
 import threading
 from pathlib import Path
 
 import pytest
+
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts" / "swarm_ledger"
@@ -24,14 +25,8 @@ BUDGET = 10
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
-def spare_port():
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
 @pytest.fixture
-def rig(tmp_path, monkeypatch):
+def rig(tmp_path, monkeypatch, ledger_port):
     import redis
     from fakeredis import TcpFakeServer
 
@@ -40,7 +35,7 @@ def rig(tmp_path, monkeypatch):
     url = f"redis://127.0.0.1:{server.server_address[1]}/0"
     client = redis.Redis.from_url(url, decode_responses=True)
     client.hset(
-        f"agentihooks:swarm:{SLUG}:config",
+        f"{KEY_ROOT}:swarm:{SLUG}:config",
         mapping={"slug": SLUG, "repo": "/repo", "max_eng": 1, "max_ci": 0, "state": "running", "gates": "{}"},
     )
     ledgers = tmp_path / "ledgers"
@@ -56,7 +51,8 @@ def rig(tmp_path, monkeypatch):
         "HOME": str(tmp_path / "home"),
         "PYTHONPATH": str(ROOT),
         "LEDGER_DIR": str(ledgers),
-        "LEDGER_PORT": str(spare_port()),
+        "LEDGER_PORT": str(ledger_port),
+        "LEDGER_AUTOSTART": "1",
         "AGENTIHOOKS_SWARM_REDIS_URL": url,
         "AGENTIHOOKS_SWARM": SLUG,
         "AGENTIHOOKS_AGENT_NAME": ENG,
@@ -89,7 +85,7 @@ def rig(tmp_path, monkeypatch):
         )
 
     def mode(chosen):
-        client.hset(f"agentihooks:swarm:{SLUG}:config", "gates", json.dumps({"talk": chosen}))
+        client.hset(f"{KEY_ROOT}:swarm:{SLUG}:config", "gates", json.dumps({"talk": chosen}))
 
     def rows():
         path = tmp_path / "home" / ".agentihooks" / "swarm" / SLUG / "gates" / "log.jsonl"
@@ -124,7 +120,7 @@ def test_the_write_past_the_budget_is_refused_until_a_push_lands(rig):
     assert [(r["gate"], r["kind"], r["agent"]) for r in rig.rows()] == [("talk", "deny", ENG)]
     pushed = rig.hook("git push -u origin feature")
     assert pushed.returncode == 0, pushed.stderr
-    assert rig.redis.hgetall(f"agentihooks:swarm:{SLUG}:progress:{ENG}").get("outcome") == "pushed"
+    assert rig.redis.hgetall(f"{KEY_ROOT}:swarm:{SLUG}:progress:{ENG}").get("outcome") == "pushed"
     passed = rig.cli("say", "one more line")
     assert passed.returncode == 0, passed.stderr
     assert json.loads(passed.stdout) == {"posted": True}

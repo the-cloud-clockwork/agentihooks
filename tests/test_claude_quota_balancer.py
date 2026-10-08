@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from scripts import claude_quota_balancer as balancer
-from scripts.session_caps import SessionCaps
 
 
 def _stream(account_usage: float, weekly_usage: float, fable_usage: float | None = None) -> str:
@@ -236,22 +235,16 @@ def test_corrupt_cache_is_replaced(monkeypatch, tmp_path):
     assert json.loads(cache.read_text())["version"] == 1
 
 
-def test_selection_fails_closed_when_every_account_is_draining(monkeypatch, tmp_path):
+def test_selection_fails_closed_when_every_week_is_under_five_percent(monkeypatch, tmp_path):
     result = balancer.parse_probe("ALPHA", _stream(0.10, 0.96), 100)
     monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([result], "live"))
 
-    try:
-        balancer.select_credential(
-            {"AH_CC_TOKEN_ALPHA": "secret"},
-            cache_file=tmp_path / "cache.json",
-        )
-    except balancer.RoutingError as exc:
-        assert exc.results == [result]
-    else:
-        raise AssertionError("selection should fail closed")
+    with pytest.raises(balancer.RoutingError, match="free session under its quota band") as raised:
+        balancer.select_credential({"AH_CC_TOKEN_ALPHA": "secret"}, cache_file=tmp_path / "cache.json", now=1000)
+    assert raised.value.results == [result]
 
 
-def test_selection_floor_is_five_percent_routing_left(monkeypatch, tmp_path):
+def test_the_week_floor_is_five_percent_left(monkeypatch, tmp_path):
     floor = balancer.parse_probe("FLOOR", _stream(0.10, 0.95), 100)
     under = balancer.parse_probe("UNDER", _stream(0.10, 0.951), 100)
     monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([under, floor], "live"))
@@ -259,14 +252,16 @@ def test_selection_floor_is_five_percent_routing_left(monkeypatch, tmp_path):
     decision = balancer.select_credential(
         {"AH_CC_TOKEN_FLOOR": "floor-secret", "AH_CC_TOKEN_UNDER": "under-secret"},
         cache_file=tmp_path / "cache.json",
+        now=1000,
     )
 
     assert decision.credential.env_name == "AH_CC_TOKEN_FLOOR"
-    assert decision.result.state == "DRAIN"
-    assert not balancer.is_routable(under)
+    assert (decision.sessions, decision.max_sessions) == (0, 6)
+    assert not balancer.is_routable(under, now=1000)
+    assert balancer.is_routable(floor, now=1000)
 
 
-def test_selection_returns_highest_routing_left(monkeypatch, tmp_path):
+def test_selection_reports_the_account_against_its_band_cap(monkeypatch, tmp_path):
     low = balancer.parse_probe("LOW", _stream(0.40, 0.60), 100)
     high = balancer.parse_probe("HIGH", _stream(0.20, 0.30), 100)
     monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([low, high], "cached"))
@@ -274,14 +269,15 @@ def test_selection_returns_highest_routing_left(monkeypatch, tmp_path):
     decision = balancer.select_credential(
         {"AH_CC_TOKEN_LOW": "low-secret", "AH_CC_TOKEN_HIGH": "high-secret"},
         cache_file=tmp_path / "cache.json",
+        sessions={"HIGH": 1},
+        now=1000,
     )
 
-    assert decision.credential.env_name == "AH_CC_TOKEN_HIGH"
-    assert decision.result.routing_left == 70.0
+    assert decision.credential.env_name == "AH_CC_TOKEN_LOW"
     assert decision.source == "cached"
-    assert "high-secret" not in repr(decision)
+    assert "low-secret" not in repr(decision)
     assert balancer.format_selection(decision) == (
-        "[agenti] account=HIGH routing_left=70% 5h_left=80% 7d_left=70% source=cached"
+        "[agenti] account=LOW routing_left=40% 5h_left=60% 7d_left=40% sessions=0/6 source=cached"
     )
 
 
@@ -448,84 +444,166 @@ def _three(monkeypatch):
     return {"AH_CC_TOKEN_BEST": "b", "AH_CC_TOKEN_MID": "m", "AH_CC_TOKEN_LOW": "l"}
 
 
-def test_account_at_the_session_cap_yields_to_the_next_one(monkeypatch, tmp_path):
+def _pick(env, tmp_path, sessions=None, **kwargs):
+    return balancer.select_credential(env, cache_file=tmp_path / "c.json", sessions=sessions, now=1000, **kwargs)
+
+
+def test_the_account_with_the_fewest_live_sessions_wins(monkeypatch, tmp_path):
     env = _three(monkeypatch)
 
-    decision = balancer.select_credential(
-        env, cache_file=tmp_path / "c.json", sessions={"BEST": 2, "MID": 1}, caps=SessionCaps(2)
-    )
+    decision = _pick(env, tmp_path, {"BEST": 2, "MID": 1})
 
-    assert decision.result.account == "MID"
-    assert decision.placement == "open"
+    assert decision.result.account == "LOW"
     assert balancer.format_selection(decision) == (
-        "[agenti] account=MID routing_left=60% 5h_left=70% 7d_left=60% sessions=1/2 source=cached"
+        "[agenti] account=LOW routing_left=30% 5h_left=50% 7d_left=30% sessions=0/4 source=cached"
     )
 
 
-def test_cap_is_configurable(monkeypatch, tmp_path):
+def test_ties_go_in_account_order_and_a_full_band_yields(monkeypatch, tmp_path):
     env = _three(monkeypatch)
 
-    decision = balancer.select_credential(
-        env, cache_file=tmp_path / "c.json", sessions={"BEST": 2, "MID": 1}, caps=SessionCaps(3)
+    assert _pick(env, tmp_path).result.account == "BEST"
+    assert _pick(env, tmp_path, {"BEST": 2, "MID": 1, "LOW": 4}).result.account == "MID"
+
+
+def test_equal_sessions_go_to_the_account_whose_week_resets_soonest(monkeypatch, tmp_path):
+    five = balancer.QuotaWindow(used=10, resets_at=5000)
+    results = [
+        balancer.ProbeResult(name, "allowed", "NORMAL", 50, five, balancer.QuotaWindow(used=50, resets_at=reset))
+        for name, reset in (("A", 90000), ("B", 3000), ("C", None), ("D", 999))
+    ]
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: (results, "cached"))
+    env = {f"AH_CC_TOKEN_{name}": name.lower() for name in "ABCD"}
+
+    assert _pick(env, tmp_path).result.account == "B"
+    assert _pick(env, tmp_path, {"B": 1}).result.account == "A"
+    assert _pick(env, tmp_path, {"A": 1, "B": 1}).result.account == "C"
+    assert _pick(env, tmp_path, {"A": 1, "B": 1, "C": 1}).result.account == "D"
+
+
+def test_an_account_at_the_five_hour_margin_spends_last_until_its_window_resets(monkeypatch, tmp_path):
+    week = balancer.QuotaWindow(used=50, resets_at=3000)
+    other = balancer.ProbeResult(
+        "B", "allowed", "NORMAL", 50, balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=50, resets_at=90000)
     )
+    tired = balancer.ProbeResult("T", "allowed", "NORMAL", 5, balancer.QuotaWindow(used=95, resets_at=5000), week)
+    rested = balancer.ProbeResult("R", "allowed", "NORMAL", 50, balancer.QuotaWindow(used=97, resets_at=999), week)
+    env = {f"AH_CC_TOKEN_{name}": name.lower() for name in "BTR"}
 
-    assert decision.result.account == "BEST"
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([tired, other], "cached"))
+    assert _pick(env, tmp_path).result.account == "B"
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([rested, other], "cached"))
+    assert _pick(env, tmp_path).result.account == "R"
 
 
-def test_every_account_at_cap_overflows_to_the_least_loaded(monkeypatch, tmp_path):
+def test_every_account_at_its_band_cap_refuses_the_launch(monkeypatch, tmp_path):
     env = _three(monkeypatch)
 
-    decision = balancer.select_credential(
-        env, cache_file=tmp_path / "c.json", sessions={"BEST": 4, "MID": 2, "LOW": 2}, caps=SessionCaps(2)
-    )
-
-    assert decision.result.account == "MID"
-    assert decision.placement == "overflow"
-    assert "placement=overflow" in balancer.format_selection(decision)
+    with pytest.raises(balancer.RoutingError, match="free session under its quota band"):
+        _pick(env, tmp_path, {"BEST": 6, "MID": 6, "LOW": 4})
 
 
 def test_excluded_account_is_never_selected(monkeypatch, tmp_path):
     env = _three(monkeypatch)
 
-    decision = balancer.select_credential(env, cache_file=tmp_path / "c.json", exclude=["BEST"])
-    assert decision.result.account == "MID"
-
+    assert _pick(env, tmp_path, exclude=["BEST"]).result.account == "LOW"
     with pytest.raises(balancer.RoutingError, match="outside BEST, LOW, MID"):
-        balancer.select_credential(env, cache_file=tmp_path / "c.json", exclude=["BEST", "MID", "LOW"])
+        _pick(env, tmp_path, exclude=["BEST", "MID", "LOW"])
 
 
-def test_table_shows_live_sessions_per_account():
+def test_table_shows_live_sessions_against_each_band_cap():
     alpha = balancer.parse_probe("alpha", _stream(0.10, 0.20), 100)
+    spent = balancer.parse_probe("spent", _stream(0.10, 0.99), 100)
+    broken = balancer._error_result("broken", "probe failed")
 
-    table = balancer.render_table([alpha], now=0, sessions={"alpha": 1, "unrouted": 2}, caps=SessionCaps(2))
+    table = balancer.render_table([alpha, spent, broken], now=0, sessions={"alpha": 1, "unrouted": 2})
+    rows = {line.split()[1]: line for line in table.splitlines()[2:5]}
 
     assert "SESSIONS" in table.splitlines()[0]
-    assert "1/2" in table.splitlines()[2]
+    assert " 1/6 " in rows["alpha"]
+    assert " 0/0 " in rows["spent"]
+    assert " 0/? " in rows["broken"]
     assert table.splitlines()[-1] == "unrouted: 2 session(s)"
 
 
-def test_reserve_account_is_chosen_only_when_no_other_is_routable(monkeypatch, tmp_path):
+def test_reserve_account_is_chosen_only_when_no_other_has_room(monkeypatch, tmp_path):
     env = _three(monkeypatch)
 
-    reserved = balancer.select_credential(
-        {**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST"}, cache_file=tmp_path / "c.json"
+    assert _pick({**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST"}, tmp_path).result.account == "LOW"
+    assert _pick({**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST,MID,LOW"}, tmp_path).result.account == "BEST"
+    assert _pick({**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST, LOW"}, tmp_path).result.account == "MID"
+    with pytest.raises(balancer.RoutingError, match=r"^no Claude account has a free session under its quota band$"):
+        _pick(env, tmp_path, {"BEST": 6, "MID": 6, "LOW": 6})
+    offered = []
+    with monkeypatch.context() as patched:
+        patched.setattr(balancer.session_bands, "pick", lambda seats: offered.extend(seats))
+        with pytest.raises(balancer.RoutingError):
+            _pick(env, tmp_path)
+    assert {seat.harness for seat in offered} == {"claude"}
+    reserved = {**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "LOW"}
+    assert _pick(reserved, tmp_path, {"BEST": 6, "MID": 6}).result.account == "LOW"
+    assert _pick(reserved, tmp_path, {"BEST": 6, "MID": 2}).result.account == "MID"
+
+
+NOW = 1_800_000_000
+
+
+def _today(account: str, five_left: float, week_left: float, week_hours: float) -> balancer.ProbeResult:
+    five = balancer.QuotaWindow(used=100 - five_left, resets_at=NOW + 2 * 3600)
+    week = balancer.QuotaWindow(used=100 - week_left, resets_at=NOW + int(week_hours * 3600))
+    return balancer.ProbeResult(account, "allowed", "NORMAL", min(five_left, week_left), five, week)
+
+
+TODAY = [
+    _today("ncgma", 75, 93, 159.9),
+    _today("nchotma", 95, 8, 34.9),
+    _today("ncsmgma", 100, 4, 4.9),
+    _today("nctcc", 100, 12, 71.9),
+    _today("tccgma", 80, 19, 89.9),
+]
+
+
+def test_todays_accounts_get_band_caps_and_the_next_session_rotates(monkeypatch, tmp_path):
+    assert {result.account: balancer.account_cap(result, NOW) for result in TODAY} == {
+        "ncgma": 6,
+        "nchotma": 6,
+        "ncsmgma": 0,
+        "nctcc": 6,
+        "tccgma": 6,
+    }
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: (TODAY, "live"))
+    env = {f"AH_CC_TOKEN_{result.account}": "secret" for result in TODAY}
+    live = {"ncgma": 4, "nchotma": 2, "tccgma": 3}
+    order = []
+    for _ in range(4):
+        decision = balancer.select_credential(env, cache_file=tmp_path / "c.json", sessions=live, now=NOW)
+        order.append(decision.result.account)
+        live = {**live, decision.result.account: live.get(decision.result.account, 0) + 1}
+    assert order == ["nctcc", "nctcc", "nchotma", "nctcc"]
+
+
+def test_a_reset_window_counts_as_full_and_a_rejected_account_takes_no_session():
+    spent = _today("spent", 2, 50, 100)
+    assert balancer.account_cap(spent, NOW) == 0
+    assert balancer.account_cap(spent, NOW + 3 * 3600) == 6
+    rejected = balancer.ProbeResult("x", "rejected", "BLOCKED", 0.0, TODAY[0].five_hour, TODAY[0].seven_day)
+    assert balancer.account_cap(rejected, NOW) == 0
+    assert balancer.account_cap(balancer._error_result("x", "failed"), NOW) is None
+
+
+def test_fable_routing_caps_on_the_tighter_weekly_window():
+    result = balancer.parse_probe("FABLE", _stream(0.20, 0.30, 0.97), 100, include_fable=True)
+    assert balancer.account_cap(result, 1000) == 6
+    assert balancer.account_cap(result, 1000, include_fable=True) == 0
+    assert balancer.is_routable(result, 1000)
+    assert not balancer.is_routable(result, 1000, include_fable=True)
+    table = balancer.render_table([result], now=1000, include_fable=True, sessions={})
+    assert " 0/0 " in table.splitlines()[2]
+
+
+def test_a_week_that_reset_before_now_counts_as_full():
+    spent = balancer.ProbeResult(
+        "a", "allowed", "NORMAL", 1.0, balancer.QuotaWindow(10.0), balancer.QuotaWindow(99.0, 500)
     )
-    everything = balancer.select_credential(
-        {**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST,MID,LOW"}, cache_file=tmp_path / "c.json"
-    )
-
-    assert reserved.result.account == "MID"
-    assert everything.result.account == "BEST"
-
-
-def test_reserve_account_below_the_cap_is_chosen_before_overflow(monkeypatch, tmp_path):
-    env = {**_three(monkeypatch), "AGENTIHOOKS_RESERVE_ACCOUNTS": "LOW"}
-
-    def pick(sessions):
-        return balancer.select_credential(env, cache_file=tmp_path / "c.json", sessions=sessions, caps=SessionCaps(3))
-
-    opened = pick({"BEST": 4, "MID": 3, "LOW": 0})
-    assert (opened.result.account, opened.placement) == ("LOW", "open")
-    assert pick({"BEST": 4, "MID": 2, "LOW": 0}).result.account == "MID"
-    full = pick({"BEST": 4, "MID": 3, "LOW": 3})
-    assert (full.result.account, full.placement) == ("MID", "overflow")
+    assert balancer.account_cap(spent, 1000) == 6
+    assert balancer.account_cap(spent, 400) == 0

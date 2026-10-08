@@ -147,8 +147,13 @@ class SurfaceLadder(unittest.TestCase):
             self.assertNotRegex(rule, r"(?<![-\w])border:", selector)
 
 
+def block(selector):
+    body = re.search(rf"(?m)^{re.escape(selector)} \{{([^}}]*)\}}", palette()).group(1)
+    return dict(re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", body))
+
+
 def tokens():
-    return dict(re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", palette()))
+    return block(":root")
 
 
 def resolve(name):
@@ -262,6 +267,28 @@ class BluePalette(unittest.TestCase):
     def test_no_text_glow_anywhere(self):
         for name, css in (("palette", palette()), ("ledger", self.ledger), ("home", self.home)):
             self.assertNotIn("text-shadow", css, name)
+
+
+class LandingBays(unittest.TestCase):
+    def test_ledger_and_bin_sections_take_the_landing_bay_and_inner_tiles_the_raised_bay(self):
+        scoped = block("main:not(.home)")
+        self.assertEqual(set(scoped), {"--surface-1", "--surface-2"})
+        self.assertEqual(scoped["--surface-1"], "var(--bay-050)")
+        self.assertEqual(scoped["--surface-2"], "var(--bay-075)")
+        self.assertEqual(tokens()["--bay-050"], "rgba(147, 197, 253, .05)")
+        self.assertEqual(tokens()["--bay-075"], "rgba(147, 197, 253, .075)")
+
+    def test_home_keeps_its_frameless_surfaces(self):
+        self.assertEqual(resolve("--surface-1"), "transparent")
+        self.assertEqual(resolve("--surface-2"), "#1b2636")
+
+    def test_only_home_falls_outside_the_bay_scope(self):
+        mains = {
+            "ledger": re.search(r"<main([^>]*)>", page_source()).group(1),
+            "home": re.search(r"<main([^>]*)>", server.index_page("home")).group(1),
+            "bin": re.search(r"<main([^>]*)>", server.index_page("bin")).group(1),
+        }
+        self.assertEqual(mains, {"ledger": "", "home": ' class="home"', "bin": ' class="bin"'})
 
 
 if __name__ == "__main__":

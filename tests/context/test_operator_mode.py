@@ -283,12 +283,38 @@ def test_a_typed_prompt_uncaps_only_its_reply_turn(monkeypatch, capsys):
     assert expected not in out
     assert [operator_mode.reminder("s1", SWARM) for _ in range(4)] == [""] * 4
     assert not operator_mode.present("s1", SWARM)
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == ASK.format(slug="demo", name="master@a1-1")
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == ""
     assert [operator_mode.reminder("s2", SWARM) for _ in range(2)] == ["", expected]
     next_turn = run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
     assert expected in next_turn
     assert typed_notice not in next_turn
     assert [operator_mode.reminder("s1", SWARM) for _ in range(2)] == ["", expected]
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == ASK.format(slug="demo", name="master@a1-1")
+
+
+def test_a_typed_prompt_opens_the_question_tool_and_a_woken_turn_closes_it(monkeypatch, capsys):
+    payload = {"session_id": "s1", "tool_name": "AskUserQuestion", "tool_input": {"questions": []}}
+    run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
+    run_prompt(monkeypatch, capsys, "s1", "triage priorities")
+    hook_manager.on_pre_tool_use(payload)
+    for woken in (CHANNEL, delivery.marked("continue")):
+        run_prompt(monkeypatch, capsys, "s1", woken)
+        with pytest.raises(hook_manager.BlockAction) as blocked:
+            hook_manager.on_pre_tool_use(payload)
+        assert str(blocked.value) == ASK.format(slug="demo", name="master@a1-1")
+
+
+def test_the_question_tool_follows_the_typed_turn_window(monkeypatch):
+    for key, value in SWARM.items():
+        monkeypatch.setenv(key, value)
+    operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100)
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=100 + WINDOW - 1) == ""
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=100 + WINDOW) == ASK.format(
+        slug="demo", name="master@a1-1"
+    )
+    assert operator_mode.question_block("AskUserQuestion", "", SWARM, now=101) == ASK.format(
+        slug="demo", name="master@a1-1"
+    )
 
 
 def test_the_typed_turn_notice_is_exact_and_operator_off_gives_only_the_away_notice(monkeypatch):

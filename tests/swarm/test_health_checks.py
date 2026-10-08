@@ -4,6 +4,7 @@ import pytest
 
 from scripts.swarm.health import checks
 from scripts.swarm.health.findings import Limits
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -58,10 +59,10 @@ def test_a_cached_probe_asks_github_once_per_ttl():
     import fakeredis
 
     redis, seen = fakeredis.FakeRedis(decode_responses=True), []
-    probe = checks.cached(redis, "agentihooks:swarm:sw:checks", run=runner(PENDING, 8, seen))
+    probe = checks.cached(redis, f"{KEY_ROOT}:swarm:sw:checks", run=runner(PENDING, 8, seen))
     assert [probe(URL), probe(URL)] == [True, True]
     assert len(seen) == 1
-    assert 0 < redis.ttl(f"agentihooks:swarm:sw:checks:{URL}") <= checks.CACHE_SECONDS
+    assert 0 < redis.ttl(f"{KEY_ROOT}:swarm:sw:checks:{URL}") <= checks.CACHE_SECONDS
 
 
 def test_a_pull_request_whose_checks_all_passed_or_skipped_is_green():
@@ -95,14 +96,14 @@ def test_a_cached_green_probe_asks_github_once_per_ttl_under_its_own_key():
     import fakeredis
 
     redis, seen = fakeredis.FakeRedis(decode_responses=True), []
-    probe = checks.cached_green(redis, "agentihooks:swarm:sw:checks", run=runner(PASSED, 0, seen))
+    probe = checks.cached_green(redis, f"{KEY_ROOT}:swarm:sw:checks", run=runner(PASSED, 0, seen))
     assert [probe(URL), probe(URL)] == [True, True]
     assert len(seen) == 1
-    assert redis.get(f"agentihooks:swarm:sw:checks:green:{URL}") == "1"
-    assert 0 < redis.ttl(f"agentihooks:swarm:sw:checks:green:{URL}") <= checks.CACHE_SECONDS
-    red = checks.cached_green(redis, "agentihooks:swarm:sw:checks", run=runner(PENDING, 8))
+    assert redis.get(f"{KEY_ROOT}:swarm:sw:checks:green:{URL}") == "1"
+    assert 0 < redis.ttl(f"{KEY_ROOT}:swarm:sw:checks:green:{URL}") <= checks.CACHE_SECONDS
+    red = checks.cached_green(redis, f"{KEY_ROOT}:swarm:sw:checks", run=runner(PENDING, 8))
     assert [red("https://github.com/o/r/pull/8"), red("https://github.com/o/r/pull/8")] == [False, False]
-    assert redis.get("agentihooks:swarm:sw:checks:green:https://github.com/o/r/pull/8") == "0"
+    assert redis.get(f"{KEY_ROOT}:swarm:sw:checks:green:https://github.com/o/r/pull/8") == "0"
 
 
 def test_status_raises_worker_ceremony_only_past_the_talk_budget(monkeypatch):

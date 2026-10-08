@@ -5,6 +5,7 @@ import pytest
 from hooks.classifier import Answer, DecisionResult
 from scripts import init_agent
 from scripts.swarm import cli, effort_range, model_pick
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.store import SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_runtime import _launched, _passed, _resuming
@@ -70,8 +71,6 @@ def test_spawn_hands_init_agent_the_swarm_effort_range(tmp_path):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
         effort_min="low",
@@ -107,8 +106,6 @@ def test_spawn_and_resume_take_the_swarm_range_not_the_default(tmp_path):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={"eng": {"model": "fable", "effort": "max"}},
         autonomy="delegate",
         effort_min="low",
@@ -218,7 +215,7 @@ def saved():
 
 def test_a_swarm_stored_before_the_range_reads_the_default_and_keeps_its_lanes_editable(saved):
     saved.redis.hset(
-        "agentihooks:swarm:old:config",
+        f"{KEY_ROOT}:swarm:old:config",
         mapping={
             "slug": "old",
             "repo": "/r",
@@ -252,7 +249,7 @@ def test_store_update_checks_and_normalises_the_range(saved):
 def test_store_create_refuses_an_out_of_range_lane_and_stores_nothing(saved):
     with pytest.raises(SwarmError, match="lane ci effort low is outside the swarm effort range medium to high"):
         saved.create(SwarmConfig("sw", "/r", 1, 0, lanes={"ci": {"effort": "low"}}))
-    assert saved.slugs() == [] and not saved.redis.exists("agentihooks:swarm:sw:config")
+    assert saved.slugs() == [] and not saved.redis.exists(f"{KEY_ROOT}:swarm:sw:config")
 
 
 def test_create_refuses_a_template_lane_effort_outside_the_range(env, tmp_path, monkeypatch, capsys):  # noqa: F811

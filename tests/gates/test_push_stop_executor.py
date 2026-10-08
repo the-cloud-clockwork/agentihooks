@@ -5,13 +5,14 @@ worktree with its pull request stops freely.
 
 import json
 import os
-import socket
 import subprocess
 import sys
 import threading
 from pathlib import Path
 
 import pytest
+
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts" / "swarm_ledger"
@@ -35,19 +36,13 @@ IDENTITY = ("-c", "user.name=t", "-c", "user.email=t@example.com")
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
-def spare_port():
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
 def git(path, *args):
     done = subprocess.run(["git", "-C", str(path), *IDENTITY, *args], capture_output=True, text=True, check=True)
     return done.stdout.strip()
 
 
 @pytest.fixture
-def rig(tmp_path, monkeypatch):
+def rig(tmp_path, monkeypatch, ledger_port):
     import redis
     from fakeredis import TcpFakeServer
 
@@ -100,7 +95,8 @@ def rig(tmp_path, monkeypatch):
         "REDIS_URL": url,
         "AGENTIHOOKS_SWARM_REDIS_URL": url,
         "LEDGER_DIR": str(ledgers),
-        "LEDGER_PORT": str(spare_port()),
+        "LEDGER_PORT": str(ledger_port),
+        "LEDGER_AUTOSTART": "1",
         "WORKTREE_ROOT": str(trees),
         "AGENTIHOOKS_SWARM": SLUG,
         "AGENTIHOOKS_AGENT_NAME": ME,
@@ -108,7 +104,7 @@ def rig(tmp_path, monkeypatch):
         "AGENTIHOOKS_SWARM_TASK": task,
     }
     client.hset(
-        f"agentihooks:swarm:{SLUG}:config",
+        f"{KEY_ROOT}:swarm:{SLUG}:config",
         mapping={"slug": SLUG, "repo": "/repo", "max_eng": 1, "max_ci": 0, "state": "running", "gates": "{}"},
     )
 
@@ -174,8 +170,8 @@ def test_unpushed_commits_reach_origin_and_the_task_until_the_agent_records_prog
     assert [(c["by"], c["text"]) for c in comments] == [
         ("swarm", f"The stop hook pushed the task branch {BRANCH} to origin")
     ]
-    inbox = rig.redis.zrange(f"agentihooks:inbox:address:{ME}", 0, -1)
-    assert [rig.redis.hget(f"agentihooks:inbox:item:{item}", "text") for item in inbox] == [TEMPLATE]
+    inbox = rig.redis.zrange(f"{KEY_ROOT}:inbox:address:{ME}", 0, -1)
+    assert [rig.redis.hget(f"{KEY_ROOT}:inbox:item:{item}", "text") for item in inbox] == [TEMPLATE]
     rig.cli("comment", f"tasks/{rig.task}", "Pushed the first slice of the work.")
     second = rig.stop()
     assert second.returncode == 0, (second.stderr, rig.rows())
