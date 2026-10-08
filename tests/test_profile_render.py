@@ -723,7 +723,7 @@ def test_copilot_render_follows_a_rotated_gateway_key_into_a_private_file(world,
 
     out = render.render_copilot("rb-role")
 
-    assert out is not None and out != first
+    assert out != first and out == render.profile_dir("rb-role") / "copilot"
     headers = json.loads((out / "mcp-config.json").read_text())["mcpServers"]["gateway-tools"]["headers"]
     assert headers == {"Authorization": "Bearer k-rotated"}
     assert (out / "mcp-config.json").stat().st_mode & 0o777 == 0o600
@@ -774,7 +774,7 @@ def test_forced_copilot_render_starts_a_new_home_beside_a_fresh_claude_one(world
     assert out == render.profile_dir("rb-role") / "copilot"
 
 
-def test_copilot_renders_an_overlay_set_into_its_own_home(world, overlays, copilot_gateway):
+def test_copilot_renders_an_overlay_set_into_its_own_home(world, overlays, copilot_gateway, monkeypatch):
     from scripts.profiles import render
 
     out = render.render_copilot("rb-eng", overlays=["ov-a"])
@@ -786,6 +786,10 @@ def test_copilot_renders_an_overlay_set_into_its_own_home(world, overlays, copil
     forced = render.render_copilot("rb-eng", force=True, overlays=["ov-a"])
     assert forced == render.profile_dir("rb-eng", ["ov-a"]) / "copilot"
     assert "OV-A RULE MARKER" in (forced / "copilot-instructions.md").read_text()
+    monkeypatch.setenv("GW_KEY", "k-rotated")
+    stale = render.render_copilot("rb-eng", overlays=["ov-a"])
+    assert stale != forced and stale == render.profile_dir("rb-eng", ["ov-a"]) / "copilot"
+    assert "OV-A RULE MARKER" in (stale / "copilot-instructions.md").read_text()
 
 
 def test_init_re_renders_each_copilot_role_home(world, copilot_gateway, monkeypatch):
