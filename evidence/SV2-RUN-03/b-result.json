@@ -1,5 +1,5 @@
 {
-  "tested_commit": "615a95eb42289dced3ca8cf9b1a41468554ec475",
+  "tested_commit": "afbdcb1bcca20c1f8125a116ff812e28e92a6831",
   "evidence_class": "mocked transport and isolated fakeredis; no live runtime or rollout proof",
   "passed": true,
   "independent_fixtures": [

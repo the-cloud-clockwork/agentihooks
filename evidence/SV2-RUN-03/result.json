@@ -4,7 +4,7 @@
   "integration_gate": "G1",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1838",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1843",
-  "tested_commit": "615a95eb42289dced3ca8cf9b1a41468554ec475",
+  "tested_commit": "afbdcb1bcca20c1f8125a116ff812e28e92a6831",
   "plan_revision": "3bd4f4a6b01057b447cad15fa48c85802d3f78ee",
   "status": "implemented-not-live-qualified",
   "evidence_class": "mocked transport and isolated fakeredis; no live runtime or rollout proof",
@@ -19,7 +19,7 @@
   },
   "authority": "Controller-side service operates on previously admitted immutable execution identity and canonical seat generation. No display label grants authority. Worker-facing launch grant verification remains at the authenticated registration boundary; this service is not a public unauthenticated endpoint.",
   "states": {
-    "observed": "196 focused operations, preceding runtime, execution identity and store tests passed. Operations line coverage 100 percent before recovery isolation addition; its new exception path is covered by the stale and current recovery regression. Ruff check and format clean; exact committed base size gate zero errors.",
+    "observed": "208 focused operations, preceding runtime, execution identity, store, collection speed and reload tests passed. Ruff check and format clean. RedisStore journal construction is lazy; a subprocess regression proves legacy construction leaves the new runtime service unloaded.",
     "accepted": "Acceptance A, B and C each pass twice on independent fixtures. Original Standards and Spec readers closed recovery isolation finding on 9305448c; no open findings.",
     "committed": "Implementation and fixture inputs committed on tested_commit; generated case manifests identify exact input hashes.",
     "externally_verified": "CI run 37846250223 exposed collection speed, fakeredis group and imported folder reload regressions; local regression suites now pass after deferred imports. Final CI pending."
@@ -37,7 +37,8 @@
   "remaining_limitations": [
     "The new journal service requires an OperationTransport implementing authoritative absence, atomic operation and execution deduplication, and backend generation fencing. No real remote backend exists at G1. The preceding local RuntimeRouter path is unchanged and the new service is exercised by mocked transport fixtures; worker adapter integration is supplied by later runtime packages.",
     "The journal is Redis coordination state, retained by existing swarm snapshots; it is not a durable transcript archive. Dispatch_enabled is an explicit service construction option and must remain false while unresolved operations are reconciled during rollback.",
-    "The service stores payload digests rather than prompts. Recovery classifies unresolved operations by observation; an absent operation requires the original request payload for explicit dispatch. Stale conflicts are returned as refused without changing old persisted entries; other entries continue recovery."
+    "The service stores payload digests rather than prompts. Recovery classifies unresolved operations by observation; an absent operation requires the original request payload for explicit dispatch. Stale conflicts are returned as refused without changing old persisted entries; other entries continue recovery.",
+    "When a later package integrates journal dispatch into the ledger server, its runtime folder must join the reload watcher. The trace-plan classifier excluded that integration from this package; proposed on the ledger. Legacy store construction does not load the new journal service."
   ],
   "next_action": "Close independent reviews, qualify CI and merge into dev."
 }
