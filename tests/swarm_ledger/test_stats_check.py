@@ -115,6 +115,7 @@ def test_the_stats_card_has_no_stats_check_row():
         "const nodes = {}; const $ = id => nodes[id] ||= {replaceChildren: (...rows) => {nodes[id].textContent = rows.join(' · ');}};\n"
         "const h = (tag, attrs, ...children) => attrs.text || children.filter(Boolean).join(' ');\n"
         "const when = () => 'now'; const span = () => '1m'; const inScope = list => list; const activeAgents = () => 0;\n"
+        "const swarm = null; const inboxPending = () => 0;\n"
         + EVENTS
         + "let meta = {created_at: 1, events: [sent, answer]};\n"
         "let doc = {phases: [], followups: [], questions: [], tasks: [], time_left_minutes: null, chat: [{id: 'm3', by: 'boss', at: 150, text: 'ok'}]};\n"
