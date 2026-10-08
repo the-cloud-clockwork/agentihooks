@@ -1,5 +1,7 @@
 import json
 import os
+import re
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -8,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 from xdist.workermanage import NodeManager
 
+from hooks.secrets import scan
 from tests import conftest
 from tests.shards import (
     assign_files,
@@ -21,6 +24,7 @@ from tests.shards import (
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parent.parent
+_URL_CREDENTIAL = re.compile(r"://[^/\s@:]+:[^/\s@]+@")
 
 
 def test_every_test_file_lands_in_exactly_one_shard():
@@ -47,6 +51,33 @@ def test_shards_balance_the_stored_durations_per_file():
         ["tests/test_a.py", "tests/test_d.py"],
         ["tests/test_b.py", "tests/test_c.py", "tests/test_e.py"],
     ]
+
+
+def _committed(*args: str) -> str:
+    return subprocess.run(["git", *args], cwd=_ROOT, check=True, capture_output=True, text=True).stdout
+
+
+def _credential_shaped(nodeids):
+    return [nodeid for nodeid in nodeids if scan(nodeid, mode="strict") or _URL_CREDENTIAL.search(nodeid)]
+
+
+def test_the_credential_check_flags_token_and_url_password_names():
+    planted = [
+        "t.py::t[" + "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8]",
+        "t.py::t[https://user:fixture-" + "password@github.com/o/r.git]",
+    ]
+    assert _credential_shaped([*planted, "t.py::t[github]", "t.py::t[https-userinfo]"]) == planted
+
+
+def test_committed_durations_name_no_credential_shaped_case():
+    stored = _committed("ls-files", ".test_durations*").split()
+    assert stored
+    flagged = [
+        f"{path}: {nodeid}"
+        for path in stored
+        for nodeid in _credential_shaped(json.loads(_committed("show", f"HEAD:{path}")))
+    ]
+    assert flagged == []
 
 
 def test_serial_group_costs_are_not_divided_across_workers():
