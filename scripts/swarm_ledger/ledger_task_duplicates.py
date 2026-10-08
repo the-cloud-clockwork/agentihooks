@@ -1,6 +1,8 @@
 """Screens task adds against the tasks the ledger already holds, before the locked apply takes the write lock."""
 
 import json
+import os
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -73,9 +75,18 @@ def refusal(op: dict, match: dict) -> str:
 
 
 def find(doc: dict, adds: list[dict]) -> list:
-    request = json.dumps({"doc": doc, "kind": "task", "items": adds})
-    done = subprocess.run(CHILD, input=request, capture_output=True, text=True, timeout=BUDGET_S, check=True, cwd=ROOT)
-    return json.loads(done.stdout.splitlines()[-1])
+    held = {key: doc.get(key, []) for key in ("tasks", "phases", "followups")}
+    request = json.dumps({"doc": held, "kind": "task", "items": adds})
+    pipes = {"stdin": subprocess.PIPE, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE}
+    with subprocess.Popen(CHILD, **pipes, text=True, cwd=ROOT, start_new_session=True) as child:
+        try:
+            out, err = child.communicate(request, timeout=BUDGET_S)
+        except subprocess.TimeoutExpired:
+            os.killpg(child.pid, signal.SIGKILL)
+            raise
+    if child.returncode:
+        raise subprocess.CalledProcessError(child.returncode, CHILD, out, err)
+    return json.loads(out.splitlines()[-1])
 
 
 def _find(doc, adds):

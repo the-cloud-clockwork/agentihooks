@@ -1,8 +1,11 @@
 import inspect
 import json
+import os
 import subprocess
 import sys
+import time
 import uuid
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -291,6 +294,42 @@ def test_a_finder_that_dies_silently_is_named_as_such(live, monkeypatch):
         "the duplicate check did not run for task t9 because it failed with no message, so it was added unchecked"
         in reply["_meta"]["warnings"]
     )
+
+
+def test_an_overrun_kills_every_process_the_finder_started(monkeypatch, tmp_path):
+    marker = tmp_path / "grandchild.pid"
+    spawn = (
+        "import subprocess, sys, time; "
+        "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+        f"open({str(marker)!r}, 'w').write(str(g.pid)); time.sleep(30)"
+    )
+    monkeypatch.setattr(ledger_task_duplicates, "CHILD", (sys.executable, "-c", spawn))
+    monkeypatch.setattr(ledger_task_duplicates, "BUDGET_S", 2)
+    with pytest.raises(subprocess.TimeoutExpired):
+        ledger_task_duplicates.find({}, [])
+    grandchild = int(marker.read_text())
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and alive(grandchild):
+        time.sleep(0.05)
+    assert not alive(grandchild)
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    status = Path(f"/proc/{pid}/status")
+    return not (status.exists() and "\nState:\tZ" in status.read_text())
+
+
+def test_the_finder_receives_only_the_lists_it_reads(monkeypatch, tmp_path):
+    seen = tmp_path / "request.json"
+    copy = f"import sys; open({str(seen)!r}, 'w').write(sys.stdin.read()); print('[null]')"
+    monkeypatch.setattr(ledger_task_duplicates, "CHILD", (sys.executable, "-c", copy))
+    doc = {"tasks": [{"id": "t1"}], "phases": [], "followups": [], "_meta": {"seeds": ["a" * 1000]}}
+    assert ledger_task_duplicates.find(doc, [{"task": "t9"}]) == [None]
+    assert set(json.loads(seen.read_text())["doc"]) == {"tasks", "phases", "followups"}
 
 
 def test_the_server_never_loads_the_classifier_or_its_home_configuration():
