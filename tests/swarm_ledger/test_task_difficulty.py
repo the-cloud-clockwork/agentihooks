@@ -93,7 +93,10 @@ def test_task_set_refuses_any_other_difficulty(bad):
 @pytest.mark.parametrize(
     ("fields", "message"),
     [
-        ({"difficulty": "S", "difficulty_source": "guess"}, "difficulty_source must be one of"),
+        (
+            {"difficulty": "S", "difficulty_source": "guess"},
+            "difficulty_source must be one of ('operator', 'rule', 'classifier', 'default')",
+        ),
         ({"difficulty": "S", "difficulty_confidence": 1.5}, "difficulty_confidence must be a number from 0 to 1"),
         ({"difficulty": "S", "difficulty_confidence": -0.1}, "difficulty_confidence must be a number from 0 to 1"),
         ({"difficulty": "S", "difficulty_confidence": True}, "difficulty_confidence must be a number from 0 to 1"),
@@ -103,13 +106,21 @@ def test_task_set_refuses_any_other_difficulty(bad):
     ],
 )
 def test_source_and_confidence_are_checked(fields, message):
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError) as refused:
         core.check_op({"op": "task_update", "id": "x", "by": MASTER, "item": "tasks/t1", "fields": fields})
+    assert str(refused.value) == message
 
 
 def test_a_seeded_task_with_a_bad_difficulty_is_refused():
-    with pytest.raises(ValueError, match="difficulty must be one of"):
+    with pytest.raises(ValueError) as refused:
         ledger_tasks.check_task({"id": "t1", "difficulty": "XL"})
+    assert str(refused.value) == "difficulty must be one of ('S', 'M', 'L')"
+
+
+def test_task_add_help_names_the_difficulty(capsys):
+    with pytest.raises(SystemExit):
+        ledger.build_parser().parse_args(["task", "--help"])
+    assert "--difficulty {S,M,L} task size: S, M or L" in " ".join(capsys.readouterr().out.split())
 
 
 def test_the_server_schema_accepts_a_task_add_difficulty():
@@ -157,8 +168,9 @@ def test_task_set_cli_refuses_a_confidence_that_is_not_a_number(monkeypatch):
     args = ledger.build_parser().parse_args(
         ["--slug", SLUG, "--as", MASTER, "task", "set", "t1", "difficulty=S", "difficulty_confidence=high"]
     )
-    with pytest.raises(SystemExit, match="task set takes difficulty_confidence as a number from 0 to 1"):
+    with pytest.raises(SystemExit) as refused:
         ledger.cmd_task(args)
+    assert refused.value.code == "task set takes difficulty_confidence as a number from 0 to 1"
 
 
 def label(task):
