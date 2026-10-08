@@ -2,7 +2,7 @@ import pytest
 
 from scripts.inbox.dispatch import REASSIGNED, RELEASED, Dispatcher, DispatchError, digest
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks, claim, first_showing, write_ref
-from scripts.inbox.store import InboxStore, owner_key
+from scripts.inbox.store import InboxStore, now_ms, owner_key
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -366,6 +366,79 @@ def test_hook_delivery_reads_the_owner_inside_its_transaction(store, dispatcher)
     pending = store.pending_mail("bob")
     Dispatcher(store).own("bob", "bridge-1")
     assert [store.deliver(found.id, "bob") for found in pending] == [None]
+
+
+def test_an_owner_taken_inside_the_hook_transaction_refuses_the_delivery(server, store, monkeypatch):
+    item = store.send("alice", "bob", "hi")
+    other = Dispatcher(fresh(server))
+    real = store.last_pending
+    calls = []
+
+    def interleaved(pipe, found):
+        calls.append(1)
+        last = real(pipe, found)
+        other.own("bob", "bridge-1")
+        return last
+
+    monkeypatch.setattr(store, "last_pending", interleaved)
+    assert store.deliver(item.id, "bob") is None
+    assert len(calls) == 1
+    assert store.get(item.id).state == "pending"
+
+
+def test_an_owner_taken_inside_the_mark_transaction_refuses_the_mark(store, monkeypatch):
+    marks = SeenMarks(store.redis)
+    real = store.redis.pipeline
+    calls = []
+
+    def pipeline(*args, **kwargs):
+        pipe = real(*args, **kwargs)
+        if not calls:
+            multi = pipe.multi
+
+            def interleaved():
+                store.redis.set(owner_key("bob"), "bridge-1")
+                multi()
+
+            pipe.multi = interleaved
+        calls.append(1)
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    assert marks.mark("bob", "sw:3:c1") is False
+    assert len(calls) == 2
+    assert marks.seen("bob", "sw:3:c1") is False
+
+
+def test_seen_marks_check_the_owner_of_the_resolved_name(store):
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    swarm = RedisStore(store.redis)
+    swarm.create(SwarmConfig("sw", "/repo", 2, 1))
+    name = swarm.next_name("sw", "eng")
+    swarm.put_agent("sw", AgentRecord(name=name, lane="eng", task="t1"))
+    store.names.alias("old-name", name)
+    Dispatcher(store).own(name, "bridge-1")
+    assert SeenMarks(store.redis).mark("old-name", "sw:3:c1") is False
+    assert SeenMarks(store.redis).mark("someone-else", "sw:3:c1") is True
+
+
+def test_a_committed_delivery_is_never_redelivered(store, dispatcher):
+    item = store.send("alice", "bob", "hi")
+    [delivery] = dispatcher.reserve("bob", "bridge-1")
+    send(dispatcher, "bridge-1", delivery)
+    assert store.redeliver(now_ms() + 10**9, 0) == []
+    assert store.get(item.id).state == "delivered"
+    assert dispatcher.reserve("bob", "bridge-1") == []
+
+
+@pytest.mark.parametrize("evidence", ["", "not a digest"])
+def test_a_malformed_payload_is_rejected(store, dispatcher, evidence):
+    item = store.send("alice", "bob", "hi")
+    [delivery] = dispatcher.reserve("bob", "bridge-1")
+    dispatcher.submitting(delivery.id, "bridge-1")
+    assert dispatcher.accept(delivery.id, "bridge-1", evidence).state == "rejected"
+    assert store.get(item.id).state == "pending"
 
 
 def test_other_recipients_keep_legacy_delivery(store, dispatcher):
