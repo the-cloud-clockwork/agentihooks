@@ -10,6 +10,14 @@ class ArgumentParser(argparse.ArgumentParser):
         kwargs.setdefault("metavar", "COMMAND")
         return super().add_subparsers(**kwargs)
 
+    def _parse_optional(self, arg_string: str):
+        result = super()._parse_optional(arg_string)
+        if result is not None:
+            option = result[0] if isinstance(result, list) else result
+            if option[0] is None:
+                self.unknown("option", arg_string, self._option_string_actions)
+        return result
+
     def _check_value(self, action: argparse.Action, value: str) -> None:
         if action.choices is not None and value not in action.choices and not action.option_strings:
             self.unknown("command", value, action.choices)

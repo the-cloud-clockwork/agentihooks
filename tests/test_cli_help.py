@@ -31,6 +31,8 @@ def test_help_lists_commands_without_brace_list(monkeypatch, capsys):
         (("zzzzz",), "unknown command zzzzz"),
         (("versoin",), "unknown command versoin; did you mean version?"),
         (("--zzzzz",), "unknown option --zzzzz"),
+        (("--zzzzz", "value"), "unknown option --zzzzz"),
+        (("bundle", "--zzzzz"), "unknown option --zzzzz"),
         (("init", "--zzzzz"), "unknown option --zzzzz"),
         (("bundle", "zzzzz"), "unknown command zzzzz"),
         (("bundle", "lnik"), "unknown command lnik; did you mean link?"),
@@ -72,3 +74,23 @@ def test_shared_parser_preserves_arguments_and_reports_missing_values(capsys):
         parser.parse_args(["--mode"])
     assert exc.value.code == 2
     assert capsys.readouterr().err == "argument --mode: expected one argument, run agentihooks -h and try again\n"
+
+
+@pytest.mark.parametrize("result", [(None, "--zzzzz", None), [(None, "--zzzzz", None, None)]])
+def test_unknown_options_support_both_argparse_return_shapes(monkeypatch, capsys, result):
+    import argparse
+
+    from scripts.cli_parser import ArgumentParser
+
+    monkeypatch.setattr(argparse.ArgumentParser, "_parse_optional", lambda self, token: result)
+    with pytest.raises(SystemExit) as exc:
+        ArgumentParser()._parse_optional("--zzzzz")
+    assert exc.value.code == 2
+    assert capsys.readouterr().err == "unknown option --zzzzz, run agentihooks -h and try again\n"
+
+
+def test_unknown_option_suggests_nearby_flag(monkeypatch, capsys):
+    code, out, err = run_cli(monkeypatch, capsys, "--versoin")
+    assert code == 2
+    assert out == ""
+    assert err == "unknown option --versoin; did you mean --version?, run agentihooks -h and try again\n"
