@@ -1,13 +1,14 @@
 import json
-import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
-
-from redis.exceptions import WatchError
 
 from scripts.swarm.store import RedisStore, SwarmError
 
 TICK_MS = 60_000
 TTL_MS = 3 * TICK_MS
+EPOCH = ContextVar("controller_epoch", default=None)
 
 
 @dataclass(frozen=True)
@@ -17,23 +18,26 @@ class Lease:
     expires_at: int
 
 
-def now_ms() -> int:
-    return time.time_ns() // 1_000_000
+def now_ms(store: RedisStore) -> int:
+    seconds, microseconds = store.redis.time()
+    return seconds * 1000 + microseconds // 1000
 
 
 def current(store: RedisStore, slug: str) -> Lease | None:
     raw = store.redis.get(store.key(slug, "control-owner"))
     held = Lease(**json.loads(raw)) if raw and raw.startswith("{") else None
-    return held if held and held.expires_at > now_ms() else None
+    return held if held and held.expires_at > now_ms(store) else None
 
 
 def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
+    from redis.exceptions import WatchError
+
     key, epochs = store.key(slug, "control-owner"), store.key(slug, "control-epoch")
     while True:
         with store.redis.pipeline() as pipe:
             try:
                 pipe.watch(key, epochs)
-                raw, at = pipe.get(key), now_ms()
+                raw, at = pipe.get(key), now_ms(store)
                 held = Lease(**json.loads(raw)) if raw and raw.startswith("{") else None
                 if held and held.expires_at > at:
                     if held.owner != owner:
@@ -58,7 +62,24 @@ def require(store: RedisStore, slug: str, held: Lease) -> None:
         raise SwarmError("the controller lease is stale")
 
 
+def require_epoch(store: RedisStore, slug: str, epoch: int) -> None:
+    live = current(store, slug)
+    if live is None or live.epoch != epoch:
+        raise SwarmError("the controller lease is stale")
+
+
+@contextmanager
+def fencing(epoch: int) -> Iterator[None]:
+    token = EPOCH.set(epoch)
+    try:
+        yield
+    finally:
+        EPOCH.reset(token)
+
+
 def release(store: RedisStore, slug: str, held: Lease) -> bool:
+    from redis.exceptions import WatchError
+
     key = store.key(slug, "control-owner")
     with store.redis.pipeline() as pipe:
         try:

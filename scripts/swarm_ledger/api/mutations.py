@@ -5,10 +5,11 @@ from .errors import APIError
 
 
 class GuardedOperations:
-    def __init__(self, payload: dict, budget: object, core: ModuleType) -> None:
+    def __init__(self, payload: dict, budget: object, core: ModuleType, fence=None) -> None:
         self.payload = payload
         self.budget = budget
         self.core = core
+        self.fence = fence
         self.checked = False
         self.results = {}
         self.digest = resources.revision({"ops": payload["ops"], "changes": payload.get("changes", [])})
@@ -35,7 +36,17 @@ class GuardedOperations:
                 raise APIError(409, "revision_conflict", "Resource changed since the expected revision")
         self.checked = True
 
+    def check_controller(self, op: dict) -> None:
+        from scripts.swarm.store import SwarmError
+
+        if "controller_epoch" in op:
+            try:
+                self.fence(op["controller_epoch"])
+            except SwarmError as exc:
+                raise APIError(409, "stale_controller", str(exc)) from None
+
     def apply(self, doc: dict, op: dict, ctx: object, apply_op: object) -> bool:
+        self.check_controller(op)
         if not self.checked:
             self.check(doc, ctx)
         if op["id"] in self.results:
@@ -44,6 +55,7 @@ class GuardedOperations:
         accepted = (
             not self.core.apply_changes(doc, changes, ctx) if changes else self.budget.apply(doc, op, ctx, apply_op)
         )
+        self.check_controller(op)
         self.results[op["id"]] = bool(accepted)
         receipts = ctx.meta.setdefault("api_operations", {})
         receipts[self.payload["operation_id"]] = {"digest": self.digest, "results": dict(self.results)}
@@ -68,7 +80,9 @@ def apply(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
         raise APIError(403, "forbidden", "Caller cannot perform this operation as its author", details)
     server.ledger_media.resolve(slug, operations)
     server.ledger_artifacts.resolve(slug, operations)
-    gate = GuardedOperations(payload, server.talk.Budget(slug), server.core)
+    gate = GuardedOperations(
+        payload, server.talk.Budget(slug), server.core, lambda epoch: server.authority.fence(slug, epoch)
+    )
     state, rejected = server.repository.apply_ops(slug, ops=operations, gate=gate)
     server.relay_to_inbox(slug, state)
     server.doctor_phrase(slug, state)

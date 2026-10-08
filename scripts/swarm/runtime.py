@@ -28,7 +28,7 @@ from scripts.swarm import (
     timing,
 )
 from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
-from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
+from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, connect
 from scripts.swarm.tick import Placed, SpawnError
 
 SWARM_HOME = Path.home() / ".agentihooks" / "swarm"
@@ -396,6 +396,7 @@ class HerdrRuntime:
                 *mode,
             ],
             predecessor=_predecessor(task),
+            controller_epoch=task.get("controller_epoch"),
         )
         self._reserve_account(account, lane, agent)
         return replace(
@@ -473,7 +474,11 @@ class HerdrRuntime:
         argv += [arg for overlay in worn for arg in ("--overlay", overlay)]
         return [*argv, "--profile", profile, "--prompt-file", str(path)]
 
-    def _launch(self, config, lane, task_id, name, argv, predecessor=None):
+    def _launch(self, config, lane, task_id, name, argv, predecessor=None, controller_epoch=None):
+        if controller_epoch is not None:
+            from scripts.swarm import lease
+
+            lease.require_epoch(connect(), config.slug, controller_epoch)
         agent = argv[argv.index("--agent") + 1]
         launched_at = int(time.time() * 1000)
         load_at_launch = list(os.getloadavg())

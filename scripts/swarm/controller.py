@@ -18,7 +18,8 @@ class FencedLedger:
 
         def call(*args, **kwargs):
             lease.require(self.store, self.slug, self.held)
-            return value(*args, **kwargs)
+            with lease.fencing(self.held.epoch):
+                return value(*args, **kwargs)
 
         return call
 

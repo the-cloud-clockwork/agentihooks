@@ -214,3 +214,21 @@ def test_controller_fences_ledger_and_spawn_writes(store):
             write()
         assert str(error.value) == "the controller lease is stale"
     assert len(runtime.spawned) == 1
+
+
+def test_spawn_receiver_refuses_epoch_after_launch_preparation(store, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from scripts.swarm import lease, runtime
+    from scripts.swarm.store import SwarmError
+
+    held = lease.acquire(store, "sw", "home")
+    calls = []
+    monkeypatch.setattr(runtime, "connect", lambda: store, raising=False)
+    receiver = runtime.HerdrRuntime(home=tmp_path, run=lambda *args, **kwargs: calls.append(args))
+    assert lease.release(store, "sw", held)
+    lease.acquire(store, "sw", "other")
+    with pytest.raises(SwarmError) as error:
+        receiver._launch(SimpleNamespace(slug="sw"), "eng", "t", "one", ["--agent", "claude"], controller_epoch=1)
+    assert str(error.value) == "the controller lease is stale"
+    assert calls == []

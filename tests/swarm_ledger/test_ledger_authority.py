@@ -29,6 +29,9 @@ OTHER = "engineer@323133-0257"
 MASTER = "master@323133-0001"
 
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
 def operation(kind, **fields):
     return {"op": kind, "id": uuid.uuid4().hex, **fields}
 
@@ -318,3 +321,47 @@ def test_the_transport_selects_the_bound_credential_only_in_a_pinned_session(cre
     with pinned():
         assert ledger.credentials(SLUG) == agent_headers(crew, WORKER)
         assert ledger.credentials(SLUG, service=True) == {"X-Ledger-Token": crew["admin"]}
+
+
+def test_controller_ledger_operations_carry_epoch(monkeypatch):
+    from types import SimpleNamespace
+
+    import fakeredis
+
+    from scripts.swarm import controller, lease, ledger_client
+    from scripts.swarm.store import RedisStore
+
+    saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    held = lease.acquire(saved, SLUG, "home")
+    calls = []
+    transport = SimpleNamespace(call=lambda slug, ops, service: calls.append(ops) or {})
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: transport)
+    client = LedgerClient()
+    controller.FencedLedger(saved, SLUG, held, client).say(SLUG, "Fenced write", by="swarm")
+    assert calls[0][0]["controller_epoch"] == 1
+    client.say(SLUG, "Ordinary write", by="swarm")
+    assert "controller_epoch" not in calls[1][0]
+
+
+def test_takeover_before_repository_write_refuses_stale_controller(crew, monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import controller, lease
+    from scripts.swarm.ledger_client import LedgerRefused
+    from scripts.swarm.store import RedisStore
+
+    saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    held = lease.acquire(saved, SLUG, "home")
+    monkeypatch.setattr(server.authority, "connect", lambda: saved)
+    apply = server.repository.apply_ops
+
+    def takeover(*args, **kwargs):
+        assert lease.release(saved, SLUG, held)
+        lease.acquire(saved, SLUG, "other")
+        return apply(*args, **kwargs)
+
+    monkeypatch.setattr(server.repository, "apply_ops", takeover)
+    with pytest.raises(LedgerRefused) as error:
+        controller.FencedLedger(saved, SLUG, held, LedgerClient()).say(SLUG, "Stale controller write", by="swarm")
+    assert "the controller lease is stale" in str(error.value)
+    assert all(row["text"] != "Stale controller write" for row in LedgerClient().chat(SLUG))
