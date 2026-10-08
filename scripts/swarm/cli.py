@@ -89,6 +89,7 @@ from scripts.swarm import (
     templates,
     tick_master,
     timer,
+    timing,
     trace_plan,
     waits,
 )
@@ -129,6 +130,7 @@ def now_ms():
     return int(time.time() * 1000)
 
 
+@timing.instrument_tick
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
     ledger = ledger or LedgerClient()
     lock, token = store.key(slug, "tick-lock"), uuid.uuid4().hex
@@ -139,8 +141,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
 
         if not commands.bind(store, slug, commands.hive_id()):
             return ["the swarm belongs to another hive"]
-        controls = command_runner.consume(store, slug)
-        if ledger.binned(slug):
+        controls = timing.call(command_runner.consume, store, slug)
+        if timing.call(ledger.binned, slug):
             _, left = stop_now(store, slug, runtime or HerdrRuntime(), ledger)
             return [
                 f"the ledger is in the bin, still retiring {', '.join(left)}"
@@ -149,43 +151,53 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
             ]
         inbox = InboxStore(store.redis)
         try:
-            doc = ledger.state(slug)
+            doc = timing.call(ledger.state, slug)
         except LedgerGone as exc:
             first = store.redis.set(store.key(slug, "ledger-gone"), 1, nx=True)
             return [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
-        actions = phase_planning.planning_pass(inbox, store, slug, doc, ledger, store.config(slug))
+        actions = timing.call(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
         if actions:
-            doc = ledger.state(slug)
-        ticked = phases.phase_pass(inbox, store, slug, doc, ledger)
+            doc = timing.call(ledger.state, slug)
+        ticked = timing.call(phases.phase_pass, inbox, store, slug, doc, ledger)
         actions += ticked
         if ticked:
-            actions += phase_planning.planning_pass(inbox, store, slug, ledger.state(slug), ledger, store.config(slug))
-        actions += tick(slug, store, ledger, runtime or HerdrRuntime(), now_ms())
+            actions += timing.call(
+                phase_planning.planning_pass,
+                inbox,
+                store,
+                slug,
+                timing.call(ledger.state, slug),
+                ledger,
+                store.config(slug),
+            )
+        actions += timing.call(tick, slug, store, ledger, runtime or HerdrRuntime(), now_ms())
         if store.config(slug).template == "doctor":
             from scripts.doctor import cli as doctor
 
-            actions += doctor.timer(store, slug, now_ms())
+            actions += timing.call(doctor.timer, store, slug, now_ms())
         herdr = messenger or delivery.HerdrMessenger()
-        delivery.migrate_outbox(store, slug, inbox)
-        agents = [a for a in store.agents(slug) if a.state != "finished"]
-        delivery.relay_to_page(inbox, slug, agents, ledger)
-        doc, config = ledger.state(slug), store.config(slug)
-        actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
-        actions += done_gate.recheck_pass(store, slug, doc, ledger, now_ms(), ledger_events.view)
+        timing.call(delivery.migrate_outbox, store, slug, inbox)
+        agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
+        timing.call(delivery.relay_to_page, inbox, slug, agents, ledger)
+        doc, config = timing.call(ledger.state, slug), store.config(slug)
+        actions += timing.call(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms())
+        actions += timing.call(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), ledger_events.view)
         mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
-        actions += intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge).run(doc)
-        actions += progress.checks_pass(store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
+        actions += timing.call(intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge).run, doc)
+        actions += timing.call(progress.checks_pass, store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
         rows = {t["id"]: t for t in doc["tasks"]}
-        actions += waits.end_pass(store, slug, rows, inbox, ledger_events.view, now_ms())
-        actions += quiet.quiet_pass(store, slug, rows, now_ms())
-        actions += priority_sweep.priority_pass(store, slug, doc, ledger)
-        found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
-        actions += ledger_events.findings_pass(inbox, store, slug, found)
+        actions += timing.call(waits.end_pass, store, slug, rows, inbox, ledger_events.view, now_ms())
+        actions += timing.call(quiet.quiet_pass, store, slug, rows, now_ms())
+        actions += timing.call(priority_sweep.priority_pass, store, slug, doc, ledger)
+        found = timing.call(findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
+        actions += timing.call(ledger_events.findings_pass, inbox, store, slug, found)
         window = wake.window_ms(os.environ)
-        actions += wake.wake_pass(inbox, slug, agents, herdr, ledger, now_ms(), window, wake.quiet_ms(os.environ))
-        taken = snapshot.auto(store, slug, now_ms(), os.environ)
+        actions += timing.call(
+            wake.wake_pass, inbox, slug, agents, herdr, ledger, now_ms(), window, wake.quiet_ms(os.environ)
+        )
+        taken = timing.call(snapshot.auto, store, slug, now_ms(), os.environ)
         store.redis.set(store.key(slug, "last-tick"), now_ms())
-        command_runner.publish(store, slug, ledger.state(slug))
+        timing.call(command_runner.publish, store, slug, timing.call(ledger.state, slug))
         return controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
         if store.redis.get(lock) == token:

@@ -825,6 +825,26 @@ def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", e
     return passed[:-2] if passed[-2:] == PLAN_MODE else passed
 
 
+def test_spawn_records_launch_preparation_and_waited_subprocess_cost(tmp_path, monkeypatch, capsys):
+    import json
+
+    from scripts.swarm import timing
+
+    with timing.tick("sw"):
+        _launched(tmp_path, monkeypatch, "eng", {"id": "t1", "title": "x"})
+    rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if '"swarm_tick_step"' in line]
+    finished = {row["step"] for row in rows if row["phase"] == "finished"}
+    assert {
+        "scripts.swarm.profile_choice.choose",
+        "scripts.swarm.prompt.build",
+        "scripts.swarm.priming_trace.write",
+        "scripts.swarm.model_pick.pick",
+        "scripts.swarm.runtime.HerdrRuntime._launch",
+    } <= finished
+    assert all(row["slug"] == "sw" for row in rows)
+    assert all(row["outcome"] == "success" for row in rows if row["phase"] == "finished")
+
+
 SEAT_TASKS = {
     "eng": {"id": "t1", "title": "x"},
     "ci": {"id": "t1", "title": "x"},
