@@ -132,22 +132,44 @@ def test_an_allow_with_a_rewrite_is_a_rewrite(monkeypatch):
     )
 
 
-def test_refuse_raises_only_on_a_deny(monkeypatch):
+def test_screen_returns_the_text_raises_on_a_deny_and_applies_a_rewrite(monkeypatch):
     seen = []
-    outcomes = iter([check.FilterOutcome("allow"), check.FilterOutcome("rewrite", "", {"text": "x"})])
+    outcomes = iter([check.FilterOutcome("allow"), check.FilterOutcome("rewrite", "", {"text": "cut"})])
 
     def fake(tool, tool_input):
         seen.append((tool, tool_input))
         return next(outcomes)
 
     monkeypatch.setattr(check, "check", fake)
-    assert check.refuse("ledger_write", TEXT) is None
-    assert check.refuse("inbox_send", TEXT) is None
+    assert check.screen("ledger_write", TEXT) == TEXT
+    assert check.screen("inbox_send", TEXT) == "cut"
     assert seen == [("ledger_write", {"text": TEXT}), ("inbox_send", {"text": TEXT})]
     monkeypatch.setattr(check, "check", lambda tool, tool_input: check.FilterOutcome("deny", "sent back"))
     with pytest.raises(ValueError) as refused:
-        check.refuse("ledger_write", TEXT)
+        check.screen("ledger_write", TEXT)
     assert str(refused.value) == "sent back"
+
+
+def test_a_matching_ledger_write_filter_refuses_an_agent_status_comment(project_filters):
+    (project_filters / "pre-ledger_write-x.filter.yaml").write_text(FILTER)
+    op = {"op": "set", "id": "s1", "path": "phases/p1/done", "value": True, "status": TEXT, "by": "eng"}
+    with pytest.raises(ValueError) as refused:
+        ledger_agent_ops.check(op)
+    assert str(refused.value) == _sent_back("pre-ledger_write-x.filter.yaml")
+
+
+def test_a_strip_filter_rewrites_ledger_and_inbox_text_before_it_lands(project_filters, inbox, capsys):
+    for tool in ("ledger_write", "inbox_send"):
+        (project_filters / f"pre-{tool}-x.filter.yaml").write_text(FILTER + "action: strip\n")
+    comment, followup = _comment(), _followup()
+    status = {"op": "set", "id": "s1", "path": "phases/p1/done", "value": True, "status": TEXT, "by": "eng"}
+    assert ledger_core.check_op(comment) is None
+    assert ledger_agent_ops.check(followup) is None
+    assert ledger_agent_ops.check(status) is None
+    assert (comment["text"], followup["text"], status["status"]) == ("The capacity line changed ",) * 3
+    assert cli.main(["send", "bob", *TEXT.split()]) == 0
+    sent = json.loads(capsys.readouterr().out)
+    assert inbox.get(sent["id"]).text == "The capacity line changed "
 
 
 @pytest.fixture

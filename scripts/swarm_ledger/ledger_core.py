@@ -742,9 +742,9 @@ def check_op(op, task_ids=()):
         if op["op"] in ("add", "edit"):
             ledger_comments.check(op["text"], kind_of(op["thread"]), op.get("long") is True, task_ids)
             if op["thread"].endswith("/comments"):
-                from hooks.filters import check
+                from hooks.filters import check as filters
 
-                check.refuse("ledger_write", op["text"])
+                op["text"] = filters.screen("ledger_write", op["text"])
 
 
 def check_body(body, task_ids=()):

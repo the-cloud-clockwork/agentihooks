@@ -7,6 +7,8 @@ import re
 
 import ledger_comments
 
+from hooks.filters import check as filters
+
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ROLES = ("orchestrator", "member")
 ITEM_PATH_RE = re.compile(r"^(phases|questions|followups)/[^/]+$")
@@ -50,9 +52,7 @@ def check(op, task_ids=()):
         raise ValueError("retext needs item questions/<id> or followups/<id> and text")
     if kind in ("add_item", "retext"):
         ledger_comments.check(op["text"], "item", task_ids=task_ids)
-        from hooks.filters import check
-
-        check.refuse("ledger_write", op["text"])
+        op["text"] = filters.screen("ledger_write", op["text"])
     if kind == "gate_bypass" and not isinstance(op.get("unhandled"), int):
         raise ValueError("gate_bypass needs an integer unhandled")
     if kind == "gate_lift" and not GATE_RE.match(str(op.get("gate"))):
@@ -61,6 +61,7 @@ def check(op, task_ids=()):
         if not _text(op["status"]):
             raise ValueError(f"status must be text up to {MAX_TEXT} characters")
         ledger_comments.check(op["status"], "comment", task_ids=task_ids)
+        op["status"] = filters.screen("ledger_write", op["status"])
 
 
 def _text(value):

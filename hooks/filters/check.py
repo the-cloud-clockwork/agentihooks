@@ -46,7 +46,10 @@ def check(tool: str, tool_input: dict, cwd: str | None = None) -> FilterOutcome:
         return ALLOW
 
 
-def refuse(tool: str, text: str) -> None:
+def screen(tool: str, text: str) -> str:
     outcome = check(tool, {"text": text})
     if outcome.decision == "deny":
         raise ValueError(outcome.reason)
+    if outcome.decision == "rewrite":
+        return outcome.tool_input["text"]
+    return text
