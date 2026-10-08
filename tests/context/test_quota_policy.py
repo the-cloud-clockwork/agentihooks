@@ -117,6 +117,18 @@ def test_other_accounts_count_an_account_with_no_live_session_as_zero(monkeypatc
     assert (found.sessions, found.observed_at) == (0, observed)
 
 
+def test_a_stale_reading_stays_a_target_with_no_band_cap_for_the_router_to_refresh(monkeypatch):
+    from scripts import claude_quota_balancer as balancer
+
+    beta = balancer.ProbeResult(
+        "beta", "allowed", "NORMAL", 70.0, balancer.QuotaWindow(10.0, None), balancer.QuotaWindow(30.0, None)
+    )
+    observed = time.time() - 901
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [(observed, beta)])
+    [found] = qp._other_accounts({})
+    assert (found.account, found.observed_at, found.cap) == ("beta", observed, None)
+
+
 def test_an_open_account_with_exactly_the_minimum_routing_left_wins_over_a_full_one():
     edge = qp.Candidate("beta", 0, 100 - qp.MIN_ROUTING_LEFT, 0, time.time())
     full = qp.Candidate("gamma", 10, 50, 5, time.time())

@@ -161,15 +161,18 @@ def _other_accounts(sessions: dict[str, int]) -> list[Candidate]:
     from scripts.claude_quota_balancer import cached_observations
 
     now = time.time()
-    candidates = []
+    newest = {}
     for observed_at, result in cached_observations():
+        if observed_at >= newest.get(result.account, (observed_at,))[0]:
+            newest[result.account] = (observed_at, result)
+    candidates = []
+    for observed_at, result in newest.values():
         five = _effective(result.five_hour.used, result.five_hour.resets_at, now)
         week = _effective(result.seven_day.used, result.seven_day.resets_at, now)
         if five is None or week is None or result.provider_status == "rejected":
             continue
-        if not session_bands.fresh(observed_at, now):
-            continue
-        cap = session_bands.cap(100.0 - five, 100.0 - week)
+        fresh = session_bands.fresh(observed_at, now)
+        cap = session_bands.cap(100.0 - five, 100.0 - week) if fresh else None
         candidates.append(Candidate(result.account, five, week, sessions.get(result.account, 0), observed_at, cap))
     return candidates
 
