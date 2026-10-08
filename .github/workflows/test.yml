@@ -24,6 +24,9 @@ permissions:
   contents: read
 
 jobs:
+  swarm-image:
+    uses: ./.github/workflows/swarm-smoke.yml
+
   unit:
     runs-on: ubuntu-latest
     permissions:
@@ -283,7 +286,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, lint, sonar, mutation]
+    needs: [unit, lint, sonar, mutation, swarm-image]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

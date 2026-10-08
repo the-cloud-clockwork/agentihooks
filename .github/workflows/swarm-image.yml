@@ -1,8 +1,6 @@
 name: Swarm image
 
 on:
-  pull_request:
-    branches: [dev]
   push:
     branches: [dev]
   workflow_dispatch:
@@ -15,13 +13,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  smoke:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: Prove a clean local Compose install
-        run: bash scripts/packaging/swarm-smoke.sh
   tags:
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
@@ -39,7 +30,7 @@ jobs:
             echo EOF
           } >> "$GITHUB_OUTPUT"
   publish:
-    needs: [smoke, tags]
+    needs: [tags]
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     permissions:
       contents: read

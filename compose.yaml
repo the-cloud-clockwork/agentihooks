@@ -10,6 +10,7 @@ services:
       LEDGER_DIR: /data
       SWARM_AUTH_MODE: local
       SWARM_RELOAD: "0"
+      SWARM_PUBLIC_URL: "http://127.0.0.1:${SWARM_PORT:-8765}"
       AGENTIHOOKS_SWARM_REDIS_URL: redis://redis:6379/0
     volumes:
       - swarm-data:/data

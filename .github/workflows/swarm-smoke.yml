@@ -1,0 +1,17 @@
+name: Swarm container smoke
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove a clean local Compose install
+        run: bash scripts/packaging/swarm-smoke.sh

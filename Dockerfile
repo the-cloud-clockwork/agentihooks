@@ -25,4 +25,4 @@ USER 10001:10001
 VOLUME /data
 EXPOSE 8765
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 CMD python -c 'import os, urllib.request; urllib.request.urlopen("http://127.0.0.1:" + os.environ["LEDGER_PORT"] + "/healthz", timeout=2).read()'
-CMD ["python", "-c", "from scripts.swarm_ledger import run; run(['serve'])"]
+CMD ["python", "-c", "from scripts.swarm_ledger import run; run(['serve', '--serve'])"]
