@@ -52,19 +52,20 @@ def _account(result) -> str:
 def at_cap(agent: str, environ: dict[str, str]) -> bool:
     """True when every account of this agent already runs the maximum number of sessions."""
     from hooks.context import account_sessions
+    from scripts import session_caps
 
-    cap = account_sessions.max_sessions(environ)
+    cap, caps = account_sessions.max_sessions(environ), session_caps.stored(agent)
     if agent == "codex":
         from scripts import codex_router
 
         counts = account_sessions.codex_sessions_by_account()
         pool = [account for account in codex_router.routing_pool(environ) if account.signed_in]
-        return all(counts.get(account.name, 0) >= cap for account in pool)
+        return all(counts.get(account.name, 0) >= caps.get(account.name, cap) for account in pool)
     from scripts import claude_quota_balancer as balancer
 
     accounts = {_account(result) for _, result in balancer.cached_observations() if balancer.is_routable(result)}
     counts = account_sessions.sessions_by_account()
-    return bool(accounts) and all(counts.get(account, 0) >= cap for account in accounts)
+    return bool(accounts) and all(counts.get(account, 0) >= caps.get(account, cap) for account in accounts)
 
 
 def choose(requested: str, environ: dict[str, str]) -> tuple[str, str]:
