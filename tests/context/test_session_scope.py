@@ -357,9 +357,28 @@ def test_markers_outside_recorded_scope_stay_unknown_instead_of_taking_the_lates
 def test_an_outbox_replay_keeps_the_attributes_computed_when_it_was_written(home):
     _record_all("first")
     written, _ = _marker_request({"type": "lesson", "content": "x", "at": "2026-10-08T10:05:00Z", "attrs": {}}, "first")
-    replayed, _ = _marker_request({"type": "lesson", "content": "x", "attrs": dict(written["attrs"])}, "first")
+    replayed, _ = _marker_request({"type": "lesson", "content": "x", "attrs": dict(written["attrs"])}, "first", "")
     assert replayed == written
     assert replayed["attrs"]["worktree"] == "one"
+
+
+def test_a_direct_marker_without_a_time_stays_unknown_in_a_scoped_session(home):
+    _record_all("first")
+    body, _ = _marker_request({"type": "lesson", "content": "x", "attrs": {}}, "first")
+    assert body["attrs"]["attribution"] == "unknown"
+    assert not set(body["attrs"]) & set(project_sessions.SCOPE_FIELDS)
+
+
+def test_worker_written_scope_fields_never_override_event_time(home):
+    _record_all("first")
+    attrs = {"task": "second", "lane": "ci", "worktree": "two", "task_revision": "9"}
+    for extra in ({}, {"project_id": "github.com/fixture/beta", "project": "beta"}):
+        marker = {"type": "lesson", "content": "x", "at": "2026-10-08T10:05:00Z", "attrs": {**attrs, **extra}}
+        body, _ = _marker_request(marker, "first")
+        scoped = {key: body["attrs"][key] for key in ("task", "lane", "worktree", "task_revision")}
+        assert scoped == {"task": "first", "lane": "eng", "worktree": "one", "task_revision": "1"}
+    assert (body["attrs"]["project_id"], body["attrs"]["project"]) == ("github.com/fixture/beta", "beta")
+    assert "repo" not in body["attrs"]
 
 
 def test_an_older_task_revision_cannot_replace_a_newer_one(home):
@@ -418,6 +437,8 @@ def test_stop_reports_unattributed_markers(home, monkeypatch):
     record_scope("late", FIXTURE["transitions"][0]["scope"], "2000-01-01T00:00:00+00:00")
     assert brain_writer_hook.write_markers("late", str(home / "none.jsonl"), late)["markers"] == 1
     assert recorded["unattributed_session_events_total"] == 0
+    assert brain_writer_hook.write_markers("unlogged", str(home / "none.jsonl"), late)["markers"] == 1
+    assert recorded["unattributed_session_events_total"] == 0
 
 
 def test_an_unwritable_scope_log_never_stops_session_start_or_stop(home):
@@ -446,11 +467,29 @@ def test_transcript_branch_changes_are_recorded_and_never_read_from_live_git(hom
         {"type": "assistant", "timestamp": "2026-10-08T10:00:00Z", "cwd": "/work/alpha/one", "gitBranch": "main"},
         {"type": "assistant", "timestamp": "2026-10-08T10:05:00Z", "cwd": "/work/alpha/one", "gitBranch": "feat"},
         {"type": "turn_context", "timestamp": "2026-10-08T10:10:00Z", "payload": {"cwd": "/work/alpha/one"}},
+        {"type": "turn_context", "timestamp": "2026-10-08T10:15:00Z", "payload": {"cwd": "/work/alpha/two"}},
+        {"type": "turn_context", "timestamp": "2026-10-08T10:20:00Z", "payload": {"cwd": "/work/alpha/two"}},
     ]
     path = home / "branches.jsonl"
     path.write_text("\n".join(json.dumps(entry) for entry in entries) + "\n")
     assert observe_transcript("branches", str(path), {}) == 3
-    assert [row["branch"] for row in transitions("branches")] == ["main", "feat", ""]
+    assert [(row["at"][11:16], row["branch"]) for row in transitions("branches")] == [
+        ("10:00", "main"),
+        ("10:05", "feat"),
+        ("10:15", ""),
+    ]
+
+
+def test_a_branchless_entry_keeps_the_launch_branch_of_the_same_folder(home, monkeypatch):
+    identity = ProjectIdentity("alpha", "fixture/alpha", "one", "/work/alpha/one", "", "github.com/fixture/alpha")
+    monkeypatch.setattr(project_sessions, "resolve_project", lambda cwd, env=None: identity)
+    monkeypatch.setattr(project_sessions, "_branch", lambda cwd: "feat")
+    record_session("codex", identity)
+    path = home / "codex.jsonl"
+    entry = {"type": "turn_context", "timestamp": "2999-01-01T00:00:00Z", "payload": {"cwd": "/work/alpha/one"}}
+    path.write_text(json.dumps(entry) + "\n")
+    assert observe_transcript("codex", str(path), {}) == 0
+    assert [row["branch"] for row in transitions("codex")] == ["feat"]
 
 
 def test_transitions_and_attributions_match_the_schema(home):

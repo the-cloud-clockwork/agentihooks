@@ -25,7 +25,8 @@ Live sources:
   `AGENTIHOOKS_SWARM_TASK` and `AGENTIHOOKS_SWARM_LANE` variables.
 - At Stop, `observe_transcript` records a transition at the time of each transcript entry whose working directory
   or branch changed (Claude `cwd` and `gitBranch`, Codex `turn_context` `cwd`). The branch comes only from the
-  transcript; an entry without one records an empty branch rather than today's checkout.
+  transcript, never from today's checkout. Codex entries carry no branch: an entry in the same folder keeps the
+  branch already recorded, and one in a new folder records an empty branch.
 - A failure to read or write the scope log never stops session start or Stop.
 
 ## Attribution
@@ -47,15 +48,15 @@ labels each event:
 Brain markers take the time of the transcript record that holds them; a marker read from the Stop payload's last
 message takes the Stop time. Once a session has a scope log, every marker is attributed through it:
 
-- the body takes the scope fields in force, plus `attribution`;
-- a `project`, `repo`, `remote` or `project_id` the model wrote without a valid `project_id` claim is replaced
-  by the event-time project, so a display label never stands beside a different project ID;
+- every scope attribute the model wrote is dropped, then the body takes the scope in force, plus `attribution`;
+- a valid `project_id` claim keeps the model's `project_id`, `project`, `repo` and `remote`; task, worktree,
+  branch, lane and revision still come from the event time;
 - a `share=fleet` marker loses every scope field;
-- a marker before the first transition is `unknown` and carries no project.
+- a marker before the first transition, or a marker read from a transcript record without a time, is `unknown`
+  and carries no project.
 
-A marker without a time is an outbox replay whose attributes were computed when it was written, or a record from
-a transcript without timestamps; it keeps the preceding lookup by session, which only fills missing attributes.
-A session with no scope log keeps that lookup too.
+An outbox replay carries attributes computed when it was written, so it keeps the preceding lookup by session,
+which only fills missing attributes. A session with no scope log keeps that lookup too.
 
 ## Grant
 

@@ -144,16 +144,13 @@ def _marker_request(marker: dict, session_id: str, cwd: str | None = None) -> tu
     outbox dedupes server-side against its original (possibly partial) POST.
     """
     from hooks.context.project_identity import resolve_project
-    from hooks.context.project_sessions import PROJECT_FIELDS, SCOPE_FIELDS, lookup, marker_scope
+    from hooks.context.project_sessions import SCOPE_FIELDS, lookup, marker_scope
 
     attrs = dict(marker.get("attrs") or {})
     folder = os.getenv("CLAUDE_PROJECT_DIR", str(Path.cwd())) if cwd is None else cwd
-    scope = marker_scope(session_id, marker)
+    scope = marker["scope"] if "scope" in marker else marker_scope(session_id, marker, replay=cwd is not None)
     if scope is not None:
-        dropped = {"scoped": PROJECT_FIELDS, "unknown": PROJECT_FIELDS, "explicit": ()}.get(
-            scope["attribution"], SCOPE_FIELDS
-        )
-        for name in dropped:
+        for name in SCOPE_FIELDS:
             attrs.pop(name, None)
         for name, value in scope.items():
             attrs.setdefault(name, value)
@@ -327,7 +324,8 @@ def write_markers(session_id: str, transcript_path: str, last_message: str = "")
 
         from hooks.context.project_sessions import marker_scope, unattributed_session_events_total
 
-        scopes = [marker_scope(session_id, m) or {"attribution": "unknown"} for m in markers]
+        markers = [{**m, "scope": marker_scope(session_id, m)} for m in markers]
+        scopes = [m["scope"] for m in markers if m["scope"] is not None]
         span.set_attrs({"unattributed_session_events_total": unattributed_session_events_total(scopes)})
 
         # HTTP is the only transport — any marker we fail to POST buffers in

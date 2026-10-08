@@ -178,7 +178,7 @@ def record_scope(
         transition_id = _transition_id(session_id, at, values)
         if any(row.get("transition_id") == transition_id for row in rows):
             return None
-        if rows and not _supersedes(rows[-1], values, moment):
+        if rows and not _changes(rows[-1], values, moment):
             return None
         row = {"session_id": session_id, "sequence": len(rows), "at": at, "transition_id": transition_id, **values}
         with path.open("a") as stream:
@@ -186,7 +186,7 @@ def record_scope(
     return row
 
 
-def _supersedes(latest: dict, values: dict, moment: datetime) -> bool:
+def _changes(latest: dict, values: dict, moment: datetime) -> bool:
     if moment < (_instant(latest.get("at")) or moment):
         raise ScopeRefused("transition is older than the latest accepted one")
     revision, accepted = values["task_revision"], str(latest.get("task_revision") or "")
@@ -232,13 +232,17 @@ def enabled(environ: Mapping[str, str] | None = None) -> bool:
     return (os.environ if environ is None else environ).get("AGENTIHOOKS_SESSION_SCOPE", "1") != "0"
 
 
-def marker_scope(session_id: str, marker: Mapping, grant: SessionGrant | None = None) -> dict | None:
+def marker_scope(
+    session_id: str, marker: Mapping, grant: SessionGrant | None = None, *, replay: bool = False
+) -> dict | None:
     if not enabled():
         return None
     attrs = marker.get("attrs") or {}
     if attrs.get("share") == FLEET:
         return {"attribution": FLEET}
-    rows = transitions(session_id) if marker.get("at") else []
+    if replay and not marker.get("at"):
+        return None
+    rows = transitions(session_id)
     if not rows:
         return None
     return _attribution(rows, {"at": marker.get("at"), "attrs": attrs}, grant)
@@ -292,12 +296,15 @@ def observe_transcript(session_id: str, transcript_path: str, environ: Mapping[s
         return 0
     rows = transitions(session_id)
     after = _instant(rows[-1].get("at")) if rows else None
-    seen, recorded = None, 0
+    seen = (rows[-1].get("cwd"), rows[-1].get("branch", "")) if rows else None
+    recorded = 0
     for entry in _load_entries(Path(transcript_path)):
         cwd, at = _entry_context(entry)
-        branch = str(entry.get("gitBranch") or "") if cwd else ""
         moment = _instant(at)
-        if not cwd or (cwd, branch) == seen or moment is None or (after and moment < after):
+        if not cwd or moment is None or (after and moment < after):
+            continue
+        branch = str(entry.get("gitBranch") or (seen[1] if seen and seen[0] == cwd else ""))
+        if (cwd, branch) == seen:
             continue
         seen = (cwd, branch)
         recorded += _observe(session_id, _scope(resolve_project(cwd, env), cwd, branch, env), at) is not None
