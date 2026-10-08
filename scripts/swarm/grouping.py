@@ -54,7 +54,7 @@ def group_pass(slug, config, store, ledger, doc):
 
 
 def release_pass(slug, store, ledger, doc):
-    known = {t["id"]: t for t in doc.get("tasks", [])}
+    known = {t["id"]: t for t in doc["tasks"]}
     actions = []
     for lead in [t for t in known.values() if t.get("group_members")]:
         why = _stopped(slug, store, lead, doc)

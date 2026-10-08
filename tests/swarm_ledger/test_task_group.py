@@ -268,7 +268,7 @@ def test_ungroup_leaves_a_member_that_points_at_another_lead(with_ungroup):
 def test_ungroup_of_a_task_without_a_group_changes_nothing(with_ungroup):
     state, rejected = ungroup("t1")
     assert rejected == ["ungroup-1"]
-    assert "tasks/t1 leads no group" in state["_meta"]["warnings"][-1]
+    assert state["_meta"]["warnings"][-1] == "tasks/t1 leads no group"
     state, rejected = ungroup("t9", n=2)
     assert rejected == ["ungroup-2"]
 
