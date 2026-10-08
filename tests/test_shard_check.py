@@ -110,6 +110,7 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     assert download["with"]["pattern"] == "durations-${{ matrix.python-version }}-*"
     check = next(step for step in steps if step.get("run", "").startswith("python -m tests.shard_check"))
     assert download["with"]["path"] in check["run"]
+    assert steps.index(download) < steps.index(check)
 
 
 @pytest.mark.parametrize(

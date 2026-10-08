@@ -30,7 +30,7 @@ def test_shards_inside_the_budget_pass_and_every_shard_is_reported(tmp_path):
     result = _budget(tmp_path, [300.0, 200.0], [100.0], [450.0, 449.0])
     assert result.returncode == 0, result.stdout + result.stderr
     lines = result.stdout.splitlines()
-    assert lines[0] == "3 shards, slowest 899.0 s against a budget of 900 s"
+    assert lines[0] == "3 shards, slowest 899.0 s of test time against a budget of 900 s"
     assert [line.split()[0] for line in lines[1:]] == ["durations-3.12-3", "durations-3.12-1", "durations-3.12-2"]
 
 
@@ -39,6 +39,26 @@ def test_a_shard_over_the_fifteen_minute_default_is_red_and_named(tmp_path):
     assert result.returncode == 1
     assert "durations-3.12-2 901.0 s over budget" in result.stdout
     assert "::error::1 of 2 shards passed the 900 s budget" in result.stdout
+
+
+def test_a_shard_exactly_at_the_budget_passes(tmp_path):
+    result = _budget(tmp_path, [450.0, 450.0])
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "durations-3.12-1 900.0 s" in result.stdout.splitlines()
+
+
+def test_shards_sharing_a_folder_name_are_each_graded(tmp_path):
+    paths = []
+    for side, seconds in (("a", 100.0), ("b", 901.0)):
+        path = tmp_path / side / "durations-3.12-1" / "durations.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"test_suite.py::test_0": seconds}))
+        paths.append(str(path))
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.shard_budget", *paths], cwd=_ROOT, capture_output=True, text=True
+    )
+    assert result.returncode == 1
+    assert result.stdout.startswith("2 shards, slowest 901.0 s")
 
 
 def test_the_budget_flag_moves_the_limit(tmp_path):

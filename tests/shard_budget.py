@@ -14,13 +14,13 @@ def main(argv: list[str] | None = None) -> int:
     if unread:
         print(f"::error::No shard durations at {', '.join(unread)}, so those shards cannot be graded.")
         return 1
-    seconds = {path.parent.name: sum(json.loads(path.read_text()).values()) for path in args.durations}
+    seconds = {path: sum(json.loads(path.read_text()).values()) for path in args.durations}
     ranked = sorted(seconds, key=lambda shard: -seconds[shard])
     budget = f"{args.budget:g}"
-    print(f"{len(seconds)} shards, slowest {seconds[ranked[0]]:.1f} s against a budget of {budget} s")
+    print(f"{len(seconds)} shards, slowest {seconds[ranked[0]]:.1f} s of test time against a budget of {budget} s")
     over = [shard for shard in ranked if seconds[shard] > args.budget]
     for shard in ranked:
-        print(f"{shard} {seconds[shard]:.1f} s{' over budget' if shard in over else ''}")
+        print(f"{shard.parent.name} {seconds[shard]:.1f} s{' over budget' if shard in over else ''}")
     if over:
         print(f"::error::{len(over)} of {len(seconds)} shards passed the {budget} s budget.")
         return 1
