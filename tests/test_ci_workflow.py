@@ -367,11 +367,11 @@ def test_every_later_step_skips_when_the_tree_already_passed(job):
 
 def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
     job = _workflow()["jobs"]["record-pass"]
-    assert job["needs"] in (["unit", "lint"], ["unit", "lint", "shard-check"])
-    checked = " && needs.shard-check.result == 'success'" if "shard-check" in job["needs"] else ""
+    assert job["needs"] == ["unit", "lint", "shard-check"]
     assert job["if"] == (
         "${{ !cancelled() && github.event_name == 'pull_request'"
-        " && needs.unit.result == 'success' && needs.lint.result == 'success'" + checked + " }}"
+        " && needs.unit.result == 'success' && needs.lint.result == 'success'"
+        " && needs.shard-check.result == 'success' }}"
     )
     tree, upload = job["steps"]
     assert tree["env"]["GH_TOKEN"] == "${{ github.token }}"
