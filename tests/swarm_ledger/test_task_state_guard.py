@@ -90,6 +90,7 @@ LIST_REFUSAL = "parked_on must be a list of nonempty strings"
     [
         ({"branch": "two words"}, BRANCH_REFUSAL),
         ({"branch": "tab\there"}, BRANCH_REFUSAL),
+        ({"branch": "--upload-pack=touch x"}, BRANCH_REFUSAL),
         ({"stacked_base": "dev"}, BASE_REFUSAL),
         ({"stacked_base": "0a86fd"}, BASE_REFUSAL),
         ({"stacked_base": "0A86FD7A"}, BASE_REFUSAL),
@@ -119,6 +120,49 @@ def test_a_stacked_base_of_seven_to_sixty_four_hex_characters_is_kept(base):
     doc = stacked_ledger()
     assert update(doc, {"stacked_base": base}, [])[0] is True
     assert doc["tasks"][1]["stacked_base"] == base
+
+
+REPOS = {"branch_repo": "git@github.com:o/bundle.git", "parked_repos": ["https://github.com/o/r", "/srv/docs.git"]}
+
+
+def test_the_ledger_keeps_a_branch_repository_and_the_parked_repositories():
+    doc = stacked_ledger()
+    applied, ctx = update(doc, REPOS, [])
+    assert applied is True
+    assert {key: doc["tasks"][1][key] for key in REPOS} == REPOS
+    assert sorted(ctx.stamps) == ["tasks/t1/branch_repo", "tasks/t1/parked_repos"]
+    update(doc, {"branch_repo": "", "parked_repos": []}, [])
+    assert (doc["tasks"][1]["branch_repo"], doc["tasks"][1]["parked_repos"]) == ("", [])
+
+
+@pytest.mark.parametrize(
+    ("fields", "refusal"),
+    [
+        ({"branch_repo": "two words"}, "branch_repo must be a repository url or path, or empty to clear it"),
+        (
+            {"branch_repo": "--upload-pack=touch x"},
+            "branch_repo must be a repository url or path, or empty to clear it",
+        ),
+        ({"parked_repos": ["a b"]}, "parked_repos must list repository urls or paths"),
+        ({"parked_repos": ["-oops"]}, "parked_repos must list repository urls or paths"),
+        ({"parked_repos": "https://github.com/o/r"}, "parked_repos must be a list of nonempty strings"),
+        ({"parked_repos": [""]}, "parked_repos must be a list of nonempty strings"),
+    ],
+)
+def test_bad_repository_shapes_are_refused(fields, refusal):
+    with pytest.raises(ValueError) as refused:
+        update(stacked_ledger(), fields, [])
+    assert str(refused.value) == refusal
+
+
+def test_a_branch_repository_that_is_not_a_string_is_refused():
+    with pytest.raises(ValueError) as refused:
+        update(stacked_ledger(), {"branch_repo": ["git@github.com:o/r.git"]}, [])
+    assert str(refused.value) == (
+        f"task_update may set only {ledger_tasks.UPDATABLE}, as strings, {ledger_tasks.LIST_FIELDS} as lists or "
+        f"{ledger_tasks.OBJECT_FIELDS} as objects"
+    )
+    assert {"branch_repo", "parked_repos"} <= set(ledger_tasks.UPDATABLE)
 
 
 @pytest.mark.parametrize(

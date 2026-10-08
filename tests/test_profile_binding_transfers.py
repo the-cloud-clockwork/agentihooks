@@ -36,20 +36,25 @@ def test_handoff_missing_original_choices_cannot_spawn(launching, key):
         task["handoff_envelope"].pop("launch")
     else:
         saved.pop(key)
-    with pytest.raises(SpawnError, match="^unsupported handoff: original profile and run options are missing$"):
+    with pytest.raises(
+        SpawnError, match="^unsupported handoff: original profile and run options are missing$"
+    ) as error:
         engine.spawn(config, "eng", "worker", task)
+    assert error.value.status == "unsupported"
     assert not calls
 
 
 def test_handoff_rejects_unsupported_harness_and_router_substitution(launching):
     engine, config, task, saved, calls = launching
     saved["harness"] = "copilot"
-    with pytest.raises(SpawnError, match="^unsupported handoff harness: copilot$"):
+    with pytest.raises(SpawnError, match="^unsupported handoff harness: copilot$") as error:
         engine.spawn(config, "eng", "worker", task)
+    assert error.value.status == "unsupported"
     saved["harness"] = "codex"
     engine.choose = lambda *a: ("claude", "fallback")
-    with pytest.raises(SpawnError, match="^unsupported handoff: router substituted the original harness$"):
+    with pytest.raises(SpawnError, match="^unsupported handoff: router substituted the original harness$") as error:
         engine.spawn(config, "eng", "worker", task)
+    assert error.value.status == "unsupported"
     assert not calls
 
 
@@ -58,8 +63,9 @@ def test_handoff_cannot_move_a_claude_only_profile_to_codex(launching, monkeypat
     monkeypatch.setattr(runtime.plugins, "claude_only", lambda *a: True)
     with pytest.raises(
         SpawnError, match="^unsupported handoff: required profile cannot mount on the original harness$"
-    ):
+    ) as error:
         engine.spawn(config, "eng", "worker", task)
+    assert error.value.status == "unsupported"
     assert not calls
     saved["harness"] = "claude"
     result = engine.spawn(config, "eng", "worker", task)
@@ -105,8 +111,11 @@ def test_an_explicit_task_profile_prevails_over_the_saved_seat_profile(launching
 def test_handoff_refuses_to_clamp_saved_effort(launching):
     engine, config, task, saved, calls = launching
     config.effort_min = config.effort_max = "high"
-    with pytest.raises(SpawnError, match="^unsupported transfer: saved effort is outside the current swarm range$"):
+    with pytest.raises(
+        SpawnError, match="^unsupported transfer: saved effort is outside the current swarm range$"
+    ) as error:
         engine.spawn(config, "eng", "worker", task)
+    assert error.value.status == "unsupported"
     assert not calls
 
 

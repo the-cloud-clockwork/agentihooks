@@ -35,6 +35,7 @@ import ledger_tasks
 import ledger_time_left
 import ledger_title
 import ledger_verdict
+import orjson
 
 from scripts.swarm_ledger import ledger_groups, ledger_phases, ledger_rank
 
@@ -136,6 +137,16 @@ def _reject_constant(name):
 
 def loads(text):
     return json.loads(text, parse_constant=_reject_constant)
+
+
+PRETTY = orjson.OPT_INDENT_2 | orjson.OPT_PASSTHROUGH_DATETIME | orjson.OPT_PASSTHROUGH_DATACLASS
+
+
+def pretty(value):
+    try:
+        return orjson.dumps(value, option=PRETTY).decode()
+    except orjson.JSONEncodeError:
+        return json.dumps(value, indent=2, ensure_ascii=False)
 
 
 def legacy_entries(text, prefix, by_default, split):
@@ -330,7 +341,7 @@ def read_token(html):
 
 def seed_text(doc, rev=None):
     body = doc if rev is None else {"_rev": rev, **doc}
-    return "\n" + json.dumps(body, indent=2, ensure_ascii=False).replace("<", "\\u003c") + "\n"
+    return "\n" + pretty(body).replace("<", "\\u003c") + "\n"
 
 
 def rotate_if_full(path, limit=LOG_MAX_BYTES):
@@ -351,7 +362,9 @@ def atomic_write(path, text):
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(text)
+    written = os.stat(tmp)
     os.replace(tmp, path)
+    return written
 
 
 def write_if_changed(path, text):
@@ -715,7 +728,8 @@ def load_state(json_path, seed):
 def rewrite_seed(html_path, html, doc, rev):
     new = SEED_RE.sub(lambda m: m.group(1) + seed_text(doc, rev) + m.group(3), html, count=1)
     if new != html and html_path.read_text(encoding="utf-8") == html:
-        atomic_write(html_path, new)
+        return atomic_write(html_path, new)
+    return None
 
 
 def gated(gate, doc, op, ctx):

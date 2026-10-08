@@ -247,6 +247,7 @@ class Check:
     view: Callable
     ask: Callable
     home: object = None
+    head: Callable | None = None
 
     def run(self, doc):
         if self.mode == "off":
@@ -259,27 +260,21 @@ class Check:
             record = verdicts.read(task["id"]) or verdicts.write(task["id"], PENDING, RUNNING, self.now_ms)
             if self.mode != "coach" and record["verdict"] != PENDING:
                 continue
+            if self._keep_if_unmoved(task, verdicts):
+                continue
             pr = self.view(task["pr_url"])
             if pr is not None:
                 actions += self._check(doc, task, pr, verdicts)
         return actions
 
     def _check(self, doc, task, pr, verdicts):
-        coaching = Verdicts(self.slug, "intent-coach", self.home)
+        coaching = self._coaching()
         previous = coaching.read(task["id"]) if self.mode == "coach" else None
         head = pr.get("head")
         if self.mode == "coach" and not head:
             return []
         if previous and previous["head"] == head:
-            verdicts.write(
-                task["id"],
-                previous["verdict"],
-                previous["reason"],
-                previous["at"],
-                coach_rounds=previous["coach_rounds"],
-                head=head,
-                url=task["pr_url"],
-            )
+            self._keep(task, previous, verdicts)
             return []
         rounds = min(previous["coach_rounds"] + (previous["verdict"] == FAIL), 2) if previous else 0
         state = intent_history.prepare(state_of(doc, task, pr))
@@ -310,6 +305,29 @@ class Check:
         elif self.mode == "coach" and task.get("state") == "claimed":
             self.ledger.update_task(self.slug, task["id"], {"state": "pr"})
         return actions
+
+    def _coaching(self):
+        return Verdicts(self.slug, "intent-coach", self.home)
+
+    def _keep_if_unmoved(self, task, verdicts):
+        if self.mode != "coach" or self.head is None:
+            return False
+        previous = self._coaching().read(task["id"])
+        if not previous or not previous.get("head") or previous["head"] != self.head(task["pr_url"]):
+            return False
+        self._keep(task, previous, verdicts)
+        return True
+
+    def _keep(self, task, previous, verdicts):
+        verdicts.write(
+            task["id"],
+            previous["verdict"],
+            previous["reason"],
+            previous["at"],
+            coach_rounds=previous["coach_rounds"],
+            head=previous["head"],
+            url=task["pr_url"],
+        )
 
     def _failed(self, task, who, reason, rounds=0):
         kind = "deny" if self.mode == "enforce" else "observe"
