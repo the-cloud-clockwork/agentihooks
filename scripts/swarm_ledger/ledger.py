@@ -94,7 +94,7 @@ import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
 from scripts.gates.base import Who
-from scripts.swarm_ledger import ledger_phases
+from scripts.swarm_ledger import ledger_phases, ledger_task_duplicates
 from scripts.swarm_ledger.repository import repository
 
 BASE = ledger_link.base()
@@ -185,6 +185,9 @@ def send(args, kind, /, **fields):
     ops = [op(kind, args, **fields)]
     state = call(args.slug, ops)
     refused(state, ops)
+    for warning in state.get("_meta", {}).get("warnings", []):
+        if warning.startswith(ledger_task_duplicates.UNCHECKED_PREFIX):
+            print(warning, file=sys.stderr)
     return state
 
 
@@ -512,18 +515,17 @@ def cmd_task(args):
         contract = {k: getattr(args, k) for k in ("must", "check", "judge") if getattr(args, k)}
         if contract:
             lists["contract"] = contract
-        if args.kind:
-            lists["kind"] = args.kind
         if args.artifact:
             lists["artifact"] = True
-        if args.profile:
-            lists["profile"] = args.profile
-        if args.rank:
-            lists["rank"] = args.rank
-        if args.difficulty:
-            lists["difficulty"] = args.difficulty
-        if args.plan:
-            lists["plan_url"] = args.plan
+        options = (
+            ("kind", args.kind),
+            ("profile", args.profile),
+            ("rank", args.rank),
+            ("difficulty", args.difficulty),
+            ("plan_url", args.plan),
+            ("not_duplicate", args.not_duplicate),
+        )
+        lists.update((key, value) for key, value in options if value)
         if args.scaffold:
             task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **lists}
             doc = call(args.slug) if args.kind == "plan" else None
@@ -698,6 +700,9 @@ def build_parser():
     task.add_argument("--rank", help="queue rank: urgent, high, normal (default) or low; next means urgent")
     task.add_argument("--plan", default="", help="link to the published plan; default the phase's plan link")
     task.add_argument("--difficulty", choices=ledger_tasks.DIFFICULTIES, help="task size: S, M or L")
+    task.add_argument(
+        "--not-duplicate", default="", help="why the task differs from the one it resembles; skips the duplicate check"
+    )
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")
     publish.add_argument("--phase", required=True, help="comma separated ids of the phases the plan fills")

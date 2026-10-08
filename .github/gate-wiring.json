@@ -1,11 +1,5 @@
 {
-  "not_gates": {
-    "test.yml/record-pass": {
-      "reason": "Uploads the passed tree artifact that lets the dev push skip unit and lint; it grades nothing, and its needs already cover the gates it records.",
-      "owner": "ci-1@rig-grade-swarm",
-      "expires": "2027-04-08"
-    }
-  },
+  "not_gates": {},
   "outside_gate": {
     "equivalence.yml/ledger-equivalence": {
       "reason": "Opt in replay of ledger storage and pages; the equivalence gate task wires it into the gate.",
