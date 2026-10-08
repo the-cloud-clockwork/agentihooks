@@ -1,0 +1,43 @@
+{
+  "package": "SV2-RUN-03",
+  "dependency": "SV2-RUN-02",
+  "integration_gate": "G1",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1838",
+  "pull_request": null,
+  "tested_commit": "f32bdb8f01bf325e2650ce6dcddf804e521528b8",
+  "plan_revision": "3bd4f4a6b01057b447cad15fa48c85802d3f78ee",
+  "status": "implemented-not-live-qualified",
+  "evidence_class": "mocked transport and isolated fakeredis; no live runtime or rollout proof",
+  "interfaces": [
+    "OperationRequest, Operation, Observation and OperationTransport",
+    "OperationJournal via RedisStore.operation_journal",
+    "Operations.execute, recover, unresolved and runtime_ambiguous_operations"
+  ],
+  "supported_versions": {
+    "runtime_protocol": "SV2-RUN-01 and SV2-RUN-02 unchanged; journal operation protocol introduced by SV2-RUN-03",
+    "journal": "Redis hash of immutable operation identity, execution generation, backend, target and payload digest; accepted, unknown, applied and refused phases"
+  },
+  "authority": "Controller-side service operates on previously admitted immutable execution identity and canonical seat generation. No display label grants authority. Worker-facing launch grant verification remains at the authenticated registration boundary; this service is not a public unauthenticated endpoint.",
+  "states": {
+    "observed": "Lost acknowledgement transport fixture and persisted Redis journal agree; 195 focused tests passed. Operations line coverage: 100 percent. Ruff check and format passed.",
+    "accepted": "Acceptance cases A, B and C each pass twice with independent fakeredis and transport fixtures.",
+    "committed": "Implementation and fixture inputs committed on tested_commit; generated case manifests identify exact input hashes.",
+    "externally_verified": "Pending independent reviews and CI."
+  },
+  "cases": {
+    "a": "evidence/SV2-RUN-03/a-result.json",
+    "b": "evidence/SV2-RUN-03/b-result.json",
+    "c": "evidence/SV2-RUN-03/c-result.json"
+  },
+  "migrations": [],
+  "rollback_rehearsal": {
+    "action": "Set dispatch_enabled false on Operations, retain the runtime-operations journal and execution history, and run recover before enabling dispatch. Recovery only observes. Retain preceding RuntimeRouter local compatibility path.",
+    "evidence": "Case C snapshots and restores unresolved journal, recovers applied object, replays without creation, rejects stale attempt and accepts an absent command without dispatch."
+  },
+  "remaining_limitations": [
+    "The new journal service requires an OperationTransport implementing authoritative absence, atomic operation and execution deduplication, and backend generation fencing. No real remote backend exists at G1. The preceding local RuntimeRouter path is unchanged and the new service is exercised by mocked transport fixtures; worker adapter integration is supplied by later runtime packages.",
+    "The journal is Redis coordination state, retained by existing swarm snapshots; it is not a durable transcript archive. Dispatch_enabled is an explicit service construction option and must remain false while unresolved operations are reconciled during rollback.",
+    "The service stores payload digests rather than prompts. Recovery classifies unresolved operations by observation; an absent operation requires the original request payload for explicit dispatch. A stale generation raises conflict and preserves its journal entry."
+  ],
+  "next_action": "Close independent reviews, qualify CI and merge into dev."
+}

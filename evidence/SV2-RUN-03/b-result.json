@@ -1,0 +1,21 @@
+{
+  "tested_commit": "f32bdb8f01bf325e2650ce6dcddf804e521528b8",
+  "evidence_class": "mocked transport and isolated fakeredis; no live runtime or rollout proof",
+  "passed": true,
+  "independent_fixtures": [
+    {
+      "passed": true,
+      "conflict": true,
+      "protected_state_unchanged": true,
+      "effects": 1,
+      "runtime_ambiguous_operations": 0
+    },
+    {
+      "passed": true,
+      "conflict": true,
+      "protected_state_unchanged": true,
+      "effects": 1,
+      "runtime_ambiguous_operations": 0
+    }
+  ]
+}
