@@ -427,6 +427,14 @@ def test_samples_under_the_run_limit_are_all_kept(tmp_path):
     assert sorted(path.name for path in samples.iterdir()) == ["100", "20", "3"]
 
 
+def test_a_foreign_folder_among_the_samples_never_fails_the_pruning(tmp_path):
+    samples = tmp_path / "samples"
+    for run in ("notes", "1", "2", "3"):
+        (samples / run).mkdir(parents=True)
+    refresh_durations.keep_newest(samples, 2, "3")
+    assert sorted(path.name for path in samples.iterdir()) == ["2", "3", "notes"]
+
+
 def test_samples_refresh_refuses_a_run_that_kept_no_durations(tmp_path, monkeypatch):
     samples = tmp_path / "samples"
     _sample(samples, "11", 1.0)
