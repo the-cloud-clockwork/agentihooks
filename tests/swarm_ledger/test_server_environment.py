@@ -127,7 +127,7 @@ def test_the_workstation_server_reloads_code_unless_told_not_to(monkeypatch, tmp
         monkeypatch.setenv("SWARM_RELOAD", value)
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(server, "LOGFILE", tmp_path / ".server.log")
-    monkeypatch.setattr(server, "serving_dir", Mock(side_effect=[None, str(tmp_path)]))
+    monkeypatch.setattr(server.ledger_link, "serving", Mock(side_effect=[None, str(tmp_path)]))
     monkeypatch.setattr(server, "port_held", lambda: False)
     monkeypatch.setattr(server, "server_process_alive", lambda: False)
     monkeypatch.setattr(server.subprocess, "Popen", Mock())
