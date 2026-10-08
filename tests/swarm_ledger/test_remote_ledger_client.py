@@ -1,7 +1,10 @@
 import json
 import os
+import subprocess
+import sys
 import threading
 import uuid
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -15,6 +18,7 @@ from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 live = _authority_live
+ROOT = Path(__file__).resolve().parents[2]
 CREDENTIAL = "hive-ledger-credential"
 REMOTE = {
     "AGENTIHOOKS_DEPLOYMENT": "compose",
@@ -116,9 +120,24 @@ def test_a_remote_client_without_a_credential_is_refused(live, hive):
             ledger.credentials(SLUG)
 
 
-def test_a_remote_client_without_ledger_url_is_refused():
-    with pytest.raises(SystemExit, match="LEDGER_URL"):
-        ledger_link.base({"AGENTIHOOKS_DEPLOYMENT": "compose"})
+def test_a_remote_client_without_ledger_url_imports_and_is_refused_at_request_time():
+    env = {key: value for key, value in os.environ.items() if key != "LEDGER_URL"}
+    env.update(AGENTIHOOKS_DEPLOYMENT="compose", PYTHONPATH=str(ROOT))
+    imported = subprocess.run(
+        [sys.executable, "-c", "from scripts.swarm_ledger import ledger; print(repr(ledger.BASE))"],
+        env=env,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert (imported.returncode, imported.stdout.strip()) == (0, "''")
+    with patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "compose"}), patch.object(ledger, "BASE", ""):
+        os.environ.pop("LEDGER_URL", None)
+        with pytest.raises(SystemExit, match="LEDGER_URL"):
+            ledger.base()
+
+
+def test_a_remote_client_refuses_service_writes():
     with patch.dict(os.environ, REMOTE):
         with pytest.raises(SystemExit, match="service writes"):
             ledger.credentials(SLUG, service=True)
