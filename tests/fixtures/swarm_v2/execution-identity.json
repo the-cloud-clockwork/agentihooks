@@ -1,0 +1,13 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-IDN-02",
+  "grant": "fixture metadata only; no runtime or mutation authority",
+  "swarm": "fixture",
+  "seat": "eng-1@fixture",
+  "task": "task",
+  "attempts": [
+    {"runtime_backend": "kubernetes", "runtime_target": {"pod_namespace": "workers", "pod_name": "shared-label", "pod_uid": "pod-one"}},
+    {"runtime_backend": "kubernetes", "runtime_target": {"pod_namespace": "workers", "pod_name": "shared-label", "pod_uid": "pod-two"}},
+    {"runtime_backend": "local", "runtime_target": {}}
+  ]
+}

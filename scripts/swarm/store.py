@@ -8,6 +8,7 @@ from scripts import agent_choice
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
 from scripts.swarm import effort_range
+from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.naming import NameRegistry
 
 PREFIX = "agentihooks:swarm"
@@ -72,6 +73,10 @@ class AgentRecord:
     choice: str = ""
     launched_at: int = 0
     overlays: list = field(default_factory=list)
+    execution_id: str = ""
+    generation: int = 0
+    runtime_backend: str = "local"
+    runtime_target: dict = field(default_factory=dict)
 
 
 class RedisStore:
@@ -83,6 +88,7 @@ class RedisStore:
         self.memory = SeatMemory(redis)
         self.culture = SwarmCulture(redis)
         self.names = NameRegistry(redis)
+        self.execution_registry = ExecutionRegistry(self)
 
     def key(self, slug, *parts):
         return ":".join((PREFIX, slug, *parts))
@@ -229,16 +235,26 @@ class RedisStore:
         self.ensure_code(slug)
         return self.names.next(slug, lane, at)
 
-    def put_agent(self, slug, agent):
-        from scripts.swarm.tick import agent_status
+    def start_execution(self, slug: str, agent: AgentRecord, previous_execution_id: str = "") -> AgentRecord:
+        return self.execution_registry.start(slug, agent, previous_execution_id)
 
-        previous = self.redis.hget(self.key(slug, "agents"), agent.name)
-        if not previous or agent_status(AgentRecord(**json.loads(previous))) != agent_status(agent):
-            self.redis.hset(self.key(slug, "state-since"), agent.name, int(time.time() * 1000))
-        self.redis.hset(self.key(slug, "agents"), agent.name, json.dumps(asdict(agent)))
+    def execution(self, slug: str, execution_id: str) -> AgentRecord:
+        return self.execution_registry.get(slug, execution_id)
+
+    def executions(self, slug: str, seat: str) -> list[AgentRecord]:
+        return [agent for agent in self.execution_registry.records(slug) if agent.seat == seat]
+
+    def execution_occupants(self, slug: str) -> dict[str, AgentRecord]:
+        return self.execution_registry.occupants(slug)
+
+    def execution_identity_conflicts_total(self, slug: str) -> int:
+        return int(self.redis.get(self.key(slug, "identity-conflicts")) or 0)
+
+    def put_agent(self, slug, agent):
+        self.execution_registry.put(slug, agent)
 
     def agents(self, slug):
-        return [AgentRecord(**json.loads(v)) for _, v in sorted(self.redis.hgetall(self.key(slug, "agents")).items())]
+        return self.execution_registry.agents(slug)
 
     def drop_agent(self, slug, name, at=None):
         ended = int(time.time() * 1000) if at is None else at

@@ -25,6 +25,7 @@ from scripts.swarm import (
     profile_choice,
     prompt,
     reaper,
+    timing,
 )
 from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
@@ -251,7 +252,9 @@ class HerdrRuntime:
                 or saved.get("profile_decision", {}).get("bundle_revision", ""),
             )
             if saved and (relaunch or not task.get("profile"))
-            else profile_choice.choose(config.slug, lane, chosen, task, environ, getattr(config, "overlays", {}))
+            else timing.call(
+                profile_choice.choose, config.slug, lane, chosen, task, environ, getattr(config, "overlays", {})
+            )
         )
         decision = decision if decision.bundle_revision else replace(decision, bundle_revision=overlays.revision())
         profile = decision.profile
@@ -281,10 +284,17 @@ class HerdrRuntime:
         if saved and agent != saved["harness"]:
             raise SpawnError("unsupported handoff: router substituted the original harness")
         task = {**task, "harness": agent}
-        text = prompt.build(
-            config.slug, config.repo, lane, name, task, role=chosen.get("role", ""), autonomy=config.autonomy
+        text = timing.call(
+            prompt.build,
+            config.slug,
+            config.repo,
+            lane,
+            name,
+            task,
+            role=chosen.get("role", ""),
+            autonomy=config.autonomy,
         )
-        priming_trace.write(self.home, config.slug, name, task)
+        timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
         if saved:
             picked = model_pick.ModelPick(
@@ -294,7 +304,7 @@ class HerdrRuntime:
                 confidence=saved.get("model_confidence"),
             )
         elif lane in PICKED_LANES:
-            picked = model_pick.pick(agent, chosen, task, environ)
+            picked = timing.call(model_pick.pick, agent, chosen, task, environ)
         else:
             picked = _lane_default(lane, agent, chosen)
         mode = PLAN_MODE if (lane, agent) == ("plan", "claude") else []
@@ -305,7 +315,8 @@ class HerdrRuntime:
             account = next((row for row in eligible if row.name == saved.get("account")), None)
             account = account or max(eligible, key=lambda row: min(row.five_left, row.week_left))
             route = ["--route", account.name]
-        placed = self._launch(
+        placed = timing.call(
+            self._launch,
             config,
             lane,
             task["id"],
