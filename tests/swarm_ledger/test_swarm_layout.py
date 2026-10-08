@@ -580,6 +580,37 @@ def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(op
     assert page.text("#quota-count").lower() == "3 accounts · probed 2m ago"
 
 
+def test_the_quota_table_with_its_capacity_line_fits_its_box_at_1920(open_page):
+    payload = status()
+    payload["quota_capacity"] = {
+        "configured": {"eng": 4, "ci": 1, "plan": 1},
+        "effective": {"eng": 2, "ci": 1, "plan": 0},
+        "reason": "accounts are drain; Claude has 1 free seats and Codex has 1 free seats",
+        "accounts": [
+            {
+                "harness": "claude",
+                "name": "tccgma",
+                "state": "DRAIN_SOON",
+                "sessions": 2,
+                "five_left": 92,
+                "week_left": 78,
+            }
+        ],
+        "at": NOW_MS - 7 * 60_000,
+    }
+    page = open_page(payload, 1920)
+    scroll = page.tab.eval_on_selector("#quota-box .sw-scroll", "s => [s.scrollWidth, s.clientWidth]")
+    assert scroll[0] == scroll[1]
+    assert page.table("swarm-quota")[0][2] == "DRAIN SOON"
+    assert page.text("#quota-capacity").split("\n") == [
+        "ENG 2 OF 4 · CI 1 OF 1 · PLAN 0 OF 1",
+        "changed 7m ago",
+        "because accounts are drain; Claude has 1 free seats and Codex has 1 free seats",
+    ]
+    table, line = page.box("quota-table"), page.box("quota-capacity")
+    assert abs(table["x"] - line["x"]) < 1
+
+
 def test_the_sessions_cell_reads_plain_value_over_cap(open_page):
     page = open_page()
     parts = page.tab.eval_on_selector_all(
