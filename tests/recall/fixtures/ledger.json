@@ -1,0 +1,24 @@
+{
+  "title": "Recall fixture",
+  "overview": "Earlier swarm work",
+  "phases": [{"id": "p1", "title": "Memory", "description": "Find earlier work", "comments": [{"id": "pc", "by": "planner", "at": 11, "text": "Phase comment"}]}],
+  "tasks": [{"id": "t1", "title": "Build recall", "description": "Extract ledger records", "phase": "p1", "by": "wrong", "at": 999, "claimed_by": "worker", "contract": {"must": "Records are searchable", "check": "Fixture test", "judge": "Reader"}, "proof": {"command": "pytest recall", "output": "passed", "fix": "https://example.com/fix"}, "pr_url": "https://example.com/pull/42", "issue_url": "https://example.com/issues/41", "comments": [{"id": "tc", "by": "worker", "at": 12, "text": "Task comment"}, {"id": "gone", "deleted": true, "text": "Deleted comment"}]}],
+  "questions": [{"id": "q1", "text": "How does recall work?", "answers": [{"id": "a1", "by": "operator", "at": 13, "text": "Search the archive", "comments": [{"id": "ac", "by": "reader", "at": 14, "text": "Answer comment"}]}], "comments": [{"id": "qc", "by": "operator", "at": 15, "text": "Question comment"}]}],
+  "followups": [{"id": "f1", "text": "Add semantic search", "comments": [{"id": "fc", "by": "planner", "at": 16, "text": "Follow up comment"}]}],
+  "notes": [{"id": "n1", "by": "operator", "at": 17, "text": "Remember this decision", "comments": [{"id": "nc", "by": "master", "at": 18, "text": "Note comment"}]}],
+  "chat": [{"id": "m1", "by": "engineer", "at": 19, "text": "The work merged", "comments": [{"id": "mc", "by": "master", "at": 20, "text": "Chat comment"}]}],
+  "artifacts": [{"id": "r1", "by": "planner", "at": 21, "title": "Recall design", "task": "t1", "file": {"id": "design.md"}, "comments": [{"id": "rc", "by": "operator", "at": 22, "text": "Artifact comment"}]}],
+  "_meta": {
+    "created_at": 1,
+    "events": [
+      {"target": "tasks/t1", "by": "creator", "at": 2, "kind": "added"},
+      {"target": "tasks/t1", "by": "editor", "at": 3, "kind": "changed"},
+      {"target": "questions/q1", "by": "asker", "at": 4, "kind": "added"},
+      {"target": "questions/q1", "by": "answerer", "at": 5, "kind": "answer added"},
+      {"target": "followups/f1", "by": "reporter", "at": 6, "kind": "added"},
+      {"target": "followups/f1", "by": "editor", "at": 7, "kind": "changed"},
+      {"target": "phases/p1", "by": "master", "at": 8, "kind": "added"}
+    ],
+    "seeds": {"0": {"tasks": [{"id": "seed", "title": "Snapshot only"}], "chat": [{"id": "seed-chat", "text": "Snapshot text"}]}}
+  }
+}
