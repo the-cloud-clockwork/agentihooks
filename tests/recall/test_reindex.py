@@ -173,6 +173,19 @@ def test_agentihooks_dispatches_recall(monkeypatch):
     assert (exc.value.code, seen) == (0, [["reindex", "--all"]])
 
 
+def test_agentihooks_delegates_only_on_the_first_word():
+    import scripts.inbox.cli
+    import scripts.trace_cli
+    from scripts.cli_delegates import delegated_cli
+    from scripts.recall import cli
+
+    assert delegated_cli(["recall", "reindex"]) is cli.main
+    assert delegated_cli(["msg", "inbox"]) is scripts.inbox.cli.main
+    assert delegated_cli(["trace"]) is scripts.trace_cli.main
+    assert delegated_cli(["status", "recall"]) is None
+    assert delegated_cli([]) is None
+
+
 def test_agentihooks_help_lists_recall(monkeypatch, capsys):
     import scripts.install as install
 
