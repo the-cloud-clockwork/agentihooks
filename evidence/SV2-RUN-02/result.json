@@ -5,7 +5,7 @@
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1801",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1802",
   "tested_commit": "2ddf3613965d4132eef6552a401ce3b0194b34ca",
-  "ci_head": "",
+  "ci_head": "b526c334d959cf26e65fccb20a8a9466e4103ae5",
   "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI and the process reaper behind HerdrRuntime, the local process table and PID namespace are fixture values, and the remote backend is an in-memory fake; not live rollout proof",
   "supported_versions": {
     "process_identity": "a local runtime target names its process by process_namespace (boot id plus PID namespace link), pid and pid_start (the start time in clock ticks from /proc stat); the reaper signals the launch PID only while its start time still matches",
@@ -21,10 +21,10 @@
     "scripts.swarm.execution: a local runtime target may carry pid_start as a positive integer"
   ],
   "states": {
-    "observed": "Local on 2ddf3613: pytest -n 2 over the process, runtime protocol, tick, execution identity, lifetime, live binding, master retire, reaper, retire watch, swarm runtime and swarm cli suites -> 807 passed on bfecd6f7; process and execution identity suites 117 passed on this commit after the mutation kill tests; ruff check and ruff format clean; size_limits against the dev checkout -> 0 errors.",
+    "observed": "Local on 2ddf3613: pytest -n 2 over the process, runtime protocol, tick, execution identity, lifetime, live binding, master retire, reaper, retire watch, swarm runtime and swarm cli suites -> 807 passed on bfecd6f7; process and execution identity suites 117 passed on this commit after the mutation kill tests; ruff check and ruff format clean; size_limits against the dev checkout -> 0 errors. On the merged head b526c334, the touched suites ran 746 passed.",
     "accepted": "Cases A, B and C passed: A and C on two independent fixtures each, B with a snapshot of the refused record before and after.",
     "committed": "The tested commit carries the code; the case results and manifest in this folder were generated on it.",
-    "externally_verified": ""
+    "externally_verified": "CI Tests run 37837076127 on b526c334: every unit shard, mutation (all survivors on changed lines killed), sonar quality gate and Gate Required passed"
   },
   "measurements": {
     "unqualified_process_actions_rejected_total": {
