@@ -155,7 +155,13 @@ def test_sonar_names_the_current_dev_head_from_git_and_gates_the_scan_on_it():
     names = [step.get("name") for step in steps]
     assert "Wait for older dev analyses" not in names
     later = steps[steps.index(current) + 1 :]
-    gated = {"Download shard coverage", "Merge shard coverage", "SonarQube Scan", "SonarQube Quality Gate"}
+    gated = {
+        "Download shard coverage",
+        "Merge shard coverage",
+        "SonarQube Scan",
+        "SonarQube Quality Gate",
+        "Hold the Delivery L2 conditions",
+    }
     assert {
         step["name"] for step in later if "steps.current.outputs.superseded != 'true'" in step.get("if", "")
     } >= gated

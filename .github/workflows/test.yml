@@ -391,12 +391,43 @@ jobs:
           SONAR_HOST_URL: http://127.0.0.1:9000
 
       - name: SonarQube Quality Gate
+        id: gate
         if: steps.current.outputs.superseded != 'true'
         uses: sonarsource/sonarqube-quality-gate-action@v1
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://127.0.0.1:9000
+
+      # The gate action grades against whatever gate the server binds, so a silent rebind would loosen it.
+      - name: Hold the Delivery L2 conditions
+        if: always() && steps.current.outputs.superseded != 'true'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          set -o pipefail
+          api() { curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $SONAR_TOKEN" "http://127.0.0.1:9000/api/$1"; }
+          expected=$(printf '%s\n' "new_bugs GT 0" "new_coverage LT 80" "new_duplicated_lines_density GT 3" \
+            "new_security_hotspots_reviewed LT 100" "new_vulnerabilities GT 0" | sort)
+          defined=$(api "qualitygates/show?name=Delivery%20L2" | jq -er '.conditions[] | "\(.metric) \(.op) \(.error)"' | sort)
+          if [[ "$defined" != "$expected" ]]; then
+            echo "::error::The Delivery L2 gate on the server differs from its antoncore definition."
+            printf 'Expected:\n%s\nDefined:\n%s\n' "$expected" "$defined"
+            exit 1
+          fi
+          task=$(sed -n 's/^ceTaskId=//p' .scannerwork/report-task.txt)
+          [[ -n "$task" ]] || { echo "::error::No Sonar task id in report-task.txt."; exit 1; }
+          analysis=$(api "ce/task?id=$task" | jq -er .task.analysisId)
+          status=$(api "qualitygates/project_status?analysisId=$analysis")
+          jq -c .projectStatus <<<"$status"
+          graded=$(jq -er '.projectStatus.conditions[] | "\(.metricKey) \(.comparator) \(.errorThreshold)"' <<<"$status" | sort)
+          required=$(printf '%s\n' "new_bugs GT 0" "new_vulnerabilities GT 0")
+          foreign=$(comm -13 <(echo "$expected") <(echo "$graded"))
+          missing=$(comm -23 <(echo "$required") <(echo "$graded"))
+          if [[ -n "$foreign$missing" ]]; then
+            echo "::error::The analysis was not graded on the Delivery L2 conditions. Foreign: ${foreign:-none}. Missing: ${missing:-none}."
+            exit 1
+          fi
 
       - name: Upload coverage and analysis evidence
         if: always() && steps.current.outputs.superseded != 'true'
