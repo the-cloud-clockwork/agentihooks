@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests import installer_isolation, ledger_guard, swarm_v2_isolation
+from tests import installer_isolation, ledger_guard, redis_key_guard, swarm_v2_isolation
 from tests.shards import (
     assign_files,
     assign_nodes,
@@ -356,6 +356,15 @@ def _real_ledger_folder_guard():
     before = len(ledger_guard.touched)
     yield
     assert ledger_guard.touched[before:] == [], "this test reached the operator's real ledger folder"
+
+
+@pytest.fixture(autouse=True)
+def _production_redis_key_guard(monkeypatch):
+    # The isolation fixture above drops every AGENTIHOOKS_ variable; subprocesses need the prefix back.
+    monkeypatch.setenv(redis_key_guard.keyspace.ENV, redis_key_guard.keyspace.ROOT)
+    before = len(redis_key_guard.written)
+    yield
+    assert redis_key_guard.written[before:] == [], "this test wrote a production swarm Redis key"
 
 
 @pytest.fixture
