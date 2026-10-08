@@ -65,7 +65,14 @@ def test_a_reworded_repeat_is_found_with_its_rank_and_phase():
     ]
     state, questions, purpose = judge.asked[0]
     assert purpose == PURPOSE == "ledger-duplicate"
-    assert [e["id"] for e in state["existing"]] == ["t1"]
+    assert state["existing"] == [
+        {
+            "kind": "task",
+            "id": "t1",
+            "title": "Publish the wheel to PyPI from main",
+            "description": "Run the publish workflow on main after the release tag",
+        }
+    ]
     assert state["new"] == [{"ref": 0, "title": new["title"], "description": new["description"]}]
     assert list(questions) == ["new_0_existing_0"]
     assert questions["new_0_existing_0"].instructions == (
