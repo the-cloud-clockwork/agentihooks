@@ -1,111 +1,16 @@
 import argparse
-import difflib
-import functools
-import itertools
 import os
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Iterator
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from coverage import Coverage, CoverageData
 
-GRADED = ("hooks/", "scripts/")
-SEARCH = 60
-HISTORY = 30
+from tests.coverage_grade import GRADED, Measurement, Result, Unmeasured, executed, grade, line_map
+from tests.coverage_history import dev_runs, git, renamed
 
-Source = Callable[[str], str | None]
-
-
-class Unmeasured(Exception):
-    pass
-
-
-@dataclass
-class Measurement:
-    commit: str
-    executed: dict[str, set[int]]
-    source: Source
-
-
-@dataclass
-class Result:
-    base: str
-    lost: dict[str, list[int]]
-    unstable: dict[str, list[int]] = field(default_factory=dict)
-
-
-def executed(shards: list[Path]) -> dict[str, set[int]]:
-    lines: dict[str, set[int]] = {}
-    for shard in shards:
-        data = CoverageData(basename=str(shard))
-        data.read()
-        measured = {path: data.lines(path) for path in data.measured_files() if path.startswith(GRADED)}
-        measured = {path: ran for path, ran in measured.items() if ran}
-        if not measured:
-            raise Unmeasured(f"shard {shard} measured no line under {', '.join(GRADED)}")
-        for path, ran in measured.items():
-            lines.setdefault(path, set()).update(ran)
-    return lines
-
-
-@functools.cache
-def line_map(old: str, new: str) -> dict[int, int]:
-    old_lines, new_lines = old.splitlines(), new.splitlines()
-    if old_lines == new_lines:
-        return {n: n for n in range(1, len(old_lines) + 1)}
-    matcher = difflib.SequenceMatcher(None, old_lines, new_lines)
-    return {a + k + 1: b + k + 1 for a, b, size in matcher.get_matching_blocks() for k in range(size)}
-
-
-def _lost(base: Measurement, head: dict[str, set[int]], head_source: Source) -> dict[str, list[int]]:
-    lost = {}
-    for path, ran in sorted(base.executed.items()):
-        old, new = base.source(path), head_source(path)
-        if old is None or new is None:
-            continue
-        mapped = line_map(old, new)
-        gone = sorted(line for line in ran if line in mapped and mapped[line] not in head.get(path, set()))
-        if gone:
-            lost[path] = gone
-    return lost
-
-
-def _statuses(base: Measurement, path: str, lines: list[int], older: list[Measurement]) -> dict[int, list[bool]]:
-    statuses: dict[int, list[bool]] = {line: [] for line in lines}
-    for run in older:
-        old = run.source(path)
-        if old is None or path not in run.executed:
-            continue
-        mapped = line_map(base.source(path), old)
-        for line in lines:
-            if line in mapped:
-                statuses[line].append(mapped[line] in run.executed[path])
-    return statuses
-
-
-def _flaky(history: list[bool]) -> bool:
-    return any(not newer and older for i, newer in enumerate(history) for older in history[i + 1 :])
-
-
-def grade(head: dict[str, set[int]], head_source: Source, runs: Iterator[Measurement]) -> Result:
-    base = next(runs, None)
-    if base is None:
-        raise Unmeasured("no measured base run within the searched dev history")
-    lost = _lost(base, head, head_source)
-    if not lost:
-        return Result(base.commit, {})
-    older = list(itertools.islice(runs, HISTORY))
-    result = Result(base.commit, {})
-    for path, lines in lost.items():
-        statuses = _statuses(base, path, lines, older)
-        for line in lines:
-            bucket = result.unstable if _flaky(statuses[line]) else result.lost
-            bucket.setdefault(path, []).append(line)
-    return result
+__all__ = ["Measurement", "Result", "Unmeasured", "executed", "grade", "line_map", "main", "report"]
 
 
 def report(result: Result, missed: dict[str, list[int]], covered: dict[str, int], base_covered: dict[str, int]) -> str:
@@ -120,76 +25,6 @@ def report(result: Result, missed: dict[str, list[int]], covered: dict[str, int]
     return "\n".join(out) + "\n"
 
 
-def _git(*args: str, cwd: Path) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
-
-
-def _show(repo: Path, commit: str) -> Source:
-    def source(path: str) -> str | None:
-        shown = subprocess.run(["git", "show", f"{commit}:{path}"], cwd=repo, capture_output=True, text=True)
-        return shown.stdout if shown.returncode == 0 else None
-
-    return source
-
-
-def _gh(*args: str) -> str:
-    return subprocess.run(["gh", *args], capture_output=True, text=True, check=True).stdout.strip()
-
-
-def _passed_run(repo: Path, commit: str) -> str | None:
-    tree = _git("rev-parse", f"{commit}^{{tree}}", cwd=repo).strip()
-    found = _gh(
-        "api",
-        f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/artifacts?name=tests-passed-{tree}",
-        "--jq",
-        "[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id"
-        " == .workflow_run.repository_id)] | first.workflow_run.id // empty",
-    )
-    return found or None
-
-
-def _download(run: str, shards: int, into: Path) -> list[Path] | None:
-    names = [arg for shard in range(1, shards + 1) for arg in ("--name", f"coverage-3.12-{shard}")]
-    fetched = subprocess.run(
-        ["gh", "run", "download", run, "--repo", os.environ["GITHUB_REPOSITORY"], *names, "--dir", str(into)],
-        capture_output=True,
-        text=True,
-    )
-    files = [into / f"coverage-3.12-{shard}" / ".coverage" for shard in range(1, shards + 1)]
-    return files if fetched.returncode == 0 and all(f.is_file() for f in files) else None
-
-
-def dev_runs(repo: Path, base: str, shards: int, scratch: Path) -> Iterator[Measurement]:
-    commits = _git("rev-list", "--first-parent", f"--max-count={SEARCH}", base, cwd=repo).split()
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        runs = list(pool.map(lambda commit: _passed_run(repo, commit), commits))
-    measured = [(commit, run) for commit, run in zip(commits, runs) if run]
-    fetch = _fetcher(repo, shards, scratch, executed)
-    first = next(((i, found) for i, pair in enumerate(measured) if (found := fetch(pair))), None)
-    if first is None:
-        return
-    index, base = first
-    yield base
-    # Reading coverage data holds the GIL, so threads only download and processes read.
-    with ThreadPoolExecutor(max_workers=8) as pool, ProcessPoolExecutor() as readers:
-        fetch = _fetcher(repo, shards, scratch, lambda files: readers.submit(executed, files).result())
-        yield from filter(None, pool.map(fetch, measured[index + 1 : index + 1 + HISTORY]))
-
-
-def _fetcher(
-    repo: Path, shards: int, scratch: Path, read: Callable[[list[Path]], dict[str, set[int]]]
-) -> Callable[[tuple[str, str]], Measurement | None]:
-    def fetch(pair: tuple[str, str]) -> Measurement | None:
-        commit, run = pair
-        files = _download(run, shards, scratch / run)
-        if not files:
-            return None
-        print(f"dev {commit[:12]} measured by run {run}", flush=True)
-        return Measurement(commit, read(files), _show(repo, commit))
-
-    return fetch
-
-
 def _missed(head: Path, shards: list[Path], out: Path) -> dict[str, list[int]]:
     combined = CoverageData(basename=str(out.resolve() / ".coverage"))
     for shard in shards:
@@ -202,13 +37,30 @@ def _missed(head: Path, shards: list[Path], out: Path) -> dict[str, list[int]]:
     cwd = Path.cwd()
     os.chdir(head)
     try:
-        return {
-            path: sorted(coverage.analysis2(path)[3])
-            for path in sorted(combined.measured_files())
-            if path.startswith(GRADED) and Path(path).is_file()
-        }
+        modules = sorted(str(path) for root in GRADED for path in Path(root).rglob("*.py"))
+        return {path: sorted(coverage.analysis2(path)[3]) for path in modules}
     finally:
         os.chdir(cwd)
+
+
+def _grade(args: argparse.Namespace, head_files: list[Path], scratch: Path) -> tuple[dict, Measurement, Result]:
+    missing = [str(f) for f in head_files if not f.is_file()]
+    if missing:
+        raise Unmeasured(f"head shard coverage missing: {', '.join(missing)}")
+    head = executed(head_files)
+    wanted = git("rev-parse", args.base, cwd=args.head).strip()
+    runs = dev_runs(args.head, wanted, args.shards, scratch)
+    base = next(runs, None)
+    if base is None or base.commit != wanted:
+        raise Unmeasured(f"no passed Tests run with coverage holds the base {wanted}")
+    moved = renamed(args.head, wanted)
+    result = grade(head, lambda path: _read(args.head / path), _chain(base, runs), moved)
+    return head, base, result
+
+
+def _chain(first: Measurement, rest):
+    yield first
+    yield from rest
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -223,14 +75,8 @@ def main(argv: list[str] | None = None) -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as scratch:
         try:
-            missing = [str(f) for f in head_files if not f.is_file()]
-            if missing:
-                raise Unmeasured(f"head shard coverage missing: {', '.join(missing)}")
-            head = executed(head_files)
-            runs = dev_runs(args.head, args.base, args.shards, Path(scratch))
-            base = next(runs, None)
-            result = grade(head, lambda path: _read(args.head / path), itertools.chain([base] if base else [], runs))
-        except Unmeasured as exc:
+            head, base, result = _grade(args, head_files, Path(scratch))
+        except (Unmeasured, subprocess.CalledProcessError, KeyError) as exc:
             print(f"::error::The coverage ratchet cannot grade: {exc}")
             return 1
     text = report(

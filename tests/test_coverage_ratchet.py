@@ -59,6 +59,13 @@ def test_a_deleted_module_loses_nothing():
     assert ratchet.grade({}, lambda path: None, iter([base])).lost == {}
 
 
+def test_a_renamed_module_keeps_every_line_the_base_ran():
+    base = _measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE})
+    sources = {"hooks/b.py": SOURCE}
+    result = ratchet.grade({"hooks/b.py": {1, 2}}, sources.get, iter([base]), {"hooks/a.py": "hooks/b.py"})
+    assert result.lost == {"hooks/a.py": [3]}
+
+
 def test_a_module_the_head_stopped_measuring_loses_every_line_it_still_has():
     base = _measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE})
     assert ratchet.grade({}, lambda path: SOURCE, iter([base])).lost == {"hooks/a.py": [1, 2, 3]}

@@ -490,7 +490,7 @@ jobs:
           pattern: coverage-3.12-*
           path: head-coverage
 
-      # The tested commit's first parent is the exact base; the base copy grades, so a pull request cannot loosen its own ratchet.
+      # The tested commit's first parent is the exact base.
       - name: Hold every line the base ran
         if: steps.lookup.outputs.skip != 'true'
         env:
