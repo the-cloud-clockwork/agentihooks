@@ -1,4 +1,5 @@
 import argparse
+import itertools
 import json
 import os
 import subprocess
@@ -54,13 +55,12 @@ def wait_ready(ready, process, deadline):
 
 def test_readiness_wait_returns_only_a_complete_reply(tmp_path):
     ready = tmp_path / "ready.json"
-    ready.write_text("")
-    writer = threading.Timer(0.2, ready.write_text, [json.dumps({"port": 1})])
-    writer.start()
-    try:
-        assert wait_ready(ready, SimpleNamespace(poll=lambda: None), time.monotonic() + 5) == {"port": 1}
-    finally:
-        writer.join()
+    writes = itertools.chain(["", '{"port": '], itertools.repeat('{"port": 1}'))
+
+    def poll():
+        ready.write_text(next(writes))
+
+    assert wait_ready(ready, SimpleNamespace(poll=poll), time.monotonic() + 5) == {"port": 1}
 
 
 @pytest.fixture
