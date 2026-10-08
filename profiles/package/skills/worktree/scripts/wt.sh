@@ -203,6 +203,12 @@ case "${cmd}" in
       git -C "${TARGET}" status -s | sed 's/^/  /' >&2
       exit 1
     fi
+    if [[ "${NAME}" != _tmp/* ]] && command -v gh >/dev/null 2>&1; then
+      OPEN_PR="$(cd "${REPO}" && gh pr list --head "${BR}" --base "${BASE}" --state open --json url --jq '.[0].url')" \
+        || die "cannot read pull requests for '${BR}' — worktree kept"
+      [[ -z "${OPEN_PR}" ]] \
+        || die "pull request ${OPEN_PR} is not merged — wait for it to land before worktree teardown"
+    fi
     release "${TARGET}"
     if [[ "${FORCE}" -eq 1 ]]; then
       git -C "${REPO}" worktree remove --force "${TARGET}"

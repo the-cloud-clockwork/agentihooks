@@ -77,7 +77,7 @@ def test_checked_wait_targets_are_checked(started, capsys):
     assert run("sw", "--as", ME, "wait", "--on", "task", "t1") == 1
     assert "task t1 is your own task" in capsys.readouterr().err
     assert run("sw", "--as", ME, "wait", "--on", "deploy", "x") == 1
-    assert "wait on one of: checks, reply, task" in capsys.readouterr().err
+    assert "wait on one of: checks, merge, reply, task" in capsys.readouterr().err
 
 
 def test_a_bare_wait_is_capped_at_sixty_minutes(started, capsys):
@@ -178,6 +178,31 @@ def test_a_checks_wait_stays_while_checks_run_or_github_cannot_answer(tick, pull
     assert tick.end() == []
     assert idle.wait(tick.store.redis, "sw", ME)["on"]["target"] == URL
     assert tick.told() == []
+
+
+@pytest.mark.parametrize("state", ["OPEN", "CLOSED"])
+def test_a_merge_wait_ends_red_when_the_queued_pull_request_drops_out(tick, state):
+    tick.hold("merge", URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, False, resolved=True, queued=True)
+    assert tick.end() == []
+    tick.pulls[URL] = None
+    assert tick.end() == []
+    tick.pulls[URL] = PullRequest(state, None, 1, False, resolved=True)
+    assert tick.end() == [
+        f"ended the wait of {ME}: pull request {URL}, now red; left the merge queue without merging; fix it and queue it again"
+    ]
+    assert held(tick.store) is None
+    assert "now red" in tick.told()[0]
+    assert "fix it and queue it again" in tick.told()[0]
+    assert tick.end() == []
+
+
+def test_cli_records_a_checked_merge_wait_with_a_pull_request_url(started, capsys):
+    store, _ = started
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 0
+    assert held(store)["on"] == {"kind": "merge", "target": URL}
+    assert run("sw", "--as", ME, "wait", "--on", "merge", "bad-url") == 1
+    assert "wait on merge needs a pull request url" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -333,7 +358,7 @@ def test_an_agent_without_a_seat_is_told_by_name(tick):
 
 
 def test_cli_wait_refuses_a_checked_wait_for_an_unknown_kind():
-    with pytest.raises(SwarmError, match="wait on one of: checks, reply, task"):
+    with pytest.raises(SwarmError, match="wait on one of: checks, merge, reply, task"):
         waits.on("deploy", "x")
 
 
@@ -569,6 +594,7 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                         "resource": {
                             "state": "OPEN",
                             "headRefOid": "first",
+                            "mergeQueueEntry": {"id": "entry"},
                             "commits": {
                                 "nodes": [
                                     {
@@ -596,6 +622,7 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
     assert pull.resolved is True
     assert pull.red is False
     assert pull.pushed_at == 1791392400000
+    assert pull.queued is True
     assert calls == [
         (
             [
@@ -603,7 +630,7 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "api",
                 "graphql",
                 "-f",
-                "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
+                "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id} "
                 "commits(last:1){nodes{commit{committedDate "
                 'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"
