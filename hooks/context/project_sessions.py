@@ -236,8 +236,10 @@ def marker_scope(session_id: str, marker: Mapping, grant: SessionGrant | None = 
     if not enabled():
         return None
     attrs = marker.get("attrs") or {}
-    rows = transitions(session_id)
-    if not rows and attrs.get("share") != FLEET:
+    if attrs.get("share") == FLEET:
+        return {"attribution": FLEET}
+    rows = transitions(session_id) if marker.get("at") else []
+    if not rows:
         return None
     return _attribution(rows, {"at": marker.get("at"), "attrs": attrs}, grant)
 

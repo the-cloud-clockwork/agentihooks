@@ -51,9 +51,11 @@ message takes the Stop time. Once a session has a scope log, every marker is att
 - a `project`, `repo`, `remote` or `project_id` the model wrote without a valid `project_id` claim is replaced
   by the event-time project, so a display label never stands beside a different project ID;
 - a `share=fleet` marker loses every scope field;
-- a marker before the first transition, or without a time, is `unknown` and carries no project.
+- a marker before the first transition is `unknown` and carries no project.
 
-A session with no scope log keeps the preceding lookup by session.
+A marker without a time is an outbox replay whose attributes were computed when it was written, or a record from
+a transcript without timestamps; it keeps the preceding lookup by session, which only fills missing attributes.
+A session with no scope log keeps that lookup too.
 
 ## Grant
 

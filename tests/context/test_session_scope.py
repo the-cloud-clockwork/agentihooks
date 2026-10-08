@@ -222,6 +222,68 @@ def test_session_start_records_the_launch_scope(home, monkeypatch):
     assert transitions("live")[-1]["project_id"] == ""
 
 
+def test_branch_is_read_from_git_only_for_a_folder(tmp_path):
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", "-b", "feature", str(tmp_path)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "x",
+        ],
+        check=True,
+    )
+    assert project_sessions._branch(str(tmp_path)) == "feature"
+    assert project_sessions._branch("") == ""
+
+
+def test_scope_carries_the_identity_and_swarm_variables():
+    env = {"AGENTIHOOKS_SWARM": "s", "AGENTIHOOKS_SWARM_TASK": "t", "AGENTIHOOKS_SWARM_LANE": "l"}
+    identity = ProjectIdentity("alpha", "fixture/alpha", "one", "/work/alpha/one", "r", "github.com/fixture/alpha")
+    assert project_sessions._scope(identity, "/ignored", "b", env) == {
+        **identity.attributes(),
+        "branch": "b",
+        "swarm": "s",
+        "task": "t",
+        "lane": "l",
+    }
+    assert project_sessions._scope(None, "/scratch", "", {}) == {
+        "cwd": "/scratch",
+        "branch": "",
+        "swarm": "",
+        "task": "",
+        "lane": "",
+    }
+
+
+def test_scope_log_location_time_zones_and_transition_identity(home):
+    assert project_sessions._scope_path("a.b_c-1") == home / "state" / "brain" / "session-scopes" / "a.b_c-1.jsonl"
+    assert project_sessions._scope_path("x" * 129) is None
+    assert project_sessions._scope_path("-lead") is None
+    record_scope("tz", {"task": "naive"}, "2026-10-08T10:00:00")
+    assert scope_at("tz", "2026-10-08T10:00:00+00:00")["task"] == "naive"
+    assert scope_at("tz", "2026-10-08T11:59:59+02:00") is None
+    scope = FIXTURE["transitions"][0]["scope"]
+    row = record_scope("order", dict(reversed(list(scope.items()))), FIXTURE["transitions"][0]["at"])
+    values = {name: str(scope.get(name) or "") for name in project_sessions.SCOPE_FIELDS}
+    expected = json.dumps(["order", FIXTURE["transitions"][0]["at"], values], sort_keys=True).encode()
+    import hashlib
+
+    assert row["transition_id"] == hashlib.sha256(expected).hexdigest()
+    assert row["session_id"] == "order"
+    assert row["at"] == FIXTURE["transitions"][0]["at"]
+
+
 def _variant():
     text = json.dumps(FIXTURE).replace("2026-10-08", "2026-10-09")
     for old, new in (
@@ -285,12 +347,19 @@ def test_markers_outside_recorded_scope_stay_unknown_instead_of_taking_the_lates
     _record_all("first")
     record_session("first", latest)
     assert project_sessions.lookup("first").project == "beta"
-    for at in ("2026-10-08T09:59:00Z", None):
-        marker = {"type": "lesson", "content": "early", "at": at, "attrs": {"project": "beta"}}
-        body, _ = _marker_request(marker, "first")
-        assert body["attrs"]["attribution"] == "unknown"
-        assert "project_id" not in body["attrs"]
-        assert "project" not in body["attrs"]
+    marker = {"type": "lesson", "content": "early", "at": "2026-10-08T09:59:00Z", "attrs": {"project": "beta"}}
+    body, _ = _marker_request(marker, "first")
+    assert body["attrs"]["attribution"] == "unknown"
+    assert "project_id" not in body["attrs"]
+    assert "project" not in body["attrs"]
+
+
+def test_an_outbox_replay_keeps_the_attributes_computed_when_it_was_written(home):
+    _record_all("first")
+    written, _ = _marker_request({"type": "lesson", "content": "x", "at": "2026-10-08T10:05:00Z", "attrs": {}}, "first")
+    replayed, _ = _marker_request({"type": "lesson", "content": "x", "attrs": dict(written["attrs"])}, "first")
+    assert replayed == written
+    assert replayed["attrs"]["worktree"] == "one"
 
 
 def test_an_older_task_revision_cannot_replace_a_newer_one(home):
