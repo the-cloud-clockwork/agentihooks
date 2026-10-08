@@ -5,6 +5,7 @@ task's pull request on GitHub and pass every new health finding on for a verdict
 of the same ledger sends nothing; the wake ladder then carries every item to a reader.
 """
 
+import functools
 import json
 import re
 import subprocess
@@ -12,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from scripts.inbox.seats import seat_address
-from scripts.inbox.store import CLOSED
+from scripts.inbox.store import CLOSED, InboxError
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER
@@ -163,39 +164,57 @@ class Mail:
             return [f"told {address}: {key}"]
         return []
 
+    def send_red(self, key, address, text, url):
+        if self.once(key, lambda: self.track_red(self.inbox.send(SENDER, address, text), url)):
+            return [f"told {address}: {key}"]
+        return []
+
+    def red_index(self):
+        return self.store.key(self.slug, "red-notices")
+
+    def track_red(self, item, url):
+        self.store.redis.hset(self.red_index(), item.id, url)
+
     def engineer(self, task):
         return self.seats.get(task.get("claimed_by", ""), self.master)
 
 
 def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
-    mail = Mail(inbox, store, slug)
+    mail, github = Mail(inbox, store, slug), functools.cache(github)
     events = doc.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
     return (
         _events(mail, new_events(store, slug, doc, "events-cursor"), tasks)
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github)
-        + _settle_red_notices(inbox, store, mail, github)
+        + _settle_red_notices(mail, github)
     )
 
 
-def _settle_red_notices(inbox, store, mail, github):
-    addresses = dict.fromkeys([*(agent.seat or agent.name for agent in store.agents(mail.slug)), mail.master])
-    notices = [
-        (item, found.group(1))
-        for address in addresses
-        for item in inbox.inbox(address)
-        if item.sender == SENDER and item.state not in CLOSED and (found := RED_NOTICE.match(item.text))
-    ]
-    views, settled = {}, []
-    for item, url in notices:
-        if url not in views:
-            views[url] = github(url)
-        how = _settled(views[url])
-        if how:
-            inbox.close(item.id, SENDER, "done", f"pull request {url} {how}")
-            settled.append(f"closed the red notice {item.id}: {url} {how}")
+def _settle_red_notices(mail, github):
+    mail.once("red-notices:backfill", lambda: _backfill_red_notices(mail))
+    index, settled = mail.red_index(), []
+    for item_id, url in mail.store.redis.hgetall(index).items():
+        try:
+            if mail.inbox.get(item_id).state not in CLOSED:
+                how = _settled(github(url))
+                if not how:
+                    continue
+                mail.inbox.close(item_id, SENDER, "done", f"pull request {url} {how}")
+                settled.append(f"closed the red notice {item_id}: {url} {how}")
+        except InboxError:
+            pass
+        mail.store.redis.hdel(index, item_id)
     return settled
+
+
+def _backfill_red_notices(mail):
+    prefix = mail.inbox.key("address", "")
+    for key in mail.inbox.redis.scan_iter(match=f"{prefix}*@{mail.slug}"):
+        for item in mail.inbox.inbox(key[len(prefix) :]):
+            found = RED_NOTICE.match(item.text)
+            if item.sender == SENDER and item.state not in CLOSED and found:
+                mail.track_red(item, found.group(1))
 
 
 def _settled(found):
@@ -323,5 +342,5 @@ def _pull_requests(mail, tasks, now_ms, github):
             text = (
                 f"Your pull request {url} for {title} has red checks and no push for twenty minutes. Fix them and push."
             )
-            sent += mail.send(f"{url}:red:{found.head}", mail.engineer(task), text)
+            sent += mail.send_red(f"{url}:red:{found.head}", mail.engineer(task), text, url)
     return sent
