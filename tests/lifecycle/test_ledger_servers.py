@@ -64,6 +64,57 @@ def test_sweep_stops_orphan_servers_and_logs_their_identity(tmp_path, monkeypatc
     assert json.loads((home / "gc-ledger-servers.jsonl").read_text()) == result[0]
 
 
+@pytest.mark.parametrize("vanished_at", ["identity", "sigterm", "sigkill"])
+def test_sweep_counts_a_server_that_vanishes_before_stopping_as_stopped(tmp_path, monkeypatch, vanished_at):
+    import signal
+
+    folder = tmp_path / "ledger"
+    folder.mkdir()
+    row = process()
+    proc = plant(tmp_path, row, folder, owner=(7, 99))
+    monkeypatch.setattr(
+        ledger_servers, "_process", Mock(side_effect=[None] if vanished_at == "identity" else [row, row])
+    )
+    missing = ProcessLookupError(3, "No such process")
+    kill = Mock(side_effect=[None, missing] if vanished_at == "sigkill" else missing)
+    monkeypatch.setattr(ledger_servers.os, "kill", kill)
+    monkeypatch.setattr(ledger_servers.time, "monotonic", Mock(side_effect=[1, 2]))
+
+    result = ledger_servers.sweep_servers({row.pid: row}, tmp_path, act=True, proc=proc)
+
+    assert len(result) == 1
+    assert result[0]["action"] == "stopped"
+    assert result[0]["pid"] == 42
+    assert result[0]["reason"] == "starting run ended"
+    assert json.loads((tmp_path / "gc-ledger-servers.jsonl").read_text()) == result[0]
+    assert (
+        kill.call_args_list
+        == {
+            "identity": [],
+            "sigterm": [call(42, signal.SIGTERM)],
+            "sigkill": [call(42, signal.SIGTERM), call(42, signal.SIGKILL)],
+        }[vanished_at]
+    )
+
+
+@pytest.mark.parametrize("failed_signal", ["sigterm", "sigkill"])
+def test_sweep_reports_signal_permission_errors(tmp_path, monkeypatch, failed_signal):
+    folder = tmp_path / "ledger"
+    folder.mkdir()
+    row = process()
+    proc = plant(tmp_path, row, folder, owner=(7, 99))
+    monkeypatch.setattr(ledger_servers, "_process", Mock(side_effect=[row, row]))
+    error = PermissionError(1, "Operation not permitted")
+    kill = Mock(side_effect=[None, error] if failed_signal == "sigkill" else error)
+    monkeypatch.setattr(ledger_servers.os, "kill", kill)
+    monkeypatch.setattr(ledger_servers.time, "monotonic", Mock(side_effect=[1, 2]))
+
+    result = ledger_servers.sweep_servers({row.pid: row}, tmp_path, act=True, proc=proc)
+
+    assert result == [{"pid": 42, "action": "error", "error": "[Errno 1] Operation not permitted"}]
+    assert not (tmp_path / "gc-ledger-servers.jsonl").exists()
+
+
 @pytest.mark.parametrize("kind", ["shared", "shared stale port", "live", "unrelated", "dry", "scope"])
 def test_sweep_preserves_shared_active_and_unmatched_processes(tmp_path, monkeypatch, kind):
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
@@ -252,7 +303,7 @@ def test_terminate_signals_only_the_observed_process(tmp_path, monkeypatch, outc
     assert read.call_args_list == [call(42, tmp_path), call(42, tmp_path)]
 
 
-@pytest.mark.parametrize("current", [process(start=101), process(start=99), None])
+@pytest.mark.parametrize("current", [process(start=101), process(start=99)])
 def test_terminate_refuses_a_changed_process_identity(tmp_path, monkeypatch, current):
     monkeypatch.setattr(ledger_servers, "_process", lambda pid, proc: current)
     kill = Mock()
