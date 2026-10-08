@@ -94,7 +94,6 @@ def notice_moved_to_the_seat(inbox, store):
     item = inbox.send("swarm", "sw-eng-1", TEMPLATE)
     inbox.deliver(item.id, "sw-eng-1")
     inbox.redirect(item.id, "swarm", "eng-1@sw", "sw-eng-1 handed off its seat; moved to eng-1@sw", "sw-eng-1")
-    inbox.deliver(item.id, "sw-eng-1")
     return item
 
 
@@ -141,20 +140,35 @@ def test_the_sweep_leaves_a_seat_notice_open_while_its_agent_is_live(monkeypatch
     item = notice_moved_to_the_seat(inbox, store)
     store.put_agent("sw", AgentRecord(name="sw-eng-1", lane="eng", task="t1", seat="eng-1@sw"))
     exits.sweep(inbox, "sw", store, dict)
-    assert inbox.get(item.id).state == "delivered"
+    assert inbox.get(item.id).state == "pending"
 
 
-def test_the_sweep_closes_a_seat_notice_no_agent_received_behind_other_seat_mail(monkeypatch, redis, tmp_path):
+def test_the_sweep_names_the_occupant_a_seat_notice_nobody_received_was_sent_to(monkeypatch, redis, tmp_path):
+    import subprocess
+
     from scripts.gates.push_stop import TEMPLATE
 
+    tree = tmp_path / "repo" / "sw-eng-1"
+    tree.mkdir(parents=True)
+    for args in (("init", "-q", "-b", "sw-eng-1"), ("commit", "-q", "--allow-empty", "-m", "work")):
+        subprocess.run(["git", "-C", str(tree), "-c", "user.name=t", "-c", "user.email=t@e", *args], check=True)
     monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path))
     inbox, store = InboxStore(redis), RedisStore(redis)
     store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
     other = inbox.send("sender", "eng-1@sw", "contract")
     item = inbox.send("swarm", "eng-1@sw", TEMPLATE)
+    store.seats.occupy("eng-1@sw", "sw-eng-2", item.created_at + 1)
     exits.sweep(inbox, "sw", store, dict)
-    assert (
-        inbox.get(item.id).reason
-        == "done: an earlier occupant left its seat; its worktree was not found, so whether its branch was pushed is unknown"
-    )
+    assert inbox.get(item.id).reason == "done: sw-eng-1 left its seat; its branch sw-eng-1 was not pushed"
     assert inbox.get(other.id).state == "pending"
+
+
+def test_the_sweep_closes_a_seat_notice_sent_before_any_occupant_as_unknown(monkeypatch, redis, tmp_path):
+    from scripts.gates.push_stop import TEMPLATE
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path))
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    item = inbox.send("swarm", "eng-1@sw", TEMPLATE)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", item.created_at + 1)
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).reason == f"done: {exits.UNKNOWN_OWNER}"

@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from scripts.swarm.store import RedisStore
 
 BY = "swarm"
+UNKNOWN_OWNER = "the agent it was sent to is unknown, so no branch was checked"
 
 
 def settle(inbox, name, seat, exit_text):
@@ -98,11 +99,17 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
         for item in inbox.inbox(seat):
             if item.state in CLOSED or not push_stop.is_notice(item):
                 continue
-            got = [entry["by"] for entry in inbox.history(item.id) if entry.get("state") == "delivered"]
-            if not got or got[0] not in active:
-                inbox.close(
-                    item.id, BY, "done", push_stop.left(got[0] if got else "an earlier occupant", "left its seat")
-                )
+            owner = _owner(inbox, item, seat)
+            if owner not in active:
+                reason = push_stop.left(owner, "left its seat") if owner else UNKNOWN_OWNER
+                inbox.close(item.id, BY, "done", reason)
+
+
+def _owner(inbox, item, seat):
+    """The agent the notice was sent to: its first receiver, else the seat's occupant when it was sent."""
+    got = [entry["by"] for entry in inbox.history(item.id) if entry.get("state") == "delivered"]
+    held = [e["occupant"] for e in inbox.seats.history(seat) if "event" not in e and e["at"] <= item.created_at]
+    return (got or held[-1:] or [""])[0]
 
 
 def _told(item, name, exit_text):
