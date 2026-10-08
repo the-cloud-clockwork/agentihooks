@@ -347,10 +347,11 @@ def test_refused_capacity_comment_keeps_the_fresh_decision():
         cfg, [account()], agents, demand
     )
 
-    def refuse(*args, **kwargs):
+    def refuse(slug, task, text, now_ms):
+        assert (slug, task, now_ms) == ("sw", "e", 1000)
         raise LedgerRefused("plain words refused")
 
-    ledger.comment = refuse
+    ledger.capacity_comment = refuse
     with pytest.raises(LedgerRefused, match="plain words refused"):
         capacity.apply("sw", config, store, ledger, runtime, 1000)
     assert capacity.read(store, "sw")["tasks"] == {"e": "claude"}
