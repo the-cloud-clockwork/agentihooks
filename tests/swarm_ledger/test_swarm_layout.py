@@ -80,7 +80,6 @@ def status(**changes):
         ],
         "findings": [],
         "quota": {
-            "cap": 3,
             "probed_at": NOW_S - 120,
             "rows": [
                 {
@@ -91,7 +90,7 @@ def status(**changes):
                     "seven_day_left": 78,
                     "seven_day_resets_at": NOW_S + 4 * 86400 + 15 * 3600,
                     "sessions": 2,
-                    "cap": 7,
+                    "cap": 6,
                 },
                 {
                     "agent": "claude",
@@ -101,6 +100,7 @@ def status(**changes):
                     "seven_day_left": 51,
                     "seven_day_resets_at": NOW_S + 6 * 86400,
                     "sessions": 1,
+                    "cap": 4,
                 },
                 {
                     "agent": "codex",
@@ -546,9 +546,9 @@ def test_every_button_is_flat_at_rest(open_page):
 def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(open_page):
     page = open_page()
     assert page.table("swarm-quota") == [
-        ["tccgma", "claude", "92%", "53m", "78%", "4d15h", "2/7", ""],
-        ["luna", "claude", "64%", "2h05m", "51%", "6d00h", "1/3", "MASTER"],
-        ["default", "codex", "—", "—", "61%", "3d10h", "0/3", ""],
+        ["tccgma", "claude", "92%", "53m", "78%", "4d15h", "2/6", ""],
+        ["luna", "claude", "64%", "2h05m", "51%", "6d00h", "1/4", "MASTER"],
+        ["default", "codex", "—", "—", "61%", "3d10h", "0/—", ""],
     ]
     assert page.text("#quota-count").lower() == "3 accounts · probed 2m ago"
 
@@ -559,7 +559,7 @@ def test_the_sessions_cell_reads_plain_value_over_cap(open_page):
         "#swarm-quota tr:first-child .sw-sessions-value",
         "els => els.map(e => [e.tagName, e.innerText])",
     )
-    assert parts == [["SPAN", "2/7"]]
+    assert parts == [["SPAN", "2/6"]]
 
 
 def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_page):

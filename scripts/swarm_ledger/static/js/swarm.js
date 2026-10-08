@@ -167,7 +167,7 @@ function resetIn(at, now) {
 function quotaRows(sw, now) {
   const quota = sw.quota || {}, master = (sw.agents || []).find((a) => a.lane === "master") || {};
   return (quota.rows || []).map((r) => ({ account: r.account, harness: r.agent, five: percent(r.five_hour_left), fiveReset: resetIn(r.five_hour_resets_at, now),
-    seven: percent(r.seven_day_left), sevenReset: resetIn(r.seven_day_resets_at, now), sessions: r.sessions, cap: r.cap ?? quota.cap,
+    seven: percent(r.seven_day_left), sevenReset: resetIn(r.seven_day_resets_at, now), sessions: r.sessions, cap: r.cap,
     master: !!master.account && r.account === master.account && r.agent === (master.harness || "claude") }));
 }
 
