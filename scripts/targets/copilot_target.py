@@ -786,6 +786,10 @@ class CopilotAdapter:
         table: dict = {}
         for name, spec in servers.items():
             spec = dict(spec)
+            if "enabled_tools" in spec:
+                spec.setdefault("tools", spec["enabled_tools"])
+            if "disabled_tools" in spec:
+                spec.setdefault("excludeTools", spec["disabled_tools"])
             if drop_if_credentialed(name, spec, "mcp-config.json"):
                 continue
             stype = spec.get("type") or ("local" if spec.get("command") else "http")

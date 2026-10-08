@@ -729,6 +729,32 @@ def test_copilot_render_follows_a_rotated_gateway_key_into_a_private_file(world,
     assert (out / "mcp-config.json").stat().st_mode & 0o777 == 0o600
 
 
+def test_copilot_render_keeps_a_declared_tool_allowlist(world, copilot_gateway):
+    from scripts.profiles import render
+
+    _declare(
+        world, lf={"type": "http", "url": "http://lf.example/mcp", "enabled_tools": READS, "disabled_tools": ["x"]}
+    )
+
+    entry = json.loads((render.render_copilot("rb-role") / "mcp-config.json").read_text())["mcpServers"]["lf"]
+
+    assert entry["tools"] == READS
+    assert entry["excludeTools"] == ["x"]
+
+
+def test_init_re_renders_each_copilot_role_home(world, copilot_gateway, monkeypatch):
+    from scripts.profiles import render
+
+    first = render.render_copilot("rb-role")
+    monkeypatch.setenv("GW_KEY", "k-init")
+
+    world["install"]._rerender_profile_homes("copilot")
+
+    out = render.rendered_root() / "rb-role" / "copilot"
+    assert out.resolve() != first
+    assert "Bearer k-init" in (out / "mcp-config.json").read_text()
+
+
 def test_profile_render_cli_renders_a_copilot_home(world, copilot_gateway, capsys):
     from scripts.profiles import render
 
