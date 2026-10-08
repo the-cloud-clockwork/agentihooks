@@ -190,6 +190,49 @@ class Done(WtBase):
         self.assertFalse(dest.exists())
         self.assertFalse(self.branch_exists("queue-one"))
 
+    def test_done_deletes_the_remote_branch_only_after_the_pull_request_merges(self):
+        dest = self._new("remote-queue")
+        _git(dest, "push", "--quiet", "-u", "origin", "remote-queue", env=self.gitenv)
+        state = Path(self.tmp) / "remote-pr-state"
+        gh = self.bin / "gh"
+        gh.write_text(
+            f"#!{BASH}\nset -euo pipefail\n"
+            f'current="$(<"{state}")"\n'
+            'if [[ "$current" == missing ]]; then exit 0; fi\n'
+            'if [[ "$current" == merged ]]; then\n'
+            '  echo "MERGED"\n'
+            "else\n"
+            '  echo "https://github.com/o/r/pull/9"\n'
+            "fi\n"
+        )
+        gh.chmod(0o755)
+        for value in ("queued", "open", "closed", "missing"):
+            state.write_text(value)
+            result = self.run_wt("done", "remote-queue", "--repo", str(self.primary), "--force")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("merged", result.stderr)
+            self.assertTrue(dest.is_dir())
+            self.assertTrue(self.branch_exists("remote-queue"))
+            self.assertEqual(
+                subprocess.run(
+                    ["git", "-C", str(self.origin), "show-ref", "--verify", "--quiet", "refs/heads/remote-queue"],
+                    env=self.gitenv,
+                ).returncode,
+                0,
+            )
+        state.write_text("merged")
+        result = self.run_wt("done", "remote-queue", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("remote-queue"))
+        self.assertNotEqual(
+            subprocess.run(
+                ["git", "-C", str(self.origin), "show-ref", "--verify", "--quiet", "refs/heads/remote-queue"],
+                env=self.gitenv,
+            ).returncode,
+            0,
+        )
+
     def test_done_keeps_the_worktree_when_github_cannot_read_its_pull_request(self):
         dest = self._new("queue-unknown")
         gh = self.bin / "gh"

@@ -108,6 +108,31 @@ def test_done_closes_the_task_and_marks_the_agent_finished(env, monkeypatch):
     assert store.claimant("sw", "t1") is None
 
 
+def test_done_on_a_group_lead_closes_its_members_with_the_lead_pull_request(env, monkeypatch):
+    store, ledger, _ = env
+    ledger.rows["t1"]["group_members"] = ["t3", "t4"]
+    member = {"lane": "eng", "title": "member", "description": "spec", "claimed_by": "", "merged_into": "t1"}
+    ledger.rows["t3"] = {"id": "t3", "state": "open", **member}
+    ledger.rows["t4"] = {"id": "t4", "state": "done", **member}
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    url = "https://github.com/o/r/pull/9"
+    ledger.rows["t1"]["pr_url"] = url
+    ledger.updates, slugs = [], []
+    original, listed = ledger.update_task, ledger.tasks
+    ledger.update_task = lambda slug, task_id, fields, **kw: (
+        ledger.updates.append((slug, task_id, kw["by"])) or original(slug, task_id, fields, **kw)
+    )
+    ledger.tasks = lambda slug: slugs.append(slug) or listed(slug)
+    assert run("sw", "done", "--finding", "one pull request") == 0
+    assert (ledger.rows["t3"]["state"], ledger.rows["t3"]["pr_url"]) == ("done", url)
+    assert ledger.rows["t3"]["proof"] == {"finding": "one pull request"}
+    agent = "engineer@a1b2c3-0001"
+    assert ledger.updates == [("sw", "t1", agent), ("sw", "t3", agent)]
+    assert set(slugs) == {"sw"}
+
+
 def test_done_on_a_code_task_waits_for_its_pull_request_to_merge(env, monkeypatch, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")

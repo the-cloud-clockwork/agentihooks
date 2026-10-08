@@ -62,7 +62,7 @@ def send(store, slug, text, sender, to, fyi=False):
     for agent in found:
         links.check_send(inbox, sender, agent.name)
     for agent in found:
-        inbox.send(sender, agent.name, text, fyi=fyi)
+        inbox.send(sender, agent.name, text, fyi=fyi, task=agent.task)
     return [a.name for a in found]
 
 

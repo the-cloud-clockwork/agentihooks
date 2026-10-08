@@ -71,7 +71,7 @@ def cmd_send(store, me, args):
     links.check_send(store, me, args.address)
     fyi, words = informational(args.text)
     check_for_operator(args.address, " ".join(words))
-    item = store.send(me, args.address, " ".join(words), fyi=fyi)
+    item = store.send(me, args.address, " ".join(words), fyi=fyi, task=store.receiver_task(args.address))
     print(json.dumps({"id": item.id, "from": item.sender, "to": item.address, "state": item.state}))
 
 

@@ -26,6 +26,7 @@ from scripts.swarm import (
     claim_order,
     control_notifications,
     difficulty,
+    grouping,
     launch_check,
     lifetime,
     live_binding,
@@ -156,6 +157,8 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions.append("new tasks, running again")
     actions += skip_refused(_orphans, slug, store, ledger, rows)
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
+    actions += skip_refused(grouping.release_pass, slug, store, ledger, doc)
+    actions += skip_refused(grouping.group_pass, slug, config, store, ledger, doc)
     from scripts.swarm import capacity
 
     actions += skip_refused(capacity.apply, slug, config, store, ledger, runtime, now_ms)
@@ -518,6 +521,7 @@ def _claimable(slug, store, rows, doc, lane):
             and t.get("state") == "open"
             and t["id"] not in awaiting
             and not t.get("out_of_scope")
+            and not t.get("merged_into")
             and store.claimant(slug, t["id"]) is None
             and phase_state.admits(t, doc)
             and _unblocked(t, rows)
@@ -613,6 +617,11 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             store.put_reclaim(slug, name, task["reclaim"])
         task["stack_base"] = _stack_base(task, rows)
         task["overlaps"] = _sharing(task, rows)
+        task["group"] = [
+            {key: rows[m][key] for key in ("id", "title", "description")}
+            for m in task.get("group_members") or []
+            if m in rows
+        ]
         saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
         preferred = json.loads(saved)["seat"] if saved else store.handoff_seat(slug, task["id"])
         seat = _free_seat(slug, lane, taken, preferred)

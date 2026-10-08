@@ -110,6 +110,12 @@ class LedgerClient:
     def priority(self, slug, item, text):
         self._call(slug, [_op("priority", "swarm", item=item, text=text)])
 
+    def group_tasks(self, slug, lead, members):
+        self._call(slug, [_op("task_group", "swarm", item=f"tasks/{lead}", members=list(members))])
+
+    def ungroup_tasks(self, slug, lead):
+        self._call(slug, [_op("task_ungroup", "swarm", item=f"tasks/{lead}")])
+
     def clear_priority(self, slug, priority_id, reason):
         self._call(slug, [_op("priority_clear", "swarm", target=priority_id, reason=reason)])
 
