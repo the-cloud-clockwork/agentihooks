@@ -7,9 +7,12 @@ from scripts.swarm_ledger.repository import sqlite
 from scripts.swarm_ledger.repository.sqlite import (
     Missing,
     SQLiteLedgerRepository,
+    read_document,
     read_ids,
     read_ledger,
+    read_ledgers,
     read_registry,
+    read_slugs,
 )
 
 CONTENT = {
@@ -245,6 +248,26 @@ def test_partial_reads_return_only_the_named_parts(tmp_path):
     assert read_registry(tmp_path / "ledgers", "bin") == {}
     with pytest.raises(Missing):
         repo.read("missing", "overview")
+
+
+def test_whole_and_every_ledger_reads_need_no_writable_connection(tmp_path):
+    repo = store(tmp_path)
+    repo.create("zeta", CONTENT)
+    repo.create("alpha", {**CONTENT, "title": "Alpha"})
+    repo.apply_ops("zeta", ops=[chat(1)])
+    folder = tmp_path / "ledgers"
+    assert read_slugs(folder) == ["alpha", "zeta"]
+    assert read_ledgers(folder, "title") == {"alpha": {"title": "Alpha"}, "zeta": {"title": "Store"}}
+    assert read_document(folder, "zeta") == repo.get_document("zeta")
+    assert read_document(folder, "zeta")["_meta"]["events"][-1]["kind"] == "message added"
+    assert read_document(folder, "missing") is None
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (empty / sqlite.DATABASE).touch()
+    for nowhere in (tmp_path / "nowhere", empty):
+        assert read_slugs(nowhere) == []
+        assert read_ledgers(nowhere, "title") == {}
+        assert read_document(nowhere, "zeta") is None
 
 
 def test_missing_ledgers_raise_one_error_both_lookup_and_value_callers_catch(tmp_path):
