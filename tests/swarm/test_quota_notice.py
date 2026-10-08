@@ -1,7 +1,6 @@
 import json
 from dataclasses import replace
 
-import fakeredis
 import pytest
 
 from scripts.inbox.store import InboxStore
@@ -15,6 +14,8 @@ HURRY = "Your account has fifteen percent or less quota left. Finish the current
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     result = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     result.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, code="a1b2c3"))
     return result

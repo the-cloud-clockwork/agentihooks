@@ -1,5 +1,13 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from scripts.inbox.store import InboxStore
 from scripts.swarm import capacity
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm.tick import Ledger, Runtime
 
 HURRY = "Your account has fifteen percent or less quota left. Finish the current step and push."
 HANDOFF = (
@@ -18,7 +26,7 @@ def level(account: dict) -> str:
     return ""
 
 
-def apply(slug: str, store, decision: dict) -> list[str]:
+def apply(slug: str, store: RedisStore, decision: dict) -> list[str]:
     accounts = {(row["harness"], row["name"]): row for row in decision.get("accounts", [])}
     key = store.key(slug, "quota-notices")
     actions = []
@@ -40,6 +48,8 @@ def apply(slug: str, store, decision: dict) -> list[str]:
     return actions
 
 
-def refresh(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
+def refresh(
+    slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, runtime: Runtime, now_ms: int
+) -> list[str]:
     actions = capacity.apply(slug, config, store, ledger, runtime, now_ms)
     return actions + apply(slug, store, capacity.read(store, slug))
