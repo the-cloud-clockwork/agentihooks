@@ -21,13 +21,30 @@ def test_sonar_uses_all_shards_without_running_tests_again():
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     jobs = workflow["jobs"]
     scan = jobs["sonar"]
-    assert scan.get("needs", ["unit"]) == ["unit"]
+    assert "needs" not in scan
     merge = next(step for step in scan["steps"] if step.get("name") == "Merge shard coverage")
     assert "pytest" not in merge["run"]
     assert "combine.sh" in merge["run"]
     assert merge["env"]["GH_TOKEN"] == "${{ github.token }}"
     assert "sonar" in jobs["gate-required"]["needs"]
     assert not (ROOT / ".github/workflows/sonar-scan.yml").exists()
+
+
+def test_sonar_setup_overlaps_the_shards_and_only_the_analysis_waits_for_coverage():
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["sonar"]["steps"]
+    names = [step.get("name") or step.get("uses") for step in steps]
+    merge = names.index("Merge shard coverage")
+    for setup in (
+        "actions/checkout@v4",
+        "actions/setup-python@v5",
+        "Install coverage",
+        "Start Cloudflare Access proxy",
+    ):
+        assert names.index(setup) < merge
+    assert names.index("Restore Sonar downloads") < merge < names.index("SonarQube Scan")
+    combine = (ROOT / ".github/coverage/combine.sh").read_text()
+    assert "collect.py" in combine
+    assert "gh run download" not in combine
 
 
 def test_coverage_options_measure_hooks_and_scripts_on_one_interpreter():
@@ -95,6 +112,7 @@ for shard in range(1, 5):
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "TOTAL" in result.stdout
     report = ET.parse(tmp_path / "coverage.xml")
     classes = report.findall(".//class")
     assert {node.attrib["filename"] for node in classes} == {
