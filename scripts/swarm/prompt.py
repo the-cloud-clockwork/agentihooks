@@ -428,7 +428,10 @@ def code_steps(me, led, name, phase):
         "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds.",
         f"5. Push, open the pull request into dev (with Closes #<n> when there is an issue), record it: {me} pr <pr url>",
         f"6. Wait on the checks with {me} wait --on checks <pr url>: the tick ends the wait and tells you when they "
-        f"resolve, so no Monitor is needed. Merge on green checks, then {me} wait --on merge <pr url>. "
+        f"resolve, so no Monitor is needed. Queue on green checks with {me} merge queue <pr url>, then "
+        f"{me} wait --on merge <pr url>. Report queue state with {me} merge state <pr url>. "
+        f"Before fixing a queued pull request, dequeue first with {me} merge dequeue <pr url>, then push, "
+        f"then queue again with {me} merge queue <pr url> once checks pass. "
         "Keep the worktree until the tick confirms merged; a red merge wait means fix the pull request and "
         "queue it again. After merged, run wt.sh done.",
         f"7. Leave the crew with {led} leave, then close the task: {me} done --pr <pr url>. {CLOSES}",
@@ -589,8 +592,11 @@ def assist_ship(me, led, task_id):
         "6. This swarm runs at assist autonomy. Once checks are green, ask the operator to approve the merge: "
         f'{led} comment tasks/{task_id} "<plain words: what the pull request does, checks green, waiting for your '
         f'approval to merge>", then {me} wait 60 --reason "operator merge approval"; his answer reaches you as an '
-        f"inbox message. Merge only after an OPERATOR line on the ledger approves it, then {me} wait --on merge "
-        "<pr url>. Keep the worktree until the tick confirms merged; a red merge wait means fix the pull request "
+        f"inbox message. Queue with {me} merge queue <pr url> only after an OPERATOR line on the ledger approves "
+        f"it, then {me} wait --on merge <pr url>. Report queue state with {me} merge state <pr url>. "
+        f"Before fixing a queued pull request, dequeue first with {me} merge dequeue <pr url>, then push, "
+        f"then queue again with {me} merge queue <pr url> once checks pass and approval still holds. "
+        "Keep the worktree until the tick confirms merged; a red merge wait means fix the pull request "
         "and queue it again. After merged, run wt.sh done. An OPERATOR "
         "line asking for changes: make them and ask again.",
         f"7. Leave the crew with {led} leave, then close the task: {me} done --pr <pr url>. {CLOSES}",
