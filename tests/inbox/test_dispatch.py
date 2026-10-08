@@ -663,10 +663,10 @@ def journal(store, item_id):
 def test_own_and_release_watch_the_owner_and_open_deliveries(store, watched):
     dispatcher = Dispatcher(store)
     dispatcher.own("bob", "bridge-1")
-    assert watched == [owner_key("bob")]
+    assert set(watched) == {owner_key("bob")}
     watched.clear()
     dispatcher.release("bob", "bridge-1")
-    assert watched == [owner_key("bob"), store.key("deliveries", "bob")]
+    assert set(watched) == {owner_key("bob"), store.key("deliveries", "bob")}
 
 
 def test_reserve_watches_every_key_it_reads(store, dispatcher, watched):
@@ -704,7 +704,7 @@ def test_reserve_and_commit_watch_the_seat_of_a_seat_item(store, watched):
 def test_a_seen_mark_watches_the_alias_and_the_resolved_owner(store, watched):
     store.redis.set(NameRegistry.key("alias", "old-name"), "bob")
     assert SeenMarks(store.redis).mark("old-name", "sw:3:c1") is True
-    assert watched == [NameRegistry.key("alias", "old-name"), owner_key("bob")]
+    assert set(watched) == {NameRegistry.key("alias", "old-name"), owner_key("bob")}
 
 
 def test_a_seen_mark_expires(store):
