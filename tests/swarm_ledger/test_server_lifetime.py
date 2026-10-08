@@ -19,7 +19,7 @@ SERVER = ROOT / "scripts/swarm_ledger/ledger_server.py"
 
 def running(pid):
     try:
-        return (Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]) != "Z"
+        return (Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]) not in {"Z", "X"}
     except OSError:
         return False
 
@@ -30,6 +30,12 @@ def test_running_reads_a_process_reaped_mid_read_as_gone(monkeypatch):
 
     monkeypatch.setattr(Path, "read_text", reaped)
     assert running(os.getpid()) is False
+
+
+@pytest.mark.parametrize("state,alive", [("S", True), ("R", True), ("Z", False), ("X", False)])
+def test_running_reads_a_zombie_or_a_process_being_reaped_as_gone(monkeypatch, state, alive):
+    monkeypatch.setattr(Path, "read_text", lambda self, *args, **kwargs: f"7 (python) {state} 1 7 7")
+    assert running(7) is alive
 
 
 @pytest.mark.parametrize("ending", ["exit", "terminate", "kill"])
