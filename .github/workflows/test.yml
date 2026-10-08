@@ -29,6 +29,9 @@ jobs:
   swarm-image:
     uses: ./.github/workflows/swarm-smoke.yml
 
+  brain-smoke:
+    uses: ./.github/workflows/brain-smoke.yml
+
   wiring:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -408,7 +411,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, shard-check, lint, sonar, mutation, swarm-image, wiring]
+    needs: [unit, shard-check, lint, sonar, mutation, swarm-image, brain-smoke, wiring]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
