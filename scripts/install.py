@@ -93,6 +93,7 @@ import yaml
 
 from scripts.claude_config import claude_home
 from scripts.claude_config import claude_json as claude_json_path
+from scripts.cli_parser import ArgumentParser
 from scripts.targets import DEFAULT_TARGET, SUPPORTED_TARGETS, get_adapter, resolve_target
 from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
 
@@ -6482,7 +6483,7 @@ def main() -> None:
 
         raise SystemExit(gc_main(_argv))
 
-    parser = argparse.ArgumentParser(
+    parser = ArgumentParser(
         description="agentihooks — Claude Code harness: hooks, profiles, skills, MCPs.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_USAGE_TEXT,
