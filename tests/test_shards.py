@@ -99,7 +99,8 @@ def test_shard_option_weighs_source_size(tmp_path):
     assert ignored == {"b", "c"}
 
 
-def test_shard_option_accounts_for_serial_worker_groups(tmp_path):
+@pytest.mark.parametrize("worker", [False, True])
+def test_shard_option_accounts_for_serial_worker_groups(tmp_path, worker):
     (tmp_path / "tests").mkdir()
     for name in "abcd":
         mark = 'pytestmark = pytest.mark.xdist_group("redis")\n' if name in "ac" else ""
@@ -107,7 +108,11 @@ def test_shard_option_accounts_for_serial_worker_groups(tmp_path):
     durations = {f"tests/test_{name}.py::t": seconds for name, seconds in zip("abcd", (5, 9, 5, 8))}
     (tmp_path / ".test_durations").write_text(json.dumps(durations))
     config = SimpleNamespace(
-        getoption=lambda name: "1/2", stash=pytest.Stash(), rootpath=tmp_path, option=SimpleNamespace(numprocesses=4)
+        getoption=lambda name: "1/2",
+        stash=pytest.Stash(),
+        rootpath=tmp_path,
+        option=SimpleNamespace(numprocesses=None if worker else 4),
+        **({"workerinput": {"workercount": 4}} if worker else {}),
     )
     assert conftest._shard_files(config) == frozenset({"tests/test_a.py", "tests/test_b.py"})
 

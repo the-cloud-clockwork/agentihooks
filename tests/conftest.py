@@ -65,7 +65,11 @@ def _shard_files(config) -> frozenset[str]:
         index, shards = (int(part) for part in config.getoption("shard").split("/"))
         durations = json.loads((config.rootpath / ".test_durations").read_text())
         files = discover_test_files(config.rootpath)
-        workers = getattr(getattr(config, "option", None), "numprocesses", None) or 1
+        workers = (
+            getattr(config, "workerinput", {}).get("workercount")
+            or getattr(getattr(config, "option", None), "numprocesses", None)
+            or 1
+        )
         if workers == "auto":
             workers = os.cpu_count() or 1
         files = assign_files(
