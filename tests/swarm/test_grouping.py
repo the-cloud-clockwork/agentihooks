@@ -128,6 +128,11 @@ def test_filter_never_pairs_tasks_that_differ_depend_or_are_taken(other):
     assert grouping.candidates(doc(task("a"), other)) == []
 
 
+def test_filter_never_pairs_a_task_that_reaches_the_lead_through_a_done_task():
+    found = grouping.candidates(doc(task("a"), task("b", depends_on=["x"]), task("x", state="done", depends_on=["a"])))
+    assert found == []
+
+
 def test_filter_caps_a_group_at_five_tasks():
     found = grouping.candidates(doc(*(task(f"t{n}") for n in range(7))))
     assert ids(found) == [["t0", "t1", "t2", "t3", "t4"], ["t5", "t6"]]

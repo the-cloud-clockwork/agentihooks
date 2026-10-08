@@ -65,13 +65,10 @@ def refusal(tasks: list[dict], known: dict) -> str:
 
 
 def _upstream(task, known):
-    seen, todo = set(), list(task.get("depends_on") or [])
-    while todo:
-        dep = todo.pop()
-        if dep not in seen:
-            seen.add(dep)
-            todo += known.get(dep, {}).get("depends_on") or []
-    return seen
+    seen = list(dict.fromkeys(task.get("depends_on") or []))
+    for dep in seen:
+        seen += [d for d in known.get(dep, {}).get("depends_on") or [] if d not in seen]
+    return set(seen)
 
 
 def apply(doc, op, ctx):
