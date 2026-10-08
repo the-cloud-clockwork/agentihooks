@@ -118,7 +118,7 @@ def test_empty_page_set_names_all_cap_fields():
     assert (
         str(caught.value)
         == "set needs max_eng, max_ci, max_plan, codex_share, compact_limit, effort_min, effort_max, autonomy, "
-        "master_agent or gates"
+        "master_agent, overlays or gates"
     )
 
 

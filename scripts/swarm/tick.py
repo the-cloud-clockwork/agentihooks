@@ -137,6 +137,9 @@ def tick(slug, store, ledger, runtime, now_ms):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
     actions += _orphans(slug, store, ledger, rows)
+    from scripts.swarm import capacity
+
+    actions += capacity.apply(slug, config, store, ledger, runtime, now_ms)
     if not sleeping:
         actions += _codex_hook_order()
         actions += _master_down(slug, config, store, ledger, runtime, now_ms)
@@ -619,10 +622,17 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
 
 
 def _spawn_order(slug, config, store, agents, rows, doc):
+    from scripts.swarm import capacity
+
+    decision = capacity.read(store, slug)
+    caps = decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
     queue = []
-    for lane, cap in (("eng", config.max_eng), ("ci", config.max_ci), ("plan", config.max_plan)):
+    for lane, cap in caps.items():
         busy = sum(1 for a in agents if a.lane == lane and not _ended(a, rows))
-        ready = _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))[: max(cap - busy, 0)]
+        ready = _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))
+        if "tasks" in decision:
+            ready = [task for task in ready if task["id"] in decision["tasks"]]
+        ready = ready[: max(cap - busy, 0)]
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
     return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])]
 

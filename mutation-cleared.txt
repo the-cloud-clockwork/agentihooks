@@ -1883,6 +1883,50 @@
     "reader": "Standards /root/standards_reader",
     "reason": "For event dictionaries, present text values follow identical code. Missing text normalizes to empty string versus xxxx; both differ from the fixed DOCTOR_PHRASE rig doctor stop, so neither queues a command. The fallback is not otherwise exposed or persisted. No alternate implementation or consumer found. Evidence: CI run 37692175970, mutant-map and parent symbol dumps. Adversarial Standards ruling."
   },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x__window__mutmut_3:dae84d6f3f8525418fcac482316b97a4ef5c5d2ddcd4336ca721c929663bc5cf": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Omitting resets_at=None uses the QuotaWindow dataclass default None and constructs the identical value."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_accounts__mutmut_103:23899dbd5b8f530a34afc0a824ca96a9533e4861b1a67d7b7e48c358a561c10c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The state classifier distinguishes only exact rejected; None remains non rejected and produces identical states for every quota window."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_accounts__mutmut_109:a3fa476201fff5043582bb5de4c39ab43dc5f07b28eedd6d7188e64f1410943b": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The state classifier distinguishes only exact rejected; XXallowedXX remains non rejected and produces identical states for every quota window."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_accounts__mutmut_110:3d65ee86fcad972c5d25893d4e8b5f4198160db1fb9f7018ae59126bae4119f9": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The state classifier distinguishes only exact rejected; ALLOWED remains non rejected and produces identical states for every quota window."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_calculate__mutmut_5:57ddee1979bb019ac79d4562ecd678ebb0447aa65b84bea86bef652609b75203": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "LANES and the constructed configuration cap tuple always contain three entries, so zip strict None changes no result."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_calculate__mutmut_8:63bc9c9b45649aba3565389a3db8c3ce1e46d2ea3ebd1f7547e327d94e3e17e8": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "LANES and the constructed configuration cap tuple always contain three entries, so omitted zip strict changes no result."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_calculate__mutmut_9:de00a8135f745f635b9a46d410b8743bba5fc715e27370258901009d09e3dbc0": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "LANES and the constructed configuration cap tuple always contain three entries, so zip strict False changes no result."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_calculate__mutmut_5:416b166b4c72ffd306e1dd127de4b2dd0111e3632855d77d8263299e1a4c1fb3": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "LANES and the constructed configuration cap tuple always contain exactly three entries. Zip strict None, omitted or False changes no result for supported configurations. The Standards reader reconfirmed this fingerprint against CI run 37705576339."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_calculate__mutmut_8:2744751cce91ff433e596bd89152404382ed35e2720a373655b5a32933f08bbc": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "LANES and the constructed configuration cap tuple always contain exactly three entries. Zip strict None, omitted or False changes no result for supported configurations. The Standards reader reconfirmed this fingerprint against CI run 37705576339."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_calculate__mutmut_9:dd55e276dafc6abbcf3b95c012dfbfe6400f601da359cc5335ad56cc09a977d8": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "LANES and the constructed configuration cap tuple always contain exactly three entries. Zip strict None, omitted or False changes no result for supported configurations. The Standards reader reconfirmed this fingerprint against CI run 37705576339."
+  },
+  "scripts/profiles/scaffold.py:scripts.profiles.scaffold.x_overlay_new__mutmut_38:8143335d4bf42677f71b9ed3a94c80c65c7cd1c576e964ad4c5abbec46ecf000": {
+    "reader": "Standards ov3 reader",
+    "reason": "Equivalent mutant. sort_keys has one reader in PyYAML 6.0.3, BaseRepresenter.represent_mapping, which tests if self.sort_keys; the Dumper and CDumper classes only forward the value, and the serializer, emitter, constructor and nodes never read it. None and False are both falsy, so both keep insertion order: safe_dump of the overlay manifest is byte identical for sort_keys False and None, also for a nested mapping and CSafeDumper. sort_keys True gives description, kind, name, wears, which the exact profile.yml text test kills. Evidence: CI run 37703337103 at 2df7d0a2. Adversarial Standards ruling."
+  },
   "hooks/context/project_identity.py:hooks.context.project_identity.x__project_aliases__mutmut_26:22a9a06ae36882a722dc70af57dfab9710e9567a078e6a40c1c919dbb3ba2184": {
     "reader": "Standards /root/standards_reader",
     "reason": "For the supported JSON alias-document contract, every non-string source or target fails canonical_remote string equality even when the early type guard changes OR to AND. The later check raises the identical ValueError before traversal or mutation. Adversarial JSON null, booleans, numbers, arrays, objects and strings produced identical outputs across 77 combinations. This ruling excludes arbitrary custom Python objects outside the JSON schema."
@@ -1935,10 +1979,6 @@
     "reader": "Standards /root/standards_reader",
     "reason": "The config-read exception fallback repo is used only as a truth operand. Empty string and None both select identity None and return None; no path operation consumes the changed value."
   },
-  "scripts/profiles/scaffold.py:scripts.profiles.scaffold.x_overlay_new__mutmut_38:8143335d4bf42677f71b9ed3a94c80c65c7cd1c576e964ad4c5abbec46ecf000": {
-    "reader": "Standards ov3 reader",
-    "reason": "Equivalent mutant. sort_keys has one reader in PyYAML 6.0.3, BaseRepresenter.represent_mapping, which tests if self.sort_keys; the Dumper and CDumper classes only forward the value, and the serializer, emitter, constructor and nodes never read it. None and False are both falsy, so both keep insertion order: safe_dump of the overlay manifest is byte identical for sort_keys False and None, also for a nested mapping and CSafeDumper. sort_keys True gives description, kind, name, wears, which the exact profile.yml text test kills. Evidence: CI run 37703337103 at 2df7d0a2. Adversarial Standards ruling."
-  },
   "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_30:e9e73925e70dabdb004ae0af81c513cd65016c79072920da9bd1bbd2f26cfffb": {
     "reader": "Standards",
     "reason": "ProfileDecision.bundle_revision is read only by the next line, which replaces a falsy value with overlays.revision(); None and the empty string are both falsy, so both take the same branch and store the same revision, and nothing reads the field before that line. Exact CI artifact mutant from run 37699550281."
@@ -1950,6 +1990,22 @@
   "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_56:409a637151996c215b8cdad4ef75d9e362591c631aad7cd4c8c892d6fdbefa29": {
     "reader": "Standards",
     "reason": "The argument reaches only overlays.chosen through role_overlays or {} in profile_choice.choose, which normalizes None to an empty map before any read, so chosen sees the same defaults. Exact CI artifact mutant from run 37699550281."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_accounts__mutmut_119:73968c7f056b2e72c45e28c7bb6ee58f7b682fc801cf8e24f52992796bba6be5": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The state classifier only distinguishes exact rejected. None, XXallowedXX and ALLOWED remain non rejected and produce identical states for every quota window. The Standards reader reconfirmed this identity against CI run 37710037693."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_accounts__mutmut_125:0e2e1fbf4ae6485c2e1771a0f3ef23a1fa2a4d1c82f8656745aa628c992b4437": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The state classifier only distinguishes exact rejected. None, XXallowedXX and ALLOWED remain non rejected and produce identical states for every quota window. The Standards reader reconfirmed this identity against CI run 37710037693."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_accounts__mutmut_126:b39b349550e5414165feb4b2cc8ea82a0876f1595721d468c9d38304f56ca158": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The state classifier only distinguishes exact rejected. None, XXallowedXX and ALLOWED remain non rejected and produce identical states for every quota window. The Standards reader reconfirmed this identity against CI run 37710037693."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1quota_requirements__mutmut_67:073f50ffe1cf25b2262630f9b5693c54cec2d87aad3726f6589b82dd053dd227": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Exact claude and codex lane tokens leave through the requested branch. The fallback therefore sees only auto or absent tokens; template parsing rejects None lane keys. Replacing the lane argument by None yields the same effective share harness tuple for every supported configuration. Standards approved against CI run 37710037693."
   },
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_34:0218fd3c8879d332906b0c9f657eff071d5df0f589e99aa45c713f72eb1c7fb3": {
     "reader": "Standards",
@@ -1966,5 +2022,9 @@
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_page_for__mutmut_39:9fb197a866645940aeeeadfc8a45d53d12c97717d4bfa0c78034bdcee2f839eb": {
     "reader": "Standards",
     "reason": "Python normalizes codec names before lookup: codecs.lookup('UTF-8') and codecs.lookup('utf-8') resolve to the same utf-8 codec, so read_text(encoding='UTF-8') decodes to the identical str as encoding='utf-8' for any bytes, independent of the file content, and page_for output is unchanged. Evidence: CI run 37704627823. Adversarial Standards ruling."
+  },
+  "scripts/swarm_ledger/ledger_workspace.py:scripts.swarm_ledger.ledger_workspace.x_rewrite__mutmut_13:db2e21ac01eac5f7c1c3a9bdc01f8a785380137bda0f2745414e11f993bd5644": {
+    "reader": "Standards",
+    "reason": "Equivalent encoding alias: utf-8 and UTF-8 resolve to the identical Python CodecInfo and produce identical steering bytes, verified independently by codec identity and non-ASCII byte equality. CI run 37711290169."
   }
 }
