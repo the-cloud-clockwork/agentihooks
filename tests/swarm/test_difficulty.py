@@ -268,6 +268,23 @@ def test_pass_goes_on_past_a_refused_task(asked):
     assert ledger.rows["b"]["difficulty"] == "S"
 
 
+def test_pass_asks_the_classifier_for_every_task_of_its_bound_at_once(monkeypatch):
+    import threading
+
+    monkeypatch.setattr(difficulty, "PER_TICK", 40)
+    together = threading.Barrier(40, timeout=10)
+
+    def decide(state, questions, **kw):
+        together.wait()
+        return answered("S", 0.9)
+
+    monkeypatch.setattr(difficulty, "decide", decide)
+    ledger = FakeLedger([{**TASK, "id": f"t{i}"} for i in range(41)])
+    actions = difficulty.size_pass("sw", ledger, {**DOC, "tasks": ledger.tasks("sw")})
+    assert actions == [f"sized task t{i} S by classifier" for i in range(40)]
+    assert ledger.rows["t40"].get("difficulty") is None
+
+
 @pytest.fixture
 def store():
     import fakeredis
