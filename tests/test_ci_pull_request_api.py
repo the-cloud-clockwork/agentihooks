@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PUSH_ONLY = "github.event_name == 'push'"
 PUSH_TOKEN = "${{ github.event_name == 'push' && github.token || '' }}"
 API_CALL = re.compile(r"\bgh\b(?!-)|api\.github\.com|GITHUB_API_URL|collect\.py")
-TOKEN = re.compile(r"github\.token|secrets\.github_token", re.IGNORECASE)
+TOKEN = re.compile(r"github\.token|secrets\.(github|gh)_\w*", re.IGNORECASE)
 
 
 def _workflow(name: str) -> dict:
@@ -45,7 +45,12 @@ def _pull_request_steps():
 
 def _holds_token(step: dict) -> bool:
     env = {key: value for key, value in step.get("env", {}).items() if value != PUSH_TOKEN}
-    return bool(TOKEN.search(str(env)) or TOKEN.search(str(step.get("with", {}))))
+    return bool(
+        TOKEN.search(str(env))
+        or TOKEN.search(str(step.get("with", {})))
+        or TOKEN.search(step.get("run", ""))
+        or step.get("uses", "").startswith("actions/github-script@")
+    )
 
 
 def test_no_pull_request_step_holds_the_workflow_token_or_calls_the_api():
@@ -64,8 +69,11 @@ def test_no_pull_request_step_holds_the_workflow_token_or_calls_the_api():
         {"run": 'curl "$GITHUB_API_URL/rate_limit"'},
         {"env": {"GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}},
         {"uses": "actions/github-script@v7", "with": {"github-token": "${{ github.token }}"}},
+        {"run": "echo ${{ github.token }}"},
+        {"uses": "actions/github-script@v7"},
+        {"env": {"TOKEN": "${{ secrets.GH_PAT }}"}},
     ],
-    ids=["gh-with-flags", "api-url", "github-token-env", "action-input"],
+    ids=["gh-with-flags", "api-url", "github-token-env", "action-input", "token-in-run", "script-default", "pat"],
 )
 def test_each_way_of_reaching_the_api_is_an_offender(plant):
     assert _holds_token(plant) or API_CALL.search(plant.get("run", ""))
