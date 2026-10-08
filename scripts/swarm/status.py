@@ -29,6 +29,7 @@ from scripts.swarm.naming import swarm_name
 from scripts.swarm.store import ASSIST, SwarmError
 from scripts.swarm.tick import agent_status
 from scripts.swarm_ledger import plan_shape
+from scripts.swarm_v2.runtime import observe
 
 DEFAULT_COMPACT_LIMIT = 600
 
@@ -180,6 +181,7 @@ def status_report(store, slug, state):
                 "status": agent_status(a),
                 "promoted": a.name == promotion.get("promoted"),
                 "state_since": int(store.redis.hget(store.key(slug, "state-since"), a.name) or 0),
+                "observation": observe.projection(store, slug, a),
                 "gates": active.get(a.name, []),
                 "inbox": [
                     {"text": item.text, "sender": item.sender, "state": item.state}
