@@ -22,7 +22,7 @@ _PROC = Path("/proc")
 def account_from_names(names: Iterable[str], prefix: str = TOKEN_PREFIX) -> str:
     """The one slug among names carrying ``prefix``; UNROUTED when there is none or more than one."""
     names = list(names)
-    if prefix == TOKEN_PREFIX and API_MARKER in names:
+    if API_MARKER in names:
         return API_ACCOUNT
     slugs = {name.removeprefix(prefix) for name in names if name.startswith(prefix) and name != prefix}
     return slugs.pop() if len(slugs) == 1 else UNROUTED
