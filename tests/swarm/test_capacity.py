@@ -90,7 +90,7 @@ def test_placement_spends_the_soonest_week_reset_first_only_above_the_handoff_ma
     soon = replace(account("soon"), week_resets_at=1000)
     late = replace(account("late"), week_resets_at=9000)
     edge = capacity.Account("claude", "edge", "OPEN", 0, 5, 90, 2, 10)
-    assert [seat.week_resets_at for seat in capacity.seats([soon, late, edge])] == [1000, 9000, None]
+    assert [seat.spend_before for seat in capacity.seats([soon, late, edge])] == [1000, 9000, None]
     config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0)
     result = capacity.calculate(config, [late, edge, soon], [])
     assert [slot["account"] for slot in result["placements"]["eng"]] == ["soon", "late"]
@@ -147,8 +147,8 @@ def test_accounts_judge_every_window_at_the_given_time_and_pass_the_environment(
         capacity.codex_router, "quotas", lambda p, environ: calls.append(("quotas", [a.name for a in p], environ)) or {}
     )
     assert capacity.accounts(env, now) == [
-        capacity.Account("claude", "a", "OPEN", 0, 5.0, 100.0, 2, now - 10),
-        capacity.Account("codex", "default", "OPEN", 0, 60.0, 100.0, 6, now - 10),
+        capacity.Account("claude", "a", "OPEN", 0, 5.0, 100.0, 2),
+        capacity.Account("codex", "default", "OPEN", 0, 60.0, 100.0, 6),
         capacity.Account("codex", "x", "UNKNOWN", 1, None, None, None),
     ]
     assert calls == [("pool", env), ("fresh", env, now), ("quotas", ["x"], env)]

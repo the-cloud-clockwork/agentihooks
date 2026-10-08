@@ -39,7 +39,7 @@ def _claude(environ: dict, now: float) -> list[Account]:
     for at, result in observed.values():
         cap = balancer.account_cap(result, now) if session_bands.fresh(at, now) else None
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
-        reset = result.seven_day.resets_at
+        reset = session_bands.upcoming(result.seven_day.resets_at, now)
         rows.append(
             Account("claude", result.account, _state(cap), counts.get(result.account, 0), five, week, cap, reset)
         )
@@ -66,7 +66,7 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
         cap = codex_router.account_cap(quota, now) if account.name in known else None
         five = _left(quota.five_hour, now) if quota else None
         week = _left(quota.seven_day, now) if quota else None
-        reset = quota.seven_day.resets_at if quota else None
+        reset = session_bands.upcoming(quota.seven_day.resets_at, now) if quota else None
         rows.append(Account("codex", account.name, _state(cap), counts.get(account.name, 0), five, week, cap, reset))
     return rows
 

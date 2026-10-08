@@ -199,8 +199,9 @@ def seats(
 
 
 def _spend_by(quota: CodexQuota, now: float) -> float | None:
+    five = session_bands.left(quota.five_hour.used, quota.five_hour.resets_at, now)
     week = session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now)
-    return session_bands.spend_by(None, week, quota.seven_day.resets_at)
+    return session_bands.spend_by(five, week, session_bands.upcoming(quota.seven_day.resets_at, now))
 
 
 def child_environment(account: CodexAccount, environ: Mapping[str, str]) -> dict[str, str]:

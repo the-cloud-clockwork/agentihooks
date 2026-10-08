@@ -112,4 +112,9 @@ def test_among_equal_sessions_the_soonest_week_reset_wins():
 )
 def test_only_an_account_above_the_handoff_margin_spends_its_week_first(five_left, week_left, spend_by):
     assert session_bands.spend_by(five_left, week_left, NOW) == spend_by
-    assert session_bands.spend_by(50, 50, None) is None
+
+
+def test_only_a_reset_still_ahead_counts_as_upcoming():
+    assert session_bands.upcoming(NOW + 1, NOW) == NOW + 1
+    assert session_bands.upcoming(NOW, NOW) is None
+    assert session_bands.upcoming(None, NOW) is None

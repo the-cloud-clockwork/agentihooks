@@ -470,14 +470,15 @@ def test_equal_sessions_go_to_the_account_whose_week_resets_soonest(monkeypatch,
     five = balancer.QuotaWindow(used=10, resets_at=5000)
     results = [
         balancer.ProbeResult(name, "allowed", "NORMAL", 50, five, balancer.QuotaWindow(used=50, resets_at=reset))
-        for name, reset in (("A", 90000), ("B", 3000), ("C", None))
+        for name, reset in (("A", 90000), ("B", 3000), ("C", None), ("D", 999))
     ]
     monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: (results, "cached"))
-    env = {f"AH_CC_TOKEN_{name}": name.lower() for name in "ABC"}
+    env = {f"AH_CC_TOKEN_{name}": name.lower() for name in "ABCD"}
 
     assert _pick(env, tmp_path).result.account == "B"
     assert _pick(env, tmp_path, {"B": 1}).result.account == "A"
     assert _pick(env, tmp_path, {"A": 1, "B": 1}).result.account == "C"
+    assert _pick(env, tmp_path, {"A": 1, "B": 1, "C": 1}).result.account == "D"
 
 
 def test_every_account_at_its_band_cap_refuses_the_launch(monkeypatch, tmp_path):

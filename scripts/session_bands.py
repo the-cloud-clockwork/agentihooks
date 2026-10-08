@@ -15,7 +15,7 @@ class Seat:
     account: str
     cap: int
     sessions: int
-    week_resets_at: float | None = None
+    spend_before: float | None = None
 
     @property
     def free(self) -> int:
@@ -49,14 +49,17 @@ def cap(five_left: float | None, week_left: float | None) -> int | None:
     return None if week is None else min(week, five_hour_cap(five_left))
 
 
+def upcoming(resets_at: float | None, now: float) -> float | None:
+    return resets_at if resets_at is not None and resets_at > now else None
+
+
 def spend_by(five_left: float | None, week_left: float | None, resets_at: float | None) -> float | None:
     above = week_left is not None and week_left > HANDOFF_WEEK and (five_left is None or five_left > HANDOFF_FIVE)
     return resets_at if above else None
 
 
 def _order(seat: Seat) -> tuple:
-    reset = seat.week_resets_at
-    return (seat.sessions, reset is None, reset or 0, seat.harness, seat.account)
+    return (seat.sessions, seat.spend_before is None, seat.spend_before, seat.harness, seat.account)
 
 
 def pick(seats: Iterable[Seat]) -> Seat | None:
