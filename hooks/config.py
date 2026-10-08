@@ -714,12 +714,53 @@ CI_MANIFESTO_ENABLED = _env_bool("CI_MANIFESTO_ENABLED", "true")
 
 # Manifesto resolution loads every Markdown manifesto in deterministic filename
 # order. CI_MANIFESTO_PATH remains a single-file compatibility override.
+def manifesto_name(name: str) -> str:
+    return Path(name.strip()).stem.casefold()
+
+
 def _manifesto_skip_names() -> set[str]:
     raw = os.getenv("AGENTIHOOKS_SKIP_MANIFESTO", "")
-    return {Path(name.strip()).stem.casefold() for name in raw.split(",") if name.strip()}
+    return {manifesto_name(name) for name in raw.split(",") if name.strip()}
 
 
-def _resolve_manifesto_paths(bundle_root: str | Path | None = None) -> list[str]:
+_FRONT_MATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)^---[ \t]*(?:\r?\n|\Z)", re.S | re.M)
+
+
+def _manifesto_front(text: str) -> tuple[dict, str]:
+    import yaml
+
+    match = _FRONT_MATTER.match(text)
+    if not match:
+        return {}, text
+    try:
+        data = yaml.safe_load(match.group(1))
+    except yaml.YAMLError:
+        return {}, text
+    return (data, text[match.end() :].lstrip("\r\n")) if isinstance(data, dict) else ({}, text)
+
+
+def manifesto_body(path: str | Path) -> str:
+    return _manifesto_front(Path(path).read_text(encoding="utf-8"))[1]
+
+
+def manifesto_roles(path: str | Path) -> list[str] | None:
+    roles = _manifesto_front(Path(path).read_text(encoding="utf-8"))[0].get("roles")
+    if roles is None:
+        return None
+    return [str(role).casefold() for role in (roles if isinstance(roles, list) else [roles])]
+
+
+def _receives(path: Path, role: str | None, choice: dict[str, bool]) -> bool:
+    picked = choice.get(manifesto_name(path.name))
+    if picked is not None:
+        return picked
+    roles = manifesto_roles(path)
+    return role is None or roles is None or role.casefold() in roles
+
+
+def _resolve_manifesto_paths(
+    bundle_root: str | Path | None = None, role: str | None = None, choice: dict[str, bool] | None = None
+) -> list[str]:
     explicit = os.getenv("CI_MANIFESTO_PATH")
     if explicit:
         path = Path(explicit).expanduser()
@@ -738,7 +779,9 @@ def _resolve_manifesto_paths(bundle_root: str | Path | None = None) -> list[str]
         return [
             str(path)
             for path in sorted(directory.glob("*.md"), key=lambda item: item.name.casefold())
-            if path.name.casefold() != "readme.md" and path.stem.casefold() not in skip
+            if path.name.casefold() != "readme.md"
+            and path.stem.casefold() not in skip
+            and _receives(path, role, choice or {})
         ]
     legacy = Path.home() / "dev" / "tcc-ecosystem" / "documents" / "anton" / "ANTON-CORE-CI-MANIFESTO.md"
     return [str(legacy)] if legacy.is_file() and legacy.stem.casefold() not in skip else []

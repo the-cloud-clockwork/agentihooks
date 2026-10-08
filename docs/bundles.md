@@ -130,6 +130,32 @@ in filename order; `README.md` is excluded. Set
 include or omit `.md`. `CI_MANIFESTO_PATH` remains a single-file compatibility
 override, and `MANIFESTOS_DIR` can replace the bundle directory.
 
+A manifesto may open with front matter naming the package roles that receive it:
+
+```markdown
+---
+roles: [engineer, planner, qa, master]
+---
+# Development Manifesto
+```
+
+A rendered profile home receives a manifesto when the chain's package role
+(`package:<role>`) is in its `roles`, or when the manifesto has no `roles` key, so
+manifestos without front matter reach every role. A chain with no package role
+receives every manifesto. The front matter never reaches rendered text. A bundle
+profile overrides the roles by name in `profile.yml`; profiles apply in chain
+order and a later one wins:
+
+```yaml
+manifestos:
+  include: [CI-GUARDRAILS-MANIFESTO]
+  exclude: [DEVELOPMENT-MANIFESTO]
+```
+
+`CI_MANIFESTO_ENABLED: "false"` in a chain profile's settings `env` renders no
+manifestos for that chain. `agentihooks manifestos list [--bundle PATH]` prints
+which package roles receive each manifesto.
+
 ## Profile Resolution Order
 
 When you run `agentihooks init --profile X`:

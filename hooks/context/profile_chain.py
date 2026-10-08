@@ -65,6 +65,13 @@ def parents(path: Path) -> list[str]:
     return data.get("extends", [])
 
 
+def manifestos(path: Path) -> dict:
+    manifest = path / "profile.yml"
+    data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
+    picks = data.get("manifestos") or {}
+    return picks if isinstance(picks, dict) else {}
+
+
 def overlays(path: Path) -> list[str]:
     manifest = path / "profile.yml"
     data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
