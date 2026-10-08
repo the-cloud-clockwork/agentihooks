@@ -215,3 +215,43 @@ def test_links_round_trip_and_an_old_config_reads_as_none(store):
     assert store.config("smoke").links == links
     store.redis.hdel(store.key("smoke", "config"), "links")
     assert store.config("smoke").links == []
+
+
+def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store):
+    from scripts.swarm.store import DEFAULT_LOAD_HIGH, DEFAULT_LOAD_LOW, DEFAULT_MEMORY_PER_AGENT_MB
+
+    store.create(config(scaling="manual", load_high=1.5, load_low=0.5, memory_per_agent_mb=900))
+    read = store.config("smoke")
+    assert (read.scaling, read.load_high, read.load_low, read.memory_per_agent_mb) == ("manual", 1.5, 0.5, 900)
+    store.redis.hdel(store.key("smoke", "config"), "scaling", "load_high", "load_low", "memory_per_agent_mb")
+    read = store.config("smoke")
+    assert (read.scaling, read.load_high, read.load_low, read.memory_per_agent_mb) == (
+        "auto",
+        DEFAULT_LOAD_HIGH,
+        DEFAULT_LOAD_LOW,
+        DEFAULT_MEMORY_PER_AGENT_MB,
+    )
+    assert DEFAULT_LOAD_LOW < DEFAULT_LOAD_HIGH
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"load_low": 2.0, "load_high": 1.0},
+        {"load_low": 5.0},
+        {"scaling": "sometimes"},
+        {"memory_per_agent_mb": 0},
+        {"load_high": 0.0, "load_low": 0.0},
+    ],
+)
+def test_update_refuses_bad_scaling_settings_and_keeps_the_stored_ones(store, changes):
+    store.create(config())
+    before = store.config("smoke")
+    with pytest.raises(SwarmError):
+        store.update("smoke", **changes)
+    assert store.config("smoke") == before
+
+
+def test_create_refuses_a_low_watermark_above_the_high_one(store):
+    with pytest.raises(SwarmError, match="load low"):
+        store.create(config(load_low=2.0, load_high=1.0))
