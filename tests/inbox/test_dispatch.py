@@ -114,6 +114,9 @@ def test_the_owner_expiry_defaults_to_thirty_seconds():
     assert OWNER_TTL_ENV == "AGENTIHOOKS_INBOX_OWNER_TTL_S"
     assert owner_ttl_s({}) == 30
     assert owner_ttl_s({OWNER_TTL_ENV: "5"}) == 5
+    assert owner_ttl_s({OWNER_TTL_ENV: "1"}) == 1
+    assert owner_ttl_s({OWNER_TTL_ENV: "0"}) == 1
+    assert owner_ttl_s({OWNER_TTL_ENV: "-4"}) == 1
 
 
 def test_own_holds_the_recipient_for_the_owner_expiry(store, dispatcher):
@@ -174,6 +177,23 @@ def test_a_killed_bridge_releases_its_recipient_within_the_expiry_window(store, 
     assert successor.owner("bob") == "bridge-2"
 
 
+def test_a_killed_bridge_keeps_its_in_flight_items_for_a_successor(store, dispatcher, clock):
+    first = store.send("alice", "bob", "submitted")
+    second = store.send("alice", "bob", "reserved")
+    submitted, reserved = dispatcher.reserve("bob", "bridge-1")
+    dispatcher.receipts.submitting(submitted.id, "bridge-1")
+    clock(31)
+    after = store.send("alice", "bob", "after")
+    assert [shown.id for shown in claim(store, "bob")] == [after.id]
+    assert store.get(first.id).state == "pending"
+    assert store.get(second.id).state == "pending"
+    successor = Dispatcher(store)
+    successor.own("bob", "bridge-2")
+    recovered = {d.item: (d.state, d.reason) for d in successor.receipts.recover("bob", "bridge-2")}
+    assert recovered == {first.id: ("unknown", ""), second.id: ("rejected", RELEASED)}
+    assert [d.item for d in successor.reserve("bob", "bridge-2")] == [second.id]
+
+
 def test_a_killed_bridge_lets_the_ledger_marks_through_again(store, dispatcher, clock):
     marks = SeenMarks(store.redis)
     event = {"rev": 3, "id": "c1"}
@@ -210,6 +230,15 @@ def test_renew_watches_the_owner(store, dispatcher, watched):
     watched.clear()
     dispatcher.renew("bob", "bridge-1")
     assert set(watched) == {owner_key("bob")}
+
+
+def test_hook_delivery_watches_the_reservation_once_the_owner_expired(store, dispatcher, clock, watched):
+    item = store.send("alice", "bob", "hi")
+    dispatcher.reserve("bob", "bridge-1")
+    clock(31)
+    watched.clear()
+    assert store.deliver(item.id, "bob") is None
+    assert store.key("reservation", item.id) in watched
 
 
 def test_reserve_takes_pending_items_in_inbox_order_with_a_digest(store, dispatcher):

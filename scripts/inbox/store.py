@@ -58,7 +58,7 @@ def owner_key(recipient):
 
 def owner_ttl_s(environ=None):
     env = os.environ if environ is None else environ
-    return int(env.get(OWNER_TTL_ENV) or DEFAULT_OWNER_TTL_S)
+    return max(1, int(env.get(OWNER_TTL_ENV) or DEFAULT_OWNER_TTL_S))
 
 
 def redelivery_ms(environ=None):
@@ -551,7 +551,7 @@ class InboxStore:
                 raise InboxError("done needs an outcome naming where the work went")
             if item.state == state:
                 return item
-            if state == "delivered" and self._owned(pipe, by):
+            if state == "delivered" and (self._owned(pipe, by) or self._reserved(pipe, item_id)):
                 return None
             moved = replace(item, state=state, updated_at=now_ms(), reason=reason)
             last = self.last_pending(pipe, item)
@@ -564,6 +564,11 @@ class InboxStore:
         key = owner_key(NameRegistry(pipe).resolve(by))
         pipe.watch(key)
         return pipe.get(key) is not None
+
+    def _reserved(self, pipe, item_id):
+        key = self.key("reservation", item_id)
+        pipe.watch(key)
+        return pipe.exists(key) == 1
 
     def last_pending(self, pipe, item):
         pending = self.key("pending", item.address)
