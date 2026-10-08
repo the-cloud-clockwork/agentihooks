@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from typing import Callable
 
 from hooks.classifier import ClassifierError, YesNo, decide
+from hooks.classifier.questions import MAX_QUESTIONS
 from scripts.gates import intent_history, log
 from scripts.gates.base import Decision, Who
 from scripts.gates.identity import program_index, simple_commands
@@ -237,6 +238,8 @@ def questions_for(state):
     rows = _rows(state)
     if not rows:
         return {key: question for key, question in QUESTIONS.items() if key not in CHUNK_QUESTIONS}
+    if len(QUESTIONS) + len(rows) > MAX_QUESTIONS:
+        return QUESTIONS
     return {**QUESTIONS, **{f"misses_line_{number}": _missed(number, row) for number, row in rows}}
 
 
@@ -261,7 +264,8 @@ def _chunk_steps(state, answers):
     if not rows:
         return steps
     if answers["underdelivers"].noul >= CHUNK_LINE:
-        missed = [(n, row) for n, row in rows if answers[f"misses_line_{n}"].noul >= CHUNK_LINE] or rows
+        named = [(n, row) for n, row in rows if f"misses_line_{n}" in answers]
+        missed = [(n, row) for n, row in named if answers[f"misses_line_{n}"].noul >= CHUNK_LINE] or rows
         steps.append(
             f"Deliver what plan lines {state['plan_lines']} ask for and the change leaves out: {_quoted(missed)}."
         )

@@ -601,6 +601,21 @@ class TestPlanChunk:
             "the plan chunk for lines 15-17 could not be read",
         )
 
+    def test_a_slice_too_long_for_line_questions_is_still_judged_on_the_whole_chunk(self):
+        from hooks.classifier.questions import MAX_QUESTIONS
+
+        fits = MAX_QUESTIONS - len(intent.QUESTIONS)
+        state = {"plan_lines": f"1-{fits + 1}", "plan_chunk": "".join(f"r{n}\n" for n in range(1, fits + 2))}
+        fitting = "".join(f"r{n}\n" for n in range(1, fits + 1))
+        assert len(intent.questions_for({"plan_lines": f"1-{fits}", "plan_chunk": fitting})) == MAX_QUESTIONS
+        assert list(intent.questions_for(state)) == list(intent.QUESTIONS)
+        verdict, reason = intent.judge(state, decide=chunk_classifier(0.5))
+        quoted = ", ".join(f'line {n} "r{n}"' for n in range(1, fits + 2))
+        assert (verdict, reason.split("; ")[-1]) == (
+            "fail",
+            f"What would meet intent: Deliver what plan lines 1-{fits + 1} ask for and the change leaves out: {quoted}.",
+        )
+
     def test_the_chunk_questions_are_asked_only_with_a_chunk(self):
         assert list(intent.QUESTIONS) == [*BASE_QUESTIONS, "underdelivers", "overdelivers"]
         assert list(intent.questions_for({})) == BASE_QUESTIONS
