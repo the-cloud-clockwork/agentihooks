@@ -773,6 +773,36 @@ def cmd_status(store, args):
         )
 
 
+def autoscale_lines(config, decision):
+    caps = decision["ceilings"]
+    pending = decision["pending_raise"]
+    lines = [f"scaling {config.scaling}, ceilings eng {caps['eng']}, ci {caps['ci']}, plan {caps['plan']}"]
+    if config.scaling != "auto":
+        lines.append(
+            f"manual scaling keeps the configured caps eng {config.max_eng}, ci {config.max_ci}, plan {config.max_plan}"
+        )
+    if pending["target"] is not None:
+        lines.append(f"pending raise to {pending['target']}, held {pending['ticks']} of 3 ticks")
+    lines.append(f"host room {decision['host']['room']}: {decision['host']['reason']}")
+    lines.append(decision["reason"])
+    return lines
+
+
+def cmd_autoscale(store, args):
+    from scripts.swarm import capacity
+
+    config = store.config(args.slug) if args.slug in store.slugs() else SwarmConfig(args.slug, "")
+    if args.fixture:
+        inputs = capacity.fixture_inputs(json.loads(Path(args.fixture).read_text()))
+    else:
+        inputs = capacity.live_inputs(args.slug, store, LedgerClient(), dict(os.environ), now_ms())
+    _, decision = capacity.autoscaled(replace(config, scaling="auto"), inputs)
+    if args.json:
+        print(json.dumps({"scaling": config.scaling, **decision}, indent=2))
+        return
+    print("\n".join(autoscale_lines(config, decision)))
+
+
 def cmd_names(store, args):
     config = store.ensure_code(args.slug)
     rows = store.names.names(args.slug)
@@ -1315,6 +1345,9 @@ def build_parser():
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
+    scale = sub.add_parser("autoscale")
+    scale.add_argument("--fixture", default="")
+    scale.add_argument("--json", action="store_true")
     sub.add_parser("controller").add_argument("action", nargs="?", choices=("release",), default=None)
     sub.add_parser("names").add_argument("--json", action="store_true")
     verdict = sub.add_parser("verdict")
