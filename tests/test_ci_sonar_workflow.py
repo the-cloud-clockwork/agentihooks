@@ -100,6 +100,7 @@ def test_queued_merges_are_analysed_as_their_pull_request(tmp_path, head_ref, ar
     step = _queued_step()
     scan = next(s for s in steps if s.get("name") == "SonarQube Scan")
     assert step["if"] == "github.event_name == 'merge_group'"
+    assert _workflow()["jobs"]["sonar"]["permissions"]["pull-requests"] == "read"
     assert steps.index(step) < steps.index(scan)
     assert scan["with"]["args"] == "${{ steps.queued.outputs.args }}"
     bin_dir = tmp_path / "bin"

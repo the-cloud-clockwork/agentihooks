@@ -7,11 +7,14 @@ push protection, linear history and pull requests without bypass actors.
 Dev requires the exact `Gate — Required` check from the Tests workflow and
 allows squash merges with zero required approvals. Instead of requiring each
 branch to be up to date, dev merges through a merge queue: the Tests workflow
-runs on `merge_group`, so the gate grades the merged tree before it lands.
+runs on `merge_group`, so unit, lint, Sonar and the swarm image smoke grade
+the merged tree before it lands. Mutation stays on the pull request head.
+Once the queue is active, `gh pr merge --squash` adds the pull request to the
+queue; it lands when the queue run passes the gate.
 Main keeps its existing branch match and rules; only its bypass list changes.
 
-The operator applies the payloads after the CI duration artifact and tag version
-change has merged and passed its live proofs. Agents cannot mutate remote
+The operator applies the payloads after the merge queue change to the Tests
+workflow has merged into dev. Agents cannot mutate remote
 rulesets. From a checkout containing the reviewed payloads:
 
 ```bash
