@@ -1,6 +1,8 @@
 """The ledger page link handed to the operator, from the ledger server's configured host and port."""
 
+import json
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -15,9 +17,7 @@ def base() -> str:
 
 
 def shared_directory(environ=os.environ) -> bool:
-    shared = Path.home() / "development-ledger"
-    selected = Path(environ.get("LEDGER_DIR", shared)).expanduser()
-    return selected.resolve() == shared.resolve()
+    return folder(environ).resolve() == (Path.home() / "development-ledger").resolve()
 
 
 def address(environ=os.environ) -> tuple[str, int]:
@@ -58,16 +58,30 @@ def page_url(slug):
     return f"{base()}/{slug}"
 
 
-def answering():
+def folder(environ=os.environ) -> Path:
+    return Path(environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
+
+
+def serving(timeout: float = 1) -> str | None:
     try:
-        with urllib.request.urlopen(f"{base()}/healthz", timeout=1):
-            return True
-    except (OSError, ValueError):
-        return False
+        with urllib.request.urlopen(f"{base()}/healthz", timeout=timeout) as resp:
+            body = json.loads(resp.read())
+    except (urllib.error.HTTPError, ValueError):
+        return ""
+    except OSError:
+        return None
+    served = body.get("dir") if isinstance(body, dict) else None
+    return served if isinstance(served, str) else ""
 
 
 def page_line(slug):
     line = f"Ledger page: {page_url(slug)} (open it to follow and steer the work)"
-    if answering():
-        return line
-    return f"{line}. The ledger server is not answering: start it with {START}"
+    served = serving()
+    if served is None:
+        return f"{line}. The ledger server is not answering: start it with {START}"
+    if not served or Path(served).resolve() != folder().resolve():
+        return (
+            f"No ledger page link: {base()} serves {served or 'no ledger folder'}, not {folder()}. "
+            f"Set a spare LEDGER_PORT and start the ledger server with {START}"
+        )
+    return line

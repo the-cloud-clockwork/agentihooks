@@ -164,7 +164,7 @@ jobs:
   sonar:
     needs: [unit]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     env:
       SONAR_SCANNER_VERSION: 7.2.0.5079
     permissions:
@@ -214,6 +214,37 @@ jobs:
             ~/.sonar/cache
             ${{ runner.tool_cache }}/sonar-scanner-cli
           key: sonar-${{ runner.os }}-${{ runner.arch }}-${{ env.SONAR_SCANNER_VERSION }}-${{ steps.proxy.outputs.version }}-${{ hashFiles('.github/workflows/test.yml') }}
+
+      # Sonar refuses an analysis dated before the project's latest one, so dev push scans run one at a time in push order.
+      - name: Wait for older dev analyses
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          for poll in {1..36}; do
+            waiting=""
+            unread=""
+            if runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?event=push&branch=dev&per_page=100" \
+              | jq -r --argjson number "$RUN_NUMBER" '.workflow_runs[] | select(.run_number < $number and .status != "completed") | .id'); then
+              for run in $runs; do
+                sonar=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" \
+                  | jq -r '[.jobs[] | select(.name == "sonar") | .status][0] // "absent"') || unread=yes
+                if [[ "$sonar" != "completed" ]]; then waiting="$waiting $run"; fi
+              done
+            else
+              unread=yes
+            fi
+            if [[ -z "$waiting" && -z "$unread" ]]; then exit 0; fi
+            echo "Waiting for the Sonar analysis of older dev runs:$waiting${unread:+ (runs API unreadable)}"
+            sleep 30
+          done
+          if [[ -n "$unread" ]]; then
+            echo "::error::The runs API stayed unreadable for 18 minutes."
+            exit 1
+          fi
+          echo "::warning::Older dev runs still hold Sonar after 18 minutes:$waiting; scanning anyway."
 
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@v6
@@ -345,7 +376,7 @@ jobs:
         run: |
           source_run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tests-passed-$TREE" \
             --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)][0].workflow_run.id // empty')
-          python -m tests.refresh_durations --ci-run "${source_run:-$GITHUB_RUN_ID}"
+          python -m tests.refresh_durations --ci-run "${source_run:-$GITHUB_RUN_ID}" --ci 5
           test -s .test_durations
 
       - name: Publish merged durations
