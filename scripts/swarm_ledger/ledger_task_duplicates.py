@@ -86,11 +86,3 @@ def _refuse(reason):
         return False
 
     return refuse
-
-
-def _refuse(refusal):
-    def refuse(doc, op, ctx):
-        ctx.refused.append(refusal)
-        return False
-
-    return refuse
