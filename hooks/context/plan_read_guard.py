@@ -26,14 +26,18 @@ def check(payload: dict, environ: Mapping[str, str] | None = None) -> str | None
     tool_name, tool_input = payload.get("tool_name"), payload.get("tool_input")
     if tool_name not in FIELDS or not isinstance(tool_input, dict):
         return None
+    try:
+        return _decide(env, slug, tool_name, tool_input)
+    except Exception:
+        return refusal(None)
+
+
+def _decide(env: Mapping[str, str], slug: str, tool_name: str, tool_input: dict) -> str | None:
     text = _text(tool_name, tool_input)
     folder = _names_folder(text, _ledger_dir(env))
     if not PLAN_ID.search(text) and not folder:
         return None
-    try:
-        plans, window = _plans(env, slug)
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        return refusal(None)
+    plans, window = _plans(env, slug)
     named = set(PLAN_ID.findall(text))
     if not (named & plans or (plans and folder)):
         return None
@@ -56,7 +60,7 @@ def refusal(window: tuple[str, int, int] | None) -> str:
 
 def _read(tool_input: dict, window) -> bool:
     limit, offset = tool_input.get("limit"), tool_input.get("offset") or 1
-    if not isinstance(limit, int) or limit < 1 or not isinstance(offset, int):
+    if type(limit) is not int or limit < 1 or type(offset) is not int:
         return False
     if PurePath(tool_input.get("file_path") or "").name != window[0]:
         return False

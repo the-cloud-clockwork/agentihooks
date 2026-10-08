@@ -164,6 +164,16 @@ def test_non_numeric_offset_refused(ledger):
     assert check(read(stored(ledger), offset=[40], limit=5), env(ledger))
 
 
+def test_boolean_offset_or_limit_refused(ledger):
+    assert check(read(stored(ledger), offset=True, limit=5), env(ledger))
+    assert check(read(stored(ledger), offset=45, limit=True), env(ledger))
+
+
+def test_errors_while_deciding_refuse(ledger):
+    assert check(bash(f"cat ~nosuchuser/x {PLAN}"), env(ledger))
+    assert check(read(["x", PLAN], offset=45, limit=5), env(ledger))
+
+
 @pytest.mark.parametrize(
     "command",
     [
