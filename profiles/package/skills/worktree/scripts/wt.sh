@@ -209,13 +209,13 @@ case "${cmd}" in
           || die "cannot read pull requests for '${BR}' — worktree kept"
         [[ -z "${PR_STATE}" || "${PR_STATE}" == MERGED ]] \
           || die "pull request ${PR_STATE} is not merged — wait for it to land before worktree teardown"
-        if [[ "${PR_STATE}" == MERGED ]]; then
-          REMOTE_BRANCH="$(git -C "${REPO}" ls-remote --heads origin "refs/heads/${BR}")" \
-            || die "cannot read remote branch '${BR}' — worktree kept"
-          if [[ -n "${REMOTE_BRANCH}" ]]; then
-            git -C "${REPO}" push origin --delete "${BR}" \
-              || die "cannot delete remote branch '${BR}' — worktree kept"
-          fi
+        REMOTE_BRANCH="$(git -C "${REPO}" ls-remote --heads origin "refs/heads/${BR}")" \
+          || die "cannot read remote branch '${BR}' — worktree kept"
+        if [[ -n "${REMOTE_BRANCH}" ]]; then
+          [[ "${PR_STATE}" == MERGED ]] \
+            || die "published branch '${BR}' has no confirmed merged pull request — worktree kept"
+          git -C "${REPO}" push origin --delete "${BR}" \
+            || die "cannot delete remote branch '${BR}' — worktree kept"
         fi
       else
         PUBLISHED=0

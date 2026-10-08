@@ -198,6 +198,7 @@ class Done(WtBase):
         gh.write_text(
             f"#!{BASH}\nset -euo pipefail\n"
             f'current="$(<"{state}")"\n'
+            'if [[ "$current" == missing ]]; then exit 0; fi\n'
             'if [[ "$current" == merged ]]; then\n'
             '  echo "MERGED"\n'
             "else\n"
@@ -205,11 +206,11 @@ class Done(WtBase):
             "fi\n"
         )
         gh.chmod(0o755)
-        for value in ("queued", "open", "closed"):
+        for value in ("queued", "open", "closed", "missing"):
             state.write_text(value)
             result = self.run_wt("done", "remote-queue", "--repo", str(self.primary), "--force")
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("not merged", result.stderr)
+            self.assertIn("merged", result.stderr)
             self.assertTrue(dest.is_dir())
             self.assertTrue(self.branch_exists("remote-queue"))
             self.assertEqual(
