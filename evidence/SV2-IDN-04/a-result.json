@@ -1,5 +1,5 @@
 {
-  "tested_commit": "424d8fefdc84c398b97e94e924ba50f27eabbcf2",
+  "tested_commit": "071987af0a2c088af1bfdaa40b30a3097fe6d383",
   "evidence_class": "local isolated fixture on an in-memory Redis with a fake clock; not live rollout proof",
   "then": "a correctly launched worker registers only its own execution and authorized corpus",
   "runs": [
