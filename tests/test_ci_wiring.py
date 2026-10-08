@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -63,6 +63,19 @@ def test_main_grades_expiry_against_the_current_utc_date(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "1 workflows, 5 jobs, 1 wiring problems" in out
     assert "::error::test.yml/old expired on 2000-01-01." in out
+
+
+def test_main_reads_today_in_utc(tmp_path, monkeypatch, capsys):
+    class Clock:
+        @staticmethod
+        def now(tz):
+            assert tz is UTC
+            return datetime(2026, 10, 9, 0, 30, tzinfo=UTC)
+
+    monkeypatch.setattr(ci_wiring, "datetime", Clock)
+    _write(tmp_path, {"test.yml": _gate_workflow(x={})}, {"not_gates": {"test.yml/x": _entry(expires="2026-10-08")}})
+    assert ci_wiring.main(["--root", str(tmp_path)]) == 1
+    assert "::error::test.yml/x expired on 2026-10-08." in capsys.readouterr().out
 
 
 def test_help_names_what_the_check_enforces(capsys):
