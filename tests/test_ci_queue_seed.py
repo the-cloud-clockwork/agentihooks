@@ -120,7 +120,8 @@ def test_the_queue_baseline_holds_the_exact_base_tree_on_the_app_token():
     assert [steps.index(s) for s in (mint, find, download, hold, upload)] == sorted(
         steps.index(s) for s in (mint, find, download, hold, upload)
     )
-    assert job["timeout-minutes"] > 10
+    assert 'wait="${WAIT_SECONDS:-600}"' in find["run"]
+    assert job["timeout-minutes"] * 60 > 600
 
 
 @pytest.mark.parametrize(("measured", "fails"), [("abc", False), ("old", True)])
