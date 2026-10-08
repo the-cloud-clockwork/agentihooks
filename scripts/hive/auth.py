@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 INVITE_TTL_S = 900
 # Outside the ROOT keyspace, so a member's ACL user cannot mint invites or read the credential index.
 PREFIX = f"{ROOT}-hive"
+# ACL cannot confine a user to one database, so a hive's Redis serves that hive alone.
 ACL_RULES = (f"~{ROOT}:*", f"&{ROOT}:*", "+@all", "-@admin", "-@dangerous")
 ENV_FILE = "hive.env"
 
