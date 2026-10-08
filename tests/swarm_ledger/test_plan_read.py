@@ -114,3 +114,64 @@ def test_installer_delegates_plan_deps_and_quota():
     assert delegated_cli(["plan", "read"]) is plan_read.main
     assert delegated_cli(["deps", "check"]) is scripts.deps_preflight.main
     assert delegated_cli(["quota"]) is scripts.agents_quota.main
+
+
+def test_installer_help_lists_the_plan_command(monkeypatch, capsys):
+    import re
+    import sys
+
+    from scripts import install
+
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr(sys, "argv", ["agentihooks", "--help"])
+    with pytest.raises(SystemExit):
+        install.main()
+    help_text = capsys.readouterr().out
+    assert re.search(r"^ +plan +Read only your task's plan chunk: read \[--task ID\] \[--phase ID\]$", help_text, re.M)
+
+
+def test_help_names_the_command_and_its_options(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "200")
+    with pytest.raises(SystemExit):
+        plan_read.main(["--help"], {})
+    top = capsys.readouterr().out
+    assert top.startswith("usage: agentihooks plan [-h] {read} ...\n")
+    assert "agentihooks plan read: the task's plan chunk with ten lines of margin on each side." in top
+    assert "print the task's plan chunk with ten lines of margin on each side" in top
+    with pytest.raises(SystemExit):
+        plan_read.main(["read", "--help"], {})
+    reader = capsys.readouterr().out
+    for text in (
+        "task id; defaults to AGENTIHOOKS_SWARM_TASK",
+        "print this phase's whole plan range instead",
+        "ledger slug; defaults to AGENTIHOOKS_SWARM",
+    ):
+        assert text in reader
+
+
+def test_a_subcommand_is_required(capsys):
+    with pytest.raises(SystemExit) as caught:
+        plan_read.main([], {})
+    assert caught.value.code == 2
+    assert capsys.readouterr().err.endswith("error: the following arguments are required: command\n")
+
+
+def test_read_refuses_a_ledger_without_tasks_or_phases():
+    with pytest.raises(ValueError) as task:
+        plan_read.read({}, "bare", "mid", None)
+    assert str(task.value) == "no task mid in ledger bare"
+    with pytest.raises(ValueError) as phase:
+        plan_read.read({}, "bare", None, "p1")
+    assert str(phase.value) == "no phase p1 in ledger bare"
+
+
+def test_ledger_modules_load_with_the_ledger_folder_first_on_the_path(monkeypatch):
+    import sys
+
+    from scripts.swarm_ledger import HERE
+
+    monkeypatch.setattr(sys, "path", [entry for entry in sys.path if entry != str(HERE)])
+    assert plan_read._ledger("plan_ranges").__name__ == "scripts.swarm_ledger.plan_ranges"
+    assert sys.path[0] == str(HERE)
+    plan_read._ledger("plan_ranges")
+    assert sys.path.count(str(HERE)) == 1

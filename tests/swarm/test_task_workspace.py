@@ -71,9 +71,7 @@ SLICED = {"id": "t1", "title": "Build it", "plan_url": "https://example.com/plan
 
 
 def test_steering_names_the_plan_read_command_in_place_of_the_plan_link():
-    lines = ledger_workspace.steering(SLICED).splitlines()
-    assert plan_read.pointer(SLICED) in lines
-    assert "Plan: https://example.com/plan" not in lines
+    assert ledger_workspace.steering(SLICED) == f"# t1: Build it\n\n{plan_read.pointer(SLICED)}\n"
 
 
 def test_steering_keeps_the_plan_link_for_a_task_without_plan_lines():

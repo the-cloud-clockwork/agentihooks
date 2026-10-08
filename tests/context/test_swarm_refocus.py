@@ -110,7 +110,8 @@ def test_the_block_names_the_plan_read_command_for_a_sliced_task_within_the_cap(
 
 
 def test_the_block_of_a_task_without_plan_lines_says_nothing_about_plan_read():
-    assert plan_read.COMMAND not in refocus.build_block(LEDGER, "i1", 1500)
+    lines = refocus.build_block(LEDGER, "i1", 1500).splitlines()
+    assert lines[-2:] == ["Your task i1: Refocus agents", "Inject a refocus block."]
 
 
 def test_the_block_stays_under_the_cap_with_a_long_description():

@@ -232,10 +232,10 @@
   "PLR0912": 20
  },
  "scripts/install.py::main": {
-  "C901": 71,
-  "PLR0912": 74,
-  "PLR0915": 339,
-  "function-lines": 701
+  "C901": 69,
+  "PLR0912": 72,
+  "PLR0915": 334,
+  "function-lines": 694
  },
  "scripts/install.py::uninstall_global": {
   "C901": 35,

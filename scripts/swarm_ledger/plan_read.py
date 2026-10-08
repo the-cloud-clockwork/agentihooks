@@ -41,7 +41,7 @@ def pointer(task: dict) -> str:
 
 
 def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str:
-    lines = None
+    lines = ""
     if not phase_id:
         task = next((t for t in doc.get("tasks", []) if t.get("id") == task_id), None)
         if task is None:
@@ -67,14 +67,14 @@ def main(argv=None, environ=None) -> int:
     reader.add_argument("--phase", help="print this phase's whole plan range instead")
     reader.add_argument("--slug", help="ledger slug; defaults to AGENTIHOOKS_SWARM")
     args = parser.parse_args(argv)
-    slug = args.slug or env.get("AGENTIHOOKS_SWARM", "")
+    slug = args.slug or env.get("AGENTIHOOKS_SWARM")
     if not slug:
         raise SystemExit("plan read needs a swarm: pass --slug or run it inside a swarm session")
     task_id = None if args.phase else args.task or env.get("AGENTIHOOKS_SWARM_TASK", "")
     if task_id == "":
         raise SystemExit("plan read needs a task: pass --task or run it inside a swarm task session")
     try:
-        doc = json.loads(_ledger("ledger_core").paths(slug)[1].read_text(encoding="utf-8"))
+        doc = json.loads(_ledger("ledger_core").paths(slug)[1].read_bytes())
     except (OSError, ValueError):
         raise SystemExit(f"no ledger {slug}") from None
     try:
