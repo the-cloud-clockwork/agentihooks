@@ -52,7 +52,7 @@ def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_th
     named = store.names.next(SLUG, "eng")
     store.put_agent(SLUG, AgentRecord(name=named, lane="eng", task="t6"))
     addresses = [seat, named, f"{SLUG}-eng-2", f"{SLUG}-eng-5", "engineer-100001-0001-tmp-1", "operator", doctor]
-    items = [{"address": address} for address in addresses]
+    items = [{"address": address, "history": []} for address in addresses]
     assert read.inbox_receivers(store, box, SLUG, items) == {
         seat: Receiver(live=True, quiet_ms=2 * 60_000),
         named: Receiver(live=True),
@@ -61,6 +61,23 @@ def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_th
         "engineer-100001-0001-tmp-1": Receiver(scoped=False),
         "operator": Receiver(),
         doctor: Receiver(),
+    }
+
+
+def test_inbox_receivers_name_the_agent_that_took_delivery_apart_from_the_seat_occupant(redis):
+    from scripts.doctor.inbox import Receiver
+    from scripts.swarm.store import AgentRecord
+
+    store, box = RedisStore(redis), InboxStore(redis)
+    seat = f"eng-1@{SLUG}"
+    store.seats.occupy(seat, f"{SLUG}-eng-2", 10)
+    store.put_agent(SLUG, AgentRecord(name=f"{SLUG}-eng-2", lane="eng", task="t2"))
+    store.put_agent(SLUG, AgentRecord(name=f"{SLUG}-eng-1", lane="eng", task="t1", state="finished"))
+    took = [{"state": "pending", "by": "swarm"}, {"state": "delivered", "by": f"{SLUG}-eng-1"}]
+    items = [{"address": seat, "history": took}, {"address": seat, "history": took[:1]}]
+    assert read.inbox_receivers(store, box, SLUG, items) == {
+        seat: Receiver(live=True),
+        f"{SLUG}-eng-1": Receiver(),
     }
 
 

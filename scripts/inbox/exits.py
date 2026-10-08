@@ -91,18 +91,28 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
 
 
 def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
-    """Push stop notices an earlier exit moved to a seat: closed once the agent that got them has gone."""
+    """Push stop and wait ended notices left on a seat: closed once the agent that got them has gone."""
     from scripts.gates import push_stop
     from scripts.inbox.store import CLOSED
+    from scripts.swarm.waits import notice_task
 
     for seat in sorted(seats):
         for item in inbox.inbox(seat):
-            if item.state in CLOSED or not push_stop.is_notice(item):
+            if item.state in CLOSED:
+                continue
+            task = notice_task(item)
+            if not (task or push_stop.is_notice(item)):
                 continue
             owner = _owner(inbox, item, seat)
-            if owner not in active:
-                reason = push_stop.left(owner, "left its seat") if owner else UNKNOWN_OWNER
-                inbox.close(item.id, BY, "done", reason)
+            if owner in active:
+                continue
+            if not owner:
+                reason = UNKNOWN_OWNER
+            elif task:
+                reason = f"{owner} left its seat before picking task {task} back up"
+            else:
+                reason = push_stop.left(owner, "left its seat")
+            inbox.close(item.id, BY, "done", reason)
 
 
 def _owner(inbox, item, seat):

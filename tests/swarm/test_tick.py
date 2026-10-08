@@ -440,6 +440,8 @@ def test_a_task_closed_done_during_a_tick_stays_done_and_is_not_claimed_again(st
 
 def test_an_open_task_closed_done_during_a_tick_spawns_no_agent(store):
     ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "eng"}]), FakeRuntime()
+    for row in ledger.rows.values():
+        row["difficulty"] = "M"
     ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("done", "")
@@ -507,7 +509,7 @@ def test_a_stalled_agents_open_items_follow_the_live_reopen_result(store, closed
 
 
 def test_a_task_closed_done_during_a_tick_is_not_blocked_by_the_claim_cap(store):
-    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}]), FakeRuntime()
+    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng", "difficulty": "M"}]), FakeRuntime()
     for _ in range(3):
         store.count_claim("sw", "t1")
     ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
@@ -659,6 +661,38 @@ def test_a_finished_agent_frees_its_slot_on_the_same_tick(store):
     actions = tick("sw", store, ledger, runtime, now_ms=2_000)
     assert actions.index("retired engineer@a1b2c3-0001") < actions.index("spawned engineer@a1b2c3-0002 for t2")
     assert [a.name for a in workers(store)] == ["engineer@a1b2c3-0002"]
+
+
+def test_every_tick_sends_the_ledger_its_time_left_inputs(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    sent = []
+    ledger.time_left = lambda slug, slots, ci_minutes: sent.append((slug, slots, ci_minutes))
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert sent == [("sw", None, None), ("sw", None, None)]
+
+
+def test_the_tick_sends_quota_slots_and_counts_ledger_events_against_its_clock(store):
+    ledger, runtime = FakeLedger([{"id": "t0", "state": "done", "done": True}, {"id": "t1"}]), FakeRuntime()
+    ledger.log = [
+        {"kind": "task claimed", "target": "tasks/t0", "at": 1_000, "by": "eng", "rev": 1},
+        {"kind": "task pr", "target": "tasks/t0", "at": 61_000, "by": "eng", "rev": 2},
+    ]
+    ledger.comment = lambda slug, item, text, by: None
+    lanes = ("eng", "ci", "plan")
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: {
+        "configured": {"eng": 2, "ci": 1, "plan": 1},
+        "effective": dict.fromkeys(lanes, 0),
+        "placeable": {"claude": 3, "codex": 0},
+        "reason": "accounts have quota",
+        "accounts": [],
+        "allocation": {lane: {"claude": 0, "codex": 0} for lane in lanes},
+        "placements": {lane: [] for lane in lanes},
+    }
+    sent = []
+    ledger.time_left = lambda slug, slots, ci_minutes: sent.append((slug, slots, ci_minutes))
+    tick("sw", store, ledger, runtime, now_ms=120_000)
+    assert sent == [("sw", 3, None)]
 
 
 def test_a_finished_agent_whose_retire_fails_holds_no_lane_slot(store):

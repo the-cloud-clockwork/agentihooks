@@ -17,6 +17,7 @@ CHECKED_MINUTES = 12 * 60
 TASK_ENDS = ("done", "blocked")
 SENDER = "swarm"
 PULL_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
+NOTICE_RE = re.compile(r"Your wait on .+ has ended\. Pick task (\S+) back up:")
 
 
 def on(kind, target):
@@ -129,6 +130,12 @@ def end_pass(store, slug, rows, inbox, github, now_ms):
 
 def _pick_up(task):
     return f" Pick task {task} back up:"
+
+
+def notice_task(item):
+    """The task a wait ended notice asks its receiver to pick back up, '' for any other item."""
+    found = NOTICE_RE.match(item.text) if item.sender == SENDER else None
+    return found.group(1) if found else ""
 
 
 def settle_notices(inbox, agent, action):

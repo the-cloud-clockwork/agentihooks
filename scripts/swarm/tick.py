@@ -25,6 +25,7 @@ from scripts.swarm import (
     ci_speed,
     claim_order,
     control_notifications,
+    difficulty,
     launch_check,
     lifetime,
     live_binding,
@@ -35,6 +36,7 @@ from scripts.swarm import (
     retire_watch,
     session_model,
     tick_master,
+    time_left,
     timing,
 )
 from scripts.swarm import idle as idle_state
@@ -122,7 +124,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     config = store.ensure_code(slug)
     actions = []
     if config.state != "stopped" or _woken(slug, config, store, ledger):
-        actions = _step(_recover_master, slug, config, store, runtime, now_ms)
+        actions = skip_refused(_recover_master, slug, config, store, runtime, now_ms)
     doc = timing.call(ledger.state, slug)
     rows = {t["id"]: t for t in doc["tasks"]}
     timing.call(
@@ -132,12 +134,12 @@ def tick(slug, store, ledger, runtime, now_ms):
         store,
         lambda: {t["id"]: t for t in timing.call(ledger.state, slug)["tasks"]},
     )
-    actions += _step(master_start.observe, slug, config, store, ledger, runtime, now_ms)
-    actions += _step(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
-    actions += _step(_verify, slug, store, ledger, runtime, rows, now_ms)
-    actions += _step(_reap, slug, store, ledger, runtime, rows, now_ms)
-    actions += _step(_strays, slug, config, store, runtime)
-    actions += _step(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
+    actions += skip_refused(master_start.observe, slug, config, store, ledger, runtime, now_ms)
+    actions += skip_refused(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
+    actions += skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
+    actions += skip_refused(_reap, slug, store, ledger, runtime, rows, now_ms)
+    actions += skip_refused(_strays, slug, config, store, runtime)
+    actions += skip_refused(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
     if config.state == "stopped":
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
         if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
@@ -152,15 +154,17 @@ def tick(slug, store, ledger, runtime, now_ms):
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
-    actions += _step(_orphans, slug, store, ledger, rows)
+    actions += skip_refused(_orphans, slug, store, ledger, rows)
+    actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
     from scripts.swarm import capacity
 
-    actions += _step(capacity.apply, slug, config, store, ledger, runtime, now_ms)
-    actions += _step(ci_speed.refresh, slug, config, store, now_ms)
+    actions += skip_refused(capacity.apply, slug, config, store, ledger, runtime, now_ms)
+    actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
+    actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, doc, now_ms)
     if not sleeping:
-        actions += _step(_codex_hook_order)
-        actions += _step(_master_down, slug, config, store, ledger, runtime, now_ms)
-        actions += _step(
+        actions += skip_refused(_codex_hook_order)
+        actions += skip_refused(_master_down, slug, config, store, ledger, runtime, now_ms)
+        actions += skip_refused(
             tick_master.run,
             slug,
             config,
@@ -171,19 +175,19 @@ def tick(slug, store, ledger, runtime, now_ms):
             lambda: _master(slug, config, store, runtime, now_ms),
         )
         if config.state == "running":
-            actions += _step(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+            actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
     timing.call(_conversations, slug, store, runtime)
     timing.call(_session_models, slug, store)
     starting = {a.name for a in store.agents(slug) if a.lane == MASTER and a.state == "starting"}
     timing.call(transfers.observe, store, slug, runtime.live_names() - starting)
     return (
         actions
-        + _step(_settle, slug, config, store, ledger, rows, doc)
+        + skip_refused(_settle, slug, config, store, ledger, rows, doc)
         + timing.call(_close_space, slug, config, store, runtime)
     )
 
 
-def _step(function, *args):
+def skip_refused(function, *args):
     try:
         return timing.call(function, *args)
     except LedgerRefused as exc:

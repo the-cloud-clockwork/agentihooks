@@ -449,6 +449,35 @@ def test_a_wait_ended_notice_for_another_task_stays_open(tick):
     assert tick.inbox.get(notice.id).state == "pending"
 
 
+def test_a_handoff_closes_its_wait_ended_notice_before_the_seat_passes_on(started, tmp_path):
+    from tests.swarm.test_cli import _handoff_doc
+    from tests.swarm.test_delivery import FakeHerdr
+    from tests.swarm.test_tick import FakeRuntime
+
+    store, ledger = started
+    inbox = InboxStore(store.redis)
+    [agent] = [a for a in store.agents("sw") if a.name == ME]
+    assert run("sw", "--as", ME, "wait", "--on", "task", "t2") == 0
+    ledger.rows["t2"].update(state="done")
+    cli.run_tick(store, "sw", ledger, FakeRuntime(), FakeHerdr({}))
+    [notice] = [item for item in inbox.inbox(agent.seat) if item.text.startswith("Your wait on")]
+    assert waits.notice_task(notice) == "t1"
+    inbox.deliver(notice.id, ME)
+    assert run("sw", "--as", ME, "handoff", str(_handoff_doc(tmp_path))) == 0
+    closed = inbox.get(notice.id)
+    assert (closed.state, closed.reason) == ("done", f"done: {ME} recorded a handoff on task t1")
+
+
+def test_notice_task_names_the_task_only_a_swarm_wait_ended_notice_asks_back():
+    from scripts.inbox.store import Item
+
+    text = f"Your wait on checks on {URL}, now red has ended. Pick task t13 back up: agentihooks swarm sw done"
+    notice = Item(id="n", sender="swarm", address="eng-1@sw", text=text, state="delivered", created_at=1, updated_at=1)
+    assert waits.notice_task(notice) == "t13"
+    assert waits.notice_task(Item(**{**notice.__dict__, "sender": "master@sw"})) == ""
+    assert waits.notice_task(Item(**{**notice.__dict__, "text": "Pick task t13 back up: then"})) == ""
+
+
 def test_checks_declaration_records_the_remote_head(started, monkeypatch, capsys):
     from types import SimpleNamespace
 
