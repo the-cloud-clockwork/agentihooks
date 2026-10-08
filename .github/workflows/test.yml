@@ -164,7 +164,7 @@ jobs:
   sonar:
     needs: [unit]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     permissions:
       contents: read
       actions: read
@@ -199,6 +199,27 @@ jobs:
             sleep 1
           done
           exit 1
+
+      # Sonar refuses an analysis dated before the project's latest one, so dev push scans run one at a time in push order.
+      - name: Wait for older dev analyses
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          while :; do
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?event=push&branch=dev&per_page=100" \
+              | jq -r --argjson number "$RUN_NUMBER" '.workflow_runs[] | select(.run_number < $number and .status != "completed") | .id')
+            waiting=""
+            for run in $runs; do
+              sonar=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" \
+                | jq -r '[.jobs[] | select(.name == "sonar") | .status][0] // "absent"')
+              if [[ "$sonar" != "completed" ]]; then waiting="$waiting $run"; fi
+            done
+            if [[ -z "$waiting" ]]; then exit 0; fi
+            echo "Waiting for the Sonar analysis of older dev runs:$waiting"
+            sleep 15
+          done
 
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@v6
