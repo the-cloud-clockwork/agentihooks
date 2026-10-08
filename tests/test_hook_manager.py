@@ -153,6 +153,39 @@ def test_brain_writer_skips_dispatch(event, enabled, transcript_path, last_messa
     assert not any(c.args[0] is write_markers for c in brain_dispatch.call_args_list)
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_brain_reader_session_start_dispatch(enabled, brain_dispatch, monkeypatch, tmp_path):
+    from unittest.mock import Mock
+
+    from hooks import config
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    monkeypatch.setattr(config, "BRAIN_ENABLED", enabled)
+    for flag in (
+        "PROJECT_BRIDGE_ENABLED",
+        "MCP_SESSION_ID_BANNER_ENABLED",
+        "MCP_HYGIENE_ENABLED",
+        "EFFORT_POLICY_ENABLED",
+        "AGENTIHOOKS_FORCE_DEV_BRANCH",
+        "CI_MANIFESTO_ENABLED",
+        "BROADCAST_ENABLED",
+    ):
+        monkeypatch.setattr(config, flag, False)
+    monkeypatch.setattr("hooks.lifecycle.guard.session_event", Mock())
+    monkeypatch.setattr("hooks.lifecycle.deps_kick.kick", Mock())
+    monkeypatch.setattr("hooks.context.injection_trace.record_session_start", Mock())
+    monkeypatch.setattr("hooks.context.enforcement.get_session_start_enforcements", Mock(return_value=""))
+    monkeypatch.setattr("hooks.context.voice_output.cleanup_stale_flags", Mock(return_value=0))
+    inject = Mock()
+    monkeypatch.setattr("hooks.context.brain_adapter.inject_on_session_start", inject)
+    EVENT_HANDLERS["SessionStart"]({"session_id": "session", "cwd": str(tmp_path)})
+
+    if enabled:
+        inject.assert_called_once_with("session", str(tmp_path))
+    else:
+        inject.assert_not_called()
+
+
 class TestBlockActionIntegration:
     """Integration tests: BlockAction propagates through main() with exit 2."""
 
