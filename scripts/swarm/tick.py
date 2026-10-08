@@ -47,7 +47,7 @@ from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig
-from scripts.swarm_ledger import ledger_workspace
+from scripts.swarm_ledger import ledger_rank, ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
@@ -564,7 +564,7 @@ def _claimable(slug, store, rows, doc, lane):
 
 
 def _launch_order(slug, store, tasks):
-    return sorted(tasks, key=lambda task: bool(store.launch_failure(slug, task["id"])))
+    return sorted(tasks, key=lambda task: (ledger_rank.order(task), bool(store.launch_failure(slug, task["id"]))))
 
 
 def _unblocked(task, rows):
@@ -620,6 +620,13 @@ def _held_for_master(slug, store, now_ms):
     waiting = store.redis.hgetall(MASTER_WAITING)
     others = sorted(s for s, at in waiting.items() if s != slug and now_ms - int(at) < MASTER_WAIT_MS)
     return [f"holding spawns: swarm {s} waits on a session slot for its master" for s in others[:1]]
+
+
+def _record_spawn_failure(slug, store, record, error):
+    transfers.failed(store, slug, record)
+    if not isinstance(error, SpawnError) or error.status != "unavailable":
+        store.note_launch_failure(slug, record.task, str(error))
+    store.record_launch(slug, record, "failed", str(error))
 
 
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
@@ -679,9 +686,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             task["transfer"] = transfers.attach(store, slug, record)
             placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
         except Exception as exc:
-            transfers.failed(store, slug, record)
-            store.note_launch_failure(slug, task["id"], str(exc))
-            store.record_launch(slug, record, "failed", str(exc))
+            _record_spawn_failure(slug, store, record, exc)
             actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
             if isinstance(exc, ProfileUnresolved):
                 actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
