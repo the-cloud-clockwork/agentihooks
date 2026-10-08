@@ -5,6 +5,7 @@ task's pull request on GitHub and pass every new health finding on for a verdict
 of the same ledger sends nothing; the wake ladder then carries every item to a reader.
 """
 
+import functools
 import json
 import re
 import subprocess
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from scripts.inbox.seats import seat_address
+from scripts.inbox.store import CLOSED, InboxError
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER
@@ -31,6 +33,7 @@ FINAL_RED = RED - {"TIMED_OUT"}
 PASSED = {"SUCCESS", "SKIPPED"}
 PENDING = {None, "", "PENDING", "EXPECTED"}
 GATE = "Gate — Required"
+RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no push for twenty minutes\.")
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
@@ -171,19 +174,76 @@ class Mail:
             return [f"told {address}: {key}"]
         return []
 
+    def send_red(self, key, address, text, url):
+        if self.once(key, lambda: self.track_red(self.inbox.send(SENDER, address, text), url)):
+            return [f"told {address}: {key}"]
+        return []
+
+    def red_index(self):
+        return self.store.key(self.slug, "red-notices")
+
+    def track_red(self, item, url):
+        self.store.redis.hset(self.red_index(), item.id, url)
+
     def engineer(self, task):
         return self.seats.get(task.get("claimed_by", ""), self.master)
 
 
 def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
-    mail = Mail(inbox, store, slug)
+    mail, github = Mail(inbox, store, slug), functools.cache(github)
     events = doc.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
     return (
         _events(mail, new_events(store, slug, doc, "events-cursor"), tasks)
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github)
+        + _settle_red_notices(mail, github)
     )
+
+
+def _settle_red_notices(mail, github):
+    mail.once("red-notices:backfill", lambda: _backfill_red_notices(mail))
+    index, settled = mail.red_index(), []
+    for item_id, url in mail.store.redis.hgetall(index).items():
+        if not _open(mail.inbox, item_id):
+            mail.store.redis.hdel(index, item_id)
+            continue
+        how = _settled(github(url))
+        if not how:
+            continue
+        try:
+            mail.inbox.close(item_id, SENDER, "done", f"pull request {url} {how}")
+        except InboxError:
+            continue
+        settled.append(f"closed the red notice {item_id}: {url} {how}")
+        mail.store.redis.hdel(index, item_id)
+    return settled
+
+
+def _open(inbox, item_id):
+    try:
+        return inbox.get(item_id).state not in CLOSED
+    except InboxError:
+        return False
+
+
+def _backfill_red_notices(mail):
+    prefix = mail.inbox.key("address", "")
+    for key in mail.inbox.redis.scan_iter(match=f"{prefix}*@{mail.slug}"):
+        for item in mail.inbox.inbox(key[len(prefix) :]):
+            found = RED_NOTICE.match(item.text)
+            if item.sender == SENDER and item.state not in CLOSED and found:
+                mail.track_red(item, found.group(1))
+
+
+def _settled(found):
+    if found is None:
+        return ""
+    if found.state == "MERGED":
+        return "merged"
+    if found.state == "CLOSED":
+        return "closed"
+    return "turned green" if found.resolved and not found.red else ""
 
 
 def findings_pass(inbox, store, slug, shown):
@@ -305,5 +365,5 @@ def _pull_requests(mail, tasks, now_ms, github):
             text = (
                 f"Your pull request {url} for {title} has red checks and no push for twenty minutes. Fix them and push."
             )
-            sent += mail.send(f"{url}:red:{found.head}", mail.engineer(task), text)
+            sent += mail.send_red(f"{url}:red:{found.head}", mail.engineer(task), text, url)
     return sent
