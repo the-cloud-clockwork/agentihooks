@@ -180,7 +180,9 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms())
         actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), ledger_events.view)
         mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
-        actions += skip_refused(intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge).run, doc)
+        actions += skip_refused(
+            intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge, head=intent.pr_head).run, doc
+        )
         actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
         rows = {t["id"]: t for t in doc["tasks"]}
         actions += skip_refused(waits.end_pass, store, slug, rows, inbox, ledger_events.view, now_ms())

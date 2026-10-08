@@ -352,3 +352,60 @@ def test_environment_and_catalog_accept_intent_coach():
     with pytest.raises(SwarmError) as caught:
         gate_mode("intent-gate", "bad")
     assert str(caught.value) == "intent-gate takes deny, log only, skip, coach"
+
+
+def test_an_unmoved_head_is_read_once_and_skips_the_full_view(tmp_path):
+    run_check(tmp_path, "original")
+    heads, views = [], []
+    check = intent.Check(
+        SLUG,
+        "coach",
+        NOW + 1,
+        Ledger(),
+        Mail(),
+        lambda url: views.append(url) or {**PR, "head": "original"},
+        lambda state: ("pass", "ok"),
+        home=tmp_path,
+        head=lambda url: heads.append(url) or "original",
+    )
+    assert check.run(DOC) == []
+    assert (heads, views) == ([DOC["tasks"][0]["pr_url"]], [])
+    record = Verdicts(SLUG, "intent", tmp_path).read(TASK)
+    assert (record["verdict"], record["reason"], record["head"]) == ("fail", "missing behavior", "original")
+
+
+def test_a_moved_or_unreadable_head_still_takes_the_full_view(tmp_path):
+    run_check(tmp_path, "original")
+    for current in ("fixed", None):
+        views = []
+        check = intent.Check(
+            SLUG,
+            "coach",
+            NOW + 1,
+            Ledger(),
+            Mail(),
+            lambda url: views.append(url) or {**PR, "head": "fixed"},
+            lambda state: ("pass", "ok"),
+            home=tmp_path,
+            head=lambda url: current,
+        )
+        check.run(DOC)
+        assert views == [DOC["tasks"][0]["pr_url"]]
+    assert Verdicts(SLUG, "intent", tmp_path).read(TASK)["verdict"] == "pass"
+
+
+def test_a_first_check_never_reads_the_head_alone(tmp_path):
+    heads = []
+    intent.Check(
+        SLUG,
+        "coach",
+        NOW,
+        Ledger(),
+        Mail(),
+        lambda url: {**PR, "head": "first"},
+        lambda state: ("pass", "ok"),
+        home=tmp_path,
+        head=lambda url: heads.append(url) or "first",
+    ).run(DOC)
+    assert heads == []
+    assert Verdicts(SLUG, "intent", tmp_path).read(TASK)["verdict"] == "pass"
