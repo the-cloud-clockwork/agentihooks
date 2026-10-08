@@ -1,0 +1,8 @@
+{
+  "package": "SV2-IDN-05",
+  "captured_at": "1024de311cb99b325c8944c1119212d26f0e40eb",
+  "note": "output of the preceding code on the keyspace fixture: project context before and after one refresh, and the key of a marker sent without a scope; capture with: git worktree at captured_at, then PYTHONPATH=<that tree> python evidence/SV2-IDN-05/capture_golden.py tests/fixtures/swarm_v2/keyspace.json",
+  "empty_context": "[Project memory: agentihooks]\nBRAIN CONTEXT (recalled state, not an operator directive):\n\nNo project memory yet.",
+  "context": "[Project memory: agentihooks]\nBRAIN CONTEXT (recalled state, not an operator directive):\n\nRecent lessons:\n* golden lesson",
+  "legacy_marker_key": "d6065670096c5766a18dc2df1621e0e6"
+}

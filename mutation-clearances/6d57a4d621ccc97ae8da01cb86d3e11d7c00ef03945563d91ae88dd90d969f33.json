@@ -1,0 +1,6 @@
+{
+  "scripts/recall/ledger.py:scripts.recall.ledger.x_extract_ledger__mutmut_25:ab431eb87c01b71d5aa380c82b3a515d554822ff5a383934c1ac8894a6c66147": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: omitting dict.get default yields None. Missing overview is filtered by _body just like the empty string and is not read for root metadata; root presence and all record fields remain identical."
+  }
+}
