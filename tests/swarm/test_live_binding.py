@@ -869,6 +869,64 @@ def test_unbound_absent_process_has_no_live_report(monkeypatch):
     assert HerdrRuntime().bindings([AgentRecord("engineer", "eng", "one")]) == {}
 
 
+@pytest.mark.parametrize(
+    "status, session_id, expected",
+    [
+        ("alive", "current", {"pid": 22, "rebound": 22}),
+        ("unregistered", "current", {"process": False}),
+        ("alive", "other", {"process": False}),
+    ],
+)
+def test_a_session_resumed_under_a_new_process_rebinds_by_name_and_conversation(
+    monkeypatch, status, session_id, expected
+):
+    from types import SimpleNamespace
+
+    from scripts import terminate_agent
+    from scripts.swarm.runtime import HerdrRuntime
+
+    resumed = SimpleNamespace(
+        name="engineer",
+        target="claude",
+        status=status,
+        session_id=session_id,
+        process=SimpleNamespace(pid=22, start_time=3),
+    )
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [resumed])
+    monkeypatch.setattr(live_binding, "read", lambda agent, pid: {"pid": pid})
+    agent = AgentRecord(
+        "engineer",
+        "eng",
+        "one",
+        harness="claude",
+        conversation_id="current",
+        profile_decision={"validation": {"pid": 99}},
+    )
+    assert HerdrRuntime().bindings([agent]) == {"engineer": expected}
+
+
+def test_tick_keeps_a_resumed_agent_and_records_its_new_process_and_pane(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    old = replace(old, conversation_id="conv", profile_decision={"validation": {"pid": 99}})
+    store.put_agent("sw", old)
+    runtime.conversation_ids = {"w1:p9": "conv"}
+    runtime.bindings = lambda agents: {
+        a.name: {**live_binding.assignment(a), "hooks": True, **({"rebound": 1234} if a.name == old.name else {})}
+        for a in agents
+    }
+    actions = tick("sw", store, ledger, runtime, 200)
+    now = next(a for a in store.agents("sw") if a.name == old.name)
+    assert now.profile_decision["validation"]["pid"] == 1234
+    assert now.pane_id == "w1:p9"
+    assert not runtime.killed
+    assert ledger.rows["one"]["claimed_by"] == old.name
+    assert f"rebound {old.name} to its resumed process 1234 in pane w1:p9" in actions
+
+
 @pytest.mark.parametrize("proof_harness, proof_status", [("claude", "unregistered"), ("codex", "alive")])
 def test_legacy_reader_prefers_registered_assigned_harness(monkeypatch, proof_harness, proof_status):
     from types import SimpleNamespace

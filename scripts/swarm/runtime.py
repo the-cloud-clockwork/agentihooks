@@ -552,10 +552,13 @@ class HerdrRuntime:
         self._binding_pids = {}
         for agent in agents:
             session = live_binding.bound_session(agent, items)
+            validated = agent.profile_decision.get("validation", {}).get("pid")
             if session is not None:
                 facts[agent.name] = live_binding.read(agent, session.process.pid)
                 self._binding_pids[agent.name] = str(session.process.pid)
-            elif agent.profile_decision.get("validation", {}).get("pid"):
+                if validated and validated != session.process.pid and facts[agent.name].get("process") is not False:
+                    facts[agent.name]["rebound"] = session.process.pid
+            elif validated:
                 facts[agent.name] = {"process": False}
                 self._binding_pids[agent.name] = None
         return facts

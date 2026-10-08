@@ -52,7 +52,7 @@ def process_started_at(pid: int) -> float:
 def due(payload: dict, environ: dict, home: Path, pid: int) -> bool:
     if payload.get("agent_id") or payload.get("stop_hook_active"):
         return False
-    if environ.get(LAUNCH_ENV) != "1":
+    if environ.get(LAUNCH_ENV) != "1" or environ.get("AGENTIHOOKS_SWARM"):
         return False
     return latest_affecting_change(home) > process_started_at(pid)
 

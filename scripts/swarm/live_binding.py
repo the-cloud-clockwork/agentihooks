@@ -144,12 +144,12 @@ def fill(agent: AgentRecord, facts: dict) -> AgentRecord:
 def bound_session(agent: AgentRecord, sessions: list[Session]) -> Session | None:
     named = {s.process.pid: s for s in sessions if s.name == agent.name}
     validated = agent.profile_decision.get("validation", {}).get("pid")
+    conversation = [s for s in named.values() if agent.conversation_id and s.session_id == agent.conversation_id]
     if validated:
-        return named.get(validated)
-    if agent.conversation_id:
-        conversation = [s for s in named.values() if s.session_id == agent.conversation_id]
-        if conversation:
-            return conversation[0]
+        resumed = [s for s in conversation if s.status == "alive"]
+        return named.get(validated) or (resumed[0] if resumed else None)
+    if conversation:
+        return conversation[0]
     registered = [s for s in named.values() if s.status != "unregistered" and s.target == agent.harness]
     return min(registered or named.values(), key=lambda s: s.process.start_time, default=None)
 
