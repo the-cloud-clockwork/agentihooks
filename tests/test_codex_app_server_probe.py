@@ -873,7 +873,8 @@ def test_client_waits_a_minute_by_default(monkeypatch):
     monkeypatch.setattr(probe.Client, "send", lambda self, method, params: seen.append((method, params)) or 4)
     monkeypatch.setattr(probe.Client, "wait_response", lambda self, rid, timeout: (rid, timeout))
     assert client.request("m", {"p": 1}) == (4, None)
-    assert seen == [("m", {"p": 1})]
+    assert client.request("m", {"p": 2}, 7) == (4, 7)
+    assert seen == [("m", {"p": 1}), ("m", {"p": 2})]
 
 
 class Clock:
