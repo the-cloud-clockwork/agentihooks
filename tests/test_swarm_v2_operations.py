@@ -1,6 +1,5 @@
 from dataclasses import replace
 
-import fakeredis
 import pytest
 
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
@@ -12,7 +11,7 @@ from scripts.swarm_v2.runtime.operations import (
     Phase,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 
 class LostAcknowledgement:
@@ -47,6 +46,8 @@ class LostAcknowledgement:
 
 @pytest.fixture
 def fixture():
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("fixture", "agentihooks", 1, 0))
     agent = store.start_execution(
@@ -263,6 +264,8 @@ def test_invalid_generation_is_rejected_before_journal_write(fixture, generation
 
 
 def test_snapshot_preserves_unresolved_journal_for_observation(fixture):
+    import fakeredis
+
     store, agent, transport, operations = fixture
     first = operations.execute("fixture", request(agent))
     state = store.export("fixture")

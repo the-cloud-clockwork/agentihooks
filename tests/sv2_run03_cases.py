@@ -1,7 +1,5 @@
 from dataclasses import replace
 
-import fakeredis
-
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2.runtime.operations import OperationConflict, Operations, Phase
 from tests.test_swarm_v2_operations import fixture, request
@@ -66,6 +64,8 @@ def case_b():
 
 
 def case_c():
+    import fakeredis
+
     runs = []
     for _ in range(2):
         store, agent, transport, operations = fixture.__wrapped__()

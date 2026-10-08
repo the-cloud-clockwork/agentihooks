@@ -10,7 +10,6 @@ from scripts.swarm import effort_range
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
-from scripts.swarm_v2.runtime.operations import OperationJournal
 
 PREFIX = f"{ROOT}:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
@@ -79,6 +78,8 @@ class AgentRecord:
 
 class RedisStore:
     def __init__(self, redis):
+        from scripts.swarm_v2.runtime.operations import OperationJournal
+
         if redis is None:
             raise SwarmError("no Redis client; the swarm refuses to run without it")
         self.redis = redis

@@ -5,8 +5,6 @@ from enum import StrEnum
 from typing import Any, Iterable, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
-from redis.exceptions import WatchError
-
 WRITE_ATTEMPTS = 5
 ACTIONS = frozenset(("spawn", "command", "drain", "terminate", "recover"))
 
@@ -148,6 +146,8 @@ class OperationJournal:
         return occupant
 
     def _write(self, slug: str, change: Any) -> Operation:
+        from redis.exceptions import WatchError
+
         key = self.store.key(slug, "runtime-operations")
         for _ in range(WRITE_ATTEMPTS):
             with self.store.redis.pipeline() as pipe:
