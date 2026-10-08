@@ -301,3 +301,17 @@ def test_missing_swarm_repository_keeps_observed_git_identity(monkeypatch, tmp_p
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path / "state")
     env = {"AGENTIHOOKS_SWARM": "fixture", "AGENTIHOOKS_PROJECT_ID": "local:registered"}
     assert project_identity.resolve_project(str(first), env).project_id == "github.com/first/common"
+
+
+def test_nested_git_directory_shares_the_configured_checkout(repositories):
+    first, _, _, nested, _ = repositories
+    working = project_identity.resolve_project(str(nested), {})
+    assert project_identity._same_checkout(working, str(first))
+
+
+def test_absent_swarm_binding_does_not_read_swarm_configuration(monkeypatch, tmp_path):
+    def refused(*args, **kwargs):
+        raise AssertionError("Unbound resolver read swarm configuration")
+
+    monkeypatch.setattr(Path, "read_text", refused)
+    assert project_identity.resolve_project(str(tmp_path), {}) is None
