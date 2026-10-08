@@ -61,7 +61,9 @@ def test_record_apis_match_the_base_and_detect_a_planted_digest_fault(name, modu
     path = tmp_path / "record.json"
     assert _replay(module, name, path) == expected
     source = Path(records.__file__).read_text().replace("sort_keys=True", "sort_keys=False")
-    digest = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == "digest")
+    digest = next(
+        node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == "digest"
+    )
     digest.decorator_list = []
     faulty_helpers = records.__dict__.copy()
     exec(compile(ast.Module(body=[digest], type_ignores=[]), "faulty_digest", "exec"), faulty_helpers)
