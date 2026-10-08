@@ -634,6 +634,13 @@ def spendable_rate(result: ProbeResult, include_fable: bool = False, now: float 
     return quota_pace.rate(result.five_hour, _weeks(result, include_fable), time.time() if now is None else now)
 
 
+def account_state(result: ProbeResult, include_fable: bool = False, now: float | None = None) -> str:
+    if result.state == "ERROR":
+        return result.state
+    timestamp = time.time() if now is None else now
+    return window_state(result.provider_status, result.five_hour, _weeks(result, include_fable), timestamp)
+
+
 def is_routable(result: ProbeResult, include_fable: bool = False, now: float | None = None) -> bool:
     return result.provider_status != "rejected" and quota_pace.routable(
         result.five_hour, _weeks(result, include_fable), time.time() if now is None else now
@@ -799,11 +806,7 @@ def render_table(
         headers.append("AGE")
     rows = []
     for rank, result in enumerate(rank_results(results, include_fable, timestamp), 1):
-        state = (
-            result.state
-            if result.state == "ERROR"
-            else window_state(result.provider_status, result.five_hour, _weeks(result, include_fable), timestamp)
-        )
+        state = account_state(result, include_fable, timestamp)
         rate = spendable_rate(result, include_fable, timestamp)
         row = [
             str(rank),

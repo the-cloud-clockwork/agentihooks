@@ -83,3 +83,11 @@ def test_a_nearly_empty_week_is_routable_only_while_it_can_be_spent_at_full_pace
 def test_the_five_hour_routing_minimum_is_inclusive():
     assert quota_pace.routable(QuotaWindow(used=95), [FRESH], NOW)
     assert not quota_pace.routable(QuotaWindow(used=95.1), [FRESH], NOW)
+
+
+def test_a_nearly_empty_week_too_slow_to_spend_before_reset_drains_and_does_not_route():
+    slow = window(4, 20)
+    assert quota_pace.state(FIVE, [slow], NOW) == "DRAIN"
+    assert not quota_pace.routable(FIVE, [slow], NOW)
+    assert quota_pace.state(FIVE, [window(19, 168)], NOW) == "DRAIN"
+    assert quota_pace.routable(FIVE, [window(19, 168)], NOW)

@@ -207,3 +207,17 @@ def test_a_codex_week_without_a_five_hour_reading_is_guarded_by_the_week():
     weekly = CodexQuota(observed_at=0, plan_type="team", seven_day=QuotaWindow(used=16))
     assert router.spendable_rate(weekly, 0) == pytest.approx(84 / 168)
     assert router.spendable_rate(None, 0) is None
+
+
+def test_codex_windows_read_passed_resets_as_empty_and_a_stale_weekly_only_reading_as_unknown():
+    from scripts.codex_quota import FIVE_HOUR_MINUTES
+
+    stale_at = 100 + FIVE_HOUR_MINUTES * 60
+    weekly = CodexQuota(100, "team", seven_day=QuotaWindow(used=96, resets_at=100 + 2 * 3600))
+    assert router.windows(weekly, stale_at - 1) == (QuotaWindow(used=0), weekly.seven_day)
+    assert router._admits(weekly, stale_at - 1)
+    assert router.windows(weekly, stale_at)[0] == QuotaWindow()
+    assert router._admits(weekly, stale_at)
+    passed = CodexQuota(100, "team", QuotaWindow(used=99, resets_at=200), QuotaWindow(used=99, resets_at=300))
+    assert router.windows(passed, 300) == (QuotaWindow(used=0), QuotaWindow(used=0))
+    assert router.windows(passed, 199) == (passed.five_hour, passed.seven_day)

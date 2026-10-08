@@ -584,3 +584,20 @@ def test_the_table_shows_each_accounts_pace_state_and_spend_rate():
     assert rows["tccgma"][2] == "REDUCE"
     error = balancer._error_result("broken", "probe failed")
     assert "ERROR" in balancer.render_table([error], now=NOW)
+
+
+def test_routing_reads_the_wall_clock_when_no_time_is_given(monkeypatch):
+    monkeypatch.setattr(balancer.time, "time", lambda: NOW)
+    resetting = TODAY[1]
+    assert balancer.is_routable(resetting)
+    assert balancer.spendable_rate(resetting) == pytest.approx(4 / 4.9, rel=1e-3)
+    assert balancer.account_state(resetting) == "NORMAL"
+    assert [r.account for r in balancer.rank_results(TODAY)][0] == "ncsmgma"
+    assert "0.82%" in balancer.render_table(TODAY)
+
+
+def test_an_unread_account_shows_no_spend_rate_and_keeps_its_error_state():
+    error = balancer._error_result("broken", "probe failed")
+    row = balancer.render_table([error], now=NOW).splitlines()[2].split()
+    assert row[:6] == ["1", "broken", "ERROR", "?", "?", "?"]
+    assert balancer.account_state(error, now=NOW) == "ERROR"

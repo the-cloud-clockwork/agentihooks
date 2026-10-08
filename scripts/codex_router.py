@@ -102,17 +102,29 @@ def quotas(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, Co
     return {account.name: codex_quota.latest_codex_quota(dict(environ), keep(account)) for account in pool}
 
 
-def _windows(quota: CodexQuota) -> tuple[QuotaWindow, list[QuotaWindow]]:
-    five = quota.five_hour if quota.five_hour.used is not None else quota.seven_day
-    return five, [quota.seven_day]
+def windows(quota: CodexQuota, now: float) -> tuple[QuotaWindow, QuotaWindow]:
+    """(five hour, week) with each reset passed read as empty; a fresh weekly only reading has no five hour limit."""
+    five, week = (
+        QuotaWindow(used=0, resets_at=None) if window.resets_at and window.resets_at <= now else window
+        for window in (quota.five_hour, quota.seven_day)
+    )
+    if five.used is None and now - quota.observed_at < codex_quota.FIVE_HOUR_MINUTES * 60:
+        five = QuotaWindow(used=0)
+    return five, week
 
 
 def spendable_rate(quota: CodexQuota | None, now: float) -> float | None:
-    return None if quota is None else quota_pace.rate(*_windows(quota), now)
+    if quota is None:
+        return None
+    five, week = windows(quota, now)
+    return quota_pace.rate(five, [week], now)
 
 
 def _admits(quota: CodexQuota | None, now: float) -> bool:
-    return spendable_rate(quota, now) is None or quota_pace.routable(*_windows(quota), now)
+    if spendable_rate(quota, now) is None:
+        return True
+    five, week = windows(quota, now)
+    return quota_pace.routable(five, [week], now)
 
 
 def _rank(pool: list[CodexAccount], quotas: Mapping[str, CodexQuota | None], now: float) -> list[CodexAccount]:

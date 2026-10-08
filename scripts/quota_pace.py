@@ -36,15 +36,20 @@ def rate(five: Window, weeks: Sequence[Window], now: float) -> float | None:
     return min(_week_rate(week, now) for week in weeks)
 
 
+def _weeks_open(weeks: Sequence[Window], now: float) -> bool:
+    return all(week.remaining >= MIN_LEFT or _week_rate(week, now) >= FULL_PACE for week in weeks)
+
+
 def state(five: Window, weeks: Sequence[Window], now: float) -> str:
     spendable = rate(five, weeks, now)
     if spendable is None:
         return "UNKNOWN"
+    if not _weeks_open(weeks, now):
+        return "DRAIN"
     five_state = next((name for used, name in FIVE_HOUR_STATES if five.used >= used), "NORMAL")
     week_state = next((name for pace, name in PACE_STATES if spendable >= pace * FULL_PACE), "DRAIN")
     return max(five_state, week_state, key=SEVERITY.index)
 
 
 def routable(five: Window, weeks: Sequence[Window], now: float) -> bool:
-    spendable = rate(five, weeks, now)
-    return bool(spendable) and all(week.remaining >= MIN_LEFT or _week_rate(week, now) >= FULL_PACE for week in weeks)
+    return bool(rate(five, weeks, now)) and _weeks_open(weeks, now)

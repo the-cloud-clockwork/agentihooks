@@ -430,7 +430,7 @@ def test_a_fresh_codex_reading_with_only_the_week_is_judged_on_the_week(monkeypa
     stale_at = 100 + FIVE_HOUR_MINUTES * 60
     unread = capacity.Account("codex", "b", "UNKNOWN", 0, None, None)
     fresh = capacity.accounts({}, stale_at - 1)
-    assert fresh == [capacity.Account("codex", "a", "REDUCE", 0, 26, 26), unread]
+    assert fresh == [capacity.Account("codex", "a", "REDUCE", 0, 100, 26), unread]
     assert capacity.free_seats(fresh[0], 4, 5) == 2
     assert capacity.free_seats(fresh[0], 4, 27) == 0
     stale = capacity.accounts({}, stale_at)
@@ -1006,23 +1006,29 @@ def test_todays_accounts_get_seats_by_spendable_rate(monkeypatch):
         return now, balancer.ProbeResult(name, "allowed_warning", "DRAIN", week_left, five, week)
 
     today = [
+        observed("nchotma", 5, 8, 34.9),
         observed("ncsmgma", 0, 4, 4.9),
-        observed("tccgma", 20, 19, 96),
-        observed("nctcc", 0, 10, 96),
-        observed("ncgma", 0, 100, 168),
+        observed("nctcc", 0, 12, 71.9),
+        observed("tccgma", 20, 19, 89.9),
+        observed("ncgma", 25, 93, 159.9),
+        observed("fresh", 0, 100, 168),
+        observed("spent", 0, 10, 96),
     ]
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: today)
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"ncgma": 1})
     monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
     rows = {row.name: row for row in capacity.accounts({}, now)}
     assert {name: row.state for name, row in rows.items()} == {
+        "nchotma": "REDUCE",
         "ncsmgma": "NORMAL",
+        "nctcc": "REDUCE",
         "tccgma": "REDUCE",
-        "nctcc": "DRAIN",
         "ncgma": "NORMAL",
+        "fresh": "NORMAL",
+        "spent": "DRAIN",
     }
     seats = {name: capacity.free_seats(row, 4, 5) for name, row in rows.items()}
-    assert seats == {"ncsmgma": 4, "tccgma": 2, "nctcc": 0, "ncgma": 3}
+    assert seats == {"nchotma": 2, "ncsmgma": 4, "nctcc": 2, "tccgma": 2, "ncgma": 3, "fresh": 4, "spent": 0}
 
 
 def test_drain_soon_is_guarded_by_the_five_hour_window_only():
