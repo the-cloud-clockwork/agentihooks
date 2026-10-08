@@ -38,6 +38,7 @@ def test_source_run_ignores_artifacts_published_after_this_run_was_created():
     gh, calls = _gh(listing, "2026-10-08T10:00:00Z")
     assert dev_durations.source_run("42", gh) == "9"
     assert calls[0][1] == "repos/{owner}/{repo}/actions/runs/42"
+    assert calls[1][:2] == ["api", "--paginate"]
 
 
 def test_source_run_is_empty_without_an_earlier_dev_artifact():
@@ -49,6 +50,11 @@ def test_adopt_fills_the_tests_the_version_file_lacks_from_the_merged_file(tmp_p
     (tmp_path / ".test_durations").write_text(json.dumps({"t.py::a": 2.0, "t.py::b": 4.0}))
     (tmp_path / ".test_durations-3.12").write_text(json.dumps({"t.py::a": 3.0}))
     assert dev_durations.adopt(tmp_path, "3.12") == {"t.py::a": 3.0, "t.py::b": 4.0}
+
+
+def test_adopt_takes_the_merged_file_of_an_artifact_without_a_version_file(tmp_path):
+    (tmp_path / ".test_durations").write_text(json.dumps({"t.py::a": 2.0}))
+    assert dev_durations.adopt(tmp_path, "3.12") == {"t.py::a": 2.0}
 
 
 @pytest.mark.parametrize("bad", [{}, {"t.py::a": -1.0}, {"t.py::a": float("inf")}, {"t.py::a": "1"}, []])

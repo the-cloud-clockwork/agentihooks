@@ -18,10 +18,11 @@ def source_run(run_id: str, gh=_gh) -> str:
     # Every shard and re-run of one run must split on the same file, so a failure fails the shard, never falls back.
     created = gh(["api", f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}", "--jq", ".created_at"]).strip()
     jq = (
-        '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == "dev")'
-        f' | select(.created_at < "{created}")] | sort_by(.created_at) | last | .workflow_run.id // empty'
+        '.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == "dev")'
+        f' | select(.created_at < "{created}") | "\\(.created_at) \\(.workflow_run.id)"'
     )
-    return gh(["api", ARTIFACTS, "--jq", jq]).strip()
+    earlier = gh(["api", "--paginate", ARTIFACTS, "--jq", jq]).split("\n")
+    return max((line.split() for line in earlier if line), default=["", ""])[1]
 
 
 def download(run: str, folder: Path) -> None:
@@ -40,7 +41,8 @@ def _durations(path: Path) -> dict[str, float]:
 
 
 def adopt(folder: Path, version: str) -> dict[str, float]:
-    return {**_durations(folder / ".test_durations"), **_durations(folder / f".test_durations-{version}")}
+    measured = folder / f".test_durations-{version}"
+    return {**_durations(folder / ".test_durations"), **(_durations(measured) if measured.exists() else {})}
 
 
 def main(argv: list[str] | None = None) -> None:
