@@ -1,11 +1,13 @@
-"""Routing settings: one validated store over a Redis hash, or a JSON file in the agentihooks home without Redis."""
-
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from scripts.swarm import keyspace
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 
 def _weight(value: object) -> bool:
@@ -65,7 +67,7 @@ class SettingsStore(ABC):
 
 
 class RedisSettings(SettingsStore):
-    def __init__(self, client) -> None:
+    def __init__(self, client: "Redis") -> None:
         self.client = client
         self.key = f"{keyspace.ROOT}:routing:settings"
         self.history_key = f"{self.key}:history"
@@ -103,7 +105,7 @@ class FileSettings(SettingsStore):
 
     def _write(self, key: str, value: object, entry: dict) -> None:
         data = self._load()
-        data["settings"].pop(key, None)
+        data["settings"] = {name: kept for name, kept in data["settings"].items() if name != key}
         if value is not None:
             data["settings"][key] = value
         data["history"].append(entry)
@@ -111,7 +113,7 @@ class FileSettings(SettingsStore):
         self.path.write_text(json.dumps(data))
 
 
-def open_store(client, environ: Mapping[str, str]) -> SettingsStore:
+def open_store(client: "Redis | None", environ: Mapping[str, str]) -> SettingsStore:
     if client is not None:
         return RedisSettings(client)
     home = environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks"

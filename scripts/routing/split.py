@@ -13,8 +13,6 @@ def choose_side(
         return "pool"
     if not pool:
         return "api" if api_room else None
-    if weight == 0:
-        return "pool"
     if api_live / (api_live + pool_live + 1) < weight / 100 and api_room:
         return "api"
     return "pool"
