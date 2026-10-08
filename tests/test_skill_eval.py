@@ -145,7 +145,7 @@ def test_evaluation_refuses_unknown_agent(launch, capsys):
     with pytest.raises(SystemExit) as error:
         skill_eval.main(["--agent", "unknown", "--", "python3", "evaluate.py"])
     assert error.value.code == 2
-    assert "invalid choice: 'unknown' (choose from 'claude', 'codex')" in capsys.readouterr().err
+    assert "argument --agent: invalid choice: 'unknown'" in capsys.readouterr().err
     loader.assert_not_called()
     selector.assert_not_called()
     execute.assert_not_called()
