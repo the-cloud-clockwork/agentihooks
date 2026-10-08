@@ -8,6 +8,7 @@ from scripts import agent_choice
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
 from scripts.swarm import effort_range
+from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.naming import NameRegistry
 
 PREFIX = "agentihooks:swarm"
@@ -72,6 +73,10 @@ class AgentRecord:
     choice: str = ""
     launched_at: int = 0
     overlays: list = field(default_factory=list)
+    execution_id: str = ""
+    generation: int = 0
+    runtime_backend: str = "local"
+    runtime_target: dict = field(default_factory=dict)
 
 
 class RedisStore:
@@ -83,6 +88,7 @@ class RedisStore:
         self.memory = SeatMemory(redis)
         self.culture = SwarmCulture(redis)
         self.names = NameRegistry(redis)
+        self.execution_registry = ExecutionRegistry(self)
 
     def key(self, slug, *parts):
         return ":".join((PREFIX, slug, *parts))
@@ -229,7 +235,31 @@ class RedisStore:
         self.ensure_code(slug)
         return self.names.next(slug, lane, at)
 
+    def start_execution(self, slug: str, agent: AgentRecord, previous_execution_id: str = "") -> AgentRecord:
+        return self.execution_registry.start(slug, agent, previous_execution_id)
+
+    def execution(self, slug: str, execution_id: str) -> AgentRecord:
+        return self.execution_registry.get(slug, execution_id)
+
+    def executions(self, slug: str, seat: str) -> list[AgentRecord]:
+        return [agent for agent in self.execution_registry.records(slug) if agent.seat == seat]
+
+    def execution_occupants(self, slug: str) -> dict[str, AgentRecord]:
+        return self.execution_registry.occupants(slug)
+
+    def execution_identity_conflicts_total(self, slug: str) -> int:
+        return int(self.redis.get(self.key(slug, "identity-conflicts")) or 0)
+
     def put_agent(self, slug, agent):
+        if (
+            agent.execution_id
+            or agent.generation
+            or agent.runtime_backend != "local"
+            or agent.runtime_target
+            or self.execution_registry.managed(slug, agent.name)
+        ):
+            self.execution_registry.update(slug, agent)
+            return
         from scripts.swarm.tick import agent_status
 
         previous = self.redis.hget(self.key(slug, "agents"), agent.name)
