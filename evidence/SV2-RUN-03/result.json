@@ -4,7 +4,7 @@
   "integration_gate": "G1",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1838",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1843",
-  "tested_commit": "a4c9bfe972d0ef15f7d9300f1c14a4585256c891",
+  "tested_commit": "05f3c81b8c3e9488408994d490cdc145e7796878",
   "plan_revision": "3bd4f4a6b01057b447cad15fa48c85802d3f78ee",
   "status": "implemented-not-live-qualified",
   "evidence_class": "mocked transport and isolated fakeredis; no live runtime or rollout proof",
@@ -19,7 +19,7 @@
   },
   "authority": "Controller-side service operates on previously admitted immutable execution identity and canonical seat generation. No display label grants authority. Worker-facing launch grant verification remains at the authenticated registration boundary; this service is not a public unauthenticated endpoint.",
   "states": {
-    "observed": "213 focused operations, preceding runtime, execution identity, store, collection speed and reload tests passed. Operations coverage: 169 statements, zero missed, 100 percent. Ruff check and format clean. Canonical digest has a literal SHA256 reference, nonfinite input is rejected, and transactions pass with a one connection Redis pool.",
+    "observed": "217 focused tests passed. Final observation qualifier tests: 50 passed; operations coverage 171 statements, zero missed, 100 percent. Four malformed state/generation cases were seen red, then fixed: only Phase enum values and actual integer generations can acknowledge applied effects. Ruff check and format clean.",
     "accepted": "Acceptance A, B and C each pass twice on independent fixtures. Original Standards and Spec readers closed recovery isolation finding on 9305448c; no open findings.",
     "committed": "Implementation and fixture inputs committed on tested_commit; generated case manifests identify exact input hashes.",
     "externally_verified": "CI run 37847733472 on 94570b57 passed full unit suite, sonar, lint, size and integration jobs; mutation found 332 killed and 36 surviving variants. Canonical payload and one connection tests were added and redundant serialization was removed; renewed CI pending."
@@ -41,5 +41,5 @@
     "When a later package integrates journal dispatch into the ledger server, its runtime folder must join the reload watcher. The trace-plan classifier excluded that integration from this package; proposed on the ledger. Legacy store construction does not load the new journal service."
   ],
   "next_action": "Close independent reviews, qualify CI and merge into dev.",
-  "mutation_resolution": "Canonical codec options and fixed diagnostic messages are module data. Redundant journal key sorting, duplicate nonfinite validation and recovery result clearing were removed. Added digest key order and literal hash, recorded action, nonfinite payload, single connection pool and empty stale result assertions. No mutation clearances used."
+  "mutation_resolution": "Canonical codec options and fixed diagnostic messages are module data. Redundant journal key sorting, duplicate nonfinite validation and recovery result clearing were removed. Added digest key order and literal hash, recorded action, nonfinite payload, single connection pool and empty stale result assertions. No mutation clearances used. Malformed observation state and generation types are refused before journal settlement; a string applied state cannot bypass ownership checks."
 }

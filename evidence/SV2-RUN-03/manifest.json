@@ -1,10 +1,10 @@
 {
-  "tested_commit": "a4c9bfe972d0ef15f7d9300f1c14a4585256c891",
+  "tested_commit": "05f3c81b8c3e9488408994d490cdc145e7796878",
   "evidence_class": "mocked transport and isolated fakeredis; no live runtime or rollout proof",
   "inputs": {
-    "scripts/swarm_v2/runtime/operations.py": "35c880b805fe770998f9b0a894dbe8b3402f48c1778917d08b6cdda6604ea760",
+    "scripts/swarm_v2/runtime/operations.py": "4bf24d225ed0c6b2ed48adfaabbc32ca8d430fa977f00bdc9088f6547659df65",
     "scripts/swarm/store.py": "2fe3c91c934c4d4b86cd925798b2f1bdebd0d759e8de29fea0a622e43837a359",
-    "tests/test_swarm_v2_operations.py": "8f0033fd2cfe2f890c23428f6e9541c0b15226add6afc6928a9a73a92833b026",
+    "tests/test_swarm_v2_operations.py": "019892676703b1c94888d2b16e44d77bcf6d61db718eab368c736ea609e8f8bc",
     "tests/sv2_run03_cases.py": "77a884a192b58d05ea75108fe86be5b5ad0e20de3b5de9926a6c61d85864fc46",
     "evidence/SV2-RUN-03/generate_case_results.py": "0c5575b9b95e8e03f6d44a9a34478ec0f81ca33671ab367aa92ba2a9ca39ef6d",
     "Swarm-v2.md": "901950210888681b37156ed3f990b4c9b6050cee78468293993b656999bd26d9"
