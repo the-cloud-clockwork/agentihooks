@@ -98,7 +98,7 @@ async def _push(store, me, write, ready, pubsub):
                 note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
                 try:
                     await write.send(SessionMessage(types.JSONRPCMessage(note)))
-                except Exception:
+                except BaseException:
                     for unsent in items[index:]:
                         store.requeue(unsent.id, me, UNSHOWN)
                     raise

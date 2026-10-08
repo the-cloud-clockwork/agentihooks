@@ -259,3 +259,29 @@ def test_a_failed_channel_write_puts_every_unsent_item_back_to_pending(store):
         channel.SETTLE_S = saved
     assert (store.get(first.id).state, store.get(second.id).state) == ("pending", "pending")
     assert states(store, first.id)[-1] == ("pending", "bob", "the inbox channel could not show it")
+
+
+def test_a_cancelled_channel_write_puts_the_item_back_to_pending(store):
+    import anyio
+
+    item = store.send("alice", "bob", "one")
+
+    class Cancelled(BaseException):
+        pass
+
+    class Stopping:
+        async def send(self, message):
+            raise Cancelled
+
+    async def drive():
+        ready = anyio.Event()
+        ready.set()
+        with pytest.raises(Cancelled):
+            await channel._push(store, "bob", Stopping(), ready, store.redis.pubsub())
+
+    channel.SETTLE_S, saved = 0, channel.SETTLE_S
+    try:
+        anyio.run(drive)
+    finally:
+        channel.SETTLE_S = saved
+    assert states(store, item.id)[-1] == ("pending", "bob", "the inbox channel could not show it")
