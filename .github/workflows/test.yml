@@ -642,14 +642,14 @@ jobs:
           echo "tree=$(git rev-parse "$base^{tree}")" >> "$GITHUB_OUTPUT"
 
       - name: Restore the exact coverage baseline
-        if: github.event_name != 'merge_group'
+        if: github.event_name != 'merge_group' && github.event_name != 'workflow_dispatch'
         uses: actions/cache/restore@v4
         with:
           path: ~/coverage-baseline
           key: coverage-baseline-${{ steps.base.outputs.tree }}
 
       - name: Download the queue base coverage baseline
-        if: github.event_name == 'merge_group'
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@v4
         with:
           name: queue-coverage-baseline

@@ -86,9 +86,9 @@ def test_queue_grading_consumes_the_restored_exact_base():
     assert base["env"]["QUEUE_BASE"] == "${{ github.event.merge_group.base_sha }}"
     assert "git merge-base" not in base["run"]
     restore = steps["Restore the exact coverage baseline"]
-    assert restore["if"] == "github.event_name != 'merge_group'"
+    assert restore["if"] == "github.event_name != 'merge_group' && github.event_name != 'workflow_dispatch'"
     download = steps["Download the queue base coverage baseline"]
-    assert download["if"] == "github.event_name == 'merge_group'"
+    assert download["if"] == "github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'"
     assert download["with"]["name"] == "queue-coverage-baseline"
     assert download["with"]["path"] == "~/coverage-baseline"
     assert "git merge-base" not in steps["Hold every line the base ran"]["run"]
