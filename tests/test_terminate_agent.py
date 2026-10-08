@@ -46,6 +46,25 @@ def test_validate_rejects_shared_process_without_override(monkeypatch):
         validate(item, [item, other])
 
 
+@pytest.mark.parametrize("state", ["Z", "X"])
+def test_validate_leaves_out_group_members_that_ended(monkeypatch, state):
+    item = session()
+    ended = Process(201, 200, 190, 190, 100, state, "node", ("node",))
+    table = {100: process(100, comm="python", argv=("python",)), 200: item.process, 201: ended}
+    monkeypatch.setattr("scripts.terminate_agent.processes", lambda proc=Path("/proc"): table)
+    monkeypatch.setattr("scripts.terminate_agent.os.getpid", lambda: 100)
+    assert validate(item, [item]) == [item.process]
+
+
+@pytest.mark.parametrize("state,alive", [("S", True), ("Z", False), ("X", False)])
+def test_alive_counts_a_zombie_or_a_process_being_reaped_as_ended(monkeypatch, state, alive):
+    from scripts.terminate_agent import _alive
+
+    current = Process(7, 1, 7, 7, 100, state, "claude", ())
+    monkeypatch.setattr("scripts.terminate_agent._process", lambda pid, proc: current)
+    assert _alive({7: (100, "claude")}, Path("/proc")) == ([current] if alive else [])
+
+
 def test_main_dry_run_sends_no_signal(monkeypatch, capsys):
     item = session(name="engineer-270926-2337-b")
     monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [item])

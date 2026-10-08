@@ -10,6 +10,7 @@ from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
@@ -1768,7 +1769,7 @@ def test_restore_hands_the_runtime_to_restore_and_prints_every_agent_outcome(env
     seen = {}
 
     def restore(store, slug, live, source, runtime):
-        seen["runtime"] = runtime
+        seen["runtime"], seen["source"] = runtime, source
         return [Outcome("engineer@a1b2c3-0001", "eng", "t1", "fresh", "no conversation id")]
 
     run("sw", "create", "--repo", "/repo")
@@ -1779,7 +1780,35 @@ def test_restore_hands_the_runtime_to_restore_and_prints_every_agent_outcome(env
     assert [(r["name"], r["outcome"], r["reason"]) for r in printed["restored"]] == [
         ("engineer@a1b2c3-0001", "fresh", "no conversation id")
     ]
-    assert seen["runtime"] is rt
+    assert isinstance(seen["runtime"], RoutedRuntime)
+    assert seen["runtime"].herdr_runtime is rt
+    assert seen["source"] == "/snap.json"
+
+
+def test_restore_decision_hands_resume_the_routed_runtime_the_clock_and_the_ledger(env, monkeypatch, capsys):
+    store, ledger, rt = env
+    seen = []
+
+    def decide(*args):
+        seen.append(args)
+        return Outcome("engineer@a1b2c3-0001", "eng", "t1", "fresh", "chosen")
+
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    monkeypatch.setattr("scripts.swarm.resume.decide", decide)
+    monkeypatch.setattr(cli, "now_ms", lambda: 4242)
+    run("sw", "create", "--repo", "/repo")
+    assert run("sw", "restore-decision", "engineer@a1b2c3-0001", "fresh") == 0
+    [(got_store, slug, agent, choice, runtime, now, got_ledger)] = seen
+    assert (got_store, slug, agent, choice, now, got_ledger) == (
+        store,
+        "sw",
+        "engineer@a1b2c3-0001",
+        "fresh",
+        4242,
+        ledger,
+    )
+    assert isinstance(runtime, RoutedRuntime) and runtime.herdr_runtime is rt
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["reason"] == "chosen"
 
 
 @pytest.mark.parametrize("command", ["create", "start", "url"])
@@ -1902,3 +1931,73 @@ def test_trace_plan_without_a_plan_names_the_file_and_format(env, capsys, monkey
         f"swarm: write the plan first: {tmp_path}/_home/.agentihooks/swarm/sw/tasks/t1/plan.md, "
         "one piece per line: - what | area, area | why"
     )
+
+
+def _tick_all(monkeypatch, run_tick, slugs):
+    import os
+    import types
+
+    from scripts import herdr_gc, operator_env
+
+    filled, swept = [], []
+    monkeypatch.setattr(timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(operator_env, "fill", lambda environ: filled.append(environ))
+    monkeypatch.setattr(cli, "now_ms", lambda: 77)
+    monkeypatch.setattr(herdr_gc, "run", lambda environ, now, apply: swept.append((environ, now, apply)) or ["swept"])
+    monkeypatch.setattr(cli, "run_tick", run_tick)
+    store = types.SimpleNamespace(slugs=lambda: slugs)
+    cli.cmd_tick(store, None)
+    assert filled == [os.environ]
+    assert swept == [(dict(os.environ), 77, True)]
+    return store
+
+
+def test_the_tick_runs_every_swarm_at_the_same_time(monkeypatch, capsys):
+    import threading
+
+    both, seen = threading.Barrier(2, timeout=5), []
+
+    def run_tick(store, slug):
+        both.wait()
+        seen.append((store, slug, threading.current_thread()))
+        return [f"ticked {slug}"]
+
+    store = _tick_all(monkeypatch, run_tick, ["a", "b"])
+    assert sorted((s, slug) for s, slug, _ in seen) == [(store, "a"), (store, "b")]
+    assert threading.main_thread() not in {thread for _, _, thread in seen}
+    out = capsys.readouterr().out.splitlines()
+    assert sorted(out[:2]) == ["a: ticked a", "b: ticked b"]
+    assert out[2:] == ["herdr: swept"]
+
+
+def test_a_failing_swarm_tick_leaves_the_others_and_the_sweep_running(monkeypatch, capsys):
+    def run_tick(store, slug):
+        if slug == "a":
+            raise ValueError("ledger down")
+        return [f"ok {slug}"]
+
+    _tick_all(monkeypatch, run_tick, ["a", "b"])
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == ["b: ok b", "herdr: swept"]
+    assert captured.err == "a: ValueError: ledger down\n"
+
+
+def test_every_swarm_gets_its_own_thread_however_many_there_are(monkeypatch, capsys):
+    import threading
+
+    slugs = [f"s{n}" for n in range(48)]
+    together = threading.Barrier(len(slugs), timeout=10)
+
+    def run_tick(store, slug):
+        together.wait()
+        return ["ticked"]
+
+    _tick_all(monkeypatch, run_tick, slugs)
+    assert sorted(capsys.readouterr().out.splitlines()) == sorted(
+        [f"{slug}: ticked" for slug in slugs] + ["herdr: swept"]
+    )
+
+
+def test_no_swarms_still_sweeps_herdr(monkeypatch, capsys):
+    _tick_all(monkeypatch, lambda store, slug: pytest.fail("no swarm to tick"), [])
+    assert capsys.readouterr().out.splitlines() == ["herdr: swept"]

@@ -429,6 +429,9 @@ def test_resume_refuses_to_change_recorded_effort_when_policy_changed(tmp_path, 
 
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness)
     config.effort_min = config.effort_max = "high"
-    with pytest.raises(SpawnError, match="^unsupported transfer: saved effort is outside the current swarm range$"):
+    with pytest.raises(
+        SpawnError, match="^unsupported transfer: saved effort is outside the current swarm range$"
+    ) as error:
         runtime.resume(config, replace(agent, effort="medium"), "continue")
+    assert error.value.status == "unsupported"
     assert not seen["runs"]

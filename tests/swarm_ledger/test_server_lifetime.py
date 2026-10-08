@@ -131,7 +131,7 @@ def test_unreadable_process_is_gone(tmp_path, stat):
     assert server_lifetime.process(7, tmp_path) is None
 
 
-@pytest.mark.parametrize("state,start,expected", [("S", 99, False), ("Z", 99, True), ("S", 100, True)])
+@pytest.mark.parametrize("state,start,expected", [("S", 99, False), ("Z", 99, True), ("X", 99, True), ("S", 100, True)])
 def test_owner_identity_rejects_zombies_and_reused_pids(tmp_path, state, start, expected):
     fake_process(tmp_path, start=start, state=state)
     assert server_lifetime.ended((7, 99), tmp_path) is expected

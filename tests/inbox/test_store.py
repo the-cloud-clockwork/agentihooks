@@ -447,3 +447,29 @@ def test_open_index_names_a_missing_item(store):
     with pytest.raises(InboxError) as error:
         store.open_items("receiver")
     assert str(error.value) == f"no message {item.id}"
+
+
+def test_quiet_names_only_indexed_addresses_without_open_mail(store):
+    done = store.send("alice", "gone", "finished")
+    store.close(done.id, "gone", "done", "finished")
+    store.open_items("gone")
+    store.open_items("empty")
+    store.send("alice", "late", "contract")
+    store.open_items("late")
+    store.send("alice", "never-indexed", "contract")
+    unflagged = store.send("alice", "unflagged", "finished")
+    store.close(unflagged.id, "unflagged", "done", "finished")
+    store.open_items("sizeless")
+    store.redis.delete(store.key("open-size", "sizeless"))
+    addresses = ["gone", "empty", "late", "never-indexed", "unknown", "unflagged", "sizeless"]
+    assert store.quiet(addresses) == {"gone", "empty"}
+    store.send("alice", "empty", "arrived after the index")
+    assert store.quiet(["empty"]) == set()
+    assert store.quiet([]) == set()
+
+
+def test_quiet_reads_in_one_pipeline_without_a_transaction(store, monkeypatch):
+    opened, pipeline = [], store.redis.pipeline
+    monkeypatch.setattr(store.redis, "pipeline", lambda **kw: opened.append(kw) or pipeline(**kw))
+    store.quiet(["a", "b"])
+    assert opened == [{"transaction": False}]

@@ -336,15 +336,15 @@ def linked_profile_names() -> set[str]:
     return {e.get("name", "") for e in entries if isinstance(e, dict)}
 
 
-def read_manifestos(bundle_dir: Path | None = None) -> str:
+def read_manifestos(bundle_dir: Path | None = None, profile_dirs: list[tuple[str, Path]] | None = None) -> str:
     try:
-        from hooks.config import _resolve_manifesto_paths
+        from hooks.config import manifesto_body
+        from scripts.profiles import manifestos
 
         parts = []
-        for raw_path in _resolve_manifesto_paths(bundle_dir):
-            path = Path(raw_path)
+        for path in manifestos.paths(bundle_dir, profile_dirs or []):
             if path.is_file():
-                parts.append(f"<!-- manifesto: {path.name} -->\n{path.read_text().strip()}")
+                parts.append(f"<!-- manifesto: {path.name} -->\n{manifesto_body(path).strip()}")
         return "\n\n---\n\n".join(parts)
     except Exception:
         pass
@@ -478,7 +478,7 @@ def build_persona(
         rule_parts = [f"<!-- rule: {name} ({label}) -->\n{text.strip()}" for label, name, text in pending_rules]
         parts.append("# Rules\n\n" + "\n\n---\n\n".join(rule_parts))
 
-    manifesto_text = read_manifestos(bundle_dir)
+    manifesto_text = read_manifestos(bundle_dir, profile_dirs)
     if manifesto_text:
         parts.append(f"<!-- ci-manifesto -->\n{manifesto_text.strip()}")
 
