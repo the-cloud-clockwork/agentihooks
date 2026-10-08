@@ -76,6 +76,28 @@ def test_python_literal_offsets_count_only_newline_as_a_source_line(separator):
     assert all(source[item["start"] : item["end"]] == item["text"] for item in findings)
 
 
+def test_segmented_fstrings_do_not_emit_interpolation_strings(monkeypatch):
+    import tokenize
+
+    from hooks.filters.finders.string_literals import find
+
+    start_type = max(tokenize.tok_name) + 1
+    end_type = start_type + 1
+    tokens = [
+        tokenize.TokenInfo(start_type, 'f"', (1, 0), (1, 2), ""),
+        tokenize.TokenInfo(tokenize.STRING, "'name'", (1, 9), (1, 15), ""),
+        tokenize.TokenInfo(end_type, '"', (1, 16), (1, 17), ""),
+    ]
+    monkeypatch.setattr(
+        tokenize, "tok_name", {**tokenize.tok_name, start_type: "FSTRING_START", end_type: "FSTRING_END"}
+    )
+    monkeypatch.setattr(tokenize, "generate_tokens", lambda _: iter(tokens))
+    source = "f\"hello {'name'}\""
+    assert find(source, "page.py", "Write") == [
+        {"start": 2, "end": 16, "text": "hello {'name'}", "reason": "user-facing literal"}
+    ]
+
+
 def test_unknown_language_has_no_literals():
     from hooks.filters.finders.string_literals import find
 

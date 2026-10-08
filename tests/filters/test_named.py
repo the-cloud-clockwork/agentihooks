@@ -195,6 +195,18 @@ def test_script_can_return_a_finding_through_the_last_source_character(tmp_path)
     assert scripts.run("finder", {"finder": finder}, "label", "page.py", "Write") == [row]
 
 
+def test_callable_finder_receives_the_tool_contract():
+    from hooks.filters.finders import scripts
+
+    def finder(text, path, tool):
+        assert text == "label" and path == "page.py"
+        return [{"start": 0, "end": 5, "text": text, "reason": tool}]
+
+    assert scripts.run("finder", {"finder": finder}, "label", "page.py", "Write") == [
+        {"start": 0, "end": 5, "text": "label", "reason": "Write"}
+    ]
+
+
 def test_finder_stderr_is_captured_and_failure_logs_exit_status(tmp_path, monkeypatch, capfd):
     from hooks.filters.finders import scripts
 
@@ -218,6 +230,36 @@ def test_script_execution_owns_a_process_session(tmp_path):
         scripts.run("finder", {"finder": finder}, "label", "page.py", "Write")[0]["reason"]
         == "isolated process session"
     )
+
+
+def test_timeout_still_bounds_drain_when_process_group_kill_is_refused(tmp_path, monkeypatch):
+    import os
+    import signal
+
+    from hooks.filters.finders import scripts
+
+    finder = tmp_path / "finder.py"
+    finder.write_text('import time\ntime.sleep(1.5)\nprint("[]")')
+    real_killpg = os.killpg
+    groups = []
+    logs = []
+
+    def refused(group, sig):
+        groups.append(group)
+        raise PermissionError("group kill refused")
+
+    monkeypatch.setattr(os, "killpg", refused)
+    monkeypatch.setattr(scripts.config, "CONDITIONS_TIMEOUT_SEC", 0.1)
+    monkeypatch.setattr(scripts, "log", lambda *args: logs.append(args))
+    try:
+        assert scripts.run("finder", {"finder": finder}, "label", "page.py", "Write") == []
+        assert logs[0][1]["reason"].endswith("timed out after 1 seconds")
+    finally:
+        for group in groups:
+            try:
+                real_killpg(group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def test_builtin_resolution_with_missing_state_and_invalid_state(monkeypatch, tmp_path):
