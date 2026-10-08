@@ -4,6 +4,7 @@ import pytest
 
 from hooks.proc import Process
 from scripts.swarm import reaper
+from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import LEASE_MS, tick
 from scripts.swarm_v2.runtime import process
@@ -13,6 +14,8 @@ from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.swarm.test_tick import FakeLedger
 from tests.swarm.test_tick import FakeRuntime as TickRuntime
 from tests.test_swarm_v2_runtime import REMOTE, herdr_runtime, local_fake, remote_fake, request
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
 
 ANTON = "boot-anton/pid:[4026531836]"
 WORKER = "boot-aws-worker/pid:[4026532001]"
@@ -157,10 +160,8 @@ def test_a_foreign_namespace_terminate_signals_nothing_and_counts_one_rejection(
     local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
     router = RuntimeRouter([local])
     outcome = router.terminate(record(namespace=WORKER))
-    assert (outcome.status, outcome.value, outcome.detail) == (
-        Status.REFUSED,
-        Unqualified.FOREIGN_NAMESPACE,
-        "process belongs to another PID namespace",
+    assert outcome == Outcome(
+        "terminate", Status.REFUSED, LOCAL, Unqualified.FOREIGN_NAMESPACE, "process belongs to another PID namespace"
     )
     assert WORKER not in repr(outcome)
     assert (ended, calls) == ([], [])
@@ -286,3 +287,63 @@ def test_the_launch_check_never_judges_a_remote_agent_from_the_local_process_tab
     remote = AgentRecord(NAME, "eng", "t1", runtime_backend=REMOTE, profile_decision=validated)
     local = replace(remote, name="engineer@a1b2c3-0002", runtime_backend=LOCAL)
     assert herdr.bindings([remote, local]) == {local.name: {"process": False}}
+
+
+def test_retire_process_hands_the_reaper_the_verified_start_time_and_legacy_retire_none(tmp_path, monkeypatch):
+    herdr, _ = herdr_runtime(tmp_path, monkeypatch)
+    assert isinstance(herdr, HerdrRuntime)
+    seen = []
+    herdr.end = lambda name, pid, homes, start=-1: seen.append((name, pid, homes, start)) or reaper.Outcome()
+    assert herdr.retire_process(AgentRecord(NAME, "eng", "t1"), PID, ("/scratch/t1",), STARTED)
+    assert herdr.retire(AgentRecord(NAME, "eng", "t1", profile_decision={"validation": {"pid": 55}}))
+    assert seen == [(NAME, PID, ["/scratch/t1"], STARTED), (NAME, 55, [], 0)]
+
+
+def test_each_unqualified_terminate_is_counted():
+    router = RuntimeRouter([local_fake()])
+    router.terminate(record(execution=""))
+    router.terminate(record(execution=""))
+    assert router.rejected == {(LOCAL, Unqualified.NO_EXECUTION): 2}
+    assert router.unqualified_process_actions_rejected_total() == 2
+
+
+def test_an_operation_on_an_unregistered_backend_names_that_operation():
+    stray = AgentRecord(NAME, "eng", "t1", runtime_backend="ssh")
+    outcome = RuntimeRouter([local_fake()]).observe(stray)
+    assert outcome == Outcome("observe", Status.UNAVAILABLE, "ssh", detail="no runtime registered for ssh")
+
+
+def test_a_successful_retire_clears_the_routed_refusal(tmp_path, monkeypatch):
+    herdr, _ = herdr_runtime(tmp_path, monkeypatch)
+    routed = RoutedRuntime(herdr, RuntimeRouter([LocalHerdrRuntime(herdr)]))
+    refused, legacy_agent = record(execution=""), AgentRecord(NAME, "eng", "t1")
+    assert routed.retire(refused) is False
+    assert routed.retire(legacy_agent) is True
+    assert routed.refusal(legacy_agent) == {"process": 0, "refusal": "unknown"}
+
+
+def test_the_reap_keeps_earlier_actions_when_a_remote_agent_turns_suspect(remote_swarm):
+    store, ledger, agent = remote_swarm
+    local_name = store.next_name("sw", "eng")
+    store.put_agent("sw", AgentRecord(local_name, "eng", "t0", started_at=1_000))
+    ledger.rows["t0"] = {"id": "t0", "lane": "eng", "state": "done", "claimed_by": local_name, "out_of_scope": False}
+    runtime = TickRuntime()
+    runtime.live.add(local_name)
+    runtime.statuses[agent.name] = "unknown"
+    actions = tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert f"retired {local_name}" in actions
+    assert f"suspect {agent.name}: its runtime did not answer" in actions
+
+
+def test_an_idle_remote_agent_is_nudged_then_retired_through_its_runtime(remote_swarm):
+    from scripts.swarm.tick import IDLE_KILL_TICKS, IDLE_NUDGE_TICKS
+
+    store, ledger, agent = remote_swarm
+    store.update("sw", state="paused")
+    runtime = TickRuntime()
+    runtime.statuses[agent.name] = "idle"
+    for n in range(IDLE_KILL_TICKS):
+        tick("sw", store, ledger, runtime, now_ms=2_000 + n)
+        if n + 1 == IDLE_NUDGE_TICKS:
+            assert runtime.nudged == [agent.name]
+    assert agent.name in runtime.homes and ledger.rows["t1"]["state"] == "open"

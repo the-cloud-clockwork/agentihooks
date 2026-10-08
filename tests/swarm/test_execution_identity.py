@@ -162,6 +162,9 @@ def test_execution_metadata_schema(store, agent):
         ({"runtime_target": {"server_id": 1}}, "runtime target identity must be a string"),
         ({"runtime_target": {"pid": 0}}, "runtime PID must be a positive integer"),
         ({"runtime_target": {"pid": True}}, "runtime PID must be a positive integer"),
+        ({"runtime_target": {"pid": 7, "pid_start": 0}}, "runtime PID start time must be a positive integer"),
+        ({"runtime_target": {"pid": 7, "pid_start": "777"}}, "runtime PID start time must be a positive integer"),
+        ({"runtime_target": {"pid": 7, "pid_start": True}}, "runtime PID start time must be a positive integer"),
         ({"execution_id": "exe-forged"}, "new execution identity and generation must be allocated by the store"),
         ({"generation": 9}, "new execution identity and generation must be allocated by the store"),
         ({"name": "engineer@ffffff-9999"}, "execution requires a registered canonical agent name"),
@@ -174,6 +177,11 @@ def test_invalid_admission_is_contained(store, agent, changes, message):
     assert str(error.value) == message
     assert protected(store) == before
     assert store.execution_identity_conflicts_total("fixture") == 1
+
+
+def test_a_local_target_names_its_process_by_namespace_pid_and_start_time(store, agent):
+    target = {"process_namespace": "boot/pid:[1]", "pid": 7, "pid_start": 1}
+    assert store.start_execution("fixture", replace(agent, runtime_target=target)).runtime_target == target
 
 
 @pytest.mark.parametrize(
