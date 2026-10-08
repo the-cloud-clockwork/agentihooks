@@ -38,9 +38,11 @@ def ci_download(run_ids: list[str], folder: Path) -> None:
         _gh(["run", "download", run, "--dir", str(folder / run)])
 
 
-def keep_newest(folder: Path, limit: int) -> None:
-    runs = sorted((path for path in folder.iterdir() if path.is_dir()), key=lambda path: int(path.name))
-    for path in runs[: max(len(runs) - limit, 0)]:
+def keep_newest(folder: Path, limit: int, keep: str | None = None) -> None:
+    runs = sorted(
+        (path for path in folder.iterdir() if path.is_dir() and path.name != keep), key=lambda path: int(path.name)
+    )
+    for path in runs[: max(len(runs) - limit + (keep is not None), 0)]:
         shutil.rmtree(path)
 
 
@@ -87,7 +89,7 @@ def main(argv: list[str] | None = None) -> None:
         if args.ci or args.ci_run:
             folder = args.samples or Path(tmp)
             if args.samples:
-                keep_newest(folder, args.ci or 1)
+                keep_newest(folder, args.ci or 1, args.ci_run)
             else:
                 run_ids = [args.ci_run] if args.ci_run else []
                 run_ids = list(dict.fromkeys([*run_ids, *(ci_run_ids(args.ci) if args.ci else [])]))[: args.ci or 1]

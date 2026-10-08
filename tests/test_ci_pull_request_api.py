@@ -66,8 +66,24 @@ def test_no_step_on_any_event_holds_the_workflow_token_or_calls_the_api():
         {"run": "echo ${{ github.token }}"},
         {"uses": "actions/github-script@v7"},
         {"env": {"TOKEN": "${{ secrets.GH_PAT }}"}},
+        {"run": 'gh api "repos/$GITHUB_REPOSITORY/actions/artifacts"'},
+        {"run": "gh run download 42 --dir out"},
+        {"run": "curl https://api.github.com/rate_limit"},
+        {"uses": "actions/download-artifact@v4", "with": {"github-token": "${{ secrets.GITHUB_TOKEN }}"}},
     ],
-    ids=["gh-with-flags", "api-url", "github-token-env", "action-input", "token-in-run", "script-default", "pat"],
+    ids=[
+        "gh-with-flags",
+        "api-url",
+        "github-token-env",
+        "action-input",
+        "token-in-run",
+        "script-default",
+        "pat",
+        "gh-api",
+        "gh-run-download",
+        "api-host",
+        "cross-run-download",
+    ],
 )
 def test_each_way_of_reaching_the_api_is_an_offender(plant):
     assert _holds_token(plant) or API_CALL.search(plant.get("run", ""))
@@ -87,6 +103,18 @@ def test_sonar_downloads_this_runs_coverage_after_the_shards():
     assert merge["run"] == "bash .github/coverage/combine.sh --downloaded 8"
 
 
+@pytest.mark.parametrize("job", ["unit", "shard-check", "test-count", "size", "lint"])
+def test_a_dev_push_runs_every_step_of_the_job_itself(job):
+    steps = _jobs()[job]["steps"]
+    assert steps[0]["uses"] == "actions/checkout@v4"
+    assert "if" not in steps[0]
+    assert [step.get("name") for step in steps if "skip" in step.get("if", "")] == []
+
+
+def test_no_job_is_granted_the_actions_api():
+    assert [name for name, job in _jobs().items() if "actions" in job.get("permissions", {})] == []
+
+
 def test_no_job_skips_on_a_tree_another_run_passed():
     jobs = _jobs()
     assert "record-pass" not in jobs
@@ -94,26 +122,29 @@ def test_no_job_skips_on_a_tree_another_run_passed():
     assert "steps.lookup" not in (ROOT / ".github/workflows/test.yml").read_text()
 
 
-def _superseded(tmp_path, dev_head: str, sha: str = "a" * 40) -> str:
+def _superseded(tmp_path, dev_head: str, sha: str = "a" * 40) -> str | None:
     step = next(step for step in _jobs()["sonar"]["steps"] if step.get("id") == "current")
     tools = tmp_path / "bin"
     tools.mkdir()
-    (tools / "git").write_text(
-        f'#!/usr/bin/env bash\n[[ "$*" == "ls-remote origin refs/heads/dev" ]]\necho "{dev_head}\trefs/heads/dev"\n'
-    )
+    listing = f'echo "{dev_head}\trefs/heads/dev"' if dev_head else "true"
+    (tools / "git").write_text(f'#!/usr/bin/env bash\n[[ "$*" == "ls-remote origin refs/heads/dev" ]]\n{listing}\n')
     (tools / "git").chmod(0o755)
     output = tmp_path / "output"
-    subprocess.run(
+    result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],
         env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "GITHUB_OUTPUT": str(output), "SHA": sha},
-        check=True,
+        check=False,
     )
-    return output.read_text()
+    return output.read_text() if result.returncode == 0 else None
 
 
 @pytest.mark.parametrize(("dev_head", "superseded"), [("a" * 40, "false"), ("b" * 40, "true")])
 def test_a_dev_push_skips_the_analysis_once_dev_moved_past_it(tmp_path, dev_head, superseded):
     assert _superseded(tmp_path, dev_head) == f"superseded={superseded}\n"
+
+
+def test_an_unreadable_dev_head_fails_the_check_instead_of_skipping_the_analysis(tmp_path):
+    assert _superseded(tmp_path, "") is None
 
 
 def test_sonar_names_the_current_dev_head_from_git_and_gates_the_scan_on_it():

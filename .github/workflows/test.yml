@@ -57,7 +57,6 @@ jobs:
     timeout-minutes: 7
     permissions:
       contents: read
-      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -163,7 +162,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -192,7 +190,6 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -227,7 +224,6 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -273,7 +269,6 @@ jobs:
       SONAR_SCANNER_VERSION: 7.2.0.5079
     permissions:
       contents: read
-      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -340,6 +335,7 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           dev=$(git ls-remote origin refs/heads/dev)
+          [[ -n "$dev" ]]
           if [[ "${dev%%[[:space:]]*}" == "$SHA" ]]; then echo "superseded=false" >> "$GITHUB_OUTPUT"; else echo "superseded=true" >> "$GITHUB_OUTPUT"; fi
 
       - name: Download shard coverage
@@ -396,7 +392,6 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     permissions:
       contents: read
-      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -476,7 +471,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read
     steps:
       - uses: actions/checkout@v4
         with:

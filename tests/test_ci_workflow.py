@@ -358,7 +358,7 @@ def test_dev_push_refreshes_stored_durations_after_tests_pass():
     job = _workflow()["jobs"]["refresh-durations"]
     assert job["needs"] == ["unit", "lint"]
     assert job["if"] == "github.event_name == 'push'"
-    assert job["permissions"] == {"contents": "read", "actions": "read"}
+    assert job["permissions"] == {"contents": "read"}
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["ref"] == "${{ github.sha }}"
@@ -406,6 +406,25 @@ def test_samples_refresh_keeps_the_newest_runs_and_never_calls_github(tmp_path, 
     refresh_durations.main(["--samples", str(samples), "--ci-run", "12", "--ci", "3"])
     assert sorted(path.name for path in samples.iterdir()) == ["10", "11", "12"]
     assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 2.0}
+
+
+def test_samples_refresh_keeps_a_rerun_older_than_the_newest_runs(tmp_path, monkeypatch):
+    samples = tmp_path / "samples"
+    for run, seconds in [("5", 4.0), ("10", 1.0), ("11", 2.0), ("12", 3.0)]:
+        _sample(samples, run, seconds)
+    monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
+    refresh_durations.main(["--samples", str(samples), "--ci-run", "5", "--ci", "3"])
+    assert sorted(path.name for path in samples.iterdir()) == ["11", "12", "5"]
+    assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 3.0}
+
+
+def test_samples_under_the_run_limit_are_all_kept(tmp_path):
+    samples = tmp_path / "samples"
+    for run in ("3", "20", "100"):
+        (samples / run).mkdir(parents=True)
+    refresh_durations.keep_newest(samples, 5, "100")
+    assert sorted(path.name for path in samples.iterdir()) == ["100", "20", "3"]
 
 
 def test_samples_refresh_refuses_a_run_that_kept_no_durations(tmp_path, monkeypatch):
