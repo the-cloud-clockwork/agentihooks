@@ -68,16 +68,51 @@ def _open_dependencies(row, rows):
     return open_
 
 
-def _stacked_base(open_):
-    bases = []
-    for branch in (b["branch"] for b in open_ if b.get("branch")):
+def repo_key(url: str) -> str:
+    rest = url.lower().partition("://")[2] or url.lower()
+    host, slash, path = rest.partition("/")
+    rest = host.rpartition("@")[2].replace(":", "/", 1) + slash + path
+    return rest.rstrip("/").removesuffix(".git")
+
+
+def public_url(url: str) -> str:
+    scheme, sep, rest = url.partition("://")
+    if not sep:
+        return url
+    host, slash, path = rest.partition("/")
+    return f"{scheme}://{host.rpartition('@')[2]}{slash}{path}"
+
+
+def _foreign(open_):
+    marked = [b for b in open_ if b.get("branch") and b.get("branch_repo")]
+    home = repo_key(_out(["git", "remote", "get-url", "origin"], "cannot read the origin url")) if marked else ""
+    return [b for b in marked if repo_key(b["branch_repo"]) != home]
+
+
+def _base_of(dep, foreign):
+    branch = dep["branch"]
+    if dep not in foreign:
         _out(["git", "fetch", "origin", branch], f"cannot fetch {branch}")
-        bases.append(_out(["git", "merge-base", "HEAD", f"origin/{branch}"], f"{branch} shares no history"))
+        return _out(["git", "merge-base", "HEAD", f"origin/{branch}"], f"{branch} shares no history")
+    _out(["git", "fetch", dep["branch_repo"], branch], f"cannot fetch {branch} from {dep['branch_repo']}")
+    _out(["git", "fetch", "origin", "dev"], "cannot fetch dev")
+    return _out(["git", "merge-base", "HEAD", "origin/dev"], "the task shares no history with dev")
+
+
+def _stacked_base(open_, foreign):
+    bases = [_base_of(b, foreign) for b in open_ if b.get("branch")]
     return max(bases, key=lambda sha: int(_out(["git", "rev-list", "--count", sha], f"cannot count {sha}")))
 
 
-def _issue_body(row, open_, base):
-    blockers = ", ".join(f"{b['id']} (`{b['branch']}`)" if b.get("branch") else b["id"] for b in open_)
+def _blocker(dep, foreign):
+    if not dep.get("branch"):
+        return dep["id"]
+    where = f" in {dep['branch_repo']}" if dep in foreign else ""
+    return f"{dep['id']} (`{dep['branch']}`{where})"
+
+
+def _issue_body(row, open_, base, foreign):
+    blockers = ", ".join(_blocker(b, foreign) for b in open_)
     return (
         f"Parked on branch `{row['branch']}` until {blockers} merges. Stacked base `{base}`. "
         "The next engineer restacks it onto dev and finishes it."
@@ -100,11 +135,13 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     found = handoff_check.problems(text, Resolver(slug, store.redis, ledger.state))
     if found:
         raise SwarmError(handoff_check.refusal(found))
-    base = _stacked_base(open_)
+    foreign = _foreign(open_)
+    base = _stacked_base(open_, foreign)
     if row.get("issue_url"):
-        body = _issue_body(row, open_, base)
+        body = _issue_body(row, open_, base, foreign)
         _out(["gh", "issue", "comment", row["issue_url"], "--body", body], "could not comment on the issue")
-    fields = {"parked_on": [b["id"] for b in open_], "stacked_base": base}
+    repos = list(dict.fromkeys(b["branch_repo"] for b in foreign))
+    fields = {"parked_on": [b["id"] for b in open_], "stacked_base": base, **({"parked_repos": repos} if repos else {})}
     ledger.update_task(slug, agent.task, fields, by=agent.name)
     ledger.comment(slug, agent.task, _ledger_note(open_), by=agent.name)
     return fields, top

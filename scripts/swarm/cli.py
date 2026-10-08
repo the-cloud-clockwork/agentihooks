@@ -788,11 +788,18 @@ def pull_branch(url, run=subprocess.run):
         return ""
 
 
+def origin_repo(run=subprocess.run):
+    done = _git(run, "remote", "get-url", "origin")
+    return stack.public_url(done.stdout.strip()) if done.returncode == 0 else ""
+
+
 def cmd_branch(store, args):
     agent = _worker(store, args)
     branch = worktree_branch()
-    LedgerClient().update_task(args.slug, agent.task, {"branch": branch}, by=agent.name)
-    print(json.dumps({"task": agent.task, "branch": branch}))
+    repo = origin_repo()
+    fields = {"branch": branch, **({"branch_repo": repo} if repo else {})}
+    LedgerClient().update_task(args.slug, agent.task, fields, by=agent.name)
+    print(json.dumps({"task": agent.task, **fields}))
 
 
 def cmd_pr(store, args):
@@ -800,7 +807,7 @@ def cmd_pr(store, args):
     config = store.config(args.slug)
     awaiting = "approval" if config.autonomy == ASSIST else ""
     head = pull_branch(args.url)
-    branch = {"branch": head} if head else {}
+    branch = {"branch": head, "branch_repo": args.url.split("/pull/")[0]} if head else {}
     fields = {"pr_url": args.url, "state": "pr", "awaiting": awaiting, **branch}
     ledger = LedgerClient()
     checked = intent.stamp(args.slug, agent.task, args.url, ledger.state(args.slug), intent.mode_of(config), now_ms())

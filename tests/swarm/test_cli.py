@@ -1339,20 +1339,39 @@ def test_a_failing_github_call_gives_no_branch():
     assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ""
 
 
-def test_swarm_branch_records_the_worktree_branch_on_the_agent_task(env, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    ("repo", "recorded"), [("git@github.com:o/r.git", {"branch_repo": "git@github.com:o/r.git"}), ("", {})]
+)
+def test_swarm_branch_records_the_worktree_branch_on_the_agent_task(env, monkeypatch, capsys, repo, recorded):
     _, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setattr(cli, "worktree_branch", lambda: "engineer-a1b2c3-0001")
+    monkeypatch.setattr(cli, "origin_repo", lambda: repo)
     writes, update = [], ledger.update_task
     ledger.update_task = lambda slug, task, fields, by="swarm": (
         writes.append((task, fields, by)) or update(slug, task, fields)
     )
     capsys.readouterr()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "branch") == 0
-    assert writes == [("t1", {"branch": "engineer-a1b2c3-0001"}, "engineer@a1b2c3-0001")]
+    assert writes == [("t1", {"branch": "engineer-a1b2c3-0001", **recorded}, "engineer@a1b2c3-0001")]
     assert ledger.rows["t1"]["branch"] == "engineer-a1b2c3-0001"
-    assert json.loads(capsys.readouterr().out) == {"task": "t1", "branch": "engineer-a1b2c3-0001"}
+    assert ledger.rows["t1"].get("branch_repo") == recorded.get("branch_repo")
+    assert json.loads(capsys.readouterr().out) == {"task": "t1", "branch": "engineer-a1b2c3-0001", **recorded}
+
+
+@pytest.mark.parametrize(
+    ("answer", "repo"),
+    [
+        ((0, "git@github.com:o/r.git\n"), "git@github.com:o/r.git"),
+        ((0, "https://user:token@github.com/o/r.git\n"), "https://github.com/o/r.git"),
+        ((2, "error: No such remote 'origin'\n"), ""),
+    ],
+)
+def test_the_origin_repository_is_read_without_credentials(answer, repo):
+    calls, fake = git_answers({"remote": answer})
+    assert cli.origin_repo(run=fake) == repo
+    assert calls == [(["git", "remote", "get-url", "origin"], GIT_OPTS)]
 
 
 def test_swarm_branch_writes_nothing_when_the_branch_is_refused(env, monkeypatch, capsys):
@@ -1368,7 +1387,10 @@ def test_swarm_branch_writes_nothing_when_the_branch_is_refused(env, monkeypatch
     assert "branch x is not on origin" in capsys.readouterr().err and "branch" not in ledger.rows["t1"]
 
 
-@pytest.mark.parametrize(("head", "fields"), [("engineer-a1b2c3-0001", {"branch": "engineer-a1b2c3-0001"}), ("", {})])
+@pytest.mark.parametrize(
+    ("head", "fields"),
+    [("engineer-a1b2c3-0001", {"branch": "engineer-a1b2c3-0001", "branch_repo": "https://github.com/o/r"}), ("", {})],
+)
 def test_swarm_pr_records_the_pull_request_head_branch(env, monkeypatch, capsys, head, fields):
     _, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
@@ -1377,6 +1399,7 @@ def test_swarm_pr_records_the_pull_request_head_branch(env, monkeypatch, capsys,
     capsys.readouterr()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL3) == 0
     assert ledger.rows["t1"].get("branch") == fields.get("branch")
+    assert ledger.rows["t1"].get("branch_repo") == fields.get("branch_repo")
     out = json.loads(capsys.readouterr().out)
     assert {key: out[key] for key in out if key != "intent"} == {"task": "t1", "pr_url": URL3, **fields}
 

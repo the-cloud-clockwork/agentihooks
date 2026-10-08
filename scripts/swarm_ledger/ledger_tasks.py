@@ -31,8 +31,10 @@ UPDATABLE = (
     "plan_url",
     "rank",
     "branch",
+    "branch_repo",
     "stacked_base",
     "parked_on",
+    "parked_repos",
     "overlays",
     "difficulty",
     "difficulty_source",
@@ -43,7 +45,7 @@ DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
 NUMBER_FIELDS = ("difficulty_confidence",)
-LIST_FIELDS = ("depends_on", "territory", "parked_on", "overlays")
+LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays")
 OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
@@ -119,6 +121,10 @@ def check(op):
 def check_stack(fields):
     if "branch" in fields and not (isinstance(fields["branch"], str) and BRANCH_RE.match(fields["branch"])):
         raise ValueError("branch must be a git branch name, or empty to clear it")
+    if not BRANCH_RE.match(fields.get("branch_repo", "")):
+        raise ValueError("branch_repo must be a repository url or path, or empty to clear it")
+    if not all(BRANCH_RE.match(repo) for repo in fields.get("parked_repos", [])):
+        raise ValueError("parked_repos must list repository urls or paths")
     base = fields.get("stacked_base", "")
     if not (isinstance(base, str) and COMMIT_RE.match(base)):
         raise ValueError("stacked_base must be a lowercase commit hash of 7 to 64 characters, or empty to clear it")
