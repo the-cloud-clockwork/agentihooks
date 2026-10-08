@@ -79,7 +79,9 @@ def test_spawn_hands_agents_the_level(tmp_path, monkeypatch):
 def test_delegate_is_todays_prompt_for_every_lane():
     for lane in ("eng", "ci", MASTER):
         assert build("delegate", lane) == build(lane=lane)
-    assert "Merge on green checks, then wt.sh done." in build("delegate")
+    text = build("delegate")
+    assert "Merge on green checks, then agentihooks swarm sw wait --on merge <pr url>." in text
+    assert "After merged, run wt.sh done." in text
 
 
 def test_manual_opens_a_draft_and_stops_for_the_operator():
