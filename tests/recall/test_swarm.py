@@ -11,7 +11,6 @@ from scripts.swarm import store as swarm_store
 from scripts.swarm.naming import NameRegistry
 from scripts.swarm.store import AgentRecord, RedisStore
 
-
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
