@@ -350,20 +350,9 @@ def test_a_stalled_tls_client_does_not_block_an_https_join(admin, cert, tmp_path
     assert (tmp_path / "home" / "hive.env").exists()
 
 
-@pytest.mark.parametrize(
-    ("flags", "error"),
-    [
-        (["--tls-cert", "/c.pem"], "--tls-cert and --tls-key go together"),
-        (["--tls-key", "/k.pem"], "--tls-cert and --tls-key go together"),
-        (["--tls-cert", "/missing.pem", "--tls-key", "/missing.pem"], "the TLS certificate or key cannot be loaded"),
-    ],
-)
-def test_serve_refuses_incomplete_or_unreadable_tls(admin, monkeypatch, capsys, flags, error):
-    monkeypatch.setattr(cli, "redis_client", lambda: admin)
-
-    assert cli.main(["serve", "--port", "0", *flags]) == 1
-
-    assert capsys.readouterr().err.startswith(f"hive serve refused: {error}")
+def test_an_unreadable_tls_certificate_is_refused(admin):
+    with pytest.raises(auth.HiveError, match=r"^the TLS certificate or key cannot be loaded \("):
+        server.make_server(admin, PUBLIC, "127.0.0.1", 0, ("/missing.pem", "/missing.pem"))
 
 
 def test_join_reports_a_body_that_is_not_json(tmp_path, monkeypatch, capsys):

@@ -42,8 +42,8 @@ def exchange(redis: "Redis", code: str, redis_url: str) -> dict:
     if name is None:
         raise HiveError("invite code is invalid, expired or already used")
     member_id = secrets.token_hex(8)
-    password = secrets.token_urlsafe(32)
-    ledger = secrets.token_urlsafe(32)
+    password = secrets.token_urlsafe()
+    ledger = secrets.token_urlsafe()
     records = (f"{PREFIX}:member:{member_id}", f"{PREFIX}:ledger:{_digest(ledger)}")
     with redis.pipeline() as pipe:
         pipe.hset(records[0], mapping={"name": name, "ledger": _digest(ledger)})

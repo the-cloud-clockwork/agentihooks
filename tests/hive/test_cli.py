@@ -33,7 +33,8 @@ def _serve(httpd):
 
 
 @pytest.fixture
-def hive(admin):
+def hive(admin, monkeypatch):
+    monkeypatch.setattr(server, "REQUEST_TIMEOUT_S", 0.5)
     httpd = server.make_server(admin, PUBLIC, "127.0.0.1", 0)
     port = _serve(httpd)
     yield port
@@ -44,7 +45,6 @@ def hive(admin):
 def _raw(port, request):
     with socket.create_connection(("127.0.0.1", port), timeout=5) as conn:
         conn.sendall(request)
-        conn.shutdown(socket.SHUT_WR)
         reply = b""
         while chunk := conn.recv(65536):
             reply += chunk
@@ -150,10 +150,10 @@ def test_join_posts_the_code_to_the_join_path_with_the_request_timeout(tmp_path,
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
 
-    assert cli.main(["join", "https://hive.example/", "the-code"]) == 0
+    assert cli.main(["join", "https://hive.example/baseX/", "the-code"]) == 0
 
     assert sent == {
-        "url": "https://hive.example/hive/join",
+        "url": "https://hive.example/baseX/hive/join",
         "method": "POST",
         "data": b'{"code": "the-code"}',
         "timeout": server.REQUEST_TIMEOUT_S,
@@ -192,20 +192,20 @@ def test_help_names_every_command_and_option(monkeypatch, capsys):
     serve = capsys.readouterr().out
 
     assert top.startswith("usage: agentihooks hive ")
+    assert "\n\nHive credentials for remote swarm hosts\n" in top
     for text in (
-        "Hive credentials for remote swarm hosts",
         "Print a one-time join code, valid fifteen minutes",
         "Exchange a join code for credentials in hive.env",
         "Delete a member's ledger credential and Redis user",
         "Run the join endpoint",
     ):
-        assert text in top
+        assert f" {text}\n" in top
     for text in (
         "Redis URL members connect to; defaults to this host's",
         "PEM certificate; required off loopback",
         "PEM private key for --tls-cert",
     ):
-        assert text in serve
+        assert f" {text}\n" in serve
 
 
 def test_a_command_is_required(capsys):
