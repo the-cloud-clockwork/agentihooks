@@ -43,6 +43,7 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -117,6 +118,9 @@ GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
 TICK_LOCK_MS = 10 * 60 * 1000
+TICK_SECONDS = 60
+# systemd stops a pass at TimeoutStartSec=540; leave an extra tick room to finish.
+EXTRA_TICKS_UNTIL = 420
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
 ONLY_MASTER_RETIRE = "only the master or the operator retires a learned note"
@@ -233,6 +237,30 @@ def _tick_one(store, slug):
         timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
 
 
+class _Firsts:
+    def __init__(self, count):
+        self.left, self.lock, self.settled = count, threading.Lock(), threading.Event()
+
+    def done(self):
+        with self.lock:
+            self.left -= 1
+            if not self.left:
+                self.settled.set()
+
+
+def _tick_while_others_run(store, slug, firsts, until):
+    started = time.monotonic()
+    try:
+        _tick_one(store, slug)
+    finally:
+        firsts.done()
+    while not firsts.settled.wait(max(0.0, started + TICK_SECONDS - time.monotonic())):
+        started = time.monotonic()
+        if started > until:
+            return
+        _tick_one(store, slug)
+
+
 def cmd_tick(store, args):
     from scripts import operator_env
 
@@ -241,8 +269,9 @@ def cmd_tick(store, args):
     operator_env.fill(os.environ)
     slugs = store.slugs()
     if slugs:
+        firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
         with ThreadPoolExecutor(max_workers=len(slugs)) as pool:
-            list(pool.map(lambda slug: _tick_one(store, slug), slugs))
+            list(pool.map(lambda slug: _tick_while_others_run(store, slug, firsts, until), slugs))
     from scripts import herdr_gc
 
     try:
