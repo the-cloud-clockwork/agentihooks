@@ -181,6 +181,7 @@ class HerdrRuntime:
     def quota_requirements(self, config, ready):
         from scripts.swarm.capacity import _harnesses
 
+        config = replace(config, codex_share=codex_split(config, dict(os.environ))[0])
         self._quota_ready_ids = {lane: [task["id"] for task in tasks] for lane, tasks in ready.items()}
         requirements = {}
         for lane, tasks in ready.items():

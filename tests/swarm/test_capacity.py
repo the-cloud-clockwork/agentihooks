@@ -231,7 +231,7 @@ def test_codex_accounts_with_live_sessions_keep_their_own_quotas(monkeypatch):
     )
 
     def quotas(pool, environ):
-        assert [row.name for row in pool] == ["a", "b"]
+        assert [(row.name, row.env_name) for row in pool] == [("a", "AH_CX_TOKEN_a"), ("b", "AH_CX_TOKEN_b")]
         return {
             name: CodexQuota(100, "pro", balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=20))
             for name in ("a", "b")
@@ -665,3 +665,181 @@ def test_capacity_comment_uses_controller_authority(monkeypatch):
     assert ops[0]["thread"] == "tasks/e/comments"
     assert ops[0]["by"] == "quota capacity 1000"
     assert ops[0]["text"] == "quota capacity changed"
+
+
+def test_inherited_zero_codex_share_is_respected_when_planning_ready_tasks(tmp_path, monkeypatch):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_SHARE", "0")
+    monkeypatch.setattr("scripts.swarm.runtime.plugins.claude_only", lambda _: False)
+    runtime = HerdrRuntime(home=tmp_path)
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    requirements = runtime.quota_requirements(config, {"eng": [{"id": "e"}], "ci": [], "plan": []})
+    assert requirements == {"eng": [("claude",)], "ci": [], "plan": []}
+
+
+def test_a_missing_signed_in_default_does_not_create_a_fake_token_account(monkeypatch):
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kwargs: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"default": 1})
+    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+
+    def quotas(pool, env):
+        assert pool == []
+        return {}
+
+    monkeypatch.setattr(capacity.codex_router, "quotas", quotas)
+    assert capacity.accounts({}, 100) == []
+
+
+def test_one_free_seat_goes_to_engineering_before_other_empty_lanes():
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=1, max_plan=1)
+    decision = capacity.calculate(config, [account(sessions=2)], [], 3, 5)
+    assert decision["effective"] == {"eng": 1, "ci": 0, "plan": 0}
+
+
+def test_balanced_free_harnesses_keep_the_declared_priority():
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    decision = capacity.calculate(config, [account(sessions=2), account("cx", sessions=2, harness="codex")], [], 3, 5)
+    assert decision["placements"] == {"eng": [{"index": 0, "harness": "claude"}], "ci": [], "plan": []}
+
+
+def test_reservations_ignore_fixed_work_beyond_the_configured_lane_cap():
+    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0)
+    live = [AgentRecord("live", "eng", "active")]
+    requirements = {"eng": [("claude", "codex"), ("claude",)], "ci": [], "plan": []}
+    seen = [account(sessions=2), account("cx", sessions=2, harness="codex")]
+    decision = capacity.calculate(config, seen, live, 3, 5, {"eng": 2, "ci": 0, "plan": 0}, requirements)
+    assert decision["placements"] == {"eng": [{"index": 0, "harness": "claude"}], "ci": [], "plan": []}
+
+
+def test_runtime_keeps_one_environment_snapshot_for_account_limits(tmp_path, monkeypatch):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    monkeypatch.setenv("AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT", "4")
+    config = SwarmConfig("sw", "/repo", max_eng=4, max_ci=1, max_plan=0, codex_share=0)
+
+    def observations(env, now):
+        assert env["AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT"] == "4"
+        monkeypatch.setenv("AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT", "1")
+        return [account()]
+
+    monkeypatch.setattr(capacity, "accounts", observations)
+    runtime = HerdrRuntime(home=tmp_path)
+    decision = runtime.quota_capacity(config, [], 100, {"eng": 1, "ci": 0, "plan": 0})
+    assert runtime._quota_cap == 4
+    assert decision["effective"] == {"eng": 1, "ci": 0, "plan": 0}
+    runtime._quota_accounts = [account("cx", harness="codex", state="DRAIN", left=4)]
+    assert runtime.has_capacity(config) is False
+
+
+def test_runtime_capacity_without_requirements_honors_the_inherited_share(tmp_path, monkeypatch):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_SHARE", "0")
+    monkeypatch.setattr(capacity, "accounts", lambda env, now: [account("cx", harness="codex")])
+    runtime = HerdrRuntime(home=tmp_path)
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    assert runtime.quota_capacity(config, [], 100)["effective"] == {"eng": 0, "ci": 0, "plan": 0}
+
+
+@pytest.mark.parametrize(
+    ("chosen", "task", "expected"),
+    [
+        ({"profile": "frontend"}, {"id": "e"}, ("claude",)),
+        ({"agent": "codex"}, {"id": "e"}, ("codex",)),
+        ({}, {"id": "e", "launch_assignment": {"profile": "engineer", "harness": "codex"}}, ("codex",)),
+        ({}, {"id": "e", "handoff_envelope": {"launch": {"profile": "frontend", "harness": "codex"}}}, ("claude",)),
+    ],
+)
+def test_requirements_keep_lane_and_saved_profile_constraints(tmp_path, monkeypatch, chosen, task, expected):
+    from scripts.swarm import runtime as module
+
+    def requires_claude(profile):
+        assert profile in {"frontend", "engineer"}
+        return profile == "frontend"
+
+    monkeypatch.setattr(module.plugins, "claude_only", requires_claude)
+    runtime = module.HerdrRuntime(home=tmp_path)
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, codex_share=30, lanes={"eng": chosen})
+    assert runtime.quota_requirements(config, {"eng": [task], "ci": [], "plan": []})["eng"] == [expected]
+
+
+def test_capacity_apply_preserves_saved_options_and_controller_evidence(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from scripts.swarm import ledger_client
+    from scripts.swarm import runtime as module
+
+    store = _store()
+    config = SwarmConfig("sw", "/repo", max_eng=3, max_ci=0, max_plan=0, codex_share=30)
+    store.create(config)
+    tasks = [{"id": "fixed", "profile": "frontend"}, {"id": "saved", "profile": "engineer"}]
+    doc = FakeLedger(tasks)
+    saved = {"profile": "engineer", "harness": "codex", "model": "sol", "effort": "high"}
+    store.redis.hset(store.key("sw", "launch-assignments"), "saved", json.dumps(saved))
+    envelope = {"launch": {"profile": "frontend", "harness": "claude"}}
+
+    def handoff(slug, task):
+        assert slug == "sw" and task in {"fixed", "saved"}
+        return envelope if task == "fixed" else {}
+
+    monkeypatch.setattr(store, "handoff_envelope", handoff)
+    rt = module.HerdrRuntime(home=tmp_path)
+    monkeypatch.setattr(module.plugins, "claude_only", lambda profile: profile == "frontend")
+    original = rt.quota_requirements
+
+    def requirements(cfg, ready):
+        assert cfg == config
+        assert ready["eng"][0] == {**doc.rows["fixed"], "handoff_envelope": envelope, "launch_assignment": {}}
+        assert ready["eng"][1] == {**doc.rows["saved"], "handoff_envelope": {}, "launch_assignment": saved}
+        return original(cfg, ready)
+
+    monkeypatch.setattr(rt, "quota_requirements", requirements)
+
+    def observations(env, now):
+        assert now == 1234.567
+        return [account(), account("cx", harness="codex")]
+
+    monkeypatch.setattr(capacity, "accounts", observations)
+    calls = []
+
+    def call(slug, ops, service):
+        assert slug == "sw" and service is True
+        calls.extend(ops)
+        return {}
+
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=call))
+    client = ledger_client.LedgerClient()
+
+    def state(slug):
+        assert slug == "sw"
+        return doc.state(slug)
+
+    monkeypatch.setattr(client, "state", state)
+    result = capacity.apply("sw", config, store, client, rt, 1234567)
+    assert capacity.read(store, "sw")["tasks"] == {"fixed": "claude", "saved": "codex"}
+    assert capacity.read(store, "sw")["effective"] == {"eng": 2, "ci": 0, "plan": 0}
+    assert len(result) == len(calls) == 1
+    assert calls[0]["by"] == "quota capacity 1234567"
+    assert calls[0]["text"] == result[0] and calls[0]["thread"] == "tasks/fixed/comments"
+
+
+def test_legacy_runtime_without_quota_reader_performs_no_capacity_work():
+    from types import SimpleNamespace
+
+    assert capacity.apply("sw", None, None, None, SimpleNamespace(), 1000) == []
+
+
+def test_legacy_effective_caps_still_limit_spawns_when_task_mapping_is_absent():
+    import json
+
+    from scripts.swarm.tick import _spawn_order
+
+    store = _store()
+    config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=0)
+    store.create(config)
+    ledger = FakeLedger([{"id": "e"}])
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"effective": {"eng": 0, "ci": 0, "plan": 0}}))
+    assert _spawn_order("sw", config, store, [], ledger.rows, ledger.state("sw")) == []
