@@ -1,0 +1,56 @@
+{
+  "package": "SV2-IDN-02",
+  "case": "b",
+  "status": "passed",
+  "manifest": {
+    "fixture": "tests/fixtures/swarm_v2/execution-identity.json",
+    "sha256": "64f178abfa892e96a5f3609ebdd96c05d78e45a24836f467c0943f41a3d25769",
+    "tested_commit": "6433fc51d7481099ed8677d039f28114afe64fa8",
+    "evidence_class": "isolated fakeredis metadata fixture; Pods are synthetic; no rollout claim",
+    "grant": "fixture metadata only; no runtime or mutation authority"
+  },
+  "runs": [
+    {
+      "repeat": 0,
+      "refusals": [
+        {
+          "case": "stale_uid",
+          "error": "Pod UID already belongs to another execution",
+          "accepted_state_preserved": true
+        },
+        {
+          "case": "display_label",
+          "error": "unknown execution identity; display labels cannot identify attempts",
+          "accepted_state_preserved": true
+        },
+        {
+          "case": "stale_attempt",
+          "error": "stale or changed execution identity",
+          "accepted_state_preserved": true
+        }
+      ],
+      "execution_identity_conflicts_total": 3
+    },
+    {
+      "repeat": 1,
+      "refusals": [
+        {
+          "case": "stale_uid",
+          "error": "Pod UID already belongs to another execution",
+          "accepted_state_preserved": true
+        },
+        {
+          "case": "display_label",
+          "error": "unknown execution identity; display labels cannot identify attempts",
+          "accepted_state_preserved": true
+        },
+        {
+          "case": "stale_attempt",
+          "error": "stale or changed execution identity",
+          "accepted_state_preserved": true
+        }
+      ],
+      "execution_identity_conflicts_total": 3
+    }
+  ]
+}

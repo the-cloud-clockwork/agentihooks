@@ -1,0 +1,68 @@
+{
+  "package": "SV2-IDN-02",
+  "dependency": "SV2-IDN-01",
+  "integration_gate": "G1",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1518",
+  "status": "implemented; isolated fixture and rollback proofs passed; CI qualification required before merge",
+  "evidence_class": "isolated fakeredis metadata fixture; Pods are synthetic; no rollout claim",
+  "tested_commit": "6433fc51d7481099ed8677d039f28114afe64fa8",
+  "supported_versions": {
+    "execution_metadata": "2.0",
+    "legacy_local_agent_records": "preceding shape retained"
+  },
+  "interfaces": [
+    "AgentRecord execution metadata",
+    "RedisStore.start_execution",
+    "RedisStore.execution",
+    "RedisStore.executions",
+    "RedisStore.execution_occupants",
+    "RedisStore.put_agent",
+    "RedisStore.execution_identity_conflicts_total",
+    "RedisStore.export and restore"
+  ],
+  "states": {
+    "observed": "300 focused tests passed; lint and format passed; preceding strict reader executed successfully",
+    "accepted": "two independent positive rejection and recovery fixtures passed; historical attempts and seat memory preserved; three identity conflicts counted in each negative fixture",
+    "committed": "6433fc51d7481099ed8677d039f28114afe64fa8",
+    "externally_verified": "CI evidence is required before merge and is recorded on the pull request and task proof; no live Pod or rollout claim"
+  },
+  "measurements": {
+    "execution_identity_conflicts_total": {
+      "a": [
+        0,
+        0
+      ],
+      "b": [
+        3,
+        3
+      ],
+      "c": [
+        3,
+        3
+      ]
+    }
+  },
+  "cases": {
+    "a": "evidence/SV2-IDN-02/a-result.json",
+    "b": "evidence/SV2-IDN-02/b-result.json",
+    "c": "evidence/SV2-IDN-02/c-result.json"
+  },
+  "reviews": {
+    "standards": "both admission race and strict reader findings closed at implementation commit; reviewer independently passed both regressions",
+    "spec": "old reader compatibility finding closed; no remaining findings"
+  },
+  "rollback_rehearsal": {
+    "preceding_commit": "bc0fe91d",
+    "strict_reader": "passed",
+    "retained_attempts": 3,
+    "seat_memory": "preserved"
+  },
+  "rollback": "Stop distributed launches before reverting writer; preserve authoritative execution history and seat memory; preceding agents decoder works with unchanged projection fields.",
+  "limitations": [
+    "Redis durability remains the existing swarm persistence and snapshot contract; this metadata package adds no separate database.",
+    "Runtime adapter wiring and authenticated launch grants are owned by subsequent packages.",
+    "Seat execution generation is distinct from task ownership generation and controller epoch.",
+    "Latest recorded occupancy is metadata, including terminal states, and is neither liveness proof nor authority.",
+    "Kubernetes fixtures use synthetic Pod identities; live qualification belongs to its rollout gate."
+  ]
+}
