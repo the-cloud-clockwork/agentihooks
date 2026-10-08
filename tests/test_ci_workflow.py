@@ -147,7 +147,7 @@ def test_unit_matrix_runs_one_shard_per_split():
     assert "--splits" not in command
 
 
-def test_a_hung_unit_shard_fails_within_twice_the_slowest_shard():
+def test_a_hung_unit_shard_fails_near_twice_the_slowest_shard():
     slowest_shard_minutes = 186 / 60
     timeout = _workflow()["jobs"]["unit"]["timeout-minutes"]
     assert 2 * slowest_shard_minutes <= timeout <= 3 * slowest_shard_minutes
