@@ -99,7 +99,7 @@ def _state(items, shortlists):
 
 def _best(doc, i, found, answers):
     yes = [(answers[_name(i, j)].noul, c) for j, c in enumerate(found)]
-    yes = [(p, c) for p, c in yes if isinstance(p, (int, float)) and not isinstance(p, bool) and p >= YES]
+    yes = [(p, c) for p, c in yes if isinstance(p, (int, float)) and not isinstance(p, bool) and p > YES]
     if not yes:
         return None
     probability, (kind, item) = max(yes, key=lambda y: y[0])

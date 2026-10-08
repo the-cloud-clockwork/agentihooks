@@ -1,3 +1,4 @@
+from hooks import classifier
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
 from scripts.swarm_ledger import ledger_duplicates
 from scripts.swarm_ledger.ledger_duplicates import PURPOSE, SHORTLIST, UNCHECKED, Match, find
@@ -127,6 +128,13 @@ def test_the_shortlist_caps_what_is_sent():
     assert [e["id"] for e in state["existing"][:SHORTLIST]] == [f"t{n}" for n in range(SHORTLIST)]
 
 
+def test_a_batch_past_the_classifier_question_limit_is_unchecked_not_an_error():
+    doc = {"phases": [], "tasks": [{"id": f"t{n}", "title": f"Publish wheel {n}", "state": "open"} for n in range(4)]}
+    items = [{"title": "Publish wheel"}] * 33
+
+    assert find(doc, "task", items, judge=classifier.decide) == [UNCHECKED] * 33
+
+
 def test_the_best_confirmed_candidate_wins():
     doc = ledger()
     doc["tasks"].append({"id": "t4", "title": "Publish the wheel to PyPI", "state": "pr", "rank": "high"})
@@ -141,11 +149,13 @@ def test_the_best_confirmed_candidate_wins():
     assert (match.id, match.probability, match.phase, match.phase_title) == ("t4", 0.95, None, None)
 
 
-def test_a_probability_below_the_threshold_or_missing_is_no_match():
+def test_a_probability_at_the_threshold_or_missing_is_no_match():
     assert find(
-        ledger(), "task", [{"title": "Publish the wheel to PyPI"}], judge=Judge(yes={"t1"}, probability=0.59)
+        ledger(), "task", [{"title": "Publish the wheel to PyPI"}], judge=Judge(yes={"t1"}, probability=0.6)
     ) == [None]
-    assert find(ledger(), "task", [{"title": "Publish the wheel to PyPI"}], judge=Judge(yes={"t1"}, probability=0.6))[0]
+    assert find(ledger(), "task", [{"title": "Publish the wheel to PyPI"}], judge=Judge(yes={"t1"}, probability=0.61))[
+        0
+    ]
     assert find(
         ledger(), "task", [{"title": "Publish the wheel to PyPI"}], judge=Judge(yes={"t1"}, probability=True)
     ) == [None]
