@@ -157,7 +157,11 @@ def test_a_quota_handoff_waits_with_its_handoff_while_every_account_is_full(stor
 @pytest.mark.parametrize("claude_only", [False, True])
 @pytest.mark.parametrize("codex_account", ["roomy", "old"])
 def test_quota_successor_falls_back_during_tick_without_losing_its_seat(
-    store, tmp_path, monkeypatch, claude_only, codex_account  # noqa: F811
+    store,
+    tmp_path,
+    monkeypatch,
+    claude_only,
+    codex_account,  # noqa: F811
 ):
     pool = [OLD, capacity.Account("codex", codex_account, "OPEN", 0, 90, 90, 6)]
     ledger, rt = _ledger(), QuotaRuntime(tmp_path, pool, monkeypatch)
