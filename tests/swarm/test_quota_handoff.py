@@ -1,13 +1,17 @@
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 
+import fakeredis
 import pytest
 
-from scripts.swarm import capacity
+from scripts.inbox.store import InboxStore
+from scripts.swarm import capacity, quota_handoff, runtime
 from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.profile_fixture import validated
-from tests.swarm.test_tick import FakeRuntime, store, tasks, workers  # noqa: F401
+from tests.swarm.test_tick import FakeLedger, FakeRuntime, store, tasks, workers  # noqa: F401
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -101,7 +105,7 @@ def test_a_quota_handoff_keeps_the_seat_and_launch_settings_on_another_account(s
         f"spawned {successor.name} for {first.task}",
     ]
     assert successor.seat == first.seat
-    assert runtime.chosen == ["claude"]
+    assert runtime.chosen == []
     assert runtime.tasks[-1]["handoff_envelope"] == envelope
     assert _option(argv, "--route") == "fresh"
     assert [_option(argv, flag) for flag in ("--profile", "--agent", "--model", "--effort")] == [
@@ -150,23 +154,28 @@ def test_a_quota_handoff_waits_with_its_handoff_while_every_account_is_full(stor
     _waits_with_its_handoff(store, ledger, runtime, first, envelope)
 
 
-import json
-from dataclasses import replace
+@pytest.mark.parametrize("claude_only", [False, True])
+def test_quota_successor_falls_back_during_tick_without_losing_its_seat(store, tmp_path, monkeypatch, claude_only):  # noqa: F811
+    pool = [OLD, capacity.Account("codex", "roomy", "OPEN", 0, 90, 90, 6)]
+    ledger, rt = _ledger(), QuotaRuntime(tmp_path, pool, monkeypatch)
+    _, first, envelope = _quota_handoff(store, ledger, rt)
+    pool[0] = replace(OLD, state="DRAIN", cap=0)
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: claude_only)
+    tick("sw", store, ledger, rt, 2)
+    if claude_only:
+        _waits_with_its_handoff(store, ledger, rt, first, envelope)
+    else:
+        (argv,) = rt.argv
+        successor = next(a for a in workers(store) if a.task == first.task and a.name != first.name)
+        assert successor.seat == first.seat
+        assert [_option(argv, flag) for flag in ("--agent", "--route", "--profile")] == ["codex", "roomy", "engineer"]
+        assert "opus" not in argv
+        assert store.handoff("sw", first.task) == ""
 
-import fakeredis
-import pytest
 
-from scripts.inbox.store import InboxStore
-from scripts.swarm import capacity, quota_handoff, runtime
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm.tick import tick
-from tests.swarm.test_tick import FakeLedger, FakeRuntime
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
-def account(name="spent", harness="claude", five=50, week=90, state="NORMAL", sessions=1):
-    return capacity.Account(harness, name, state, sessions, 100 - five, 100 - week)
+def account(name="spent", harness="claude", five=50, week=90, state="OPEN", sessions=1):
+    cap = 0 if state in ("DRAIN", "DRAIN_SOON") else 1 if state == "REDUCE" else 3
+    return capacity.Account(harness, name, state, sessions, 100 - five, 100 - week, cap)
 
 
 @pytest.mark.parametrize(
@@ -206,19 +215,19 @@ def test_warning_must_precede_hard_handoff(environ):
 
 
 def test_a_new_agent_gets_its_own_warning_after_a_reset():
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.put_agent("sw", AgentRecord("first", "eng", "e", harness="claude", account="spent"))
-    key = store.key("sw", "quota-capacity")
-    store.redis.set(key, json.dumps({"accounts": [account().__dict__]}))
-    assert quota_handoff.warn("sw", store, {}) == ["early quota handoff warning sent to first"]
-    store.redis.set(key, json.dumps({"accounts": [account(week=0).__dict__]}))
-    assert quota_handoff.warn("sw", store, {}) == []
-    store.redis.set(key, json.dumps({"accounts": [account().__dict__]}))
-    assert quota_handoff.warn("sw", store, {}) == []
-    store.put_agent("sw", AgentRecord("second", "eng", "f", harness="claude", account="spent"))
-    assert quota_handoff.warn("sw", store, {}) == ["early quota handoff warning sent to second"]
-    assert len(InboxStore(store.redis).pending_items("first")) == 1
-    assert len(InboxStore(store.redis).pending_items("second")) == 1
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    storage.put_agent("sw", AgentRecord("first", "eng", "e", harness="claude", account="spent"))
+    key = storage.key("sw", "quota-capacity")
+    storage.redis.set(key, json.dumps({"accounts": [account().__dict__]}))
+    assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to first"]
+    storage.redis.set(key, json.dumps({"accounts": [account(week=0).__dict__]}))
+    assert quota_handoff.warn("sw", storage, {}) == []
+    storage.redis.set(key, json.dumps({"accounts": [account().__dict__]}))
+    assert quota_handoff.warn("sw", storage, {}) == []
+    storage.put_agent("sw", AgentRecord("second", "eng", "f", harness="claude", account="spent"))
+    assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to second"]
+    assert len(InboxStore(storage.redis).pending_items("first")) == 1
+    assert len(InboxStore(storage.redis).pending_items("second")) == 1
 
 
 @pytest.mark.parametrize("field", ["five_left", "week_left"])
@@ -227,20 +236,22 @@ def test_unknown_quota_does_not_warn(field):
 
 
 def test_tick_warns_once_per_agent_without_retiring_it(monkeypatch):
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, state="running", code="a1b2c3")
-    store.create(config)
+    storage.create(config)
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "e", harness="claude", account="spent", state="working")
-    store.put_agent("sw", agent)
-    store.claim("sw", "e", agent.name, 60_000)
+    storage.put_agent("sw", agent)
+    storage.claim("sw", "e", agent.name, 60_000)
     ledger = FakeLedger([{"id": "e", "state": "claimed", "claimed_by": agent.name}])
     ledger.comment = lambda *args, **kwargs: None
     rt = FakeRuntime()
     rt.live.add(agent.name)
-    rt.quota_capacity = lambda cfg, agents, now, demand: capacity.calculate(cfg, [account()], agents, 3, 5, demand)
-    tick("sw", store, ledger, rt, 1000)
-    tick("sw", store, ledger, rt, 2000)
-    messages = InboxStore(store.redis).pending_items(agent.name)
+    rt.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
+        cfg, [account()], agents, demand, requirements
+    )
+    tick("sw", storage, ledger, rt, 1000)
+    tick("sw", storage, ledger, rt, 2000)
+    messages = InboxStore(storage.redis).pending_items(agent.name)
     assert len(messages) == 1
     assert messages[0].text == (
         "QUOTA HANDOFF WARNING: claude account spent has used 90% of its week window. "
@@ -254,17 +265,19 @@ def test_tick_warns_once_per_agent_without_retiring_it(monkeypatch):
     assert "--reason quota" in messages[0].text
     assert not rt.killed
     assert not rt.nudged
-    assert store.agents("sw")[0].name == agent.name
+    assert storage.agents("sw")[0].name == agent.name
 
 
 def test_warning_matches_account_and_harness_and_skips_finished_agents():
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     for name, harness, state in [("healthy", "claude", "working"), ("finished", "codex", "finished")]:
-        store.put_agent("sw", AgentRecord(name, "eng", "e", harness=harness, account="spent", state=state))
-    store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"accounts": [account(harness="codex").__dict__]}))
-    assert quota_handoff.warn("sw", store, {}) == []
-    assert not InboxStore(store.redis).pending_items("healthy")
-    assert not InboxStore(store.redis).pending_items("finished")
+        storage.put_agent("sw", AgentRecord(name, "eng", "e", harness=harness, account="spent", state=state))
+    storage.redis.set(
+        storage.key("sw", "quota-capacity"), json.dumps({"accounts": [account(harness="codex").__dict__]})
+    )
+    assert quota_handoff.warn("sw", storage, {}) == []
+    assert not InboxStore(storage.redis).pending_items("healthy")
+    assert not InboxStore(storage.redis).pending_items("finished")
 
 
 @pytest.mark.parametrize("state", ["DRAIN", "DRAIN_SOON", "REDUCE"])
@@ -276,14 +289,14 @@ def test_successor_uses_most_routing_left_and_skips_unplaceable_accounts(state):
         account("best", five=10, week=20),
         account("cx", "codex", five=0, week=0),
     ]
-    assert quota_handoff.successor(rows, 3, 5, True, quota_handoff.Thresholds()).name == "best"
+    assert quota_handoff.successor(rows, True, quota_handoff.Thresholds()).name == "best"
 
 
 def test_successor_falls_back_to_codex_and_respects_profile_and_floor():
     rows = [account("cc", state="DRAIN"), account("cx", "codex", five=10, week=20)]
-    assert quota_handoff.successor(rows, 3, 5, True, quota_handoff.Thresholds()) == rows[1]
-    assert quota_handoff.successor(rows, 3, 5, False, quota_handoff.Thresholds()) is None
-    assert quota_handoff.successor(rows, 3, 81, True, quota_handoff.Thresholds()) is None
+    assert quota_handoff.successor(rows, True, quota_handoff.Thresholds()) == rows[1]
+    assert quota_handoff.successor(rows, False, quota_handoff.Thresholds()) is None
+    assert quota_handoff.successor([replace(rows[1], cap=0)], True, quota_handoff.Thresholds()) is None
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])

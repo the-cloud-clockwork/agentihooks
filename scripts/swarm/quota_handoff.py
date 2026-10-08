@@ -24,7 +24,7 @@ class Thresholds:
 
 
 def trigger(account: capacity.Account, thresholds: Thresholds) -> str:
-    if account.five_left is None or account.week_left is None:
+    if account.state == "UNKNOWN" or account.five_left is None or account.week_left is None:
         return ""
     if 100 - account.week_left >= thresholds.week:
         return "week"
@@ -62,14 +62,16 @@ def warn(slug: str, store: RedisStore, environ: dict) -> list[str]:
     return actions
 
 
-def successor(
-    accounts: list[capacity.Account], cap: int, floor: float, allow_codex: bool, thresholds: Thresholds
-) -> capacity.Account | None:
+def successor(accounts: list[capacity.Account], allow_codex: bool, thresholds: Thresholds) -> capacity.Account | None:
     for harness in ("claude", "codex") if allow_codex else ("claude",):
         eligible = [
             row
             for row in accounts
-            if row.harness == harness and capacity.free_seats(row, cap, floor) and not trigger(row, thresholds)
+            if row.harness == harness
+            and capacity.free_seats(row)
+            and row.five_left is not None
+            and row.week_left is not None
+            and not trigger(row, thresholds)
         ]
         if eligible:
             return min(eligible, key=lambda row: (-min(row.five_left, row.week_left), row.name))
