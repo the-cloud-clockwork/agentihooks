@@ -258,6 +258,9 @@ details.panel-fold[open]::details-content { display: flex; flex-direction: colum
 .who { font-weight: 700; color: var(--text-2); }
 .mine .who { color: var(--accent-2); }
 .entry-body { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.his-words { margin-top: 6px; }
+.his-words .label { font-size: var(--fs-meta); color: var(--dim); }
+.his-words blockquote { margin: 2px 0 0; padding-left: 10px; border-left: 2px solid var(--edge); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .entry-actions { margin-left: auto; display: flex; gap: 10px; }
 .link { background: none; border: 0; padding: 0; font: inherit; font-size: var(--fs-meta); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); cursor: pointer; transition: color .15s; }
 .link:hover, .link:focus-visible { color: var(--accent); outline: none; }

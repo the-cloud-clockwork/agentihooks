@@ -19,6 +19,7 @@ from typing import Any
 
 from scripts import session_bands
 from scripts.claude_config import claude_home
+from scripts.routing.envs import subscription_child
 from scripts.routing.slots import Slot
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
@@ -284,8 +285,7 @@ def _probe_command(model: str, claude_bin: str = "claude", include_partial: bool
 
 
 def _child_environment(credential: Credential, environ: Mapping[str, str]) -> dict[str, str]:
-    child = {name: value for name, value in environ.items() if not name.startswith(TOKEN_PREFIX)}
-    child.pop("ANTHROPIC_API_KEY", None)
+    child = {name: value for name, value in subscription_child(environ).items() if not name.startswith(TOKEN_PREFIX)}
     child["CLAUDE_CODE_OAUTH_TOKEN"] = credential.token
     return child
 
