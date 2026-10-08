@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x_load_state__mutmut_7:556cf541cb4ff467f406dc8d5b9f09137f3c527dc99a59099c84c2ca032c63e7": {
+    "reader": "Standards",
+    "reason": "Python resolves UTF-8 and utf-8 to the same utf_8 codec, so the stored file reads back as identical text."
+  }
+}
