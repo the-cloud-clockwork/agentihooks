@@ -10,6 +10,8 @@ from pathlib import Path
 
 import ledger_core as core
 
+from .sqlite import BEGIN_IMMEDIATE, STORED
+
 BACKUP = ".imported"
 REGISTRIES = {"bin": ".bin.json", "restored": ".bin-restored.json"}
 FAILED = {}
@@ -63,7 +65,7 @@ def backup(directory: Path, name: str, found: list) -> Path:
 def import_files(repository, slug: str, found: list) -> None:
     html_path, json_path = repository.directory / f"{slug}.html", repository.directory / f"{slug}.json"
     page = html_path.read_text(encoding="utf-8") if html_path in found else ""
-    doc, meta, created = load_state(json_path, core.parse_seed(page) if page else None, core)
+    doc, meta, created = load_state(json_path, core.parse_seed(page) if page else None)
     if created:
         repository.create_document(slug, doc, meta, core.read_token(page))
     else:
@@ -75,21 +77,26 @@ def adopt_registries(repository) -> None:
         path = repository.directory / filename
         if not path.exists():
             continue
-        try:
-            entries = json.loads(path.read_text(encoding="utf-8"))
-        except ValueError:
-            entries = {}
-        backup(repository.directory, filename.strip(".").removesuffix(".json"), [path])
+        entries = registry_file(path)
+        backup(repository.directory, name, [path])
         with repository.connect() as connection, connection:
-            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(BEGIN_IMMEDIATE)
             current = repository.registry(name, connection)
-            repository.save_registry(connection, name, {**(entries if isinstance(entries, dict) else {}), **current})
+            repository.save_registry(connection, name, {**entries, **current})
         path.unlink()
+
+
+def registry_file(path: Path) -> dict:
+    try:
+        entries = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return {}
+    return entries if isinstance(entries, dict) else {}
 
 
 def stored(repository, slug: str) -> bool:
     with repository.connect() as connection:
-        return connection.execute("SELECT 1 FROM ledgers WHERE slug=?", (slug,)).fetchone() is not None
+        return connection.execute(STORED, (slug,)).fetchone() is not None
 
 
 def adopt_bin(repository) -> None:

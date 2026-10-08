@@ -125,8 +125,8 @@ def test_bin_indexes_merge_into_the_registry_and_are_set_aside(tmp_path):
     (directory / ".bin-restored.json").write_text("not json", encoding="utf-8")
     repo = stored(directory)
     repo.list_summaries()
-    assert repo.registry("bin") == {"gone": 5}
-    assert repo.registry("restored") == {}
+    assert sqlite.read_registry(directory, "bin") == {"gone": 5}
+    assert sqlite.read_registry(directory, "restored") == {}
     assert not (directory / ".bin.json").exists() and not (directory / ".bin-restored.json").exists()
     kept = sorted(path.name for backup in (directory / legacy.BACKUP).iterdir() for path in backup.iterdir())
     assert kept == [".bin-restored.json", ".bin.json"]
@@ -250,7 +250,7 @@ def test_adopt_registries_processes_restored_even_when_bin_file_is_absent(tmp_pa
     (directory / ".bin-restored.json").write_text(json.dumps({"r": 1}), encoding="utf-8")
     repo = stored(directory)
     legacy.adopt_registries(repo)
-    assert repo.registry("restored") == {"r": 1}
+    assert sqlite.read_registry(directory, "restored") == {"r": 1}
     assert not (directory / ".bin-restored.json").exists()
 
 
@@ -279,7 +279,7 @@ def test_adopt_registries_backs_up_under_the_exact_stripped_registry_name(tmp_pa
     legacy.adopt_registries(repo)
     names = [p.name for p in (directory / legacy.BACKUP).iterdir()]
     assert any(re.fullmatch(r"bin-\d+-\d+", name) for name in names)
-    assert any(re.fullmatch(r"bin-restored-\d+-\d+", name) for name in names)
+    assert any(re.fullmatch(r"restored-\d+-\d+", name) for name in names)
 
 
 def test_adopt_registries_merges_new_entries_over_what_is_already_stored(tmp_path):
@@ -290,7 +290,7 @@ def test_adopt_registries_merges_new_entries_over_what_is_already_stored(tmp_pat
         repo.save_registry(connection, "bin", {"already-there": 10})
     (directory / ".bin.json").write_text(json.dumps({"from-file": 20}), encoding="utf-8")
     legacy.adopt_registries(repo)
-    assert repo.registry("bin") == {"already-there": 10, "from-file": 20}
+    assert sqlite.read_registry(directory, "bin") == {"already-there": 10, "from-file": 20}
 
 
 def test_candidates_requires_actual_files_for_a_named_slug(tmp_path):

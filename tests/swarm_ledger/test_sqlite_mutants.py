@@ -197,19 +197,6 @@ def test_entry_keeps_a_stale_readers_cache_when_not_asking_for_latest(tmp_path):
     assert kept is ahead
 
 
-def test_entry_rereads_when_latest_is_requested_even_though_the_cache_is_newer(tmp_path):
-    r = store(tmp_path)
-    r.create("ledger", CONTENT)
-    with r.connect() as connection:
-        base = r._entry(connection, "ledger")
-    ahead = Entry(base.generation + 5, base.text, base.state)
-    r._cache[r._key("ledger")] = ahead
-    with r.connect() as connection:
-        got = r._entry(connection, "ledger", latest=True)
-    assert got is not ahead
-    assert got.generation == base.generation
-
-
 def test_remember_stores_the_first_entry_for_a_slug(tmp_path):
     r = store(tmp_path)
     entry = Entry(3, "text", {})
@@ -230,15 +217,6 @@ def test_remember_only_overwrites_with_a_strictly_newer_generation(tmp_path):
     newer = Entry(6, "text-6", {})
     r._remember("ledger", newer)
     assert r._cache[r._key("ledger")] is newer
-
-
-def test_remember_always_overwrites_when_latest_is_true(tmp_path):
-    r = store(tmp_path)
-    current = Entry(10, "text-10", {})
-    r._remember("ledger", current)
-    older = Entry(3, "text-3", {})
-    r._remember("ledger", older, latest=True)
-    assert r._cache[r._key("ledger")] is older
 
 
 def test_write_advances_the_generation_updates_the_row_and_appends_events(tmp_path, monkeypatch):
@@ -379,7 +357,6 @@ def test_registry_round_trips_through_save_registry_and_the_module_level_reader(
         r.save_registry(connection, "bin", {"a": 1, "b": [2, 3]})
     with r.connect() as connection:
         assert r.registry("bin", connection) == {"a": 1, "b": [2, 3]}
-    assert r.registry("bin") == {"a": 1, "b": [2, 3]}
     assert read_registry(tmp_path / "ledgers", "bin") == {"a": 1, "b": [2, 3]}
     assert read_registry(tmp_path / "ledgers", "missing-registry") == {}
 

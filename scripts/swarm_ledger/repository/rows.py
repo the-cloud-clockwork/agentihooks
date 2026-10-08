@@ -1,6 +1,6 @@
 import json
 
-TABLES = ("fields", "resources", "threads")
+FIELDS, RESOURCES, THREADS = TABLES = ("fields", "resources", "threads")
 COLLECTIONS = frozenset(
     (
         "phases",
@@ -26,9 +26,9 @@ def children(item, parts, table):
     """(child, parts, key, position, table) of a container, in the path scheme flatten stores."""
     if isinstance(item, dict):
         for index, (name, child) in enumerate(item.items()):
-            bucket = "threads" if name in ("comments", "answers") else table
+            bucket = THREADS if name in ("comments", "answers") else table
             if not parts and name in COLLECTIONS:
-                bucket = "resources"
+                bucket = RESOURCES
             yield child, [*parts, name], name, index, bucket
     elif isinstance(item, list):
         seen = {}

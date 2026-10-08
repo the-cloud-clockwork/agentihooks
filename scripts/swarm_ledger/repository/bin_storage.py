@@ -4,6 +4,8 @@ import ledger_bin as domain
 import ledger_core as core
 import ledger_media
 
+from .sqlite import BEGIN_IMMEDIATE, read_registry
+
 
 def _repository():
     from . import legacy, repository
@@ -16,21 +18,24 @@ def _repository():
 def _transaction():
     repository = _repository()
     with domain.LOCK, repository.connect() as connection, connection:
-        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(BEGIN_IMMEDIATE)
         yield repository, connection
 
 
+def _registry(name):
+    return read_registry(_repository().directory, name)
+
+
 def restored():
-    return {k: v for k, v in _repository().registry("restored").items() if isinstance(v, int)}
+    return {k: v for k, v in _registry("restored").items() if isinstance(v, int)}
 
 
 def entries():
-    return {k: v for k, v in _repository().registry("bin").items() if isinstance(v, int)}
+    return {k: v for k, v in _registry("bin").items() if isinstance(v, int)}
 
 
 def registries():
-    repository = _repository()
-    return {"bin": repository.registry("bin"), "restored": repository.registry("restored")}
+    return {"bin": _registry("bin"), "restored": _registry("restored")}
 
 
 def delete(slug, now=None):

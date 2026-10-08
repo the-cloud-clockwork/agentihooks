@@ -22,6 +22,16 @@ CREATE INDEX IF NOT EXISTS events_position ON events(slug,position);
 """
 PER_LEDGER = (*TABLES, "ledgers", "revisions", "seed_base", "seed_deltas", "events")
 GENERATION_SHIFT = 20
+BEGIN = "BEGIN"
+BEGIN_IMMEDIATE = "BEGIN IMMEDIATE"
+STORED = "SELECT 1 FROM ledgers WHERE slug=?"
+GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
+TOKEN = "SELECT token FROM ledgers WHERE slug=?"
+SUMMARIES = "SELECT summary FROM ledgers ORDER BY touched_at DESC, slug"
+REGISTRY = "SELECT path,value FROM registry WHERE slug=?"
+UPDATE = "UPDATE ledgers SET revision=?, generation=?, summary=?, touched_at=? WHERE slug=?"
+INSERT = "INSERT INTO ledgers VALUES (?, ?, ?, ?, ?, ?)"
+PATH_END = "\x7f"
 SUMMARY_KEYS = ("slug", "title", "overview", "closed_at", "size", "open", "done", "updated_at")
 
 
@@ -73,7 +83,7 @@ def read_partial(connection, slug: str, keys: tuple) -> dict:
             for path, parent, key, position, kind, value in connection.execute(
                 f"SELECT path, parent, key, position, kind, value FROM {table} "
                 f"WHERE slug=? AND (path IN ({marks}) OR (path > ? AND path < ?))",
-                (slug, *exact, prefix, prefix + "\x7f"),
+                (slug, *exact, prefix, prefix + PATH_END),
             ):
                 rows[path] = (table, parent, key, position, kind, value)
     if "[]" not in rows:
@@ -113,7 +123,7 @@ def read_ledger(directory, slug: str, *keys: str) -> dict | None:
             return None
         try:
             with connection:
-                connection.execute("BEGIN")
+                connection.execute(BEGIN)
                 return read_partial(connection, slug, tuple(key_parts(key) for key in keys))
         except (Missing, sqlite3.OperationalError):
             return None
@@ -124,10 +134,7 @@ def read_registry(directory, name: str) -> dict:
         if connection is None:
             return {}
         try:
-            return {
-                key: json.loads(value)
-                for key, value in connection.execute("SELECT path,value FROM registry WHERE slug=?", (name,))
-            }
+            return {key: json.loads(value) for key, value in connection.execute(REGISTRY, (name,))}
         except sqlite3.OperationalError:
             return {}
 
@@ -148,8 +155,13 @@ def read_ids(directory, slug: str, collection: str) -> tuple:
             ]
         except sqlite3.OperationalError:
             return ()
-    found = (json.loads(path)[-1] for _, path in sorted(rows))
+    found = (json.loads(path)[1] for _, path in sorted(rows))
     return tuple(part[1] for part in found if part[0] == "id")
+
+
+def without_events(state: dict) -> dict:
+    """The document as its rows hold it: the event log lives in its own table."""
+    return {**state, "_meta": {key: value for key, value in state["_meta"].items() if key != "events"}}
 
 
 class SQLiteLedgerRepository:
@@ -211,25 +223,25 @@ class SQLiteLedgerRepository:
     def _key(self, slug):
         return str(self.path), slug
 
-    def _entry(self, connection, slug: str, latest: bool = False) -> Entry:
+    def _entry(self, connection, slug: str) -> Entry:
         """The stored ledger; a reader whose snapshot predates a cached write gets that newer committed copy."""
-        row = connection.execute("SELECT generation FROM ledgers WHERE slug=?", (slug,)).fetchone()
+        row = connection.execute(GENERATION, (slug,)).fetchone()
         if row is None:
             raise Missing(slug)
         cached = self._cache.get(self._key(slug))
-        if cached is not None and (cached.generation == row[0] or not latest and cached.generation > row[0]):
+        if cached is not None and cached.generation >= row[0]:
             return cached
         state = assemble(read_rows(connection, slug))
         if "events" in state["_meta"]:
             state["_meta"]["events"] = read_events(connection, slug)
         entry = Entry(row[0], encode(state), state)
-        self._remember(slug, entry, latest)
+        self._remember(slug, entry)
         return entry
 
-    def _remember(self, slug: str, entry: Entry, latest: bool = False) -> None:
+    def _remember(self, slug: str, entry: Entry) -> None:
         with self._guard:
             current = self._cache.get(self._key(slug))
-            if latest or current is None or current.generation < entry.generation:
+            if current is None or current.generation < entry.generation:
                 self._cache[self._key(slug)] = entry
 
     def _adopt(self, slug: str | None = None) -> None:
@@ -240,25 +252,25 @@ class SQLiteLedgerRepository:
     def exists(self, slug: str) -> bool:
         self._adopt(slug)
         with self.connect() as connection:
-            return connection.execute("SELECT 1 FROM ledgers WHERE slug=?", (slug,)).fetchone() is not None
+            return connection.execute(STORED, (slug,)).fetchone() is not None
 
     def get_document(self, slug: str) -> dict:
         self._adopt(slug)
         with self.connect() as connection, connection:
-            connection.execute("BEGIN")
+            connection.execute(BEGIN)
             return json.loads(self._entry(connection, slug).text)
 
     def read(self, slug: str, *keys: str) -> dict:
         """Only the named parts of a ledger, such as `overview`, `_meta.members` or `tasks/t1`."""
         self._adopt(slug)
         with self.connect() as connection, connection:
-            connection.execute("BEGIN")
+            connection.execute(BEGIN)
             return read_partial(connection, slug, tuple(key_parts(key) for key in keys))
 
     def token(self, slug: str) -> str | None:
         self._adopt(slug)
         with self.connect() as connection:
-            row = connection.execute("SELECT token FROM ledgers WHERE slug=?", (slug,)).fetchone()
+            row = connection.execute(TOKEN, (slug,)).fetchone()
         return None if row is None else row[0]
 
     def apply_ops(
@@ -269,34 +281,29 @@ class SQLiteLedgerRepository:
         self._adopt(slug)
         with self.domain.LOCK, self.connect() as connection:
             with connection:
-                connection.execute("BEGIN IMMEDIATE")
-                entry = self._entry(connection, slug, latest=True)
+                connection.execute(BEGIN_IMMEDIATE)
+                entry = self._entry(connection, slug)
                 state = json.loads(entry.text)
                 meta = state.pop("_meta")
                 rejected, ctx = mutation.apply(slug, state, meta, self.domain, changes, ops, gate)
                 state["_meta"] = meta
                 written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
-            self._remember(slug, written, latest=True)
+            self._remember(slug, written)
         return json.loads(written.text), rejected
 
     def _write(self, connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
-        old = {**entry.state, "_meta": {**entry.state["_meta"]}}
-        new = {**state, "_meta": {**state["_meta"]}}
-        for meta in (old["_meta"], new["_meta"]):
-            if "events" in meta:
-                meta["events"] = []
-        before, after = diff(old, new)
+        before, after = diff(*(without_events(document) for document in (entry.state, state)))
         write_rows(connection, slug, before, after)
         append_events(connection, slug, events, self.domain.EVENTS_KEPT)
         generation = entry.generation + 1
         connection.execute(
-            "UPDATE ledgers SET revision=?, generation=?, summary=?, touched_at=? WHERE slug=?",
+            UPDATE,
             (state["_meta"]["rev"], generation, encode(summarize(slug, state)), self.domain.now_ms(), slug),
         )
         return Entry(generation, encode(state), state)
 
     def _insert(self, connection, slug: str, state: dict, token: str, seeds: dict | None = None) -> None:
-        previous = connection.execute("SELECT generation FROM ledgers WHERE slug=?", (slug,)).fetchone()
+        previous = connection.execute(GENERATION, (slug,)).fetchone()
         now = self.domain.now_ms()
         generation = max(now << GENERATION_SHIFT, previous[0] + 1 if previous else 0)
         for table in PER_LEDGER:
@@ -309,7 +316,7 @@ class SQLiteLedgerRepository:
         write_events(connection, slug, events)
         write_seeds(connection, slug, seeds or {})
         connection.execute(
-            "INSERT INTO ledgers VALUES (?, ?, ?, ?, ?, ?)",
+            INSERT,
             (
                 slug,
                 state["_meta"]["rev"],
@@ -328,8 +335,8 @@ class SQLiteLedgerRepository:
         from . import mutation
 
         with self.domain.LOCK, self.connect() as connection, connection:
-            connection.execute("BEGIN IMMEDIATE")
-            if not replace and connection.execute("SELECT 1 FROM ledgers WHERE slug=?", (slug,)).fetchone():
+            connection.execute(BEGIN_IMMEDIATE)
+            if not replace and connection.execute(STORED, (slug,)).fetchone():
                 return False
             mutation.apply(slug, doc, meta, self.domain, created=True)
             self._insert(connection, slug, {**doc, "_meta": meta}, token or secrets.token_urlsafe(24))
@@ -342,8 +349,8 @@ class SQLiteLedgerRepository:
         if seeds is not None:
             stored["_meta"]["seeds"] = {}
         with self.domain.LOCK, self.connect() as connection, connection:
-            connection.execute("BEGIN IMMEDIATE")
-            if not replace and connection.execute("SELECT 1 FROM ledgers WHERE slug=?", (slug,)).fetchone():
+            connection.execute(BEGIN_IMMEDIATE)
+            if not replace and connection.execute(STORED, (slug,)).fetchone():
                 raise ValueError(f"ledger {slug} exists; import refuses to replace it")
             self._insert(connection, slug, stored, token or secrets.token_urlsafe(24), seeds)
             if self._export(connection, slug) != json.loads(encode(state)):
@@ -360,13 +367,13 @@ class SQLiteLedgerRepository:
         """The complete stored document, seeds included: the explicit interchange read."""
         self._adopt(slug)
         with self.connect() as connection, connection:
-            connection.execute("BEGIN")
+            connection.execute(BEGIN)
             return self._export(connection, slug)
 
     def events_since(self, slug: str, revision: int) -> list:
         self._adopt(slug)
         with self.connect() as connection:
-            if connection.execute("SELECT 1 FROM ledgers WHERE slug=?", (slug,)).fetchone() is None:
+            if connection.execute(STORED, (slug,)).fetchone() is None:
                 raise Missing(slug)
             return read_events(connection, slug, revision)
 
@@ -376,10 +383,7 @@ class SQLiteLedgerRepository:
             self._adopt()
             with self.connect() as connection:
                 return self.summaries(connection)
-        return [
-            json.loads(summary)
-            for (summary,) in connection.execute("SELECT summary FROM ledgers ORDER BY touched_at DESC, slug")
-        ]
+        return [json.loads(summary) for (summary,) in connection.execute(SUMMARIES)]
 
     def list_summaries(self) -> list:
         return [{key: summary[key] for key in SUMMARY_KEYS} for summary in self.summaries()]
@@ -389,14 +393,8 @@ class SQLiteLedgerRepository:
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         self._cache.pop(self._key(slug), None)
 
-    def registry(self, name: str, connection=None) -> dict:
-        if connection is None:
-            with self.connect() as connection:
-                return self.registry(name, connection)
-        return {
-            key: json.loads(value)
-            for key, value in connection.execute("SELECT path,value FROM registry WHERE slug=?", (name,))
-        }
+    def registry(self, name: str, connection) -> dict:
+        return {key: json.loads(value) for key, value in connection.execute(REGISTRY, (name,))}
 
     def save_registry(self, connection, name: str, entries: dict) -> None:
         sync_values(connection, "registry", name, {key: encode(value) for key, value in entries.items()})
