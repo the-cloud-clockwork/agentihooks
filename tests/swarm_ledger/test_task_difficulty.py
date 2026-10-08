@@ -116,7 +116,18 @@ def test_the_server_schema_accepts_a_task_add_difficulty():
     schema = schemas.operation_schema("task_add")
     op = {"op": "task_add", "id": "a", "difficulty": "M", "difficulty_source": "default", "difficulty_confidence": 0.5}
     assert schemas.mismatched_field(schema, op) is None
-    assert schemas.mismatched_field(schema, {**op, "difficulty_confidence": "high"}) == "difficulty_confidence"
+    for bad in ("high", 1.5, -0.1):
+        assert schemas.mismatched_field(schema, {**op, "difficulty_confidence": bad}) == "difficulty_confidence"
+    for edge in (0, 1):
+        assert schemas.mismatched_field(schema, {**op, "difficulty_confidence": edge}) is None
+
+
+@pytest.mark.parametrize("edge", [0, 1])
+def test_a_confidence_at_either_bound_is_kept(edge):
+    state, rejected = update(
+        "swarm", {"difficulty": "M", "difficulty_source": "classifier", "difficulty_confidence": edge}
+    )
+    assert (rejected, sized(state)) == ([], ("M", "classifier", edge))
 
 
 def test_task_cli_sends_the_difficulty(monkeypatch):

@@ -136,11 +136,12 @@ def check_difficulty(fields):
         return
     if "difficulty" not in fields:
         raise ValueError("difficulty_source and difficulty_confidence come with a difficulty")
+    fields = sized(fields)
     if fields["difficulty"] not in DIFFICULTIES:
         raise ValueError(f"difficulty must be one of {DIFFICULTIES}")
-    if fields.get("difficulty_source", "operator") not in DIFFICULTY_SOURCES:
+    if fields["difficulty_source"] not in DIFFICULTY_SOURCES:
         raise ValueError(f"difficulty_source must be one of {DIFFICULTY_SOURCES}")
-    confidence = fields.get("difficulty_confidence", 1.0)
+    confidence = fields["difficulty_confidence"]
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
         raise ValueError("difficulty_confidence must be a number from 0 to 1")
 
