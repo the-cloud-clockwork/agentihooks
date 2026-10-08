@@ -1,9 +1,6 @@
 import json
-<<<<<<< HEAD
 import logging
-=======
 import re
->>>>>>> origin/dev
 from types import ModuleType
 from urllib.parse import parse_qs, urlsplit
 
