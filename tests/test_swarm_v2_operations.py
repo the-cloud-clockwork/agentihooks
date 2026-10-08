@@ -397,3 +397,19 @@ def test_package_acceptance_cases_pass_on_independent_fixtures(case):
     assert result["passed"]
     assert len(result["independent_fixtures"]) == 2
     assert all(run["passed"] for run in result["independent_fixtures"])
+
+
+def test_stale_entry_cannot_stop_current_operation_recovery(fixture):
+    store, agent, transport, operations = fixture
+    stale = operations.execute("fixture", request(agent))
+    current = store.start_execution("fixture", replace(agent, execution_id="", generation=0), agent.execution_id)
+    transport.lose_ack = True
+    pending = operations.execute("fixture", request(current))
+    recovered = Operations(RedisStore(store.redis), [transport], dispatch_enabled=False).recover("fixture")
+    by_id = {operation.operation_id: operation for operation in recovered}
+    assert by_id[stale.operation_id].phase is Phase.REFUSED
+    assert store.operation_journal.get("fixture", stale.operation_id) == stale
+    assert by_id[pending.operation_id] == replace(pending, phase=Phase.APPLIED, result={"uid": "object-2"})
+    assert store.operation_journal.get("fixture", pending.operation_id) == by_id[pending.operation_id]
+    assert transport.creations == 2
+    assert operations.runtime_ambiguous_operations("fixture") == 1

@@ -195,7 +195,11 @@ class Operations:
         for operation in self.unresolved(slug):
             transport = self.transports.get(operation.backend)
             observed = self._observe(transport, operation) if transport else Observation(Phase.UNKNOWN)
-            recovered.append(self.journal.settle(slug, operation, observed))
+            try:
+                result = self.journal.settle(slug, operation, observed)
+            except OperationConflict:
+                result = replace(operation, phase=Phase.REFUSED, result={})
+            recovered.append(result)
         return recovered
 
     def runtime_ambiguous_operations(self, slug: str) -> int:
