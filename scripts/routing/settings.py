@@ -107,7 +107,7 @@ class FileSettings(SettingsStore):
         if value is not None:
             data["settings"][key] = value
         data["history"].append(entry)
-        self.path.parent.mkdir(exist_ok=True)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(data))
 
 

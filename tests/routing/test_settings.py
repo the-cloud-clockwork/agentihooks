@@ -137,7 +137,8 @@ def test_the_file_store_lives_in_the_agentihooks_home(home, tmp_path):
     assert [p.name for p in (tmp_path / "ah").iterdir()] == ["routing-settings.json"]
 
 
-def test_the_file_store_defaults_to_the_agentihooks_folder_in_the_user_home():
+def test_the_file_store_defaults_to_the_agentihooks_folder_in_the_user_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "user")
     settings.open_store(None, {}).set("codex-api-weight", 3, "operator", NOW)
     assert settings.open_store(None, {"AGENTIHOOKS_HOME": ""}).get("codex-api-weight") == 3
-    assert (Path.home() / ".agentihooks" / "routing-settings.json").exists()
+    assert (tmp_path / "user" / ".agentihooks" / "routing-settings.json").exists()
