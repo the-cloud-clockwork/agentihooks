@@ -170,12 +170,13 @@ class Done(WtBase):
         gh = self.bin / "gh"
         gh.write_text(
             f"#!{BASH}\nset -euo pipefail\n"
-            f'if [[ "$*" == *"--state open"* && "$(<"{state}")" != merged ]]; then\n'
+            f'current="$(<"{state}")"\n'
+            'if [[ "$current" != merged && ( "$*" == *"--state all"* || "$current" != closed ) ]]; then\n'
             '  echo "https://github.com/o/r/pull/9"\n'
             "fi\n"
         )
         gh.chmod(0o755)
-        for value in ("open", "dropped"):
+        for value in ("open", "dropped", "closed"):
             state.write_text(value)
             result = self.run_wt("done", "queue-one", "--repo", str(self.primary))
             self.assertNotEqual(result.returncode, 0)
@@ -199,6 +200,17 @@ class Done(WtBase):
         self.assertIn("cannot read", result.stderr)
         self.assertTrue(dest.is_dir())
         self.assertTrue(self.branch_exists("queue-unknown"))
+
+
+    def test_done_keeps_a_published_worktree_when_github_cli_is_missing_even_with_force(self):
+        dest = self._new("queue-no-gh")
+        _git(dest, "push", "--quiet", "-u", "origin", "queue-no-gh", env=self.gitenv)
+        for flags in ((), ("--force",)):
+            result = self.run_wt("done", "queue-no-gh", "--repo", str(self.primary), *flags)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("cannot verify", result.stderr)
+            self.assertTrue(dest.is_dir())
+            self.assertTrue(self.branch_exists("queue-no-gh"))
 
 
 CONCURRENT_GIT = """#!{bash}
