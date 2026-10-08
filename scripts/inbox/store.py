@@ -561,12 +561,12 @@ class InboxStore:
         pipe.watch(pending)
         return pipe.zscore(pending, item.id) is not None and pipe.zcard(pending) == 1
 
-    def stage_move(self, pipe, item, moved, by, last):
-        """pipe is already in MULTI."""
+    def stage_move(self, pipe, item, moved, by, last, indexed=True):
+        """pipe is already in MULTI; indexed=False keeps a delivered item out of the redelivery index."""
         pipe.hset(self.key("item", item.id), mapping=_fields(moved))
         if moved.state in CLOSED:
             pipe.zrem(self.key("open", item.address), item.id)
-        if moved.state == "delivered":
+        if moved.state == "delivered" and indexed:
             pipe.zadd(self.key("delivered"), {item.id: moved.updated_at})
         else:
             pipe.zrem(self.key("delivered"), item.id)
