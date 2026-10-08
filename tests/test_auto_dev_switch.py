@@ -51,6 +51,8 @@ def test_session_start_switches_only_when_forced(repo_on_main, tmp_path, setting
 
     assert result.returncode == 0, result.stderr
     assert _git(repo_on_main, "rev-parse", "--abbrev-ref", "HEAD") == branch
+    assert ("checkout:" in _git(repo_on_main, "reflog")) == (branch == "dev")
+    assert ("[auto-dev-switch]" in result.stdout) == (branch == "dev")
 
 
 def test_setting_defaults_to_false(tmp_path):
