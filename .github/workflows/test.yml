@@ -150,7 +150,7 @@ jobs:
               exit 0
             fi
           done
-          echo "::error::No dev push Tests run on base $BASE ($sha) kept live durations-merged and coverage-baseline artifacts."
+          echo "::error::No dev push Tests run on base $BASE ($sha) kept live durations-merged and coverage-baseline artifacts; pin a base whose dev push run passed and finished."
           exit 1
 
       - name: Download the dev durations

@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -300,7 +301,7 @@ def test_the_lookup_is_red_when_no_dev_push_run_passed(lookup):
 
 
 def _runs_on(step, event):
-    condition = step.get("if", "true").removeprefix("${{").removesuffix("}}").strip()
+    condition = str(step.get("if", "true")).removeprefix("${{").removesuffix("}}").strip()
     if condition == "true":
         return True
     for clause in condition.split("||"):
@@ -361,10 +362,12 @@ def dispatch_lookup(tmp_path):
         "#!/usr/bin/env bash\n"
         'printf "%s\\n" "$@" >> "$ARGS"\n'
         'case "$2" in\n'
-        '  */commits/*) [[ -z "$FAIL_COMMIT" ]] || exit 1; printf "%s" "$FAKE_SHA" ;;\n'
-        '  */runs\\?*) printf "%s\\n" $FAKE_RUNS ;;\n'
-        '  */runs/*/artifacts*) run="${2#*/runs/}"; run="${run%%/*}"; v="KEPT_$run"; printf "%s" "${!v}" ;;\n'
+        '  */commits/*) [[ -z "$FAIL_COMMIT" ]] || exit 1; body="{\\"sha\\": \\"$FAKE_SHA\\"}" ;;\n'
+        '  */runs\\?*) body=$(printf "%s\\n" $FAKE_RUNS | jq -s "{workflow_runs: map({id: .})}") ;;\n'
+        '  */runs/*/artifacts*) run="${2#*/runs/}"; run="${run%%/*}"; v="KEPT_$run"; body="${!v:-[]}"'
+        '; body="{\\"artifacts\\": $body}" ;;\n'
         "esac\n"
+        'jq -r "$4" <<< "$body"\n'
     )
     (tools / "gh").chmod(0o755)
 
@@ -381,7 +384,12 @@ def dispatch_lookup(tmp_path):
             FAIL_COMMIT=fail_commit,
             GITHUB_OUTPUT=str(output),
             GITHUB_REPOSITORY="the-cloud-clockwork/agentihooks",
-            **{f"KEPT_{k.removeprefix('run')}": v for k, v in kept.items()},
+            **{
+                f"KEPT_{k.removeprefix('run')}": json.dumps(
+                    [{"name": n.lstrip("~"), "expired": n.startswith("~")} for n in v.split()]
+                )
+                for k, v in kept.items()
+            },
         )
         result = subprocess.run(["bash", "-e", "-c", find["run"]], env=env, capture_output=True, text=True)
         args = (tmp_path / "args").read_text().splitlines() if (tmp_path / "args").exists() else []
@@ -416,6 +424,7 @@ def test_dispatch_resolves_a_pinned_commit_as_given(dispatch_lookup):
         ("", {}),
         ("111", {"run111": "durations-merged"}),
         ("111", {"run111": "coverage-baseline durations-merged-old"}),
+        ("111", {"run111": "~durations-merged ~coverage-baseline"}),
     ],
 )
 def test_dispatch_is_red_when_no_dev_push_run_on_the_base_kept_both(dispatch_lookup, runs, kept):
