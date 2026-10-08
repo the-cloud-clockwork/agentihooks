@@ -391,7 +391,7 @@ def test_ensure_passes_its_effective_folder_and_port_to_the_lifetime_owner(tmp_p
 
     monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(ledger_server, "LOGFILE", tmp_path / ".server.log")
-    monkeypatch.setattr(ledger_server, "serving_dir", Mock(side_effect=[None, str(tmp_path)]))
+    monkeypatch.setattr(ledger_server.ledger_link, "serving", Mock(side_effect=[None, str(tmp_path)]))
     monkeypatch.setattr(ledger_server, "port_held", lambda: False)
     monkeypatch.setattr(ledger_server, "server_process_alive", lambda: False)
     monkeypatch.setattr(ledger_server.subprocess, "Popen", Mock())

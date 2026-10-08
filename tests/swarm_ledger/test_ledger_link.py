@@ -121,6 +121,14 @@ def test_serving_is_none_when_nothing_listens(monkeypatch):
     assert ledger_link.serving() is None
 
 
+def test_serving_probes_the_address_it_is_given(server, monkeypatch):
+    server["dir"] = "/srv/other"
+    given = ledger_link.base()
+    monkeypatch.setenv("LEDGER_PORT", "1")
+    assert ledger_link.serving() is None
+    assert ledger_link.serving(url=given) == "/srv/other"
+
+
 def test_the_ledger_folder_defaults_to_the_home_ledger(monkeypatch):
     monkeypatch.delenv("LEDGER_DIR", raising=False)
     assert ledger_link.folder() == Path.home() / "development-ledger"
