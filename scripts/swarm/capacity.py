@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, session_caps
+from scripts.codex_quota import FIVE_HOUR_MINUTES
 
 LANES = ("eng", "ci", "plan")
 
@@ -66,6 +67,8 @@ def accounts(environ: dict, now: float) -> list[Account]:
         quota = quotas.get(account.name)
         five = _window(quota.five_hour, now) if quota else balancer.QuotaWindow()
         week = _window(quota.seven_day, now) if quota else balancer.QuotaWindow()
+        if quota and five.used is None and now - quota.observed_at < FIVE_HOUR_MINUTES * 60:
+            five = week
         state = balancer.window_state("allowed", five, [week], now)
         results.append(
             Account(
