@@ -1377,6 +1377,23 @@ def test_equal_ranks_keep_ledger_order_and_ranks_order_the_rest(store):
     assert spawned_ids(runtime) == ["t6", "t3", "t5", "t2", "t4", "t1"]
 
 
+def test_claims_follow_rank_then_the_small_fast_clear_task_then_critical_path_depth(store):
+    store.update("sw", max_eng=6)
+    ledger = FakeLedger(
+        [
+            {"id": "shallow", "phase": "p1"},
+            {"id": "deep", "phase": "p2"},
+            {"id": "w1", "depends_on": ["deep"], "rank": "low", "phase": "p2"},
+            {"id": "w2", "depends_on": ["w1"], "rank": "low", "phase": "p2"},
+            {"id": "small", "difficulty": "S", "phase": "p3"},
+            {"id": "top", "rank": "high", "phase": "p9"},
+        ]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["top", "small", "deep", "shallow"]
+
+
 def test_a_rank_change_applies_on_the_next_tick(store):
     store.update("sw", max_eng=1)
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2"}, {"id": "t3"}])

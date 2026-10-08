@@ -975,3 +975,25 @@ def test_master_affinity_cannot_fall_back_when_its_account_has_no_quota(tmp_path
     with pytest.raises(SpawnError, match="^no codex account has placeable quota seats$"):
         runtime.spawn(config, "master", "master@a1b2c3-0001", {"id": "p", "title": "Master", "profile": "master"})
     assert seen == []
+
+
+def test_capacity_places_ready_tasks_in_the_claim_order():
+    store = _store()
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    store.create(config)
+    ledger = FakeLedger(
+        [
+            {"id": "plain"},
+            {"id": "deep"},
+            {"id": "after", "depends_on": ["deep"], "rank": "low"},
+            {"id": "urgent", "rank": "urgent", "lane": "ci"},
+        ]
+    )
+    ledger.state = lambda slug: {"tasks": list(ledger.rows.values())}
+    ledger.comment = lambda *args, **kwargs: None
+    runtime = FakeRuntime()
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
+        cfg, [account()], agents, 3, 5, demand
+    )
+    capacity.apply("sw", config, store, ledger, runtime, 1000)
+    assert capacity.read(store, "sw")["tasks"] == {"deep": "claude"}
