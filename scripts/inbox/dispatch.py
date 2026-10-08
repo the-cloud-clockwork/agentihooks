@@ -9,7 +9,7 @@ import uuid
 from dataclasses import asdict, dataclass, fields, replace
 
 from scripts.inbox.seen import SEEN_ON_LEDGER, TTL_S, SeenMarks
-from scripts.inbox.store import MOVE_ATTEMPTS, InboxError, now_ms, owner_key
+from scripts.inbox.store import MOVE_ATTEMPTS, InboxError, close_reason, now_ms, owner_key
 
 OPEN = ("reserved", "submitting", "unknown")
 RELEASED = "released on recovery before submission"
@@ -87,13 +87,7 @@ class Dispatcher:
         """Reserve each pending item in inbox order; an item whose ref was accepted or shown closes as shown."""
         recipient = self.store.names.resolve(recipient)
         items = self.store.pending_mail(recipient)
-        reserved, superseded = self._transact([], lambda pipe: self._reserve(pipe, recipient, owner, items))
-        for item in superseded:
-            try:
-                self.store.close(item.id, recipient, "done", SEEN_ON_LEDGER)
-            except InboxError:
-                continue
-        return reserved
+        return self._transact([], lambda pipe: self._reserve(pipe, recipient, owner, items))
 
     def submitting(self, delivery_id, owner):
         return self._transact([], lambda pipe: self._advance(pipe, delivery_id, owner, ("reserved",), "submitting"))
@@ -154,20 +148,10 @@ class Dispatcher:
 
     def _reserve(self, pipe, recipient, owner, items):
         self._check_owner(pipe, recipient, owner)
-        plan, taken = [], set()
-        for item in items:
-            pipe.watch(self.key("item", item.id), self.key("reservation", item.id))
-            if pipe.hget(self.key("item", item.id), "state") != "pending" or pipe.exists(
-                self.key("reservation", item.id)
-            ):
-                continue
-            state = self._ref_state(pipe, recipient, item.ref, taken)
-            if state != "held":
-                plan.append((item, state))
-                taken.add(item.ref)
+        plan = self._plan(pipe, recipient, items)
         pipe.multi()
-        reserved, superseded = [], []
-        for item, state in plan:
+        reserved = []
+        for item, state, last in plan:
             delivery = Delivery(
                 uuid.uuid4().hex[:12], recipient, owner, item.id, item.ref, digest(item), "reserved", now_ms()
             )
@@ -176,7 +160,10 @@ class Dispatcher:
                     self.key("delivery", delivery.id),
                     mapping=_fields(replace(delivery, state="superseded", reason=SHOWN)),
                 )
-                superseded.append(item)
+                closed = replace(
+                    item, state="done", updated_at=now_ms(), reason=close_reason("done", SEEN_ON_LEDGER)[1]
+                )
+                self.store.stage_move(pipe, item, closed, recipient, last)
                 continue
             pipe.hset(self.key("delivery", delivery.id), mapping=_fields(delivery))
             pipe.set(self.key("reservation", item.id), delivery.id)
@@ -184,7 +171,24 @@ class Dispatcher:
                 pipe.set(self.key("ref-reservation", recipient, item.ref), delivery.id)
             pipe.sadd(self.key("deliveries", recipient), delivery.id)
             reserved.append(delivery)
-        return reserved, superseded
+        return reserved
+
+    def _plan(self, pipe, recipient, items):
+        """(item, free or shown, last pending) for each item still pending for recipient and not reserved."""
+        plan, taken = [], set()
+        for listed in items:
+            pipe.watch(self.key("item", listed.id), self.key("reservation", listed.id))
+            item = self.store.get(listed.id)
+            if item.state != "pending" or pipe.exists(self.key("reservation", item.id)):
+                continue
+            if not self.store.acts_for(recipient, item.address, pipe):
+                continue
+            state = self._ref_state(pipe, recipient, item.ref, taken)
+            if state == "held":
+                continue
+            taken.add(item.ref)
+            plan.append((item, state, state == "shown" and self.store.last_pending(pipe, item)))
+        return plan
 
     def _ref_state(self, pipe, recipient, ref, taken):
         """free, held by an open delivery, or shown: seen, or held by an accepted one."""

@@ -12,6 +12,7 @@ from scripts.swarm.naming import NameRegistry
 PREFIX = f"{ROOT}:inbox:seen"
 TTL_S = 30 * 24 * 3600
 SEEN_ON_LEDGER = "already shown through the ledger"
+UNSETTLED = "returned to pending: its seen mark kept changing"
 
 
 def write_ref(slug, event):
@@ -29,16 +30,18 @@ class SeenMarks:
         """True when this call is the first to show the write to name; False while a delivery owner holds name."""
         from redis.exceptions import WatchError
 
-        owner = owner_key(NameRegistry(self.redis).resolve(name))
+        names = NameRegistry(self.redis)
         for _ in range(MOVE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(owner)
-                    if pipe.get(owner) is not None:
+                    pipe.watch(names.key("alias", name))
+                    resolved = names.resolve(name, pipe)
+                    pipe.watch(owner_key(resolved))
+                    if pipe.get(owner_key(resolved)) is not None:
                         return False
                     pipe.multi()
-                    pipe.sadd(self.key(name), ref)
-                    pipe.expire(self.key(name), TTL_S)
+                    pipe.sadd(self.key(resolved), ref)
+                    pipe.expire(self.key(resolved), TTL_S)
                     added, _ = pipe.execute()
                     return added == 1
                 except WatchError:
@@ -46,7 +49,7 @@ class SeenMarks:
         raise InboxError(f"the delivery owner of {name} changed meanwhile; run it again")
 
     def seen(self, name, ref):
-        return bool(self.redis.sismember(self.key(name), ref))
+        return bool(self.redis.sismember(self.key(NameRegistry(self.redis).resolve(name)), ref))
 
 
 def marks_for(slug, environ=None):
@@ -78,7 +81,12 @@ def claim(store, me):
     marks = SeenMarks(store.redis)
     shown = []
     for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me))):
-        if item.ref and _shown_elsewhere(marks, store, item, me):
+        try:
+            elsewhere = item.ref and _shown_elsewhere(marks, store, item, me)
+        except InboxError:
+            store.requeue(item.id, me, UNSETTLED)
+            continue
+        if elsewhere:
             store.close(item.id, me, "done", SEEN_ON_LEDGER)
         else:
             shown.append(item)
