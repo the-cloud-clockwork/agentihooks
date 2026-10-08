@@ -195,6 +195,14 @@ jobs:
           done
           exit 1
 
+      - name: Restore Sonar downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.sonar/cache
+            ${{ runner.tool_cache }}/sonar-scanner-cli
+          key: sonar-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/test.yml') }}
+
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@v6
         env:

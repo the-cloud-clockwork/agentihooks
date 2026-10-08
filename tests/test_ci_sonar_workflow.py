@@ -33,6 +33,23 @@ def test_sonar_is_required_on_dev_and_main_pull_requests():
     assert "needs" not in jobs["unit"]
 
 
+def test_sonar_restores_downloads_before_every_scan():
+    steps = _workflow()["jobs"]["sonar"]["steps"]
+    scan_index = next(i for i, step in enumerate(steps) if step.get("name") == "SonarQube Scan")
+    cache = next(step for step in steps[:scan_index] if step.get("uses") == "actions/cache@v4")
+    assert set(cache["with"]["path"].splitlines()) == {
+        "~/.sonar/cache",
+        "${{ runner.tool_cache }}/sonar-scanner-cli",
+    }
+    key = cache["with"]["key"]
+    assert "${{ runner.os }}" in key
+    assert "${{ runner.arch }}" in key
+    assert "hashFiles('.github/workflows/test.yml')" in key
+    assert "if" not in cache
+    assert "if" not in steps[scan_index]
+    assert not cache.get("continue-on-error")
+
+
 @pytest.mark.parametrize("sonar", ["success", "failure", "skipped", "cancelled", "pending"])
 def test_required_gate_rejects_unsuccessful_sonar(sonar):
     step = _workflow()["jobs"]["gate-required"]["steps"][0]
