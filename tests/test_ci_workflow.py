@@ -530,6 +530,8 @@ def test_ci_refresh_can_use_the_exact_run_that_passed_the_dev_tree(tmp_path, mon
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci-run", "42"])
     assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 2.0}
+    assert json.loads((tmp_path / ".test_durations-3.11").read_text()) == {"t.py::a": 1.0}
+    assert json.loads((tmp_path / ".test_durations-3.12").read_text()) == {"t.py::a": 3.0}
 
 
 def test_mutation_job_runs_independently_and_keeps_its_evidence():

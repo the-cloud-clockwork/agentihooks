@@ -108,10 +108,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           folder="$RUNNER_TEMP/dev-durations"
+          timings=".test_durations-${{ matrix.python-version }}"
+          if [[ -f "$timings" ]]; then cp "$timings" .test_durations; fi
           # refresh-durations uploads only after unit and lint pass, so a later Sonar failure on that run does not void it.
           run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=durations-merged&per_page=20" --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == "dev")] | sort_by(.created_at) | last | .workflow_run.id // empty') || run=
           if [[ -n "$run" ]] && gh run download "$run" --repo "$GITHUB_REPOSITORY" --name durations-merged --dir "$folder" &&
-             python - "$folder/.test_durations" <<'PYTHON'
+             python - "$folder/$timings" <<'PYTHON'
           import json
           import math
           import sys
@@ -122,7 +124,7 @@ jobs:
           print(f"Downloaded {len(data)} duration records")
           PYTHON
           then
-            cp "$folder/.test_durations" .test_durations
+            cp "$folder/$timings" .test_durations
             echo "Using durations from green dev run $run"
           else
             echo "Using committed durations"
@@ -330,7 +332,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: durations-merged
-          path: .test_durations
+          path: .test_durations*
           include-hidden-files: true
           retention-days: 14
           overwrite: true

@@ -37,7 +37,7 @@ def test_dev_push_publishes_merged_durations_with_read_permissions():
     assert job["permissions"] == {"contents": "read", "actions": "read"}
     upload = next(s for s in job["steps"] if s.get("uses") == "actions/upload-artifact@v4")
     assert upload["with"]["name"] == "durations-merged"
-    assert upload["with"]["path"] == ".test_durations"
+    assert upload["with"]["path"] == ".test_durations*"
     assert upload["with"]["include-hidden-files"] is True
 
 
@@ -52,8 +52,9 @@ def test_a_newer_dev_push_never_cancels_a_running_dev_push_run():
     }
 
 
-@pytest.mark.parametrize("mode", ["download", "no_run", "missing", "invalid"])
-def test_pr_shards_use_the_newest_dev_durations_artifact_or_the_committed_fallback(tmp_path, mode):
+@pytest.mark.parametrize("version", ["3.11", "3.12"])
+@pytest.mark.parametrize("mode", ["download", "no_run", "missing", "invalid", "legacy"])
+def test_pr_shards_use_the_newest_dev_durations_artifact_or_the_committed_fallback(tmp_path, mode, version):
     steps = _workflow("test.yml")["jobs"]["unit"]["steps"]
     step = next(s for s in steps if s.get("name") == "Download latest dev durations")
     assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
@@ -82,19 +83,22 @@ else:
     value = {"tests/a.py::test_a": 90.0, "tests/b.py::test_b": 1.0}
     if os.environ["MODE"] == "invalid":
         value = {"bad": "seconds"}
-    (folder / ".test_durations").write_text(json.dumps(value))
+    filename = ".test_durations" if os.environ["MODE"] == "legacy" else ".test_durations-" + os.environ["VERSION"]
+    (folder / filename).write_text(json.dumps(value))
 """
     )
     gh.chmod(0o755)
     committed = '{"committed": 0.1}'
-    (tmp_path / ".test_durations").write_text(committed)
+    (tmp_path / ".test_durations").write_text('{"blended": 1.0}')
+    (tmp_path / f".test_durations-{version}").write_text(committed)
     result = subprocess.run(
-        ["bash", "-euo", "pipefail", "-c", step["run"]],
+        ["bash", "-euo", "pipefail", "-c", step["run"].replace("${{ matrix.python-version }}", version)],
         cwd=tmp_path,
         env={
             **os.environ,
             "PATH": f"{tools}:{os.environ['PATH']}",
             "MODE": mode,
+            "VERSION": version,
             "GITHUB_REPOSITORY": "owner/repo",
             "RUNNER_TEMP": str(tmp_path),
         },
