@@ -162,7 +162,7 @@ class LaunchAuthority:
                     pipe.watch(disabled, self.store.key(slug, "executions"))
                     if pipe.exists(disabled):
                         self.refuse(slug, "forbidden_scope", "launch grants are disabled for this swarm")
-                    occupants = self.store.execution_registry.occupants(slug, pipe).values()
+                    occupants = self.store.execution_occupants(slug).values()
                     if execution.execution_id not in {occupant.execution_id for occupant in occupants}:
                         self.refuse(slug, "stale_generation", "execution is not the current attempt of its seat")
                     pipe.multi()
@@ -255,7 +255,7 @@ class LaunchAuthority:
         audit = json.loads(raw)
         if audit["state"] == "revoked":
             self.refuse(slug, "unauthenticated", "launch grant was revoked")
-        occupants = self.store.execution_registry.occupants(slug, pipe).values()
+        occupants = self.store.execution_occupants(slug).values()
         if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
             self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
         existing = pipe.hget(registrations, claims["execution_id"])
@@ -345,6 +345,6 @@ def _encode(raw: bytes) -> str:
 
 def _decode(payload: str) -> object:
     try:
-        return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        return json.loads(base64.urlsafe_b64decode(payload + "=="))
     except (binascii.Error, ValueError):
         return None

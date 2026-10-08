@@ -668,6 +668,29 @@ def test_tokens_carry_canonical_unpadded_claims(authority, execution):
     assert token.startswith("v2.")
 
 
+def test_encoding_strips_only_padding():
+    from scripts.swarm_v2.auth_context import _decode, _encode
+
+    assert _encode(bytes([0, 0, 0x17])) == "AAAX"
+    assert _encode(b"a") == "YQ"
+    for value in ({"a": 1}, {"ab": 1}, {"abc": 1}):
+        assert _decode(encoded(value)) == value
+
+
+def test_times_are_utc_whatever_the_host_zone(monkeypatch):
+    from scripts.swarm_v2.auth_context import _seconds, _timestamp
+
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    time.tzset()
+    try:
+        assert _timestamp(0) == "1970-01-01T00:00:00Z"
+        assert _seconds("1970-01-01T00:00:00Z") == 0
+        assert _seconds(_timestamp(FIXTURE["now"])) == FIXTURE["now"]
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
 def test_a_minimal_body_registers_and_a_partial_body_is_still_checked(store, authority, execution):
     token = issue(authority, execution)
     minimal = {"execution_id": execution.execution_id, "generation": 1}
