@@ -51,6 +51,7 @@ from scripts.swarm_ledger import ledger_rank, ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
+SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
 # Swarms tick in threads; two placing from one live session count overfill an account.
@@ -424,6 +425,8 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             else:
                 retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
                 actions.append(f"could not retire {agent.name}, retrying next tick")
+        elif agent.runtime_backend != "local":
+            actions += _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live and agent.lane == MASTER:
             runtime.name_pane(agent)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
@@ -434,6 +437,21 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
             actions.append(f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent))
     return actions
+
+
+def _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms):
+    """A remote agent is judged by its own runtime, never by this host's process table: no answer keeps it suspect,
+    holding its claim, neither retired nor dropped."""
+    store.refresh(slug, agent.task, agent.name, LEASE_MS)
+    if runtime.observe(agent).state == "unknown":
+        if agent.state == SUSPECT:
+            return []
+        store.put_agent(slug, replace(agent, state=SUSPECT))
+        return [f"suspect {agent.name}: its runtime did not answer"]
+    if agent.state == SUSPECT:
+        agent = replace(agent, state="working")
+        store.put_agent(slug, agent)
+    return _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
 
 
 def _strays(slug, config, store, runtime):
