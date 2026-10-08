@@ -85,6 +85,16 @@ def test_send_leaves_one_pending_inbox_item_per_recipient_from_the_real_sender(s
     assert inbox(store, "sw-ci-1") == []
 
 
+def test_peer_delivery_records_each_receivers_task(store):
+    from scripts.inbox.store import InboxStore
+
+    store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2"))
+    delivery.send(store, "sw", "Tell me when your branch is pushed.", sender="sw-ci-1", to="eng")
+    inbox = InboxStore(store.redis)
+    assert inbox.inbox("sw-eng-1")[0].task == "t"
+    assert inbox.inbox("sw-eng-2")[0].task == "t2"
+
+
 def test_items_for_the_operator_from_swarm_agents_are_shown_on_the_page_and_closed(store):
     box = InboxStore(store.redis)
     reply = box.send("sw-eng-1", "operator", "the slow job is fixed")

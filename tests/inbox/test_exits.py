@@ -252,7 +252,7 @@ def test_the_sweep_settles_departed_peer_task_mail_after_seat_reassignment(redis
     for agent in (departed, peer):
         store.record_launch("sw", agent, "started")
     store.seats.occupy(departed.seat, departed.name, 1)
-    item = inbox.send(peer.name, departed.seat, "Please tell me when your branch is pushed.")
+    item = inbox.send(peer.name, departed.seat, "Please tell me when your branch is pushed.", task="t1")
     inbox.deliver(item.id, departed.name)
     if state == "read":
         inbox.read(item.id, departed.name)
@@ -266,6 +266,7 @@ def test_the_sweep_settles_departed_peer_task_mail_after_seat_reassignment(redis
     assert closed.state == "cancelled"
     assert closed.reason == "cancelled: sw-eng-1 left its seat and task t1 before closing it"
     assert inbox.get(general.id).state == "pending"
+    assert inbox.history(item.id)[-1]["by"] == "swarm"
     notices = inbox.inbox(peer.name)
     assert len(notices) == 1
     assert notices[0].fyi
@@ -303,7 +304,13 @@ def test_the_sweep_keeps_peer_mail_that_still_belongs_to_the_seat(redis, retaine
     if retained != "unknown sender":
         store.record_launch("sw", peer, "started")
     store.seats.occupy(departed.seat, departed.name, 1)
-    item = inbox.send(peer.name, departed.seat, "Keep this message.", fyi=retained == "information")
+    item = inbox.send(
+        peer.name,
+        departed.seat,
+        "Keep this message.",
+        fyi=retained == "information",
+        task="" if retained in ("unknown sender", "master sender", "unknown task") else "t1",
+    )
     if retained != "unreceived":
         inbox.deliver(item.id, departed.name)
     if retained == "closed":
@@ -323,3 +330,84 @@ def test_the_sweep_keeps_peer_mail_that_still_belongs_to_the_seat(redis, retaine
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(item.id) == before
     assert inbox.inbox(peer.name) == []
+
+
+def test_the_sweep_preserves_general_peer_mail_received_by_a_departed_agent(redis):
+    from scripts.swarm.store import AgentRecord
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    general = inbox.send("sw-eng-3", "eng-1@sw", "Carry this shared seat rule to the next occupant.")
+    inbox.deliver(general.id, "sw-eng-1")
+    legacy = inbox.send("sw-eng-3", "eng-1@sw", "Legacy seat mail.")
+    redis.hdel(inbox.key("item", legacy.id), "task")
+    inbox.deliver(legacy.id, "sw-eng-1")
+    store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw"))
+    store.seats.occupy("eng-1@sw", "sw-eng-2", general.created_at + 1)
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(general.id).state == "delivered"
+    assert inbox.get(legacy.id).task == ""
+    assert inbox.get(legacy.id).state == "delivered"
+    assert inbox.inbox("sw-eng-3") == []
+
+
+@pytest.mark.parametrize("receiver_state", ["delivered", "read"])
+def test_the_sweep_keeps_task_mail_taken_up_by_the_live_successor(redis, receiver_state):
+    from scripts.swarm.store import AgentRecord
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    item = inbox.send("sw-eng-3", "eng-1@sw", "Finish the old work.", task="t1")
+    inbox.deliver(item.id, "sw-eng-1")
+    inbox.redirect(item.id, "swarm", "eng-1@sw", "handed off", "eng-1@sw")
+    store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw"))
+    store.seats.occupy("eng-1@sw", "sw-eng-2", item.created_at + 1)
+    if receiver_state == "read":
+        inbox.read(item.id, "sw-eng-2")
+    else:
+        inbox.deliver(item.id, "sw-eng-2")
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).state == receiver_state
+    assert inbox.inbox("sw-eng-3") == []
+
+
+def test_the_sweep_continues_past_retained_mail_and_finished_or_unseated_agents(redis):
+    from scripts.swarm.store import AgentRecord
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.put_agent("sw", AgentRecord(name="sw-eng-0", lane="eng", task="t0", seat="eng-0@sw", state="finished"))
+    store.put_agent("sw", AgentRecord(name="sw-ci-1", lane="ci", task="t0"))
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    general = inbox.send("sw-eng-3", "eng-1@sw", "General seat mail.")
+    unreceived = inbox.send("sw-eng-3", "eng-1@sw", "New task mail.", task="t1")
+    read = inbox.send("sw-eng-3", "eng-1@sw", "Read without delivery.", task="t1")
+    inbox.read(read.id, "sw-eng-1")
+    store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw"))
+    store.seats.occupy("eng-1@sw", "sw-eng-2", read.created_at + 1)
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(general.id).state == "pending"
+    assert inbox.get(unreceived.id).state == "pending"
+    assert inbox.get(read.id).state == "cancelled"
+    assert inbox.get(read.id).reason == "cancelled: sw-eng-1 left its seat and task t1 before closing it"
+
+
+def test_a_message_moved_during_the_sweep_is_kept_and_its_sender_is_not_told(redis, monkeypatch):
+    from scripts.swarm.store import AgentRecord
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    item = inbox.send("sw-eng-3", "eng-1@sw", "Finish the old work.", task="t1")
+    inbox.deliver(item.id, "sw-eng-1")
+    store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw"))
+    store.seats.occupy("eng-1@sw", "sw-eng-2", item.created_at + 1)
+    withdraw = inbox.withdraw
+
+    def move_then_withdraw(item_id, by, reason, expected_address=""):
+        inbox.redirect(item_id, "sw-eng-2", "eng-2@sw", "work moved", "eng-1@sw")
+        return withdraw(item_id, by, reason, expected_address)
+
+    monkeypatch.setattr(inbox, "withdraw", move_then_withdraw)
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).address == "eng-2@sw"
+    assert inbox.get(item.id).state == "pending"
+    assert inbox.inbox("sw-eng-3") == []

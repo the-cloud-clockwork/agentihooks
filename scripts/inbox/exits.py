@@ -118,23 +118,20 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
 
 def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", active: set) -> None:
     from scripts.inbox.store import CLOSED
-    from scripts.swarm.store import MASTER
 
-    tasks = {row["agent"]: row["task"] for row in store.launches(slug)}
-    agents = [agent for agent in store.agents(slug) if agent.name in active]
-    tasks.update({agent.name: agent.task for agent in agents})
-    for agent in agents:
-        if not agent.seat:
+    for agent in store.agents(slug):
+        if agent.name not in active or not agent.seat:
             continue
         for item in inbox.inbox(agent.seat):
-            if item.state in CLOSED or item.fyi or tasks.get(item.sender, MASTER) == MASTER:
+            if item.state in CLOSED or item.fyi or not item.task or item.task == agent.task:
                 continue
-            receivers = [entry["by"] for entry in inbox.history(item.id) if entry["state"] in ("delivered", "read")]
-            owner = (receivers[:1] or [""])[0]
-            task = tasks.get(owner)
-            if owner in active or not task or task == agent.task:
+            owner = next(
+                (entry["by"] for entry in reversed(inbox.history(item.id)) if entry["state"] in ("delivered", "read")),
+                "",
+            )
+            if not owner or owner in active:
                 continue
-            exit_text = f"left its seat and task {task}"
+            exit_text = f"left its seat and task {item.task}"
             if inbox.withdraw(item.id, BY, f"cancelled: {owner} {exit_text} before closing it", agent.seat):
                 inbox.send(BY, notice_address(inbox, item.sender), _told(item, owner, exit_text), fyi=True)
 

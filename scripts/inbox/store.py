@@ -38,6 +38,7 @@ class Item:
     ref: str = ""
     sequence: int = 0
     fyi: bool = False
+    task: str = ""
 
 
 def now_ms():
@@ -68,7 +69,25 @@ class InboxStore:
     def key(self, *parts):
         return ":".join((PREFIX, *parts))
 
-    def send(self, sender, address, text, ref="", fyi=False):
+    def receiver_task(self, address: str) -> str:
+        from scripts.inbox.seats import is_seat, master_of
+        from scripts.swarm.store import MASTER, RedisStore
+
+        address = self.names.resolve(address)
+        master = master_of(address, self.names)
+        if not master:
+            return ""
+        receiver = self.seats.occupant(address).occupant if is_seat(address) else address
+        return next(
+            (
+                agent.task
+                for agent in RedisStore(self.redis).agents(master.split("@", 1)[1])
+                if agent.name == receiver and agent.state != "finished" and agent.task != MASTER
+            ),
+            "",
+        )
+
+    def send(self, sender, address, text, ref="", fyi=False, task=""):
         """ref names the ledger write an operator item carries, for the seen marks; fyi marks an item that needs no
         work, so a bare close names no outcome."""
         if not (sender and address and text.strip()):
@@ -86,6 +105,7 @@ class InboxStore:
             ref=ref,
             sequence=self.redis.incr(self.key("sequence", address)),
             fyi=fyi,
+            task=task,
         )
         with self.redis.pipeline() as pipe:
             pipe.hset(self.key("item", item.id), mapping=_fields(item))
