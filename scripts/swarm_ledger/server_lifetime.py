@@ -58,7 +58,7 @@ def environment(folder: Path, port: int) -> dict:
 
 def ended(identity: tuple[int, int], proc: Path = Path("/proc")) -> bool:
     parent = process(identity[0], proc)
-    return parent is None or parent["start"] != identity[1] or parent["state"] == "Z"
+    return parent is None or parent["start"] != identity[1] or parent["state"] in {"Z", "X"}
 
 
 def watch(server, folder: Path, port: int) -> threading.Event:
