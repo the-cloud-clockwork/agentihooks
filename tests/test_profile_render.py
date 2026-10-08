@@ -2168,10 +2168,18 @@ def test_headed_overlay_keeps_the_vm_browser(world, overlays, monkeypatch, targe
         "name: headed\nkind: overlay\nwears: [engineer]\nrequired_capabilities: [headed]\n",
     )
     headed = {"command": "playwright-mcp", "args": ["--cdp-endpoint", "http://127.0.0.1:9222"]}
+    extension = {"command": "cmd.exe", "args": ["/c", "playwright-mcp", "--extension"]}
     _write(overlays / "headed" / ".claude" / ".mcp.json", json.dumps({"mcpServers": {"playwright-headed": headed}}))
+    _write(
+        overlays / "rb-eng" / ".claude" / ".mcp.json",
+        json.dumps({"mcpServers": {"playwright-ext-operator": extension}}),
+    )
     monkeypatch.setenv("AGENTIHOOKS_HIVE_CAPABILITIES", "headed")
     dirs = render._chain("rb-eng", ["headed"])
     servers = render._mcp_servers(target, world["bundle"], dirs)
     assert servers["playwright-headed"] == headed
     assert servers["playwright-cmd"] == browser.spec()
-    assert "playwright-headed" not in render._mcp_servers(target, world["bundle"], render._chain("rb-eng"))
+    assert "playwright-ext-operator" not in servers
+    normal = render._mcp_servers(target, world["bundle"], render._chain("rb-eng"))
+    assert "playwright-headed" not in normal
+    assert normal["playwright-ext-operator"] == extension
