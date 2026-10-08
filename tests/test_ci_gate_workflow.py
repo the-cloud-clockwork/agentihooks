@@ -17,7 +17,7 @@ def _workflow():
 def test_required_gate_runs_after_parallel_unit_and_lint():
     jobs = _workflow()["jobs"]
     gate = jobs["gate-required"]
-    required = {"unit", "lint", "sonar", "mutation"}
+    required = {"unit", "lint", "sonar", "mutation", "test-count"}
     assert gate["name"] == "Gate — Required"
     assert required <= set(gate["needs"]) <= required | {"swarm-image", "shard-check"}
     assert gate["if"] == "${{ always() }}"
@@ -29,6 +29,22 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
 
 def test_unit_matrix_does_not_fail_fast():
     assert _workflow()["jobs"]["unit"]["strategy"]["fail-fast"] is False
+
+
+def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
+    job = _workflow()["jobs"]["test-count"]
+    assert "needs" not in job
+    assert (
+        job["strategy"]["matrix"]["python-version"]
+        == _workflow()["jobs"]["unit"]["strategy"]["matrix"]["python-version"]
+    )
+    base, floor = job["steps"][-2:]
+    assert base["env"]["BASE"] == (
+        "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+        " || github.event.before || inputs.base }}"
+    )
+    assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$BASE"'
+    assert floor["run"] == 'python -m tests.count_floor --base "$RUNNER_TEMP/base"'
 
 
 @pytest.mark.parametrize("unit", ["success", "failure", "skipped", "cancelled", "pending"])

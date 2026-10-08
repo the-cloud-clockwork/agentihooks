@@ -200,6 +200,41 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         run: python -m tests.shard_check shard-durations/*/durations.json
 
+  test-count:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - *lookup
+
+      - uses: actions/checkout@v4
+        if: steps.lookup.outputs.skip != 'true'
+        with:
+          fetch-depth: 0
+
+      - *python
+      - *day
+      - *venv
+      - *uv
+      - *install
+      - *use-venv
+
+      - name: Check out the base revision
+        if: steps.lookup.outputs.skip != 'true'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+        run: git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
+
+      - name: Hold the base revision's test count
+        if: steps.lookup.outputs.skip != 'true'
+        run: python -m tests.count_floor --base "$RUNNER_TEMP/base"
+
   sonar:
     needs: [unit]
     runs-on: ubuntu-latest
@@ -392,7 +427,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, shard-check, lint, sonar, mutation, swarm-image]
+    needs: [unit, shard-check, test-count, lint, sonar, mutation, swarm-image]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
