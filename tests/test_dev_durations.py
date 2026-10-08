@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 import pytest
@@ -29,12 +30,54 @@ def test_adopt_rejects_a_file_that_is_not_durations(tmp_path, bad):
         dev_durations.adopt(tmp_path, "3.12")
 
 
-def _restored(folder, merged, version=None):
+RUN = "1970-01-01T01:00:00Z"
+
+
+def _restored(folder, merged, version=None, saved_at=1000):
     folder.mkdir()
     (folder / ".test_durations").write_text(json.dumps(merged))
     if version is not None:
         (folder / ".test_durations-3.12").write_text(json.dumps(version))
+    if saved_at is not None:
+        (folder / "saved-at").write_text(f"{saved_at}\n")
     return folder
+
+
+def _shard(root, restored, run_time=RUN):
+    root.mkdir(exist_ok=True)
+    (root / ".test_durations").write_text('{"t.py::a": 1.0}')
+    dev_durations._ROOT = root
+    dev_durations.main(["3.12", str(restored), "--run-time", run_time, "--hash", str(root / "durations.sha256")])
+    return (root / "durations.sha256").read_text().strip()
+
+
+def test_two_shards_of_one_run_refuse_a_cache_saved_after_the_run_began_and_report_one_hash(tmp_path, monkeypatch):
+    monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
+    late = _restored(tmp_path / "late", {"t.py::a": 9.0}, saved_at=3500)
+    first = _shard(tmp_path / "first", tmp_path / "missing")
+    second = _shard(tmp_path / "second", late)
+    assert first == second
+    assert json.loads((tmp_path / "second" / ".test_durations").read_text()) == {"t.py::a": 1.0}
+
+
+def test_two_shards_of_one_run_adopt_a_cache_saved_before_the_run_began_and_report_one_hash(tmp_path, monkeypatch):
+    monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
+    early = _restored(tmp_path / "early", {"t.py::a": 9.0}, saved_at=3000)
+    first = _shard(tmp_path / "first", early)
+    second = _shard(tmp_path / "second", early)
+    assert first == second
+    assert first == hashlib.sha256((tmp_path / "first" / ".test_durations").read_bytes()).hexdigest()
+    assert json.loads((tmp_path / "first" / ".test_durations").read_text()) == {"t.py::a": 9.0}
+
+
+@pytest.mark.parametrize(("saved_at", "run_time"), [(None, RUN), (1000, "")])
+def test_a_cache_with_no_save_time_or_a_run_with_no_event_time_keeps_the_committed_durations(
+    tmp_path, monkeypatch, saved_at, run_time
+):
+    monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
+    restored = _restored(tmp_path / "restored", {"t.py::a": 9.0}, saved_at=saved_at)
+    _shard(tmp_path / "shard", restored, run_time)
+    assert json.loads((tmp_path / "shard" / ".test_durations").read_text()) == {"t.py::a": 1.0}
 
 
 def test_main_keeps_the_committed_version_file_on_a_cache_miss(tmp_path, monkeypatch):
@@ -58,7 +101,7 @@ def test_main_stays_green_on_a_cache_miss_with_incomplete_committed_durations(tm
 def test_main_adopts_the_restored_dev_durations(tmp_path, monkeypatch):
     restored = _restored(tmp_path / "restored", {"t.py::a": 2.0, "t.py::b": 4.0}, {"t.py::a": 3.0})
     monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
-    dev_durations.main(["3.12", str(restored)])
+    dev_durations.main(["3.12", str(restored), "--run-time", RUN])
     assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 3.0, "t.py::b": 4.0}
 
 
@@ -81,4 +124,4 @@ def test_main_fails_the_shard_when_the_restored_durations_cannot_be_adopted(tmp_
     restored = _restored(tmp_path / "restored", {}, {})
     monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
     with pytest.raises(ValueError):
-        dev_durations.main(["3.12", str(restored)])
+        dev_durations.main(["3.12", str(restored), "--run-time", RUN])
