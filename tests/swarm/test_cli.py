@@ -1951,3 +1951,24 @@ def test_a_failing_swarm_tick_leaves_the_others_and_the_sweep_running(monkeypatc
     captured = capsys.readouterr()
     assert captured.out.splitlines() == ["b: ok b", "herdr: swept"]
     assert captured.err == "a: ValueError: ledger down\n"
+
+
+def test_every_swarm_gets_its_own_thread_however_many_there_are(monkeypatch, capsys):
+    import threading
+
+    slugs = [f"s{n}" for n in range(48)]
+    together = threading.Barrier(len(slugs), timeout=10)
+
+    def run_tick(store, slug):
+        together.wait()
+        return ["ticked"]
+
+    _tick_all(monkeypatch, run_tick, slugs)
+    assert sorted(capsys.readouterr().out.splitlines()) == sorted(
+        [f"{slug}: ticked" for slug in slugs] + ["herdr: swept"]
+    )
+
+
+def test_no_swarms_still_sweeps_herdr(monkeypatch, capsys):
+    _tick_all(monkeypatch, lambda store, slug: pytest.fail("no swarm to tick"), [])
+    assert capsys.readouterr().out.splitlines() == ["herdr: swept"]

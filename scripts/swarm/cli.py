@@ -225,8 +225,9 @@ def cmd_tick(store, args):
         raise SwarmError(f"the tick refused to run: {why}")
     operator_env.fill(os.environ)
     slugs = store.slugs()
-    with ThreadPoolExecutor(max_workers=max(len(slugs), 1)) as pool:
-        list(pool.map(lambda slug: _tick_one(store, slug), slugs))
+    if slugs:
+        with ThreadPoolExecutor(max_workers=len(slugs)) as pool:
+            list(pool.map(lambda slug: _tick_one(store, slug), slugs))
     from scripts import herdr_gc
 
     try:
