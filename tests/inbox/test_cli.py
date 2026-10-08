@@ -66,11 +66,13 @@ def test_a_receiver_without_a_live_worker_task_has_no_task_association(store, st
 
 
 def test_a_receivers_alias_records_the_current_task(store):
-    from scripts.swarm.store import AgentRecord, RedisStore
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
     swarm = RedisStore(store.redis)
-    swarm.put_agent("sw", AgentRecord(name="sw-eng-1", lane="eng", task="t1"))
-    store.names.alias("old-receiver", "sw-eng-1")
+    swarm.create(SwarmConfig("sw", "/repo", 2, 1))
+    name = swarm.next_name("sw", "eng")
+    swarm.put_agent("sw", AgentRecord(name=name, lane="eng", task="t1"))
+    store.names.alias("old-receiver", name)
     assert store.receiver_task("old-receiver") == "t1"
 
 
