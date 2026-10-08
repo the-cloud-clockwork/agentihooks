@@ -155,7 +155,7 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
 
 def remove_worktree(top: str) -> str:
     refused = f"the task is parked and its seat handed off, but wt.sh done could not remove {top}"
-    _out(["bash", str(WT_SCRIPT), "done", Path(top).name, "--repo", top], refused)
+    _out(["bash", str(WT_SCRIPT), "done", Path(top).name, "--repo", top, "--pushed"], refused)
     return top
 
 

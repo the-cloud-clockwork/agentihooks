@@ -30,7 +30,7 @@ LOCATE = [
     ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
     ["bash", str(stack.WT_SCRIPT), "root"],
 ]
-REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo", TOP]
+REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo", TOP, "--pushed"]
 
 
 class Shell:

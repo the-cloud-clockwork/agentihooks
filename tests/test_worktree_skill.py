@@ -301,6 +301,55 @@ class Done(WtBase):
         self.assertIn(f"wt: removed {dest} and branch closed-probe\n", result.stdout)
         self.assertNotIn("kept", result.stderr)
 
+    def _pushed_worktree(self, name):
+        dest = self._new(name)
+        (dest / "parked.txt").write_text("parked work\n")
+        _git(dest, "add", "parked.txt", env=self.gitenv)
+        _git(dest, "commit", "--quiet", "-m", "parked work", env=self.gitenv)
+        _git(dest, "push", "--quiet", "-u", "origin", name, env=self.gitenv)
+        gh = self.bin / "gh"
+        gh.write_text(f"#!{BASH}\nset -euo pipefail\nexit 1\n")
+        gh.chmod(0o755)
+        return dest
+
+    def test_done_pushed_drops_a_worktree_whose_head_is_on_origin_and_keeps_the_remote_branch(self):
+        dest = self._pushed_worktree("parked-one")
+        result = self.run_wt("done", "parked-one", "--repo", str(self.primary), "--pushed")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("parked-one"))
+        self.assertTrue(self.remote_branch_exists("parked-one"))
+        self.assertIn("wt: removed", result.stdout)
+
+    def test_done_pushed_keeps_a_worktree_whose_head_is_not_on_origin(self):
+        dest = self._pushed_worktree("parked-two")
+        (dest / "later.txt").write_text("not pushed\n")
+        _git(dest, "add", "later.txt", env=self.gitenv)
+        _git(dest, "commit", "--quiet", "-m", "later", env=self.gitenv)
+        result = self.run_wt("done", "parked-two", "--repo", str(self.primary), "--pushed")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(
+            result.stderr.strip().splitlines()[-1],
+            "wt: branch 'parked-two' is not on origin at the worktree head — worktree kept",
+        )
+        self.assertTrue(dest.is_dir())
+        self.assertTrue(self.branch_exists("parked-two"))
+
+    def test_done_pushed_keeps_a_worktree_never_pushed(self):
+        dest = self._new("parked-three")
+        result = self.run_wt("done", "parked-three", "--repo", str(self.primary), "--pushed")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("is not on origin at the worktree head", result.stderr)
+        self.assertTrue(dest.is_dir())
+
+    def test_done_pushed_refuses_a_dirty_worktree(self):
+        dest = self._pushed_worktree("parked-four")
+        (dest / "scratch.txt").write_text("uncommitted\n")
+        result = self.run_wt("done", "parked-four", "--repo", str(self.primary), "--pushed")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("uncommitted changes", result.stderr)
+        self.assertTrue(dest.is_dir())
+
     def test_done_without_force_keeps_a_worktree_whose_pull_request_closed_unmerged(self):
         dest = self._published_with_pull_requests(
             "closed-kept", '[{"state": "CLOSED", "url": "https://github.com/o/r/pull/7"}]'
