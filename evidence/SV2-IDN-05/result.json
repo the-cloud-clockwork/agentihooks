@@ -1,0 +1,66 @@
+{
+  "package": "SV2-IDN-05",
+  "dependency": "SV2-IDN-04",
+  "integration_gate": "G1",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1705",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1708",
+  "companion_pull_request": "https://github.com/the-cloud-clockwork/agentibrain-kernel/pull/106 (merged d786b06759e9df23e5fd137d23741155875e4daa)",
+  "tested_commit": "85327de7502f46bd9a88668ed64aeeb902ca9a0d",
+  "ci_head": "ad6afc3883b8f42b985a9e7ce69ac34eb74b5b06",
+  "evidence_class": "local isolated fixture on temporary homes with a fixed installation time; mocked: the brain vault fetch, the background refresh fork and the brain HTTP post; not live rollout proof",
+  "supported_versions": {
+    "key_format": "k2",
+    "policy_version": "1",
+    "installation_record": "installation.json, inst-<32 hex> and created_at"
+  },
+  "interfaces": [
+    "scripts.swarm_v2.keyspace: Namespace, Installation, installation, brain_identity, key, stamp, admits, current, marker_key, legacy_marker_key, sweep_legacy, drop_namespaced, main drop",
+    "hooks.context.project_cache.namespace and cache_scope_mismatch_total",
+    "hooks.context.brain_adapter.brain_id and get_status cache_scope_mismatch_total",
+    "hooks.context.brain_writer_hook marker idempotency key and outbox idempotency_key field",
+    "hooks._redis.redis_key with the installation segment",
+    "agentibrain-kernel outbox drains replay the recorded idempotency_key"
+  ],
+  "states": {
+    "observed": "Local: keyspace, project cache, marker, brain writer, session scope, isolation, controls and guard suites passed; ruff check and format clean.",
+    "accepted": "Cases A, B and C passed on the paired personal and swarm fixture sharing every display label; case A repeated on a second independent fixture.",
+    "committed": "The tested commit carries the code; the case results in this folder were generated on it.",
+    "externally_verified": "CI Tests run 37809100337 at ad6afc38: unit shards, lint, smoke, swarm image smoke and the mutation gate passed; sonar and Gate Required passed on rerun after a GitHub API rate limit refusal in the coverage artifact fetch."
+  },
+  "measurements": {
+    "cache_scope_mismatch_total": {
+      "a": [
+        0,
+        0
+      ],
+      "b": 2,
+      "c": 0
+    }
+  },
+  "cases": {
+    "a": "evidence/SV2-IDN-05/a-result.json",
+    "b": "evidence/SV2-IDN-05/b-result.json",
+    "c": "evidence/SV2-IDN-05/c-result.json",
+    "manifest": "evidence/SV2-IDN-05/manifest.json",
+    "generator": "evidence/SV2-IDN-05/generate_case_results.py",
+    "golden_capture": "evidence/SV2-IDN-05/capture_golden.py"
+  },
+  "reviews": {
+    "standards": "Three rounds; fixed: event-time scope as the only marker key input, test log isolation, docstring, installation cached per process, removal counts, restored cutover test, golden capture script, kernel docstring wrap. Open, non-blocking: shared key vectors across repositories, filed as a ledger follow-up.",
+    "spec": "Three rounds; fixed: kernel drains replay the recorded key, hook Redis keys carry the installation, mocked boundaries labelled, deferred context excluded from rollback, mismatch counter in brain_status, golden compatibility check, transcript-level marker test; controls switch per installation kept deliberately and documented."
+  },
+  "rollback_rehearsal": {
+    "action": "python -m scripts.swarm_v2.keyspace drop <agentihooks home>/brain/project-memory",
+    "tests": [
+      "test_rollback_drops_only_new_rebuildable_caches"
+    ],
+    "case": "c: rollback dropped 2 rebuildable caches and kept every durable record"
+  },
+  "remaining_limitations": [
+    "The archive clause of the output contract is unmet: no session transcript archive exists yet.",
+    "Namespace.generation has no producer until a runtime package registers execution generations.",
+    "Sessions without a scope log key markers with an empty project and task.",
+    "Durable Redis records (memory store, event relay streams) keep their keys.",
+    "No live rollout proof; the evidence is a local isolated fixture plus CI."
+  ]
+}
