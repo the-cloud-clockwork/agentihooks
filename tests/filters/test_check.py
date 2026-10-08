@@ -150,6 +150,23 @@ def test_screen_returns_the_text_raises_on_a_deny_and_applies_a_rewrite(monkeypa
     assert str(refused.value) == "sent back"
 
 
+def test_screen_refuses_a_rewrite_that_leaves_no_text(monkeypatch):
+    monkeypatch.setattr(check, "check", lambda tool, tool_input: check.FilterOutcome("rewrite", "", {"text": " \n"}))
+    with pytest.raises(ValueError) as refused:
+        check.screen("ledger_write", TEXT)
+    assert str(refused.value) == "a filter stripped all of the text"
+
+
+def test_a_strip_filter_that_removes_a_whole_comment_refuses_it(project_filters):
+    (project_filters / "pre-ledger_write-x.filter.yaml").write_text(
+        "mode: finders\nfinders:\n  - regex: '.+'\n    reason: all of it\naction: strip\n"
+    )
+    for write in (lambda: ledger_core.check_op(_comment()), lambda: ledger_agent_ops.check(_followup())):
+        with pytest.raises(ValueError) as refused:
+            write()
+        assert str(refused.value) == "a filter stripped all of the text"
+
+
 def test_a_matching_ledger_write_filter_refuses_an_agent_status_comment(project_filters):
     (project_filters / "pre-ledger_write-x.filter.yaml").write_text(FILTER)
     op = {"op": "set", "id": "s1", "path": "phases/p1/done", "value": True, "status": TEXT, "by": "eng"}
