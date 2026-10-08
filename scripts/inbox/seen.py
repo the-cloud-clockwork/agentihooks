@@ -5,7 +5,7 @@ Whichever path shows a write first marks it; the others skip it, so each write r
 
 import os
 
-from scripts.inbox.store import now_ms, redelivery_ms
+from scripts.inbox.store import MOVE_ATTEMPTS, now_ms, owner_key, redelivery_ms
 from scripts.swarm.keyspace import ROOT
 
 PREFIX = f"{ROOT}:inbox:seen"
@@ -25,12 +25,23 @@ class SeenMarks:
         return f"{PREFIX}:{name}"
 
     def mark(self, name, ref):
-        """True when this call is the first to show the write to name."""
-        with self.redis.pipeline() as pipe:
-            pipe.sadd(self.key(name), ref)
-            pipe.expire(self.key(name), TTL_S)
-            added, _ = pipe.execute()
-        return added == 1
+        """True when this call is the first to show the write to name; False while a delivery owner holds name."""
+        from redis.exceptions import WatchError
+
+        for _ in range(MOVE_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(owner_key(name))
+                    if pipe.get(owner_key(name)) is not None:
+                        return False
+                    pipe.multi()
+                    pipe.sadd(self.key(name), ref)
+                    pipe.expire(self.key(name), TTL_S)
+                    added, _ = pipe.execute()
+                    return added == 1
+                except WatchError:
+                    continue
+        return False
 
     def seen(self, name, ref):
         return bool(self.redis.sismember(self.key(name), ref))
