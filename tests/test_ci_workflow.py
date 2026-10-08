@@ -389,10 +389,9 @@ def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
         " && needs.shard-check.result == 'success' && needs.test-count.result == 'success' }}"
     )
     tree, upload = job["steps"]
-    assert tree["env"]["GH_TOKEN"] == "${{ github.token }}"
-    assert "git/commits/$GITHUB_SHA" in tree["run"]
+    assert tree["env"] == {"TREE": "${{ needs.lint.outputs.tree }}"}
     assert upload["uses"].startswith("actions/upload-artifact@")
-    assert upload["with"]["name"] == "tests-passed-${{ steps.tree.outputs.sha }}"
+    assert upload["with"]["name"] == "tests-passed-${{ needs.lint.outputs.tree }}"
 
 
 def _fake_github(tmp_path, tested_tree, artifact):
@@ -402,32 +401,28 @@ def _fake_github(tmp_path, tested_tree, artifact):
     store.mkdir()
     listing = tmp_path / "listing.json"
     listing.write_text(json.dumps({"artifacts": [artifact]}))
-    commit = tmp_path / "commit.json"
-    commit.write_text(json.dumps({"sha": "merge-sha", "tree": {"sha": tested_tree}}))
     (bin_dir / "gh").write_text(
         "#!/usr/bin/env bash\n"
         'path="$2"; while [ $# -gt 0 ]; do [ "$1" = --jq ] && f="$2"; shift; done\n'
         'case "$path" in\n'
-        f'  */git/commits/merge-sha) jq -r "$f" "{commit}" ;;\n'
         f'  *artifacts\\?name=*) [ -e "{store}/${{path#*name=}}" ] || exit 1; jq -r "$f" "{listing}" ;;\n'
         "  *) exit 1 ;;\n"
         "esac\n"
     )
     (bin_dir / "gh").chmod(0o755)
-    return {"PATH": f"{bin_dir}:{os.environ['PATH']}", "GITHUB_REPOSITORY": "o/r", "STORE": str(store)}
+    return {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "GITHUB_REPOSITORY": "o/r",
+        "STORE": str(store),
+        "TESTED_TREE": tested_tree,
+    }
 
 
 def _record_pass(tmp_path, env):
     tree, upload = _workflow()["jobs"]["record-pass"]["steps"]
-    out = tmp_path / "record-out"
-    subprocess.run(
-        ["bash", "-e", "-c", tree["run"]],
-        env={**env, "GITHUB_SHA": "merge-sha", "GITHUB_OUTPUT": str(out)},
-        cwd=tmp_path,
-        check=True,
-    )
-    sha = dict(line.split("=", 1) for line in out.read_text().split())["sha"]
-    name = upload["with"]["name"].replace("${{ steps.tree.outputs.sha }}", sha)
+    subprocess.run(["bash", "-e", "-c", tree["run"]], env={**env, "TREE": env["TESTED_TREE"]}, cwd=tmp_path, check=True)
+    sha = (tmp_path / "tree.txt").read_text().strip()
+    name = upload["with"]["name"].replace("${{ needs.lint.outputs.tree }}", sha)
     (Path(env["STORE"]) / name).touch()
 
 
