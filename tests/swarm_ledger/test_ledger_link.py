@@ -1,5 +1,6 @@
 import http.server
 import json
+import socket
 import threading
 import time
 from pathlib import Path
@@ -127,6 +128,21 @@ def test_serving_probes_the_address_it_is_given(server, monkeypatch):
     monkeypatch.setenv("LEDGER_PORT", "1")
     assert ledger_link.serving() is None
     assert ledger_link.serving(url=given) == "/srv/other"
+
+
+def test_serving_is_empty_for_a_reply_that_is_not_http():
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+
+        def answer():
+            conn, _ = listener.accept()
+            with conn:
+                conn.recv(1024)
+                conn.sendall(b"SSH-2.0-OpenSSH_9.6\r\n")
+
+        threading.Thread(target=answer, daemon=True).start()
+        assert ledger_link.serving(url=f"http://127.0.0.1:{listener.getsockname()[1]}") == ""
 
 
 def test_the_ledger_folder_defaults_to_the_home_ledger(monkeypatch):

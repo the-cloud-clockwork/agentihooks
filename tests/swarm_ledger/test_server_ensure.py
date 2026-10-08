@@ -121,6 +121,21 @@ def test_occupied_unresponsive_port_times_out_without_starting(isolated_server, 
         start.assert_not_called()
 
 
+def test_a_listening_silent_port_waits_out_the_deadline_without_starting(isolated_server, monkeypatch):
+    monkeypatch.setattr(server, "SERVER_WAIT", 0.15)
+    with socket.socket() as silent:
+        silent.bind(("127.0.0.1", 0))
+        silent.listen()
+        monkeypatch.setattr(server, "BASE", f"http://127.0.0.1:{silent.getsockname()[1]}")
+        with (
+            patch.object(server.subprocess, "Popen") as start,
+            pytest.raises(SystemExit) as refused,
+        ):
+            server.ensure()
+    assert str(refused.value) == f"ledger server did not answer on {server.BASE}; see {server.LOGFILE}"
+    start.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "pid", [None, "invalid", "999999999", str(os.getpid())], ids=["missing", "invalid", "stale", "unrelated"]
 )
@@ -232,8 +247,7 @@ def test_a_port_answering_an_error_is_refused_without_waiting(isolated_server, m
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Refusing)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    monkeypatch.setattr(server, "PORT", httpd.server_address[1])
-    monkeypatch.setattr(server, "BASE", f"http://127.0.0.1:{server.PORT}")
+    monkeypatch.setattr(server, "BASE", f"http://127.0.0.1:{httpd.server_address[1]}")
     try:
         with (
             patch.object(server.time, "sleep") as wait,
