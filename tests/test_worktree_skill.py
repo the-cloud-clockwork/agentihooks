@@ -167,8 +167,8 @@ class Done(WtBase):
 CONCURRENT_GIT = """#!{bash}
 "{real}" "$@"
 rc=$?
-if [[ -z "${{CONCURRENT_FETCHED:-}}" && " $* " == *" fetch "* ]]; then
-  CONCURRENT_FETCHED=1 GIT_EXEC_PATH="{exec_path}" "{real}" -C "{primary}" fetch --quiet origin dev side
+if [[ " $* " == *" fetch "* ]]; then
+  GIT_EXEC_PATH="{exec_path}" "{real}" -C "{primary}" fetch --quiet origin dev side
 fi
 exit $rc
 """
@@ -191,7 +191,7 @@ class DoneSync(WtBase):
             os.symlink(entry, shim / entry.name)
         script = CONCURRENT_GIT.format(bash=BASH, real=real, exec_path=exec_path, primary=self.primary)
         for path in (shim / "git", self.bin / "git"):
-            path.unlink()
+            path.unlink(missing_ok=True)
             path.write_text(script)
             path.chmod(0o755)
         self.env["GIT_EXEC_PATH"] = str(shim)

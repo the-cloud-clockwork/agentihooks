@@ -217,10 +217,12 @@ case "${cmd}" in
       echo "wt: primary checkout ${REPO} is on '${PRIMARY_BR}', not ${BASE} — local ${BASE} NOT synced" >&2
     elif [[ -n "$(git -C "${REPO}" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
       echo "wt: primary checkout ${REPO} has uncommitted changes — local ${BASE} NOT synced" >&2
-    elif git -C "${REPO}" fetch --quiet origin "${BASE}" && git -C "${REPO}" merge --ff-only --quiet "origin/${BASE}"; then
+    elif ! git -C "${REPO}" fetch --quiet origin "${BASE}"; then
+      echo "wt: 'git fetch origin ${BASE}' failed in ${REPO} — local ${BASE} NOT synced" >&2
+    elif git -C "${REPO}" merge --ff-only --quiet "origin/${BASE}"; then
       echo "wt: local ${BASE} synced to origin/${BASE} ($(git -C "${REPO}" rev-parse --short HEAD))"
     else
-      echo "wt: fast-forward of ${BASE} to origin/${BASE} failed in ${REPO} — local ${BASE} NOT synced" >&2
+      echo "wt: 'git merge --ff-only origin/${BASE}' failed in ${REPO} — local ${BASE} NOT synced" >&2
     fi
     if git -C "${REPO}" show-ref --verify --quiet "refs/heads/${BR}"; then
       git -C "${REPO}" fetch origin "${BASE}" --quiet 2>/dev/null || true
