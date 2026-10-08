@@ -139,10 +139,13 @@ def loads(text):
     return json.loads(text, parse_constant=_reject_constant)
 
 
+PRETTY = orjson.OPT_INDENT_2 | orjson.OPT_PASSTHROUGH_DATETIME | orjson.OPT_PASSTHROUGH_DATACLASS
+
+
 def pretty(value):
     try:
-        return orjson.dumps(value, option=orjson.OPT_INDENT_2).decode()
-    except TypeError:
+        return orjson.dumps(value, option=PRETTY).decode()
+    except orjson.JSONEncodeError:
         return json.dumps(value, indent=2, ensure_ascii=False)
 
 

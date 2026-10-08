@@ -1,8 +1,15 @@
+import dataclasses
+import datetime
 import json
 
 import pytest
 
 from scripts.swarm_ledger import ledger_core as core
+
+
+@dataclasses.dataclass
+class Row:
+    n: int
 
 
 def stdlib(value):
@@ -36,6 +43,12 @@ def test_pretty_text_uses_orjson_for_the_values_it_accepts(monkeypatch):
     monkeypatch.setattr(core.orjson, "dumps", spy)
     assert core.pretty({"text": "café"}) == stdlib({"text": "café"})
     assert seen == [{"text": "café"}]
+
+
+@pytest.mark.parametrize("value", [{"at": datetime.datetime(2026, 1, 1)}, {"row": Row(1)}])
+def test_pretty_text_refuses_what_the_stdlib_refuses(value):
+    with pytest.raises(TypeError):
+        core.pretty(value)
 
 
 def test_the_stored_ledger_is_written_with_the_fast_encoder(monkeypatch, tmp_path):
