@@ -379,7 +379,7 @@ class InboxStore:
     def redeliver(self, now, window):
         """Return each item delivered at least window ms ago and never confirmed to pending, for the next claim."""
         cutoff = now - window
-        with self.redis.pipeline(transaction=False) as pipe:
+        with self.redis.pipeline() as pipe:
             pipe.exists(self.key("delivered", "built"))
             pipe.zrangebyscore(self.key("delivered"), "-inf", cutoff)
             built, stale = pipe.execute()
@@ -393,7 +393,7 @@ class InboxStore:
         for key in self.redis.scan_iter(match=prefix + "*"):
             state, updated_at = self.redis.hmget(key, "state", "updated_at")
             if state == "delivered" and int(updated_at) > since:
-                self.redis.zadd(self.key("delivered"), {key[len(prefix) :]: int(updated_at)}, nx=True)
+                self.redis.zadd(self.key("delivered"), {key[len(prefix) :]: int(updated_at)})
         self.redis.set(self.key("delivered", "built"), 1)
 
     def requeue(self, item_id, by, reason, before=None):

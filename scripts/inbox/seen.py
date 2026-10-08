@@ -65,12 +65,16 @@ def claim(store, me):
     marks = SeenMarks(store.redis)
     shown = []
     for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me))):
-        if item.ref and not marks.mark(me, item.ref) and not _delivered_before(store, item.id, me):
+        if item.ref and _shown_elsewhere(marks, store, item, me):
             store.close(item.id, me, "done", SEEN_ON_LEDGER)
         else:
             shown.append(item)
     return shown
 
 
+def _shown_elsewhere(marks, store, item, me):
+    return not marks.mark(me, item.ref) and not _delivered_before(store, item.id, me)
+
+
 def _delivered_before(store, item_id, me):
-    return any(e.get("state") == "delivered" and e.get("by") == me for e in store.history(item_id)[:-1])
+    return sum(e.get("state") == "delivered" and e.get("by") == me for e in store.history(item_id)) > 1

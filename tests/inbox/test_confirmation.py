@@ -4,7 +4,7 @@ import hooks.context.inbox_delivery as delivery
 from hooks import hook_manager
 from hooks.targets.emitter import flush
 from scripts.inbox import channel, seen, wake
-from scripts.inbox.store import NOTIFY, InboxStore, redelivery_ms
+from scripts.inbox.store import NOTIFY, InboxError, InboxStore, redelivery_ms
 from scripts.swarm.store import MASTER, AgentRecord
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -295,3 +295,138 @@ def test_a_cancelled_channel_write_puts_the_item_back_to_pending(store):
     finally:
         channel.SETTLE_S = saved
     assert states(store, item.id)[-1] == ("pending", "bob", "the inbox channel could not show it")
+
+
+def test_pending_context_is_empty_for_a_session_with_no_identity(store, monkeypatch):
+    store.send("alice", "bob", "hi")
+
+    def nobody(env):
+        raise InboxError("no identity")
+
+    monkeypatch.setattr(delivery, "identity", nobody)
+    assert delivery.pending_context("s1") == ""
+
+
+def test_confirm_shown_connects_with_the_session_environment(store, monkeypatch):
+    item = store.deliver(store.send("alice", "carol", "hi").id, "carol")
+    seen_env = []
+    monkeypatch.setattr(delivery, "connect", lambda environ=None: seen_env.append(environ) or store)
+    monkeypatch.setattr(delivery, "now_ms", lambda: item.updated_at + 1)
+    delivery.confirm_shown("s1", {"AGENTIHOOKS_AGENT_NAME": "carol"})
+    assert seen_env == [{"AGENTIHOOKS_AGENT_NAME": "carol", "CLAUDE_CODE_SESSION_ID": "s1"}]
+    assert store.get(item.id).state == "confirmed"
+
+
+@pytest.mark.parametrize("event", ["stop", "prompt"])
+def test_stop_and_prompt_confirm_for_their_own_session(event, monkeypatch):
+    sessions = []
+    monkeypatch.setattr(delivery, "confirm_shown", lambda session_id: sessions.append(session_id))
+    if event == "stop":
+        hook_manager.on_stop({"session_id": "s9"})
+    else:
+        hook_manager.on_user_prompt_submit({"session_id": "s9", "prompt": "go on"})
+    assert sessions == ["s9"]
+
+
+def test_a_seat_successor_still_closes_a_ledger_write_its_predecessor_was_shown(store):
+    seat = "eng-1@sw"
+    store.seats.occupy(seat, "carol", at=1)
+    item = store.deliver(store.send("operator", seat, "a comment", ref="sw:3:c1").id, "carol")
+    store.requeue(item.id, "inbox", "again")
+    store.seats.occupy(seat, "bob", at=2)
+    seen.SeenMarks(store.redis).mark("bob", "sw:3:c1")
+    assert seen.claim(store, "bob") == []
+    assert store.get(item.id).state == "done"
+
+
+def test_confirm_shown_skips_items_it_cannot_confirm_and_goes_on(store, monkeypatch):
+    other = store.deliver(store.send("alice", "carol", "for carol").id, "carol")
+    store.redis.zadd(store.key("delivered"), {"gone": 1, "never-delivered": 2})
+    store.redis.zadd(store.key("delivered"), {other.id: 3})
+    stale = store.send("alice", "bob", "pending only")
+    store.redis.zadd(store.key("delivered"), {stale.id: 4})
+    closed = delivered(store, "closed")
+    store.close(closed.id, "bob", "done", "handled the request")
+    store.redis.zadd(store.key("delivered"), {closed.id: 5})
+    store.seats.occupy("eng-1@sw", "bob", at=1)
+    moved_on = store.deliver(store.send("alice", "eng-1@sw", "for the seat").id, "bob")
+    store.seats.occupy("eng-1@sw", "carol", at=2)
+    store.redis.zadd(store.key("delivered"), {moved_on.id: 5.5})
+    with pytest.raises(InboxError):
+        store.confirm(moved_on.id, "bob")
+    mine = delivered(store, "mine")
+    store.redis.zadd(store.key("delivered"), {mine.id: 6})
+    assert [i.id for i in store.confirm_shown("bob", 7)] == [mine.id]
+
+
+def test_confirm_shown_leaves_an_item_with_no_delivery_on_record(store):
+    item = store.deliver(store.send("alice", "XXXX", "hi").id, "XXXX")
+    store.redis.delete(store.key("history", item.id))
+    assert store.confirm_shown("XXXX", item.updated_at + 1) == []
+    assert store.get(item.id).state == "delivered"
+
+
+def test_a_wake_entry_after_the_delivery_does_not_hide_an_earlier_one(store, monkeypatch):
+    item = store.send("operator", "bob", "a comment", ref="sw:3:c1")
+    seen.claim(store, "bob")
+    monkeypatch.setattr(seen, "now_ms", lambda: store.get(item.id).updated_at + W)
+    real = store.deliver
+
+    def deliver_then_wake(item_id, receiver):
+        moved = real(item_id, receiver)
+        store.redis.rpush(store.key("history", item_id), '{"event": "woke", "by": "swarm"}')
+        return moved
+
+    monkeypatch.setattr(store, "deliver", deliver_then_wake)
+    assert [i.id for i in seen.claim(store, "bob")] == [item.id]
+
+
+def test_leaving_delivered_drops_the_item_from_the_delivered_index(store):
+    read, moved = delivered(store), delivered(store, "moved")
+    store.read(read.id, "bob")
+    store.redirect(moved.id, "swarm", "carol", "reassigned")
+    assert store.redis.zrange(store.key("delivered"), 0, -1) == []
+
+
+def test_redelivery_leaves_an_item_delivered_again_since_its_index_entry(store):
+    item = delivered(store)
+    store.redis.zadd(store.key("delivered"), {item.id: item.updated_at - W})
+    assert store.redeliver(item.updated_at + 1, W) == []
+    assert store.get(item.id).state == "delivered"
+
+
+def test_requeue_stamps_its_time_and_puts_the_address_back_on_the_waiting_set(store, monkeypatch):
+    import scripts.inbox.store as store_module
+
+    store.pending()
+    item = delivered(store)
+    monkeypatch.setattr(store_module, "now_ms", lambda: 123456)
+    moved = store.requeue(item.id, "inbox", "again")
+    assert (moved.updated_at, store.get(item.id).updated_at) == (123456, 123456)
+    assert store.redis.smembers(store.key("waiting")) == {"bob"}
+    assert [i.id for i in store.pending()] == [item.id]
+
+
+def test_requeue_retries_a_watch_conflict_and_then_names_the_message(store, monkeypatch):
+    from redis.exceptions import WatchError
+
+    item = delivered(store)
+    real, calls = store._try_requeue, []
+
+    def flaky(*args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise WatchError
+        return real(*args)
+
+    monkeypatch.setattr(store, "_try_requeue", flaky)
+    assert store.requeue(item.id, "inbox", "again").state == "pending"
+    assert len(calls) == 2
+
+    def conflict(*args):
+        raise WatchError
+
+    monkeypatch.setattr(store, "_try_requeue", conflict)
+    with pytest.raises(InboxError) as raised:
+        store.requeue(item.id, "inbox", "again")
+    assert str(raised.value) == f"message {item.id} changed meanwhile; run the command again"
