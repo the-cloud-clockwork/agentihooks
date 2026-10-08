@@ -3299,7 +3299,7 @@ def _install_claude_persona(
     _prepend_bundle_claude_md(bundle_dir)
 
     # --- 5b. Append CI manifesto to ~/.claude/CLAUDE.md (memory channel) ---
-    _append_ci_manifesto_to_claude_md(bundle_dir)
+    _append_ci_manifesto_to_claude_md(bundle_dir, profile_dirs)
 
 
 # ---------------------------------------------------------------------------
@@ -4326,7 +4326,9 @@ def _symlink_dir_contents(
     _state_record_links(records)
 
 
-def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
+def _append_ci_manifesto_to_claude_md(
+    bundle_dir: Path | None = None, profile_dirs: list[tuple[str, Path]] | None = None
+) -> None:
     """Append every enabled bundle manifesto to ~/.claude/CLAUDE.md as a fenced block.
 
     The manifesto used to be injected at SessionStart via stdout, but Claude
@@ -4345,7 +4347,9 @@ def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
         return
     if not getattr(_cfg, "CI_MANIFESTO_ENABLED", True):
         return
-    manifesto_paths = [Path(path) for path in _cfg._resolve_manifesto_paths(bundle_dir)]
+    from scripts.profiles import manifestos
+
+    manifesto_paths = manifestos.paths(bundle_dir, profile_dirs or [])
     if not manifesto_paths:
         _cprint("  [--] No enabled manifestos found — skipping CLAUDE.md append.")
         return
@@ -4354,7 +4358,9 @@ def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
         # Nothing to append to — install_system_prompt handles its own write
         return
     bodies = [
-        f"<!-- manifesto: {path.name} -->\n{path.read_text().rstrip()}" for path in manifesto_paths if path.is_file()
+        f"<!-- manifesto: {path.name} -->\n{_cfg.manifesto_body(path).rstrip()}"
+        for path in manifesto_paths
+        if path.is_file()
     ]
     if not bodies:
         _cprint("  [--] No enabled manifestos found — skipping CLAUDE.md append.")
@@ -6462,6 +6468,10 @@ def main() -> None:
             raise SystemExit("usage: agentihooks skill eval [--agent {claude,codex}] -- <command>")
 
         raise SystemExit(skill_eval_main(_argv[2:]))
+    if _argv and _argv[0] == "manifestos":
+        from scripts.profiles.manifestos import main as manifestos_main
+
+        raise SystemExit(manifestos_main(_argv[1:]))
     if _argv and _argv[0] == "herdr":
         from scripts.herdr_setup import main as herdr_main
 
