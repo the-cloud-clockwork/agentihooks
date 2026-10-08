@@ -715,6 +715,20 @@ def test_copilot_render_links_the_role_persona_and_operator_state(world, copilot
     assert os.readlink(forced / "copilot-instructions.md") == str(forced.parent / "claude" / "CLAUDE.md")
 
 
+def test_copilot_render_follows_a_rotated_gateway_key_into_a_private_file(world, copilot_gateway, monkeypatch):
+    from scripts.profiles import render
+
+    first = render.render_copilot("rb-role")
+    monkeypatch.setenv("GW_KEY", "k-rotated")
+
+    out = render.render_copilot("rb-role")
+
+    assert out is not None and out != first
+    headers = json.loads((out / "mcp-config.json").read_text())["mcpServers"]["gateway-tools"]["headers"]
+    assert headers == {"Authorization": "Bearer k-rotated"}
+    assert (out / "mcp-config.json").stat().st_mode & 0o777 == 0o600
+
+
 def test_profile_render_cli_renders_a_copilot_home(world, copilot_gateway, capsys):
     from scripts.profiles import render
 
@@ -1510,14 +1524,15 @@ def test_cli_usage(world, capsys):
     )
 
 
-def test_agentihooks_profile_dispatches_to_render(monkeypatch, capsys):
+def test_agentihooks_profile_dispatches_to_render(world, copilot_gateway, monkeypatch, capsys):
     from scripts import install
+    from scripts.profiles import render
 
     monkeypatch.setattr("sys.argv", ["agentihooks", "profile", "render", "rb-role", "--target", "copilot"])
     with pytest.raises(SystemExit) as exc:
         install.main()
-    assert exc.value.code == 1
-    assert capsys.readouterr().err == "ERROR: Profile 'rb-role' not found\n"
+    assert exc.value.code == 0
+    assert ROLE_TOOLSET in (render.rendered_root() / "rb-role" / "copilot" / "mcp-config.json").read_text()
 
 
 def test_agentihooks_help_lists_profile(monkeypatch, capsys):
@@ -1526,7 +1541,7 @@ def test_agentihooks_help_lists_profile(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["agentihooks", "--help"])
     with pytest.raises(SystemExit):
         install.main()
-    line = r"(?<!\S)profile Render a profile into its own home: render NAME --target claude\|codex \[--force\] \[--out DIR \[--bundle DIR\]\](?!\S)"
+    line = r"(?<!\S)profile Render a profile into its own home: render NAME --target claude\|codex\|copilot \[--force\] \[--out DIR \[--bundle DIR\]\](?!\S)"
     assert re.search(line, _flat(capsys.readouterr().out))
 
 

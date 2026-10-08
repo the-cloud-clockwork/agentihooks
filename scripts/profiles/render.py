@@ -458,9 +458,15 @@ def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ())
     bundle, dirs = _bundle(), _chain(name, overlays)
     claude_fresh = render_claude(name, force=force, overlays=overlays) is None
     current = _stamp(bundle, dirs)
+    config = {"mcpServers": CopilotAdapter().mcp_entries(_mcp_servers("copilot", bundle, dirs))}
     root = profile_dir(name, overlays)
     out = root / "copilot"
-    if not force and claude_fresh and (out / "mcp-config.json").is_file() and _read_json(out / STAMP) == current:
+    if (
+        not force
+        and claude_fresh
+        and _read_json(out / "mcp-config.json") == config
+        and _read_json(out / STAMP) == current
+    ):
         return None
     if out.exists():
         root = render_claude(name, force=True, overlays=overlays).parent
@@ -470,8 +476,9 @@ def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ())
     operator = copilot_home()
     for item in COPILOT_STATE:
         _link(out / item, operator / item)
-    servers = CopilotAdapter().mcp_entries(_mcp_servers("copilot", bundle, dirs))
-    _atomic_write(out / "mcp-config.json", json.dumps({"mcpServers": servers}, indent=2) + "\n")
+    # Copilot sends header values literally, so this file holds the resolved gateway credential.
+    _atomic_write(out / "mcp-config.json", json.dumps(config, indent=2) + "\n")
+    (out / "mcp-config.json").chmod(0o600)
     _install_module().save_json(out / STAMP, current)
     return out
 

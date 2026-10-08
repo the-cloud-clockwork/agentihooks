@@ -754,15 +754,7 @@ class CopilotAdapter:
             _atomic_write(settings_path, json.dumps(settings, indent=2) + "\n")
 
     def register_mcp(self, servers: dict) -> None:
-        """Merge a layer of MCP servers into ~/.copilot/mcp-config.json.
-
-        Claude ``.mcp.json`` entries translate almost 1:1. Unlike codex,
-        Copilot has an SSE client, so no transport is dropped. It has no
-        ``${VAR}`` header expansion either — a header reference is resolved
-        from the install environment and baked to the literal Copilot needs
-        (the same value ``~/.claude.json`` holds); an unset variable keeps the
-        drop-and-warn.
-        """
+        """Merge a layer of MCP servers into ~/.copilot/mcp-config.json."""
         _i = _install_module()
         config_path = self.home() / "mcp-config.json"
         doc = self._load_json(config_path)
@@ -779,6 +771,15 @@ class CopilotAdapter:
             _i._cprint(f"  [OK] Copilot MCP servers: {', '.join(added)}")
 
     def mcp_entries(self, servers: dict) -> dict:
+        """Translate Claude ``.mcp.json`` entries to Copilot ones, writing nothing.
+
+        Claude ``.mcp.json`` entries translate almost 1:1. Unlike codex,
+        Copilot has an SSE client, so no transport is dropped. It has no
+        ``${VAR}`` header expansion either — a header reference is resolved
+        from the install environment and baked to the literal Copilot needs
+        (the same value ``~/.claude.json`` holds); an unset variable keeps the
+        drop-and-warn.
+        """
         _i = _install_module()
         from hooks.secrets import scan as _scan_secrets
 
