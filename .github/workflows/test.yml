@@ -200,10 +200,50 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         run: python -m tests.shard_check shard-durations/*/durations.json
 
-  sonar:
-    needs: [unit]
+  test-count:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - *lookup
+
+      - uses: actions/checkout@v4
+        if: steps.lookup.outputs.skip != 'true'
+        with:
+          fetch-depth: 0
+
+      - *python
+      - *day
+      - *venv
+      - *uv
+      - *install
+      - *use-venv
+
+      - name: Check out the base revision
+        if: steps.lookup.outputs.skip != 'true'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+        run: git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
+
+      # The base revision's copy grades, so a pull request cannot loosen its own floor.
+      - name: Hold the base revision's test count
+        if: steps.lookup.outputs.skip != 'true'
+        run: |
+          grader="$RUNNER_TEMP/base"
+          [[ -f "$grader/tests/count_floor.py" ]] || grader="$GITHUB_WORKSPACE"
+          cd "$grader"
+          python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
+  sonar:
+    runs-on: ubuntu-latest
+    # Covers the 18 minute dev push wait, the 20 minute coverage deadline, the scan and the gate.
+    timeout-minutes: 45
     env:
       SONAR_SCANNER_VERSION: 7.2.0.5079
     permissions:
@@ -221,11 +261,6 @@ jobs:
 
       - name: Install coverage
         run: python -m pip install "coverage>=7.4"
-
-      - name: Merge shard coverage
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/coverage/combine.sh "$GITHUB_RUN_ID" 8
 
       - name: Start Cloudflare Access proxy
         id: proxy
@@ -299,6 +334,12 @@ jobs:
             exit 1
           fi
           echo "::warning::Older dev runs still hold Sonar after 18 minutes:$waiting; scanning anyway."
+
+      # Placed after every step that needs no coverage, so those overlap the unit shards.
+      - name: Merge shard coverage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/coverage/combine.sh "$GITHUB_RUN_ID" 8
 
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@v6
@@ -392,7 +433,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, shard-check, lint, sonar, mutation, swarm-image]
+    needs: [unit, shard-check, test-count, lint, sonar, mutation, swarm-image]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -452,8 +493,8 @@ jobs:
           overwrite: true
 
   record-pass:
-    needs: [unit, lint, shard-check]
-    if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.unit.result == 'success' && needs.lint.result == 'success' && needs.shard-check.result == 'success' }}
+    needs: [unit, lint, shard-check, test-count]
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.unit.result == 'success' && needs.lint.result == 'success' && needs.shard-check.result == 'success' && needs.test-count.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Resolve the tested tree
