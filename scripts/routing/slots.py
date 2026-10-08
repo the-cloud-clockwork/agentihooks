@@ -19,6 +19,7 @@ class Slot:
     _: KW_ONLY
     kind: Kind = SUBSCRIPTION
     weight: float | None = None
+    provider: str = ""
 
     @property
     def free(self) -> int:
