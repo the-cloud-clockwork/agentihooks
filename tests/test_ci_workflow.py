@@ -93,7 +93,7 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
 
 
 def test_unit_restores_one_venv_per_interpreter_and_dependency_files():
-    _, cache = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/cache"))
+    _, cache = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/cache@"))
     _, python = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/setup-python"))
     key = cache["with"]["key"]
     assert cache["with"]["path"] == "~/venv"
@@ -107,7 +107,7 @@ def test_unit_restores_one_venv_per_interpreter_and_dependency_files():
 
 
 def test_a_restored_venv_skips_uv_and_the_install():
-    _, cache = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/cache"))
+    _, cache = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/cache@"))
     hit = f"steps.{cache['id']}.outputs.cache-hit != 'true'"
     for predicate in (
         lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"),
