@@ -44,7 +44,7 @@ import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
-from scripts.swarm_ledger import page_policy, server_lifetime  # noqa: E402
+from scripts.swarm_ledger import ledger_task_duplicates, page_policy, server_lifetime  # noqa: E402
 from scripts.swarm_ledger.events import Hub  # noqa: E402
 from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
 from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
@@ -556,11 +556,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(403, "missing or wrong ledger token", "text/plain") or True
         return False
 
-    def reply_state(self, slug, changes=None, ops=None, refusals=None):
+    def reply_state(self, slug, changes=None, ops=None, refusals=None, screen=None):
         refusals = refusals or {}
+        screen = screen or ledger_task_duplicates.Screen()
+        gate = talk.Budget(slug) if ops else None
         try:
             state, rejected = repository.apply_ops(
-                slug, changes=changes, ops=ops, gate=talk.Budget(slug) if ops else None
+                slug,
+                changes=changes,
+                ops=ops,
+                gate=ledger_task_duplicates.Gate(screen, gate) if screen.refused else gate,
             )
         except (ValueError, OSError) as exc:
             return self.send(500, f"ledger unreadable: {exc}", "text/plain")
@@ -573,7 +578,11 @@ class Handler(BaseHTTPRequestHandler):
             "page_version": core.page_version(),
             "crew": ledger_gate.crew(state["_meta"]),
         }
-        state["_meta"]["warnings"] = [*state["_meta"].get("warnings", []), *refusals.values()]
+        state["_meta"]["warnings"] = [
+            *state["_meta"].get("warnings", []),
+            *refusals.values(),
+            *screen.warnings.values(),
+        ]
         reply = {**state, "rejected": [*rejected, *refusals]}
         return self.send(200, json.dumps(reply, ensure_ascii=False), "application/json")
 
@@ -835,7 +844,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403, "page changes need the operator", "text/plain")
         refusals = {op["id"]: text for op in ops if (text := authority.refusal(self.principal, op))}
         allowed = [op for op in ops if op["id"] not in refusals]
-        return self.reply_state(slug, changes, allowed, refusals)
+        return self.reply_state(slug, changes, allowed, refusals, ledger_task_duplicates.screen(state, allowed))
 
 
 def code_stamp(code_dirs=CODE_DIRS):
