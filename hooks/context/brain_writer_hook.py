@@ -324,7 +324,7 @@ def write_markers(session_id: str, transcript_path: str, last_message: str = "")
 
         from hooks.context.project_sessions import marker_scope, unattributed_session_events_total
 
-        markers = [{**m, "scope": marker_scope(session_id, m, replay=False)} for m in markers]
+        markers = [{**m, "scope": marker_scope(session_id, m)} for m in markers]
         scopes = [m["scope"] for m in markers if m["scope"] is not None]
         span.set_attrs({"unattributed_session_events_total": unattributed_session_events_total(scopes)})
 

@@ -204,7 +204,8 @@ def test_transcript_observation_records_the_worktree_switch(home, monkeypatch):
     assert len(calls) == 4
     assert len(transitions("live")) == 4
     assert observe_transcript("live", str(home / "missing.jsonl"), env) == 0
-    assert observe_transcript("live", str(path), {**env, "AGENTIHOOKS_SESSION_SCOPE": "0"}) == 0
+    assert observe_transcript("off", str(path), {**env, "AGENTIHOOKS_SESSION_SCOPE": "0"}) == 0
+    assert transitions("off") == []
 
 
 def test_transcript_observation_skips_entries_without_a_folder_or_time(home, monkeypatch):
@@ -245,7 +246,7 @@ def test_codex_task_completion_markers_carry_their_time(home):
 
 def test_marker_times_follow_their_own_record_after_many_short_records(home):
     entries = [
-        {"type": "assistant", "timestamp": f"2026-10-08T10:{n:02d}:00Z", "message": {"content": "a"}} for n in range(12)
+        {"type": "assistant", "timestamp": f"2026-10-08T10:{n:02d}:00Z", "message": {"content": "a"}} for n in range(20)
     ]
     entries.append(
         {
@@ -622,6 +623,10 @@ def test_stop_reports_unattributed_markers(home, monkeypatch):
     assert recorded["unattributed_session_events_total"] == 0
     assert brain_writer_hook.write_markers("unlogged", str(home / "none.jsonl"), late)["markers"] == 1
     assert recorded["unattributed_session_events_total"] == 0
+    timeless = home / "timeless.jsonl"
+    timeless.write_text(json.dumps({"type": "assistant", "message": {"content": late}}) + "\n")
+    assert brain_writer_hook.write_markers("late", str(timeless))["markers"] == 1
+    assert recorded["unattributed_session_events_total"] == 1
 
 
 def test_an_unwritable_scope_log_never_stops_session_start_or_stop(home):

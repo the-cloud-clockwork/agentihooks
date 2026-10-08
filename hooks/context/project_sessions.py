@@ -229,7 +229,9 @@ def enabled(environ: Mapping[str, str] | None = None) -> bool:
     return (os.environ if environ is None else environ).get("AGENTIHOOKS_SESSION_SCOPE") != "0"
 
 
-def marker_scope(session_id: str, marker: Mapping, grant: SessionGrant | None = None, *, replay: bool) -> dict | None:
+def marker_scope(
+    session_id: str, marker: Mapping, grant: SessionGrant | None = None, *, replay: bool = False
+) -> dict | None:
     if not enabled():
         return None
     attrs = marker.get("attrs") or {}
@@ -289,7 +291,7 @@ def observe_transcript(session_id: str, transcript_path: str, environ: Mapping[s
         return 0
     rows = transitions(session_id)
     after = _instant(rows[-1].get("at")) if rows else None
-    seen = (rows[-1].get("cwd"), rows[-1].get("branch", "")) if rows else None
+    seen = (rows[-1].get("cwd"), rows[-1].get("branch")) if rows else None
     recorded = 0
     for entry in _load_entries(Path(transcript_path)):
         if not isinstance(entry, dict):
