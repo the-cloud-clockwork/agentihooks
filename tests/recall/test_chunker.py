@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.recall import chunk_body
+from scripts.recall.chunker import chunk_body
 
 
 def test_short_body_stays_whole():

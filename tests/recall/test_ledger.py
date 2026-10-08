@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from scripts.recall import RecallRecord, extract_ledger
+from scripts.recall.ledger import extract_ledger
+from scripts.recall.models import RecallRecord
 
 
 @pytest.fixture
