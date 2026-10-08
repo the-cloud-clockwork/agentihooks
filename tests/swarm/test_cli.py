@@ -108,6 +108,25 @@ def test_done_closes_the_task_and_marks_the_agent_finished(env, monkeypatch):
     assert store.claimant("sw", "t1") is None
 
 
+def test_done_on_a_group_lead_closes_its_members_with_the_lead_pull_request(env, monkeypatch):
+    store, ledger, _ = env
+    ledger.rows["t1"]["group_members"] = ["t3", "t4"]
+    ledger.rows["t3"] = {"id": "t3", "lane": "eng", "state": "open", "claimed_by": "", "merged_into": "t1"}
+    ledger.rows["t4"] = {"id": "t4", "lane": "eng", "state": "done", "claimed_by": "", "merged_into": "t1"}
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    url = "https://github.com/o/r/pull/9"
+    ledger.updates = []
+    original = ledger.update_task
+    ledger.update_task = lambda slug, task_id, fields, **kw: (
+        ledger.updates.append(task_id) or original(slug, task_id, fields, **kw)
+    )
+    assert run("sw", "done", "--pr", url) == 0
+    assert (ledger.rows["t3"]["state"], ledger.rows["t3"]["pr_url"]) == ("done", url)
+    assert ledger.updates == ["t1", "t3"]
+
+
 def test_done_on_a_code_task_waits_for_its_pull_request_to_merge(env, monkeypatch, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
