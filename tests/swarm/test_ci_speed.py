@@ -76,10 +76,13 @@ def test_a_read_failure_keeps_the_last_value_and_is_logged(swarm, capsys):
     assert "ci speed kept its last value" in capsys.readouterr().err
 
 
-def test_a_malformed_run_record_keeps_the_last_value(swarm, capsys):
+@pytest.mark.parametrize("updated_at", ["missing", None])
+def test_a_malformed_run_record_keeps_the_last_value(swarm, capsys, updated_at):
     store, config = swarm
     ci_speed.refresh("sw", config, store, NOW_MS, run=gh("\n".join(json.dumps(r) for r in RUNS), []))
     broken = {k: v for k, v in RUNS[0].items() if k != "updated_at"}
+    if updated_at is None:
+        broken["updated_at"] = None
     ci_speed.refresh("sw", config, store, NOW_MS + HOUR_MS, run=gh(json.dumps(broken), []))
     cached = ci_speed.get(store.redis, "sw")
     assert (cached["minutes"], cached["at"]) == (pytest.approx(4.43, abs=0.01), NOW_MS)
