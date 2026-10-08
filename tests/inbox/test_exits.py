@@ -176,7 +176,6 @@ def test_the_sweep_names_the_occupant_a_seat_notice_nobody_received_was_sent_to(
     other = inbox.send("sender", "eng-1@sw", "contract")
     item = inbox.send("swarm", "eng-1@sw", TEMPLATE)
     store.seats.occupy("eng-1@sw", "sw-eng-1", item.created_at)
-    store.seats.note("eng-1@sw", "woke", "", item.created_at)
     store.seats.occupy("eng-1@sw", "sw-eng-2", item.created_at + 1)
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(item.id).reason == "done: sw-eng-1 left its seat; its branch sw-eng-1 was not pushed"
