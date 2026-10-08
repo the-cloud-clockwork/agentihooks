@@ -1,4 +1,9 @@
+import os
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 from scripts.swarm_ledger import page_policy
 
@@ -12,6 +17,7 @@ LIVE = (
     "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 )
 ON = {"LEDGER_IMPECCABLE_LIVE": "1"}
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_scratch_server_with_the_setting_allows_the_live_origin(tmp_path):
@@ -50,3 +56,25 @@ def test_ledger_server_sends_the_policy_built_from_its_folder_and_port():
     assert ledger_server.PAGE_POLICY == page_policy.policy(
         ledger_server.os.environ, ledger_server.core.LEDGER_DIR, ledger_server.PORT
     )
+
+
+@pytest.mark.parametrize(
+    "env,expected",
+    [
+        ({"LEDGER_IMPECCABLE_LIVE": "1", "LEDGER_DIR": "scratch", "LEDGER_PORT": "8799"}, LIVE),
+        ({"LEDGER_DIR": "scratch", "LEDGER_PORT": "8799"}, SELF_ONLY),
+        ({"LEDGER_IMPECCABLE_LIVE": "1", "LEDGER_PORT": "8799"}, SELF_ONLY),
+    ],
+)
+def test_ledger_server_policy_follows_its_environment(tmp_path, env, expected):
+    if "LEDGER_DIR" in env:
+        env = {**env, "LEDGER_DIR": str(tmp_path / env["LEDGER_DIR"])}
+    run = subprocess.run(
+        [sys.executable, "-c", "from scripts.swarm_ledger import ledger_server; print(ledger_server.PAGE_POLICY)"],
+        env={"PATH": os.environ["PATH"], "HOME": str(tmp_path), "PYTHONPATH": str(ROOT), **env},
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert run.stdout == expected + "\n"
