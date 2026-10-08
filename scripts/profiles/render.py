@@ -90,6 +90,30 @@ def _bundle() -> Path | None:
     return bundle
 
 
+def _pin(bundle: Path | None, revision: str) -> None:
+    recorded = f"the launch recorded bundle commit {revision}, but"
+    if bundle is None:
+        raise ValueError(f"{recorded} no bundle is linked")
+    git = ["git", "-C", str(bundle)]
+    try:
+        head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
+        status = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, timeout=10)
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(f"{recorded} git did not answer within 10 seconds for the bundle at {bundle}") from exc
+    for done in (head, status):
+        if done.returncode:
+            raise ValueError(f"{recorded} git cannot read the bundle at {bundle}: {done.stderr.strip()}")
+    if head.stdout.strip() != revision:
+        differs = f"is at commit {head.stdout.strip()}"
+    elif status.stdout.strip():
+        differs = "has uncommitted changes"
+    else:
+        return
+    raise ValueError(
+        f"{recorded} the bundle at {bundle} {differs}; check out {revision} in the bundle before this launch renders"
+    )
+
+
 def _base_digest() -> str:
     _i = _install_module()
     digest = hashlib.sha256()
@@ -483,10 +507,14 @@ def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ())
     return out
 
 
-def render(target: str, name: str, force: bool = False, overlays: Sequence[str] = ()) -> Path | None:
+def render(
+    target: str, name: str, force: bool = False, overlays: Sequence[str] = (), bundle_revision: str = ""
+) -> Path | None:
     renderers = {"claude": render_claude, "codex": render_codex, "copilot": render_copilot}
     if target not in renderers:
         raise ValueError(f"{target} per-run profiles are not supported")
+    if bundle_revision:
+        _pin(_bundle(), bundle_revision)
     return renderers[target](name, force=force, overlays=overlays)
 
 
