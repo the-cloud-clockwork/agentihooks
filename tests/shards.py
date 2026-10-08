@@ -99,5 +99,7 @@ def warm_imports(modules: list[str], workers: int) -> list[int]:
 
 def setup_nodes_in_parallel(manager, putevent) -> list:
     manager.config.hook.pytest_xdist_setupnodes(config=manager.config, specs=manager.specs)
+    if hasattr(manager.config, "_tmp_path_factory"):
+        manager.config._tmp_path_factory.getbasetemp()
     with ThreadPoolExecutor(len(manager.specs)) as pool:
         return list(pool.map(lambda spec: manager.setup_node(spec, putevent), manager.specs))
