@@ -216,6 +216,9 @@ jobs:
       - name: Check every collected test ran in exactly one shard
         run: python -m tests.shard_check shard-durations/*/durations.json
 
+      - name: Check every shard's test time fits the fifteen minute budget
+        run: python -m tests.shard_budget shard-durations/*/durations.json
+
   test-count:
     runs-on: ubuntu-latest
     timeout-minutes: 5

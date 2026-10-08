@@ -15,6 +15,7 @@
 /tests/dev_durations.py @nestorcolt
 /tests/leaks.py @nestorcolt
 /tests/refresh_durations.py @nestorcolt
+/tests/shard_budget.py @nestorcolt
 /tests/shard_check.py @nestorcolt
 /tests/shards.py @nestorcolt
 /tests/test_ci_*.py @nestorcolt
@@ -22,6 +23,7 @@
 /tests/test_count_floor.py @nestorcolt
 /tests/test_dev_durations.py @nestorcolt
 /tests/test_rulesets.py @nestorcolt
+/tests/test_shard_budget.py @nestorcolt
 /tests/test_shard_check.py @nestorcolt
 /tests/test_shards.py @nestorcolt
 /tests/test_size_limits.py @nestorcolt
