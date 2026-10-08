@@ -274,8 +274,9 @@ ROW_BUTTONS = {
 @pytest.mark.parametrize("view", ROW_BUTTONS)
 def test_ledger_row_buttons_carry_no_native_hover_text_and_keep_their_label(tab, view):
     page = tab(home_html(view), "?view=bin" if view == "bin" else "")
-    buttons = page.locator("li.row .act")
-    buttons.first.wait_for()
+    page.locator("li.row .act").first.wait_for()
+    buttons = page.locator("li.row .act, a.fab")
+    assert buttons.count() == 2
     found = buttons.evaluate_all("(els) => els.map((el) => [el.getAttribute('title'), el.getAttribute('aria-label')])")
     assert [title for title, _ in found] == [None] * len(found)
     selector, label, _ = ROW_BUTTONS[view]
