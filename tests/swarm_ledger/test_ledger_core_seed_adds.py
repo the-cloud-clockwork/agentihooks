@@ -66,11 +66,19 @@ def test_a_new_task_in_the_seed_page_is_refused_with_its_add_command():
 
 def test_the_refused_task_command_quotes_its_title_and_carries_its_fields():
     make_ledger()
-    task = {"id": "t2", "title": 'Say "hi"', "description": "Do it now", "depends_on": ["t1", "t0"]}
+    task = {
+        "id": "t2",
+        "title": 'Say "hi"',
+        "description": "Do it now",
+        "depends_on": ["t1", "t0"],
+        "territory": ["docs"],
+        "gain": 2.5,
+        "release": True,
+    }
     state = edit_seed(lambda seed: seed["tasks"].append(task))
     assert state["_meta"]["warnings"] == [
         f'The page added the task "Say "hi"", which was not added. Add it with {PREFIX}'
-        "task add <id> 'Say \"hi\"' --description 'Do it now' --depends-on t1,t0"
+        "task add <id> 'Say \"hi\"' --description 'Do it now' --depends-on t1,t0 --territory docs --gain 2.5"
     ]
 
 
@@ -100,13 +108,20 @@ def test_a_new_phase_in_the_seed_page_is_refused_with_its_add_command():
     before = make_ledger()
     state = edit_seed(
         lambda seed: seed["phases"].append(
-            {"id": "p2", "title": "Second", "description": "Later work", "depends_on": ["p1"]}
+            {
+                "id": "p2",
+                "title": "Second",
+                "description": "Later work",
+                "depends_on": ["p1"],
+                "planning": "auto",
+                "release": True,
+            }
         )
     )
     assert state["phases"] == before["phases"]
     assert state["_meta"]["warnings"] == [
         f'The page added the phase "Second", which was not added. Add it with {PREFIX}'
-        "phase add <id> Second --description 'Later work' --depends-on p1"
+        "phase add <id> Second --description 'Later work' --depends-on p1 --planning auto --release"
     ]
     assert state["_meta"]["seed_error"] is None
 

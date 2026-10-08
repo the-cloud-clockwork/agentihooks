@@ -70,9 +70,13 @@ LISTS = {
 }
 BOOL_FIELDS = ("done", "out_of_scope")
 SEED_ADD_COMMANDS = {
-    "tasks": ("task", "task add <id>", ("phase", "lane", "description", "depends_on")),
+    "tasks": (
+        "task",
+        "task add <id>",
+        ("phase", "lane", "description", "depends_on", "territory", "gain", "kind", "profile", "rank", "difficulty"),
+    ),
     "followups": ("follow up", "followup add", ()),
-    "phases": ("phase", "phase add <id>", ("description", "depends_on")),
+    "phases": ("phase", "phase add <id>", ("description", "depends_on", "planning", "release")),
 }
 STATE_EVENTS = {"done": ("checked", "unchecked"), "out_of_scope": ("out of scope", "back in scope")}
 THREADS = {
@@ -449,10 +453,12 @@ def refuse_seed_adds(doc, base_doc, seed, ctx):
 def seed_add_command(command, label, item, fields):
     flags = []
     for field in fields:
-        value = item.get(field)
-        if value:
-            value = ",".join(value) if isinstance(value, list) else value
-            flags.append(f"--{field.replace('_', '-')} {shlex.quote(value)}")
+        value, flag = item.get(field), f"--{field.replace('_', '-')}"
+        if value is True:
+            flags.append(flag)
+        elif value:
+            value = ",".join(value) if isinstance(value, list) else str(value)
+            flags.append(f"{flag} {shlex.quote(value)}")
     return " ".join(["agentihooks ledger --slug <slug> --as <name>", command, shlex.quote(label), *flags])
 
 

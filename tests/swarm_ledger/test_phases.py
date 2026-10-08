@@ -153,7 +153,10 @@ def test_review_op_changes_only_review_and_seed_cannot_forge_it():
         lambda seed: seed["phases"].append({"id": "p2", "title": "Second", "review": {"state": "approved"}})
     )
     assert [p["id"] for p in state["phases"]] == ["p1"]
-    assert state["_meta"]["warnings"][-1].startswith('The page added the phase "Second", which was not added.')
+    assert state["_meta"]["warnings"][-1] == (
+        'The page added the phase "Second", which was not added. Add it with '
+        "agentihooks ledger --slug <slug> --as <name> phase add <id> Second"
+    )
     apply("phase_add", phase="p2", title="Second")
     state = edit_seed(lambda seed: seed["phases"][1].update(review={"state": "approved"}))
     assert "review" not in state["phases"][1]
