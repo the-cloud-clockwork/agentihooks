@@ -260,3 +260,36 @@ def test_the_tick_groups_open_tasks(asked, store):
     ledger = GroupLedger([task("a"), task("b")])
     actions = tick("sw", store, ledger, FakeRuntime(), now_ms=1_000)
     assert "grouped tasks b under a" in actions
+
+
+def test_the_lead_prompt_lists_every_member_spec():
+    from scripts.swarm import prompt
+
+    lead = {
+        "id": "a",
+        "title": "Lead",
+        "group": [
+            {"id": "b", "title": "title b", "description": "spec b"},
+            {"id": "c", "title": "title c", "description": ""},
+        ],
+    }
+    lines = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0003", lead).splitlines()
+    start = lines.index(prompt.GROUP_LINE)
+    assert lines[start + 1 : start + 3] == ["Task b: title b. spec b", "Task c: title c."]
+    assert "one pull request" in prompt.GROUP_LINE and "swarm done" in prompt.GROUP_LINE
+
+
+def test_a_prompt_without_a_group_says_nothing_about_members():
+    from scripts.swarm import prompt
+
+    text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0003", {"id": "a", "title": "Lead", "group": []})
+    assert prompt.GROUP_LINE not in text
+
+
+def test_the_tick_gives_the_lead_agent_its_member_specs(store):
+    store.update("sw", max_eng=1)
+    ledger = GroupLedger([task("a", group_members=["b"]), task("b", merged_into="a")])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [t["id"] for t in runtime.tasks] == ["a"]
+    assert runtime.tasks[0]["group"] == [{"id": "b", "title": "title b", "description": "spec b"}]
