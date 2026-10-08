@@ -22,7 +22,10 @@
             "architecture_unowned_components": 0
           }
         },
-        "bytes": "c085d0e4299a3c0d56df66ce44621cdd2c08407350ea76e6f350d97a38733967"
+        "bytes": "c085d0e4299a3c0d56df66ce44621cdd2c08407350ea76e6f350d97a38733967",
+        "files": [
+          "record.json"
+        ]
       },
       {
         "result": {
@@ -44,14 +47,20 @@
             "architecture_unowned_components": 0
           }
         },
-        "bytes": "c085d0e4299a3c0d56df66ce44621cdd2c08407350ea76e6f350d97a38733967"
+        "bytes": "c085d0e4299a3c0d56df66ce44621cdd2c08407350ea76e6f350d97a38733967",
+        "files": [
+          "record.json"
+        ]
       },
       {
         "result": {
           "error": "ArchitectureError",
           "message": "operation fixture-inventory-1 was already recorded with different content"
         },
-        "bytes": "c085d0e4299a3c0d56df66ce44621cdd2c08407350ea76e6f350d97a38733967"
+        "bytes": "c085d0e4299a3c0d56df66ce44621cdd2c08407350ea76e6f350d97a38733967",
+        "files": [
+          "record.json"
+        ]
       },
       {
         "result": {
@@ -62,7 +71,10 @@
           ],
           "restored": []
         },
-        "bytes": "15a72b649b71777bd314b7228de9ca4ffdddc7d9dbc42dfe7a63ecbab244e6ff"
+        "bytes": "15a72b649b71777bd314b7228de9ca4ffdddc7d9dbc42dfe7a63ecbab244e6ff",
+        "files": [
+          "record.json"
+        ]
       },
       {
         "result": {
@@ -73,7 +85,10 @@
           ],
           "restored": []
         },
-        "bytes": "15a72b649b71777bd314b7228de9ca4ffdddc7d9dbc42dfe7a63ecbab244e6ff"
+        "bytes": "15a72b649b71777bd314b7228de9ca4ffdddc7d9dbc42dfe7a63ecbab244e6ff",
+        "files": [
+          "record.json"
+        ]
       }
     ],
     "evidence-index": [
@@ -85,7 +100,10 @@
           "claim": "open",
           "added": []
         },
-        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c"
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c",
+        "files": [
+          "record.json"
+        ]
       },
       {
         "result": {
@@ -95,28 +113,40 @@
           "claim": "open",
           "added": []
         },
-        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c"
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c",
+        "files": [
+          "record.json"
+        ]
       },
       {
         "result": {
           "error": "EvidenceError",
           "message": "operation replay was already recorded with different content"
         },
-        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c"
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c",
+        "files": [
+          "record.json"
+        ]
       },
       {
         "result": {
           "error": "EvidenceError",
           "message": "backup at revision 1 is older than the registry at revision 2"
         },
-        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c"
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c",
+        "files": [
+          "record.json"
+        ]
       },
       {
         "result": {
           "error": "EvidenceError",
           "message": "SV2-FND-04 is not claimed complete"
         },
-        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c"
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c",
+        "files": [
+          "record.json"
+        ]
       }
     ]
   }

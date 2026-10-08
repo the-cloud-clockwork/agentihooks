@@ -17,13 +17,20 @@ def _observe(module, path, calls):
             result = getattr(module, function)(*arguments)
         except ValueError as error:
             result = {"error": type(error).__name__, "message": str(error)}
-        outputs.append({"result": result, "bytes": hashlib.sha256(path.read_bytes()).hexdigest()})
+        outputs.append(
+            {
+                "result": result,
+                "bytes": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "files": sorted(file.name for file in path.parent.glob(path.name + "*")),
+            }
+        )
     return outputs
 
 
 def _replay(module, name, path):
     initial = (ROOT / "docs/swarm-v2" / f"{name}.json").read_text()
     path.write_text(initial)
+    path.with_name(path.name + ".tmp").write_text("interrupted write")
     if name == "architecture":
         change = json.loads((ROOT / "tests/fixtures/swarm_v2/architecture/inventory.json").read_text())
         change["base_revision"] = json.loads(initial)["revision"]
