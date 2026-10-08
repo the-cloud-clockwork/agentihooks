@@ -301,7 +301,7 @@ def test_the_lookup_is_red_when_no_dev_push_run_passed(lookup):
 
 
 def _runs_on(step, event):
-    condition = str(step.get("if", "true")).removeprefix("${{").removesuffix("}}").strip()
+    condition = str(step.get("if", "true")).lower().removeprefix("${{").removesuffix("}}").strip()
     if condition == "true":
         return True
     for clause in condition.split("||"):
