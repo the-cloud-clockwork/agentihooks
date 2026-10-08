@@ -104,15 +104,19 @@ def _binding(env, session_id):
 def question_block(tool_name, session_id, environ=None, now=None):
     """The refusal of the question tool while the operator is away, naming the ledger command to use instead."""
     env = os.environ if environ is None else environ
-    if tool_name != QUESTION_TOOL or present(session_id, env, now):
+    if tool_name != QUESTION_TOOL or _heard(session_id, env, now):
         return ""
     slug, name = _binding(env, session_id)
     return ASK_REFUSAL.format(slug=slug, name=name)
 
 
-def _away(session_id, environ, now):
+def _heard(session_id, environ, now):
     now = time.time() if now is None else now
-    return bool(session_id) and not present(session_id, environ, now) and not _turn(_load(session_id), now)
+    return present(session_id, environ, now) or _turn(_load(session_id), now)
+
+
+def _away(session_id, environ, now):
+    return bool(session_id) and not _heard(session_id, environ, now)
 
 
 def _reminder_text(environ):
