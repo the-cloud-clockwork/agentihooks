@@ -281,6 +281,7 @@ def test_open_index_retries_concurrent_mail_changes(store, monkeypatch, conflict
 def test_open_index_cleanup_lists_all_owned_keys(store):
     first = store.send("sender", "receiver", "work")
     store.open_items("receiver")
+    store.pending_items("receiver")
     keys, memberships = store.keys_for(lambda address: address == "receiver")
     assert set(keys) == {
         store.key("address", "receiver"),
@@ -291,7 +292,11 @@ def test_open_index_cleanup_lists_all_owned_keys(store):
         store.key("item", first.id),
         store.key("history", first.id),
     }
-    assert memberships == {store.key("waiting"): ["receiver"], store.key("open-indexed"): ["receiver"]}
+    assert memberships == {
+        store.key("waiting"): ["receiver"],
+        store.key("indexed"): ["receiver"],
+        store.key("open-indexed"): ["receiver"],
+    }
 
 
 def test_open_index_cleanup_keeps_empty_addresses_and_redirected_mail(store):
@@ -380,3 +385,65 @@ def test_new_writers_keep_warm_mailbox_indexes_current(store, monkeypatch, chang
     assert [item.id for item in store.open_items("b")] == expected[1]
     for address in ("a", "b"):
         assert int(store.redis.get(store.key("open-size", address))) == store.redis.zcard(store.key("address", address))
+
+
+@pytest.mark.parametrize("count", [1, 5])
+def test_warm_index_reads_all_open_mail_and_rebuilds_when_its_size_stamp_is_missing(store, count):
+    items = [store.send("sender", "receiver", str(index)) for index in range(count)]
+    expected = [item.id for item in items]
+    assert [item.id for item in store.open_items("receiver")] == expected
+    assert [item.id for item in store.open_items("receiver")] == expected
+    store.redis.delete(store.key("open-size", "receiver"))
+    store.redis.delete(store.key("open", "receiver"))
+    assert [item.id for item in store.open_items("receiver")] == expected
+
+
+def test_legacy_redirect_rebuild_removes_stale_open_pointers(store):
+    item = store.send("sender", "old", "work")
+    store.open_items("old")
+    store.redirect(item.id, "swarm", "new", "moved", "old")
+    store.redis.zadd(store.key("open", "old"), {item.id: item.created_at})
+    store.redis.incr(store.key("open-size", "old"))
+    assert store.open_items("old") == []
+    assert store.redis.zcard(store.key("open", "old")) == 0
+    assert [entry.id for entry in store.open_items("new")] == [item.id]
+
+
+def test_cleanup_reads_legacy_addresses_and_index_members_without_size_stamps(store):
+    item = store.send("sender", "legacy", "work")
+    store.redis.delete(store.key("open", "legacy"), store.key("open-size", "legacy"))
+    store.open_items("empty")
+    store.redis.delete(store.key("open-size", "empty"))
+    keys, memberships = store.keys_for(lambda address: True)
+    expected = {
+        store.key(kind, address)
+        for address in ("empty", "legacy")
+        for kind in ("address", "pending", "open", "open-size", "sequence")
+    }
+    expected.update({store.key("item", item.id), store.key("history", item.id)})
+    assert set(keys) == expected
+    assert memberships == {store.key("waiting"): ["legacy"], store.key("open-indexed"): ["empty"]}
+
+
+def test_new_withdrawal_does_not_read_closed_mail_on_the_next_sweep(store, monkeypatch):
+    item = store.send("sender", "receiver", "work")
+    store.open_items("receiver")
+    assert store.withdraw(item.id, "swarm", "receiver exited", "receiver").state == "cancelled"
+    seen = []
+    get = store.get
+
+    def read(item_id):
+        seen.append(item_id)
+        return get(item_id)
+
+    monkeypatch.setattr(store, "get", read)
+    assert store.open_items("receiver") == []
+    assert seen == []
+
+
+def test_open_index_names_a_missing_item(store):
+    item = store.send("sender", "receiver", "work")
+    store.redis.delete(store.key("item", item.id))
+    with pytest.raises(InboxError) as error:
+        store.open_items("receiver")
+    assert str(error.value) == f"no message {item.id}"

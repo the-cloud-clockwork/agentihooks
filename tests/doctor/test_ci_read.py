@@ -30,6 +30,7 @@ def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs():
         elif "/check-runs?" in endpoint:
             output = "\n".join(json.dumps(c) for c in fixture["checks"])
         elif "/attempts/" in endpoint:
+            assert argv[3:] == ["--paginate", "--jq", ".jobs[] | @json"]
             number = int(endpoint.split("/attempts/")[1].split("/")[0])
             output = json.dumps(
                 {"id": number, "name": "unit (3.11, 1)", "status": "completed", "conclusion": "success"}
@@ -42,7 +43,19 @@ def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs():
             output = "\n".join(json.dumps(r) for r in (unrelated, run))
         return subprocess.CompletedProcess(argv, 0, output, "")
 
-    record = ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=gh)
+    import fakeredis
+
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    record = ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=gh, cache=cache)
+    first_calls = len(calls)
+    fixture["checks"][0]["conclusion"] = "failure"
+    refreshed = ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=gh, cache=cache)
+    assert refreshed["checks"][0]["conclusion"] == "failure"
+    assert refreshed["attempts"] == record["attempts"]
+    assert len(calls) - first_calls == 3
+    assert calls[first_calls][2] == "repos/the-cloud-clockwork/agentihooks/pulls/487"
+    assert "/check-runs?" in calls[first_calls + 1][2]
+    assert "/actions/runs?head_sha=" in calls[first_calls + 2][2]
     assert len(record["checks"]) == 10
     assert "committed_at" not in record
     assert [r["id"] for r in record["runs"]] == [37323835080]
@@ -101,6 +114,7 @@ def test_completed_attempts_are_reused_while_new_attempts_are_read():
         endpoint = argv[2]
         calls.append(endpoint)
         if "/attempts/" in endpoint:
+            assert argv[3:] == ["--paginate", "--jq", ".jobs[] | @json"]
             number = int(endpoint.split("/attempts/")[1].split("/")[0])
             assert endpoint == f"repos/o/r/actions/runs/{workflow['id']}/attempts/{number}/jobs?per_page=100"
             output = json.dumps({"id": number, "name": "unit", "status": "completed", "conclusion": "success"})
@@ -111,7 +125,8 @@ def test_completed_attempts_are_reused_while_new_attempts_are_read():
             output = f"2026-10-05T00:00:00Z {outcome} tests/test_x.py::test_x\n"
         return subprocess.CompletedProcess(argv, 0, output, "")
 
-    first = ci_read._attempts("o/r", [workflow], gh, cache)
+    single = {**workflow, "id": 99, "run_attempt": 1}
+    first = ci_read._attempts("o/r", [single, workflow], gh, cache)
     assert [a["attempt"] for a in first] == [1, 2]
     assert first[0]["tests"][0]["outcome"] == "FAILED"
     assert first[1]["tests"][0]["outcome"] == "PASSED"
