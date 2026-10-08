@@ -17,7 +17,7 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxError
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, PREFIX
 
 MINUTE_MS = 60_000
 FOLLOWUP_RAISE_MS = 15 * MINUTE_MS
@@ -229,7 +229,7 @@ def _workflow_gates(data, run, cache):
     gates = {None: False, "": None, **dict.fromkeys(trees)}
     pending = []
     for tree in sorted(trees):
-        saved = cache.get(f"swarm:workflow-gate:{tree}") if cache is not None else None
+        saved = cache.get(f"{PREFIX}:workflow-gate:{tree}") if cache is not None else None
         if saved in ("0", "1"):
             gates[tree] = saved == "1"
         else:
@@ -242,7 +242,7 @@ def _workflow_gates(data, run, cache):
             tree = node["id"]
             gates[tree] = declares_gate({"object": node})
             if cache is not None:
-                cache.set(f"swarm:workflow-gate:{tree}", int(gates[tree]), ex=SENT_TTL_S)
+                cache.set(f"{PREFIX}:workflow-gate:{tree}", int(gates[tree]), ex=SENT_TTL_S)
     return gates
 
 

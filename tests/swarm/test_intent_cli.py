@@ -122,6 +122,7 @@ def test_the_tick_batches_active_tasks_and_red_notices_then_refreshes_the_next_t
     batches, heads = [], []
 
     def batch(urls, cache=None):
+        assert cache is store.redis
         batches.append(set(urls))
         head = "h1" if len(batches) == 1 else "h2"
         return {url: ledger_events.PullRequest("OPEN", None, None, False, head=head) for url in urls}

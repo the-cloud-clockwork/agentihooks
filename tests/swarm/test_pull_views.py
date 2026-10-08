@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm.ledger_events import GATE, views
+from scripts.swarm.ledger_events import GATE, SENT_TTL_S, views
+from scripts.swarm.store import PREFIX
 
 
 def resource(head="h1", state="OPEN"):
@@ -46,6 +47,11 @@ def test_distinct_pull_requests_share_a_bounded_graphql_request():
     assert found[urls[1]].head == "h1"
     assert found[urls[20]].head == "h0"
     query = calls[0][0][-1]
+    assert calls[0][0][:4] == ["gh", "api", "graphql", "-f"]
+    assert query.startswith("query={p0:resource(url:") and query.endswith("}")
+    assert query.count("{") == query.count("}")
+    assert "} p1:resource(url:" in query
+    assert ' file(path:".github/workflows"){object{id}} statusCheckRollup{' in query
     assert urls[0] in query and urls[1] in query
     assert query.count("resource(url:") == 20
     assert calls[0][1] == {"capture_output": True, "text": True, "timeout": 20}
@@ -56,7 +62,14 @@ def test_a_bad_resource_does_not_discard_its_neighbors():
     paginated = resource()
     paginated["commits"]["nodes"][0]["commit"]["checkSuites"]["pageInfo"] = {"hasNextPage": True}
     data = {"p0": resource(), "p1": None, "p2": paginated, "p3": {"state": "OPEN"}}
-    found = views(urls, lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps({"data": data})))
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"data": data}))
+
+    found = views(urls, run)
+    assert len(calls) == 1
     assert found[urls[0]].head == "h1"
     assert [found[url] for url in urls[1:]] == [None, None, None]
 
@@ -118,6 +131,9 @@ def test_workflow_declarations_cache_by_immutable_tree_while_heads_and_checks_re
         calls.append(query)
         if "nodes(ids:" in query:
             tree = "tree1" if '"tree1"' in query else "tree2"
+            assert (
+                query == f'query={{nodes(ids:["{tree}"]){{id ...on Tree{{entries{{object{{...on Blob{{text}}}}}}}}}}}}'
+            )
             return SimpleNamespace(
                 returncode=0,
                 stdout=json.dumps(
@@ -144,11 +160,15 @@ def test_workflow_declarations_cache_by_immutable_tree_while_heads_and_checks_re
     first = views([url], run, cache)[url]
     second = views([url], run, cache)[url]
     third = views([url], run, cache)[url]
-    assert len(calls) == 5
+    fourth = views([url], run, cache)[url]
+    assert len(calls) == 6
+    assert fourth.gate_passed is False
     assert first.head != second.head
     assert first.gate_passed and second.gate_passed
     assert not third.gate_passed
     assert "Blob{text}" not in calls[0]
+    assert all(key.startswith(f"{PREFIX}:") for key in cache.scan_iter())
+    assert 0 < cache.ttl(f"{PREFIX}:workflow-gate:tree1") <= SENT_TTL_S
 
 
 def test_unreadable_workflow_declaration_is_unknown_and_is_not_cached():
@@ -169,3 +189,56 @@ def test_unreadable_workflow_declaration_is_unknown_and_is_not_cached():
     assert views([url], run, cache) == {url: None}
     assert len(calls) == 4
     assert cache.dbsize() == 0
+
+
+@pytest.mark.parametrize(
+    "doc", [{}, {"tasks": [{"state": "claimed", "pr_url": "active"}, {"state": "done", "pr_url": "old"}]}]
+)
+def test_tick_snapshot_batches_claimed_tasks_and_caches_fallbacks(doc, monkeypatch):
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    inbox = InboxStore(store.redis)
+    item = inbox.send("swarm", "eng-1@sw", "notice")
+    inbox.close(item.id, "swarm", "done", "settled")
+    store.redis.hset(store.key("sw", "red-notices"), item.id, "closed-notice")
+    batched, fallback = [], []
+    monkeypatch.setattr(ledger_events, "views", lambda urls, cache: batched.append(urls) or {url: None for url in urls})
+    monkeypatch.setattr(ledger_events, "view", lambda url: fallback.append(url))
+    lookup = ledger_events.tick_view(inbox, store, "sw", doc)
+    assert batched == [["active"]] if doc else batched == [[]]
+    if doc:
+        assert lookup("active") is None
+        assert fallback == []
+    lookup("other")
+    lookup("other")
+    assert fallback == ["other"]
+
+
+def test_missing_workflow_directory_does_not_declare_a_required_gate():
+    url = "https://github.com/o/r/pull/1"
+    pr = resource()
+    pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"] = {
+        "contexts": {"nodes": [{"name": GATE, "conclusion": "SUCCESS"}], "pageInfo": {}}
+    }
+    found = views([url], lambda *a, **k: SimpleNamespace(returncode=0, stdout=json.dumps({"data": {"p0": pr}})))[url]
+    assert found.gate_passed is False
+
+
+def test_an_unreadable_workflow_tree_does_not_hide_the_readable_tree_after_it():
+    urls = ["https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"]
+    data = {"p0": resource(), "p1": resource()}
+    for i in range(2):
+        data[f"p{i}"]["commits"]["nodes"][0]["commit"]["file"] = {"object": {"id": f"tree{i}"}}
+
+    def run(command, **kwargs):
+        answer = {"nodes": [None, {"id": "tree1", "entries": []}]} if "nodes(ids:" in command[-1] else data
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"data": answer}))
+
+    found = views(urls, run)
+    assert found[urls[0]] is None
+    assert found[urls[1]].head == "h1"
