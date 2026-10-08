@@ -261,8 +261,8 @@
   "PLR0913": 8
  },
  "scripts/swarm_ledger/ledger.py::cmd_task": {
-  "C901": 18,
-  "PLR0912": 17
+  "C901": 17,
+  "PLR0912": 16
  },
  "scripts/swarm_ledger/ledger_agent_ops.py::check": {
   "C901": 17,

@@ -70,7 +70,7 @@ FIELDS = {
     "priority": "by item text",
     "priority_clear": "by target reason",
     "notification_clear": "target",
-    "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence",
+    "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate",
     "task_update": "by item fields if_state",
     "task_rank": "item rank",
     "task_group": "by item members",

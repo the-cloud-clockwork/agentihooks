@@ -455,7 +455,8 @@ def test_task_cli_forwards_each_set_option_and_names_the_plan_slice(monkeypatch)
     options = ["--kind", "ops", "--profile", "frontend", "--rank", "high", "--difficulty", "S", "--plan-slice", "t9"]
     monkeypatch.setattr("sys.argv", [*base, *options])
     ledger.main()
-    assert {k: sent[0][k] for k in ledger.TASK_OPTIONS} == {
+    keys = ("kind", "profile", "rank", "difficulty", "plan_slice")
+    assert {k: sent[0][k] for k in keys} == {
         "kind": "ops",
         "profile": "frontend",
         "rank": "high",
@@ -464,7 +465,7 @@ def test_task_cli_forwards_each_set_option_and_names_the_plan_slice(monkeypatch)
     }
     monkeypatch.setattr("sys.argv", base)
     ledger.main()
-    assert not set(ledger.TASK_OPTIONS) & set(sent[1])
+    assert not set(keys) & set(sent[1])
     parser = ledger.build_parser()
     commands = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices
     option = next(a for a in commands["task"]._actions if a.dest == "plan_slice")
