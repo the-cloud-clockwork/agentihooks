@@ -67,7 +67,7 @@ def test_shell_timeout_fails_open_without_leaving_child_pipes_open(filters_dir, 
     (filters_dir / "pre-write-slop.filter.yaml").write_text(FILTER)
     folder = filters_dir / "_finders"
     folder.mkdir()
-    (folder / "string_literals.sh").write_text("sleep 30")
+    (folder / "string_literals.sh").write_text("sleep 1")
     monkeypatch.setattr("hooks.config.CONDITIONS_TIMEOUT_SEC", 0.1)
     logs = []
     monkeypatch.setattr("hooks.filters.finders.scripts.log", lambda *args: logs.append(args))
@@ -154,3 +154,109 @@ def test_strip_named_findings_uses_exact_offsets(filters_dir):
     call["permission_mode"] = "bypassPermissions"
     effect = conditions.pre_effect(call)
     assert effect.rewrite == {"file_path": "/repo/page.py", "content": 'label = ""'}
+
+
+@pytest.mark.parametrize(
+    "raw, message",
+    [
+        ({}, "finder output must be a list"),
+        ([{}], "finder output must contain spans with text and reason"),
+        (
+            [{"start": 0, "end": 5, "text": "label", "reason": "x", "other": "extra"}],
+            "finder output must contain spans with text and reason",
+        ),
+        ([{"start": False, "end": 5, "text": "label", "reason": "x"}], "finder output has invalid offsets"),
+        ([{"start": 0, "end": 50, "text": "label", "reason": "x"}], "finder output has invalid offsets"),
+        ([{"start": 0, "end": 5, "text": "wrong", "reason": "x"}], "finder output does not match the source"),
+        ([{"start": 0, "end": 5, "text": "label", "reason": 1}], "finder output does not match the source"),
+    ],
+)
+def test_invalid_finder_contract_logs_the_exact_problem(tmp_path, monkeypatch, raw, message):
+    import json
+
+    from hooks.filters.finders import scripts
+
+    finder = tmp_path / "finder.py"
+    finder.write_text(f"print({json.dumps(raw)!r})")
+    logs = []
+    monkeypatch.setattr(scripts, "log", lambda *args: logs.append(args))
+    assert scripts.run("finder", {"finder": finder}, "label", "page.py", "Write") == []
+    assert logs == [("filter finder failed", {"finder": "finder", "reason": message})]
+
+
+def test_script_can_return_a_finding_through_the_last_source_character(tmp_path):
+    import json
+
+    from hooks.filters.finders import scripts
+
+    finder = tmp_path / "finder.py"
+    row = {"start": 0, "end": 5, "text": "label", "reason": "whole source"}
+    finder.write_text(f"print({json.dumps([row])!r})")
+    assert scripts.run("finder", {"finder": finder}, "label", "page.py", "Write") == [row]
+
+
+def test_finder_stderr_is_captured_and_failure_logs_exit_status(tmp_path, monkeypatch, capfd):
+    from hooks.filters.finders import scripts
+
+    finder = tmp_path / "finder.py"
+    finder.write_text('import sys\nprint("finder diagnostic", file=sys.stderr)\nsys.exit(7)')
+    logs = []
+    monkeypatch.setattr(scripts, "log", lambda *args: logs.append(args))
+    assert scripts.run("finder", {"finder": finder}, "label", "page.py", "Write") == []
+    assert capfd.readouterr().err == ""
+    assert logs == [("filter finder failed", {"finder": "finder", "reason": "finder exited with status 7"})]
+
+
+def test_script_execution_owns_a_process_session(tmp_path):
+    from hooks.filters.finders import scripts
+
+    finder = tmp_path / "finder.py"
+    finder.write_text(
+        'import os,json\nassert os.getsid(0) == os.getpid()\nprint(json.dumps([{ "start":0,"end":5,"text":"label","reason":"isolated process session"}]))'
+    )
+    assert (
+        scripts.run("finder", {"finder": finder}, "label", "page.py", "Write")[0]["reason"]
+        == "isolated process session"
+    )
+
+
+def test_builtin_resolution_with_missing_state_and_invalid_state(monkeypatch, tmp_path):
+    from hooks.context import profile_chain
+    from hooks.filters.finders import scripts
+
+    state = tmp_path / "state.json"
+    monkeypatch.setattr(profile_chain, "state_path", lambda: state)
+    assert scripts.run("string_literals", scripts.resolve(None), '"hello"', "page.py", "Write")[0]["text"] == "hello"
+    state.write_text("[]")
+    with pytest.raises(ValueError) as error:
+        scripts.resolve(None)
+    assert str(error.value) == "condition state must be a mapping"
+
+
+def test_resolution_ignores_hidden_and_unsupported_finder_files(filters_dir):
+    from hooks.filters.finders import scripts
+
+    folder = filters_dir / "_finders"
+    folder.mkdir()
+    (folder / "string_literals.txt").write_text("ignored")
+    (folder / "_hidden.py").write_text("ignored")
+    (folder / ".hidden.sh").write_text("ignored")
+    (folder / "directory.py").mkdir()
+    found = scripts.resolve(None)
+    assert callable(found["string_literals"])
+    assert "_hidden" not in found
+    assert ".hidden" not in found
+    assert "directory" not in found
+
+
+def test_missing_tool_name_passes_empty_tool_to_a_script(filters_dir):
+    from hooks.filters import extract, runner, schema
+
+    folder = filters_dir / "_finders"
+    folder.mkdir()
+    (folder / "finder.py").write_text(
+        'import json,sys\np=json.load(sys.stdin)\nassert p["tool"] == ""\nprint(json.dumps([{"start":0,"end":5,"text":p["text"],"reason":"empty tool"}]))'
+    )
+    spec = schema.parse({"finders": [{"script": "finder"}]})
+    findings = runner.find(spec, extract.pieces("Write", {"content": "label"}))
+    assert findings[0].reason == "empty tool"

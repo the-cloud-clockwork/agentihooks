@@ -49,6 +49,14 @@ def test_explanation_tail_only_flags_clauses_inside_literals(clause):
     assert source[findings[0]["start"] : findings[0]["end"]] == clause
 
 
+def test_explanation_tail_has_the_finder_contract_reason():
+    from hooks.filters.finders.explanation_tail import find
+
+    assert find('"hello because quota"', "page.py", "Write") == [
+        {"start": 7, "end": 20, "text": "because quota", "reason": "explanation tail"}
+    ]
+
+
 def test_python_multiline_escaped_raw_and_nested_fstrings_keep_source_text():
     from hooks.filters.finders.string_literals import find
 

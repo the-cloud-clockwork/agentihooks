@@ -83,13 +83,23 @@ def test_an_invalid_filter_names_what_is_wrong(raw, message):
 
 @pytest.mark.parametrize("name", ["", "../other", "folder/name", "file.py", 1])
 def test_invalid_script_names_are_rejected(name):
-    with pytest.raises(FilterSchemaError):
+    message = "finder 0 script must be text" if isinstance(name, int) else "finder 0 script must be a finder name"
+    with pytest.raises(FilterSchemaError) as error:
         schema.parse({"finders": [{"script": name}]})
+    assert str(error.value) == message
 
 
 def test_named_script_rejects_unknown_keys():
     with pytest.raises(FilterSchemaError, match="unknown keys: name"):
         schema.parse({"finders": [{"script": "string_literals", "name": "other"}]})
+
+
+@pytest.mark.parametrize("name", ["string_literals", "My_finder-1"])
+def test_named_finder_schema_keeps_the_script_name_and_reason(name):
+    finder = schema.parse({"finders": [{"script": name, "reason": "custom reason"}]}).finders[0]
+    assert finder.script == name
+    assert finder.reason == "custom reason"
+    assert finder.pattern is None
 
 
 def test_one_round_is_allowed():
