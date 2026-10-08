@@ -6441,6 +6441,10 @@ def main() -> None:
         from scripts.trace_cli import main as trace_main
 
         raise SystemExit(trace_main(_argv[1:]))
+    if _argv and _argv[0] == "hive":
+        from scripts.hive.cli import main as hive_main
+
+        raise SystemExit(hive_main(_argv[1:]))
     if _argv and _argv[0] == "classify":
         from hooks.classifier import cli as classifier_cli
 
@@ -6630,6 +6634,7 @@ def main() -> None:
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",
     )
     sub.add_parser("msg", help="Durable messages between sessions: send|inbox|read|close")
+    sub.add_parser("hive", help="Hive credentials for remote swarm hosts: invite|join|revoke|list|serve")
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"
     )
