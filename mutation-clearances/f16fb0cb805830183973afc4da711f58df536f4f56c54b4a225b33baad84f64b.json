@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_upload_artifact__mutmut_18:b631b10e4ffa10e603ae1a85c2c31c3aa623cc4ee5c9d2c3b1c96f4c653b6be6": {
+    "reader": "Standards reader",
+    "reason": "HTTP header case changes preserve urllib normalized transport headers; the Standards reader executed a differential Request control."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_repo_name__mutmut_9:7255a9b5ff4351838ec93ba7be6dcd17ae44bbc4e1420a524fdc3bda1028ff49": {
+    "reader": "Standards",
+    "reason": "The git timeout bound only matters for a hung git; the name read is the same."
+  }
+}

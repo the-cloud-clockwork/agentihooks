@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_handle__mutmut_24:f65decbd357e550643d875db6816aa9f3e63b40b8f038d803bbbf4274eb70299": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Within the OSError/ValueError handler, the response status is the independent literal 500 in status,result assignment. APIError stores its first argument only as self.status; envelope reads only code, message and details. This instance is immediately converted to its envelope and never raised or otherwise observed, so replacing its unused internal status by 501 leaves the external status 500, JSON bytes and side effects unchanged."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1request__mutmut_14:4d38f1093d61200281fea656f0c8d568ca713fb29664181ec96cf8befb3614c2": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Adding X to quote safe characters changes nothing: ASCII X is always unreserved and never escaped, independently of safe. All other ASCII and all encoded non-ASCII characters retain the same quoting."
+  }
+}

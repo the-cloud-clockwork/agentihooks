@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_main__mutmut_17:3b5563eddcc9c946680e42b0d49b3afc9e6707565a41787601877c92fe53c545": {
+    "reader": "Standards",
+    "reason": "Creation supplies a new empty members dictionary; _join defaults the missing role to member and records the same joined event."
+  }
+}

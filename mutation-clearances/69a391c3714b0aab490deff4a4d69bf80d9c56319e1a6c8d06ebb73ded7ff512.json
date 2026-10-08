@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/naming.py:scripts.swarm.naming.x__clean__mutmut_12:4fb4618b48213b4eab942a5786cf204463c2648cf06eea1421b16feb92548c53": {
+    "reader": "Standards",
+    "reason": "Text is lowered before the strip, so uppercase X in the strip set can never match."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_50:ffccada65e9e7e40e00a628bd97777e5c6517b79432211ab253fa0497f1d388e": {
+    "reader": "Standards reader",
+    "reason": "Absent title defaults of None and empty string fail the same title validation with identical HTTP 400 reason and no storage."
+  }
+}

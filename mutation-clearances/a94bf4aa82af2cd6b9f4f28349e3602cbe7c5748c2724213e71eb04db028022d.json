@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/health/findings.py:scripts.swarm.health.findings.x_waiting_on_input__mutmut_17:df825097be97b85aa5ab7ad35adccc47e7215e4eca4ce205b5aa0f8d0da9038a": {
+    "reader": "Standards /root/standards",
+    "reason": "Missing tick counts zero and one both remain below the four tick finding threshold."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_3:0cda8c824382f55f9e4e0b9f399856f9365e6883790bf10ff3030f514843c2c9": {
+    "reader": "Standards /root/standards",
+    "reason": "False and None have the same false truth value in argparse."
+  }
+}

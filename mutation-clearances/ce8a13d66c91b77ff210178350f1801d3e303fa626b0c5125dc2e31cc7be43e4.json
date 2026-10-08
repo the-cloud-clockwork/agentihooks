@@ -1,0 +1,6 @@
+{
+  "scripts/skill_links.py:scripts.skill_links.x_dangling__mutmut_1:c51314edcc197dbd6ec40fd80806b8f5b874aeba677094e327d471fdf4d6e7ba": {
+    "reader": "standards_reader",
+    "reason": "With the installation ledger unchanged, omitting the cached ledger reloads identical entries through the existing ownership predicate; returned paths and output are identical, only repeated reads differ."
+  }
+}

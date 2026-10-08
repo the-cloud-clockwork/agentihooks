@@ -1,0 +1,6 @@
+{
+  "351e01c673f74947d8bf03706c6e2f753799d83f90a528578190089f20f60ac7": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The schema name is always built with HTTPMessage.get of X-Artifact-Name and a string default. HTTP parser header field values and the fallback are strings, never another JSON type. Removing the redundant name string constraint leaves the maxLength check and actual downstream original header untouched. No extra reachable upload values are admitted."
+  }
+}

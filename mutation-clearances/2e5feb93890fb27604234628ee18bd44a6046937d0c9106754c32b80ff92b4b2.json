@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_is_built_slug__mutmut_4:d2882cb3fe0c11f9cad4339cc890853c6ff2d26179b72a832527f41597cc3e3f": {
+    "reader": "Standards",
+    "reason": "A placeholder matches no slug pattern, exactly like the empty string."
+  }
+}
