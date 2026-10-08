@@ -93,9 +93,9 @@ the scaffold or edit the ledger JSON or swarm store directly.
    explicit empty task override; `overlays-engineer=` clears the role default. An omitted task
    field inherits the role default. Every selected overlay must wear the
    agent's role. The page's OVERLAYS controls set the same role defaults.
-   Explain all three launch cases: selections apply at the next fresh launch;
-   running agents keep their current overlays; relaunches and handoffs retain
-   their recorded overlays. For a new swarm,
+   Include this selection explanation: "A newly placed agent uses the current
+   selection. Running agents keep their launch record. Relaunches and handoffs
+   reuse that record and do not pick up selection changes." For a new swarm,
    use init-swarm only after the plan is accepted, then set the role defaults
    before its start step. Let that skill generate the swarm name and tasks.
    Done when `agentihooks swarm SWARM status` and the affected task record show
