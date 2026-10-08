@@ -37,7 +37,7 @@ def test_late_message_keeps_the_exit_outcome_after_task_reassignment(redis, exit
     inbox, store = InboxStore(redis), RedisStore(redis)
     store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
     exits.settle(inbox, "sw-eng-1", "", exit_text)
-    store.seats.occupy("eng-1@sw", "sw-eng-2", item.created_at + 1)
+    store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
     item = inbox.send("sender", "sw-eng-1", "late contract")
     rows = {"t1": {"claimed_by": "sw-eng-2", "state": "claimed"}}
     exits.sweep(inbox, "sw", store, lambda: rows)
