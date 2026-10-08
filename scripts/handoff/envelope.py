@@ -52,6 +52,7 @@ def build(store, slug, agent, reason, rows, at, run=subprocess.run):
                 "model_source",
                 "model_confidence",
                 "profile_decision",
+                "overlays",
             )
         },
     }

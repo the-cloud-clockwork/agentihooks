@@ -1,5 +1,6 @@
 import re
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -62,14 +63,27 @@ def ledger_html():
     return shell_html()
 
 
+ROW_TITLE = "Swarm design system & home <rows>"
+ROW_OVERVIEW = 'Borrow what OpenRig does that we lack, while keeping the ledger "quota" routing.'
+ROW_AT = 90_000_000
+ROW = {"slug": "s", "title": ROW_TITLE, "overview": ROW_OVERVIEW, "size": "swarm", "open": 1, "done": 0}
+COLLECTIONS = {
+    "/api/v1/ledgers?": [{**ROW, "swarm": "running", "updated_at": ROW_AT, "closed_at": 0}],
+    "/api/v1/bin?": [{**ROW, "deleted_at": 0, "days_left": 3}],
+}
+
+
 def home_html(view):
     return server.index_page(view)
 
 
 def route(r, html):
     url = r.request.url
+    rows = next((rows for path, rows in COLLECTIONS.items() if path in url), None)
     if is_events(url):
         fulfill_events(r, ledger=ledger_state(DOC), swarm=STATUS)
+    elif rows is not None:
+        r.fulfill(json={"data": rows, "next_cursor": None})
     elif "/api/swarm/" in url:
         r.fulfill(json=STATUS)
     elif "/api/" in url:
@@ -181,6 +195,69 @@ def test_the_tip_appears_exactly_one_second_after_the_pointer_rests(tab):
     page.clock.run_for(1)
     assert tip_shown(page) == page.evaluate("""ledgerTip(document.querySelector('[data-swarm="stop_now"]'))""")
     assert page.locator('[data-swarm="stop_now"]').get_attribute("title") is None
+
+
+ROW_TIPS = {
+    "a.title": ROW_TITLE,
+    "span.ov": ROW_OVERVIEW,
+    "time.when": time.strftime("%Y-%m-%d %H:%M", time.localtime(ROW_AT / 1000)),
+}
+
+
+@pytest.mark.parametrize("cell", ROW_TIPS)
+def test_a_home_row_shows_its_full_text_in_the_tip_exactly_one_second_after_the_pointer_rests(tab, cell):
+    page = tab(home_html("home"))
+    page.clock.install(time=0)
+    page.clock.pause_at(60_000)
+    page.locator(f"li.row {cell}").first.hover()
+    page.clock.run_for(999)
+    assert tip_shown(page) is None
+    page.clock.run_for(1)
+    assert tip_shown(page) == ROW_TIPS[cell]
+    page.mouse.move(2, 890)
+    assert tip_shown(page) is None
+
+
+@pytest.mark.parametrize("leave", ["click", "scroll"])
+def test_a_home_row_tip_hides_on_click_or_scroll(tab, leave):
+    page = tab(home_html("home"))
+    page.clock.install(time=0)
+    page.clock.pause_at(60_000)
+    page.locator("li.row span.ov").first.hover()
+    page.clock.run_for(1000)
+    assert tip_shown(page) == ROW_OVERVIEW
+    if leave == "click":
+        page.evaluate(
+            """document.querySelector("li.row span.ov").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))"""
+        )
+    else:
+        page.evaluate("window.dispatchEvent(new Event('scroll'))")
+    assert tip_shown(page) is None
+
+
+def test_an_empty_row_tip_leaves_the_enclosing_control_its_own_tip(tab):
+    page = tab(home_html("home"))
+    found = page.evaluate(
+        """() => { const fold = document.querySelector("li.row button.fold");
+          const empty = document.createElement("span");
+          empty.dataset.tip = "";
+          fold.append(empty);
+          return [ledgerTip(empty), ledgerTip(fold)]; }"""
+    )
+    assert found == ["Show this ledger's full title and overview, or fold it back to one line."] * 2
+
+
+@pytest.mark.parametrize("view", ["home", "bin"])
+def test_ledger_rows_carry_no_native_hover_text(tab, view):
+    page = tab(home_html(view), "?view=bin" if view == "bin" else "")
+    cells = page.locator("li.row :is(.title, .ov, .when)")
+    cells.first.wait_for()
+    found = cells.evaluate_all(
+        "(els) => els.map((el) => [el.className, el.getAttribute('title'), el.dataset.tip ?? null])"
+    )
+    assert [title for _, title, _ in found] == [None] * len(found)
+    assert ["title", None, ROW_TITLE] in found
+    assert ["ov", None, ROW_OVERVIEW] in found
 
 
 @pytest.mark.parametrize("leave", ["pointer", "click", "scroll"])

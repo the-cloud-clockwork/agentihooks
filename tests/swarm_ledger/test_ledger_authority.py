@@ -267,8 +267,9 @@ def test_call_keeps_the_service_choice_when_it_retries_after_starting_the_server
         return {"rejected": []}
 
     with patch.object(ledger, "request", request), patch.object(ledger.subprocess, "run") as run:
-        assert ledger.call(SLUG, [], service=True) == {"rejected": []}
-        assert ledger.call(SLUG) == {"rejected": []}
+        with patch.object(ledger.repository, "exists", lambda slug: True):
+            assert ledger.call(SLUG, [], service=True) == {"rejected": []}
+            assert ledger.call(SLUG) == {"rejected": []}
     assert seen == [(SLUG, [], True), (SLUG, [], True), (SLUG, None, False), (SLUG, None, False)]
     assert run.call_count == 2
 

@@ -100,12 +100,16 @@ def test_home_spans_the_full_window_width():
 
 def test_each_row_carries_title_kind_counts_swarm_state_and_last_activity(browser, updated_at):
     found = row(home(browser, now=updated_at + 5 * MINUTE), SLUG)
-    assert '<a class="title" href="/rows-2026-01-03" title="Rows plan">Rows plan</a>' in found
+    assert '<a class="title" href="/rows-2026-01-03" data-tip="Rows plan">Rows plan</a>' in found
     assert '<span class="kind">swarm</span>' in found
     assert '<span class="num open"><b>2</b> open</span><span class="num done"><b>1</b> done</span>' in found
     assert '<span class="state s-running">running</span>' in found
-    assert re.search(r'<time class="when" datetime="[^"]+" title="[^"]+">5m ago</time>', found)
-    assert re.search(r'<span class="ov" title="A long overview[^"]*">A long overview', found)
+    assert re.search(r'<time class="when" datetime="[^"]+" data-tip="[^"]+">5m ago</time>', found)
+    assert re.search(
+        r'</a><span class="kind">swarm</span><span class="ov" data-tip="A long overview[^"]*">A long overview[^<]*</span>'
+        r'<span class="num open">',
+        found,
+    )
     assert '<span class="acts"><button class="act del" type="button" data-act="delete"' in found
     assert 'data-slug="rows-2026-01-03" title="Move to the bin" aria-label="Move Rows plan to the bin">' in found
     assert 'data-act="reopen"' not in found
@@ -219,11 +223,11 @@ def test_activity_in_the_future_reads_just_now_and_unknown_when_missing(browser)
     assert ">just now</time>" in one_row(browser, 0, updated_at=5 * MINUTE)
     assert '<span class="when">unknown</span>' in one_row(browser, 0, updated_at=None)
     stamp = re.search(r'<time class="when"[^>]*>[^<]*</time>', one_row(browser, 3 * MINUTE, updated_at=MINUTE)).group(0)
-    assert stamp.startswith('<time class="when" datetime="1970-01-01T00:01:00Z" title="1970-01-01 ')
+    assert stamp.startswith('<time class="when" datetime="1970-01-01T00:01:00Z" data-tip="1970-01-01 ')
     assert stamp.endswith('">2m ago</time>')
     at = 1_791_290_000_000
     local = server.time.strftime("%Y-%m-%d %H:%M", server.time.localtime(at / 1000))
-    assert f'title="{local}">just now</time>' in one_row(browser, at, updated_at=at)
+    assert f'data-tip="{local}">just now</time>' in one_row(browser, at, updated_at=at)
 
 
 def test_the_swarm_state_comes_from_the_swarm_config():

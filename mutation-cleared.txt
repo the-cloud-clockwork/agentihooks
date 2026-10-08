@@ -1887,6 +1887,18 @@
     "reader": "Standards ov3 reader",
     "reason": "Equivalent mutant. sort_keys has one reader in PyYAML 6.0.3, BaseRepresenter.represent_mapping, which tests if self.sort_keys; the Dumper and CDumper classes only forward the value, and the serializer, emitter, constructor and nodes never read it. None and False are both falsy, so both keep insertion order: safe_dump of the overlay manifest is byte identical for sort_keys False and None, also for a nested mapping and CSafeDumper. sort_keys True gives description, kind, name, wears, which the exact profile.yml text test kills. Evidence: CI run 37703337103 at 2df7d0a2. Adversarial Standards ruling."
   },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_30:e9e73925e70dabdb004ae0af81c513cd65016c79072920da9bd1bbd2f26cfffb": {
+    "reader": "Standards",
+    "reason": "ProfileDecision.bundle_revision is read only by the next line, which replaces a falsy value with overlays.revision(); None and the empty string are both falsy, so both take the same branch and store the same revision, and nothing reads the field before that line. Exact CI artifact mutant from run 37699550281."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_32:c2697e43a7a6e4085d4ac57d4ea6db1a961dd7f727f136d5e0517414c0dc64b5": {
+    "reader": "Standards",
+    "reason": "ProfileDecision.bundle_revision is read only by the next line, which replaces a falsy value with overlays.revision(); None and the empty string are both falsy, so both take the same branch and store the same revision, and nothing reads the field before that line. Exact CI artifact mutant from run 37699550281."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_56:409a637151996c215b8cdad4ef75d9e362591c631aad7cd4c8c892d6fdbefa29": {
+    "reader": "Standards",
+    "reason": "The argument reaches only overlays.chosen through role_overlays or {} in profile_choice.choose, which normalizes None to an empty map before any read, so chosen sees the same defaults. Exact CI artifact mutant from run 37699550281."
+  },
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_34:0218fd3c8879d332906b0c9f657eff071d5df0f589e99aa45c713f72eb1c7fb3": {
     "reader": "Standards",
     "reason": "On Python 3.12 Path.read_text(encoding=None) decodes with the locale encoding, and every POSIX locale charmap is an ASCII compatible byte table, so a charset such as UTF-16 can never be the active locale charset. core.HOME is pure ASCII at the byte level and test_page_shells_are_plain_ascii_so_any_ascii_locale_reads_them_alike pins that on core.HOME. Decoding all ASCII bytes under explicit utf-8 or any ASCII compatible locale codec yields the same str with no decode error, so index_page returns identical HTML for every request. Evidence: CI run 37704627823. Adversarial Standards ruling."

@@ -56,7 +56,7 @@ function activity(at, now) {
   if (!at) return h("span", { class: "when", text: "unknown" });
   const d = new Date(at), pad = (n) => String(n).padStart(2, "0");
   return h("time", { class: "when", datetime: d.toISOString().replace(/\.\d+Z$/, "Z"),
-    title: `${stamp(at)} ${pad(d.getHours())}:${pad(d.getMinutes())}`, text: ago(at, now) });
+    "data-tip": `${stamp(at)} ${pad(d.getHours())}:${pad(d.getMinutes())}`, text: ago(at, now) });
 }
 
 function act(cls, act, slug, label, title, ...kids) {
@@ -65,8 +65,8 @@ function act(cls, act, slug, label, title, ...kids) {
 
 function ledgerRow(s, cells, controls, lead, attrs) {
   return h("li", { class: "row", ...attrs }, lead,
-    h("a", { class: "title", href: `/${s.slug}`, title: s.title, text: s.title }),
-    h("span", { class: "kind", text: s.size }), h("span", { class: "ov", title: s.overview, text: s.overview }),
+    h("a", { class: "title", href: `/${s.slug}`, "data-tip": s.title, text: s.title }),
+    h("span", { class: "kind", text: s.size }), h("span", { class: "ov", "data-tip": s.overview, text: s.overview }),
     ...cells, h("span", { class: "acts" }, ...controls));
 }
 

@@ -79,7 +79,24 @@ def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owne
             run.kill()
             run.wait(timeout=5)
         if pid and running(pid):
-            os.kill(pid, signal.SIGTERM)
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+
+def test_detached_server_cleanup_accepts_a_process_reaped_after_the_running_check(tmp_path, monkeypatch):
+    (tmp_path / ".server.pid").write_text("42")
+    run = Mock()
+    run.poll.return_value = 0
+    monkeypatch.setattr(subprocess, "Popen", Mock(return_value=run))
+    monkeypatch.setitem(globals(), "running", Mock(side_effect=[True, False, False, True]))
+    kill = Mock(side_effect=ProcessLookupError(3, "No such process"))
+    monkeypatch.setattr(os, "kill", kill)
+
+    test_detached_server_stops_when_its_run_ends(tmp_path, "exit", True, "--ensure")
+
+    kill.assert_called_once_with(42, signal.SIGTERM)
 
 
 def fake_process(proc, pid=7, ppid=1, start=99, state="S", comm="python", argv=(b"python",)):
