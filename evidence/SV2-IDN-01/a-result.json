@@ -1,6 +1,6 @@
 {
   "case": "T-SV2-IDN-01-A",
-  "tested_commit": "f08d6d95055c3060e8144522b987aac442881f57",
+  "tested_commit": "64a650a13bd2406c4c76bea34d9d1a611a06f25e",
   "evidence_class": "local isolated Git fixtures; not live rollout or CI proof",
   "passed": 15,
   "tests": [

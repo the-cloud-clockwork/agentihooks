@@ -3,7 +3,7 @@
   "status": "implemented; awaiting CI",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1470",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1486",
-  "tested_commit": "f08d6d95055c3060e8144522b987aac442881f57",
+  "tested_commit": "64a650a13bd2406c4c76bea34d9d1a611a06f25e",
   "evidence_class": "local isolated Git fixtures; not a CI or rollout claim",
   "supported_versions": {
     "project_metadata": "2.0",
@@ -18,10 +18,10 @@
     "AGENTIHOOKS_PROJECT_ID for non Git registration"
   ],
   "states": {
-    "observed": "61 focused tests passed; 54 canonical identity tests; legacy identity and project memory tests passed. CI plugin mode passed before latest added boundaries.",
+    "observed": "63 focused tests passed; 56 canonical identity tests; legacy identity and project memory tests passed",
     "accepted": "identity metadata satisfies schema; unsafe remotes yield unknown and empty remote; Git configuration and alias map bytes preserved",
     "committed": "implementation commit recorded in tested_commit; fixture case reports are additive",
-    "externally_verified": "CI run 37704624931: lint and four unit shards passed; hub grace eviction and deleted working folder sweep failed; one shard cancelled. Mutation failed with 31 survivors and one timeout. Fixes and stronger boundary tests await a new run."
+    "externally_verified": "CI run 37705360927 passed all eight unit shards, lint, Sonar and required aggregator. Mutation: 293 killed, 12 survived (one cleared), no timeout. Remaining exact independent rulings and two boundary tests await final CI."
   },
   "measurements": {
     "project_identity_ambiguities_total": {
@@ -44,13 +44,15 @@
     "Full CI and mutation remain pending. Live proof belongs to the applicable rollout gate; this package modifies metadata only."
   ],
   "reviews": {
-    "standards": "Inherited implementation review closed; successor regression and evidence refresh awaiting review",
-    "spec": "Inherited implementation review closed; successor regression and evidence refresh awaiting review"
+    "standards": "Closed after resolving Git rediscovery precedence; nine fresh exact equivalent rulings reviewed independently; no open findings",
+    "spec": "Closed with no findings after registration fix and bounded alias traversal"
   },
   "ci": {
     "initial_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37704624931",
     "initial_head": "df0370e4425208191975b4f6c5c95c5bb0f315d4",
-    "status": "failed; successor fix awaiting CI"
+    "status": "unit suites and Sonar passed; final mutation proof pending",
+    "reviewed_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37705360927",
+    "reviewed_head": "943f15051701070816efd75d7fc4061a6d05eddb"
   },
-  "supplemental_tests": "Seven additional registration, Git rediscovery and non Git checkout boundary cases are in the focused JUnit report; named A B C reports cover the original acceptance families."
+  "supplemental_tests": "Nine additional registration, Git rediscovery, checkout comparison and absent swarm binding cases are in the focused JUnit report; named A B C reports cover the original acceptance families."
 }
