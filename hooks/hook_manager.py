@@ -1462,6 +1462,21 @@ def on_pre_tool_use(payload: dict) -> None:
         log("credential_guard failed", {"error": str(e)})
         print(f"WARNING: credential_guard check failed ({e}) — guard bypassed", file=sys.stderr)
 
+    try:
+        from hooks.context.plan_read_guard import check as _plan_read_check
+
+        _plan_refusal = _plan_read_check(payload)
+        if _plan_refusal:
+            otel.emit_event(
+                "agentihooks.guardrail.plan_read_blocked",
+                {"session.id": payload.get("session_id", ""), "tool_name": tool_name},
+            )
+            raise BlockAction(_plan_refusal)
+    except BlockAction:
+        raise
+    except Exception as e:
+        log("plan_read_guard failed", {"error": str(e)})
+
     # File read deduplication
     if tool_name == "Read":
         try:
