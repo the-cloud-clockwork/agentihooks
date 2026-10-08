@@ -117,6 +117,7 @@ TYPES = {
     "proof": {"type": "object"},
     "file": {"type": "object"},
     "outcome": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "quote": {"type": "string", "minLength": 1},
     "override": {"type": "object"},
     "phases": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
     "attachments": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
