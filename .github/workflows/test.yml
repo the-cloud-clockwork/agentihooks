@@ -208,7 +208,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
-          while :; do
+          for poll in {1..36}; do
             runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?event=push&branch=dev&per_page=100" \
               | jq -r --argjson number "$RUN_NUMBER" '.workflow_runs[] | select(.run_number < $number and .status != "completed") | .id')
             waiting=""
@@ -219,8 +219,9 @@ jobs:
             done
             if [[ -z "$waiting" ]]; then exit 0; fi
             echo "Waiting for the Sonar analysis of older dev runs:$waiting"
-            sleep 15
+            sleep 30
           done
+          echo "::warning::Older dev runs still hold Sonar after 18 minutes:$waiting; scanning anyway."
 
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@v6

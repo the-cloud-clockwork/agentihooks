@@ -158,6 +158,15 @@ def test_wait_passes_at_once_without_older_running_runs(tmp_path):
     assert ticks == 0
 
 
+def test_wait_gives_up_with_a_warning_when_an_older_run_never_finishes(tmp_path):
+    spec = {"runs": [{"id": 5, "run_number": 5, "status": "queued"}], "jobs": {"5": [[]]}}
+    result, ticks, _ = _run_wait(tmp_path, spec)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert ticks == 36
+    assert "::warning::" in result.stdout
+    assert " 5;" in result.stdout
+
+
 def test_wait_is_red_when_the_runs_cannot_be_read(tmp_path):
     result, _, _ = _run_wait(tmp_path, {"fail": True, "runs": [], "jobs": {}})
     assert result.returncode != 0
