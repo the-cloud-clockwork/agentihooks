@@ -347,8 +347,8 @@ def test_runtime_refuses_an_account_when_its_harness_has_no_free_seat(tmp_path):
     runtime = HerdrRuntime(home=tmp_path)
     runtime._quota_accounts = [account(sessions=3), account("cx", harness="codex")]
     with pytest.raises(SpawnError, match="no claude account has placeable quota seats"):
-        runtime._quota_account("claude", None)
-    assert runtime._quota_account("codex", None).name == "cx"
+        runtime._quota_account("claude", None, None)
+    assert runtime._quota_account("codex", None, None).name == "cx"
 
 
 def test_failed_fresh_probe_does_not_leave_a_stale_healthy_account_placeable(monkeypatch):
