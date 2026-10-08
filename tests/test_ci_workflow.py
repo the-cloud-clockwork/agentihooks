@@ -151,6 +151,7 @@ def test_tests_run_on_pull_requests_into_dev_and_main():
     triggers = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())[True]
     assert set(triggers["pull_request"]["branches"]) == {"dev", "main"}
     assert triggers["push"]["branches"] == ["dev"]
+    assert triggers["merge_group"] == {"types": ["checks_requested"]}
 
 
 def test_ruff_runs_in_the_tests_workflow_only():
@@ -181,6 +182,14 @@ def test_lint_runs_the_artifact_sanity_checks_in_a_real_browser():
     check = next(s for s in steps if s.get("run", "").endswith(".artifact_sanity tests/fixtures/artifacts/*"))
     assert steps.index(install) < steps.index(check)
     assert {p.suffix for p in (_ROOT / "tests/fixtures/artifacts").iterdir()} == {".md", ".json", ".svg"}
+
+
+def test_queued_merges_select_artifact_checks_against_the_queue_base():
+    select = next(s for s in _workflow()["jobs"]["lint"]["steps"] if s.get("id") == "artifacts")
+    assert select["env"]["BASE"] == (
+        "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+        " || github.event.before || inputs.base }}"
+    )
 
 
 def _mutation_workflow():
@@ -370,7 +379,7 @@ def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
     assert job["needs"] in (["unit", "lint"], ["unit", "lint", "shard-check"])
     checked = " && needs.shard-check.result == 'success'" if "shard-check" in job["needs"] else ""
     assert job["if"] == (
-        "${{ !cancelled() && github.event_name == 'pull_request'"
+        "${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group')"
         " && needs.unit.result == 'success' && needs.lint.result == 'success'" + checked + " }}"
     )
     tree, upload = job["steps"]
