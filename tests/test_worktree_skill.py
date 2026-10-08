@@ -254,6 +254,89 @@ class Done(WtBase):
             self.assertTrue(dest.is_dir())
             self.assertTrue(self.branch_exists("queue-no-gh"))
 
+    def _published_with_pull_requests(self, name, pulls):
+        jq = shutil.which("jq")
+        if not jq:
+            self.skipTest("jq is required to evaluate the gh query")
+        dest = self._new(name)
+        (dest / "probe.txt").write_text("probe\n")
+        _git(dest, "add", "probe.txt", env=self.gitenv)
+        _git(dest, "commit", "--quiet", "-m", "probe", env=self.gitenv)
+        _git(dest, "push", "--quiet", "-u", "origin", name, env=self.gitenv)
+        listing = Path(self.tmp) / f"{name}-pulls.json"
+        listing.write_text(pulls)
+        gh = self.bin / "gh"
+        gh.write_text(
+            f"#!{BASH}\nset -euo pipefail\n"
+            'query=""; state=all\n'
+            "while (($#)); do\n"
+            '  case "$1" in --jq) query="$2"; shift ;; --state) state="$2"; shift ;; esac\n'
+            "  shift\n"
+            "done\n"
+            f'"{jq}" -r --arg s "$state" '
+            '"map(select(\\$s == \\"all\\" or .state == (\\$s | ascii_upcase))) | ($query) | values"'
+            f' < "{listing}"\n'
+        )
+        gh.chmod(0o755)
+        return dest
+
+    def remote_branch_exists(self, name):
+        return (
+            subprocess.run(
+                ["git", "-C", str(self.origin), "show-ref", "--verify", "--quiet", f"refs/heads/{name}"],
+                env=self.gitenv,
+            ).returncode
+            == 0
+        )
+
+    def test_done_force_drops_a_worktree_whose_pull_request_closed_unmerged(self):
+        dest = self._published_with_pull_requests(
+            "closed-probe", '[{"state": "CLOSED", "url": "https://github.com/o/r/pull/7"}]'
+        )
+        result = self.run_wt("done", "closed-probe", "--repo", str(self.primary), "--force")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("closed-probe"))
+        self.assertTrue(self.remote_branch_exists("closed-probe"))
+        self.assertIn(f"wt: removed {dest} and branch closed-probe\n", result.stdout)
+        self.assertNotIn("kept", result.stderr)
+
+    def test_done_without_force_keeps_a_worktree_whose_pull_request_closed_unmerged(self):
+        dest = self._published_with_pull_requests(
+            "closed-kept", '[{"state": "CLOSED", "url": "https://github.com/o/r/pull/7"}]'
+        )
+        result = self.run_wt("done", "closed-kept", "--repo", str(self.primary))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(
+            result.stderr,
+            "wt: pull request https://github.com/o/r/pull/7 was closed without merging"
+            " — pass --force to drop the worktree and branch closed-kept\n",
+        )
+        self.assertTrue(dest.is_dir())
+        self.assertTrue(self.branch_exists("closed-kept"))
+        self.assertTrue(self.remote_branch_exists("closed-kept"))
+
+    def test_done_refuses_an_open_or_queued_pull_request_even_with_force(self):
+        pulls = {
+            "open": '[{"state": "OPEN", "url": "https://github.com/o/r/pull/8"}]',
+            "queued-reads-open": '[{"state": "OPEN", "url": "https://github.com/o/r/pull/8"},'
+            ' {"state": "CLOSED", "url": "https://github.com/o/r/pull/6"}]',
+        }
+        for kind, listing in pulls.items():
+            name = f"{kind}-pull"
+            dest = self._published_with_pull_requests(name, listing)
+            for flags in ((), ("--force",)):
+                result = self.run_wt("done", name, "--repo", str(self.primary), *flags)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(
+                    result.stderr,
+                    "wt: pull request https://github.com/o/r/pull/8 is not merged"
+                    " — wait for it to land before worktree teardown\n",
+                )
+                self.assertTrue(dest.is_dir())
+                self.assertTrue(self.branch_exists(name))
+                self.assertTrue(self.remote_branch_exists(name))
+
 
 CONCURRENT_GIT = """#!{bash}
 "{real}" "$@"
