@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_ledger import ledger
+from scripts.swarm_ledger import ledger, ledger_hook
 
 SLUG = "autostart-2026-01-01"
 
@@ -27,3 +27,13 @@ def test_a_failed_request_outside_the_suite_still_starts_the_server(starts, monk
     with pytest.raises(SystemExit, match="ledger server not answering"):
         ledger.call(SLUG)
     assert [command[-1] for command in starts] == ["--ensure"]
+
+
+def test_a_session_start_on_a_closed_port_starts_no_server_in_the_suite(tmp_path, monkeypatch, ledger_port):
+    (tmp_path / f"{SLUG}.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(ledger_hook, "LEDGER_DIR", tmp_path)
+    monkeypatch.setenv("LEDGER_PORT", str(ledger_port))
+    seen = []
+    monkeypatch.setattr(ledger_hook.subprocess, "Popen", lambda command, **kwargs: seen.append(command))
+    ledger_hook.serve_ledgers()
+    assert seen == []
