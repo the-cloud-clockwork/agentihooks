@@ -1116,3 +1116,105 @@ def test_a_recycle_successor_leaves_its_warned_saved_account_or_refuses_naming_i
     with pytest.raises(SpawnError, match="^no claude account has placeable quota seats: claude w is at its week"):
         runtime.spawn(config, "plan", "planner@a1b2c3-0002", task)
     assert seen == []
+
+
+def _roomy_host():
+    from scripts.swarm.host_budget import HostSample
+
+    return HostSample(load1=0.5, cpus=8, available_mb=64_000, agents=2)
+
+
+def _scaling_runtime(tmp_path, monkeypatch, seen):
+    from scripts.swarm import runtime as module
+
+    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: seen)
+    rt = module.HerdrRuntime(home=tmp_path)
+    rt.host = _roomy_host
+    return rt
+
+
+def test_a_manual_swarm_keeps_its_capacity_decision_unchanged(tmp_path, monkeypatch):
+    seen = [account(cap=6), account("cx", harness="codex", cap=6)]
+    rt = _scaling_runtime(tmp_path, monkeypatch, seen)
+    rt.host = lambda: pytest.fail("a manual swarm never reads the host")
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="manual")
+    demand = {"eng": 4, "ci": 1, "plan": 0}
+    previous = {
+        "autoscale": {"ceilings": {"eng": 9, "ci": 0, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}}
+    }
+    rt.quota_previous(previous)
+    decision = rt.quota_capacity(config, [], 100, demand)
+    expected = capacity.calculate(config, seen, [], demand, warned={})
+    assert json.dumps(decision, sort_keys=True) == json.dumps(expected, sort_keys=True)
+
+
+def _scaling_tick(store, ledger, rt, now_ms):
+    capacity.apply("sw", store.config("sw"), store, ledger, rt, now_ms)
+    return capacity.read(store, "sw")
+
+
+def test_an_auto_swarm_with_quota_and_host_room_rises_above_its_configured_caps_after_a_held_raise(
+    tmp_path, monkeypatch
+):
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto"))
+    ledger = FakeLedger([{"id": f"e{n}"} for n in range(4)] + [{"id": "c", "lane": "ci"}])
+    ledger.comment = lambda slug, item, text, by: None
+    rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=6), account("cx", harness="codex", cap=6)])
+    first = _scaling_tick(store, ledger, rt, 1000)
+    assert sum(first["configured"].values()) == 1
+    assert first["autoscale"]["pending_raise"] == {"target": 12, "ticks": 1}
+    second = _scaling_tick(store, ledger, rt, 61_000)
+    assert second["autoscale"]["pending_raise"] == {"target": 12, "ticks": 2}
+    assert "raise held at tick 2 of 3" in second["autoscale"]["reason"]
+    third = _scaling_tick(store, ledger, rt, 121_000)
+    assert third["configured"] == {"eng": 2, "ci": 1, "plan": 0}
+    assert third["effective"] == {"eng": 2, "ci": 1, "plan": 0}
+    assert third["autoscale"]["host"]["room"] > 0
+    assert store.config("sw").max_eng == 1
+
+
+def test_an_auto_swarm_lowers_its_ceiling_at_once_when_quota_drains(tmp_path, monkeypatch):
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=4, max_ci=1, max_plan=0, scaling="auto"))
+    ledger = FakeLedger([{"id": f"e{n}"} for n in range(4)])
+    ledger.comment = lambda slug, item, text, by: None
+    rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=1)])
+    decision = _scaling_tick(store, ledger, rt, 1000)
+    assert decision["configured"] == {"eng": 1, "ci": 0, "plan": 0}
+    assert decision["autoscale"]["pending_raise"] == {"target": None, "ticks": 0}
+
+
+def test_the_autoscale_command_prints_the_decision_for_a_fixture(tmp_path, capsys, monkeypatch):
+    from scripts.swarm import cli
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    fixture = tmp_path / "readings.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "accounts": [account(cap=6).__dict__, account("cx", harness="codex", cap=6).__dict__],
+                "host": {"load1": 0.5, "cpus": 8, "available_mb": 64_000, "agents": 2},
+                "live": {"eng": 0, "ci": 0, "plan": 0},
+                "demand": {"eng": 4, "ci": 1, "plan": 0},
+                "previous": {
+                    "autoscale": {
+                        "ceilings": {"eng": 1, "ci": 0, "plan": 0},
+                        "pending_raise": {"target": 12, "ticks": 2},
+                    }
+                },
+            }
+        )
+    )
+    cli.main(["sw", "autoscale", "--fixture", str(fixture), "--json"])
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["scaling"] == "auto"
+    assert printed["ceilings"] == {"plan": 0, "ci": 1, "eng": 2}
+    assert printed["host"]["room"] > 0
+    cli.main(["sw", "autoscale", "--fixture", str(fixture)])
+    text = capsys.readouterr().out
+    assert "scaling auto, ceilings eng 2, ci 1, plan 0" in text
+    assert "host room" in text
+    assert store.redis.get(store.key("sw", "quota-capacity")) is None
