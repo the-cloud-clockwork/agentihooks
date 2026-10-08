@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from hooks import config
 from hooks.context import profile_chain
 from scripts.profiles import manifestos, sources
@@ -262,3 +264,115 @@ def test_list_names_an_empty_manifesto_folder(monkeypatch, tmp_path, capsys):
     assert manifestos.main(["list", "--bundle", str(tmp_path / "empty")]) == 1
 
     assert capsys.readouterr().err == f"No manifestos in {tmp_path / 'empty' / 'manifestos'}\n"
+
+
+def test_skip_manifesto_splits_on_commas_without_spaces(monkeypatch, tmp_path):
+    root = _bundle(tmp_path)
+    _clean_env(monkeypatch)
+    monkeypatch.setenv("AGENTIHOOKS_SKIP_MANIFESTO", "uno,dos")
+
+    assert config._resolve_manifesto_paths(root) == []
+
+
+def test_body_keeps_a_leading_x_after_the_front_matter(tmp_path):
+    path = tmp_path / "xray.md"
+    path.write_text("---\nroles: [qa]\n---\n\nXray body\n")
+
+    assert config.manifesto_body(path) == "Xray body\n"
+
+
+def test_matrix_pads_the_header_to_the_longest_manifesto_name(monkeypatch, tmp_path):
+    roles = tmp_path / "roles"
+    (roles / "qa").mkdir(parents=True)
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", roles)
+    path = tmp_path / "a-long-manifesto-name.md"
+    path.write_text("# Long\n")
+
+    assert manifestos.matrix([path]) == "manifesto                 qa\na-long-manifesto-name.md  x\n"
+
+
+def test_list_requires_a_command(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        manifestos.main([])
+
+    assert exit_info.value.code == 2
+    assert capsys.readouterr().err == (
+        "usage: agentihooks manifestos [-h] {list} ...\n"
+        "agentihooks manifestos: error: the following arguments are required: command\n"
+    )
+
+
+def test_list_help_names_the_command_and_the_bundle_option(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "200")
+    with pytest.raises(SystemExit):
+        manifestos.main(["--help"])
+    top = capsys.readouterr().out.splitlines()
+    with pytest.raises(SystemExit):
+        manifestos.main(["list", "--help"])
+    listing = capsys.readouterr().out.splitlines()
+
+    assert top[0] == "usage: agentihooks manifestos [-h] {list} ..."
+    assert "    list      Print which package roles receive each bundle manifesto" in top
+    assert "  --bundle BUNDLE  Bundle to read (default: the linked bundle)" in listing
+
+
+def test_list_reads_the_linked_bundle_without_a_bundle_option(monkeypatch, tmp_path, capsys):
+    root = _scoped(tmp_path)
+    _clean_env(monkeypatch)
+    monkeypatch.setattr(profile_chain, "read_state", lambda: {"bundle": {"path": str(root)}})
+
+    assert manifestos.main(["list"]) == 0
+    assert capsys.readouterr().out.splitlines()[1].startswith("core.md ")
+
+
+def test_list_names_the_default_folder_when_no_bundle_is_linked(monkeypatch, tmp_path, capsys):
+    _clean_env(monkeypatch)
+    monkeypatch.delenv("AGENTIHOOKS_BUNDLE_ROOT", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(profile_chain, "read_state", lambda: {})
+
+    assert manifestos.main(["list"]) == 1
+    assert capsys.readouterr().err == "No manifestos in the default manifesto folder\n"
+
+
+def test_an_empty_bundle_option_reads_the_current_folder(monkeypatch, tmp_path, capsys):
+    root = _scoped(tmp_path)
+    _clean_env(monkeypatch)
+    monkeypatch.delenv("AGENTIHOOKS_BUNDLE_ROOT", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(profile_chain, "read_state", lambda: {})
+    monkeypatch.chdir(root)
+
+    assert manifestos.main(["list", "--bundle", ""]) == 0
+    assert capsys.readouterr().out.splitlines()[1].startswith("core.md ")
+
+
+def test_install_entry_runs_the_manifestos_list_command(monkeypatch, tmp_path, capsys):
+    from scripts import install
+
+    root = _scoped(tmp_path)
+    _clean_env(monkeypatch)
+    monkeypatch.setattr("sys.argv", ["agentihooks", "manifestos", "list", "--bundle", str(root)])
+
+    with pytest.raises(SystemExit) as exit_info:
+        install.main()
+
+    assert exit_info.value.code == 0
+    assert capsys.readouterr().out.splitlines()[1].startswith("core.md ")
+
+
+def test_claude_persona_appends_manifestos_for_the_bundle_and_chain(monkeypatch, tmp_path):
+    from scripts import install
+
+    bundle = tmp_path / "bundle"
+    dirs = [_role("cicd")]
+    calls = []
+    monkeypatch.setattr(install, "CLAUDE_HOME", tmp_path / "claude")
+    monkeypatch.setattr(install, "_cleanup_stale_claude_md_symlink", lambda: None)
+    monkeypatch.setattr(install, "_install_system_prompt", lambda *args: None)
+    monkeypatch.setattr(install, "_prepend_bundle_claude_md", lambda *args: None)
+    monkeypatch.setattr(install, "_append_ci_manifesto_to_claude_md", lambda *args: calls.append(args))
+
+    install._install_claude_persona(dirs, ["package:cicd"], bundle)
+
+    assert calls == [(bundle, dirs)]
