@@ -14,6 +14,14 @@ def test_persistent_identity_survives_registry_cleanup(monkeypatch, tmp_path):
     assert len((tmp_path / "brain" / "project-sessions.jsonl").read_text().splitlines()) == 1
 
 
+def test_lookup_returns_the_stored_project_id(monkeypatch, tmp_path):
+    monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path)
+    record_session("scoped", ProjectIdentity("alpha", "org/alpha", project_id="github:org/alpha"))
+    assert lookup("scoped").project_id == "github:org/alpha"
+    record_session("unscoped", ProjectIdentity("beta", "org/beta"))
+    assert lookup("unscoped").project_id == "unknown"
+
+
 def test_old_session_uses_transcript_folder(monkeypatch, tmp_path):
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path / "state")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
