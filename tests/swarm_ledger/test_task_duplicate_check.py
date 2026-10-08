@@ -247,6 +247,16 @@ def test_a_broken_check_lands_the_task_naming_its_error(live, monkeypatch):
     assert stored("t9") is not None
 
 
+def test_a_timeout_error_inside_the_check_is_named_not_counted_as_slow(live, monkeypatch):
+    judged(monkeypatch, Judge(yes={"t1"}, error=TimeoutError("socket")))
+    status, reply = operations(live, task("t9", REPEAT, live["phases"][0]))
+    assert (status, reply["rejected"]) == (200, [])
+    assert (
+        "the duplicate check did not run for task t9 because it failed with TimeoutError, so it was added unchecked"
+        in reply["_meta"]["warnings"]
+    )
+
+
 def test_a_refused_repeat_still_needs_a_current_revision(live, monkeypatch):
     stale = guards(live)
     core.sync(SLUG, ops=[task("t8", "Rename the ledger page title", live["phases"][1])])

@@ -1,13 +1,11 @@
 """Screens task adds against the tasks the ledger already holds, before the locked apply takes the write lock."""
 
-import os
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as Overrun
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 
 from scripts.swarm_ledger import ledger_duplicates
 
-BUDGET_S = float(os.environ.get("LEDGER_DUPLICATE_BUDGET_S", "5"))
+BUDGET_S = 5.0
 WORKERS = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ledger-duplicates")
 TICK = "swarm"
 MINTED = ("plan", "release")
@@ -34,8 +32,8 @@ class Gate:
     inner: object
 
     def apply(self, doc: dict, op: dict, ctx: object, apply_op: object) -> bool:
-        refusal = self.screen.refused.get(op["id"])
-        return self.inner.apply(doc, op, ctx, _refuse(refusal) if refusal else apply_op)
+        reason = self.screen.refused.get(op["id"])
+        return self.inner.apply(doc, op, ctx, _refuse(reason) if reason else apply_op)
 
 
 def screen(doc: dict, ops: list[dict]) -> Screen:
@@ -73,14 +71,21 @@ def refusal(op: dict, match: ledger_duplicates.Match) -> str:
 
 def _find(doc, adds):
     future = WORKERS.submit(ledger_duplicates.find, doc, "task", adds)
-    try:
-        return future.result(timeout=BUDGET_S), UNANSWERED
-    except Overrun:
+    if future not in wait([future], timeout=BUDGET_S).done:
         future.cancel()
-        why = SLOW.format(budget=BUDGET_S)
-    except Exception as exc:  # a broken check lets the add land, named in its warning
-        why = FAILED.format(error=type(exc).__name__)
-    return [ledger_duplicates.UNCHECKED] * len(adds), why
+        return [ledger_duplicates.UNCHECKED] * len(adds), SLOW.format(budget=BUDGET_S)
+    try:
+        return future.result(), UNANSWERED
+    except Exception as exc:
+        return [ledger_duplicates.UNCHECKED] * len(adds), FAILED.format(error=type(exc).__name__)
+
+
+def _refuse(reason):
+    def refuse(doc, op, ctx):
+        ctx.refused.append(reason)
+        return False
+
+    return refuse
 
 
 def _refuse(refusal):
