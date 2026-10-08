@@ -139,15 +139,20 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
+      - name: Restore latest dev durations
+        if: steps.lookup.outputs.skip != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/dev-durations
+          key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
+
+      - name: Adopt latest dev durations
+        if: steps.lookup.outputs.skip != 'true'
+        run: python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations
+
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
       # are allowed to delete — never ran in CI at all.
-      - name: Download latest dev durations
-        if: steps.lookup.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python -m tests.dev_durations ${{ matrix.python-version }}
-
       - name: Run tests
         if: steps.lookup.outputs.skip != 'true'
         env:
@@ -262,6 +267,56 @@ jobs:
           [[ -f "$grader/tests/count_floor.py" ]] || grader="$GITHUB_WORKSPACE"
           cd "$grader"
           python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
+  size:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - *lookup
+
+      - uses: actions/checkout@v4
+        if: steps.lookup.outputs.skip != 'true'
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        if: steps.lookup.outputs.skip != 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        if: steps.lookup.outputs.skip != 'true'
+        run: python -m pip install ruff==0.15.12
+
+      - name: Check out the base revision
+        if: steps.lookup.outputs.skip != 'true'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+        run: git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
+
+      - name: Check out the protected grader
+        if: steps.lookup.outputs.skip != 'true'
+        run: |
+          git fetch --no-tags origin dev
+          git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
+
+      # dev's copy grades against the base's allowlist, so a pull request cannot loosen its own limits or allowlist.
+      # The bootstrap branch runs only while dev's history has never carried the grader.
+      - name: Hold the size and complexity limits
+        if: steps.lookup.outputs.skip != 'true'
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/size_limits.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+            python -m scripts.size_limits --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+          elif [[ -z "$(git -C "$RUNNER_TEMP/grader" log -1 --format=%H -- scripts/size_limits.py)" ]]; then
+            python -m scripts.size_limits --bootstrap --head "$GITHUB_WORKSPACE"
+          else
+            echo "::error::dev once carried scripts/size_limits.py and no longer does, so nothing trusted can grade."
+            exit 1
+          fi
 
   sonar:
     runs-on: ubuntu-latest
@@ -434,6 +489,22 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         run: python -m ruff format --check hooks/ scripts/ tests/
 
+      - name: Select docs build
+        id: docs
+        if: steps.lookup.outputs.skip != 'true'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+        run: |
+          git diff --name-only "$BASE" HEAD -- docs index.md _config.yml assets .github/workflows/test.yml > "$RUNNER_TEMP/docs-changes"
+          if [[ -s "$RUNNER_TEMP/docs-changes" ]]; then echo "build=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Build docs with Jekyll
+        if: steps.lookup.outputs.skip != 'true' && steps.docs.outputs.build == 'true'
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./
+          destination: ./_site
+
       - name: Select artifact browser checks
         id: artifacts
         if: steps.lookup.outputs.skip != 'true'
@@ -456,7 +527,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, shard-check, test-count, lint, sonar, mutation, swarm-image, brain-smoke, wiring, semgrep]
+    needs: [unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, brain-smoke, wiring, semgrep]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -514,6 +585,15 @@ jobs:
           include-hidden-files: true
           retention-days: 14
           overwrite: true
+
+      - name: Stage merged durations for the cache
+        run: mkdir -p ~/dev-durations && cp .test_durations* ~/dev-durations/
+
+      - name: Save merged durations to the cache
+        uses: actions/cache/save@v4
+        with:
+          path: ~/dev-durations
+          key: durations-merged-${{ github.sha }}
 
   record-pass:
     needs: [unit, lint, shard-check, test-count]
