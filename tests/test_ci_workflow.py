@@ -601,17 +601,34 @@ def test_ci_refresh_takes_the_median_over_recent_runs_for_the_tests_of_the_passe
     def download(run_ids, folder):
         assert run_ids == ["42", "41", "40"]
         for run in run_ids:
-            for version in ("3.11", "3.12"):
+            for version, scale in (("3.11", 1), ("3.12", 10)):
                 path = folder / run / f"durations-{version}-1"
                 path.mkdir(parents=True)
-                (path / "durations.json").write_text(json.dumps(measured[run]))
+                (path / "durations.json").write_text(json.dumps({k: v * scale for k, v in measured[run].items()}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
     monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["42", "41", "40", "39"][:limit])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci-run", "42", "--ci", "3"])
-    for name in (".test_durations", ".test_durations-3.11", ".test_durations-3.12"):
-        assert json.loads((tmp_path / name).read_text()) == {"t.py::a": 2.0, "t.py::new": 4.0}
+    assert json.loads((tmp_path / ".test_durations-3.11").read_text()) == {"t.py::a": 2.0, "t.py::new": 4.0}
+    assert json.loads((tmp_path / ".test_durations-3.12").read_text()) == {"t.py::a": 20.0, "t.py::new": 40.0}
+    assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 9.5, "t.py::new": 22.0}
+
+
+def test_ci_refresh_counts_the_passed_run_within_its_run_limit(tmp_path, monkeypatch):
+    downloads = []
+
+    def download(run_ids, folder):
+        downloads.extend(run_ids)
+        for run in run_ids:
+            (folder / run / "durations-3.12-1").mkdir(parents=True)
+            (folder / run / "durations-3.12-1" / "durations.json").write_text(json.dumps({"t.py::a": 1.0}))
+
+    monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["42", "41", "40"][:limit])
+    monkeypatch.setattr(refresh_durations, "ci_download", download)
+    refresh_durations.main(["--ci-run", "39", "--ci", "3"])
+    assert downloads == ["39", "42", "41"]
 
 
 def test_credential_parameters_have_readable_timing_identifiers():
