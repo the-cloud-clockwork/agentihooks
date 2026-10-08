@@ -218,6 +218,10 @@ def test_dollar_or_letters_alone_do_not_refuse(ledger):
     assert check(bash(f"ls {ledger}/XY"), env(ledger)) is None
 
 
+def test_grep_of_ledger_root_with_a_glob_refused(ledger):
+    assert check({"tool_name": "Grep", "tool_input": {"path": str(ledger), "glob": "*.md"}}, env(ledger))
+
+
 def test_other_ledger_plans_add_to_this_one(ledger):
     (ledger / "other.json").write_text(json.dumps({"artifacts": [{"file": {"id": "d" * 64 + ".md"}, "plan": True}]}))
     assert check(read(stored(ledger)), env(ledger))
