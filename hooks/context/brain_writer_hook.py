@@ -53,6 +53,10 @@ def _parse_attrs(attr_str: str) -> dict[str, str]:
 
 def _find_markers(text: str) -> list[dict[str, Any]]:
     """Extract brain markers from raw text. Returns list of marker dicts."""
+    return [marker for marker, _ in _markers_at(text)]
+
+
+def _markers_at(text: str) -> list[tuple[dict[str, Any], int]]:
     results = []
     for m in _BLOCK_RE.finditer(text):
         mtype = m.group(1).lower()
@@ -61,7 +65,7 @@ def _find_markers(text: str) -> list[dict[str, Any]]:
         attrs = _parse_attrs(m.group(2))
         content = m.group(3).strip()
         if content:
-            results.append({"type": mtype, "attrs": attrs, "content": content})
+            results.append(({"type": mtype, "attrs": attrs, "content": content}, m.start()))
     return results
 
 
@@ -70,20 +74,31 @@ def _find_markers(text: str) -> list[dict[str, Any]]:
 
 def _parse_transcript_for_markers(transcript_path: str, max_markers: int) -> list[dict]:
     """Extract markers from assistant text in a transcript (claude or codex)."""
+    from bisect import bisect_right
+
     from hooks.memory.transcript_reader import iter_transcript_records
 
-    all_text: list[str] = [
-        rec["text"]
-        for rec in iter_transcript_records(transcript_path)
-        if rec.get("kind") in ("assistant_text", "turn_complete") and rec.get("text")
-    ]
+    all_text: list[str] = []
+    starts: list[int] = []
+    stamps: list[object] = []
+    offset = 0
+    for rec in iter_transcript_records(transcript_path):
+        if rec.get("kind") in ("assistant_text", "turn_complete") and rec.get("text"):
+            all_text.append(rec["text"])
+            starts.append(offset)
+            stamps.append((rec.get("raw") or {}).get("timestamp"))
+            offset += len(rec["text"]) + 1
 
     if not all_text:
         return []
 
-    combined = "\n".join(all_text)
-    markers = _find_markers(combined)
-    return markers[:max_markers]
+    markers = []
+    for marker, start in _markers_at("\n".join(all_text))[:max_markers]:
+        stamp = stamps[bisect_right(starts, start) - 1]
+        if stamp:
+            marker["at"] = stamp
+        markers.append(marker)
+    return markers
 
 
 # ── Outbox write ─────────────────────────────────────────────────────
@@ -129,14 +144,21 @@ def _marker_request(marker: dict, session_id: str, cwd: str | None = None) -> tu
     outbox dedupes server-side against its original (possibly partial) POST.
     """
     from hooks.context.project_identity import resolve_project
-    from hooks.context.project_sessions import lookup
+    from hooks.context.project_sessions import SCOPE_FIELDS, lookup, marker_scope
 
     attrs = dict(marker.get("attrs") or {})
     folder = os.getenv("CLAUDE_PROJECT_DIR", str(Path.cwd())) if cwd is None else cwd
-    identity = lookup(session_id) or resolve_project(attrs.get("cwd") or folder, {} if cwd is not None else None)
-    if identity:
-        for name, value in identity.attributes().items():
+    scope = marker["scope"] if "scope" in marker else marker_scope(session_id, marker, replay=cwd is not None)
+    if scope is not None:
+        for name in SCOPE_FIELDS:
+            attrs.pop(name, None)
+        for name, value in scope.items():
             attrs.setdefault(name, value)
+    elif "attribution" not in attrs:
+        identity = lookup(session_id) or resolve_project(attrs.get("cwd") or folder, {} if cwd is not None else None)
+        if identity:
+            for name, value in identity.attributes().items():
+                attrs.setdefault(name, value)
     attrs.setdefault("session_id", session_id)
     attrs.setdefault("source", attrs.get("source") or os.getenv("AGENTICORE_AGENT_NAME", "agent"))
 
@@ -286,14 +308,25 @@ def write_markers(session_id: str, transcript_path: str, last_message: str = "")
         # the outbox self-empties the moment brain-api is reachable again.
         drained = _drain_outbox(BRAIN_WRITER_OUTBOX)
 
+        if transcript_path:
+            from hooks.context.project_sessions import observe_transcript
+
+            observe_transcript(session_id, transcript_path)
         markers = _parse_transcript_for_markers(transcript_path, BRAIN_WRITER_MAX_MARKERS)
 
         # Fallback: if transcript had no markers but last_message does, parse that
         if not markers and last_message:
-            markers = _find_markers(last_message)[:BRAIN_WRITER_MAX_MARKERS]
+            now = datetime.now(timezone.utc).isoformat()
+            markers = [{**m, "at": now} for m in _find_markers(last_message)[:BRAIN_WRITER_MAX_MARKERS]]
         if not markers:
             span.set_attrs({"markers_found": 0, "outbox_drained": drained})
             return {"markers": 0, "drained": drained}
+
+        from hooks.context.project_sessions import marker_scope, unattributed_session_events_total
+
+        markers = [{**m, "scope": marker_scope(session_id, m)} for m in markers]
+        scopes = [m["scope"] for m in markers if m["scope"] is not None]
+        span.set_attrs({"unattributed_session_events_total": unattributed_session_events_total(scopes)})
 
         # HTTP is the only transport — any marker we fail to POST buffers in
         # the outbox for the retry-drain above.
