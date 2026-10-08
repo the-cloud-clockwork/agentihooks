@@ -10,7 +10,7 @@ from tests.swarm_ledger.test_sqlite import document
 
 
 def run(monkeypatch, *argv):
-    monkeypatch.setattr(sys, "argv", ["agentihooks ledger storage", *argv])
+    monkeypatch.setattr(sys, "argv", ["storage-entry", *argv])
     command.main()
 
 
@@ -75,13 +75,11 @@ def test_the_command_names_itself_and_each_action_and_needs_one(monkeypatch, cap
     shown = " ".join(capsys.readouterr().out.split())
     assert helped.value.code == 0
     assert shown.startswith("usage: agentihooks ledger storage [-h] {export,import,cutover}")
-    for text in (
-        " ".join(command.__doc__.split()),
-        "print or write the complete stored document",
-        "store an exported document",
-        "import every ledger file left in the ledger folder",
-    ):
-        assert text in shown
+    assert " ".join(command.__doc__.split()) in shown
+    assert (
+        "{export,import,cutover} export print or write the complete stored document import store an exported "
+        "document cutover import every ledger file left in the ledger folder options:"
+    ) in shown
     with pytest.raises(SystemExit) as bare:
         run(monkeypatch)
     assert bare.value.code == 2

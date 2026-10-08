@@ -174,7 +174,7 @@ def summary_lines(slug):
     from scripts.swarm_ledger.repository.folder import ledger_folder
     from scripts.swarm_ledger.repository.sqlite import read_ledger
 
-    overview = (read_ledger(ledger_folder(os.environ), slug, "overview") or {}).get("overview", "")
+    overview = str((read_ledger(ledger_folder(os.environ), slug, "overview") or {}).get("overview"))
     _, marker, summary = overview.partition(ledger_close.MARK)
     if not marker:
         return []

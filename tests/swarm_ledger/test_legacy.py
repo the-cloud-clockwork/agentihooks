@@ -293,6 +293,25 @@ def test_adopt_registries_merges_new_entries_over_what_is_already_stored(tmp_pat
     assert sqlite.read_registry(directory, "bin") == {"already-there": 10, "from-file": 20}
 
 
+def test_adopt_bin_imports_bin_files_under_the_folder_storage_lock(tmp_path, monkeypatch):
+    directory = folder(tmp_path)
+    (directory / ".bin-restored.json").write_text(json.dumps({"r": 1}), encoding="utf-8")
+    repo = stored(directory)
+    locked = []
+    real = legacy.storage_lock
+    monkeypatch.setattr(legacy, "storage_lock", lambda path: locked.append(path) or real(path))
+    legacy.adopt_bin(repo)
+    assert locked == [directory]
+    assert sqlite.read_registry(directory, "restored") == {"r": 1}
+    assert not (directory / ".bin-restored.json").exists()
+
+
+def test_adopt_bin_without_bin_files_takes_no_lock(tmp_path, monkeypatch):
+    directory = folder(tmp_path)
+    monkeypatch.setattr(legacy, "storage_lock", lambda path: pytest.fail("no bin file to adopt"))
+    legacy.adopt_bin(stored(directory))
+
+
 def test_candidates_requires_actual_files_for_a_named_slug(tmp_path):
     directory = folder(tmp_path)
     assert legacy.candidates(directory, "wanted") == []

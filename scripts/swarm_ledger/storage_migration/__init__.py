@@ -5,12 +5,14 @@ from pathlib import Path
 
 from scripts.swarm_ledger.repository import legacy, repository
 
+ESCAPE_NON_ASCII = False
+
 
 def export(slug: str, out: Path | None = None) -> dict:
     """The complete stored document; written to `out` when given, else returned."""
     state = repository.export_document(slug)
     if out is not None:
-        Path(out).write_bytes((json.dumps(state, indent=2, ensure_ascii=False) + "\n").encode())
+        Path(out).write_bytes((json.dumps(state, indent=2, ensure_ascii=ESCAPE_NON_ASCII) + "\n").encode())
     return state
 
 

@@ -29,6 +29,7 @@ GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
 SUMMARIES = "SELECT summary FROM ledgers ORDER BY touched_at DESC, slug"
 REGISTRY = "SELECT path,value FROM registry WHERE slug=?"
+REGISTRY_TABLE = "registry"
 UPDATE = "UPDATE ledgers SET revision=?, generation=?, summary=?, touched_at=? WHERE slug=?"
 INSERT = "INSERT INTO ledgers VALUES (?, ?, ?, ?, ?, ?)"
 PATH_END = "\x7f"
@@ -305,7 +306,7 @@ class SQLiteLedgerRepository:
     def _insert(self, connection, slug: str, state: dict, token: str, seeds: dict | None = None) -> None:
         previous = connection.execute(GENERATION, (slug,)).fetchone()
         now = self.domain.now_ms()
-        generation = max(now << GENERATION_SHIFT, previous[0] + 1 if previous else 0)
+        generation = now << GENERATION_SHIFT if previous is None else max(now << GENERATION_SHIFT, previous[0] + 1)
         for table in PER_LEDGER:
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         stored = {**state, "_meta": {**state["_meta"]}}
@@ -397,7 +398,7 @@ class SQLiteLedgerRepository:
         return {key: json.loads(value) for key, value in connection.execute(REGISTRY, (name,))}
 
     def save_registry(self, connection, name: str, entries: dict) -> None:
-        sync_values(connection, "registry", name, {key: encode(value) for key, value in entries.items()})
+        sync_values(connection, REGISTRY_TABLE, name, {key: encode(value) for key, value in entries.items()})
 
     def create(self, slug: str, content: dict, size: str = "small") -> bool:
         from . import legacy

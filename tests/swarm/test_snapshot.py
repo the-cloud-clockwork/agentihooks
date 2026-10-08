@@ -366,3 +366,7 @@ def test_status_shows_when_the_last_automatic_snapshot_was_taken(env, capsys):
     cli.main(["sw", "status", "--json"])
     doc = json.loads(capsys.readouterr().out)
     assert doc["auto_snapshot"] == {"last": 1_791_206_100_000, "kept": 1, "every_minutes": 30}
+
+
+def test_the_ledger_source_names_the_show_command_for_its_slug():
+    assert snapshot.ledger_source("sw") == "agentihooks ledger --slug sw show"

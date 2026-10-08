@@ -99,6 +99,7 @@ from scripts.swarm_ledger import ledger_phases
 from scripts.swarm_ledger.repository import repository
 
 BASE = ledger_link.base()
+ESCAPE_NON_ASCII = False
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
     "contract": (ledger_kinds.CONTRACT_KEYS, "contract.must=M contract.check=C"),
@@ -209,7 +210,7 @@ def cmd_events(args):
 
 
 def cmd_show(args):
-    print(json.dumps(call(args.slug), indent=1, ensure_ascii=False))
+    print(json.dumps(call(args.slug), indent=1, ensure_ascii=ESCAPE_NON_ASCII))
 
 
 def cmd_status(args):

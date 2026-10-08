@@ -17,13 +17,13 @@ class Context:
 
 def domain(calls, chat_kept=2, events_kept=2):
     def apply_changes(doc, changes, ctx):
-        calls.append(("changes", changes))
+        calls.append(("changes", doc, changes))
         ctx.dirty = "dirty" in changes
         ctx.refused.extend(change for change in changes if change.startswith("refuse"))
         return [change for change in changes if change.startswith("bad")]
 
     def gated(gate, doc, op, ctx):
-        calls.append(("op", gate, op["id"]))
+        calls.append(("op", gate, doc, op["id"]))
         if op["id"].startswith("refused"):
             return False
         ctx.events.append(op["id"])
@@ -44,38 +44,40 @@ def domain(calls, chat_kept=2, events_kept=2):
 @pytest.fixture
 def derived(monkeypatch):
     calls = []
-    monkeypatch.setattr(ledger_artifacts, "sweep", lambda slug, doc, ctx: calls.append(("sweep", slug, ctx.at)))
-    monkeypatch.setattr(ledger_media, "attach_paths", lambda slug, doc, events: calls.append(("media", slug, events)))
-    monkeypatch.setattr(ledger_priorities, "derive", lambda doc, ctx: calls.append(("priorities", ctx.at)))
-    monkeypatch.setattr(ledger_notifications, "derive", lambda doc, ctx: calls.append(("notifications", ctx.at)))
+    monkeypatch.setattr(ledger_artifacts, "sweep", lambda slug, doc, ctx: calls.append(("sweep", slug, doc, ctx.at)))
     monkeypatch.setattr(
-        ledger_alerts, "derive", lambda doc, ctx, found, kept: calls.append(("alerts", list(found), kept))
+        ledger_media, "attach_paths", lambda slug, doc, events: calls.append(("media", slug, doc, events))
+    )
+    monkeypatch.setattr(ledger_priorities, "derive", lambda doc, ctx: calls.append(("priorities", doc, ctx.at)))
+    monkeypatch.setattr(ledger_notifications, "derive", lambda doc, ctx: calls.append(("notifications", doc, ctx.at)))
+    monkeypatch.setattr(
+        ledger_alerts, "derive", lambda doc, ctx, found, kept: calls.append(("alerts", doc, ctx, list(found), kept))
     )
     return calls
 
 
 def test_apply_folds_changes_and_ops_in_order_and_records_the_change(derived):
     calls = []
-    doc = {"chat": [1, 2, 3, 4], "big": ["w1"]}
+    doc = {"chat": [1, 2, 3, 4, 5], "big": ["w1"]}
     meta = {"rev": 4, "events": ["e0"], "warnings": ["old"]}
     ops = [{"op": "stats_sync", "id": "s"}, {"op": "add", "id": "refused"}, {"op": "add", "id": "a"}]
     rejected, ctx = mutation.apply("demo", doc, meta, domain(calls), ["bad-1", "refuse-1"], ops, "G")
     assert rejected == ["bad-1", "refused"]
     assert calls == [
         ("earliest", {"rev": 4, "events": ["e0"], "warnings": ["old"], "members": {}}, 50),
-        ("changes", ["bad-1", "refuse-1"]),
-        ("op", "G", "refused"),
-        ("op", "G", "a"),
-        ("op", "G", "s"),
+        ("changes", doc, ["bad-1", "refuse-1"]),
+        ("op", "G", doc, "refused"),
+        ("op", "G", doc, "a"),
+        ("op", "G", doc, "s"),
     ]
     assert derived == [
-        ("sweep", "demo", 50),
-        ("media", "demo", ["a", "s"]),
-        ("priorities", 50),
-        ("notifications", 50),
-        ("alerts", [(ledger_alerts.SIZE, "w1"), (ledger_alerts.SYNC, "refuse-1")], ["old"]),
+        ("sweep", "demo", doc, 50),
+        ("media", "demo", doc, ["a", "s"]),
+        ("priorities", doc, 50),
+        ("notifications", doc, 50),
+        ("alerts", doc, ctx, [(ledger_alerts.SIZE, "w1"), (ledger_alerts.SYNC, "refuse-1")], ["old"]),
     ]
-    assert doc["chat"] == [3, 4]
+    assert doc["chat"] == [4, 5]
     assert ctx.changed is True
     assert meta == {
         "rev": 5,
@@ -89,10 +91,11 @@ def test_apply_folds_changes_and_ops_in_order_and_records_the_change(derived):
 
 def test_apply_without_anything_to_change_leaves_meta_alone(derived):
     meta = {"rev": 4, "events": ["e0"], "warnings": [], "members": {"m": {"role": "member"}}}
-    rejected, ctx = mutation.apply("demo", {"chat": []}, meta, domain([]))
+    doc = {"chat": []}
+    rejected, ctx = mutation.apply("demo", doc, meta, domain([]))
     assert (rejected, ctx.changed) == ([], False)
     assert meta == {"rev": 4, "events": ["e0"], "warnings": [], "members": {"m": {"role": "member"}}, "created_at": 7}
-    assert derived[-1] == ("alerts", [], [])
+    assert derived[-1] == ("alerts", doc, ctx, [], [])
 
 
 @pytest.mark.parametrize(
