@@ -227,6 +227,24 @@ def test_a_write_after_its_own_sync_stores_what_a_full_sync_stores(repo, monkeyp
     assert (html_path.read_text(encoding="utf-8"), json_path.read_text(encoding="utf-8")) == fast
 
 
+class RecordingDomain:
+    def __init__(self):
+        self.written = []
+
+    def __getattr__(self, name):
+        return getattr(core, name)
+
+    def atomic_write(self, path, text):
+        self.written.append(path)
+        return core.atomic_write(path, text)
+
+
+def test_a_write_after_its_own_sync_stores_through_the_repository_domain(repo):
+    domain = RecordingDomain()
+    FileLedgerRepository(domain).apply_ops(SLUG, ops=[chat("m2", "second")])
+    assert domain.written == [core.paths(SLUG)[1]]
+
+
 def test_a_page_edit_after_the_last_write_is_folded_into_the_next_write(repo, seed_parses):
     html_path = core.paths(SLUG)[0]
     html_path.write_text(
