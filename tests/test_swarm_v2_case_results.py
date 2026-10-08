@@ -44,3 +44,29 @@ def test_an_uncommitted_input_writes_nothing(tmp_path):
     ran = []
     assert case_results.write(tmp_path, tmp_path / "out", ["input.py"], "c", (("a", ran.append),)) is None
     assert ran == [] and list((tmp_path / "out").iterdir()) == []
+
+
+def test_a_staged_but_uncommitted_input_writes_nothing(tmp_path):
+    repo(tmp_path)
+    (tmp_path / "input.py").write_text("staged\n")
+    subprocess.run(["git", "add", "input.py"], cwd=tmp_path, check=True)
+    assert case_results.write(tmp_path, tmp_path / "out", ["input.py"], "c", (("a", dict),)) is None
+
+
+def test_an_input_named_like_a_revision_is_read_as_a_path(tmp_path):
+    repo(tmp_path)
+    (tmp_path / "HEAD").write_text("first\n")
+    subprocess.run(["git", "add", "HEAD"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "named"], cwd=tmp_path, check=True)
+    cases = (("a", lambda: {"passed": True}),)
+    assert case_results.write(tmp_path, tmp_path / "out", ["HEAD"], "c", cases) == {"a": True}
+
+
+def test_a_change_outside_the_inputs_does_not_stop_the_results(tmp_path):
+    repo(tmp_path)
+    (tmp_path / "other.py").write_text("tracked\n")
+    subprocess.run(["git", "add", "other.py"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "other"], cwd=tmp_path, check=True)
+    (tmp_path / "other.py").write_text("changed\n")
+    cases = (("a", lambda: {"passed": True}),)
+    assert case_results.write(tmp_path, tmp_path / "out", ["input.py"], "c", cases) == {"a": True}
