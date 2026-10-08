@@ -29,7 +29,7 @@ def has_issues(repo: str, run=subprocess.run) -> bool:
 
 
 def open_issue(path: str, title: str, repo: str, run=subprocess.run) -> str:
-    argv = ["gh", "issue", "create", "--title", title, "--body-file", str(path), *(["--repo", repo] if repo else [])]
+    argv = ["gh", "issue", "create", "--title", title, "--body", f"{title}\n\n{path}", *(["--repo", repo] if repo else [])]
     done = run(argv, capture_output=True, text=True)
     if done.returncode:
         raise PublishError(f"gh issue create failed: {(done.stderr or done.stdout).strip()}")
@@ -37,6 +37,7 @@ def open_issue(path: str, title: str, repo: str, run=subprocess.run) -> str:
 
 
 def publish(path: str, title: str, repo: str, artifact, run=subprocess.run) -> tuple[str, str]:
+    url = artifact(path, title)
     if has_issues(repo, run):
-        return open_issue(path, title, repo, run), "issue"
-    return artifact(path, title), "artifact"
+        return open_issue(url, title, repo, run), "issue"
+    return url, "artifact"

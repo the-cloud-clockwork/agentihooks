@@ -236,6 +236,15 @@ def _add(doc, op, ctx):
     phase = next((p for p in doc.get("phases", []) if p["id"] == task["phase"]), {})
     if plan_url := op.get("plan_url") or phase.get("plan_url"):
         task["plan_url"] = plan_url
+    if "plan_slice" in op:
+        from scripts.swarm_ledger import plan_ranges
+
+        try:
+            task["plan_lines"] = plan_ranges.task_slice(doc, phase, op["plan_slice"])
+        except ValueError as exc:
+            ctx.refused.append(str(exc))
+            return False
+        task["plan_slice"] = op["plan_slice"]
     tasks.append(task)
     ctx.record(op["by"], "added", f"tasks/{task['id']}", text=task["title"])
     return True
@@ -333,6 +342,11 @@ def _update(doc, op, ctx):
             return False
         if unlinked := unlinked_slice(after, doc["tasks"]):
             ctx.refused.append(f"{op['item']} slice tasks carry no plan link: {', '.join(unlinked)}. {PUBLISH}")
+            return False
+        from scripts.swarm_ledger import plan_ranges
+
+        if incomplete := plan_ranges.invalid_tasks(after, doc, slice_ids(after)):
+            ctx.refused.append(f"{op['item']} slice tasks lack valid plan ranges or anchors: {', '.join(incomplete)}")
             return False
     changed = {k: v for k, v in fields.items() if task.get(k) != v}
     if "kind" in changed and after.get("workspace"):

@@ -1,7 +1,7 @@
 import re
 
 OPS = ("phase_add", "phase_update", "phase_review", "phase_append")
-FIELDS = ("title", "description", "depends_on", "planning", "release", "plan_url")
+FIELDS = ("title", "description", "depends_on", "planning", "release", "plan_url", "plan_ref")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 ID_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
@@ -12,6 +12,10 @@ PLANNING_DEFAULT = "auto"
 
 
 def check_fields(fields: dict) -> None:
+    from scripts.swarm_ledger import plan_ranges
+
+    if "plan_ref" in fields:
+        plan_ranges.check_ref(fields["plan_ref"])
     for key in ("title", "description"):
         if key in fields and not isinstance(fields[key], str):
             raise ValueError(f"{key} must be a string")
