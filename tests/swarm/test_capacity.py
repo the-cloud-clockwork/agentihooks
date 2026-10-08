@@ -376,8 +376,9 @@ def test_runtime_refuses_an_account_when_its_harness_has_no_free_seat(tmp_path):
 
     runtime = HerdrRuntime(home=tmp_path)
     runtime._quota_accounts = [account(sessions=3), account("cx", harness="codex")]
-    with pytest.raises(SpawnError, match="no claude account has placeable quota seats"):
+    with pytest.raises(SpawnError, match="no claude account has placeable quota seats") as error:
         runtime._quota_account("claude", None, None)
+    assert error.value.status == "unavailable"
     assert runtime._quota_account("codex", None, None).name == "cx"
 
 
@@ -647,8 +648,9 @@ def test_a_fixed_claude_task_never_falls_through_to_codex(tmp_path, monkeypatch,
         task["handoff_envelope"] = {
             "launch": {"profile": "planner", "harness": "claude", "model": "fable", "effort": "high"}
         }
-    with pytest.raises(SpawnError, match="^no claude account has placeable quota seats$"):
+    with pytest.raises(SpawnError, match="^no claude account has placeable quota seats$") as error:
         runtime.spawn(config, "plan", "planner@a1b2c3-0001", task)
+    assert error.value.status == "unavailable"
     assert seen == []
 
 
@@ -959,8 +961,9 @@ def test_master_affinity_cannot_fall_back_when_its_account_has_no_quota(tmp_path
     monkeypatch.setattr(module.affinity, "desired", lambda cfg: "codex")
     if planned:
         runtime._quota_tasks = {"p": "claude"}
-    with pytest.raises(SpawnError, match="^no codex account has placeable quota seats$"):
+    with pytest.raises(SpawnError, match="^no codex account has placeable quota seats$") as error:
         runtime.spawn(config, "master", "master@a1b2c3-0001", {"id": "p", "title": "Master", "profile": "master"})
+    assert error.value.status == "unavailable"
     assert seen == []
 
 
