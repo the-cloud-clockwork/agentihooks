@@ -35,7 +35,9 @@ def configure(servers: dict, chain: list[str]) -> dict:
         **{
             name: server
             for name, server in servers.items()
-            if "playwright" not in name.lower() or name.startswith(EXTENSION)
+            if "playwright" not in name.lower()
+            or (name.startswith(EXTENSION) and "headed" not in chain)
+            or ("headed" in chain and name == "playwright-headed")
         },
         NAME: spec(),
     }
