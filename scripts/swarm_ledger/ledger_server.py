@@ -257,8 +257,6 @@ MIN_COMPACT, MAX_COMPACT = 100, 1000
 QUOTA_PROBE_TIMEOUT_S = 120
 AUTONOMY = ("manual", "assist", "delegate", "full")
 EFFORTS = ("low", "medium", "high", "max")
-SCALING = ("auto", "manual")
-MAX_LOAD = 10.0
 MASTER_AGENTS = ("claude", "codex")
 MAX_NOTE = 500
 FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
@@ -304,7 +302,6 @@ def control_argv(body):
         if body["autonomy"] not in AUTONOMY:
             raise ValueError(f"autonomy must be one of {', '.join(AUTONOMY)}")
         pairs.append(f"autonomy={body['autonomy']}")
-    pairs += scaling_pairs(body)
     if "gates" in body:
         pairs += gate_pairs(body["gates"])
     if "master_agent" in body:
@@ -316,31 +313,9 @@ def control_argv(body):
     if not pairs:
         raise ValueError(
             "set needs max_eng, max_ci, max_plan, compact_limit, effort_min, effort_max, autonomy, "
-            "scaling, load_high, load_low, memory_per_agent_mb, master_agent, overlays or gates"
+            "master_agent, overlays or gates"
         )
     return ["set", *pairs]
-
-
-def scaling_pairs(body):
-    pairs = []
-    if "scaling" in body:
-        if body["scaling"] not in SCALING:
-            raise ValueError(f"scaling must be one of {', '.join(SCALING)}")
-        pairs.append(f"scaling={body['scaling']}")
-    for key, flag in (("load_high", "load-high"), ("load_low", "load-low")):
-        if key in body:
-            value = body[key]
-            if type(value) not in (int, float) or not 0 < value <= MAX_LOAD:
-                raise ValueError(f"{key} must be a number above 0 and at most {MAX_LOAD:g}")
-            pairs.append(f"{flag}={value}")
-    if body.get("load_low", 0) > body.get("load_high", MAX_LOAD):
-        raise ValueError("load_low must be at most load_high")
-    if "memory_per_agent_mb" in body:
-        value = body["memory_per_agent_mb"]
-        if type(value) is not int or value <= 0:
-            raise ValueError("memory_per_agent_mb must be a whole number of MB above 0")
-        pairs.append(f"memory-per-agent={value}")
-    return pairs
 
 
 def overlay_pairs(overlays):

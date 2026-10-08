@@ -125,13 +125,7 @@ CONTROL = {
                 "doctor_stop",
             ]
         },
-        **{
-            key: {"type": "integer"}
-            for key in ("max_eng", "max_ci", "max_plan", "compact_limit", "memory_per_agent_mb")
-        },
-        "scaling": {"enum": ["auto", "manual"]},
-        "load_high": {"type": "number"},
-        "load_low": {"type": "number"},
+        **{key: {"type": "integer"} for key in ("max_eng", "max_ci", "max_plan", "compact_limit")},
         **{
             key: {"type": "string", "maxLength": 2000}
             for key in (
