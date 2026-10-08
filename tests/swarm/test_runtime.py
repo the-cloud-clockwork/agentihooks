@@ -621,7 +621,7 @@ def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_
     homes = scratch("t1")
     runtime, config, agent, seen = _resuming(tmp_path, "someone-else")
     ended = []
-    runtime.end = lambda name, pid, homes: ended.append((name, pid, homes)) or Outcome()
+    runtime.end = lambda name, pid, homes, start=0: ended.append((name, pid, homes)) or Outcome()
     with pytest.raises(SpawnError, match="conversation c0ffee") as error:
         runtime.resume(config, agent, "you were restored")
     assert error.value.status == "ambiguous"

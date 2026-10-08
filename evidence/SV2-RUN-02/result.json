@@ -8,7 +8,7 @@
   "ci_head": "",
   "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI and the process reaper behind HerdrRuntime, the local process table and PID namespace are fixture values, and the remote backend is an in-memory fake; not live rollout proof",
   "supported_versions": {
-    "process_identity": "a local runtime target names its process by process_namespace (boot id plus PID namespace link), pid and pid_start (the start time in clock ticks from /proc stat)",
+    "process_identity": "a local runtime target names its process by process_namespace (boot id plus PID namespace link), pid and pid_start (the start time in clock ticks from /proc stat); the reaper signals the launch PID only while its start time still matches",
     "runtime_protocol": "SV2-RUN-01 protocol; terminate gains the refused value Unqualified (no execution identity, runtime target names no process, local process namespace is unreadable, process belongs to another PID namespace)"
   },
   "interfaces": [
@@ -52,10 +52,10 @@
   },
   "remaining_limitations": [
     "The tick does not yet allocate execution identity (start_execution is not called at spawn), so live local agents are legacy records and keep the pre-existing launch PID path; the namespace check applies once records carry execution_id and a local runtime target.",
-    "HerdrRuntime.live_names, reported, conversations and reap_name still read this host's process table by agent name. The tick reap pass no longer judges remote agents with them, but master recovery, take master, resume, lifetime and the swarm CLI still call live_names; those callers handle local agents only today.",
-    "A suspect remote agent keeps its record but its claim lease is not refreshed without an answer; fencing a returning attempt against a replacement belongs to the generation fencing work (INV-R07).",
-    "The reaper re-reads the process table between resolution and signalling; it ends members by start time, but a PID reused in that window is checked by the reaper's name check only.",
-    "unqualified_process_actions_rejected_total is an in-process counter on RuntimeRouter with no exporter.",
+    "HerdrRuntime.live_names, reported, conversations and reap_name still read this host's process table by agent name (through terminate_agent.sessions). The tick reap pass and the launch check no longer judge remote agents with them, but master recovery, take master, resume, lifetime, the stray sweep and the swarm CLI still call them; those callers handle local agents only today. The stray sweep reaps only local processes carrying a name this swarm issued and retired.",
+    "hooks.context.account_sessions counts live sessions per Claude account from this host's process table for quota placement; it is local by design and unchanged. scripts.terminate_agent stays the operator's local CLI, with its caller and process-group checks unchanged.",
+    "A remote agent with no answer stays suspect and keeps its claim lease indefinitely; nothing escalates it to the operator yet, and fencing a returning attempt against a replacement belongs to the generation fencing work (INV-R07). A remote backend without the observe capability reads as unknown, so its agents stay suspect rather than being judged lost.",
+    "unqualified_process_actions_rejected_total counts terminate refusals for missing or unqualified process identity only; unavailable backends and foreign backend refusals are counted elsewhere or not at all. It is an in-process counter on RuntimeRouter with no exporter.",
     "No remote backend exists yet; the remote runtime is a fixture. No live rollout proof."
   ]
 }

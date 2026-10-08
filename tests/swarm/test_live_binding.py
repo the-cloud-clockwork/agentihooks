@@ -840,7 +840,7 @@ def test_retirement_uses_the_same_process_the_verifier_checked(monkeypatch):
     ended = []
     agent = AgentRecord("engineer", "eng", "one", harness="claude")
     runtime = HerdrRuntime(run=lambda argv, **kwargs: pytest.fail("retire never runs terminate-agent"))
-    runtime.end = lambda name, pid, homes: ended.append((name, pid, homes)) or Outcome((pid,))
+    runtime.end = lambda name, pid, homes, start=0: ended.append((name, pid, homes)) or Outcome((pid,))
     runtime.bindings([agent])
     assert runtime.retire(agent) is True
     assert ended == [("engineer", "11", [])]

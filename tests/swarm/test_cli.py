@@ -769,11 +769,11 @@ def test_runtime_retire_reports_a_refused_end_and_closes_no_pane(tmp_path):
 
     closed = []
     rt = runtime.HerdrRuntime(home=tmp_path, herdr=lambda args: closed.append(args) or {})
-    rt.end = lambda name, pid, homes: Outcome((), 4242, "survived SIGKILL: 4242")
+    rt.end = lambda name, pid, homes, start=0: Outcome((), 4242, "survived SIGKILL: 4242")
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w3:p1")
     assert rt.retire(agent) is False and closed == []
     assert rt.refusal(agent) == {"process": 4242, "refusal": "survived SIGKILL: 4242"}
-    rt.end = lambda name, pid, homes: Outcome()
+    rt.end = lambda name, pid, homes, start=0: Outcome()
     assert rt.retire(agent) is True and closed == [["pane", "close", "w3:p1"]]
     assert rt.refusal(agent) == {"process": 0, "refusal": "unknown"}
 
@@ -785,7 +785,7 @@ def test_runtime_retire_ends_the_recorded_launch_process_never_the_name(tmp_path
     rt = runtime.HerdrRuntime(
         home=tmp_path, run=lambda argv, **kw: pytest.fail("retire never runs terminate-agent"), herdr=lambda a: {}
     )
-    rt.end = lambda name, pid, homes: ended.append((name, pid, homes)) or Outcome((pid,))
+    rt.end = lambda name, pid, homes, start=0: ended.append((name, pid, homes)) or Outcome((pid,))
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", profile_decision={"validation": {"pid": 321}})
     assert rt.retire(agent, homes=[tmp_path])
     assert ended == [("engineer@a1b2c3-0001", 321, [tmp_path])]
@@ -798,7 +798,7 @@ def test_runtime_reports_a_pane_that_will_not_close(tmp_path):
         raise RuntimeError("herdr socket gone")
 
     rt = runtime.HerdrRuntime(home=tmp_path, herdr=herdr)
-    rt.end = lambda name, pid, homes: Outcome()
+    rt.end = lambda name, pid, homes, start=0: Outcome()
     agent = AgentRecord(
         "engineer@a1b2c3-0001", "eng", "t1", pane_id="w3:p1", profile_decision={"validation": {"pid": 9}}
     )

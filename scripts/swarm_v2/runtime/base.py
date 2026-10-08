@@ -125,12 +125,11 @@ class RuntimeRouter:
         return self._own(agent, "drain", Capability.DRAIN, agent)
 
     def terminate(self, agent: AgentRecord, homes: tuple = ()) -> Outcome:
-        backend = agent.runtime_backend
-        if agent.execution_id or legacy(agent):
-            outcome = self._own(agent, "terminate", Capability.TERMINATE, agent, homes)
-        else:
-            reason = Unqualified.NO_EXECUTION
+        backend, reason = agent.runtime_backend, Unqualified.NO_EXECUTION
+        outcome = self._unavailable(agent, "terminate")
+        if outcome is None and not agent.execution_id and not legacy(agent):
             outcome = Outcome("terminate", Status.REFUSED, backend, reason, reason.value)
+        outcome = outcome or self._call(backend, "terminate", (Capability.TERMINATE,), agent, homes)
         if isinstance(outcome.value, Unqualified):
             self.rejected[(backend, outcome.value)] += 1
         return outcome
@@ -146,12 +145,15 @@ class RuntimeRouter:
         return sum(self.rejected.values())
 
     def _own(self, agent: AgentRecord, operation: str, need: Capability, *args) -> Outcome:
+        return self._unavailable(agent, operation) or self._call(agent.runtime_backend, operation, (need,), *args)
+
+    def _unavailable(self, agent: AgentRecord, operation: str) -> Outcome | None:
         backend = agent.runtime_backend
         if backend not in self.runtimes:
             return Outcome(operation, Status.UNAVAILABLE, backend, detail=f"no runtime registered for {backend}")
         if backend in self.disabled:
             return Outcome(operation, Status.UNAVAILABLE, backend, detail=f"runtime {backend} is disabled")
-        return self._call(backend, operation, (need,), *args)
+        return None
 
     def _call(self, backend: str, operation: str, needs: tuple, *args) -> Outcome:
         runtime = self.runtimes[backend]

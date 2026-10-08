@@ -5,14 +5,14 @@ import pytest
 from hooks.proc import Process
 from scripts.swarm import reaper
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
-from scripts.swarm.tick import tick
+from scripts.swarm.tick import LEASE_MS, tick
 from scripts.swarm_v2.runtime import process
 from scripts.swarm_v2.runtime.base import LOCAL, Outcome, RuntimeRouter, Status, Unqualified, legacy
 from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.swarm.test_tick import FakeLedger
 from tests.swarm.test_tick import FakeRuntime as TickRuntime
-from tests.test_swarm_v2_runtime import REMOTE, herdr_runtime, local_fake, remote_fake
+from tests.test_swarm_v2_runtime import REMOTE, herdr_runtime, local_fake, remote_fake, request
 
 ANTON = "boot-anton/pid:[4026531836]"
 WORKER = "boot-aws-worker/pid:[4026532001]"
@@ -24,8 +24,8 @@ def proc(pid=PID, start=STARTED):
     return Process(pid, 1, pid, pid, start, "S", "claude", ("claude",))
 
 
-def record(namespace=ANTON, pid=PID, start=STARTED, execution="exe-1", backend=LOCAL, **target):
-    runtime_target = {"process_namespace": namespace, "pid": pid, "pid_start": start, **target}
+def record(namespace=ANTON, pid=PID, start=STARTED, execution="exe-1"):
+    runtime_target = {"process_namespace": namespace, "pid": pid, "pid_start": start}
     return AgentRecord(
         NAME,
         "eng",
@@ -33,7 +33,6 @@ def record(namespace=ANTON, pid=PID, start=STARTED, execution="exe-1", backend=L
         pane_id="w1:p1",
         execution_id=execution,
         generation=1 if execution else 0,
-        runtime_backend=backend,
         runtime_target={k: v for k, v in runtime_target.items() if v is not None},
     )
 
@@ -131,26 +130,26 @@ def adapter(tmp_path, monkeypatch, table, namespace=ANTON):
     herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={})
     ended = []
 
-    def end(name, pid, homes):
-        ended.append((name, pid, tuple(homes)))
+    def end(name, pid, homes, start=0):
+        ended.append((name, pid, tuple(homes), start))
         return reaper.Outcome()
 
     herdr.end = end
     return LocalHerdrRuntime(herdr, namespace=lambda: namespace, table=lambda: dict(table)), calls, ended
 
 
-def test_a_qualified_local_terminate_signals_only_the_verified_pid(tmp_path, monkeypatch):
+def test_a_qualified_local_terminate_signals_only_the_verified_pid_with_its_start_time(tmp_path, monkeypatch):
     local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
     router = RuntimeRouter([local, remote_fake()])
     assert router.terminate(record(), ("/scratch/t1",)) == Outcome("terminate", Status.OK, LOCAL)
-    assert ended == [(NAME, PID, ("/scratch/t1",))]
+    assert ended == [(NAME, PID, ("/scratch/t1",), STARTED)]
     assert ["pane", "close", "w1:p1"] in calls
 
 
-def test_a_reused_pid_is_never_signalled_but_the_pane_and_homes_are_retired(tmp_path, monkeypatch):
+def test_the_recorded_pid_of_a_reused_process_is_never_signalled_but_pane_and_homes_retire(tmp_path, monkeypatch):
     local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc(start=STARTED + 9)})
     assert RuntimeRouter([local]).terminate(record(), ("/scratch/t1",)).ok
-    assert ended == [(NAME, None, ("/scratch/t1",))]
+    assert ended == [(NAME, None, ("/scratch/t1",), STARTED)]
     assert ["pane", "close", "w1:p1"] in calls
 
 
@@ -172,25 +171,38 @@ def test_a_legacy_local_record_keeps_the_recorded_launch_pid_path(tmp_path, monk
     local, calls, ended = adapter(tmp_path, monkeypatch, {})
     agent = AgentRecord(NAME, "eng", "t1", pane_id="w1:p1", profile_decision={"validation": {"pid": 55}})
     assert RuntimeRouter([local]).terminate(agent).ok
-    assert ended == [(NAME, 55, ())]
+    assert ended == [(NAME, 55, (), 0)]
+
+
+def on_worker(router):
+    spawned = router.spawn(request("engineer@a1b2c3-0002", "t2")).value
+    worker_process = {"process_namespace": WORKER, "pid": PID, "pid_start": STARTED}
+    return replace(spawned, runtime_target={**spawned.runtime_target, **worker_process})
 
 
 def test_anton_and_a_remote_worker_sharing_pid_4321_are_each_ended_only_by_their_owner(tmp_path, monkeypatch):
     local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
     remote = remote_fake()
     router = RuntimeRouter([local, remote], REMOTE)
-    on_worker = replace(router.spawn(request_for("engineer@a1b2c3-0002")).value, execution_id="exe-2")
-    assert router.terminate(on_worker).ok
-    assert ended == [] and on_worker.name not in remote.objects
+    worker = on_worker(router)
+    assert router.terminate(worker).ok
+    assert ended == [] and worker.name not in remote.objects
     assert router.terminate(record()).ok
-    assert ended == [(NAME, PID, ())]
-    assert [call for call in remote.calls if call[0] == "terminate"] == [("terminate", on_worker.name)]
+    assert ended == [(NAME, PID, (), STARTED)]
+    assert [call for call in remote.calls if call[0] == "terminate"] == [("terminate", worker.name)]
+    assert router.unqualified_process_actions_rejected_total() == 0
 
 
-def request_for(name):
-    from tests.test_swarm_v2_runtime import request
+def test_a_qualified_execution_started_by_the_store_terminates_through_the_router(tmp_path, monkeypatch):
+    import fakeredis
 
-    return request(name, "t2")
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    seed = replace(record(execution=""), name=store.next_name("sw", "eng"), seat="eng-1@sw")
+    started = store.start_execution("sw", seed)
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    assert RuntimeRouter([local]).terminate(store.execution("sw", started.execution_id)).ok
+    assert ended == [(started.name, PID, (), STARTED)]
 
 
 def test_the_routed_runtime_reports_why_the_router_refused(tmp_path, monkeypatch):
@@ -203,7 +215,7 @@ def test_the_routed_runtime_reports_why_the_router_refused(tmp_path, monkeypatch
 
 def test_the_routed_runtime_keeps_the_adapter_refusal_when_a_retire_fails(tmp_path, monkeypatch):
     herdr, _ = herdr_runtime(tmp_path, monkeypatch)
-    herdr.end = lambda name, pid, homes: reaper.Outcome(process=PID, refusal="survived SIGKILL: 4321")
+    herdr.end = lambda name, pid, homes, start=0: reaper.Outcome(process=PID, refusal="survived SIGKILL: 4321")
     routed = RoutedRuntime(herdr, RuntimeRouter([LocalHerdrRuntime(herdr)]))
     agent = AgentRecord(NAME, "eng", "t1")
     assert routed.retire(agent) is False
@@ -258,6 +270,8 @@ def test_a_remote_agent_without_an_answer_is_suspect_kept_and_never_ended_locall
     kept = {a.name: a for a in store.agents("sw")}[agent.name]
     assert kept.state == "suspect" and kept.execution_id == agent.execution_id
     assert (runtime.killed, runtime.homes, runtime.reaped) == ([], {}, [])
+    assert store.claimant("sw", "t1") == agent.name and store.redis.pttl(store.key("sw", "claim", "t1")) > 60_000
+    assert store.redis.pttl(store.key("sw", "claim", "t1")) <= LEASE_MS
     assert ledger.rows["t1"]["claimed_by"] == agent.name and runtime.spawned == []
     runtime.statuses[agent.name] = "working"
     tick("sw", store, ledger, runtime, now_ms=late + 1)

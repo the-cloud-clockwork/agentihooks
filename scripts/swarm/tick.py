@@ -419,7 +419,8 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
 
 def _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms):
     """A remote agent is judged by its own runtime, never by this host's process table: no answer keeps it suspect,
-    neither retired nor dropped."""
+    holding its claim, neither retired nor dropped."""
+    store.refresh(slug, agent.task, agent.name, LEASE_MS)
     if runtime.observe(agent).state == "unknown":
         if agent.state == SUSPECT:
             return []
@@ -428,7 +429,6 @@ def _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms):
     if agent.state == SUSPECT:
         agent = replace(agent, state="working")
         store.put_agent(slug, agent)
-    store.refresh(slug, agent.task, agent.name, LEASE_MS)
     return _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
 
 

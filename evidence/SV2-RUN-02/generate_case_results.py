@@ -10,12 +10,12 @@ import fakeredis
 import pytest
 
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm.tick import tick
+from scripts.swarm.tick import LEASE_MS, tick
 from scripts.swarm_v2.runtime.base import LOCAL, RuntimeRouter, Status
 from tests.swarm.test_tick import FakeLedger
 from tests.swarm.test_tick import FakeRuntime as TickRuntime
-from tests.test_swarm_v2_process import ANTON, NAME, PID, WORKER, adapter, proc, record
-from tests.test_swarm_v2_runtime import REMOTE, remote_fake, request
+from tests.test_swarm_v2_process import ANTON, NAME, PID, STARTED, WORKER, adapter, on_worker, proc, record
+from tests.test_swarm_v2_runtime import REMOTE, remote_fake
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "evidence/SV2-RUN-02"
@@ -45,16 +45,16 @@ def colliding(root: Path) -> dict:
         local, calls, ended = adapter(root, monkeypatch, {PID: proc()})
         remote = remote_fake()
         router = RuntimeRouter([local, remote], REMOTE)
-        on_worker = router.spawn(request("engineer@a1b2c3-0002", "t2")).value
+        worker = on_worker(router)
         on_anton = record()
         impostor = replace(record(namespace=WORKER), name="engineer@a1b2c3-0003")
-        worker_end = router.terminate(on_worker)
+        worker_end = router.terminate(worker)
         anton_end = router.terminate(on_anton)
         impostor_end = router.terminate(impostor)
     return {
         "worker_terminate": [worker_end.status, worker_end.backend],
         "anton_terminate": [anton_end.status, anton_end.backend],
-        "local_signalled": [[name, pid] for name, pid, _ in ended],
+        "local_signalled": [[name, pid, start] for name, pid, _, start in ended],
         "remote_terminated": [name for op, name in remote.calls if op == "terminate"],
         "foreign_namespace_local_record": [impostor_end.status, impostor_end.detail],
         "unqualified_process_actions_rejected_total": router.unqualified_process_actions_rejected_total(),
@@ -69,7 +69,7 @@ def case_a() -> dict:
     expected = {
         "worker_terminate": [Status.OK, REMOTE],
         "anton_terminate": [Status.OK, LOCAL],
-        "local_signalled": [[NAME, PID]],
+        "local_signalled": [[NAME, PID, STARTED]],
         "remote_terminated": ["engineer@a1b2c3-0002"],
         "foreign_namespace_local_record": [Status.REFUSED, "process belongs to another PID namespace"],
         "unqualified_process_actions_rejected_total": 1,
@@ -105,7 +105,7 @@ def case_b() -> dict:
             "remote_without_identity": [remote_refused.status, remote_refused.detail, len(remote.calls)],
             "unqualified_process_actions_rejected_total": refusals,
             "rejections_by_backend": sorted([backend, reason] for (backend, reason) in router.rejected),
-            "corrected_request": [corrected.status, [[name, pid] for name, pid, _ in ended]],
+            "corrected_request": [corrected.status, [[name, pid, start] for name, pid, _, start in ended]],
         }
     passed = result == {
         "status": Status.REFUSED,
@@ -117,7 +117,7 @@ def case_b() -> dict:
         "remote_without_identity": [Status.REFUSED, "no execution identity", 0],
         "unqualified_process_actions_rejected_total": 2,
         "rejections_by_backend": [[REMOTE, "no execution identity"], [LOCAL, "no execution identity"]],
-        "corrected_request": [Status.OK, [[NAME, PID]]],
+        "corrected_request": [Status.OK, [[NAME, PID, STARTED]]],
     }
     return {
         "then": "a terminate request lacking execution identity fails even when a local PID happens to match",
@@ -144,6 +144,7 @@ def lost_remote() -> dict:
     first = tick("sw", store, ledger, runtime, now_ms=late)
     second = tick("sw", store, ledger, runtime, now_ms=late + 1)
     suspect = {a.name: a for a in store.agents("sw")}[name]
+    lease_ms = store.redis.pttl(store.key("sw", "claim", "t1"))
     runtime.statuses[name] = "working"
     tick("sw", store, ledger, runtime, now_ms=late + 2)
     restored = {a.name: a for a in store.agents("sw")}[name]
@@ -158,6 +159,7 @@ def lost_remote() -> dict:
         "local_retires": sorted(runtime.homes),
         "local_reaps": runtime.reaped,
         "task_claim_kept": ledger.rows["t1"]["claimed_by"] == name,
+        "claim_lease_refreshed_while_suspect": 60_000 < lease_ms <= LEASE_MS,
         "replacement_spawns": len(runtime.spawned),
         "state_after_observation_restored": restored.state,
     }
@@ -173,6 +175,7 @@ def case_c() -> dict:
         "local_retires": [],
         "local_reaps": [],
         "task_claim_kept": True,
+        "claim_lease_refreshed_while_suspect": True,
         "replacement_spawns": 0,
         "state_after_observation_restored": "working",
     }

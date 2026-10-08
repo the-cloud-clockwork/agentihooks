@@ -83,7 +83,7 @@ class LocalHerdrRuntime:
             pid = process.resolve(agent, self.namespace(), self.table())
             if isinstance(pid, Unqualified):
                 return Outcome("terminate", Status.REFUSED, LOCAL, pid, pid.value)
-            retired = self.herdr.retire_process(agent, pid, homes)
+            retired = self.herdr.retire_process(agent, pid, homes, agent.runtime_target["pid_start"])
         if retired:
             return Outcome("terminate", Status.OK, LOCAL)
         refusal = self.herdr.refusal(agent)

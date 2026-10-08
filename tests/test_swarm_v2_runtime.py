@@ -114,7 +114,7 @@ def herdr_runtime(tmp_path, monkeypatch, panes=None, run=None):
         return {}
 
     runtime = HerdrRuntime(home=tmp_path, run=run or started, herdr=herdr, choose=lambda *_: ("claude", "open"))
-    runtime.end = lambda name, pid, homes: reaper.Outcome()
+    runtime.end = lambda name, pid, homes, start=0: reaper.Outcome()
     return runtime, calls
 
 
@@ -278,7 +278,7 @@ def test_foreign_passes_an_object_of_the_same_backend():
 
 def test_an_unregistered_backend_object_is_unavailable_and_no_runtime_acts():
     local, remote, router = pair()
-    stray = AgentRecord("engineer@a1b2c3-0002", "eng", "t2", execution_id="exe-2", runtime_backend="ssh")
+    stray = AgentRecord("engineer@a1b2c3-0002", "eng", "t2", runtime_backend="ssh")
     assert router.terminate(stray) == Outcome(
         "terminate", Status.UNAVAILABLE, "ssh", detail="no runtime registered for ssh"
     )
@@ -405,7 +405,7 @@ def test_local_drain_is_unsupported():
 
 def test_a_refused_retirement_carries_the_herdr_refusal(tmp_path, monkeypatch):
     herdr, _ = herdr_runtime(tmp_path, monkeypatch)
-    herdr.end = lambda name, pid, homes: reaper.Outcome(process=42, refusal="shared process group")
+    herdr.end = lambda name, pid, homes, start=0: reaper.Outcome(process=42, refusal="shared process group")
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1")
     outcome = LocalHerdrRuntime(herdr).terminate(agent, homes=("/scratch",))
     refusal = {"process": 42, "refusal": "shared process group"}

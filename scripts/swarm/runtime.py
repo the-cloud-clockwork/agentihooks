@@ -584,8 +584,8 @@ class HerdrRuntime:
         pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
         return self.retire_process(agent, pid, homes)
 
-    def retire_process(self, agent, pid, homes=()):
-        outcome = self.end(agent.name, pid, list(homes))
+    def retire_process(self, agent, pid, homes=(), start=0):
+        outcome = self.end(agent.name, pid, list(homes), start)
         if outcome.refusal:
             self.refusals[agent.name] = {"process": outcome.process, "refusal": outcome.refusal}
             return False
