@@ -1,7 +1,9 @@
 import { $, h } from "./dom.js";
 import { itemState } from "./state.js";
 import { doc } from "./sync.js";
-import { noticeTarget } from "./notices.js";
+import { noticeTarget, showAlerts, showNotifications } from "./notices.js";
+import { showArtifacts } from "./artifacts.js";
+import { renderSwarm, swarm } from "./swarm.js";
 import { collapsible, groupOpen, markToggles, rememberGroup } from "./folds.js";
 import { selectTab } from "./layout.js";
 import { render } from "./render.js";
@@ -11,16 +13,27 @@ let outlinePick = null;
 
 let outlineFrame = 0;
 
-export function revealTarget(id) {
-  let el = document.getElementById(id);
-  if (!el && id.startsWith("item-")) {
+function swarmRows() {
+  selectTab("swarm", false);
+  renderSwarm(swarm);
+}
+
+const PANEL_ROWS = { notice: () => showNotifications(true), alert: () => showAlerts(true), artifact: () => showArtifacts(true), finding: swarmRows, seat: swarmRows };
+
+function fetchTarget(id) {
+  const kind = id.split("-")[0];
+  if (kind === "item") {
     const section = document.querySelector(`section[data-outline="${id.split("-")[1]}"] > details.fold`);
     if (section) section.open = true;
-    wanted.id = id;
-    render();
-    setTimeout(() => { wanted.id = null; }, 0);
-    el = document.getElementById(id);
-  }
+  } else if (!Object.hasOwn(PANEL_ROWS, kind)) return;
+  wanted.id = id;
+  (kind === "item" ? render : PANEL_ROWS[kind])();
+  setTimeout(() => { wanted.id = null; }, 0);
+}
+
+export function revealTarget(id) {
+  if (!document.getElementById(id)) fetchTarget(id);
+  const el = document.getElementById(id);
   if (el) reveal(el);
   return el;
 }

@@ -4,6 +4,7 @@ import { artifactUrl, readArtifact } from "./api.js";
 import { doc, queue } from "./sync.js";
 import { jsonTree, markdown } from "./markdown.js";
 import { anchorPanel } from "./notices.js";
+import { firstPage, moreButton } from "./pages.js";
 
 async function artifactBody(file) {
   const url = artifactUrl(file.id);
@@ -48,18 +49,20 @@ export function renderArtifacts() {
     $("art-trash").replaceChildren();
     return $("art-list").replaceChildren();
   }
-  $("art-list").replaceChildren(...list.map((a) => h("li", { class: "notif-row art-row" },
+  $("art-list").replaceChildren(...firstPage("art-list", list, (a) => `artifact-${a.id}`).map((a) => h("li", { class: "notif-row art-row", id: `artifact-${a.id}` },
     h("div", { class: "notif-meta", text: artifactMeta(a) }),
     h("button", { class: "art-title", type: "button", text: a.title, on: { click: () => openArtifact(a) } }),
     h("button", { class: "link danger", type: "button", text: "Delete", "aria-label": `Delete ${a.title}`,
-      on: { click: () => queue({ op: "artifact_delete", id: newId("artdel"), target: a.id }) } }))));
+      on: { click: () => queue({ op: "artifact_delete", id: newId("artdel"), target: a.id }) } }))),
+    moreButton("art-list", list.length, "more artifacts", renderArtifacts) || "");
   if (!list.length) $("art-list").append(h("li", { class: "empty", text: "No artifacts yet." }));
   const trash = [...doc.artifact_trash].sort((a, b) => (b.deleted_at || 0) - (a.deleted_at || 0));
   $("art-trash-head").hidden = !trash.length;
-  $("art-trash").replaceChildren(...trash.map((a) => h("li", { class: "notif-row art-row" },
+  $("art-trash").replaceChildren(...firstPage("art-trash", trash, (a) => `artifact-${a.id}`).map((a) => h("li", { class: "notif-row art-row", id: `artifact-${a.id}` },
     h("div", { class: "notif-meta", text: `${a.title} · ${daysLeft(a.deleted_at)} days left` }),
     h("button", { class: "link", type: "button", text: "Restore", "aria-label": `Restore ${a.title}`,
-      on: { click: () => queue({ op: "artifact_restore", id: newId("artback"), target: a.id }) } }))));
+      on: { click: () => queue({ op: "artifact_restore", id: newId("artback"), target: a.id }) } }))),
+    moreButton("art-trash", trash.length, "more trashed artifacts", renderArtifacts) || "");
 }
 
 export function showArtifacts(open) {
