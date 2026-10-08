@@ -484,6 +484,10 @@ class FakeHerdr:
     def live_names(self):
         return {"engineer@a1b2c3-0001"}
 
+    def recover(self, name):
+        self.calls.append(("recover", name))
+        return Placed(self.pane_id, "claude")
+
 
 def tick_runtime(herdr, environ=None):
     return routed(environ or {}, herdr=herdr)
@@ -548,6 +552,36 @@ def test_disabling_local_stops_tick_spawns_without_touching_herdr():
         runtime.spawn("cfg", "eng", "engineer@a1b2c3-0001", {"id": "t1"})
     assert (str(raised.value), raised.value.status) == ("no enabled runtime for local", "unavailable")
     assert herdr.calls == []
+
+
+def test_the_tick_reattaches_a_live_master_by_name_through_the_router():
+    herdr = FakeHerdr(pane_id="w1:p4")
+    assert tick_runtime(herdr).recover("master@a1b2c3-0001") == Placed("w1:p4", "claude")
+    assert herdr.calls == [("recover", "master@a1b2c3-0001")]
+
+
+def test_a_tick_reattach_with_local_disabled_finds_nothing_and_touches_nothing():
+    herdr = FakeHerdr()
+    runtime = tick_runtime(herdr, {"AGENTIHOOKS_RUNTIME_DISABLED": LOCAL})
+    assert runtime.recover("master@a1b2c3-0001") == Placed("", "")
+    assert herdr.calls == []
+
+
+def test_herdr_launch_failures_carry_their_status_at_the_source(tmp_path, monkeypatch):
+    def hang(argv, **kwargs):
+        if "init-agent" in argv:
+            raise subprocess.TimeoutExpired(argv, 300)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def failed(argv, **kwargs):
+        return SimpleNamespace(returncode=3, stdout="", stderr="")
+
+    task = {"id": "t1", "title": "x", "profile": "engineer"}
+    for run, status in ((hang, "ambiguous"), (failed, "refused")):
+        herdr, _ = herdr_runtime(tmp_path, monkeypatch, run=run)
+        with pytest.raises(SpawnError) as raised:
+            herdr.spawn(config(tmp_path), "eng", "engineer@x-1", task)
+        assert raised.value.status == status
 
 
 def test_an_unregistered_tick_backend_spawns_nothing():

@@ -348,7 +348,7 @@ def _retire_each(store, slug, runtime, agents):
 
 def cmd_close(store, args):
     store.config(args.slug)
-    runtime = HerdrRuntime()
+    runtime = routed(herdr=HerdrRuntime())
     live = runtime.live_names()
     by = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
     master = None if args.now else _live_master(store, args.slug, live)
@@ -376,7 +376,7 @@ def cmd_close(store, args):
 
 
 def cmd_reopen(store, args):
-    runtime = HerdrRuntime()
+    runtime = routed(herdr=HerdrRuntime())
     live = runtime.live_names()
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, live)
@@ -391,7 +391,7 @@ def cmd_reopen(store, args):
 
 
 def cmd_take_master(store, args):
-    runtime = HerdrRuntime()
+    runtime = routed(herdr=HerdrRuntime())
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, runtime.live_names())
     from scripts.gates import Who
@@ -418,7 +418,7 @@ def cmd_take_master(store, args):
 
 
 def cmd_master(store, args):
-    runtime = HerdrRuntime()
+    runtime = routed(herdr=HerdrRuntime())
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, runtime.live_names())
     launched = master_launch.up(store, args.slug, runtime, now_ms(), args.choice, input, print)
@@ -688,7 +688,7 @@ def cmd_rename(store, args):
     from scripts.swarm.rename import rename_swarm
 
     slugs = [args.slug] if getattr(args, "slug", "") else store.slugs()
-    ledger, runtime, failed = LedgerClient(), HerdrRuntime(), []
+    ledger, runtime, failed = LedgerClient(), routed(herdr=HerdrRuntime()), []
     for slug in slugs:
         store.ensure_code(slug)
         if not store.agents(slug):
@@ -1033,7 +1033,9 @@ def cmd_restore_decision(store, args):
     name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
     if name not in {"", "operator"} and _me(store, args).lane != MASTER:
         raise SwarmError("Only the master or operator can choose resume or fresh")
-    outcome = resume.decide(store, args.slug, args.agent, args.choice, HerdrRuntime(), now_ms(), LedgerClient())
+    outcome = resume.decide(
+        store, args.slug, args.agent, args.choice, routed(herdr=HerdrRuntime()), now_ms(), LedgerClient()
+    )
     print(json.dumps(asdict(outcome)))
 
 

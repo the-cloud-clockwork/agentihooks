@@ -136,7 +136,7 @@ def _pinned(worn, revision):
     if not worn:
         return []
     if not revision:
-        raise SpawnError("an overlay launch needs the bundle commit it renders from, and none was recorded")
+        raise SpawnError("an overlay launch needs the bundle commit it renders from, and none was recorded", "refused")
     return ["--bundle-revision", revision]
 
 
@@ -279,7 +279,7 @@ class HerdrRuntime:
         want = affinity.desired(config) if lane == MASTER else _set(chosen.get("agent"))
         if want and plugins.claude_only(profile) and want != "claude":
             kind = "master affinity" if lane == MASTER else "lane harness"
-            raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}")
+            raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")
         if saved and want and saved["harness"] != want:
             saved = {}
         if want and not saved:
@@ -396,7 +396,9 @@ class HerdrRuntime:
                 replace(agent, pane_id=placed.pane_id, profile_decision=placed.profile_decision),
                 homes=reaper.scratch_homes(config.slug, agent.task),
             )
-            raise SpawnError(f"herdr never showed conversation {agent.conversation_id} on pane {placed.pane_id}")
+            raise SpawnError(
+                f"herdr never showed conversation {agent.conversation_id} on pane {placed.pane_id}", "ambiguous"
+            )
         return replace(
             placed,
             model_source=picked.source,
@@ -455,7 +457,7 @@ class HerdrRuntime:
             )
         except subprocess.TimeoutExpired as exc:
             self._terminate(name)
-            raise SpawnError(f"init-agent timed out for {name}") from exc
+            raise SpawnError(f"init-agent timed out for {name}", "ambiguous") from exc
         timings = {
             "launched_at": launched_at,
             "returned_at": int(time.time() * 1000),
@@ -469,12 +471,12 @@ class HerdrRuntime:
         if proc.returncode or fields.get("status") != "started" or fields.get("route_status") not in STARTED_ROUTES:
             self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
-            raise SpawnError(tail[-1] if tail else f"init-agent exit {proc.returncode}")
+            raise SpawnError(tail[-1] if tail else f"init-agent exit {proc.returncode}", "refused")
         try:
             validated = binding.fields(fields, argv[argv.index("--profile") + 1], agent)
         except ValueError as exc:
             self._terminate(name)
-            raise SpawnError(str(exc)) from exc
+            raise SpawnError(str(exc), "refused") from exc
         return Placed(
             fields.get("pane_id", ""),
             fields.get("agent", agent),
