@@ -197,6 +197,18 @@ def test_a_merge_wait_ends_red_when_the_queued_pull_request_drops_out(tick, stat
     assert tick.end() == []
 
 
+def test_the_tick_accepts_a_merge_wait_only_after_the_pull_request_lands(tick):
+    tick.hold("merge", URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, False, resolved=True, queued=True)
+    assert tick.end() == []
+    assert held(tick.store)["on"] == {"kind": "merge", "target": URL}
+    tick.pulls[URL] = PullRequest("MERGED", 2, 1, False)
+    assert tick.end() == [f"ended the wait of {ME}: pull request {URL}, now merged"]
+    assert held(tick.store) is None
+    assert f"Your wait on pull request {URL}, now merged has ended." in tick.told()[0]
+    assert tick.end() == []
+
+
 def test_cli_records_a_checked_merge_wait_with_a_pull_request_url(started, capsys):
     store, _ = started
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 0
