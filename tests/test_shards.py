@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -52,14 +53,29 @@ def test_shards_balance_the_stored_durations_per_file():
     ]
 
 
-def test_stored_durations_name_no_credential_shaped_case():
-    stored = sorted(_ROOT.glob(".test_durations*"))
+def _committed(*args: str) -> str:
+    return subprocess.run(["git", *args], cwd=_ROOT, check=True, capture_output=True, text=True).stdout
+
+
+def _credential_shaped(nodeids):
+    return [nodeid for nodeid in nodeids if scan(nodeid, mode="strict") or _URL_CREDENTIAL.search(nodeid)]
+
+
+def test_the_credential_check_flags_token_and_url_password_names():
+    planted = [
+        "t.py::t[" + "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8]",
+        "t.py::t[https://user:fixture-" + "password@github.com/o/r.git]",
+    ]
+    assert _credential_shaped([*planted, "t.py::t[github]", "t.py::t[https-userinfo]"]) == planted
+
+
+def test_committed_durations_name_no_credential_shaped_case():
+    stored = _committed("ls-files", ".test_durations*").split()
     assert stored
     flagged = [
-        f"{path.name}: {nodeid}"
+        f"{path}: {nodeid}"
         for path in stored
-        for nodeid in json.loads(path.read_text())
-        if scan(nodeid, mode="strict") or _URL_CREDENTIAL.search(nodeid)
+        for nodeid in _credential_shaped(json.loads(_committed("show", f"HEAD:{path}")))
     ]
     assert flagged == []
 
