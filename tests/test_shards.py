@@ -108,6 +108,23 @@ def test_measured_cases_from_one_module_balance_across_shards():
     assert sorted(node for part in parts for node in part) == nodes
 
 
+def test_independent_worker_groups_balance_without_serializing_each_other():
+    from tests.shards import assign_nodes
+
+    nodes = [f"tests/test_{n}.py::test_x" for n in range(4)]
+    durations = dict(zip(nodes, (30, 30, 20, 20)))
+    grouped = {f"tests/test_{n}.py": "redis" if n % 2 == 0 else "sdk" for n in range(4)}
+    parts = assign_nodes(durations, 2, grouped, 4)
+    loads = [
+        max(
+            sum(durations[node] for node in part if grouped[node.split("::")[0]] == group) for group in ("redis", "sdk")
+        )
+        for part in parts
+    ]
+    assert loads == [30, 30]
+    assert sorted(node for part in parts for node in part) == nodes
+
+
 def test_worker_shards_select_each_measured_and_unknown_case_once(tmp_path):
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests/test_hot.py").write_text('import pytest\npytestmark = pytest.mark.xdist_group("redis")\n')
@@ -175,7 +192,10 @@ def test_grouped_files_reads_real_markers_and_ignores_fixture_strings(tmp_path):
     }
     for name, source in sources.items():
         (tmp_path / f"{name}.py").write_text(source)
-    assert grouped_files(tmp_path, [f"{name}.py" for name in sources]) == {"module.py", "function.py"}
+    assert grouped_files(tmp_path, [f"{name}.py" for name in sources]) == {
+        "module.py": "'redis'",
+        "function.py": "'sdk'",
+    }
 
 
 def test_shards_weigh_source_size_since_every_worker_collects_the_whole_shard():
