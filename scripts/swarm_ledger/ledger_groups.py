@@ -82,7 +82,7 @@ def apply(doc, op, ctx):
         verb = "release" if op["op"] == "task_ungroup" else "set"
         ctx.refused.append(f"{op['by']} works in the {lane_of(op['by'])} lane and cannot {verb} a task group")
         return False
-    known = {t["id"]: t for t in doc.get("tasks", [])}
+    known = {t["id"]: t for t in doc["tasks"]}
     return (_ungroup if op["op"] == "task_ungroup" else _group)(known, op, ctx)
 
 

@@ -85,7 +85,8 @@ def _stopped(slug, store, lead, doc):
 
 def _reopened(lead, doc):
     stamps, item = doc.get("_meta", {}).get("stamps", {}), f"tasks/{lead['id']}"
-    return stamps.get(f"{item}/state", {}).get("rev", 0) > stamps.get(f"{item}/group_members", {}).get("rev", 0)
+    grouped_at = stamps.get(f"{item}/group_members")
+    return bool(grouped_at) and stamps.get(f"{item}/state", {}).get("rev", 0) > grouped_at.get("rev", 0)
 
 
 def candidates(doc: dict) -> list[list[dict]]:

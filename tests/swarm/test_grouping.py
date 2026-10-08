@@ -399,6 +399,7 @@ def release(store, found, claim=None, handoff=None):
         ),
         ({"state": "open"}, CHANGED_AFTER, None, None, "was reopened"),
         ({"state": "done", "pr_url": ""}, CHANGED_AFTER, None, None, "closed without its pull request"),
+        ({"state": "done"}, CHANGED_AFTER, None, None, "closed without its pull request"),
         ({"out_of_scope": True}, CHANGED_BEFORE, None, None, "closed without its pull request"),
     ],
 )
@@ -435,6 +436,13 @@ def test_a_working_lead_keeps_its_members(store, lead, state_rev, claim, handoff
 def test_a_lead_without_stamps_is_not_taken_for_reopened(store):
     found = grouped({"state": "open"})
     found["_meta"] = {}
+    ledger, actions = release(store, found)
+    assert (ledger.ungrouped, actions) == ([], [])
+
+
+def test_a_lead_without_a_grouping_stamp_is_not_taken_for_reopened(store):
+    found = grouped({"state": "open"}, CHANGED_AFTER)
+    del found["_meta"]["stamps"]["tasks/a/group_members"]
     ledger, actions = release(store, found)
     assert (ledger.ungrouped, actions) == ([], [])
 
