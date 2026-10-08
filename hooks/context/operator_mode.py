@@ -104,7 +104,7 @@ def _binding(env, session_id):
 def question_block(tool_name, session_id, environ=None, now=None):
     """The refusal of the question tool while the operator is away, naming the ledger command to use instead."""
     env = os.environ if environ is None else environ
-    if tool_name != QUESTION_TOOL or present(session_id, env, now):
+    if tool_name != QUESTION_TOOL or not _away(session_id, env, now):
         return ""
     slug, name = _binding(env, session_id)
     return ASK_REFUSAL.format(slug=slug, name=name)
