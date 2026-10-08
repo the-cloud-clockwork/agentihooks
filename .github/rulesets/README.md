@@ -68,12 +68,18 @@ for env in release pypi; do
     --method PUT \
     "repos/The-Cloud-Clockwork/agentihooks/environments/$env" \
     --input -
+  jq -c '.deployment_branch_policies[]' ".github/environments/$env.json" |
+    while read -r policy; do
+      gh api \
+        --method POST \
+        "repos/The-Cloud-Clockwork/agentihooks/environments/$env/deployment-branch-policies" \
+        --input - <<< "$policy"
+    done
 done
 ```
 
-Each entry of `deployment_branch_policies` is added with a `POST` to
-`environments/<name>/deployment-branch-policies`; a live policy not in the
-file is removed with a `DELETE` by its id. Verify:
+A live policy not in the file is removed with a `DELETE` to
+`deployment-branch-policies/<id>`. Verify:
 
 ```bash
 gh api repos/The-Cloud-Clockwork/agentihooks/environments/release/deployment-branch-policies --jq '.branch_policies[]|{name,type}'
