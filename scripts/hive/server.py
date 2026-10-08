@@ -18,9 +18,15 @@ REQUEST_TIMEOUT_S = 10
 BAD_BODY = "the body must be a JSON object with a string code"
 
 
-def _handler(redis: "Redis", redis_url: str) -> type[BaseHTTPRequestHandler]:
+def _handler(redis: "Redis", redis_url: str, context: ssl.SSLContext | None) -> type[BaseHTTPRequestHandler]:
     class Join(BaseHTTPRequestHandler):
         timeout = REQUEST_TIMEOUT_S
+
+        def setup(self):
+            if context is not None:
+                self.request.settimeout(self.timeout)
+                self.request = context.wrap_socket(self.request, server_side=True)
+            super().setup()
 
         def do_POST(self):
             if self.path != JOIN_PATH:
@@ -36,7 +42,7 @@ def _handler(redis: "Redis", redis_url: str) -> type[BaseHTTPRequestHandler]:
         def _code(self):
             try:
                 length = int(self.headers.get("Content-Length") or 0)
-                if not 0 < length <= MAX_BODY:
+                if length not in range(MAX_BODY + 1):
                     return None
                 code = json.loads(self.rfile.read(length))["code"]
             except (ValueError, KeyError, TypeError):
@@ -44,12 +50,9 @@ def _handler(redis: "Redis", redis_url: str) -> type[BaseHTTPRequestHandler]:
             return code if isinstance(code, str) else None
 
         def _answer(self, status, body):
-            data = json.dumps(body).encode()
             self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
             self.end_headers()
-            self.wfile.write(data)
+            self.wfile.write(json.dumps(body).encode())
 
         def log_message(self, format, *args):
             pass
@@ -57,10 +60,10 @@ def _handler(redis: "Redis", redis_url: str) -> type[BaseHTTPRequestHandler]:
     return Join
 
 
-def is_loopback(host: str) -> bool:
+def is_loopback(host: str | None) -> bool:
     try:
         return ipaddress.ip_address(socket.gethostbyname(host)).is_loopback
-    except (OSError, ValueError):
+    except (OSError, TypeError, ValueError):
         return False
 
 
@@ -71,12 +74,9 @@ def make_server(
         raise auth.HiveError("a join endpoint off loopback hands out credentials, so it needs --tls-cert and --tls-key")
     context = None
     if tls is not None:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         try:
             context.load_cert_chain(*tls)
         except (OSError, ssl.SSLError) as exc:
             raise auth.HiveError(f"the TLS certificate or key cannot be loaded ({exc})") from exc
-    httpd = ThreadingHTTPServer((host, port), _handler(redis, redis_url))
-    if context is not None:
-        httpd.socket = context.wrap_socket(httpd.socket, server_side=True, do_handshake_on_connect=False)
-    return httpd
+    return ThreadingHTTPServer((host, port), _handler(redis, redis_url, context))

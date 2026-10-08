@@ -68,6 +68,31 @@ def test_a_valid_code_joins_with_a_ledger_credential_and_a_redis_acl_user(admin,
     assert not auth.PREFIX.startswith(f"{ROOT}:")
 
 
+def test_the_grant_sizes_and_member_record(admin, redis_lib):
+    code = auth.invite(admin, "laptop")
+    grant = auth.exchange(admin, code, PUBLIC)
+    password = redis_lib.connection.parse_url(grant["redis_url"])["password"]
+
+    assert len(code) == 22
+    assert len(grant["id"]) == 16
+    int(grant["id"], 16)
+    assert len(password) == 43
+    assert len(grant["ledger_credential"]) == 43
+    assert admin.hgetall(f"{auth.PREFIX}:member:{grant['id']}") == {
+        "name": "laptop",
+        "ledger": hashlib.sha256(grant["ledger_credential"].encode()).hexdigest(),
+    }
+    assert admin.acl_getuser(f"hive-{grant['id']}")["flags"] == ["on"]
+
+
+def test_the_member_url_replaces_credentials_already_in_the_hive_url(admin):
+    grant = auth.exchange(admin, auth.invite(admin, "laptop"), "redis://admin:secret@hive.example:6380/2")
+
+    assert "admin" not in grant["redis_url"]
+    assert "secret" not in grant["redis_url"]
+    assert grant["redis_url"].endswith("@hive.example:6380/2")
+
+
 def test_a_reused_code_is_refused(admin):
     code = auth.invite(admin, "laptop")
     auth.exchange(admin, code, PUBLIC)
@@ -151,6 +176,19 @@ def test_rejoining_tightens_an_existing_env_file(tmp_path):
 
     assert stat.S_IMODE((tmp_path / "hive.env").stat().st_mode) == 0o600
     assert "old" not in (tmp_path / "hive.env").read_text()
+
+
+def test_a_new_env_file_is_created_private_in_a_new_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(auth.os, "fchmod", lambda fd, mode: None)
+    previous = os.umask(0)
+    try:
+        path = auth.write_env(
+            tmp_path / "a" / "b", "http://hive", {"id": "i", "ledger_credential": "l", "redis_url": "r"}
+        )
+    finally:
+        os.umask(previous)
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 @pytest.fixture

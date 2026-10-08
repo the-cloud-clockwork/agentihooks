@@ -16,7 +16,8 @@ INVITE_TTL_S = 900
 # Outside the ROOT keyspace, so a member's ACL user cannot mint invites or read the credential index.
 PREFIX = f"{ROOT}-hive"
 # ACL cannot confine a user to one database, so a hive's Redis serves that hive alone.
-ACL_RULES = (f"~{ROOT}:*", f"&{ROOT}:*", "+@all", "-@admin", "-@dangerous")
+ACL_PATTERNS = (f"{ROOT}:*",)
+ACL_CATEGORIES = ("+@all", "-@admin", "-@dangerous")
 ENV_FILE = "hive.env"
 
 
@@ -44,10 +45,17 @@ def exchange(redis: "Redis", code: str, redis_url: str) -> dict:
     password = secrets.token_urlsafe(32)
     ledger = secrets.token_urlsafe(32)
     records = (f"{PREFIX}:member:{member_id}", f"{PREFIX}:ledger:{_digest(ledger)}")
-    with redis.pipeline(transaction=True) as pipe:
+    with redis.pipeline() as pipe:
         pipe.hset(records[0], mapping={"name": name, "ledger": _digest(ledger)})
         pipe.set(records[1], member_id)
-        pipe.execute_command("ACL", "SETUSER", f"hive-{member_id}", "reset", "on", f"#{_digest(password)}", *ACL_RULES)
+        pipe.acl_setuser(
+            f"hive-{member_id}",
+            enabled=True,
+            hashed_passwords=[f"+{_digest(password)}"],
+            categories=ACL_CATEGORIES,
+            keys=ACL_PATTERNS,
+            channels=ACL_PATTERNS,
+        )
         try:
             pipe.execute()
         except RedisError as exc:
@@ -66,7 +74,7 @@ def _forget(redis: "Redis", member_id: str, records: tuple[str, ...]) -> None:
 
     try:
         redis.delete(*records)
-        redis.execute_command("ACL", "DELUSER", f"hive-{member_id}")
+        redis.acl_deluser(f"hive-{member_id}")
     except RedisError:
         pass
 
@@ -85,9 +93,9 @@ def revoke(redis: "Redis", member_id: str) -> None:
     member = redis.hgetall(f"{PREFIX}:member:{member_id}")
     if not member:
         raise HiveError(f"no hive member {member_id}")
-    with redis.pipeline(transaction=True) as pipe:
+    with redis.pipeline() as pipe:
         pipe.delete(f"{PREFIX}:member:{member_id}", f"{PREFIX}:ledger:{member['ledger']}")
-        pipe.execute_command("ACL", "DELUSER", f"hive-{member_id}")
+        pipe.acl_deluser(f"hive-{member_id}")
         pipe.execute()
 
 
