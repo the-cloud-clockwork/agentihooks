@@ -1,4 +1,5 @@
 import json
+import queue
 import socket
 import tempfile
 import threading
@@ -170,7 +171,12 @@ def test_conversation_records_two_turns_and_the_history(fakes, tmp_path):
         {
             "thread/start": [thread()],
             "turn/start": [turn("T1"), turn("T2")],
-            "thread/read": [history(user_turn("T1", "u1"), user_turn("T2", "u2"))],
+            "thread/read": [
+                history(
+                    user_turn("T1", "u1"),
+                    {"id": "T2", "items": [{"type": "userMessage"}, *user_turn("T2", "u2")["items"]]},
+                )
+            ],
         },
         [agent("ALPHA"), done("T1"), item("started", "reasoning"), agent("BRAVO"), done("T2", "interrupted")],
     )
@@ -207,11 +213,15 @@ def test_conversation_records_two_turns_and_the_history(fakes, tmp_path):
 def test_conversation_flags_history_whose_turn_ids_differ(fakes, tmp_path):
     scripts, _ = fakes
     scripts["probe-conversation"] = (
-        {"thread/start": [thread()], "turn/start": [turn("T1"), turn("T2")], "thread/read": [ok({"thread": {}})]},
+        {
+            "thread/start": [thread()],
+            "turn/start": [turn("T1"), turn("T2")],
+            "thread/read": [history({"id": "T2"}, {"id": "T1"})],
+        },
         [done("T1"), done("T2")],
     )
     assert probe.conversation("SOCK", str(tmp_path))["thread_read"] == {
-        "turn_count": 0,
+        "turn_count": 2,
         "turn_ids_match": False,
         "user_texts": [],
     }
@@ -282,14 +292,18 @@ def test_steer_without_a_command_or_a_later_turn(fakes, tmp_path):
     scripts["probe-steer"] = (
         {
             "thread/start": [thread()],
-            "turn/start": [turn("T"), turn("T")],
-            "turn/steer": [ok({}), ok({}), ok({})],
+            "turn/start": [turn("T"), err("busy")],
+            "turn/steer": [ok({"turnId": "S"}), err("stale"), ok({"turnId": "T"})],
             "thread/read": [ok({"thread": {}})],
         },
-        [PAUSE, PAUSE],
+        [item("started", "reasoning"), item("completed", "commandExecution"), PAUSE, PAUSE],
     )
     record = probe.steer("SOCK", str(tmp_path))
     assert record["command_started_before_steer"] is False
+    assert record["steer_stale_expected_turn"] == {"turnId": "S"}
+    assert record["steer_matching_expected_turn"] == {"code": -32600, "message": "stale"}
+    assert record["turn_start_while_busy"] == {"code": -32600, "message": "busy"}
+    assert record["steer_after_completion"] == {"turnId": "T"}
     assert record["busy_turn_status"] is None
     assert record["later_turn_completed"] is None
     assert record["later_agent_text"] == []
@@ -380,7 +394,9 @@ def test_a_viewer_alone_owns_an_approval_it_alone_receives(fakes, tmp_path):
 def test_no_approval_request_keeps_the_record_short(fakes, tmp_path):
     scripts, made = fakes
     scripts.update(approval_scripts([PAUSE, PAUSE], [PAUSE]))
+    scripts["probe-viewer-b"][0]["thread/resume"][1] = err("gone")
     record = probe.approvals("SOCK", str(tmp_path))
+    assert record["viewer_resume"] == {"code": -32600, "message": "gone"}
     assert record["request_method"] is None
     assert "answered_by" not in record
     assert made["probe-owner-a"].answers == []
@@ -397,7 +413,7 @@ def test_detach_records_a_viewer_leaving_and_another_returning(fakes, tmp_path):
     repo = str(tmp_path)
     scripts["probe-bridge"] = (
         {"thread/start": [thread()], "turn/start": [turn("G")]},
-        [{"method": "turn/started"}, agent("GOLF"), done("G"), done("X"), done("H")],
+        [{"method": "turn/started"}, agent("GOLF"), done("G"), done("X", "failed"), done("H")],
     )
     scripts["probe-viewer"] = ({"thread/resume": [ok({})]}, [item("started", "reasoning")])
     scripts["probe-viewer-reopen"] = (
@@ -444,7 +460,7 @@ def test_detach_records_a_viewer_leaving_and_another_returning(fakes, tmp_path):
 
 def test_detach_with_nothing_seen(fakes, tmp_path):
     scripts, _ = fakes
-    scripts["probe-bridge"] = ({"thread/start": [thread()], "turn/start": [turn("G")]}, [])
+    scripts["probe-bridge"] = ({"thread/start": [thread()], "turn/start": [turn("G")]}, [PAUSE, PAUSE, done("Q")])
     scripts["probe-viewer"] = ({"thread/resume": [ok({})]}, [])
     scripts["probe-viewer-reopen"] = (
         {
@@ -627,7 +643,7 @@ def test_bridge_and_seed_turns_for_the_terminal_attach(fakes, tmp_path):
     repo = str(tmp_path)
     scripts["probe-bridge-tui"] = ({"thread/resume": [ok({})], "turn/start": [turn("L")]}, [done("L")])
     scripts["probe-tui-seed"] = ({"thread/start": [thread()], "turn/start": [turn("M")]}, [agent("MIKE"), done("M")])
-    assert probe.bridge_turn("SOCK", repo, "TH") == {
+    assert probe.bridge_turn("SOCK", "TH") == {
         "turn": "L",
         "completed": True,
         "status": "completed",
@@ -648,7 +664,10 @@ def test_bridge_and_seed_turns_for_the_terminal_attach(fakes, tmp_path):
             "methods": ["item/completed", "turn/completed"],
         },
     }
-    assert made["probe-tui-seed"].calls[1] == turn_call("TH", "Fixture thirteen seeds the terminal thread. Reply MIKE.")
+    assert made["probe-tui-seed"].calls == [
+        start_call(repo),
+        turn_call("TH", "Fixture thirteen seeds the terminal thread. Reply MIKE."),
+    ]
     assert made["probe-bridge-tui"].closed and made["probe-tui-seed"].closed
 
 
@@ -698,6 +717,17 @@ def test_trust_hooks_writes_nothing_when_every_hook_is_trusted(fakes, tmp_path):
     assert [method for method, _, _ in made["probe-hook-trust"].calls] == ["hooks/list", "hooks/list"]
 
 
+def test_trust_hooks_reports_a_refused_write(fakes, tmp_path):
+    scripts, _ = fakes
+    scripts["probe-hook-trust"] = (
+        {"hooks/list": [hooks("untrusted", "trusted")] * 2, "config/batchWrite": [err("read only")]},
+        [],
+    )
+    record = probe.trust_hooks("SOCK", str(tmp_path))
+    assert record["write_error"] == {"code": -32600, "message": "read only"}
+    assert record["after"] == {"Stop": "untrusted", "SessionStart": "trusted"}
+
+
 def test_every_scenario_is_registered():
     assert probe.SCENARIOS == {
         "transport": probe.transport,
@@ -714,13 +744,14 @@ def test_every_scenario_is_registered():
 
 
 def test_main_writes_the_scenario_record(fakes, tmp_path, capsys):
-    scripts, _ = fakes
+    scripts, made = fakes
     scripts["probe-hook-trust"] = ({"hooks/list": [ok({"data": []})] * 2}, [])
     out = tmp_path / "trust.json"
     assert probe.main(["probe", "SOCK", str(tmp_path), "trust_hooks", str(out)]) == 0
     record = {"before": {}, "write_error": None, "after": {}}
     assert out.read_text() == json.dumps(record, indent=2) + "\n"
     assert capsys.readouterr().out == json.dumps(record) + "\n"
+    assert made["probe-hook-trust"].calls[0] == ("hooks/list", {"cwds": [str(tmp_path)]}, DEFAULT)
 
 
 def test_main_runs_a_bridge_turn_on_the_named_thread(fakes, tmp_path, capsys):
@@ -828,6 +859,79 @@ def test_client_waits_a_minute_by_default(monkeypatch):
     monkeypatch.setattr(probe.Client, "wait_response", lambda self, rid, timeout: (rid, timeout))
     assert client.request("m", {"p": 1}) == (4, 60)
     assert seen == [("m", {"p": 1})]
+
+
+class Clock:
+    def __init__(self, *readings):
+        self.readings = list(readings)
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.readings.pop(0)
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+
+
+class EmptyQueue:
+    def __init__(self):
+        self.waits = []
+
+    def get(self, timeout):
+        self.waits.append(timeout)
+        raise queue.Empty
+
+
+def test_wait_response_stops_at_the_deadline_without_sleeping(monkeypatch):
+    clock = Clock(0, 60)
+    monkeypatch.setattr(probe, "time", clock)
+    client = object.__new__(probe.Client)
+    client.name, client.responses, client.lock = "c", {}, threading.Lock()
+    with pytest.raises(TimeoutError, match="^c: no response to 3$"):
+        client.wait_response(3)
+    assert clock.sleeps == []
+
+
+def test_wait_response_polls_every_twenty_milliseconds(monkeypatch):
+    clock = Clock(0, 59.9, 60)
+    monkeypatch.setattr(probe, "time", clock)
+    client = object.__new__(probe.Client)
+    client.name, client.responses, client.lock = "c", {}, threading.Lock()
+    with pytest.raises(TimeoutError):
+        client.wait_response(3, 60)
+    assert clock.sleeps == [0.02]
+
+
+def test_until_polls_the_queue_every_half_second_until_the_deadline(monkeypatch):
+    clock = Clock(0, 5, 9.99, 10)
+    monkeypatch.setattr(probe, "time", clock)
+    client = object.__new__(probe.Client)
+    client.events = EmptyQueue()
+    assert client.until(probe.method_is("x"), 10) == (None, [])
+    assert client.events.waits == [0.5, 0.5]
+
+
+def test_client_reads_in_a_daemon_thread_without_a_message_size_cap():
+    big = "x" * (2 * 1024 * 1024)
+
+    def handler(ws):
+        for raw in ws:
+            msg = json.loads(raw)
+            if msg.get("method") == "initialize":
+                ws.send(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}))
+                ws.send(json.dumps({"jsonrpc": "2.0", "method": "big", "params": {"blob": big}}))
+
+    folder, path, server = serve(handler)
+    try:
+        client = probe.Client(path, "t")
+        assert client.reader.daemon is True
+        got, _ = client.until(lambda m: m.get("method") in ("big", "_closed"), 5)
+        assert got["method"] == "big"
+        assert len(got["params"]["blob"]) == len(big)
+        client.close()
+    finally:
+        server.shutdown()
+        folder.cleanup()
 
 
 def test_transport_shows_a_websocket_upgrade_and_a_closed_raw_json_stream():

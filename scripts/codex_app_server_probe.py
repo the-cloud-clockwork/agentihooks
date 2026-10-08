@@ -22,7 +22,7 @@ TURN_TIMEOUT_S = 240
 class Client:
     def __init__(self, socket_path: str, name: str):
         self.name = name
-        self.ws = unix_connect(socket_path, uri="ws://localhost/", max_size=None)
+        self.ws = unix_connect(socket_path, max_size=None)
         self.next_id = 1
         self.responses: dict[int, dict] = {}
         self.events: queue.Queue = queue.Queue()
@@ -94,7 +94,7 @@ def method_is(name: str) -> Callable[[dict], bool]:
 
 
 def is_approval_request(msg: dict) -> bool:
-    return "id" in msg and str(msg.get("method", "")).endswith("requestApproval")
+    return "id" in msg and str(msg.get("method")).endswith("requestApproval")
 
 
 def agent_texts(seen: list[dict]) -> list[str]:
@@ -362,7 +362,7 @@ def account(sock: str, repo: str) -> dict:
     }
 
 
-def bridge_turn(sock: str, repo: str, thread: str) -> dict:
+def bridge_turn(sock: str, thread: str) -> dict:
     c = Client(sock, "probe-bridge-tui")
     c.request("thread/resume", {"threadId": thread})
     turn = run_turn(c, thread, "Fixture twelve from the bridge while the terminal is attached. Reply LIMA.")
@@ -413,15 +413,15 @@ RAW_LINE = b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo
 
 
 def first_reply(sock_path: str, payload: bytes, wait_s: float) -> str:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+    with socket.socket(socket.AF_UNIX) as s:
         s.settimeout(wait_s)
         s.connect(sock_path)
         s.sendall(payload)
         try:
-            data = s.recv(4096)
+            line = s.makefile("rb").readline()
         except TimeoutError:
             return "no reply"
-        return data.decode("latin-1").split("\r\n", 1)[0] if data else "closed"
+    return line.decode().strip() or "closed"
 
 
 def transport(sock: str, repo: str) -> dict:
@@ -449,7 +449,7 @@ SCENARIOS = {
 def main(argv: list[str]) -> int:
     sock, repo, scenario, out = argv[1:5]
     if scenario == "bridge_turn":
-        record = bridge_turn(sock, repo, argv[5])
+        record = bridge_turn(sock, argv[5])
     else:
         record = SCENARIOS[scenario](sock, repo)
     Path(out).write_text(json.dumps(record, indent=2, default=str) + "\n")
