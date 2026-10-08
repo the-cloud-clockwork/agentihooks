@@ -24,19 +24,19 @@ def _dep(name, version, *ids):
     return {"name": name, "version": version, "vulns": [{"id": i, "fix_versions": []} for i in ids]}
 
 
-def test_findings_collect_every_advisory_once():
+def test_parse_collects_every_advisory_once():
     report = _report(_dep("urllib3", "1.26.4", "PYSEC-1", "PYSEC-1", "PYSEC-2"), _dep("idna", "3.7"))
-    assert audit.findings(report) == {("urllib3", "1.26.4", "PYSEC-1"), ("urllib3", "1.26.4", "PYSEC-2")}
+    assert audit.parse(report) == ({("urllib3", "1.26.4", "PYSEC-1"), ("urllib3", "1.26.4", "PYSEC-2")}, set())
 
 
-def test_findings_ignore_skipped_dependencies():
-    assert audit.findings(_report({"name": "local", "skip_reason": "not on PyPI"})) == set()
+def test_parse_names_dependencies_pip_audit_skipped():
+    assert audit.parse(_report({"name": "local", "skip_reason": "not on PyPI"})) == (set(), {"local"})
 
 
 @pytest.mark.parametrize("report", ["", "not json", "{}", '{"dependencies": [1]}'])
 def test_a_report_that_is_not_a_pip_audit_report_is_an_error(report):
     with pytest.raises(audit.AuditError):
-        audit.findings(report)
+        audit.parse(report)
 
 
 def test_new_findings_ignore_advisories_the_base_already_carries_at_any_version():
@@ -45,9 +45,7 @@ def test_new_findings_ignore_advisories_the_base_already_carries_at_any_version(
     assert audit.new_findings(head, base) == [("idna", "2.0", "PYSEC-3"), ("urllib3", "1.26.5", "PYSEC-2")]
 
 
-def test_resolve_compiles_every_extra_without_the_test_excludes(tmp_path, monkeypatch):
-    (tmp_path / ".github").mkdir()
-    (tmp_path / ".github/test-excludes.txt").write_text("grpc\n")
+def test_resolve_compiles_every_extra_with_nothing_excluded(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(
         audit.subprocess,
@@ -60,8 +58,8 @@ def test_resolve_compiles_every_extra_without_the_test_excludes(tmp_path, monkey
     assert cmd[:4] == ["uv", "pip", "compile", str(tmp_path / "pyproject.toml")]
     assert {"--all-extras", "--no-header", "--no-annotate"} <= set(cmd)
     assert cmd[cmd.index("--python-version") + 1] == "3.12"
-    assert cmd[cmd.index("--excludes") + 1] == str(tmp_path / ".github/test-excludes.txt")
     assert cmd[cmd.index("-o") + 1] == str(out)
+    assert not [a for a in cmd if a.startswith(("--exclude", "--no-deps", "--only"))]
 
 
 def test_a_failed_resolve_is_an_error(tmp_path, monkeypatch):
@@ -112,6 +110,16 @@ def test_main_passes_when_head_adds_no_advisory(monkeypatch, capsys):
     _stub(monkeypatch, {"head": _report(_dep("idna", "3.7")), "base": _report(_dep("idna", "3.6", "PYSEC-3"))})
     assert audit.main(["--base", "base", "--head", "head"]) == 0
     assert "0 known vulnerabilities on head, 1 on base, 0 new" in capsys.readouterr().out
+
+
+def test_main_fails_on_a_dependency_head_could_not_audit_and_the_base_could(monkeypatch, capsys):
+    skipped = {"name": "private", "skip_reason": "not on PyPI"}
+    _stub(monkeypatch, {"head": _report(skipped, {"name": "other", "skip_reason": "x"}), "base": _report(skipped)})
+    assert audit.main(["--base", "base", "--head", "head"]) == 1
+    out = capsys.readouterr().out
+    assert "2 dependencies not audited on head, 1 on base, 1 new" in out
+    assert "::error::other could not be audited" in out
+    assert "private could not" not in out
 
 
 def test_main_is_red_when_an_audit_produces_no_report(monkeypatch):
