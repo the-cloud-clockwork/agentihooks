@@ -403,6 +403,7 @@ def test_agent_projection_is_compatible_with_the_preceding_strict_reader(store, 
         "choice",
         "launched_at",
         "overlays",
+        "launch_timings",
     ]
     preceding_record = make_dataclass("PrecedingAgentRecord", preceding_fields)
     current = store.start_execution("fixture", agent)
