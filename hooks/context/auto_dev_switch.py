@@ -10,7 +10,7 @@ Skipped when:
   - Working tree is dirty (don't risk operator's in-progress work)
 
 Config:
-    AUTO_DEV_SWITCH_ENABLED (bool, default True)
+    AGENTIHOOKS_FORCE_DEV_BRANCH (bool, default False)
 
 See CI Manifesto §13 for doctrine.
 """
@@ -43,13 +43,10 @@ def _git(args: list[str], cwd: str, timeout: int = 10) -> tuple[int, str, str]:
 
 def ensure_on_dev(cwd: str) -> str:
     """Perform the switch. Return a status message (empty if no action taken)."""
-    try:
-        from hooks.config import AUTO_DEV_SWITCH_ENABLED
+    from hooks.config import AGENTIHOOKS_FORCE_DEV_BRANCH
 
-        if not AUTO_DEV_SWITCH_ENABLED:
-            return ""
-    except Exception:
-        pass
+    if not AGENTIHOOKS_FORCE_DEV_BRANCH:
+        return ""
 
     if not cwd or not Path(cwd).is_dir():
         return ""

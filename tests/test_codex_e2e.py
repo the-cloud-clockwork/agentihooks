@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -56,6 +57,8 @@ class TestCodexSessionStartSingleEnvelope:
     @pytest.fixture(autouse=True)
     def _setup(self, tmp_path):
         self._empty_home = str(tmp_path / "empty_agentihooks")
+        (tmp_path / "empty_agentihooks").mkdir()
+        (tmp_path / "empty_agentihooks" / "deps.stamp").write_text(json.dumps({"ok_at": time.time()}))
         # A real git repo on main/master with a clean tree is what makes
         # ensure_on_dev() actually produce a switch message — the exact
         # condition that fed the second print.
@@ -78,6 +81,7 @@ class TestCodexSessionStartSingleEnvelope:
             "AGENTIHOOKS_TARGET": "codex",
             "AGENTIHOOKS_HOME": self._empty_home,
             "AGENTIHOOKS_DISABLE_BYPASS_LOOKUP": "1",
+            "AGENTIHOOKS_FORCE_DEV_BRANCH": "true",
         }
         result = _run(
             {"hook_event_name": "SessionStart", "session_id": "codex-sid-1", "cwd": str(self._repo)},

@@ -766,7 +766,7 @@ CI_MANIFESTO_RUNTIME_INJECT: bool = _env_bool("CI_MANIFESTO_RUNTIME_INJECT", "fa
 CI_MANIFESTO_REFRESH_EVERY: int = int(os.getenv("CI_MANIFESTO_REFRESH_EVERY", "8"))
 
 # Auto dev-switch — at SessionStart, if cwd is on main/master, switch to dev.
-AUTO_DEV_SWITCH_ENABLED = _env_bool("AUTO_DEV_SWITCH_ENABLED", "true")
+AGENTIHOOKS_FORCE_DEV_BRANCH = _env_bool("AGENTIHOOKS_FORCE_DEV_BRANCH", "false")
 
 # =============================================================================
 # OTEL — Custom hook telemetry (Layer 2)
