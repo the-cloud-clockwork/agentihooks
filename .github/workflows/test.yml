@@ -305,6 +305,19 @@ jobs:
           done
           exit 1
 
+      # The gate action grades against whatever gate the server binds, so a silent rebind would loosen it.
+      - name: Hold the Delivery L2 binding
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          gate=$(curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $SONAR_TOKEN" \
+            "http://127.0.0.1:9000/api/qualitygates/get_by_project?project=agentihooks" | jq -r .qualityGate.name)
+          echo "Bound quality gate: $gate"
+          if [[ "$gate" != "Delivery L2" ]]; then
+            echo "::error::agentihooks is bound to '$gate', not Delivery L2."
+            exit 1
+          fi
+
       - name: Restore Sonar downloads
         uses: actions/cache@v4
         with:

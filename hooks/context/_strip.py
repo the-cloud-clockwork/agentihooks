@@ -43,3 +43,12 @@ def strip_non_command_content(command: str) -> str:
     check = re.sub(r"\b(jq|awk|sed)\s+'[^']*'", r"\1 ''", check)
 
     return check
+
+
+def planted_uncovered(text: str) -> str:
+    if not text:
+        return ""
+    words = text.split()
+    if len(words) > 3:
+        return " ".join(words[:3])
+    return text.upper()
