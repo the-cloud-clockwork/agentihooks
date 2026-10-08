@@ -68,6 +68,13 @@ Merge on green checks and closed review, remove the worktree, then
 `agentihooks ledger --slug <slug> --as <name> leave` and close with the proof
 your task kind needs. The ledger refuses `done` without it.
 
+`gh pr merge` only queues the pull request; it lands when the queue run
+passes, so wait with `agentihooks swarm <slug> wait --on merge <url>`. GitHub
+refuses a push while the pull request sits in the queue. To fix a queued pull
+request, dequeue it first with
+`gh api graphql -f query='mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }' -f id="$(gh pr view <url> --json id --jq .id)"`,
+then push the fix, and once its checks pass queue it again with `gh pr merge`.
+
 | Kind | Close |
 |---|---|
 | code | `agentihooks swarm <slug> done --pr <url>` |
