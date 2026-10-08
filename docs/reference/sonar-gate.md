@@ -16,9 +16,9 @@ The job's `Hold the Delivery L2 conditions` step runs after the gate action and 
 
 - the `Delivery L2` gate on the server holds conditions other than the five above, so a loosened threshold turns the job red;
 - the analysis was graded on a condition outside those five, as after a rebind to another gate;
-- bugs or vulnerabilities were not graded, or coverage and duplication were not graded on a change Sonar did not mark as small.
+- bugs or vulnerabilities were not graded.
 
-Sonar leaves the hotspots condition out of the result when a change has no hotspots, and skips coverage and duplication on a change under 20 new lines. The scan token cannot read the project binding itself (HTTP 403 on `api/qualitygates/get_by_project`), so a rebind to a gate whose conditions are a subset of these five passes the step; the binding is kept by antoncore's `projects.json`, applied on every SonarQube stack deploy. Gate thresholds change only through the antoncore config.
+Sonar leaves a condition out of the result when its metric has no value on the change (no new coverable lines, no hotspots), and skips coverage and duplication on a change under 20 new lines; a planted fault must therefore add at least 20 coverable lines. The scan token cannot read the project binding itself (HTTP 403 on `api/qualitygates/get_by_project`), so a rebind to a gate whose conditions are a subset of these five passes the step; the binding is kept by antoncore's `projects.json`, applied on every SonarQube stack deploy. Gate thresholds change only through the antoncore config.
 
 ## False positives
 
