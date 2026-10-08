@@ -383,23 +383,31 @@ jobs:
 
       # The gate action grades against whatever gate the server binds, so a silent rebind would loosen it.
       - name: Hold the Delivery L2 conditions
-        if: always() && steps.gate.outcome != 'skipped'
+        if: always()
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
+          set -o pipefail
           api() { curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $SONAR_TOKEN" "http://127.0.0.1:9000/api/$1"; }
+          expected=$(printf '%s\n' "new_bugs GT 0" "new_coverage LT 80" "new_duplicated_lines_density GT 3" \
+            "new_security_hotspots_reviewed LT 100" "new_vulnerabilities GT 0" | sort)
+          defined=$(api "qualitygates/show?name=Delivery%20L2" | jq -er '.conditions[] | "\(.metric) \(.op) \(.error)"' | sort)
+          if [[ "$defined" != "$expected" ]]; then
+            echo "::error::The Delivery L2 gate on the server differs from its antoncore definition."
+            diff <(echo "$expected") <(echo "$defined") || true
+            exit 1
+          fi
           task=$(sed -n 's/^ceTaskId=//p' .scannerwork/report-task.txt)
-          analysis=$(api "ce/task?id=$task" | jq -r .task.analysisId)
+          [[ -n "$task" ]] || { echo "::error::No Sonar task id in report-task.txt."; exit 1; }
+          analysis=$(api "ce/task?id=$task" | jq -er .task.analysisId)
           status=$(api "qualitygates/project_status?analysisId=$analysis")
           jq -c .projectStatus <<<"$status"
-          graded=$(jq -r '.projectStatus.conditions[] | "\(.metricKey) \(.comparator) \(.errorThreshold)"' <<<"$status" | sort)
-          allowed=$(printf '%s\n' "new_bugs GT 0" "new_coverage LT 80" "new_duplicated_lines_density GT 3" \
-            "new_security_hotspots_reviewed LT 100" "new_vulnerabilities GT 0" | sort)
+          graded=$(jq -er '.projectStatus.conditions[] | "\(.metricKey) \(.comparator) \(.errorThreshold)"' <<<"$status" | sort)
           required=$(printf '%s\n' "new_bugs GT 0" "new_vulnerabilities GT 0")
           if [[ $(jq -r .projectStatus.ignoredConditions <<<"$status") != true ]]; then
             required=$(printf '%s\n' "$required" "new_coverage LT 80" "new_duplicated_lines_density GT 3")
           fi
-          foreign=$(comm -13 <(echo "$allowed") <(echo "$graded"))
+          foreign=$(comm -13 <(echo "$expected") <(echo "$graded"))
           missing=$(comm -23 <(echo "$required" | sort) <(echo "$graded"))
           if [[ -n "$foreign$missing" ]]; then
             echo "::error::The analysis was not graded on the Delivery L2 conditions. Foreign: ${foreign:-none}. Missing: ${missing:-none}."
