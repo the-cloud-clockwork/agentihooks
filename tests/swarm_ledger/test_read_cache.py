@@ -259,6 +259,52 @@ def test_a_page_left_unreadable_stays_reported_and_untouched_on_every_write(repo
     assert html_path.read_text(encoding="utf-8") == broken
 
 
+def test_a_page_repaired_after_being_unreadable_is_parsed_once_then_reused(repo, seed_parses):
+    html_path = core.paths(SLUG)[0]
+    good = html_path.read_text(encoding="utf-8")
+    html_path.write_text(good.replace('id="ledger-data"', 'id="broken-data"', 1), encoding="utf-8")
+    repo.apply_ops(SLUG, ops=[chat("m2", "more")])
+    html_path.write_text(good, encoding="utf-8")
+    seed_parses.clear()
+    for n in (3, 4):
+        state, _ = repo.apply_ops(SLUG, ops=[chat(f"m{n}", "again")])
+        assert state["_meta"]["seed_error"] is None
+    assert len(seed_parses) == 1
+
+
+def test_a_write_that_leaves_an_invalid_page_sends_the_next_write_through_the_full_sync(repo, seed_parses, monkeypatch):
+    derive = file_repository.ledger_priorities.derive
+
+    def break_graph(doc, ctx):
+        doc["phases"][0]["depends_on"] = ["missing-phase"]
+        derive(doc, ctx)
+
+    monkeypatch.setattr(file_repository.ledger_priorities, "derive", break_graph)
+    repo.apply_ops(SLUG, ops=[chat("m2", "second")])
+    monkeypatch.setattr(file_repository.ledger_priorities, "derive", derive)
+    seed_parses.clear()
+    state, _ = repo.apply_ops(SLUG, ops=[chat("m3", "third")])
+    assert len(seed_parses) == 1
+    assert "missing-phase" in json.dumps([state["_meta"].get("warnings"), state["_meta"].get("seed_error")])
+
+
+def test_a_write_that_leaves_an_invalid_seed_document_sends_the_next_write_through_the_full_sync(
+    repo, seed_parses, monkeypatch
+):
+    derive = file_repository.ledger_priorities.derive
+
+    def break_title(doc, ctx):
+        doc["title"] = 7
+        derive(doc, ctx)
+
+    monkeypatch.setattr(file_repository.ledger_priorities, "derive", break_title)
+    repo.apply_ops(SLUG, ops=[chat("m2", "second")])
+    monkeypatch.setattr(file_repository.ledger_priorities, "derive", derive)
+    seed_parses.clear()
+    repo.apply_ops(SLUG, ops=[chat("m3", "third")])
+    assert len(seed_parses) == 1
+
+
 def test_a_write_with_the_sqlite_shadow_on_parses_the_page_seed(repo, seed_parses, monkeypatch):
     monkeypatch.setattr(file_repository.shadow, "enabled", lambda: True)
     monkeypatch.setattr(file_repository.shadow, "persist", lambda *args: None)

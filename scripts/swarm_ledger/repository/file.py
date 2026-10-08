@@ -70,6 +70,15 @@ def read_seed(html, core=core):
         return None, f"HTML seed unreadable, agent edits ignored until fixed: {exc}"
 
 
+def parses_as_seed(doc, core=core):
+    try:
+        core.validate(doc)
+        core.ledger_phases.validate(doc["phases"])
+    except ValueError:
+        return False
+    return True
+
+
 def store(json_path, text, own, core=core):
     if own is None:
         core.write_if_changed(json_path, text)
@@ -151,7 +160,9 @@ def sync(slug, changes=None, ops=None, gate=None, core=core):
             page = stamp(written)
         shadow.persist(core.LEDGER_DIR, slug, state)
         if not ctx.refused:
-            SYNCED[json_path] = Synced(page, stored, ctx.at // SWEEP_MS, text, seed_error is None)
+            SYNCED[json_path] = Synced(
+                page, stored, ctx.at // SWEEP_MS, text, seed_error is None and parses_as_seed(doc, core)
+            )
         return state, rejected
 
 
