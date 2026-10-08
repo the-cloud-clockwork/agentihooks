@@ -15,11 +15,6 @@ ENV = {
 }
 
 
-@pytest.fixture(autouse=True)
-def _no_stored_caps(monkeypatch):
-    monkeypatch.setattr("scripts.session_caps.stored", lambda harness="claude": {})
-
-
 NOW = 1_800_000_000
 
 

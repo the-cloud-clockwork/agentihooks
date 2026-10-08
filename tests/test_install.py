@@ -13,11 +13,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import install  # noqa: I001
 
 
-@pytest.fixture(autouse=True)
-def _no_stored_caps(monkeypatch):
-    monkeypatch.setattr("scripts.session_caps.stored", lambda harness="claude": {})
-
-
 class TestClaudeRouting:
     def test_cmd_claude_exports_winner_for_process_tree(self, monkeypatch):
         from scripts import claude_quota_balancer as balancer
@@ -222,18 +217,16 @@ class TestClaudeRouting:
 
         rows = [
             agents_quota.QuotaRow("codex", "default", "SIGNED_OUT", 0, None, None, None, "no session log"),
-            agents_quota.QuotaRow("codex", "alpha", "NORMAL", 2, None, 60.0, None, "session-log 1m ago"),
+            agents_quota.QuotaRow("codex", "alpha", "NORMAL", 2, None, 60.0, None, "session-log 1m ago", cap=6),
         ]
         monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
         monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [])
         monkeypatch.setattr(agents_quota, "_codex", lambda now: rows)
-        monkeypatch.setattr("hooks.context.account_sessions.max_sessions", lambda environ=None: 3)
-        monkeypatch.setattr("scripts.session_caps.stored", lambda harness="claude": {"alpha": 5})
 
         assert install.cmd_balance(include_fable=False, refresh=False, timeout=10) == 2
         lines = capsys.readouterr().out.splitlines()
-        assert lines[1].split()[:4] == ["codex", "default", "SIGNED_OUT", "0/3"]
-        assert lines[2].split()[:4] == ["codex", "alpha", "NORMAL", "2/5"]
+        assert lines[1].split()[:4] == ["codex", "default", "SIGNED_OUT", "0/?"]
+        assert lines[2].split()[:4] == ["codex", "alpha", "NORMAL", "2/6"]
 
     def test_cmd_balance_can_print_raw_account_metadata(self, monkeypatch, capsys):
         from scripts import claude_quota_balancer as balancer

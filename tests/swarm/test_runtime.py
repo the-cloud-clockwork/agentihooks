@@ -255,7 +255,7 @@ def _spawn_env(tmp_path, monkeypatch, task=None, **config):
             repo=str(tmp_path),
             code="a1b2c3",
             lanes={},
-            **{"autonomy": "delegate", "codex_share": None, "codex_min_week_left": 0, **config},
+            **{"autonomy": "delegate", **config},
         ),
         "eng",
         "engineer@a1b2c3-0001",
@@ -325,7 +325,6 @@ def _spawn_seen(tmp_path, lanes, lane="eng"):
 @pytest.mark.parametrize("pin", ["claude", "codex"])
 @pytest.mark.parametrize("saved_kind", ["launch_assignment", "handoff_envelope", "none"])
 def test_a_lane_pin_wins_over_an_opposite_saved_harness(tmp_path, monkeypatch, pin, saved_kind):
-    from scripts import agent_choice
     from scripts.swarm import model_pick
 
     opposite = "codex" if pin == "claude" else "claude"
@@ -353,7 +352,6 @@ def test_a_lane_pin_wins_over_an_opposite_saved_harness(tmp_path, monkeypatch, p
         seen["classifier_harness"] = harness
         return model_pick.ModelPick("", "high", "classifier", 0.9)
 
-    monkeypatch.setattr(agent_choice, "codex_open", lambda *args: False)
     monkeypatch.setattr(model_pick, "pick", pick)
     runtime = HerdrRuntime(
         home=tmp_path,
@@ -370,7 +368,7 @@ def test_a_lane_pin_wins_over_an_opposite_saved_harness(tmp_path, monkeypatch, p
         lanes={"eng": {"agent": pin, "effort": "auto"}},
         autonomy="delegate",
     )
-    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task, spawns={"claude": 20})
+    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task)
     argv = seen["argv"]
     assert argv[argv.index("--agent") + 1] == pin
     assert placed.harness == pin
@@ -438,51 +436,15 @@ def test_the_lane_role_replaces_the_default_role_in_the_prompt(tmp_path):
     assert text.startswith("You are engineer@a1b2c3-0001, a reviewer who only reads in swarm sw,")
 
 
-def test_an_auto_work_lane_spawn_asks_for_the_codex_share_with_the_swarm_settings(tmp_path, monkeypatch):
-    from scripts import agent_choice
-
-    seen = {}
-
-    def shared(requested, environ, spawns, share, min_week_left, choose):
-        seen.update(requested=requested, spawns=spawns, share=share, min_week_left=min_week_left)
-        return "codex", "codex share 0/2 below 30%"
-
-    def run(argv, **kwargs):
-        seen["argv"] = argv
-        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
-
-    monkeypatch.setattr(agent_choice, "choose_shared", shared)
-    monkeypatch.delenv("AGENTIHOOKS_SWARM_CODEX_SHARE", raising=False)
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_MIN_WEEK_LEFT", "7")
-    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "priority"))
-    config = SimpleNamespace(
-        slug="sw",
-        repo=str(tmp_path),
-        code="a1b2c3",
-        compact_limit=0,
-        lanes={"eng": {"agent": "auto"}},
-        autonomy="delegate",
-        codex_share=None,
-        codex_min_week_left=None,
-    )
-    runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"}, spawns={"claude": 2})
-    assert seen["requested"] == "" and seen["spawns"] == {"claude": 2}
-    assert (seen["share"], seen["min_week_left"]) == (30, 7)
-    assert seen["argv"][seen["argv"].index("--agent") + 1] == "codex"
-
-
 @pytest.mark.parametrize(
     ("reason", "choice"),
-    [("fallthrough: claude is at its session cap", "overflow"), ("codex share 0/2 below 30%", "share")],
+    [("priority", "other"), ("rotation", "rotation"), ("fallthrough: claude is at its session cap", "overflow")],
 )
-def test_a_spawn_carries_the_router_choice_kind(tmp_path, monkeypatch, reason, choice):
-    from scripts import agent_choice
-
+def test_a_spawn_carries_the_router_choice_kind(tmp_path, reason, choice):
     def run(argv, **kwargs):
         return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
-    monkeypatch.setattr(agent_choice, "choose_shared", lambda *args, **kwargs: ("codex", reason))
-    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "priority"))
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("codex", reason))
     config = SimpleNamespace(
         slug="sw",
         repo=str(tmp_path),
@@ -490,98 +452,9 @@ def test_a_spawn_carries_the_router_choice_kind(tmp_path, monkeypatch, reason, c
         compact_limit=0,
         lanes={"eng": {"agent": "auto"}},
         autonomy="delegate",
-        codex_share=20,
-        codex_min_week_left=5,
     )
-    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"}, spawns={})
+    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     assert placed.choice == choice
-
-
-@pytest.mark.parametrize(
-    ("profile", "lane_agent", "harness"),
-    [("frontend", "auto", "claude"), ("frontend", "claude", "claude"), ("engineer", "auto", "codex")],
-)
-def test_a_task_naming_a_claude_only_profile_spawns_on_claude_at_codex_share_one_hundred(
-    tmp_path, monkeypatch, profile, lane_agent, harness
-):
-    from scripts import agent_choice
-    from scripts.profiles import plugins
-
-    monkeypatch.setattr(plugins, "claude_only", lambda name: name == "frontend")
-    monkeypatch.setattr(agent_choice, "at_cap", lambda *_: False)
-    monkeypatch.setattr(agent_choice, "codex_week_left", lambda *_: 90.0)
-    seen = {}
-
-    def run(argv, **kwargs):
-        seen["argv"] = argv
-        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
-
-    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda requested, environ: (requested or "claude", "x"))
-    config = SimpleNamespace(
-        slug="sw",
-        repo=str(tmp_path),
-        code="a1b2c3",
-        compact_limit=0,
-        lanes={"eng": {"agent": lane_agent}},
-        autonomy="delegate",
-        codex_share=100,
-        codex_min_week_left=5,
-    )
-    task = {"id": "t1", "title": "x", "profile": profile}
-    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task, spawns={"claude": 3})
-    assert seen["argv"][seen["argv"].index("--agent") + 1] == harness
-    assert placed.harness == harness
-
-
-@pytest.mark.parametrize(("lane", "spawns"), [("eng", {"claude": 3}), ("ci", {}), ("plan", {}), ("master", None)])
-@pytest.mark.parametrize("lane_agent", ["auto", "codex"])
-def test_a_zero_codex_share_applies_only_to_auto_lanes(tmp_path, monkeypatch, lane, spawns, lane_agent):
-    from scripts import agent_choice
-
-    monkeypatch.setattr(agent_choice, "codex_week_left", lambda *_: 90.0)
-    seen = {}
-
-    def run(argv, **kwargs):
-        seen["argv"] = argv
-        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
-
-    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda requested, environ: ("codex", "priority"))
-    config = SimpleNamespace(
-        slug="sw",
-        repo=str(tmp_path),
-        code="a1b2c3",
-        compact_limit=0,
-        lanes={lane: {"agent": lane_agent}},
-        autonomy="delegate",
-        codex_share=0,
-        codex_min_week_left=5,
-    )
-    task = {**SEAT_TASKS[lane], "profile": "engineer"}
-    placed = runtime.spawn(config, lane, "engineer@a1b2c3-0001", task, spawns=spawns)
-    expected = "codex" if lane_agent == "codex" else "claude"
-    assert seen["argv"][seen["argv"].index("--agent") + 1] == expected
-    assert placed.harness == expected
-
-
-@pytest.mark.parametrize(("share", "swarm_share", "capacity"), [(0, "30", False), (30, "0", True), (None, "0", False)])
-def test_a_free_codex_slot_counts_only_while_the_codex_share_allows_codex(
-    tmp_path, monkeypatch, share, swarm_share, capacity
-):
-    from scripts import agent_choice
-
-    monkeypatch.setattr(agent_choice, "codex_week_left", lambda *_: 90.0)
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_SHARE", swarm_share)
-
-    def choose(requested, environ):
-        if requested:
-            return requested, "requested"
-        if environ.get("AGENTIHOOKS_AGENT_PRIORITY") == "claude":
-            return "claude", agent_choice.ALL_FULL
-        return "codex", "fallthrough: claude is at its session cap"
-
-    runtime = HerdrRuntime(home=tmp_path, choose=choose)
-    config = SimpleNamespace(codex_share=share, codex_min_week_left=5)
-    assert runtime.has_capacity(config) is capacity
 
 
 def test_a_claude_only_profile_asks_the_plain_choice_for_claude_with_the_environment(tmp_path, monkeypatch):

@@ -577,7 +577,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
             stderr="",
         )
 
-    rt = runtime.HerdrRuntime(home=tmp_path, run=fake_run, choose=lambda r, e: ("codex", "priority"))
+    rt = runtime.HerdrRuntime(home=tmp_path, run=fake_run, choose=lambda r, e: ("codex", "rotation"))
     config = cli.SwarmConfig("sw", "/repo", 1, 1)
     placed = rt.spawn(config, "ci", "ci@a1b2c3-0001", {"id": "t2", "title": "speed up the tests"})
     prompt_path = tmp_path / "sw" / "prompts" / "ci@a1b2c3-0001.md"
@@ -599,7 +599,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
         profile="cicd",
         model_source="lane-default",
         profile_decision={**decision, "validation": placed.profile_decision["validation"]},
-        choice="share",
+        choice="rotation",
         launched_at=7_000,
         launch_timings=placed.launch_timings,
     )

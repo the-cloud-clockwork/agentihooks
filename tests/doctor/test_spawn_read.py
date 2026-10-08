@@ -92,6 +92,3 @@ def test_spawn_reader_passes_an_explicit_upper_journal_bound(monkeypatch):
     assert record["actions"] == ["sw: spawn failed for mu1, task mu1 reopened: timeout"]
     assert spawns.failed(record)[0].measure == 1
     assert store.export("sw") == before
-
-
-

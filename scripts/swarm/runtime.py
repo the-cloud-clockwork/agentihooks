@@ -251,9 +251,6 @@ class HerdrRuntime:
         if row is None:
             seat = session_bands.pick(seats(eligible))
             row = next(row for row in eligible if row.name == seat.account)
-        self._quota_accounts = [
-            replace(found, sessions=found.sessions + 1) if found is row else found for found in self._quota_accounts
-        ]
         return row
 
     def spawn(self, config, lane, name, task):

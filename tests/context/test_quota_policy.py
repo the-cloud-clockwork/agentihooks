@@ -254,7 +254,6 @@ def test_evaluate_reads_the_session_snapshot_and_the_router_cache(tmp_path, monk
     monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda start=None: 1)
     monkeypatch.setattr("hooks.context.account_sessions.session_account", lambda pid: "alpha")
     monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"alpha": 1, "beta": 1})
-    monkeypatch.setattr("scripts.session_caps.stored", lambda harness="claude": {"beta": 6})
 
     d = qp.evaluate("sess-1")
     assert d.target.cap == 6

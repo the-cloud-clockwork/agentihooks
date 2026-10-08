@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from scripts import session_caps
 from scripts.gates.progress import Progress
 from scripts.inbox.seen import SeenMarks
 from scripts.inbox.store import InboxStore
@@ -40,7 +39,6 @@ def test_every_swarm_store_writes_under_the_suite_prefix(redis):
     InboxStore(redis).send("master@demo", "eng-1@demo", "hello")
     Progress(redis, "demo").outcome("eng-1@demo", "pushed")
     SeenMarks(redis).mark("eng-1@demo", "demo:1:c1")
-    session_caps.set_cap("acct", 2)
 
     keys = sorted(redis.scan_iter("*"))
 

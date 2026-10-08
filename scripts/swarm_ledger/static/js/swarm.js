@@ -171,15 +171,8 @@ function quotaRows(sw, now) {
     master: !!master.account && r.account === master.account && r.agent === (master.harness || "claude") }));
 }
 
-function sessionStep(q, up) {
-  const cap = up ? q.cap + 1 : q.cap - 1, word = up ? "Raise" : "Lower";
-  return h("button", { class: "sw-btn sw-step", type: "button", "data-session-cap": String(cap), "data-account": q.account, "data-harness": q.harness,
-    "aria-label": `${word} the ${q.harness} session cap for ${q.account}`, disabled: !!pending || !(cap >= 1 && cap <= SESSION_CAP_MAX), text: up ? "+" : "\u2212" });
-}
-
 function sessionCell(q) {
-  const value = h("span", { class: "sw-sessions-value", text: `${q.sessions}/${q.cap ?? "—"}` });
-  return q.cap == null ? value : h("span", { class: "sw-cap sw-sessions" }, sessionStep(q, false), value, sessionStep(q, true));
+  return h("span", { class: "sw-sessions-value", text: `${q.sessions}/${q.cap ?? "—"}` });
 }
 
 function quotaCount(sw, count, now) {
