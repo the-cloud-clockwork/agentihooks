@@ -4,7 +4,7 @@
   "integration_gate": "G1",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1718",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1733",
-  "tested_commit": "81b29ff7425f3220245b4f645e2177c261c0f51c",
+  "tested_commit": "dacc772c5d1a6a432b85edd70f98992db203718f",
   "ci_head": "pending",
   "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI, the init-agent launch and the process reaper behind HerdrRuntime, and the remote backend is an in-memory fake; not live rollout proof",
   "supported_versions": {
@@ -19,19 +19,24 @@
     "AGENTIHOOKS_RUNTIME_BACKEND selects the spawn backend, an unregistered one is unavailable and never falls back to local; AGENTIHOOKS_RUNTIME_DISABLED lists backends to disable"
   ],
   "states": {
-    "observed": "Local on 81b29ff7: pytest -n 2 tests/test_swarm_v2_runtime.py tests/swarm/test_runtime.py -> 177 passed; pytest -n 2 over the cli, tick, snapshot, phases, priority sweep, master launch, terminal mail and doctor cli suites -> 691 passed; ruff check and ruff format --check clean.",
+    "observed": "Local on dacc772c: pytest -n 2 tests/test_swarm_v2_runtime.py tests/swarm/test_runtime.py -> 180 passed; pytest -n 2 over the runtime, cli, tick, master launch, take master and resume suites -> 560 passed; before the dev merge the same suites plus snapshot, phases, priority sweep, terminal mail and doctor cli -> 922 passed; ruff check and ruff format --check clean.",
     "accepted": "Cases A, B and C passed on a local and a remote fake with different capabilities; case A ran the tick's routed runtime over a herdr fixture on two independent temporary homes.",
     "committed": "The tested commit carries the code; the case results in this folder were generated on it.",
     "externally_verified": "pending CI on the pull request"
   },
   "measurements": {
     "runtime_capability_failures_total": {
-      "a": [0, 0],
-      "b": {"kubernetes/recover": 1},
+      "a": [
+        0,
+        0
+      ],
+      "b": {
+        "kubernetes/recover": 1
+      },
       "c": 0
     }
   },
-  "authority": "Not applicable at this layer: runtime operations carry no operator grant. Dispatch keys on the runtime_backend the router itself records at spawn, never on a display label; grants belong to the claims and fencing packages.",
+  "authority": "Recorded as not applicable at this layer, pending acceptance: runtime operations carry no operator grant. Dispatch keys on the runtime_backend the router itself records at spawn, never on a display label; grants belong to the claims and fencing packages.",
   "cases": {
     "a": "evidence/SV2-RUN-01/a-result.json",
     "b": "evidence/SV2-RUN-01/b-result.json",
@@ -50,7 +55,7 @@
   },
   "remaining_limitations": [
     "Replay deduplication is the owning backend's: the router forwards a replayed spawn to its owner and adds no second backend; reconciliation by immutable execution ID (INV-R06) and generation fencing (INV-R07) are not implemented here.",
-    "The tick's remaining herdr calls (live names, bindings, conversations, pane naming, reattach by name, space close) and the swarm CLI commands other than tick and stop still call HerdrRuntime directly; process-level assumptions are SV2-RUN-02.",
+    "Inspection calls (live names, bindings, conversations, pane naming, status, space close) still go to HerdrRuntime directly; every lifecycle call from the tick and the swarm CLI goes through RuntimeRouter. Process-level assumptions are SV2-RUN-02.",
     "No remote backend exists yet; the remote runtime is a fixture.",
     "runtime_capability_failures_total is an in-process counter on RuntimeRouter with no exporter.",
     "No live rollout proof; the evidence is a local isolated fixture plus CI."

@@ -1,5 +1,5 @@
 {
-  "tested_commit": "81b29ff7425f3220245b4f645e2177c261c0f51c",
+  "tested_commit": "dacc772c5d1a6a432b85edd70f98992db203718f",
   "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI, the init-agent launch and the process reaper behind HerdrRuntime, and the remote backend is an in-memory fake; not live rollout proof",
   "then": "the existing local swarm completes its original spawn, observe and retire tests through the new interface",
   "runs": [
