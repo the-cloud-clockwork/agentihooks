@@ -41,7 +41,7 @@ class GrantRefused(SwarmError):
     def __init__(self, error_class: str, message: str) -> None:
         super().__init__(message)
         self.error_class = error_class
-        self.operation_id = ""
+        self.operation_id = "unknown"
         self.retry = "same_request" if error_class == "dependency_unavailable" else "new_request"
 
     def detail(self) -> dict:
@@ -171,7 +171,7 @@ class LaunchAuthority:
                     return
                 except WatchError:
                     continue
-        raise GrantRefused("dependency_unavailable", "launch grants kept changing; the grant was not issued")
+        self.refuse(slug, "dependency_unavailable", "launch grants kept changing; the grant was not issued")
 
     def sign(self, claims: Mapping) -> str:
         payload = _encode(json.dumps(claims, sort_keys=True, separators=(",", ":")).encode())
@@ -225,7 +225,7 @@ class LaunchAuthority:
         try:
             return self.commit(slug, token, body)
         except GrantRefused as error:
-            error.operation_id = operation_id
+            error.operation_id = operation_id if _identifier(operation_id) else "unknown"
             raise
 
     def commit(self, slug: str, token: str, body: object) -> Registration:
@@ -242,8 +242,8 @@ class LaunchAuthority:
                     return self.admit(pipe, slug, claims)
                 except WatchError:
                     continue
-        raise GrantRefused(
-            "dependency_unavailable", "launch registrations kept changing; registration was not committed"
+        self.refuse(
+            slug, "dependency_unavailable", "launch registrations kept changing; registration was not committed"
         )
 
     def admit(self, pipe: Pipeline, slug: str, claims: dict) -> Registration:
@@ -297,7 +297,7 @@ class LaunchAuthority:
                     return revoked
                 except WatchError:
                     continue
-        raise GrantRefused("dependency_unavailable", "launch grants kept changing; revocation was not committed")
+        self.refuse(slug, "dependency_unavailable", "launch grants kept changing; revocation was not committed")
 
     def enable(self, slug: str) -> None:
         self.redis.delete(self.store.key(slug, "launch-grants-disabled"))

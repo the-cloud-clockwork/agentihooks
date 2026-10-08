@@ -45,10 +45,12 @@ execution admitted through `RedisStore.start_execution` (SV2-IDN-02).
 | Grants disabled for the swarm | `forbidden_scope` |
 
 Every refusal happens before any registry write. A `GrantRefused` carries `error_class`, the
-`operation_id` of the request (`register(..., operation_id)`, echoed so a retry can name it) and a retry
+`operation_id` of the request (`register(..., operation_id)`), echoed only when it is an identifier and
+`unknown` otherwise, as the shared contract refusals do; `issue` and `disable` are controller calls and
+report `unknown`. It also carries a retry
 class: `new_request` for every refusal, since correcting the input takes a new valid request and never
 an implicit fallback, and `same_request` for `dependency_unavailable`, raised when a watched transaction
-kept conflicting and nothing was written. `detail()` is the sanitized form; it never contains the token,
+kept conflicting and nothing was written; for `issue` the retry is a fresh issue. `detail()` is the sanitized form; it never contains the token,
 the key or another caller's resource. `launch_grant_rejections(store, slug)` counts refusals per error class, and
 `launch_grant_rejections_total` sums them.
 

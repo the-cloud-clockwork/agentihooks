@@ -410,9 +410,19 @@ def test_a_refusal_carries_the_request_operation_id_and_retry_class(store, autho
             "retry": "new_request",
             "message": "launch grant is malformed",
         }
+    token = issue(authority, execution)
+    for unusable in ("", 7, ["op-x"], token, "op id", "a" * 129):
+        with pytest.raises(GrantRefused) as error:
+            authority.register("fixture", "bad", body(execution), unusable)
+        assert error.value.detail()["operation_id"] == "unknown"
     with pytest.raises(GrantRefused) as error:
         authority.register("fixture", "bad", body(execution))
-    assert error.value.operation_id == ""
+    assert error.value.operation_id == "unknown"
+    with pytest.raises(GrantRefused) as error:
+        issue(authority, execution, brain_id="")
+    assert error.value.detail()["operation_id"] == "unknown"
+    registration = authority.register("fixture", token, body(execution), "op-" + "a" * 125)
+    assert registration.execution_id == execution.execution_id
     assert GrantRefused("dependency_unavailable", "fixture").retry == "same_request"
 
 
@@ -687,6 +697,7 @@ def test_writes_retry_a_concurrent_change_then_give_up(store, authority, executi
     with pytest.raises(GrantRefused, match="kept changing") as error:
         run()
     assert (error.value.error_class, error.value.retry) == ("dependency_unavailable", "same_request")
+    assert launch_grant_rejections(store, "fixture") == {"dependency_unavailable": 1}
     assert len(calls) == 5
 
 
@@ -713,9 +724,8 @@ def test_a_grant_issued_while_its_execution_is_replaced_is_refused(store, author
 
     def replace_first(pipe):
         if not replaced:
-            monkeypatch.undo()
-            replaced.append(admit(store, FIXTURE["seat"], execution.execution_id))
-            hook_pipelines(store, monkeypatch, replace_first)
+            replaced.append(True)
+            admit(store, FIXTURE["seat"], execution.execution_id)
         return pipe.execute()
 
     hook_pipelines(store, monkeypatch, replace_first)
