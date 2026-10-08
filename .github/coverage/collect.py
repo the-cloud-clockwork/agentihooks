@@ -34,9 +34,13 @@ def _get(url: str, token: str, etag: str | None = None) -> tuple[int, str | None
 
 
 def _describe(error: Exception) -> str:
-    if isinstance(error, HTTPError):
-        return f"HTTP {error.code} {error.reason}: {error.read().decode(errors='replace')[:1000]}"
-    return str(error)
+    if not isinstance(error, HTTPError):
+        return str(error)
+    try:
+        body = error.read().decode(errors="replace")[:1000]
+    except (OSError, HTTPException):
+        body = ""
+    return f"HTTP {error.code} {error.reason}: {body}"
 
 
 def _shard_states(runs_url: str, token: str) -> dict[str, str | None]:
