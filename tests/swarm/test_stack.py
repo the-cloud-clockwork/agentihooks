@@ -235,7 +235,8 @@ def test_park_writes_the_open_dependencies_and_the_stacked_base(parked, capsys):
     }
 
 
-def test_a_stop_after_park_passes_the_claim_stop_gate(parked, tmp_path):
+@pytest.mark.parametrize("merged_before_stop", [False, True])
+def test_a_stop_after_park_passes_the_claim_stop_gate(parked, tmp_path, merged_before_stop):
     store, ledger, _, _, doc = parked
     ledger.rows["t1"].update({"state": "claimed", "claimed_by": AGENT, "pr_url": ""})
     gate = ClaimStop(connect=lambda: store, ledger=lambda: ledger, github=lambda url: None, now=lambda: NOW)
@@ -246,6 +247,8 @@ def test_a_stop_after_park_passes_the_claim_stop_gate(parked, tmp_path):
 
     assert not stop().allowed
     assert park(doc) == 0
+    if merged_before_stop:
+        ledger.rows["a"]["state"] = "done"
     assert stop() == Decision()
     assert ledger.rows["t1"]["state"] == "claimed"
 
