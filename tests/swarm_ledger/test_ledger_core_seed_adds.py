@@ -49,16 +49,29 @@ def test_a_ledger_created_from_a_seed_page_keeps_every_item():
     assert state["_meta"]["warnings"] == []
 
 
+PREFIX = "agentihooks ledger --slug <slug> --as <name> "
+
+
 def test_a_new_task_in_the_seed_page_is_refused_with_its_add_command():
     before = make_ledger()
     state = edit_seed(lambda seed: seed["tasks"].append({"id": "t2", "title": "Ship it", "phase": "p1", "lane": "eng"}))
     assert state["tasks"] == before["tasks"]
     assert state["_meta"]["warnings"] == [
-        'The page added the task "Ship it", which was not added. Add it with '
-        'agentihooks ledger --slug <slug> --as <name> task add <id> "Ship it", which checks it for duplicates.'
+        f'The page added the task "Ship it", which was not added. Add it with {PREFIX}'
+        "task add <id> 'Ship it' --phase p1 --lane eng"
     ]
     assert not [e for e in state["_meta"]["events"] if e["kind"] == "added"]
     assert [t["id"] for t in page_seed()["tasks"]] == ["t1"]
+
+
+def test_the_refused_task_command_quotes_its_title_and_carries_its_fields():
+    make_ledger()
+    task = {"id": "t2", "title": 'Say "hi"', "description": "Do it now", "depends_on": ["t1", "t0"]}
+    state = edit_seed(lambda seed: seed["tasks"].append(task))
+    assert state["_meta"]["warnings"] == [
+        f'The page added the task "Say "hi"", which was not added. Add it with {PREFIX}'
+        "task add <id> 'Say \"hi\"' --description 'Do it now' --depends-on t1,t0"
+    ]
 
 
 def test_a_new_follow_up_in_the_seed_page_is_refused_with_its_add_command():
@@ -66,18 +79,34 @@ def test_a_new_follow_up_in_the_seed_page_is_refused_with_its_add_command():
     state = edit_seed(lambda seed: seed["followups"].append({"id": "f2", "text": "rotate the logs"}))
     assert state["followups"] == before["followups"]
     assert state["_meta"]["warnings"] == [
-        'The page added the follow up "rotate the logs", which was not added. Add it with '
-        'agentihooks ledger --slug <slug> --as <name> followup add "rotate the logs", which checks it for duplicates.'
+        f'The page added the follow up "rotate the logs", which was not added. Add it with {PREFIX}'
+        "followup add 'rotate the logs'"
+    ]
+
+
+def test_every_new_item_in_one_seed_is_refused_in_page_order():
+    before = make_ledger()
+    state = edit_seed(
+        lambda seed: seed["followups"].extend([{"id": "f2", "text": "first"}, {"id": "f3", "text": "second"}])
+    )
+    assert state["followups"] == before["followups"]
+    assert state["_meta"]["warnings"] == [
+        f'The page added the follow up "first", which was not added. Add it with {PREFIX}followup add first',
+        f'The page added the follow up "second", which was not added. Add it with {PREFIX}followup add second',
     ]
 
 
 def test_a_new_phase_in_the_seed_page_is_refused_with_its_add_command():
     before = make_ledger()
-    state = edit_seed(lambda seed: seed["phases"].append({"id": "p2", "title": "Second", "depends_on": ["p1"]}))
+    state = edit_seed(
+        lambda seed: seed["phases"].append(
+            {"id": "p2", "title": "Second", "description": "Later work", "depends_on": ["p1"]}
+        )
+    )
     assert state["phases"] == before["phases"]
     assert state["_meta"]["warnings"] == [
-        'The page added the phase "Second", which was not added. Add it with '
-        'agentihooks ledger --slug <slug> --as <name> phase add <id> "Second", which checks it for duplicates.'
+        f'The page added the phase "Second", which was not added. Add it with {PREFIX}'
+        "phase add <id> Second --description 'Later work' --depends-on p1"
     ]
     assert state["_meta"]["seed_error"] is None
 
@@ -91,6 +120,14 @@ def test_an_existing_phase_cannot_depend_on_a_refused_new_phase():
 
     state = edit_seed(change)
     assert state["phases"] == before["phases"]
+
+
+def test_a_comment_on_a_refused_task_is_dropped_with_it():
+    before = make_ledger()
+    task = {"id": "t2", "title": "Ship it", "comments": [{"id": "c-x", "by": "engineer", "text": "Started it."}]}
+    state = edit_seed(lambda seed: seed["tasks"].append(task))
+    assert state["tasks"] == before["tasks"]
+    assert len(state["_meta"]["warnings"]) == 1
 
 
 def test_an_edited_title_still_merges():

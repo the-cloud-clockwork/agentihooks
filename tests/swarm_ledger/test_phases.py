@@ -149,6 +149,11 @@ def test_review_op_changes_only_review_and_seed_cannot_forge_it():
         "release": True,
         "review": review,
     }
+    state = edit_seed(
+        lambda seed: seed["phases"].append({"id": "p2", "title": "Second", "review": {"state": "approved"}})
+    )
+    assert [p["id"] for p in state["phases"]] == ["p1"]
+    assert state["_meta"]["warnings"][-1].startswith('The page added the phase "Second", which was not added.')
     apply("phase_add", phase="p2", title="Second")
     state = edit_seed(lambda seed: seed["phases"][1].update(review={"state": "approved"}))
     assert "review" not in state["phases"][1]
@@ -567,7 +572,7 @@ def test_a_seed_phase_that_would_complete_a_concurrent_cycle_is_refused():
     assert "depends_on" not in state["phases"][1]
     assert state["_meta"]["warnings"] == [
         'The page added the phase "Third", which was not added. Add it with '
-        'agentihooks ledger --slug <slug> --as <name> phase add <id> "Third", which checks it for duplicates.',
+        "agentihooks ledger --slug <slug> --as <name> phase add <id> Third --depends-on p1",
         "phase p2 depends on unknown phases: p3",
     ]
 

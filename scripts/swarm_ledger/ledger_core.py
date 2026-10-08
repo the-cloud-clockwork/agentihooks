@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import sys
 import tempfile
 import threading
@@ -69,9 +70,9 @@ LISTS = {
 }
 BOOL_FIELDS = ("done", "out_of_scope")
 SEED_ADD_COMMANDS = {
-    "tasks": ("task", "task add <id>"),
-    "followups": ("follow up", "followup add"),
-    "phases": ("phase", "phase add <id>"),
+    "tasks": ("task", "task add <id>", ("phase", "lane", "description", "depends_on")),
+    "followups": ("follow up", "followup add", ()),
+    "phases": ("phase", "phase add <id>", ("description", "depends_on")),
 }
 STATE_EVENTS = {"done": ("checked", "unchecked"), "out_of_scope": ("out of scope", "back in scope")}
 THREADS = {
@@ -430,9 +431,9 @@ def new_item(name, seed_item, ctx):
 
 
 def refuse_seed_adds(doc, base_doc, seed, ctx):
-    """New tasks, follow ups and phases come only from the ledger commands, which check them for duplicates."""
+    """New tasks, follow ups and phases come only from the ledger add commands, where the duplicate check runs."""
     kept = {}
-    for name, (noun, command) in SEED_ADD_COMMANDS.items():
+    for name, (noun, command, fields) in SEED_ADD_COMMANDS.items():
         known = {i["id"] for i in doc[name]} | {i["id"] for i in base_doc[name]}
         kept[name] = [i for i in seed[name] if i["id"] in known]
         for item in seed[name]:
@@ -440,9 +441,19 @@ def refuse_seed_adds(doc, base_doc, seed, ctx):
                 label = item.get("text") or item.get("title", "")
                 ctx.refused.append(
                     f'The page added the {noun} "{label}", which was not added. Add it with '
-                    f'agentihooks ledger --slug <slug> --as <name> {command} "{label}", which checks it for duplicates.'
+                    f"{seed_add_command(command, label, item, fields)}"
                 )
     return {**seed, **kept}
+
+
+def seed_add_command(command, label, item, fields):
+    flags = []
+    for field in fields:
+        value = item.get(field)
+        if value:
+            value = ",".join(value) if isinstance(value, list) else value
+            flags.append(f"--{field.replace('_', '-')} {shlex.quote(value)}")
+    return " ".join(["agentihooks ledger --slug <slug> --as <name>", command, shlex.quote(label), *flags])
 
 
 def reconcile_fields(doc, base_doc, seed, ctx):
