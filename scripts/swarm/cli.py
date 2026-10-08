@@ -577,7 +577,7 @@ def cmd_snapshot(store, args):
 def cmd_restore(store, args):
     source = Path(args.source).expanduser() if args.source else snapshot.newest(args.slug)
     herdr = HerdrRuntime()
-    outcomes = snapshot.restore(store, args.slug, herdr.live_names(), source, runtime=herdr)
+    outcomes = snapshot.restore(store, args.slug, herdr.live_names(), source, runtime=routed(herdr=herdr))
     for action in run_tick(store, args.slug):
         print(action)
     state = store.config(args.slug).state
