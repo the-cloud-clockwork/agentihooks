@@ -10,6 +10,11 @@ def _artifact(run, created, branch="dev", expired=False):
     return {"expired": expired, "created_at": created, "workflow_run": {"id": run, "head_branch": branch}}
 
 
+@pytest.fixture(autouse=True)
+def _collected_suite(monkeypatch):
+    monkeypatch.setattr(dev_durations, "collected_tests", lambda root: ["t.py::a"])
+
+
 def _gh(listing, created):
     calls = []
 
