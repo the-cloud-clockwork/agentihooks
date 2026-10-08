@@ -1,0 +1,17 @@
+{
+  "tested_commit": "8b6130b8cfe710834f6589c76713c5f009ea560f",
+  "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI, the init-agent launch and the process reaper behind HerdrRuntime, and the remote backend is an in-memory fake; not live rollout proof",
+  "then": "a backend lacking native resume reports unsupported capability rather than silently starting fresh",
+  "result": {
+    "status": "unsupported",
+    "detail": "kubernetes lacks native_resume",
+    "remote_state_unchanged": true,
+    "remote_calls_after_spawn": 0,
+    "local_calls": 0,
+    "discloses_runtime_target": false,
+    "runtime_capability_failures_total": {
+      "kubernetes/recover": 1
+    }
+  },
+  "passed": true
+}

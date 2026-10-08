@@ -1,0 +1,52 @@
+{
+  "package": "SV2-RUN-01",
+  "dependency": "SV2-IDN-05",
+  "integration_gate": "G1",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1718",
+  "pull_request": "pending",
+  "tested_commit": "8b6130b8cfe710834f6589c76713c5f009ea560f",
+  "ci_head": "pending",
+  "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI, the init-agent launch and the process reaper behind HerdrRuntime, and the remote backend is an in-memory fake; not live rollout proof",
+  "supported_versions": {
+    "runtime_protocol": "operations spawn, observe, command, drain, terminate, recover; statuses ok, ambiguous, unavailable, unsupported, refused; recovery modes reattach, resume",
+    "backends": "local (LocalHerdrRuntime over HerdrRuntime); remote backends are fixtures only"
+  },
+  "interfaces": [
+    "scripts.swarm_v2.runtime.base: Capability, Status, Recovery, SpawnRequest, Outcome, Runtime, foreign, RuntimeRouter (spawn, observe, command, drain, terminate, recover, spawn_backend, capability_failures_total, from_environ)",
+    "scripts.swarm_v2.runtime.local.LocalHerdrRuntime: compatibility adapter over scripts.swarm.runtime.HerdrRuntime spawn, observe, nudge, retire, recover and resume",
+    "AGENTIHOOKS_RUNTIME_BACKEND selects the spawn backend; AGENTIHOOKS_RUNTIME_DISABLED lists backends to disable"
+  ],
+  "states": {
+    "observed": "Local: the runtime protocol module and the existing herdr runtime suite passed; ruff check and format clean.",
+    "accepted": "Cases A, B and C passed on a local and a remote fake with different capabilities; case A repeated on a second independent temporary home.",
+    "committed": "The tested commit carries the code; the case results in this folder were generated on it.",
+    "externally_verified": "pending CI on the pull request"
+  },
+  "measurements": {
+    "runtime_capability_failures_total": {
+      "a": [0, 0],
+      "b": {"kubernetes/recover": 1},
+      "c": 0
+    }
+  },
+  "cases": {
+    "a": "evidence/SV2-RUN-01/a-result.json",
+    "b": "evidence/SV2-RUN-01/b-result.json",
+    "c": "evidence/SV2-RUN-01/c-result.json",
+    "manifest": "evidence/SV2-RUN-01/manifest.json",
+    "generator": "evidence/SV2-RUN-01/generate_case_results.py"
+  },
+  "rollback_rehearsal": {
+    "action": "AGENTIHOOKS_RUNTIME_DISABLED=<backend> routes new spawns to the local adapter; existing attempt records keep their runtime_backend and their operations return unavailable",
+    "tests": [
+      "test_disabling_the_remote_adapter_routes_new_spawns_local_and_keeps_its_records"
+    ],
+    "case": "c: a disabled remote left its attempt record and runtime object unchanged, a new spawn went local, and re-enabling served the first object again without a duplicate"
+  },
+  "remaining_limitations": [
+    "The tick and the swarm command line still call HerdrRuntime directly; moving those call sites onto RuntimeRouter belongs to SV2-RUN-02.",
+    "No remote backend exists yet; the remote runtime is a fixture.",
+    "runtime_capability_failures_total is an in-process counter on RuntimeRouter with no exporter.",
+    "No live rollout proof; the evidence is a local isolated fixture plus CI."
+  ]
+}
