@@ -195,17 +195,26 @@ def _settle_red_notices(mail, github):
     mail.once("red-notices:backfill", lambda: _backfill_red_notices(mail))
     index, settled = mail.red_index(), []
     for item_id, url in mail.store.redis.hgetall(index).items():
+        if not _open(mail.inbox, item_id):
+            mail.store.redis.hdel(index, item_id)
+            continue
+        how = _settled(github(url))
+        if not how:
+            continue
         try:
-            if mail.inbox.get(item_id).state not in CLOSED:
-                how = _settled(github(url))
-                if not how:
-                    continue
-                mail.inbox.close(item_id, SENDER, "done", f"pull request {url} {how}")
-                settled.append(f"closed the red notice {item_id}: {url} {how}")
+            mail.inbox.close(item_id, SENDER, "done", f"pull request {url} {how}")
         except InboxError:
-            pass
+            continue
+        settled.append(f"closed the red notice {item_id}: {url} {how}")
         mail.store.redis.hdel(index, item_id)
     return settled
+
+
+def _open(inbox, item_id):
+    try:
+        return inbox.get(item_id).state not in CLOSED
+    except InboxError:
+        return False
 
 
 def _backfill_red_notices(mail):

@@ -322,16 +322,20 @@ def test_a_red_notice_closed_by_its_reader_leaves_the_index_unasked(store):
     assert red_index(store) == {}
 
 
-def test_a_red_notice_closed_meanwhile_or_gone_leaves_the_index_and_the_pass_runs_on(store, monkeypatch):
+def test_a_red_notice_whose_close_races_stays_indexed_and_closes_next_pass(store, monkeypatch):
     red, item = red_notice(store)
     store.redis.hset(store.key("sw", "red-notices"), "gone", URL)
 
-    def closed_meanwhile(self, item_id, closer, kind, detail=""):
+    def changed_meanwhile(self, item_id, closer, kind, detail=""):
         raise ledger_events.InboxError(f"message {item_id} changed meanwhile")
 
-    monkeypatch.setattr(InboxStore, "close", closed_meanwhile)
-    told = run(store, done_task(), now_ms=red.red_at + 21 * MINUTE, github=lambda url: answer("merged"))
+    with monkeypatch.context() as patched:
+        patched.setattr(InboxStore, "close", changed_meanwhile)
+        told = run(store, done_task(), now_ms=red.red_at + 21 * MINUTE, github=lambda url: answer("merged"))
     assert not [line for line in told if line.startswith("closed the red notice")]
+    assert red_index(store) == {item.id: URL}
+    told = run(store, done_task(), now_ms=red.red_at + 22 * MINUTE, github=lambda url: answer("merged"))
+    assert told == [f"closed the red notice {item.id}: {URL} merged"]
     assert red_index(store) == {}
 
 
