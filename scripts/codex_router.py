@@ -180,17 +180,37 @@ class CodexAccountSource:
     def pool(self, environ: Mapping[str, str]) -> list[CodexAccount]:
         return routing_pool(environ, *self._run())
 
-    def readings(self, pool: list[CodexAccount], environ: Mapping[str, str], now: float) -> dict:
+    def readings(
+        self, pool: list[CodexAccount], environ: Mapping[str, str], now: float
+    ) -> dict[str, CodexQuota | None]:
         return fresh_quotas(pool, environ, now, *self._run()) if self.refresh else quotas(pool, environ)
+
+    def offer(self, pool: list[CodexAccount], readings: Mapping[str, CodexQuota | None], now: float) -> list[Slot]:
+        return [
+            Slot(
+                "codex",
+                account.name,
+                cap,
+                self.sessions.get(account.name, 0),
+                _spend_by(quota, now),
+                kind=SUBSCRIPTION if account.is_token else INTERACTIVE,
+            )
+            for account in pool
+            if account.signed_in and (cap := account_cap(quota := readings.get(account.name), now)) is not None
+        ]
 
     def slots(self, environ: Mapping[str, str], now: float) -> list[Slot]:
         pool = self.pool(environ)
-        return seats(pool, self.readings(pool, environ, now), self.sessions, now)
+        return self.offer(pool, self.readings(pool, environ, now), now)
 
     def child_env(self, slot: Slot, environ: Mapping[str, str]) -> dict[str, str]:
+        if slot.kind == INTERACTIVE:
+            return child_environment(CodexAccount(CODEX_DEFAULT), environ)
         tokens = {account.name: account for account in token_accounts(environ)}
-        account = CodexAccount(CODEX_DEFAULT) if slot.kind == INTERACTIVE else tokens[slot.account]
-        return child_environment(account, environ)
+        if slot.account not in tokens:
+            available = ", ".join(tokens) or "none"
+            raise RoutingError(f"Codex account '{slot.account}' has no token; available: {available}")
+        return child_environment(tokens[slot.account], environ)
 
 
 def select(
@@ -208,7 +228,7 @@ def select(
         available = ", ".join(account.name for account in pool)
         raise RoutingError(f"Codex account '{route}' not found; available: {available}")
     by_name = {account.name: account for account in pool}
-    seat = session_bands.pick(seats(pool, quotas, sessions, now))
+    seat = session_bands.pick(CodexAccountSource(sessions=sessions).offer(pool, quotas, now))
     if seat is None:
         raise RoutingError("no signed in Codex account has a fresh reading and a free session under its quota band")
     return by_name[seat.account], "open", seat
@@ -217,18 +237,7 @@ def select(
 def seats(
     pool: list[CodexAccount], quotas: Mapping[str, CodexQuota | None], sessions: Mapping[str, int], now: float
 ) -> list[session_bands.Seat]:
-    return [
-        Slot(
-            "codex",
-            account.name,
-            cap,
-            sessions.get(account.name, 0),
-            _spend_by(quota, now),
-            kind=SUBSCRIPTION if account.is_token else INTERACTIVE,
-        )
-        for account in pool
-        if account.signed_in and (cap := account_cap(quota := quotas.get(account.name), now)) is not None
-    ]
+    return CodexAccountSource(sessions=sessions).offer(pool, quotas, now)
 
 
 def _spend_by(quota: CodexQuota, now: float) -> float | None:

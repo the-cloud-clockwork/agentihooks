@@ -52,7 +52,9 @@ def test_the_claude_token_source_offers_a_subscription_slot_per_routable_account
         Slot("claude", "a", 6, 0, NOW + 600, kind="subscription"),
         Slot("claude", "b", 4, 1, NOW + 600, kind="subscription"),
     ]
-    assert calls == [(["AH_CC_TOKEN_a", "AH_CC_TOKEN_b", "AH_CC_TOKEN_d"], {"refresh": True, "environ": environ})]
+    assert calls == [
+        (["AH_CC_TOKEN_a", "AH_CC_TOKEN_b", "AH_CC_TOKEN_d"], {"refresh": True, "environ": environ, "now": NOW})
+    ]
 
 
 def test_the_claude_token_source_forwards_now_only_when_given(monkeypatch):
@@ -123,3 +125,9 @@ def test_the_codex_source_gives_the_child_only_the_slot_credentials():
         "CODEX_ACCESS_TOKEN": "cx-b",
     }
     assert source.child_env(Slot("codex", "default", 6, 0, kind="interactive"), CODEX_ENV) == {"HOME": "/h"}
+    with pytest.raises(codex_router.RoutingError) as refused:
+        source.child_env(Slot("codex", "default", 6, 0), CODEX_ENV)
+    assert str(refused.value) == "Codex account 'default' has no token; available: alpha, beta"
+    with pytest.raises(codex_router.RoutingError) as empty:
+        source.child_env(Slot("codex", "zulu", 6, 0, kind="api"), {})
+    assert str(empty.value) == "Codex account 'zulu' has no token; available: none"

@@ -12,11 +12,11 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest import mock
 
-from scripts import claude_quota_balancer as balancer
-from scripts import codex_router
+import scripts.claude_quota_balancer as balancer
+import scripts.codex_router as codex_router
+import scripts.swarm.capacity as capacity
 from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
 from scripts.codex_quota import CodexQuota
-from scripts.swarm import capacity
 from scripts.swarm.store import AgentRecord, SwarmConfig
 
 GOLDEN = Path(__file__).with_name("slot_equivalence.json")

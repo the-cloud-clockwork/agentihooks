@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from scripts import session_bands
 from scripts.claude_config import claude_home
@@ -656,7 +657,7 @@ def rank_results(results: list[ProbeResult], include_fable: bool = False) -> lis
 
 @dataclass(frozen=True)
 class ClaudeTokenSource:
-    options: Mapping[str, object] = field(default_factory=dict)
+    options: Mapping[str, Any] = field(default_factory=dict)
     sessions: Mapping[str, int] = field(default_factory=dict)
     exclude: frozenset[str] = frozenset()
 
@@ -678,7 +679,7 @@ class ClaudeTokenSource:
         ]
 
     def slots(self, environ: Mapping[str, str], now: float) -> list[Slot]:
-        results, _ = self.results(environ)
+        results, _ = self.results(environ, now)
         return self.offer(results, now)
 
     def child_env(self, slot: Slot, environ: Mapping[str, str]) -> dict[str, str]:
