@@ -129,3 +129,19 @@ def test_the_statusline_reports_the_live_model_and_effort_to_the_swarm(monkeypat
     statusline.main()
 
     assert seen == [reported]
+
+
+@pytest.mark.parametrize("branch", ["coverage-branch", ""])
+def test_statusline_branch_display_ignores_working_directory(monkeypatch, tmp_path, capsys, branch):
+    from hooks import statusline
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(statusline, "_git_branch", lambda: branch)
+    monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
+    statusline.main()
+
+    output = capsys.readouterr().out
+    if branch:
+        assert f"{statusline._MAGENTA}{branch}{statusline._RESET}\n" in output
+    else:
+        assert "coverage-branch" not in output
