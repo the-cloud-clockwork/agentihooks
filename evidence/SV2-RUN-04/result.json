@@ -4,7 +4,7 @@
   "integration_gate": "G1",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1874",
   "pull_request": "",
-  "tested_commit": "48e9aa0c048c124ad869aaddcefdad8c61b0d428",
+  "tested_commit": "ece20df35128d72bda3ac9140006b17d7bb0bf11",
   "status": "implemented-fixture-qualified-not-live",
   "evidence_class": "mocked signals and isolated fakeredis; no live Kubernetes, SSH or rollout proof",
   "interfaces": [
