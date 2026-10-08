@@ -1,0 +1,13 @@
+{
+  "tested_commit": "a3e90281916d6c2d5d4d8bfecfeaaa7872a9a630",
+  "evidence_class": "isolated fakeredis and mocked command transports; no live terminal, Pod or UI rollout proof",
+  "passed": true,
+  "refusal": "execution generation is stale",
+  "protected_state_unchanged": true,
+  "refused_request_had_no_effect": true,
+  "new_valid_request_targets_replacement": true,
+  "runtime_commands_by_outcome": {
+    "[\"\", \"force-stop\", \"refused\"]": 1,
+    "[\"kubernetes\", \"force-stop\", \"ok\"]": 1
+  }
+}

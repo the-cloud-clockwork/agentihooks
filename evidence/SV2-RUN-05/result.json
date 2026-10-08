@@ -1,0 +1,65 @@
+{
+  "package": "SV2-RUN-05",
+  "dependency": "SV2-RUN-04",
+  "integration_gate": "G1",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1899",
+  "pull_request": "",
+  "tested_commit": "a3e90281916d6c2d5d4d8bfecfeaaa7872a9a630",
+  "status": "implemented-service-fixture-qualified-awaiting-dependency-and-integration",
+  "evidence_class": "isolated fakeredis and mocked command transports; no live terminal, Pod or UI rollout proof",
+  "interfaces": [
+    "Action: attach, detach, answer, drain, cancel and force-stop",
+    "Request: immutable execution id, generation, action, retry key and transient answer",
+    "Principal and Role: distinct authenticated operator subject or registered master execution incarnation",
+    "CommandTransport: separately declared supported commands plus operation observation and application",
+    "Commands.execute, controls, audit and runtime_commands_by_outcome"
+  ],
+  "supported_versions": {
+    "runtime": "SV2-RUN-01 through SV2-RUN-04 unchanged",
+    "journal": "SV2-RUN-03 canonical operation actions retained; typed command name participates in the payload digest",
+    "storage": "runtime-command-audit list and runtime-command-outcomes hash; included by the existing swarm export and restore"
+  },
+  "authority": "The caller supplies a trusted scoped authenticator. It resolves credentials separately from the command payload into Principal with an explicit typed Role and a nonempty actor subject. Each operator remains distinguishable in audit. A master must match the registry's current canonical name, execution id, generation, master lane and active record. A display label grants nothing. Before the backend applies an effect, authenticated principal and target registry record are checked again. The transport must fence immutable execution identity and runtime target at its external effect boundary.",
+  "behavior": {
+    "detach": "Only the selected transport may remove viewer registration; no task release or execution state change occurs in the command service.",
+    "cancel": "A distinct typed cooperative stop request; the transport owns checkpoint and task-stop protocol. Cancellation acceptance does not certify task completion.",
+    "force-stop": "A distinct terminate operation targeting the current selected backend and runtime target. Old browser requests are refused before effects.",
+    "reopen": "Controls are reconstructed by read-only lookup of the seat's current admitted registry occupant and declared capabilities; no journal payload or button is replayed.",
+    "retry": "A command's retry key and payload digest identify its durable operation. A changed typed action conflicts even when its canonical journal action is the same. Lost acknowledgements reconcile before any further effect."
+  },
+  "states": {
+    "observed": "The three isolated acceptance fixtures returned passed true; direct backend state and execution registry records were compared.",
+    "accepted": "Operation records identify current execution, generation, backend, target and digest; audit identifies the requesting principal and outcome.",
+    "committed": "Service, tests, fixture and evidence generator are committed at tested_commit. Fixture input hashes are in manifest.json.",
+    "externally_verified": "None: no live terminal, Kubernetes, authenticated receiver or UI control proof at this stage."
+  },
+  "validation": {
+    "focused_tests": "155 passed in 1.88 seconds: command service, operation journal and accepted runtime protocol, two pytest workers",
+    "lint": "ruff check passed for changed Python files",
+    "format": "ruff format --check passed for changed Python files",
+    "limits": "ruff complexity, branches, arguments and statements passed; size gate: 84 units over a limit, 84 on the base allowlist, 0 errors"
+  },
+  "cases": {
+    "a": "evidence/SV2-RUN-05/a-result.json",
+    "b": "evidence/SV2-RUN-05/b-result.json",
+    "c": "evidence/SV2-RUN-05/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Construct Commands with enabled false. It hides new command controls and returns unsupported for new effects while retaining read-only attempt state. Existing local RuntimeRouter and controls are unchanged.",
+    "authoritative_objects": "Execution registry, task claims, operation journal and command audit are retained; terminal registration is a separate transport-owned object.",
+    "proof": "Case C restores exported coordination state, retains working status, hides new controls and leaves the task running."
+  },
+  "remaining_limitations": [
+    "This parked life does not claim the package or integration gate complete; the observation dependency is still open.",
+    "Commands is an injectable service; CLI and authenticated ledger receivers have not been wired to it.",
+    "No production CommandTransport exists yet. A concrete backend must separately implement viewer registration, terminal answers, drain, cooperative task stop and identity-fenced forced termination, observing operation identity to reconcile lost acknowledgements.",
+    "The mock transport models cooperative cancellation without releasing authority; final checkpoint and task-stop behavior must be proved when the concrete adapter is connected.",
+    "The trusted authentication adapter must resolve the operator role or verify a scoped launch grant, rather than accepting a request-provided Principal.",
+    "Actual UI buttons and terminal profiles remain unchanged; later connected controls require the scratch-page visual proof and applicable live rollout evidence.",
+    "Continuous integration and mutation are not run for the parked branch's pull request because no pull request has been opened yet."
+  ],
+  "reviews": {
+    "Standards": "S1 closed after explicit authenticated Role and named operator subject were added; no open findings in parked service scope",
+    "Spec": "P2 closed; distinct operator audit identity and master incarnation fencing verified; real receiver and transport remain named gaps"
+  }
+}
