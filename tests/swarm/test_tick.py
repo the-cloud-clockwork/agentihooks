@@ -291,6 +291,43 @@ def test_a_task_whose_launch_failed_takes_only_a_slot_left_over(store):
     assert [task for _, _, task in runtime.spawned] == ["t2", "t3"]
 
 
+def test_rank_precedes_launch_failures_when_selecting_a_lane_task(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger(
+        [
+            {"id": "normal"},
+            {"id": "high", "rank": "high"},
+            {"id": "urgent", "rank": "urgent"},
+        ]
+    )
+    store.note_launch_failure("sw", "urgent", "canary timeout")
+    store.note_launch_failure("sw", "high", "canary timeout")
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["urgent"]
+    store.update("sw", max_eng=2)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["urgent", "high"]
+
+
+@pytest.mark.parametrize(
+    ("error", "failure"),
+    [
+        (SpawnError("no claude account has placeable quota seats", "unavailable"), ""),
+        (SpawnError("profile canary timeout", "refused"), "profile canary timeout"),
+        (OSError("worktree timer"), "worktree timer"),
+    ],
+)
+def test_quota_seat_refusal_does_not_mark_a_task_launch_failure(store, error, failure):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime(crash=error)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert store.launch_failure("sw", "t1") == failure
+    assert ledger.rows["t1"]["state"] == "open"
+    assert store.claimant("sw", "t1") is None
+    assert store.claims("sw", "t1") == 0
+    assert [(row["state"], row["error"]) for row in store.launches("sw")] == [("failed", str(error))]
+
+
 def test_a_launch_is_pending_while_the_runtime_spawns_it(store):
     ledger, runtime, seen = tasks(("t1", "eng")), FakeRuntime(), []
     spawn = runtime.spawn
@@ -1403,7 +1440,7 @@ def test_an_urgent_task_wins_a_shared_territory_over_an_earlier_normal_one(store
     assert spawned_ids(runtime) == ["t2", "t1"]
 
 
-def test_a_non_overlapping_task_is_claimed_ahead_of_a_higher_ranked_overlapping_one(store):
+def test_an_urgent_overlapping_task_is_claimed_ahead_of_lower_ranked_clear_work(store):
     store.update("sw", max_eng=1)
     ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}])
     runtime = FakeRuntime()
@@ -1412,7 +1449,7 @@ def test_a_non_overlapping_task_is_claimed_ahead_of_a_higher_ranked_overlapping_
     ledger.rows["t3"] = {**ledger.rows["t2"], "id": "t3", "rank": "low", "territory": ["docs"]}
     store.update("sw", max_eng=2)
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert spawned_ids(runtime) == ["t1", "t3"]
+    assert spawned_ids(runtime) == ["t1", "t2"]
 
 
 def test_equal_ranks_keep_ledger_order_and_ranks_order_the_rest(store):
