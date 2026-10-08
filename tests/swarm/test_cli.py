@@ -1982,18 +1982,21 @@ def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsy
     release, ticks, starts = threading.Event(), {"fast": 0, "slow": 0}, []
 
     def run_tick(store, slug):
+        assert store.slugs() == ["slow", "fast"]
         ticks[slug] += 1
         if slug == "slow":
-            assert release.wait(10)
+            release.wait(3)
         else:
             starts.append(time.monotonic())
+            if ticks["fast"] > 3:
+                pytest.fail("extra ticks went on after every first tick ended")
             if ticks["fast"] == 3:
                 release.set()
         return [f"tick {ticks[slug]}"]
 
     _tick_all(monkeypatch, run_tick, ["slow", "fast"])
     assert ticks == {"fast": 3, "slow": 1}
-    assert all(later - earlier >= 0.45 for earlier, later in zip(starts, starts[1:]))
+    assert all(0.45 <= later - earlier < 0.9 for earlier, later in zip(starts, starts[1:]))
     out = capsys.readouterr().out.splitlines()
     assert sorted(out[:-1]) == ["fast: tick 1", "fast: tick 2", "fast: tick 3", "slow: tick 1"]
     assert out[-1] == "herdr: swept"
@@ -2020,6 +2023,28 @@ def test_a_quick_swarm_stops_its_extra_ticks_at_the_pass_deadline(monkeypatch, c
 
     _tick_all(monkeypatch, run_tick, ["slow", "fast"])
     assert ticks == {"fast": 2, "slow": 1}
+
+
+def test_an_extra_tick_starting_exactly_at_the_deadline_still_runs(monkeypatch, capsys):
+    import threading
+    import time
+    import types
+
+    monkeypatch.setattr(cli, "time", types.SimpleNamespace(monotonic=lambda: 100.0, time=time.time, sleep=time.sleep))
+    monkeypatch.setattr(cli, "TICK_SECONDS", 0.05)
+    monkeypatch.setattr(cli, "EXTRA_TICKS_UNTIL", 0)
+    release, ticks = threading.Event(), {"fast": 0, "slow": 0}
+
+    def run_tick(store, slug):
+        ticks[slug] += 1
+        if slug == "slow":
+            release.wait(2)
+        elif ticks["fast"] == 2:
+            release.set()
+        return []
+
+    _tick_all(monkeypatch, run_tick, ["slow", "fast"])
+    assert ticks["slow"] == 1 and ticks["fast"] >= 2
 
 
 def test_a_first_tick_that_dies_still_ends_the_extra_ticks(monkeypatch, capsys):
