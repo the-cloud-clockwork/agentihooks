@@ -458,7 +458,7 @@ def test_runtime_preserves_flexible_first_then_fixed_task_reservations(monkeypat
     monkeypatch.setattr(
         module.profile_choice,
         "choose",
-        lambda slug, lane, chosen, task, env: module.profile_choice.ProfileDecision(
+        lambda slug, lane, chosen, task, env, overlays=None: module.profile_choice.ProfileDecision(
             task["profile"], "task", "explicit"
         ),
     )
@@ -500,7 +500,7 @@ def _runtime_probe(tmp_path, monkeypatch, observations, reason="priority"):
     monkeypatch.setattr(
         module.profile_choice,
         "choose",
-        lambda slug, lane, chosen, task, env: module.profile_choice.ProfileDecision(
+        lambda slug, lane, chosen, task, env, overlays=None: module.profile_choice.ProfileDecision(
             task.get("profile", "planner"), "task", "explicit"
         ),
     )
