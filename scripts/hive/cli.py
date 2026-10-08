@@ -1,16 +1,17 @@
-"""agentihooks hive invite|join|revoke|serve."""
+"""agentihooks hive invite|join|revoke|serve|set|show|list."""
 
 import argparse
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
-from scripts.hive import auth, server
+from scripts.hive import auth, registry, server
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -20,6 +21,10 @@ def redis_client() -> "Redis":
     from scripts.swarm.store import redis_client as connect
 
     return connect()
+
+
+def now_ms() -> int:
+    return time.time_ns() // 1_000_000
 
 
 def _home() -> Path:
@@ -73,7 +78,32 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument("--redis-url", help="Redis URL members connect to; defaults to this host's")
     serve.add_argument("--tls-cert", help="PEM certificate; required off loopback")
     serve.add_argument("--tls-key", help="PEM private key for --tls-cert")
+    settings = sub.add_parser("set", help="Set name, ui, ephemeral, roles, prefer and max-agents as key=value")
+    settings.add_argument("id")
+    settings.add_argument("settings", nargs="*", metavar="key=value")
+    sub.add_parser("show", help="Print a hive's record as JSON").add_argument("id")
+    sub.add_parser("list", help="One line per hive with its liveness")
     return parser
+
+
+def _list() -> None:
+    now = now_ms()
+    for record in registry.hives(redis_client()):
+        state = "live" if registry.live(record, now) else "stale"
+        roles = ",".join(record["roles"])
+        print(f"{record['id']}\t{state}\tui={record['ui']}\troles={roles}\tmax-agents={record['max_agents']}")
+
+
+def _registry(args: argparse.Namespace) -> None:
+    if args.command == "set":
+        print(json.dumps(registry.update(redis_client(), args.id, args.settings)))
+    elif args.command == "show":
+        record = registry.show(redis_client(), args.id)
+        if record is None:
+            raise auth.HiveError(f"no hive {args.id}")
+        print(json.dumps(record))
+    else:
+        _list()
 
 
 def main(argv: list[str]) -> int:
@@ -88,6 +118,8 @@ def main(argv: list[str]) -> int:
         elif args.command == "revoke":
             auth.revoke(redis_client(), args.id)
             print(f"revoked {args.id}")
+        elif args.command in ("set", "show", "list"):
+            _registry(args)
         else:
             return _serve(args)
     except auth.HiveError as exc:
