@@ -203,6 +203,7 @@ jobs:
       # Sonar refuses an analysis dated before the project's latest one, so dev push scans run one at a time in push order.
       - name: Wait for older dev analyses
         if: github.event_name == 'push'
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_NUMBER: ${{ github.run_number }}

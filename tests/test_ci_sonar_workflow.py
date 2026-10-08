@@ -51,11 +51,13 @@ def test_required_gate_rejects_unsuccessful_sonar(sonar):
 
 _FAKE_GH = """
 import json, os, re, sys
-state = os.environ["FAKE_STATE"]
-spec = json.loads(open(os.path.join(state, "spec.json")).read())
-tick = int(open(os.path.join(state, "tick")).read())
+from pathlib import Path
+state = Path(os.environ["FAKE_STATE"])
+spec = json.loads((state / "spec.json").read_text())
+tick = int((state / "tick").read_text())
 url = sys.argv[2]
-open(os.path.join(state, "calls"), "a").write(url + "\\n")
+with (state / "calls").open("a") as calls:
+    calls.write(url + "\\n")
 if spec.get("fail"):
     sys.exit(1)
 if "/workflows/test.yml/runs?" in url:
@@ -90,8 +92,10 @@ def _run_wait(tmp_path, spec, run_number=6):
         GITHUB_REPOSITORY="owner/repo",
         RUN_NUMBER=str(run_number),
     )
+    step = _wait_step()
+    assert step["shell"] == "bash"
     result = subprocess.run(
-        ["timeout", "20", "bash", "-e", "-o", "pipefail", "-c", _wait_step()["run"]],
+        ["timeout", "20", "bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
         env=env,
         capture_output=True,
         text=True,
