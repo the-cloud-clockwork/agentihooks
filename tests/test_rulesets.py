@@ -18,7 +18,7 @@ def test_rulesets_enforce_branch_protection_without_bypass(name):
     rules = {rule["type"]: rule for rule in ruleset["rules"]}
     assert {"deletion", "non_fast_forward", "required_linear_history", "pull_request"} <= rules.keys()
     assert rules["pull_request"]["parameters"]["required_approving_review_count"] == 0
-    assert rules["pull_request"]["parameters"]["require_code_owner_review"] is False
+    assert rules["pull_request"]["parameters"]["require_code_owner_review"] is (name == "dev-no-delete")
 
 
 def test_dev_merges_through_a_queue_that_runs_the_workflow_gate():
