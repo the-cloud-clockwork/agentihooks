@@ -1,19 +1,19 @@
 {
-  "tested_commit": "ae414338b9a3fccf4d9b973b661ad0e975851151",
+  "tested_commit": "c0a74a1de7172251a866b23b484ea94307d767eb",
   "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI, the init-agent launch and the process reaper behind HerdrRuntime, and the remote backend is an in-memory fake; not live rollout proof",
   "inputs": {
-    "scripts/swarm_v2/runtime/base.py": "2a23cdeff79d0c1a8b96114272317add371432ac439537d2ff0f4769ef16a5f4",
-    "scripts/swarm_v2/runtime/local.py": "2722e20a457a03729751cabacb5beb0bb4ee6f19a91649b85e5a93229637d34a",
+    "scripts/swarm_v2/runtime/base.py": "a55473a4041a227c18b30477be0695fb5c99fbd0daa94183c9dd4adaf89334fc",
+    "scripts/swarm_v2/runtime/local.py": "1dbf478e8c338162d136ea1e6cb6076df326dfb81039e7676ac24c678c19afa2",
     "scripts/swarm_v2/runtime/routed.py": "93c50d1264e0a07a45dae77f717138c872bf077f649f8998a9db3e47a9aba06e",
-    "scripts/swarm/runtime.py": "646a0485fcc041be42f24220707f24e74b2f244809c55567b2d662aa6b637c81",
-    "scripts/swarm/tick.py": "ac4b0cdd4694e328d5810c4be489c9775e7054f9f702edab7d5f4999a3a0a38c",
+    "scripts/swarm/runtime.py": "568d6c01d424d737903a9099765d05d477c6f9ab67b50edc657f86e90fde3584",
+    "scripts/swarm/tick.py": "4ce9408c62255a0911ba30f3082dc12de9cbc6bc8047585b1ee593688a9c6a72",
     "scripts/swarm/cli.py": "0977914ae55c672d51d8da76f1977b1358bc895161b2f323c38e483495e0dea5",
     "scripts/swarm/store.py": "81bbfd55b79138b9c1de93a5dd32e1d4fa2624544317cb2932df55743bae7d67",
     "scripts/swarm/pane.py": "83d5ffa05165e15f6fc0edbef4227efda04f06541392879bb3d929c42dd6f2bf",
     "scripts/swarm/reaper.py": "6d4c1d3c05c4cd90e2ff66d4671053b9f6704b39568534a92b84e6fea14dd4ff",
     "scripts/agent_choice.py": "da449134e3a4f5966d78a497a5697d447b4a514c69baa1ed4a91e393229e1878",
     "tests/swarm/profile_fixture.py": "08563b84a05e6a03aa85c56c77b06f164b2ee2027b4fd3f6d07977c38004da3e",
-    "tests/test_swarm_v2_runtime.py": "6dfcf5c60b5bef3b3db6c4925a9825f6b59a988f0d359fa917236e578549b328",
+    "tests/test_swarm_v2_runtime.py": "f5bb73050a92455da31363b1a4be67908b48159129921ccb8c5792ffac09cf83",
     "evidence/SV2-RUN-01/generate_case_results.py": "842d34a4439df171e436ae9166e2d7b4f80a8011b563a6c2fd000f67139b2065"
   }
 }

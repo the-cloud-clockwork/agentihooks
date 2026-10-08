@@ -4,7 +4,7 @@
   "integration_gate": "G1",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1718",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1733",
-  "tested_commit": "ae414338b9a3fccf4d9b973b661ad0e975851151",
+  "tested_commit": "c0a74a1de7172251a866b23b484ea94307d767eb",
   "ci_head": "pending",
   "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI, the init-agent launch and the process reaper behind HerdrRuntime, and the remote backend is an in-memory fake; not live rollout proof",
   "supported_versions": {
@@ -19,7 +19,7 @@
     "AGENTIHOOKS_RUNTIME_BACKEND selects the spawn backend, an unregistered one is unavailable and never falls back to local; AGENTIHOOKS_RUNTIME_DISABLED lists backends to disable"
   ],
   "states": {
-    "observed": "Local on ae414338: pytest -n 2 tests/test_swarm_v2_runtime.py tests/swarm/test_runtime.py -> 180 passed; pytest -n 2 over the runtime, cli, tick, master launch, take master and resume suites -> 560 passed; before the dev merge the same suites plus snapshot, phases, priority sweep, terminal mail and doctor cli -> 922 passed; ruff check and ruff format --check clean.",
+    "observed": "Local on c0a74a1d: pytest -n 2 over the runtime protocol, swarm runtime, cli, capacity, profile binding, profile binding transfers, master launch, master recovery, tick, resume and restore decisions suites -> 669 passed; ruff check and ruff format clean. CI mutation on cbb549dd left 64 survivors on the changed lines; this commit asserts the typed status at each non-default raise site and the routed recover arguments, and drops unused defaults.",
     "accepted": "Cases A, B and C passed on a local and a remote fake with different capabilities; case A ran the tick's routed runtime over a herdr fixture on two independent temporary homes.",
     "committed": "The tested commit carries the code; the case results in this folder were generated on it.",
     "externally_verified": "pending CI on the pull request"
@@ -36,7 +36,7 @@
       "c": 0
     }
   },
-  "authority": "Recorded as not applicable at this layer, pending acceptance: runtime operations carry no operator grant. Dispatch keys on the runtime_backend the router itself records at spawn, never on a display label; grants belong to the claims and fencing packages.",
+  "authority": "Not applicable at this layer, accepted by the master on the swarm ledger: runtime operations carry no operator grant. Dispatch keys on the runtime_backend the router itself records at spawn, never on a display label; the claims and fencing packages own grants.",
   "cases": {
     "a": "evidence/SV2-RUN-01/a-result.json",
     "b": "evidence/SV2-RUN-01/b-result.json",

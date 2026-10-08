@@ -1,5 +1,5 @@
 {
-  "tested_commit": "ae414338b9a3fccf4d9b973b661ad0e975851151",
+  "tested_commit": "c0a74a1de7172251a866b23b484ea94307d767eb",
   "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI, the init-agent launch and the process reaper behind HerdrRuntime, and the remote backend is an in-memory fake; not live rollout proof",
   "then": "a backend lacking native resume reports unsupported capability rather than silently starting fresh",
   "result": {
