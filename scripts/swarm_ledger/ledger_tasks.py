@@ -301,7 +301,7 @@ def _update(doc, op, ctx):
     if "kind" in changed and after.get("workspace"):
         from scripts.swarm_ledger import ledger_workspace
 
-        ledger_workspace.rewrite(after, doc)
+        ledger_workspace.rewrite(after)
     task.update(changed)
     if "state" in changed:
         task["done"] = changed["state"] == "done"

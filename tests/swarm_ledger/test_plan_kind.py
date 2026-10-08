@@ -211,3 +211,32 @@ def test_plan_kind_change_without_workspace_and_same_kind(plan_ledger):
     assert rejected == []
     assert state["tasks"][0]["kind"] == "research"
     assert state["tasks"][0]["lane"] == "eng"
+
+
+def test_same_plan_kind_keeps_workspace_notes(plan_ledger, tmp_path):
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    add(plan_ledger, "plan", kind="plan", lane="plan", workspace=str(workspace))
+    (workspace / "steering.md").write_text("Agent notes\n", encoding="utf-8")
+    state, rejected = update(plan_ledger, kind="plan")
+    assert rejected == []
+    assert state["tasks"][0]["kind"] == "plan"
+    assert (workspace / "steering.md").read_text() == "Agent notes\n"
+
+
+def test_workspace_rewrite_uses_utf8_in_an_ascii_locale(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    code = (
+        "from scripts.swarm_ledger import ledger_workspace; "
+        f'ledger_workspace.rewrite({{"id": "plan", "title": "\\u00f1", "workspace": {str(tmp_path)!r}}})'
+    )
+    subprocess.run(
+        [sys.executable, "-c", code],
+        env={**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"},
+        check=True,
+        capture_output=True,
+    )
+    assert (tmp_path / "steering.md").read_bytes() == "# plan: ñ\n".encode("utf-8")

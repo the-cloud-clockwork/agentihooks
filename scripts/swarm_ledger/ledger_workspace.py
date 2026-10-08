@@ -48,8 +48,8 @@ def steering(task: dict, doc: dict | None = None) -> str:
     return "\n".join(lines)
 
 
-def rewrite(task: dict, doc: dict) -> None:
-    (Path(task["workspace"]) / "steering.md").write_text(steering(task, doc), encoding="utf-8")
+def rewrite(task: dict) -> None:
+    (Path(task["workspace"]) / "steering.md").write_text(steering(task), encoding="utf-8")
 
 
 def tails(slug, task_id):
