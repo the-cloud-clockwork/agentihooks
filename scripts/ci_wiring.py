@@ -1,6 +1,7 @@
 import argparse
 import json
 import re
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import yaml
@@ -11,7 +12,9 @@ GATE_EVENTS = ("pull_request", "merge_group")
 FILTERED_EVENTS = ("pull_request", "push")
 FILTERS = ("paths", "paths-ignore", "types")
 CONFIG = ".github/gate-wiring.json"
-EVENT_ONLY = re.compile(r"\$\{\{\s*github\.event_name == '(\w+)'\s*\}\}|github\.event_name == '(\w+)'")
+FIELDS = ("reason", "owner", "expires")
+EVENT_TERM = re.compile(r"github\.event_name\s*(==|!=)\s*'(\w+)'")
+EXPRESSION = re.compile(r"\$\{\{(.*)\}\}", re.DOTALL)
 
 
 def triggers(workflow: dict) -> dict[str, dict]:
@@ -28,9 +31,19 @@ def needs_of(job: dict) -> set[str]:
     return {needs} if isinstance(needs, str) else set(needs)
 
 
+def _skips_pull_requests(term: str) -> bool:
+    match = EVENT_TERM.fullmatch(term.strip())
+    if match is None:
+        return False
+    operator, event = match.groups()
+    return event not in PULL_REQUEST_EVENTS if operator == "==" else event == "pull_request"
+
+
 def on_pull_requests(job: dict) -> bool:
-    only = EVENT_ONLY.fullmatch(str(job.get("if")).strip())
-    return only is None or (only.group(1) or only.group(2)) in PULL_REQUEST_EVENTS
+    condition = str(job.get("if")).strip()
+    wrapped = EXPRESSION.fullmatch(condition)
+    condition = wrapped.group(1) if wrapped else condition
+    return "||" in condition or not any(_skips_pull_requests(term) for term in condition.split("&&"))
 
 
 def load(root: Path) -> dict[str, dict]:
@@ -84,9 +97,18 @@ def _outside_problems(workflows: dict[str, dict], gate_file: str, outside: dict)
     ]
 
 
-def check(workflows: dict[str, dict], config: dict) -> list[str]:
+def _declaration_problems(declared: dict[str, dict], today: date) -> list[str]:
+    problems = []
+    for key, entry in declared.items():
+        problems += [f"{key} is declared without its {field}." for field in FIELDS if not entry.get(field)]
+        if entry.get("expires") and date.fromisoformat(entry["expires"]) < today:
+            problems.append(f"{key} expired on {entry['expires']}.")
+    return problems
+
+
+def check(workflows: dict[str, dict], config: dict, today: date) -> list[str]:
     not_gates, outside = config.get("not_gates", {}), config.get("outside_gate", {})
-    problems = [f"{key} is declared without a reason." for key, why in {**not_gates, **outside}.items() if not why]
+    problems = _declaration_problems({**not_gates, **outside}, today)
     gates = [
         (file, job_id)
         for file, workflow in workflows.items()
@@ -109,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     workflows = load(args.root)
     config = json.loads((args.root / CONFIG).read_text())
-    problems = check(workflows, config)
+    problems = check(workflows, config, datetime.now(UTC).date())
     jobs = sum(len(workflow.get("jobs") or {}) for workflow in workflows.values())
     print(f"{len(workflows)} workflows, {jobs} jobs, {len(problems)} wiring problems")
     for problem in problems:
