@@ -94,3 +94,24 @@ def test_unknown_option_suggests_nearby_flag(monkeypatch, capsys):
     assert code == 2
     assert out == ""
     assert err == "unknown option --versoin; did you mean --version?, run agentihooks -h and try again\n"
+
+
+def test_nested_parser_keeps_valid_flags_abbreviations_and_negative_values(capsys):
+    from scripts.cli_parser import ArgumentParser
+
+    parser = ArgumentParser(prog="agentihooks")
+    sub = parser.add_subparsers(dest="command")
+    leaf = sub.add_parser("sample", help="Sample command")
+    leaf.add_argument("--number", type=int)
+    assert vars(parser.parse_args(["sample", "--num=-3"])) == {"command": "sample", "number": -3}
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["sample", "--zzzzz=value"])
+    assert exc.value.code == 2
+    assert capsys.readouterr().err == "unknown option --zzzzz, run agentihooks -h and try again\n"
+
+
+def test_plain_parser_errors_have_a_single_retry_hint(monkeypatch, capsys):
+    code, out, err = run_cli(monkeypatch, capsys, "version", "extra")
+    assert code == 2
+    assert out == ""
+    assert err == "unknown argument extra, run agentihooks -h and try again\n"

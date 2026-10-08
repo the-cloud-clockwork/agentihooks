@@ -1,5 +1,5 @@
 import argparse
-from collections.abc import Sequence
+from collections.abc import Iterable
 from difflib import get_close_matches
 from typing import NoReturn
 
@@ -10,12 +10,22 @@ class ArgumentParser(argparse.ArgumentParser):
         kwargs.setdefault("metavar", "COMMAND")
         return super().add_subparsers(**kwargs)
 
+    def _known_options(self) -> set[str]:
+        choices = set(self._option_string_actions)
+        for action in self._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for parser in action.choices.values():
+                    choices.update(parser._known_options())
+        return choices
+
     def _parse_optional(self, arg_string: str):
         result = super()._parse_optional(arg_string)
         if result is not None:
             option = result[0] if isinstance(result, list) else result
-            if option[0] is None:
-                self.unknown("option", arg_string, self._option_string_actions)
+            choices = self._known_options()
+            name = arg_string.split("=")[0]
+            if option[0] is None and not any(flag.startswith(name) for flag in choices):
+                self.unknown("option", name, choices)
         return result
 
     def _check_value(self, action: argparse.Action, value: str) -> None:
@@ -23,7 +33,7 @@ class ArgumentParser(argparse.ArgumentParser):
             self.unknown("command", value, action.choices)
         super()._check_value(action, value)
 
-    def unknown(self, kind: str, value: str, choices: Sequence[str]) -> NoReturn:
+    def unknown(self, kind: str, value: str, choices: Iterable[str]) -> NoReturn:
         message = f"unknown {kind} {value}"
         matches = get_close_matches(value, choices, n=1)
         if matches:
