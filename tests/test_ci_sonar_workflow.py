@@ -24,7 +24,7 @@ def test_sonar_is_required_on_dev_and_main_pull_requests():
     jobs = workflow["jobs"]
     assert "sonar" in jobs["gate-required"]["needs"]
     sonar = jobs["sonar"]
-    assert sonar.get("needs", ["unit"]) == ["unit"]
+    assert "needs" not in sonar
     assert "if" not in sonar
     assert not sonar.get("continue-on-error")
     gate = next(step for step in sonar["steps"] if step.get("uses") == "sonarsource/sonarqube-quality-gate-action@v1")
