@@ -237,6 +237,7 @@ def test_a_home_row_tip_hides_on_click_or_scroll(tab, leave):
 
 def test_an_empty_row_tip_leaves_the_enclosing_control_its_own_tip(tab):
     page = tab(home_html("home"))
+    page.locator("li.row button.fold").first.wait_for(state="attached")
     found = page.evaluate(
         """() => { const fold = document.querySelector("li.row button.fold");
           const empty = document.createElement("span");
