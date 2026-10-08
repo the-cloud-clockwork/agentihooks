@@ -11,7 +11,7 @@ from scripts.inbox.store import CLOSED, InboxError
 from scripts.swarm import idle
 from scripts.swarm.store import SwarmError
 
-KINDS = ("checks", "reply", "task")
+KINDS = ("checks", "merge", "reply", "task")
 BARE_MAX_MINUTES = 60
 CHECKED_MINUTES = 12 * 60
 TASK_ENDS = ("done", "blocked")
@@ -71,8 +71,8 @@ def _save_wait(redis, slug, name, previous, held, outcome, now_ms):
 
 def target_problem(kind, target, mine, rows, get):
     """Why the target cannot be waited on, or '' when the tick can check it."""
-    if kind == "checks":
-        return "" if PULL_URL.fullmatch(target) else f"wait on checks needs a pull request url, not {target}"
+    if kind in ("checks", "merge"):
+        return "" if PULL_URL.fullmatch(target) else f"wait on {kind} needs a pull request url, not {target}"
     if kind == "task":
         if target == mine:
             return f"task {target} is your own task"
@@ -92,6 +92,13 @@ def resolution(held, rows, inbox, github):
     kind, target = held["kind"], held["target"]
     if kind == "checks":
         return checks_resolution(held, github)
+    if kind == "merge":
+        pull = github(target)
+        if pull is None or (pull.state == "OPEN" and pull.queued):
+            return ""
+        if pull.state == "MERGED":
+            return f"pull request {target}, now merged"
+        return f"pull request {target}, now red; left the merge queue without merging; fix it and queue it again"
     if kind == "task":
         if target not in rows:
             return f"task {target}, gone from the ledger"

@@ -203,6 +203,19 @@ case "${cmd}" in
       git -C "${TARGET}" status -s | sed 's/^/  /' >&2
       exit 1
     fi
+    if [[ "${NAME}" != _tmp/* ]]; then
+      if command -v gh >/dev/null 2>&1; then
+        UNMERGED_PR="$(cd "${REPO}" && gh pr list --head "${BR}" --base "${BASE}" --state all --json state,url --jq '.[0] | select(.state != "MERGED") | .url')" \
+          || die "cannot read pull requests for '${BR}' — worktree kept"
+        [[ -z "${UNMERGED_PR}" ]] \
+          || die "pull request ${UNMERGED_PR} is not merged — wait for it to land before worktree teardown"
+      else
+        PUBLISHED=0
+        git -C "${REPO}" show-ref --verify --quiet "refs/remotes/origin/${BR}" || PUBLISHED=$?
+        [[ "${PUBLISHED}" -eq 1 ]] \
+          || die "cannot verify the published branch '${BR}' merged without gh — worktree kept"
+      fi
+    fi
     release "${TARGET}"
     if [[ "${FORCE}" -eq 1 ]]; then
       git -C "${REPO}" worktree remove --force "${TARGET}"
