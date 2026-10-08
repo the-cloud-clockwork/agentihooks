@@ -15,10 +15,6 @@ small-<session> for a small ledger. --slug accepts only one of those built forms
 Idempotent: an existing ledger is left untouched and its page link is printed.
 In the shared ledger folder only a master seat or the operator creates a ledger, and a small one needs three phases
 unless --operator-asked quotes the operator asking for it.
-
-Usage: new_ledger.py --upgrade <slug>
-Re-renders an existing ledger's page from the current template, keeping its token and
-its document (the JSON's, folded through a sync first).
 """
 
 import argparse

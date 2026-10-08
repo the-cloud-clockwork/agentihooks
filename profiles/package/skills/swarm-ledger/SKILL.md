@@ -311,7 +311,7 @@ Every change to `template.html` keeps these:
   `_meta.created_at`, the ledger's earliest recorded timestamp.
 - Chat is the `chat` thread (last 500 messages); each send is one event, so
   it reaches the orchestrator through the inbox (or a watch, outside a swarm) within seconds.
-- The page polls the server every 2 s and redraws agent changes, keeping the
+- The page follows the server's event stream and redraws agent changes, keeping the
   cursor and any message not yet sent. Original sources are collapsed by
   default.
 - A save answers with a short acknowledgment (applied and refused op ids, the revision, warnings);
