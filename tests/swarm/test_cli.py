@@ -1769,7 +1769,7 @@ def test_restore_hands_the_runtime_to_restore_and_prints_every_agent_outcome(env
     seen = {}
 
     def restore(store, slug, live, source, runtime):
-        seen["runtime"] = runtime
+        seen["runtime"], seen["source"] = runtime, source
         return [Outcome("engineer@a1b2c3-0001", "eng", "t1", "fresh", "no conversation id")]
 
     run("sw", "create", "--repo", "/repo")
@@ -1782,6 +1782,33 @@ def test_restore_hands_the_runtime_to_restore_and_prints_every_agent_outcome(env
     ]
     assert isinstance(seen["runtime"], RoutedRuntime)
     assert seen["runtime"].herdr_runtime is rt
+    assert seen["source"] == "/snap.json"
+
+
+def test_restore_decision_hands_resume_the_routed_runtime_the_clock_and_the_ledger(env, monkeypatch, capsys):
+    store, ledger, rt = env
+    seen = []
+
+    def decide(*args):
+        seen.append(args)
+        return Outcome("engineer@a1b2c3-0001", "eng", "t1", "fresh", "chosen")
+
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    monkeypatch.setattr("scripts.swarm.resume.decide", decide)
+    monkeypatch.setattr(cli, "now_ms", lambda: 4242)
+    run("sw", "create", "--repo", "/repo")
+    assert run("sw", "restore-decision", "engineer@a1b2c3-0001", "fresh") == 0
+    [(got_store, slug, agent, choice, runtime, now, got_ledger)] = seen
+    assert (got_store, slug, agent, choice, now, got_ledger) == (
+        store,
+        "sw",
+        "engineer@a1b2c3-0001",
+        "fresh",
+        4242,
+        ledger,
+    )
+    assert isinstance(runtime, RoutedRuntime) and runtime.herdr_runtime is rt
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["reason"] == "chosen"
 
 
 @pytest.mark.parametrize("command", ["create", "start", "url"])

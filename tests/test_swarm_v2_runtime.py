@@ -8,7 +8,7 @@ from scripts.agent_choice import ALL_FULL
 from scripts.swarm import reaper
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.runtime import HerdrRuntime, herdr_target
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import MASTER, AgentRecord
 from scripts.swarm.tick import Placed, SpawnError
 from scripts.swarm_v2.runtime.base import (
     LOCAL,
@@ -31,7 +31,7 @@ PRIVATE = "private-target-marker"
 class FakeRuntime:
     def __init__(self, backend, capabilities):
         self.backend, self.capabilities = backend, frozenset(capabilities)
-        self.objects, self.calls = {}, []
+        self.objects, self.calls, self.texts = {}, [], []
 
     def spawn(self, request):
         self.calls.append(("spawn", request.name))
@@ -66,6 +66,7 @@ class FakeRuntime:
 
     def recover(self, agent, mode, config=None, text=""):
         self.calls.append((f"recover:{mode}", agent.name))
+        self.texts.append(text)
         return Outcome("recover", Status.OK, self.backend, self.objects.get(agent.name))
 
 
@@ -126,7 +127,12 @@ def test_the_local_swarm_spawns_observes_and_retires_through_the_protocol(tmp_pa
     spawned = router.spawn(
         SpawnRequest(config(home), "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "profile": "engineer"})
     )
-    assert (spawned.status, spawned.backend, spawned.value.pane_id) == (Status.OK, LOCAL, "w1:p1")
+    assert (spawned.operation, spawned.status, spawned.backend, spawned.value.pane_id) == (
+        "spawn",
+        Status.OK,
+        LOCAL,
+        "w1:p1",
+    )
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id=spawned.value.pane_id)
     assert router.observe(agent) == Outcome("observe", Status.OK, LOCAL, PaneObservation("working"))
     assert router.terminate(agent) == Outcome("terminate", Status.OK, LOCAL)
@@ -156,13 +162,14 @@ def test_a_local_agent_is_commanded_and_resumed_on_local_alone():
     agent = router.spawn(request()).value
     assert router.command(agent, "wake") == Outcome("command", Status.OK, LOCAL, "accepted")
     assert router.recover(agent, Recovery.RESUME).status is Status.OK
-    assert router.recover(agent).status is Status.OK
+    assert router.recover(agent, Recovery.REATTACH).status is Status.OK
     assert local.calls == [
         ("spawn", agent.name),
         ("command", agent.name),
         ("recover:resume", agent.name),
         ("recover:reattach", agent.name),
     ]
+    assert local.texts == ["", ""]
     assert remote.calls == []
 
 
@@ -261,7 +268,7 @@ def test_an_adapter_refuses_a_runtime_object_of_another_backend():
     assert adapter.observe(remote) == refused
     assert adapter.command(remote, "wake") == replace(refused, operation="command")
     assert adapter.terminate(remote) == replace(refused, operation="terminate")
-    assert adapter.recover(remote, Recovery.RESUME) == replace(refused, operation="recover")
+    assert adapter.recover(remote, Recovery.RESUME, None, "") == replace(refused, operation="recover")
 
 
 def test_foreign_passes_an_object_of_the_same_backend():
@@ -421,8 +428,12 @@ def test_reattach_finds_the_live_pane_by_name_or_reports_it_unavailable(tmp_path
     adapter = LocalHerdrRuntime(herdr)
     live = AgentRecord("engineer@a1b2c3-0001", "eng", "t1")
     gone = AgentRecord("engineer@a1b2c3-0002", "eng", "t2")
-    assert adapter.recover(live, Recovery.REATTACH) == Outcome("recover", Status.OK, LOCAL, Placed("w1:p1", "claude"))
-    assert adapter.recover(gone, Recovery.REATTACH) == Outcome("recover", Status.UNAVAILABLE, LOCAL, Placed("", ""))
+    assert adapter.recover(live, Recovery.REATTACH, None, "") == Outcome(
+        "recover", Status.OK, LOCAL, Placed("w1:p1", "claude")
+    )
+    assert adapter.recover(gone, Recovery.REATTACH, None, "") == Outcome(
+        "recover", Status.UNAVAILABLE, LOCAL, Placed("", "")
+    )
 
 
 def test_resume_reopens_through_the_herdr_resume_and_types_its_refusal():
@@ -558,6 +569,23 @@ def test_the_tick_reattaches_a_live_master_by_name_through_the_router():
     herdr = FakeHerdr(pane_id="w1:p4")
     assert tick_runtime(herdr).recover("master@a1b2c3-0001") == Placed("w1:p4", "claude")
     assert herdr.calls == [("recover", "master@a1b2c3-0001")]
+
+
+def test_the_routed_runtime_names_the_master_seat_and_the_recovery_mode():
+    seen = []
+
+    def recover(*args):
+        seen.append(args)
+        return Outcome("recover", Status.OK, LOCAL, Placed("w1:p4", "claude"))
+
+    runtime = RoutedRuntime(FakeHerdr(), SimpleNamespace(recover=recover))
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1")
+    assert runtime.recover("master@a1b2c3-0001") == Placed("w1:p4", "claude")
+    assert runtime.resume("cfg", agent, "back") == Placed("w1:p4", "claude")
+    assert seen == [
+        (AgentRecord("master@a1b2c3-0001", MASTER, MASTER), Recovery.REATTACH),
+        (agent, Recovery.RESUME, "cfg", "back"),
+    ]
 
 
 def test_a_tick_reattach_with_local_disabled_finds_nothing_and_touches_nothing():

@@ -71,7 +71,7 @@ class Runtime(Protocol):
 
     def terminate(self, agent: AgentRecord, homes: tuple = ()) -> Outcome: ...
 
-    def recover(self, agent: AgentRecord, mode: Recovery, config: Any = None, text: str = "") -> Outcome: ...
+    def recover(self, agent: AgentRecord, mode: Recovery, config: Any, text: str) -> Outcome: ...
 
 
 def foreign(runtime: Runtime, operation: str, agent: AgentRecord) -> Outcome | None:
@@ -114,9 +114,7 @@ class RuntimeRouter:
     def terminate(self, agent: AgentRecord, homes: tuple = ()) -> Outcome:
         return self._own(agent, "terminate", Capability.TERMINATE, agent, homes)
 
-    def recover(
-        self, agent: AgentRecord, mode: Recovery = Recovery.REATTACH, config: Any = None, text: str = ""
-    ) -> Outcome:
+    def recover(self, agent: AgentRecord, mode: Recovery, config: Any = None, text: str = "") -> Outcome:
         need = Capability.NATIVE_RESUME if mode is Recovery.RESUME else Capability.RECOVER
         return self._own(agent, "recover", need, agent, mode, config, text)
 

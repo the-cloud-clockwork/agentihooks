@@ -72,7 +72,7 @@ NUDGE = (
 
 
 class SpawnError(RuntimeError):
-    def __init__(self, message: str = "", status: str = "refused"):
+    def __init__(self, message: str, status: str = "refused"):
         super().__init__(message)
         self.status = status
 

@@ -136,7 +136,7 @@ def _pinned(worn, revision):
     if not worn:
         return []
     if not revision:
-        raise SpawnError("an overlay launch needs the bundle commit it renders from, and none was recorded", "refused")
+        raise SpawnError("an overlay launch needs the bundle commit it renders from, and none was recorded")
     return ["--bundle-revision", revision]
 
 
@@ -515,12 +515,12 @@ class HerdrRuntime:
         if proc.returncode or fields.get("status") != "started" or fields.get("route_status") not in STARTED_ROUTES:
             self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
-            raise SpawnError(tail[-1] if tail else f"init-agent exit {proc.returncode}", "refused")
+            raise SpawnError(tail[-1] if tail else f"init-agent exit {proc.returncode}")
         try:
             validated = binding.fields(fields, argv[argv.index("--profile") + 1], agent)
         except ValueError as exc:
             self._terminate(name)
-            raise SpawnError(str(exc), "refused") from exc
+            raise SpawnError(str(exc)) from exc
         return Placed(
             fields.get("pane_id", ""),
             fields.get("agent", agent),

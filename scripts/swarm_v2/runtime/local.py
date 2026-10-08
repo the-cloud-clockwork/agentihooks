@@ -64,7 +64,7 @@ class LocalHerdrRuntime:
         refusal = self.herdr.refusal(agent)
         return Outcome("terminate", Status.REFUSED, LOCAL, refusal, refusal["refusal"])
 
-    def recover(self, agent: AgentRecord, mode: Recovery, config: Any = None, text: str = "") -> Outcome:
+    def recover(self, agent: AgentRecord, mode: Recovery, config: Any, text: str) -> Outcome:
         refused = foreign(self, "recover", agent)
         if refused:
             return refused
