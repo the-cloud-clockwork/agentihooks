@@ -280,7 +280,7 @@ def _report(path: str, **fields: str) -> None:
 
 def _route(environ: Mapping[str, str], route: str, run: Callable) -> tuple[CodexAccount, str, int, str]:
     sessions = codex_sessions_by_account()
-    source = CodexAccountSource(run, sessions, refresh=not route)
+    source = CodexAccountSource(run, refresh=not route)
     pool = source.pool(environ)
     now = time.time()
     found = source.readings(pool, environ, now)
