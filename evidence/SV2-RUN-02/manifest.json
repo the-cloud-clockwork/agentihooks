@@ -1,0 +1,20 @@
+{
+  "tested_commit": "2ddf3613965d4132eef6552a401ce3b0194b34ca",
+  "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI and the process reaper behind HerdrRuntime, the local process table and PID namespace are fixture values, and the remote backend is an in-memory fake; not live rollout proof",
+  "inputs": {
+    "scripts/swarm_v2/runtime/base.py": "9933d61456a29b19fee2f1a904567bea459c99cdc262cc8a5fefe52414704bf2",
+    "scripts/swarm_v2/runtime/local.py": "a00bfe0b95b5bd1dc180229318c5d3018c1dad82de9b93996736a979b489fdda",
+    "scripts/swarm_v2/runtime/process.py": "c56b97ae366c3bf44609f23005690ba62e62dcab7b2fc9982be195266c17570c",
+    "scripts/swarm_v2/runtime/routed.py": "ec6b17fce66dd463921292165298b3f290f12317a12a9f567c71e59870a0b442",
+    "scripts/swarm/runtime.py": "e5a1a7d9be6f6934099282fc583b1008e87ead8a52b724a5a3eaf598f12612a4",
+    "scripts/swarm/tick.py": "9a1978e831316ce3028863b83ca412acaafac1eaa333421928cf147e7ff4e5c0",
+    "scripts/swarm/execution.py": "8d0e5614713563e9e991d0f65f69e3909d3f75497181b69e53730d718bd32797",
+    "scripts/swarm/reaper.py": "07d7a61f6409c759b28645cd7c690612e021a8940f1fc5f1bae3bb7986f59085",
+    "tests/test_swarm_v2_process.py": "8686d228b8b1000160d3a603bedd70df62301a03ca1cadc5da4a9c83147ef402",
+    "tests/test_swarm_v2_runtime.py": "2d817b7e9fa95b2d3c82be2b0d8190df26b3ddf3fd1c1e3dc30c77e61acc0423",
+    "tests/swarm/test_tick.py": "899485dd3e99f58b9f41a964cd109ef6e2f7ff7ae9ef0adc6d887e286b4451d6",
+    "tests/sv2_run02_cases.py": "99d6c9b1099ba8721db68a96e2918c53a1889dcc57812ac84c7065d8fd44e61a",
+    "scripts/swarm_v2/case_results.py": "a1a167899c52534956a5208ac51a689f09bb4f9b5534e57d622de7b06ffab4a8",
+    "evidence/SV2-RUN-02/generate_case_results.py": "5d04ea8c2bbd9837134fb869ce253692f16c21dcab72b7a4684b8bd310aecae4"
+  }
+}
