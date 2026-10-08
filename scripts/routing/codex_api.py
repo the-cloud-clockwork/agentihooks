@@ -29,7 +29,7 @@ def base_url(environ: Mapping[str, str]) -> str:
 def carries_credentials(url: str) -> bool:
     try:
         parts = urlsplit(url)
-        return bool(parts.username or parts.password or parts.query)
+        return bool(parts.username or parts.password or parts.query or parts.fragment)
     except ValueError:
         return True
 

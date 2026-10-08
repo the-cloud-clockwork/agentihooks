@@ -272,7 +272,7 @@ def api_account(environ: Mapping[str, str]) -> CodexAccount:
         raise RoutingError(f"Codex account '{API_ACCOUNT}' needs {' or '.join(codex_api.KEY_NAMES)}")
     base_url = codex_api.base_url(environ)
     if codex_api.carries_credentials(base_url):
-        raise RoutingError(f"{codex_api.base_url_name(environ)} must not carry credentials or a query")
+        raise RoutingError(f"{codex_api.base_url_name(environ)} must not carry credentials, a query or a fragment")
     return CodexAccount(API_ACCOUNT, key_env=key_env, base_url=base_url)
 
 
