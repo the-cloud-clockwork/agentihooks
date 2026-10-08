@@ -233,3 +233,33 @@ def test_words_drop_short_and_common_words():
     item = {"title": "Add the new CI api task", "description": "for PyPI", "text": "x"}
 
     assert ledger_duplicates.words(item) == {"api", "pypi"}
+
+
+def test_missing_lists_and_fields_read_as_empty():
+    judge = Judge(yes={"t1"})
+    doc = {"tasks": [{"id": "t1", "title": "Publish wheel pypi", "state": "open", "phase": "p9"}]}
+
+    assert find(doc, "phase", [{"title": "Publish wheel"}], judge=judge) == [None]
+    assert find({"followups": []}, "followup", [{"text": "Publish wheel"}], judge=judge) == [None]
+    assert (
+        find(doc, "task", [{"description": "Publish wheel pypi"}, {"title": "Publish wheel"}], judge=judge)
+        == [Match("t1", "task", "Publish wheel pypi", "open", "normal", "p9", None, 0.9)] * 2
+    )
+    assert judge.asked[-1][0] == {
+        "new": [
+            {"ref": 0, "title": "", "description": "Publish wheel pypi"},
+            {"ref": 1, "title": "Publish wheel", "description": ""},
+        ],
+        "existing": [{"kind": "task", "id": "t1", "title": "Publish wheel pypi", "description": ""}] * 2,
+    }
+
+
+def test_equal_probabilities_keep_the_first_shortlisted_candidate():
+    doc = {
+        "tasks": [
+            {"id": "tb", "title": "Publish wheel", "state": "open"},
+            {"id": "ta", "title": "Publish wheel pypi", "state": "open"},
+        ]
+    }
+
+    assert find(doc, "task", [{"title": "Publish wheel pypi"}], judge=Judge(yes={"ta", "tb"}))[0].id == "ta"
