@@ -251,10 +251,16 @@ def test_a_restarted_agent_gets_a_new_warning_for_its_new_life():
     storage.redis.set(storage.key("sw", "quota-capacity"), json.dumps({"accounts": [account().__dict__]}))
     assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to same"]
     assert quota_handoff.warn("sw", storage, {}) == []
+    (first,) = InboxStore(storage.redis).pending_items("same")
+    assert storage.redis.hget(storage.key("sw", "quota-warnings"), "same") == first.id
     storage.put_agent("sw", replace(row, started_at=2))
     assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to same"]
     assert quota_handoff.warn("sw", storage, {}) == []
-    assert len(InboxStore(storage.redis).pending_items("same")) == 2
+    messages = InboxStore(storage.redis).pending_items("same")
+    assert len(messages) == 2
+    latest = storage.redis.hget(storage.key("sw", "quota-warnings"), "same")
+    assert latest != first.id
+    assert latest in {item.id for item in messages}
 
 
 def test_an_old_warning_does_not_suppress_a_new_lifes_quota_notice():
@@ -323,6 +329,18 @@ def test_warning_matches_account_and_harness_and_skips_finished_agents():
     assert quota_handoff.warn("sw", storage, {}) == []
     assert not InboxStore(storage.redis).pending_items("healthy")
     assert not InboxStore(storage.redis).pending_items("finished")
+
+
+def test_a_finished_agent_on_the_warned_account_does_not_receive_a_directive():
+    import fakeredis
+
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    storage.put_agent("sw", AgentRecord("finished", "eng", "a", harness="claude", account="spent", state="finished"))
+    storage.put_agent("sw", AgentRecord("running", "eng", "b", harness="claude", account="spent", state="working"))
+    storage.redis.set(storage.key("sw", "quota-capacity"), json.dumps({"accounts": [account().__dict__]}))
+    assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to running"]
+    assert InboxStore(storage.redis).pending_items("finished") == []
+    assert len(InboxStore(storage.redis).pending_items("running")) == 1
 
 
 def test_warning_ignores_unknown_state_and_handles_empty_observations():
