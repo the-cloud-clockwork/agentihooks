@@ -2,12 +2,12 @@ import json
 import os
 import threading
 import uuid
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
 from scripts.hive import auth
-from scripts.swarm_ledger import ledger, ledger_link
+from scripts.swarm_ledger import ledger, ledger_hook, ledger_link
 from scripts.swarm_ledger import ledger_authority as authority
 from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER, send
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
@@ -16,7 +16,12 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 live = _authority_live
 CREDENTIAL = "hive-ledger-credential"
-REMOTE = {"AGENTIHOOKS_DEPLOYMENT": "compose", "AGENTIHOOKS_SWARM": "rig-grade-swarm", "AGENTIHOOKS_AGENT_NAME": WORKER}
+REMOTE = {
+    "AGENTIHOOKS_DEPLOYMENT": "compose",
+    "AGENTIHOOKS_SWARM": "rig-grade-swarm",
+    "AGENTIHOOKS_AGENT_NAME": WORKER,
+    "LEDGER_URL": "https://hub.example",
+}
 
 
 @pytest.fixture
@@ -82,6 +87,7 @@ def test_the_server_derives_the_agent_token_for_a_hive_credential(live, hive):
         {"X-Ledger-Agent": WORKER},
         {"X-Hive-Credential": "wrong", "X-Ledger-Agent": WORKER},
         {"X-Hive-Credential": CREDENTIAL},
+        {"X-Hive-Credential": CREDENTIAL, "X-Ledger-Agent": WORKER, "Host": "evil.example"},
     ],
 )
 def test_a_client_without_a_hive_credential_and_agent_is_refused(live, hive, headers):
@@ -90,7 +96,6 @@ def test_a_client_without_a_hive_credential_and_agent_is_refused(live, hive, hea
 
 
 def test_a_remote_client_with_a_hive_credential_joins_and_comments(live, hive):
-    ledger.launch_token.cache_clear()
     with patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": CREDENTIAL}):
         os.environ.pop("AGENTIHOOKS_LEDGER_AGENT_TOKEN", None)
         with patch.object(ledger.core, "read_token", server_only(ledger.core.read_token)):
@@ -104,9 +109,39 @@ def test_a_remote_client_with_a_hive_credential_joins_and_comments(live, hive):
 
 
 def test_a_remote_client_without_a_credential_is_refused(live, hive):
-    ledger.launch_token.cache_clear()
     with patch.dict(os.environ, REMOTE):
         os.environ.pop("AGENTIHOOKS_LEDGER_AGENT_TOKEN", None)
         os.environ.pop("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL", None)
         with pytest.raises(SystemExit, match="hive credential"):
             ledger.credentials(SLUG)
+
+
+def test_a_remote_client_without_ledger_url_is_refused():
+    with patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_LEDGER_AGENT_TOKEN": "launch-token"}):
+        os.environ.pop("LEDGER_URL")
+        with pytest.raises(SystemExit, match="LEDGER_URL"):
+            ledger.credentials(SLUG)
+
+
+def test_a_remote_client_never_starts_a_local_ledger_server():
+    with (
+        patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_LEDGER_AGENT_TOKEN": "launch-token"}),
+        patch.object(ledger, "request", side_effect=OSError("down")),
+        patch.object(ledger.repository, "exists", return_value=True),
+        patch.object(ledger.subprocess, "run") as run,
+        pytest.raises(SystemExit, match="not answering"),
+    ):
+        os.environ.pop("LEDGER_AUTOSTART", None)
+        ledger.call(SLUG)
+    run.assert_not_called()
+
+
+def test_a_remote_session_start_starts_no_ledger_server(tmp_path, monkeypatch):
+    (tmp_path / "remote.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(ledger_hook, "LEDGER_DIR", tmp_path)
+    monkeypatch.delenv("LEDGER_AUTOSTART", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    monkeypatch.setattr(ledger_hook.socket, "create_connection", Mock(side_effect=OSError("closed")))
+    monkeypatch.setattr(ledger_hook.subprocess, "Popen", Mock())
+    ledger_hook.serve_ledgers()
+    ledger_hook.subprocess.Popen.assert_not_called()

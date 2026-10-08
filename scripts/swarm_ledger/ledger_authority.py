@@ -7,6 +7,8 @@ binding governs the transport a session selects; any process of the operator's u
 import hashlib
 import hmac
 
+from scripts.hive import auth
+from scripts.swarm import store
 from scripts.swarm.naming import lane_of, resolve_name
 from scripts.swarm.store import connect
 
@@ -31,9 +33,6 @@ def principal(admin, slug, token, agent):
 
 
 def hive_member(credential):
-    from scripts.hive import auth
-    from scripts.swarm import store
-
     return auth.ledger_member(store.redis_client(), credential) if credential else None
 
 

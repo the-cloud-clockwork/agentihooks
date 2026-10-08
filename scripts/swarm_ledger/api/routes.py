@@ -58,7 +58,9 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
 
 def agent_token(handler: object, server: ModuleType, slug: str) -> dict:
     agent = handler.headers.get("X-Ledger-Agent")
-    if not agent or server.authority.hive_member(handler.headers.get("X-Hive-Credential")) is None:
+    if not agent:
+        raise APIError(403, "forbidden", "An agent token names its agent in X-Ledger-Agent")
+    if server.authority.hive_member(handler.headers.get("X-Hive-Credential")) is None:
         raise APIError(403, "forbidden", "Missing or wrong hive credential")
     admin = server.core.read_token(server.repository.read_page(slug))
     return {"data": {"agent": agent, "token": server.authority.agent_token(admin, slug, agent)}}

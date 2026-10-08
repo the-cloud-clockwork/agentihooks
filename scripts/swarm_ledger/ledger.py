@@ -71,7 +71,6 @@ LEDGER_AUTOSTART=0 (never start a server on a failed request).
 """
 
 import argparse
-import functools
 import json
 import os
 import subprocess
@@ -108,8 +107,10 @@ OBJECT_FORMS = {
 def credentials(slug, service=False):
     who = Who.from_env()
     if ledger_link.remote():
+        if not os.environ.get("LEDGER_URL"):
+            sys.exit("a remote ledger client needs LEDGER_URL, the address of the hive ledger server")
         if service or not who.pinned:
-            sys.exit("a remote ledger client writes only as a pinned agent; service writes need the local ledger page")
+            sys.exit("a remote ledger client needs a pinned agent identity; the operator credential stays on its host")
         token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or launch_token(slug, who.name)
         return {"X-Ledger-Token": token, "X-Ledger-Agent": who.name}
     token = core.read_token(repository.read_page(slug)) or ""
@@ -118,7 +119,6 @@ def credentials(slug, service=False):
     return {"X-Ledger-Token": authority.agent_token(token, slug, who.name), "X-Ledger-Agent": who.name}
 
 
-@functools.cache
 def launch_token(slug, name):
     from scripts.swarm_ledger.api.client import ResourceClient
 
@@ -129,7 +129,10 @@ def launch_token(slug, name):
             "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive join"
         )
     client = ResourceClient(BASE, {"X-Hive-Credential": credential, "X-Ledger-Agent": name})
-    return client.request(slug, "agent-token", {})["data"]["token"]
+    try:
+        return client.request(slug, "agent-token", {})["data"]["token"]
+    except urllib.error.HTTPError as exc:
+        sys.exit(f"the ledger server refused the hive credential: {exc.code}")
 
 
 def request(slug, ops=None, service=False, timeout=10):
@@ -164,7 +167,7 @@ def call(slug, ops=None, service=False):
     except OSError:
         if not repository.exists(slug):
             raise Missing(f"ledger {slug} does not exist") from None
-        if os.environ.get("LEDGER_AUTOSTART") != "0":
+        if os.environ.get("LEDGER_AUTOSTART") != "0" and not ledger_link.remote():
             subprocess.run(
                 [sys.executable, str(HERE / "ledger_server.py"), "--ensure"], check=False, capture_output=True
             )

@@ -13,9 +13,10 @@ LOOPBACK = ("127.0.0.1", "localhost")
 
 
 def base(environ=os.environ) -> str:
+    if remote(environ) and environ.get("LEDGER_URL"):
+        return environ["LEDGER_URL"].rstrip("/")
     host, port = address(environ)
-    url = environ.get("LEDGER_URL", "").rstrip("/") if remote(environ) else ""
-    return url or f"http://{host}:{port}"
+    return f"http://{host}:{port}"
 
 
 def remote(environ=os.environ) -> bool:
