@@ -1,0 +1,24 @@
+{
+  "case": "T-SV2-IDN-01-A",
+  "tested_commit": "64a650a13bd2406c4c76bea34d9d1a611a06f25e",
+  "evidence_class": "local isolated Git fixtures; not live rollout or CI proof",
+  "passed": 15,
+  "tests": [
+    "test_canonical_checkout_worktree_nested_and_owner_isolation[0]",
+    "test_canonical_checkout_worktree_nested_and_owner_isolation[1]",
+    "test_swarm_does_not_confuse_equal_repository_basenames",
+    "test_explicit_non_git_registration_is_stable[plain-plain]",
+    "test_explicit_non_git_registration_is_stable[scratchpad/common/task-common]",
+    "test_git_remote_cannot_be_overridden_by_local_registration",
+    "test_normalized_forge_host_and_case[https://GitLab.example/Owner/Repo.git-gitlab.example/Owner/Repo]",
+    "test_normalized_forge_host_and_case[ssh://gitlab.example/Owner/Repo.git-gitlab.example/Owner/Repo]",
+    "test_normalized_forge_host_and_case[git@gitlab.example:Owner/Repo.git-gitlab.example/Owner/Repo]",
+    "test_normalized_forge_host_and_case[https://github.com/first/common-github.com/first/common]",
+    "test_normalized_forge_host_and_case[https://github..com/first/common-unknown]",
+    "test_normalized_forge_host_and_case[https://github.com:443/first/common-unknown]",
+    "test_normalized_forge_host_and_case[ssh://alice@github.com/first/common-unknown]",
+    "test_metadata_schema_and_authority_boundary",
+    "test_git_registration_and_swarm_worktree_expand_tilde"
+  ],
+  "project_identity_ambiguities_total": 0
+}

@@ -1,0 +1,71 @@
+{
+  "package": "SV2-IDN-01",
+  "status": "implemented and CI qualified; live rollout qualification belongs to the applicable rollout gate",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1470",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1486",
+  "tested_commit": "21fa99c1e7c768a24d2cb2a472601d917403b02e",
+  "evidence_class": "local isolated Git fixtures; not a CI or rollout claim",
+  "supported_versions": {
+    "project_metadata": "2.0",
+    "alias_map": "2.0"
+  },
+  "interfaces": [
+    "ProjectIdentity.project_id",
+    "ProjectIdentity.attributes",
+    "ProjectIdentity.project_identity_ambiguities_total",
+    "canonical_remote",
+    "resolve_project with optional aliases document",
+    "AGENTIHOOKS_PROJECT_ID for non Git registration"
+  ],
+  "states": {
+    "observed": "63 focused tests passed; 56 canonical identity tests; legacy identity and project memory tests passed",
+    "accepted": "identity metadata satisfies schema; unsafe remotes yield unknown and empty remote; Git configuration and alias map bytes preserved",
+    "committed": "implementation commit recorded in tested_commit; fixture case reports are additive",
+    "externally_verified": "CI run 37706002087 passed all eight unit shards, lint, Sonar, mutation and required aggregator at tested_commit. Final report and accepted integration merge await final head checks."
+  },
+  "measurements": {
+    "project_identity_ambiguities_total": {
+      "a": 0,
+      "b": 14,
+      "c": 0
+    }
+  },
+  "test_results": {
+    "a": "evidence/SV2-IDN-01/a-result.json",
+    "b": "evidence/SV2-IDN-01/b-result.json",
+    "c": "evidence/SV2-IDN-01/c-result.json"
+  },
+  "rollback_rehearsal": "test_alias_rename_recovery_and_rollback repeats twice: persisted alias document restores historical ID, unrelated owner remains separate, Git config and alias bytes unchanged; removing project_id preserves the preceding five fields",
+  "rollback": "Read prior identity fields; retain evidence and alias documents. New fields remain additive. Revert via Git if disabling new resolution.",
+  "limitations": [
+    "Other forge IDs are metadata only until existing GitHub-only transport contracts are updated.",
+    "Only unambiguous HTTPS and SSH owner/repository remotes are accepted; ports and nested groups remain unknown.",
+    "Alias documents are persisted by their authoritative caller; this resolver neither writes them nor grants permissions.",
+    "Live qualification is required only at the applicable rollout gate. G1 metadata qualification is recorded with CI and isolated Git fixtures."
+  ],
+  "reviews": {
+    "standards": "Closed after resolving Git rediscovery precedence; nine fresh exact equivalent rulings reviewed independently; no open findings",
+    "spec": "Closed with no findings after registration fix and bounded alias traversal"
+  },
+  "ci": {
+    "initial_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37704624931",
+    "initial_head": "df0370e4425208191975b4f6c5c95c5bb0f315d4",
+    "status": "all required checks and mutation passed at qualification_head",
+    "reviewed_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37705360927",
+    "reviewed_head": "943f15051701070816efd75d7fc4061a6d05eddb",
+    "qualification_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37706002087",
+    "qualification_head": "21fa99c1e7c768a24d2cb2a472601d917403b02e"
+  },
+  "supplemental_tests": "Nine additional registration, Git rediscovery, checkout comparison and absent swarm binding cases are in the focused JUnit report; named A B C reports cover the original acceptance families.",
+  "local_tested_commit": "64a650a13bd2406c4c76bea34d9d1a611a06f25e",
+  "mutation": {
+    "counts": {
+      "killed": 295,
+      "survived": 10
+    },
+    "cleared_by_independent_standards": 10,
+    "unruled": 0,
+    "timeouts": 0,
+    "job": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37706002087/job/113080391596"
+  }
+}
