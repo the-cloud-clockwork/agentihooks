@@ -55,3 +55,38 @@ def test_existing_priority_disappears_when_item_moves_out_of_scope(state, name):
     assert other in [row["item"] for row in state["priorities"]]
     state, _ = core.sync(SLUG)
     assert item not in [row["item"] for row in state["priorities"]]
+
+
+@pytest.mark.parametrize("name", ["phases", "questions", "followups", "tasks"])
+def test_priority_extension_refuses_out_of_scope_target(name):
+    doc = {name: [{"id": "choice", "out_of_scope": True}]}
+    ctx = core.Context({"rev": 0, "stamps": {}}, 1)
+    op = {"op": "priority", "id": "priority", "by": "boss", "item": f"{name}/choice", "text": "Approve this choice."}
+    assert ledger_priorities.apply(doc, op, ctx) is False
+    assert ctx.refused == ["Cannot add a priority to an out of scope item."]
+    assert "priorities" not in doc
+    assert ctx.events == []
+
+
+def test_priority_extension_refuses_missing_collection():
+    ctx = core.Context({"rev": 0, "stamps": {}}, 1)
+    op = {"op": "priority", "id": "priority", "by": "boss", "item": "tasks/missing", "text": "Approve this choice."}
+    assert ledger_priorities.apply({"phases": []}, op, ctx) is False
+    assert ctx.refused == []
+    assert ctx.events == []
+
+
+@pytest.mark.parametrize("name", ["phases", "questions", "followups", "tasks"])
+def test_priority_derivation_filters_out_of_scope_targets_in_sparse_document(name):
+    kept = {"id": "keep", "item": f"{name}/keep", "text": "Keep this choice."}
+    doc = {
+        "phases": [],
+        name: [{"id": "choice", "out_of_scope": True}, {"id": "keep"}],
+        "priorities": [{"id": "stale", "item": f"{name}/choice", "text": "Approve this choice."}, kept],
+    }
+    if name == "questions":
+        doc[name][1]["answers"] = [{"text": "Already answered."}]
+    ctx = core.Context({"rev": 0, "stamps": {}}, 1)
+    ledger_priorities.derive(doc, ctx)
+    assert doc["priorities"] == [kept]
+    assert ctx.dirty is True
