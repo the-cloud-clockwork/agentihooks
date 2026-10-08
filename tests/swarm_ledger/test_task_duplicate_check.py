@@ -94,10 +94,10 @@ def judged(monkeypatch, judge):
     return judge
 
 
-def operations(live, *ops):
+def operations(live, *ops, method="POST"):
     body = {"operation_id": uuid.uuid4().hex, "ops": list(ops), "guards": guards(live)}
     headers = {"X-Ledger-Token": live["admin"], "Content-Type": "application/json"}
-    status, data, _ = send(live, "POST", f"/api/v1/ledgers/{SLUG}/operations", json.dumps(body).encode(), **headers)
+    status, data, _ = send(live, method, f"/api/v1/ledgers/{SLUG}/operations", json.dumps(body).encode(), **headers)
     return status, json.loads(data)
 
 
@@ -125,6 +125,13 @@ def test_a_repeat_of_a_done_task_says_it_is_already_built(live, monkeypatch):
     judged(monkeypatch, Judge(yes={"t2"}))
     status, reply = operations(live, task("t9", "Fold the chat panel when its header is clicked", live["phases"][1]))
     assert status == 200 and DONE_REFUSAL in reply["_meta"]["warnings"]
+    assert stored("t9") is None
+
+
+def test_the_api_put_transport_refuses_a_repeat_too(live, monkeypatch):
+    judged(monkeypatch, Judge(yes={"t1"}))
+    status, reply = operations(live, task("t9", REPEAT, live["phases"][0]), method="PUT")
+    assert status == 200 and OPEN_REFUSAL in reply["_meta"]["warnings"]
     assert stored("t9") is None
 
 

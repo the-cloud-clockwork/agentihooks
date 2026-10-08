@@ -85,8 +85,12 @@ def find(doc: dict, adds: list[dict]) -> list:
             os.killpg(child.pid, signal.SIGKILL)
             raise
     if child.returncode:
-        raise subprocess.CalledProcessError(child.returncode, CHILD, out, err)
+        raise Died(_error(err))
     return json.loads(out.splitlines()[-1])
+
+
+class Died(Exception):
+    pass
 
 
 def _find(doc, adds):
@@ -94,8 +98,8 @@ def _find(doc, adds):
         return find(doc, adds), UNANSWERED
     except subprocess.TimeoutExpired:
         why = SLOW.format(budget=BUDGET_S)
-    except subprocess.CalledProcessError as exc:
-        why = FAILED.format(error=_error(exc.stderr))
+    except Died as exc:
+        why = FAILED.format(error=exc)
     except Exception as exc:
         why = FAILED.format(error=type(exc).__name__)
     return [UNCHECKED] * len(adds), why
@@ -103,7 +107,7 @@ def _find(doc, adds):
 
 def _error(stderr):
     lines = stderr.strip().splitlines()
-    return lines[-1].split(":", 1)[0] if lines else "no message"
+    return lines[-1].partition(":")[0] if lines else "no message"
 
 
 def _refuse(reason):
