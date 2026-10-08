@@ -155,8 +155,11 @@ def test_a_quota_handoff_waits_with_its_handoff_while_every_account_is_full(stor
 
 
 @pytest.mark.parametrize("claude_only", [False, True])
-def test_quota_successor_falls_back_during_tick_without_losing_its_seat(store, tmp_path, monkeypatch, claude_only):  # noqa: F811
-    pool = [OLD, capacity.Account("codex", "roomy", "OPEN", 0, 90, 90, 6)]
+@pytest.mark.parametrize("codex_account", ["roomy", "old"])
+def test_quota_successor_falls_back_during_tick_without_losing_its_seat(
+    store, tmp_path, monkeypatch, claude_only, codex_account  # noqa: F811
+):
+    pool = [OLD, capacity.Account("codex", codex_account, "OPEN", 0, 90, 90, 6)]
     ledger, rt = _ledger(), QuotaRuntime(tmp_path, pool, monkeypatch)
     _, first, envelope = _quota_handoff(store, ledger, rt)
     pool[0] = replace(OLD, state="DRAIN", cap=0)
@@ -168,7 +171,11 @@ def test_quota_successor_falls_back_during_tick_without_losing_its_seat(store, t
         (argv,) = rt.argv
         successor = next(a for a in workers(store) if a.task == first.task and a.name != first.name)
         assert successor.seat == first.seat
-        assert [_option(argv, flag) for flag in ("--agent", "--route", "--profile")] == ["codex", "roomy", "engineer"]
+        assert [_option(argv, flag) for flag in ("--agent", "--route", "--profile")] == [
+            "codex",
+            codex_account,
+            "engineer",
+        ]
         assert "opus" not in argv
         assert store.handoff("sw", first.task) == ""
 
@@ -331,13 +338,23 @@ def test_quota_transfer_routes_to_best_account_and_preserves_profile(tmp_path, m
         assert "opus" not in seen[0]
 
 
-def test_quota_successor_uses_its_lane_reservation(tmp_path, monkeypatch):
+@pytest.mark.parametrize("same_lane", [False, True])
+def test_quota_successor_uses_its_lane_reservation(tmp_path, monkeypatch, same_lane):
     rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
     rt._quota_accounts = [account("cc", five=0, week=0), account("cx", "codex", five=10, week=20)]
     rt._quota_cap, rt._quota_floor, rt._quota_share = 3, 5, 30
-    rt._quota_allocations = {"eng": {"claude": 0, "codex": 1}, "ci": {"claude": 1, "codex": 0}}
+    rt._quota_allocations = {
+        "eng": {"claude": int(same_lane), "codex": 1},
+        "ci": {"claude": int(not same_lane), "codex": 0},
+    }
+    rt._quota_tasks = {"e": "codex", "required": "claude"}
+    seen = []
     monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
-    monkeypatch.setattr(rt, "_launch", lambda *args, **kw: runtime.Placed("pane", "codex", "cx"))
+    monkeypatch.setattr(
+        rt,
+        "_launch",
+        lambda cfg, lane, task, name, argv, **kw: seen.append(argv) or runtime.Placed("pane", "codex", "cx"),
+    )
     config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=1, code="a1b2c3")
     task = {
         "id": "e",
@@ -350,4 +367,8 @@ def test_quota_successor_uses_its_lane_reservation(tmp_path, monkeypatch):
     }
     placed = rt.spawn(config, "eng", "engineer@a1b2c3-0002", task)
     assert placed.harness == "codex"
-    assert rt._quota_allocations == {"eng": {"claude": 0, "codex": 0}, "ci": {"claude": 1, "codex": 0}}
+    assert _option(seen[0], "--agent") == "codex"
+    assert rt._quota_allocations == {
+        "eng": {"claude": int(same_lane), "codex": 0},
+        "ci": {"claude": int(not same_lane), "codex": 0},
+    }

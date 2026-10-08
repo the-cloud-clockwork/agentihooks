@@ -250,7 +250,9 @@ class HerdrRuntime:
             [
                 row
                 for row in self._quota_accounts
-                if allocation[row.harness] and row.name != saved.get("account") and (not want or row.harness == want)
+                if allocation[row.harness]
+                and (row.harness, row.name) != (saved["harness"], saved.get("account"))
+                and (not want or row.harness == want)
             ],
             not plugins.claude_only(profile),
             quota_handoff.Thresholds.from_env(environ),
@@ -325,7 +327,13 @@ class HerdrRuntime:
             kind = "master affinity" if lane == MASTER else "lane harness"
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}")
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
-        saved = self._quota_transfer(saved, profile, environ, lane, want) if saved and quota_transfer else saved
+        saved = (
+            self._quota_transfer(
+                saved, profile, environ, lane, want or getattr(self, "_quota_tasks", {}).get(task["id"])
+            )
+            if saved and quota_transfer
+            else saved
+        )
         if saved and want and saved["harness"] != want and not quota_transfer:
             saved = {}
         if want and not saved:
@@ -372,7 +380,8 @@ class HerdrRuntime:
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
         if hasattr(self, "_quota_accounts"):
-            excluded = _transfer(task).get("account") if quota_transfer else None
+            original = _transfer(task) if quota_transfer else {}
+            excluded = original.get("account") if original.get("harness") == agent else None
             account = self._quota_account(
                 agent, saved.get("account") or self._planned_account(task["id"], agent), excluded
             )
