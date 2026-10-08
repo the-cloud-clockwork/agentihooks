@@ -22,6 +22,7 @@ DOC = {
     "tasks": [
         {"id": "t1", "title": "Shipped", "lane": "eng", "state": "done", "done": True},
         {"id": "t2", "title": "Waiting", "lane": "eng", "state": "open", "done": False},
+        {"id": "t3", "title": "Dropped task", "lane": "eng", "state": "open", "done": False, "out_of_scope": True},
     ],
     "followups": [
         {"id": "f1", "text": "Still wanted", "done": False},
@@ -163,8 +164,17 @@ def test_a_live_update_out_of_scope_drops_the_verdicts_and_back_in_scope_restore
 
 def test_every_out_of_scope_item_list_hides_the_verdicts(ledger):
     page, _ = ledger
+    assert verdicts(page, "#item-tasks-t3") == []
+    assert scope_dot(page, "#item-tasks-t3").get_attribute("aria-pressed") == "true"
     assert verdicts(page, "#item-phases-p3") == []
     assert verdicts(page, "#item-questions-q2") == []
     assert scope_dot(page, "#item-phases-p3").get_attribute("aria-pressed") == "true"
     assert scope_dot(page, "#item-questions-q2").get_attribute("aria-pressed") == "true"
     assert verdicts(page, "#item-questions-q1") == ["Approve", "Deny"]
+
+
+def test_bringing_an_out_of_scope_task_back_restores_approve_and_deny(ledger):
+    page, _ = ledger
+    scope_dot(page, "#item-tasks-t3").click()
+    page.wait_for_function("() => !document.querySelector('#item-tasks-t3').classList.contains('out')", timeout=6000)
+    assert verdicts(page, "#item-tasks-t3") == ["Approve", "Deny"]
