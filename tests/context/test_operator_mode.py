@@ -312,7 +312,9 @@ def test_the_question_tool_follows_the_typed_turn_window(monkeypatch):
     assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=100 + WINDOW) == ASK.format(
         slug="demo", name="master@a1-1"
     )
-    assert operator_mode.question_block("AskUserQuestion", "", SWARM, now=101) == ""
+    assert operator_mode.question_block("AskUserQuestion", "", SWARM, now=101) == ASK.format(
+        slug="demo", name="master@a1-1"
+    )
 
 
 def test_the_typed_turn_notice_is_exact_and_operator_off_gives_only_the_away_notice(monkeypatch):
