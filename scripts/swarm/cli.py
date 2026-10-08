@@ -36,12 +36,14 @@ done carries the proof its task's kind needs: ops and tune --command C --output 
 """
 
 import argparse
+import functools
 import json
 import os
 import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -116,6 +118,9 @@ GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
 TICK_LOCK_MS = 10 * 60 * 1000
+TICK_SECONDS = 60
+# systemd stops a pass at TimeoutStartSec=540; leave an extra tick room to finish.
+EXTRA_TICKS_UNTIL = 420
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
 ONLY_MASTER_RETIRE = "only the master or the operator retires a learned note"
@@ -179,17 +184,28 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
         skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
         doc, config = timing.call(ledger.state, slug), store.config(slug)
-        actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms())
-        actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), ledger_events.view)
+        view = functools.cache(ledger_events.view)
+        actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
+        actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
         mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
         actions += skip_refused(
-            intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge, head=intent.pr_head).run, doc
+            intent.Check(
+                slug,
+                mode,
+                now_ms(),
+                ledger,
+                mail,
+                intent.pr_view,
+                intent.judge,
+                head=lambda url: getattr(view(url), "head", None),
+            ).run,
+            doc,
         )
-        actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
+        actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
         rows = {t["id"]: t for t in doc["tasks"]}
-        actions += skip_refused(waits.end_pass, store, slug, rows, inbox, ledger_events.view, now_ms())
+        actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms())
         actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
-        actions += skip_refused(priority_sweep.priority_pass, store, slug, doc, ledger)
+        actions += skip_refused(priority_sweep.priority_pass, store, slug, doc, ledger, None, view)
         found = timing.call(findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found)
         window = wake.window_ms(os.environ)
@@ -221,6 +237,30 @@ def _tick_one(store, slug):
         timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
 
 
+class _Firsts:
+    def __init__(self, count):
+        self.left, self.lock, self.settled = count, threading.Lock(), threading.Event()
+
+    def done(self):
+        with self.lock:
+            self.left -= 1
+            if not self.left:
+                self.settled.set()
+
+
+def _tick_while_others_run(store, slug, firsts, until):
+    started = time.monotonic()
+    try:
+        _tick_one(store, slug)
+    finally:
+        firsts.done()
+    while not firsts.settled.wait(max(0.0, started + TICK_SECONDS - time.monotonic())):
+        started = time.monotonic()
+        if started > until:
+            return
+        _tick_one(store, slug)
+
+
 def cmd_tick(store, args):
     from scripts import operator_env
 
@@ -229,8 +269,9 @@ def cmd_tick(store, args):
     operator_env.fill(os.environ)
     slugs = store.slugs()
     if slugs:
+        firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
         with ThreadPoolExecutor(max_workers=len(slugs)) as pool:
-            list(pool.map(lambda slug: _tick_one(store, slug), slugs))
+            list(pool.map(lambda slug: _tick_while_others_run(store, slug, firsts, until), slugs))
     from scripts import herdr_gc
 
     try:

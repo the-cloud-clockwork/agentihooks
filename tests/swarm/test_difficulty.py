@@ -268,6 +268,33 @@ def test_pass_goes_on_past_a_refused_task(asked):
     assert ledger.rows["b"]["difficulty"] == "S"
 
 
+def test_pass_asks_the_classifier_for_every_task_of_its_bound_at_once(monkeypatch):
+    import threading
+
+    monkeypatch.setattr(difficulty, "PER_TICK", 40)
+    together, asked = threading.Barrier(40, timeout=10), []
+
+    def decide(state, questions, **kw):
+        asked.append((state["task"], state["phase_intent"]))
+        together.wait()
+        return answered("S" if int(state["task"][1:]) % 2 else "L", 0.9)
+
+    monkeypatch.setattr(difficulty, "decide", decide)
+    ledger = FakeLedger([{**TASK, "id": f"t{i}"} for i in range(41)])
+    actions = difficulty.size_pass("sw", ledger, {**DOC, "tasks": ledger.tasks("sw")})
+    assert actions == [f"sized task t{i} {'S' if i % 2 else 'L'} by classifier" for i in range(40)]
+    assert sorted(asked) == sorted((f"t{i}", "Sizing: Every task carries a size") for i in range(40))
+    assert ledger.rows["t40"].get("difficulty") is None
+
+
+def test_pass_writes_the_tasks_before_one_that_fails_and_raises(asked):
+    asked("S", 0.9)
+    ledger = FakeLedger([{**TASK, "id": "a"}, {**TASK, "id": "b", "territory": None}, {**TASK, "id": "c"}])
+    with pytest.raises(TypeError):
+        difficulty.size_pass("sw", ledger, {**DOC, "tasks": ledger.tasks("sw")})
+    assert (ledger.rows["a"]["difficulty"], ledger.rows["b"].get("difficulty")) == ("S", None)
+
+
 @pytest.fixture
 def store():
     import fakeredis
