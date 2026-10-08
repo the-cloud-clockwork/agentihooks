@@ -293,8 +293,7 @@
   "PLR0912": 20
  },
  "scripts/swarm_ledger/ledger_tasks.py::_update": {
-  "C901": 14,
-  "PLR0912": 13
+  "C901": 13
  },
  "scripts/targets/codex_target.py::CodexAdapter.teardown": {
   "C901": 20,

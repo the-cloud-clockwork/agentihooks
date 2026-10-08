@@ -244,6 +244,15 @@ def _add(doc, op, ctx):
     phase = next((p for p in doc.get("phases", []) if p["id"] == task["phase"]), {})
     if plan_url := op.get("plan_url") or phase.get("plan_url"):
         task["plan_url"] = plan_url
+    if "plan_slice" in op:
+        from scripts.swarm_ledger import plan_ranges
+
+        try:
+            task["plan_lines"] = plan_ranges.task_slice(doc, phase, op["plan_slice"])
+        except ValueError as exc:
+            ctx.refused.append(str(exc))
+            return False
+        task["plan_slice"] = op["plan_slice"]
     tasks.append(task)
     ctx.record(op["by"], "added", f"tasks/{task['id']}", text=task["title"])
     return True
@@ -304,6 +313,18 @@ def unlinked_slice(task: dict, tasks: list[dict]) -> list[str]:
     return [item["id"] for item in tasks if item["id"] in ids and not item.get("plan_url")]
 
 
+def slice_refusal(item: str, plan: dict, doc: dict) -> str:
+    from scripts.swarm_ledger import plan_ranges
+
+    if bad := invalid_slice(plan, doc["tasks"]):
+        return f"{item} has invalid slice task ids: {', '.join(bad)}"
+    if unlinked := unlinked_slice(plan, doc["tasks"]):
+        return f"{item} slice tasks carry no plan link: {', '.join(unlinked)}. {PUBLISH}"
+    if incomplete := plan_ranges.invalid_tasks(plan, doc, slice_ids(plan)):
+        return f"{item} slice tasks lack valid plan ranges or anchors: {', '.join(incomplete)}"
+    return ""
+
+
 def _update_fields(task: dict, fields: dict) -> dict:
     if ledger_kinds.kind(task) == "plan" and fields.get("kind", "plan") != "plan" and "lane" not in fields:
         return {**fields, "lane": "eng"}
@@ -335,12 +356,8 @@ def _update(doc, op, ctx):
         ctx.refused.append(f"{op['item']} cannot be done without its proof: {', '.join(ledger_kinds.unmet(after))}")
         return False
     if after.get("state") == "done" and ledger_kinds.kind(after) == "plan":
-        bad = invalid_slice(after, doc["tasks"])
-        if bad:
-            ctx.refused.append(f"{op['item']} has invalid slice task ids: {', '.join(bad)}")
-            return False
-        if unlinked := unlinked_slice(after, doc["tasks"]):
-            ctx.refused.append(f"{op['item']} slice tasks carry no plan link: {', '.join(unlinked)}. {PUBLISH}")
+        if refusal := slice_refusal(op["item"], after, doc):
+            ctx.refused.append(refusal)
             return False
     changed = {k: v for k, v in fields.items() if task.get(k) != v}
     if "kind" in changed and after.get("workspace"):
