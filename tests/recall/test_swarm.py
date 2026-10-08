@@ -2,7 +2,6 @@ import json
 import os
 from hashlib import sha256
 
-import fakeredis
 import pytest
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture
@@ -13,8 +12,13 @@ from scripts.swarm.naming import NameRegistry
 from scripts.swarm.store import AgentRecord, RedisStore
 
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
 @pytest.fixture
 def source():
+    import fakeredis
+
     return RedisStore(fakeredis.FakeRedis(decode_responses=True))
 
 
