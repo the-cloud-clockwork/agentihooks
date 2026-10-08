@@ -6624,7 +6624,7 @@ def main() -> None:
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",
     )
     sub.add_parser("msg", help="Durable messages between sessions: send|inbox|read|close")
-    sub.add_parser("recall", help="Recall archive of ledgers and swarms: reindex")
+    sub.add_parser("recall", help="Recall archive of ledgers and swarms: reindex, eval")
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"
     )

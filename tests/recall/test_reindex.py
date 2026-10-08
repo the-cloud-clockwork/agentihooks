@@ -180,7 +180,7 @@ def test_agentihooks_help_lists_recall(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["agentihooks", "--help"])
     with pytest.raises(SystemExit):
         install.main()
-    assert re.search(r"\n +recall +Recall archive of ledgers and swarms: reindex\n", capsys.readouterr().out)
+    assert re.search(r"\n +recall +Recall archive of ledgers and swarms: reindex, eval\n", capsys.readouterr().out)
 
 
 def test_help_names_the_command_and_its_options(monkeypatch, capsys):
@@ -188,9 +188,15 @@ def test_help_names_the_command_and_its_options(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         main(["--help"], {})
     top = capsys.readouterr().out
-    assert top.startswith("usage: agentihooks recall [-h] {reindex} ...\n")
+    assert top.startswith("usage: agentihooks recall [-h] {reindex,eval} ...\n")
     assert "\nRecall archive of ledgers and swarms\n" in top
     assert re.search(r"\n +reindex +Backfill the recall archive from ledger files\n", top)
+    assert re.search(r"\n +eval +Print the top five hit rate of a golden question file\n", top)
+    with pytest.raises(SystemExit):
+        main(["eval", "--help"], {})
+    grade = capsys.readouterr().out
+    assert grade.startswith("usage: agentihooks recall eval [-h] golden\n")
+    assert re.search(r"\n  golden +JSON list of question, expect and optional scope and kinds\n", grade)
     with pytest.raises(SystemExit):
         main(["reindex", "--help"], {})
     sub = capsys.readouterr().out
