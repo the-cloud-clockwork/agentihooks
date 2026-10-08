@@ -198,10 +198,10 @@ def test_the_probe_runs_one_tiny_exec_on_the_account_and_reads_its_rollout(monke
         seen.update(environ=environ)
         return thread
 
-    monkeypatch.setattr(router.shutil, "which", lambda name: None)
+    monkeypatch.setattr(router.shutil, "which", lambda name: {"codex": "/usr/bin/codex"}.get(name))
     monkeypatch.setattr(router.codex_quota, "session_quota", session_quota)
     assert router.probe(_accounts()[1], ENV, run) == "t-1"
-    assert seen["argv"] == ["codex", "--no-daemon", *router.PROBE_ARGS]
+    assert seen["argv"] == ["/usr/bin/codex", "--no-daemon", *router.PROBE_ARGS]
     assert seen["kwargs"] == {
         "env": router.child_environment(_accounts()[1], ENV),
         "capture_output": True,
@@ -210,6 +210,11 @@ def test_the_probe_runs_one_tiny_exec_on_the_account_and_reads_its_rollout(monke
         "timeout": router.PROBE_TIMEOUT_S,
     }
     assert seen["environ"] == ENV
+    monkeypatch.setattr(router.shutil, "which", lambda name: None)
+    no_start = '{"type": "turn.completed"}\n'
+    assert (
+        router.probe(_accounts()[1], ENV, lambda argv, **kw: subprocess.CompletedProcess(argv, 0, no_start, "")) is None
+    )
     no_thread = '{"type": "thread.started"}\n'
     assert (
         router.probe(_accounts()[1], ENV, lambda argv, **kw: subprocess.CompletedProcess(argv, 0, no_thread, ""))

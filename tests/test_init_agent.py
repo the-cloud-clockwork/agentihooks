@@ -29,6 +29,11 @@ def _profile(monkeypatch, tmp_path, target="claude"):
     return binding, env
 
 
+def test_the_agent_flag_explains_the_rotation_default():
+    [agent] = [action for action in init_agent._parser()._actions if "--agent" in action.option_strings]
+    assert agent.help == init_agent.AGENT_HELP
+
+
 def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeypatch, tmp_path, capsys):
     project = tmp_path / "project"
     project.mkdir()

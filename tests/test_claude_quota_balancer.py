@@ -504,6 +504,12 @@ def test_reserve_account_is_chosen_only_when_no_other_has_room(monkeypatch, tmp_
     assert _pick({**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST, LOW"}, tmp_path).result.account == "MID"
     with pytest.raises(balancer.RoutingError, match=r"^no Claude account has a free session under its quota band$"):
         _pick(env, tmp_path, {"BEST": 6, "MID": 6, "LOW": 6})
+    offered = []
+    with monkeypatch.context() as patched:
+        patched.setattr(balancer.session_bands, "pick", lambda seats: offered.extend(seats))
+        with pytest.raises(balancer.RoutingError):
+            _pick(env, tmp_path)
+    assert {seat.harness for seat in offered} == {"claude"}
     reserved = {**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "LOW"}
     assert _pick(reserved, tmp_path, {"BEST": 6, "MID": 6}).result.account == "LOW"
     assert _pick(reserved, tmp_path, {"BEST": 6, "MID": 2}).result.account == "MID"
