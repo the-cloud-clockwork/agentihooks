@@ -218,7 +218,7 @@ jobs:
           path: |
             ~/.sonar/cache
             ${{ runner.tool_cache }}/sonar-scanner-cli
-          key: sonar-${{ runner.os }}-${{ runner.arch }}-${{ env.SONAR_SCANNER_VERSION }}-${{ steps.proxy.outputs.version }}-${{ hashFiles('.github/workflows/test.yml') }}
+          key: sonar-${{ runner.os }}-${{ runner.arch }}-${{ env.SONAR_SCANNER_VERSION }}-${{ steps.proxy.outputs.version }}
 
       # Sonar refuses an analysis dated before the project's latest one, so dev push scans run one at a time in push order.
       - name: Wait for older dev analyses

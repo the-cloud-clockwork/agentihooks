@@ -9,9 +9,10 @@ from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
 from scripts.swarm import effort_range
 from scripts.swarm.execution import ExecutionRegistry
+from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
 
-PREFIX = "agentihooks:swarm"
+PREFIX = f"{ROOT}:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
 DEFAULT_URL = "redis://127.0.0.1:6379/0"
 MASTER = "master"
