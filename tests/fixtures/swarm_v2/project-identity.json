@@ -1,0 +1,9 @@
+{
+  "repositories": [
+    {"folder": "first/common", "remote": "https://GitHub.COM/First/Common.git/", "project_id": "github.com/first/common"},
+    {"folder": "second/common", "remote": "git@github.com:second/common.git", "project_id": "github.com/second/common"},
+    {"folder": "other-machine/renamed-folder", "remote": "ssh://git@github.com/first/common.git", "project_id": "github.com/first/common"}
+  ],
+  "renamed_remote": "https://github.com/first/renamed.git",
+  "alias_map": {"schema_version": "2.0", "aliases": {"github.com/first/renamed": "github.com/first/common"}}
+}
