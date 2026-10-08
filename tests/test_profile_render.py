@@ -2307,6 +2307,21 @@ def test_an_overlay_render_refuses_a_recorded_commit_without_a_linked_bundle(wor
     assert str(refused.value) == "the launch recorded bundle commit abc123, but no bundle is linked"
 
 
+def test_an_overlay_render_refuses_a_bundle_git_cannot_read(world, overlays, monkeypatch, tmp_path):
+    from scripts.profiles import render
+
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    monkeypatch.setattr(render, "_bundle", lambda: plain)
+
+    with pytest.raises(ValueError) as refused:
+        render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision="abc123")
+
+    assert str(refused.value).startswith(
+        f"the launch recorded bundle commit abc123, but git cannot read the bundle at {plain}: fatal: not a git repository"
+    )
+
+
 def test_an_overlay_render_from_the_recorded_commit_renders_and_stamps_it(world, overlays):
     from scripts.profiles import render
 

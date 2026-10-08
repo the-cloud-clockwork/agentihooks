@@ -226,7 +226,8 @@ def _profile_command(command: list[str], spec: AgentSpec) -> list[str]:
     if not spec.profile:
         return command
     worn = [f"--overlay={overlay}" for overlay in spec.overlays]
-    worn += [f"--bundle-revision={spec.bundle_revision}"] if spec.bundle_revision else []
+    if spec.bundle_revision:
+        worn.append(f"--bundle-revision={spec.bundle_revision}")
     return [command[0], "select-profile", spec.profile, *worn, "--agent", spec.agent, "--", *command[2:]]
 
 
@@ -327,19 +328,21 @@ def _write_launcher(
 
 def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], environ: dict[str, str]) -> list[str]:
     from scripts.profiles import binding
-    from scripts.select_profile import OVERLAYS, prepare
+    from scripts.select_profile import BUNDLE_REVISION, OVERLAYS, prepare
 
     continuing = args.handoff or args.resume or "--resume" in flags or (agent == "codex" and flags[:1] == ["resume"])
     if not args.profile and continuing:
         args.profile = environ.get("AGENTIHOOKS_PROFILE")
         args.overlay = [o for o in environ.get(OVERLAYS, "").split(",") if o]
+        args.bundle_revision = environ.get(BUNDLE_REVISION, "")
     if continuing and not args.profile:
         raise ValueError("unsupported continuation: original required profile is missing; pass --profile")
     if not args.profile:
         return flags
     if args.handoff:
         flags = binding.continuation(flags, agent, environ)
-    profile_env, flags = prepare(args.profile, agent, "", "", flags, environ, args.overlay, args.bundle_revision)
+    environ[BUNDLE_REVISION] = args.bundle_revision
+    profile_env, flags = prepare(args.profile, agent, "", "", flags, environ, args.overlay)
     environ.update(profile_env)
     return flags
 

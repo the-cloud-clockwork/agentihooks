@@ -95,13 +95,20 @@ def _pin(bundle: Path | None, revision: str) -> None:
     if bundle is None:
         raise ValueError(f"{recorded} no bundle is linked")
     git = ["git", "-C", str(bundle)]
-    head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    dirty = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True).stdout.strip()
-    differs = f"is at commit {head}" if head != revision else "has uncommitted changes" if dirty else ""
-    if differs:
-        raise ValueError(
-            f"{recorded} the bundle at {bundle} {differs}; check out {revision} in the bundle before this launch renders"
-        )
+    head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
+    status = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, timeout=10)
+    for done in (head, status):
+        if done.returncode:
+            raise ValueError(f"{recorded} git cannot read the bundle at {bundle}: {done.stderr.strip()}")
+    if head.stdout.strip() != revision:
+        differs = f"is at commit {head.stdout.strip()}"
+    elif status.stdout.strip():
+        differs = "has uncommitted changes"
+    else:
+        return
+    raise ValueError(
+        f"{recorded} the bundle at {bundle} {differs}; check out {revision} in the bundle before this launch renders"
+    )
 
 
 def _base_digest() -> str:

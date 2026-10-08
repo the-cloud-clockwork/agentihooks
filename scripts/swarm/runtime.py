@@ -128,6 +128,18 @@ def _transfer(task):
     return saved
 
 
+def _recorded_revision(saved):
+    return saved.get("bundle_revision") or saved.get("profile_decision", {}).get("bundle_revision", "")
+
+
+def _pinned(worn, revision):
+    if not worn:
+        return []
+    if not revision:
+        raise SpawnError("an overlay launch needs the bundle commit it renders from, and none was recorded")
+    return ["--bundle-revision", revision]
+
+
 def _predecessor(task):
     conversation = (task.get("handoff_envelope") or {}).get("conversation_id")
     return conversation if task.get("transfer") and conversation != envelope.UNKNOWN else None
@@ -248,15 +260,16 @@ class HerdrRuntime:
                 "handoff",
                 "original seat profile",
                 overlays=tuple(saved.get("overlays", ())),
-                bundle_revision=saved.get("bundle_revision")
-                or saved.get("profile_decision", {}).get("bundle_revision", ""),
+                bundle_revision=_recorded_revision(saved),
             )
             if saved and (relaunch or not task.get("profile"))
             else timing.call(
                 profile_choice.choose, config.slug, lane, chosen, task, environ, getattr(config, "overlays", {})
             )
         )
-        decision = decision if decision.bundle_revision else replace(decision, bundle_revision=overlays.revision())
+        if not decision.bundle_revision:
+            kept = _recorded_revision(saved) if saved.get("profile") == decision.profile else ""
+            decision = replace(decision, bundle_revision=kept or overlays.revision())
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
         want = affinity.desired(config) if lane == MASTER else _set(chosen.get("agent"))
@@ -296,7 +309,7 @@ class HerdrRuntime:
         )
         timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
-        argv += ["--bundle-revision", decision.bundle_revision] if decision.overlays else []
+        argv += _pinned(decision.overlays, decision.bundle_revision)
         if saved:
             picked = model_pick.ModelPick(
                 saved["model"],
@@ -359,6 +372,7 @@ class HerdrRuntime:
             agent.profile,
             agent.overlays,
         )
+        argv += _pinned(agent.overlays, agent.profile_decision.get("bundle_revision", ""))
         defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}))
         picked = model_pick.ModelPick(
             agent.model or defaults.model,

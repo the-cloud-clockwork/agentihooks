@@ -35,6 +35,7 @@ def test_dry_run_parses_run_flags_and_preserves_harness_arguments(profile, capsy
         "AGENTIHOOKS_PROFILE=engineer\n"
         "AGENTIHOOKS_BASE_CHANNELS=amygdala,brain\n"
         "AGENTIHOOKS_OVERLAYS=\n"
+        "AGENTIHOOKS_BUNDLE_REVISION=\n"
         f"CLAUDE_CONFIG_DIR={root}/rendered/engineer/claude\n"
         "argv=agentihooks claude --model opus --effort low -p 'reply OK'\n"
     )
@@ -48,6 +49,7 @@ def test_profile_defaults_and_native_codex_layer(profile):
         "AGENTIHOOKS_PROFILE": "qa",
         "AGENTIHOOKS_BASE_CHANNELS": "amygdala,brain",
         "AGENTIHOOKS_OVERLAYS": "",
+        "AGENTIHOOKS_BUNDLE_REVISION": "",
         "CODEX_HOME": f"{root}/rendered/qa/codex",
     }
     assert argv == ["-m", "sonnet", "-c", 'model_reasoning_effort="medium"', "exec", "reply OK"]
@@ -209,6 +211,7 @@ def test_codex_dry_run_from_sys_argv_has_only_run_environment(profile, monkeypat
     assert (
         capsys.readouterr().out == "AGENTIHOOKS_PROFILE=qa\nAGENTIHOOKS_BASE_CHANNELS=amygdala,brain\n"
         "AGENTIHOOKS_OVERLAYS=\n"
+        "AGENTIHOOKS_BUNDLE_REVISION=\n"
         f"CODEX_HOME={profile[0]}/rendered/qa/codex\n"
         "argv=agentihooks codex -m sonnet -c 'model_reasoning_effort=\"medium\"' exec OK\n"
     )
@@ -338,9 +341,10 @@ def test_terminal_profile_prepares_model_and_environment_once(profile, monkeypat
     monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
     env = {"HOME": str(tmp_path)}
     assert init_agent.main(["--profile", "qa", "--agent", "codex", "--dir", str(tmp_path), "--dry-run"], env) == 0
-    prepare.assert_called_once_with("qa", "codex", "", "", [], {**env, "AGENTIHOOKS_PROFILE": "qa"}, [], "")
+    chosen = {**env, "AGENTIHOOKS_BUNDLE_REVISION": "", "AGENTIHOOKS_PROFILE": "qa"}
+    prepare.assert_called_once_with("qa", "codex", "", "", [], chosen, [])
     assert launch.call_args.args[3] == ["-m", "selected", "-c", 'model_reasoning_effort="low"']
-    assert launch.call_args.args[4] == {**env, "AGENTIHOOKS_PROFILE": "qa"}
+    assert launch.call_args.args[4] == chosen
 
 
 def test_installer_help_has_exact_selector_entry(monkeypatch, capsys):
@@ -443,6 +447,7 @@ def test_dry_run_wears_each_overlay_in_its_own_home(profile, capsys):
         "AGENTIHOOKS_PROFILE=engineer\n"
         "AGENTIHOOKS_BASE_CHANNELS=amygdala,brain\n"
         "AGENTIHOOKS_OVERLAYS=tuner,trader\n"
+        "AGENTIHOOKS_BUNDLE_REVISION=\n"
         f"CLAUDE_CONFIG_DIR={root}/rendered/engineer+tuner+trader/claude\n"
         "argv=agentihooks claude --model sonnet --effort medium\n"
     )
@@ -557,3 +562,31 @@ def test_init_agent_pins_the_render_to_the_recorded_bundle_commit(profile, monke
     renderer.assert_called_once_with("claude", "engineer", overlays=["tuner"], bundle_revision="abc123")
     launcher = next((tmp_path / "agentihooks-claude-terminal").glob("*.sh"))
     assert "select-profile engineer --overlay=tuner --bundle-revision=abc123 --agent claude --" in launcher.read_text()
+
+
+def test_a_continued_session_pins_the_bundle_commit_of_its_environment(profile, monkeypatch, tmp_path):
+    _, renderer = profile
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/bin/agentihooks" if name == "agentihooks" else None)
+    environ = {"AGENTIHOOKS_PROFILE": "engineer", "AGENTIHOOKS_OVERLAYS": "tuner"}
+    environ["AGENTIHOOKS_BUNDLE_REVISION"] = "abc123"
+    assert _dry_launch(tmp_path, ["--resume", "conversation"], environ) == 0
+    renderer.assert_called_once_with("claude", "engineer", overlays=["tuner"], bundle_revision="abc123")
+    launcher = next((tmp_path / "agentihooks-claude-terminal").glob("*.sh"))
+    assert "select-profile engineer --overlay=tuner --bundle-revision=abc123 --agent claude --" in launcher.read_text()
+
+
+def test_a_fresh_launch_drops_the_bundle_commit_its_caller_carries(profile, monkeypatch, tmp_path):
+    _, renderer = profile
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/bin/agentihooks" if name == "agentihooks" else None)
+    assert _dry_launch(tmp_path, ["--profile", "engineer"], {"AGENTIHOOKS_BUNDLE_REVISION": "abc123"}) == 0
+    renderer.assert_called_once_with("claude", "engineer", overlays=[], bundle_revision="")
+
+
+def test_the_selector_ignores_a_bundle_commit_its_caller_carries(profile, monkeypatch, capsys):
+    _, renderer = profile
+    monkeypatch.setenv("AGENTIHOOKS_BUNDLE_REVISION", "abc123")
+    assert select_profile.main(["engineer", "--dry-run"]) == 0
+    renderer.assert_called_once_with("claude", "engineer", overlays=[], bundle_revision="")
+    assert "AGENTIHOOKS_BUNDLE_REVISION=\n" in capsys.readouterr().out

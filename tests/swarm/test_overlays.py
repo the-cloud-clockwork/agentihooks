@@ -1,5 +1,6 @@
 import json
 import subprocess
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -207,9 +208,9 @@ def test_a_swarm_without_overlays_reads_an_empty_map(swarm):
     assert swarm.config("sw").overlays == {}
 
 
-def _spawned(tmp_path, monkeypatch, task, config_overlays, saved=None):
+def _spawned(tmp_path, monkeypatch, task, config_overlays, saved=None, revision="abc123"):
     seen = {}
-    monkeypatch.setattr(overlays, "revision", lambda: "abc123")
+    monkeypatch.setattr(overlays, "revision", lambda: revision)
     monkeypatch.setattr(profile_choice, "installed", lambda name: True)
 
     def run(argv, **kwargs):
@@ -323,6 +324,7 @@ def test_resume_wears_the_overlays_the_agent_was_launched_with(tmp_path, monkeyp
         conversation_id="conv-1",
         overlays=["tuner"],
     )
+    agent = replace(agent, profile_decision={"bundle_revision": "abc123"})
     placed = rt.resume(store.SwarmConfig("sw", str(tmp_path), 1, 0, code="a1b2c3"), agent, "resume")
     assert _passed_overlays(seen["argv"]) == ["tuner"]
     assert placed.overlays == ["tuner"]
@@ -358,3 +360,80 @@ def test_an_overlay_relaunch_pins_its_render_to_the_revision_its_launch_recorded
 def test_a_launch_without_overlays_leaves_its_render_unpinned(bundle, tmp_path, monkeypatch):
     _, argv = _spawned(tmp_path, monkeypatch, {}, {})
     assert _passed_revision(argv) == []
+
+
+def test_a_handoff_pins_its_render_to_the_revision_its_launch_recorded(bundle, tmp_path, monkeypatch):
+    launch = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "overlays": ["scout"]}
+    task = {
+        "profile": "",
+        "handoff_envelope": {"launch": {**launch, "profile_decision": {"bundle_revision": "fed789"}}},
+    }
+    _, argv = _spawned(tmp_path, monkeypatch, task, {})
+    assert _passed_revision(argv) == ["fed789"]
+
+
+def test_a_handoff_on_a_task_profile_keeps_the_revision_its_launch_recorded(bundle, tmp_path, monkeypatch):
+    launch = {
+        "profile": "engineer",
+        "harness": "claude",
+        "model": "opus",
+        "effort": "high",
+        "bundle_revision": "fed789",
+    }
+    placed, argv = _spawned(tmp_path, monkeypatch, {"handoff_envelope": {"launch": launch}}, {"engineer": ["tuner"]})
+    assert placed.profile_decision["bundle_revision"] == "fed789"
+    assert _passed_revision(argv) == ["fed789"]
+
+
+def test_a_handoff_onto_another_task_profile_pins_the_current_revision(bundle, tmp_path, monkeypatch):
+    launch = {"profile": "qa", "harness": "claude", "model": "opus", "effort": "high", "bundle_revision": "fed789"}
+    placed, _ = _spawned(tmp_path, monkeypatch, {"handoff_envelope": {"launch": launch}}, {"engineer": ["tuner"]})
+    assert placed.profile_decision["bundle_revision"] == "abc123"
+
+
+def test_an_overlay_launch_without_a_bundle_revision_is_refused(bundle, tmp_path, monkeypatch):
+    with pytest.raises(tick.SpawnError) as refused:
+        _spawned(tmp_path, monkeypatch, {}, {"engineer": ["tuner"]}, revision="")
+    assert str(refused.value) == "an overlay launch needs the bundle commit it renders from, and none was recorded"
+
+
+def _resumed(tmp_path, agent):
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(
+            returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\npane_id=w1:p1\n"), stderr=""
+        )
+
+    rt = runtime.HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    rt.conversations = lambda: {"w1:p1": "conv-1"}
+    rt.resume(store.SwarmConfig("sw", str(tmp_path), 1, 0, code="a1b2c3"), agent, "resume")
+    return seen["argv"]
+
+
+def test_a_resumed_overlay_agent_pins_its_render_to_the_revision_its_launch_recorded(tmp_path):
+    agent = store.AgentRecord(
+        "engineer@a1b2c3-0001",
+        "eng",
+        "t1",
+        harness="claude",
+        profile="engineer",
+        conversation_id="conv-1",
+        overlays=["tuner"],
+        profile_decision={"bundle_revision": "abc123"},
+    )
+    assert _passed_revision(_resumed(tmp_path, agent)) == ["abc123"]
+
+
+def test_a_resumed_agent_without_overlays_leaves_its_render_unpinned(tmp_path):
+    agent = store.AgentRecord(
+        "engineer@a1b2c3-0001",
+        "eng",
+        "t1",
+        harness="claude",
+        profile="engineer",
+        conversation_id="conv-1",
+        profile_decision={"bundle_revision": "abc123"},
+    )
+    assert _passed_revision(_resumed(tmp_path, agent)) == []
