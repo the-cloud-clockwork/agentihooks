@@ -1,6 +1,8 @@
+import errno
 import hashlib
 import io
 import json
+import os
 import socket
 import ssl
 import stat
@@ -101,10 +103,12 @@ def test_a_refused_acl_user_leaves_no_member_records(admin, monkeypatch):
 
     monkeypatch.setattr(redis_lib.client.Pipeline, "execute", refuse)
 
-    with pytest.raises(auth.HiveError, match=r"^Redis refused the member's ACL user \(ERR Error in ACL SETUSER"):
+    with pytest.raises(auth.HiveError) as refused:
         auth.exchange(admin, code, PUBLIC)
 
-    assert [key for key in admin.keys("*") if key.startswith(f"{auth.PREFIX}:")] == []
+    assert str(refused.value) == "Redis refused the new member (ERR Error in ACL SETUSER modifier)"
+    assert admin.keys("*") == []
+    assert admin.acl_users() == ["default"]
 
 
 def test_revoke_cuts_both_credentials(admin, fake):
@@ -244,7 +248,8 @@ def test_a_join_endpoint_off_loopback_needs_tls(admin):
         ("http://hive.example:8770", "a join off loopback carries credentials, so the hive URL must be https"),
         (
             "http://127.0.0.1:{port}",
-            "the hive at http://127.0.0.1:{port} is unreachable (<urlopen error [Errno 111] Connection refused>)",
+            f"the hive at http://127.0.0.1:{{port}} is unreachable "
+            f"(<urlopen error [Errno {errno.ECONNREFUSED}] {os.strerror(errno.ECONNREFUSED)}>)",
         ),
     ],
 )

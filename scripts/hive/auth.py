@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
-from redis.exceptions import ResponseError
+from redis.exceptions import RedisError
 
 from scripts.swarm.keyspace import ROOT
 
@@ -50,15 +50,23 @@ def exchange(redis: "Redis", code: str, redis_url: str) -> dict:
         pipe.execute_command("ACL", "SETUSER", f"hive-{member_id}", "reset", "on", f"#{_digest(password)}", *ACL_RULES)
         try:
             pipe.execute()
-        except ResponseError as exc:
-            redis.delete(*records)
-            raise HiveError(f"Redis refused the member's ACL user ({exc})") from exc
+        except RedisError as exc:
+            _forget(redis, member_id, records)
+            raise HiveError(f"Redis refused the new member ({exc})") from exc
     return {
         "id": member_id,
         "name": name,
         "ledger_credential": ledger,
         "redis_url": _with_user(redis_url, f"hive-{member_id}", password),
     }
+
+
+def _forget(redis: "Redis", member_id: str, records: tuple[str, ...]) -> None:
+    try:
+        redis.delete(*records)
+        redis.execute_command("ACL", "DELUSER", f"hive-{member_id}")
+    except RedisError:
+        pass
 
 
 def _with_user(url: str, user: str, password: str) -> str:
