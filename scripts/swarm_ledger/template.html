@@ -494,7 +494,7 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-pair > .sw-block { min-width: 0; padding: var(--space-row); }
 .sw-pair > .sw-block ~ .sw-block { border-left: 1px solid var(--rule); }
 @media (min-width: 1024px) {
-  #swarm-row-work { grid-template-columns: minmax(0, max-content) 0 minmax(14rem, 1fr); }
+  #swarm-row-work, #swarm-row-accounts { grid-template-columns: minmax(0, max-content) 0 minmax(14rem, 1fr); }
   #swarm-box .sw-pair.split { grid-template-columns: minmax(14rem, var(--split)) 0 minmax(14rem, 1fr); }
   #swarm-box .sized { height: var(--h); overflow: hidden; }
   #swarm-box .sw-capacity.sized { overflow-y: auto; align-content: flex-start; }
@@ -565,7 +565,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 #quota-table .lbl.normal { color: var(--positive); }
 #quota-table .lbl.reduce, #quota-table .lbl.drain-soon { color: var(--warn); }
 #quota-table .lbl.drain, #quota-table .lbl.blocked { color: var(--destructive); }
-.sw-capline { display: flex; flex-wrap: wrap; gap: 4px var(--space-row); margin: 0; padding: var(--space-tight) var(--space-row); font-size: var(--fs-meta); color: var(--muted); }
+.sw-capline { display: flex; flex-wrap: wrap; gap: 4px var(--space-row); margin: 0; padding: var(--space-tight) 0 0; font-size: var(--fs-meta); color: var(--muted); }
 .sw-capline:empty { display: none; }
 .sw-caplanes { font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text); }
 .sw-promoted { display: inline-flex; gap: 8px; }
