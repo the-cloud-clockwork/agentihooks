@@ -10,13 +10,11 @@ import ledger_bin  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
-from scripts.swarm_ledger.repository.file import FileLedgerRepository
+from scripts.swarm_ledger.repository import repository as storage
 
 from scripts.swarm.store import SwarmError  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import chromium, rendered_home  # noqa: E402
-
-storage = FileLedgerRepository(core)
 
 MINUTE = 60 * 1000
 SWARM_STATE = server.swarm_state
@@ -83,7 +81,8 @@ def updated_at():
 
 @pytest.fixture(autouse=True)
 def states():
-    ledger_bin.bin_path().unlink(missing_ok=True)
+    with storage.connect() as connection, connection:
+        storage.save_registry(connection, "bin", {})
     with patch.object(server, "swarm_state", side_effect=lambda slug: "running" if slug == SLUG else None):
         yield
 
@@ -339,5 +338,5 @@ def test_the_home_shell_bins_nothing_and_the_watch_loop_bins_closed_ledgers_with
         patch.object(server.time, "sleep", finish),
         pytest.raises(RuntimeError, match="watch ended"),
     ):
-        server.watch_seeds()
+        server.watch_ledgers()
     assert "served-closed" in ledger_bin.entries()

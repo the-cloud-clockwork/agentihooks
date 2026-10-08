@@ -17,7 +17,7 @@ def fake_server(calls):
         HUB=Hub(),
         core=SimpleNamespace(SLUG_RE=re.compile(r"[a-z0-9-]+"), read_token=lambda page: "tok"),
         authority=SimpleNamespace(principal=lambda token, slug, given, agent: "operator"),
-        repository=SimpleNamespace(read_page=lambda slug: "", get_document=lambda slug: {"events": []}),
+        repository=SimpleNamespace(token=lambda slug: "tok", get_document=lambda slug: {"events": []}),
         stream_resources=lambda slug: calls.append(("load", slug)) or {"ledger": {"_meta": {"rev": 1}}},
     )
 

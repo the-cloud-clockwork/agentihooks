@@ -119,12 +119,10 @@ def test_shell_size_does_not_grow_with_the_record(base):
 
 
 def test_serving_the_shell_never_writes_the_record_files(base):
-    html_path, json_path = core.paths(SLUG)
-    html_path.write_text(html_path.read_text().replace(core.page_version(), "000000000000"))
-    stamps = (html_path.stat().st_mtime_ns, json_path.stat().st_mtime_ns)
+    before = server.repository.get_document(SLUG)
     get(f"{base}/{SLUG}")
     get(base + "/")
-    assert (html_path.stat().st_mtime_ns, json_path.stat().st_mtime_ns) == stamps
+    assert server.repository.get_document(SLUG) == before
 
 
 def test_home_shell_lists_no_ledger_rows(base):
@@ -227,7 +225,7 @@ def test_the_bin_shell_leaves_the_watermark_slot_empty(base):
 
 
 def test_the_shell_names_the_server_port_and_an_empty_token_when_the_record_has_none(base, monkeypatch):
-    monkeypatch.setattr(server.repository, "read_page", lambda slug: "<html></html>")
+    monkeypatch.setattr(server.repository, "token", lambda slug: None)
     page = server.page_for(SLUG)
     assert '<meta name="ledger-token" content="">' in page
     assert f'<meta name="ledger-port" content="{server.PORT}">' in page
@@ -237,7 +235,6 @@ def test_the_watch_loop_sweeps_the_bin_every_fifteenth_pass(monkeypatch):
     sweeps, passes = [], []
     monkeypatch.setattr(server, "bin_closed_without_swarm", lambda: sweeps.append(len(passes)))
     monkeypatch.setattr(server.ledger_bin, "tidy", lambda: None)
-    monkeypatch.setattr(server.repository, "pages", lambda: [])
     monkeypatch.setattr(server, "sample_streams", lambda: None)
     monkeypatch.setattr(server, "reloading", lambda: False)
 
@@ -248,15 +245,8 @@ def test_the_watch_loop_sweeps_the_bin_every_fifteenth_pass(monkeypatch):
 
     monkeypatch.setattr(server.time, "sleep", tick)
     with pytest.raises(StopIteration):
-        server.watch_seeds()
+        server.watch_ledgers()
     assert sweeps == [0, 15, 30]
-
-
-def test_upgrading_a_record_fills_every_placeholder(base):
-    new_ledger.upgrade_page(SLUG)
-    page = core.paths(SLUG)[0].read_text(encoding="utf-8")
-    assert "__LEDGER_" not in page
-    assert "<title>Shell &lt;ledger&gt;</title>" in page
 
 
 def history(copies):

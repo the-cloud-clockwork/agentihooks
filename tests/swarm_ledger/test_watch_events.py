@@ -229,7 +229,7 @@ def test_main_resumes_from_the_last_cursor_and_refreshes_credentials_only_after_
     assert sleeps == [0.5, 0.5]
     out = capsys.readouterr().out.splitlines()
     assert out == [
-        f"WATCHING {ledger_file} rev 1",
+        f"WATCHING ledger {SLUG} rev 1",
         'OPERATOR rev=2 comment added on tasks/t1 [c-2]: "x"',
         "WARNING ledger stream: dropped",
     ]

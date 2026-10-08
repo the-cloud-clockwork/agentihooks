@@ -1232,7 +1232,7 @@ def test_composite_status_preserves_member_events_and_crew(live, capsys):
     state = ledger.request(SLUG, service=True)
     member = state["_meta"]["members"]["api-reader"]
     assert member["role"] == "member"
-    assert member["handled_rev"] == 0
+    assert member["handled_rev"] == 1
     assert member["claims"] == []
     assert "id" not in member
     assert "revision" not in member
@@ -1244,7 +1244,7 @@ def test_composite_status_preserves_member_events_and_crew(live, capsys):
     [crew] = state["_meta"]["crew"]
     assert crew["name"] == "api-reader"
     assert crew["role"] == "member"
-    assert crew["handled_rev"] == 0
+    assert crew["handled_rev"] == 1
     ledger.cmd_status(SimpleNamespace(slug=SLUG, name="api-reader"))
     status = json.loads(capsys.readouterr().out)
     assert status["crew"] == state["_meta"]["crew"]
@@ -1931,7 +1931,7 @@ def test_latest_thousand_operation_receipts_remain_retry_safe(live):
     guard = request(live, "GET", "metadata")[1]["revision"]
     payload = {"operation_id": "latest", "ops": [operation("latest")], "guards": {"metadata": guard}}
     assert request(live, "POST", "operations", payload)[0] == 200
-    saved = server.repository.get_document(SLUG, reconcile=False)["_meta"]["api_operations"]
+    saved = server.repository.get_document(SLUG)["_meta"]["api_operations"]
     assert len(saved) == 1000
     assert "0" not in saved
     assert "1" in saved
@@ -2421,7 +2421,7 @@ def test_repository_optional_collections_have_empty_http_resources(live, monkeyp
     from scripts.swarm_ledger.api.resources import revision
 
     document = {"_meta": {}, "questions": [{"id": "q1"}]}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, reconcile=True: document)
+    monkeypatch.setattr(server.repository, "get_document", lambda slug: document)
     assert request(live, "GET", path) == (
         200,
         {"data": [], "revision": revision([]), "next_cursor": None},
@@ -2432,11 +2432,9 @@ def test_optional_repository_fields_preserve_forbidden_details(live, monkeypatch
     from tests.swarm_ledger.test_ledger_authority import authority
 
     document = {"_meta": {}}
-    reads = []
 
-    def read(slug, reconcile=True):
+    def read(slug):
         assert slug == SLUG
-        reads.append(reconcile)
         return document
 
     monkeypatch.setattr(server.repository, "get_document", read)
@@ -2458,14 +2456,13 @@ def test_optional_repository_fields_preserve_forbidden_details(live, monkeypatch
             }
         },
     )
-    assert reads == [False]
     assert document == {"_meta": {}}
 
 
 def test_optional_repository_fields_preserve_success_acknowledgment(live, monkeypatch):
     from unittest.mock import Mock
 
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, reconcile=True: {"_meta": {}})
+    monkeypatch.setattr(server.repository, "get_document", lambda slug: {"_meta": {}})
     apply = Mock(return_value=({"_meta": {"rev": 3}}, []))
     monkeypatch.setattr(server.repository, "apply_ops", apply)
     monkeypatch.setattr(server, "relay_to_inbox", Mock())
@@ -2670,6 +2667,6 @@ def test_ack_succeeds_while_members_change_between_every_read_and_write(live, ca
     ):
         ledger.cmd_ack(SimpleNamespace(slug=SLUG, name="api-reader", rev=None))
     acked = json.loads(capsys.readouterr().out)["acked"]
-    members = server.repository.get_document(SLUG, reconcile=False)["_meta"]["members"]
+    members = server.repository.get_document(SLUG)["_meta"]["members"]
     assert members["api-reader"]["handled_rev"] == acked
     assert "busy-0" in members
