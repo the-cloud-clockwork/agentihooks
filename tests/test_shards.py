@@ -353,13 +353,10 @@ def test_the_workers_of_a_shard_are_set_up_side_by_side():
 
 def test_the_base_temp_exists_once_before_any_worker_starts(tmp_path):
     root = tmp_path / "basetemp"
-    created = []
 
     class Factory:
         def getbasetemp(self):
-            if not created:
-                root.mkdir()
-                created.append(root)
+            root.mkdir()
             return root
 
     manager = _Manager(["gw0", "gw1", "gw2", "gw3"])
@@ -369,7 +366,6 @@ def test_the_base_temp_exists_once_before_any_worker_starts(tmp_path):
     manager.setup_node = lambda spec, putevent: seen.append(root.is_dir()) or setup(spec, putevent)
     setup_nodes_in_parallel(manager, object())
     assert seen == [True, True, True, True]
-    assert created == [root]
 
 
 def test_the_controller_of_a_sharded_run_sets_up_its_workers_side_by_side(monkeypatch):
