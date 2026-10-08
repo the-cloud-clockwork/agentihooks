@@ -55,7 +55,7 @@ def rule(task: dict) -> dict | None:
     territory = [str(area) for area in task.get("territory", [])]
     if ledger_kinds.kind(task) == "ops" or any(INFRA_RE.search(area) for area in territory):
         return sized("L", "rule", 1.0)
-    if task.get("profile") == "frontend" and territory and all(_on_page(area) for area in territory):
+    if task.get("profile") == "frontend" and territory and all(on_page(area) for area in territory):
         return sized("S", "rule", 1.0)
     return None
 
@@ -94,5 +94,5 @@ def _real(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and not math.isnan(value)
 
 
-def _on_page(area):
+def on_page(area):
     return area in PAGE_FILES or area == PAGE_FOLDER or area.startswith(f"{PAGE_FOLDER}/")
