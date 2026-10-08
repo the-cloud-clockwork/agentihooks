@@ -72,19 +72,53 @@ def test_empty_roles_and_prefer_clear_them(redis):
     assert (record["roles"], record["prefer"]) == ([], {})
 
 
-def test_a_setting_keeps_a_heartbeat_written_while_it_was_checked(redis, monkeypatch):
-    registry.update(redis, "box", ["ui=yes"])
+def _race_once(monkeypatch, field, value):
     read = registry.show
+    pending = [(field, value)]
 
     def racing(client, hive_id):
         record = read(client, hive_id)
-        client.hset(registry.key(hive_id), "heartbeat_at", "900")
+        if pending:
+            client.hset(registry.key(hive_id), *pending.pop())
         return record
 
     monkeypatch.setattr(registry, "show", racing)
+    return read
+
+
+def test_a_setting_keeps_a_heartbeat_written_while_it_was_checked(redis, monkeypatch):
+    registry.update(redis, "box", ["ui=yes"])
+    _race_once(monkeypatch, "heartbeat_at", "900")
     registry.update(redis, "box", ["name=Laptop"])
     assert redis.hget(registry.key("box"), "heartbeat_at") == "900"
     assert redis.hget(registry.key("box"), "name") == "Laptop"
+
+
+def test_a_new_hive_keeps_a_heartbeat_written_while_it_was_checked(redis, monkeypatch):
+    read = _race_once(monkeypatch, "heartbeat_at", "900")
+    assert registry.update(redis, "box", ["ui=yes"]) == {**DEFAULT, "ui": "yes", "heartbeat_at": 900}
+    assert read(redis, "box") == {**DEFAULT, "ui": "yes", "heartbeat_at": 900}
+
+
+def test_a_setting_is_checked_again_against_a_concurrent_change(redis, monkeypatch):
+    registry.update(redis, "box", ["ui=yes"])
+    _race_once(monkeypatch, "ui", "no")
+    with pytest.raises(HiveError) as error:
+        registry.update(redis, "box", ["roles=master"])
+    assert str(error.value) == "role master needs a UI, and this hive has ui=no"
+    assert redis.hget(registry.key("box"), "roles") == "[]"
+
+
+@pytest.mark.parametrize(("field", "value"), [("roles", "eng"), ("max_agents", "many")])
+def test_an_unreadable_stored_field_is_refused_by_name(redis, field, value):
+    redis.hset(registry.key("box"), field, value)
+    with pytest.raises(HiveError) as error:
+        registry.show(redis, "box")
+    assert str(error.value) == f"hive box holds an unreadable {field}: {value!r}"
+
+
+def test_repeated_roles_are_kept_once(redis):
+    assert registry.update(redis, "box", ["roles=eng,ci,eng"])["roles"] == ["eng", "ci"]
 
 
 def test_a_record_written_by_another_writer_shows_with_defaults(redis):
@@ -106,6 +140,7 @@ def test_a_record_written_by_another_writer_shows_with_defaults(redis):
         (["max-agents=0"], "max-agents must be a positive whole number, not '0'"),
         (["max-agents=two"], "max-agents must be a positive whole number, not 'two'"),
         (["max-agents=-1"], "max-agents must be a positive whole number, not '-1'"),
+        (["max-agents=²"], "max-agents must be a positive whole number, not '²'"),
         (["roles=eng", "prefer=eng"], "prefer takes role:rank, not 'eng'"),
         (["roles=eng", "prefer=eng:0"], "the rank of eng must be a positive whole number, not '0'"),
         (["roles=eng", "prefer=ci:1"], "prefer names ci, a role this hive does not take"),
@@ -156,10 +191,11 @@ def test_liveness_follows_the_heartbeat_window():
 
 
 def test_hives_lists_indexed_records_sorted_and_skips_missing(redis):
-    registry.update(redis, "zeta", ["ui=yes"])
-    registry.update(redis, "alpha", ["ui=no"])
+    names = ["zeta", "alpha", "mu", "kappa", "omega", "beta", "delta", "sigma"]
+    for name in names:
+        registry.update(redis, name, ["ui=yes"])
     redis.sadd(f"{registry.ROOT}:hives", "gone")
-    assert [record["id"] for record in registry.hives(redis)] == ["alpha", "zeta"]
+    assert [record["id"] for record in registry.hives(redis)] == sorted(names)
 
 
 def test_cli_set_show_and_list(redis, monkeypatch, capsys):
@@ -213,7 +249,7 @@ def test_hive_id_is_seeded_from_the_installation_record(home):
 def test_hive_id_reads_the_default_home(tmp_path, monkeypatch):
     monkeypatch.delenv("SWARM_HIVE_ID", raising=False)
     monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
-    monkeypatch.setattr(commands.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(registry.Path, "home", lambda: tmp_path)
     (tmp_path / ".agentihooks").mkdir()
     (tmp_path / ".agentihooks" / "installation.json").write_text(json.dumps({"hive_id": "home-box"}))
     assert commands.hive_id() == "home-box"

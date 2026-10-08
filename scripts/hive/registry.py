@@ -1,6 +1,7 @@
 """Hive registry: one Redis hash per hive under <ROOT>:hive:<id>, indexed in <ROOT>:hives."""
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -11,6 +12,7 @@ from scripts.swarm_v2.keyspace import INSTALLATION_FILE
 
 if TYPE_CHECKING:
     from redis import Redis
+    from redis.client import Pipeline
 
 ROLES = ("master", "qa", "frontend", "eng", "ci", "plan")
 UI_ROLES = ("master", "qa", "frontend")
@@ -56,13 +58,13 @@ def _flag(setting: str, value: str) -> str:
 
 
 def _count(setting: str, value: str) -> int:
-    if not value.isdigit() or int(value) < 1:
+    if not (value.isascii() and value.isdigit()) or int(value) < 1:
         raise HiveError(f"{setting} must be a positive whole number, not {value!r}")
     return int(value)
 
 
 def _roles(setting: str, value: str) -> list[str]:
-    roles = [role for role in value.split(",") if role]
+    roles = list(dict.fromkeys(role for role in value.split(",") if role))
     for role in roles:
         if role not in ROLES:
             raise HiveError(f"unknown role {role}; roles are {', '.join(ROLES)}")
@@ -113,17 +115,20 @@ def _encode(field: str, value: object) -> str:
     return json.dumps(value) if field in JSON_FIELDS else str(value)
 
 
-def _decode(field: str, value: str) -> object:
-    if field in JSON_FIELDS:
-        return json.loads(value)
-    return int(value) if field in INT_FIELDS else value
+def _decode(hive_id: str, field: str, value: str) -> object:
+    try:
+        if field in JSON_FIELDS:
+            return json.loads(value)
+        return int(value) if field in INT_FIELDS else value
+    except ValueError as exc:
+        raise HiveError(f"hive {hive_id} holds an unreadable {field}: {value!r}") from exc
 
 
 def show(redis: "Redis", hive_id: str) -> dict | None:
     stored = redis.hgetall(key(hive_id))
     if not stored:
         return None
-    return {**_default(hive_id), **{field: _decode(field, value) for field, value in stored.items()}}
+    return {**_default(hive_id), **{field: _decode(hive_id, field, value) for field, value in stored.items()}}
 
 
 def update(redis: "Redis", hive_id: str, pairs: list[str]) -> dict:
@@ -132,15 +137,18 @@ def update(redis: "Redis", hive_id: str, pairs: list[str]) -> dict:
     if not pairs:
         raise HiveError("hive set needs at least one setting")
     fields = parse(pairs)
-    stored = show(redis, hive_id)
-    record = {**(stored or _default(hive_id)), **fields}
-    _check(record)
-    written = fields if stored else record
-    with redis.pipeline() as pipe:
-        pipe.hset(key(hive_id), mapping={field: _encode(field, value) for field, value in written.items()})
+
+    def write(pipe: "Pipeline") -> dict:
+        record = {**(show(pipe, hive_id) or _default(hive_id)), **fields}
+        _check(record)
+        pipe.multi()
+        for field, value in _default(hive_id).items():
+            pipe.hsetnx(key(hive_id), field, _encode(field, value))
+        pipe.hset(key(hive_id), mapping={field: _encode(field, value) for field, value in fields.items()})
         pipe.sadd(INDEX, hive_id)
-        pipe.execute()
-    return record
+        return record
+
+    return redis.transaction(write, key(hive_id), value_from_callable=True)
 
 
 def hives(redis: "Redis") -> list[dict]:
@@ -151,9 +159,13 @@ def live(record: dict, now_ms: int) -> bool:
     return record["heartbeat_at"] > 0 and now_ms - record["heartbeat_at"] <= LIVE_MS
 
 
-def seeded_id(home: Path) -> str:
+def home() -> Path:
+    return Path(os.environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
+
+
+def seeded_id() -> str:
     try:
-        record = json.loads((home / INSTALLATION_FILE).read_text())
+        record = json.loads((home() / INSTALLATION_FILE).read_text())
     except (OSError, ValueError):
         return ""
     seeded = record.get("hive_id") if isinstance(record, dict) else None
