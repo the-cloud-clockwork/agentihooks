@@ -20,7 +20,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       ledger artifact; links it on each phase, comments the phase, and every task
                                       added to those phases carries the link
   plan phases PATH                    append a plan's phases (JSON, the init-swarm content phases shape) to the
-                                      ledger, planned manually and in review; a taken phase id refuses them all
+                                      ledger, planned automatically unless a phase names manual, which waits in
+                                      review; a taken phase id refuses them all
   phase ID done|open [--status T]     set a phase state, T becomes your status comment
   followup add TEXT | done|open ID    add a follow-up, close one, or reopen one
   followup add TEXT --needs-operator  add a follow-up that waits on the operator's decision; it shows in Priorities
@@ -45,16 +46,17 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
   task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N] [--profile NAME]
-           [--kind K] [--must M --check C --judge J] [--scaffold] [--artifact] [--rank R]
+           [--kind K] [--must M --check C --judge J] [--scaffold] [--artifact] [--rank R] [--difficulty D]
                                       add a swarm task; IDS and AREAS are comma separated; K is code (default), ci,
                                       ops, troubleshoot, tune or research; M, C, J form its proof contract;
                                       --scaffold creates its work folder (steering, progress, proof) in the same call;
                                       --artifact marks a file the operator asked for, so the task may publish it;
                                       R is the queue rank, urgent, high, normal (default) or low, next meaning
                                       urgent: the swarm claims eligible tasks highest rank first, ledger order
-                                      within a rank; only the master, a planner or the operator sets it
-  task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory, kind, rank or
-                                      artifact (yes or no) of a task;
+                                      within a rank; only the master, a planner or the operator sets it;
+                                      D is the task size, S, M or L, recorded as the operator's choice
+  task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory, kind, rank,
+                                      difficulty (S, M or L) or artifact (yes or no) of a task;
                                       proof.KEY=VALUE and contract.KEY=VALUE pairs form one object, e.g.
                                       proof.command=C proof.output=O
   prompt                              print the join paragraph for a launch prompt
@@ -91,6 +93,7 @@ import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
 from scripts.gates.base import Who
+from scripts.swarm_ledger import ledger_phases
 from scripts.swarm_ledger.repository import repository
 
 BASE = ledger_link.base()
@@ -323,7 +326,11 @@ def cmd_plan(args):
         plan, [phase["id"] for phase in resource(args.slug, "phases", collection=True)]
     )
     send(args, "phase_append", phases=phases)
-    print(json.dumps({"appended": [phase["phase"] for phase in phases], "planning": "manual", "review": "pending"}))
+    print(
+        json.dumps(
+            {"appended": [phase["phase"] for phase in phases], "planning": {p["phase"]: p["planning"] for p in phases}}
+        )
+    )
 
 
 def cmd_artifact_purge(args):
@@ -509,6 +516,8 @@ def cmd_task(args):
             lists["profile"] = args.profile
         if args.rank:
             lists["rank"] = args.rank
+        if args.difficulty:
+            lists["difficulty"] = args.difficulty
         if args.plan:
             lists["plan_url"] = args.plan
         if args.scaffold:
@@ -537,6 +546,11 @@ def cmd_task(args):
         if fields["artifact"] not in ("yes", "no"):
             sys.exit("task set takes artifact=yes or artifact=no")
         fields["artifact"] = fields["artifact"] == "yes"
+    if "difficulty_confidence" in fields:
+        try:
+            fields["difficulty_confidence"] = float(fields["difficulty_confidence"])
+        except ValueError:
+            sys.exit("task set takes difficulty_confidence as a number from 0 to 1")
     for dotted in [key for key in fields if "." in key]:
         name, _, sub = dotted.partition(".")
         if not isinstance(fields.get(name, {}), dict):
@@ -611,7 +625,7 @@ def build_parser():
     phase.add_argument("--status")
     phase.add_argument("--description", default="")
     phase.add_argument("--depends-on", default="")
-    phase.add_argument("--planning", choices=["manual", "auto"], default="manual")
+    phase.add_argument("--planning", choices=["manual", "auto"], default=ledger_phases.PLANNING_DEFAULT)
     phase.add_argument("--release", action="store_true")
     followup = sub.add_parser("followup")
     followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])
@@ -675,6 +689,7 @@ def build_parser():
     task.add_argument("--overlays", help="comma separated overlays this task's agent wears, at most three")
     task.add_argument("--rank", help="queue rank: urgent, high, normal (default) or low; next means urgent")
     task.add_argument("--plan", default="", help="link to the published plan; default the phase's plan link")
+    task.add_argument("--difficulty", choices=ledger_tasks.DIFFICULTIES, help="task size: S, M or L")
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")
     publish.add_argument("--phase", required=True, help="comma separated ids of the phases the plan fills")

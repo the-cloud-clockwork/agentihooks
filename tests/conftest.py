@@ -391,6 +391,14 @@ def _swarm_runs_as_installed(monkeypatch):
     monkeypatch.setattr(timer, "_roots", lambda: (Path("/installed"), Path("/installed")))
 
 
+@pytest.fixture(autouse=True)
+def _ci_speed_offline(request, monkeypatch):
+    from scripts.swarm import ci_speed
+
+    if not getattr(request.module, "CI_SPEED_READ", False):
+        monkeypatch.setattr(ci_speed, "read_runs", lambda *args, **kwargs: [])
+
+
 @pytest.fixture
 def mock_env():
     """Provide a clean environment for tests."""
