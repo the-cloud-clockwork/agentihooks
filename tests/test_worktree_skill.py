@@ -350,6 +350,35 @@ class Done(WtBase):
         self.assertIn("uncommitted changes", result.stderr)
         self.assertTrue(dest.is_dir())
 
+    def test_done_pushed_refuses_force_so_a_dirty_worktree_is_never_dropped(self):
+        dest = self._pushed_worktree("parked-five")
+        (dest / "scratch.txt").write_text("uncommitted\n")
+        result = self.run_wt("done", "parked-five", "--repo", str(self.primary), "--pushed", "--force")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stderr.strip(), "wt: --pushed and --force do not combine")
+        self.assertTrue((dest / "scratch.txt").is_file())
+
+    def test_done_pushed_keeps_a_worktree_behind_origin(self):
+        dest = self._pushed_worktree("parked-six")
+        other = Path(self.tmp) / "other-six"
+        _git(Path(self.tmp), "clone", "--quiet", "-b", "parked-six", str(self.origin), str(other), env=self.gitenv)
+        (other / "ahead.txt").write_text("ahead\n")
+        _git(other, "add", "ahead.txt", env=self.gitenv)
+        _git(other, "commit", "--quiet", "-m", "ahead", env=self.gitenv)
+        _git(other, "push", "--quiet", "origin", "parked-six", env=self.gitenv)
+        result = self.run_wt("done", "parked-six", "--repo", str(self.primary), "--pushed")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("is not on origin at the worktree head", result.stderr)
+        self.assertTrue(dest.is_dir())
+
+    def test_done_pushed_keeps_the_worktree_when_origin_cannot_be_read(self):
+        dest = self._pushed_worktree("parked-seven")
+        _git(self.primary, "remote", "set-url", "origin", str(Path(self.tmp) / "gone.git"), env=self.gitenv)
+        result = self.run_wt("done", "parked-seven", "--repo", str(self.primary), "--pushed")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot read remote branch 'parked-seven' — worktree kept", result.stderr)
+        self.assertTrue(dest.is_dir())
+
     def test_done_without_force_keeps_a_worktree_whose_pull_request_closed_unmerged(self):
         dest = self._published_with_pull_requests(
             "closed-kept", '[{"state": "CLOSED", "url": "https://github.com/o/r/pull/7"}]'

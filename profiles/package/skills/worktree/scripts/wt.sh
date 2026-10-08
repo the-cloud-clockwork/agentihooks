@@ -44,6 +44,7 @@ while [[ $# -gt 0 ]]; do
     *) [[ -z "${NAME}" ]] || die "unexpected argument '$1'"; NAME="$1"; shift ;;
   esac
 done
+[[ "${FORCE}" -eq 1 && "${PUSHED}" -eq 1 ]] && die "--pushed and --force do not combine"
 
 primary_of() {
   local dir="$1" common
