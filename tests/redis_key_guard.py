@@ -18,12 +18,16 @@ from scripts.swarm import keyspace  # noqa: E402
 PRODUCTION = (f"{keyspace.PRODUCTION}:", "agenticore:")
 READS = frozenset(
     """
-    BITCOUNT CLIENT DBSIZE DISCARD DUMP ECHO EXEC EXISTS GET GETRANGE HELLO HEXISTS HGET HGETALL HKEYS HLEN HMGET
-    HSCAN HSTRLEN HVALS INFO KEYS LINDEX LLEN LRANGE MGET MULTI OBJECT PING PSUBSCRIBE PTTL PUBSUB SCAN SCARD SELECT
-    SISMEMBER SMEMBERS SMISMEMBER SSCAN STRLEN SUBSCRIBE TTL TYPE UNWATCH WATCH XINFO XLEN XRANGE XREAD XREVRANGE
-    ZCARD ZCOUNT ZMSCORE ZRANGE ZRANGEBYSCORE ZRANK ZREVRANGE ZREVRANGEBYSCORE ZSCAN ZSCORE
+    BITCOUNT BITPOS CLIENT COMMAND DBSIZE DISCARD DUMP ECHO EXEC EXISTS EXPIRETIME GET GETBIT GETRANGE HELLO HEXISTS
+    HGET HGETALL HKEYS HLEN HMGET HRANDFIELD HSCAN HSTRLEN HVALS INFO KEYS LCS LINDEX LLEN LPOS LRANGE MEMORY MGET
+    MULTI OBJECT PEXPIRETIME PFCOUNT PING PSUBSCRIBE PTTL PUBSUB RANDOMKEY SCAN SCARD SDIFF SELECT SINTER SINTERCARD
+    SISMEMBER SMEMBERS SMISMEMBER SRANDMEMBER SSCAN STRLEN SUBSCRIBE SUNION TIME TTL TYPE UNWATCH WATCH XINFO XLEN
+    XPENDING XRANGE XREAD XREVRANGE ZCARD ZCOUNT ZDIFF ZINTER ZLEXCOUNT ZMSCORE ZRANDMEMBER ZRANGE ZRANGEBYLEX
+    ZRANGEBYSCORE ZRANK ZREVRANGE ZREVRANGEBYLEX ZREVRANGEBYSCORE ZREVRANK ZSCAN ZSCORE ZUNION
     """.split()
 )
+SCRIPTS = frozenset(("EVAL", "EVALSHA", "EVAL_RO", "EVALSHA_RO", "FCALL", "FCALL_RO", "FUNCTION", "SCRIPT"))
+WIPES = frozenset(("FLUSHALL", "FLUSHDB", "SWAPDB", "MOVE"))
 written: list[str] = []
 
 
@@ -31,8 +35,16 @@ class ProductionKey(RuntimeError):
     pass
 
 
-def _check(args):
-    if not args or str(args[0]).upper() in READS:
+def _fake(client):
+    return client.connection_pool.connection_class.__module__.startswith("fakeredis.")
+
+
+def _check(client, args):
+    command = str(args[0]).upper() if args else ""
+    if command in SCRIPTS or (command in WIPES and not _fake(client)):
+        written.append(command)
+        raise ProductionKey(f"a test sent {command}, which can reach production keys the guard cannot read")
+    if not command or command in READS:
         return
     for arg in args[1:]:
         text = arg.decode(errors="replace") if isinstance(arg, bytes) else arg
@@ -43,7 +55,7 @@ def _check(args):
 
 def _guarded(method):
     def guarded(self, *args, **options):
-        _check(args)
+        _check(self, args)
         return method(self, *args, **options)
 
     return guarded

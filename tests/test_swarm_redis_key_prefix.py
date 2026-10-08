@@ -78,11 +78,11 @@ def test_a_queued_pipeline_write_to_a_production_key_fails_the_test():
     "command",
     [
         ("XGROUP", "CREATE", "agentihooks:swarm:demo:events", "readers", "$", "MKSTREAM"),
-        ("EVAL", "return redis.call('SET', KEYS[1], 'x')", 1, "agentihooks:swarm:demo:config"),
         ("SUNIONSTORE", "agentihooks:swarm:demo:all", "suite:a"),
         ("SET", "agenticore:memory:x", "1"),
+        ("SADD", "suite:index", "agentihooks:swarm:demo:config"),
     ],
-    ids=["xgroup", "eval", "sunionstore", "agenticore"],
+    ids=["xgroup", "sunionstore", "agenticore", "value"],
 )
 def test_any_command_outside_the_reads_naming_a_production_key_fails(command):
     client = _client()
@@ -94,6 +94,43 @@ def test_any_command_outside_the_reads_naming_a_production_key_fails(command):
     del redis_key_guard.written[before:]
 
     assert caught == [next(arg for arg in command if str(arg).startswith(redis_key_guard.PRODUCTION))]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ("EVAL", "return redis.call('SET', 'agentihooks:swarm:x', '1')", 0),
+        ("FCALL", "set_it", 0),
+    ],
+    ids=["eval", "fcall"],
+)
+def test_a_script_fails_the_test_whatever_it_names(command):
+    client = _client()
+    before = len(redis_key_guard.written)
+
+    with pytest.raises(redis_key_guard.ProductionKey) as refused:
+        client.execute_command(*command)
+    caught = redis_key_guard.written[before:]
+    del redis_key_guard.written[before:]
+
+    assert str(refused.value) == f"a test sent {command[0]}, which can reach production keys the guard cannot read"
+    assert caught == [command[0]]
+    assert client.exists("agentihooks:swarm:x") == 0
+
+
+def test_a_wipe_passes_on_fakeredis_and_fails_on_a_real_client():
+    import redis
+
+    before = len(redis_key_guard.written)
+    _client().flushall()
+    real = redis.Redis(unix_socket_path="/nonexistent/redis.sock")
+
+    with pytest.raises(redis_key_guard.ProductionKey):
+        real.flushdb()
+    caught = redis_key_guard.written[before:]
+    del redis_key_guard.written[before:]
+
+    assert caught == ["FLUSHDB"]
 
 
 def test_a_watched_pipeline_write_to_a_production_key_fails_the_test():
