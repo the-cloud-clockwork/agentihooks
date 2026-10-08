@@ -1,7 +1,7 @@
+import ast
 import hashlib
 import json
 from pathlib import Path
-from types import FunctionType, ModuleType
 
 import pytest
 
@@ -56,17 +56,14 @@ def _replay(module, name, path):
 
 
 @pytest.mark.parametrize("name,module", [("architecture", architecture), ("evidence-index", validate_plan)])
-def test_record_apis_match_the_base_and_detect_a_planted_digest_fault(name, module, tmp_path):
+def test_record_apis_match_the_base_and_detect_a_planted_digest_fault(name, module, tmp_path, monkeypatch):
     expected = json.loads((ROOT / "tests/fixtures/swarm_v2/records/replay.json").read_text())["outputs"][name]
     path = tmp_path / "record.json"
     assert _replay(module, name, path) == expected
-    planted = ModuleType("planted")
-    planted.__dict__.update(module.__dict__)
-    faulty_helpers = ModuleType("faulty_helpers")
     source = Path(records.__file__).read_text().replace("sort_keys=True", "sort_keys=False")
-    exec(compile(source, "faulty_helpers", "exec"), faulty_helpers.__dict__)
-    planted.digest = faulty_helpers.digest
-    for function, value in module.__dict__.items():
-        if callable(value) and getattr(value, "__globals__", None) is module.__dict__:
-            planted.__dict__[function] = FunctionType(value.__code__, planted.__dict__, function, value.__defaults__)
-    assert _replay(planted, name, path) != expected
+    digest = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == "digest")
+    digest.decorator_list = []
+    faulty_helpers = records.__dict__.copy()
+    exec(compile(ast.Module(body=[digest], type_ignores=[]), "faulty_digest", "exec"), faulty_helpers)
+    monkeypatch.setattr(module, "digest", faulty_helpers["digest"])
+    assert _replay(module, name, path) != expected
