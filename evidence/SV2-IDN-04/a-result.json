@@ -1,38 +1,30 @@
 {
-  "tested_commit": "22c4036a08afbd87146d9bb59d4d33a3fc555df9",
+  "tested_commit": "424d8fefdc84c398b97e94e924ba50f27eabbcf2",
   "evidence_class": "local isolated fixture on an in-memory Redis with a fake clock; not live rollout proof",
   "then": "a correctly launched worker registers only its own execution and authorized corpus",
   "runs": [
     {
-      "registered_execution_is_admitted_execution": true,
+      "registered_execution_is_admitted": true,
       "registration_equals_store": true,
-      "seat": "eng-1@fixture",
-      "task": "task",
-      "brain": "swarm-brain",
       "corpus": [
         "github.com/the-cloud-clockwork/agentihooks"
       ],
-      "corpus_admits_granted_project": true,
       "corpus_refuses_other_project": true,
+      "brain": "swarm-brain",
       "issuer": "controller@fixture",
       "audience": "registry@fixture",
-      "registrations": 1,
       "launch_grant_rejections_total": 0
     },
     {
-      "registered_execution_is_admitted_execution": true,
+      "registered_execution_is_admitted": true,
       "registration_equals_store": true,
-      "seat": "eng-1@fixture",
-      "task": "task",
-      "brain": "swarm-brain",
       "corpus": [
         "github.com/the-cloud-clockwork/agentihooks"
       ],
-      "corpus_admits_granted_project": true,
       "corpus_refuses_other_project": true,
+      "brain": "swarm-brain",
       "issuer": "controller@fixture",
       "audience": "registry@fixture",
-      "registrations": 1,
       "launch_grant_rejections_total": 0
     }
   ],

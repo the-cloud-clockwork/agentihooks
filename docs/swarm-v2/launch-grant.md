@@ -12,14 +12,17 @@ execution admitted through `RedisStore.start_execution` (SV2-IDN-02).
 - The subject comes from admitted state, never from the caller: `execution_id`, `generation`, `seat_id`
   and `task_id` are read from the execution registry. An execution that is no longer the current attempt
   of its seat is refused (`stale_generation`).
-- The controller selects the corpus: a non-empty set of canonical project IDs (SV2-IDN-01, never
-  `unknown`), one `brain_id` and one `account`, each validated before anything is written.
+- The controller selects the corpus: a non-empty list of canonical project IDs (SV2-IDN-01, never
+  `unknown`), one `brain_id` and one `account`, each validated before anything is written
+  (`invalid_request`). The grant carries the projects sorted and unique.
 - The grant carries `issuer`, `audience` and `key_id`, issued and expiry times, and a random `grant_id`.
   Lifetime defaults to 300 seconds and is at most 900.
 - The token is `v2.<claims>.<HMAC-SHA256>`, with canonical JSON claims and unpadded base64url. The
   signing key is a `LaunchKey` of at least 32 bytes held by the controller; workers never verify grants.
 - Each issue records a nonsecret audit row (`launch-grants`): grant, issuer, audience, key ID, execution,
   generation, times and state `issued`. Neither the token nor the key is stored.
+- The currency check is not part of a transaction with the audit write. A grant issued while its
+  execution is being replaced is refused at registration (`stale_generation`).
 
 ## Register
 
@@ -27,34 +30,41 @@ execution admitted through `RedisStore.start_execution` (SV2-IDN-02).
 
 | Check | Error class |
 |---|---|
-| Token shape, signature, claim set | `unauthenticated` |
+| Token shape, signature, claim set and claim types | `unauthenticated` |
 | Schema version other than `2.0` | `invalid_request` |
 | Signing key ID, issuer, audience | `unauthenticated` |
 | Not yet valid, or at or past expiry | `unauthenticated` |
 | Grant for another swarm | `forbidden_scope` |
-| Grant not issued by this controller | `unauthenticated` |
 | Body not an object, names a field outside the bound set, or omits `execution_id` or `generation` | `invalid_request` |
-| Any body field (`swarm_id`, `execution_id`, `generation`, `seat_id`, `task_id`, `account`, `brain_id`, `project_ids`) that differs from the grant | `forbidden_scope` |
-| Grant revoked | `unauthenticated` |
+| A body field (`swarm_id`, `execution_id`, `generation`, `seat_id`, `task_id`, `account`, `brain_id`, `project_ids`) whose type or value differs from the grant; `project_ids` must match the grant's sorted list | `forbidden_scope` |
+| Grant not issued by this controller, or revoked | `unauthenticated` |
 | Grant execution no longer the seat's current attempt | `stale_generation` |
 | Execution already registered under another grant | `forbidden_scope` |
+| Grants disabled for the swarm | `forbidden_scope` |
 
-Every refusal happens before any registry write. Messages name the failed check and never contain the
-token, the key or another caller's resource. `launch_grant_rejections(store, slug)` counts refusals per
-error class; `launch_grant_rejections_total` sums them.
+Every refusal happens before any registry write. A `GrantRefused` carries `error_class`, an
+`operation_id` and the retry class `new_request`: correcting the input takes a new valid request, never
+an implicit fallback. `detail()` is the sanitized form; it never contains the token, the key or another
+caller's resource. `launch_grant_rejections(store, slug)` counts refusals per error class, and
+`launch_grant_rejections_total` sums them.
 
-A registration is written in one watched transaction with the execution history and the grant's audit
-row, which moves to `registered`. A retry with the same valid grant, from the same or a restarted
-controller, returns the stored `Registration` unchanged and writes nothing. A stale attempt cannot
-replace a newer generation's registration. `Registration.session_grant()` returns the SV2-IDN-03
-`SessionGrant` for the registered corpus.
+The last four checks and the write run in one watched transaction over the execution history, the
+registrations, the grant audit rows and the disable switch. The transaction writes the registration
+(`launch-registrations`) and moves the grant's audit row to `registered`; it never writes execution
+records. A retry with the same valid grant, from the same or a restarted controller, returns the stored
+`Registration` unchanged and writes nothing. Losing the transport before the commit leaves nothing
+written; losing it after the commit leaves the registration, and the retry returns it. A stale attempt
+cannot replace a newer generation's registration. `Registration.session_grant()` returns the
+SV2-IDN-03 `SessionGrant` for the registered corpus.
 
 ## Rollback
 
-`revoke_outstanding(slug)` moves every grant still `issued` to `revoked` and returns their IDs; a revoked
-grant can no longer register. Registrations and audit rows are authoritative history and stay readable;
-nothing deletes them. Reverting the code leaves the preceding local launch path untouched, because no
-existing launch path calls this module.
+`disable(slug)` sets the swarm's disable switch and, in the same transaction, moves every grant still
+`issued` to `revoked`, returning their IDs. While disabled, `issue` and every new registration are
+refused; a retry of an existing registration still returns it. Registrations, audit rows and execution
+records are authoritative history: this module never deletes them and never writes execution records.
+`enable(slug)` clears the switch. The preceding local launch path does not call this module, so it is
+unaffected either way.
 
 ## Limitations
 

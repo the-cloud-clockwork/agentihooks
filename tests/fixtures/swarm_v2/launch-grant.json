@@ -19,8 +19,8 @@
   "cases": {
     "valid": {},
     "expired": {"advance": 300},
-    "wrong_audience": {"audience": "registry@other"},
-    "mismatched_generation": {"replace_execution": true},
+    "wrong_audience": {"audience": "registry@other", "note": "the grant is minted for this audience and presented to the fixture audience"},
+    "mismatched_generation": {"body_generation_offset": 1},
     "altered_project_body": {"body": {"project_ids": ["github.com/the-cloud-clockwork/antoncore"]}}
   }
 }

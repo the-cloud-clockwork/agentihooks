@@ -1,103 +1,127 @@
 {
-  "tested_commit": "22c4036a08afbd87146d9bb59d4d33a3fc555df9",
+  "tested_commit": "424d8fefdc84c398b97e94e924ba50f27eabbcf2",
   "evidence_class": "local isolated fixture on an in-memory Redis with a fake clock; not live rollout proof",
   "then": "changing a body field to another task or brain fails authorization before any registry write",
   "results": {
     "expired": {
       "refused": {
         "error_class": "unauthenticated",
+        "message": "launch grant has expired",
+        "retry": "new_request"
+      },
+      "expected": {
+        "error_class": "unauthenticated",
         "message": "launch grant has expired"
       },
       "protected_state_unchanged": true,
       "registrations": 0,
-      "token_absent_from_message": true,
-      "launch_grant_rejections": {
-        "unauthenticated": 1
-      }
+      "token_absent_from_error": true,
+      "launch_grant_rejections_total": 1
     },
     "wrong_audience": {
       "refused": {
+        "error_class": "unauthenticated",
+        "message": "launch grant is for another audience",
+        "retry": "new_request"
+      },
+      "expected": {
         "error_class": "unauthenticated",
         "message": "launch grant is for another audience"
       },
       "protected_state_unchanged": true,
       "registrations": 0,
-      "token_absent_from_message": true,
-      "launch_grant_rejections": {
-        "unauthenticated": 1
-      }
+      "token_absent_from_error": true,
+      "launch_grant_rejections_total": 1
     },
     "mismatched_generation": {
       "refused": {
+        "error_class": "forbidden_scope",
+        "message": "registration generation is outside the launch grant",
+        "retry": "new_request"
+      },
+      "expected": {
         "error_class": "forbidden_scope",
         "message": "registration generation is outside the launch grant"
       },
       "protected_state_unchanged": true,
       "registrations": 0,
-      "token_absent_from_message": true,
-      "launch_grant_rejections": {
-        "forbidden_scope": 1
-      }
+      "token_absent_from_error": true,
+      "launch_grant_rejections_total": 1
     },
-    "superseded_generation": {
+    "replaced_execution": {
       "refused": {
+        "error_class": "stale_generation",
+        "message": "launch grant is for a superseded execution",
+        "retry": "new_request"
+      },
+      "expected": {
         "error_class": "stale_generation",
         "message": "launch grant is for a superseded execution"
       },
       "protected_state_unchanged": true,
       "registrations": 0,
-      "token_absent_from_message": true,
-      "launch_grant_rejections": {
-        "stale_generation": 1
-      }
+      "token_absent_from_error": true,
+      "launch_grant_rejections_total": 1
     },
     "altered_project_body": {
       "refused": {
+        "error_class": "forbidden_scope",
+        "message": "registration project_ids is outside the launch grant",
+        "retry": "new_request"
+      },
+      "expected": {
         "error_class": "forbidden_scope",
         "message": "registration project_ids is outside the launch grant"
       },
       "protected_state_unchanged": true,
       "registrations": 0,
-      "token_absent_from_message": true,
-      "launch_grant_rejections": {
-        "forbidden_scope": 1
-      }
+      "token_absent_from_error": true,
+      "launch_grant_rejections_total": 1
     },
     "other_task": {
       "refused": {
+        "error_class": "forbidden_scope",
+        "message": "registration task_id is outside the launch grant",
+        "retry": "new_request"
+      },
+      "expected": {
         "error_class": "forbidden_scope",
         "message": "registration task_id is outside the launch grant"
       },
       "protected_state_unchanged": true,
       "registrations": 0,
-      "token_absent_from_message": true,
-      "launch_grant_rejections": {
-        "forbidden_scope": 1
-      }
+      "token_absent_from_error": true,
+      "launch_grant_rejections_total": 1
     },
     "other_brain": {
       "refused": {
+        "error_class": "forbidden_scope",
+        "message": "registration brain_id is outside the launch grant",
+        "retry": "new_request"
+      },
+      "expected": {
         "error_class": "forbidden_scope",
         "message": "registration brain_id is outside the launch grant"
       },
       "protected_state_unchanged": true,
       "registrations": 0,
-      "token_absent_from_message": true,
-      "launch_grant_rejections": {
-        "forbidden_scope": 1
-      }
+      "token_absent_from_error": true,
+      "launch_grant_rejections_total": 1
     },
     "other_account": {
       "refused": {
+        "error_class": "forbidden_scope",
+        "message": "registration account is outside the launch grant",
+        "retry": "new_request"
+      },
+      "expected": {
         "error_class": "forbidden_scope",
         "message": "registration account is outside the launch grant"
       },
       "protected_state_unchanged": true,
       "registrations": 0,
-      "token_absent_from_message": true,
-      "launch_grant_rejections": {
-        "forbidden_scope": 1
-      }
+      "token_absent_from_error": true,
+      "launch_grant_rejections_total": 1
     }
   },
   "passed": true
