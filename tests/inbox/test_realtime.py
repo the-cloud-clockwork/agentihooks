@@ -88,36 +88,10 @@ def test_an_item_becomes_a_channel_event_tagged_with_its_id_and_sender(inbox):
     }
 
 
-def test_the_channel_pushes_an_item_a_newer_writer_stored_with_a_field_this_code_lacks(inbox, monkeypatch):
-    import anyio
-    import mcp.types as types
-    from mcp.shared.message import SessionMessage
-
-    monkeypatch.setattr(channel, "SETTLE_S", 0)
-    monkeypatch.setattr(channel, "RECHECK_S", 0.1)
+def test_the_channel_pushes_an_item_a_newer_writer_stored_with_a_field_this_code_lacks(inbox):
     item = inbox.send("operator", "bob", "a comment on your task")
     inbox.redis.hset(inbox.key("item", item.id), "added_later", "x")
-
-    def message(**fields):
-        return SessionMessage(types.JSONRPCMessage.model_validate({"jsonrpc": "2.0", **fields}))
-
-    async def drive():
-        to_server, server_in = anyio.create_memory_object_stream(50)
-        server_out, from_server = anyio.create_memory_object_stream(50)
-        init = {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}
-        async with anyio.create_task_group() as group:
-            group.start_soon(channel.run, inbox, "bob", server_in, server_out)
-            await to_server.send(message(id=1, method="initialize", params=init))
-            await from_server.receive()
-            await to_server.send(message(method="notifications/initialized"))
-            await to_server.send(message(id=2, method="tools/list"))
-            await from_server.receive()
-            with anyio.fail_after(10):
-                pushed = await from_server.receive()
-            group.cancel_scope.cancel()
-        return pushed.message.root.model_dump(exclude_none=True)
-
-    assert anyio.run(drive) == {"jsonrpc": "2.0", **channel.event(inbox.get(item.id))}
+    assert [channel.event(pushed) for pushed in channel.claim(inbox, "bob")] == [channel.event(inbox.get(item.id))]
     assert inbox.get(item.id).state == "delivered"
 
 
