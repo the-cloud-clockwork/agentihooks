@@ -205,10 +205,18 @@ case "${cmd}" in
     fi
     if [[ "${NAME}" != _tmp/* ]]; then
       if command -v gh >/dev/null 2>&1; then
-        UNMERGED_PR="$(cd "${REPO}" && gh pr list --head "${BR}" --base "${BASE}" --state all --json state,url --jq '.[0] | select(.state != "MERGED") | .url')" \
+        PR_STATE="$(cd "${REPO}" && gh pr list --head "${BR}" --base "${BASE}" --state all --json state,url --jq '.[0] | if .state == "MERGED" then .state else .url end')" \
           || die "cannot read pull requests for '${BR}' — worktree kept"
-        [[ -z "${UNMERGED_PR}" ]] \
-          || die "pull request ${UNMERGED_PR} is not merged — wait for it to land before worktree teardown"
+        [[ -z "${PR_STATE}" || "${PR_STATE}" == MERGED ]] \
+          || die "pull request ${PR_STATE} is not merged — wait for it to land before worktree teardown"
+        if [[ "${PR_STATE}" == MERGED ]]; then
+          REMOTE_BRANCH="$(git -C "${REPO}" ls-remote --heads origin "refs/heads/${BR}")" \
+            || die "cannot read remote branch '${BR}' — worktree kept"
+          if [[ -n "${REMOTE_BRANCH}" ]]; then
+            git -C "${REPO}" push origin --delete "${BR}" \
+              || die "cannot delete remote branch '${BR}' — worktree kept"
+          fi
+        fi
       else
         PUBLISHED=0
         git -C "${REPO}" show-ref --verify --quiet "refs/remotes/origin/${BR}" || PUBLISHED=$?
