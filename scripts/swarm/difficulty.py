@@ -19,7 +19,8 @@ PAGE_FILES = (
     "scripts/swarm_ledger/tooltips.js",
 )
 INFRA_RE = re.compile(
-    r"\b(kubernetes|k8s|helm|argo|argocd|deploy|deploys|deployment|infra|infrastructure)\b", re.IGNORECASE
+    r"(?<![a-z0-9])(kubernetes|k8s|helm|argo|argocd|deploy(?:s|ing|ment|ments)?|infra(?:structure)?)(?![a-z0-9])",
+    re.IGNORECASE,
 )
 RUBRIC = {
     "S": "A mundane frontend change: copy, layout, style or a small control on a page, even when grouped with others.",
@@ -64,7 +65,8 @@ def classify(task: dict, doc: dict) -> dict:
         answer = decide(state(task, doc), {QUESTION: question}, purpose="task-difficulty").answers[QUESTION]
     except ClassifierError:
         return sized(FALLBACK, "default", 0.0)
-    confidence = min(max(answer.confidence or 0.0, 0.0), 1.0)
+    raw = answer.confidence
+    confidence = min(max(raw, 0.0), 1.0) if isinstance(raw, (int, float)) else 0.0
     if confidence < MIN_CONFIDENCE or answer.choice not in RUBRIC:
         return sized(FALLBACK, "default", confidence)
     return sized(answer.choice, "classifier", confidence)

@@ -65,6 +65,11 @@ def test_limits():
         "deployment/ledger",
         "infra/terraform",
         "infrastructure",
+        "charts/helm_values.yaml",
+        "argocd_app.yaml",
+        "k8s_manifests/x",
+        "charts/templates/deployments.yaml",
+        "scripts/deploying.sh",
     ],
 )
 def test_infrastructure_territory_is_large(area):
@@ -192,7 +197,8 @@ def test_confidence_above_one_is_capped(asked):
 
 
 @pytest.mark.parametrize(
-    ("choice", "confidence", "kept"), [("S", 0.59, 0.59), ("L", None, 0.0), ("XL", 0.9, 0.9), ("S", -0.2, 0.0)]
+    ("choice", "confidence", "kept"),
+    [("S", 0.59, 0.59), ("L", None, 0.0), ("XL", 0.9, 0.9), ("S", -0.2, 0.0), ("S", "high", 0.0)],
 )
 def test_low_confidence_or_unknown_answer_falls_back_to_medium(asked, choice, confidence, kept):
     asked(choice, confidence)
