@@ -57,9 +57,7 @@ def claude_rows(
             source=source,
             five_hour_resets_at=result.five_hour.resets_at,
             observed_at=(observed or {}).get(result.account),
-            cap=account_cap(result, now)
-            if session_bands.fresh((observed or {}).get(result.account, now), now)
-            else None,
+            cap=account_cap(result, now) if session_bands.fresh((observed or {}).get(result.account), now) else None,
         )
         for result in results
     ]
@@ -122,8 +120,10 @@ def _claude(refresh: bool, timeout: float) -> list[QuotaRow]:
         results, source = collect_results(
             credentials, refresh=refresh, timeout=timeout, claude_bin=shutil.which("claude") or "claude"
         )
-        return claude_rows(results, sessions, source)
-    return claude_rows([result for _, result in cached_observations()], sessions, "cached")
+    else:
+        results, source = [result for _, result in cached_observations()], "cached"
+    observed = {result.account: at for at, result in cached_observations()}
+    return claude_rows(results, sessions, source, observed)
 
 
 def _codex(now: float) -> list[QuotaRow]:

@@ -291,7 +291,8 @@ def test_codex_accounts_with_live_sessions_keep_their_own_quotas(monkeypatch):
     monkeypatch.setattr(capacity.codex_router, "quotas", quotas)
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: pytest.fail("reached the real codex probe"))
     seen = capacity.accounts({}, 100)
-    assert [(row.name, row.sessions, row.week_left) for row in seen] == [("a", 1, 80), ("b", 2, 80)]
+    assert [(row.name, row.sessions, row.week_left, row.cap) for row in seen] == [("a", 1, 80, 6), ("b", 2, 80, None)]
+    assert [seat.account for seat in capacity.seats(seen)] == ["a"]
 
 
 def test_runtime_honors_reserved_harness_seats(tmp_path):

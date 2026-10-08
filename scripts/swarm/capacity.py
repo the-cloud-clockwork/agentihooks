@@ -59,7 +59,7 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     rows = []
     for account in pool + live:
         quota = found.get(account.name)
-        cap = codex_router.account_cap(quota, now)
+        cap = codex_router.account_cap(quota, now) if account.name in known else None
         five = _left(quota.five_hour, now) if quota else None
         week = _left(quota.seven_day, now) if quota else None
         rows.append(Account("codex", account.name, _state(cap), counts.get(account.name, 0), five, week, cap))

@@ -68,7 +68,7 @@ def test_rows_list_every_claude_account_and_codex():
         five_hour=QuotaWindow(used=5.0, resets_at=2000),
         seven_day=QuotaWindow(used=40.0, resets_at=9000),
     )
-    rows = agents_quota.claude_rows([claude], {"ncgma": 2}, "cached", now=1000)
+    rows = agents_quota.claude_rows([claude], {"ncgma": 2}, "cached", {"ncgma": 1000.0}, now=1000)
     quota = codex_quota.parse_event(_event("2026-10-04T15:00:00Z", WEEK))
     accounts = [CodexAccount("default"), CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
     rows += agents_quota.codex_rows(accounts, {"default": quota}, {"default": 1}, now=quota.observed_at + 120)
@@ -92,6 +92,13 @@ def test_rows_list_every_claude_account_and_codex():
     assert table[2].split()[:6] == ["codex", "default", "NORMAL", "1/6", "?", "?"]
     assert table[2].endswith("session-log 2m ago")
     assert table[3].split() == ["codex", "alpha", "UNKNOWN", "0/?", "?", "?", "?", "?", "no", "session", "log"]
+
+
+def test_a_claude_row_with_no_or_a_stale_reading_time_shows_no_cap():
+    claude = ProbeResult("ncgma", "allowed", "NORMAL", 60.0, QuotaWindow(5.0, 2000), QuotaWindow(40.0, 9000))
+    assert agents_quota.claude_rows([claude], {}, "cached", now=1000)[0].cap is None
+    assert agents_quota.claude_rows([claude], {}, "cached", {"ncgma": 99.0}, now=1000)[0].cap is None
+    assert agents_quota.claude_rows([claude], {}, "cached", {"ncgma": 100.0}, now=1000)[0].cap == 6
 
 
 def test_rows_carry_both_reset_times_and_when_each_was_observed():
