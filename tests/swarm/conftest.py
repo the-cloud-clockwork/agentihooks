@@ -23,6 +23,7 @@ def isolate_classifier(monkeypatch):
     monkeypatch.setattr(intent, "decide", unavailable)
     monkeypatch.setattr(intent, "stamp_body", lambda url, doc, task, run=None: False)
     monkeypatch.setattr(intent, "pr_view", lambda url, run=None: None)
+    monkeypatch.setattr(intent, "pr_head", lambda url, run=None: None)
 
 
 @pytest.fixture
