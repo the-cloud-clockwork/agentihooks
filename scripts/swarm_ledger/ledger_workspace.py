@@ -48,6 +48,10 @@ def steering(task: dict, doc: dict | None = None) -> str:
     return "\n".join(lines)
 
 
+def rewrite(task: dict) -> None:
+    (Path(task["workspace"]) / "steering.md").write_text(steering(task), encoding="utf-8")
+
+
 def tails(slug, task_id):
     path = folder(slug, task_id)
     return {key: "\n".join(lines) for key, name in TAILS if (lines := _tail(path / name))}
