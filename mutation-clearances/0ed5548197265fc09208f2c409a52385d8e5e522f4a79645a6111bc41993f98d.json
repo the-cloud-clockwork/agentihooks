@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ledger_events.py:scripts.swarm.ledger_events.x__workflow_gates__mutmut_7:816efd0ef98d7a09d819c8af5e22f63da56956f50cbf5c34757fe5e13eb4dc0f": {
+    "reader": "Standards reader",
+    "reason": "The malformed workflow identity is excluded from tree queries. Removing its explicit None dictionary entry leaves gates.get returning None, so public views remains unknown with identical queries and output."
+  }
+}
