@@ -10,7 +10,7 @@
 #   wt.sh new  [name] [--repo DIR] [--from REF]  # worktree + branch <name> off fresh origin/<base> (or REF); prints the path
 #   wt.sh tmp  [name] [--repo DIR] [--from REF]  # throwaway detached worktree under <repo>/_tmp/; prints the path
 #   wt.sh ls   [--repo DIR | --all]           # branch, dirty, ahead/behind origin/<base>
-#   wt.sh done <name> [--repo DIR] [--force]  # remove a worktree + its local branch, pull origin/<base> into the primary checkout
+#   wt.sh done <name> [--repo DIR] [--force]  # remove a worktree + its local branch, fast-forward the primary checkout to origin/<base>
 #                                             # (<name> may be a _tmp path printed by 'tmp'; those are removed even if dirty)
 #   wt.sh root                                # print the worktree root
 #
@@ -217,10 +217,12 @@ case "${cmd}" in
       echo "wt: primary checkout ${REPO} is on '${PRIMARY_BR}', not ${BASE} — local ${BASE} NOT synced" >&2
     elif [[ -n "$(git -C "${REPO}" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
       echo "wt: primary checkout ${REPO} has uncommitted changes — local ${BASE} NOT synced" >&2
-    elif git -C "${REPO}" pull --ff-only --quiet origin "${BASE}"; then
+    elif ! git -C "${REPO}" fetch --quiet origin "${BASE}"; then
+      echo "wt: 'git fetch origin ${BASE}' failed in ${REPO} — local ${BASE} NOT synced" >&2
+    elif git -C "${REPO}" merge --ff-only --quiet "origin/${BASE}"; then
       echo "wt: local ${BASE} synced to origin/${BASE} ($(git -C "${REPO}" rev-parse --short HEAD))"
     else
-      echo "wt: 'git pull --ff-only origin ${BASE}' failed in ${REPO} — local ${BASE} NOT synced" >&2
+      echo "wt: 'git merge --ff-only origin/${BASE}' failed in ${REPO} — local ${BASE} NOT synced" >&2
     fi
     if git -C "${REPO}" show-ref --verify --quiet "refs/heads/${BR}"; then
       git -C "${REPO}" fetch origin "${BASE}" --quiet 2>/dev/null || true

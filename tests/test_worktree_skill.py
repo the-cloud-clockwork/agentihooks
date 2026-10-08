@@ -164,6 +164,57 @@ class Done(WtBase):
         self.assertIn("kept", result.stderr)
 
 
+CONCURRENT_GIT = """#!{bash}
+"{real}" "$@"
+rc=$?
+if [[ " $* " == *" fetch "* ]]; then
+  GIT_EXEC_PATH="{exec_path}" "{real}" -C "{primary}" fetch --quiet origin dev side
+fi
+exit $rc
+"""
+
+
+class DoneSync(WtBase):
+    def _advance(self, clone, branch, name):
+        _git(clone, "checkout", "--quiet", "-B", branch, "origin/dev", env=self.gitenv)
+        (clone / name).write_text(f"{name}\n")
+        _git(clone, "add", name, env=self.gitenv)
+        _git(clone, "commit", "--quiet", "-m", name, env=self.gitenv)
+        _git(clone, "push", "--quiet", "origin", branch, env=self.gitenv)
+
+    def _arm_concurrent_fetch(self):
+        real = shutil.which("git")
+        exec_path = subprocess.run([real, "--exec-path"], capture_output=True, text=True, check=True).stdout.strip()
+        shim = Path(self.tmp) / "git-exec"
+        shim.mkdir()
+        for entry in Path(exec_path).iterdir():
+            os.symlink(entry, shim / entry.name)
+        script = CONCURRENT_GIT.format(bash=BASH, real=real, exec_path=exec_path, primary=self.primary)
+        for path in (shim / "git", self.bin / "git"):
+            path.unlink(missing_ok=True)
+            path.write_text(script)
+            path.chmod(0o755)
+        self.env["GIT_EXEC_PATH"] = str(shim)
+
+    def test_done_syncs_dev_while_another_session_fetches_two_advanced_branches(self):
+        self.run_wt("new", "racing", "--repo", str(self.primary))
+        other = Path(self.tmp) / "other"
+        _git(Path(self.tmp), "clone", "--quiet", str(self.origin), str(other), env=self.gitenv)
+        self._advance(other, "dev", "dev-advance.txt")
+        self._advance(other, "side", "side-advance.txt")
+        dev_sha = subprocess.run(
+            ["git", "-C", str(self.origin), "rev-parse", "dev"], capture_output=True, text=True, env=self.gitenv
+        ).stdout.strip()
+        self._arm_concurrent_fetch()
+        result = self.run_wt("done", "racing", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("local dev synced to origin/dev", result.stdout, result.stderr)
+        head = subprocess.run(
+            ["git", "-C", str(self.primary), "rev-parse", "HEAD"], capture_output=True, text=True, env=self.gitenv
+        ).stdout.strip()
+        self.assertEqual(head, dev_sha)
+
+
 class Limits(WtBase):
     def test_new_refuses_below_the_free_space_floor(self):
         self.env["WT_MIN_FREE_GB"] = "999999"
