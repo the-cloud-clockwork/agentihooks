@@ -469,7 +469,11 @@ def test_park_stores_the_handoff_and_retires_the_agent_so_the_reaped_task_waits(
     assert (transfer["reason"], transfer["at"], transfer["handoff"]) == ("exit", NOW, text)
     recap = "\n\n".join(f"## {h}\n{handoff_check.section(text, h)}" for h in ("Done", "Stopped at", "Next"))
     assert store.memory.recaps("eng-1@sw")[0] == {"occupant": AGENT, "task": "t1", "text": recap, "at": NOW}
-    assert SeatRegistry(store.redis).exit_of(AGENT) == {"seat": "eng-1@sw", "reason": "handed off its seat"}
+    assert SeatRegistry(store.redis).exit_of(AGENT) == {
+        "seat": "eng-1@sw",
+        "reason": "handed off its seat",
+        "generation": 1,
+    }
     assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["finished"]
     assert store.claimant("sw", "t1") == AGENT
     tick._reap("sw", store, ledger, rt, ledger.rows, 1)

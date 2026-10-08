@@ -1,6 +1,6 @@
-"""The operator's own words in an agent session, typed prompts and AskUserQuestion answers, kept one hour.
+"""The operator's own words in an agent session, typed prompts and AskUserQuestion answers, the latest ROWS_KEPT.
 
-A relay to the ledger is accepted only when it quotes words recorded here for the relaying agent.
+A relay to the ledger is accepted only when it quotes words recorded here for a master or planner of its swarm.
 """
 
 import json
@@ -12,25 +12,34 @@ from hooks.context.swarm_heartbeat import is_operator_prompt
 
 TTL_SEC = 3600
 KEPT = 50
+ROWS_KEPT = 500
+
+
+def _dir():
+    from hooks.config import AGENTIHOOKS_HOME
+
+    return AGENTIHOOKS_HOME / "operator_words"
 
 
 def _path(name):
-    from hooks.config import AGENTIHOOKS_HOME
-
-    return AGENTIHOOKS_HOME / "operator_words" / (re.sub(r"[^A-Za-z0-9_.@-]", "_", name) + ".json")
+    return _dir() / (re.sub(r"[^A-Za-z0-9_.@-]", "_", name) + ".json")
 
 
 def _norm(text):
     return " ".join(str(text).lower().split())
 
 
-def _load(name, now):
+def _load(name):
     try:
         data = json.loads(_path(name).read_text())
     except (OSError, ValueError):
         data = {}
-    rows = [r for r in data.get("rows", []) if now - r["at"] < TTL_SEC]
-    return {"sessions": data.get("sessions", []), "rows": rows}
+    return {"sessions": data.get("sessions", []), "rows": data.get("rows", [])}
+
+
+def recorded(pattern):
+    """Names with words recorded under the glob `pattern`."""
+    return sorted(p.stem for p in _dir().glob(f"{pattern}.json"))
 
 
 def _save(name, data):
@@ -46,23 +55,23 @@ def record(name, words, now=None):
     text = str(words or "").strip()
     if not (name and text):
         return False
-    data = _load(name, now)
-    data["rows"] = (data["rows"] + [{"at": now, "words": text}])[-KEPT:]
+    data = _load(name)
+    data["rows"] = (data["rows"] + [{"at": now, "words": text}])[-ROWS_KEPT:]
     _save(name, data)
     return True
 
 
 def matching(name, quote, now=None, within=TTL_SEC):
-    """The latest words recorded under `within` seconds ago that hold the quote, or an empty string."""
+    """The latest words recorded under `within` seconds ago, or ever when it is None, that hold the quote."""
     needle = _norm(quote)
     now = time.time() if now is None else now
-    rows = _load(name, now)["rows"] if needle else []
-    return next((r["words"] for r in reversed(rows) if needle in _norm(r["words"]) and now - r["at"] < within), "")
+    rows = [r for r in _load(name)["rows"] if within is None or now - r["at"] < within] if needle else []
+    return next((r["words"] for r in reversed(rows) if needle in _norm(r["words"])), "")
 
 
-def _opening(name, session, now):
+def _opening(name, session):
     """True once per session: the first prompt of a swarm agent is its launch or handoff prompt."""
-    data = _load(name, now)
+    data = _load(name)
     if not session or session in data["sessions"]:
         return False
     data["sessions"] = (data["sessions"] + [session])[-KEPT:]
@@ -76,7 +85,7 @@ def heard_prompt(prompt, environ=None, now=None, session=""):
     if not name or not is_operator_prompt(prompt, slug):
         return False
     now = time.time() if now is None else now
-    if slug and _opening(name, session, now):
+    if slug and _opening(name, session):
         return False
     return record(name, prompt, now)
 

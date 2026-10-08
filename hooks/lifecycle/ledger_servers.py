@@ -2,6 +2,7 @@ import json
 import os
 import signal
 import time
+from contextlib import suppress
 from pathlib import Path
 
 from hooks.proc import Process, _process
@@ -60,22 +61,27 @@ def orphan(row: Process, info: dict, table: dict[int, Process]) -> str:
 
 
 def terminate(row: Process, proc: Path) -> None:
-    if (current := _process(row.pid, proc)) is None:
-        return
-    if current.start_time != row.start_time:
-        raise ProcessLookupError("server identity changed")
     try:
-        os.kill(row.pid, signal.SIGTERM)
-        deadline = time.monotonic() + 1
-        while current := _process(row.pid, proc):
-            if current.start_time != row.start_time or current.state == "Z":
-                return
-            if time.monotonic() >= deadline:
-                os.kill(row.pid, signal.SIGKILL)
-                return
-            time.sleep(0.02)
+        handle = os.pidfd_open(row.pid)
     except ProcessLookupError:
         return
+    try:
+        if (current := _process(row.pid, proc)) is None:
+            return
+        if current.start_time != row.start_time:
+            raise ProcessLookupError("server identity changed")
+        with suppress(ProcessLookupError):
+            signal.pidfd_send_signal(handle, signal.SIGTERM)
+            deadline = time.monotonic() + 1
+            while current := _process(row.pid, proc):
+                if current.start_time != row.start_time or current.state == "Z":
+                    return
+                if time.monotonic() >= deadline:
+                    signal.pidfd_send_signal(handle, signal.SIGKILL)
+                    return
+                time.sleep(0.02)
+    finally:
+        os.close(handle)
 
 
 def sweep_servers(

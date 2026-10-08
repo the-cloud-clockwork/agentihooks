@@ -227,6 +227,25 @@ def test_red_checks_with_no_push_for_twenty_minutes_go_to_its_engineer(store):
     assert len(texts(store, ENG_SEAT)) == 2
 
 
+@pytest.mark.parametrize(("gate", "notices"), [("SUCCESS", 0), ("FAILURE", 1)])
+def test_a_red_job_beside_the_required_gate_is_noticed_only_when_the_gate_failed(store, gate, notices):
+    rollup = [
+        {"name": "record pass", "conclusion": "FAILURE", "completedAt": "2026-10-07T17:00:01Z"},
+        {"name": GATE, "conclusion": gate},
+    ]
+    raw = {
+        "state": "OPEN",
+        "gated": True,
+        "commits": [{"committedDate": "2026-10-07T17:00:00Z"}],
+        "statusCheckRollup": rollup,
+        "checkSuites": [FINISHED_RUN],
+    }
+    pull = ledger_events.pull_request(raw)
+    run(store, recorded())
+    run(store, in_pr(), now_ms=pull.red_at + 20 * MINUTE, github=lambda url: pull)
+    assert len(texts(store, ENG_SEAT)) == notices
+
+
 def test_a_red_notice_adds_to_the_notices_of_earlier_pull_requests(store):
     red, closed = answer("open_red"), answer("closed_unmerged")
     urls = {"https://github.com/o/r/pull/8": closed, "https://github.com/o/r/pull/9": red}
@@ -603,6 +622,20 @@ def test_a_failed_gate_resolves_red(suites, conclusion):
     assert pull.resolved is True
     assert pull.red is True
     assert pull.failed == (GATE,)
+
+
+@pytest.mark.parametrize(
+    ("gated", "gate", "passed"), [(True, "SUCCESS", True), (True, "FAILURE", False), (False, "SUCCESS", False)]
+)
+def test_the_view_records_whether_the_required_gate_passed_beside_a_red_job(gated, gate, passed):
+    rollup = [{"name": "record pass", "conclusion": "FAILURE"}, {"name": GATE, "conclusion": gate}]
+    raw = {"state": "OPEN", "gated": gated, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}
+    pull = ledger_events.pull_request(raw)
+    assert (pull.red, pull.resolved, pull.gate_passed) == (True, True, passed)
+    raw["statusCheckRollup"] = [rollup[0], {"context": GATE, "state": gate}]
+    assert ledger_events.pull_request(raw).gate_passed is passed
+    raw["statusCheckRollup"] = rollup + [{"name": GATE, "conclusion": "SUCCESS"}]
+    assert ledger_events.pull_request(raw).gate_passed is passed
 
 
 def test_a_failed_check_beside_a_pending_gate_resolves_red_once_runs_finish():

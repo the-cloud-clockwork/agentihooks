@@ -4,6 +4,17 @@ from dataclasses import dataclass
 from .chunker import chunk_body
 from .models import RecallRecord
 
+COLLECTIONS = (
+    ("phases", "phase"),
+    ("tasks", "task"),
+    ("questions", "question"),
+    ("followups", "followup"),
+    ("notes", "note"),
+    ("chat", "chat"),
+    ("artifacts", "artifact"),
+)
+THREADS = (("comments", "comment"), ("answers", "answer"))
+
 
 @dataclass(frozen=True)
 class _Origin:
@@ -49,7 +60,7 @@ def _entry(origin: _Origin, item: dict, ref: str, kind: str, parent_ref: str) ->
         )
         for index, chunk in enumerate(chunk_body(_body(item)) or [""])
     ]
-    for thread, child_kind in (("comments", "comment"), ("answers", "answer")):
+    for thread, child_kind in THREADS:
         for child in item.get(thread, []):
             result.extend(_entry(origin, child, f"{ref}/{thread}/{child['id']}", child_kind, ref))
     return result
@@ -71,15 +82,7 @@ def extract_ledger(slug: str, document: dict, *, swarm_slug: str = "") -> list[R
         "at": document.get("_meta", {}).get("created_at", 0),
     }
     result = _entry(origin, root, "ledger", "ledger", "") if _body(root) else []
-    for collection, kind in (
-        ("phases", "phase"),
-        ("tasks", "task"),
-        ("questions", "question"),
-        ("followups", "followup"),
-        ("notes", "note"),
-        ("chat", "chat"),
-        ("artifacts", "artifact"),
-    ):
+    for collection, kind in COLLECTIONS:
         for item in document.get(collection, []):
             ref = f"{collection}/{item['id']}"
             result.extend(_entry(origin, item, ref, kind, _parent(item, kind)))

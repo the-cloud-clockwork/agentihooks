@@ -598,6 +598,8 @@ class HerdrRuntime:
         items, facts = sessions(), {}
         self._binding_pids = {}
         for agent in agents:
+            if agent.runtime_backend != "local":
+                continue
             session = live_binding.bound_session(agent, items)
             validated = agent.profile_decision.get("validation", {}).get("pid")
             if session is not None:
@@ -626,7 +628,10 @@ class HerdrRuntime:
         """End the launch process recorded at spawn with its group and every process from the task's scratch homes,
         then close the pane; the agent's name alone never selects a process."""
         pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
-        outcome = self.end(agent.name, pid, list(homes))
+        return self.retire_process(agent, pid, homes)
+
+    def retire_process(self, agent, pid, homes=(), start=0):
+        outcome = self.end(agent.name, pid, list(homes), start)
         if outcome.refusal:
             self.refusals[agent.name] = {"process": outcome.process, "refusal": outcome.refusal}
             return False

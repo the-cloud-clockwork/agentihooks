@@ -83,7 +83,23 @@ jobs:
           cd "$grader"
           python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
+  # Every shard restores this one key, or nothing when the lookup found none, so all shards of a run split alike.
+  durations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      key: ${{ steps.stored.outputs.cache-matched-key }}
+    steps:
+      - name: Look up the base revision's dev durations
+        id: stored
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/dev-durations
+          key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
+          lookup-only: true
+
   unit:
+    needs: [durations]
     runs-on: ubuntu-latest
     timeout-minutes: 7
     permissions:
@@ -151,10 +167,12 @@ jobs:
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
       - name: Restore latest dev durations
+        if: needs.durations.outputs.key != ''
         uses: actions/cache/restore@v4
         with:
           path: ~/dev-durations
-          key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
+          key: ${{ needs.durations.outputs.key }}
+          fail-on-cache-miss: true
 
       - name: Adopt latest dev durations
         run: python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations
@@ -215,6 +233,9 @@ jobs:
 
       - name: Check every collected test ran in exactly one shard
         run: python -m tests.shard_check shard-durations/*/durations.json
+
+      - name: Check every shard's test time fits the fifteen minute budget
+        run: python -m tests.shard_budget shard-durations/*/durations.json
 
   test-count:
     runs-on: ubuntu-latest
@@ -436,6 +457,7 @@ jobs:
           name: sonar-report
           path: |
             coverage.xml
+            .coverage-shards/
             .scannerwork/report-task.txt
           include-hidden-files: true
           if-no-files-found: error
@@ -511,7 +533,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, brain-smoke, wiring, semgrep, dependency-audit]
+    needs: [durations, unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, brain-smoke, wiring, semgrep, dependency-audit]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -528,7 +550,7 @@ jobs:
           fi
 
   refresh-durations:
-    needs: [unit, lint]
+    needs: [unit, lint, shard-check]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -591,6 +613,56 @@ jobs:
         with:
           path: ~/durations-samples
           key: durations-samples-${{ github.sha }}
+
+  coverage-baseline:
+    needs: [gate-required, sonar]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install coverage
+        run: python -m pip install "coverage>=7.4"
+
+      - name: Resolve baseline trees
+        id: tree
+        env:
+          PREVIOUS: ${{ github.event.before }}
+        run: |
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+          echo "previous=$(git rev-parse "$PREVIOUS^{tree}")" >> "$GITHUB_OUTPUT"
+
+      - name: Restore measured coverage history
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/coverage-baseline
+          key: coverage-baseline-${{ steps.tree.outputs.previous }}
+
+      - name: Download this run's measured coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: sonar-report
+          path: baseline-coverage
+
+      - name: Compute the coverage baseline
+        run: |
+          python -m tests.coverage_baseline --shards 8 \
+            --head-shards baseline-coverage/.coverage-shards \
+            --out "$HOME/coverage-baseline/baseline.json" \
+            --previous "$HOME/coverage-baseline/baseline.json"
+
+      - name: Save the passed dev coverage baseline
+        uses: actions/cache/save@v4
+        with:
+          path: ~/coverage-baseline
+          key: coverage-baseline-${{ steps.tree.outputs.tree }}
 
   mutation:
     if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}

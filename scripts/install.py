@@ -93,6 +93,7 @@ import yaml
 
 from scripts.claude_config import claude_home
 from scripts.claude_config import claude_json as claude_json_path
+from scripts.cli_delegates import delegated_cli
 from scripts.cli_parser import ArgumentParser
 from scripts.targets import DEFAULT_TARGET, SUPPORTED_TARGETS, get_adapter, resolve_target
 from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
@@ -5585,6 +5586,7 @@ def cmd_claude(extra_args: list[str]) -> None:
     from scripts.claude_quota_balancer import (
         RoutingError,
         _cache_path,
+        _child_environment,
         credential_for_slug,
         discover_credentials,
         format_selection,
@@ -5651,10 +5653,9 @@ def cmd_claude(extra_args: list[str]) -> None:
         placement="forced" if route else "open",
     )
 
-    os.environ.pop("ANTHROPIC_API_KEY", None)
-    for name in [name for name in os.environ if name.startswith("AH_CC_TOKEN_")]:
-        if name != selected_credential.env_name:
-            os.environ.pop(name, None)
+    kept = _child_environment(selected_credential, os.environ)
+    for name in [name for name in os.environ if name not in kept and name != selected_credential.env_name]:
+        del os.environ[name]
     os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = selected_credential.token
     os.environ["AGENTIHOOKS_ROUTE_ACCOUNT"] = selected_credential.account
     print(
@@ -6433,14 +6434,9 @@ def main() -> None:
         from scripts.doctor.cli import main as doctor_main
 
         raise SystemExit(doctor_main(_argv[1:]))
-    if _argv and _argv[0] == "msg":
-        from scripts.inbox.cli import main as msg_main
-
-        raise SystemExit(msg_main(_argv[1:]))
-    if _argv and _argv[0] == "trace":
-        from scripts.trace_cli import main as trace_main
-
-        raise SystemExit(trace_main(_argv[1:]))
+    _delegated = delegated_cli(_argv)
+    if _delegated:
+        raise SystemExit(_delegated(_argv[1:]))
     if _argv and _argv[0] == "classify":
         from hooks.classifier import cli as classifier_cli
 
@@ -6466,8 +6462,8 @@ def main() -> None:
 
         if _argv[1:2] != ["eval"]:
             raise SystemExit("usage: agentihooks skill eval [--agent {claude,codex}] -- <command>")
-
-        raise SystemExit(skill_eval_main(_argv[2:]))
+        skill_eval_main(_argv[2:])
+        return
     if _argv and _argv[0] == "manifestos":
         from scripts.profiles.manifestos import main as manifestos_main
 
@@ -6630,6 +6626,7 @@ def main() -> None:
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",
     )
     sub.add_parser("msg", help="Durable messages between sessions: send|inbox|read|close")
+    sub.add_parser("recall", help="Recall archive of ledgers and swarms: reindex")
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"
     )
