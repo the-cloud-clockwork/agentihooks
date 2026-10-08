@@ -43,12 +43,8 @@ def verified(by, quote):
     from hooks.context import operator_words
 
     words = next((w for name in speakers(by) if (w := operator_words.matching(name, quote, within=None))), "")
-    return _span(words, quote) if words else ""
-
-
-def _span(words, quote):
     found = re.search(r"\s+".join(map(re.escape, quote.split())), words, re.IGNORECASE)
-    return found.group(0) if found else words
+    return found.group(0) if found else ""
 
 
 def apply(doc, op, ctx):

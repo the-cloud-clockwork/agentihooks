@@ -231,6 +231,12 @@ def test_a_relay_onto_a_note_is_his_comment_carrying_only_the_quoted_words():
     assert (comment["by"], comment["quote"]) == ("operator", "Keep the  Filters idea")
 
 
+def test_a_quote_the_span_search_misses_is_refused_not_stored_as_the_whole_prompt():
+    operator_words.record("master@a1-1", "İstanbul is the city")
+    assert operator_words.matching("master@a1-1", "i̇stanbul", within=None)
+    assert ledger_relay.verified("master@a1-1", "i̇stanbul") == ""
+
+
 def test_cli_relay_needs_item_text_and_quote():
     args = ledger.build_parser().parse_args(
         ["--slug", SLUG, "--as", "m", "relay", "questions/q", "Yes.", "--quote", "y"]
