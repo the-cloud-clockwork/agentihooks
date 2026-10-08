@@ -88,6 +88,7 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
         else:
             settle(inbox, name, seat, "exited")
     _settle_seat_notices(inbox, {seat for _, seat in store.seats.agent_seats(slug) if seat}, active)
+    _settle_peer_mail(inbox, slug, store, active)
 
 
 def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
@@ -113,6 +114,29 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
             else:
                 reason = push_stop.left(owner, "left its seat")
             inbox.close(item.id, BY, "done", reason)
+
+
+def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", active: set) -> None:
+    from scripts.inbox.store import CLOSED
+    from scripts.swarm.store import MASTER
+
+    tasks = {row["agent"]: row["task"] for row in store.launches(slug)}
+    agents = [agent for agent in store.agents(slug) if agent.name in active]
+    tasks.update({agent.name: agent.task for agent in agents})
+    for agent in agents:
+        if not agent.seat:
+            continue
+        for item in inbox.inbox(agent.seat):
+            if item.state in CLOSED or item.fyi or tasks.get(item.sender, MASTER) == MASTER:
+                continue
+            receivers = [entry["by"] for entry in inbox.history(item.id) if entry["state"] in ("delivered", "read")]
+            owner = (receivers[:1] or [""])[0]
+            task = tasks.get(owner)
+            if owner in active or not task or task == agent.task:
+                continue
+            exit_text = f"left its seat and task {task}"
+            if inbox.withdraw(item.id, BY, f"cancelled: {owner} {exit_text} before closing it", agent.seat):
+                inbox.send(BY, notice_address(inbox, item.sender), _told(item, owner, exit_text), fyi=True)
 
 
 def _owner(inbox, item, seat):
