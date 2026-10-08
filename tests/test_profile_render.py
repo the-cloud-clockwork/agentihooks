@@ -423,6 +423,42 @@ def test_a_home_without_a_stamp_still_drops_a_plugin_its_source_dropped(world):
     assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"local@m": True}
 
 
+def test_a_home_built_on_a_package_role_leaves_out_the_operator_plugins(world):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / "rb-front" / "profile.yml", "name: rb-front\nextends: [package:engineer]\n")
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
+
+    out = render.render_claude("rb-front")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {MATTPOCOCK: True}
+
+
+def test_a_plugin_the_bundle_layer_drops_leaves_the_home(world):
+    from scripts.profiles import render
+
+    layer = world["bundle"] / ".claude" / "settings.overrides.json"
+    _write(layer, json.dumps({"enabledPlugins": {"bundle@m": True}}))
+    render.render_claude("rb-role")
+    _write(layer, json.dumps({}))
+
+    out = render.render_claude("rb-role", force=True)
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
+
+
+def test_a_render_inside_a_profile_home_reads_the_operator_plugins(world, monkeypatch):
+    from scripts.profiles import render
+
+    inside = _write(world["home"] / "inside" / "settings.json", json.dumps({"enabledPlugins": {"inner@m": True}}))
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(inside.parent))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"mine@m": True}
+
+
 def test_a_profile_disable_beats_a_plugin_installed_inside_the_home(world):
     from scripts.profiles import render
 
