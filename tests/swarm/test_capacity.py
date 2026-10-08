@@ -1005,15 +1005,17 @@ def test_allocation_skips_a_harness_whose_only_room_is_on_accounts_the_handoff_c
 
 def test_a_warned_account_gets_no_placeable_seat_and_the_reason_names_it():
     config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0)
-    observed = [account("w", left=5), account("cx", harness="codex")]
-    result = capacity.calculate(config, observed, [], warned={("claude", "w"): "week"})
+    observed = [account("w", left=5), account("v", left=5), account("cx", harness="codex")]
+    result = capacity.calculate(config, observed, [], warned={("claude", "w"): "week", ("claude", "v"): "five hour"})
     assert result["placeable"] == {"claude": 0, "codex": 3}
     assert result["placements"]["eng"] == [
         {"index": 0, "harness": "codex", "account": "cx"},
         {"index": 1, "harness": "codex", "account": "cx"},
     ]
     assert result["accounts"][0]["sessions"] == 0 and result["accounts"][0]["cap"] == 3
-    assert "; claude w is at its week quota warning" in result["reason"]
+    assert result["reason"].endswith(
+        "free seats; claude w is at its week quota warning; claude v is at its five hour quota warning"
+    )
 
 
 def test_runtime_capacity_passes_the_warned_accounts_to_the_calculation(tmp_path, monkeypatch):
@@ -1041,12 +1043,11 @@ def test_a_fresh_spawn_never_lands_on_a_warned_account_while_another_has_a_seat(
 
 def test_a_claude_only_spawn_with_only_a_warned_account_refuses_naming_it(tmp_path, monkeypatch):
     runtime, config, seen = _runtime_probe(
-        tmp_path, monkeypatch, [account("w", left=5), account("cx", harness="codex")]
+        tmp_path, monkeypatch, [account("w", left=5), account("v", left=5), account("cx", harness="codex")]
     )
     task = {"id": "p", "title": "Plan", "profile": "frontend"}
-    with pytest.raises(
-        SpawnError, match="^no claude account has placeable quota seats: claude w is at its week quota warning$"
-    ) as error:
+    refusal = "no claude account has placeable quota seats: claude w is at its week quota warning; claude v is at its"
+    with pytest.raises(SpawnError, match=f"^{refusal} week quota warning$") as error:
         runtime.spawn(config, "plan", "planner@a1b2c3-0001", task)
     assert error.value.status == "unavailable"
     assert seen == []
