@@ -18,7 +18,7 @@ MASTER, ENGINEER, PLANNER, STRANGER = (
     "planner@a1b2c3-0003",
     "master@d4e5f6-0001",
 )
-TEMPLATE = Path(ledger_server.__file__).with_name("template.html")
+SHELL = Path(ledger_server.__file__).with_name("shell.html")
 
 
 @pytest.fixture
@@ -183,7 +183,7 @@ NOT_SWARM = {"apply", "doctor_start", "doctor_stop"}
 
 
 def panel_bodies():
-    page = TEMPLATE.read_text()
+    page = SHELL.read_text()
     swarm_buttons = set(re.findall(r'data-swarm="([a-z_]+)"', page))
     for action in sorted(swarm_buttons - NOT_SWARM):
         if not re.search(r"_(?:up|down)$", action):

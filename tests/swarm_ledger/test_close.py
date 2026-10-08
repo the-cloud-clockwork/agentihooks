@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.swarm_ledger.ledger_page import page_source
+from tests.swarm_ledger.ledger_page import browser_home, page_source
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -160,7 +160,7 @@ class Home(unittest.TestCase):
         self.assertIsInstance(found[SLUG]["closed_at"], int)
         self.assertIsNone(found[OPEN_SLUG]["closed_at"])
         with patch.object(server, "swarm_state", return_value="stopped"):
-            page = server.index_page()
+            page = browser_home(server)
         self.assertNotIn("<h1>CLOSED</h1>", page)
         rows = {
             slug: row

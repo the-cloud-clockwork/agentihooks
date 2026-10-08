@@ -1,4 +1,3 @@
-import json
 import sys
 import threading
 import time
@@ -7,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import MODULES, is_events, serve_modules, snapshot_body
+from tests.swarm_ledger.ledger_page import MODULES, is_events, serve_modules, shell_html, snapshot_body
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 from tests.swarm_ledger.test_patch import CASES
 from tests.swarm_ledger.test_tabs import DOC, SWARM, URL
@@ -41,8 +40,7 @@ def test_the_page_applies_every_patch_the_server_builds_to_the_same_value(browse
 def stub_page(browser, answers):
     """Open the page with events answered from a list: a status code, or a (ledger, swarm) snapshot."""
     context = browser.new_context(viewport={"width": 1440, "height": 900})
-    html = (ROOT / "scripts/swarm_ledger/template.html").read_text().replace("__LEDGER_DATA__", json.dumps(DOC))
-    html = html.replace("__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text())
+    html = shell_html()
     seen = []
 
     def route(request):
@@ -80,8 +78,9 @@ def test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410(
     assert [r["headers"].get("last-event-id") for r in events[:4]] == [None, "first", None, "second"]
     assert all(r["url"].endswith("/api/v1/ledgers/__LEDGER_SLUG__/events") for r in events)
     assert all("token" not in r["url"].lower() and r["headers"].get("x-ledger-token") for r in events)
-    assert [r["url"] for r in seen if "/api/" in r["url"] and not is_events(r["url"])] == [
-        "http://ledger.test/api/layout"
+    assert sorted(r["url"] for r in seen if "/api/" in r["url"] and not is_events(r["url"])) == [
+        "http://ledger.test/api/layout",
+        "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__",
     ]
 
 
@@ -139,7 +138,7 @@ def test_tabs_get_ledger_and_swarm_changes_without_polling_the_document(browser,
         tab.wait_for_function("() => document.querySelector('#swarm-state').textContent === 'paused'", timeout=5000)
     time.sleep(3)
     reads = [(method, path) for method, path in requests if path.startswith("/api/") and path != "/api/layout"]
-    assert reads == [("GET", f"/api/v1/ledgers/{SLUG}/events")] * 2
+    assert sorted(reads) == sorted([("GET", f"/api/v1/ledgers/{SLUG}/events"), ("GET", f"/api/v1/ledgers/{SLUG}")] * 2)
     context.close()
     for _ in range(100):
         if not server.HUB.watched():

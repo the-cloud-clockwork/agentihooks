@@ -56,7 +56,7 @@ class CollapsedByDefault(unittest.TestCase):
 })()"""
         self.assertTrue(run_js(["reveal"], expr))
         click = page().split('$("outline").addEventListener("click"', 1)[1].split("});", 1)[0]
-        self.assertLess(click.index("reveal(el)"), click.index("scrollIntoView"))
+        self.assertLess(click.index("revealTarget("), click.index("scrollIntoView"))
 
     def test_hidden_outline_targets_never_count_as_the_section_in_view(self):
         self.assertIn("getClientRects().length", function_source("markOutline"))
