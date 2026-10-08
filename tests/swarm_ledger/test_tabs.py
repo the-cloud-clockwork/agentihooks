@@ -1,9 +1,8 @@
-import json
 from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import fulfill_events, is_events, serve_modules
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events, ledger_state, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -28,12 +27,11 @@ SWARM = {
 @pytest.fixture
 def tab(browser):
     context = browser.new_context(viewport={"width": 1440, "height": 900})
-    html = (ROOT / "scripts/swarm_ledger/template.html").read_text().replace("__LEDGER_DATA__", json.dumps(DOC))
-    html = html.replace("__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text())
+    html = shell_html()
 
     def route(request):
         if is_events(request.request.url):
-            fulfill_events(request, swarm=SWARM)
+            fulfill_events(request, ledger_state(DOC), SWARM)
         elif "/api/swarm/" in request.request.url:
             request.fulfill(json=SWARM)
         elif request.request.url.startswith(URL):

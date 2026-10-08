@@ -1,18 +1,17 @@
 import { RETRY_MS } from "./config.js";
 import { openEvents } from "./api.js";
 import { applyPatch } from "./patch.js";
-import { disconnected, receiveLedger, receiveTails, resume } from "./sync.js";
+import { disconnected, receiveLedger, resume } from "./sync.js";
 import { receiveSwarm, swarmLost } from "./swarm.js";
 
 let eventCursor = null;
-const latest = { ledger: null, swarm: null, workspaces: {} };
+const latest = { ledger: null, swarm: null };
 
 function onStreamEvent(name, data) {
   if (name === "snapshot") {
     const same = (key) => JSON.stringify(data[key]) === JSON.stringify(latest[key]);
-    const changed = { ledger: !same("ledger"), swarm: !same("swarm"), workspaces: !same("workspaces") };
+    const changed = { ledger: !same("ledger"), swarm: !same("swarm") };
     Object.assign(latest, data);
-    if (changed.workspaces) receiveTails(latest.workspaces);
     if (changed.swarm || latest.swarm === null) receiveSwarm(latest.swarm);
     if (changed.ledger && latest.ledger) receiveLedger(latest.ledger);
   } else if (name === "ledger") {
@@ -21,9 +20,6 @@ function onStreamEvent(name, data) {
   } else if (name === "swarm") {
     latest.swarm = applyPatch(latest.swarm, data.patch);
     receiveSwarm(latest.swarm);
-  } else if (name === "workspaces") {
-    latest.workspaces = applyPatch(latest.workspaces, data.patch);
-    receiveTails(latest.workspaces);
   } else if (name === "heartbeat") {
     resume();
   }
