@@ -133,6 +133,31 @@ def test_filter_never_pairs_a_task_that_reaches_the_lead_through_a_done_task():
     assert found == []
 
 
+def test_filter_groups_tasks_without_a_territory_in_the_same_phase_and_profile():
+    found = grouping.candidates(doc(task("a", territory=[], phase="p1"), task("b", territory=[], phase="p1")))
+    assert ids(found) == [["a", "b"]]
+
+
+@pytest.mark.parametrize(
+    "first, second",
+    [
+        (task("a", territory=[], phase="p1"), task("b", territory=[], phase="p2")),
+        (task("a", territory=[]), task("b", territory=[])),
+        (task("a", territory=[], phase="p1"), task("b", territory=[], phase="p1", profile="frontend")),
+        (task("a", phase="p1"), task("b", territory=[], phase="p1")),
+        (task("a", territory=[], phase="p1"), task("b", phase="p1")),
+        (task("a", phase="p1"), task("b", territory=["docs"], phase="p1")),
+    ],
+)
+def test_filter_never_pairs_tasks_without_a_territory_outside_a_shared_phase_and_profile(first, second):
+    assert grouping.candidates(doc(first, second)) == []
+
+
+def test_filter_caps_a_group_of_tasks_without_a_territory():
+    found = grouping.candidates(doc(*(task(f"x{n}", territory=[], phase="p1") for n in range(7))))
+    assert ids(found) == [["x0", "x1", "x2", "x3", "x4"], ["x5", "x6"]]
+
+
 def test_filter_caps_a_group_at_five_tasks():
     found = grouping.candidates(doc(*(task(f"t{n}") for n in range(7))))
     assert ids(found) == [["t0", "t1", "t2", "t3", "t4"], ["t5", "t6"]]
