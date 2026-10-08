@@ -643,3 +643,25 @@ def test_capacity_can_comment_after_every_task_has_closed():
     text = "quota capacity eng 0 ci 0 plan 0 because accounts have quota; Claude has 0 free seats and Codex has 0 free seats"
     assert capacity.apply("sw", config, store, ledger, runtime, 1000) == [text]
     assert comments == [(("sw", "done", text), {"by": "quota capacity 1000"})]
+
+
+def test_capacity_comment_uses_controller_authority(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm import ledger_client
+
+    calls = []
+
+    def call(slug, ops, service):
+        calls.append((slug, ops, service))
+        return {}
+
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=call))
+    client = ledger_client.LedgerClient()
+    client.capacity_comment("sw", "e", "quota capacity changed", 1000)
+    assert len(calls) == 1
+    slug, ops, service = calls[0]
+    assert slug == "sw" and service is True
+    assert ops[0]["thread"] == "tasks/e/comments"
+    assert ops[0]["by"] == "quota capacity 1000"
+    assert ops[0]["text"] == "quota capacity changed"

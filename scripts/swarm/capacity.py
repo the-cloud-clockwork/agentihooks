@@ -208,6 +208,9 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     text = status_line(decision)
     if changed and rows:
         task = next((row for row in rows.values() if not row.get("done")), next(iter(rows.values())))
-        ledger.comment(slug, task["id"], text, by=f"quota capacity {now_ms}")
+        if hasattr(ledger, "capacity_comment"):
+            ledger.capacity_comment(slug, task["id"], text, now_ms)
+        else:
+            ledger.comment(slug, task["id"], text, by=f"quota capacity {now_ms}")
     store.redis.set(store.key(slug, "quota-capacity"), json.dumps(decision))
     return [text] if changed else []
