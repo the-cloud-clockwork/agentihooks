@@ -10,15 +10,30 @@ python3 - <<'PY'
 import json
 import os
 import urllib.request
+from html.parser import HTMLParser
+
+
+class Assets(HTMLParser):
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        url = attrs.get("src") if tag == "script" else attrs.get("href")
+        if url and url.startswith("/static/"):
+            with urllib.request.urlopen(base + url, timeout=5) as response:
+                assert response.status == 200 and response.read()
+                print(f"GET {url}: 200, page asset")
 
 base = f"http://127.0.0.1:{os.environ.get('SWARM_PORT', '8765')}"
-for route in ("/healthz", "/", "/api/v1/ledgers"):
+for route in ("/healthz", "/", "/api/v1/ledgers", "/logo.png", "/favicon.ico"):
     with urllib.request.urlopen(base + route, timeout=5) as response:
         body = response.read()
         assert response.status == 200
         if route == "/":
             assert b"<!doctype html>" in body.lower() and b"<title>HOME</title>" in body
+            Assets().feed(body.decode())
             print(f"GET {route}: 200, ledger home HTML ({len(body)} bytes)")
+        elif route in ("/logo.png", "/favicon.ico"):
+            assert body.startswith(b"\x89PNG\r\n\x1a\n")
+            print(f"GET {route}: 200, PNG ({len(body)} bytes)")
         else:
             print(f"GET {route}: 200, {json.loads(body)}")
 payload = json.dumps({"capacity-box": {"height": 240}}).encode()
