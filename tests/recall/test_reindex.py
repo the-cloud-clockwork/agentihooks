@@ -40,7 +40,7 @@ def store(environ):
 
 def test_ledger_dir_follows_the_ledger_server_setting(tmp_path):
     assert ledger_dir({"LEDGER_DIR": str(tmp_path)}) == tmp_path
-    assert ledger_dir({"HOME": str(tmp_path)}) == tmp_path / "development-ledger"
+    assert ledger_dir({"HOME": str(tmp_path)}) == Path.home() / "development-ledger"
     assert ledger_dir({"LEDGER_DIR": "~/ledgers"}) == Path.home() / "ledgers"
 
 
@@ -101,6 +101,18 @@ def test_an_unreadable_ledger_is_reported_and_the_rest_indexed(home, capsys):
     assert code == 0
     assert out["unreadable"] == ["broken"]
     assert list(out["indexed"]) == ["alpha"]
+
+
+def test_a_malformed_ledger_is_unreadable_and_the_rest_indexed(home, capsys):
+    folder = Path(home["LEDGER_DIR"])
+    (folder / "listed.json").write_text("[]")
+    write(folder, "idless", document("Idless", [{"title": "no id"}]))
+    write(folder, "nameless", document("Nameless", [{"id": "t1", "comments": [{"text": "no id"}]}]))
+    code, out = run(home, "--all", capsys=capsys)
+    assert code == 0
+    assert out["unreadable"] == ["idless", "listed", "nameless"]
+    assert list(out["indexed"]) == ["alpha"]
+    assert store(home).match("Idless") == []
 
 
 def test_the_swarm_slug_comes_from_the_swarm_folder(home, capsys):

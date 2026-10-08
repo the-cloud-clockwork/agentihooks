@@ -141,6 +141,24 @@ def test_a_deleted_source_entry_is_removed_with_its_children(store):
     assert store.remove("ledger/demo", []) == 0
 
 
+def test_sync_removes_deleted_refs_with_the_same_write(store):
+    store.sync("ledger/demo", [record("tasks/t1", text="gone"), record("tasks/t2", text="kept")])
+    counts = store.sync("ledger/demo", [record("tasks/t2", text="kept")], ["tasks/t1"])
+    assert counts == SyncCounts(unchanged=1, removed=1)
+    assert set(rows(store)) == {"demo/tasks/t2#0"}
+
+
+def test_a_failed_sync_leaves_the_archive_as_it_was(store):
+    store.sync("ledger/demo", [record("tasks/t1", text="before")])
+    before = rows(store)
+    clash = [record("tasks/t2", text="first"), record("tasks/t3", text="second", key="demo/tasks/t2#0")]
+    with pytest.raises(sqlite3.IntegrityError):
+        store.sync("ledger/demo", clash, ["tasks/t1"])
+    assert rows(store) == before
+    assert store.match("before") == ["demo/tasks/t1#0"]
+    assert store.match("first") == []
+
+
 def test_remove_leaves_other_sources_alone(store):
     store.sync("ledger/other", [record("tasks/t1", key="other/tasks/t1#0", ledger_slug="other")])
     assert store.remove("ledger/demo", ["tasks/t1"]) == 0
@@ -164,17 +182,19 @@ def test_two_writers_on_separate_connections_both_land(tmp_path):
     path = tmp_path / "recall.sqlite3"
     SQLiteRecallStore(path)
     errors = []
+    start = threading.Barrier(2)
 
     def write(slug):
-        writer = SQLiteRecallStore(path)
         try:
+            writer = SQLiteRecallStore(path)
+            start.wait(timeout=10)
             for round_ in range(40):
                 batch = [
                     record(f"tasks/t{i}", text=f"{slug} round{round_}", key=f"{slug}/tasks/t{i}#0", ledger_slug=slug)
                     for i in range(20)
                 ]
                 writer.sync(f"ledger/{slug}", batch)
-        except sqlite3.Error as error:
+        except Exception as error:  # noqa: BLE001
             errors.append(error)
 
     threads = [threading.Thread(target=write, args=(slug,)) for slug in ("one", "two")]

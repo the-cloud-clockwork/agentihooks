@@ -3,17 +3,14 @@ from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 
-from .ledger import extract_ledger
+from .ledger import COLLECTIONS, THREADS, extract_ledger
 from .store import RecallStore
-
-COLLECTIONS = ("phases", "tasks", "questions", "followups", "notes", "chat", "artifacts")
-THREADS = ("comments", "answers")
 
 
 def ledger_dir(environ: Mapping[str, str]) -> Path:
     if environ.get("LEDGER_DIR"):
         return Path(environ["LEDGER_DIR"]).expanduser()
-    return Path(environ.get("HOME") or Path.home()) / "development-ledger"
+    return Path.home() / "development-ledger"
 
 
 def binned(folder: Path) -> set[str]:
@@ -29,7 +26,7 @@ def _walk(item: dict, ref: str) -> list[str]:
         return [ref]
     return [
         found
-        for thread in THREADS
+        for thread, _ in THREADS
         for child in item.get(thread, [])
         for found in _walk(child, f"{ref}/{thread}/{child['id']}")
     ]
@@ -38,17 +35,10 @@ def _walk(item: dict, ref: str) -> list[str]:
 def deleted_refs(document: dict) -> list[str]:
     return [
         found
-        for collection in COLLECTIONS
+        for collection, _ in COLLECTIONS
         for item in document.get(collection, [])
         for found in _walk(item, f"{collection}/{item['id']}")
     ]
-
-
-def reindex_ledger(store: RecallStore, slug: str, document: dict, swarm_slug: str) -> dict:
-    source = f"ledger/{slug}"
-    removed = store.remove(source, deleted_refs(document))
-    counts = asdict(store.sync(source, extract_ledger(slug, document, swarm_slug=swarm_slug)))
-    return {**counts, "removed": counts["removed"] + removed}
 
 
 def reindex(store: RecallStore, folder: Path, home: Path, slugs: list[str], include_binned: bool) -> dict:
@@ -58,13 +48,15 @@ def reindex(store: RecallStore, folder: Path, home: Path, slugs: list[str], incl
         if slug in hidden:
             result["skipped_binned"].append(slug)
             continue
+        swarm_slug = slug if (home / "swarm" / slug).is_dir() else ""
         try:
             document = json.loads((folder / f"{slug}.json").read_text(encoding="utf-8"))
-        except ValueError:
+            records = extract_ledger(slug, document, swarm_slug=swarm_slug)
+            deleted = deleted_refs(document)
+        except (OSError, ValueError, AttributeError, KeyError, TypeError):
             result["unreadable"].append(slug)
             continue
-        swarm_slug = slug if (home / "swarm" / slug).is_dir() else ""
-        result["indexed"][slug] = reindex_ledger(store, slug, document, swarm_slug)
+        result["indexed"][slug] = asdict(store.sync(f"ledger/{slug}", records, deleted))
     return result
 
 

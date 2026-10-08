@@ -36,7 +36,7 @@ class SyncCounts:
 
 @runtime_checkable
 class RecallStore(Protocol):
-    def sync(self, source: str, records: Iterable[RecallRecord]) -> SyncCounts: ...
+    def sync(self, source: str, records: Iterable[RecallRecord], deleted: Iterable[str] = ()) -> SyncCounts: ...
 
     def remove(self, source: str, refs: Iterable[str]) -> int: ...
 
@@ -96,11 +96,12 @@ class SQLiteRecallStore:
             (cursor.lastrowid, record.title, record.text),
         )
 
-    def sync(self, source: str, records: Iterable[RecallRecord]) -> SyncCounts:
+    def sync(self, source: str, records: Iterable[RecallRecord], deleted: Iterable[str] = ()) -> SyncCounts:
         records = list(records)
         refs = {record.ref for record in records}
         counts = dict.fromkeys(("written", "unchanged", "archived", "removed"), 0)
         with self._write() as connection:
+            counts["removed"] = self._remove(connection, source, deleted)
             existing = {
                 key: (rowid, ref, digest, state)
                 for rowid, key, ref, digest, state in connection.execute(
@@ -124,18 +125,21 @@ class SQLiteRecallStore:
                     counts["archived"] += 1
         return SyncCounts(**counts)
 
-    def remove(self, source: str, refs: Iterable[str]) -> int:
+    def _remove(self, connection: sqlite3.Connection, source: str, refs: Iterable[str]) -> int:
         removed = 0
-        with self._write() as connection:
-            for ref in refs:
-                rows = connection.execute(
-                    "SELECT id FROM records WHERE source = ? AND (ref = ? OR substr(ref, 1, ?) = ?)",
-                    (source, ref, len(ref) + 1, f"{ref}/"),
-                ).fetchall()
-                for (rowid,) in rows:
-                    self._drop(connection, rowid)
-                removed += len(rows)
+        for ref in refs:
+            rows = connection.execute(
+                "SELECT id FROM records WHERE source = ? AND (ref = ? OR substr(ref, 1, ?) = ?)",
+                (source, ref, len(ref) + 1, f"{ref}/"),
+            ).fetchall()
+            for (rowid,) in rows:
+                self._drop(connection, rowid)
+            removed += len(rows)
         return removed
+
+    def remove(self, source: str, refs: Iterable[str]) -> int:
+        with self._write() as connection:
+            return self._remove(connection, source, refs)
 
     def match(self, expression: str) -> list[str]:
         with self.connect() as connection:
