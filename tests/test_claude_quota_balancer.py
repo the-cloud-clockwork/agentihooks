@@ -501,6 +501,9 @@ def test_reserve_account_is_chosen_only_when_no_other_has_room(monkeypatch, tmp_
 
     assert _pick({**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST"}, tmp_path).result.account == "LOW"
     assert _pick({**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST,MID,LOW"}, tmp_path).result.account == "BEST"
+    assert _pick({**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST, LOW"}, tmp_path).result.account == "MID"
+    with pytest.raises(balancer.RoutingError, match=r"^no Claude account has a free session under its quota band$"):
+        _pick(env, tmp_path, {"BEST": 6, "MID": 6, "LOW": 6})
     reserved = {**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "LOW"}
     assert _pick(reserved, tmp_path, {"BEST": 6, "MID": 6}).result.account == "LOW"
     assert _pick(reserved, tmp_path, {"BEST": 6, "MID": 2}).result.account == "MID"
@@ -556,3 +559,15 @@ def test_fable_routing_caps_on_the_tighter_weekly_window():
     result = balancer.parse_probe("FABLE", _stream(0.20, 0.30, 0.97), 100, include_fable=True)
     assert balancer.account_cap(result, 1000) == 6
     assert balancer.account_cap(result, 1000, include_fable=True) == 0
+    assert balancer.is_routable(result, 1000)
+    assert not balancer.is_routable(result, 1000, include_fable=True)
+    table = balancer.render_table([result], now=1000, include_fable=True, sessions={})
+    assert " 0/0 " in table.splitlines()[2]
+
+
+def test_a_week_that_reset_before_now_counts_as_full():
+    spent = balancer.ProbeResult(
+        "a", "allowed", "NORMAL", 1.0, balancer.QuotaWindow(10.0), balancer.QuotaWindow(99.0, 500)
+    )
+    assert balancer.account_cap(spent, 1000) == 6
+    assert balancer.account_cap(spent, 400) == 0

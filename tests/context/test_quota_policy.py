@@ -94,9 +94,19 @@ def test_other_accounts_carry_their_band_cap(monkeypatch):
             balancer.QuotaWindow(week_used, None),
         )
 
-    seen = [result("beta", 10.0, 30.0), result("gamma", 55.0, 30.0), result("delta", 10.0, 96.0)]
+    seen = [
+        result("beta", 10.0, 30.0),
+        result("gamma", 55.0, 30.0),
+        result("delta", 10.0, 96.0),
+        result("eps", 60.5, 30.0),
+    ]
     monkeypatch.setattr(balancer, "cached_observations", lambda: [(time.time(), found) for found in seen])
-    assert [(c.account, c.cap) for c in qp._other_accounts({"beta": 3})] == [("beta", 6), ("gamma", 4), ("delta", 0)]
+    assert [(c.account, c.cap) for c in qp._other_accounts({"beta": 3})] == [
+        ("beta", 6),
+        ("gamma", 4),
+        ("delta", 0),
+        ("eps", 3),
+    ]
 
 
 def test_a_band_cap_of_zero_is_full_and_no_cap_falls_back_to_the_default():
@@ -269,7 +279,7 @@ def test_evaluate_reads_the_session_snapshot_and_the_router_cache(tmp_path, monk
     monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"alpha": 1, "beta": 1})
 
     d = qp.evaluate("sess-1")
-    assert d.target.cap == 6
+    assert (d.target.cap, d.max_sessions) == (6, 6)
 
     assert d.action == "handoff"
     assert d.trigger == "week"

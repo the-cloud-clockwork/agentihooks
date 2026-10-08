@@ -28,6 +28,8 @@ from scripts.codex_quota import CodexQuota
 TOKEN_ENV = "CODEX_ACCESS_TOKEN"
 PROBE_ARGS = ["exec", "--json", "--skip-git-repo-check", "Reply with the single word ok."]
 PROBE_TIMEOUT_S = 90
+CODEX_BIN = "codex"
+ATTEMPTS_FILE = "codex-probe-attempts.json"
 # A running app-server daemon answers account/read with its own auth, so a token session must not attach to it.
 NO_DAEMON = "--no-daemon"
 
@@ -122,7 +124,7 @@ def _thread(stdout: str) -> str:
 
 def probe(account: CodexAccount, environ: Mapping[str, str], run: Callable = subprocess.run) -> CodexQuota | None:
     """A fresh reading from one tiny exec on the account, read from the rollout it writes."""
-    codex_bin = shutil.which("codex") or "codex"
+    codex_bin = shutil.which(CODEX_BIN) or CODEX_BIN
     try:
         done = run(
             command(account, codex_bin, PROBE_ARGS),
@@ -134,12 +136,12 @@ def probe(account: CodexAccount, environ: Mapping[str, str], run: Callable = sub
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    thread = _thread(done.stdout or "")
+    thread = _thread(done.stdout) if done.stdout else ""
     return codex_quota.session_quota(dict(environ), thread) if thread else None
 
 
 def _attempts_path() -> Path:
-    return Path.home() / ".agentihooks" / "codex-probe-attempts.json"
+    return Path.home() / ".agentihooks" / ATTEMPTS_FILE
 
 
 def _probe_attempts() -> dict[str, float]:

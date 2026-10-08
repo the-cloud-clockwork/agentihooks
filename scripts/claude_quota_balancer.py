@@ -20,6 +20,7 @@ from scripts import session_bands
 from scripts.claude_config import claude_home
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
+HARNESS = "claude"
 OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 MAX_PROBE_WORKERS = 3
 CACHE_TTL_SECONDS = 60
@@ -677,11 +678,11 @@ def select_credential(
     excluded = set(exclude)
     counts = sessions or {}
     seats = {
-        result.account: session_bands.Seat("claude", result.account, cap, counts.get(result.account, 0))
+        result.account: session_bands.Seat(HARNESS, result.account, cap, counts.get(result.account, 0))
         for result in results
         if result.account not in excluded and (cap := account_cap(result, timestamp, include_fable)) is not None
     }
-    reserve = {slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", "").split(",") if slug.strip()}
+    reserve = {slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", str()).split(",") if slug.strip()}
     seat = session_bands.pick(seat for seat in seats.values() if seat.account not in reserve)
     seat = seat or session_bands.pick(seats.values())
     if seat is None:

@@ -1,4 +1,5 @@
 import subprocess
+import time
 
 import pytest
 
@@ -107,6 +108,32 @@ def test_a_forced_route_ignores_quota_and_cap():
         router.select(_accounts(), quotas, {}, NOW, route="gamma")
 
 
+def test_no_seat_names_why_and_seats_are_codex():
+    with pytest.raises(
+        router.RoutingError,
+        match=r"^no signed in Codex account has a fresh reading and a free session under its quota band$",
+    ):
+        router.select(_accounts(), {}, {}, NOW)
+    assert {seat.harness for seat in router.seats(_accounts(), {"default": _quota(1.0)}, {}, NOW)} == {"codex"}
+
+
+def test_route_reads_quotas_for_a_forced_account_and_refreshes_them_otherwise(monkeypatch):
+    calls = []
+    pool = _accounts()
+    runner = object()
+    monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(router, "routing_pool", lambda environ, run: pool)
+    monkeypatch.setattr(router, "quotas", lambda p, environ: calls.append(("quotas", p, environ)) or {})
+    monkeypatch.setattr(
+        router,
+        "fresh_quotas",
+        lambda p, environ, now, run: calls.append(("fresh", p, environ, run)) or {"default": _quota(1.0, time.time())},
+    )
+    assert router._route(ENV, "alpha", runner) == (pool[1], "forced", 0, "?")
+    assert router._route(ENV, "", runner) == (pool[0], "open", 0, "6")
+    assert calls == [("quotas", pool, ENV), ("fresh", pool, ENV, runner)]
+
+
 def test_a_stale_reading_is_refreshed_by_a_probe_before_placing(monkeypatch):
     probed = []
     fresh = _quota(40.0)
@@ -131,20 +158,64 @@ def test_a_failed_probe_waits_a_freshness_window_before_the_next(monkeypatch):
     assert probed == ["default", "default"]
 
 
+def test_fresh_quotas_hands_its_pool_environment_and_runner_on_and_skips_fresh_readings(monkeypatch):
+    calls = []
+    fresh, stale = _quota(10.0), _quota(10.0, observed_at=NOW - 901)
+    monkeypatch.setattr(
+        router, "quotas", lambda pool, environ: calls.append((pool, environ)) or {"default": fresh, "alpha": stale}
+    )
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: calls.append((account.name, environ, run)))
+    pool = _accounts()[:2]
+    runner = object()
+    assert router.fresh_quotas(pool, ENV, NOW, runner) == {"default": fresh, "alpha": stale}
+    assert calls == [(pool, ENV), ("alpha", ENV, runner)]
+
+
+def test_probe_attempts_live_in_one_file_and_survive_bad_contents(monkeypatch):
+    from pathlib import Path
+
+    path = Path.home() / ".agentihooks" / "codex-probe-attempts.json"
+    assert router._attempts_path() == path
+    path.write_text("not json")
+    assert router._probe_attempts() == {}
+    path.unlink()
+    path.mkdir()
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {"default": None})
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: None)
+    assert router.fresh_quotas([router.CodexAccount("default")], ENV, NOW) == {"default": None}
+
+
 def test_the_probe_runs_one_tiny_exec_on_the_account_and_reads_its_rollout(monkeypatch):
     seen = {}
 
     def run(argv, **kwargs):
-        seen.update(argv=argv, **kwargs)
-        out = '{"type": "thread.started", "thread_id": "t-1"}\nnot json\n{"type": "turn.completed"}\n'
+        seen.update(argv=argv, kwargs=kwargs)
+        out = 'not json\n[1]\n{"type": "turn.started", "thread_id": "t-0"}\n'
+        out += '{"type": "thread.started", "thread_id": "t-1"}\n{"type": "turn.completed"}\n'
         return subprocess.CompletedProcess(argv, 0, out, "")
 
-    monkeypatch.setattr(router.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(router.codex_quota, "session_quota", lambda environ, thread: seen.setdefault("thread", thread))
+    def session_quota(environ, thread):
+        seen.update(environ=environ)
+        return thread
+
+    monkeypatch.setattr(router.shutil, "which", lambda name: None)
+    monkeypatch.setattr(router.codex_quota, "session_quota", session_quota)
     assert router.probe(_accounts()[1], ENV, run) == "t-1"
-    assert seen["argv"] == ["/usr/bin/codex", "--no-daemon", *router.PROBE_ARGS]
-    assert seen["env"]["CODEX_ACCESS_TOKEN"] == "cx-value-a"
-    assert seen["stdin"] is subprocess.DEVNULL
+    assert seen["argv"] == ["codex", "--no-daemon", *router.PROBE_ARGS]
+    assert seen["kwargs"] == {
+        "env": router.child_environment(_accounts()[1], ENV),
+        "capture_output": True,
+        "text": True,
+        "stdin": subprocess.DEVNULL,
+        "timeout": router.PROBE_TIMEOUT_S,
+    }
+    assert seen["environ"] == ENV
+    no_thread = '{"type": "thread.started"}\n'
+    assert (
+        router.probe(_accounts()[1], ENV, lambda argv, **kw: subprocess.CompletedProcess(argv, 0, no_thread, ""))
+        is None
+    )
+    assert router.probe(_accounts()[1], ENV, lambda argv, **kw: subprocess.CompletedProcess(argv, 0, None, "")) is None
     assert router.probe(_accounts()[1], ENV, lambda argv, **kw: subprocess.CompletedProcess(argv, 1, "", "")) is None
 
     def stuck(argv, **kwargs):

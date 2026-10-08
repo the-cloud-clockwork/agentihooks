@@ -287,3 +287,48 @@ def test_page_quota_is_reused_for_a_minute(monkeypatch):
     assert agents_quota.page_quota(now=1059.0)["rows"][0]["at"] == 1000.0
     assert agents_quota.page_quota(now=1060.0)["rows"][0]["at"] == 1060.0
     assert calls == [1000.0, 1060.0]
+
+
+def test_a_claude_cap_reads_the_five_hour_window_at_the_given_time():
+    claude = ProbeResult("ncgma", "allowed", "NORMAL", 5.0, QuotaWindow(95.0, 2000), QuotaWindow(10.0, 9000))
+    [row] = agents_quota.claude_rows([claude], {}, "cached", {"ncgma": 1000.0}, now=1000)
+    assert row.cap == 2
+
+
+def test_the_cached_claude_table_carries_sessions_source_and_reading_time(monkeypatch):
+    import time
+
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer, install
+
+    at = time.time()
+    claude = ProbeResult("ncgma", "allowed", "NORMAL", 60.0, QuotaWindow(5.0), QuotaWindow(10.0))
+    monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+    monkeypatch.setattr(claude_quota_balancer, "discover_credentials", lambda environ: [])
+    monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: [(at, claude)])
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"ncgma": 2})
+    [row] = agents_quota._claude(False, 1.0)
+    assert (row.account, row.sessions, row.source, row.observed_at, row.cap) == ("ncgma", 2, "cached", at, 6)
+
+
+def test_the_codex_table_renders_at_the_current_time(monkeypatch):
+    seen = []
+    row = agents_quota.QuotaRow("codex", "default", "NORMAL", 0, 90.0, 80.0, 1_000_000 + 7200, "log", cap=6)
+    monkeypatch.setattr(agents_quota.time, "time", lambda: 1_000_000.5)
+    monkeypatch.setattr(agents_quota, "_codex", lambda now: seen.append(now) or [row])
+    table = agents_quota.codex_table()
+    assert seen == [1_000_000.5]
+    assert "2h00m" in table.splitlines()[1]
+
+
+def test_page_quota_without_a_cached_reading_has_no_probe_time(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer, codex_router
+
+    agents_quota._page_cache.clear()
+    monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: [])
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(codex_router, "routing_pool", lambda environ: [])
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
+    assert agents_quota.page_quota(now=100.0) == {"probed_at": None, "rows": []}

@@ -21,8 +21,10 @@ def test_the_rotation_pick_names_the_harness_with_the_fewest_sessions(monkeypatc
         capacity.Account("claude", "a", "OPEN", 2, 90, 90, 3),
         capacity.Account("codex", "cx", "OPEN", 0, 90, 90, 3),
     ]
-    monkeypatch.setattr(capacity, "accounts", lambda environ, now: rows)
-    assert agent_choice.choose("", {}) == ("codex", "rotation")
+    seen = []
+    monkeypatch.setattr(capacity, "accounts", lambda environ, now: seen.append((environ, now)) or rows)
+    assert agent_choice.choose("", {"A": "1"}) == ("codex", "rotation")
+    assert seen[0][0] == {"A": "1"} and abs(seen[0][1] - time.time()) < 60
 
 
 def test_no_free_seat_gives_claude_all_full(monkeypatch):

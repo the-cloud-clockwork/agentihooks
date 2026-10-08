@@ -82,7 +82,7 @@ class TestClaudeRouting:
         assert exc.value.code == 3
         assert "no capacity" in capsys.readouterr().err
 
-    def test_cmd_claude_route_selects_exact_slug_without_probing(self, monkeypatch, capsys):
+    def test_cmd_claude_route_selects_exact_slug_without_probing(self, monkeypatch, capsys, tmp_path):
         from scripts import claude_quota_balancer as balancer
 
         observed = {}
@@ -102,9 +102,11 @@ class TestClaudeRouting:
 
         monkeypatch.setattr(install.os, "execvpe", execvpe)
 
+        report = tmp_path / "route.report"
         with pytest.raises(RuntimeError, match="exec intercepted"):
-            install.cmd_claude(["--route", "0", "--model", "sonnet"])
+            install.cmd_claude(["--route", "0", "--agentihooks-report", str(report), "--model", "sonnet"])
 
+        assert report.read_text() == "status=routed\naccount=0\nplacement=forced\n"
         assert observed["command"] == ["/usr/bin/claude", "--dangerously-skip-permissions", "--model", "sonnet"]
         assert observed["environ"]["CLAUDE_CODE_OAUTH_TOKEN"] == "selected-secret"
         assert observed["environ"]["AGENTIHOOKS_ROUTE_ACCOUNT"] == "0"
@@ -205,9 +207,13 @@ class TestClaudeRouting:
         monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [credential])
         monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([result], "cached"))
 
-        assert install.cmd_balance(include_fable=False, refresh=False, timeout=10) == 0
+        monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"ALPHA": 2})
+
+        assert install.cmd_balance(include_fable=True, refresh=False, timeout=10) == 0
         output = capsys.readouterr().out
         assert "ROUTING LEFT" in output
+        assert "FABLE LEFT" in output
+        assert " 2/? " in output
         assert "70%" in output
         assert "source=cached" in output
 
