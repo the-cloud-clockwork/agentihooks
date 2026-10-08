@@ -21,18 +21,29 @@ def test_rulesets_enforce_branch_protection_without_bypass(name):
     assert rules["pull_request"]["parameters"]["require_code_owner_review"] is False
 
 
-def test_dev_requires_the_workflow_gate_on_the_latest_base():
+def test_dev_merges_through_a_queue_that_runs_the_workflow_gate():
     ruleset = json.loads((ROOT / ".github" / "rulesets" / "dev-no-delete.json").read_text())
     workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "test.yml").read_text())
 
     assert ruleset["conditions"] == {"ref_name": {"include": ["refs/heads/dev"], "exclude": []}}
     rules = {rule["type"]: rule for rule in ruleset["rules"]}
     params = rules["required_status_checks"]["parameters"]
-    assert params["strict_required_status_checks_policy"] is True
+    assert params["strict_required_status_checks_policy"] is False
     assert params["do_not_enforce_on_create"] is False
     checks = params["required_status_checks"]
     assert len(checks) == 1
     assert checks[0]["context"] == workflow["jobs"]["gate-required"]["name"] == "Gate — Required"
+    assert rules["merge_queue"]["parameters"] == {
+        "check_response_timeout_minutes": 60,
+        "grouping_strategy": "ALLGREEN",
+        "max_entries_to_build": 5,
+        "max_entries_to_merge": 5,
+        "merge_method": "SQUASH",
+        "min_entries_to_merge": 1,
+        "min_entries_to_merge_wait_minutes": 0,
+    }
+    assert rules["pull_request"]["parameters"]["allowed_merge_methods"] == ["squash"]
+    assert workflow[True]["merge_group"] == {"types": ["checks_requested"]}
 
 
 def test_main_keeps_its_existing_branch_match_and_rules():

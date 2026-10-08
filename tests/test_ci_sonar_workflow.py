@@ -80,6 +80,53 @@ def test_required_gate_rejects_unsuccessful_sonar(sonar):
         assert "::error::" in result.stdout
 
 
+def _queued_step():
+    steps = _workflow()["jobs"]["sonar"]["steps"]
+    return next(step for step in steps if step.get("id") == "queued")
+
+
+@pytest.mark.parametrize(
+    ("head_ref", "args"),
+    [
+        (
+            "refs/heads/gh-readonly-queue/dev/pr-1630-f5eb044a8d0c2b1e3f4a5b6c7d8e9f0a1b2c3d4e",
+            "-Dsonar.pullrequest.key=1630 -Dsonar.pullrequest.branch=ci-323133-0078 -Dsonar.pullrequest.base=dev",
+        ),
+        ("refs/heads/dev", None),
+    ],
+)
+def test_queued_merges_are_analysed_as_their_pull_request(tmp_path, head_ref, args):
+    steps = _workflow()["jobs"]["sonar"]["steps"]
+    step = _queued_step()
+    scan = next(s for s in steps if s.get("name") == "SonarQube Scan")
+    assert step["if"] == "github.event_name == 'merge_group'"
+    assert _workflow()["jobs"]["sonar"]["permissions"]["pull-requests"] == "read"
+    assert steps.index(step) < steps.index(scan)
+    assert scan["with"]["args"] == "${{ steps.queued.outputs.args }}"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text('#!/usr/bin/env bash\n[[ "$2" == repos/owner/repo/pulls/1630 ]] && echo ci-323133-0078\n')
+    gh.chmod(0o755)
+    output = tmp_path / "output"
+    output.write_text("")
+    env = dict(
+        os.environ,
+        PATH=f"{bin_dir}:{os.environ['PATH']}",
+        GITHUB_REPOSITORY="owner/repo",
+        GITHUB_OUTPUT=str(output),
+        HEAD_REF=head_ref,
+        BASE_REF="refs/heads/dev",
+    )
+    result = subprocess.run(["bash", "-eo", "pipefail", "-c", step["run"]], env=env, capture_output=True, text=True)
+    if args is None:
+        assert result.returncode != 0
+        assert output.read_text() == ""
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert output.read_text() == f"args={args}\n"
+
+
 _FAKE_GH = """
 import json, os, re, sys
 from pathlib import Path
