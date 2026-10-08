@@ -110,3 +110,27 @@ def test_the_report_lists_every_missed_line_and_every_lost_line(tmp_path):
     text = ratchet.report(result, {"hooks/a.py": [3, 4]}, {"hooks/a.py": 2}, {"hooks/a.py": 3})
     assert "hooks/a.py: covered 2 (base 3), missed 3, 4" in text
     assert "hooks/a.py:3 ran on base b1 and no head test runs it" in text
+
+
+def test_a_failed_github_read_is_retried_before_the_gate_gives_up(monkeypatch):
+    import subprocess
+
+    from tests import coverage_history
+
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        code = 1 if len(calls) < 3 else 0
+        return subprocess.CompletedProcess(cmd, code, stdout="42\n", stderr="HTTP 502")
+
+    monkeypatch.setattr(coverage_history.subprocess, "run", run)
+    monkeypatch.setattr(coverage_history.time, "sleep", lambda seconds: None)
+    assert coverage_history._gh("api", "x") == "42"
+    assert len(calls) == 3
+    calls.clear()
+    monkeypatch.setattr(
+        coverage_history.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "HTTP 502")
+    )
+    with pytest.raises(subprocess.CalledProcessError):
+        coverage_history._gh("api", "x")

@@ -1,5 +1,6 @@
 import os
 import subprocess
+import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 from tests.coverage_grade import HISTORY, Measurement, Source, executed
 
 SEARCH = 60
+ATTEMPTS = 4
 
 
 def git(*args: str, cwd: Path) -> str:
@@ -27,7 +29,13 @@ def _show(repo: Path, commit: str) -> Source:
 
 
 def _gh(*args: str) -> str:
-    return subprocess.run(["gh", *args], capture_output=True, text=True, check=True).stdout.strip()
+    for attempt in range(ATTEMPTS):
+        done = subprocess.run(["gh", *args], capture_output=True, text=True)
+        if done.returncode == 0:
+            return done.stdout.strip()
+        print(f"::warning::gh {args[0]} failed ({done.stderr.strip()[:200]}), attempt {attempt + 1} of {ATTEMPTS}")
+        time.sleep(2**attempt)
+    raise subprocess.CalledProcessError(done.returncode, ["gh", *args], done.stdout, done.stderr)
 
 
 def _passed_run(repo: Path, commit: str) -> str | None:
