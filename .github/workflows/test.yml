@@ -17,9 +17,8 @@ on:
         default: origin/dev
 
 concurrency:
-  group: tests-${{ github.ref }}
-  # A running dev push run publishes the merged durations every pull request shard downloads.
-  cancel-in-progress: ${{ github.event_name != 'push' }}
+  group: tests-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -158,7 +157,7 @@ jobs:
 
   sonar:
     needs: [unit]
-    runs-on: anton
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
@@ -284,7 +283,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, lint, sonar]
+    needs: [unit, lint, sonar, mutation]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -292,9 +291,10 @@ jobs:
       - name: Require every gate to succeed
         env:
           NEEDS: ${{ toJSON(needs) }}
+          MUTATION: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
         run: |
           echo "$NEEDS"
-          if ! jq -e 'all(.[]; .result == "success")' <<< "$NEEDS"; then
+          if ! jq -e --arg mutation "$MUTATION" 'all(to_entries[]; .value.result == "success" or (.key == "mutation" and .value.result == "skipped" and $mutation == "false"))' <<< "$NEEDS"; then
             echo "::error::Every required gate must succeed."
             exit 1
           fi

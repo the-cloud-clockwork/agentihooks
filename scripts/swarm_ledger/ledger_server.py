@@ -128,8 +128,8 @@ HOME_ICON = ICON.format('<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><pat
 def ledger_row(s, cells, control, lead="", attrs=""):
     slug, title, overview = html.escape(s["slug"]), html.escape(s["title"]), html.escape(s["overview"])
     return (
-        f'<li class="row"{attrs}>{lead}<a class="title" href="/{slug}" title="{title}">{title}</a>'
-        f'<span class="kind">{html.escape(s["size"])}</span><span class="ov" title="{overview}">{overview}</span>'
+        f'<li class="row"{attrs}>{lead}<a class="title" href="/{slug}" data-tip="{title}">{title}</a>'
+        f'<span class="kind">{html.escape(s["size"])}</span><span class="ov" data-tip="{overview}">{overview}</span>'
         f'{cells}<span class="acts">{control.format(slug=slug, title=title)}</span></li>'
     )
 
@@ -147,7 +147,7 @@ def activity(at, now):
         return '<span class="when">unknown</span>'
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(at / 1000))
     local = time.strftime("%Y-%m-%d %H:%M", time.localtime(at / 1000))
-    return f'<time class="when" datetime="{stamp}" title="{local}">{ago(at, now)}</time>'
+    return f'<time class="when" datetime="{stamp}" data-tip="{local}">{ago(at, now)}</time>'
 
 
 def home_cells(s, state, now):
@@ -336,6 +336,16 @@ MAX_NOTE = 500
 FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
 
 
+def session_cap_argv(body):
+    from scripts import session_caps
+
+    account, cap, harness = body.get("account"), body.get("cap"), body.get("harness", "claude")
+    if cap is None:
+        raise ValueError("session_cap needs a cap")
+    session_caps.check(account, cap, harness)
+    return ["session-cap", account, str(cap), "--harness", harness]
+
+
 def control_argv(body):
     action = body.get("action") if isinstance(body, dict) else None
     if action in CONTROLS:
@@ -351,6 +361,8 @@ def control_argv(body):
         return restore_decision_argv(body)
     if action == "lift":
         return lift_argv(body)
+    if action == "session_cap":
+        return session_cap_argv(body)
     if action != "set":
         raise ValueError("action must be start, pause, stop, stop_now, close, reopen, set or verdict")
     pairs = []

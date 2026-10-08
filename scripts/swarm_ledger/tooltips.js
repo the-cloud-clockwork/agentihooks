@@ -1,6 +1,6 @@
 (() => {
   const DELAY = 1000;
-  const CONTROLS = 'button, [role="tab"], [role="button"], [role="switch"], a.sync, a.fab, [data-gate-name]';
+  const CONTROLS = 'button, [role="tab"], [role="button"], [role="switch"], a.sync, a.fab, [data-gate-name], [data-tip]:not([data-tip=""])';
   const TIPS = [
     ["#title-edit", "Rename this ledger. The new title shows here and on HOME."],
     ['#title-form [type="submit"]', "Save the new ledger title."],
@@ -133,6 +133,7 @@
   function tip(el) {
     const target = control(el);
     if (!target) return null;
+    if (target.dataset.tip) return target.dataset.tip;
     const found = TIPS.find(([selector]) => target.matches(selector));
     return found ? found[1] : null;
   }
