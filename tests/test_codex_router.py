@@ -6,6 +6,8 @@ import pytest
 from scripts import codex_router as router
 from scripts.claude_quota_balancer import QuotaWindow
 from scripts.codex_quota import CodexQuota
+from scripts.routing import codex_api, place
+from scripts.routing.slots import API_UNBOUNDED
 
 ENV = {
     "HOME": "/home/u",
@@ -354,3 +356,62 @@ def test_the_api_route_is_forced_with_its_own_live_count_and_no_cap(monkeypatch)
     assert router._route(environ, "api", no_status) == (expected, "forced", 2, "?")
     monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"default": 5})
     assert router._route(environ, "api", no_status) == (expected, "forced", 0, "?")
+
+
+def _weighted(monkeypatch, weight, cap=API_UNBOUNDED):
+    monkeypatch.setattr(place, "policy", lambda harness, environ: place.ApiPolicy(weight, cap))
+
+
+API_ENV = {**ENV, "CODEX_API_KEY": "key"}
+API = router.CodexAccount("api", key_env="CODEX_API_KEY")
+
+
+def test_three_accounts_and_an_api_at_weight_25_give_api_one_of_every_four_sessions(monkeypatch):
+    _weighted(monkeypatch, 25)
+    quotas = {"default": _quota(10.0), "alpha": _quota(10.0), "beta": _quota(10.0)}
+    sessions, chosen = {}, []
+    for _ in range(8):
+        account, placement, seat = router.select(_accounts(), quotas, dict(sessions), NOW, environ=API_ENV)
+        chosen.append(account.name)
+        assert (placement, seat.account) == ("open", account.name)
+        sessions[account.name] = sessions.get(account.name, 0) + 1
+    assert chosen == ["api", "alpha", "beta", "default"] * 2
+
+
+def test_with_every_codex_week_below_five_percent_every_session_goes_to_api(monkeypatch):
+    _weighted(monkeypatch, 0)
+    quotas = {"default": _quota(97.0), "alpha": _quota(97.0), "beta": _quota(99.0)}
+    for live in range(3):
+        account, placement, seat = router.select(_accounts(), quotas, {"api": live}, NOW, environ=API_ENV)
+        assert (account, placement, seat.cap, seat.sessions, seat.kind) == (API, "open", API_UNBOUNDED, live, "api")
+
+
+def test_codex_routing_fails_only_when_the_pool_and_the_api_are_both_closed(monkeypatch):
+    _weighted(monkeypatch, 0, cap=1)
+    quotas = {"default": _quota(97.0), "alpha": _quota(97.0), "beta": _quota(99.0)}
+    assert router.select(_accounts(), quotas, {}, NOW, environ=API_ENV)[0] == API
+    with pytest.raises(router.RoutingError) as raised:
+        router.select(_accounts(), quotas, {"api": 1}, NOW, environ=API_ENV)
+    assert str(raised.value) == (
+        "no signed in Codex account has a fresh reading and a free session under its quota band"
+    )
+
+
+def test_without_api_variables_no_routing_setting_is_read(monkeypatch):
+    monkeypatch.setattr(place, "policy", lambda harness, environ: pytest.fail("policy read without an api slot"))
+    quotas = {"default": _quota(90.0), "alpha": _quota(10.0), "beta": _quota(50.0)}
+    assert router.select(_accounts(), quotas, {}, NOW, environ=ENV)[0].name == "alpha"
+    assert router.select(_accounts(), quotas, {}, NOW)[0].name == "alpha"
+
+
+def test_an_open_route_to_the_api_launches_with_the_api_scrubber(monkeypatch, tmp_path, capsys):
+    _weighted(monkeypatch, 100)
+    quotas = {"default": _quota(10.0), "alpha": _quota(10.0), "beta": _quota(10.0)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, API_ENV, ["-m", "o3"], quotas)
+    assert rc == 0
+    assert seen["cmd"] == ["/usr/bin/codex", "--no-daemon", *codex_api.overrides("CODEX_API_KEY", ""), "-m", "o3"]
+    assert seen["env"]["AH_ROUTE_API"] == "1"
+    assert seen["env"]["CODEX_API_KEY"] == "key"
+    assert not [name for name in seen["env"] if name.startswith("AH_CX_TOKEN_") or name == "CODEX_ACCESS_TOKEN"]
+    assert report.read_text() == "status=routed\naccount=api\nplacement=open\n"
+    assert "account=api sessions=0/1000000 placement=open" in capsys.readouterr().out
