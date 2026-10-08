@@ -9,7 +9,7 @@ import yaml
 MODES = ("finders", "classifier", "both")
 ACTIONS = ("send-back", "strip", "flag")
 DEFAULT_QUESTION = "Does this finding go against the filter intent?"
-_FINDER_KEYS = frozenset({"regex", "reason"})
+_FINDER_KEYS = frozenset({"regex", "reason", "script"})
 
 
 class FilterSchemaError(ValueError):
@@ -18,8 +18,9 @@ class FilterSchemaError(ValueError):
 
 @dataclass(frozen=True)
 class Finder:
-    pattern: re.Pattern
+    pattern: re.Pattern | None
     reason: str
+    script: str = ""
 
 
 @dataclass(frozen=True)
@@ -59,16 +60,22 @@ def _rounds(value: object) -> int:
 
 
 def _finder(index: int, raw: object) -> Finder:
-    if not isinstance(raw, dict) or "regex" not in raw:
-        raise FilterSchemaError(f"finder {index} must be a mapping with a regex")
+    if not isinstance(raw, dict) or len({"regex", "script"} & raw.keys()) != 1:
+        raise FilterSchemaError(f"finder {index} must be a mapping with exactly one regex or script")
     unknown = sorted(set(raw) - _FINDER_KEYS)
     if unknown:
         raise FilterSchemaError(f"finder {index} has unknown keys: {', '.join(map(str, unknown))}")
+    reason = _text(f"finder {index} reason", raw.get("reason", "matched a finder"))
+    if "script" in raw:
+        name = _text(f"finder {index} script", raw["script"])
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", name):
+            raise FilterSchemaError(f"finder {index} script must be a finder name")
+        return Finder(None, reason, name)
     try:
         pattern = re.compile(_text(f"finder {index} regex", raw["regex"]))
     except re.error as error:
         raise FilterSchemaError(f"finder {index} regex does not compile: {error}") from None
-    return Finder(pattern, _text(f"finder {index} reason", raw.get("reason", "matched a finder")))
+    return Finder(pattern, reason)
 
 
 def _finders(value: object) -> tuple[Finder, ...]:
