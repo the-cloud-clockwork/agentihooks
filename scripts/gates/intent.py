@@ -14,6 +14,7 @@ from scripts.gates import intent_history, log
 from scripts.gates.base import Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.verdicts import Verdicts
+from scripts.swarm_ledger import plan_read
 
 NAME = "intent"
 PURPOSE = "intent-check"
@@ -24,6 +25,7 @@ RUNNING = "intent check running"
 FAIL_LINE = 0.3
 REASON_LINE = 0.5
 WEAKEN_LINE = 0.5
+CHUNK_LINE = 0.5
 GRACE_MS = 2 * 60_000
 GH_TIMEOUT_SEC = 20
 PROOF_CHARS = 4000
@@ -55,7 +57,18 @@ QUESTIONS = {
         true="the change weakens what the phase builds",
         false="the change weakens nothing the phase builds",
     ),
+    "underdelivers": YesNo(
+        "Does the change leave out anything the plan chunk asks for?",
+        true="the change leaves out part of the plan chunk",
+        false="the change delivers every item of the plan chunk",
+    ),
+    "overdelivers": YesNo(
+        "Does the change add scope the plan chunk does not ask for?",
+        true="the change adds scope beyond the plan chunk",
+        false="the change stays within the plan chunk",
+    ),
 }
+CHUNK_QUESTIONS = ("underdelivers", "overdelivers")
 REASONS = {
     "delivers": "the change may not deliver what the task text asks",
     "reachable": "nothing in the change may let the phase reach it",
@@ -179,6 +192,17 @@ def _proof_notes(task, proof_chars):
         return ""
 
 
+def _plan_chunk(doc, task):
+    ref = _phase(doc, task).get("plan_ref")
+    if not (ref and task.get("plan_lines")):
+        return {}
+    try:
+        text = plan_read.exact(doc, ref, task["plan_lines"])
+    except (ValueError, OSError):
+        return {}
+    return {"plan_lines": task["plan_lines"], "plan_chunk": text}
+
+
 def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
     phase = _phase(doc, task)
     return {
@@ -193,36 +217,77 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
         "proof": task.get("proof") or {},
         "proof_notes": _proof_notes(task, proof_chars),
         "reviewer_findings": pr.get("reviewer_findings", {}),
+        **_plan_chunk(doc, task),
     }
 
 
+def questions_for(state):
+    if "plan_chunk" in state:
+        return QUESTIONS
+    return {key: question for key, question in QUESTIONS.items() if key not in CHUNK_QUESTIONS}
+
+
+def _quoted(state):
+    start = int(state["plan_lines"].split("-")[0])
+    rows = enumerate(state["plan_chunk"].splitlines(), start)
+    return ", ".join(f'line {number} "{row.strip()}"' for number, row in rows if row.strip())
+
+
+def _chunk_reasons(state, answers):
+    if "plan_chunk" not in state:
+        return []
+    lines, under, over = state["plan_lines"], answers["underdelivers"].noul, answers["overdelivers"].noul
+    reasons = []
+    if under >= CHUNK_LINE:
+        reasons.append(f"the change may leave out something plan lines {lines} ask for, at probability {under:.2f}")
+    if over >= CHUNK_LINE:
+        reasons.append(f"the change may add scope plan lines {lines} do not ask for, at probability {over:.2f}")
+    return reasons
+
+
+def _chunk_steps(state, answers):
+    if "plan_chunk" not in state:
+        return []
+    lines, quoted, steps = state["plan_lines"], _quoted(state), []
+    if answers["underdelivers"].noul >= CHUNK_LINE:
+        steps.append(f"Deliver every item of plan lines {lines}: {quoted}.")
+    if answers["overdelivers"].noul >= CHUNK_LINE:
+        steps.append(f"Remove the scope beyond plan lines {lines}, which ask only for {quoted}.")
+    return steps
+
+
 def remediation(state: dict, answers: dict) -> str:
-    if not state.get("task_text"):
-        return ""
-    task = f"{state['task']}: {state['task_text']}"
-    phase = f"{state['phase']}: {state['phase_intent']}"
-    steps = [f"Deliver {task}. The phase must be able to use it for {phase}."]
-    if answers["delivers"].noul < REASON_LINE:
-        steps.append(f"Implement the missing acceptance behavior described by {task}.")
-    if answers["reachable"].noul < REASON_LINE:
-        steps.append(f"Wire the production entrypoint for {state['task']} and prove an invocation delivers {phase}.")
-    if answers["weakens"].noul >= WEAKEN_LINE:
-        steps.append(f"Preserve {phase} while implementing {task}.")
-    return "What would meet intent: " + " ".join(steps)
+    steps = []
+    if state.get("task_text"):
+        task = f"{state['task']}: {state['task_text']}"
+        phase = f"{state['phase']}: {state['phase_intent']}"
+        steps.append(f"Deliver {task}. The phase must be able to use it for {phase}.")
+        if answers["delivers"].noul < REASON_LINE:
+            steps.append(f"Implement the missing acceptance behavior described by {task}.")
+        if answers["reachable"].noul < REASON_LINE:
+            steps.append(
+                f"Wire the production entrypoint for {state['task']} and prove an invocation delivers {phase}."
+            )
+        if answers["weakens"].noul >= WEAKEN_LINE:
+            steps.append(f"Preserve {phase} while implementing {task}.")
+    steps += _chunk_steps(state, answers)
+    return "What would meet intent: " + " ".join(steps) if steps else ""
 
 
 def judge(state, decide=decide):
     try:
-        answers = decide(state, QUESTIONS, purpose=PURPOSE).answers
+        answers = decide(state, questions_for(state), purpose=PURPOSE).answers
     except ClassifierError:
         return UNCHECKED, "the classifier did not answer"
     usable, weakens = answers["usable"].noul, answers["weakens"].noul
-    if usable >= FAIL_LINE and weakens < WEAKEN_LINE:
+    chunk = _chunk_reasons(state, answers)
+    if usable >= FAIL_LINE and weakens < WEAKEN_LINE and not chunk:
         return PASS, f"the phase can use it as delivered at probability {usable:.2f}"
     lead = f"the phase can use this change at probability {usable:.2f}"
     reasons = [text for key, text in REASONS.items() if answers[key].noul < REASON_LINE]
     if weakens >= WEAKEN_LINE:
         reasons.append(f"the change may weaken what the phase builds, at probability {weakens:.2f}")
+    reasons += chunk
     guidance = remediation(state, answers)
     if guidance:
         reasons.append(guidance)
@@ -288,7 +353,7 @@ class Check:
                 "purpose": PURPOSE,
                 "verdict": verdict,
                 "reason": reason,
-                "classifier_input": intent_history.request(state, QUESTIONS),
+                "classifier_input": intent_history.request(state, questions_for(state)),
             },
             self.home,
         )

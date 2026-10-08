@@ -25,10 +25,14 @@ def _ledger(name: str):
     return import_module(f"scripts.swarm_ledger.{name}")
 
 
-def chunk(text: str, lines: str) -> str:
+def chunk(text: str, lines: str, margin: int = MARGIN) -> str:
     start, end = _ledger("plan_ranges").bounds(lines)
     rows = text.splitlines()
-    return "".join(f"{row}\n" for row in rows[max(1, start - MARGIN) - 1 : min(len(rows), end + MARGIN)])
+    return "".join(f"{row}\n" for row in rows[max(1, start - margin) - 1 : min(len(rows), end + margin)])
+
+
+def exact(doc: dict, ref: dict, lines: str) -> str:
+    return chunk(_ledger("plan_ranges").stored_text(ref, doc), lines, margin=0)
 
 
 def pointer(task: dict) -> str:

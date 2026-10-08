@@ -50,7 +50,7 @@ def test_each_verdict_replays_the_exact_request_and_original_findings(tmp_path, 
     pr = pull_request()
 
     def ask(state):
-        seen.append(json.dumps(DecisionRequest(state, intent.QUESTIONS).wire()).encode())
+        seen.append(json.dumps(DecisionRequest(state, intent.questions_for(state)).wire()).encode())
         return verdict, "original result"
 
     check = intent.Check("proof", "observe", 123, None, None, lambda url: pr, ask, tmp_path)
