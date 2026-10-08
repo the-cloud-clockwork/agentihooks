@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 from xdist.workermanage import NodeManager
 
+from hooks.secrets import scan
 from tests import conftest
 from tests.shards import (
     assign_files,
@@ -21,6 +23,7 @@ from tests.shards import (
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parent.parent
+_URL_CREDENTIAL = re.compile(r"://[^/\s@:]+:[^/\s@]+@")
 
 
 def test_every_test_file_lands_in_exactly_one_shard():
@@ -47,6 +50,18 @@ def test_shards_balance_the_stored_durations_per_file():
         ["tests/test_a.py", "tests/test_d.py"],
         ["tests/test_b.py", "tests/test_c.py", "tests/test_e.py"],
     ]
+
+
+def test_stored_durations_name_no_credential_shaped_case():
+    stored = sorted(_ROOT.glob(".test_durations*"))
+    assert stored
+    flagged = [
+        f"{path.name}: {nodeid}"
+        for path in stored
+        for nodeid in json.loads(path.read_text())
+        if scan(nodeid, mode="strict") or _URL_CREDENTIAL.search(nodeid)
+    ]
+    assert flagged == []
 
 
 def test_serial_group_costs_are_not_divided_across_workers():
