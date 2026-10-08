@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from hooks.classifier import ClassifierUnavailable, YesNo
-from scripts.gates import Call, Gate, Who, entry, intent
+from scripts.gates import Call, Gate, Who, entry, intent, intent_history
 from scripts.gates.verdicts import Verdicts
 
 SLUG, ME, TASK = "demo", "engineer@1-1", "t1"
@@ -593,6 +593,13 @@ class TestPlanChunk:
             f"the plan chunk for lines {lines} could not be read",
         )
         assert seen == []
+
+    def test_a_chunk_truncated_by_the_history_bound_is_unchecked(self):
+        state = intent_history.prepare({**CHUNK_STATE, "plan_chunk": "x\n" * 20000})
+        assert intent.judge(state, decide=chunk_classifier()) == (
+            "unchecked",
+            "the plan chunk for lines 15-17 could not be read",
+        )
 
     def test_the_chunk_questions_are_asked_only_with_a_chunk(self):
         assert list(intent.QUESTIONS) == [*BASE_QUESTIONS, "underdelivers", "overdelivers"]

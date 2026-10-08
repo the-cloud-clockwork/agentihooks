@@ -289,7 +289,7 @@ def remediation(state: dict, answers: dict) -> str:
 
 
 def judge(state, decide=decide):
-    if state.get("plan_lines") and state.get("plan_chunk") is None:
+    if state.get("plan_lines") and not isinstance(state.get("plan_chunk"), str):
         return UNCHECKED, f"the plan chunk for lines {state['plan_lines']} could not be read"
     try:
         answers = decide(state, questions_for(state), purpose=PURPOSE).answers
