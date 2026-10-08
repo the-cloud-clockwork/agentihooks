@@ -147,7 +147,7 @@ def bound_session(agent: AgentRecord, sessions: list[Session]) -> Session | None
     conversation = [s for s in named.values() if agent.conversation_id and s.session_id == agent.conversation_id]
     if validated:
         resumed = [s for s in conversation if s.status == "alive"]
-        return named.get(validated) or (resumed[0] if resumed else None)
+        return named.get(validated) or min(resumed, key=lambda s: s.process.start_time, default=None)
     if conversation:
         return conversation[0]
     registered = [s for s in named.values() if s.status != "unregistered" and s.target == agent.harness]

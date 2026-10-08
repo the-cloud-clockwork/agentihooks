@@ -905,7 +905,44 @@ def test_a_session_resumed_under_a_new_process_rebinds_by_name_and_conversation(
     assert HerdrRuntime().bindings([agent]) == {"engineer": expected}
 
 
-def test_tick_keeps_a_resumed_agent_and_records_its_new_process_and_pane(ticking):
+@pytest.mark.parametrize(
+    "validation, read, expected",
+    [
+        ({"pid": 22}, {"pid": 22}, {"pid": 22}),
+        ({}, {"pid": 22}, {"pid": 22}),
+        ({"pid": 99}, {"process": False}, {"process": False}),
+    ],
+)
+def test_bindings_report_a_rebound_only_for_a_live_process_other_than_the_validated_one(
+    monkeypatch, validation, read, expected
+):
+    from types import SimpleNamespace
+
+    from scripts import terminate_agent
+    from scripts.swarm.runtime import HerdrRuntime
+
+    session = SimpleNamespace(
+        name="engineer",
+        target="claude",
+        status="alive",
+        session_id="current",
+        process=SimpleNamespace(pid=22, start_time=3),
+    )
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+    monkeypatch.setattr(live_binding, "read", lambda agent, pid: dict(read))
+    agent = AgentRecord(
+        "engineer",
+        "eng",
+        "one",
+        harness="claude",
+        conversation_id="current",
+        profile_decision={"validation": validation},
+    )
+    assert HerdrRuntime().bindings([agent]) == {"engineer": expected}
+
+
+@pytest.mark.parametrize("panes", [{}, {"w1:p9": "conv", "w1:p8": "conv"}, {"w1:p9": "other"}])
+def test_tick_holds_a_resumed_agent_until_one_pane_holds_its_conversation(ticking, panes):
     from scripts.swarm.tick import tick
 
     store, runtime, ledger = ticking
@@ -913,14 +950,37 @@ def test_tick_keeps_a_resumed_agent_and_records_its_new_process_and_pane(ticking
     old = next(a for a in store.agents("sw") if a.lane == "eng")
     old = replace(old, conversation_id="conv", profile_decision={"validation": {"pid": 99}})
     store.put_agent("sw", old)
-    runtime.conversation_ids = {"w1:p9": "conv"}
+    runtime.conversation_ids = panes
     runtime.bindings = lambda agents: {
         a.name: {**live_binding.assignment(a), "hooks": True, **({"rebound": 1234} if a.name == old.name else {})}
         for a in agents
     }
     actions = tick("sw", store, ledger, runtime, 200)
     now = next(a for a in store.agents("sw") if a.name == old.name)
-    assert now.profile_decision["validation"]["pid"] == 1234
+    assert now.profile_decision["validation"]["pid"] == 99
+    assert now.pane_id == old.pane_id
+    assert not runtime.killed
+    assert f"held {old.name} until one pane holds its resumed process 1234" in actions
+
+
+def test_tick_keeps_a_resumed_agent_and_records_its_new_process_and_pane(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "eng")
+    old = replace(
+        old, conversation_id="conv", profile_decision={"profile": "engineer", "validation": {"pid": 99, "canary": "c"}}
+    )
+    store.put_agent("sw", old)
+    runtime.conversation_ids = {"w1:p9": "conv", "w1:p8": "other"}
+    runtime.bindings = lambda agents: {
+        a.name: {**live_binding.assignment(a), "hooks": True, **({"rebound": 1234} if a.name == old.name else {})}
+        for a in agents
+    }
+    actions = tick("sw", store, ledger, runtime, 200)
+    now = next(a for a in store.agents("sw") if a.name == old.name)
+    assert now.profile_decision == {"profile": "engineer", "validation": {"pid": 1234, "canary": "c"}}
     assert now.pane_id == "w1:p9"
     assert not runtime.killed
     assert ledger.rows["one"]["claimed_by"] == old.name

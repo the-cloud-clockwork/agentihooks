@@ -282,7 +282,10 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
         if agent.name not in facts and agent.state != "retiring":
             continue
         if (pid := facts.get(agent.name, {}).get("rebound")) is not None:
-            agent = _rebind(slug, store, runtime, agent, pid)
+            if (rebound := _rebind(slug, store, runtime, agent, pid)) is None:
+                actions.append(f"held {agent.name} until one pane holds its resumed process {pid}")
+                continue
+            agent = rebound
             actions.append(f"rebound {agent.name} to its resumed process {pid} in pane {agent.pane_id}")
         filled = live_binding.fill(agent, facts.get(agent.name, {}))
         if filled != agent:
@@ -313,10 +316,11 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
 
 
 def _rebind(slug, store, runtime, agent, pid):
-    panes = runtime.conversations() or {}
-    pane = next((p for p, c in panes.items() if c and c == agent.conversation_id), agent.pane_id)
+    panes = [p for p, c in (runtime.conversations() or {}).items() if c and c == agent.conversation_id]
+    if len(panes) != 1:
+        return None
     validation = {**agent.profile_decision.get("validation", {}), "pid": pid}
-    rebound = replace(agent, pane_id=pane, profile_decision={**agent.profile_decision, "validation": validation})
+    rebound = replace(agent, pane_id=panes[0], profile_decision={**agent.profile_decision, "validation": validation})
     store.put_agent(slug, rebound)
     return rebound
 
