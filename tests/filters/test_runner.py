@@ -191,6 +191,26 @@ def test_strip_asks_outside_bypass_permissions(filters_dir, stub):
     assert effect.decision == "ask"
 
 
+def test_strip_in_classifier_mode_removes_the_whole_text(filters_dir, stub):
+    (filters_dir / "pre-write-ids.filter.yaml").write_text("mode: classifier\naction: strip\n")
+    stub(yes=True)
+    effect = conditions.pre_effect(_write_call("all of it", mode="bypassPermissions"))
+    assert effect.rewrite == {"file_path": "/repo/page.py", "content": ""}
+
+
+def test_strip_rewrites_only_the_edits_with_findings(filters_dir, stub):
+    (filters_dir / "pre-multiedit-ids.filter.yaml").write_text(FILTER + "action: strip\n")
+    stub(yes=True)
+    call = _write_call("x", mode="bypassPermissions")
+    edits = [{"old_string": "a", "new_string": "keep"}, {"old_string": "b", "new_string": "drop task flt1 here"}]
+    call["tool_name"], call["tool_input"] = "MultiEdit", {"file_path": "/repo/page.py", "edits": edits}
+    effect = conditions.pre_effect(call)
+    assert effect.rewrite == {
+        "file_path": "/repo/page.py",
+        "edits": [{"old_string": "a", "new_string": "keep"}, {"old_string": "b", "new_string": "drop  here"}],
+    }
+
+
 def test_strip_sends_back_where_the_harness_cannot_rewrite_input(filters_dir, stub, monkeypatch):
     (filters_dir / "pre-write-ids.filter.yaml").write_text(FILTER + "action: strip\n")
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
@@ -281,7 +301,7 @@ def test_a_tool_input_that_is_not_a_mapping_passes(tmp_path):
 
 def test_a_filter_that_overruns_the_timeout_fails(monkeypatch):
     release = threading.Event()
-    monkeypatch.setattr(runner, "run", lambda *a: release.wait(5))
+    monkeypatch.setattr(runner, "run", lambda *a: release.wait(5) or {"returncode": 0})
     try:
         result = conditions.execute({"file": "pre-any-slow.filter.yaml", "path": "x"}, "pre", {}, 0.05)
     finally:
@@ -300,8 +320,10 @@ def test_a_crashing_filter_fails_without_raising(monkeypatch):
 
 def test_a_filter_runs_in_process_and_hands_back_the_runner_result(monkeypatch):
     seen = []
-    monkeypatch.setattr(runner, "run", lambda *args: seen.append(args) or {"returncode": 0})
+    monkeypatch.setattr(
+        runner, "run", lambda *args: seen.append((*args, threading.current_thread().daemon)) or {"returncode": 0}
+    )
     monkeypatch.setattr(conditions.subprocess, "Popen", lambda *a, **k: pytest.fail("filters never spawn"))
     entry = {"file": "pre-any-x.filter.yaml", "path": "x"}
     assert conditions.execute(entry, "pre", {"tool_name": "Write"}, 1) == {"returncode": 0}
-    assert seen == [(entry, "pre", {"tool_name": "Write"})]
+    assert seen == [(entry, "pre", {"tool_name": "Write"}, True)]

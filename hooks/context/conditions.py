@@ -348,7 +348,7 @@ def _run_filter(entry: dict, step: str, payload: dict, timeout: float) -> dict:
         except Exception as error:
             box["run"] = {"error": f"filter crashed: {error}"}
 
-    thread = threading.Thread(target=work, daemon=True, name=f"filter:{entry['file']}")
+    thread = threading.Thread(target=work, daemon=True)
     thread.start()
     thread.join(timeout)
     return box.get("run") or {"error": f"timed out after {timeout:g}s"}

@@ -28,7 +28,7 @@ def _items(tool_input: dict, key: str, field: str | None = None) -> list[Piece]:
     return pieces
 
 
-def pieces(tool_name: str, tool_input: dict) -> list[Piece]:
+def pieces(tool_name: str | None, tool_input: dict) -> list[Piece]:
     field = _SINGLE_FIELD.get(tool_name)
     if field:
         value = tool_input.get(field)
@@ -40,22 +40,16 @@ def pieces(tool_name: str, tool_input: dict) -> list[Piece]:
     return found + _items(tool_input, "evidence")
 
 
-def _set(patch: dict, where: tuple, value: str) -> None:
+def _set(patch: dict, tool_input: dict, where: tuple, value: str) -> None:
     if len(where) == 1:
         patch[where[0]] = value
         return
-    key, index = where[0], where[1]
-    if len(where) == 3:
-        patch[key][index] = {**patch[key][index], where[2]: value}
-    else:
-        patch[key][index] = value
+    items = patch.setdefault(where[0], list(tool_input[where[0]]))
+    items[where[1]] = {**items[where[1]], where[2]: value} if len(where) == 3 else value
 
 
 def rewrite(tool_input: dict, replaced: dict[tuple, str]) -> dict:
     patch = {}
-    for where in replaced:
-        if len(where) > 1 and where[0] not in patch:
-            patch[where[0]] = list(tool_input[where[0]])
     for where, value in replaced.items():
-        _set(patch, where, value)
+        _set(patch, tool_input, where, value)
     return patch

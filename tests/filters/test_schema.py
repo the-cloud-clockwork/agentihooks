@@ -55,7 +55,10 @@ def test_every_key_is_read():
         ({"finders": {"regex": "a"}}, "finders must be a list"),
         ({"finders": ["a"]}, "finder 0 must be a mapping with a regex"),
         ({"finders": [{"reason": "x"}]}, "finder 0 must be a mapping with a regex"),
-        ({"finders": [{"regex": "a"}, {"regex": "a", "script": "x"}]}, "finder 1 has unknown keys: script"),
+        (
+            {"finders": [{"regex": "a"}, {"regex": "a", "script": "x", "name": "y"}]},
+            "finder 1 has unknown keys: name, script",
+        ),
         (
             {"finders": [{"regex": "("}]},
             "finder 0 regex does not compile: missing ), unterminated subpattern at position 0",
