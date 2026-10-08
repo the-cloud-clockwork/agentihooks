@@ -327,7 +327,7 @@ class HerdrRuntime:
         }
         fields = parse_fields(proc.stdout)
         for step in ("launcher_at", "harness_at"):
-            if fields.get(step, "").isdigit():
+            if step in fields and fields[step].isdigit():
                 timings[step] = int(fields[step])
         if proc.returncode or fields.get("status") != "started" or fields.get("route_status") not in STARTED_ROUTES:
             self._terminate(name)

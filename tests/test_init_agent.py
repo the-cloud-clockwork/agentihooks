@@ -152,6 +152,7 @@ def test_launch_succeeds_only_after_the_terminal_starts_the_launcher(monkeypatch
     assert rc == 0
     assert "status=started" in out
     assert "claude_args=--model opus" in out
+    assert "harness_at=" in out.splitlines()
     assert not list((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.started"))
 
 

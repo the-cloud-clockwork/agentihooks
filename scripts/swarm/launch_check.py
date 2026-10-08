@@ -88,7 +88,7 @@ def launched_at(agent: AgentRecord) -> int:
 
 
 def session_started_at(agent: AgentRecord) -> int:
-    return max(launched_at(agent), agent.launch_timings.get("harness_at") or 0)
+    return max(launched_at(agent), agent.launch_timings.get("harness_at", launched_at(agent)))
 
 
 def _joined(store, agent, doc, started_at):
