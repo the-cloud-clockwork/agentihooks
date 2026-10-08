@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_34:0218fd3c8879d332906b0c9f657eff071d5df0f589e99aa45c713f72eb1c7fb3": {
+    "reader": "Standards",
+    "reason": "On Python 3.12 Path.read_text(encoding=None) decodes with the locale encoding, and every POSIX locale charmap is an ASCII compatible byte table, so a charset such as UTF-16 can never be the active locale charset. core.HOME is pure ASCII at the byte level and test_page_shells_are_plain_ascii_so_any_ascii_locale_reads_them_alike pins that on core.HOME. Decoding all ASCII bytes under explicit utf-8 or any ASCII compatible locale codec yields the same str with no decode error, so index_page returns identical HTML for every request. Evidence: CI run 37704627823. Adversarial Standards ruling."
+  }
+}

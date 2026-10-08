@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/rows.py:scripts.swarm_ledger.repository.rows.x_encode__mutmut_2:eb26588b1d634ac8cb56f7137962936171c65585c40c8368c7750f45c2436f63": {
+    "reader": "Standards",
+    "reason": "ensure_ascii=None is falsy exactly as ensure_ascii=False; JSONEncoder follows the same Unicode output branch for every input."
+  }
+}

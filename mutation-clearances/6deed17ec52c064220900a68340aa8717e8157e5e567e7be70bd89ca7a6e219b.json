@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/addresses.py:scripts.inbox.addresses.x_settle_unresolved__mutmut_14:39843caea8de3ffa50c93e4f6e088ec5a6454ebcd5c5e8d54bf92e794e6b27a3": {
+    "reader": "Standards",
+    "reason": "An absent name yields an empty string originally and None in the mutant. Both are removed by the comprehension's if n filter; present values and session identifiers are identical. Missing, empty, None, and present-name cases were compared with identical live sets."
+  }
+}

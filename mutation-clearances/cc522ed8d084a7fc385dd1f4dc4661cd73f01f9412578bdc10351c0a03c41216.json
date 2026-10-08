@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_56:409a637151996c215b8cdad4ef75d9e362591c631aad7cd4c8c892d6fdbefa29": {
+    "reader": "Standards",
+    "reason": "The argument reaches only overlays.chosen through role_overlays or {} in profile_choice.choose, which normalizes None to an empty map before any read, so chosen sees the same defaults. Exact CI artifact mutant from run 37699550281."
+  }
+}

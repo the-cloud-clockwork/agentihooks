@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/browser.py:scripts.ci_mutation.browser.x_imported_paths__mutmut_12:aa3a7c994194b1b451b26b3a68dbc4b15a0285bd1ce4cfd948dc0ba942fd6cf4": {
+    "reader": "Standards reader",
+    "reason": "Parsed import modules have no whitespace. Relative imports without a module only add edge dots; splitting those dots yields empty components ignored by Path.joinpath, so both candidate paths, suffix conversion and file checks are identical. Standards checked four valid import forms against CI run 37668310093."
+  }
+}

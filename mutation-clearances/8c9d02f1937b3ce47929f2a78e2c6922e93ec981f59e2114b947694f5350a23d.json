@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_doctor_phrase__mutmut_9:790c064abbdf0cf00090b29d8b0741d3dfde0df5a5bec6a63c4fb9af83be78f9": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "For event dictionaries, present text values follow identical code. Missing text normalizes to empty string versus xxxx; both differ from the fixed DOCTOR_PHRASE rig doctor stop, so neither queues a command. The fallback is not otherwise exposed or persisted. No alternate implementation or consumer found. Evidence: CI run 37692175970, mutant-map and parent symbol dumps. Adversarial Standards ruling."
+  }
+}

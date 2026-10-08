@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/effort_range.py:scripts.swarm.effort_range.x_launch_args__mutmut_24:9ffc31b7d6da93b43614465a396a4068ee6a84aa97955600fc38668a8ed82ded": {
+    "reader": "Standards",
+    "reason": "parse of an empty and of an unknown range string both return the default range."
+  }
+}

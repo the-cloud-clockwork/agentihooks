@@ -1,0 +1,6 @@
+{
+  "hooks/observability/token_monitor.py:hooks.observability.token_monitor.x_record_lifecycle_context__mutmut_22:c7f4af87e3d96deb9de1f35ba0a9955c505444a8be1a9f8fe3ba59c2f7e7bae0": {
+    "reader": "Standards",
+    "reason": "Even with a valid matching XXXX rollout, the original payload lacks a session and update_context_metrics emits and persists no metrics. Original and mutant controls produce identical output; the computed status is discarded."
+  }
+}

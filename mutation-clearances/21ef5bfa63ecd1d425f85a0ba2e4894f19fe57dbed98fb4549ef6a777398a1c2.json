@@ -1,0 +1,6 @@
+{
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__registered_project__mutmut_8:bbeefdf6b1fa5d2960387163ac24e34d705f1e28179581d46d5404ba2b70f930": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Omitting the dict get default changes only missing registration from empty string to None. _folder_identity uses registered only as a truth operand before validation or replacement; every observed identity and rejection remains identical."
+  }
+}

@@ -167,6 +167,9 @@ class TestAreas:
     def test_the_shared_clearance_file_is_always_allowed_and_nothing_beside_it(self, world):
         world.plan()
         assert edit(world, "mutation-cleared.txt").allowed
+        assert edit(world, "mutation-clearances/ruling.json").allowed
+        assert not edit(world, "mutation-clearances.bak/ruling.json").allowed
+        assert not edit(world, "scripts/mutation-clearances/ruling.json").allowed
         assert not edit(world, "mutation-cleared.txt.bak").allowed
         assert not edit(world, "scripts/mutation-cleared.txt").allowed
         assert not edit(world, "power/generator/diesel.py").allowed

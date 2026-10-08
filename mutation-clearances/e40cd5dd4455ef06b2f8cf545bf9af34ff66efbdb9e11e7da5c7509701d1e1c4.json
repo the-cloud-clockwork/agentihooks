@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__norm__mutmut_2:37e780ff917e694f8a1fa9284bb3b798ce523c2fb66d21aeab001a0c422b9b58": {
+    "reader": "Standards",
+    "reason": "Quote and recorded words pass through the same join, and the uppercase separator can only sit at token boundaries of lowercased text, so containment and the returned words are unchanged for every input."
+  }
+}

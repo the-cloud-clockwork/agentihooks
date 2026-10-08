@@ -1,0 +1,6 @@
+{
+  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_43:7287b0e795ede253d6db09994deaa8690effb47dde4a441d6b8647f3001b557f": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  }
+}

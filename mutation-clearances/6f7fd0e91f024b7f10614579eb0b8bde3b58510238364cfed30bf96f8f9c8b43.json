@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_ensure__mutmut_3:83b5c3341eba581ced3779613419d723ad3759b23941b92a53d6879c071fd292": {
+    "reader": "Standards",
+    "reason": "False and None are only tested through not started before both branches assign True. The independent reader verified identical truth values at both reads; the value is never returned or printed."
+  }
+}

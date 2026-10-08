@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_phases.py:scripts.swarm_ledger.ledger_phases.x_check_review__mutmut_43:ad2c72a392f5327baa8e97d84cc58b6798d5fc2c98cf52127ee02860045f0e48": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "When rounds is absent, changing the negative-comparison default from zero to one preserves acceptance because both are nonnegative. Supplied rounds is unchanged and the stored review still defaults to zero."
+  }
+}

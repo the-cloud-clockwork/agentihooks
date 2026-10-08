@@ -1,0 +1,6 @@
+{
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_member__mutmut_24:fcedbddd680c1d30e117ddbc4e1035fc15d421b65072ba6f99093274f0bb567c": {
+    "reader": "Standards reader",
+    "reason": "ensure_ascii False and None take the same false branch, producing identical JSON and contextual redaction input."
+  }
+}
