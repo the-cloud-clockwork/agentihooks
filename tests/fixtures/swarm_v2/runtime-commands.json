@@ -1,0 +1,9 @@
+{
+  "package": "SV2-RUN-05",
+  "schema_version": "2.0",
+  "authority": "fixture-scoped authenticated operator; grant values are synthetic",
+  "stale_browser": {"execution": "first attempt", "generation": 1},
+  "replaced_pod": {"label": "same-label", "previous_uid": "first-pod", "current_uid": "new-pod"},
+  "disconnected_terminal": {"saved_profile": true, "transport": "unreachable"},
+  "clock": "no expiry or timing logic in command service"
+}
