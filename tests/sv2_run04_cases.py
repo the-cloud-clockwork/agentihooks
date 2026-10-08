@@ -80,7 +80,7 @@ def case_b():
                 "deleted_pod_claimed": any(seen.state is State.LOST for seen in denied),
                 "protected_state_unchanged": unchanged,
                 "corrected_by_new_read": corrected.state,
-                "execution_observation_age_seconds": observer.execution_observation_age_seconds("fixture", NOW + 3700),
+                "execution_observation_age_seconds": observer.execution_observation_age_seconds("fixture", NOW + 14400),
             }
         )
     return {"passed": all(run["passed"] for run in runs), "independent_fixtures": runs}
