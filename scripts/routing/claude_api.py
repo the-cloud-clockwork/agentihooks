@@ -16,7 +16,7 @@ _ON = frozenset({"1", "true", "yes", "on"})
 
 def provider(environ: Mapping[str, str]) -> str:
     for name, label in _PLATFORMS:
-        if environ.get(name, "").strip().lower() in _ON:
+        if name in environ and environ[name].strip().lower() in _ON:
             return label
     base = environ.get("ANTHROPIC_BASE_URL")
     if (

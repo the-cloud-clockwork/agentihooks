@@ -5585,6 +5585,7 @@ def cmd_claude(extra_args: list[str]) -> None:
     from scripts.claude_quota_balancer import (
         RoutingError,
         _cache_path,
+        _child_environment,
         credential_for_slug,
         discover_credentials,
         format_selection,
@@ -5592,7 +5593,6 @@ def cmd_claude(extra_args: list[str]) -> None:
         route_requires_fable,
         select_credential,
     )
-    from scripts.routing.envs import subscription_child
 
     fallback_flag = "--agentihooks-fallback-bare"
     fallback_bare = fallback_flag in extra_args
@@ -5652,12 +5652,9 @@ def cmd_claude(extra_args: list[str]) -> None:
         placement="forced" if route else "open",
     )
 
-    kept = subscription_child(os.environ)
-    for name in [name for name in os.environ if name not in kept]:
-        os.environ.pop(name, None)
-    for name in [name for name in os.environ if name.startswith("AH_CC_TOKEN_")]:
-        if name != selected_credential.env_name:
-            os.environ.pop(name, None)
+    kept = _child_environment(selected_credential, os.environ)
+    for name in [name for name in os.environ if name not in kept and name != selected_credential.env_name]:
+        del os.environ[name]
     os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = selected_credential.token
     os.environ["AGENTIHOOKS_ROUTE_ACCOUNT"] = selected_credential.account
     print(
