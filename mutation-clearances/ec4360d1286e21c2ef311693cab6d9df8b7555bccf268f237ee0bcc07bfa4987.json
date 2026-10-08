@@ -1,0 +1,6 @@
+{
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__save_progress__mutmut_16:7b7035313938d6143d6ef04f1e0017853c0475147ef735f4ff95832782f2f2e5": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None take the same false branch and serialize identically."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_102:32f5ba45b417fd06db6d6f88a9d17ec9211ca22f6c9530c4a497ba28806c9234": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares X-Ledger-Agent field names case insensitively. The identical value reaches the unchanged authority.principal call, preserving identity, status, state and response."
+  }
+}

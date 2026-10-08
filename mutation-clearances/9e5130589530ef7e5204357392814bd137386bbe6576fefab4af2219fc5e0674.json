@@ -1,0 +1,6 @@
+{
+  "58994efb2a34ec6d77e0bb796a306c34c69b86b7c60bcb763d8f252237206035": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload validates a dictionary literal it constructs from parsed headers. The value is always an object; removing this redundant object constraint cannot affect validation or upload delegation. Independent extracted-function probe: eight redundant-schema variants identical across thirty header cases including invalid lengths, content types and boundary names."
+  }
+}

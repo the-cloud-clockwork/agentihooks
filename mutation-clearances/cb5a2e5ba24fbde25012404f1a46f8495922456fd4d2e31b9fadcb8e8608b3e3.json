@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_36:95256e8725cf3ed87c8a5dc1c91b8758750d6db7d77bc4779acc70a5dacd4b5f": {
+    "reader": "Standards reader",
+    "reason": "HTTPMessage header lookup is case insensitive. The Standards reader executed a differential control confirming identical values for each casing."
+  }
+}

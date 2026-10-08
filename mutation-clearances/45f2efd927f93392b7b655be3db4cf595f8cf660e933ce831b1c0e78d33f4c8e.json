@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/schemas.py:scripts.swarm_ledger.api.schemas.x_operation_schema__mutmut_33:65c7d82eee58a3486fbff3af8207f6b4c8b25bd0f5f6d416d7905c2e45f3b9fe": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "check_operations selects kind by operation.get(op) and passes that exact kind to operation_schema before validation. The op const equals the value used to choose the schema for every reachable operation, so removing it admits no additional request. Unknown kinds are rejected earlier. Independent generated validation probe agreed across 205 object cases."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "hooks/context/conditions.py:hooks.context.conditions.x_parse_filename__mutmut_18:a6288aca9993c9d6efea2ba799f9170d9579e894edd31f3ebe21f43c79c132cc": {
+    "reader": "Standards",
+    "reason": "tool_matcher.parse lowercases its input, so inserting any or ANY yields the same matcher, key and index bucket."
+  }
+}

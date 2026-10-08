@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_upload__mutmut_35:958917f4d1d44a35e9026e2f2edba9e94c8ab82f17e40e491e649ae59834b982": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The length value is produced by int before schema validation. A failed conversion exits via the unchanged stable error, and every converted value has integer type. Removing the redundant length integer check preserves the unchanged minimum constraint, status and uploader path."
+  }
+}

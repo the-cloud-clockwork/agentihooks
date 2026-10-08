@@ -1,0 +1,6 @@
+{
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_member__mutmut_3:ddce7a071dffa01c420d794cab4e217db4ccb0ca29ec2bed4b738c5b5860fbd0": {
+    "reader": "Standards",
+    "reason": "The label feeds only contains_generic_secret, whose generic_secret regex is compiled case insensitive, so SECRET and secret match identically."
+  }
+}

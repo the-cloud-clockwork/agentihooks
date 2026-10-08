@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_layout__mutmut_6:b4059cb3e7d3e96d43ce220c7d877c3d510a733234e0c8f95bd33c7424d066da": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The layout HTTPMessage Origin lookup changes only key case. The operator-origin authorization decision and subsequent layout operation are identical."
+  }
+}
