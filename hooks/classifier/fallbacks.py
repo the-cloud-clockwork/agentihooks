@@ -12,9 +12,11 @@ from hooks.classifier.fallback_schema import answer_schema, normalize_answers
 from hooks.classifier.result import DecisionRequest, DecisionResult
 from hooks.targets import codex_home
 
-# An ssh agent the rc started during this shell's startup outlives the exec; one it attached to started earlier.
+# An ssh agent the rc started during this shell's startup outlives the exec; the caller's own value and one the rc
+# attached to (started earlier) are left alone.
 STOP_STARTUP_AGENT = (
     'a="${SSH_AGENT_PID:-}"; '
+    '! grep -qzx "SSH_AGENT_PID=$a" "/proc/$$/environ" && '
     '[ "$(cat "/proc/$a/comm" 2>/dev/null)" = ssh-agent ] && '
     '[ "$(cut -d" " -f22 "/proc/$a/stat")" -ge "$(cut -d" " -f22 "/proc/$$/stat")" ] && kill "$a"; '
 )

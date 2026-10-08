@@ -1,10 +1,11 @@
 import json
 import os
+import shlex
 import shutil
 import signal
 import time
 from pathlib import Path
-from subprocess import Popen
+from subprocess import PIPE, Popen
 from subprocess import run as _real_run
 from types import SimpleNamespace
 
@@ -177,6 +178,23 @@ def test_startup_process_that_is_no_agent_survives_the_cli(monkeypatch, tmp_path
     finally:
         if not _gone(pid, wait=0):
             os.kill(pid, signal.SIGKILL)
+
+
+@needs_proc
+def test_caller_value_naming_a_later_agent_survives(tmp_path):
+    binary = tmp_path / "ssh-agent"
+    binary.symlink_to(shutil.which("sleep"))
+    shell = Popen(["bash"], stdin=PIPE, text=True)
+    time.sleep(0.05)
+    agent = Popen([str(binary), "300"])
+    try:
+        # exec keeps the shell's pid and start time but gives it a caller environment naming the later agent.
+        script = f"exec env SSH_AGENT_PID={agent.pid} bash -c {shlex.quote(fallbacks.STOP_STARTUP_AGENT)}\n"
+        shell.communicate(script, timeout=10)
+        assert not _gone(agent.pid, wait=0.3)
+    finally:
+        agent.kill()
+        agent.wait()
 
 
 def test_codex_keeps_native_auth_environment(monkeypatch):
