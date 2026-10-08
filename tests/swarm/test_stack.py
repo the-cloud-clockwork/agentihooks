@@ -3,6 +3,10 @@ import subprocess
 
 import pytest
 
+from scripts.gates import Call, Who
+from scripts.gates.base import Decision
+from scripts.gates.claim_stop import ClaimStop
+from scripts.gates.verdicts import Verdicts
 from scripts.handoff import check as handoff_check
 from scripts.handoff import transfers
 from scripts.inbox.seats import SeatRegistry
@@ -229,6 +233,21 @@ def test_park_writes_the_open_dependencies_and_the_stacked_base(parked, capsys):
         "worktree_removed": TOP,
         "next": "stop now; the task waits on its branch",
     }
+
+
+def test_a_stop_after_park_passes_the_claim_stop_gate(parked, tmp_path):
+    store, ledger, _, _, doc = parked
+    ledger.rows["t1"].update({"state": "claimed", "claimed_by": AGENT, "pr_url": ""})
+    gate = ClaimStop(connect=lambda: store, ledger=lambda: ledger, github=lambda url: None, now=lambda: NOW)
+    who = Who(name=AGENT, swarm="sw", lane="eng", task="t1")
+
+    def stop():
+        return gate.decide(Call(""), who, Verdicts("sw", gate.name, tmp_path))
+
+    assert not stop().allowed
+    assert park(doc) == 0
+    assert stop() == Decision()
+    assert ledger.rows["t1"]["state"] == "claimed"
 
 
 def test_park_removes_the_worktree_only_after_the_seat_is_handed_off(parked, monkeypatch):

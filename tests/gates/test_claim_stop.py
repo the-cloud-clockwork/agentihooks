@@ -3,7 +3,8 @@ import json
 import pytest
 
 from scripts.gates import Call, Gate, Who
-from scripts.gates.claim_stop import PLAIN, STREAK, ClaimStop, refusal, ruling
+from scripts.gates.base import Decision
+from scripts.gates.claim_stop import PLAIN, STREAK, ClaimStop, parked, refusal, ruling
 from scripts.gates.progress import Progress
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import idle
@@ -327,6 +328,30 @@ def test_a_task_not_held_in_claimed_or_pr_lets_the_stop_through(rig, fields):
 
 def test_a_task_missing_from_the_ledger_lets_the_stop_through(rig):
     assert rig.stop(Who(name=ME, swarm=SLUG, lane="eng", task="t9")).allowed
+
+
+@pytest.mark.parametrize("states", [["claimed"], ["done", "pr"], ["pr", "done"], []])
+def test_a_task_parked_on_an_open_dependency_lets_the_stop_through(rig, states):
+    names = [f"d{i}" for i in range(len(states))] or ["gone"]
+    rig.ledger.rows.update({name: {"id": name, "state": state} for name, state in zip(names, states)})
+    rig.task.update(parked_on=names)
+    assert rig.stop() == Decision()
+    assert rig.store.redis.get(rig.store.key(SLUG, "stop-blocks", ME)) is None
+
+
+def test_a_task_whose_parked_dependencies_are_all_done_owes_its_stop(rig):
+    rig.ledger.rows.update({"d0": {"id": "d0", "state": "done"}, "d1": {"id": "d1", "state": "done"}})
+    rig.task.update(parked_on=["d0", "d1"])
+    decision = rig.stop()
+    assert not decision.allowed and "you hold task t1 with no open pull request and no wait" in decision.reason
+
+
+def test_parked_reads_only_the_parked_dependencies():
+    rows = {"d0": {"id": "d0", "state": "claimed"}}
+    assert parked({"parked_on": ["d0"]}, rows)
+    assert not parked({"depends_on": ["d0"]}, rows)
+    assert not parked({"parked_on": None}, rows)
+    assert not parked({"parked_on": []}, rows)
 
 
 def test_a_pull_request_github_cannot_read_lets_the_stop_through(rig):

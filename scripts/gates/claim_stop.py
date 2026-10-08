@@ -50,6 +50,11 @@ def ruling(task, pull, waiting):
     return "idle", ""
 
 
+def parked(task, rows):
+    """A park leaves the task claimed until its dependencies are done; the tick holds it, so the stop owes nothing."""
+    return any(rows.get(dep, {}).get("state") != "done" for dep in task.get("parked_on") or [])
+
+
 def refusal(owed, slug, task, pull):
     url, block = task.get("pr_url"), f'agentihooks swarm {slug} block "<why>"'
     name_wait = (
@@ -87,8 +92,11 @@ class ClaimStop:
         if not (who.pinned and who.task) or lane_of(who.name) not in WORKERS:
             return Decision()
         ledger = self.ledger()
-        task = next((t for t in ledger.tasks(who.swarm) if t.get("id") == who.task), None)
+        rows = {t.get("id"): t for t in ledger.tasks(who.swarm)}
+        task = rows.get(who.task)
         if task is None or task.get("state") not in ACTIVE or task.get("claimed_by") != who.name:
+            return Decision()
+        if parked(task, rows):
             return Decision()
         from scripts.swarm import idle
 
