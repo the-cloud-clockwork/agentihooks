@@ -64,7 +64,11 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     steps = jobs["unit"]["steps"]
     restore = next(s for s in steps if s.get("name") == "Restore latest dev durations")
     adopt = next(s for s in steps if s.get("name") == "Adopt latest dev durations")
-    save = next(s for s in jobs["refresh-durations"]["steps"] if s.get("uses") == "actions/cache/save@v4")
+    refresh = jobs["refresh-durations"]
+    save = next(s for s in refresh["steps"] if s.get("uses") == "actions/cache/save@v4")
+    stage = next(s for s in refresh["steps"] if s.get("name") == "Stage merged durations for the cache")
+    assert refresh["if"] == "github.event_name == 'push'"
+    assert refresh["steps"].index(stage) == refresh["steps"].index(save) - 1
     assert restore["uses"] == "actions/cache/restore@v4"
     assert steps.index(restore) == steps.index(adopt) - 1
     assert "restore-keys" not in restore["with"]
