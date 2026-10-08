@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 
-from scripts import quota_pace
 from scripts.claude_config import claude_home
 from scripts.session_caps import SessionCaps
 
@@ -24,6 +23,7 @@ TOKEN_PREFIX = "AH_CC_TOKEN_"
 OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 MAX_PROBE_WORKERS = 3
 CACHE_TTL_SECONDS = 60
+MIN_ROUTING_LEFT = 5.0
 
 
 @dataclass(frozen=True)
@@ -620,43 +620,22 @@ def _metric(value: float | None) -> float:
     return -1.0 if value is None else value
 
 
-def _weeks(result: ProbeResult, include_fable: bool) -> list[QuotaWindow]:
-    return [result.seven_day, *([result.fable] if include_fable else [])]
+def is_routable(result: ProbeResult) -> bool:
+    return result.margin is not None and result.margin >= MIN_ROUTING_LEFT
 
 
-def window_state(provider_status: str, five_hour: QuotaWindow, weeks: list[QuotaWindow], now: float) -> str:
-    return "BLOCKED" if provider_status == "rejected" else quota_pace.state(five_hour, weeks, now)
-
-
-def spendable_rate(result: ProbeResult, include_fable: bool = False, now: float | None = None) -> float | None:
-    if result.provider_status == "rejected":
-        return 0.0
-    return quota_pace.rate(result.five_hour, _weeks(result, include_fable), time.time() if now is None else now)
-
-
-def account_state(result: ProbeResult, include_fable: bool = False, now: float | None = None) -> str:
-    if result.state == "ERROR":
-        return result.state
-    timestamp = time.time() if now is None else now
-    return window_state(result.provider_status, result.five_hour, _weeks(result, include_fable), timestamp)
-
-
-def is_routable(result: ProbeResult, include_fable: bool = False, now: float | None = None) -> bool:
-    return result.provider_status != "rejected" and quota_pace.routable(
-        result.five_hour, _weeks(result, include_fable), time.time() if now is None else now
+def rank_results(results: list[ProbeResult], include_fable: bool = False) -> list[ProbeResult]:
+    return sorted(
+        results,
+        key=lambda result: (
+            result.margin is None,
+            -_metric(result.margin),
+            -_metric(result.fable.remaining) if include_fable else 0,
+            -_metric(result.seven_day.remaining),
+            -_metric(result.five_hour.remaining),
+            result.account,
+        ),
     )
-
-
-def rank_results(
-    results: list[ProbeResult], include_fable: bool = False, now: float | None = None
-) -> list[ProbeResult]:
-    timestamp = time.time() if now is None else now
-
-    def key(result: ProbeResult) -> tuple:
-        rate = spendable_rate(result, include_fable, timestamp)
-        return (rate is None, -_metric(rate), -_metric(result.five_hour.remaining), result.account)
-
-    return sorted(results, key=key)
 
 
 def select_credential(
@@ -670,9 +649,8 @@ def select_credential(
     sessions: Mapping[str, int] | None = None,
     caps: SessionCaps = SessionCaps(3),
     exclude: Iterable[str] = (),
-    now: float | None = None,
 ) -> RouteDecision:
-    """Pick the account with the highest spendable rate among those below the per-account session cap.
+    """Pick the account with the most routing left among those below the per-account session cap.
 
     When every routable account is at the cap, the least-loaded one wins (placement=overflow).
     """
@@ -689,11 +667,8 @@ def select_credential(
         cache_file=cache_file,
         claude_bin=claude_bin,
     )
-    timestamp = time.time() if now is None else now
     excluded = set(exclude)
-    eligible = [
-        result for result in results if is_routable(result, include_fable, timestamp) and result.account not in excluded
-    ]
+    eligible = [result for result in results if is_routable(result) and result.account not in excluded]
     if not eligible:
         outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
         raise RoutingError(f"no Claude account has verified routing capacity{outside}", results)
@@ -705,9 +680,9 @@ def select_credential(
     pool = below_cap or eligible
     pool = [result for result in pool if result.account not in reserve] or pool
     if below_cap:
-        winner, placement = rank_results(pool, include_fable, timestamp)[0], "open"
+        winner, placement = rank_results(pool, include_fable)[0], "open"
     else:
-        winner = min(rank_results(pool, include_fable, timestamp), key=lambda result: counts.get(result.account, 0))
+        winner = min(rank_results(pool, include_fable), key=lambda result: counts.get(result.account, 0))
         placement = "overflow"
     by_account = {credential.account: credential for credential in credentials}
     return RouteDecision(
@@ -794,7 +769,6 @@ def render_table(
         "STATE",
         *(["SESSIONS"] if sessions is not None else []),
         "ROUTING LEFT",
-        "SPEND/H",
         "5H LEFT",
         "5H RESET",
         "7D LEFT",
@@ -805,20 +779,17 @@ def render_table(
     if observed is not None:
         headers.append("AGE")
     rows = []
-    for rank, result in enumerate(rank_results(results, include_fable, timestamp), 1):
-        state = account_state(result, include_fable, timestamp)
-        rate = spendable_rate(result, include_fable, timestamp)
+    for rank, result in enumerate(rank_results(results, include_fable), 1):
         row = [
             str(rank),
             f"{result.account} (current)" if current and result.account == current else result.account,
-            state,
+            result.state,
             *(
                 [f"{sessions.get(result.account, 0)}/{caps.of(result.account) if caps else '?'}"]
                 if sessions is not None
                 else []
             ),
             _percent(result.margin),
-            "?" if rate is None else f"{rate:.2f}%",
             _percent(result.five_hour.remaining),
             _duration(result.five_hour.resets_at, timestamp),
             _percent(result.seven_day.remaining),
@@ -834,11 +805,7 @@ def render_table(
     lines = ["  ".join(value.ljust(widths[index]) for index, value in enumerate(headers))]
     lines.append("  ".join("-" * width for width in widths))
     lines.extend("  ".join(value.ljust(widths[index]) for index, value in enumerate(row)) for row in rows)
-    errors = [
-        f"{result.account}: {result.error}"
-        for result in rank_results(results, include_fable, timestamp)
-        if result.error
-    ]
+    errors = [f"{result.account}: {result.error}" for result in rank_results(results, include_fable) if result.error]
     if errors:
         lines.extend(["", *errors])
     known = {result.account for result in results}

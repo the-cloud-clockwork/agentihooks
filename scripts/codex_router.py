@@ -9,7 +9,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,11 +20,11 @@ from hooks.context.account_sessions import (
     codex_sessions_by_account,
     max_sessions,
 )
-from scripts import codex_quota, quota_pace, session_caps
-from scripts.claude_quota_balancer import QuotaWindow
+from scripts import codex_quota, session_caps
 from scripts.codex_quota import CodexQuota
 
 TOKEN_ENV = "CODEX_ACCESS_TOKEN"
+MIN_ROUTING_LEFT = 5.0
 # A running app-server daemon answers account/read with its own auth, so a token session must not attach to it.
 NO_DAEMON = "--no-daemon"
 
@@ -102,35 +101,15 @@ def quotas(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, Co
     return {account.name: codex_quota.latest_codex_quota(dict(environ), keep(account)) for account in pool}
 
 
-def windows(quota: CodexQuota, now: float) -> tuple[QuotaWindow, QuotaWindow]:
-    """(five hour, week) with each reset passed read as empty; a fresh weekly only reading has no five hour limit."""
-    five, week = (
-        QuotaWindow(used=0, resets_at=None) if window.resets_at and window.resets_at <= now else window
-        for window in (quota.five_hour, quota.seven_day)
-    )
-    if five.used is None and now - quota.observed_at < codex_quota.FIVE_HOUR_MINUTES * 60:
-        five = QuotaWindow(used=0)
-    return five, week
+def routing_left(quota: CodexQuota | None) -> float | None:
+    used = quota.highest_used if quota else None
+    return None if used is None else max(0.0, 100.0 - used)
 
 
-def spendable_rate(quota: CodexQuota | None, now: float) -> float | None:
-    if quota is None:
-        return None
-    five, week = windows(quota, now)
-    return quota_pace.rate(five, [week], now)
-
-
-def _admits(quota: CodexQuota | None, now: float) -> bool:
-    if spendable_rate(quota, now) is None:
-        return True
-    five, week = windows(quota, now)
-    return quota_pace.routable(five, [week], now)
-
-
-def _rank(pool: list[CodexAccount], quotas: Mapping[str, CodexQuota | None], now: float) -> list[CodexAccount]:
+def _rank(pool: list[CodexAccount], quotas: Mapping[str, CodexQuota | None]) -> list[CodexAccount]:
     def key(account: CodexAccount):
-        rate = spendable_rate(quotas.get(account.name), now)
-        return (rate is None, -(rate or 0.0), account.name)
+        left = routing_left(quotas.get(account.name))
+        return (left is None, -(left or 0.0), account.name)
 
     return sorted(pool, key=key)
 
@@ -142,23 +121,25 @@ def select(
     cap: int,
     route: str = "",
     caps: Mapping[str, int] | None = None,
-    now: float | None = None,
 ) -> tuple[CodexAccount, str]:
-    """(account, placement): the highest spendable rate below the cap, the least loaded when all are full."""
+    """(account, placement): the most routing left below the cap, the least loaded when all are full."""
     if route:
         for account in pool:
             if account.name == route:
                 return account, "forced"
         available = ", ".join(account.name for account in pool)
         raise RoutingError(f"Codex account '{route}' not found; available: {available}")
-    timestamp = time.time() if now is None else now
-    eligible = [account for account in pool if account.signed_in and _admits(quotas.get(account.name), timestamp)]
+    eligible = [
+        account
+        for account in pool
+        if account.signed_in and ((left := routing_left(quotas.get(account.name))) is None or left >= MIN_ROUTING_LEFT)
+    ]
     if not eligible:
         raise RoutingError("no Codex account is signed in with routing left")
     below = [account for account in eligible if sessions.get(account.name, 0) < (caps or {}).get(account.name, cap)]
     if below:
-        return _rank(below, quotas, timestamp)[0], "open"
-    return min(_rank(eligible, quotas, timestamp), key=lambda account: sessions.get(account.name, 0)), "overflow"
+        return _rank(below, quotas)[0], "open"
+    return min(_rank(eligible, quotas), key=lambda account: sessions.get(account.name, 0)), "overflow"
 
 
 def child_environment(account: CodexAccount, environ: Mapping[str, str]) -> dict[str, str]:

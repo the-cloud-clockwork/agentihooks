@@ -8,8 +8,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 
-from scripts import quota_pace
-from scripts.claude_quota_balancer import _duration, _percent, _span, account_state
+from scripts.claude_quota_balancer import _duration, _percent, _span
 from scripts.session_caps import SessionCaps
 
 PAGE_TTL_S = 60
@@ -44,7 +43,7 @@ def claude_rows(
         QuotaRow(
             agent="claude",
             account=result.account,
-            state=account_state(result),
+            state=result.state,
             sessions=sessions.get(result.account, 0),
             five_hour_left=result.five_hour.remaining,
             seven_day_left=result.seven_day.remaining,
@@ -57,18 +56,11 @@ def claude_rows(
     ]
 
 
-def _codex_state(quota, now: float) -> str:
-    from scripts.codex_router import windows
-
-    five, week = windows(quota, now)
-    return quota_pace.state(five, [week], now)
-
-
 def codex_rows(accounts: list, quotas: dict, sessions: dict[str, int], now: float) -> list[QuotaRow]:
     rows = []
     for account in accounts:
         quota = quotas.get(account.name)
-        state = "SIGNED_OUT" if not account.signed_in else _codex_state(quota, now) if quota else "UNKNOWN"
+        state = "SIGNED_OUT" if not account.signed_in else quota.state if quota else "UNKNOWN"
         rows.append(
             QuotaRow(
                 agent="codex",

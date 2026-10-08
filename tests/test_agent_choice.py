@@ -115,7 +115,7 @@ def test_claude_quota_comes_from_routable_accounts_in_the_router_cache(monkeypat
     from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
 
     def result(margin):
-        return ProbeResult("a", "allowed", "NORMAL", margin, QuotaWindow(used=10), QuotaWindow(used=100 - margin))
+        return ProbeResult("a", "allowed", "NORMAL", margin, QuotaWindow(), QuotaWindow())
 
     monkeypatch.setattr("scripts.claude_quota_balancer.cached_observations", lambda: [(0, result(2.0))])
     assert agent_choice.has_quota("claude", {}) is False
@@ -131,7 +131,7 @@ def test_one_claude_account_quota_comes_from_that_account_in_the_router_cache(mo
     from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
 
     def result(account, margin):
-        return ProbeResult(account, "allowed", "NORMAL", margin, QuotaWindow(used=10), QuotaWindow(used=100 - margin))
+        return ProbeResult(account, "allowed", "NORMAL", margin, QuotaWindow(), QuotaWindow())
 
     monkeypatch.setattr(
         "scripts.claude_quota_balancer.cached_observations", lambda: [(0, result("a", 2.0)), (0, result("b", 40.0))]
