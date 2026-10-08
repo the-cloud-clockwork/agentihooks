@@ -600,6 +600,13 @@ def _held_for_master(slug, store, now_ms):
     return [f"holding spawns: swarm {s} waits on a session slot for its master" for s in others[:1]]
 
 
+def _record_spawn_failure(slug, store, record, error):
+    transfers.failed(store, slug, record)
+    if not isinstance(error, SpawnError) or error.status != "unavailable":
+        store.note_launch_failure(slug, record.task, str(error))
+    store.record_launch(slug, record, "failed", str(error))
+
+
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents, actions = store.agents(slug), []
     taken = {a.seat for a in agents}
@@ -657,10 +664,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             task["transfer"] = transfers.attach(store, slug, record)
             placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
         except Exception as exc:
-            transfers.failed(store, slug, record)
-            if not isinstance(exc, SpawnError) or exc.status != "unavailable":
-                store.note_launch_failure(slug, task["id"], str(exc))
-            store.record_launch(slug, record, "failed", str(exc))
+            _record_spawn_failure(slug, store, record, exc)
             actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
             if isinstance(exc, ProfileUnresolved):
                 actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
