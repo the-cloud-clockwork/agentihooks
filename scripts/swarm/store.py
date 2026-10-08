@@ -406,6 +406,8 @@ def _dump(redis, keys):
 
 
 def redis_url(environ):
+    if environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local" and environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
+        return environ["AGENTIHOOKS_HIVE_REDIS_URL"]
     return environ.get("AGENTIHOOKS_SWARM_REDIS_URL") or DEFAULT_URL
 
 
