@@ -325,6 +325,83 @@ class TestBannerFormat:
             add_enforcement("", 5, enforcement_type="rule", path=credential)
 
 
+@pytest.mark.parametrize(
+    ("target", "home_var", "wrapped"), [("claude", "CLAUDE_CONFIG_DIR", False), ("codex", "CODEX_HOME", True)]
+)
+def test_stamped_overlay_enforcement_fires_at_tool_cadence(
+    bundle_dir, tmp_path, monkeypatch, target, home_var, wrapped
+):
+    from hooks.context import enforcement, profile_chain
+
+    overlay = bundle_dir / "profiles" / "tuner"
+    overlay.mkdir()
+    (overlay / "enforcements.json").write_text(
+        json.dumps({"enforcements": [{"id": "tuner-rule", "message": "measure each tuning change", "cadence": 3}]})
+    )
+    home = tmp_path / "session-home"
+    home.mkdir()
+    stamp = {"overlays": ["tuner"]}
+    (home / profile_chain.RENDER_STAMP).write_text(json.dumps({"render": stamp} if wrapped else stamp))
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", target)
+    monkeypatch.setenv(home_var, str(home))
+    with (
+        patch("hooks.context.enforcement._get_bundle_path", return_value=bundle_dir),
+        patch("hooks.context.enforcement._get_active_profile", return_value="testprofile"),
+        patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", True),
+    ):
+        first = enforcement.get_pretool_enforcements("overlay-session")
+        assert first is not None
+        assert "measure each tuning change" in first
+        assert enforcement.get_pretool_enforcements("overlay-session") is None
+        third = enforcement.get_pretool_enforcements("overlay-session")
+        assert third is not None
+        assert "measure each tuning change" in third
+        fourth = enforcement.get_pretool_enforcements("overlay-session")
+        assert "measure each tuning change" not in (fourth or "")
+        (home / profile_chain.RENDER_STAMP).write_text(json.dumps({"overlays": []}))
+        plain = enforcement.get_pretool_enforcements("plain-session")
+        assert "measure each tuning change" not in (plain or "")
+        (home / profile_chain.RENDER_STAMP).unlink()
+        missing = enforcement.get_pretool_enforcements("missing-stamp-session")
+        assert "measure each tuning change" not in (missing or "")
+
+
+@pytest.mark.parametrize(
+    ("overlays", "winner"), [(["brain", "tuner", "auditor"], "auditor"), (["brain", "auditor", "tuner"], "tuner")]
+)
+def test_stamped_overlays_override_enforcements_in_render_order(bundle_dir, tmp_path, monkeypatch, overlays, winner):
+    from hooks.context.enforcement import load_all_enforcements
+    from hooks.context.profile_chain import RENDER_STAMP
+
+    (bundle_dir / "profiles" / "testprofile" / "profile.yml").write_text("allowedOverlays: [brain]\n")
+    linked = tmp_path / "brain"
+    linked.mkdir()
+    for name, root in (
+        ("brain", linked),
+        ("tuner", bundle_dir / "profiles" / "tuner"),
+        ("auditor", bundle_dir / "profiles" / "auditor"),
+    ):
+        root.mkdir(exist_ok=True)
+        (root / "enforcements.json").write_text(
+            json.dumps({"enforcements": [{"id": "p-1", "message": name, "cadence": 3}]})
+        )
+    home = tmp_path / "session-home"
+    home.mkdir()
+    (home / RENDER_STAMP).write_text(json.dumps({"overlays": overlays}))
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+    with (
+        patch("hooks.context.enforcement._get_bundle_path", return_value=bundle_dir),
+        patch("hooks.context.enforcement._get_active_profile", return_value="testprofile"),
+        patch("hooks.context.enforcement._get_linked_profiles", return_value={"brain": linked}),
+    ):
+        entries = load_all_enforcements()
+    assert [(entry["id"], entry["message"], entry["source"]) for entry in entries] == [
+        ("b-1", "bundle msg", "bundle"),
+        ("p-1", winner, "profile"),
+    ]
+
+
 class TestThreeSourceMerge:
     def test_bundle_only(self, bundle_dir):
         from hooks.context.enforcement import load_all_enforcements
