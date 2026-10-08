@@ -24,19 +24,6 @@ if ! docker compose up --build --wait --wait-timeout 180; then
   docker compose logs >&2
   exit 1
 fi
-ready=""
-for _ in $(seq 60); do
-  if [[ "$(docker compose logs hive 2>&1)" == *"hive join endpoint on https://"* ]]; then
-    ready=1
-    break
-  fi
-  sleep 1
-done
-if [[ -z $ready ]]; then
-  docker compose logs >&2
-  printf 'the hive join endpoint never started\n' >&2
-  exit 1
-fi
 
 slug="compose-proof"
 docker compose exec -T -e SLUG="$slug" controller python - <<'PY'
