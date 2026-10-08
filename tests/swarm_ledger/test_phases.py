@@ -152,7 +152,12 @@ def test_review_op_changes_only_review_and_seed_cannot_forge_it():
     state = edit_seed(
         lambda seed: seed["phases"].append({"id": "p2", "title": "Second", "review": {"state": "approved"}})
     )
-    assert "review" not in state["phases"][1]
+    assert [p["id"] for p in state["phases"]] == ["p1"]
+    assert state["_meta"]["warnings"][-1] == (
+        'The page added the phase "Second", which was not added. Add it with '
+        "agentihooks ledger --slug <slug> --as <name> phase add <id> Second"
+    )
+    apply("phase_add", phase="p2", title="Second")
     state = edit_seed(lambda seed: seed["phases"][1].update(review={"state": "approved"}))
     assert "review" not in state["phases"][1]
 
@@ -418,18 +423,6 @@ def test_content_and_seed_reject_invalid_fields(fields):
         core.validate({"phases": [{"id": "p1", **fields}]})
 
 
-def test_seed_added_fields_are_preserved():
-    make_ledger()
-    state = edit_seed(
-        lambda seed: seed["phases"].append(
-            {"id": "p2", "title": "Second", "depends_on": ["p1"], "planning": "auto", "release": True}
-        )
-    )
-    assert state["phases"][1]["depends_on"] == ["p1"]
-    assert state["phases"][1]["planning"] == "auto"
-    assert state["phases"][1]["release"] is True
-
-
 def test_phase_cli_refusal_names_the_dependency_chain():
     args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "engineer", "phase", "set", "p1", "depends_on=p2"])
     reply = {"rejected": ["phase-operation"], "_meta": {"warnings": ["phase dependency cycle: p1 -> p2 -> p1"]}}
@@ -517,7 +510,7 @@ def test_content_preserves_titles_descriptions_and_optional_fields():
         (
             "phase_update",
             {"fields": {"review": {}}},
-            "phase fields may set only ('title', 'description', 'depends_on', 'planning', 'release', 'plan_url')",
+            "phase fields may set only ('title', 'description', 'depends_on', 'planning', 'release', 'plan_url', 'plan_ref')",
         ),
         ("phase_review", {"title": "bad"}, "phase_review writes only the review record"),
         ("phase_review", {"state": "bad"}, "review state must be one of ('pending', 'approved', 'sent_back')"),
@@ -568,7 +561,7 @@ def test_phase_operations_record_actor_events_and_stamps():
     }
 
 
-def test_seed_added_phase_can_complete_a_concurrent_cycle():
+def test_a_seed_phase_that_would_complete_a_concurrent_cycle_is_refused():
     make_ledger([{"title": "First"}, {"title": "Second"}])
     html, _ = core.paths(SLUG)
     stale = html.read_text()
@@ -579,7 +572,12 @@ def test_seed_added_phase_can_complete_a_concurrent_cycle():
     html.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], stale))
     state = core.sync(SLUG)[0]
     assert [p["id"] for p in state["phases"]] == ["p1", "p2"]
-    assert "phase dependency cycle: p1 -> p2 -> p3 -> p1" in state["_meta"]["warnings"]
+    assert "depends_on" not in state["phases"][1]
+    assert state["_meta"]["warnings"] == [
+        'The page added the phase "Third", which was not added. Add it with '
+        "agentihooks ledger --slug <slug> --as <name> phase add <id> Third --depends-on p1",
+        "phase p2 depends on unknown phases: p3",
+    ]
 
 
 def test_concurrently_added_phase_seed_uses_current_dependencies():

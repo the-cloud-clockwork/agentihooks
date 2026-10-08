@@ -196,7 +196,7 @@ def _validate_target(backend, target, refuse):
     allowed = (
         {"pod_namespace", "pod_name", "pod_uid"}
         if backend == "kubernetes"
-        else {"server_id", "process_namespace", "pid"}
+        else {"server_id", "process_namespace", "pid", "pid_start"}
     )
     if set(target) - allowed:
         refuse("unsupported runtime target identity field")
@@ -208,6 +208,9 @@ def _validate_target(backend, target, refuse):
         if field == "pid":
             if type(value) is not int or value < 1:
                 refuse("runtime PID must be a positive integer")
+        elif field == "pid_start":
+            if type(value) is not int or value < 1:
+                refuse("runtime PID start time must be a positive integer")
         elif not isinstance(value, str):
             refuse("runtime target identity must be a string")
 

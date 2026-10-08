@@ -30,18 +30,19 @@ LOCATE = [
     ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
     ["bash", str(stack.WT_SCRIPT), "root"],
 ]
-REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo", TOP]
+REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo", TOP, "--pushed"]
 
 
 class Shell:
     def __init__(self):
         self.calls, self.remote, self.issues, self.fail = [], HEAD, json.dumps({"hasIssuesEnabled": True}), ()
-        self.status, self.top = "", TOP
+        self.status, self.top, self.origin = "", TOP, "git@github.com:O/r.git"
 
     def __call__(self, argv):
         self.calls.append(argv)
         code = 1 if tuple(argv[:3]) in self.fail else 0
         out = {
+            ("git", "remote", "get-url"): self.origin,
             ("git", "rev-parse", "--show-toplevel"): self.top,
             ("git", "rev-parse", "--path-format=absolute"): "/home/me/dev/repo/.git",
             ("bash", str(stack.WT_SCRIPT), "root"): ROOT,
@@ -212,7 +213,7 @@ def test_park_resolves_read_first_addresses_against_this_swarm(parked, capsys, a
 def test_park_writes_the_open_dependencies_and_the_stacked_base(parked, capsys):
     _, ledger, _, shell, doc = parked
     assert park(doc) == 0
-    assert ("t1", {"parked_on": ["a"], "stacked_base": BASE}, AGENT) in ledger.updates
+    assert ("t1", {"parked_on": ["a"], "stacked_base": BASE, "parked_repos": []}, AGENT) in ledger.updates
     assert ledger.rows["t1"]["parked_on"] == ["a"] and ledger.rows["t1"]["stacked_base"] == BASE
     body = f"Parked on branch `eng-t1` until a (`eng-a`) merges. Stacked base `{BASE}`. {NOTE}"
     assert shell.calls == [
@@ -230,6 +231,7 @@ def test_park_writes_the_open_dependencies_and_the_stacked_base(parked, capsys):
         "task": "t1",
         "parked_on": ["a"],
         "stacked_base": BASE,
+        "parked_repos": [],
         "worktree_removed": TOP,
         "next": "stop now; the task waits on its branch",
     }
@@ -321,6 +323,133 @@ def test_park_stacks_on_the_deepest_of_several_dependency_branches(parked, monke
     assert ledger.comments == [("sw", "t1", note, AGENT)]
 
 
+OTHER = "https://github.com/o/bundle"
+
+
+def test_park_fetches_a_dependency_branch_from_its_other_repository(parked, capsys):
+    _, ledger, _, shell, doc = parked
+    ledger.rows["a"]["branch_repo"] = OTHER
+    assert park(doc) == 0
+    fields = {"parked_on": ["a"], "stacked_base": BASE, "parked_repos": [OTHER]}
+    assert ("t1", fields, AGENT) in ledger.updates
+    assert ledger.rows["t1"]["parked_repos"] == [OTHER]
+    body = f"Parked on branch `eng-t1` until a (`eng-a` in {OTHER}) merges. Stacked base `{BASE}`. {NOTE}"
+    assert shell.calls == [
+        ["git", "ls-remote", "--heads", "origin", "eng-t1"],
+        ["git", "rev-parse", "HEAD"],
+        ["git", "status", "--porcelain"],
+        *LOCATE,
+        ["git", "remote", "get-url", "origin"],
+        ["git", "fetch", "--", OTHER, "eng-a"],
+        ["git", "fetch", "origin", "dev"],
+        ["git", "merge-base", "HEAD", "origin/dev"],
+        ["git", "rev-list", "--count", BASE],
+        ["gh", "issue", "comment", ISSUE, "--body", body],
+        REMOVE,
+    ]
+    assert json.loads(capsys.readouterr().out)["parked_repos"] == [OTHER]
+
+
+@pytest.mark.parametrize(
+    "repo", ["git@github.com:o/r.git", "https://github.com/O/R/", "ssh://git@github.com/o/r", "https://github.com/o/r"]
+)
+def test_park_fetches_a_dependency_in_the_same_repository_from_origin(parked, repo):
+    _, ledger, _, shell, doc = parked
+    ledger.rows["a"]["branch_repo"] = repo
+    assert park(doc) == 0
+    assert ("t1", {"parked_on": ["a"], "stacked_base": BASE, "parked_repos": []}, AGENT) in ledger.updates
+    assert ledger.rows["t1"]["parked_repos"] == []
+    assert ["git", "remote", "get-url", "origin"] in shell.calls
+    assert ["git", "fetch", "origin", "eng-a"] in shell.calls
+    assert ["git", "merge-base", "HEAD", "origin/eng-a"] in shell.calls
+    [comment] = shell.comments()
+    assert "a (`eng-a`) merges" in comment[-1]
+
+
+def test_park_names_each_other_repository_once_in_dependency_order(parked):
+    _, ledger, _, shell, doc = parked
+    ledger.rows["b"].update({"state": "claimed", "branch_repo": "git@github.com:O/bundle.git"})
+    ledger.rows["c"] = {"id": "c", "title": "Docs", "state": "pr", "branch": "eng-c", "branch_repo": "/srv/docs.git"}
+    ledger.rows["d"] = {"id": "d", "title": "Plan", "state": "pr", "branch": "", "branch_repo": "/srv/plan.git"}
+    ledger.rows["a"]["branch_repo"] = OTHER
+    ledger.rows["t1"]["depends_on"] = ["a", "b", "c", "d"]
+    assert park(doc) == 0
+    assert ledger.rows["t1"]["parked_on"] == ["a", "b", "c", "d"]
+    assert ledger.rows["t1"]["parked_repos"] == [OTHER, "/srv/docs.git"]
+    assert shell.calls.count(["git", "remote", "get-url", "origin"]) == 1
+    assert [c[3:] for c in shell.calls if c[:3] == ["git", "fetch", "--"]] == [
+        [OTHER, "eng-a"],
+        ["git@github.com:O/bundle.git", "eng-b"],
+        ["/srv/docs.git", "eng-c"],
+    ]
+
+
+def test_park_reads_no_origin_url_when_no_dependency_records_a_repository(parked):
+    _, ledger, _, shell, doc = parked
+    ledger.rows["b"].update({"state": "claimed", "branch": "", "branch_repo": OTHER})
+    assert park(doc) == 0
+    assert ["git", "remote", "get-url", "origin"] not in shell.calls
+    assert ledger.rows["t1"]["parked_repos"] == []
+
+
+@pytest.mark.parametrize(
+    ("failing", "says"),
+    [
+        (("git", "remote", "get-url"), "cannot read the origin url"),
+        (("git", "fetch", "--"), f"cannot fetch eng-a from {OTHER}"),
+        (("git", "fetch", "origin"), "cannot fetch dev"),
+        (("git", "merge-base", "HEAD"), "the task shares no history with dev"),
+    ],
+)
+def test_park_on_another_repository_refuses_when_a_command_fails(parked, capsys, failing, says):
+    parked[1].rows["a"]["branch_repo"] = OTHER
+    parked[3].fail = (failing,)
+    _refused(parked, capsys, f"{says}: boom")
+
+
+@pytest.mark.parametrize(
+    ("url", "key"),
+    [
+        ("git@github.com:The-Cloud-Clockwork/agentihooks.git", "github.com/the-cloud-clockwork/agentihooks"),
+        ("https://github.com/the-cloud-clockwork/agentihooks", "github.com/the-cloud-clockwork/agentihooks"),
+        ("ssh://git@github.com/o/r.git/", "github.com/o/r"),
+        ("/srv/repos/docs.git", "/srv/repos/docs"),
+        ("/srv/repos/docs.git/", "/srv/repos/docs"),
+        ("/srv/Repos/Docs.git", "/srv/Repos/Docs"),
+        ("https://github.com/o/gist.git", "github.com/o/gist"),
+        ("git@github.com:o/digit", "github.com/o/digit"),
+        ("https://github.com/o/r?u=ssh://x", "github.com/o/r?u=ssh://x"),
+        ("/srv/A:b/Repo.git", "/srv/A:b/Repo"),
+        ("/srv/REPOX/", "/srv/REPOX"),
+        ("https://github.com/o@x/r", "github.com/o@x/r"),
+        ("git@host:a:b/r", "host/a:b/r"),
+        ("https://github.com/o/REPOX", "github.com/o/repox"),
+    ],
+)
+def test_a_repository_key_ignores_scheme_user_case_and_suffix(url, key):
+    assert stack.repo_key(url) == key
+
+
+@pytest.mark.parametrize(
+    ("url", "public"),
+    [
+        ("https://user:token@github.com/o/r.git", "https://github.com/o/r.git"),
+        ("HTTPS://token@github.com/o/r", "HTTPS://github.com/o/r"),
+        ("ssh://git@github.com/o/r.git", "ssh://git@github.com/o/r.git"),
+        ("ssh://git:secret@host/o/r", "ssh://git@host/o/r"),
+        ("ssh://host/o/r", "ssh://host/o/r"),
+        ("https://user:p@ss@github.com/o/r", "https://github.com/o/r"),
+        ("https://github.com/o@x/r?next=https://h", "https://github.com/o@x/r?next=https://h"),
+        ("https://user:tok@github.com/o?next=https://h", "https://github.com/o?next=https://h"),
+        ("https://github.com/o/r", "https://github.com/o/r"),
+        ("git@github.com:o/r.git", "git@github.com:o/r.git"),
+        ("/srv/repos/docs.git", "/srv/repos/docs.git"),
+    ],
+)
+def test_a_public_url_drops_credentials_from_a_scheme_url(url, public):
+    assert stack.public_url(url) == public
+
+
 def test_park_without_issues_skips_the_issue_comment(parked):
     _, ledger, _, shell, doc = parked
     ledger.rows["t1"]["issue_url"] = ""
@@ -340,7 +469,11 @@ def test_park_stores_the_handoff_and_retires_the_agent_so_the_reaped_task_waits(
     assert (transfer["reason"], transfer["at"], transfer["handoff"]) == ("exit", NOW, text)
     recap = "\n\n".join(f"## {h}\n{handoff_check.section(text, h)}" for h in ("Done", "Stopped at", "Next"))
     assert store.memory.recaps("eng-1@sw")[0] == {"occupant": AGENT, "task": "t1", "text": recap, "at": NOW}
-    assert SeatRegistry(store.redis).exit_of(AGENT) == {"seat": "eng-1@sw", "reason": "handed off its seat"}
+    assert SeatRegistry(store.redis).exit_of(AGENT) == {
+        "seat": "eng-1@sw",
+        "reason": "handed off its seat",
+        "generation": 1,
+    }
     assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["finished"]
     assert store.claimant("sw", "t1") == AGENT
     tick._reap("sw", store, ledger, rt, ledger.rows, 1)
@@ -461,6 +594,58 @@ def test_restack_conflict_lists_files_and_keeps_parked_state(stacked_repo, capsy
     assert ledger.updates == []
     saved = json.loads((repo / _git(repo, "rev-parse", "--git-path", "agentihooks-restack.json")).read_text())
     assert saved == {"context": ["sw", "t1", "finisher", base], "onto": _git(repo, "rev-parse", "origin/dev")}
+
+
+def _task_repo(tmp_path, monkeypatch):
+    origin, repo = tmp_path / "origin.git", tmp_path / "work"
+    _git(tmp_path, "init", "--bare", str(origin))
+    _git(tmp_path, "init", "-b", "dev", str(repo))
+    for key, value in (("user.email", "test@example.invalid"), ("user.name", "Test"), ("core.hooksPath", "/dev/null")):
+        _git(repo, "config", key, value)
+    _git(repo, "remote", "add", "origin", str(origin))
+    (repo / "shared.txt").write_text("original\n")
+    _git(repo, "add", "shared.txt")
+    _git(repo, "commit", "-m", "Initial")
+    _git(repo, "push", "-u", "origin", "dev")
+    _git(repo, "switch", "-c", "parked")
+    (repo / "task.txt").write_text("task work\n")
+    _git(repo, "add", "task.txt")
+    _git(repo, "commit", "-m", "Task work")
+    _git(repo, "push", "origin", "parked")
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(stack, "shell", lambda argv: subprocess.run(argv, capture_output=True, text=True, timeout=10))
+    return repo, _git(repo, "rev-parse", "dev")
+
+
+def test_the_stacked_base_of_another_repository_is_the_task_fork_from_dev(tmp_path, monkeypatch):
+    other = tmp_path / "other"
+    _git(tmp_path, "init", "-b", "eng-a", str(other))
+    _git(other, "-c", "user.email=t@example.invalid", "-c", "user.name=T", "commit", "--allow-empty", "-m", "Other")
+    repo, fork = _task_repo(tmp_path, monkeypatch)
+    dep = {"id": "a", "branch": "eng-a", "branch_repo": str(other)}
+    assert stack._foreign([dep]) == [dep]
+    assert stack._stacked_base([dep], [dep]) == fork
+    assert _git(repo, "cat-file", "-t", _git(other, "rev-parse", "eng-a")) == "commit"
+
+
+def test_restack_of_a_task_parked_on_another_repository_rebases_onto_dev(parked, tmp_path, monkeypatch, capsys):
+    ledger = parked[1]
+    repo, fork = _task_repo(tmp_path, monkeypatch)
+    _git(repo, "switch", "dev")
+    (repo / "dev.txt").write_text("integration\n")
+    _git(repo, "add", "dev.txt")
+    _git(repo, "commit", "-m", "Integration work")
+    _git(repo, "push", "origin", "dev")
+    _git(repo, "switch", "-c", "finisher", "parked")
+    gone = str(tmp_path / "gone.git")
+    ledger.rows["a"].update({"state": "done", "branch_repo": gone})
+    ledger.rows["t1"].update({"branch": "parked", "stacked_base": fork, "parked_on": ["a"], "parked_repos": [gone]})
+    assert restack() == 0
+    assert _git(repo, "log", "--format=%s", "origin/dev..HEAD") == "Task work"
+    assert _git(repo, "rev-parse", "HEAD^") == _git(repo, "rev-parse", "origin/dev")
+    assert (repo / "dev.txt").read_text() == "integration\n" and (repo / "task.txt").read_text() == "task work\n"
+    assert ledger.rows["t1"]["parked_on"] == []
+    assert json.loads(capsys.readouterr().out.splitlines()[-1]) == {"task": "t1", "parked_on": []}
 
 
 def test_restack_reports_only_conflicted_files_when_other_work_changes(stacked_repo, monkeypatch, capsys):

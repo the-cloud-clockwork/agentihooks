@@ -8,7 +8,7 @@ pytestmark = pytest.mark.unit
 
 _WORKFLOW = Path(__file__).parent.parent / ".github/workflows/test.yml"
 _APP_TOKEN = "${{ steps.app-token.outputs.token }}"
-_BUCKETS = "Report the API rate limit buckets"
+_PROBE = "Prove the App token reaches its installation bucket"
 
 
 def _jobs():
@@ -21,16 +21,17 @@ def _calls_api(step):
 
 
 def _consumers():
-    return [
-        (name, job, step)
-        for name, job in _jobs().items()
-        for step in job.get("steps", [])
-        if _calls_api(step) and step.get("name") != _BUCKETS
-    ]
+    return [(name, job, step) for name, job in _jobs().items() for step in job.get("steps", []) if _calls_api(step)]
 
 
-def test_tests_workflow_has_api_consumers():
-    assert {name for name, _, _ in _consumers()} >= {"unit", "shard-check", "sonar", "refresh-durations", "record-pass"}
+def _minting_jobs():
+    return sorted(
+        name for name, job in _jobs().items() if any(s.get("id") == "app-token" for s in job.get("steps", []))
+    )
+
+
+def test_sonar_mints_the_app_token():
+    assert "sonar" in _minting_jobs()
 
 
 @pytest.mark.parametrize("name,job,step", _consumers(), ids=lambda v: v if isinstance(v, str) else "")
@@ -42,31 +43,29 @@ def test_every_api_step_uses_the_minted_app_token(name, job, step):
     assert mint.get("if") in (None, step.get("if")), (name, step.get("name"))
 
 
-@pytest.mark.parametrize("name", sorted({name for name, _, _ in _consumers()}))
-def test_each_consuming_job_mints_a_read_only_repository_token(name):
+@pytest.mark.parametrize("name", _minting_jobs())
+def test_each_minting_job_mints_a_read_only_repository_token(name):
     mint = next(s for s in _jobs()[name]["steps"] if s.get("id") == "app-token")
     assert mint["uses"] == "actions/create-github-app-token@v3.2.0"
     assert mint["with"] == {
-        "app-id": "${{ secrets.TESTS_APP_ID }}",
-        "private-key": "${{ secrets.TESTS_APP_PRIVATE_KEY }}",
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
         "permission-actions": "read",
         "permission-contents": "read",
         "permission-pull-requests": "read",
     }
-    assert "continue-on-error" not in mint
+    assert "continue-on-error" not in mint and "if" not in mint
 
 
 def test_no_step_falls_back_to_the_workflow_token():
     for name, job in _jobs().items():
         for step in job.get("steps", []):
-            if step.get("name") == _BUCKETS:
-                continue
             assert "github.token" not in str(step) and "GITHUB_TOKEN" not in str(step), (name, step.get("name"))
 
 
-def test_sonar_reports_both_rate_limit_buckets_without_spending_either():
+def test_the_probe_reads_an_installation_only_endpoint_and_the_rate_limit():
     steps = _jobs()["sonar"]["steps"]
-    report = next(s for s in steps if s.get("name") == _BUCKETS)
-    assert report["env"] == {"APP_TOKEN": _APP_TOKEN, "WORKFLOW_TOKEN": "${{ github.token }}"}
-    assert set(re.findall(r"gh api (\S+)", report["run"])) == {"rate_limit"}
-    assert steps.index(next(s for s in steps if s.get("id") == "app-token")) < steps.index(report)
+    probe = next(s for s in steps if s.get("name") == _PROBE)
+    assert probe["env"] == {"GH_TOKEN": _APP_TOKEN}
+    assert re.findall(r"gh api (\S+)", probe["run"]) == ["installation/repositories", "rate_limit"]
+    assert steps.index(next(s for s in steps if s.get("id") == "app-token")) < steps.index(probe)

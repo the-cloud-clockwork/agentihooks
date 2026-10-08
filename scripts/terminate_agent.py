@@ -164,7 +164,7 @@ def validate(
     caller_groups = {table[pid].pgid for pid in caller_ancestors if pid in table}
     if current.pgid in caller_groups or any(pid in caller_ancestors for pid in (current.pid, current.pgid)):
         raise ValueError("target overlaps the current caller")
-    members = [item for item in table.values() if item.pgid == current.pgid and item.state != "Z"]
+    members = [item for item in table.values() if item.pgid == current.pgid and item.state not in {"Z", "X"}]
     if not members:
         raise ValueError("target process group has no live members")
     if any(item.sid != current.sid for item in members):
@@ -184,7 +184,7 @@ def _alive(identities: dict[int, tuple[int, str]], proc: Path) -> list[Process]:
     result = []
     for pid, identity in identities.items():
         current = _process(pid, proc)
-        if current and current.state != "Z" and (current.start_time, current.comm) == identity:
+        if current and current.state not in {"Z", "X"} and (current.start_time, current.comm) == identity:
             result.append(current)
     return result
 

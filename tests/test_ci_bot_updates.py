@@ -31,9 +31,9 @@ def test_ci_creates_no_commits_or_bot_pull_requests():
 
 def test_dev_push_publishes_merged_durations_with_read_permissions():
     job = _workflow("test.yml")["jobs"]["refresh-durations"]
-    assert job["needs"] == ["unit", "lint"]
+    assert job["needs"] == ["unit", "lint", "shard-check"]
     assert job["if"] == "github.event_name == 'push'"
-    assert job["permissions"] == {"contents": "read", "actions": "read"}
+    assert job["permissions"] == {"contents": "read"}
     upload = next(s for s in job["steps"] if s.get("uses") == "actions/upload-artifact@v4")
     assert upload["with"]["name"] == "durations-merged"
     assert upload["with"]["path"] == ".test_durations*"
@@ -53,11 +53,45 @@ def test_a_newer_dev_push_never_cancels_a_running_dev_push_run():
 
 def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run():
     steps = _workflow("test.yml")["jobs"]["unit"]["steps"]
-    step = next(s for s in steps if s.get("name") == "Download latest dev durations")
-    assert step["run"].strip() == "python -m tests.dev_durations ${{ matrix.python-version }}"
-    assert step["env"] == {"GH_TOKEN": "${{ steps.app-token.outputs.token }}"}
-    assert _workflow("test.yml")["jobs"]["unit"]["permissions"]["actions"] == "read"
+    step = next(s for s in steps if s.get("name") == "Adopt latest dev durations")
+    assert step["run"].strip() == "python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations"
+    assert "env" not in step
     assert steps.index(step) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
+
+
+def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
+    jobs = _workflow("test.yml")["jobs"]
+    steps = jobs["unit"]["steps"]
+    restore = next(s for s in steps if s.get("name") == "Restore latest dev durations")
+    adopt = next(s for s in steps if s.get("name") == "Adopt latest dev durations")
+    refresh = jobs["refresh-durations"]
+    save = next(s for s in refresh["steps"] if s.get("uses") == "actions/cache/save@v4")
+    stage = next(s for s in refresh["steps"] if s.get("name") == "Stage merged durations for the cache")
+    assert refresh["if"] == "github.event_name == 'push'"
+    assert refresh["steps"].index(stage) == refresh["steps"].index(save) - 1
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert steps.index(restore) == steps.index(adopt) - 1
+    assert "restore-keys" not in restore["with"]
+    assert restore["with"]["path"] == save["with"]["path"] == "~/dev-durations"
+    assert save["with"]["key"] == "durations-merged-${{ github.sha }}"
+    assert restore["with"]["key"] == "${{ needs.durations.outputs.key }}"
+    assert restore["if"] == "needs.durations.outputs.key != ''"
+    assert restore["with"]["fail-on-cache-miss"] is True
+    assert jobs["unit"]["needs"] == ["durations"]
+    lookup = jobs["durations"]["steps"][0]
+    assert jobs["durations"]["outputs"] == {"key": "${{ steps.stored.outputs.cache-matched-key }}"}
+    assert lookup["id"] == "stored"
+    assert lookup["uses"] == "actions/cache/restore@v4"
+    assert lookup["with"] == {
+        "path": "~/dev-durations",
+        "key": "durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+        " || github.event.before || github.sha }}",
+        "lookup-only": True,
+    }
+    assert "durations" in jobs["gate-required"]["needs"]
+    assert "run" not in restore
+    assert adopt["run"] == "python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations"
+    assert "env" not in adopt
 
 
 @pytest.mark.parametrize("bump,expected", [("patch", "2.17.1"), ("minor", "2.18.0"), ("major", "3.0.0")])
@@ -103,3 +137,18 @@ def test_package_version_is_derived_from_git():
         s for s in _workflow("publish-pypi.yml")["jobs"]["publish"]["steps"] if s.get("uses") == "actions/checkout@v4"
     )
     assert checkout["with"]["fetch-depth"] == 0
+
+
+def test_publish_proves_the_published_version_installs_clean():
+    workflow = _workflow("publish-pypi.yml")
+    on = workflow.get("on", workflow.get(True))
+    assert "version" in on["workflow_dispatch"]["inputs"]
+    publish, verify = workflow["jobs"]["publish"], workflow["jobs"]["verify"]
+    assert publish["if"] == "${{ !inputs.version }}"
+    assert publish["outputs"]["version"]
+    assert verify["needs"] == "publish"
+    assert "environment" not in verify
+    script = "\n".join(s.get("run", "") for s in verify["steps"])
+    assert "https://pypi.org/pypi/agentihooks/$VERSION/json" in script
+    assert '"agentihooks==$VERSION"' in script
+    assert '"agentihooks $VERSION"' in script

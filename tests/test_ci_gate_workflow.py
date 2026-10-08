@@ -19,9 +19,13 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     gate = jobs["gate-required"]
     required = {"unit", "lint", "sonar", "mutation", "test-count", "semgrep"}
     assert gate["name"] == "Gate — Required"
-    assert required <= set(gate["needs"]) <= required | {"swarm-image", "shard-check", "brain-smoke", "wiring", "size"}
+    assert (
+        required
+        <= set(gate["needs"])
+        <= required | {"swarm-image", "shard-check", "brain-smoke", "wiring", "size", "dependency-audit", "durations"}
+    )
     assert gate["if"] == "${{ always() }}"
-    assert "needs" not in jobs["unit"]
+    assert jobs["unit"]["needs"] == ["durations"]
     assert "needs" not in jobs["lint"]
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
@@ -88,6 +92,16 @@ def test_required_gate_rejects_every_non_success_result(unit, lint):
         assert "::error::" in result.stdout
 
 
+@pytest.mark.parametrize("durations", ["success", "failure", "skipped", "cancelled"])
+def test_required_gate_is_red_when_the_durations_lookup_did_not_succeed(durations):
+    gate = _workflow()["jobs"]["gate-required"]
+    assert "durations" in gate["needs"]
+    needs = {"durations": {"result": durations}, "unit": {"result": "skipped" if durations != "success" else "success"}}
+    env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="false")
+    result = subprocess.run(["bash", "-e", "-c", gate["steps"][0]["run"]], env=env, capture_output=True, text=True)
+    assert (result.returncode == 0) == (durations == "success"), result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("mutation", ["success", "failure", "skipped", "cancelled"])
 @pytest.mark.parametrize("expected", ["true", "false", ""])
 def test_required_gate_is_red_unless_mutation_passed_or_was_not_due(mutation, expected):
@@ -106,14 +120,12 @@ def test_required_gate_is_red_unless_mutation_passed_or_was_not_due(mutation, ex
         assert "::error::" in result.stdout
 
 
-def test_passed_tree_lookup_skips_steps_without_skipping_required_jobs():
+def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
     jobs = _workflow()["jobs"]
     for name in ("unit", "lint"):
         job = jobs[name]
         assert "if" not in job
-        _, lookup, *steps = job["steps"]
-        assert lookup["if"] == "github.event_name == 'push'"
-        assert all("steps.lookup.outputs.skip != 'true'" in step["if"] for step in steps)
+        assert all("steps.lookup" not in step.get("if", "") for step in job["steps"])
     step = jobs["gate-required"]["steps"][0]
     result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],

@@ -1,0 +1,319 @@
+{
+ "hooks/config.py::_parse_env_file": {
+  "C901": 20,
+  "PLR0912": 19
+ },
+ "hooks/context/bash_output_filter.py::truncate_test_output": {
+  "PLR0912": 13
+ },
+ "hooks/context/branch_guard.py::check_branch_guard": {
+  "C901": 15,
+  "PLR0912": 14
+ },
+ "hooks/context/conditions.py::create_condition": {
+  "PLR0913": 11
+ },
+ "hooks/context/credential_guard.py::operands_of": {
+  "C901": 16,
+  "PLR0912": 15
+ },
+ "hooks/context/credential_guard.py::stage_verdict": {
+  "C901": 29,
+  "PLR0912": 29
+ },
+ "hooks/context/enforcement.py::add_enforcement": {
+  "PLR0913": 8
+ },
+ "hooks/context/kubectl_mutation_guard.py::check_kubectl_mutation_command": {
+  "C901": 20,
+  "PLR0912": 19
+ },
+ "hooks/context/quota_policy.py::decide": {
+  "PLR0913": 12
+ },
+ "hooks/context/voice_output.py::_speak_and_play": {
+  "PLR0912": 13
+ },
+ "hooks/hook_manager.py::main": {
+  "C901": 15,
+  "PLR0912": 16
+ },
+ "hooks/hook_manager.py::notify_on_error": {
+  "C901": 15,
+  "PLR0912": 15
+ },
+ "hooks/hook_manager.py::on_post_tool_use": {
+  "C901": 56,
+  "PLR0912": 56,
+  "function-lines": 305
+ },
+ "hooks/hook_manager.py::on_pre_tool_use": {
+  "C901": 88,
+  "PLR0912": 93,
+  "PLR0915": 305,
+  "function-lines": 558
+ },
+ "hooks/hook_manager.py::on_session_end": {
+  "C901": 19,
+  "PLR0912": 18
+ },
+ "hooks/hook_manager.py::on_session_start": {
+  "C901": 31,
+  "PLR0912": 30
+ },
+ "hooks/hook_manager.py::on_stop": {
+  "C901": 23,
+  "PLR0912": 22
+ },
+ "hooks/hook_manager.py::on_user_prompt_submit": {
+  "C901": 45,
+  "PLR0912": 45
+ },
+ "hooks/hook_manager.py::parse_transcript_metrics": {
+  "C901": 17,
+  "PLR0912": 16
+ },
+ "hooks/integrations/dynamodb.py::main": {
+  "C901": 35,
+  "PLR0912": 39,
+  "function-lines": 311
+ },
+ "hooks/integrations/lambda_invoke.py::main": {
+  "C901": 14,
+  "PLR0912": 14
+ },
+ "hooks/integrations/mailer.py::main": {
+  "C901": 16,
+  "PLR0912": 18
+ },
+ "hooks/integrations/postgres.py::PostgresClient.__init__": {
+  "PLR0913": 8
+ },
+ "hooks/integrations/postgres.py::PostgresClient.get_client": {
+  "PLR0913": 8
+ },
+ "hooks/integrations/postgres.py::main": {
+  "C901": 22,
+  "PLR0912": 24
+ },
+ "hooks/integrations/session_state.py::main": {
+  "C901": 19,
+  "PLR0912": 20
+ },
+ "hooks/integrations/storage.py::main": {
+  "C901": 24,
+  "PLR0912": 26
+ },
+ "hooks/mcp/channels.py::register": {
+  "C901": 18
+ },
+ "hooks/mcp/conditions.py::register.condition_set": {
+  "PLR0913": 11
+ },
+ "hooks/mcp/enforcement.py::register": {
+  "C901": 16
+ },
+ "hooks/mcp/enforcement.py::register.enforcement_set": {
+  "PLR0913": 8
+ },
+ "hooks/memory/transcript_reader.py::_iter_codex_records": {
+  "C901": 15,
+  "PLR0912": 14
+ },
+ "hooks/memory/transcript_reader.py::_iter_copilot_records": {
+  "C901": 19,
+  "PLR0912": 18
+ },
+ "hooks/quota.py::fmt_quota": {
+  "C901": 15,
+  "PLR0912": 14
+ },
+ "hooks/statusline.py::main": {
+  "C901": 36,
+  "PLR0912": 37
+ },
+ "hooks/targets/normalizer.py::_normalize_copilot": {
+  "C901": 18,
+  "PLR0912": 17
+ },
+ "hooks/tool_memory.py::_is_error": {
+  "C901": 16,
+  "PLR0912": 15
+ },
+ "scripts/ci_mutation/runner.py::run_gate": {
+  "PLR0912": 14
+ },
+ "scripts/ci_mutation/selection.py::run_selected": {
+  "C901": 14
+ },
+ "scripts/claude_quota_balancer.py::collect_results": {
+  "PLR0913": 8
+ },
+ "scripts/claude_quota_balancer.py::parse_probe": {
+  "C901": 14,
+  "PLR0912": 13
+ },
+ "scripts/claude_quota_balancer.py::select_credential": {
+  "PLR0913": 9
+ },
+ "scripts/doctor/traces_read.py::record": {
+  "PLR0913": 8
+ },
+ "scripts/inbox/wake.py::wake_pass": {
+  "C901": 13,
+  "PLR0913": 8
+ },
+ "scripts/init_agent.py::main": {
+  "C901": 31,
+  "PLR0912": 28
+ },
+ "scripts/install.py": {
+  "file-lines": 7098
+ },
+ "scripts/install.py::_clean_state_dir": {
+  "C901": 14,
+  "PLR0912": 13
+ },
+ "scripts/install.py::_cmd_broadcast": {
+  "PLR0912": 14
+ },
+ "scripts/install.py::_cmd_enforcement": {
+  "C901": 21,
+  "PLR0912": 24
+ },
+ "scripts/install.py::_cmd_mcp_lib": {
+  "C901": 13
+ },
+ "scripts/install.py::_collect_all_managed_mcp_servers": {
+  "C901": 16,
+  "PLR0912": 15
+ },
+ "scripts/install.py::_connector_inspect": {
+  "C901": 18,
+  "PLR0912": 17
+ },
+ "scripts/install.py::_connector_new": {
+  "C901": 25,
+  "PLR0912": 25
+ },
+ "scripts/install.py::_install_claude_persona": {
+  "C901": 14,
+  "PLR0912": 16
+ },
+ "scripts/install.py::_install_global_inner": {
+  "C901": 40,
+  "PLR0912": 39
+ },
+ "scripts/install.py::_link_profile_link": {
+  "C901": 17,
+  "PLR0912": 18
+ },
+ "scripts/install.py::_link_profile_unlink": {
+  "C901": 13,
+  "PLR0912": 14
+ },
+ "scripts/install.py::_load_connectors": {
+  "C901": 13
+ },
+ "scripts/install.py::_prune_stale_mcp_servers": {
+  "C901": 25,
+  "PLR0912": 25
+ },
+ "scripts/install.py::_reseed_managed_mcp_sources": {
+  "C901": 18,
+  "PLR0912": 17
+ },
+ "scripts/install.py::cmd_init_unified": {
+  "C901": 27,
+  "PLR0912": 27
+ },
+ "scripts/install.py::cmd_migrate": {
+  "C901": 20,
+  "PLR0912": 20
+ },
+ "scripts/install.py::main": {
+  "C901": 71,
+  "PLR0912": 74,
+  "PLR0915": 339,
+  "function-lines": 701
+ },
+ "scripts/install.py::uninstall_global": {
+  "C901": 35,
+  "PLR0912": 43
+ },
+ "scripts/mcp_daemon.py::status": {
+  "C901": 15,
+  "PLR0912": 15
+ },
+ "scripts/status_checker.py::check_hook_injection": {
+  "C901": 15,
+  "PLR0912": 14
+ },
+ "scripts/status_checker.py::check_mcp": {
+  "C901": 16,
+  "PLR0912": 16
+ },
+ "scripts/status_checker.py::format_cli": {
+  "C901": 22,
+  "PLR0912": 26
+ },
+ "scripts/swarm/tick.py::_spawn": {
+  "PLR0913": 8
+ },
+ "scripts/swarm_ledger/ledger.py::cmd_task": {
+  "C901": 17,
+  "PLR0912": 16
+ },
+ "scripts/swarm_ledger/ledger_agent_ops.py::check": {
+  "C901": 17,
+  "PLR0912": 16
+ },
+ "scripts/swarm_ledger/ledger_core.py::apply_op": {
+  "C901": 18,
+  "PLR0912": 18
+ },
+ "scripts/swarm_ledger/ledger_core.py::check_op": {
+  "C901": 16,
+  "PLR0912": 15
+ },
+ "scripts/swarm_ledger/ledger_core.py::validate": {
+  "C901": 16,
+  "PLR0912": 15
+ },
+ "scripts/swarm_ledger/ledger_server.py::Handler.do_GET": {
+  "C901": 16,
+  "PLR0912": 15
+ },
+ "scripts/swarm_ledger/ledger_server.py::Handler.do_POST": {
+  "C901": 14,
+  "PLR0912": 13
+ },
+ "scripts/swarm_ledger/ledger_server.py::control_argv": {
+  "C901": 21,
+  "PLR0912": 20
+ },
+ "scripts/swarm_ledger/ledger_tasks.py::_update": {
+  "C901": 13
+ },
+ "scripts/targets/codex_target.py::CodexAdapter.teardown": {
+  "C901": 20,
+  "PLR0912": 20
+ },
+ "scripts/targets/copilot_target.py::CopilotAdapter._translate_agents": {
+  "C901": 13
+ },
+ "scripts/targets/copilot_target.py::CopilotAdapter.doctor": {
+  "PLR0912": 14
+ },
+ "scripts/targets/copilot_target.py::CopilotAdapter.mcp_entries": {
+  "C901": 24,
+  "PLR0912": 24
+ },
+ "scripts/targets/copilot_target.py::CopilotAdapter.teardown": {
+  "C901": 25,
+  "PLR0912": 27
+ },
+ "tests/swarm/test_drain_watch.py::_drain_swarm": {
+  "PLR0913": 9
+ }
+}

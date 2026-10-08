@@ -45,6 +45,11 @@ def test_hand_launched_sessions_are_never_restarted(home):
     assert refresh.due({}, {}, home, os.getpid()) is False
 
 
+def test_swarm_sessions_are_never_restarted(home):
+    _log_change(home, time.time() + 60)
+    assert refresh.due({}, {**LAUNCHED, "AGENTIHOOKS_SWARM": "sw"}, home, os.getpid()) is False
+
+
 @pytest.mark.parametrize("payload", [{"agent_id": "a1"}, {"stop_hook_active": True}])
 def test_subagent_and_reentrant_stops_are_ignored(home, payload):
     _log_change(home, time.time() + 60)

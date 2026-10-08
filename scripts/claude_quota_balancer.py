@@ -15,9 +15,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from scripts import session_bands
 from scripts.claude_config import claude_home
+from scripts.routing.envs import subscription_child
+from scripts.routing.slots import Slot
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
 HARNESS = "claude"
@@ -282,8 +285,7 @@ def _probe_command(model: str, claude_bin: str = "claude", include_partial: bool
 
 
 def _child_environment(credential: Credential, environ: Mapping[str, str]) -> dict[str, str]:
-    child = {name: value for name, value in environ.items() if not name.startswith(TOKEN_PREFIX)}
-    child.pop("ANTHROPIC_API_KEY", None)
+    child = {name: value for name, value in subscription_child(environ).items() if not name.startswith(TOKEN_PREFIX)}
     child["CLAUDE_CODE_OAUTH_TOKEN"] = credential.token
     return child
 
@@ -653,6 +655,37 @@ def rank_results(results: list[ProbeResult], include_fable: bool = False) -> lis
     )
 
 
+@dataclass(frozen=True)
+class ClaudeTokenSource:
+    options: Mapping[str, Any] = field(default_factory=dict)
+    sessions: Mapping[str, int] = field(default_factory=dict)
+    exclude: frozenset[str] = frozenset()
+
+    def results(self, environ: Mapping[str, str], now: float | None = None) -> tuple[list[ProbeResult], str]:
+        credentials = discover_credentials(environ)
+        if not credentials:
+            return [], "cached"
+        timing = {} if now is None else {"now": now}
+        return collect_results(credentials, **self.options, environ=environ, **timing)
+
+    def cap(self, result: ProbeResult, now: float) -> int | None:
+        return account_cap(result, now, bool(self.options.get("include_fable")))
+
+    def offer(self, results: list[ProbeResult], now: float) -> list[Slot]:
+        return [
+            Slot(HARNESS, result.account, cap, self.sessions.get(result.account, 0), _spend_by(result, now))
+            for result in results
+            if result.account not in self.exclude and (cap := self.cap(result, now)) is not None
+        ]
+
+    def slots(self, environ: Mapping[str, str], now: float) -> list[Slot]:
+        results, _ = self.results(environ, now)
+        return self.offer(results, now)
+
+    def child_env(self, slot: Slot, environ: Mapping[str, str]) -> dict[str, str]:
+        return _child_environment(credential_for_slug(discover_credentials(environ), slot.account), environ)
+
+
 def select_credential(
     environ: Mapping[str, str] | None = None,
     *,
@@ -670,30 +703,23 @@ def select_credential(
     credentials = discover_credentials(active_env)
     if not credentials:
         raise RoutingError(f"no non-empty {TOKEN_PREFIX}* variables found")
-    results, source = collect_results(
-        credentials,
-        include_fable=include_fable,
-        refresh=refresh,
-        timeout=timeout,
-        environ=active_env,
-        cache_file=cache_file,
-        claude_bin=claude_bin,
-    )
-    timestamp = time.time() if now is None else now
     excluded = set(exclude)
-    counts = sessions or {}
-    seats = {
-        result.account: session_bands.Seat(
-            HARNESS, result.account, cap, counts.get(result.account, 0), _spend_by(result, timestamp)
-        )
-        for result in results
-        if result.account not in excluded and (cap := account_cap(result, timestamp, include_fable)) is not None
+    options = {
+        "include_fable": include_fable,
+        "refresh": refresh,
+        "timeout": timeout,
+        "cache_file": cache_file,
+        "claude_bin": claude_bin,
     }
+    tokens = ClaudeTokenSource(options, sessions or {}, frozenset(excluded))
+    results, source = tokens.results(active_env)
+    timestamp = time.time() if now is None else now
+    seats = tokens.offer(results, timestamp)
     reserve = {
         slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", str()).split(",") if slug.strip()
     }
-    seat = session_bands.pick(seat for seat in seats.values() if seat.account not in reserve)
-    seat = seat or session_bands.pick(seats.values())
+    seat = session_bands.pick(seat for seat in seats if seat.account not in reserve)
+    seat = seat or session_bands.pick(seats)
     if seat is None:
         outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
         raise RoutingError(f"no Claude account has a free session under its quota band{outside}", results)

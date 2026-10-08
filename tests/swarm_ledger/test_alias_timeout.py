@@ -22,6 +22,7 @@ def ledger_page(monkeypatch, tmp_path):
     token = core.read_token(html_path.read_text())
     redis = Mock()
     redis.get.side_effect = TimeoutError("Timeout reading from socket")
+    redis.mget.side_effect = TimeoutError("Timeout reading from socket")
     monkeypatch.setattr("hooks._redis.get_redis", lambda: redis)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01})
@@ -52,5 +53,5 @@ def test_page_and_api_answer_when_alias_lookup_times_out(ledger_page, caplog):
                 state = json.loads(body)
                 assert state["title"] == "Alias timeout proof"
                 assert state["_meta"]["crew"][0]["name"] == "engineer"
-    assert "alias lookup failed for engineer" in caplog.text
+    assert "alias lookup failed for 1 names" in caplog.text
     assert "Timeout reading from socket" in caplog.text

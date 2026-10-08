@@ -31,8 +31,10 @@ UPDATABLE = (
     "plan_url",
     "rank",
     "branch",
+    "branch_repo",
     "stacked_base",
     "parked_on",
+    "parked_repos",
     "overlays",
     "difficulty",
     "difficulty_source",
@@ -43,9 +45,9 @@ DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
 NUMBER_FIELDS = ("difficulty_confidence",)
-LIST_FIELDS = ("depends_on", "territory", "parked_on", "overlays")
+LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays")
 OVERLAY_CAP = 3
-BRANCH_RE = re.compile(r"^\S*$")
+BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
 OBJECT_FIELDS = ("contract", "proof")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
@@ -80,6 +82,8 @@ def check(op):
             raise ValueError(f"lane must be one of {LANES}")
         if not all(isinstance(op.get(key, ""), str) for key in ("phase", "description", "workspace")):
             raise ValueError("phase, description and workspace must be strings")
+        if "not_duplicate" in op and not (isinstance(op["not_duplicate"], str) and op["not_duplicate"].strip()):
+            raise ValueError("not_duplicate must say in plain words why the task differs from the one it resembles")
         check_lists(op)
         check_bools(op)
         check_profile(op)
@@ -119,6 +123,10 @@ def check(op):
 def check_stack(fields):
     if "branch" in fields and not (isinstance(fields["branch"], str) and BRANCH_RE.match(fields["branch"])):
         raise ValueError("branch must be a git branch name, or empty to clear it")
+    if "branch_repo" in fields and not BRANCH_RE.match(fields["branch_repo"]):
+        raise ValueError("branch_repo must be a repository url or path, or empty to clear it")
+    if not all(BRANCH_RE.match(repo) for repo in fields.get("parked_repos", [])):
+        raise ValueError("parked_repos must list repository urls or paths")
     base = fields.get("stacked_base", "")
     if not (isinstance(base, str) and COMMIT_RE.match(base)):
         raise ValueError("stacked_base must be a lowercase commit hash of 7 to 64 characters, or empty to clear it")
@@ -227,7 +235,7 @@ def _add(doc, op, ctx):
         "done": False,
         "comments": [],
     }
-    for key in ("gain", "contract", "workspace", "artifact", "profile", "overlays"):
+    for key in ("gain", "contract", "workspace", "artifact", "profile", "overlays", "not_duplicate"):
         if key in op:
             task[key] = op[key]
     if "rank" in op:
@@ -236,6 +244,15 @@ def _add(doc, op, ctx):
     phase = next((p for p in doc.get("phases", []) if p["id"] == task["phase"]), {})
     if plan_url := op.get("plan_url") or phase.get("plan_url"):
         task["plan_url"] = plan_url
+    if "plan_slice" in op:
+        from scripts.swarm_ledger import plan_ranges
+
+        try:
+            task["plan_lines"] = plan_ranges.task_slice(doc, phase, op["plan_slice"])
+        except ValueError as exc:
+            ctx.refused.append(str(exc))
+            return False
+        task["plan_slice"] = op["plan_slice"]
     tasks.append(task)
     ctx.record(op["by"], "added", f"tasks/{task['id']}", text=task["title"])
     return True
@@ -296,6 +313,18 @@ def unlinked_slice(task: dict, tasks: list[dict]) -> list[str]:
     return [item["id"] for item in tasks if item["id"] in ids and not item.get("plan_url")]
 
 
+def slice_refusal(item: str, plan: dict, doc: dict) -> str:
+    from scripts.swarm_ledger import plan_ranges
+
+    if bad := invalid_slice(plan, doc["tasks"]):
+        return f"{item} has invalid slice task ids: {', '.join(bad)}"
+    if unlinked := unlinked_slice(plan, doc["tasks"]):
+        return f"{item} slice tasks carry no plan link: {', '.join(unlinked)}. {PUBLISH}"
+    if incomplete := plan_ranges.invalid_tasks(plan, doc, slice_ids(plan)):
+        return f"{item} slice tasks lack valid plan ranges or anchors: {', '.join(incomplete)}"
+    return ""
+
+
 def _update_fields(task: dict, fields: dict) -> dict:
     if ledger_kinds.kind(task) == "plan" and fields.get("kind", "plan") != "plan" and "lane" not in fields:
         return {**fields, "lane": "eng"}
@@ -327,12 +356,8 @@ def _update(doc, op, ctx):
         ctx.refused.append(f"{op['item']} cannot be done without its proof: {', '.join(ledger_kinds.unmet(after))}")
         return False
     if after.get("state") == "done" and ledger_kinds.kind(after) == "plan":
-        bad = invalid_slice(after, doc["tasks"])
-        if bad:
-            ctx.refused.append(f"{op['item']} has invalid slice task ids: {', '.join(bad)}")
-            return False
-        if unlinked := unlinked_slice(after, doc["tasks"]):
-            ctx.refused.append(f"{op['item']} slice tasks carry no plan link: {', '.join(unlinked)}. {PUBLISH}")
+        if refusal := slice_refusal(op["item"], after, doc):
+            ctx.refused.append(refusal)
             return False
     changed = {k: v for k, v in fields.items() if task.get(k) != v}
     if "kind" in changed and after.get("workspace"):

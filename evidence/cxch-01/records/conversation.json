@@ -1,0 +1,52 @@
+{
+  "thread": "01a11cb7-5185-7790-b12c-a42a481cd270",
+  "first_turn": {
+    "turn": "01a11cb7-5220-7720-9932-c1df1ab64cc5",
+    "completed": true,
+    "status": "completed",
+    "agent_text": [
+      "ALPHA"
+    ],
+    "methods": [
+      "account/rateLimits/updated",
+      "account/updated",
+      "configWarning",
+      "item/agentMessage/delta",
+      "item/completed",
+      "item/started",
+      "mcpServer/startupStatus/updated",
+      "remoteControl/status/changed",
+      "thread/started",
+      "thread/status/changed",
+      "thread/tokenUsage/updated",
+      "turn/completed",
+      "turn/started"
+    ]
+  },
+  "idle_turn_start": {
+    "turn": "01a11cb7-6312-7d23-be2a-4ec4bf9ebff3",
+    "completed": true,
+    "status": "completed",
+    "agent_text": [
+      "BRAVO"
+    ],
+    "methods": [
+      "account/rateLimits/updated",
+      "item/agentMessage/delta",
+      "item/completed",
+      "item/started",
+      "thread/status/changed",
+      "thread/tokenUsage/updated",
+      "turn/completed",
+      "turn/started"
+    ]
+  },
+  "thread_read": {
+    "turn_count": 2,
+    "turn_ids_match": true,
+    "user_texts": [
+      "Fixture one. Reply with exactly the word ALPHA and nothing else.",
+      "Fixture two. The thread is idle now. Reply with exactly the word BRAVO."
+    ]
+  }
+}
