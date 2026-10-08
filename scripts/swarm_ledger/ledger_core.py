@@ -442,6 +442,13 @@ def clear_chat(thread, op, target, ctx):
     return True
 
 
+def new_entry(op, by, at, text):
+    entry = {"id": op["id"], "by": by, "at": at, "text": text}
+    if op["thread"] == "notes":
+        entry["comments"] = []
+    return entry
+
+
 def record_sync(doc, op, ctx):
     """An operator sync order; each kind rests SYNC_COOLDOWN_MS after it was last sent."""
     import ledger_gate
@@ -494,9 +501,7 @@ def apply_op(doc, op, ctx):
         if entry is not None or not (text.strip() or op.get("attachments")):
             return entry is not None
         by = op.get("by", "operator")
-        thread.append({"id": op["id"], "by": by, "at": ctx.at, "text": text})
-        if op["thread"] == "notes":
-            thread[-1]["comments"] = []
+        thread.append(new_entry(op, by, ctx.at, text))
         if op.get("attachments"):
             thread[-1]["attachments"] = op["attachments"]
         if by != "operator" and by in ctx.meta["members"]:

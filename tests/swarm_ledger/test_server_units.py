@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.swarm_ledger import ledger_server as server
+from scripts.swarm_ledger import ledger_task_duplicates
 
 HOST = "ledger.test"
 
@@ -75,7 +76,7 @@ def test_a_save_to_a_ledger_without_tasks_checks_against_no_task_ids(quiet, monk
     h.rfile, h.exists, h.refused = io.BytesIO(body), lambda slug: True, lambda slug=None: False
     h.reply_state = lambda *args: h.sent.append(args)
     h.do_PUT()
-    assert h.sent == [("demo", [{"path": "title", "value": "Renamed"}], [], {})]
+    assert h.sent == [("demo", [{"path": "title", "value": "Renamed"}], [], {}, ledger_task_duplicates.Screen())]
 
 
 def test_serve_runs_the_ledger_watch_on_a_daemon_thread(monkeypatch, tmp_path):

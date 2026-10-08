@@ -334,9 +334,7 @@ class SQLiteLedgerRepository:
                 connection.execute(BEGIN_IMMEDIATE)
                 entry = self._entry(connection, slug)
                 state = json.loads(entry.text)
-                meta = state.pop("_meta")
-                rejected, ctx = mutation.apply(slug, state, meta, self.domain, changes, ops, gate)
-                state["_meta"] = meta
+                rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
                 written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
             self._remember(slug, written)
         return json.loads(written.text), rejected
@@ -388,8 +386,9 @@ class SQLiteLedgerRepository:
             connection.execute(BEGIN_IMMEDIATE)
             if not replace and connection.execute(STORED, (slug,)).fetchone():
                 return False
-            mutation.apply(slug, doc, meta, self.domain, created=True)
-            self._insert(connection, slug, {**doc, "_meta": meta}, token or secrets.token_urlsafe(24))
+            state = {**doc, "_meta": meta}
+            mutation.apply(slug, state, self.domain, created=True)
+            self._insert(connection, slug, state, token or secrets.token_urlsafe(24))
             return True
 
     def import_document(self, slug: str, state: dict, token: str | None = None, replace: bool = False) -> None:

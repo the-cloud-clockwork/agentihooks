@@ -3,10 +3,12 @@ import ledger_notifications
 import ledger_priorities
 
 
-def apply(slug, doc, meta, core, changes=None, ops=None, gate=None, created=False):
-    """Fold checkbox changes and ops into doc and meta in place; returns (rejected ids, the context)."""
+def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
+    """Fold checkbox changes and ops into the stored state in place; returns (rejected ids, the context)."""
     import ledger_artifacts
     import ledger_media
+
+    doc, meta = state, state.pop("_meta")
 
     ctx = core.Context(meta, core.now_ms())
     meta.setdefault("members", {})
@@ -31,4 +33,5 @@ def apply(slug, doc, meta, core, changes=None, ops=None, gate=None, created=Fals
     if ctx.changed:
         meta.update(rev=ctx.rev, updated_at=ctx.at, warnings=found)
         meta["events"] = (meta["events"] + ctx.events)[-core.EVENTS_KEPT :]
+    state["_meta"] = meta
     return rejected, ctx

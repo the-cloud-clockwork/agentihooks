@@ -61,7 +61,8 @@ def test_apply_folds_changes_and_ops_in_order_and_records_the_change(derived):
     doc = {"chat": [1, 2, 3, 4, 5], "big": ["w1"]}
     meta = {"rev": 4, "events": ["e0"], "warnings": ["old"]}
     ops = [{"op": "stats_sync", "id": "s"}, {"op": "add", "id": "refused"}, {"op": "add", "id": "a"}]
-    rejected, ctx = mutation.apply("demo", doc, meta, domain(calls), ["bad-1", "refuse-1"], ops, "G")
+    doc["_meta"] = meta
+    rejected, ctx = mutation.apply("demo", doc, domain(calls), ["bad-1", "refuse-1"], ops, "G")
     assert rejected == ["bad-1", "refused"]
     assert calls == [
         ("earliest", {"rev": 4, "events": ["e0"], "warnings": ["old"], "members": {}}, 50),
@@ -78,6 +79,7 @@ def test_apply_folds_changes_and_ops_in_order_and_records_the_change(derived):
         ("alerts", doc, ctx, [(ledger_alerts.SIZE, "w1"), (ledger_alerts.SYNC, "refuse-1")], ["old"]),
     ]
     assert doc["chat"] == [4, 5]
+    assert doc["_meta"] is meta
     assert ctx.changed is True
     assert meta == {
         "rev": 5,
@@ -92,7 +94,8 @@ def test_apply_folds_changes_and_ops_in_order_and_records_the_change(derived):
 def test_apply_without_anything_to_change_leaves_meta_alone(derived):
     meta = {"rev": 4, "events": ["e0"], "warnings": [], "members": {"m": {"role": "member"}}}
     doc = {"chat": []}
-    rejected, ctx = mutation.apply("demo", doc, meta, domain([]))
+    doc["_meta"] = meta
+    rejected, ctx = mutation.apply("demo", doc, domain([]))
     assert (rejected, ctx.changed) == ([], False)
     assert meta == {"rev": 4, "events": ["e0"], "warnings": [], "members": {"m": {"role": "member"}}, "created_at": 7}
     assert derived[-1] == ("alerts", doc, ctx, [], [])
@@ -109,5 +112,6 @@ def test_apply_without_anything_to_change_leaves_meta_alone(derived):
 )
 def test_each_kind_of_change_alone_moves_the_revision(derived, changes, ops, doc, created):
     meta = {"rev": 4, "events": [], "warnings": []}
-    _, ctx = mutation.apply("demo", doc, meta, domain([]), changes, ops, created=created)
+    doc["_meta"] = meta
+    _, ctx = mutation.apply("demo", doc, domain([]), changes, ops, created=created)
     assert (ctx.changed, meta["rev"], meta["updated_at"]) == (True, 5, 50)
