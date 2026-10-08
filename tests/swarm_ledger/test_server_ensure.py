@@ -128,7 +128,14 @@ def test_a_listening_silent_port_waits_out_the_deadline_without_starting(isolate
         silent.listen()
         monkeypatch.setattr(server, "PORT", silent.getsockname()[1])
         monkeypatch.setattr(server, "BASE", f"http://127.0.0.1:{server.PORT}")
+        probe = server.ledger_link.serving
+
+        def bounded(timeout=1, url=None):
+            assert 0 < timeout <= 1
+            return probe(timeout, url)
+
         with (
+            patch.object(server.ledger_link, "serving", side_effect=bounded),
             patch.object(server.time, "monotonic", side_effect=[0, 0.05, 1]),
             patch.object(server.time, "sleep"),
             patch.object(server, "port_held", wraps=server.port_held) as held,
