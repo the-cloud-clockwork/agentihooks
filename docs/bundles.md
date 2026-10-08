@@ -142,9 +142,10 @@ roles: [engineer, planner, qa, master]
 A rendered profile home receives a manifesto when the chain's package role
 (`package:<role>`) is in its `roles`, or when the manifesto has no `roles` key, so
 manifestos without front matter reach every role. A chain with no package role
-receives every manifesto. The front matter never reaches rendered text. A bundle
-profile overrides the roles by name in `profile.yml`; profiles apply in chain
-order and a later one wins:
+receives every manifesto. Valid front matter never reaches rendered text; a block
+that is not a YAML mapping is left in place and its manifesto reaches every role.
+A bundle profile overrides the roles by name in `profile.yml`; profiles apply in
+chain order and a later one wins:
 
 ```yaml
 manifestos:
@@ -153,8 +154,9 @@ manifestos:
 ```
 
 `CI_MANIFESTO_ENABLED: "false"` in a chain profile's settings `env` renders no
-manifestos for that chain. `agentihooks manifestos list [--bundle PATH]` prints
-which package roles receive each manifesto.
+manifestos for that chain. `agentihooks init` applies the same filter to the
+installed profile chain. `agentihooks manifestos list [--bundle PATH]` prints the
+roles each manifesto declares, before profile overrides.
 
 ## Profile Resolution Order
 

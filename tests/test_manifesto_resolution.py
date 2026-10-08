@@ -121,6 +121,8 @@ def test_manifesto_roles_and_body_read_the_front_matter(tmp_path):
     (manifests / "broken.md").write_text("---\nroles: [a\n---\n# Broken\n")
     (manifests / "unclosed.md").write_text("---\nroles: [cicd]\n# Unclosed\n")
     (manifests / "listed.md").write_text("---\n- roles\n---\n# Listed\n")
+    (manifests / "crlf.md").write_bytes(b"--- \r\nroles: [qa]\r\n---\t\r\n\r\n# Crlf\r\n")
+    (manifests / "padded.md").write_text("---\nroles: [qa]\n---\n\n  indented body\n")
 
     assert config.manifesto_roles(manifests / "dev.md") == ["engineer", "planner"]
     assert config.manifesto_roles(manifests / "solo.md") == ["master"]
@@ -133,6 +135,9 @@ def test_manifesto_roles_and_body_read_the_front_matter(tmp_path):
     assert config.manifesto_body(manifests / "core.md") == "# Core\ncore body\n"
     assert config.manifesto_body(manifests / "broken.md") == "---\nroles: [a\n---\n# Broken\n"
     assert config.manifesto_body(manifests / "listed.md") == "---\n- roles\n---\n# Listed\n"
+    assert config.manifesto_roles(manifests / "crlf.md") == ["qa"]
+    assert config.manifesto_body(manifests / "crlf.md") == "# Crlf\n"
+    assert config.manifesto_body(manifests / "padded.md") == "  indented body\n"
     assert config.manifesto_name(" Dev.MD ") == "dev"
 
 
@@ -148,6 +153,9 @@ def test_chain_paths_take_the_package_role_and_profile_choices_in_chain_order(mo
     assert _names(manifestos.paths(root, [base, top, _role("engineer")])) == ["core.md", "dev.md", "solo.md"]
     assert _names(manifestos.paths(root, [base])) == ["core.md", "dev.md", "guard.md"]
     assert manifestos.choice([base, top]) == {"guard": False, "solo": True, "core": True}
+    scalar = _profile(tmp_path, "scalar", "manifestos:\n  include: GUARD.md\n  exclude: dev\n")
+    assert manifestos.choice([scalar]) == {"guard": True, "dev": False}
+    assert manifestos.choice([_profile(tmp_path, "bare", "manifestos: [guard]\n")]) == {}
 
 
 def test_chain_paths_honour_the_enabled_setting_from_the_chain(monkeypatch, tmp_path):
@@ -164,6 +172,8 @@ def test_chain_paths_honour_the_enabled_setting_from_the_chain(monkeypatch, tmp_
     assert _names(manifestos.paths(root, [off, on])) == ["core.md", "dev.md", "guard.md", "solo.md"]
     assert manifestos.enabled(root, [on, off]) is False
     assert manifestos.enabled(None, []) is True
+    assert manifestos.enabled(None, [off, _profile(tmp_path, "one", env={"CI_MANIFESTO_ENABLED": "1"})]) is True
+    assert manifestos.enabled(None, [_profile(tmp_path, "typo", env={"CI_MANIFESTO_ENABLED": "on"})]) is False
 
 
 def test_bundle_settings_layer_can_disable_manifestos(monkeypatch, tmp_path):
@@ -184,12 +194,15 @@ def test_persona_holds_only_the_role_manifestos_without_front_matter(monkeypatch
     cicd = build_persona([_role("cicd")], ["package:cicd"], root, [], "<!-- head -->", "<!-- foot -->")
     silent = build_persona([off, _role("cicd")], ["off"], root, [], "<!-- head -->", "<!-- foot -->")
 
-    assert "<!-- manifesto: dev.md -->\n# Dev\ndev body" in engineer
-    assert "# Core" in engineer and "# Guard" not in engineer and "# Solo" not in engineer
-    assert "<!-- manifesto: guard.md -->\n# Guard\nguard body" in cicd
-    assert "# Core" in cicd and "# Dev" not in cicd
-    assert "roles:" not in engineer + cicd
-    assert "<!-- ci-manifesto -->" not in silent and "# Core" not in silent
+    assert engineer.endswith(
+        "<!-- ci-manifesto -->\n<!-- manifesto: core.md -->\n# Core\ncore body\n\n---\n\n"
+        "<!-- manifesto: dev.md -->\n# Dev\ndev body\n\n<!-- foot -->\n"
+    )
+    assert cicd.endswith(
+        "<!-- ci-manifesto -->\n<!-- manifesto: core.md -->\n# Core\ncore body\n\n---\n\n"
+        "<!-- manifesto: guard.md -->\n# Guard\nguard body\n\n<!-- foot -->\n"
+    )
+    assert "<!-- ci-manifesto -->" not in silent and "<!-- manifesto:" not in silent
 
 
 def test_doctrine_sources_list_only_the_role_manifestos(monkeypatch, tmp_path):
@@ -201,18 +214,44 @@ def test_doctrine_sources_list_only_the_role_manifestos(monkeypatch, tmp_path):
     assert [file.name for file in files if file.parent.name == "manifestos"] == ["core.md", "guard.md"]
 
 
+def test_global_install_appends_only_the_chain_manifestos(monkeypatch, tmp_path):
+    from scripts import install
+
+    root = _scoped(tmp_path)
+    _clean_env(monkeypatch)
+    home = tmp_path / "claude"
+    home.mkdir()
+    (home / "CLAUDE.md").write_text("# Persona\n")
+    monkeypatch.setattr(install, "CLAUDE_HOME", home)
+    monkeypatch.setattr(config, "CI_MANIFESTO_ENABLED", True)
+
+    install._append_ci_manifesto_to_claude_md(root, [_role("cicd")])
+
+    text = (home / "CLAUDE.md").read_text()
+    assert (
+        "<!-- manifesto: core.md -->\n# Core\ncore body\n\n---\n\n<!-- manifesto: guard.md -->\n# Guard\nguard body"
+        in text
+    )
+    assert "dev.md" not in text and "solo.md" not in text and "roles:" not in text
+
+
 def test_list_prints_the_role_by_manifesto_matrix(monkeypatch, tmp_path, capsys):
     root = _scoped(tmp_path)
     _clean_env(monkeypatch)
+    roles = tmp_path / "roles"
+    for name in ("qa", "planner", "Master", "engineer", "cicd", "_guards"):
+        (roles / name).mkdir(parents=True)
+    (roles / "notes.md").write_text("not a role")
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", roles)
 
     assert manifestos.main(["list", "--bundle", str(root)]) == 0
 
     assert capsys.readouterr().out == (
-        "manifesto  cicd  engineer  master  planner  qa\n"
-        "core.md    x     x         x       x        x\n"
-        "dev.md     -     x         -       x        -\n"
-        "guard.md   x     -         -       -        -\n"
-        "solo.md    -     -         x       -        -\n"
+        "manifesto  Master  cicd  engineer  planner  qa\n"
+        "core.md    x       x     x         x        x\n"
+        "dev.md     -       -     x         x        -\n"
+        "guard.md   -       x     -         -        -\n"
+        "solo.md    x       -     -         -        -\n"
     )
 
 

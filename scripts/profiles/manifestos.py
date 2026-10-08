@@ -26,14 +26,18 @@ def enabled(bundle: Path | None, dirs: list[tuple[str, Path]]) -> bool:
     return value.lower() in ("true", "1", "yes")
 
 
+def _names(value) -> list[str]:
+    return [str(name) for name in (value if isinstance(value, list) else [value] if value else [])]
+
+
 def choice(dirs: list[tuple[str, Path]]) -> dict[str, bool]:
     chosen: dict[str, bool] = {}
     for _, path in dirs:
         picks = profile_chain.manifestos(path)
-        for name in picks.get("include") or []:
-            chosen[config.manifesto_name(str(name))] = True
-        for name in picks.get("exclude") or []:
-            chosen[config.manifesto_name(str(name))] = False
+        for name in _names(picks.get("include")):
+            chosen[config.manifesto_name(name)] = True
+        for name in _names(picks.get("exclude")):
+            chosen[config.manifesto_name(name)] = False
     return chosen
 
 
@@ -54,7 +58,7 @@ def matrix(found: list[Path]) -> str:
     lines = ["  ".join(["manifesto".ljust(width), *columns])]
     for path in found:
         allowed = config.manifesto_roles(path)
-        cells = [("x" if allowed is None or role in allowed else "-").ljust(len(role)) for role in columns]
+        cells = [("x" if allowed is None or role.casefold() in allowed else "-").ljust(len(role)) for role in columns]
         lines.append("  ".join([path.name.ljust(width), *cells]).rstrip())
     return "\n".join(lines) + "\n"
 

@@ -3299,7 +3299,7 @@ def _install_claude_persona(
     _prepend_bundle_claude_md(bundle_dir)
 
     # --- 5b. Append CI manifesto to ~/.claude/CLAUDE.md (memory channel) ---
-    _append_ci_manifesto_to_claude_md(bundle_dir)
+    _append_ci_manifesto_to_claude_md(bundle_dir, profile_dirs)
 
 
 # ---------------------------------------------------------------------------
@@ -4326,7 +4326,9 @@ def _symlink_dir_contents(
     _state_record_links(records)
 
 
-def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
+def _append_ci_manifesto_to_claude_md(
+    bundle_dir: Path | None = None, profile_dirs: list[tuple[str, Path]] | None = None
+) -> None:
     """Append every enabled bundle manifesto to ~/.claude/CLAUDE.md as a fenced block.
 
     The manifesto used to be injected at SessionStart via stdout, but Claude
@@ -4345,7 +4347,9 @@ def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
         return
     if not getattr(_cfg, "CI_MANIFESTO_ENABLED", True):
         return
-    manifesto_paths = [Path(path) for path in _cfg._resolve_manifesto_paths(bundle_dir)]
+    from scripts.profiles import manifestos
+
+    manifesto_paths = manifestos.paths(bundle_dir, profile_dirs or [])
     if not manifesto_paths:
         _cprint("  [--] No enabled manifestos found — skipping CLAUDE.md append.")
         return

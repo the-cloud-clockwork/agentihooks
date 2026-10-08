@@ -712,12 +712,12 @@ CONTROLS_BYPASS_ENABLED: bool = _env_bool("CONTROLS_BYPASS_ENABLED", "true")
 CI_MANIFESTO_ENABLED = _env_bool("CI_MANIFESTO_ENABLED", "true")
 
 
-# Manifesto resolution loads every Markdown manifesto in deterministic filename
-# order. CI_MANIFESTO_PATH remains a single-file compatibility override.
 def manifesto_name(name: str) -> str:
     return Path(name.strip()).stem.casefold()
 
 
+# Manifesto resolution loads every Markdown manifesto in deterministic filename
+# order. CI_MANIFESTO_PATH remains a single-file compatibility override.
 def _manifesto_skip_names() -> set[str]:
     raw = os.getenv("AGENTIHOOKS_SKIP_MANIFESTO", "")
     return {manifesto_name(name) for name in raw.split(",") if name.strip()}
@@ -754,8 +754,10 @@ def _receives(path: Path, role: str | None, choice: dict[str, bool]) -> bool:
     picked = choice.get(manifesto_name(path.name))
     if picked is not None:
         return picked
+    if role is None:
+        return True
     roles = manifesto_roles(path)
-    return role is None or roles is None or role.casefold() in roles
+    return roles is None or role.casefold() in roles
 
 
 def _resolve_manifesto_paths(
