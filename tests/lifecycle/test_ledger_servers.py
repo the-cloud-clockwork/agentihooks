@@ -252,13 +252,26 @@ def test_terminate_signals_only_the_observed_process(tmp_path, monkeypatch, outc
     assert read.call_args_list == [call(42, tmp_path), call(42, tmp_path)]
 
 
-def test_terminate_refuses_a_changed_process_identity(tmp_path, monkeypatch):
-    monkeypatch.setattr(ledger_servers, "_process", lambda pid, proc: process(start=101))
+@pytest.mark.parametrize("current", [process(start=101), process(start=99), None])
+def test_terminate_refuses_a_changed_process_identity(tmp_path, monkeypatch, current):
+    monkeypatch.setattr(ledger_servers, "_process", lambda pid, proc: current)
     kill = Mock()
     monkeypatch.setattr(ledger_servers.os, "kill", kill)
     with pytest.raises(ProcessLookupError, match="^server identity changed$"):
         ledger_servers.terminate(process(), tmp_path)
     kill.assert_not_called()
+
+
+def test_terminate_stops_a_server_whose_state_changed_since_the_snapshot(tmp_path, monkeypatch):
+    row = Process(42, 7, 42, 42, 100, "R", "python", ("python", "ledger_server.py", "--serve"))
+    monkeypatch.setattr(ledger_servers, "_process", Mock(side_effect=[process(), None]))
+    kill = Mock()
+    monkeypatch.setattr(ledger_servers.os, "kill", kill)
+    monkeypatch.setattr(ledger_servers.time, "monotonic", Mock(side_effect=[1, 1.5]))
+    ledger_servers.terminate(row, tmp_path)
+    import signal
+
+    kill.assert_called_once_with(42, signal.SIGTERM)
 
 
 def test_scope_accepts_the_working_folder_even_when_data_is_elsewhere(tmp_path, monkeypatch):
