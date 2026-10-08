@@ -1,3 +1,4 @@
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +13,7 @@ def starts(monkeypatch, ledger_port):
     monkeypatch.setattr(ledger, "repository", SimpleNamespace(exists=lambda slug: True, read_page=lambda slug: ""))
     monkeypatch.setattr(ledger, "BASE", f"http://127.0.0.1:{ledger_port}")
     seen = []
-    monkeypatch.setattr(ledger.subprocess, "run", lambda command, **kwargs: seen.append(command))
+    monkeypatch.setattr(ledger.subprocess, "run", lambda *args, **kwargs: seen.append((args, kwargs)))
     return seen
 
 
@@ -26,7 +27,8 @@ def test_a_failed_request_outside_the_suite_still_starts_the_server(starts, monk
     monkeypatch.delenv("LEDGER_AUTOSTART", raising=False)
     with pytest.raises(SystemExit, match="ledger server not answering"):
         ledger.call(SLUG)
-    assert [command[-1] for command in starts] == ["--ensure"]
+    server = str(ledger.HERE / "ledger_server.py")
+    assert starts == [(([sys.executable, server, "--ensure"],), {"check": False, "capture_output": True})]
 
 
 def test_a_session_start_on_a_closed_port_starts_no_server_in_the_suite(tmp_path, monkeypatch, ledger_port):
