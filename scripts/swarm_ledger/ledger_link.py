@@ -1,5 +1,6 @@
 """The ledger page link handed to the operator, from the ledger server's configured host and port."""
 
+import json
 import os
 import urllib.parse
 import urllib.request
@@ -58,16 +59,26 @@ def page_url(slug):
     return f"{base()}/{slug}"
 
 
-def answering():
+def folder(environ=os.environ) -> Path:
+    return Path(environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
+
+
+def serving():
     try:
-        with urllib.request.urlopen(f"{base()}/healthz", timeout=1):
-            return True
+        with urllib.request.urlopen(f"{base()}/healthz", timeout=1) as resp:
+            return json.loads(resp.read()).get("dir")
     except (OSError, ValueError):
-        return False
+        return None
 
 
 def page_line(slug):
     line = f"Ledger page: {page_url(slug)} (open it to follow and steer the work)"
-    if answering():
-        return line
-    return f"{line}. The ledger server is not answering: start it with {START}"
+    served = serving()
+    if served is None:
+        return f"{line}. The ledger server is not answering: start it with {START}"
+    if Path(served).resolve() != folder().resolve():
+        return (
+            f"No ledger page link: {base()} serves {served}, not {folder()}. "
+            f"Set a spare LEDGER_PORT and start the ledger server with {START}"
+        )
+    return line
