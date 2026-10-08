@@ -251,24 +251,10 @@ class RedisStore:
         return int(self.redis.get(self.key(slug, "identity-conflicts")) or 0)
 
     def put_agent(self, slug, agent):
-        if (
-            agent.execution_id
-            or agent.generation
-            or agent.runtime_backend != "local"
-            or agent.runtime_target
-            or self.execution_registry.managed(slug, agent.name)
-        ):
-            self.execution_registry.update(slug, agent)
-            return
-        from scripts.swarm.tick import agent_status
-
-        previous = self.redis.hget(self.key(slug, "agents"), agent.name)
-        if not previous or agent_status(AgentRecord(**json.loads(previous))) != agent_status(agent):
-            self.redis.hset(self.key(slug, "state-since"), agent.name, int(time.time() * 1000))
-        self.redis.hset(self.key(slug, "agents"), agent.name, json.dumps(asdict(agent)))
+        self.execution_registry.put(slug, agent)
 
     def agents(self, slug):
-        return [AgentRecord(**json.loads(v)) for _, v in sorted(self.redis.hgetall(self.key(slug, "agents")).items())]
+        return self.execution_registry.agents(slug)
 
     def drop_agent(self, slug, name, at=None):
         ended = int(time.time() * 1000) if at is None else at

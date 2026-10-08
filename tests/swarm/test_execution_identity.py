@@ -286,9 +286,9 @@ def test_transaction_contention_is_bounded_and_never_partially_commits(store, ag
     def pipeline(*args, **kwargs):
         pipe = original(*args, **kwargs)
         execute = pipe.execute
-        attempts.append(pipe)
 
         def contested():
+            attempts.append(pipe)
             if len(attempts) <= failures:
                 raise WatchError("synthetic competing controller")
             return execute()
@@ -322,3 +322,60 @@ def test_explicit_local_runtime_identity_is_preserved(store, agent):
     assert current.runtime_target == runtime_target
     with pytest.raises(SwarmError, match="immutable"):
         store.put_agent("fixture", replace(current, runtime_target={**runtime_target, "pid": 200}))
+
+
+def test_legacy_writer_cannot_overwrite_concurrent_execution_admission(store, agent, monkeypatch):
+    registry = store.execution_registry
+    managed = registry.managed
+    admitted = []
+
+    def concurrent_admission(slug, name, reader=None):
+        result = managed(slug, name) if reader is None else managed(slug, name, reader)
+        if not admitted:
+            admitted.append(store.start_execution(slug, agent))
+        return result
+
+    monkeypatch.setattr(registry, "managed", concurrent_admission)
+    with pytest.raises(SwarmError):
+        store.put_agent("fixture", agent)
+    assert store.agents("fixture") == admitted
+    assert store.execution("fixture", admitted[0].execution_id) == admitted[0]
+
+
+def test_agent_projection_is_compatible_with_the_preceding_strict_reader(store, agent):
+    from dataclasses import make_dataclass
+
+    preceding_fields = [
+        "name",
+        "lane",
+        "task",
+        "pane_id",
+        "harness",
+        "account",
+        "started_at",
+        "state",
+        "idle_ticks",
+        "model",
+        "effort",
+        "seat",
+        "conversation_id",
+        "placement",
+        "profile",
+        "model_source",
+        "model_confidence",
+        "profile_decision",
+        "input_prompt",
+        "input_ticks",
+        "choice",
+        "launched_at",
+        "overlays",
+    ]
+    preceding_record = make_dataclass("PrecedingAgentRecord", preceding_fields)
+    current = store.start_execution("fixture", agent)
+    raw = json.loads(store.redis.hget(store.key("fixture", "agents"), agent.name))
+    prior = preceding_record(**raw)
+    assert prior.name == current.name
+    assert prior.task == current.task
+    assert prior.seat == current.seat
+    assert prior.state == current.state
+    assert store.agents("fixture") == [current]

@@ -10,6 +10,7 @@ from scripts.inbox.seats import is_seat
 
 IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend")
 WRITE_ATTEMPTS = 5
+EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
 
 
 if TYPE_CHECKING:
@@ -39,8 +40,58 @@ class ExecutionRegistry:
     def occupants(self, slug: str, reader: Redis | Pipeline | None = None) -> dict[str, AgentRecord]:
         return {agent.seat: agent for agent in self.records(slug, reader)}
 
-    def managed(self, slug: str, name: str) -> bool:
-        return any(agent.name == name for agent in self.records(slug))
+    def managed(self, slug: str, name: str, reader: Redis | Pipeline | None = None) -> bool:
+        return any(agent.name == name for agent in self.records(slug, reader))
+
+    def agents(self, slug: str) -> list[AgentRecord]:
+        from scripts.swarm.store import AgentRecord
+
+        with self.redis.pipeline() as pipe:
+            pipe.hgetall(self.store.key(slug, "agents"))
+            pipe.hvals(self.store.key(slug, "executions"))
+            projections, attempts = pipe.execute()
+        latest = {}
+        for raw in attempts:
+            row = json.loads(raw)
+            if row["name"] not in latest or row["generation"] > latest[row["name"]]["generation"]:
+                latest[row["name"]] = row
+        result = []
+        for name, raw in sorted(projections.items()):
+            row = json.loads(raw)
+            if name in latest:
+                row.update({field: latest[name][field] for field in EXECUTION_FIELDS})
+            result.append(AgentRecord(**row))
+        return result
+
+    def put(self, slug: str, agent: AgentRecord) -> None:
+        from redis.exceptions import WatchError
+
+        from scripts.swarm.store import SwarmError
+
+        for _ in range(WRITE_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(self.store.key(slug, "executions"), self.store.key(slug, "agents"))
+                    if _has_identity(agent) or self.managed(slug, agent.name, pipe):
+                        pipe.unwatch()
+                        self.update(slug, agent)
+                        return
+                    previous = pipe.hget(self.store.key(slug, "agents"), agent.name)
+                    pipe.multi()
+                    _write_projection(pipe, self.store.key(slug, "agents"), agent)
+                    self.write_status(pipe, slug, agent, previous)
+                    pipe.execute()
+                    return
+                except WatchError:
+                    continue
+        raise SwarmError("agent registry kept changing; update was not committed")
+
+    def write_status(self, pipe: Pipeline, slug: str, agent: AgentRecord, previous: str | None) -> None:
+        from scripts.swarm.store import AgentRecord
+        from scripts.swarm.tick import agent_status
+
+        if not previous or agent_status(AgentRecord(**json.loads(previous))) != agent_status(agent):
+            pipe.hset(self.store.key(slug, "state-since"), agent.name, int(time.time() * 1000))
 
     def get(self, slug: str, execution_id: str) -> AgentRecord:
         from scripts.swarm.store import AgentRecord
@@ -134,7 +185,7 @@ class ExecutionRegistry:
 
         raw = json.dumps(asdict(agent))
         pipe.hset(self.store.key(slug, "executions"), agent.execution_id, raw)
-        pipe.hset(self.store.key(slug, "agents"), agent.name, raw)
+        _write_projection(pipe, self.store.key(slug, "agents"), agent)
         if previous is None or agent_status(previous) != agent_status(agent):
             pipe.hset(self.store.key(slug, "state-since"), agent.name, int(time.time() * 1000))
 
@@ -167,3 +218,15 @@ def _check_binding(previous, current, refuse):
             continue
         if previous.get(field) != current.get(field):
             refuse("runtime target identity is immutable after binding")
+
+
+def _has_identity(agent):
+    return bool(agent.execution_id or agent.generation or agent.runtime_backend != "local" or agent.runtime_target)
+
+
+def _write_projection(pipe, key, agent):
+    pipe.hset(
+        key,
+        agent.name,
+        json.dumps({field: value for field, value in asdict(agent).items() if field not in EXECUTION_FIELDS}),
+    )
