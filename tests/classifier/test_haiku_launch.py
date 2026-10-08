@@ -193,6 +193,8 @@ def test_caller_value_naming_a_later_agent_survives(tmp_path):
         shell.communicate(script, timeout=10)
         assert not _gone(agent.pid, wait=0.3)
     finally:
+        shell.kill()
+        shell.wait()
         agent.kill()
         agent.wait()
 
