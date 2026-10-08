@@ -1990,5 +1990,21 @@
   "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_56:409a637151996c215b8cdad4ef75d9e362591c631aad7cd4c8c892d6fdbefa29": {
     "reader": "Standards",
     "reason": "The argument reaches only overlays.chosen through role_overlays or {} in profile_choice.choose, which normalizes None to an empty map before any read, so chosen sees the same defaults. Exact CI artifact mutant from run 37699550281."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_accounts__mutmut_119:73968c7f056b2e72c45e28c7bb6ee58f7b682fc801cf8e24f52992796bba6be5": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The state classifier only distinguishes exact rejected. None, XXallowedXX and ALLOWED remain non rejected and produce identical states for every quota window. The Standards reader reconfirmed this identity against CI run 37710037693."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_accounts__mutmut_125:0e2e1fbf4ae6485c2e1771a0f3ef23a1fa2a4d1c82f8656745aa628c992b4437": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The state classifier only distinguishes exact rejected. None, XXallowedXX and ALLOWED remain non rejected and produce identical states for every quota window. The Standards reader reconfirmed this identity against CI run 37710037693."
+  },
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_accounts__mutmut_126:b39b349550e5414165feb4b2cc8ea82a0876f1595721d468c9d38304f56ca158": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The state classifier only distinguishes exact rejected. None, XXallowedXX and ALLOWED remain non rejected and produce identical states for every quota window. The Standards reader reconfirmed this identity against CI run 37710037693."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1quota_requirements__mutmut_67:073f50ffe1cf25b2262630f9b5693c54cec2d87aad3726f6589b82dd053dd227": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Exact claude and codex lane tokens leave through the requested branch. The fallback therefore sees only auto or absent tokens; template parsing rejects None lane keys. Replacing the lane argument by None yields the same effective share harness tuple for every supported configuration. Standards approved against CI run 37710037693."
   }
 }

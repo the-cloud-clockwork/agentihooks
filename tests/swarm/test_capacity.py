@@ -484,8 +484,10 @@ def test_runtime_preserves_flexible_first_then_fixed_task_reservations(monkeypat
         return module.Placed("pane", harness, seen[-1][2])
 
     monkeypatch.setattr(runtime, "_launch", launch)
+    choices = []
     for index, task in enumerate(ready["eng"], 1):
-        runtime.spawn(config, "eng", f"engineer@a1b2c3-{index:04}", task)
+        choices.append(runtime.spawn(config, "eng", f"engineer@a1b2c3-{index:04}", task).choice)
+    assert choices[0] == "overflow"
     assert seen == [("auto", "codex", "cx"), ("fixed", "claude", "a")]
     assert runtime._quota_allocations["eng"] == {"claude": 0, "codex": 0}
 
@@ -801,7 +803,7 @@ def test_capacity_apply_preserves_saved_options_and_controller_evidence(tmp_path
 
     def observations(env, now):
         assert now == 1234.567
-        return [account(), account("cx", harness="codex")]
+        return [account(sessions=2), account("cx", harness="codex")]
 
     monkeypatch.setattr(capacity, "accounts", observations)
     calls = []
@@ -878,3 +880,47 @@ def test_closed_or_reduced_account_caps_never_use_the_global_default():
     reduced = capacity.Account("codex", "cx", "REDUCE", 1, 30, 30, cap=5)
     assert capacity.free_seats(closed, 7, 5) == 0
     assert capacity.free_seats(reduced, 7, 5) == 1
+
+
+def test_lane_harness_pin_wins_over_a_saved_different_harness(tmp_path, monkeypatch):
+    from scripts.swarm import runtime as module
+
+    monkeypatch.setattr(module.plugins, "claude_only", lambda profile: False)
+    runtime = module.HerdrRuntime(home=tmp_path)
+    config = SwarmConfig(
+        "sw", "/repo", max_eng=1, max_ci=0, max_plan=0, lanes={"eng": {"agent": "codex"}}, codex_share=30
+    )
+    task = {"id": "e", "launch_assignment": {"profile": "engineer", "harness": "claude"}}
+    assert runtime.quota_requirements(config, {"eng": [task], "ci": [], "plan": []})["eng"] == [("codex",)]
+
+
+def test_spawn_obeys_lane_reservations_without_a_task_map(tmp_path, monkeypatch):
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account(), account("cx", harness="codex")])
+    runtime._quota_allocations = {"plan": {"claude": 0, "codex": 1}}
+    runtime.spawn(config, "plan", "planner@a1b2c3-0001", {"id": "p", "title": "Plan"})
+    assert seen == [("p", "codex", "cx")]
+
+
+def test_required_profile_keeps_its_forced_choice_when_reservation_agrees(tmp_path, monkeypatch):
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account()], reason="requested")
+    runtime._quota_allocations = {"plan": {"claude": 1, "codex": 0}}
+    runtime._quota_tasks = {"p": "claude"}
+    placed = runtime.spawn(config, "plan", "planner@a1b2c3-0001", {"id": "p", "title": "Plan", "profile": "frontend"})
+    assert placed.choice == "forced"
+    assert seen == [("p", "claude", "a")]
+
+
+@pytest.mark.parametrize("planned", [False, True])
+def test_master_affinity_cannot_fall_back_when_its_account_has_no_quota(tmp_path, monkeypatch, planned):
+    from scripts.swarm import runtime as module
+    from scripts.swarm.tick import SpawnError
+
+    runtime, config, seen = _runtime_probe(
+        tmp_path, monkeypatch, [account(), account("cx", harness="codex", state="DRAIN", left=4)]
+    )
+    monkeypatch.setattr(module.affinity, "desired", lambda cfg: "codex")
+    if planned:
+        runtime._quota_tasks = {"p": "claude"}
+    with pytest.raises(SpawnError, match="^no codex account has placeable quota seats$"):
+        runtime.spawn(config, "master", "master@a1b2c3-0001", {"id": "p", "title": "Master", "profile": "master"})
+    assert seen == []
