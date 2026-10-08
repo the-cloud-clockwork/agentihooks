@@ -221,19 +221,64 @@ def test_release_is_refused_while_a_delivery_is_open(store, dispatcher):
     assert [shown.id for shown in claim(store, "bob")] == [item.id]
 
 
-def test_a_superseded_item_closed_meanwhile_still_returns_the_reservations(store, dispatcher, monkeypatch):
+def test_a_superseded_item_closes_in_the_reserve_transaction(store, dispatcher):
     store.redis.sadd(SeenMarks(store.redis).key("bob"), "sw:3:c1")
     shown = store.send("operator", "bob", "comment", ref="sw:3:c1")
     fresh_item = store.send("alice", "bob", "hi")
-    real = store.close
-
-    def closed_meanwhile(item_id, *args):
-        real(item_id, "bob", "cancel")
-        return real(item_id, *args)
-
-    monkeypatch.setattr(store, "close", closed_meanwhile)
     assert [d.item for d in dispatcher.reserve("bob", "bridge-1")] == [fresh_item.id]
-    assert store.get(shown.id).state == "cancelled"
+    closed = store.get(shown.id)
+    assert (closed.state, closed.reason) == ("done", f"done: {SEEN_ON_LEDGER}")
+    assert store.history(shown.id)[-1]["by"] == "bob"
+    assert [item.id for item in store.pending_items("bob")] == [fresh_item.id]
+
+
+def test_the_last_superseded_item_leaves_the_waiting_set(store, dispatcher):
+    store.redis.sadd(SeenMarks(store.redis).key("bob"), "sw:3:c1")
+    store.send("operator", "bob", "comment", ref="sw:3:c1")
+    assert dispatcher.reserve("bob", "bridge-1") == []
+    assert not store.redis.sismember(store.key("waiting"), "bob")
+
+
+def test_an_item_redirected_away_is_not_reserved(store, dispatcher, monkeypatch):
+    item = store.send("alice", "bob", "hi")
+    listed = store.pending_mail("bob")
+    store.redirect(item.id, "swarm", "carol", "moved")
+    monkeypatch.setattr(store, "pending_mail", lambda _: listed)
+    assert dispatcher.reserve("bob", "bridge-1") == []
+    assert store.get(item.id).state == "pending"
+
+
+def test_a_crash_inside_reserve_writes_nothing(store, dispatcher, monkeypatch):
+    from scripts.inbox import dispatch
+
+    item = store.send("alice", "bob", "hi")
+
+    def crash(_):
+        raise SystemExit("crashed")
+
+    monkeypatch.setattr(dispatch, "digest", crash)
+    with pytest.raises(SystemExit):
+        dispatcher.reserve("bob", "bridge-1")
+    monkeypatch.undo()
+    assert not store.redis.exists(store.key("reservation", item.id))
+    assert not store.redis.exists(store.key("deliveries", "bob"))
+    assert [d.item for d in dispatcher.reserve("bob", "bridge-1")] == [item.id]
+
+
+def test_claim_returns_an_item_to_pending_when_its_seen_mark_keeps_changing(store, monkeypatch):
+    from scripts.inbox import seen
+    from scripts.inbox.store import InboxError
+
+    raced = store.send("operator", "bob", "comment", ref="sw:3:c1")
+    plain = store.send("alice", "bob", "hi")
+
+    def contended(self, name, ref):
+        raise InboxError("changed")
+
+    monkeypatch.setattr(seen.SeenMarks, "mark", contended)
+    assert [item.id for item in claim(store, "bob")] == [plain.id]
+    requeued = store.get(raced.id)
+    assert (requeued.state, requeued.reason) == ("pending", seen.UNSETTLED)
 
 
 def test_a_seen_mark_retries_when_the_owner_changes_meanwhile(store, monkeypatch):
@@ -421,6 +466,11 @@ def test_seen_marks_check_the_owner_of_the_resolved_name(store):
     Dispatcher(store).own(name, "bridge-1")
     assert SeenMarks(store.redis).mark("old-name", "sw:3:c1") is False
     assert SeenMarks(store.redis).mark("someone-else", "sw:3:c1") is True
+    Dispatcher(store).release(name, "bridge-1")
+    assert SeenMarks(store.redis).mark("old-name", "sw:3:c2") is True
+    assert store.redis.sismember(SeenMarks(store.redis).key(name), "sw:3:c2")
+    assert SeenMarks(store.redis).seen("old-name", "sw:3:c2") is True
+    assert SeenMarks(store.redis).mark(name, "sw:3:c2") is False
 
 
 def test_a_committed_delivery_is_never_redelivered(store, dispatcher):
