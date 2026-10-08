@@ -67,8 +67,9 @@ outside it is refused before anything is written, even when the folder exists lo
 
 ## Limitations
 
-- Signed launch grants belong to SV2-IDN-04. Until then the live hooks pass no grant, so an explicit marker
-  `project_id` is accepted as written; this package grants no authority from any label.
+- SV2-IDN-04 supplies the grant as `Registration.session_grant()` (`launch-grant.md`). No live launch path
+  registers a grant yet, so the live hooks pass none and an explicit marker `project_id` is accepted as
+  written; this package grants no authority from any label.
 - The live hooks see a task change only when a session starts under new swarm variables; a mid-session task
   change and `task_revision` are recorded by callers of `record_scope`.
 - When a session resumes before its last Stop ran, transcript entries older than the resume are not recorded,
