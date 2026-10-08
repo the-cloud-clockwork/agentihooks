@@ -432,3 +432,54 @@ def test_a_successor_receiving_during_the_sweep_keeps_the_message(redis, monkeyp
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(item.id).state == "read"
     assert inbox.inbox("sw-eng-3") == []
+
+
+def test_task_mail_waits_until_a_live_successor_takes_the_seat(redis):
+    from scripts.swarm.store import AgentRecord
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    item = inbox.send("sw-eng-3", "eng-1@sw", "Finish the old work.", task="t1")
+    inbox.deliver(item.id, "sw-eng-1")
+    store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw", state="finished"))
+    store.seats.occupy("eng-1@sw", "sw-eng-2", item.created_at + 1)
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).state == "delivered"
+    assert inbox.inbox("sw-eng-3") == []
+
+
+def test_withdraw_without_an_address_guard_cancels_the_open_message(redis):
+    inbox = InboxStore(redis)
+    item = inbox.send("alice", "bob", "Review this work.")
+    closed = inbox.withdraw(item.id, "swarm", "cancelled: nobody takes the work")
+    assert closed.state == "cancelled"
+    assert closed.reason == "cancelled: nobody takes the work"
+    assert inbox.get(item.id).state == "cancelled"
+
+
+@pytest.mark.parametrize("receiver", ["bob", "XXXX"])
+def test_withdraw_requires_a_recorded_receipt_for_the_expected_receiver(redis, receiver):
+    inbox = InboxStore(redis)
+    item = inbox.send("alice", receiver, "Review this work.")
+    assert inbox.withdraw(item.id, "swarm", "cancelled: receiver left", expected_receiver=receiver) is None
+    assert inbox.get(item.id).state == "pending"
+
+
+def test_unreceived_task_mail_is_not_cancelled_as_a_new_occupant_receives_it(redis, monkeypatch):
+    from scripts.swarm.store import AgentRecord
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw"))
+    store.seats.occupy("eng-1@sw", "sw-eng-2", 1)
+    item = inbox.send("sw-eng-3", "eng-1@sw", "Finish old work.", task="t1")
+    withdraw = inbox.withdraw
+
+    def receive_then_withdraw(*args, **kwargs):
+        store.seats.occupy("eng-1@sw", "XXXX", item.created_at + 1)
+        inbox.read(item.id, "XXXX")
+        return withdraw(*args, **kwargs)
+
+    monkeypatch.setattr(inbox, "withdraw", receive_then_withdraw)
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).state == "pending"
+    assert inbox.inbox("sw-eng-3") == []

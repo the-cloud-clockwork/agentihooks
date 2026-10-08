@@ -35,6 +35,7 @@ def test_send_then_inbox_shows_a_pending_item_from_the_session(store, monkeypatc
     assert run("inbox") == 0
     assert capsys.readouterr().out.split("\t")[:3] == [sent["id"], "pending", "alice"]
     assert store.get(sent["id"]).text == "review my branch"
+    assert store.get(sent["id"]).task == ""
 
 
 @pytest.mark.parametrize("address", ["sw-eng-1", "eng-1@sw"])
@@ -74,6 +75,15 @@ def test_a_receivers_alias_records_the_current_task(store):
     swarm.put_agent("sw", AgentRecord(name=name, lane="eng", task="t1"))
     store.names.alias("old-receiver", name)
     assert store.receiver_task("old-receiver") == "t1"
+
+
+def test_task_lookup_preserves_the_whole_swarm_name_in_a_seat_address(store):
+    from scripts.swarm.store import AgentRecord, RedisStore
+
+    swarm = RedisStore(store.redis)
+    swarm.put_agent("sw@part", AgentRecord(name="sw-eng-1", lane="eng", task="t1"))
+    store.seats.occupy("eng-1@sw@part", "sw-eng-1", 1)
+    assert store.receiver_task("eng-1@sw@part") == "t1"
 
 
 def test_a_reply_to_the_operator_with_a_clock_time_is_refused_at_send(store, capsys):

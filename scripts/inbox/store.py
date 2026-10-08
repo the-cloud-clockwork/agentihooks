@@ -218,7 +218,7 @@ class InboxStore:
                 continue
         raise InboxError(f"message {item_id} changed meanwhile; run the command again")
 
-    def _try_redirect(self, item_id, by, address, reason, expected_address, expected_receiver=""):
+    def _try_redirect(self, item_id, by, address, reason, expected_address, expected_receiver):
         key = self.key("item", item_id)
         with self.redis.pipeline() as pipe:
             pipe.watch(key)
