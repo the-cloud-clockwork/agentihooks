@@ -506,7 +506,7 @@ def _parser() -> argparse.ArgumentParser:
         "--agent",
         choices=agent_choice.AGENTS,
         default="",
-        help="Agent to open; default the first in $AGENTIHOOKS_AGENT_PRIORITY (claude,codex) with quota left",
+        help="Agent to open; default the harness of the account with a free session and the fewest live sessions",
     )
     parser.add_argument("--profile", default="", help="Role profile for this run")
     parser.add_argument(

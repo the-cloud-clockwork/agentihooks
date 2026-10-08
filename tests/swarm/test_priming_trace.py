@@ -69,8 +69,6 @@ def test_spawn_writes_the_priming_rows_beside_the_prompt(tmp_path, monkeypatch):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
     )

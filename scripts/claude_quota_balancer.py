@@ -16,14 +16,13 @@ from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 
+from scripts import session_bands
 from scripts.claude_config import claude_home
-from scripts.session_caps import SessionCaps
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
 OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 MAX_PROBE_WORKERS = 3
 CACHE_TTL_SECONDS = 60
-MIN_ROUTING_LEFT = 5.0
 
 
 @dataclass(frozen=True)
@@ -620,8 +619,19 @@ def _metric(value: float | None) -> float:
     return -1.0 if value is None else value
 
 
-def is_routable(result: ProbeResult) -> bool:
-    return result.margin is not None and result.margin >= MIN_ROUTING_LEFT
+def account_cap(result: ProbeResult, now: float | None = None, include_fable: bool = False) -> int | None:
+    """Live sessions the account may hold under the session bands; None without a full reading."""
+    if result.provider_status == "rejected":
+        return 0
+    timestamp = time.time() if now is None else now
+    weeks = [result.seven_day, *([result.fable] if include_fable else [])]
+    left = [session_bands.left(window.used, window.resets_at, timestamp) for window in weeks]
+    five = session_bands.left(result.five_hour.used, result.five_hour.resets_at, timestamp)
+    return session_bands.cap(five, None if None in left else min(left))
+
+
+def is_routable(result: ProbeResult, now: float | None = None, include_fable: bool = False) -> bool:
+    return bool(account_cap(result, now, include_fable))
 
 
 def rank_results(results: list[ProbeResult], include_fable: bool = False) -> list[ProbeResult]:
@@ -647,13 +657,10 @@ def select_credential(
     cache_file: Path | None = None,
     claude_bin: str = "claude",
     sessions: Mapping[str, int] | None = None,
-    caps: SessionCaps = SessionCaps(3),
     exclude: Iterable[str] = (),
+    now: float | None = None,
 ) -> RouteDecision:
-    """Pick the account with the most routing left among those below the per-account session cap.
-
-    When every routable account is at the cap, the least-loaded one wins (placement=overflow).
-    """
+    """Pick the account with a free place under its session band that runs the fewest live sessions."""
     active_env = os.environ if environ is None else environ
     credentials = discover_credentials(active_env)
     if not credentials:
@@ -667,31 +674,24 @@ def select_credential(
         cache_file=cache_file,
         claude_bin=claude_bin,
     )
+    timestamp = time.time() if now is None else now
     excluded = set(exclude)
-    eligible = [result for result in results if is_routable(result) and result.account not in excluded]
-    if not eligible:
-        outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
-        raise RoutingError(f"no Claude account has verified routing capacity{outside}", results)
-    reserve = {slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", "").split(",") if slug.strip()}
     counts = sessions or {}
-    below_cap = [
-        result for result in eligible if sessions is None or counts.get(result.account, 0) < caps.of(result.account)
-    ]
-    pool = below_cap or eligible
-    pool = [result for result in pool if result.account not in reserve] or pool
-    if below_cap:
-        winner, placement = rank_results(pool, include_fable)[0], "open"
-    else:
-        winner = min(rank_results(pool, include_fable), key=lambda result: counts.get(result.account, 0))
-        placement = "overflow"
+    seats = {
+        result.account: session_bands.Seat("claude", result.account, cap, counts.get(result.account, 0))
+        for result in results
+        if result.account not in excluded and (cap := account_cap(result, timestamp, include_fable)) is not None
+    }
+    reserve = {slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", "").split(",") if slug.strip()}
+    seat = session_bands.pick(seat for seat in seats.values() if seat.account not in reserve)
+    seat = seat or session_bands.pick(seats.values())
+    if seat is None:
+        outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
+        raise RoutingError(f"no Claude account has a free session under its quota band{outside}", results)
     by_account = {credential.account: credential for credential in credentials}
+    by_result = {result.account: result for result in results}
     return RouteDecision(
-        by_account[winner.account],
-        winner,
-        source,
-        sessions=None if sessions is None else counts.get(winner.account, 0),
-        max_sessions=None if sessions is None else caps.of(winner.account),
-        placement=placement,
+        by_account[seat.account], by_result[seat.account], source, sessions=seat.sessions, max_sessions=seat.cap
     )
 
 
@@ -753,6 +753,10 @@ def _span(remaining: int) -> str:
     return f"{days}d{hours:02d}h"
 
 
+def _cap_text(cap: int | None) -> str:
+    return "?" if cap is None else str(cap)
+
+
 def render_table(
     results: list[ProbeResult],
     now: int | None = None,
@@ -760,7 +764,6 @@ def render_table(
     current: str = "",
     observed: Mapping[str, float] | None = None,
     sessions: Mapping[str, int] | None = None,
-    caps: SessionCaps | None = None,
 ) -> str:
     timestamp = int(time.time()) if now is None else now
     headers = [
@@ -785,7 +788,7 @@ def render_table(
             f"{result.account} (current)" if current and result.account == current else result.account,
             result.state,
             *(
-                [f"{sessions.get(result.account, 0)}/{caps.of(result.account) if caps else '?'}"]
+                [f"{sessions.get(result.account, 0)}/{_cap_text(account_cap(result, timestamp, include_fable))}"]
                 if sessions is not None
                 else []
             ),

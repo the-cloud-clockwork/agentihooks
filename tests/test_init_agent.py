@@ -113,6 +113,7 @@ def test_wsl_command_hands_windows_terminal_a_windows_resolvable_program(monkeyp
 
 
 def _launch(monkeypatch, tmp_path, popen):
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     monkeypatch.setattr(init_agent.shutil, "which", lambda name: None)
     monkeypatch.setattr(
         init_agent,

@@ -187,7 +187,7 @@ def test_swarm_set_master_agent_orders_the_live_master_once(env, capsys):
     assert store.config("sw").lanes[MASTER]["agent"] == "codex"
 
 
-def _spawn(tmp_path, monkeypatch, lanes, task, codex_share=None):
+def _spawn(tmp_path, monkeypatch, lanes, task):
     for key in ("MODEL", "EFFORT"):
         for agent in ("CLAUDE", "CODEX"):
             monkeypatch.delenv(f"AGENTIHOOKS_{agent}_{key}", raising=False)
@@ -210,8 +210,6 @@ def _spawn(tmp_path, monkeypatch, lanes, task, codex_share=None):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=codex_share,
-        codex_min_week_left=0,
         lanes=lanes,
         autonomy="delegate",
     )
@@ -244,7 +242,7 @@ def test_a_handoff_successor_launches_on_the_desired_harness_with_the_original_p
 
 
 def test_quota_share_routing_never_moves_a_master_off_its_affinity(tmp_path, monkeypatch):
-    argv, _ = _spawn(tmp_path, monkeypatch, {MASTER: {"agent": "codex"}}, {"id": MASTER, "peer": ""}, codex_share=0)
+    argv, _ = _spawn(tmp_path, monkeypatch, {MASTER: {"agent": "codex"}}, {"id": MASTER, "peer": ""})
     assert argv[argv.index("--agent") + 1] == "codex"
 
 

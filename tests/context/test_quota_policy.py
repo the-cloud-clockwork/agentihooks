@@ -81,15 +81,28 @@ def test_an_account_own_cap_replaces_the_default_for_the_handoff_target():
     assert "1/1 sessions" in qp._others_text(d)
 
 
-def test_other_accounts_carry_their_stored_cap(monkeypatch):
+def test_other_accounts_carry_their_band_cap(monkeypatch):
     from scripts import claude_quota_balancer as balancer
 
-    beta = balancer.ProbeResult(
-        "beta", "allowed", "NORMAL", 70.0, balancer.QuotaWindow(10.0, None), balancer.QuotaWindow(30.0, None)
-    )
-    monkeypatch.setattr(balancer, "cached_observations", lambda: [(time.time(), beta)])
-    assert [c.cap for c in qp._other_accounts({"beta": 3}, {"beta": 5})] == [5]
-    assert [c.cap for c in qp._other_accounts({"beta": 3})] == [None]
+    def result(account, five_used, week_used):
+        return balancer.ProbeResult(
+            account,
+            "allowed",
+            "NORMAL",
+            70.0,
+            balancer.QuotaWindow(five_used, None),
+            balancer.QuotaWindow(week_used, None),
+        )
+
+    seen = [result("beta", 10.0, 30.0), result("gamma", 55.0, 30.0), result("delta", 10.0, 96.0)]
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [(time.time(), found) for found in seen])
+    assert [(c.account, c.cap) for c in qp._other_accounts({"beta": 3})] == [("beta", 6), ("gamma", 4), ("delta", 0)]
+
+
+def test_a_band_cap_of_zero_is_full_and_no_cap_falls_back_to_the_default():
+    closed = qp.Candidate("a", 10.0, 96.0, 0, time.time(), cap=0)
+    assert closed.full(3)
+    assert not qp.Candidate("b", 10.0, 30.0, 2, time.time()).full(3)
 
 
 def test_other_accounts_count_an_account_with_no_live_session_as_zero(monkeypatch):

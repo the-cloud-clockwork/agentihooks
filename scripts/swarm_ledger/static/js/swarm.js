@@ -6,7 +6,6 @@ import { renderChatTo } from "./chat.js";
 import { clearNoteError, renderControls, renderGates, showNote } from "./controls.js";
 import { firstPage, moreButton, wanted } from "./pages.js";
 
-const SESSION_CAP_MAX = 50;
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd"];
 const OVERLAY_CAP = 3;

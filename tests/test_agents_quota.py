@@ -1,8 +1,6 @@
 import json
 import os
 
-import pytest
-
 from scripts import agents_quota, codex_quota
 from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
 from scripts.codex_router import CodexAccount
@@ -70,7 +68,7 @@ def test_rows_list_every_claude_account_and_codex():
         five_hour=QuotaWindow(used=5.0, resets_at=2000),
         seven_day=QuotaWindow(used=40.0, resets_at=9000),
     )
-    rows = agents_quota.claude_rows([claude], {"ncgma": 2}, "cached")
+    rows = agents_quota.claude_rows([claude], {"ncgma": 2}, "cached", now=1000)
     quota = codex_quota.parse_event(_event("2026-10-04T15:00:00Z", WEEK))
     accounts = [CodexAccount("default"), CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
     rows += agents_quota.codex_rows(accounts, {"default": quota}, {"default": 1}, now=quota.observed_at + 120)
@@ -90,10 +88,10 @@ def test_rows_list_every_claude_account_and_codex():
         "RESET",
         "SOURCE",
     ]
-    assert table[1].split()[:8] == ["claude", "ncgma", "NORMAL", "2", "95%", "16m", "60%", "2h13m"]
-    assert table[2].split()[:6] == ["codex", "default", "NORMAL", "1", "?", "?"]
+    assert table[1].split()[:8] == ["claude", "ncgma", "NORMAL", "2/6", "95%", "16m", "60%", "2h13m"]
+    assert table[2].split()[:6] == ["codex", "default", "NORMAL", "1/6", "?", "?"]
     assert table[2].endswith("session-log 2m ago")
-    assert table[3].split() == ["codex", "alpha", "UNKNOWN", "0", "?", "?", "?", "?", "no", "session", "log"]
+    assert table[3].split() == ["codex", "alpha", "UNKNOWN", "0/?", "?", "?", "?", "?", "no", "session", "log"]
 
 
 def test_rows_carry_both_reset_times_and_when_each_was_observed():
@@ -175,6 +173,7 @@ def test_quota_json_lists_every_row(monkeypatch, capsys):
             "source": "cached",
             "five_hour_resets_at": None,
             "observed_at": None,
+            "cap": None,
         }
     ]
 
@@ -207,27 +206,18 @@ def test_page_quota_reads_the_balance_cache_and_codex_logs_without_probing(monke
     monkeypatch.setattr(claude_quota_balancer, "collect_results", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"tccgma": 2})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"default": 1})
-    monkeypatch.setattr(account_sessions, "max_sessions", lambda: 3)
     monkeypatch.setattr(codex_router, "routing_pool", lambda environ: [CodexAccount("default")])
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {"default": None})
     quota = agents_quota.page_quota(now=100.0)
-    assert quota["cap"] == 3
-    assert [(r["agent"], r["account"], r["sessions"]) for r in quota["rows"]] == [
-        ("claude", "tccgma", 2),
-        ("codex", "default", 1),
+    assert [(r["agent"], r["account"], r["sessions"], r["cap"]) for r in quota["rows"]] == [
+        ("claude", "tccgma", 2, 6),
+        ("codex", "default", 1, None),
     ]
     assert quota["rows"][0]["five_hour_left"] == 92.0
     assert quota["rows"][0]["seven_day_left"] == 78.0
     assert quota["rows"][1]["five_hour_left"] is None
     assert quota["rows"][0]["observed_at"] == 1.0
     assert quota["probed_at"] == 1.0
-
-
-@pytest.fixture(autouse=True)
-def no_stored_caps(monkeypatch):
-    from scripts import session_caps
-
-    monkeypatch.setattr(session_caps, "stored", lambda harness="claude": {})
 
 
 def test_page_quota_refresh_probes_once_a_minute_and_drops_the_page_cache(monkeypatch):

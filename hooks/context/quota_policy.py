@@ -41,7 +41,7 @@ class Candidate:
     cap: int | None = None
 
     def limit(self, default: int) -> int:
-        return self.cap or default
+        return default if self.cap is None else self.cap
 
     def full(self, default: int) -> bool:
         return self.sessions >= self.limit(default)
@@ -156,7 +156,8 @@ def _session_windows(session_id: str) -> tuple[float, float, float | None, float
     )
 
 
-def _other_accounts(sessions: dict[str, int], caps: dict[str, int] | None = None) -> list[Candidate]:
+def _other_accounts(sessions: dict[str, int]) -> list[Candidate]:
+    from scripts import session_bands
     from scripts.claude_quota_balancer import cached_observations
 
     now = time.time()
@@ -166,14 +167,13 @@ def _other_accounts(sessions: dict[str, int], caps: dict[str, int] | None = None
         week = _effective(result.seven_day.used, result.seven_day.resets_at, now)
         if five is None or week is None or result.provider_status == "rejected":
             continue
-        cap = (caps or {}).get(result.account)
+        cap = session_bands.cap(100.0 - five, 100.0 - week)
         candidates.append(Candidate(result.account, five, week, sessions.get(result.account, 0), observed_at, cap))
     return candidates
 
 
 def evaluate(session_id: str) -> Decision | None:
     from hooks.context.account_sessions import agent_pid, max_sessions, session_account, sessions_by_account
-    from scripts import session_caps
 
     windows = _session_windows(session_id)
     if windows is None:
@@ -188,7 +188,7 @@ def evaluate(session_id: str) -> Decision | None:
         week_used=week_used,
         five_reset=five_reset,
         week_reset=week_reset,
-        others=_other_accounts(sessions, session_caps.stored()),
+        others=_other_accounts(sessions),
         max_sessions=max_sessions(),
         push=push_active(session_id),
     )

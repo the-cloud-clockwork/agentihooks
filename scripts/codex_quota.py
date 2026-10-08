@@ -97,3 +97,8 @@ def latest_codex_quota(
         rollouts = [path for path in rollouts if keep(rollout_session_id(path))]
     found = [q for path in rollouts[:RECENT_ROLLOUTS] if (q := _last_in(path)) is not None]
     return max(found, key=lambda q: q.observed_at, default=None)
+
+
+def session_quota(environ: dict[str, str], session_id: str) -> CodexQuota | None:
+    found = sorted((codex_home(environ) / "sessions").glob(f"*/*/*/rollout-*{session_id}.jsonl"))
+    return _last_in(found[-1]) if found else None

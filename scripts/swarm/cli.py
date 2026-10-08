@@ -13,7 +13,6 @@ agentihooks swarm <id> remove                                     drop a swarm w
 agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
 agentihooks swarm <id> set snapshot-minutes=N                      automatic snapshot interval while running (default 30, 0 off)
-agentihooks swarm <id> set codex-share=PCT codex-min-week-left=PCT   share of auto lane spawns sent to Codex (default 30, 5)
 agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E eng-kind=K eng-role=TEXT   (ci- likewise)
 agentihooks swarm <id> set effort-min=E effort-max=E               every lane launch effort stays in this range (default medium, high)
 agentihooks swarm <id> set master-agent=claude|codex              master affinity; a change orders the live master to hand off to that harness
@@ -50,7 +49,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.context import injection_trace, quarantine
-from scripts import session_caps
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, modes, progress, quiet
 from scripts.gates import log as gate_log
@@ -98,7 +96,7 @@ from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
-from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
+from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
 from scripts.swarm.tick import agent_status, primed, skip_refused, tick
 from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
 
@@ -107,8 +105,6 @@ SETTABLE = {
     "max-ci-agents": "max_ci",
     "max-plan-agents": "max_plan",
     "compact-limit": "compact_limit",
-    "codex-share": "codex_share",
-    "codex-min-week-left": "codex_min_week_left",
     "snapshot-minutes": "snapshot_minutes",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
@@ -532,8 +528,6 @@ def cmd_set(store, args):
                 "max_plan": config.max_plan,
                 "compact_limit": config.compact_limit,
                 "autonomy": config.autonomy,
-                "codex_share": config.codex_share,
-                "codex_min_week_left": config.codex_min_week_left,
                 "snapshot_minutes": config.snapshot_minutes,
                 "effort_min": config.effort_min,
                 "effort_max": config.effort_max,
@@ -543,15 +537,6 @@ def cmd_set(store, args):
             }
         )
     )
-
-
-def cmd_session_cap(store, args):
-    try:
-        cap = None if args.cap == "default" else int(args.cap)
-        session_caps.set_cap(args.account, cap, harness=args.harness)
-    except ValueError as exc:
-        raise SwarmError(f"session-cap takes an account and a cap from 1 to {session_caps.MAX_CAP}, or default: {exc}")
-    print(json.dumps({"account": args.account, "harness": args.harness, "cap": "default" if cap is None else cap}))
 
 
 def cmd_templates(store, args):
@@ -595,15 +580,6 @@ def cmd_restore(store, args):
     print(json.dumps({"swarm": args.slug, "state": state, "snapshot": str(source), "restored": restored}))
 
 
-def _share(store, config):
-    spawns = store.spawns(config.slug)
-    codex, total = spawns.get("codex", 0), sum(spawns.values())
-    share, floor = codex_split(config, os.environ)
-    return (
-        f"codex {codex}/{total} spawns {codex * 100 // total if total else 0}%  target {share}%  min week left {floor}%"
-    )
-
-
 def _snapshot_line(auto):
     every = f"every {auto['every_minutes']} min" if auto["every_minutes"] > 0 else "automatic snapshots off"
     if auto["last"] is None:
@@ -634,7 +610,7 @@ def cmd_status(store, args):
     counts = task_counts(tasks)
     found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
-        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}  {_share(store, config)}"
+        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
     )
     print(
         "gate modes  "
@@ -1160,10 +1136,6 @@ def build_parser():
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
     sub.add_parser("set").add_argument("pairs", nargs="+")
-    session_cap = sub.add_parser("session-cap")
-    session_cap.add_argument("account")
-    session_cap.add_argument("cap")
-    session_cap.add_argument("--harness", choices=session_caps.HARNESSES, default="claude")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
     sub.add_parser("names").add_argument("--json", action="store_true")
