@@ -1,0 +1,262 @@
+import pytest
+
+from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
+from scripts.inbox.seats import seat_address
+from scripts.inbox.store import InboxStore
+from scripts.swarm import grouping
+from scripts.swarm.ledger_client import LedgerRefused
+from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
+from scripts.swarm.tick import _claimable, tick
+from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+PAGE = "scripts/swarm_ledger/static/js/render.js"
+
+
+def task(task_id, territory=("scripts/swarm/tick.py",), **fields):
+    return {
+        "id": task_id,
+        "title": f"title {task_id}",
+        "description": f"spec {task_id}",
+        "state": "open",
+        "claimed_by": "",
+        "lane": "eng",
+        "kind": "code",
+        "profile": "engineer",
+        "difficulty": "S",
+        "territory": list(territory),
+        **fields,
+    }
+
+
+def doc(*tasks):
+    return {"overview": "o", "tasks": list(tasks)}
+
+
+def ids(groups):
+    return [[t["id"] for t in group] for group in groups]
+
+
+class GroupLedger(FakeLedger):
+    def __init__(self, tasks):
+        super().__init__(tasks)
+        self.groups, self.priorities = [], []
+
+    def group_tasks(self, slug, lead, members):
+        assert slug == "sw"
+        self.groups.append((lead, list(members)))
+
+    def priority(self, slug, item, text):
+        assert slug == "sw"
+        self.priorities.append((item, text))
+
+
+@pytest.fixture
+def store():
+    import fakeredis
+
+    saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    saved.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0))
+    return saved
+
+
+@pytest.fixture
+def asked(monkeypatch):
+    calls = []
+
+    def answer(*probabilities):
+        def decide(state, questions, **kw):
+            calls.append((state, questions, kw))
+            return DecisionResult(
+                {name: Answer("noul", noul=p) for name, p in zip(questions, probabilities)}, "unit-test"
+            )
+
+        monkeypatch.setattr(grouping, "decide", decide)
+        return calls
+
+    return answer
+
+
+def master_items(store):
+    return InboxStore(store.redis).inbox(seat_address("sw", MASTER))
+
+
+def test_limits():
+    assert (grouping.PER_TICK, grouping.MIN_CONFIDENCE, grouping.APPLIES) == (3, 0.6, ("delegate", "full"))
+
+
+def test_filter_groups_overlapping_small_tasks_and_leaves_the_rest():
+    found = grouping.candidates(
+        doc(
+            task("a"),
+            task("b", territory=["scripts/swarm"]),
+            task("c", territory=["hooks/classifier"]),
+            task("d", territory=["hooks/classifier/core.py"]),
+            task("e", territory=["docs"]),
+        )
+    )
+    assert ids(found) == [["a", "b"], ["c", "d"]]
+
+
+def test_filter_groups_tasks_on_the_same_page_area():
+    other_page = "scripts/swarm_ledger/static/css/tasks.css"
+    found = grouping.candidates(doc(task("a", territory=[PAGE]), task("b", territory=[other_page])))
+    assert ids(found) == [["a", "b"]]
+    assert grouping.candidates(doc(task("a", territory=[PAGE]), task("b", territory=[other_page, "hooks"]))) == []
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        task("b", lane="ci", kind="ci"),
+        task("b", profile="frontend"),
+        task("b", depends_on=["a"]),
+        task("b", state="claimed", claimed_by="engineer@abcdef-0001"),
+        task("b", claimed_by="engineer@abcdef-0001"),
+        task("b", merged_into="z"),
+        task("b", group_members=["z"]),
+        task("b", out_of_scope=True),
+        task("b", kind="ops"),
+        task("b", difficulty=None),
+        task("b", difficulty="L"),
+        task("b", difficulty="M"),
+        task("b", territory=[]),
+    ],
+)
+def test_filter_never_pairs_tasks_that_differ_depend_or_are_taken(other):
+    assert grouping.candidates(doc(task("a"), other)) == []
+
+
+def test_filter_caps_a_group_at_five_tasks():
+    found = grouping.candidates(doc(*(task(f"t{n}") for n in range(7))))
+    assert ids(found) == [["t0", "t1", "t2", "t3", "t4"], ["t5", "t6"]]
+
+
+def test_filter_keeps_the_ceiling_at_m():
+    found = grouping.candidates(doc(task("a", difficulty="M"), task("b"), task("c")))
+    assert ids(found) == [["b", "c"]]
+
+
+def test_the_highest_ranked_task_leads():
+    found = grouping.candidates(doc(task("a", rank="low"), task("b"), task("c", rank="urgent")))
+    assert ids(found) == [["c", "b", "a"]]
+
+
+def test_the_classifier_names_every_task_in_each_set(asked, store):
+    calls = asked(0.9)
+    config = store.update("sw", autonomy="delegate")
+    grouping.group_pass("sw", config, store, GroupLedger([]), doc(task("a"), task("b")))
+    state, questions, kw = calls[0]
+    assert kw == {"purpose": "task-grouping"}
+    assert "a titled title a, b titled title b" in questions["group_0"].instructions
+    assert [t["description"] for t in state["groups"][0]] == ["spec a", "spec b"]
+
+
+def test_delegate_applies_the_group_and_tells_the_master(asked, store):
+    asked(0.9)
+    config = store.update("sw", autonomy="delegate")
+    ledger = GroupLedger([])
+    actions = grouping.group_pass("sw", config, store, ledger, doc(task("a"), task("b"), task("c")))
+    assert ledger.groups == [("a", ["b", "c"])] and ledger.priorities == []
+    assert actions == ["grouped tasks b, c under a"]
+    assert "grouped tasks b, c under task a" in master_items(store)[0].text
+
+
+def test_full_autonomy_applies_too(asked, store):
+    asked(0.9)
+    ledger = GroupLedger([])
+    grouping.group_pass("sw", store.update("sw", autonomy="full"), store, ledger, doc(task("a"), task("b")))
+    assert ledger.groups == [("a", ["b"])]
+
+
+@pytest.mark.parametrize("autonomy", ["manual", "assist"])
+def test_lower_autonomy_raises_a_priority_and_asks_the_master(asked, store, autonomy):
+    asked(0.9)
+    ledger = GroupLedger([])
+    actions = grouping.group_pass("sw", store.update("sw", autonomy=autonomy), store, ledger, doc(task("a"), task("b")))
+    assert ledger.groups == [] and ledger.priorities == [
+        ("tasks/a", "Group 2 small tasks into one pull request led by this task.")
+    ]
+    assert actions == ["proposed grouping tasks b under a"]
+    assert "task group a b" in master_items(store)[0].text
+
+
+def test_a_set_is_asked_once(asked, store):
+    calls = asked(0.9)
+    config = store.update("sw", autonomy="manual")
+    ledger = GroupLedger([])
+    for _ in range(2):
+        grouping.group_pass("sw", config, store, ledger, doc(task("a"), task("b")))
+    assert len(calls) == 1 and len(ledger.priorities) == 1
+
+
+@pytest.mark.parametrize("noul", [0.59, None, float("nan"), True])
+def test_a_set_the_classifier_does_not_confirm_is_declined_for_good(asked, store, noul):
+    calls = asked(noul)
+    ledger = GroupLedger([])
+    for _ in range(2):
+        assert grouping.group_pass("sw", store.config("sw"), store, ledger, doc(task("a"), task("b"))) == []
+    assert ledger.groups == [] and len(calls) == 1
+
+
+def test_confidence_at_the_floor_confirms(asked, store):
+    asked(0.6)
+    ledger = GroupLedger([])
+    grouping.group_pass("sw", store.config("sw"), store, ledger, doc(task("a"), task("b")))
+    assert ledger.groups == [("a", ["b"])]
+
+
+def test_no_classifier_forms_no_group_and_asks_again_later(monkeypatch, store, asked):
+    def down(*args, **kwargs):
+        raise ClassifierUnavailable("down")
+
+    monkeypatch.setattr(grouping, "decide", down)
+    ledger = GroupLedger([])
+    assert grouping.group_pass("sw", store.config("sw"), store, ledger, doc(task("a"), task("b"))) == []
+    asked(0.9)
+    grouping.group_pass("sw", store.config("sw"), store, ledger, doc(task("a"), task("b")))
+    assert ledger.groups == [("a", ["b"])]
+
+
+def test_at_most_three_sets_are_asked_per_tick(asked, store):
+    calls = asked(0.1, 0.1, 0.1)
+    tasks = [task(f"{area}{n}", territory=[area]) for area in "pqrs" for n in range(2)]
+    grouping.group_pass("sw", store.config("sw"), store, GroupLedger([]), doc(*tasks))
+    assert len(calls[0][1]) == 3
+
+
+def test_a_refused_group_write_goes_on_to_the_next_set(asked, store):
+    asked(0.9, 0.9)
+
+    class Refusing(GroupLedger):
+        def group_tasks(self, slug, lead, members):
+            if lead == "a":
+                raise LedgerRefused("no")
+            super().group_tasks(slug, lead, members)
+
+    ledger = Refusing([])
+    tasks = doc(task("a"), task("b"), task("c", territory=["docs"]), task("d", territory=["docs"]))
+    actions = grouping.group_pass("sw", store.config("sw"), store, ledger, tasks)
+    assert ledger.groups == [("c", ["d"])]
+    assert actions[0] == "skipped grouping under task a: the ledger refused its write"
+
+
+def test_nothing_to_group_asks_nothing(asked, store):
+    calls = asked()
+    assert grouping.group_pass("sw", store.config("sw"), store, GroupLedger([]), doc(task("a"))) == []
+    assert calls == []
+
+
+def test_a_grouped_member_leaves_the_claim_queue(store):
+    rows = {t["id"]: t for t in [task("a", group_members=["b"]), task("b", merged_into="a")]}
+    assert [t["id"] for t in _claimable("sw", store, rows, {"phases": [], "tasks": list(rows.values())}, "eng")] == [
+        "a"
+    ]
+
+
+def test_the_tick_groups_open_tasks(asked, store):
+    asked(0.9)
+    ledger = GroupLedger([task("a"), task("b")])
+    actions = tick("sw", store, ledger, FakeRuntime(), now_ms=1_000)
+    assert "grouped tasks b under a" in actions
