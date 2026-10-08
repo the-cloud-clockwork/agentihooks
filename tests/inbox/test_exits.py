@@ -402,12 +402,33 @@ def test_a_message_moved_during_the_sweep_is_kept_and_its_sender_is_not_told(red
     store.seats.occupy("eng-1@sw", "sw-eng-2", item.created_at + 1)
     withdraw = inbox.withdraw
 
-    def move_then_withdraw(item_id, by, reason, expected_address=""):
+    def move_then_withdraw(item_id, by, reason, expected_address="", expected_receiver=""):
         inbox.redirect(item_id, "sw-eng-2", "eng-2@sw", "work moved", "eng-1@sw")
-        return withdraw(item_id, by, reason, expected_address)
+        return withdraw(item_id, by, reason, expected_address, expected_receiver)
 
     monkeypatch.setattr(inbox, "withdraw", move_then_withdraw)
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(item.id).address == "eng-2@sw"
     assert inbox.get(item.id).state == "pending"
+    assert inbox.inbox("sw-eng-3") == []
+
+
+def test_a_successor_receiving_during_the_sweep_keeps_the_message(redis, monkeypatch):
+    from scripts.swarm.store import AgentRecord
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    item = inbox.send("sw-eng-3", "eng-1@sw", "Finish the old work.", task="t1")
+    inbox.deliver(item.id, "sw-eng-1")
+    store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw"))
+    store.seats.occupy("eng-1@sw", "sw-eng-2", item.created_at + 1)
+    withdraw = inbox.withdraw
+
+    def receive_then_withdraw(*args, **kwargs):
+        inbox.read(item.id, "sw-eng-2")
+        return withdraw(*args, **kwargs)
+
+    monkeypatch.setattr(inbox, "withdraw", receive_then_withdraw)
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).state == "read"
     assert inbox.inbox("sw-eng-3") == []

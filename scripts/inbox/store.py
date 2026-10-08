@@ -194,27 +194,46 @@ class InboxStore:
             reason,
         )
 
-    def withdraw(self, item_id: str, by: str, reason: str, expected_address: str = "") -> Item | None:
-        return self.redirect(item_id, by, "", reason, expected_address)
+    def withdraw(
+        self, item_id: str, by: str, reason: str, expected_address: str = "", expected_receiver: str = ""
+    ) -> Item | None:
+        return self.redirect(item_id, by, "", reason, expected_address, expected_receiver)
 
-    def redirect(self, item_id: str, by: str, address: str, reason: str, expected_address: str = "") -> Item | None:
+    def redirect(
+        self,
+        item_id: str,
+        by: str,
+        address: str,
+        reason: str,
+        expected_address: str = "",
+        expected_receiver: str = "",
+    ) -> Item | None:
         """Return an open item to pending at another address; a swarm step, so no actor check."""
         from redis.exceptions import WatchError
 
         for _ in range(MOVE_ATTEMPTS):
             try:
-                return self._try_redirect(item_id, by, address, reason, expected_address)
+                return self._try_redirect(item_id, by, address, reason, expected_address, expected_receiver)
             except WatchError:
                 continue
         raise InboxError(f"message {item_id} changed meanwhile; run the command again")
 
-    def _try_redirect(self, item_id, by, address, reason, expected_address):
+    def _try_redirect(self, item_id, by, address, reason, expected_address, expected_receiver=""):
         key = self.key("item", item_id)
         with self.redis.pipeline() as pipe:
             pipe.watch(key)
             item = _item(pipe.hgetall(key), item_id)
             if item.state in CLOSED or (expected_address and item.address != expected_address):
                 return None
+            if expected_receiver:
+                history = self.key("history", item_id)
+                pipe.watch(history)
+                entries = [json.loads(entry) for entry in pipe.lrange(history, 0, -1)]
+                receiver = next(
+                    (entry["by"] for entry in reversed(entries) if entry["state"] in ("delivered", "read")), ""
+                )
+                if receiver != expected_receiver:
+                    return None
             pending = self.key("pending", item.address)
             pipe.watch(pending)
             last = pipe.zscore(pending, item_id) is not None and pipe.zcard(pending) == 1

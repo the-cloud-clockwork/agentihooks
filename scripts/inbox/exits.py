@@ -132,7 +132,7 @@ def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", activ
             if not owner or owner in active:
                 continue
             exit_text = f"left its seat and task {item.task}"
-            if inbox.withdraw(item.id, BY, f"cancelled: {owner} {exit_text} before closing it", agent.seat):
+            if inbox.withdraw(item.id, BY, f"cancelled: {owner} {exit_text} before closing it", agent.seat, owner):
                 inbox.send(BY, notice_address(inbox, item.sender), _told(item, owner, exit_text), fyi=True)
 
 
