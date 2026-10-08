@@ -154,7 +154,7 @@ def _marker_request(marker: dict, session_id: str, cwd: str | None = None) -> tu
             attrs.pop(name, None)
         for name, value in scope.items():
             attrs.setdefault(name, value)
-    else:
+    elif "attribution" not in attrs:
         identity = lookup(session_id) or resolve_project(attrs.get("cwd") or folder, {} if cwd is not None else None)
         if identity:
             for name, value in identity.attributes().items():

@@ -362,6 +362,17 @@ def test_an_outbox_replay_keeps_the_attributes_computed_when_it_was_written(home
     assert replayed["attrs"]["worktree"] == "one"
 
 
+def test_an_outbox_replay_written_unknown_never_takes_the_latest_project(home, monkeypatch):
+    monkeypatch.setattr(project_sessions, "_branch", lambda cwd: "")
+    _record_all("first")
+    record_session("first", ProjectIdentity("gamma", "fixture/gamma", "g", "/work/gamma", "", "github.com/f/gamma"))
+    written, _ = _marker_request({"type": "lesson", "content": "x", "attrs": {}}, "first")
+    assert written["attrs"]["attribution"] == "unknown"
+    replayed, _ = _marker_request({"type": "lesson", "content": "x", "attrs": dict(written["attrs"])}, "first", "")
+    assert replayed == written
+    assert "project" not in replayed["attrs"]
+
+
 def test_a_direct_marker_without_a_time_stays_unknown_in_a_scoped_session(home):
     _record_all("first")
     body, _ = _marker_request({"type": "lesson", "content": "x", "attrs": {}}, "first")

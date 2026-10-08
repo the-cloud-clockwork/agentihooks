@@ -49,14 +49,15 @@ Brain markers take the time of the transcript record that holds them; a marker r
 message takes the Stop time. Once a session has a scope log, every marker is attributed through it:
 
 - every scope attribute the model wrote is dropped, then the body takes the scope in force, plus `attribution`;
-- a valid `project_id` claim keeps the model's `project_id`, `project`, `repo` and `remote`; task, worktree,
-  branch, lane and revision still come from the event time;
+- a valid `project_id` claim keeps the model's `project_id`, `project`, `repo` and `remote` as written, without
+  checking them against each other; task, worktree, branch, lane and revision still come from the event time;
 - a `share=fleet` marker loses every scope field;
 - a marker before the first transition, or a marker read from a transcript record without a time, is `unknown`
   and carries no project.
 
-An outbox replay carries attributes computed when it was written, so it keeps the preceding lookup by session,
-which only fills missing attributes. A session with no scope log keeps that lookup too.
+An outbox replay carries attributes computed when it was written. One that already carries an `attribution` is sent
+as written; an older replay without one keeps the preceding lookup by session, which only fills missing attributes.
+A session with no scope log keeps that lookup too.
 
 ## Grant
 
