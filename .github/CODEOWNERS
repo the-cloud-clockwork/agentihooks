@@ -15,11 +15,14 @@
 /tests/leaks.py @nestorcolt
 /tests/refresh_durations.py @nestorcolt
 /tests/shard_check.py @nestorcolt
+/tests/shards.py @nestorcolt
 /tests/test_ci_*.py @nestorcolt
 /tests/test_codeowners.py @nestorcolt
 /tests/test_count_floor.py @nestorcolt
+/tests/test_dev_durations.py @nestorcolt
 /tests/test_rulesets.py @nestorcolt
 /tests/test_shard_check.py @nestorcolt
+/tests/test_shards.py @nestorcolt
 /mutation-cleared.txt @nestorcolt
 /mutation-clearances/ @nestorcolt
 /delivery.yaml @nestorcolt

@@ -34,6 +34,8 @@ Verify the effective rules and bypass lists:
 gh api repos/The-Cloud-Clockwork/agentihooks/rules/branches/dev
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/16090886 --jq .bypass_actors
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/15122747 --jq .bypass_actors
+gh api repos/The-Cloud-Clockwork/agentihooks/rules/branches/dev \
+  --jq '.[] | select(.type == "pull_request") | .parameters.require_code_owner_review'
 ```
 
 The dev `pull_request` rule must carry `require_code_owner_review` true, so a
