@@ -1,0 +1,32 @@
+{
+  "tested_commit": "f71cb5cbbcea4d2e1870bbdf6947963fa8d522f1",
+  "evidence_class": "local isolated fixture on an in-memory Redis with a fake clock; not live rollout proof",
+  "then": "a correctly launched worker registers only its own execution and authorized corpus",
+  "runs": [
+    {
+      "registered_execution_is_admitted": true,
+      "registration_equals_store": true,
+      "corpus": [
+        "github.com/the-cloud-clockwork/agentihooks"
+      ],
+      "corpus_refuses_other_project": true,
+      "brain": "swarm-brain",
+      "issuer": "controller@fixture",
+      "audience": "registry@fixture",
+      "launch_grant_rejections_total": 0
+    },
+    {
+      "registered_execution_is_admitted": true,
+      "registration_equals_store": true,
+      "corpus": [
+        "github.com/the-cloud-clockwork/agentihooks"
+      ],
+      "corpus_refuses_other_project": true,
+      "brain": "swarm-brain",
+      "issuer": "controller@fixture",
+      "audience": "registry@fixture",
+      "launch_grant_rejections_total": 0
+    }
+  ],
+  "passed": true
+}

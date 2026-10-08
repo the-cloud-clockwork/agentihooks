@@ -1,0 +1,26 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-IDN-04",
+  "note": "the signing key is the SHA-256 of key_label; a fixture value, never a deployed key",
+  "key_id": "fixture-key-1",
+  "key_label": "SV2-IDN-04 fixture",
+  "issuer": "controller@fixture",
+  "audience": "registry@fixture",
+  "swarm": "fixture",
+  "seat": "eng-1@fixture",
+  "task": "task",
+  "now": 1791450000,
+  "ttl": 300,
+  "grant": {
+    "project_ids": ["github.com/the-cloud-clockwork/agentihooks"],
+    "brain_id": "swarm-brain",
+    "account": "fixture-account"
+  },
+  "cases": {
+    "valid": {},
+    "expired": {"advance": 300},
+    "wrong_audience": {"audience": "registry@other", "note": "the grant is minted for this audience and presented to the fixture audience"},
+    "mismatched_generation": {"body_generation_offset": 1},
+    "altered_project_body": {"body": {"project_ids": ["github.com/the-cloud-clockwork/antoncore"]}}
+  }
+}
