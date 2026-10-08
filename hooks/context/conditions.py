@@ -15,6 +15,7 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 import zlib
 from dataclasses import dataclass, field
@@ -337,8 +338,6 @@ def _kill_group(proc: subprocess.Popen) -> None:
 
 
 def _run_filter(entry: dict, step: str, payload: dict, timeout: float) -> dict:
-    import threading
-
     from hooks.filters import runner
 
     box: dict = {}
