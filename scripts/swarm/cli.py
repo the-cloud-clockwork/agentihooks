@@ -71,6 +71,7 @@ from scripts.swarm import (
     launch_check,
     ledger_events,
     master_launch,
+    merge_queue,
     naming,
     overlays,
     phase_planning,
@@ -797,6 +798,12 @@ def cmd_pr(store, args):
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
 
 
+def cmd_merge(store, args):
+    if args.action != "state":
+        _worker(store, args)
+    print(json.dumps(merge_queue.operate(args.action, args.url)))
+
+
 def cmd_done(store, args):
     agent = _worker(store, args)
     ledger = LedgerClient()
@@ -804,6 +811,11 @@ def cmd_done(store, args):
     proof = {key: getattr(args, f"proof_{key}") for key in ledger_kinds.PROOF_KEYS if getattr(args, f"proof_{key}")}
     missing = ledger_kinds.unmet({**row, "proof": {**(row.get("proof") or {}), **proof}})
     if missing:
+        if ledger_kinds.kind(row) == "research":
+            raise SwarmError(
+                "a research task is done only with its proof: "
+                "--finding must be a single link to the artifact; put prose in a task comment"
+            )
         flags = ", ".join("--" + key.replace("_", "-").replace(" or ", " or --") for key in missing)
         raise SwarmError(f"a {ledger_kinds.kind(row)} task is done only with its proof: give {flags}")
     url = args.pr or row.get("pr_url")
@@ -1175,6 +1187,9 @@ def build_parser():
     lift.add_argument("gate")
     for name in ("issue", "pr"):
         sub.add_parser(name).add_argument("url")
+    merge = sub.add_parser("merge")
+    merge.add_argument("action", choices=("queue", "dequeue", "state"))
+    merge.add_argument("url")
     sub.add_parser("branch")
     done = sub.add_parser("done")
     done.add_argument("--pr", default="")

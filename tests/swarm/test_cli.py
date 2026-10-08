@@ -1182,8 +1182,11 @@ def test_agent_prompt_waits_on_checks_through_the_swarm():
     merge = next(line for line in text.splitlines() if line.startswith("6. "))
     assert merge == (
         "6. Wait on the checks with agentihooks swarm sw wait --on checks <pr url>: the tick ends the wait and tells "
-        "you when they resolve, so no Monitor is needed. Merge on green checks, then "
-        "agentihooks swarm sw wait --on merge <pr url>. Keep the worktree until the tick confirms merged; "
+        "you when they resolve, so no Monitor is needed. Queue on green checks with agentihooks swarm sw merge "
+        "queue <pr url>, then agentihooks swarm sw wait --on merge <pr url>. Report queue state with "
+        "agentihooks swarm sw merge state <pr url>. Before fixing a queued pull request, dequeue first with "
+        "agentihooks swarm sw merge dequeue <pr url>, then push, then queue again with agentihooks swarm sw "
+        "merge queue <pr url> once checks pass. Keep the worktree until the tick confirms merged; "
         "a red merge wait means fix the pull request and queue it again. After merged, run wt.sh done."
     )
 
@@ -1210,9 +1213,12 @@ def test_assist_asks_for_merge_approval_on_the_task_and_waits_through_the_swarm(
         "6. This swarm runs at assist autonomy. Once checks are green, ask the operator to approve the merge: "
         'agentihooks ledger --slug sw --as engineer@a1b2c3-0001 comment tasks/t1 "<plain words: what the pull '
         'request does, checks green, waiting for your approval to merge>", then agentihooks swarm sw wait 60 '
-        '--reason "operator merge approval"; his answer reaches you as an inbox message. Merge only after an '
-        "OPERATOR line on the ledger approves it, then agentihooks swarm sw wait --on merge <pr url>. "
-        "Keep the worktree until the tick confirms merged; a red merge wait means fix the pull request and "
+        '--reason "operator merge approval"; his answer reaches you as an inbox message. Queue with agentihooks '
+        "swarm sw merge queue <pr url> only after an OPERATOR line on the ledger approves it, then agentihooks "
+        "swarm sw wait --on merge <pr url>. Report queue state with agentihooks swarm sw merge state <pr url>. "
+        "Before fixing a queued pull request, dequeue first with agentihooks swarm sw merge dequeue <pr url>, "
+        "then push, then queue again with agentihooks swarm sw merge queue <pr url> once checks pass and "
+        "approval still holds. Keep the worktree until the tick confirms merged; a red merge wait means fix the pull request and "
         "queue it again. After merged, run wt.sh done. An OPERATOR line asking for changes: make them "
         "and ask again."
     )
@@ -1225,7 +1231,7 @@ def test_agent_prompt_runs_gates_and_review_before_the_merge_and_ends_with_leave
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"})
     steps = [line for line in text.splitlines() if line[:1].isdigit() and line[1:3] == ". "]
     review = next(i for i, s in enumerate(steps) if "Gates green" in s and "review per the dev-cycle skill" in s)
-    merge = next(i for i, s in enumerate(steps) if "Merge on green checks" in s)
+    merge = next(i for i, s in enumerate(steps) if "Queue on green checks" in s)
     assert review < merge
     assert "Standards and Spec" in steps[review] and "three rounds" in steps[review]
     last = steps[-1]
