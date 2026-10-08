@@ -1,5 +1,5 @@
 {
-  "tested_commit": "a1fd5937638e411c367e9591ca9b230edabfb293",
+  "tested_commit": "f71cb5cbbcea4d2e1870bbdf6947963fa8d522f1",
   "evidence_class": "local isolated fixture on an in-memory Redis with a fake clock; not live rollout proof",
   "then": "a retried registration with the same valid grant returns the original identity without creating another worker",
   "result": {
