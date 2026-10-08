@@ -1,8 +1,8 @@
-import json
-
 import pytest
 
 from hooks.context import conditions, ledger_request, operator_words
+from scripts.swarm_ledger.repository.sqlite import DATABASE
+from tests.swarm_ledger import legacy_page
 
 pytestmark = pytest.mark.unit
 
@@ -23,7 +23,7 @@ def ledger(tmp_path):
             "tasks": [{"id": "t0", "comments": list(other)}, {"id": "t1", "comments": comments, **task}],
             "_meta": {"members": members},
         }
-        (folder / "demo.json").write_text(json.dumps(doc))
+        legacy_page.store(folder, "demo", doc)
         return env
 
     return write
@@ -104,7 +104,7 @@ def test_a_session_without_its_swarm_task_or_ledger_finds_nothing(ledger, tmp_pa
     assert find({k: v for k, v in env.items() if k != "AGENTIHOOKS_SWARM_TASK"}) is None
     assert find({**env, "AGENTIHOOKS_SWARM": ""}) is None
     assert find({**env, "AGENTIHOOKS_SWARM": "other"}) is None
-    (tmp_path / "ledgers" / "demo.json").write_text("{not json")
+    (tmp_path / "ledgers" / DATABASE).unlink()
     assert find(env) is None
 
 
@@ -113,6 +113,6 @@ def test_the_ledger_folder_defaults_to_the_home_development_ledger(tmp_path, mon
     folder.mkdir(parents=True)
     monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path / "home"))
     tasks = [{"id": "t1", "comments": [comment("c-1", REQUEST)]}]
-    (folder / "demo.json").write_text(json.dumps({"tasks": tasks, "_meta": {"members": {}}}))
+    legacy_page.store(folder, "demo", {"tasks": tasks, "_meta": {"members": {}}})
     env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_SWARM_TASK": "t1"}
     assert find(env) == ("ledger", "c-1")

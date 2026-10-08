@@ -5,6 +5,8 @@ import pytest
 import hooks.context.swarm_refocus as refocus
 from hooks import hook_manager
 from hooks.targets.emitter import flush
+from scripts.swarm_ledger.repository.sqlite import DATABASE
+from tests.swarm_ledger import legacy_page
 
 OBLIGATIONS = (
     "Master obligations: Troubleshoot with read only diagnostics, plan with the operator, "
@@ -31,7 +33,7 @@ LEDGER = {
 def ledger_dir(tmp_path, monkeypatch):
     folder = tmp_path / "ledgers"
     folder.mkdir()
-    (folder / "rig.json").write_text(json.dumps(LEDGER), encoding="utf-8")
+    legacy_page.store(folder, "rig", LEDGER)
     monkeypatch.setenv("LEDGER_DIR", str(folder))
     monkeypatch.setattr(refocus, "STATE_DIR", tmp_path / "refocus-state")
     monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
@@ -136,7 +138,7 @@ def test_an_unchanged_block_waits_for_the_window_and_a_changed_one_does_not(boun
     assert "Inject a refocus block." in _pre(capsys)
     ledger = json.loads(json.dumps(LEDGER))
     ledger["tasks"][1]["description"] = "A sharper description."
-    (bound / "rig.json").write_text(json.dumps(ledger), encoding="utf-8")
+    legacy_page.store(bound, "rig", ledger)
     assert "A sharper description." in _pre(capsys)
     assert "A sharper description." not in _pre(capsys)
 
@@ -150,7 +152,7 @@ def test_codex_receives_the_block_through_post_tool_use(bound, monkeypatch, caps
 
 
 def test_a_missing_ledger_lets_the_tool_call_through_silently(bound, capsys):
-    (bound / "rig.json").unlink()
+    (bound / DATABASE).unlink()
     assert "Inject a refocus block." not in _prompt(capsys)
     assert "Inject a refocus block." not in _pre(capsys)
 

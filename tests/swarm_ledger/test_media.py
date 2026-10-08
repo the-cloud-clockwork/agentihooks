@@ -181,10 +181,11 @@ class Endpoint(unittest.TestCase):
         forged = {**entry, "width": 9999, "type": "text/html"}
         code, _, body = self.put([{"op": "add", "thread": "chat", "id": "m-pic", "text": "", "attachments": [forged]}])
         self.assertEqual(code, 200)
-        state = json.loads(body)
+        self.assertEqual(json.loads(body)["rejected"], [])
+        state = server.repository.get_document("via-media")
         line = next(e for e in state["chat"] if e["id"] == "m-pic")
         self.assertEqual(line["attachments"], [entry])
-        stored = core.paths("via-media")[1].read_text(encoding="utf-8")
+        stored = json.dumps(server.repository.export_document("via-media"))
         self.assertNotIn("GIF89a", stored)
 
     def test_an_attachment_the_server_does_not_hold_is_refused(self):

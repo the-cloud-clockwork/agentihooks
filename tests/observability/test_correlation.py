@@ -7,6 +7,7 @@ import pytest
 
 from hooks.observability import agent_trace, correlation, otel, signals
 from tests.observability.test_agent_trace import ENTRIES, _Exporter, _identity, _transcript
+from tests.swarm_ledger import legacy_page
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -187,7 +188,7 @@ def test_account_names_the_token_variable_and_never_its_value():
 def test_gather_reads_the_record_ledger_task_and_report(monkeypatch, tmp_path):
     report = tmp_path / "report.json"
     report.write_text(json.dumps(REPORT))
-    (tmp_path / "rig.json").write_text(json.dumps({"tasks": ["x", {"id": "t1"}, {"id": "t44", "phase": "p23"}]}))
+    legacy_page.store(tmp_path, "rig", {"tasks": [{"id": "t1"}, {"id": "t44", "phase": "p23"}]})
     monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
     looked_up = []
     monkeypatch.setattr(correlation, "_agent_record", lambda slug, name: looked_up.append((slug, name)) or AGENT)
@@ -212,13 +213,11 @@ def test_ledger_task_defaults_to_the_home_ledger_folder_and_reads_gaps_as_empty(
     monkeypatch.delenv("LEDGER_DIR", raising=False)
     folder = Path.home() / "development-ledger"
     folder.mkdir()
-    (folder / "rig.json").write_text(json.dumps({"tasks": [{"id": "t44", "phase": "p23"}]}))
-    (folder / "untasked.json").write_text(json.dumps({"title": "no tasks key"}))
-    (folder / "odd.json").write_text(json.dumps({"tasks": None}))
+    legacy_page.store(folder, "rig", {"tasks": [{"id": "t44", "phase": "p23"}]})
+    legacy_page.store(folder, "untasked", {"title": "no tasks key"})
     assert correlation._ledger_task("rig", "t44") == {"id": "t44", "phase": "p23"}
     assert correlation._ledger_task("rig", "t99") == {}
     assert correlation._ledger_task("untasked", "t44") == {}
-    assert correlation._ledger_task("odd", "t44") == {}
     assert correlation._ledger_task("absent", "t44") == {}
 
 

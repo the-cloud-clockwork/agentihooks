@@ -1,4 +1,3 @@
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -228,31 +227,6 @@ class Scope(unittest.TestCase):
         doc = {"phases": [{"done": True}, {"out_of_scope": True}], "followups": [{"out_of_scope": True}]}
         self.assertTrue(gate.closed(doc))
         self.assertFalse(gate.closed({"phases": [{"done": False}], "followups": []}))
-
-
-class Seed(unittest.TestCase):
-    def setUp(self):
-        make_ledger()
-
-    def seed_comment(self, entry):
-        html_path = core.paths(SLUG)[0]
-        html = html_path.read_text(encoding="utf-8")
-        seed = core.loads(core.SEED_RE.search(html).group(2))
-        rev = seed.pop("_rev")
-        seed["phases"][0]["comments"].append(entry)
-        html_path.write_text(
-            core.SEED_RE.sub(lambda m: m.group(1) + core.seed_text(seed, rev) + m.group(3), html, count=1),
-            encoding="utf-8",
-        )
-        return core.sync(SLUG)[0]
-
-    def test_seed_comments_amend_and_noise_becomes_a_warning(self):
-        self.seed_comment({"id": "eng-1", "by": "eng", "text": "Started."})
-        state = self.seed_comment({"id": "eng-2", "by": "eng", "text": "Fixed."})
-        self.assertEqual([e["text"] for e in live(state["phases"][0]["comments"])], ["Fixed."])
-        state = self.seed_comment({"id": "eng-3", "by": "eng", "text": "Head 4a5414f78 green."})
-        self.assertEqual([e["text"] for e in live(state["phases"][0]["comments"])], ["Fixed."])
-        self.assertTrue(any("refused" in w for w in state["_meta"]["warnings"]), json.dumps(state["_meta"]["warnings"]))
 
 
 class OperatorScope(unittest.TestCase):

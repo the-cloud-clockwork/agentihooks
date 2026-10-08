@@ -1,4 +1,3 @@
-import json
 import sys
 import unittest
 import unittest.mock
@@ -93,11 +92,12 @@ class Kinds(unittest.TestCase):
     def test_an_existing_ledger_without_kinds_loads_unchanged(self):
         make_ledger([{"task": "t1", "title": "a", "lane": "eng"}, {"task": "t2", "title": "b", "lane": "ci"}])
         core.sync(SLUG, ops=[done(1)])
-        _, json_path = core.paths(SLUG)
-        before = json.loads(json_path.read_text(encoding="utf-8"))
+        from scripts.swarm_ledger.repository import repository
+
+        before = repository.get_document(SLUG)
         for task in before["tasks"]:
             task.pop("kind", None)
-        json_path.write_text(json.dumps(before), encoding="utf-8")
+        repository.import_document(SLUG, before, replace=True)
         after = core.sync(SLUG)[0]
         self.assertEqual(after["tasks"], before["tasks"])
         self.assertEqual(after["_meta"]["rev"], before["_meta"]["rev"])
