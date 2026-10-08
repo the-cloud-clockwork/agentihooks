@@ -2008,18 +2008,18 @@ def test_swarms_that_finish_together_tick_once(monkeypatch, capsys):
 def test_a_quick_swarm_stops_its_extra_ticks_at_the_pass_deadline(monkeypatch, capsys):
     import time
 
-    monkeypatch.setattr(cli, "TICK_SECONDS", 0.5)
-    monkeypatch.setattr(cli, "EXTRA_TICKS_UNTIL", 1.2)
+    monkeypatch.setattr(cli, "TICK_SECONDS", 1.0)
+    monkeypatch.setattr(cli, "EXTRA_TICKS_UNTIL", 1.5)
     ticks = {"fast": 0, "slow": 0}
 
     def run_tick(store, slug):
         ticks[slug] += 1
         if slug == "slow":
-            time.sleep(2.0)
+            time.sleep(3.0)
         return []
 
     _tick_all(monkeypatch, run_tick, ["slow", "fast"])
-    assert ticks == {"fast": 3, "slow": 1}
+    assert ticks == {"fast": 2, "slow": 1}
 
 
 def test_a_first_tick_that_dies_still_ends_the_extra_ticks(monkeypatch, capsys):
