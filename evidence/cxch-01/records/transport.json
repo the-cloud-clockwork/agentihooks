@@ -1,0 +1,5 @@
+{
+  "socket_is_symlink": true,
+  "raw_json_line_reply": "closed",
+  "websocket_upgrade_status": "HTTP/1.1 101 Switching Protocols"
+}
