@@ -86,7 +86,7 @@ jobs:
   # Every shard restores this one key, or nothing when the lookup found none, so all shards of a run split alike.
   durations:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: ${{ github.event_name == 'merge_group' && 4 || 2 }}
     permissions:
       contents: read
     outputs:
