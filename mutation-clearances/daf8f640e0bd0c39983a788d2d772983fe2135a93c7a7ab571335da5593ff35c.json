@@ -1,0 +1,6 @@
+{
+  "scripts/recall/chunker.py:scripts.recall.chunker.x__sections__mutmut_22:2208795e8c69875f321b46f3d04f5586762cfac5b443072a979a3812be6b4042": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: after closing a fence the sentinel is used only in truthiness tests. Any subsequent indexed access occurs after a new matched marker replaces it. None and empty string both designate no open fence and are not returned."
+  }
+}

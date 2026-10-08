@@ -350,6 +350,8 @@ def test_limits_come_from_the_environment_and_fall_back_on_bad_values():
         ("master_watch_min", 60),
         ("master_watch_ratio", 15),
         ("cooldown_minutes", 60),
+        ("drain_minutes", 10),
+        ("drain_left", 10),
     ],
 )
 def test_defaults_match_the_toolbelt_rule(name, value):
