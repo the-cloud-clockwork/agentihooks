@@ -1,4 +1,5 @@
 import json
+import subprocess
 
 import pytest
 
@@ -41,3 +42,14 @@ def stub(monkeypatch):
         return fake
 
     return install
+
+
+@pytest.fixture
+def project_filters(filters_dir, tmp_path, monkeypatch):
+    repo = tmp_path / "project"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    directory = repo / ".agentihooks" / "conditions"
+    directory.mkdir(parents=True)
+    monkeypatch.chdir(repo)
+    return directory
