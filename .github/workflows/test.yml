@@ -83,7 +83,7 @@ jobs:
           cd "$grader"
           python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
-  # A dev push run can save the base's durations while shards start, so one job names the key every shard restores.
+  # Every shard restores this one key or none, so all shards of a run split on the same durations.
   durations:
     runs-on: ubuntu-latest
     timeout-minutes: 2

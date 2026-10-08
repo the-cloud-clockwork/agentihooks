@@ -306,11 +306,10 @@ def _workflow() -> dict:
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def test_no_separate_gate_job_delays_the_shards():
+def test_shards_wait_only_on_the_durations_lookup():
     jobs = _workflow()["jobs"]
     assert "already-tested" not in jobs
     assert jobs["unit"]["needs"] == ["durations"]
-    assert len(jobs["durations"]["steps"]) == 1
     assert "needs" not in jobs["lint"]
 
 

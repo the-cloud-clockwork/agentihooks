@@ -92,6 +92,16 @@ def test_required_gate_rejects_every_non_success_result(unit, lint):
         assert "::error::" in result.stdout
 
 
+@pytest.mark.parametrize("durations", ["success", "failure", "skipped", "cancelled"])
+def test_required_gate_is_red_when_the_durations_lookup_did_not_succeed(durations):
+    gate = _workflow()["jobs"]["gate-required"]
+    assert "durations" in gate["needs"]
+    needs = {"durations": {"result": durations}, "unit": {"result": "skipped" if durations != "success" else "success"}}
+    env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="false")
+    result = subprocess.run(["bash", "-e", "-c", gate["steps"][0]["run"]], env=env, capture_output=True, text=True)
+    assert (result.returncode == 0) == (durations == "success"), result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("mutation", ["success", "failure", "skipped", "cancelled"])
 @pytest.mark.parametrize("expected", ["true", "false", ""])
 def test_required_gate_is_red_unless_mutation_passed_or_was_not_due(mutation, expected):
