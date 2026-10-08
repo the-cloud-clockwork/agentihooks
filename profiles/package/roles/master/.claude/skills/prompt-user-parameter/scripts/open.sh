@@ -20,11 +20,11 @@ here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 status="${script%.*}.status"
 rm -f "$status"
 
-if [[ -n "${HERDR_PANE_ID:-}" ]]; then
-  split="$(herdr pane split --pane "$HERDR_PANE_ID" --direction right --cwd "$(dirname "$script")")"
-else
-  split="$(herdr pane split --current --direction right --cwd "$(dirname "$script")")"
+if [[ -z "${HERDR_PANE_ID:-}" ]]; then
+  echo "refused: run from inside a herdr pane (HERDR_PANE_ID is unset)" >&2
+  exit 2
 fi
+split="$(herdr pane split --pane "$HERDR_PANE_ID" --direction right --cwd "$(dirname "$script")")"
 pane="$(printf '%s' "$split" | python3 -c 'import json, sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')"
 herdr pane rename "$pane" "$title" >/dev/null 2>&1 || true
 herdr pane run "$pane" "bash $(printf '%q' "$here/run.sh") $(printf '%q' "$script") $(printf '%q' "$status") $(printf '%q' "$pane")" >/dev/null

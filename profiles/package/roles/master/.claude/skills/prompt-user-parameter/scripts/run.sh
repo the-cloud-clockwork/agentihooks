@@ -7,15 +7,19 @@ pane="$3"
 unset HISTFILE
 
 read_secret() {
-  local name="$1" prompt="$2" value
-  read -rsp "$prompt: " value
+  local __rs_name="$1" __rs_prompt="$2" __rs_value
+  if [[ ! "$__rs_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    echo "read_secret needs a variable name first" >&2
+    return 2
+  fi
+  read -rsp "$__rs_prompt: " __rs_value
   echo
-  if [[ -z "$value" ]]; then
-    echo "empty value for $name" >&2
+  if [[ -z "$__rs_value" ]]; then
+    echo "empty value for $__rs_name" >&2
     return 1
   fi
-  printf -v "$name" '%s' "$value"
-  export "${name?}"
+  printf -v "$__rs_name" '%s' "$__rs_value"
+  export "${__rs_name?}"
 }
 export -f read_secret
 
@@ -33,5 +37,7 @@ else
 fi
 mv "$status.tmp" "$status"
 
-read -rp "Press Enter to close this pane. " _ || true
+if [[ "$rc" -ne 0 ]]; then
+  read -rp "Press Enter to close this pane. " _ || true
+fi
 herdr pane close "$pane" >/dev/null 2>&1 || true

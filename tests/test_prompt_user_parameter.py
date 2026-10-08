@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from tests.test_package_internal_names import LEAKS
+from tests.test_package_role_skills import PARSERS, _argv, _commands
 from tests.test_profile_render import world as render_world
 
 world = render_world
@@ -95,6 +96,28 @@ def test_an_empty_value_stops_the_script_with_an_error(box):
     assert not script.exists()
 
 
+@pytest.mark.parametrize("name", ["value", "name", "prompt"])
+def test_a_variable_named_like_the_helper_locals_still_reaches_the_script(box, name):
+    seen = box["inputs"] / "length"
+    body = f'read_secret {name} "Tailnet key"\nprintf "%s" "${{#{name}}}" > {seen}\n'
+
+    _, status, done = _run(box, body, f"{PLANTED}\n")
+
+    assert status.read_text() == "DONE\n"
+    assert seen.read_text() == str(len(PLANTED))
+    assert PLANTED not in done.stdout + done.stderr
+
+
+def test_a_missing_variable_name_fails_without_reading_a_value(box):
+    body = 'read_secret "Tailnet key"\n'
+
+    _, status, done = _run(box, body, f"{PLANTED}\n")
+
+    assert status.read_text() == "ERROR 2\n"
+    assert "read_secret needs a variable name first" in done.stderr
+    assert PLANTED not in done.stdout + done.stderr
+
+
 def test_the_value_never_reaches_the_status_file_or_any_file_beside_it(box):
     body = 'read_secret TOKEN "Tailnet key"\ntrue\n'
 
@@ -143,6 +166,17 @@ def test_open_refuses_a_script_outside_the_scratch_folder(box):
     assert _herdr_calls(box) == []
 
 
+def test_open_refuses_a_caller_outside_a_herdr_pane(box):
+    script = box["inputs"] / "key.sh"
+    script.write_text("true\n")
+
+    done = _open(box, script)
+
+    assert done.returncode == 2
+    assert done.stderr == "refused: run from inside a herdr pane (HERDR_PANE_ID is unset)\n"
+    assert _herdr_calls(box) == []
+
+
 def test_the_skill_passes_the_skill_gate():
     _, front, body = (SKILL / "SKILL.md").read_text().split("---", 2)
     meta = yaml.safe_load(front)
@@ -161,6 +195,9 @@ def test_the_master_rule_says_when_to_use_the_skill():
     line = next(line for line in rule.splitlines() if "prompt-user-parameter" in line)
 
     assert "operator on" in line and "Priorities" in line and "Monitor" in line
+    for command in _commands(line):
+        tool, argv = _argv(command)
+        assert PARSERS[tool](argv).values == ["x", "x"]
 
 
 @pytest.mark.parametrize("role", sorted(p.name for p in ROLES.iterdir() if not p.name.startswith("_")))

@@ -23,9 +23,10 @@ Priorities with `agentihooks ledger --slug <slug> --as <name> priority add
 
 ## Steps
 
-1. Create the scratch folder: `agentihooks scratch new`. Write the throwaway
-   script there as `<folder>/inputs/<name>.sh`, never under `/tmp`. The opener
-   refuses a script outside `~/scratchpad`.
+1. Create the scratch folder with `agentihooks scratch new`, then
+   `mkdir -p <folder>/inputs`. Write the throwaway script there as
+   `<folder>/inputs/<name>.sh`, never under `/tmp`. The opener refuses a
+   script outside `~/scratchpad` and a caller outside a herdr pane.
 2. In the script, read each value with the runner's helper and use it only
    through its variable:
 
@@ -49,10 +50,11 @@ Priorities with `agentihooks ledger --slug <slug> --as <name> priority add
    ```
 
 5. Read the result. `DONE` means the script finished; the runner has deleted
-   it and closes the pane once the operator presses Enter. `ERROR <code>`
-   carries the exit code; the pane shows the failing step to the operator, so
-   ask him what it said instead of reading the pane. Fix the script and open a
-   new pane.
+   it and closed the pane. `ERROR <code>`
+   carries the exit code; the runner deleted the script too, and the pane
+   stays open showing the failing step until the operator presses Enter, so
+   ask him what it said instead of reading the pane. Write a corrected script
+   and open a new pane.
 
 ## Done when
 
