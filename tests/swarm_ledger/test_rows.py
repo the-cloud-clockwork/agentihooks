@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from scripts.swarm_ledger.repository.rows import assemble, flatten
+from scripts.swarm_ledger.repository.rows import assemble, diff, encode, flatten
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 from tests.swarm_ledger.test_sqlite import document
 
@@ -95,3 +95,27 @@ def test_normalized_row_identity_kind_and_order_are_stable():
         '["tasks",["index",3,0]]': ("3", 3, "object", "null"),
     }
     assert assemble(rows) == value
+
+
+def test_diff_descends_only_into_the_changed_leaf():
+    old = {"a": 1, "b": {"x": 1, "y": 2}}
+    new = {"a": 1, "b": {"x": 1, "y": 3}}
+    before, after = diff(old, new)
+    assert set(before) == set(after) == {encode(["b", "y"])}
+    assert json.loads(before[encode(["b", "y"])][5]) == 2
+    assert json.loads(after[encode(["b", "y"])][5]) == 3
+
+
+def test_diff_keeps_the_real_parent_key_position_and_table_when_falling_back():
+    before, after = diff({"a": {"x": 1}}, {"a": [1]})
+    row = before[encode(["a"])]
+    assert row[0] == "fields"
+    assert row[1] == encode([])
+    assert row[2] == encode("a")
+    assert row[3] == 0
+
+
+def test_diff_treats_a_root_type_change_as_position_zero():
+    before, after = diff({"a": 1}, [1])
+    assert before[encode([])][3] == 0
+    assert after[encode([])][3] == 0

@@ -328,7 +328,7 @@ def test_adopt_skips_a_candidate_whose_files_vanished_but_keeps_processing_other
 
     monkeypatch.setattr(legacy, "files", fake_files)
     legacy.adopt(repo)
-    assert repo.exists("bbb")
+    assert not (directory / "bbb.html").exists()
     assert (directory / "aaa.html").exists()
 
 
@@ -340,7 +340,7 @@ def test_adopt_continues_past_a_cached_refusal_to_a_later_candidate(tmp_path):
     seed = new_ledger.build_doc({"title": "Zzz", "overview": "o", "phases": []})
     (directory / "zzz.html").write_text(page(seed), encoding="utf-8")
     legacy.adopt(repo)
-    assert repo.exists("zzz")
+    assert not (directory / "zzz.html").exists()
 
 
 def test_adopt_continues_past_a_fresh_bad_file_to_a_later_candidate(tmp_path):
@@ -350,7 +350,7 @@ def test_adopt_continues_past_a_fresh_bad_file_to_a_later_candidate(tmp_path):
     seed = new_ledger.build_doc({"title": "Zzz", "overview": "o", "phases": []})
     (directory / "zzz.html").write_text(page(seed), encoding="utf-8")
     legacy.adopt(repo)
-    assert repo.exists("zzz")
+    assert not (directory / "zzz.html").exists()
 
 
 def test_import_once_tracks_failures_by_the_actual_path_not_a_fixed_marker(tmp_path):
