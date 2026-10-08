@@ -21,6 +21,7 @@ CREATE INDEX IF NOT EXISTS events_revision ON events(slug,revision);
 CREATE INDEX IF NOT EXISTS events_position ON events(slug,position);
 """
 PER_LEDGER = (*TABLES, "ledgers", "revisions", "seed_base", "seed_deltas", "events")
+GENERATION_SHIFT = 20
 SUMMARY_KEYS = ("slug", "title", "overview", "closed_at", "size", "open", "done", "updated_at")
 
 
@@ -91,57 +92,62 @@ def key_parts(key: str) -> list:
     return [*parts, ["id", item, 0]] if item else parts
 
 
-def read_ledger(directory, slug: str, *keys: str) -> dict | None:
-    """Named parts of a stored ledger through a read only connection, for hooks; None when it is not stored."""
+@contextmanager
+def read_only(directory):
+    """A read only connection to the folder's database, or None when it holds none."""
     path = Path(directory) / DATABASE
     if not path.exists():
-        return None
+        yield None
+        return
     connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=5)
     try:
-        with connection:
-            connection.execute("BEGIN")
-            return read_partial(connection, slug, tuple(key_parts(key) for key in keys))
-    except (Missing, sqlite3.OperationalError):
-        return None
+        yield connection
     finally:
         connection.close()
+
+
+def read_ledger(directory, slug: str, *keys: str) -> dict | None:
+    """Named parts of a stored ledger through a read only connection, for hooks; None when it is not stored."""
+    with read_only(directory) as connection:
+        if connection is None:
+            return None
+        try:
+            with connection:
+                connection.execute("BEGIN")
+                return read_partial(connection, slug, tuple(key_parts(key) for key in keys))
+        except (Missing, sqlite3.OperationalError):
+            return None
 
 
 def read_registry(directory, name: str) -> dict:
-    path = Path(directory) / DATABASE
-    if not path.exists():
-        return {}
-    connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=5)
-    try:
-        return {
-            key: json.loads(value)
-            for key, value in connection.execute("SELECT path,value FROM registry WHERE slug=?", (name,))
-        }
-    except sqlite3.OperationalError:
-        return {}
-    finally:
-        connection.close()
+    with read_only(directory) as connection:
+        if connection is None:
+            return {}
+        try:
+            return {
+                key: json.loads(value)
+                for key, value in connection.execute("SELECT path,value FROM registry WHERE slug=?", (name,))
+            }
+        except sqlite3.OperationalError:
+            return {}
 
 
 def read_ids(directory, slug: str, collection: str) -> tuple:
     """The ids of a stored collection in order, read from its row paths alone."""
-    path = Path(directory) / DATABASE
-    if not path.exists():
-        return ()
-    connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=5)
     parent = encode([collection])
-    try:
-        rows = [
-            row
-            for table in TABLES
-            for row in connection.execute(
-                f"SELECT position, path FROM {table} WHERE slug=? AND parent=?", (slug, parent)
-            )
-        ]
-    except sqlite3.OperationalError:
-        return ()
-    finally:
-        connection.close()
+    with read_only(directory) as connection:
+        if connection is None:
+            return ()
+        try:
+            rows = [
+                row
+                for table in TABLES
+                for row in connection.execute(
+                    f"SELECT position, path FROM {table} WHERE slug=? AND parent=?", (slug, parent)
+                )
+            ]
+        except sqlite3.OperationalError:
+            return ()
     found = (json.loads(path)[-1] for _, path in sorted(rows))
     return tuple(part[1] for part in found if part[0] == "id")
 
@@ -290,6 +296,9 @@ class SQLiteLedgerRepository:
         return Entry(generation, encode(state), state)
 
     def _insert(self, connection, slug: str, state: dict, token: str, seeds: dict | None = None) -> None:
+        previous = connection.execute("SELECT generation FROM ledgers WHERE slug=?", (slug,)).fetchone()
+        now = self.domain.now_ms()
+        generation = max(now << GENERATION_SHIFT, previous[0] + 1 if previous else 0)
         for table in PER_LEDGER:
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         stored = {**state, "_meta": {**state["_meta"]}}
@@ -304,10 +313,10 @@ class SQLiteLedgerRepository:
             (
                 slug,
                 state["_meta"]["rev"],
-                secrets.randbits(62),
+                generation,
                 token,
                 encode(summarize(slug, state)),
-                self.domain.now_ms(),
+                now,
             ),
         )
         self._cache.pop(self._key(slug), None)

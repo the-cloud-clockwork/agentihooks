@@ -105,8 +105,6 @@ def test_an_import_that_does_not_export_its_source_stores_nothing(tmp_path, monk
 
 
 def test_a_refused_replacing_import_leaves_the_stored_ledger_readable(tmp_path, monkeypatch):
-    generations = iter(range(10, 20))
-    monkeypatch.setattr(sqlite.secrets, "randbits", lambda bits: next(generations))
     repo = store(tmp_path)
     repo.create("ledger", CONTENT)
     real = repo._export
@@ -114,6 +112,15 @@ def test_a_refused_replacing_import_leaves_the_stored_ledger_readable(tmp_path, 
     with pytest.raises(ValueError, match="does not export"):
         repo.import_document("ledger", document(), replace=True)
     assert repo.get_document("ledger")["title"] == "Store"
+
+
+def test_a_reader_holding_a_cached_copy_sees_a_replace_made_by_another_process(tmp_path, monkeypatch):
+    holder, other = store(tmp_path), store(tmp_path)
+    holder.create("ledger", CONTENT)
+    assert holder.get_document("ledger")["title"] == "Store"
+    monkeypatch.setattr(holder.domain, "now_ms", lambda: 1)
+    other.import_document("ledger", document(), replace=True)
+    assert holder.get_document("ledger")["title"] == "Café"
 
 
 def test_one_operation_writes_only_the_rows_it_changed_and_no_file(tmp_path):
