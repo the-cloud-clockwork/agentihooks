@@ -15,10 +15,14 @@ KEPT = 50
 ROWS_KEPT = 500
 
 
-def _path(name):
+def _dir():
     from hooks.config import AGENTIHOOKS_HOME
 
-    return AGENTIHOOKS_HOME / "operator_words" / (re.sub(r"[^A-Za-z0-9_.@-]", "_", name) + ".json")
+    return AGENTIHOOKS_HOME / "operator_words"
+
+
+def _path(name):
+    return _dir() / (re.sub(r"[^A-Za-z0-9_.@-]", "_", name) + ".json")
 
 
 def _norm(text):
@@ -35,7 +39,7 @@ def _load(name):
 
 def recorded(pattern):
     """Names with words recorded under the glob `pattern`."""
-    return sorted(p.stem for p in _path("x").parent.glob(f"{pattern}.json"))
+    return sorted(p.stem for p in _dir().glob(f"{pattern}.json"))
 
 
 def _save(name, data):

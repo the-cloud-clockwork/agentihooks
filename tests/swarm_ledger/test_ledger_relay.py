@@ -143,6 +143,7 @@ class Relay(unittest.TestCase):
 
     def test_verified_is_empty_without_recorded_words(self):
         self.assertEqual(ledger_relay.verified("nobody", "use the queue"), "")
+        self.assertEqual(ledger_relay.verified("nobody", "xx"), "")
         self.assertEqual(ledger_relay.verified("master@a1-1", "the  QUEUE"), "the queue")
 
 
