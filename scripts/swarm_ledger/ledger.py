@@ -323,7 +323,11 @@ def cmd_plan(args):
         plan, [phase["id"] for phase in resource(args.slug, "phases", collection=True)]
     )
     send(args, "phase_append", phases=phases)
-    print(json.dumps({"appended": [phase["phase"] for phase in phases], "planning": "manual", "review": "pending"}))
+    print(
+        json.dumps(
+            {"appended": [phase["phase"] for phase in phases], "planning": {p["phase"]: p["planning"] for p in phases}}
+        )
+    )
 
 
 def cmd_artifact_purge(args):
@@ -611,7 +615,7 @@ def build_parser():
     phase.add_argument("--status")
     phase.add_argument("--description", default="")
     phase.add_argument("--depends-on", default="")
-    phase.add_argument("--planning", choices=["manual", "auto"], default="manual")
+    phase.add_argument("--planning", choices=["manual", "auto"], default="auto")
     phase.add_argument("--release", action="store_true")
     followup = sub.add_parser("followup")
     followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])

@@ -49,10 +49,14 @@ and append it instead of building a ledger:
 agentihooks ledger --slug <slug> --as <name> plan phases <phases.json>
 ```
 
-Every phase lands planned manually and in review, through the same checks as
-`phase add`; a phase without `id` takes the next free `p<n>`. A phase id already
-taken refuses the whole plan and the ledger is unchanged. Done when it prints
-the appended ids; then add their tasks (step 3) and skip steps 2 and 4.
+An appended phase without `planning` is planned automatically; set `manual`
+for phases whose tasks the plan already specifies, and each manual phase lands
+in review. Every phase passes the same checks as `phase add`; a phase without
+`id` takes the next free `p<n>`. A phase id already taken refuses the whole plan
+and the ledger is unchanged. Done when it prints the appended ids and their
+planning; then add tasks to the manual phases (step 3) and skip steps 2 and 4.
+A manual phase left without tasks gets one notice to the master from the swarm
+tick.
 
 ## 2. Build the ledger
 

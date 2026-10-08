@@ -53,7 +53,7 @@ def phase_entry(position: int, entry: dict, ids: list[str]) -> dict:
         "title": entry.get("title", ""),
         "description": entry.get("description", ""),
         "depends_on": depends_on,
-        "planning": "manual",
+        "planning": entry.get("planning", "auto"),
     }
     if "release" in entry:
         phase["release"] = entry["release"]

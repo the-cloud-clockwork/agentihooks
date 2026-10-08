@@ -132,8 +132,6 @@ def check_append(op: dict) -> None:
     for entry in phases:
         if not isinstance(entry, dict):
             raise ValueError("each appended phase is an object")
-        if entry.get("planning", "manual") != "manual":
-            raise ValueError("appended phases are planned manually")
         check({**entry, "op": "phase_add", "by": op["by"]})
         if entry["phase"] in seen:
             raise ValueError(f"phase {entry['phase']} appears twice in the plan")
@@ -153,8 +151,8 @@ def append(doc: dict, op: dict, ctx) -> bool:
             "description": "",
             "done": False,
             **{k: entry[k] for k in FIELDS if k in entry},
-            "planning": "manual",
-            "review": dict(review),
+            "planning": entry.get("planning", "auto"),
+            **({"review": dict(review)} if entry.get("planning") == "manual" else {}),
         }
         for entry in op["phases"]
     ]
@@ -182,7 +180,7 @@ def apply(doc: dict, op: dict, ctx) -> bool:
     if op["op"] == "phase_review":
         fields = {"review": review_record(phase, op, ctx.at)}
     else:
-        fields = {k: op[k] for k in FIELDS if k in op} if phase is None else op["fields"]
+        fields = {"planning": "auto", **{k: op[k] for k in FIELDS if k in op}} if phase is None else op["fields"]
     after = {**(phase or {"id": phase_id, "description": "", "done": False, "comments": []}), **fields}
     try:
         validate([after if p["id"] == phase_id else p for p in phases] + ([after] if phase is None else []))
