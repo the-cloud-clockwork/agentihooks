@@ -127,7 +127,7 @@ class TestRemaining:
     def test_a_task_in_flight_without_a_claim_event_counts_in_full(self):
         assert ledger_stats.remaining_minutes(task("a", "claimed", "M"), TIERS, 5, [], NOW) == 30
         claim = [event("task claimed", "a", NOW - 10 * MINUTE)]
-        assert ledger_stats.remaining_minutes(task("a", "pr", "M"), TIERS, 5, claim, NOW) == 30
+        assert ledger_stats.remaining_minutes(task("a", "pr", "M"), TIERS, 5, claim, NOW) == 5
 
 
 class TestChainMinutes:

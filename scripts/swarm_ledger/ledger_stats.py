@@ -92,11 +92,9 @@ def remaining_minutes(task, tiers, ci, events, now):
     if task.get("state") not in IN_FLIGHT:
         return estimate
     target, kind = f"tasks/{task['id']}", f"task {task['state']}"
+    full = ci if task["state"] == "pr" else estimate
     since = [e["at"] for e in events if e["kind"] == kind and e["target"] == target]
-    if not since:
-        return estimate
-    spent = (now - since[-1]) / MINUTE_MS
-    return max(0, (ci if task["state"] == "pr" else estimate) - spent)
+    return max(0, full - (now - since[-1]) / MINUTE_MS) if since else full
 
 
 def chain_minutes(unfinished, left):
