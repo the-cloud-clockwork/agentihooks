@@ -131,10 +131,19 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
 
 def test_unit_matrix_runs_one_shard_per_split():
     command = _pytest_command()
-    shards = int(re.search(r"--shard \$\{\{ matrix\.shard \}\}/(\d+)", command).group(1))
+    split = r"--shard \$\{\{ matrix\.shard \}\}/\$\{\{ matrix\.python-version == '3\.12' && (\d+) \|\| (\d+) \}\}"
+    coverage_shards, plain_shards = (int(count) for count in re.search(split, command).groups())
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
-    assert shards > 1
-    assert workflow["jobs"]["unit"]["strategy"]["matrix"]["shard"] == list(range(1, shards + 1))
+    matrix = workflow["jobs"]["unit"]["strategy"]["matrix"]
+    excluded = {(entry["python-version"], entry["shard"]) for entry in matrix.get("exclude", [])}
+    counts = {"3.11": plain_shards, "3.12": coverage_shards}
+    for version in matrix["python-version"]:
+        assert [shard for shard in matrix["shard"] if (version, shard) not in excluded] == list(
+            range(1, counts[version] + 1)
+        )
+    assert coverage_shards > plain_shards > 1
+    merge = next(step for step in workflow["jobs"]["sonar"]["steps"] if step.get("name") == "Merge shard coverage")
+    assert merge["run"].split()[-1] == str(coverage_shards)
     assert "--splits" not in command
 
 
