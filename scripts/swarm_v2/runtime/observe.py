@@ -155,24 +155,29 @@ def _terminal(found: Signal | None) -> Terminal:
     return Terminal.REACHABLE if found.reading is Reading.OK else Terminal.DEGRADED
 
 
-def _alive(gone: bool, phase: str, supervisor: str, latest: dict[Source, Signal]) -> tuple[State, Failure, Confidence]:
+def _alive(
+    gone: bool, phase: str, latest: dict[Source, Signal], current: dict[Source, Signal]
+) -> tuple[State, Failure, Confidence]:
     if gone:
         return State.SUSPECT, Failure.WORKER_LOSS, Confidence.UNCERTAIN
     if phase == PENDING:
         return State.SUSPECT, Failure.POD_SCHEDULING, Confidence.UNCERTAIN
-    agree = Confidence.CONFIRMED if phase == RUNNING or supervisor == HANDSHAKE else Confidence.PARTIAL
+    agrees = _value(current, Source.KUBERNETES) == RUNNING or _value(current, Source.SUPERVISOR) == HANDSHAKE
+    agree = Confidence.CONFIRMED if agrees else Confidence.PARTIAL
     if _value(latest, Source.PROVIDER) == QUOTA_WAIT:
         return State.WAITING_QUOTA, Failure.PROVIDER_WAIT, agree
     return State.WORKING, Failure.NONE, agree
 
 
-def _judge(fresh: bool, beat: bool, latest: dict[Source, Signal]) -> tuple[State, Failure, Confidence]:
+def _judge(
+    fresh: bool, beat: bool, latest: dict[Source, Signal], current: dict[Source, Signal]
+) -> tuple[State, Failure, Confidence]:
     """LOST here names failure proof only; classify decides whether the proof has held long enough."""
     pod = latest[Source.KUBERNETES].reading if Source.KUBERNETES in latest else Reading.UNREACHABLE
     phase, supervisor = _value(latest, Source.KUBERNETES), _value(latest, Source.SUPERVISOR)
     gone = pod is Reading.NOT_FOUND or phase in ENDED or supervisor == EXITED
     if fresh:
-        return _alive(gone, phase, supervisor, latest)
+        return _alive(gone, phase, latest, current)
     if gone:
         return State.LOST, Failure.WORKER_LOSS, Confidence.PARTIAL
     if phase == PENDING:
@@ -218,10 +223,13 @@ def classify(
     latest = _latest(signals, _remembered(kept))
     beat = latest.get(Source.HEARTBEAT)
     fresh = beat is not None and beat.reading is Reading.OK and now - beat.observed_at <= thresholds.fresh_s
-    state, failure, confidence = _judge(fresh, beat is not None, latest)
+    current = {source: found for source, found in latest.items() if now - found.observed_at <= thresholds.fresh_s}
+    state, failure, confidence = _judge(fresh, beat is not None, latest, current)
     denied = tuple(sorted(found.source.value for found in latest.values() if found.reading in DENIED))
     terminal = _terminal(latest.get(Source.TERMINAL))
-    proof_since = (kept and kept.proof_since or now) if state is State.LOST else 0.0
+    proof_since = 0.0
+    if state is State.LOST:
+        proof_since = kept.proof_since if kept and kept.proof_since else now
     state = _settled(state, kept, thresholds, now)
     was_suspect = kept is not None and kept.state is State.SUSPECT
     confirmed = [found.observed_at for found in latest.values() if found.reading is Reading.OK]

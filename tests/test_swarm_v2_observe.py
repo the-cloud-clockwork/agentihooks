@@ -132,6 +132,14 @@ def test_supervisor_handshake_confirms_a_fresh_heartbeat(fixture):
     assert judge(agent, beat(agent), handshake(agent)).confidence is Confidence.CONFIRMED
 
 
+def test_an_old_remembered_pod_reading_no_longer_confirms(fixture):
+    _, agent, observer = fixture
+    observer.observe("fixture", agent, [beat(agent), pod(agent), handshake(agent)], NOW)
+    seen = observer.observe("fixture", agent, [beat(agent, -3600.0)], NOW + 3600)
+    assert (seen.state, seen.confidence) == (State.WORKING, Confidence.PARTIAL)
+    assert seen.sources["kubernetes"]["observed_at"] == NOW - 1.0
+
+
 def test_heartbeat_older_than_the_threshold_is_stale(fixture):
     _, agent, _ = fixture
     assert judge(agent, beat(agent, 120.0), pod(agent)).state is State.WORKING
