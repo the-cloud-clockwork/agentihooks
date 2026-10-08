@@ -123,7 +123,7 @@ def test_a_name_only_in_a_secondary_file_reaches_the_render(tmp_path, monkeypatc
     project.mkdir()
     seen = {}
 
-    def prepare(profile, agent, model, effort, flags, environ):
+    def prepare(profile, agent, model, effort, flags, environ, overlays=()):
         seen.update(environ)
         return {}, flags
 

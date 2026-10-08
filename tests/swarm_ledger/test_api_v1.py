@@ -2205,6 +2205,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         values=["Next"],
         depends_on="",
         territory="",
+        overlays="",
         gain=None,
         must="",
         check="",

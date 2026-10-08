@@ -60,17 +60,22 @@ def orphan(row: Process, info: dict, table: dict[int, Process]) -> str:
 
 
 def terminate(row: Process, proc: Path) -> None:
-    if (current := _process(row.pid, proc)) is None or current.start_time != row.start_time:
+    if (current := _process(row.pid, proc)) is None:
+        return
+    if current.start_time != row.start_time:
         raise ProcessLookupError("server identity changed")
-    os.kill(row.pid, signal.SIGTERM)
-    deadline = time.monotonic() + 1
-    while current := _process(row.pid, proc):
-        if current.start_time != row.start_time or current.state == "Z":
-            return
-        if time.monotonic() >= deadline:
-            os.kill(row.pid, signal.SIGKILL)
-            return
-        time.sleep(0.02)
+    try:
+        os.kill(row.pid, signal.SIGTERM)
+        deadline = time.monotonic() + 1
+        while current := _process(row.pid, proc):
+            if current.start_time != row.start_time or current.state == "Z":
+                return
+            if time.monotonic() >= deadline:
+                os.kill(row.pid, signal.SIGKILL)
+                return
+            time.sleep(0.02)
+    except ProcessLookupError:
+        return
 
 
 def sweep_servers(

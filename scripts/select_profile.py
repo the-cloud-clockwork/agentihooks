@@ -3,6 +3,7 @@ import os
 import shlex
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 import yaml
@@ -11,9 +12,17 @@ from scripts import init_agent
 from scripts.profiles import binding, plugins
 from scripts.profiles import render as profiles
 
+OVERLAYS = "AGENTIHOOKS_OVERLAYS"
+
 
 def prepare(
-    name: str, agent: str, model: str, effort: str, agent_args: list[str], environ: dict[str, str]
+    name: str,
+    agent: str,
+    model: str,
+    effort: str,
+    agent_args: list[str],
+    environ: dict[str, str],
+    overlays: Sequence[str] = (),
 ) -> tuple[dict[str, str], list[str]]:
     if agent not in ("claude", "codex"):
         raise ValueError(f"{agent} per-run profiles are not supported")
@@ -30,10 +39,10 @@ def prepare(
     flags = init_agent.model_flags(
         agent, model or native_model or default_model, _effort(agent, effort or native_effort or default_effort)
     )
-    profiles.render(agent, name)
-    env = {"AGENTIHOOKS_PROFILE": name, profiles.CHANNELS: profiles.channels(name)}
+    profiles.render(agent, name, overlays=overlays)
+    env = {"AGENTIHOOKS_PROFILE": name, profiles.CHANNELS: profiles.channels(name), OVERLAYS: ",".join(overlays)}
     home = "CLAUDE_CONFIG_DIR" if agent == "claude" else "CODEX_HOME"
-    env[home] = str(profiles.profile_dir(name) / agent)
+    env[home] = str(profiles.profile_dir(name, overlays) / agent)
     return env, [*flags, *remaining]
 
 
@@ -94,10 +103,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--agent", choices=("claude", "codex", "copilot"), default="claude")
     parser.add_argument("--model", default="")
     parser.add_argument("--effort", choices=("minimal", "low", "medium", "high", "xhigh", "max"), default="")
+    parser.add_argument("--overlay", action="append", default=[], help="Wear this overlay; repeat for up to three")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(arguments[:split])
     try:
-        env, command = prepare(args.name, args.agent, args.model, args.effort, arguments[split + 1 :], dict(os.environ))
+        env, command = prepare(
+            args.name, args.agent, args.model, args.effort, arguments[split + 1 :], dict(os.environ), args.overlay
+        )
     except (OSError, ValueError) as exc:
         print(f"agentihooks select-profile: {exc}", file=sys.stderr)
         if os.environ.get(binding.REPORT):

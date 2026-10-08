@@ -81,6 +81,11 @@ def _join(doc, op, ctx):
         "claims": known["claims"] if known else [],
         "handled_rev": known["handled_rev"] if known else ctx.rev - 1,
     }
+    # Join evidence survives membership and event expiry for the ledger lifetime.
+    starts = ctx.meta.setdefault("join_history", {}).setdefault(op["by"], [])
+    joined = members[op["by"]]["joined_at"]
+    if joined not in starts:
+        starts.append(joined)
     ctx.record(op["by"], "joined", "", role=role)
     return True
 
