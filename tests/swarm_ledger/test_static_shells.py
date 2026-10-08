@@ -134,6 +134,11 @@ def test_home_shell_lists_no_ledger_rows(base):
     assert re.findall(r'data-sort="(\w+)"', body) == ["kind", "open", "done", "swarm", "at"]
 
 
+def test_page_shells_are_plain_ascii_so_any_ascii_locale_reads_them_alike():
+    for shell in (core.SHELL, core.HOME):
+        assert shell.read_bytes().isascii(), shell.name
+
+
 @pytest.mark.parametrize("name", sorted(core.static_assets()))
 def test_each_asset_is_served_immutable_under_the_page_version(base, name):
     status, headers, body = get(f"{base}/static/{core.page_version()}/{name}")
