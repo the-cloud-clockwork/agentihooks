@@ -49,6 +49,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ledger = ["redis>=5.0.0", "jsonschema>=4.23"]
 postgres = ["psycopg2-binary>=2.9.9"]
 otel = [
     "opentelemetry-api>=1.20.0",
@@ -100,7 +101,7 @@ include = ["hooks*", "scripts*", "profiles*"]
 # systemd unit template for the network-transport agentihooks MCP daemon. Lives
 # under scripts/ so AGENTIHOOKS_ROOT-relative resolution works from a wheel too.
 "scripts" = ["packaging/**/*.template"]
-"scripts.swarm_ledger" = ["*.html", "*.css", "*.js", "static/js/*.js"]
+"scripts.swarm_ledger" = ["*.html", "*.css", "*.js", "static/**/*.js", "static/**/*.css"]
 # Ship every native config and Markdown artifact under profiles/ — personas,
 # rules, settings, and profile manifests. Recursive ** globs cover .claude/
 # and target-specific subdirectories at any depth.

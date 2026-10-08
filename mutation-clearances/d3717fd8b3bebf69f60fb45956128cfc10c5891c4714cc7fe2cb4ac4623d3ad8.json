@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_3:bb14f27e3dfa0501c6fb9cb640fe8994e9d8a41d3259948544845fdf6981b2a6": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. Bindings, result rows, transaction semantics and persisted rows are identical."
+  }
+}

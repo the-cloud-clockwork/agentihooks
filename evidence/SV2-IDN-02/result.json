@@ -1,0 +1,96 @@
+{
+  "package": "SV2-IDN-02",
+  "dependency": "SV2-IDN-01",
+  "integration_gate": "G1",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1518",
+  "status": "implemented, independently reviewed and CI qualified at qualification_head; integration merge follows required checks on the current head",
+  "evidence_class": "isolated fakeredis metadata fixture; Pods are synthetic; no rollout claim",
+  "tested_commit": "19c19494e9d8938aadae449b7cfbb9c47268c653",
+  "supported_versions": {
+    "execution_metadata": "2.0",
+    "legacy_local_agent_records": "preceding shape retained"
+  },
+  "interfaces": [
+    "AgentRecord execution metadata",
+    "RedisStore.start_execution",
+    "RedisStore.execution",
+    "RedisStore.executions",
+    "RedisStore.execution_occupants",
+    "RedisStore.put_agent",
+    "RedisStore.execution_identity_conflicts_total",
+    "RedisStore.export and restore"
+  ],
+  "states": {
+    "observed": "320 focused checks passed; repository lint and format passed; actual preceding strict decoder rollback passed; eighteen surviving equivalents independently ruled.",
+    "accepted": "two independent positive rejection and recovery fixtures passed; historical attempts and seat memory preserved; three identity conflicts counted in each negative fixture",
+    "committed": "19c19494e9d8938aadae449b7cfbb9c47268c653",
+    "externally_verified": "CI run 37714327137 passed eight unit shards, lint, mutation, Sonar, image smoke and Gate Required at 81069c97c322bfdcfb4e936c6e31d3353c0f533a. No live Pod or rollout claim; remote runtime qualification belongs to its rollout gate."
+  },
+  "measurements": {
+    "execution_identity_conflicts_total": {
+      "a": [
+        0,
+        0
+      ],
+      "b": [
+        3,
+        3
+      ],
+      "c": [
+        3,
+        3
+      ]
+    }
+  },
+  "cases": {
+    "a": "evidence/SV2-IDN-02/a-result.json",
+    "b": "evidence/SV2-IDN-02/b-result.json",
+    "c": "evidence/SV2-IDN-02/c-result.json"
+  },
+  "reviews": {
+    "standards": "Source review closed; all eighteen surviving equivalent variants individually ruled with fingerprints and invariants",
+    "spec": "Closed after deterministic binding validation and final containment/concurrency test review; no findings"
+  },
+  "rollback_rehearsal": {
+    "preceding_commit": "bc0fe91d",
+    "strict_reader": "passed",
+    "retained_attempts": 3,
+    "seat_memory": "preserved"
+  },
+  "rollback": "Stop distributed launches before reverting writer; preserve authoritative execution history and seat memory; preceding agents decoder works with unchanged projection fields.",
+  "limitations": [
+    "Redis durability remains the existing swarm persistence and snapshot contract; this metadata package adds no separate database.",
+    "Runtime adapter wiring and authenticated launch grants are owned by subsequent packages.",
+    "Seat execution generation is distinct from task ownership generation and controller epoch.",
+    "Latest recorded occupancy is metadata, including terminal states, and is neither liveness proof nor authority.",
+    "Kubernetes fixtures use synthetic Pod identities; live qualification belongs to its rollout gate."
+  ],
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1533",
+  "ci": {
+    "initial_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37710855941",
+    "initial_head": "e6090d977bb6e23d3147afc4f41c4bc0c4328289",
+    "initial_result": "red: missing fakeredis test worker group and 103 mutation survivors; exact grouping correction and adversarial triage are committed; current head requires requalification",
+    "integration_repair": "Master announced integration green; snapshot repair incorporated before qualification",
+    "qualification_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37714327137",
+    "qualification_head": "81069c97c322bfdcfb4e936c6e31d3353c0f533a",
+    "status": "all required checks, image smoke and mutation passed at qualification_head"
+  },
+  "mutation": {
+    "initial_counts": {
+      "execution_killed": 446,
+      "execution_survived": 103,
+      "store_killed": 31
+    },
+    "independently_cleared": 18,
+    "remaining": "zero unruled survivors; eighteen equivalents independently cleared; required mutation check passed",
+    "job": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37714327137/job/113107223020",
+    "qualified_counts": {
+      "execution_killed": 532,
+      "execution_survived": 18,
+      "store_killed": 31
+    },
+    "qualification_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37714327137",
+    "qualification_head": "81069c97c322bfdcfb4e936c6e31d3353c0f533a",
+    "clearance_storage": "one deterministic JSON file per ruling under mutation-clearances; original reader and reasons preserved"
+  }
+}

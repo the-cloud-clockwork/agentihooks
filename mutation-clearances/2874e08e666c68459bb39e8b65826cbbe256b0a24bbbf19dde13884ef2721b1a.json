@@ -1,0 +1,6 @@
+{
+  "877ff91415756217772a905b59e33d239fd35ed7b1c9e04ed7a7d4170ad3fbf2": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "With a supplied Content-Length the changed default is unused. Without that header the original converts zero then raises ValueError; mutant int of XX0XX raises ValueError. The same except branch returns the exact same 400 schema_invalid bounded-body envelope before reading state. Independent extracted-function probe confirmed equality."
+  }
+}

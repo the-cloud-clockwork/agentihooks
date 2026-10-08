@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_comments.py:scripts.swarm_ledger.ledger_comments.x_problems__mutmut_11:a2dac3da8a95a1cce5d5e2bd0440b659cda0e1d1135014f72885e4e0e7817f0d": {
+    "reader": "Standards",
+    "reason": "Replacing a complete registered token with uppercase X text instead of spaces cannot match the lowercase hexadecimal rule or join neighboring hashes. Other checks use original text. Independent comparison across punctuation, neighboring hashes, URLs, kinds and length modes returned 968 equal outputs."
+  }
+}

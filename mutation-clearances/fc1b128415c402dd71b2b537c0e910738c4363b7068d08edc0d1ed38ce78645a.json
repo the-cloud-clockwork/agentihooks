@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x\u01c1IntentGate\u01c1decide__mutmut_1:caa9906b3ceb8264d1b86eb14e69b5e47660418ce19b5da62a80c332e2a377df": {
+    "reader": "Standards reader",
+    "reason": "Every mode condition compares with coach. Original and mutated defaults remain outside coach and give identical decisions, logs and feedback, including omitted mode calls. Independently cleared against CI run 37680501547."
+  }
+}

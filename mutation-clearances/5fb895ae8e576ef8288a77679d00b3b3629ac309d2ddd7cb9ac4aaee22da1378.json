@@ -1,0 +1,6 @@
+{
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_49:fd5b19fb8b5769b93feecb39e8f69a70896e3401d05a66484161915ee3e36b84": {
+    "reader": "Standards",
+    "reason": "Increasing the split limit preserves the first segment used to identify the option."
+  }
+}

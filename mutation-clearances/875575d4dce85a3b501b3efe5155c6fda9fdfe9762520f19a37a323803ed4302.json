@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x_render_claude__mutmut_5:f5e23bf533a952c9edfe36d3d3648ec52d1334ecc4fcb592118c37debc4ca22e": {
+    "reader": "Standards",
+    "reason": "build_persona only checks if pending_rules, so None and an empty list take the same branch for every input."
+  }
+}

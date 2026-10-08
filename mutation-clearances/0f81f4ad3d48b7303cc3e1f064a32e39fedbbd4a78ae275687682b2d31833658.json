@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/bin_storage.py:scripts.swarm_ledger.repository.bin_storage.x_purge_expired__mutmut_5:e827a58846a959ce83773b35e66f42d52c9c864f40c7d317bb0f73be74cc0573": {
+    "reader": "Standards",
+    "reason": "Within purge_expired every expired slug has had both authoritative paths unlinked before this call. apply_lifecycle derives all those same absent slugs from existing minus present. Omitting expired does not change selected deletions or persisted rows."
+  }
+}

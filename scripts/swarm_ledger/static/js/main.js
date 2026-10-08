@@ -78,7 +78,7 @@ function start() {
   $("main-content").addEventListener("scroll", markOutline, { passive: true });
   loadMetadata();
   connectEvents();
-  loaded.then(() => { if (location.hash.startsWith("#item-")) openHash(); });
+  loaded.then(() => { if (location.hash.length > 1) openHash(); });
   setInterval(refreshQuota, QUOTA_REFRESH_MS);
   setInterval(renderStats, 30000);
   setInterval(renderSync, 1000);

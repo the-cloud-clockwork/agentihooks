@@ -4,7 +4,7 @@ import { verdictButton } from "./render.js";
 import { jumpTo } from "./outline.js";
 import { foldSaved } from "./folds.js";
 import { showChat } from "./chat.js";
-import { firstPage, moreButton } from "./pages.js";
+import { firstPage, moreButton, wanted } from "./pages.js";
 
 export function anchorPanel(panel, icon) {
   panel.style.setProperty("--anchor-top", `${icon.getBoundingClientRect().top}px`);
@@ -65,7 +65,7 @@ export function renderNotifications() {
   $("bell-badge").textContent = String(list.length);
   $("notif-clear-all").hidden = !list.length;
   if ($("notif").hidden) return $("notifs").replaceChildren();
-  $("notifs").replaceChildren(...list.map((n) => h("li", { class: "notif-row" },
+  $("notifs").replaceChildren(...firstPage("notifs", list, (n) => `notice-${n.id}`).map((n) => h("li", { class: "notif-row", id: `notice-${n.id}` },
     h("div", { class: "notif-meta" },
       h("span", { text: noticeTime(n.at) }),
       h("a", { class: "prio-link", href: `#${noticeTarget(n.item)}`,
@@ -73,7 +73,8 @@ export function renderNotifications() {
       h("span", { text: n.label === "Reply" ? `Reply from ${n.by}` : n.label }),
       h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearNotification(n.id) } })),
     h("div", { class: "notif-text", text: n.text, title: "Go to it",
-      on: { click: (ev) => { if (!getSelection().toString()) jumpToNotice(ev, n.item); } } }))));
+      on: { click: (ev) => { if (!getSelection().toString()) jumpToNotice(ev, n.item); } } }))),
+    moreButton("notifs", list.length, "more notifications", renderNotifications) || "");
   if (!list.length) $("notifs").append(h("li", { class: "empty", text: "No notifications." }));
 }
 
@@ -109,8 +110,8 @@ export function renderAlerts() {
   $("alert-badge").hidden = !list.length;
   $("alert-badge").textContent = String(list.length);
   if ($("alert-panel").hidden) return $("alerts").replaceChildren();
-  if (document.activeElement.matches("#alerts input")) return;
-  $("alerts").replaceChildren(...list.map(alertRow));
+  if (!wanted.id && document.activeElement.matches("#alerts input")) return;
+  $("alerts").replaceChildren(...firstPage("alerts", list, (a) => `alert-${a.id}`).map(alertRow), moreButton("alerts", list.length, "more alerts", renderAlerts) || "");
   if (!list.length) $("alerts").append(h("li", { class: "empty", text: "No open alerts." }));
 }
 

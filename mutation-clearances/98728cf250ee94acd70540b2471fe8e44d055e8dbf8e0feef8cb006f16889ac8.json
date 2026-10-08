@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_body__mutmut_23:960957e27b2b43b54d0f04fe3f91fdd193c25b1a1c178fde1b35c521111eb596": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The HTTPMessage lookup changes only Content-Length key case; HTTPMessage compares field names case-insensitively, preserving value, length conversion, status and body."
+  }
+}

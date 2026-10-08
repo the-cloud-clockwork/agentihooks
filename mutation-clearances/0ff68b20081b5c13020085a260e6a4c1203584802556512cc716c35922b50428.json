@@ -1,0 +1,6 @@
+{
+  "hooks/context/conditions.py:hooks.context.conditions.x__git_out__mutmut_17:7e83af62eb5a9556bbfc625512b67cce33a0a983daf72c5be3a31b0cf2f14941": {
+    "reader": "Standards",
+    "reason": "The timeout bounds only a hung git; a timeout of four seconds takes the same path as three, and the TimeoutExpired path is tested."
+  }
+}

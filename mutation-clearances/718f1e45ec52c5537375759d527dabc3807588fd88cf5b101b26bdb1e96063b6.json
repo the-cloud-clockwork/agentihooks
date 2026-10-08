@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/bin_storage.py:scripts.swarm_ledger.repository.bin_storage.x_registries__mutmut_10:986e45fe577f4cdfe5489813b0d4ce845a72b64ddd800f9779f76fb114fdb04e": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same Python codec. Encoding, decoding, values and errors are unchanged."
+  }
+}

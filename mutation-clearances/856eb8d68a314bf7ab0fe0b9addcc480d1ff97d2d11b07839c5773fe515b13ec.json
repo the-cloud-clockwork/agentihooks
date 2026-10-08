@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_page_for__mutmut_39:9fb197a866645940aeeeadfc8a45d53d12c97717d4bfa0c78034bdcee2f839eb": {
+    "reader": "Standards",
+    "reason": "Python normalizes codec names before lookup: codecs.lookup('UTF-8') and codecs.lookup('utf-8') resolve to the same utf-8 codec, so read_text(encoding='UTF-8') decodes to the identical str as encoding='utf-8' for any bytes, independent of the file content, and page_for output is unchanged. Evidence: CI run 37704627823. Adversarial Standards ruling."
+  }
+}

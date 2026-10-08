@@ -1,0 +1,6 @@
+{
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_command_lines__mutmut_20:c21b45a095edd28f98f18434986e293dbdd0f2806a9ed5e38d765c777a806070": {
+    "reader": "Standards",
+    "reason": "Uppercasing the excluded command name and inert prefix preserves the discovered command descendants. Nine differential parser controls returned identical output."
+  }
+}

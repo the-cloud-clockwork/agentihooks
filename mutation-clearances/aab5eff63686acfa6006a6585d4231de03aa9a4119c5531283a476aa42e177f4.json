@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1_registries__mutmut_19:1e1d8d428da8ac82dbfcd811e05b5e2a962b42be15d807905df0ceb5d0f4fdc3": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  }
+}

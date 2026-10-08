@@ -1,0 +1,6 @@
+{
+  "e2f8723d6b4d0316b331cb08a6aba71c61e831322c671a79b1dfece8ab661ac5": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only HTTPMessage lookup key case changes. Field names are compared case insensitively, preserving exact values/defaults and validation and uploader binding."
+  }
+}

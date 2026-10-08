@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1observe__mutmut_24:19c788d22295248b72afdded7a527a1d127caff334f57559dcc85f7a5ff35f9f": {
+    "reader": "Standards",
+    "reason": "A missing pane text defaults to a string with no input marker, confirmation line or escape codes, so selection_prompt and typed_input both return empty exactly as for an empty default."
+  }
+}

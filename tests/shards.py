@@ -1,3 +1,4 @@
+import ast
 import importlib
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -15,17 +16,60 @@ def source_sizes(root: Path, files: list[str]) -> dict[str, int]:
     return {path: (root / path).stat().st_size for path in files}
 
 
-def assign_files(durations: dict[str, float], files: list[str], shards: int, sizes: dict[str, int]) -> list[list[str]]:
-    seconds = {path: sizes.get(path, 0) * SECONDS_PER_SOURCE_BYTE for path in files}
+def grouped_files(root: Path, files: list[str]) -> set[str]:
+    return {
+        path
+        for path in files
+        if any(
+            isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "xdist_group"
+            for node in ast.walk(ast.parse((root / path).read_text()))
+        )
+    }
+
+
+def assign_files(
+    durations: dict[str, float],
+    files: list[str],
+    shards: int,
+    sizes: dict[str, int],
+    grouped: set[str] | None = None,
+    workers: int = 1,
+) -> list[list[str]]:
+    seconds = dict.fromkeys(files, 0.0)
     for nodeid, duration in durations.items():
         path = nodeid.split("::", 1)[0]
         if path in seconds:
             seconds[path] += duration
+    serial = {path: seconds[path] if grouped and path in grouped else 0.0 for path in files}
+    collection = {path: sizes.get(path, 0) * SECONDS_PER_SOURCE_BYTE for path in files}
+    return _assign_work(seconds, serial, collection, shards, workers)
+
+
+def assign_nodes(durations: dict[str, float], shards: int, grouped: set[str], workers: int) -> list[list[str]]:
+    serial = {node: seconds if node.split("::", 1)[0] in grouped else 0.0 for node, seconds in durations.items()}
+    return _assign_work(durations, serial, dict.fromkeys(durations, 0.0), shards, workers)
+
+
+def _assign_work(
+    seconds: dict[str, float], serial: dict[str, float], collection: dict[str, float], shards: int, workers: int
+) -> list[list[str]]:
     loads = [0.0] * shards
+    serial_loads = [0.0] * shards
+    collection_loads = [0.0] * shards
     groups: list[list[str]] = [[] for _ in range(shards)]
-    for path in sorted(files, key=lambda f: (-seconds[f], f)):
-        lightest = loads.index(min(loads))
+    for path in sorted(seconds, key=lambda f: (-max(seconds[f] / workers, serial[f]) - collection[f], f)):
+        lightest = min(
+            range(shards),
+            key=lambda i: (
+                max((loads[i] + seconds[path]) / workers, serial_loads[i] + serial[path])
+                + collection_loads[i]
+                + collection[path],
+                loads[i],
+            ),
+        )
         loads[lightest] += seconds[path]
+        serial_loads[lightest] += serial[path]
+        collection_loads[lightest] += collection[path]
         groups[lightest].append(path)
     return groups
 

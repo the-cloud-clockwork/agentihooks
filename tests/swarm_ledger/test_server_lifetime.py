@@ -11,7 +11,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts.swarm_ledger import server_lifetime
+from scripts.swarm_ledger import ledger_link, server_lifetime
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVER = ROOT / "scripts/swarm_ledger/ledger_server.py"
@@ -188,6 +188,27 @@ def test_owner_without_a_known_runner_uses_the_live_parent(tmp_path, monkeypatch
 )
 def test_only_the_shared_folder_and_port_are_exempt(tmp_path, monkeypatch, folder, port, expected):
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    assert server_lifetime.shared(tmp_path / folder, port) is expected
+
+
+@pytest.mark.parametrize(
+    "folder,port,expected",
+    [
+        ("relocated", 9911, True),
+        ("relocated", 8765, False),
+        ("development-ledger", 9911, False),
+        ("scratch", 9911, False),
+    ],
+)
+def test_shared_exemption_follows_the_link_folder_and_default_port(tmp_path, monkeypatch, folder, port, expected):
+    monkeypatch.setenv("LEDGER_DIR", str(tmp_path / "scratch"))
+    monkeypatch.setenv("LEDGER_PORT", "9999")
+    monkeypatch.setattr(
+        ledger_link,
+        "shared_directory",
+        lambda environ: Path(environ.get("LEDGER_DIR", "")).resolve() == (tmp_path / "relocated").resolve(),
+    )
+    monkeypatch.setattr(ledger_link, "address", lambda environ: ("127.0.0.1", int(environ.get("LEDGER_PORT", "9911"))))
     assert server_lifetime.shared(tmp_path / folder, port) is expected
 
 

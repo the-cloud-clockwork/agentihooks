@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1observe__mutmut_40:4123c5fa4c231ce83765b6bf1b66e0f332b14e490a50d5d71dae6844e29bd60f": {
+    "reader": "Standards /root/standards",
+    "reason": "Absent capture text is empty or XXXX; both lack a selection dialog and return the same observed state."
+  }
+}
