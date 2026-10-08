@@ -101,13 +101,14 @@ def _harnesses(config, lane: str) -> tuple[str, ...]:
     return ("claude", "codex")
 
 
-def _ready_indices(effective: dict, limits: dict, remaining: dict, options: dict, cursors: dict) -> dict:
+def _ready_indices(effective: dict, limits: dict, options: dict, cursors: dict, room) -> dict:
     ready = {}
     for lane in LANES:
         if effective[lane] >= limits[lane]:
             continue
         index = next(
-            (i for i in range(cursors[lane], len(options[lane])) if any(remaining[h] for h in options[lane][i])), None
+            (i for i in range(cursors[lane], len(options[lane])) if any(room(lane, i, h) for h in options[lane][i])),
+            None,
         )
         if index is not None:
             ready[lane] = index
@@ -123,24 +124,34 @@ def _reserved(limits: dict, effective: dict, options: dict, cursors: dict) -> di
     return result
 
 
-def _allocate(config, effective: dict, limits: dict, open_seats: list, requirements: dict | None) -> tuple:
+def _allocate(
+    config, effective: dict, limits: dict, open_seats: list, requirements: dict | None, accounts: dict | None = None
+) -> tuple:
     allocation = {lane: {"claude": 0, "codex": 0} for lane in LANES}
     placements = {lane: [] for lane in LANES}
     options = requirements or {lane: [_harnesses(config, lane)] * limits[lane] for lane in LANES}
     cursors = dict.fromkeys(LANES, 0)
     held = {(seat.harness, seat.account): seat for seat in open_seats}
+
+    def usable(lane, index, seat):
+        allowed = (accounts or {}).get(lane, {}).get(index)
+        return allowed is None or (seat.harness, seat.account) in allowed
+
+    def room(lane, index, harness):
+        return sum(s.free for s in held.values() if s.harness == harness and usable(lane, index, s))
+
     while True:
         remaining = {h: sum(s.free for s in held.values() if s.harness == h) for h in ("claude", "codex")}
-        ready = _ready_indices(effective, limits, remaining, options, cursors)
+        ready = _ready_indices(effective, limits, options, cursors, room)
         if not ready:
             return allocation, placements
         lane = min(ready, key=lambda name: effective[name])
         index = ready[lane]
         cursors[lane] = index
         reserved = _reserved(limits, effective, options, cursors)
-        eligible = [h for h in options[lane][index] if remaining[h]]
+        eligible = [h for h in options[lane][index] if room(lane, index, h)]
         spare = [h for h in eligible if remaining[h] > reserved[h]] or eligible
-        seat = session_bands.pick(seat for seat in held.values() if seat.harness in spare)
+        seat = session_bands.pick(s for s in held.values() if s.harness in spare and usable(lane, index, s))
         held[(seat.harness, seat.account)] = replace(seat, sessions=seat.sessions + 1)
         allocation[lane][seat.harness] += 1
         placements[lane].append({"index": index, "harness": seat.harness, "account": seat.account})
@@ -154,6 +165,7 @@ def calculate(
     agents: list,
     demand: dict | None = None,
     requirements: dict | None = None,
+    accounts: dict | None = None,
 ) -> dict:
     configured = dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan), strict=True))
     busy = {lane: sum(a.lane == lane and a.state != "finished" for a in agents) for lane in LANES}
@@ -163,7 +175,7 @@ def calculate(
         for lane in LANES
     }
     placeable = {h: sum(free_seats(row) for row in observations if row.harness == h) for h in ("claude", "codex")}
-    allocation, placements = _allocate(config, effective, limits, seats(observations), requirements)
+    allocation, placements = _allocate(config, effective, limits, seats(observations), requirements, accounts)
     restricted = sorted({row.state.lower() for row in observations if row.state != "OPEN"})
     reason = "accounts have quota" if not restricted else "accounts are " + ", ".join(restricted)
     reason += f"; Claude has {placeable['claude']} free seats and Codex has {placeable['codex']} free seats"
