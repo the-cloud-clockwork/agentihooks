@@ -73,8 +73,11 @@ def test_server_existence_requires_both_slug_and_storage(stored):
 
 def test_page_read_and_upload_membership_use_the_repository(stored):
     slug = "compatibility"
+    stored_page = stored.read_page(slug)
     page = ledger_server.page_for(slug)
-    assert page == stored.read_page(slug)
+    assert f'<meta name="ledger-token" content="{legacy_core.read_token(stored_page)}">' in page
+    assert not legacy_core.SEED_RE.search(page)
+    assert stored.read_page(slug) == stored_page
     stored.apply_ops(slug, ops=[{"op": "join", "id": "join", "by": "eng"}])
     stored.write_page(slug, stored.read_page(slug).replace('"overview": "o"', '"overview": "agent edit"'))
     handler = ledger_server.Handler.__new__(ledger_server.Handler)
@@ -131,18 +134,22 @@ def test_creator_joins_the_small_ledger_with_its_original_event(stored):
     assert bin_storage.entries() == ledger_bin.entries()
 
 
-def test_current_page_preserves_markup_and_reconciles_seed_edits(stored):
+def test_the_served_shell_reads_without_writing_and_a_record_read_reconciles_seed_edits(stored):
     slug = "compatibility"
     page = stored.read_page(slug).replace('"overview": "o"', '"overview": "agent edit"')
     page = page.replace("</body>", "<div>agent page marker</div></body>")
     stored.write_page(slug, page)
     served = ledger_server.page_for(slug)
-    assert "agent page marker" in served
-    assert stored.read_snapshot(slug)["overview"] == "agent edit"
+    assert "agent page marker" not in served
+    assert stored.read_page(slug) == page
+    assert stored.read_snapshot(slug)["overview"] == "o"
+    assert stored.get_document(slug)["overview"] == "agent edit"
 
 
-def test_page_with_unreadable_json_falls_back_to_its_html(stored):
+def test_page_with_unreadable_json_serves_the_shell_titled_by_its_slug(stored):
     slug = "compatibility"
     page = stored.read_page(slug)
     legacy_core.paths(slug)[1].write_text("broken JSON")
-    assert ledger_server.page_for(slug) == page
+    served = ledger_server.page_for(slug)
+    assert f"<title>{slug}</title>" in served
+    assert f'<meta name="ledger-token" content="{legacy_core.read_token(page)}">' in served

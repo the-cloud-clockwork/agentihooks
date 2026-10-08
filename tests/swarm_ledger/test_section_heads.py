@@ -1,9 +1,8 @@
-import json
 from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import serve_modules
+from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
@@ -63,12 +62,12 @@ def open_page(browser, doc, init_script=None):
     context = browser.new_context(viewport={"width": 1600, "height": 900})
     if init_script:
         context.add_init_script(init_script)
-    html = TEMPLATE.read_text(encoding="utf-8").replace("__LEDGER_DATA__", json.dumps(doc))
+    html = shell_html()
     context.route(
         "**/*",
         lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
     )
-    serve_modules(context)
+    serve_modules(context, ledger_state(doc))
     page = context.new_page()
     page.goto(URL)
     return context, page
@@ -123,6 +122,7 @@ def test_counts_follow_an_item_change(tab):
     tab.locator("#item-phases-p0 input[type=checkbox]").evaluate("(el) => el.click()")
     settle(tab)
     assert counts(tab)["phases"] == "· 1 open · 2 done"
+    tab.locator("#followups-done > summary").click()
     tab.locator("#item-followups-f1 input[type=checkbox]").evaluate("(el) => el.click()")
     settle(tab)
     assert counts(tab)["followups"] == "· 1 open"
@@ -144,16 +144,15 @@ def test_sections_toggle_sits_under_the_overview_and_flips_every_section(tab):
 
 
 def test_sections_toggle_leaves_comments_and_outline_alone(tab):
-    before = tab.evaluate(
-        """() => [...document.querySelectorAll("details[data-key], #outline details.fold")].map((d) => d.open)"""
-    )
+    probe = """() => Object.fromEntries([...document.querySelectorAll("details[data-key], #outline details.fold")]
+             .map((d) => [d.dataset.key || d.id, d.open]))"""
+    before = tab.evaluate(probe)
     tab.click("#sections-all")
     tab.click("#sections-all")
     settle(tab)
-    after = tab.evaluate(
-        """() => [...document.querySelectorAll("details[data-key], #outline details.fold")].map((d) => d.open)"""
-    )
-    assert after == before
+    after = tab.evaluate(probe)
+    assert before.items() <= after.items()
+    assert all(v is False for k, v in after.items() if k not in before)
 
 
 def test_sections_state_survives_a_reload(tab):

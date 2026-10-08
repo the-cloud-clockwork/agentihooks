@@ -15,6 +15,7 @@ import ledger_server as server  # noqa: E402
 from scripts.swarm_ledger import ledger_bin, new_ledger  # noqa: E402
 from scripts.swarm_ledger.repository import bin_storage
 from scripts.swarm_ledger.repository import file as storage
+from tests.swarm_ledger.ledger_page import browser_home
 
 DAY_MS = 24 * 60 * 60 * 1000
 T0 = 1_800_000_000_000
@@ -115,7 +116,7 @@ class SizeOnCreate(unittest.TestCase):
         core.sync("home-legacy")
         sizes = {s["slug"]: s["size"] for s in server.ledger_summaries()}
         self.assertEqual((sizes["home-small"], sizes["home-swarm"], sizes["home-legacy"]), ("small", "swarm", "swarm"))
-        home = server.index_page()
+        home = browser_home(server)
         self.assertIn('<span class="kind">small</span>', home)
         self.assertIn('<span class="kind">swarm</span>', home)
 

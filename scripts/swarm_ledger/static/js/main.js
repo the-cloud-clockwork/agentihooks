@@ -1,18 +1,18 @@
 import { QUOTA_REFRESH_MS } from "./config.js";
 import { $ } from "./dom.js";
-import { flush, loadSeed, renderSync, sendSync } from "./sync.js";
+import { flush, loadMetadata, loadSaved, loaded, renderSync, sendSync } from "./sync.js";
 import { showArtifacts } from "./artifacts.js";
 import { editTitle, render, renderStats, saveTitle } from "./render.js";
 import { clearNotification, clearPriority, showAlerts, showNotifications } from "./notices.js";
 import { foldSections, markOutline, outlineBoxes, reveal, sectionBoxes, showOutline, wireOutline } from "./outline.js";
 import { collapsible, commentBoxes, groupOpen, markToggles, rememberGroup, rememberUnanimous, setAllComments } from "./folds.js";
-import { startLayout, wireRail, wireTabs } from "./layout.js";
+import { openHash, startLayout, wireRail, wireTabs } from "./layout.js";
 import { showChat, wireChat, wireChatInput } from "./chat.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
 import { connectEvents } from "./events.js";
 
 function start() {
-  loadSeed();
+  loadSaved();
   startLayout();
   $("sync").addEventListener("click", () => sendSync("sync", "sync"));
   $("stats-sync").addEventListener("click", () => sendSync("stats_sync", "stats-sync"));
@@ -64,7 +64,10 @@ function start() {
     if (target) { reveal(target); target.scrollIntoView({ block: "start" }); }
   });
   document.querySelector(".col").addEventListener("toggle", (ev) => {
-    if (sectionBoxes().includes(ev.target)) { rememberUnanimous("sections", sectionBoxes()); markToggles(); }
+    if (!sectionBoxes().includes(ev.target)) return;
+    rememberUnanimous("sections", sectionBoxes());
+    if (ev.target.open) render();
+    else markToggles();
   }, true);
   $("outline").addEventListener("toggle", (ev) => {
     if (ev.target.matches("details.fold")) { rememberUnanimous("outline", outlineBoxes()); markToggles(); }
@@ -73,7 +76,9 @@ function start() {
   wireTabs();
   wireRail();
   $("main-content").addEventListener("scroll", markOutline, { passive: true });
+  loadMetadata();
   connectEvents();
+  loaded.then(() => { if (location.hash.startsWith("#item-")) openHash(); });
   setInterval(refreshQuota, QUOTA_REFRESH_MS);
   setInterval(renderStats, 30000);
   setInterval(renderSync, 1000);

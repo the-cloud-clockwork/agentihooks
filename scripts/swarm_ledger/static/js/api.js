@@ -1,4 +1,4 @@
-import { API, EVENTS_API, LAYOUT_API, MEDIA_API, SLUG, TOKEN } from "./config.js";
+import { API, API_V1, EVENTS_API, LAYOUT_API, MEDIA_API, SLUG, TOKEN } from "./config.js";
 
 export function openEvents(cursor) {
   const headers = { Accept: "text/event-stream", "X-Ledger-Token": TOKEN };
@@ -17,6 +17,14 @@ export function writeSwarm(body) {
 
 export function uploadImage(file) {
   return fetch(MEDIA_API, { method: "POST", headers: { "X-Ledger-Token": TOKEN }, body: file });
+}
+
+export function readMetadata() {
+  return fetch(API_V1, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+}
+
+export function readWorkspace(taskId) {
+  return fetch(`${API_V1}/tasks/${encodeURIComponent(taskId)}/workspace`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
 }
 
 export function readArtifact(id) {
