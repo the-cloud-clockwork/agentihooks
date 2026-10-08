@@ -66,3 +66,34 @@ def test_read_host_reads_load_memory_and_agents(tmp_path, monkeypatch):
     monkeypatch.setattr(host_budget.account_sessions, "live_codex_sessions", lambda proc: 1)
 
     assert host_budget.read_host(tmp_path) == HostSample(load1=12.5, cpus=16, available_mb=5000, agents=3)
+
+
+def test_load_exactly_at_high_watermark_holds_previous_room():
+    assert host_budget.room(_sample(load1=30.0, available_mb=16000, agents=10), LIMITS, previous=4).room == 4
+
+
+def test_load_exactly_at_low_watermark_holds_previous_room():
+    assert host_budget.room(_sample(load1=20.0, available_mb=16000, agents=10), LIMITS, previous=4).room == 4
+
+
+def test_load_without_live_agents_leaves_memory_as_the_limit():
+    assert host_budget.room(_sample(load1=5.0, available_mb=2800), LIMITS).room == 4
+
+
+def test_meminfo_without_available_memory_gives_zero_room(tmp_path, monkeypatch):
+    (tmp_path / "loadavg").write_text("1.00 1.00 1.00 1/100 1\n")
+    (tmp_path / "meminfo").write_text("MemTotal:       20480000 kB\n")
+    monkeypatch.setattr(host_budget.account_sessions, "live_sessions", lambda proc: {})
+    monkeypatch.setattr(host_budget.account_sessions, "live_codex_sessions", lambda proc: 0)
+
+    assert host_budget.room(host_budget.read_host(tmp_path), LIMITS).room == 0
+
+
+def test_unreadable_proc_gives_zero_room(tmp_path, monkeypatch):
+    monkeypatch.setattr(host_budget.account_sessions, "live_sessions", lambda proc: {})
+    monkeypatch.setattr(host_budget.account_sessions, "live_codex_sessions", lambda proc: 0)
+
+    sample = host_budget.read_host(tmp_path)
+
+    assert sample.available_mb == 0
+    assert host_budget.room(sample, LIMITS).room == 0

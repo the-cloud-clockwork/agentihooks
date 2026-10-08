@@ -1,5 +1,3 @@
-"""How many more agents this host takes, from the one minute load per CPU, available memory and live agent sessions."""
-
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,9 +72,10 @@ def _mem_available_mb(proc: Path) -> int:
 
 def read_host(proc: Path = Path("/proc")) -> HostSample:
     agents = len(account_sessions.live_sessions(proc)) + account_sessions.live_codex_sessions(proc)
-    return HostSample(
-        load1=float((proc / "loadavg").read_text().split()[0]),
-        cpus=os.cpu_count() or 1,
-        available_mb=_mem_available_mb(proc),
-        agents=agents,
-    )
+    cpus = os.cpu_count() or 1
+    try:
+        load1 = float((proc / "loadavg").read_text().split()[0])
+        available_mb = _mem_available_mb(proc)
+    except (OSError, ValueError, IndexError):
+        return HostSample(load1=0.0, cpus=cpus, available_mb=0, agents=agents)
+    return HostSample(load1=load1, cpus=cpus, available_mb=available_mb, agents=agents)
