@@ -370,13 +370,13 @@ def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
     assert upload["with"]["name"] == "tests-passed-${{ steps.tree.outputs.sha }}"
 
 
-def _fake_github(tmp_path, tested_tree: str) -> dict:
+def _fake_github(tmp_path, tested_tree, artifact):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     store = tmp_path / "artifacts"
     store.mkdir()
     listing = tmp_path / "listing.json"
-    listing.write_text(json.dumps({"artifacts": [_artifact()]}))
+    listing.write_text(json.dumps({"artifacts": [artifact]}))
     commit = tmp_path / "commit.json"
     commit.write_text(json.dumps({"sha": "merge-sha", "tree": {"sha": tested_tree}}))
     (bin_dir / "gh").write_text(
@@ -392,10 +392,9 @@ def _fake_github(tmp_path, tested_tree: str) -> dict:
     return {"PATH": f"{bin_dir}:{os.environ['PATH']}", "GITHUB_REPOSITORY": "o/r", "STORE": str(store)}
 
 
-def _record_pass(tmp_path, env: dict) -> None:
+def _record_pass(tmp_path, env):
     tree, upload = _workflow()["jobs"]["record-pass"]["steps"]
     out = tmp_path / "record-out"
-    out.touch()
     subprocess.run(
         ["bash", "-e", "-c", tree["run"]],
         env={**env, "GITHUB_SHA": "merge-sha", "GITHUB_OUTPUT": str(out)},
@@ -407,9 +406,8 @@ def _record_pass(tmp_path, env: dict) -> None:
     (Path(env["STORE"]) / name).touch()
 
 
-def _dev_push_lookup(tmp_path, env: dict, pushed_tree: str) -> str:
+def _dev_push_lookup(tmp_path, env, pushed_tree):
     out = tmp_path / "lookup-out"
-    out.write_text("")
     subprocess.run(
         ["bash", "-e", "-c", _lookup_step()["run"]],
         env={**env, "TREE": pushed_tree, "GH_TOKEN": "t", "GITHUB_OUTPUT": str(out)},
@@ -419,12 +417,12 @@ def _dev_push_lookup(tmp_path, env: dict, pushed_tree: str) -> str:
 
 
 @pytest.mark.parametrize(
-    ("pushed_tree", "skip"),
-    [("a1b2c3", "true"), ("d4e5f6", "false")],
-    ids=["tree-the-pull-request-tested", "tree-after-dev-moved"],
+    ("pushed_tree", "artifact", "skip"),
+    [("a1b2c3", _artifact(), "true"), ("d4e5f6", _artifact(), "false"), ("a1b2c3", _artifact(fork=True), "false")],
+    ids=["tree-the-pull-request-tested", "tree-after-dev-moved", "tree-a-fork-tested"],
 )
-def test_dev_push_reuses_only_the_tree_its_pull_request_recorded(tmp_path, pushed_tree, skip):
-    env = _fake_github(tmp_path, tested_tree="a1b2c3")
+def test_dev_push_reuses_only_the_tree_its_pull_request_recorded(tmp_path, pushed_tree, artifact, skip):
+    env = _fake_github(tmp_path, "a1b2c3", artifact)
     _record_pass(tmp_path, env)
     assert _dev_push_lookup(tmp_path, env, pushed_tree) == f"skip={skip}\n"
 
