@@ -456,7 +456,7 @@ def seed_add_command(command, label, item, fields):
         value, flag = item.get(field), f"--{field.replace('_', '-')}"
         if value is True:
             flags.append(flag)
-        elif value:
+        elif value is not None and value is not False and value not in ("", []):
             value = ",".join(value) if isinstance(value, list) else str(value)
             flags.append(f"{flag} {shlex.quote(value)}")
     return " ".join(["agentihooks ledger --slug <slug> --as <name>", command, shlex.quote(label), *flags])

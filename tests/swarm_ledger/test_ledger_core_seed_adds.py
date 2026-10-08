@@ -72,13 +72,13 @@ def test_the_refused_task_command_quotes_its_title_and_carries_its_fields():
         "description": "Do it now",
         "depends_on": ["t1", "t0"],
         "territory": ["docs"],
-        "gain": 2.5,
+        "gain": 0,
         "release": True,
     }
     state = edit_seed(lambda seed: seed["tasks"].append(task))
     assert state["_meta"]["warnings"] == [
         f'The page added the task "Say "hi"", which was not added. Add it with {PREFIX}'
-        "task add <id> 'Say \"hi\"' --description 'Do it now' --depends-on t1,t0 --territory docs --gain 2.5"
+        "task add <id> 'Say \"hi\"' --description 'Do it now' --depends-on t1,t0 --territory docs --gain 0"
     ]
 
 
