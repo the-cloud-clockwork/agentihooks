@@ -95,5 +95,4 @@ def _real(value):
 
 
 def _on_page(area):
-    area = area.rstrip("/")
     return area in PAGE_FILES or area == PAGE_FOLDER or area.startswith(f"{PAGE_FOLDER}/")
