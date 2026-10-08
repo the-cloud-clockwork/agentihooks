@@ -1904,7 +1904,7 @@ def test_trace_plan_without_a_plan_names_the_file_and_format(env, capsys, monkey
     )
 
 
-def _tick_all(monkeypatch, run_tick, slugs):
+def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
     import os
     import types
 
@@ -1915,7 +1915,16 @@ def _tick_all(monkeypatch, run_tick, slugs):
     monkeypatch.setattr(operator_env, "fill", lambda environ: filled.append(environ))
     monkeypatch.setattr(cli, "now_ms", lambda: 77)
     monkeypatch.setattr(herdr_gc, "run", lambda environ, now, apply: swept.append((environ, now, apply)) or ["swept"])
-    monkeypatch.setattr(cli, "run_tick", run_tick)
+    counts = {}
+
+    def bounded(store, slug):
+        counts[slug] = counts.get(slug, 0) + 1
+        if counts[slug] > 10:
+            pytest.fail(f"{slug} ticked more than ten times in one pass")
+        return run_tick(store, slug)
+
+    monkeypatch.setattr(cli, "TICK_SECONDS", tick_seconds)
+    monkeypatch.setattr(cli, "run_tick", bounded)
     store = types.SimpleNamespace(slugs=lambda: slugs)
     cli.cmd_tick(store, None)
     assert filled == [os.environ]
@@ -1978,14 +1987,13 @@ def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsy
     import threading
     import time
 
-    monkeypatch.setattr(cli, "TICK_SECONDS", 0.5)
     release, ticks, starts = threading.Event(), {"fast": 0, "slow": 0}, []
 
     def run_tick(store, slug):
         assert store.slugs() == ["slow", "fast"]
         ticks[slug] += 1
         if slug == "slow":
-            release.wait(3)
+            release.wait(2)
         else:
             starts.append(time.monotonic())
             if ticks["fast"] > 3:
@@ -1994,7 +2002,7 @@ def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsy
                 release.set()
         return [f"tick {ticks[slug]}"]
 
-    _tick_all(monkeypatch, run_tick, ["slow", "fast"])
+    _tick_all(monkeypatch, run_tick, ["slow", "fast"], tick_seconds=0.5)
     assert ticks == {"fast": 3, "slow": 1}
     assert all(0.45 <= later - earlier < 0.9 for earlier, later in zip(starts, starts[1:]))
     out = capsys.readouterr().out.splitlines()
@@ -2011,7 +2019,6 @@ def test_swarms_that_finish_together_tick_once(monkeypatch, capsys):
 def test_a_quick_swarm_stops_its_extra_ticks_at_the_pass_deadline(monkeypatch, capsys):
     import time
 
-    monkeypatch.setattr(cli, "TICK_SECONDS", 1.0)
     monkeypatch.setattr(cli, "EXTRA_TICKS_UNTIL", 1.5)
     ticks = {"fast": 0, "slow": 0}
 
@@ -2021,7 +2028,7 @@ def test_a_quick_swarm_stops_its_extra_ticks_at_the_pass_deadline(monkeypatch, c
             time.sleep(3.0)
         return []
 
-    _tick_all(monkeypatch, run_tick, ["slow", "fast"])
+    _tick_all(monkeypatch, run_tick, ["slow", "fast"], tick_seconds=1.0)
     assert ticks == {"fast": 2, "slow": 1}
 
 
@@ -2031,7 +2038,6 @@ def test_an_extra_tick_starting_exactly_at_the_deadline_still_runs(monkeypatch, 
     import types
 
     monkeypatch.setattr(cli, "time", types.SimpleNamespace(monotonic=lambda: 100.0, time=time.time, sleep=time.sleep))
-    monkeypatch.setattr(cli, "TICK_SECONDS", 0.05)
     monkeypatch.setattr(cli, "EXTRA_TICKS_UNTIL", 0)
     release, ticks = threading.Event(), {"fast": 0, "slow": 0}
 
@@ -2048,7 +2054,6 @@ def test_an_extra_tick_starting_exactly_at_the_deadline_still_runs(monkeypatch, 
 
 
 def test_a_first_tick_that_dies_still_ends_the_extra_ticks(monkeypatch, capsys):
-    monkeypatch.setattr(cli, "TICK_SECONDS", 0.05)
     ticks = {"fast": 0}
 
     def run_tick(store, slug):
