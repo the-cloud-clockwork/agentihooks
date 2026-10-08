@@ -73,6 +73,7 @@ FIELDS = {
     "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url rank gain difficulty difficulty_source difficulty_confidence",
     "task_update": "by item fields if_state",
     "task_rank": "item rank",
+    "task_group": "by item members",
     "title_set": "text",
     "agent_rename": "by old new",
     "summary_set": "by note",
@@ -119,7 +120,7 @@ TYPES = {
     "phases": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
     "attachments": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
 }
-for _field in ("depends_on", "territory", "if_state"):
+for _field in ("depends_on", "territory", "if_state", "members"):
     TYPES[_field] = {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 2000}}
 
 
