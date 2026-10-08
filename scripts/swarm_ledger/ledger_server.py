@@ -26,8 +26,6 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.parse
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -890,14 +888,6 @@ def watch_seeds(interval=2.0):
         time.sleep(interval)
 
 
-def serving_dir(timeout: float = 1):
-    try:
-        with urllib.request.urlopen(f"{BASE}/healthz", timeout=timeout) as resp:
-            return json.loads(resp.read()).get("dir")
-    except (OSError, ValueError):
-        return None
-
-
 def serve():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     threading.Thread(target=watch_seeds, daemon=True).start()
@@ -942,8 +932,8 @@ def server_process_alive() -> bool:
 def ensure():
     deadline = time.monotonic() + SERVER_WAIT
     started = False
-    running = serving_dir()
-    while not running:
+    running = ledger_link.serving(url=BASE)
+    while running is None:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             sys.exit(f"ledger server did not answer on {BASE}; see {LOGFILE}")
@@ -964,9 +954,11 @@ def ensure():
                 )
             started = True
         time.sleep(min(0.1, remaining))
-        running = serving_dir(timeout=min(1, remaining))
+        running = ledger_link.serving(timeout=min(1, remaining), url=BASE)
     if running != str(core.LEDGER_DIR):
-        sys.exit(f"{BASE} already serves {running}, not {core.LEDGER_DIR}; stop that ledger server first")
+        sys.exit(
+            f"{BASE} already serves {running or 'no ledger folder'}, not {core.LEDGER_DIR}; stop that ledger server first"
+        )
     print(BASE)
 
 
