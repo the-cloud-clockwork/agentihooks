@@ -205,6 +205,21 @@ def test_a_reader_of_an_older_revision_keeps_the_newer_copy_for_the_next_writer(
     assert assembled == []
 
 
+def test_a_refused_write_keeps_the_cached_copy_for_the_next_writer(tmp_path, monkeypatch):
+    class Conflict:
+        def apply(self, doc, op, ctx, apply_op):
+            raise ValueError("revision conflict")
+
+    repo = store(tmp_path)
+    repo.create("ledger", CONTENT)
+    repo.apply_ops("ledger", ops=[chat(1)])
+    with pytest.raises(ValueError, match="revision conflict"):
+        repo.apply_ops("ledger", ops=[chat(2)], gate=Conflict())
+    monkeypatch.setattr(sqlite, "read_rows", lambda *a: pytest.fail("reassembled"))
+    state, _ = repo.apply_ops("ledger", ops=[chat(3)])
+    assert [m["id"] for m in state["chat"]] == ["m1", "m3"]
+
+
 def test_partial_reads_return_only_the_named_parts(tmp_path):
     repo = store(tmp_path)
     repo.create("ledger", CONTENT)

@@ -262,18 +262,14 @@ class SQLiteLedgerRepository:
 
         self._adopt(slug)
         with self.domain.LOCK, self.connect() as connection:
-            try:
-                with connection:
-                    connection.execute("BEGIN IMMEDIATE")
-                    entry = self._entry(connection, slug, latest=True)
-                    state = json.loads(entry.text)
-                    meta = state.pop("_meta")
-                    rejected, ctx = mutation.apply(slug, state, meta, self.domain, changes, ops, gate)
-                    state["_meta"] = meta
-                    written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
-            except BaseException:
-                self._cache.pop(self._key(slug), None)
-                raise
+            with connection:
+                connection.execute("BEGIN IMMEDIATE")
+                entry = self._entry(connection, slug, latest=True)
+                state = json.loads(entry.text)
+                meta = state.pop("_meta")
+                rejected, ctx = mutation.apply(slug, state, meta, self.domain, changes, ops, gate)
+                state["_meta"] = meta
+                written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
             self._remember(slug, written, latest=True)
         return json.loads(written.text), rejected
 
