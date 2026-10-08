@@ -215,8 +215,10 @@ def approvals(sock: str, repo: str) -> dict:
     a = Client(sock, "probe-owner-a")
     thread = start_thread(a, repo, approvalPolicy="untrusted")
     b = Client(sock, "probe-viewer-b")
-    resumed = b.request("thread/resume", {"threadId": thread})
+    early = b.request("thread/resume", {"threadId": thread})
     a.request("turn/start", {"threadId": thread, "input": text(APPROVAL_PROMPT)})
+    a.until(method_is("turn/started"), 30)
+    resumed = b.request("thread/resume", {"threadId": thread})
     is_req = lambda m: "id" in m and str(m.get("method", "")).endswith("requestApproval")  # noqa: E731
     req_a, _ = a.until(is_req, 120)
     req_b, _ = b.until(is_req, 10)
@@ -224,7 +226,8 @@ def approvals(sock: str, repo: str) -> dict:
     req = req_a or req_b
     result = {
         "thread": thread,
-        "viewer_resume": "error" not in resumed,
+        "viewer_resume_before_first_turn": early.get("error") or "ok",
+        "viewer_resume": resumed.get("error") or "ok",
         "request_method": req.get("method") if req else None,
         "delivered_to_a": req_a is not None,
         "delivered_to_b": req_b is not None,
@@ -253,11 +256,12 @@ def approvals(sock: str, repo: str) -> dict:
 def detach(sock: str, repo: str) -> dict:
     a = Client(sock, "probe-bridge")
     thread = start_thread(a, repo)
-    v = Client(sock, "probe-viewer")
-    v.request("thread/resume", {"threadId": thread})
     r = a.request("turn/start", {"threadId": thread, "input": text(SLOW_PROMPT.replace("CHARLIE", "GOLF"))})
     turn = r["result"]["turn"]["id"]
-    v_started, _ = v.until(method_is("turn/started"), 30)
+    a.until(method_is("turn/started"), 30)
+    v = Client(sock, "probe-viewer")
+    v.request("thread/resume", {"threadId": thread})
+    v_started, _ = v.until(method_is("item/started"), 60)
     v.close()
     done, seen = a.until(lambda m: m.get("method") == "turn/completed" and m["params"]["turn"]["id"] == turn)
     v2 = Client(sock, "probe-viewer-reopen")
@@ -272,7 +276,7 @@ def detach(sock: str, repo: str) -> dict:
     v2.close()
     return {
         "thread": thread,
-        "viewer_saw_turn_started": v_started is not None,
+        "viewer_saw_live_item": v_started is not None,
         "turn_after_viewer_closed": done["params"]["turn"].get("status") if done else None,
         "agent_text": agent_texts(seen),
         "reopen_resume_same_thread": resumed.get("result", {}).get("thread", {}).get("id") == thread,
@@ -317,6 +321,7 @@ SANDBOX_POLICIES = {
     "workspaceWrite(repo)": {"type": "workspaceWrite"},
     "workspaceWrite(repo)+network": {"type": "workspaceWrite", "networkAccess": True},
     "workspaceWrite(scratch only)+network": {"type": "workspaceWrite", "networkAccess": True, "writableRoots": []},
+    "workspaceWrite(writableRoots=repo)": {"type": "workspaceWrite", "writableRoots": ["REPO"]},
     "dangerFullAccess": {"type": "dangerFullAccess"},
 }
 
@@ -327,6 +332,7 @@ def sandbox(sock: str, repo: str) -> dict:
     for name, policy in SANDBOX_POLICIES.items():
         cwd = repo if "scratch only" not in name else str(Path(repo).parent / "outside")
         Path(cwd).mkdir(exist_ok=True)
+        policy = {**policy, **({"writableRoots": [repo]} if policy.get("writableRoots") == ["REPO"] else {})}
         r = c.request("command/exec", {"command": SANDBOX_CMD, "cwd": repo, "sandboxPolicy": policy}, 60)
         res = r.get("result") or {}
         out[name] = {
