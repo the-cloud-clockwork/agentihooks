@@ -6,10 +6,11 @@ import pytest
 
 from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
-from scripts.swarm import affinity, launch_check, master_launch, master_start, runtime
+from scripts.swarm import affinity, capacity, launch_check, master_launch, master_start, runtime
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm.tick import Placed, SpawnError
+from tests.swarm.test_capacity import account
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime
 
@@ -695,3 +696,52 @@ def test_the_master_command_needs_its_up_action():
     assert (parsed.action, parsed.choice) == ("up", "")
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["sw", "master"])
+
+
+def test_a_new_master_reads_quota_before_it_is_placed(up, monkeypatch):
+    store, _, rt = up
+    order = []
+    monkeypatch.setattr(
+        rt, "quota_capacity", lambda config, agents, now: order.append(("quota", config.slug, now)), raising=False
+    )
+    spawn = rt.spawn
+    monkeypatch.setattr(rt, "spawn", lambda *args: order.append("spawn") or spawn(*args))
+    direct(store, rt, master_launch.NEW)
+    assert order == [("quota", "sw", AT / 1000), "spawn"]
+
+
+def quota_master(monkeypatch, tmp_path, observed):
+    monkeypatch.setattr(capacity, "accounts", lambda environ, now, refresh=True: observed)
+    rt = runtime.HerdrRuntime(
+        home=tmp_path / "home", choose=lambda requested, environ: (requested or "claude", "priority")
+    )
+    monkeypatch.setattr(
+        runtime.profile_choice,
+        "choose",
+        lambda slug, lane, chosen, task, environ, overlays=None: runtime.profile_choice.ProfileDecision(
+            "master", "task", "explicit"
+        ),
+    )
+    monkeypatch.setattr(rt, "live_names", set)
+    monkeypatch.setattr(rt, "reported", lambda agent: True)
+    routes = []
+
+    def launch(cfg, lane, task, name, argv, **kwargs):
+        route = argv[argv.index("--route") + 1] if "--route" in argv else ""
+        routes.append(route)
+        return runtime.Placed("pane", argv[argv.index("--agent") + 1], route)
+
+    monkeypatch.setattr(rt, "_launch", launch)
+    return rt, routes
+
+
+def test_a_new_master_leaves_a_warned_account_or_refuses_naming_it(up, monkeypatch, tmp_path):
+    store, _, _ = up
+    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5), account("ok")])
+    direct(store, rt, master_launch.NEW)
+    assert routes == ["ok"]
+    rt, routes = quota_master(monkeypatch, tmp_path, [account("w", left=5)])
+    refusal = "no claude account has placeable quota seats: claude w is at its week quota warning"
+    with pytest.raises(SwarmError, match=f"^the new master could not start: {refusal}$"):
+        direct(store, rt, master_launch.NEW)
+    assert routes == []
