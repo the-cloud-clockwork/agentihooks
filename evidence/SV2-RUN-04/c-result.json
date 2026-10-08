@@ -1,5 +1,5 @@
 {
-  "tested_commit": "ece20df35128d72bda3ac9140006b17d7bb0bf11",
+  "tested_commit": "dd374e43e20e611ab6669df35ac27c92587f615e",
   "evidence_class": "mocked signals and isolated fakeredis; no live Kubernetes, SSH or rollout proof",
   "passed": true,
   "independent_fixtures": [
@@ -10,7 +10,16 @@
         "state": "working",
         "confidence": "confirmed"
       },
-      "agents_started": 0,
+      "execution_attempts_and_spawns": {
+        "before_relist": [
+          1,
+          0
+        ],
+        "after_relist": [
+          1,
+          0
+        ]
+      },
       "stale_replay_overwrote": false,
       "conservative_rollback": [
         {
@@ -23,7 +32,7 @@
         }
       ],
       "execution_observation_age_seconds": {
-        "exe-5628cd77c21f48c0810a1f3d4b786e2a": 3600.0
+        "exe-778a9608e0154f8083ffe3c45dc378a7": 3620.0
       }
     },
     {
@@ -33,7 +42,16 @@
         "state": "working",
         "confidence": "confirmed"
       },
-      "agents_started": 0,
+      "execution_attempts_and_spawns": {
+        "before_relist": [
+          1,
+          0
+        ],
+        "after_relist": [
+          1,
+          0
+        ]
+      },
       "stale_replay_overwrote": false,
       "conservative_rollback": [
         {
@@ -46,7 +64,7 @@
         }
       ],
       "execution_observation_age_seconds": {
-        "exe-95c8731942694380bd1f9575da3d699d": 3600.0
+        "exe-ebbee54cea884b3a9f75ebdf3afffca3": 3620.0
       }
     }
   ]
