@@ -109,8 +109,9 @@ class SeatRegistry:
         legacy = self.redis.scan_iter(match=f"{prefix}{slug}-*", count=SCAN_PAGE)
         old = [name for key in legacy if naming.legacy_slug(name := key[len(prefix) :]) == slug]
         named = [row["name"] for row in naming.NameRegistry(self.redis).names(slug)]
-        legacy = list(zip(old, self._known_seats(old)))
-        seated = [(name, seat) for name, seat in zip(named, self._known_seats(named)) if seat]
+        seats = self._known_seats(old + named)
+        legacy = list(zip(old, seats[: len(old)]))
+        seated = [(name, seat) for name, seat in zip(named, seats[len(old) :]) if seat]
         return legacy + seated
 
     def _known_seats(self, names):
