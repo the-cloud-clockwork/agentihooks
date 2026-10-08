@@ -2,7 +2,6 @@ import json
 from dataclasses import replace
 from types import SimpleNamespace
 
-import fakeredis
 import pytest
 
 from scripts.inbox.store import InboxStore
@@ -226,6 +225,8 @@ def test_warning_must_precede_hard_handoff(environ):
 
 
 def test_a_new_agent_gets_its_own_warning_after_a_reset():
+    import fakeredis
+
     storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     storage.put_agent("sw", AgentRecord("first", "eng", "e", harness="claude", account="spent"))
     key = storage.key("sw", "quota-capacity")
@@ -247,6 +248,8 @@ def test_unknown_quota_does_not_warn(field):
 
 
 def test_tick_warns_once_per_agent_without_retiring_it(monkeypatch):
+    import fakeredis
+
     storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, state="running", code="a1b2c3")
     storage.create(config)
@@ -280,6 +283,8 @@ def test_tick_warns_once_per_agent_without_retiring_it(monkeypatch):
 
 
 def test_warning_matches_account_and_harness_and_skips_finished_agents():
+    import fakeredis
+
     storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     for name, harness, state in [("healthy", "claude", "working"), ("finished", "codex", "finished")]:
         storage.put_agent("sw", AgentRecord(name, "eng", "e", harness=harness, account="spent", state=state))
@@ -289,6 +294,84 @@ def test_warning_matches_account_and_harness_and_skips_finished_agents():
     assert quota_handoff.warn("sw", storage, {}) == []
     assert not InboxStore(storage.redis).pending_items("healthy")
     assert not InboxStore(storage.redis).pending_items("finished")
+
+
+def test_warning_ignores_unknown_state_and_handles_empty_observations():
+    import fakeredis
+
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    storage.put_agent("sw", AgentRecord("first", "eng", "a", harness="claude", account="unobserved"))
+    assert quota_handoff.warn("sw", storage, {}) == []
+    storage.redis.set(
+        storage.key("sw", "quota-capacity"), json.dumps({"accounts": [account(state="UNKNOWN").__dict__]})
+    )
+    assert quota_handoff.trigger(account(state="UNKNOWN"), quota_handoff.Thresholds()) == ""
+    assert quota_handoff.warn("sw", storage, {}) == []
+    storage.put_agent("sw", AgentRecord("second", "eng", "b", harness="claude", account="spent"))
+    storage.redis.set(storage.key("sw", "quota-capacity"), json.dumps({"accounts": [account().__dict__]}))
+    assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to second"]
+    (item,) = InboxStore(storage.redis).pending_items("second")
+    assert item.sender == "swarm"
+
+
+def test_required_claude_successor_uses_an_eligible_account():
+    row = account("healthy", five=10, week=20)
+    assert quota_handoff.successor([row], False, quota_handoff.Thresholds()) == row
+
+
+def test_quota_transfer_obeys_its_allocation_without_a_task_pin(tmp_path, monkeypatch):
+    rt = runtime.HerdrRuntime(home=tmp_path)
+    rt._quota_accounts = [account("cc", five=0, week=0), account("cx", "codex", five=10, week=20)]
+    rt._quota_allocations = {"eng": {"claude": 0, "codex": 1}}
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    saved = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "account": "old"}
+    assert rt._quota_transfer(saved, "engineer", {}, "eng", "") == {
+        **saved,
+        "harness": "codex",
+        "model": "",
+        "account": "cx",
+    }
+
+
+def test_quota_transfer_excludes_the_original_account_even_if_it_has_quota(tmp_path, monkeypatch):
+    rt = runtime.HerdrRuntime(home=tmp_path)
+    rt._quota_accounts = [account("old", five=0, week=0), account("fresh", five=10, week=20)]
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    saved = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "account": "old"}
+    assert rt._quota_transfer(saved, "engineer", {}, "eng", "") == {**saved, "account": "fresh"}
+
+
+def test_saved_harness_selection_keeps_its_routing_environment(tmp_path, monkeypatch):
+    environ = {"AGENTIHOOKS_AGENT_PRIORITY": "codex,claude"}
+    seen = []
+    rt = runtime.HerdrRuntime(
+        home=tmp_path, choose=lambda agent, env: seen.append((agent, env)) or (agent, "requested")
+    )
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    assert rt._saved_choice({"harness": "claude"}, "engineer", False, environ) == ("claude", "requested")
+    assert seen == [("claude", environ)]
+    assert rt._saved_choice({"harness": "codex"}, "engineer", True, environ) == ("codex", "quota handoff")
+    assert seen == [("claude", environ)]
+
+
+def test_handoff_spawn_keeps_the_router_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_PRIORITY", "codex,claude")
+    seen = []
+    rt = runtime.HerdrRuntime(
+        home=tmp_path,
+        choose=lambda harness, environ: seen.append(environ["AGENTIHOOKS_AGENT_PRIORITY"]) or (harness, "requested"),
+    )
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    monkeypatch.setattr(rt, "_launch", lambda *args, **kwargs: runtime.Placed("pane", "claude", "old"))
+    saved = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "account": "old"}
+    task = {
+        "id": "e",
+        "title": "Continue",
+        "handoff": "Saved",
+        "handoff_envelope": {"reason": "recycle", "launch": saved},
+    }
+    rt.spawn(SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3"), "eng", "engineer@a1b2c3-0002", task)
+    assert seen == ["codex,claude"]
 
 
 @pytest.mark.parametrize("state", ["DRAIN", "DRAIN_SOON", "REDUCE"])
@@ -342,8 +425,8 @@ def test_quota_transfer_routes_to_best_account_and_preserves_profile(tmp_path, m
         assert "opus" not in seen[0]
 
 
-@pytest.mark.parametrize("same_lane", [False, True])
-def test_quota_successor_uses_its_lane_reservation(tmp_path, monkeypatch, same_lane):
+@pytest.mark.parametrize("same_lane,pinned", [(False, False), (False, True), (True, True)])
+def test_quota_successor_uses_its_lane_reservation(tmp_path, monkeypatch, same_lane, pinned):
     rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
     rt._quota_accounts = [account("cc", five=0, week=0), account("cx", "codex", five=10, week=20)]
     rt._quota_cap, rt._quota_floor, rt._quota_share = 3, 5, 30
@@ -351,7 +434,7 @@ def test_quota_successor_uses_its_lane_reservation(tmp_path, monkeypatch, same_l
         "eng": {"claude": int(same_lane), "codex": 1},
         "ci": {"claude": int(not same_lane), "codex": 0},
     }
-    rt._quota_tasks = {"e": "codex", "required": "claude"}
+    rt._quota_tasks = {"e": "codex", "required": "claude"} if pinned else {}
     seen = []
     monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
     monkeypatch.setattr(

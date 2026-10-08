@@ -245,12 +245,12 @@ class HerdrRuntime:
     def _quota_transfer(self, saved, profile, environ, lane, want):
         from scripts.swarm import quota_handoff
 
-        allocation = getattr(self, "_quota_allocations", {}).get(lane, {"claude": 1, "codex": 1})
+        allocation = getattr(self, "_quota_allocations", {}).get(lane)
         account = quota_handoff.successor(
             [
                 row
                 for row in self._quota_accounts
-                if allocation[row.harness]
+                if (allocation is None or allocation[row.harness])
                 and (row.harness, row.name) != (saved["harness"], saved.get("account"))
                 and (not want or row.harness == want)
             ],
@@ -380,11 +380,7 @@ class HerdrRuntime:
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
         if hasattr(self, "_quota_accounts"):
-            original = _transfer(task) if quota_transfer else {}
-            excluded = original.get("account") if original.get("harness") == agent else None
-            account = self._quota_account(
-                agent, saved.get("account") or self._planned_account(task["id"], agent), excluded
-            )
+            account = self._quota_account(agent, saved.get("account") or self._planned_account(task["id"], agent), None)
             route = ["--route", account.name]
         placed = timing.call(
             self._launch,

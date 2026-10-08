@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import capacity
-from scripts.swarm.store import AgentRecord, RedisStore
+from scripts.swarm.store import RedisStore
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ def trigger(account: capacity.Account, thresholds: Thresholds) -> str:
     return ""
 
 
-def directive(slug: str, agent: AgentRecord, account: capacity.Account, window: str) -> str:
+def directive(slug: str, account: capacity.Account, window: str) -> str:
     used = 100 - (account.week_left if window == "week" else account.five_left)
     return (
         f"QUOTA HANDOFF WARNING: {account.harness} account {account.name} has used {used:g}% of its {window} window. "
@@ -56,7 +56,7 @@ def warn(slug: str, store: RedisStore, environ: dict) -> list[str]:
         account = accounts.get((agent.harness, agent.account))
         if account is None or not (window := trigger(account, thresholds)):
             continue
-        item = InboxStore(store.redis).send("swarm", agent.name, directive(slug, agent, account, window))
+        item = InboxStore(store.redis).send("swarm", agent.name, directive(slug, account, window))
         store.redis.hset(key, agent.name, item.id)
         actions.append(f"early quota handoff warning sent to {agent.name}")
     return actions
