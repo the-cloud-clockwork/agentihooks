@@ -37,7 +37,7 @@ def ledger_page(monkeypatch, tmp_path):
 
 def test_page_and_api_answer_when_alias_lookup_times_out(ledger_page, caplog):
     port, token = ledger_page
-    for path, method in (("/demo", "GET"), ("/api/demo", "GET"), ("/api/demo?view=agent", "PUT")):
+    for path, method in (("/demo", "GET"), ("/api/demo?view=agent", "PUT")):
         request = urllib.request.Request(
             f"http://127.0.0.1:{port}{path}",
             data=b"{}" if method == "PUT" else None,
@@ -50,8 +50,9 @@ def test_page_and_api_answer_when_alias_lookup_times_out(ledger_page, caplog):
             if path == "/demo":
                 assert "Alias timeout proof" in body
             else:
-                state = json.loads(body)
-                assert state["title"] == "Alias timeout proof"
-                assert state["_meta"]["crew"][0]["name"] == "engineer"
+                assert json.loads(body)["rejected"] == []
+    view = server.ledger_view(server.repository.get_document("demo"))
+    assert view["title"] == "Alias timeout proof"
+    assert view["_meta"]["crew"][0]["name"] == "engineer"
     assert "alias lookup failed for engineer" in caplog.text
     assert "Timeout reading from socket" in caplog.text

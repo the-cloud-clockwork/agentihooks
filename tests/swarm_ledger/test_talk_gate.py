@@ -232,7 +232,7 @@ def test_the_operator_lift_arms_the_talk_gate_beside_the_condition_gates(tmp_pat
     assert lift.SERVER_GATES == {talk.NAME}
 
 
-@pytest.mark.parametrize(("ops", "gated"), [([{"op": "ack"}], True), (None, False), ([], False)])
+@pytest.mark.parametrize(("ops", "gated"), [([{"op": "ack", "id": "ack-1"}], True), (None, False), ([], False)])
 def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
     from scripts.swarm_ledger import ledger_server
 
@@ -241,7 +241,7 @@ def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
     def sync(slug, changes=None, ops=None, gate=None):
         seen.append(gate)
         seen_changes.append(changes)
-        return {"_meta": {"members": {}}, "tasks": []}, []
+        return {"_meta": {"members": {}, "rev": 1}, "tasks": []}, []
 
     monkeypatch.setattr(ledger_server.repository, "apply_ops", sync)
     monkeypatch.setattr(ledger_server, "relay_to_inbox", lambda slug, state: [])
