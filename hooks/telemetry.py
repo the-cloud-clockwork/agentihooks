@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import urllib.request
@@ -180,8 +181,7 @@ def _http_fallback(name: str, attrs: dict[str, Any], duration_ms: float | None) 
         return
     # If configured endpoint is gRPC port (4317), swap to the sibling HTTP port
     # (4318) for the fallback. Prevents silent drops when gRPC SDK isn't available.
-    if ":4317" in endpoint:
-        endpoint = endpoint.replace(":4317", ":4318")
+    endpoint = re.sub(r":4317(?!\d)", ":4318", endpoint)
     url = endpoint.rstrip("/") + "/v1/traces"
     try:
         from hooks.config import OTEL_HOOKS_SERVICE_NAME as svc
