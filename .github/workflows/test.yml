@@ -62,7 +62,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - &python
+        name: Set up Python ${{ matrix.python-version }}
         if: steps.lookup.outputs.skip != 'true'
         id: python
         uses: actions/setup-python@v5
@@ -72,12 +73,14 @@ jobs:
       # Dependencies resolve unpinned (no lock file is tracked), so the key rolls
       # daily to pick up new releases. The venv lives outside the checkout: tests
       # scan modules loaded from the repo root.
-      - name: Stamp the day
+      - &day
+        name: Stamp the day
         if: steps.lookup.outputs.skip != 'true'
         id: day
         run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
-      - name: Restore the test environment
+      - &venv
+        name: Restore the test environment
         if: steps.lookup.outputs.skip != 'true'
         id: venv
         uses: actions/cache@v4
@@ -85,7 +88,8 @@ jobs:
           path: ~/venv
           key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}
 
-      - name: Set up uv
+      - &uv
+        name: Set up uv
         if: steps.lookup.outputs.skip != 'true' && steps.venv.outputs.cache-hit != 'true'
         uses: astral-sh/setup-uv@v10.2.0
         with:
@@ -97,13 +101,15 @@ jobs:
       # script. pip on the self-hosted runner installs into the user site
       # (~/.local), whose bin dir is not on PATH, so `pytest` and `ruff`
       # resolved to "command not found" while the packages were installed fine.
-      - name: Install dependencies
+      - &install
+        name: Install dependencies
         if: steps.lookup.outputs.skip != 'true' && steps.venv.outputs.cache-hit != 'true'
         run: |
           uv venv --python "${{ steps.python.outputs.python-path }}" "$HOME/venv"
           uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
-      - name: Use the test environment
+      - &use-venv
+        name: Use the test environment
         if: steps.lookup.outputs.skip != 'true'
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
@@ -165,6 +171,40 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           overwrite: true
+
+  shard-check:
+    needs: [unit]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - *lookup
+
+      - uses: actions/checkout@v4
+        if: steps.lookup.outputs.skip != 'true'
+
+      - *python
+      - *day
+      - *venv
+      - *uv
+      - *install
+      - *use-venv
+
+      - name: Download shard durations
+        if: steps.lookup.outputs.skip != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: durations-${{ matrix.python-version }}-*
+          path: shard-durations
+
+      - name: Check every collected test ran in exactly one shard
+        if: steps.lookup.outputs.skip != 'true'
+        run: python -m tests.shard_check shard-durations/*/durations.json
 
   sonar:
     needs: [unit]
@@ -342,7 +382,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, lint, sonar, mutation, swarm-image]
+    needs: [unit, shard-check, lint, sonar, mutation, swarm-image]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
