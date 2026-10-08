@@ -102,6 +102,9 @@ def test_the_tick_reads_each_pull_request_once_for_all_its_passes(started, monke
     cli.run_tick(store, "sw")
     assert sorted(seen) == ["checks", "events", "priority", "recheck", "waits"]
     assert reads == [URL]
+    store.redis.delete(store.key("sw", "tick-lock"))
+    cli.run_tick(store, "sw")
+    assert reads == [URL, URL]
 
 
 def test_the_coach_tick_reads_only_the_head_of_an_unchanged_pull_request(started, monkeypatch):
