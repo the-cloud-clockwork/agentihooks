@@ -23,6 +23,7 @@ from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
     ci_speed,
+    claim_order,
     control_notifications,
     difficulty,
     launch_check,
@@ -44,7 +45,7 @@ from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig
-from scripts.swarm_ledger import ledger_rank, ledger_workspace
+from scripts.swarm_ledger import ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
@@ -511,7 +512,7 @@ def _claimable(slug, store, rows, doc, lane):
     awaiting = {a.task for a in store.agents(slug) if a.state == "awaiting-decision"}
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     clear, overlapping = [], []
-    for t in sorted(rows.values(), key=ledger_rank.order):
+    for t in sorted(rows.values(), key=claim_order.key(rows)):
         if (
             t.get("lane") == lane
             and t.get("state") == "open"
