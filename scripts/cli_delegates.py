@@ -1,7 +1,14 @@
 import importlib
 from collections.abc import Callable
 
-DELEGATED_CLIS = {"msg": "scripts.inbox.cli", "recall": "scripts.recall.cli", "trace": "scripts.trace_cli"}
+DELEGATED_CLIS = {
+    "msg": "scripts.inbox.cli",
+    "recall": "scripts.recall.cli",
+    "trace": "scripts.trace_cli",
+    "deps": "scripts.deps_preflight",
+    "quota": "scripts.agents_quota",
+    "plan": "scripts.swarm_ledger.plan_read",
+}
 
 
 def delegated_cli(argv: list[str]) -> Callable[[list[str]], int] | None:
