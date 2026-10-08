@@ -1,6 +1,22 @@
+import json
+import re
+from pathlib import Path
+
 import pytest
 
+from hooks.context.profile_chain import OVERLAY_CAP
+from scripts.swarm import overlays
 from scripts.swarm_ledger import ledger_server
+
+SWARM_JS = Path(ledger_server.__file__).parent / "static" / "js" / "swarm.js"
+
+
+def test_the_page_offers_the_server_roles_and_overlay_cap():
+    source = SWARM_JS.read_text()
+    roles = re.search(r"^const ROLES = (\[.*\]);$", source, re.M).group(1)
+    cap = re.search(r"^const OVERLAY_CAP = (\d+);$", source, re.M).group(1)
+    assert tuple(json.loads(roles)) == overlays.ROLES
+    assert int(cap) == OVERLAY_CAP
 
 
 def test_page_sets_overlays_per_role_in_role_order():
