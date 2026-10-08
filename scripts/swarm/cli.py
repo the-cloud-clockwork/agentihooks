@@ -71,6 +71,7 @@ from scripts.swarm import (
     launch_check,
     ledger_events,
     master_launch,
+    merge_queue,
     naming,
     overlays,
     phase_planning,
@@ -797,6 +798,12 @@ def cmd_pr(store, args):
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
 
 
+def cmd_merge(store, args):
+    if args.action != "state":
+        _worker(store, args)
+    print(json.dumps(merge_queue.operate(args.action, args.url)))
+
+
 def cmd_done(store, args):
     agent = _worker(store, args)
     ledger = LedgerClient()
@@ -1180,6 +1187,9 @@ def build_parser():
     lift.add_argument("gate")
     for name in ("issue", "pr"):
         sub.add_parser(name).add_argument("url")
+    merge = sub.add_parser("merge")
+    merge.add_argument("action", choices=("queue", "dequeue", "state"))
+    merge.add_argument("url")
     sub.add_parser("branch")
     done = sub.add_parser("done")
     done.add_argument("--pr", default="")
