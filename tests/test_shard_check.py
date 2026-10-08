@@ -1,5 +1,4 @@
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -102,52 +101,10 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     assert "if" not in job
     assert job["strategy"]["matrix"]["python-version"] == jobs["unit"]["strategy"]["matrix"]["python-version"]
     assert "shard-check" in jobs["gate-required"]["needs"]
-    lookup, *steps = job["steps"]
-    assert lookup["id"] == "lookup"
-    assert lookup["if"] == "github.event_name == 'push'"
-    assert all(step["if"].startswith("steps.lookup.outputs.skip != 'true'") for step in steps)
+    steps = job["steps"]
+    assert all("steps.lookup" not in step.get("if", "") for step in steps)
     download = next(step for step in steps if step.get("uses", "").startswith("actions/download-artifact"))
     assert download["with"]["pattern"] == "durations-${{ matrix.python-version }}-*"
     check = steps[-1]
     assert "python -m tests.shard_check" in check["run"]
     assert download["with"]["path"] in check["run"]
-
-
-@pytest.mark.parametrize(
-    ("passed", "uploaded", "skip"),
-    [
-        (0, [], "false"),
-        (1, [], "true"),
-        (1, ["durations-3.12-1"], "false"),
-        (1, ["durations-3.11-1", "durations-merged"], "true"),
-        (None, [], "false"),
-    ],
-)
-def test_check_skips_only_when_unit_skipped_a_passed_tree(tmp_path, passed, uploaded, skip):
-    step = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["shard-check"]["steps"][0]
-    (tmp_path / "passed.json").write_text(json.dumps({"artifacts": [] if passed is None else _passed(passed)}))
-    (tmp_path / "run.json").write_text(json.dumps({"artifacts": [{"name": name} for name in uploaded]}))
-    gh = tmp_path / "gh"
-    gh.write_text(
-        "#!/usr/bin/env bash\n"
-        f'[ "{passed is None}" = True ] && [[ "$2" == *tests-passed* ]] && exit 1\n'
-        f'fixture="{tmp_path}/passed.json"; [[ "$2" == */runs/* ]] && fixture="{tmp_path}/run.json"\n'
-        'while [ $# -gt 0 ]; do [ "$1" = --jq ] && f="$2"; shift; done\n'
-        'jq -r "$f" "$fixture"\n'
-    )
-    gh.chmod(0o755)
-    out = tmp_path / "out"
-    env = {
-        "PATH": f"{tmp_path}:{os.environ['PATH']}",
-        "GITHUB_OUTPUT": str(out),
-        "GITHUB_REPOSITORY": "o/r",
-        "GITHUB_RUN_ID": "7",
-        "TREE": "abc",
-        "VERSION": "3.12",
-    }
-    subprocess.run(["bash", "-e", "-c", step["run"]], env=env, check=True)
-    assert out.read_text() == f"skip={skip}\n"
-
-
-def _passed(count: int) -> list[dict]:
-    return [{"expired": False, "workflow_run": {"head_repository_id": 1, "repository_id": 1}}] * count
