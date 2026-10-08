@@ -33,7 +33,10 @@ def test_parse_names_dependencies_pip_audit_skipped():
     assert audit.parse(_report({"name": "local", "skip_reason": "not on PyPI"})) == (set(), {"local"})
 
 
-@pytest.mark.parametrize("report", ["", "not json", "{}", '{"dependencies": [1]}'])
+@pytest.mark.parametrize(
+    "report",
+    ["", "not json", "{}", '{"dependencies": [1]}', '{"dependencies": 1}', '{"dependencies": [{"vulns": [{}]}]}'],
+)
 def test_a_report_that_is_not_a_pip_audit_report_is_an_error(report):
     with pytest.raises(audit.AuditError):
         audit.parse(report)
@@ -45,49 +48,94 @@ def test_new_findings_ignore_advisories_the_base_already_carries_at_any_version(
     assert audit.new_findings(head, base) == [("idna", "2.0", "PYSEC-3"), ("urllib3", "1.26.5", "PYSEC-2")]
 
 
+def _run(calls, returncode=0, stdout="", stderr=""):
+    def run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
+
+    return run
+
+
 def test_resolve_compiles_every_extra_with_nothing_excluded(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(
-        audit.subprocess,
-        "run",
-        lambda cmd, **_: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""),
-    )
+    monkeypatch.setattr(audit.subprocess, "run", _run(calls))
     out = tmp_path / "head.txt"
     assert audit.resolve(tmp_path, out) == out
-    cmd = calls[0]
-    assert cmd[:4] == ["uv", "pip", "compile", str(tmp_path / "pyproject.toml")]
-    assert {"--all-extras", "--no-header", "--no-annotate"} <= set(cmd)
-    assert cmd[cmd.index("--python-version") + 1] == "3.12"
-    assert cmd[cmd.index("-o") + 1] == str(out)
-    assert not [a for a in cmd if a.startswith(("--exclude", "--no-deps", "--only"))]
+    assert calls == [
+        (
+            [
+                "uv",
+                "pip",
+                "compile",
+                str(tmp_path / "pyproject.toml"),
+                "--all-extras",
+                "--python-version",
+                "3.12",
+                "--no-header",
+                "--no-annotate",
+                "--quiet",
+                "-o",
+                str(out),
+            ],
+            {"capture_output": True, "text": True},
+        )
+    ]
 
 
-def test_a_failed_resolve_is_an_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        audit.subprocess, "run", lambda cmd, **_: subprocess.CompletedProcess(cmd, 2, "", "no solution")
-    )
-    with pytest.raises(audit.AuditError, match="no solution"):
+def test_a_failed_resolve_is_an_error_naming_the_tree_and_the_reason(tmp_path, monkeypatch):
+    monkeypatch.setattr(audit.subprocess, "run", _run([], 2, stderr="  no solution\n"))
+    with pytest.raises(audit.AuditError) as error:
         audit.resolve(tmp_path, tmp_path / "head.txt")
+    assert str(error.value) == f"resolving {tmp_path} failed: no solution"
 
 
 def test_audit_runs_the_pinned_pip_audit_on_the_resolved_pins_alone(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(
-        audit.subprocess,
-        "run",
-        lambda cmd, **_: calls.append(cmd) or subprocess.CompletedProcess(cmd, 1, _report(), ""),
-    )
+    monkeypatch.setattr(audit.subprocess, "run", _run(calls, 1, _report()))
     assert audit.audit(tmp_path / "head.txt") == _report()
-    cmd = calls[0]
-    assert cmd[:2] == ["uvx", "pip-audit==2.10.1"]
-    assert cmd[cmd.index("-r") + 1] == str(tmp_path / "head.txt")
-    assert {"--no-deps", "--disable-pip"} <= set(cmd)
-    assert cmd[cmd.index("--format") + 1] == "json"
+    assert calls == [
+        (
+            [
+                "uvx",
+                "pip-audit==2.10.1",
+                "-r",
+                str(tmp_path / "head.txt"),
+                "--no-deps",
+                "--disable-pip",
+                "--format",
+                "json",
+            ],
+            {"capture_output": True, "text": True},
+        )
+    ]
+
+
+def test_a_report_error_names_the_cause():
+    with pytest.raises(audit.AuditError, match=r"^pip-audit produced no report: JSONDecodeError\("):
+        audit.parse("")
 
 
 def _stub(monkeypatch, reports):
-    monkeypatch.setattr(audit, "resolve", lambda root, out: out.with_name(Path(root).name))
+    def resolve(root, out):
+        assert isinstance(root, Path)
+        assert out.parent.is_dir()
+        return out.with_name(root.name)
+
+    monkeypatch.setattr(audit, "resolve", resolve)
     monkeypatch.setattr(audit, "audit", lambda requirements: reports[requirements.name])
+
+
+@pytest.mark.parametrize("argv", [["--head", "head"], ["--base", "base"]])
+def test_main_requires_both_revisions(argv, capsys):
+    with pytest.raises(SystemExit):
+        audit.main(argv)
+    assert "required" in capsys.readouterr().err
+
+
+def test_main_describes_itself(capsys):
+    with pytest.raises(SystemExit):
+        audit.main(["--help"])
+    assert "Fail on known vulnerabilities new against the base revision." in capsys.readouterr().out
 
 
 def test_main_fails_on_an_advisory_new_against_the_base_and_reports_every_count(monkeypatch, capsys):
