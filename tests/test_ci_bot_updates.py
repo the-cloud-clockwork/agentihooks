@@ -53,11 +53,28 @@ def test_a_newer_dev_push_never_cancels_a_running_dev_push_run():
 
 def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run():
     steps = _workflow("test.yml")["jobs"]["unit"]["steps"]
-    step = next(s for s in steps if s.get("name") == "Download latest dev durations")
-    assert step["run"].strip() == "python -m tests.dev_durations ${{ matrix.python-version }}"
-    assert step["env"] == {"GH_TOKEN": "${{ github.token }}"}
-    assert _workflow("test.yml")["jobs"]["unit"]["permissions"]["actions"] == "read"
+    step = next(s for s in steps if s.get("name") == "Adopt latest dev durations")
+    assert step["run"].strip() == "python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations"
+    assert "env" not in step
     assert steps.index(step) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
+
+
+def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
+    jobs = _workflow("test.yml")["jobs"]
+    steps = jobs["unit"]["steps"]
+    restore = next(s for s in steps if s.get("name") == "Restore latest dev durations")
+    adopt = next(s for s in steps if s.get("name") == "Adopt latest dev durations")
+    save = next(s for s in jobs["refresh-durations"]["steps"] if s.get("uses") == "actions/cache/save@v4")
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert steps.index(restore) == steps.index(adopt) - 1
+    assert "restore-keys" not in restore["with"]
+    assert restore["with"]["path"] == save["with"]["path"] == "~/dev-durations"
+    assert save["with"]["key"] == "durations-merged-${{ github.sha }}"
+    assert restore["with"]["key"] == (
+        "durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+        " || github.event.before || github.sha }}"
+    )
+    assert "gh " not in json.dumps(steps[: steps.index(adopt) + 1][1:])
 
 
 @pytest.mark.parametrize("bump,expected", [("patch", "2.17.1"), ("minor", "2.18.0"), ("major", "3.0.0")])
