@@ -73,7 +73,7 @@ def exclusion(account: capacity.Account, thresholds: Thresholds, predecessor: tu
     if account.state == "UNKNOWN" or (account.five_left is None and account.week_left is None):
         return "has no quota reading"
     if window := trigger(account, thresholds):
-        return f"is at its {window} quota warning"
+        return capacity.warning(window)
     return ""
 
 

@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 import pytest
@@ -35,6 +36,25 @@ def _restored(folder, merged, version=None):
     if version is not None:
         (folder / ".test_durations-3.12").write_text(json.dumps(version))
     return folder
+
+
+def _shard(root, restored):
+    root.mkdir()
+    (root / ".test_durations").write_text('{"t.py::a": 1.0}')
+    dev_durations._ROOT = root
+    dev_durations.main(["3.12", str(restored), "--hash", str(root / "durations.sha256")])
+    return (root / "durations.sha256").read_text().strip()
+
+
+def test_each_shard_records_the_hash_of_the_durations_it_splits_on(tmp_path, monkeypatch):
+    monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
+    restored = _restored(tmp_path / "restored", {"t.py::a": 9.0})
+    first = _shard(tmp_path / "first", restored)
+    second = _shard(tmp_path / "second", restored)
+    missed = _shard(tmp_path / "missed", tmp_path / "missing")
+    assert first == second == hashlib.sha256((tmp_path / "first" / ".test_durations").read_bytes()).hexdigest()
+    assert missed == hashlib.sha256(b'{"t.py::a": 1.0}').hexdigest()
+    assert missed != first
 
 
 def test_main_keeps_the_committed_version_file_on_a_cache_miss(tmp_path, monkeypatch):

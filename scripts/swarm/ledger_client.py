@@ -31,6 +31,10 @@ class LedgerClient:
         self.service = service
 
     def _call(self, slug, ops=None):
+        from scripts.swarm import lease
+
+        if ops is not None and (epoch := lease.EPOCH.get()) is not None:
+            ops = [{**op, "controller_epoch": epoch} for op in ops]
         service = self.service or all(op.get("by") in SERVICE_AUTHORS for op in ops or ())
         ledger = _ledger()
         try:

@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import math
 import statistics
@@ -25,17 +26,13 @@ def adopt(folder: Path, version: str) -> dict[str, float]:
     return {**_durations(folder / ".test_durations"), **(_durations(measured) if measured.exists() else {})}
 
 
-def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("version", help="the Python version whose durations this shard splits on")
-    parser.add_argument("restored", type=Path, help="the folder the dev durations cache restored into")
-    args = parser.parse_args(argv)
-    committed = _ROOT / f".test_durations-{args.version}"
+def _choose(version: str, restored: Path) -> None:
+    committed = _ROOT / f".test_durations-{version}"
     if not committed.is_file():
         committed = _ROOT / ".test_durations"
     collected = collected_tests(_ROOT)
-    if (args.restored / ".test_durations").is_file():
-        durations = adopt(args.restored, args.version)
+    if (restored / ".test_durations").is_file():
+        durations = adopt(restored, version)
         try:
             validate_coverage(durations, collected)
         except IncompleteDurations as error:
@@ -59,6 +56,17 @@ def main(argv: list[str] | None = None) -> None:
     if committed != _ROOT / ".test_durations":
         (_ROOT / ".test_durations").write_bytes(committed.read_bytes())
     print("Using committed durations")
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("version", help="the Python version whose durations this shard splits on")
+    parser.add_argument("restored", type=Path, help="the folder the dev durations cache restored into")
+    parser.add_argument("--hash", type=Path, help="where to write the sha256 of the durations this shard splits on")
+    args = parser.parse_args(argv)
+    _choose(args.version, args.restored)
+    if args.hash:
+        args.hash.write_text(hashlib.sha256((_ROOT / ".test_durations").read_bytes()).hexdigest() + "\n")
 
 
 if __name__ == "__main__":

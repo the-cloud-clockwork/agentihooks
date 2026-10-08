@@ -16,7 +16,6 @@ UNKNOWN_OWNER = "the agent it was sent to is unknown, so no branch was checked"
 def settle(inbox, name, seat, exit_text):
     """seat is where the work goes on, '' when nobody takes it up. A master's mail passes to its successor, or waits
     for one while none is spawned yet."""
-    from scripts.gates import push_stop
     from scripts.inbox.store import CLOSED
     from scripts.swarm.naming import NameRegistry
 
@@ -26,8 +25,8 @@ def settle(inbox, name, seat, exit_text):
     for item in inbox.open_items(name):
         if item.state in CLOSED:
             continue
-        if push_stop.is_notice(item):
-            inbox.close(item.id, BY, "done", push_stop.left(name, exit_text))
+        if ended := _life_notice_end(item, name, exit_text):
+            inbox.close(item.id, BY, "done", ended)
         elif successor:
             inbox.redirect(item.id, BY, successor, f"{name} {exit_text}; passed to {successor}, its successor", name)
         elif seat:
@@ -38,6 +37,48 @@ def settle(inbox, name, seat, exit_text):
             inbox.withdraw(item.id, BY, f"cancelled: {name} {exit_text} before closing it", name) and item.sender != BY
         ):
             inbox.send(BY, notice_address(inbox, item.sender), _told(item, name, exit_text), fyi=True)
+    if names.entry(name).get("type") != "master":
+        _settle_taken_seat_mail(inbox, name, exit_text, bool(seat))
+
+
+def _settle_taken_seat_mail(inbox: "InboxStore", name: str, exit_text: str, goes_on: bool) -> None:
+    held = inbox.seats.known_seat(name)
+    if not held:
+        return
+    for item in inbox.open_items(held):
+        if item.state != "pending" and _taker(inbox, item) == name:
+            _settle_taken(inbox, item, held, name, exit_text, goes_on)
+
+
+def _settle_taken(inbox: "InboxStore", item, held: str, name: str, exit_text: str, goes_on: bool) -> None:
+    """Seat mail a gone life took: back to pending for the seat's next occupant when the work goes on, else closed."""
+    if ended := _life_notice_end(item, name, exit_text):
+        inbox.close(item.id, BY, "done", ended)
+    elif goes_on:
+        inbox.redirect(item.id, BY, held, f"{name} {exit_text}; back to {held} for its next occupant", held, name)
+    elif (
+        inbox.withdraw(item.id, BY, f"cancelled: {name} {exit_text} before closing it", held, name)
+        and item.sender != BY
+    ):
+        inbox.send(BY, notice_address(inbox, item.sender), _told(item, name, exit_text), fyi=True)
+
+
+def _life_notice_end(item, name: str, exit_text: str) -> str:
+    """The close reason of a notice meant only for the life that left; '' for any other item."""
+    from scripts.gates import push_stop
+    from scripts.swarm import quota_notice
+
+    if push_stop.is_notice(item):
+        return push_stop.left(name, exit_text)
+    if quota_notice.is_notice(item):
+        return f"{name} {exit_text}; its quota notice ended with it"
+    return ""
+
+
+def _taker(inbox, item):
+    return next(
+        (entry["by"] for entry in reversed(inbox.history(item.id)) if entry["state"] in ("delivered", "read")), ""
+    )
 
 
 def close_swarm(inbox: "InboxStore", slug: str) -> None:
@@ -102,7 +143,8 @@ def _settle_gone(inbox: "InboxStore", name: str, seat: str, state: str | None, o
 
 
 def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
-    """Push stop and wait ended notices left on a seat: closed once the agent that got them has gone."""
+    """Push stop and wait ended notices left on a seat: closed once the agent that got them has gone. Other mail a
+    gone life took is settled by its exit record."""
     from scripts.gates import push_stop
     from scripts.inbox.store import CLOSED
     from scripts.swarm.waits import notice_task
@@ -113,6 +155,8 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
                 continue
             task = notice_task(item)
             if not (task or push_stop.is_notice(item)):
+                if item.state != "pending":
+                    _settle_left_behind(inbox, item, seat, active)
                 continue
             owner = _owner(inbox, item, seat)
             if owner in active:
@@ -126,6 +170,15 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
             inbox.close(item.id, BY, "done", reason)
 
 
+def _settle_left_behind(inbox: "InboxStore", item, seat: str, active: set) -> None:
+    taker = _taker(inbox, item)
+    if not taker or taker in active or inbox.names.entry(taker).get("type") == "master":
+        return
+    outcome = inbox.seats.exit_of(taker)
+    if outcome:
+        _settle_taken(inbox, item, seat, taker, outcome["reason"], bool(outcome["seat"]))
+
+
 def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", active: set) -> None:
     from scripts.inbox.store import CLOSED
 
@@ -135,10 +188,7 @@ def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", activ
         for item in inbox.open_items(agent.seat):
             if item.state in CLOSED or item.fyi or not item.task or item.task == agent.task:
                 continue
-            owner = next(
-                (entry["by"] for entry in reversed(inbox.history(item.id)) if entry["state"] in ("delivered", "read")),
-                "",
-            )
+            owner = _taker(inbox, item)
             if not owner or owner in active:
                 continue
             exit_text = f"left its seat and task {item.task}"
