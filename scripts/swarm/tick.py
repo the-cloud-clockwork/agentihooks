@@ -157,7 +157,7 @@ def tick(slug, store, ledger, runtime, now_ms):
 
     actions += _step(capacity.apply, slug, config, store, ledger, runtime, now_ms)
     actions += _step(ci_speed.refresh, slug, config, store, now_ms)
-    actions += _step(time_left.refresh, slug, config, store, ledger)
+    actions += _step(time_left.refresh, slug, store, ledger, runtime, doc, now_ms)
     if not sleeping:
         actions += _step(_codex_hook_order)
         actions += _step(_master_down, slug, config, store, ledger, runtime, now_ms)

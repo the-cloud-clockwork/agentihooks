@@ -667,7 +667,7 @@ def test_every_tick_sends_the_ledger_its_time_left_inputs(store):
     ledger.time_left = lambda slug, slots, ci_minutes: sent.append((slug, slots, ci_minutes))
     tick("sw", store, ledger, runtime, now_ms=1_000)
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert sent == [("sw", 4, None), ("sw", 4, None)]
+    assert sent == [("sw", None, None), ("sw", None, None)]
 
 
 def test_a_finished_agent_whose_retire_fails_holds_no_lane_slot(store):

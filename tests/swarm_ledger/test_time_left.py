@@ -110,13 +110,24 @@ class TestRemaining:
         claim = [event("task claimed", "b", NOW - 20 * MINUTE)]
         assert ledger_stats.remaining_minutes(task("b", "blocked", "S"), TIERS, 0, claim, NOW) == 10
 
-    def test_a_task_in_flight_counts_only_what_is_left_after_its_last_claim(self):
+    def test_a_claimed_task_counts_only_what_is_left_after_its_last_claim(self):
         events = [event("task claimed", "a", NOW - 90 * MINUTE), event("task claimed", "a", NOW - 30 * MINUTE)]
         assert ledger_stats.remaining_minutes(task("a", "claimed", "L"), TIERS, 10, events, NOW) == 20
-        assert ledger_stats.remaining_minutes(task("a", "pr", "S"), TIERS, 5, events, NOW) == 0
+        assert ledger_stats.remaining_minutes(task("a", "claimed", "S"), TIERS, 5, events, NOW) == 0
+
+    def test_a_task_in_pr_counts_only_the_ci_left_after_its_last_pull_request(self):
+        events = [
+            event("task claimed", "a", NOW - 300 * MINUTE),
+            event("task pr", "a", NOW - 60 * MINUTE),
+            event("task pr", "a", NOW - 4 * MINUTE),
+        ]
+        assert ledger_stats.remaining_minutes(task("a", "pr", "L"), TIERS, 10, events, NOW) == 6
+        assert ledger_stats.remaining_minutes(task("a", "pr", "L"), TIERS, 3, events, NOW) == 0
 
     def test_a_task_in_flight_without_a_claim_event_counts_in_full(self):
         assert ledger_stats.remaining_minutes(task("a", "claimed", "M"), TIERS, 5, [], NOW) == 30
+        claim = [event("task claimed", "a", NOW - 10 * MINUTE)]
+        assert ledger_stats.remaining_minutes(task("a", "pr", "M"), TIERS, 5, claim, NOW) == 30
 
 
 class TestChainMinutes:
@@ -193,26 +204,33 @@ class TestCalculate:
 class TestOutageHour:
     """The tick was down for the last hour: no claims or pull requests were recorded inside it."""
 
-    def backlog(self, events):
+    def backlog(self):
         rows = [task(f"o{n}", "open", "M") for n in range(20)]
-        done = [task(f"m{n}", "done", "M") for n in range(30)]
-        return doc(*rows, *done), events
+        rows += [task(f"c{n}", "claimed", "M") for n in range(4)]
+        return doc(*rows, *(task(f"m{n}", "done", "M") for n in range(30)))
 
-    def steady(self):
+    def history(self, until):
         events = []
         for n in range(30):
-            pr = NOW - (n + 1) * 40 * MINUTE
-            events += [event("task claimed", f"m{n}", pr - 20 * MINUTE), event("task pr", f"m{n}", pr)]
+            pr = until - (n + 1) * 40 * MINUTE
+            events += [
+                event("task claimed", f"m{n}", pr - 20 * MINUTE),
+                event("task pr", f"m{n}", pr),
+                event("task done", f"m{n}", pr + 5 * MINUTE),
+            ]
         return events
 
     def test_an_outage_hour_stays_within_a_quarter_of_steady_state(self):
         inputs = {"slots": 4, "ci_minutes": 10}
-        steady = ledger_stats.calculate(*self.backlog(self.steady()), NOW, inputs)["minutes"]
-        outage = [e for e in self.steady() if NOW - e["at"] > HOUR]
-        outage += [event("task claimed", "m0", NOW - 3 * HOUR), event("task pr", "m0", NOW)]
-        during = ledger_stats.calculate(*self.backlog(outage), NOW, inputs)["minutes"]
-        assert steady == 150
-        assert abs(during - steady) <= steady / 4
+        steady = self.history(NOW) + [event("task claimed", f"c{n}", NOW - 10 * MINUTE) for n in range(4)]
+        outage = self.history(NOW - HOUR) + [event("task claimed", f"c{n}", NOW - 70 * MINUTE) for n in range(4)]
+        assert ledger_stats.closed_last_hour(self.backlog(), steady, NOW) != []
+        assert ledger_stats.closed_last_hour(self.backlog(), outage, NOW) == []
+        assert not [e for e in outage if NOW - e["at"] < HOUR]
+        before = ledger_stats.calculate(self.backlog(), steady, NOW, inputs)["minutes"]
+        during = ledger_stats.calculate(self.backlog(), outage, NOW, inputs)["minutes"]
+        assert (before, during) == (170, 150)
+        assert abs(during - before) <= before / 4
 
 
 class TestTimeLeftLine:
@@ -261,22 +279,23 @@ class TestTimeLeftOp:
 
         assert ledger_core.EXTENSION_OPS["time_left"].OPS == ("time_left",)
         assert schemas.FIELDS["time_left"] == "by slots ci_minutes"
-        assert schemas.TYPES["slots"] == {"type": "integer", "minimum": 0}
+        assert schemas.TYPES["slots"] == {"type": ["integer", "null"], "minimum": 0}
         assert schemas.TYPES["ci_minutes"] == {"type": ["number", "null"], "minimum": 0}
 
     def test_check_accepts_the_swarm_write(self):
         assert ledger_time_left.check(self.op()) is None
         assert ledger_time_left.check(self.op(0, None)) is None
         assert ledger_time_left.check(self.op(2, 7)) is None
+        assert ledger_time_left.check(self.op(None, 7)) is None
 
     @pytest.mark.parametrize(
         ("change", "message"),
         [
             ({"by": "eng"}, "time_left takes id, by swarm, slots and ci_minutes"),
             ({"extra": 1}, "time_left takes id, by swarm, slots and ci_minutes"),
-            ({"slots": -1}, "slots must be a nonnegative integer"),
-            ({"slots": True}, "slots must be a nonnegative integer"),
-            ({"slots": 1.0}, "slots must be a nonnegative integer"),
+            ({"slots": -1}, "slots must be a nonnegative integer or null"),
+            ({"slots": True}, "slots must be a nonnegative integer or null"),
+            ({"slots": 1.0}, "slots must be a nonnegative integer or null"),
             ({"ci_minutes": -0.5}, "ci_minutes must be a nonnegative number or null"),
             ({"ci_minutes": "5"}, "ci_minutes must be a nonnegative number or null"),
             ({"ci_minutes": False}, "ci_minutes must be a nonnegative number or null"),

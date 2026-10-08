@@ -107,7 +107,7 @@ TYPES = {
     "unhandled": {"type": "integer", "minimum": 0},
     "gain": {"type": "number", "minimum": 0},
     "difficulty_confidence": {"type": "number", "minimum": 0, "maximum": 1},
-    "slots": {"type": "integer", "minimum": 0},
+    "slots": {"type": ["integer", "null"], "minimum": 0},
     "ci_minutes": {"type": ["number", "null"], "minimum": 0},
     "value": {"type": ["boolean", "integer"]},
     "fields": {"type": "object"},

@@ -9,8 +9,8 @@ FIELDS = {"op", "id", "by", "slots", "ci_minutes"}
 def check(op):
     if set(op) != FIELDS or op["by"] != "swarm":
         raise ValueError("time_left takes id, by swarm, slots and ci_minutes")
-    if type(op["slots"]) is not int or op["slots"] < 0:
-        raise ValueError("slots must be a nonnegative integer")
+    if op["slots"] is not None and (type(op["slots"]) is not int or op["slots"] < 0):
+        raise ValueError("slots must be a nonnegative integer or null")
     ci = op["ci_minutes"]
     if ci is not None and (type(ci) not in (int, float) or ci < 0):
         raise ValueError("ci_minutes must be a nonnegative number or null")
