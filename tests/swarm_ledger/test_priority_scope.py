@@ -90,3 +90,14 @@ def test_priority_derivation_filters_out_of_scope_targets_in_sparse_document(nam
     ledger_priorities.derive(doc, ctx)
     assert doc["priorities"] == [kept]
     assert ctx.dirty is True
+    assert ctx.events == [
+        {
+            "rev": 1,
+            "at": 1,
+            "by": "swarm",
+            "kind": "priority cleared",
+            "target": f"{name}/choice",
+            "id": "stale",
+            "reason": "its item is out of scope",
+        }
+    ]

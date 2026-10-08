@@ -129,6 +129,9 @@ def derive(doc, ctx):
         if item.get("out_of_scope")
     }
     manual = [p for p in rows if not p.get("derived") and p["item"] not in out_of_scope]
+    for p in rows:
+        if not p.get("derived") and p["item"] in out_of_scope:
+            ctx.record("swarm", "priority cleared", p["item"], id=p["id"], reason="its item is out of scope")
     held, old = {p["item"] for p in manual}, {p["item"]: p for p in rows if p.get("derived")}
     found, dismissed = wanted(doc), ctx.meta.setdefault("priorities_dismissed", {})
     for item in [i for i in dismissed if found.get(i) != dismissed[i]]:
