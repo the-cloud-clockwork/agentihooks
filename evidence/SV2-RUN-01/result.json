@@ -5,7 +5,7 @@
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1718",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1733",
   "tested_commit": "c0a74a1de7172251a866b23b484ea94307d767eb",
-  "ci_head": "pending",
+  "ci_head": "8c4f653bca4d89a8fd011e2cdb911e6a79eb6d0f",
   "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI, the init-agent launch and the process reaper behind HerdrRuntime, and the remote backend is an in-memory fake; not live rollout proof",
   "supported_versions": {
     "runtime_protocol": "operations spawn, observe, command, drain, terminate, recover; statuses ok, ambiguous, unavailable, unsupported, refused; recovery modes reattach, resume",
@@ -22,7 +22,7 @@
     "observed": "Local on c0a74a1d: pytest -n 2 over the runtime protocol, swarm runtime, cli, capacity, profile binding, profile binding transfers, master launch, master recovery, tick, resume and restore decisions suites -> 669 passed; ruff check and ruff format clean. CI mutation on cbb549dd left 64 survivors on the changed lines; this commit asserts the typed status at each non-default raise site and the routed recover arguments, and drops unused defaults.",
     "accepted": "Cases A, B and C passed on a local and a remote fake with different capabilities; case A ran the tick's routed runtime over a herdr fixture on two independent temporary homes.",
     "committed": "The tested commit carries the code; the case results in this folder were generated on it.",
-    "externally_verified": "pending CI on the pull request"
+    "externally_verified": "CI Tests run 37818048670 on 8c4f653b: every unit shard, mutation, sonar and Gate Required passed"
   },
   "measurements": {
     "runtime_capability_failures_total": {
