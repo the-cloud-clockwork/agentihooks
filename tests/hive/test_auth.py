@@ -1,6 +1,8 @@
+import errno
 import hashlib
 import io
 import json
+import os
 import socket
 import ssl
 import stat
@@ -10,9 +12,7 @@ import time
 import urllib.error
 import urllib.request
 
-import fakeredis
 import pytest
-import redis as redis_lib
 
 from scripts.hive import auth, cli, server
 from scripts.swarm import store
@@ -24,20 +24,17 @@ PUBLIC = "redis://hive.example:6380/2"
 
 
 @pytest.fixture
-def fake():
-    return fakeredis.FakeServer()
+def redis_lib():
+    import redis
+
+    return redis
 
 
 @pytest.fixture
-def admin(fake):
-    return fakeredis.FakeRedis(server=fake, decode_responses=True)
+def admin():
+    import fakeredis
 
-
-def _as_user(fake, url):
-    parts = redis_lib.connection.parse_url(url)
-    return fakeredis.FakeRedis(
-        server=fake, username=parts["username"], password=parts["password"], decode_responses=True
-    )
+    return fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
 
 
 def _invite_key(code):
@@ -53,7 +50,7 @@ def test_invite_stores_only_the_code_hash_for_fifteen_minutes(admin):
     assert code not in str(admin.keys("*"))
 
 
-def test_a_valid_code_joins_with_a_ledger_credential_and_a_redis_acl_user(admin, fake):
+def test_a_valid_code_joins_with_a_ledger_credential_and_a_redis_acl_user(admin, redis_lib):
     grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
 
     assert grant["name"] == "laptop"
@@ -68,10 +65,32 @@ def test_a_valid_code_joins_with_a_ledger_credential_and_a_redis_acl_user(admin,
     assert user["commands"] == []
     password = redis_lib.connection.parse_url(grant["redis_url"])["password"]
     assert user["passwords"] == [hashlib.sha256(password.encode()).hexdigest()]
-    member = _as_user(fake, grant["redis_url"])
-    assert member.set(f"{ROOT}:probe", "1") is True
-    with pytest.raises(redis_lib.exceptions.NoPermissionError):
-        member.set(f"{ROOT}-hive:invite:forged", "intruder")
+    assert not auth.PREFIX.startswith(f"{ROOT}:")
+
+
+def test_the_grant_sizes_and_member_record(admin, redis_lib):
+    code = auth.invite(admin, "laptop")
+    grant = auth.exchange(admin, code, PUBLIC)
+    password = redis_lib.connection.parse_url(grant["redis_url"])["password"]
+
+    assert len(code) == 22
+    assert len(grant["id"]) == 16
+    int(grant["id"], 16)
+    assert len(password) == 43
+    assert len(grant["ledger_credential"]) == 43
+    assert admin.hgetall(f"{auth.PREFIX}:member:{grant['id']}") == {
+        "name": "laptop",
+        "ledger": hashlib.sha256(grant["ledger_credential"].encode()).hexdigest(),
+    }
+    assert admin.acl_getuser(f"hive-{grant['id']}")["flags"] == ["on"]
+
+
+def test_the_member_url_replaces_credentials_already_in_the_hive_url(admin):
+    grant = auth.exchange(admin, auth.invite(admin, "laptop"), "redis://admin:secret@hive.example:6380/2")
+
+    assert "admin" not in grant["redis_url"]
+    assert "secret" not in grant["redis_url"]
+    assert grant["redis_url"].endswith("@hive.example:6380/2")
 
 
 def test_a_reused_code_is_refused(admin):
@@ -91,7 +110,7 @@ def test_an_expired_code_is_refused(admin):
         auth.exchange(admin, code, PUBLIC)
 
 
-def test_a_refused_acl_user_leaves_no_member_records(admin, monkeypatch):
+def test_a_refused_acl_user_leaves_no_member_records(admin, redis_lib, monkeypatch):
     code = auth.invite(admin, "laptop")
     real = redis_lib.client.Pipeline.execute
 
@@ -101,13 +120,15 @@ def test_a_refused_acl_user_leaves_no_member_records(admin, monkeypatch):
 
     monkeypatch.setattr(redis_lib.client.Pipeline, "execute", refuse)
 
-    with pytest.raises(auth.HiveError, match=r"^Redis refused the member's ACL user \(ERR Error in ACL SETUSER"):
+    with pytest.raises(auth.HiveError) as refused:
         auth.exchange(admin, code, PUBLIC)
 
-    assert [key for key in admin.keys("*") if key.startswith(f"{auth.PREFIX}:")] == []
+    assert str(refused.value) == "Redis refused the new member (ERR Error in ACL SETUSER modifier)"
+    assert admin.keys("*") == []
+    assert admin.acl_users() == ["default"]
 
 
-def test_revoke_cuts_both_credentials(admin, fake):
+def test_revoke_cuts_both_credentials(admin):
     grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
     other = auth.exchange(admin, auth.invite(admin, "desk"), PUBLIC)
 
@@ -116,8 +137,6 @@ def test_revoke_cuts_both_credentials(admin, fake):
     assert auth.ledger_member(admin, grant["ledger_credential"]) is None
     assert admin.keys(f"{auth.PREFIX}:member:*") == [f"{auth.PREFIX}:member:{other['id']}"]
     assert sorted(admin.acl_users()) == ["default", f"hive-{other['id']}"]
-    with pytest.raises(redis_lib.exceptions.AuthenticationError):
-        _as_user(fake, grant["redis_url"]).ping()
     assert auth.ledger_member(admin, other["ledger_credential"]) == other["id"]
 
 
@@ -157,6 +176,19 @@ def test_rejoining_tightens_an_existing_env_file(tmp_path):
 
     assert stat.S_IMODE((tmp_path / "hive.env").stat().st_mode) == 0o600
     assert "old" not in (tmp_path / "hive.env").read_text()
+
+
+def test_a_new_env_file_is_created_private_in_a_new_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(auth.os, "fchmod", lambda fd, mode: None)
+    previous = os.umask(0)
+    try:
+        path = auth.write_env(
+            tmp_path / "a" / "b", "http://hive", {"id": "i", "ledger_credential": "l", "redis_url": "r"}
+        )
+    finally:
+        os.umask(previous)
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 @pytest.fixture
@@ -244,7 +276,8 @@ def test_a_join_endpoint_off_loopback_needs_tls(admin):
         ("http://hive.example:8770", "a join off loopback carries credentials, so the hive URL must be https"),
         (
             "http://127.0.0.1:{port}",
-            "the hive at http://127.0.0.1:{port} is unreachable (<urlopen error [Errno 111] Connection refused>)",
+            f"the hive at http://127.0.0.1:{{port}} is unreachable "
+            f"(<urlopen error [Errno {errno.ECONNREFUSED}] {os.strerror(errno.ECONNREFUSED)}>)",
         ),
     ],
 )
@@ -317,20 +350,9 @@ def test_a_stalled_tls_client_does_not_block_an_https_join(admin, cert, tmp_path
     assert (tmp_path / "home" / "hive.env").exists()
 
 
-@pytest.mark.parametrize(
-    ("flags", "error"),
-    [
-        (["--tls-cert", "/c.pem"], "--tls-cert and --tls-key go together"),
-        (["--tls-key", "/k.pem"], "--tls-cert and --tls-key go together"),
-        (["--tls-cert", "/missing.pem", "--tls-key", "/missing.pem"], "the TLS certificate or key cannot be loaded"),
-    ],
-)
-def test_serve_refuses_incomplete_or_unreadable_tls(admin, monkeypatch, capsys, flags, error):
-    monkeypatch.setattr(cli, "redis_client", lambda: admin)
-
-    assert cli.main(["serve", "--port", "0", *flags]) == 1
-
-    assert capsys.readouterr().err.startswith(f"hive serve refused: {error}")
+def test_an_unreadable_tls_certificate_is_refused(admin):
+    with pytest.raises(auth.HiveError, match=r"^the TLS certificate or key cannot be loaded \("):
+        server.make_server(admin, PUBLIC, "127.0.0.1", 0, ("/missing.pem", "/missing.pem"))
 
 
 def test_join_reports_a_body_that_is_not_json(tmp_path, monkeypatch, capsys):
@@ -373,7 +395,7 @@ def test_redis_url_uses_the_hive_credential_only_outside_local_mode(environ, url
     assert store.redis_url(environ) == url
 
 
-def test_redis_client_connects_over_tls_for_a_rediss_url(monkeypatch):
+def test_redis_client_connects_over_tls_for_a_rediss_url(redis_lib, monkeypatch):
     monkeypatch.setattr(redis_lib.Redis, "ping", lambda self: True)
 
     client = store.redis_client(

@@ -1,0 +1,29 @@
+{
+  "tested_commit": "05f3c81b8c3e9488408994d490cdc145e7796878",
+  "evidence_class": "mocked transport and isolated fakeredis; no live runtime or rollout proof",
+  "passed": true,
+  "independent_fixtures": [
+    {
+      "passed": true,
+      "effects": 1,
+      "runtime_ambiguous_operations": {
+        "before": 1,
+        "after": 0
+      },
+      "observed": "one fixture runtime object",
+      "accepted": "applied",
+      "selected_backend": "kubernetes"
+    },
+    {
+      "passed": true,
+      "effects": 1,
+      "runtime_ambiguous_operations": {
+        "before": 1,
+        "after": 0
+      },
+      "observed": "one fixture runtime object",
+      "accepted": "applied",
+      "selected_backend": "kubernetes"
+    }
+  ]
+}

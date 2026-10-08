@@ -693,6 +693,15 @@ def apply_op(doc, op, ctx):
     return True
 
 
+def _screened(op):
+    if not op["thread"].endswith("/comments"):
+        return op["text"]
+    from hooks.context.conditions import LEDGER_WRITE
+    from hooks.filters import check as filters
+
+    return filters.screen(LEDGER_WRITE, op["text"])
+
+
 def check_op(op, task_ids=()):
     if not isinstance(op, dict) or op.get("op") not in (
         "add",
@@ -740,6 +749,7 @@ def check_op(op, task_ids=()):
         if not talks or not AUTHOR_RE.match(str(op["by"])) or op["by"] == "operator":
             raise ValueError("by is allowed only on agent chat and comment entries, as an agent name")
         if op["op"] in ("add", "edit"):
+            op["text"] = _screened(op)
             ledger_comments.check(op["text"], kind_of(op["thread"]), op.get("long") is True, task_ids)
 
 

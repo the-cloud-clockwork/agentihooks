@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
-from redis.exceptions import ResponseError
-
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -18,7 +16,8 @@ INVITE_TTL_S = 900
 # Outside the ROOT keyspace, so a member's ACL user cannot mint invites or read the credential index.
 PREFIX = f"{ROOT}-hive"
 # ACL cannot confine a user to one database, so a hive's Redis serves that hive alone.
-ACL_RULES = (f"~{ROOT}:*", f"&{ROOT}:*", "+@all", "-@admin", "-@dangerous")
+ACL_PATTERNS = (f"{ROOT}:*",)
+ACL_CATEGORIES = ("+@all", "-@admin", "-@dangerous")
 ENV_FILE = "hive.env"
 
 
@@ -37,28 +36,47 @@ def invite(redis: "Redis", name: str) -> str:
 
 
 def exchange(redis: "Redis", code: str, redis_url: str) -> dict:
+    from redis.exceptions import RedisError
+
     name = redis.getdel(f"{PREFIX}:invite:{_digest(code)}")
     if name is None:
         raise HiveError("invite code is invalid, expired or already used")
     member_id = secrets.token_hex(8)
-    password = secrets.token_urlsafe(32)
-    ledger = secrets.token_urlsafe(32)
+    password = secrets.token_urlsafe()
+    ledger = secrets.token_urlsafe()
     records = (f"{PREFIX}:member:{member_id}", f"{PREFIX}:ledger:{_digest(ledger)}")
-    with redis.pipeline(transaction=True) as pipe:
+    with redis.pipeline() as pipe:
         pipe.hset(records[0], mapping={"name": name, "ledger": _digest(ledger)})
         pipe.set(records[1], member_id)
-        pipe.execute_command("ACL", "SETUSER", f"hive-{member_id}", "reset", "on", f"#{_digest(password)}", *ACL_RULES)
+        pipe.acl_setuser(
+            f"hive-{member_id}",
+            enabled=True,
+            hashed_passwords=[f"+{_digest(password)}"],
+            categories=ACL_CATEGORIES,
+            keys=ACL_PATTERNS,
+            channels=ACL_PATTERNS,
+        )
         try:
             pipe.execute()
-        except ResponseError as exc:
-            redis.delete(*records)
-            raise HiveError(f"Redis refused the member's ACL user ({exc})") from exc
+        except RedisError as exc:
+            _forget(redis, member_id, records)
+            raise HiveError(f"Redis refused the new member ({exc})") from exc
     return {
         "id": member_id,
         "name": name,
         "ledger_credential": ledger,
         "redis_url": _with_user(redis_url, f"hive-{member_id}", password),
     }
+
+
+def _forget(redis: "Redis", member_id: str, records: tuple[str, ...]) -> None:
+    from redis.exceptions import RedisError
+
+    try:
+        redis.delete(*records)
+        redis.acl_deluser(f"hive-{member_id}")
+    except RedisError:
+        pass
 
 
 def _with_user(url: str, user: str, password: str) -> str:
@@ -75,9 +93,9 @@ def revoke(redis: "Redis", member_id: str) -> None:
     member = redis.hgetall(f"{PREFIX}:member:{member_id}")
     if not member:
         raise HiveError(f"no hive member {member_id}")
-    with redis.pipeline(transaction=True) as pipe:
+    with redis.pipeline() as pipe:
         pipe.delete(f"{PREFIX}:member:{member_id}", f"{PREFIX}:ledger:{member['ledger']}")
-        pipe.execute_command("ACL", "DELUSER", f"hive-{member_id}")
+        pipe.acl_deluser(f"hive-{member_id}")
         pipe.execute()
 
 

@@ -957,7 +957,7 @@ def test_quota_capacity_reads_this_environment_and_hands_demand_on(tmp_path, mon
     monkeypatch.setattr(
         capacity,
         "calculate",
-        lambda config, rows, agents, demand, requirements, accounts: (
+        lambda config, rows, agents, demand, requirements, accounts, warned: (
             seen.update(demand=demand) or {"allocation": {}, "placements": {}}
         ),
     )
@@ -1043,7 +1043,7 @@ def test_handoff_account_selection_preserves_run_options(tmp_path, harness, mode
     }
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda requested, environ: (requested, "requested"))
     runtime._quota_accounts = [
-        capacity.Account(harness, "old", "OPEN", 0, 5, 90, 2),
+        capacity.Account(harness, "old", "OPEN", 0, 30, 90, 2),
         capacity.Account(harness, "fresh", "OPEN", 1, 90, 90, 6),
     ]
     config = SimpleNamespace(

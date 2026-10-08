@@ -50,6 +50,10 @@ def now_ms():
     return time.time_ns() // 1_000_000
 
 
+def owner_key(recipient):
+    return f"{PREFIX}:owner:{recipient}"
+
+
 def redelivery_ms(environ=None):
     env = os.environ if environ is None else environ
     return int(env.get(REDELIVER_ENV) or DEFAULT_REDELIVER_S) * 1000
@@ -217,7 +221,9 @@ class InboxStore:
                     continue
         else:
             raise InboxError(f"aliases for {original} changed meanwhile")
-        items = [item for address in addresses + ([seat] if seat else []) for item in read(address)]
+        if seat and not self.seats.left(me, seat):
+            addresses.append(seat)
+        items = [item for address in addresses for item in read(address)]
         return sorted({item.id: item for item in items}.values(), key=_order)
 
     def acts_for(self, by, address, pipe=None):
@@ -538,24 +544,38 @@ class InboxStore:
                 raise InboxError("done needs an outcome naming where the work went")
             if item.state == state:
                 return item
+            if state == "delivered" and self._owned(pipe, by):
+                return None
             moved = replace(item, state=state, updated_at=now_ms(), reason=reason)
-            pending = self.key("pending", item.address)
-            pipe.watch(pending)
-            last = pipe.zscore(pending, item_id) is not None and pipe.zcard(pending) == 1
+            last = self.last_pending(pipe, item)
             pipe.multi()
-            pipe.hset(key, mapping=_fields(moved))
-            if moved.state in CLOSED:
-                pipe.zrem(self.key("open", item.address), item_id)
-            if state == "delivered":
-                pipe.zadd(self.key("delivered"), {item_id: moved.updated_at})
-            else:
-                pipe.zrem(self.key("delivered"), item_id)
-            pipe.zrem(pending, item_id)
-            if last:
-                pipe.srem(self.key("waiting"), item.address)
-            pipe.rpush(self.key("history", item_id), _entry(state, by, reason, moved.updated_at))
+            self.stage_move(pipe, item, moved, by, last)
             pipe.execute()
             return moved
+
+    def _owned(self, pipe, by):
+        key = owner_key(NameRegistry(pipe).resolve(by))
+        pipe.watch(key)
+        return pipe.get(key) is not None
+
+    def last_pending(self, pipe, item):
+        pending = self.key("pending", item.address)
+        pipe.watch(pending)
+        return pipe.zscore(pending, item.id) is not None and pipe.zcard(pending) == 1
+
+    def stage_move(self, pipe, item, moved, by, last, indexed=True):
+        """pipe is already in MULTI; indexed=False keeps a delivered item out of the redelivery index."""
+        pipe.hset(self.key("item", item.id), mapping=_fields(moved))
+        if moved.state in CLOSED:
+            pipe.zrem(self.key("open", item.address), item.id)
+        if moved.state == "delivered" and indexed:
+            pipe.zadd(self.key("delivered"), {item.id: moved.updated_at})
+        else:
+            pipe.zrem(self.key("delivered"), item.id)
+        pipe.zrem(self.key("pending", item.address), item.id)
+        if last:
+            pipe.srem(self.key("waiting"), item.address)
+        pipe.rpush(self.key("history", item.id), _entry(moved.state, by, moved.reason, moved.updated_at))
 
 
 def _index_current(indexed, size, total: int) -> bool:

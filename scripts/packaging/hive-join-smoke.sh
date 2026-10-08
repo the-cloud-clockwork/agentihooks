@@ -70,7 +70,7 @@ client = redis_client()
 assert client.acl_whoami() == f"hive-{env['AGENTIHOOKS_HIVE_ID']}"
 assert client.set(f"{ROOT}:hive-proof", "1")
 print(f"Redis as {client.acl_whoami()}: SET under {ROOT}: allowed")
-for command in (("FLUSHALL",), ("CONFIG", "GET", "maxmemory"), ("SET", "outside", "1"), ("ACL", "LIST")):
+for command in (("FLUSHALL",), ("CONFIG", "GET", "maxmemory"), ("SET", "outside", "1"), ("SET", f"{ROOT}-hive:invite:forged", "1"), ("ACL", "LIST")):
     try:
         client.execute_command(*command)
     except redis.exceptions.NoPermissionError as refused:

@@ -45,7 +45,6 @@ import subprocess
 import sys
 import threading
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -136,15 +135,24 @@ def now_ms():
 
 @timing.instrument_tick
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
+    from scripts.swarm import command_runner, commands, controller, lease
+
     ledger = ledger or LedgerClient()
-    lock, token = store.key(slug, "tick-lock"), uuid.uuid4().hex
-    if not store.redis.set(lock, token, nx=True, px=TICK_LOCK_MS):
+    held = lease.acquire(store, slug, commands.hive_id())
+    if held is None:
+        return ["the swarm belongs to another hive"]
+    token = controller.take_tick_lock(store, slug, held, TICK_LOCK_MS)
+    if token is None:
         return ["another tick is running"]
     try:
-        from scripts.swarm import command_runner, commands
-
-        if not commands.bind(store, slug, commands.hive_id()):
-            return ["the swarm belongs to another hive"]
+        ledger = controller.FencedLedger(store, slug, held, ledger)
+        runtime = controller.FencedRuntime(
+            store,
+            slug,
+            held,
+            runtime or routed(herdr=HerdrRuntime()),
+            os.environ.get("AGENTIHOOKS_DEPLOYMENT", "local") == "local",
+        )
         controls = timing.call(command_runner.consume, store, slug)
         if timing.call(ledger.binned, slug):
             _, left = stop_now(store, slug, runtime or routed(herdr=HerdrRuntime()), ledger)
@@ -217,8 +225,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         timing.call(command_runner.publish, store, slug, timing.call(ledger.state, slug))
         return controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
-        if store.redis.get(lock) == token:
-            store.redis.delete(lock)
+        controller.release_tick_lock(store, slug, token)
 
 
 def cmd_list(store, args):
@@ -279,6 +286,20 @@ def cmd_tick(store, args):
             print(f"herdr: {line}")
     except Exception as exc:
         print(f"herdr: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+
+def cmd_controller(store, args):
+    from dataclasses import asdict
+
+    from scripts.swarm import commands, lease
+
+    store.config(args.slug)
+    held = lease.current(store, args.slug)
+    if args.action == "release":
+        released = bool(held and held.owner == commands.hive_id() and lease.release(store, args.slug, held))
+        print(json.dumps({"released": released}))
+    else:
+        print(json.dumps(asdict(held) if held else {"owner": "", "epoch": 0, "expires_at": 0}))
 
 
 def cmd_waker(store, args):
@@ -1247,6 +1268,7 @@ def build_parser():
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
+    sub.add_parser("controller").add_argument("action", nargs="?", choices=("release",), default=None)
     sub.add_parser("names").add_argument("--json", action="store_true")
     verdict = sub.add_parser("verdict")
     verdict.add_argument("finding")

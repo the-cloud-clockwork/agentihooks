@@ -28,16 +28,11 @@ def _home() -> Path:
 
 def _join(url: str, code: str) -> dict:
     parts = urlsplit(url)
-    if parts.scheme != "https" and not server.is_loopback(parts.hostname or ""):
+    if parts.scheme != "https" and not server.is_loopback(parts.hostname):
         raise auth.HiveError("a join off loopback carries credentials, so the hive URL must be https")
-    request = urllib.request.Request(
-        url.rstrip("/") + server.JOIN_PATH,
-        data=json.dumps({"code": code}).encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    request = urllib.request.Request(url.rstrip("/") + server.JOIN_PATH, data=json.dumps({"code": code}).encode())
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with urllib.request.urlopen(request, timeout=server.REQUEST_TIMEOUT_S) as response:
             return json.load(response)
     except urllib.error.HTTPError as exc:
         try:

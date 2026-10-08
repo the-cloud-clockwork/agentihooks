@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -178,3 +179,165 @@ class LaterClock:
 def test_the_hourly_sync_follows_the_repository_clock(repo, loads):
     FileLedgerRepository(LaterClock()).get_document(SLUG)
     assert len(loads) == 1
+
+
+def chat(item_id, text):
+    return {"op": "add", "thread": "chat", "id": item_id, "text": text}
+
+
+@pytest.fixture
+def seed_parses(monkeypatch):
+    calls = []
+    real = core.parse_seed
+    monkeypatch.setattr(core, "parse_seed", lambda html: calls.append(html) or real(html))
+    return calls
+
+
+@pytest.fixture
+def opened(monkeypatch):
+    paths = []
+    for name in ("read_text", "read_bytes"):
+        real = getattr(Path, name)
+        monkeypatch.setattr(Path, name, lambda self, *a, _real=real, **k: paths.append(self) or _real(self, *a, **k))
+    return paths
+
+
+def test_a_write_after_its_own_sync_reads_back_neither_the_page_seed_nor_the_stored_file(repo, seed_parses, opened):
+    json_path = core.paths(SLUG)[1]
+    state, _ = repo.apply_ops(SLUG, ops=[chat("m2", "second")])
+    assert seed_parses == []
+    assert json_path not in opened
+    assert [m["text"] for m in state["chat"]] == ["first", "second"]
+    assert [m["text"] for m in json.loads(json_path.read_text(encoding="utf-8"))["chat"]] == ["first", "second"]
+    assert "second" in core.paths(SLUG)[0].read_text(encoding="utf-8")
+
+
+def test_a_write_after_its_own_sync_stores_what_a_full_sync_stores(repo, monkeypatch):
+    now = core.now_ms()
+    monkeypatch.setattr(core, "now_ms", lambda: now)
+    html_path, json_path = core.paths(SLUG)
+    page, stored = html_path.read_text(encoding="utf-8"), json_path.read_text(encoding="utf-8")
+    ops = [chat("m2", "second"), {"op": "join", "id": "j1", "by": "eng"}]
+    repo.apply_ops(SLUG, ops=[dict(op) for op in ops])
+    fast = html_path.read_text(encoding="utf-8"), json_path.read_text(encoding="utf-8")
+    html_path.write_text(page, encoding="utf-8")
+    json_path.write_text(stored, encoding="utf-8")
+    file_repository.SYNCED.clear()
+    repo.apply_ops(SLUG, ops=[dict(op) for op in ops])
+    assert (html_path.read_text(encoding="utf-8"), json_path.read_text(encoding="utf-8")) == fast
+
+
+class RecordingDomain:
+    def __init__(self):
+        self.written = []
+
+    def __getattr__(self, name):
+        return getattr(core, name)
+
+    def atomic_write(self, path, text):
+        self.written.append(path)
+        return core.atomic_write(path, text)
+
+
+def test_a_write_after_its_own_sync_stores_through_the_repository_domain(repo):
+    domain = RecordingDomain()
+    FileLedgerRepository(domain).apply_ops(SLUG, ops=[chat("m2", "second")])
+    assert domain.written == [core.paths(SLUG)[1]]
+
+
+class RejectingDomain(RecordingDomain):
+    def validate(self, doc):
+        raise ValueError("rejected by this domain")
+
+
+def test_reusing_a_written_page_follows_the_repository_domain_checks(repo, seed_parses):
+    repository = FileLedgerRepository(RejectingDomain())
+    repository.apply_ops(SLUG, ops=[chat("m2", "second")])
+    seed_parses.clear()
+    repository.apply_ops(SLUG, ops=[chat("m3", "third")])
+    assert len(seed_parses) == 1
+
+
+def test_a_page_edit_after_the_last_write_is_folded_into_the_next_write(repo, seed_parses):
+    html_path = core.paths(SLUG)[0]
+    html_path.write_text(
+        html_path.read_text(encoding="utf-8").replace('"title": "Cached"', '"title": "Edited"', 1), encoding="utf-8"
+    )
+    state, _ = repo.apply_ops(SLUG, ops=[chat("m2", "second")])
+    assert state["title"] == "Edited"
+    assert len(seed_parses) == 1
+
+
+def test_a_stored_file_changed_after_the_last_write_is_read_by_the_next_write(repo, opened):
+    json_path = core.paths(SLUG)[1]
+    stored = json.loads(json_path.read_text(encoding="utf-8"))
+    stored["overview"] = "rewritten"
+    json_path.write_text(json.dumps(stored), encoding="utf-8")
+    opened.clear()
+    state, _ = repo.apply_ops(SLUG, ops=[chat("m2", "second")])
+    assert state["overview"] == "rewritten"
+    assert json_path in opened
+
+
+def test_a_page_left_unreadable_stays_reported_and_untouched_on_every_write(repo, seed_parses):
+    html_path = core.paths(SLUG)[0]
+    broken = html_path.read_text(encoding="utf-8").replace('id="ledger-data"', 'id="broken-data"', 1)
+    html_path.write_text(broken, encoding="utf-8")
+    for n in (2, 3):
+        state, _ = repo.apply_ops(SLUG, ops=[chat(f"m{n}", "more")])
+        assert state["_meta"]["seed_error"].startswith("HTML seed unreadable")
+    assert len(seed_parses) == 2
+    assert html_path.read_text(encoding="utf-8") == broken
+
+
+def test_a_page_repaired_after_being_unreadable_is_parsed_once_then_reused(repo, seed_parses):
+    html_path = core.paths(SLUG)[0]
+    good = html_path.read_text(encoding="utf-8")
+    html_path.write_text(good.replace('id="ledger-data"', 'id="broken-data"', 1), encoding="utf-8")
+    repo.apply_ops(SLUG, ops=[chat("m2", "more")])
+    html_path.write_text(good, encoding="utf-8")
+    seed_parses.clear()
+    for n in (3, 4):
+        state, _ = repo.apply_ops(SLUG, ops=[chat(f"m{n}", "again")])
+        assert state["_meta"]["seed_error"] is None
+    assert len(seed_parses) == 1
+
+
+def test_a_write_that_leaves_an_invalid_page_sends_the_next_write_through_the_full_sync(repo, seed_parses, monkeypatch):
+    derive = file_repository.ledger_priorities.derive
+
+    def break_graph(doc, ctx):
+        doc["phases"][0]["depends_on"] = ["missing-phase"]
+        derive(doc, ctx)
+
+    monkeypatch.setattr(file_repository.ledger_priorities, "derive", break_graph)
+    repo.apply_ops(SLUG, ops=[chat("m2", "second")])
+    monkeypatch.setattr(file_repository.ledger_priorities, "derive", derive)
+    seed_parses.clear()
+    state, _ = repo.apply_ops(SLUG, ops=[chat("m3", "third")])
+    assert len(seed_parses) == 1
+    assert "missing-phase" in json.dumps([state["_meta"].get("warnings"), state["_meta"].get("seed_error")])
+
+
+def test_a_write_that_leaves_an_invalid_seed_document_sends_the_next_write_through_the_full_sync(
+    repo, seed_parses, monkeypatch
+):
+    derive = file_repository.ledger_priorities.derive
+
+    def break_title(doc, ctx):
+        doc["title"] = 7
+        derive(doc, ctx)
+
+    monkeypatch.setattr(file_repository.ledger_priorities, "derive", break_title)
+    repo.apply_ops(SLUG, ops=[chat("m2", "second")])
+    monkeypatch.setattr(file_repository.ledger_priorities, "derive", derive)
+    seed_parses.clear()
+    repo.apply_ops(SLUG, ops=[chat("m3", "third")])
+    assert len(seed_parses) == 1
+
+
+def test_a_write_with_the_sqlite_shadow_on_parses_the_page_seed(repo, seed_parses, monkeypatch):
+    monkeypatch.setattr(file_repository.shadow, "enabled", lambda: True)
+    monkeypatch.setattr(file_repository.shadow, "persist", lambda *args: None)
+    repo.apply_ops(SLUG, ops=[chat("m2", "second")])
+    assert len(seed_parses) == 1
