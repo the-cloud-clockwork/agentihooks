@@ -433,6 +433,37 @@ def test_hook_redis_keys_are_scoped_by_installation(world, tmp_path, monkeypatch
     assert redis_key("file_cache", SESSION) == redis_key("file_cache", SESSION)
 
 
+class FakeRedis:
+    def __init__(self):
+        self.store = {}
+
+    def set(self, key, value):
+        self.store[key] = value
+
+    def get(self, key):
+        return self.store.get(key)
+
+    def delete(self, key):
+        self.store.pop(key, None)
+
+
+def test_the_controls_switch_lives_under_the_installation_key(world, monkeypatch):
+    from hooks.context import controls_toggle
+
+    install(world)
+    fake = FakeRedis()
+    monkeypatch.setattr(controls_toggle, "get_redis", lambda: fake)
+    monkeypatch.setattr(controls_toggle, "_FLAG_DIR", world / "controls_flags")
+    monkeypatch.setattr(controls_toggle, "_GLOBAL_FLAG", world / "controls_flags" / "active.flag")
+    controls_toggle.set_controls_disabled("owner-session")
+    assert fake.store == {controls_toggle._global_key(): "owner-session"}
+    controls_toggle._GLOBAL_FLAG.unlink()
+    assert controls_toggle._read_owner() == "owner-session"
+    controls_toggle.clear_controls_disabled(force=True)
+    assert fake.store == {}
+    assert controls_toggle._read_owner() is None
+
+
 def test_brain_status_reports_cache_scope_mismatches(world, monkeypatch):
     install(world)
     use_brain(monkeypatch, "personal")
