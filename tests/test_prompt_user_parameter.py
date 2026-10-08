@@ -108,8 +108,9 @@ def test_a_variable_named_like_the_helper_locals_still_reaches_the_script(box, n
     assert PLANTED not in done.stdout + done.stderr
 
 
-def test_a_missing_variable_name_fails_without_reading_a_value(box):
-    body = 'read_secret "Tailnet key"\n'
+@pytest.mark.parametrize("call", ['read_secret "Tailnet key"', 'read_secret __rs_name "Tailnet key"'])
+def test_a_missing_or_reserved_variable_name_fails_without_reading_a_value(box, call):
+    body = f"{call}\n"
 
     _, status, done = _run(box, body, f"{PLANTED}\n")
 

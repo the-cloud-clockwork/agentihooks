@@ -8,7 +8,7 @@ unset HISTFILE
 
 read_secret() {
   local __rs_name="$1" __rs_prompt="$2" __rs_value
-  if [[ ! "$__rs_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+  if [[ ! "$__rs_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ || "$__rs_name" == __rs_* ]]; then
     echo "read_secret needs a variable name first" >&2
     return 2
   fi
