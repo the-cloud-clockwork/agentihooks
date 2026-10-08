@@ -152,7 +152,14 @@ class HerdrRuntime:
             agent_choice.choose_shared("", environ, None, share, floor, choose=self.choose)[1] != agent_choice.ALL_FULL
         )
 
-    def quota_capacity(self, config, agents, now, demand=None, requirements=None):
+    def quota_capacity(
+        self,
+        config: SwarmConfig,
+        agents: list[AgentRecord],
+        now: float,
+        demand: dict | None = None,
+        requirements: dict | None = None,
+    ) -> dict:
         from hooks.context import account_sessions
         from scripts.swarm import capacity
 
@@ -179,7 +186,7 @@ class HerdrRuntime:
             decision["tasks"] = dict(self._quota_tasks)
         return decision
 
-    def quota_requirements(self, config, ready):
+    def quota_requirements(self, config: SwarmConfig, ready: dict) -> dict:
         from scripts.swarm.capacity import _harnesses
 
         config = replace(config, codex_share=codex_split(config, dict(os.environ))[0])

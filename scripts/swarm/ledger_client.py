@@ -69,7 +69,7 @@ class LedgerClient:
     def comment(self, slug, task_id, text, by):
         self._call(slug, [_op("add", by, thread=f"tasks/{task_id}/comments", text=text)])
 
-    def capacity_comment(self, slug, task_id, text, at):
+    def capacity_comment(self, slug: str, task_id: str, text: str, at: int) -> None:
         LedgerClient(service=True).comment(slug, task_id, text, by=f"quota capacity {at}")
 
     def set_phase(self, slug, phase_id, done, status):
