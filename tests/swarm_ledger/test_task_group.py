@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from scripts.swarm_ledger import ledger, ledger_groups, ledger_tasks, new_ledger
@@ -207,7 +209,7 @@ def test_a_malformed_group_op_is_refused(op, message):
 
 
 def test_the_core_and_the_server_schema_know_the_group_op():
-    assert core.EXTENSION_OPS["task_group"].OPS == ("task_group",)
+    assert core.EXTENSION_OPS["task_group"] is ledger_groups
     schema = schemas.operation_schema("task_group")
     op = {"op": "task_group", "id": "g", "by": "swarm", "item": "tasks/t1", "members": ["t2"]}
     assert schemas.mismatched_field(schema, op) is None
@@ -226,3 +228,82 @@ def test_task_group_cli_sends_the_lead_and_its_members(monkeypatch, capsys):
 def test_the_task_command_takes_only_add_set_or_group():
     with pytest.raises(SystemExit):
         ledger.build_parser().parse_args(["--slug", SLUG, "--as", MASTER, "task", "merge", "t1", "t2"])
+
+
+def ungroup(lead, by="swarm", n=1):
+    op = {"op": "task_ungroup", "id": f"ungroup-{n}", "by": by, "item": f"tasks/{lead}"}
+    core.check_op(op)
+    return core.sync(SLUG, ops=[op])
+
+
+@pytest.fixture
+def with_ungroup(monkeypatch):
+    monkeypatch.setitem(core.EXTENSION_OPS, "task_ungroup", ledger_groups)
+
+
+def test_ungroup_clears_the_lead_and_every_member_pointing_at_it(with_ungroup):
+    group("t1", ["t2", "t3"])
+    state, rejected = ungroup("t1")
+    found = rows(state)
+    assert rejected == []
+    assert "group_members" not in found["t1"]
+    assert "merged_into" not in found["t2"] and "merged_into" not in found["t3"]
+    assert state["_meta"]["events"][-1]["kind"] == "ungrouped"
+    assert state["_meta"]["events"][-1]["text"] == "t2, t3"
+    assert state["_meta"]["stamps"]["tasks/t1/group_members"]["by"] == "swarm"
+    assert state["_meta"]["stamps"]["tasks/t2/merged_into"]["by"] == "swarm"
+
+
+def test_ungroup_leaves_a_member_that_points_at_another_lead(with_ungroup):
+    group("t1", ["t2", "t3"])
+    path = core.paths(SLUG)[1]
+    doc = json.loads(path.read_text())
+    next(t for t in doc["tasks"] if t["id"] == "t3")["merged_into"] = "t4"
+    path.write_text(json.dumps(doc))
+    state, rejected = ungroup("t1")
+    assert rejected == [] and rows(state)["t3"]["merged_into"] == "t4"
+    assert state["_meta"]["events"][-1]["text"] == "t2"
+
+
+def test_ungroup_of_a_task_without_a_group_changes_nothing(with_ungroup):
+    state, rejected = ungroup("t1")
+    assert rejected == ["ungroup-1"]
+    assert "tasks/t1 leads no group" in state["_meta"]["warnings"][-1]
+    state, rejected = ungroup("t9", n=2)
+    assert rejected == ["ungroup-2"]
+
+
+def test_a_lane_agent_cannot_ungroup_tasks(with_ungroup):
+    group("t1", ["t2"])
+    state, rejected = ungroup("t1", by=ENGINEER)
+    assert rejected == ["ungroup-1"]
+    assert state["_meta"]["warnings"][-1] == f"{ENGINEER} works in the eng lane and cannot release a task group"
+    assert rows(state)["t2"]["merged_into"] == "t1"
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        {"op": "task_ungroup", "id": "u", "by": "swarm", "item": "phases/p1"},
+        {"op": "task_ungroup", "id": "u", "by": "operator", "item": "tasks/t1"},
+        {"op": "task_ungroup", "id": "u", "item": "tasks/t1"},
+        {"op": "task_ungroup", "id": "u", "by": "swarm", "item": "tasks/t1", "members": ["t2"]},
+    ],
+)
+def test_a_malformed_ungroup_op_is_refused(op):
+    with pytest.raises(ValueError):
+        core.check_op(op)
+
+
+def test_the_ungroup_refusal_names_its_shape():
+    with pytest.raises(ValueError) as refused:
+        core.check_op({"op": "task_ungroup", "id": "u", "by": "swarm", "item": "tasks/t1", "members": ["t2"]})
+    assert str(refused.value) == "task_ungroup takes only an id, by and an item tasks/<lead id>"
+
+
+def test_the_core_and_the_server_schema_know_the_ungroup_op():
+    assert core.EXTENSION_OPS["task_ungroup"] is ledger_groups
+    assert ledger_groups.OPS == ("task_group", "task_ungroup")
+    schema = schemas.operation_schema("task_ungroup")
+    op = {"op": "task_ungroup", "id": "u", "by": "swarm", "item": "tasks/t1"}
+    assert schemas.mismatched_field(schema, op) is None

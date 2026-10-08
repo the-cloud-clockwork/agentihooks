@@ -348,3 +348,136 @@ def test_a_group_applied_in_a_tick_spawns_only_its_lead_with_member_specs(asked,
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert [t["id"] for t in runtime.tasks] == ["a"]
     assert runtime.tasks[0]["group"] == [{"id": "b", "title": "title b", "description": "spec b"}]
+
+
+class ReleaseLedger(GroupLedger):
+    def __init__(self, tasks):
+        super().__init__(tasks)
+        self.ungrouped, self.stamps = [], {}
+
+    def state(self, slug):
+        found = super().state(slug)
+        found["_meta"]["stamps"] = self.stamps
+        return found
+
+    def ungroup_tasks(self, slug, lead):
+        assert slug == "sw"
+        self.ungrouped.append(lead)
+
+
+ENGINEER = "engineer@abcdef-0001"
+GROUPED_AT, CHANGED_AFTER, CHANGED_BEFORE = 10, 20, 5
+
+
+def grouped(lead_fields, state_rev=CHANGED_BEFORE):
+    lead = task("a", group_members=["b", "c"], **lead_fields)
+    members = [task("b", merged_into="a"), task("c", merged_into="a")]
+    stamps = {"tasks/a/group_members": {"rev": GROUPED_AT}, "tasks/a/state": {"rev": state_rev}}
+    return {"tasks": [lead, *members], "phases": [], "_meta": {"stamps": stamps}}
+
+
+def release(store, found, claim=None, handoff=None):
+    if claim:
+        store.claim("sw", "a", claim, 60_000)
+    if handoff:
+        store.put_handoff("sw", "a", handoff)
+    ledger = ReleaseLedger(found["tasks"])
+    return ledger, grouping.release_pass("sw", store, ledger, found)
+
+
+@pytest.mark.parametrize(
+    "lead, state_rev, claim, handoff, why",
+    [
+        ({"state": "blocked", "claimed_by": ENGINEER}, CHANGED_AFTER, None, None, "is blocked and its agent let it go"),
+        ({"state": "blocked", "claimed_by": ""}, CHANGED_AFTER, None, None, "is blocked and its agent let it go"),
+        (
+            {"state": "blocked", "claimed_by": ENGINEER},
+            CHANGED_AFTER,
+            "engineer@abcdef-0009",
+            None,
+            "is blocked and its agent let it go",
+        ),
+        ({"state": "open"}, CHANGED_AFTER, None, None, "was reopened"),
+        ({"state": "done", "pr_url": ""}, CHANGED_AFTER, None, None, "closed without its pull request"),
+        ({"out_of_scope": True}, CHANGED_BEFORE, None, None, "closed without its pull request"),
+    ],
+)
+def test_a_stopped_lead_releases_its_members(store, lead, state_rev, claim, handoff, why):
+    found = grouped(lead, state_rev)
+    ledger, actions = release(store, found, claim, handoff)
+    assert ledger.ungrouped == ["a"]
+    assert actions == [f"released tasks b, c from task a: its lead {why}"]
+    rows = {t["id"]: t for t in found["tasks"]}
+    assert "group_members" not in rows["a"]
+    assert "merged_into" not in rows["b"] and "merged_into" not in rows["c"]
+
+
+@pytest.mark.parametrize(
+    "lead, state_rev, claim, handoff",
+    [
+        ({"state": "blocked", "claimed_by": ENGINEER}, CHANGED_AFTER, ENGINEER, None),
+        ({"state": "open"}, CHANGED_BEFORE, None, None),
+        ({"state": "open"}, GROUPED_AT, None, None),
+        ({"state": "open"}, CHANGED_AFTER, None, "handoff for the next engineer"),
+        ({"state": "claimed", "claimed_by": ENGINEER}, CHANGED_AFTER, None, None),
+        ({"state": "pr", "claimed_by": ENGINEER}, CHANGED_AFTER, None, None),
+        ({"state": "done", "pr_url": "https://github.com/o/r/pull/1"}, CHANGED_AFTER, None, None),
+    ],
+)
+def test_a_working_lead_keeps_its_members(store, lead, state_rev, claim, handoff):
+    found = grouped(lead, state_rev)
+    ledger, actions = release(store, found, claim, handoff)
+    assert (ledger.ungrouped, actions) == ([], [])
+    rows = {t["id"]: t for t in found["tasks"]}
+    assert rows["a"]["group_members"] == ["b", "c"] and rows["b"]["merged_into"] == "a"
+
+
+def test_a_lead_without_stamps_is_not_taken_for_reopened(store):
+    found = grouped({"state": "open"})
+    found["_meta"] = {}
+    ledger, actions = release(store, found)
+    assert (ledger.ungrouped, actions) == ([], [])
+
+
+def test_only_members_that_still_point_at_the_lead_are_released(store):
+    found = grouped({"state": "done"}, CHANGED_AFTER)
+    found["tasks"][2]["merged_into"] = "z"
+    ledger, actions = release(store, found)
+    assert actions == ["released tasks b from task a: its lead closed without its pull request"]
+    assert found["tasks"][2]["merged_into"] == "z"
+
+
+def test_a_refused_release_leaves_the_group_and_goes_on(store):
+    class Refusing(ReleaseLedger):
+        def ungroup_tasks(self, slug, lead):
+            if lead == "a":
+                raise LedgerRefused("refused")
+            super().ungroup_tasks(slug, lead)
+
+    found = grouped({"state": "done"}, CHANGED_AFTER)
+    found["tasks"].append(task("d", state="done", group_members=["e"]))
+    found["tasks"].append(task("e", merged_into="d"))
+    ledger = Refusing(found["tasks"])
+    actions = grouping.release_pass("sw", store, ledger, found)
+    assert ledger.ungrouped == ["d"]
+    assert actions == [
+        "skipped releasing the group under task a: the ledger refused its write",
+        "released tasks e from task d: its lead closed without its pull request",
+    ]
+    assert found["tasks"][1]["merged_into"] == "a"
+
+
+def test_a_released_member_returns_to_the_claim_queue(store):
+    found = grouped({"state": "blocked", "claimed_by": ENGINEER}, CHANGED_AFTER)
+    rows = {t["id"]: t for t in found["tasks"]}
+    assert _claimable("sw", store, rows, found, "eng") == []
+    release(store, found)
+    assert [t["id"] for t in _claimable("sw", store, rows, found, "eng")] == ["b", "c"]
+
+
+def test_the_tick_releases_members_of_a_stopped_lead(store):
+    ledger = ReleaseLedger(grouped({"state": "done"}, CHANGED_AFTER)["tasks"])
+    ledger.stamps = {"tasks/a/group_members": {"rev": GROUPED_AT}, "tasks/a/state": {"rev": CHANGED_AFTER}}
+    actions = tick("sw", store, ledger, FakeRuntime(), now_ms=1_000)
+    assert ledger.ungrouped == ["a"]
+    assert "released tasks b, c from task a: its lead closed without its pull request" in actions
