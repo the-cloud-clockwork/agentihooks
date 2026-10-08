@@ -1,0 +1,42 @@
+{
+  "tested_commit": "bfecd6f7266a6167374e5db804fd4c47cd3f3098",
+  "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI and the process reaper behind HerdrRuntime, the local process table and PID namespace are fixture values, and the remote backend is an in-memory fake; not live rollout proof",
+  "then": "lost remote observation produces suspect status and cannot cause an unrelated local process kill",
+  "runs": [
+    {
+      "suspect_after_lost_observation": "suspect",
+      "suspect_actions": [
+        "suspect <agent>: its runtime did not answer"
+      ],
+      "execution_identity_kept": [
+        true,
+        true
+      ],
+      "local_kills": [],
+      "local_retires": [],
+      "local_reaps": [],
+      "task_claim_kept": true,
+      "claim_lease_refreshed_while_suspect": true,
+      "replacement_spawns": 0,
+      "state_after_observation_restored": "working"
+    },
+    {
+      "suspect_after_lost_observation": "suspect",
+      "suspect_actions": [
+        "suspect <agent>: its runtime did not answer"
+      ],
+      "execution_identity_kept": [
+        true,
+        true
+      ],
+      "local_kills": [],
+      "local_retires": [],
+      "local_reaps": [],
+      "task_claim_kept": true,
+      "claim_lease_refreshed_while_suspect": true,
+      "replacement_spawns": 0,
+      "state_after_observation_restored": "working"
+    }
+  ],
+  "passed": true
+}
