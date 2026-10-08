@@ -31,9 +31,9 @@ def ci_download(run_ids: list[str], folder: Path) -> None:
         _gh(["run", "download", run, "--dir", str(folder / run)])
 
 
-def ci_samples(folder: Path) -> list[dict[str, float]]:
+def ci_samples(folder: Path, version: str = "*") -> list[dict[str, float]]:
     samples = []
-    for path in sorted(folder.glob("*/*/durations.json")):
+    for path in sorted(folder.glob(f"*/durations-{version}-*/durations.json")):
         durations = json.loads(path.read_text())
         samples.append({re.sub(r"@[^\[\]]*$", "", nodeid): seconds for nodeid, seconds in durations.items()})
     return samples
@@ -60,6 +60,9 @@ def main(argv: list[str] | None = None) -> None:
         if args.ci or args.ci_run:
             ci_download([args.ci_run] if args.ci_run else ci_run_ids(args.ci), Path(tmp))
             runs = ci_samples(Path(tmp))
+            for version in ("3.11", "3.12"):
+                measured = median_durations(ci_samples(Path(tmp), version))
+                (_ROOT / f".test_durations-{version}").write_text(json.dumps(measured, indent=4, sort_keys=True) + "\n")
         else:
             runs = local_samples(Path(tmp))
     (_ROOT / ".test_durations").write_text(json.dumps(median_durations(runs), indent=4, sort_keys=True) + "\n")
