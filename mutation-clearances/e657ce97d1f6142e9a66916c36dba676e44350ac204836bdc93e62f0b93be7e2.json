@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/store.py:scripts.inbox.store.x\u01c1InboxStore\u01c1withdraw__mutmut_5:653456271d103a83f94feb561c6503f8c2b00e78613e9fb20852be08efa0c3f8": {
+    "reader": "Independent Standards reader for Doctor task t53",
+    "reason": "An empty string and None cancellation address take the same false branches, retain the address, cancel the item and produce identical indexes and history."
+  }
+}

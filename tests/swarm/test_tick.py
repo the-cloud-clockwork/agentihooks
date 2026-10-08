@@ -53,7 +53,7 @@ class FakeLedger:
 class FakeRuntime:
     def __init__(self, fail=False, full=False, crash=None):
         self.live, self.spawned, self.killed, self.closed, self.nudged = set(), [], [], [], []
-        self.tasks, self.masters, self.spawns_seen, self.harness = [], [], [], "claude"
+        self.tasks, self.masters, self.harness = [], [], "claude"
         self.fail, self.full, self.crash, self.statuses, self.stuck = fail, full, crash, {}, set()
         self.conversation_ids, self.named, self.closed_spaces, self.typed = {}, [], [], {}
         self.capacity_for = []
@@ -63,7 +63,7 @@ class FakeRuntime:
         self.capacity_for.append(config.slug)
         return not self.full
 
-    def spawn(self, config, lane, name, task, spawns=None):
+    def spawn(self, config, lane, name, task):
         if self.crash:
             raise self.crash
         if self.fail:
@@ -74,7 +74,6 @@ class FakeRuntime:
             return Placed(pane_id=f"w1:m{len(self.masters)}", harness="claude")
         self.spawned.append((lane, name, task["id"]))
         self.tasks.append(dict(task))
-        self.spawns_seen.append(dict(spawns or {}))
         return Placed(
             pane_id=f"w1:p{len(self.spawned)}",
             harness=self.harness,
@@ -269,12 +268,12 @@ class FailingFor(FakeRuntime):
         super().__init__()
         self.failing, self.tried = set(failing), []
 
-    def spawn(self, config, lane, name, task, spawns=None):
+    def spawn(self, config, lane, name, task):
         if lane != MASTER:
             self.tried.append(task["id"])
         if task["id"] in self.failing:
             raise SpawnError("MCP_KEY_GATEWAY is unset")
-        return super().spawn(config, lane, name, task, spawns)
+        return super().spawn(config, lane, name, task)
 
 
 def test_a_failing_launch_does_not_stop_the_spawns_behind_it(store):
@@ -351,9 +350,9 @@ def test_a_spawn_claims_its_task_for_one_lease_and_records_its_seat_at_launch_ti
     ledger, runtime, seen = tasks(("t1", "eng")), FakeRuntime(), []
     spawn = runtime.spawn
 
-    def watching(config, lane, name, task, spawns=None):
+    def watching(config, lane, name, task):
         seen.extend(a.state for a in store.agents("sw") if a.name == name and lane != MASTER)
-        return spawn(config, lane, name, task, spawns)
+        return spawn(config, lane, name, task)
 
     runtime.spawn = watching
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -440,6 +439,8 @@ def test_a_task_closed_done_during_a_tick_stays_done_and_is_not_claimed_again(st
 
 def test_an_open_task_closed_done_during_a_tick_spawns_no_agent(store):
     ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "eng"}]), FakeRuntime()
+    for row in ledger.rows.values():
+        row["difficulty"] = "M"
     ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("done", "")
@@ -507,7 +508,7 @@ def test_a_stalled_agents_open_items_follow_the_live_reopen_result(store, closed
 
 
 def test_a_task_closed_done_during_a_tick_is_not_blocked_by_the_claim_cap(store):
-    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}]), FakeRuntime()
+    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng", "difficulty": "M"}]), FakeRuntime()
     for _ in range(3):
         store.count_claim("sw", "t1")
     ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
@@ -659,6 +660,38 @@ def test_a_finished_agent_frees_its_slot_on_the_same_tick(store):
     actions = tick("sw", store, ledger, runtime, now_ms=2_000)
     assert actions.index("retired engineer@a1b2c3-0001") < actions.index("spawned engineer@a1b2c3-0002 for t2")
     assert [a.name for a in workers(store)] == ["engineer@a1b2c3-0002"]
+
+
+def test_every_tick_sends_the_ledger_its_time_left_inputs(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    sent = []
+    ledger.time_left = lambda slug, slots, ci_minutes: sent.append((slug, slots, ci_minutes))
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert sent == [("sw", None, None), ("sw", None, None)]
+
+
+def test_the_tick_sends_quota_slots_and_counts_ledger_events_against_its_clock(store):
+    ledger, runtime = FakeLedger([{"id": "t0", "state": "done", "done": True}, {"id": "t1"}]), FakeRuntime()
+    ledger.log = [
+        {"kind": "task claimed", "target": "tasks/t0", "at": 1_000, "by": "eng", "rev": 1},
+        {"kind": "task pr", "target": "tasks/t0", "at": 61_000, "by": "eng", "rev": 2},
+    ]
+    ledger.comment = lambda slug, item, text, by: None
+    lanes = ("eng", "ci", "plan")
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: {
+        "configured": {"eng": 2, "ci": 1, "plan": 1},
+        "effective": dict.fromkeys(lanes, 0),
+        "placeable": {"claude": 3, "codex": 0},
+        "reason": "accounts have quota",
+        "accounts": [],
+        "allocation": {lane: {"claude": 0, "codex": 0} for lane in lanes},
+        "placements": {lane: [] for lane in lanes},
+    }
+    sent = []
+    ledger.time_left = lambda slug, slots, ci_minutes: sent.append((slug, slots, ci_minutes))
+    tick("sw", store, ledger, runtime, now_ms=120_000)
+    assert sent == [("sw", 3, None)]
 
 
 def test_a_finished_agent_whose_retire_fails_holds_no_lane_slot(store):
@@ -1377,6 +1410,23 @@ def test_equal_ranks_keep_ledger_order_and_ranks_order_the_rest(store):
     assert spawned_ids(runtime) == ["t6", "t3", "t5", "t2", "t4", "t1"]
 
 
+def test_claims_follow_rank_then_the_small_fast_clear_task_then_critical_path_depth(store):
+    store.update("sw", max_eng=6)
+    ledger = FakeLedger(
+        [
+            {"id": "shallow", "phase": "p1"},
+            {"id": "deep", "phase": "p2"},
+            {"id": "w1", "depends_on": ["deep"], "rank": "low", "phase": "p2"},
+            {"id": "w2", "depends_on": ["w1"], "rank": "low", "phase": "p2"},
+            {"id": "small", "difficulty": "S", "phase": "p3"},
+            {"id": "top", "rank": "high", "phase": "p9"},
+        ]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["top", "small", "deep", "shallow"]
+
+
 def test_a_rank_change_applies_on_the_next_tick(store):
     store.update("sw", max_eng=1)
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2"}, {"id": "t3"}])
@@ -1488,43 +1538,10 @@ def test_a_task_without_a_kind_takes_its_lane_default_kind_when_claimed(store):
 def test_work_lane_spawns_are_counted_by_harness_and_handed_to_the_runtime(store):
     rt = FakeRuntime()
     tick("sw", store, FakeLedger([{"id": "t1"}, {"id": "t2"}, {"id": "t3", "lane": "ci"}]), rt, 1000)
-    assert rt.spawns_seen == [{}, {"claude": 1}, {"claude": 2}]
     rt.harness = "codex"
     store.update("sw", max_eng=3)
     tick("sw", store, FakeLedger([{"id": "t4"}]), rt, 2000)
     assert store.spawns("sw") == {"claude": 3, "codex": 1}
-
-
-def test_a_master_spawn_is_not_counted_in_the_codex_share(store):
-    store.update("sw", max_eng=0, max_ci=0)
-    tick("sw", store, FakeLedger([]), FakeRuntime(), 1000)
-    assert store.spawns("sw") == {}
-
-
-def test_overflow_on_codex_in_the_window_leaves_the_next_free_spawn_to_the_share(store, monkeypatch):
-    from scripts import agent_choice
-
-    now = 10 * 3_600_000
-    rows = [
-        *[(f"s{i}", "claude", "share", now - i * 1000) for i in range(1, 3)],
-        *[(f"o{i}", "codex", "overflow", now - i * 1000) for i in range(1, 4)],
-        ("f1", "codex", "forced", now - 9000),
-        ("old", "codex", "share", now - 7 * 3_600_000),
-        *[(f"s{i}", "claude", "share", now - i * 1000) for i in range(3, 5)],
-    ]
-    for name, harness, choice, at in rows:
-        store.put_agent("sw", AgentRecord(name, "eng", f"x-{name}", harness=harness, started_at=at, choice=choice))
-        store.drop_agent("sw", name, at=at)
-        store.count_spawn("sw", harness)
-    rt = FakeRuntime()
-    tick("sw", store, FakeLedger([{"id": "t1"}]), rt, now)
-    assert rt.spawns_seen == [{"claude": 4}]
-    monkeypatch.setattr(agent_choice, "at_cap", lambda agent, environ: False)
-    monkeypatch.setattr(agent_choice, "codex_week_left", lambda environ: 90.0)
-    assert agent_choice.choose_shared("", {}, rt.spawns_seen[0], 20, 5, choose=lambda r, e: ("claude", "priority")) == (
-        "codex",
-        "codex share 0/4 below 20%",
-    )
 
 
 def _conversations(store):

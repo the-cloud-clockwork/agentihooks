@@ -550,7 +550,6 @@ QUOTA_USAGE_STALE_SEC: int = int(os.getenv("QUOTA_USAGE_STALE_SEC", "300"))
 # Quota policy — what a session does when its own quota runs out (hooks/context/quota_policy.py).
 # Handoff when 7d used >= WEEK_PCT or 5h used >= 5H_PCT; a target account needs MIN_LEFT% routing
 # left; a spent 5h window with >= WAIT_MIN_WEEK_LEFT% of the week left waits for the reset.
-# AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT (default 3) is read by hooks/context/account_sessions.py.
 QUOTA_POLICY_ENABLED = _env_bool("QUOTA_POLICY_ENABLED", "true")
 QUOTA_HANDOFF_WEEK_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_WEEK_PCT", "98"))
 QUOTA_HANDOFF_5H_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_5H_PCT", "99"))
@@ -767,7 +766,7 @@ CI_MANIFESTO_RUNTIME_INJECT: bool = _env_bool("CI_MANIFESTO_RUNTIME_INJECT", "fa
 CI_MANIFESTO_REFRESH_EVERY: int = int(os.getenv("CI_MANIFESTO_REFRESH_EVERY", "8"))
 
 # Auto dev-switch — at SessionStart, if cwd is on main/master, switch to dev.
-AUTO_DEV_SWITCH_ENABLED = _env_bool("AUTO_DEV_SWITCH_ENABLED", "true")
+AGENTIHOOKS_FORCE_DEV_BRANCH = _env_bool("AGENTIHOOKS_FORCE_DEV_BRANCH", "false")
 
 # =============================================================================
 # OTEL — Custom hook telemetry (Layer 2)

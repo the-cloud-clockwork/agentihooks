@@ -16,7 +16,7 @@ from scripts.swarm import affinity, launch_check, live_binding, overlays, retire
 from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
-from scripts.swarm.store import ASSIST, SwarmError, codex_split
+from scripts.swarm.store import ASSIST, SwarmError
 from scripts.swarm.tick import agent_status
 from scripts.swarm_ledger import plan_shape
 
@@ -162,7 +162,6 @@ def status_report(store, slug, state):
         "config": {
             **config.__dict__,
             "name": swarm_name(config.code),
-            "codex_share": codex_split(config, os.environ)[0],
         },
         "agents": [
             {

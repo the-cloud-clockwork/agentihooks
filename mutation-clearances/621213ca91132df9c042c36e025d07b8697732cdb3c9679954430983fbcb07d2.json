@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/detect.py:scripts.doctor.detect.x_readers__mutmut_21:29fdc3d19a0a0f1d80c6435baf212dbab7e5d6769e57cbbfcf14dbbe450d3dca": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Equivalent at the mutated readers handoff call. The unchanged items() closure uses the real mail object to call read.inbox_items, which constructs and returns a list, including an empty list, or raises before handoffs is invoked. Therefore handoffs always receives a non-None items argument. Its only use of inbox is the unselected inbox_items(inbox, slug) branch when items is None; the remaining function and _record do not reference inbox. Replacing that unused argument with None preserves the snapshot, findings, Redis calls, and exceptions. Verified against the exact CI variant from run 37778455113 and parent symbol bodies for readers, inbox_items, handoffs, and _record after fd8cf8b3."
+  }
+}

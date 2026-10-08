@@ -42,7 +42,7 @@ class LedgerClient:
             raise (LedgerRefused if refused else SwarmError)(f"ledger {slug}: {exc}") from exc
         if state.get("rejected"):
             detail = "; ".join(state.get("_meta", {}).get("warnings", [])) or str(state["rejected"])
-            raise SwarmError(f"ledger {slug} refused: {detail}")
+            raise LedgerRefused(f"ledger {slug} refused: {detail}")
         return state
 
     def _resource(self, slug, path, collection=False):
@@ -77,6 +77,9 @@ class LedgerClient:
     def capacity_comment(self, slug: str, task_id: str, text: str, at: int) -> None:
         self.comment(slug, task_id, text, by="swarm")
 
+    def time_left(self, slug: str, slots: int, ci_minutes: float | None) -> None:
+        self._call(slug, [_op("time_left", "swarm", slots=slots, ci_minutes=ci_minutes)])
+
     def set_phase(self, slug, phase_id, done, status):
         self._call(slug, [_op("set", "swarm", path=f"phases/{phase_id}/done", value=done, status=status)])
 
@@ -106,6 +109,12 @@ class LedgerClient:
 
     def priority(self, slug, item, text):
         self._call(slug, [_op("priority", "swarm", item=item, text=text)])
+
+    def group_tasks(self, slug, lead, members):
+        self._call(slug, [_op("task_group", "swarm", item=f"tasks/{lead}", members=list(members))])
+
+    def ungroup_tasks(self, slug, lead):
+        self._call(slug, [_op("task_ungroup", "swarm", item=f"tasks/{lead}")])
 
     def clear_priority(self, slug, priority_id, reason):
         self._call(slug, [_op("priority_clear", "swarm", target=priority_id, reason=reason)])

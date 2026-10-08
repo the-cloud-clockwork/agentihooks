@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/store.py:scripts.inbox.store.x\u01c1InboxStore\u01c1_open_ids__mutmut_19:209619c8ce66fa1f0dd2800b75d8cad5e9d11eae4596462b2862fb67b9daf60e": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Equivalent under the Redis contract. In InboxStore._open_ids, replacing the missing or falsy open-size fallback -1 with -2 changes only the equality comparison against ZCARD. ZCARD is a nonnegative integer, so both negative sentinels make that comparison false and take the identical rebuild/retry/fallback path. A truthy stored stamp is converted unchanged in both variants. Redis errors arise from the same calls. Verified against the exact CI variant from run 37778455113 and the parent symbol evidence after fd8cf8b3."
+  }
+}

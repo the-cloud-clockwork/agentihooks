@@ -5,8 +5,7 @@ import pytest
 
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
-from scripts import install, operator_env, session_caps, skill_eval
-from scripts.session_caps import SessionCaps
+from scripts import install, operator_env, skill_eval
 
 
 @pytest.fixture
@@ -27,9 +26,6 @@ def launch(monkeypatch):
     monkeypatch.setattr(operator_env, "accounts", Mock(return_value={}))
     monkeypatch.setattr(skill_eval.shutil, "which", Mock(return_value="/usr/bin/claude"))
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"winner": 1, "peer": 3})
-    monkeypatch.setattr(account_sessions, "max_sessions", Mock(return_value=3))
-    caps = SessionCaps(3, {"winner": 2})
-    monkeypatch.setattr(session_caps, "caps", Mock(return_value=caps))
     result = balancer.ProbeResult(
         account="winner",
         provider_status="allowed",
@@ -48,11 +44,11 @@ def launch(monkeypatch):
     monkeypatch.setattr(balancer, "select_credential", selector)
     execute = Mock(side_effect=RuntimeError("exec intercepted"))
     monkeypatch.setattr(skill_eval.os, "execvpe", execute)
-    return environ, loader, selector, execute, caps
+    return environ, loader, selector, execute
 
 
 def test_claude_evaluation_routes_without_default_login(launch, monkeypatch, tmp_path, capsys):
-    environ, loader, selector, execute, caps = launch
+    environ, loader, selector, execute = launch
     environ.pop("CLAUDE_CODE_OAUTH_TOKEN")
     environ.pop("PYTEST_CURRENT_TEST")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
@@ -63,14 +59,11 @@ def test_claude_evaluation_routes_without_default_login(launch, monkeypatch, tmp
 
     loader.assert_called_once_with()
     skill_eval.shutil.which.assert_called_once_with("claude")
-    account_sessions.max_sessions.assert_called_once_with(environ)
-    session_caps.caps.assert_called_once_with(3)
     selector.assert_called_once_with(
         environ,
         include_fable=False,
         claude_bin="/usr/bin/claude",
         sessions={"winner": 1, "peer": 3},
-        caps=caps,
     )
     executable, argv, child = execute.call_args.args
     assert executable == "python3"
@@ -89,7 +82,7 @@ def test_claude_evaluation_routes_without_default_login(launch, monkeypatch, tmp
 
 
 def test_claude_evaluation_replaces_expired_auth_and_checks_model(launch, capsys):
-    _, _, selector, execute, _ = launch
+    _, _, selector, execute = launch
     with pytest.raises(RuntimeError, match="exec intercepted"):
         skill_eval.main(["--agent", "claude", "claude", "-p", "evaluate", "--model=fable"])
     assert selector.call_args.kwargs["include_fable"] is True
@@ -98,7 +91,7 @@ def test_claude_evaluation_replaces_expired_auth_and_checks_model(launch, capsys
 
 
 def test_codex_evaluation_keeps_command_and_environment(launch, capsys):
-    environ, loader, selector, execute, _ = launch
+    environ, loader, selector, execute = launch
     command = ["codex", "exec", "evaluate", "--model", "luna"]
     with pytest.raises(RuntimeError, match="exec intercepted"):
         skill_eval.main(["--agent", "codex", "--", *command])
@@ -110,7 +103,7 @@ def test_codex_evaluation_keeps_command_and_environment(launch, capsys):
 
 
 def test_evaluation_refuses_unroutable_claude(launch, capsys):
-    _, _, selector, execute, _ = launch
+    _, _, selector, execute = launch
     selector.side_effect = balancer.RoutingError("no Claude account has verified routing capacity")
     with pytest.raises(SystemExit) as error:
         skill_eval.main(["claude", "-p", "evaluate"])
@@ -123,7 +116,7 @@ def test_evaluation_refuses_unroutable_claude(launch, capsys):
 
 @pytest.mark.parametrize("args", [[], ["--"], ["--agent", "codex", "--"]])
 def test_evaluation_requires_a_command(args, launch, capsys):
-    _, loader, selector, execute, _ = launch
+    _, loader, selector, execute = launch
     with pytest.raises(SystemExit) as error:
         skill_eval.main(args)
     assert error.value.code == 2
@@ -134,7 +127,7 @@ def test_evaluation_requires_a_command(args, launch, capsys):
 
 
 def test_claude_evaluation_uses_binary_name_when_lookup_is_missing(launch):
-    _, _, selector, _, _ = launch
+    _, _, selector, _ = launch
     skill_eval.shutil.which.return_value = None
     with pytest.raises(RuntimeError, match="exec intercepted"):
         skill_eval.main(["claude", "-p", "evaluate"])
@@ -142,7 +135,7 @@ def test_claude_evaluation_uses_binary_name_when_lookup_is_missing(launch):
 
 
 def test_evaluation_refuses_unknown_agent(launch, capsys):
-    _, loader, selector, execute, _ = launch
+    _, loader, selector, execute = launch
     with pytest.raises(SystemExit) as error:
         skill_eval.main(["--agent", "unknown", "--", "python3", "evaluate.py"])
     assert error.value.code == 2
@@ -172,7 +165,7 @@ def test_account_proof_is_flushed_before_process_replacement(launch, monkeypatch
 
 
 def test_claude_evaluation_routes_over_the_operator_account_set(launch, capsys):
-    environ, loader, selector, execute, _ = launch
+    environ, loader, selector, execute = launch
     environ.pop("AH_CC_TOKEN_winner")
     environ.pop("AH_CC_TOKEN_peer")
     operator_env.accounts.return_value = {"AH_CC_TOKEN_winner": "test", "AH_CC_TOKEN_peer": "other"}
@@ -200,7 +193,7 @@ def test_codex_evaluation_does_not_load_the_operator_account_set(launch):
 
 @pytest.mark.parametrize("agent", ["claude", "codex"])
 def test_agentihooks_serves_skill_eval_as_a_subcommand(agent, launch, monkeypatch, capsys):
-    _, _, _, execute, _ = launch
+    _, _, _, execute = launch
     command = [agent, "exec", "evaluate", "--model", "haiku"]
     monkeypatch.setattr(install.sys, "argv", ["agentihooks", "skill", "eval", "--agent", agent, "--", *command])
 
@@ -222,7 +215,7 @@ def test_skill_eval_subcommand_names_itself_in_usage(launch, monkeypatch, capsys
 
 @pytest.mark.parametrize("argv", [["skill"], ["skill", "evaluate"]])
 def test_skill_without_eval_prints_its_usage(argv, launch, monkeypatch):
-    _, loader, _, execute, _ = launch
+    _, loader, _, execute = launch
     monkeypatch.setattr(install.sys, "argv", ["agentihooks", *argv])
     with pytest.raises(SystemExit) as error:
         install.main()

@@ -116,6 +116,7 @@ def test_host_selection(monkeypatch, tmp_path, flag, env, binary, state, expecte
 
 
 def _main(monkeypatch, tmp_path, *extra):
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
     monkeypatch.setattr(herdr_host, "ensure_server", lambda environ: False)
     monkeypatch.setattr(init_agent.shutil, "which", lambda name: None)

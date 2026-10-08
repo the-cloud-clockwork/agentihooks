@@ -241,8 +241,8 @@ def checked(store, monkeypatch, profile="engineer", task_profile="engineer"):
     ledger, runtime = JoiningLedger([{"id": "t1", "profile": task_profile}]), CheckedRuntime()
     original = runtime.spawn
 
-    def spawn(config, lane, name, task, spawns=None):
-        placed = original(config, lane, name, task, spawns)
+    def spawn(config, lane, name, task):
+        placed = original(config, lane, name, task)
         return replace(placed, profile=profile)
 
     runtime.spawn = spawn
@@ -296,8 +296,8 @@ def test_the_join_clock_starts_at_the_launch_not_at_the_tick(store, monkeypatch)
     ledger, runtime = checked(store, monkeypatch)
     spawn = runtime.spawn
 
-    def late(config, lane, name, task, spawns=None):
-        return replace(spawn(config, lane, name, task, spawns), launched_at=LAUNCH + 50_000)
+    def late(config, lane, name, task):
+        return replace(spawn(config, lane, name, task), launched_at=LAUNCH + 50_000)
 
     runtime.spawn = late
     tick("sw", store, ledger, runtime, LAUNCH)
@@ -311,8 +311,8 @@ def test_the_tick_times_the_join_from_the_harness_start(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     spawn = runtime.spawn
 
-    def slow_launcher(config, lane, name, task, spawns=None):
-        placed = replace(spawn(config, lane, name, task, spawns), launched_at=LAUNCH)
+    def slow_launcher(config, lane, name, task):
+        placed = replace(spawn(config, lane, name, task), launched_at=LAUNCH)
         return replace(placed, launch_timings={"launched_at": LAUNCH, "harness_at": LAUNCH + 30_000})
 
     runtime.spawn = slow_launcher
@@ -359,8 +359,8 @@ def test_a_failed_launch_names_every_miss_and_times_from_the_launch(store, monke
     runtime.profile = "anton"
     spawn = runtime.spawn
 
-    def late(config, lane, name, task, spawns=None):
-        return replace(spawn(config, lane, name, task, spawns), launched_at=LAUNCH + 50_000)
+    def late(config, lane, name, task):
+        return replace(spawn(config, lane, name, task), launched_at=LAUNCH + 50_000)
 
     runtime.spawn = late
     tick("sw", store, ledger, runtime, LAUNCH)

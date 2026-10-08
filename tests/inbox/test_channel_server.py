@@ -155,34 +155,60 @@ def test_the_server_declares_the_channel_its_instructions_and_the_reply_tool(sto
     assert listed["result"] == {"tools": [TOOL]}
 
 
-def test_an_item_is_pushed_at_its_notify_and_answered_through_the_reply_tool(store, monkeypatch):
+def _push_notified_item(store, monkeypatch, delay=0, notify=True):
     import anyio
 
+    entered, notified = threading.Event(), threading.Event()
+    real_get_message = FakePubSub.get_message
+
+    def get_message(pubsub, timeout):
+        if not pubsub.notes.empty():
+            return real_get_message(pubsub, timeout)
+        assert timeout == 3600
+        entered.set()
+        note = real_get_message(pubsub, 60)
+        if note is not None and note["type"] == "message":
+            notified.set()
+        return note
+
     monkeypatch.setattr(channel, "SETTLE_S", 0)
-    monkeypatch.setattr(channel, "RECHECK_S", 3.0)
+    monkeypatch.setattr(channel, "RECHECK_S", 3600)
+    monkeypatch.setattr(FakePubSub, "get_message", get_message)
 
     async def scenario(send, receive):
-        await anyio.sleep(0.3)
-        start = time.monotonic()
-        item = store.send("alice", "bob", "hello")
-        pushed = await receive()
-        took = time.monotonic() - start
-        await send(
-            _message(
-                id=3, method="tools/call", params={"name": "reply", "arguments": {"item_id": item.id, "text": "hi"}}
+        assert await anyio.to_thread.run_sync(lambda: entered.wait(30)), "session never entered the recheck wait"
+        item = store.send("alice", "bob", "hello", notify=notify)
+        with anyio.fail_after(10):
+            pushed = await receive()
+            assert notified.is_set(), "item arrived without interrupting the recheck wait"
+            await send(
+                _message(
+                    id=3, method="tools/call", params={"name": "reply", "arguments": {"item_id": item.id, "text": "hi"}}
+                )
             )
-        )
-        return item, pushed, took, await receive()
+            return item, pushed, await receive()
 
-    start = time.monotonic()
-    _, _, (item, pushed, took, replied) = session(store, scenario)
-    assert time.monotonic() - start < 2.5 and took < 1.0
+    if delay:
+        time.sleep(delay)
+    _, _, (item, pushed, replied) = session(store, scenario)
     assert pushed == {"jsonrpc": "2.0", **channel.event(store.get(item.id))}
     [answer] = store.inbox("alice")
     assert replied["result"]["content"] == [
         {"type": "text", "text": f"sent to alice as message {answer.id}; message {item.id} is closed"}
     ]
     assert store.get(item.id).state == "done" and answer.text == "hi"
+
+
+@pytest.mark.parametrize("delay", [0, 3])
+def test_an_item_is_pushed_at_its_notify_and_answered_through_the_reply_tool(store, monkeypatch, delay):
+    _push_notified_item(store, monkeypatch, delay=delay)
+
+
+def test_notification_proof_rejects_a_missing_notify(store, monkeypatch):
+    with pytest.raises(ExceptionGroup) as caught:
+        _push_notified_item(store, monkeypatch, notify=False)
+    assert len(caught.value.exceptions) == 1
+    assert isinstance(caught.value.exceptions[0], TimeoutError)
 
 
 def test_an_item_whose_notify_was_missed_arrives_at_the_next_recheck(store, monkeypatch):

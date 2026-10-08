@@ -203,7 +203,7 @@ def test_the_walk_finds_every_panel_control_family():
     bodies = list(panel_bodies())
     found = {b["action"] for b in bodies} | {key for b in bodies for key in b if key != "action"}
     assert {"start", "pause", "stop", "stop_now", "close", "reopen", "set", "lift"} <= found
-    assert {"autonomy", "max_eng", "max_ci", "max_plan", "codex_share", "compact_limit"} <= found
+    assert {"autonomy", "max_eng", "max_ci", "max_plan", "compact_limit"} <= found
     assert {"effort_min", "effort_max", "master_agent", "gates", "agent"} <= found
 
 

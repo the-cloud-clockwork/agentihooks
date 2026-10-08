@@ -23,12 +23,12 @@ class BrokenMaster(FakeRuntime):
         self.registered = None
         self.master_spawns = 0
 
-    def spawn(self, config, lane, name, task, spawns=None):
+    def spawn(self, config, lane, name, task):
         if lane == MASTER:
             self.master_spawns += 1
             if self.broken:
                 raise SpawnError("MCP_KEY_GATEWAY is unset")
-        return super().spawn(config, lane, name, task, spawns)
+        return super().spawn(config, lane, name, task)
 
     def reported(self, agent):
         return agent.name in (self.live if self.registered is None else self.registered)

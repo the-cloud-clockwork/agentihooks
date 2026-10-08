@@ -101,6 +101,12 @@ def codex_home(environ: Mapping[str, str] | None = None) -> Path:
     return Path(raw).expanduser() if raw else Path(env.get("HOME") or Path.home()) / ".codex"
 
 
+def _stale_catalog_files() -> tuple[Path, Path]:
+    from hooks.config import AGENTIHOOKS_HOME
+
+    return AGENTIHOOKS_HOME / "codex_model_catalog.json", AGENTIHOOKS_HOME / "codex_context_highwater.json"
+
+
 def _is_ours(group: object, wrapper: Path) -> bool:
     hooks = group.get("hooks") if isinstance(group, dict) else None
     return isinstance(hooks, list) and any(
@@ -277,9 +283,9 @@ class CodexAdapter:
 
         config_path = home / "config.toml"
         doc = self._load_toml(config_path)
-        from hooks.context.codex_context_pin import catalog_path
-
-        if doc.get("model_catalog_json") == str(catalog_path()):
+        # A pinned catalog limits codex to the models it lists.
+        stale = _stale_catalog_files()
+        if doc.get("model_catalog_json") == str(stale[0]):
             del doc["model_catalog_json"]
 
         # Native settings arrive already merged (base + bundle + profile chain).
@@ -315,6 +321,8 @@ class CodexAdapter:
         doc.setdefault("notify", [python_bin, "-m", "hooks.targets.notify_shim"])
 
         self._dump_toml(config_path, doc)
+        for path in stale:
+            path.unlink(missing_ok=True)
         _atomic_write(self._managed_sidecar(home), json.dumps(managed, indent=2) + "\n")
         _i._cprint(f"[OK] Wrote managed keys into {config_path}")
 

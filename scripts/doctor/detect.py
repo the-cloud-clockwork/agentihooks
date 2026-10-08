@@ -3,6 +3,7 @@
 import os
 import re
 from dataclasses import asdict
+from functools import cache
 
 from scripts.doctor import ci, ci_read, handoffs, health, inbox, read, spawn_read, spawns, traces, traces_read
 from scripts.inbox import wake
@@ -25,20 +26,24 @@ def reported(store, ledger, slug):
     return {f["id"] for f in status.findings(store, slug, store.config(slug), tasks, events)}
 
 
-def _inbox(store, mail, slug, now_ms, env):
-    items = read.inbox_items(mail, slug)
+def _inbox(store, mail, slug, now_ms, env, items):
     return inbox.findings(items, now_ms, wake.window_ms(env), read.inbox_receivers(store, mail, slug, items))
 
 
 def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME):
     env = os.environ if environ is None else environ
     mail = InboxStore(store.redis)
+
+    @cache
+    def items():
+        return read.inbox_items(mail, slug)
+
     return {
         "health": lambda: health.findings(
             read.health_records(store.redis, slug), now_ms, reported=reported(store, ledger, slug)
         ),
-        "inbox": lambda: _inbox(store, mail, slug, now_ms, env),
-        "handoff": lambda: handoffs.findings(read.handoffs(store, mail, home, slug)),
+        "inbox": lambda: _inbox(store, mail, slug, now_ms, env, items()),
+        "handoff": lambda: handoffs.findings(read.handoffs(store, mail, home, slug, items())),
         "spawn": lambda: spawns.findings(spawn_read.records(store, slug, now_ms)),
         "startup": lambda: spawns.silent_starts(
             [asdict(a) for a in store.agents(slug)], activity.first_events(slug), now_ms
@@ -46,7 +51,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME):
         "ci": lambda: [
             f
             for repo, number in open_pulls(ledger.tasks(slug))
-            for f in ci.findings(ci_read.pull_request(repo, number), now_ms)
+            for f in ci.findings(ci_read.pull_request(repo, number, cache=store.redis), now_ms)
         ],
         "trace": lambda: traces.findings(
             traces_read.record(

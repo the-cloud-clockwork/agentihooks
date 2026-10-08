@@ -39,11 +39,11 @@ class ResumingRuntime(FakeRuntime):
             profile_decision={"validation": {"pid": 99}},
         )
 
-    def spawn(self, config, lane, name, task, spawns=None):
+    def spawn(self, config, lane, name, task):
         self.configs.append(config.slug)
         if self.store is not None:
             self.spawn_states.append(next(a.state for a in self.store.agents(config.slug) if a.name == name))
-        return super().spawn(config, lane, name, task, spawns)
+        return super().spawn(config, lane, name, task)
 
     def recover(self, name):
         self.recovered.append(name)

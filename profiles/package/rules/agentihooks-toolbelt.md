@@ -100,7 +100,7 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 | Trigger | Action |
 |---|---|
 | Start a swarm from an accepted plan | `$init-swarm`; the swarm starts its master, `master@<code>-<n>`, which the operator talks to on the page chat or in its pane |
-| Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full codex-share=PCT codex-min-week-left=PCT effort-min=E effort-max=E`, `session-cap <account> <N\|default> [--harness claude\|codex]`; the ledger page swarm panel writes the same ops. An `auto` lane sends `codex-share` percent (default 30) of the swarm's spawns to Codex while Codex has `codex-min-week-left` percent (default 5) of its week left; `status` shows the share. Every lane agent starts inside the effort range (default medium to high) |
+| Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full effort-min=E effort-max=E`; the ledger page swarm panel writes the same ops. Codex is one more account in the session rotation, judged on its week alone with the top band. Every lane agent starts inside the effort range (default medium to high) |
 | Working a ledger | `agentihooks ledger --slug <slug> --as <name> join`, act on every OPERATOR line, then `ack`. In a swarm each operator write arrives as an inbox message at the next tool call and the tick wakes an idle pane, so no Monitor is needed; a ledger without a swarm wakes an idle session only through a `Monitor` on `agentihooks ledger watch <slug> --as <name>` |
 | Work lands, or a blocker appears | `ledger comment phases/<id> "<text>"`, `ledger followup add "<text>"`, `ledger say "<text>"`; plain words for the operator |
 | A question while the operator is away (the question tool is refused unless he typed `operator on`, or typed a prompt in the pane within thirty minutes with no swarm or inbox prompt since) | `ledger question add "<text>"`; the tick sends it to the master, who answers it or raises it to the operator |
@@ -254,12 +254,13 @@ repository's own conditions folder (trusted repositories only).
 
 Every `AH_CC_TOKEN_<slug>` is one Claude subscription.
 
-- **Launch:** `agenti` (and `agentihooks init-agent`) picks the account
-  with the most routing left (`min(5h left, 7d left)`) among accounts running
-  fewer than their session cap: the account's own cap set with `swarm <slug> session-cap`
-  or the Quota panel, else `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` (default 3).
-  When every account is at the cap, the least-loaded one takes the session
-  (`placement=overflow`). `--route <slug>` forces one account and skips the cap.
+- **Launch:** `agenti` (and `agentihooks init-agent`) picks among accounts
+  below their live session cap: 6 live sessions at 60% or more of the five-hour
+  window left, 4 at 40-60%, 3 at 10-40%, 2 at 5-10%, none below 5% until that
+  window resets; no new session on an account below 5% of its week either.
+  The next session goes to the eligible account with the fewest live sessions.
+  When no account is eligible, no session starts. `--route <slug>` forces one
+  account and skips the cap.
 - **Status:** `agentihooks balance` shows `SESSIONS n/cap` per account from a
   live process scan; `agentihooks balance --current` names this session's
   account.

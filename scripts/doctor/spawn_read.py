@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from collections.abc import Callable
 from dataclasses import asdict
@@ -20,8 +19,6 @@ def records(
     *,
     until: str | None = None,
 ) -> dict:
-    from scripts.swarm.store import codex_split
-
     journal = run(
         [
             "journalctl",
@@ -40,13 +37,9 @@ def records(
         check=True,
         timeout=30,
     )
-    config = store.config(slug)
-    target, _ = codex_split(config, os.environ)
     return {
         "slug": slug,
         "now": now_ms,
-        "target": target,
-        "target_changed_at": config.codex_share_changed_at if config.codex_share is not None else 0,
         "spawns": store.spawns(slug),
         "agents": [asdict(a) for a in store.agents(slug)],
         "history": [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)],

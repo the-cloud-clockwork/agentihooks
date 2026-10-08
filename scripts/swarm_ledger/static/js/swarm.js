@@ -6,7 +6,6 @@ import { renderChatTo } from "./chat.js";
 import { clearNoteError, renderControls, renderGates, showNote } from "./controls.js";
 import { firstPage, moreButton, wanted } from "./pages.js";
 
-const SESSION_CAP_MAX = 50;
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd"];
 const OVERLAY_CAP = 3;
@@ -168,19 +167,12 @@ function resetIn(at, now) {
 function quotaRows(sw, now) {
   const quota = sw.quota || {}, master = (sw.agents || []).find((a) => a.lane === "master") || {};
   return (quota.rows || []).map((r) => ({ account: r.account, harness: r.agent, five: percent(r.five_hour_left), fiveReset: resetIn(r.five_hour_resets_at, now),
-    seven: percent(r.seven_day_left), sevenReset: resetIn(r.seven_day_resets_at, now), sessions: r.sessions, cap: r.cap ?? quota.cap,
+    seven: percent(r.seven_day_left), sevenReset: resetIn(r.seven_day_resets_at, now), sessions: r.sessions, cap: r.cap,
     master: !!master.account && r.account === master.account && r.agent === (master.harness || "claude") }));
 }
 
-function sessionStep(q, up) {
-  const cap = up ? q.cap + 1 : q.cap - 1, word = up ? "Raise" : "Lower";
-  return h("button", { class: "sw-btn sw-step", type: "button", "data-session-cap": String(cap), "data-account": q.account, "data-harness": q.harness,
-    "aria-label": `${word} the ${q.harness} session cap for ${q.account}`, disabled: !!pending || !(cap >= 1 && cap <= SESSION_CAP_MAX), text: up ? "+" : "\u2212" });
-}
-
 function sessionCell(q) {
-  const value = h("span", { class: "sw-sessions-value", text: `${q.sessions}/${q.cap ?? "—"}` });
-  return q.cap == null ? value : h("span", { class: "sw-cap sw-sessions" }, sessionStep(q, false), value, sessionStep(q, true));
+  return h("span", { class: "sw-sessions-value", text: `${q.sessions}/${q.cap ?? "—"}` });
 }
 
 function quotaCount(sw, count, now) {

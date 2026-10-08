@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/store.py:scripts.inbox.store.x\u01c1InboxStore\u01c1_try_redirect__mutmut_17:fb3a4c41d794154bf8c073712348db5d9daf01433219e28de54b4f24642ab8dd": {
+    "reader": "Independent Standards reader for Doctor task t53",
+    "reason": "InboxStore.send atomically writes pending at history zero and history is append only with no trimming or rewriting. Receiver selection excludes pending, so skipping the first entry excludes no receiver."
+  }
+}

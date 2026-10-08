@@ -23,7 +23,7 @@ def settle(inbox, name, seat, exit_text):
     inbox.seats.record_exit(name, seat, exit_text)
     names = NameRegistry(inbox.redis)
     successor = names.successor(name) if names.entry(name).get("type") == "master" else ""
-    for item in inbox.inbox(name):
+    for item in inbox.open_items(name):
         if item.state in CLOSED:
             continue
         if push_stop.is_notice(item):
@@ -49,7 +49,7 @@ def close_swarm(inbox: "InboxStore", slug: str) -> None:
         address = key[len(prefix) :]
         if not of_swarm(address, slug, inbox.names):
             continue
-        for item in inbox.inbox(address):
+        for item in inbox.open_items(address):
             if item.state not in CLOSED:
                 inbox.withdraw(item.id, BY, f"cancelled: swarm closed; {address} has no further work", address)
 
@@ -88,21 +88,52 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
         else:
             settle(inbox, name, seat, "exited")
     _settle_seat_notices(inbox, {seat for _, seat in store.seats.agent_seats(slug) if seat}, active)
+    _settle_peer_mail(inbox, slug, store, active)
 
 
 def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
-    """Push stop notices an earlier exit moved to a seat: closed once the agent that got them has gone."""
+    """Push stop and wait ended notices left on a seat: closed once the agent that got them has gone."""
     from scripts.gates import push_stop
     from scripts.inbox.store import CLOSED
+    from scripts.swarm.waits import notice_task
 
     for seat in sorted(seats):
-        for item in inbox.inbox(seat):
-            if item.state in CLOSED or not push_stop.is_notice(item):
+        for item in inbox.open_items(seat):
+            if item.state in CLOSED:
+                continue
+            task = notice_task(item)
+            if not (task or push_stop.is_notice(item)):
                 continue
             owner = _owner(inbox, item, seat)
-            if owner not in active:
-                reason = push_stop.left(owner, "left its seat") if owner else UNKNOWN_OWNER
-                inbox.close(item.id, BY, "done", reason)
+            if owner in active:
+                continue
+            if not owner:
+                reason = UNKNOWN_OWNER
+            elif task:
+                reason = f"{owner} left its seat before picking task {task} back up"
+            else:
+                reason = push_stop.left(owner, "left its seat")
+            inbox.close(item.id, BY, "done", reason)
+
+
+def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", active: set) -> None:
+    from scripts.inbox.store import CLOSED
+
+    for agent in store.agents(slug):
+        if agent.name not in active or not agent.seat:
+            continue
+        for item in inbox.open_items(agent.seat):
+            if item.state in CLOSED or item.fyi or not item.task or item.task == agent.task:
+                continue
+            owner = next(
+                (entry["by"] for entry in reversed(inbox.history(item.id)) if entry["state"] in ("delivered", "read")),
+                "",
+            )
+            if not owner or owner in active:
+                continue
+            exit_text = f"left its seat and task {item.task}"
+            if inbox.withdraw(item.id, BY, f"cancelled: {owner} {exit_text} before closing it", agent.seat, owner):
+                inbox.send(BY, notice_address(inbox, item.sender), _told(item, owner, exit_text), fyi=True)
 
 
 def _owner(inbox, item, seat):

@@ -151,6 +151,7 @@ def test_tests_run_on_pull_requests_into_dev_and_main():
     triggers = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())[True]
     assert set(triggers["pull_request"]["branches"]) == {"dev", "main"}
     assert triggers["push"]["branches"] == ["dev"]
+    assert triggers["merge_group"] == {"types": ["checks_requested"]}
 
 
 def test_ruff_runs_in_the_tests_workflow_only():
@@ -181,6 +182,14 @@ def test_lint_runs_the_artifact_sanity_checks_in_a_real_browser():
     check = next(s for s in steps if s.get("run", "").endswith(".artifact_sanity tests/fixtures/artifacts/*"))
     assert steps.index(install) < steps.index(check)
     assert {p.suffix for p in (_ROOT / "tests/fixtures/artifacts").iterdir()} == {".md", ".json", ".svg"}
+
+
+def test_queued_merges_select_artifact_checks_against_the_queue_base():
+    select = next(s for s in _workflow()["jobs"]["lint"]["steps"] if s.get("id") == "artifacts")
+    assert select["env"]["BASE"] == (
+        "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+        " || github.event.before || inputs.base }}"
+    )
 
 
 def _mutation_workflow():
@@ -367,10 +376,11 @@ def test_every_later_step_skips_when_the_tree_already_passed(job):
 
 def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
     job = _workflow()["jobs"]["record-pass"]
-    assert job["needs"] == ["unit", "lint"]
+    assert job["needs"] == ["unit", "lint", "shard-check"]
     assert job["if"] == (
-        "${{ !cancelled() && github.event_name == 'pull_request'"
-        " && needs.unit.result == 'success' && needs.lint.result == 'success' }}"
+        "${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group')"
+        " && needs.unit.result == 'success' && needs.lint.result == 'success'"
+        " && needs.shard-check.result == 'success' }}"
     )
     tree, upload = job["steps"]
     assert tree["env"]["GH_TOKEN"] == "${{ github.token }}"
@@ -601,10 +611,13 @@ def test_ci_refresh_lists_same_repository_runs_newest_first():
 def test_ci_refresh_stores_the_median_of_the_downloaded_shard_files(tmp_path, monkeypatch):
     def download(run_ids, folder):
         for run, seconds in zip(run_ids, (1.0, 5.0, 2.0)):
-            (folder / run / "durations-3.12-1").mkdir(parents=True)
-            (folder / run / "durations-3.12-1" / "durations.json").write_text(json.dumps({"t.py::a@g": seconds}))
+            for version in ("3.11", "3.12"):
+                path = folder / run / f"durations-{version}-1"
+                path.mkdir(parents=True)
+                (path / "durations.json").write_text(json.dumps({"t.py::a@g": seconds}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["1", "2", "3"][:limit])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci", "3"])
@@ -620,6 +633,7 @@ def test_ci_refresh_can_use_the_exact_run_that_passed_the_dev_tree(tmp_path, mon
             (path / "durations.json").write_text(json.dumps({"t.py::a": seconds}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci-run", "42"])
     assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 2.0}
@@ -643,6 +657,7 @@ def test_ci_refresh_takes_the_median_over_recent_runs_for_the_tests_of_the_passe
                 (path / "durations.json").write_text(json.dumps({k: v * scale for k, v in measured[run].items()}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["42", "41", "40", "39"][:limit])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci-run", "42", "--ci", "3"])
@@ -662,6 +677,7 @@ def test_ci_refresh_counts_the_passed_run_within_its_run_limit(tmp_path, monkeyp
                 (folder / run / f"durations-{version}-1" / "durations.json").write_text(json.dumps({"t.py::a": 1.0}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["42", "41", "40"][:limit])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci-run", "39", "--ci", "3"])
@@ -674,6 +690,7 @@ def test_ci_refresh_refuses_a_passed_run_that_kept_no_durations(tmp_path, monkey
         (folder / "41" / "durations-3.11-1" / "durations.json").write_text(json.dumps({"t.py::a": 1.0}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["41"][:limit])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     with pytest.raises(SystemExit, match="run 42 kept no durations"):

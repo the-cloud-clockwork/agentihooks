@@ -53,6 +53,21 @@ def _text(result) -> str:
     return "\n".join(c.text for c in result.content if getattr(c, "type", "") == "text")
 
 
+def test_backend_starts_when_the_sdk_was_imported_under_captured_stderr():
+    script = (
+        "import asyncio, io, sys\n"
+        "sys.stderr = io.StringIO()\n"
+        "from hooks.serena_router.pool import BackendConfig, probe_tools\n"
+        "sys.stderr = sys.__stderr__\n"
+        f"config = BackendConfig(command=(sys.executable, {str(FAKE)!r}), start_timeout=30)\n"
+        "assert asyncio.run(probe_tools(config))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=Path(__file__).parents[1], capture_output=True, text=True, timeout=60
+    )
+    assert result.returncode == 0, result.stderr
+
+
 async def test_each_session_edits_only_its_own_worktree(router, repo):
     async with connect(router) as a, connect(router) as b:
         await a.call_tool("activate_project", {"project": str(repo["a"])})

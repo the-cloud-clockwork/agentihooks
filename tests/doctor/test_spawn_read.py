@@ -17,8 +17,7 @@ def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):
     fixture = load("spawns")
     slug = fixture["slug"]
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig(slug, "/repo", 1, 0, codex_share=None))
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_SHARE", "30")
+    store.create(SwarmConfig(slug, "/repo", 1, 0))
     for harness, count in fixture["spawns"].items():
         for _ in range(count):
             store.count_spawn(slug, harness)
@@ -48,11 +47,10 @@ def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):
         ("second", "share", 8),
         ("ended", "share", 9),
     ]
-    assert record["target"] == 30
     assert record["agents"] == [asdict(agent)]
     assert record["spawns"] == {"codex": 3, "claude": 5}
     assert record["restored"] == []
-    assert {f.kind for f in spawns.findings(record)} == {"failed spawn", "account overflow"}
+    assert {f.kind for f in spawns.findings(record)} == {"failed spawn"}
     assert spawns.failed(record)[0].subject == "dt2"
     assert store.export(slug) == before
 
@@ -94,29 +92,3 @@ def test_spawn_reader_passes_an_explicit_upper_journal_bound(monkeypatch):
     assert record["actions"] == ["sw: spawn failed for mu1, task mu1 reopened: timeout"]
     assert spawns.failed(record)[0].measure == 1
     assert store.export("sw") == before
-
-
-def test_spawn_reader_exposes_proven_target_period_without_writing(monkeypatch):
-    import fakeredis
-
-    from scripts.swarm.store import RedisStore, SwarmConfig
-
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    monkeypatch.setattr("scripts.swarm.store.time.time", lambda: 10)
-    store.create(SwarmConfig("sw", "/repo", 1, 0, codex_share=20))
-    monkeypatch.setattr("scripts.swarm.store.time.time", lambda: 20)
-    store.update("sw", codex_share=0)
-    before = store.export("sw")
-
-    def journal(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 0, "", "")
-
-    record = spawn_read.records(store, "sw", 30_000, run=journal)
-    assert (record["target"], record["target_changed_at"]) == (0, 20_000)
-    assert store.export("sw") == before
-    store.redis.hdel(store.key("sw", "config"), "codex_share_changed_at")
-    assert spawn_read.records(store, "sw", 30_000, run=journal)["target_changed_at"] == 0
-    store.create(SwarmConfig("env", "/repo", 1, 0))
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_SHARE", "30")
-    record = spawn_read.records(store, "env", 30_000, run=journal)
-    assert (record["target"], record["target_changed_at"]) == (30, 0)

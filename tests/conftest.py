@@ -323,15 +323,15 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     from targets.codex_target import codex_home
     from targets.copilot_target import CopilotAdapter, copilot_home
 
+    from hooks import config as hooks_config
     from hooks.config import _agentibrain_home
-    from hooks.context.codex_context_pin import catalog_path
     from scripts.claude_config import claude_home, claude_json
     from scripts.herdr_setup import config_path as herdr_config_path
 
     for label, value in (
         ("claude_home", claude_home()),
         ("claude_json", claude_json()),
-        ("codex model catalog", catalog_path()),
+        ("agentihooks home", hooks_config.AGENTIHOOKS_HOME),
         ("codex_home", codex_home()),
         ("copilot_home", copilot_home()),
         ("agents_skills_home", agents_skills_home()),
@@ -389,6 +389,36 @@ def _swarm_runs_as_installed(monkeypatch):
     from scripts.swarm import timer
 
     monkeypatch.setattr(timer, "_roots", lambda: (Path("/installed"), Path("/installed")))
+
+
+@pytest.fixture(autouse=True)
+def _ci_speed_offline(request, monkeypatch):
+    from scripts.swarm import ci_speed
+
+    if not getattr(request.module, "CI_SPEED_READ", False):
+        monkeypatch.setattr(ci_speed, "read_runs", lambda *args, **kwargs: [])
+
+
+@pytest.fixture(autouse=True)
+def _task_sizing_offline(monkeypatch):
+    from hooks.classifier import ClassifierUnavailable
+    from scripts.swarm import difficulty
+
+    def unavailable(*args, **kwargs):
+        raise ClassifierUnavailable("classifier disabled in unit tests")
+
+    monkeypatch.setattr(difficulty, "decide", unavailable)
+
+
+@pytest.fixture(autouse=True)
+def _task_grouping_offline(monkeypatch):
+    from hooks.classifier import ClassifierUnavailable
+    from scripts.swarm import grouping
+
+    def unavailable(*args, **kwargs):
+        raise ClassifierUnavailable("classifier disabled in unit tests")
+
+    monkeypatch.setattr(grouping, "decide", unavailable)
 
 
 @pytest.fixture

@@ -183,6 +183,7 @@ def _codex_trust_args(directory: Path, environ: dict[str, str]) -> list[str]:
 
 MODEL_DEFAULTS = {"claude": "opus", "codex": "gpt-6.1-sol"}
 EFFORT_DEFAULT = "high"
+AGENT_HELP = "Agent to open; default the harness of the account with a free session and the fewest live sessions"
 LAUNCH_GRACE_S = 3
 
 
@@ -506,7 +507,7 @@ def _parser() -> argparse.ArgumentParser:
         "--agent",
         choices=agent_choice.AGENTS,
         default="",
-        help="Agent to open; default the first in $AGENTIHOOKS_AGENT_PRIORITY (claude,codex) with quota left",
+        help=AGENT_HELP,
     )
     parser.add_argument("--profile", default="", help="Role profile for this run")
     parser.add_argument(
