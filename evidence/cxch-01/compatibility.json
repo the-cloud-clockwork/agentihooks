@@ -31,13 +31,16 @@
         "--dangerously-bypass-hook-trust"
       ],
       "features": {
-        "hooks": "stable, enabled"
+        "hooks": "stable, enabled",
+        "steer": "removed (always on)"
       }
-    }
+    },
+    "evidence": "records/cli.json"
   },
   "transport": {
     "status": "observed",
-    "finding": "unix:// listen serves WebSocket over the Unix socket: raw JSON lines get no reply, an HTTP upgrade answers 101. The given path is a symlink to /tmp/codex-daemon-<uid>/<hash>."
+    "evidence": "records/transport.json",
+    "finding": "unix:// listen serves WebSocket over the Unix socket: a raw JSON line got no reply within 3 s, an HTTP upgrade answered 'HTTP/1.1 101 Switching Protocols'. The given path is a symlink (to /tmp/codex-daemon-<uid>/<hash>)."
   },
   "items": {
     "full_conversation": {
@@ -57,7 +60,7 @@
     },
     "active_turn_race": {
       "status": "pass",
-      "evidence": "records/steer.json, records/steer-rerun.json",
+      "evidence": "records/steer.json, records/steer-rerun.json, records/hook_sequences.json",
       "observed": "turn/start on a busy thread returns the SAME active turn (status inProgress) instead of an error or a second turn; its input is folded into that turn (final text CHARLIE DELTA ECHO); history holds one turn; UserPromptSubmit fires for the start, the steer and the racing start"
     },
     "thread_read_history": {
@@ -72,15 +75,15 @@
     },
     "hook_payloads": {
       "status": "pass after trust",
-      "evidence": "records/trust_hooks.json, records/hook_payload_shapes.json",
-      "observed": "hooks in a fresh home are untrusted and silent; app-server rejects --dangerously-bypass-hook-trust; hooks/list + config/batchWrite of hooks.state.<key>.trusted_hash = currentHash trusts them live. Then SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse, Stop, PreCompact (trigger manual) and SessionEnd payloads were logged; the client also receives hook/started and hook/completed notifications",
-      "unsupported": "no post-compaction hook event exists in this release"
+      "evidence": "records/trust_hooks.json, records/trust_hooks_postcompact.json, records/hook_payload_shapes.json, records/hook_sequences.json",
+      "observed": "hooks in a fresh home are listed untrusted by hooks/list (records/trust_hooks.json before); the CLI flag --dangerously-bypass-hook-trust is not an app-server flag (records/cli.json); hooks/list then config/batchWrite of hooks.state.<key>.trusted_hash = currentHash trusts them live. Then SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse, Stop, PreCompact, PostCompact (trigger manual) and SessionEnd payloads were logged; the client also receives hook/started and hook/completed notifications",
+      "constraint": "a hook added later starts untrusted and needs the same trust write (records/trust_hooks_postcompact.json: postCompact untrusted, then trusted)"
     },
     "compaction": {
       "status": "pass with caveat",
-      "evidence": "records/compaction.json",
-      "observed": "thread/compact/start -> {}; PreCompact hook fired; the next turn on the same thread completed",
-      "unsupported": "no thread/compacted notification arrived within 180 s; compaction surfaced only as item and thread status events plus thread/closed"
+      "evidence": "records/compaction.json, records/compaction-postcompact.json, records/hook_sequences.json, records/hook_payload_shapes.json, records/cli.json",
+      "observed": "thread/compact/start -> {}; PreCompact and PostCompact hooks fired with trigger manual on the same turn; the next turn on the same thread completed (JULIET)",
+      "unsupported": "no thread/compacted notification arrived within 180 s; the schema marks that notification deprecated in favour of the contextCompaction item, which did arrive as item/started and item/completed"
     },
     "default_login": {
       "status": "pass",
@@ -100,13 +103,13 @@
     "viewer_disconnect_reopen": {
       "status": "pass",
       "evidence": "records/detach.json, tui/reopen.txt",
-      "observed": "a protocol viewer closed mid-turn; the turn finished for the bridge; a reopened viewer resumed the same thread (still in thread/loaded/list) and its turn was seen by the bridge. Killing the TUI viewer left the app-server running; reopening it showed the full history"
+      "observed": "a protocol viewer closed mid-turn; the turn finished for the bridge; a reopened viewer resumed the same thread (still in thread/loaded/list) and its turn was seen by the bridge. After the TUI viewer was killed, reopening it against the same socket attached and showed the full history (tui/reopen.txt), so the app-server outlived the viewer"
     },
     "two_client_approval_ownership": {
       "status": "pass",
-      "evidence": "records/approvals.json, records/approvals-run1.json, records/approvals-rerun.json",
-      "observed": "the approval request reaches every client resumed on the thread with the same request id; the first answer wins (owner declined), the other client receives serverRequest/resolved and its later accept has no effect",
-      "constraint": "thread/resume before the first turn fails with -32600 'no rollout found for thread id'; a viewer resumed that early never receives the request (run1)"
+      "evidence": "records/approvals.json, records/approvals-rerun.json",
+      "observed": "the approval request reaches every client resumed on the thread with the same request id; the owner's decline is applied (file not created, turn completed) and the other client receives serverRequest/resolved. The other client's later accept is a response with no reply; that it had no effect is inferred from file_created false",
+      "constraint": "thread/resume before the first turn fails with -32600 'no rollout found for thread id', so a viewer can attach only after the thread has a rollout"
     },
     "sandbox_for_cxp4": {
       "status": "pass",

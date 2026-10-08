@@ -47,7 +47,7 @@
     ],
     "repo_file_written": false
   },
-  "workspaceWrite(scratch only)+network": {
+  "workspaceWrite(writableRoots=[])+network": {
     "error": null,
     "exit": 0,
     "stdout": [

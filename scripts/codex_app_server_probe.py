@@ -1,15 +1,17 @@
 """Live qualification probe for the Codex app-server over a Unix socket (CXCH-01).
 
 Usage: python -m scripts.codex_app_server_probe <socket> <repo> <scenario> <out.json> [thread]
-Each scenario writes one sanitized record: methods, ids replaced by stable labels,
-agent text kept only when it is a fixture echo.
+Each scenario writes one record of the methods, results, ids and agent text it observed;
+prompts are fixtures and no account value is read beyond its type and plan presence.
 """
 
 import json
 import queue
+import socket
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from websockets.sync.client import unix_connect
@@ -24,7 +26,6 @@ class Client:
         self.next_id = 1
         self.responses: dict[int, dict] = {}
         self.events: queue.Queue = queue.Queue()
-        self.log: list[dict] = []
         self.lock = threading.Lock()
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
@@ -35,12 +36,10 @@ class Client:
         try:
             for raw in self.ws:
                 msg = json.loads(raw)
-                stamp = time.monotonic()
                 if "id" in msg and "method" not in msg:
                     with self.lock:
                         self.responses[msg["id"]] = msg
                 else:
-                    self.log.append({"t": stamp, "method": msg.get("method"), "server_request": "id" in msg})
                     self.events.put(msg)
         except Exception as exc:
             self.events.put({"method": "_closed", "error": type(exc).__name__})
@@ -66,7 +65,7 @@ class Client:
     def request(self, method: str, params: dict, timeout: float = 60) -> dict:
         return self.wait_response(self.send(method, params), timeout)
 
-    def answer(self, rid, result: dict) -> None:
+    def answer(self, rid: int | str, result: dict) -> None:
         self.ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}))
 
     def until(self, pred, timeout: float = TURN_TIMEOUT_S) -> tuple[dict | None, list[dict]]:
@@ -90,8 +89,12 @@ def text(s: str) -> list[dict]:
     return [{"type": "text", "text": s}]
 
 
-def method_is(name: str):
+def method_is(name: str) -> Callable[[dict], bool]:
     return lambda m: m.get("method") == name
+
+
+def is_approval_request(msg: dict) -> bool:
+    return "id" in msg and str(msg.get("method", "")).endswith("requestApproval")
 
 
 def agent_texts(seen: list[dict]) -> list[str]:
@@ -219,9 +222,8 @@ def approvals(sock: str, repo: str) -> dict:
     a.request("turn/start", {"threadId": thread, "input": text(APPROVAL_PROMPT)})
     a.until(method_is("turn/started"), 30)
     resumed = b.request("thread/resume", {"threadId": thread})
-    is_req = lambda m: "id" in m and str(m.get("method", "")).endswith("requestApproval")  # noqa: E731
-    req_a, _ = a.until(is_req, 120)
-    req_b, _ = b.until(is_req, 10)
+    req_a, _ = a.until(is_approval_request, 120)
+    req_b, _ = b.until(is_approval_request, 10)
     owner, other = (a, b) if req_a else (b, a)
     req = req_a or req_b
     result = {
@@ -320,7 +322,7 @@ SANDBOX_POLICIES = {
     "readOnly+network": {"type": "readOnly", "networkAccess": True},
     "workspaceWrite(repo)": {"type": "workspaceWrite"},
     "workspaceWrite(repo)+network": {"type": "workspaceWrite", "networkAccess": True},
-    "workspaceWrite(scratch only)+network": {"type": "workspaceWrite", "networkAccess": True, "writableRoots": []},
+    "workspaceWrite(writableRoots=[])+network": {"type": "workspaceWrite", "networkAccess": True, "writableRoots": []},
     "workspaceWrite(writableRoots=repo)": {"type": "workspaceWrite", "writableRoots": ["REPO"]},
     "dangerFullAccess": {"type": "dangerFullAccess"},
 }
@@ -330,8 +332,6 @@ def sandbox(sock: str, repo: str) -> dict:
     c = Client(sock, "probe-sandbox")
     out = {}
     for name, policy in SANDBOX_POLICIES.items():
-        cwd = repo if "scratch only" not in name else str(Path(repo).parent / "outside")
-        Path(cwd).mkdir(exist_ok=True)
         policy = {**policy, **({"writableRoots": [repo]} if policy.get("writableRoots") == ["REPO"] else {})}
         r = c.request("command/exec", {"command": SANDBOX_CMD, "cwd": repo, "sandboxPolicy": policy}, 60)
         res = r.get("result") or {}
@@ -405,7 +405,34 @@ def trust_hooks(sock: str, repo: str) -> dict:
     }
 
 
+UPGRADE = (
+    b"GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+    b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+)
+RAW_LINE = b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"raw","version":"0"}}}\n'
+
+
+def first_reply(sock_path: str, payload: bytes, wait_s: float) -> str:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(wait_s)
+        s.connect(sock_path)
+        s.sendall(payload)
+        try:
+            return s.recv(4096).decode("latin-1").split("\r\n", 1)[0]
+        except TimeoutError:
+            return ""
+
+
+def transport(sock: str, repo: str) -> dict:
+    return {
+        "socket_is_symlink": Path(sock).is_symlink(),
+        "raw_json_line_reply": first_reply(sock, RAW_LINE, 3),
+        "websocket_upgrade_status": first_reply(sock, UPGRADE, 3),
+    }
+
+
 SCENARIOS = {
+    "transport": transport,
     "conversation": conversation,
     "steer": steer,
     "approvals": approvals,

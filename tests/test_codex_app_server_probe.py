@@ -1,4 +1,5 @@
 import json
+import socket
 import tempfile
 import threading
 import time
@@ -132,6 +133,10 @@ def test_helpers_build_fixture_input_and_pick_agent_text():
         {"method": "turn/started"},
     ]
     assert probe.agent_texts(seen) == ["ONE", ""]
+    assert probe.is_approval_request({"id": 1, "method": "item/fileChange/requestApproval"}) is True
+    assert probe.is_approval_request({"method": "item/fileChange/requestApproval"}) is False
+    assert probe.is_approval_request({"id": 1, "method": "item/tool/call"}) is False
+    assert probe.is_approval_request({"id": 1}) is False
 
 
 def test_a_turn_that_cannot_start_reports_the_error(fakes):
@@ -555,7 +560,7 @@ def test_sandbox_runs_every_policy_and_cleans_the_repo(fakes, tmp_path):
         "repo_file_written": False,
     }
     assert not (repo / "repo-write-probe").exists()
-    assert (tmp_path / "outside").is_dir()
+    assert not (tmp_path / "outside").exists()
     policies = [params["sandboxPolicy"] for _, params, _ in made["probe-sandbox"].calls]
     assert policies == [
         {"type": "readOnly"},
@@ -695,6 +700,7 @@ def test_trust_hooks_writes_nothing_when_every_hook_is_trusted(fakes, tmp_path):
 
 def test_every_scenario_is_registered():
     assert probe.SCENARIOS == {
+        "transport": probe.transport,
         "conversation": probe.conversation,
         "steer": probe.steer,
         "approvals": probe.approvals,
@@ -775,7 +781,6 @@ def test_client_speaks_json_rpc_over_a_unix_websocket():
         assert seen == [note]
         ask, _ = client.until(lambda m: "id" in m, 5)
         assert ask["id"] == 99
-        assert [(e["method"], e["server_request"]) for e in client.log] == [("note", False), ("ask", True)]
         assert client.until(probe.method_is("none"), 0.6) == (None, [])
         client.answer(99, {"decision": "accept"})
         client.notify("ping", {"x": 1})
@@ -823,3 +828,71 @@ def test_client_waits_a_minute_by_default(monkeypatch):
     monkeypatch.setattr(probe.Client, "wait_response", lambda self, rid, timeout: (rid, timeout))
     assert client.request("m", {"p": 1}) == (4, 60)
     assert seen == [("m", {"p": 1})]
+
+
+def test_transport_shows_a_websocket_upgrade_and_silence_for_raw_json():
+    folder, path, server = serve(lambda ws: None)
+    try:
+        link = f"{folder.name}/link"
+        Path(link).symlink_to(path)
+        assert probe.transport(link, "REPO") == {
+            "socket_is_symlink": True,
+            "raw_json_line_reply": "",
+            "websocket_upgrade_status": "HTTP/1.1 101 Switching Protocols",
+        }
+        assert probe.transport(path, "REPO")["socket_is_symlink"] is False
+    finally:
+        server.shutdown()
+        folder.cleanup()
+
+
+def test_first_reply_reads_only_the_status_line():
+    def handler(conn):
+        conn.recv(4096)
+        conn.sendall(b"HTTP/1.1 400 Bad\r\nX: y\r\n\r\n")
+
+    folder = tempfile.TemporaryDirectory(prefix="cx")
+    path = f"{folder.name}/s"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        listener.bind(path)
+        listener.listen(1)
+        threading.Thread(target=lambda: handler(listener.accept()[0]), daemon=True).start()
+        assert probe.first_reply(path, b"GET / HTTP/1.1\r\n\r\n", 3) == "HTTP/1.1 400 Bad"
+    folder.cleanup()
+
+
+def test_first_reply_is_empty_when_the_server_stays_silent():
+    folder = tempfile.TemporaryDirectory(prefix="cx")
+    path = f"{folder.name}/s"
+    held = []
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        listener.bind(path)
+        listener.listen(1)
+        threading.Thread(target=lambda: held.append(listener.accept()[0]), daemon=True).start()
+        assert probe.first_reply(path, probe.RAW_LINE, 0.2) == ""
+    for conn in held:
+        conn.close()
+    folder.cleanup()
+
+
+def test_transport_waits_three_seconds_for_each_reply(monkeypatch):
+    calls = []
+    monkeypatch.setattr(probe, "first_reply", lambda sock, payload, wait_s: calls.append((payload, wait_s)) or "R")
+    assert probe.transport("/no/such/socket", "REPO") == {
+        "socket_is_symlink": False,
+        "raw_json_line_reply": "R",
+        "websocket_upgrade_status": "R",
+    }
+    assert calls == [(probe.RAW_LINE, 3), (probe.UPGRADE, 3)]
+
+
+def test_the_raw_line_is_one_initialize_request():
+    assert json.loads(probe.RAW_LINE) == {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {"clientInfo": {"name": "raw", "version": "0"}},
+    }
+    assert probe.RAW_LINE.endswith(b"\n")
+    assert probe.UPGRADE.startswith(b"GET / HTTP/1.1\r\n")
+    assert probe.UPGRADE.endswith(b"Sec-WebSocket-Version: 13\r\n\r\n")
