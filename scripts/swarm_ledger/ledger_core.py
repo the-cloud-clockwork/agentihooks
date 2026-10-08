@@ -332,7 +332,9 @@ def atomic_write(path, text):
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(text)
+    written = os.stat(tmp)
     os.replace(tmp, path)
+    return written
 
 
 def text_diff(old, new):
