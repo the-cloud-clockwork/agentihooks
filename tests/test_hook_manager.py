@@ -86,6 +86,73 @@ class TestHookManager:
         assert issubclass(BlockAction, Exception)
 
 
+@pytest.fixture
+def brain_dispatch(monkeypatch):
+    from unittest.mock import Mock
+
+    from hooks import config, hook_manager
+
+    for flag in ("MEMORY_AUTO_SAVE", "CONTEXT_AUDIT_ENABLED", "VOICE_ENABLED"):
+        monkeypatch.setattr(config, flag, False)
+    monkeypatch.setattr(hook_manager, "_request_trace_flush", Mock())
+    monkeypatch.setattr(hook_manager, "parse_transcript_metrics", Mock(return_value={}))
+    monkeypatch.setattr("hooks.tool_memory.scan_transcript", Mock())
+    monkeypatch.setattr("hooks.lifecycle.refresh.on_stop", Mock(return_value=False))
+    monkeypatch.setattr("hooks.lifecycle.handoff_close.on_stop", Mock(return_value=False))
+    monkeypatch.setattr(hook_manager.otel, "get_tracer", Mock(return_value=None))
+    fork = Mock()
+    monkeypatch.setattr("hooks._async.fork_and_call", fork)
+    return fork
+
+
+@pytest.mark.parametrize("event, task_name", [("Stop", "brain_writer"), ("SubagentStop", "brain_writer_subagent")])
+@pytest.mark.parametrize(
+    "transcript_path, last_message", [("transcript.jsonl", ""), ("", "marker"), ("transcript.jsonl", "marker")]
+)
+def test_brain_writer_dispatch(event, task_name, transcript_path, last_message, brain_dispatch, monkeypatch):
+    from unittest.mock import call
+
+    from hooks.context.brain_writer_hook import write_markers
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    monkeypatch.setattr("hooks.config.BRAIN_WRITER_ENABLED", True)
+    payload = {
+        "session_id": "session",
+        "transcript_path": transcript_path,
+        "last_assistant_message": last_message,
+    }
+    if event == "SubagentStop":
+        payload.update(agent_id="agent", agent_transcript_path=transcript_path)
+    EVENT_HANDLERS[event](payload)
+
+    assert [c for c in brain_dispatch.call_args_list if c.args[0] is write_markers] == [
+        call(
+            write_markers,
+            "agent" if event == "SubagentStop" else "session",
+            transcript_path,
+            last_message=last_message,
+            timeout_sec=60,
+            task_name=task_name,
+        )
+    ]
+
+
+@pytest.mark.parametrize("event", ["Stop", "SubagentStop"])
+@pytest.mark.parametrize(
+    "enabled, transcript_path, last_message", [(False, "transcript.jsonl", "marker"), (True, "", "")]
+)
+def test_brain_writer_skips_dispatch(event, enabled, transcript_path, last_message, brain_dispatch, monkeypatch):
+    from hooks.context.brain_writer_hook import write_markers
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    monkeypatch.setattr("hooks.config.BRAIN_WRITER_ENABLED", enabled)
+    EVENT_HANDLERS[event](
+        {"session_id": "session", "transcript_path": transcript_path, "last_assistant_message": last_message}
+    )
+
+    assert not any(c.args[0] is write_markers for c in brain_dispatch.call_args_list)
+
+
 class TestBlockActionIntegration:
     """Integration tests: BlockAction propagates through main() with exit 2."""
 
