@@ -477,7 +477,7 @@ def test_dev_push_refreshes_stored_durations_after_tests_pass():
     checkout = next(step for step in steps if step.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["ref"] == "${{ github.sha }}"
     command = next(step["run"] for step in steps if step.get("name") == "Refresh measured durations")
-    assert 'python -m tests.refresh_durations --ci-run "${source_run:-$GITHUB_RUN_ID}"' in command
+    assert 'python -m tests.refresh_durations --ci-run "${source_run:-$GITHUB_RUN_ID}" --ci 5' in command
     assert "tests-passed-$TREE" in command
     assert "git commit" not in command
     assert "git push" not in command
@@ -514,7 +514,7 @@ def test_duration_refresh_never_replays_old_measurements_onto_new_dev(tmp_path, 
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / "calls").read_text() == f"-m tests.refresh_durations --ci-run {source or '43'}\n"
+    assert (tmp_path / "calls").read_text() == f"-m tests.refresh_durations --ci-run {source or '43'} --ci 5\n"
     assert "git push" not in command
     assert (tmp_path / ".test_durations").read_text() == "measured\n"
 
@@ -589,6 +589,29 @@ def test_ci_refresh_can_use_the_exact_run_that_passed_the_dev_tree(tmp_path, mon
     assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 2.0}
     assert json.loads((tmp_path / ".test_durations-3.11").read_text()) == {"t.py::a": 1.0}
     assert json.loads((tmp_path / ".test_durations-3.12").read_text()) == {"t.py::a": 3.0}
+
+
+def test_ci_refresh_takes_the_median_over_recent_runs_for_the_tests_of_the_passed_run(tmp_path, monkeypatch):
+    measured = {
+        "42": {"t.py::a": 9.0, "t.py::new": 4.0},
+        "41": {"t.py::a": 1.0, "t.py::gone": 7.0},
+        "40": {"t.py::a": 2.0, "t.py::gone": 7.0},
+    }
+
+    def download(run_ids, folder):
+        assert run_ids == ["42", "41", "40"]
+        for run in run_ids:
+            for version in ("3.11", "3.12"):
+                path = folder / run / f"durations-{version}-1"
+                path.mkdir(parents=True)
+                (path / "durations.json").write_text(json.dumps(measured[run]))
+
+    monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["42", "41", "40", "39"][:limit])
+    monkeypatch.setattr(refresh_durations, "ci_download", download)
+    refresh_durations.main(["--ci-run", "42", "--ci", "3"])
+    for name in (".test_durations", ".test_durations-3.11", ".test_durations-3.12"):
+        assert json.loads((tmp_path / name).read_text()) == {"t.py::a": 2.0, "t.py::new": 4.0}
 
 
 def test_credential_parameters_have_readable_timing_identifiers():

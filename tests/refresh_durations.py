@@ -31,12 +31,20 @@ def ci_download(run_ids: list[str], folder: Path) -> None:
         _gh(["run", "download", run, "--dir", str(folder / run)])
 
 
-def ci_samples(folder: Path, version: str = "*") -> list[dict[str, float]]:
+def ci_samples(folder: Path, version: str = "*", run: str = "*") -> list[dict[str, float]]:
     samples = []
-    for path in sorted(folder.glob(f"*/durations-{version}-*/durations.json")):
+    for path in sorted(folder.glob(f"{run}/durations-{version}-*/durations.json")):
         durations = json.loads(path.read_text())
         samples.append({re.sub(r"@[^\[\]]*$", "", nodeid): seconds for nodeid, seconds in durations.items()})
     return samples
+
+
+def ci_medians(folder: Path, version: str, source: str | None) -> dict[str, float]:
+    measured = median_durations(ci_samples(folder, version))
+    if not source:
+        return measured
+    current = set().union(*ci_samples(folder, version, source))
+    return {nodeid: seconds for nodeid, seconds in measured.items() if nodeid in current}
 
 
 def local_samples(folder: Path) -> list[dict[str, float]]:
@@ -54,18 +62,20 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--ci", type=int, default=0, metavar="RUNS", help="take the durations CI kept from its last RUNS runs"
     )
-    parser.add_argument("--ci-run", help="take the durations from one complete CI run")
+    parser.add_argument("--ci-run", help="take the durations of the tests this complete CI run measured")
     args = parser.parse_args(argv)
     with tempfile.TemporaryDirectory() as tmp:
         if args.ci or args.ci_run:
-            ci_download([args.ci_run] if args.ci_run else ci_run_ids(args.ci), Path(tmp))
-            runs = ci_samples(Path(tmp))
+            run_ids = [args.ci_run] if args.ci_run else []
+            run_ids = list(dict.fromkeys([*run_ids, *(ci_run_ids(args.ci) if args.ci else [])]))[: args.ci or 1]
+            ci_download(run_ids, Path(tmp))
             for version in ("3.11", "3.12"):
-                measured = median_durations(ci_samples(Path(tmp), version))
+                measured = ci_medians(Path(tmp), version, args.ci_run)
                 (_ROOT / f".test_durations-{version}").write_text(json.dumps(measured, indent=4, sort_keys=True) + "\n")
+            merged = ci_medians(Path(tmp), "*", args.ci_run)
         else:
-            runs = local_samples(Path(tmp))
-    (_ROOT / ".test_durations").write_text(json.dumps(median_durations(runs), indent=4, sort_keys=True) + "\n")
+            merged = median_durations(local_samples(Path(tmp)))
+    (_ROOT / ".test_durations").write_text(json.dumps(merged, indent=4, sort_keys=True) + "\n")
 
 
 if __name__ == "__main__":
