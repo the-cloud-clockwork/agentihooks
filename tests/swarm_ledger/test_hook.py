@@ -11,8 +11,6 @@ from pathlib import Path
 
 import pytest
 
-from tests import ledger_guard
-
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
@@ -139,6 +137,8 @@ class Gate(unittest.TestCase):
         self.assertEqual((session["slug"], session["name"], session["role"]), (SLUG, "boss", "orchestrator"))
 
     def test_session_start_brings_the_server_up(self):
+        from tests import ledger_guard
+
         hold = ledger_guard.reserve_port()
         self.addCleanup(hold.close)
         port = hold.getsockname()[1]
