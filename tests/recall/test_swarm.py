@@ -9,7 +9,8 @@ from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture
 from scripts.inbox.store import InboxStore
 from scripts.recall.swarm import extract_swarm
 from scripts.swarm import store as swarm_store
-from scripts.swarm.store import RedisStore
+from scripts.swarm.naming import NameRegistry
+from scripts.swarm.store import AgentRecord, RedisStore
 
 
 @pytest.fixture
@@ -193,3 +194,173 @@ def test_empty_transfer_preserves_relationships_and_long_chunks_share_ref(source
     assert len({r.key for r in records}) == len(records)
     assert [r.chunk_index for r in records] == list(range(len(records)))
     assert all("old-engineer" in r.text for r in records)
+
+
+def test_exact_transfer_records_and_unknown_heading(source):
+    put_transfer(source, handoff="## Not a handoff heading\nLegacy\n## Done\nPassed\n<!-- handoff complete -->")
+    records = extract_swarm("sample", source)
+    assert len(records) == 1
+    record = records[0]
+    assert record.ref == "transfers/transfer-one/done"
+    assert record.key == "swarm/sample/transfers/transfer-one/done#0"
+    assert record.chunk_index == 0
+    metadata, body = record.text.split("\n\n", 1)
+    assert json.loads(metadata) == {
+        "id": "transfer-one",
+        "seat": "eng-1@sample",
+        "task": "task-one",
+        "predecessor": "old-engineer",
+        "successor": "new-engineer",
+        "at": 1234,
+    }
+    assert metadata.startswith('{"at": 1234, "id": "transfer-one",')
+    assert body == "## Done\nPassed"
+    put_transfer(source, handoff="Plain old handoff")
+    record = extract_swarm("sample", source)[0]
+    assert record.title == "Body" and record.ref == "transfers/transfer-one/body"
+    assert record.text.split("\n\n", 1)[1] == "Plain old handoff"
+
+
+def test_current_handoff_exact_metadata_and_missing_envelope(source):
+    source.put_handoff(
+        "sample",
+        "task-one",
+        "## Next\nRun tests",
+        "eng-1@sample",
+        {
+            "agent": "old-engineer",
+            "time": "1970-01-01T00:00:09+00:00",
+        },
+    )
+    record = extract_swarm("sample", source)[0]
+    metadata, body = record.text.split("\n\n", 1)
+    assert json.loads(metadata) == {
+        "task": "task-one",
+        "seat": "eng-1@sample",
+        "predecessor": "old-engineer",
+        "successor": "",
+        "at": 9000,
+        "envelope": {"agent": "old-engineer", "time": "1970-01-01T00:00:09+00:00"},
+    }
+    assert body == "## Next\nRun tests"
+    assert record.ledger_slug == record.swarm_slug == "sample"
+    source.put_handoff("sample", "task-one", "")
+    record = extract_swarm("sample", source)[0]
+    assert record.title == "Body"
+    assert record.time == 0 and record.author == ""
+    assert json.loads(record.text) == {
+        "task": "task-one",
+        "seat": "",
+        "predecessor": "",
+        "successor": "",
+        "at": 0,
+        "envelope": {},
+    }
+
+
+def test_memory_without_current_seat_recovers_author_mail(source):
+    memory = SeatMemory(source.redis)
+    memory.learn("eng-1@sample", "former-agent", "Recorded lesson", 20)
+    mail = InboxStore(source.redis).send("former-agent", "external", "Lesson discussion")
+    records = extract_swarm("sample", source)
+    learned = next(r for r in records if r.kind == "learned")
+    assert learned.ledger_slug == learned.swarm_slug == "sample"
+    metadata, body = learned.text.split("\n\n", 1)
+    assert json.loads(metadata) == {
+        "seat": "eng-1@sample",
+        "occupant": "former-agent",
+        "at": 20,
+        "maturity": "note",
+    }
+    assert body == "Recorded lesson"
+    assert any(r.ref == f"inbox/{mail.id}" for r in records)
+
+
+def test_inbox_membership_from_transfer_and_unoccupied_seat(source):
+    put_transfer(source, handoff="")
+    inbox = InboxStore(source.redis)
+    expected = [
+        inbox.send("old-engineer", "external", "Predecessor message"),
+        inbox.send("new-engineer", "external", "Successor message"),
+        inbox.send("operator", "eng-8@sample", "Unoccupied seat message"),
+    ]
+    unrelated = inbox.send("outsider", "external", "Earlier unrelated message")
+    source.redis.rename(inbox.key("item", unrelated.id), inbox.key("item", "000"))
+    records = extract_swarm("sample", source)
+    mail = {r.ref: r for r in records if r.kind == "inbox"}
+    assert set(mail) == {f"inbox/{item.id}" for item in expected}
+    for item in expected:
+        record = mail[f"inbox/{item.id}"]
+        assert record.ledger_slug == record.swarm_slug == "sample"
+        assert record.parent_ref == ""
+        assert record.title == "inbox"
+        metadata, body = record.text.split("\n\n", 1)
+        assert body == item.text
+        assert json.loads(metadata) == {
+            "id": item.id,
+            "sender": item.sender,
+            "address": item.address,
+            "state": "pending",
+            "created_at": item.created_at,
+            "updated_at": item.updated_at,
+            "reason": "",
+            "ref": "",
+            "sequence": item.sequence,
+            "fyi": False,
+            "task": "",
+        }
+
+
+def test_task_default_home_and_exact_culture_record(source, tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.recall.swarm.Path.home", lambda: tmp_path)
+    root = tmp_path / ".agentihooks" / "swarm" / "sample" / "tasks"
+    (root / "task-one").mkdir(parents=True)
+    path = root / "task-one" / "steering.md"
+    path.write_text("Steering")
+    os.utime(path, ns=(1234567890123456, 1234567890123456))
+    SwarmCulture(source.redis).set("sample", "Culture")
+    records = extract_swarm("sample", source, {"tasks": [{"id": "task-one"}]})
+    assert len(records) == 2
+    culture, steering = records
+    assert culture.key == "swarm/sample/culture#0"
+    assert culture.ref == "culture" and culture.parent_ref == ""
+    assert culture.author == "" and culture.time == 0 and culture.title == "culture"
+    assert culture.text == "Culture"
+    assert culture.ledger_slug == culture.swarm_slug == "sample"
+    assert steering.ledger_slug == steering.swarm_slug == "sample"
+    assert steering.time == 1234567890 and isinstance(steering.time, int)
+    assert steering.author == "" and steering.title == "steering"
+    assert steering.ref == "tasks/task-one/steering" and steering.text == "Steering"
+
+
+def test_inbox_from_execution_occupant_without_seat(source):
+    source.put_agent("sample", AgentRecord("execution-agent", "eng", "task-one"))
+    item = InboxStore(source.redis).send("execution-agent", "external", "Execution mail")
+    records = extract_swarm("sample", source)
+    assert [r.ref for r in records] == [f"inbox/{item.id}"]
+
+
+def test_registered_agent_and_legacy_name_mail_without_current_seat(source):
+    names = NameRegistry(source.redis)
+    names.adopt("sample", "abcdef", "sample", "repo")
+    agent = names.next("sample", "eng", at=12)
+    inbox = InboxStore(source.redis)
+    named = inbox.send(agent, "external", "Named agent mail")
+    legacy = inbox.send("sample-eng-12", "external", "Legacy agent mail")
+    records = extract_swarm("sample", source)
+    assert {r.ref for r in records} == {f"inbox/{named.id}", f"inbox/{legacy.id}"}
+
+
+def test_current_handoff_producer_membership(source):
+    source.put_handoff(
+        "sample",
+        "task-one",
+        "## Next\nContinue",
+        "eng-1@sample",
+        {
+            "agent": "only-in-handoff",
+        },
+    )
+    item = InboxStore(source.redis).send("only-in-handoff", "external", "Handoff mail")
+    records = extract_swarm("sample", source)
+    assert any(r.ref == f"inbox/{item.id}" for r in records)

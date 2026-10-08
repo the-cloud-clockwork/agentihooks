@@ -15,7 +15,7 @@ from .models import RecallRecord
 
 
 def _records(slug: str, ref: str, kind: str, source: dict, parent: str = "") -> list[RecallRecord]:
-    metadata = source.get("metadata", {})
+    metadata = source.get("metadata")
     prefix = json.dumps(metadata, sort_keys=True) + "\n\n" if metadata else ""
     return [
         RecallRecord(
@@ -31,27 +31,27 @@ def _records(slug: str, ref: str, kind: str, source: dict, parent: str = "") -> 
             text=prefix + chunk,
             chunk_index=index,
         )
-        for index, chunk in enumerate(chunk_body(source.get("text", "")) or [""])
+        for index, chunk in enumerate(chunk_body(source["text"]) or [""])
     ]
 
 
 def _handoff(slug: str, ref: str, row: dict) -> list[RecallRecord]:
     sections = []
-    for part in _sections(row.get("handoff", "")):
-        title = part.split("\n", 1)[0].removeprefix("## ").strip()
+    for part in _sections(row["handoff"]):
+        title = part.split("\n")[0].removeprefix("## ").strip()
         if part.startswith("## ") and title in HEADINGS:
             sections.append((title, part))
         elif sections:
             heading, body = sections[-1]
             sections[-1] = (heading, body + part)
     if not sections:
-        sections = [("Body", row.get("handoff", ""))]
+        sections = [("Body", row["handoff"])]
     metadata = {key: value for key, value in row.items() if key != "handoff"}
     result = []
     for heading, body in sections:
         source = {
-            "author": row.get("predecessor", ""),
-            "at": row.get("at", 0),
+            "author": row["predecessor"],
+            "at": row["at"],
             "title": heading,
             "text": body.replace(MARKER, "").strip(),
             "metadata": metadata,
@@ -61,7 +61,7 @@ def _handoff(slug: str, ref: str, row: dict) -> list[RecallRecord]:
     return result
 
 
-def _current_handoffs(slug: str, store: RedisStore) -> list[RecallRecord]:
+def _current_handoffs(slug: str, store: RedisStore, members: set[str]) -> list[RecallRecord]:
     prefix = store.key(slug, "handoff") + ":"
     result = []
     for key in sorted(store.redis.scan_iter(match=prefix + "*")):
@@ -76,17 +76,17 @@ def _current_handoffs(slug: str, store: RedisStore) -> list[RecallRecord]:
             "envelope": envelope,
             "handoff": store.handoff(slug, task),
         }
+        members.add(row["predecessor"])
         result.extend(_handoff(slug, f"tasks/{task}/handoff", row))
     return result
 
 
 def _seat_records(slug: str, registry: SeatRegistry) -> tuple[list[RecallRecord], set[str]]:
     prefix = registry.key("")
-    addresses = {key[len(prefix) :].split(":", 1)[0] for key in registry.swarm_keys(slug) if key.startswith(prefix)}
+    addresses = {key[len(prefix) :].split(":")[0] for key in registry.swarm_keys(slug) if key.startswith(prefix)}
     memory = SeatMemory(registry.redis)
     result, members = [], set(registry.agent_names(slug))
     for address in sorted(addresses):
-        members.add(address)
         members.update(row["occupant"] for row in registry.history(address))
         for kind, rows in (("recap", memory.recaps(address)), ("learned", memory.learned(address))):
             for row in rows:
@@ -148,10 +148,11 @@ def extract_swarm(
     registry = SeatRegistry(store.redis)
     result, members = _seat_records(slug, registry)
     for row in list_transfers(store, slug):
-        members.update(row.get(key, "") for key in ("seat", "predecessor", "successor"))
+        members.update(row[key] for key in ("predecessor", "successor"))
         result.extend(_handoff(slug, f"transfers/{row['id']}", row))
+    members.update(agent.name for agent in store.agents(slug))
     members.update(store.execution_occupants(slug))
-    result.extend(_current_handoffs(slug, store))
+    result.extend(_current_handoffs(slug, store, members))
     culture = SwarmCulture(store.redis).get(slug)
     if culture:
         result.extend(_records(slug, "culture", "culture", {"text": culture}))
