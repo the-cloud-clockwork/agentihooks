@@ -1,5 +1,5 @@
 {
-  "tested_commit": "4c0c75868c374bbe1b04a6af40b9b3c5ca914f6d",
+  "tested_commit": "6c93f545a41e49eea00cc96d384e49822d26612b",
   "evidence_class": "mocked signals and isolated fakeredis; no live Kubernetes, SSH or rollout proof",
   "passed": true,
   "independent_fixtures": [
@@ -32,7 +32,7 @@
         }
       ],
       "execution_observation_age_seconds": {
-        "exe-fb18021546a44e66a68a78e355e6ca63": 3620.0
+        "exe-a9d3b4f6d0874c2caeadba20507c1c2b": 3620.0
       }
     },
     {
@@ -64,7 +64,7 @@
         }
       ],
       "execution_observation_age_seconds": {
-        "exe-631811f452e24aa3890cff0732faac93": 3620.0
+        "exe-d1a564a6ba0e4edc90075aff903717b5": 3620.0
       }
     }
   ]

@@ -4,7 +4,7 @@
   "integration_gate": "G1",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1874",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1896",
-  "tested_commit": "4c0c75868c374bbe1b04a6af40b9b3c5ca914f6d",
+  "tested_commit": "6c93f545a41e49eea00cc96d384e49822d26612b",
   "status": "implemented-fixture-qualified-not-live",
   "evidence_class": "mocked signals and isolated fakeredis; no live Kubernetes, SSH or rollout proof",
   "interfaces": [
@@ -65,5 +65,6 @@
     "Confirmed confidence needs an agreeing Kubernetes or supervisor reading inside fresh_s; older remembered readings stay visible in sources with their own observed_at but no longer confirm."
   ],
   "compatibility": "Status report agent rows keep every earlier field and add observation, asserted by the status report rows test. SV2-RUN-01 to SV2-RUN-03 interfaces are unchanged.",
-  "review": "Standards and Spec readers ran three rounds. Standards held one low finding: the watched write loop duplicates the operations journal loop; kept because sharing it would change the SV2-RUN-03 module outside this package."
+  "review": "Standards and Spec readers ran three rounds. Standards held one low finding: the watched write loop duplicates the operations journal loop; kept because sharing it would change the SV2-RUN-03 module outside this package.",
+  "mutation_resolution": "First CI mutation run left 18 survivors in observe. Remembered readings became an identity free Seen record and OK values a mapping, removing three equivalent mutants. Tests added for the freshness boundary, empty evidence time, the recovered flag, the record and audit keys, an unoccupied seat, accumulated discards, audit of several executions, a same time reclassification, the audit at the lost transition and exact refusal messages. No mutation clearances used."
 }
