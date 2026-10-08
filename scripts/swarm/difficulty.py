@@ -2,6 +2,7 @@
 
 import math
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from hooks.classifier import Choice, ClassifierError, decide
 from scripts.swarm.ledger_client import LedgerRefused
@@ -38,16 +39,16 @@ INSTRUCTIONS = (
 
 
 def size_pass(slug: str, ledger, doc: dict) -> list[str]:
-    unsized = [t for t in doc.get("tasks", []) if t.get("state") != "done" and not t.get("difficulty")]
+    unsized = [t for t in doc.get("tasks", []) if t.get("state") != "done" and not t.get("difficulty")][:PER_TICK]
     actions = []
-    for task in unsized[:PER_TICK]:
-        fields = rule(task) or classify(task, doc)
-        try:
-            ledger.update_task(slug, task["id"], fields)
-        except LedgerRefused:
-            actions.append(f"skipped sizing task {task['id']}: the ledger refused its write")
-            continue
-        actions.append(f"sized task {task['id']} {fields['difficulty']} by {fields['difficulty_source']}")
+    with ThreadPoolExecutor(max_workers=PER_TICK) as pool:
+        for task, fields in zip(unsized, pool.map(lambda task: rule(task) or classify(task, doc), unsized)):
+            try:
+                ledger.update_task(slug, task["id"], fields)
+            except LedgerRefused:
+                actions.append(f"skipped sizing task {task['id']}: the ledger refused its write")
+                continue
+            actions.append(f"sized task {task['id']} {fields['difficulty']} by {fields['difficulty_source']}")
     return actions
 
 
