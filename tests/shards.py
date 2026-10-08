@@ -35,16 +35,30 @@ def assign_files(
     grouped: set[str] | None = None,
     workers: int = 1,
 ) -> list[list[str]]:
-    seconds = {path: sizes.get(path, 0) * SECONDS_PER_SOURCE_BYTE for path in files}
+    seconds = dict.fromkeys(files, 0.0)
     for nodeid, duration in durations.items():
         path = nodeid.split("::", 1)[0]
         if path in seconds:
-            seconds[path] += duration * (workers if grouped and path in grouped else 1)
+            seconds[path] += duration
+    serial = {path: seconds[path] if grouped and path in grouped else 0.0 for path in files}
+    collection = {path: sizes.get(path, 0) * SECONDS_PER_SOURCE_BYTE for path in files}
     loads = [0.0] * shards
+    serial_loads = [0.0] * shards
+    collection_loads = [0.0] * shards
     groups: list[list[str]] = [[] for _ in range(shards)]
-    for path in sorted(files, key=lambda f: (-seconds[f], f)):
-        lightest = loads.index(min(loads))
+    for path in sorted(files, key=lambda f: (-max(seconds[f] / workers, serial[f]) - collection[f], f)):
+        lightest = min(
+            range(shards),
+            key=lambda i: (
+                max((loads[i] + seconds[path]) / workers, serial_loads[i] + serial[path])
+                + collection_loads[i]
+                + collection[path],
+                loads[i],
+            ),
+        )
         loads[lightest] += seconds[path]
+        serial_loads[lightest] += serial[path]
+        collection_loads[lightest] += collection[path]
         groups[lightest].append(path)
     return groups
 

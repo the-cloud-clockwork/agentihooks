@@ -57,6 +57,16 @@ def test_serial_group_costs_are_not_divided_across_workers():
     assert assign_files(durations, files, 2, {}, grouped, 1) == assign_files(durations, files, 2, {})
 
 
+def test_shards_balance_serial_and_parallel_worker_loads():
+    files = [f"tests/test_{name}.py" for name in "abcde"]
+    durations = {f"{path}::test_x": seconds for path, seconds in zip(files, (40, 30, 60, 60, 60))}
+    grouped = {files[0], files[1]}
+    assert assign_files(durations, files, 2, {}, grouped, 4) == [
+        [files[0], files[4]],
+        [files[1], files[2], files[3]],
+    ]
+
+
 def test_grouped_files_reads_real_markers_and_ignores_fixture_strings(tmp_path):
     from tests.shards import grouped_files
 
