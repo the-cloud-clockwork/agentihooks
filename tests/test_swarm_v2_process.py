@@ -324,9 +324,10 @@ def test_a_successful_retire_clears_the_routed_refusal(tmp_path, monkeypatch):
 
 def test_the_reap_keeps_earlier_actions_when_a_remote_agent_turns_suspect(remote_swarm):
     store, ledger, agent = remote_swarm
-    local_name = store.next_name("sw", "eng")
-    store.put_agent("sw", AgentRecord(local_name, "eng", "t0", started_at=1_000))
-    ledger.rows["t0"] = {"id": "t0", "lane": "eng", "state": "done", "claimed_by": local_name, "out_of_scope": False}
+    local_name = store.next_name("sw", "ci")
+    assert local_name < agent.name
+    store.put_agent("sw", AgentRecord(local_name, "ci", "t0", started_at=1_000))
+    ledger.rows["t0"] = {"id": "t0", "lane": "ci", "state": "done", "claimed_by": local_name, "out_of_scope": False}
     runtime = TickRuntime()
     runtime.live.add(local_name)
     runtime.statuses[agent.name] = "unknown"
@@ -336,6 +337,7 @@ def test_the_reap_keeps_earlier_actions_when_a_remote_agent_turns_suspect(remote
 
 
 def test_an_idle_remote_agent_is_nudged_then_retired_through_its_runtime(remote_swarm):
+    from scripts.gates import log
     from scripts.swarm.tick import IDLE_KILL_TICKS, IDLE_NUDGE_TICKS
 
     store, ledger, agent = remote_swarm
@@ -346,4 +348,11 @@ def test_an_idle_remote_agent_is_nudged_then_retired_through_its_runtime(remote_
         tick("sw", store, ledger, runtime, now_ms=2_000 + n)
         if n + 1 == IDLE_NUDGE_TICKS:
             assert runtime.nudged == [agent.name]
+    assert [row["at"] for row in log.recent("sw")][:2] == [2_000, 2_001]
     assert agent.name in runtime.homes and ledger.rows["t1"]["state"] == "open"
+
+
+def test_each_acceptance_case_passes():
+    from tests.sv2_run02_cases import case_a, case_b, case_c
+
+    assert [case()["passed"] for case in (case_a, case_b, case_c)] == [True, True, True]
