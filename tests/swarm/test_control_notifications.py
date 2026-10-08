@@ -23,7 +23,7 @@ def controls(monkeypatch):
     ledger = FakeLedger([])
     ledger.said = []
     ledger.say = lambda slug, text, by=None: ledger.said.append((text, by))
-    ledger.notify = lambda slug, text: ledger.notes.append(text)
+    ledger.notify = lambda slug, text: ledger.notes.append((slug, text))
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     monkeypatch.setattr(cli, "run_tick", lambda *args: [])
@@ -68,7 +68,7 @@ def test_the_masters_own_pause_sends_it_nothing(controls, monkeypatch, explicit)
     assert InboxStore(store.redis).mailbox(master.name) == []
     record = "demo master 1 changed the swarm state with pause from running to paused."
     assert ledger.said == []
-    assert ledger.notes == ([] if explicit else [record])
+    assert ledger.notes == ([] if explicit else [("demo", record)])
 
 
 def test_a_master_without_a_seat_receives_the_notification_by_name(controls):

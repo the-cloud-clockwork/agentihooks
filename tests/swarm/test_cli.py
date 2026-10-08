@@ -302,27 +302,48 @@ def test_say_addresses_and_strangers_are_refused(env, capsys):
 
     assert run("sw", "--as", "stranger", "say", "hello") == 1
     assert "not an agent" in capsys.readouterr().err
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "hello", "--to", "nobody") == 1
+    assert "nobody in swarm sw answers to nobody" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("to", ["engineer@a1b2c3-0001", "eng", "all"])
-def test_say_to_an_agent_a_lane_or_everyone_never_posts_to_chat(env, to):
+def test_say_to_an_agent_a_lane_or_everyone_never_posts_to_chat(env, to, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     ledger.said.clear()
+    capsys.readouterr()
     assert run("sw", "--as", "ci@a1b2c3-0001", "say", "the docs task is merged", "--to", to) == 0
     assert ledger.said == []
     assert [i.text for i in InboxStore(store.redis).inbox("engineer@a1b2c3-0001")] == ["the docs task is merged"]
+    assert "engineer@a1b2c3-0001" in json.loads(capsys.readouterr().out)["sent"]
 
 
-def test_say_to_the_operator_posts_to_chat_and_reaches_no_inbox(env):
+def test_say_to_the_operator_posts_to_chat_and_reaches_no_inbox(env, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     ledger.said.clear()
+    ledger.say = lambda slug, text, by=None: ledger.said.append((slug, text, by))
+    capsys.readouterr()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "phase one is done", "--to", "operator") == 0
-    assert ledger.said == [("phase one is done", "engineer@a1b2c3-0001")]
+    assert ledger.said == [("sw", "phase one is done", "engineer@a1b2c3-0001")]
     assert InboxStore(store.redis).inbox("ci@a1b2c3-0001") == []
+    assert json.loads(capsys.readouterr().out) == {"posted": True}
+
+
+@pytest.mark.parametrize("flag, env_name", [("engineer@a1b2c3-0001", ""), ("", "engineer@a1b2c3-0001")])
+def test_send_message_comes_from_the_named_agent(env, capsys, monkeypatch, flag, env_name):
+    store, _, _ = env
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", env_name)
+    capsys.readouterr()
+    assert run("sw", *(["--as", flag] if flag else []), "send-message", "pause new work") == 0
+    [item] = InboxStore(store.redis).inbox("ci@a1b2c3-0001")
+    assert item.sender == "engineer@a1b2c3-0001"
+    assert "engineer@a1b2c3-0001" not in json.loads(capsys.readouterr().out)["sent"]
 
 
 def test_send_message_reaches_every_live_agent_through_the_inbox_and_never_chat(env, capsys, monkeypatch):

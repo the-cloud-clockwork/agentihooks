@@ -103,7 +103,7 @@ def test_each_successful_page_control_notifies_once(page, body, verb, state):
     items = InboxStore(store.redis).mailbox(master.name)
     if body["action"] == "stop_now":
         assert items == [] and ledger.said == []
-        assert ledger.notes[0].startswith(f"The operator {verb} from the page. The swarm is {state}.")
+        assert ledger.notes[0][1].startswith(f"The operator {verb} from the page. The swarm is {state}.")
         return
     assert len(items) == 1
     assert items[0].fyi

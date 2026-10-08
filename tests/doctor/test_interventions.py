@@ -222,3 +222,13 @@ def test_message_reaches_the_watched_master_or_an_agent_and_nobody_else(store):
             interventions.apply(ctx, "message", args(to=outside, text="x"))
     with pytest.raises(SwarmError, match="text"):
         interventions.apply(ctx, "message", args(to=f"master@{WATCHED}"))
+
+
+@pytest.mark.parametrize("seat", [f"master@{WATCHED}", ""])
+def test_the_intervention_note_reaches_the_live_master_by_seat_or_else_by_name(store, seat):
+    store.put_agent(WATCHED, AgentRecord(f"{WATCHED}-master-1", "master", "master", seat=seat))
+    ctx = context(store)
+    line = interventions.apply(ctx, "message", args(to=ENGINEER, text="Pull dev before your next commit."))
+    inbox = InboxStore(store.redis)
+    assert [i.text for i in inbox.inbox(seat or f"{WATCHED}-master-1")] == [line]
+    assert inbox.inbox(f"{WATCHED}-master-1" if seat else f"master@{WATCHED}") == []
