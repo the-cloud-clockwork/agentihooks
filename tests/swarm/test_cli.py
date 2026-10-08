@@ -1972,3 +1972,30 @@ def test_every_swarm_gets_its_own_thread_however_many_there_are(monkeypatch, cap
 def test_no_swarms_still_sweeps_herdr(monkeypatch, capsys):
     _tick_all(monkeypatch, lambda store, slug: pytest.fail("no swarm to tick"), [])
     assert capsys.readouterr().out.splitlines() == ["herdr: swept"]
+
+
+def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsys):
+    import threading
+
+    monkeypatch.setattr(cli, "TICK_SECONDS", 0.5)
+    release, ticks = threading.Event(), {"fast": 0, "slow": 0}
+
+    def run_tick(store, slug):
+        ticks[slug] += 1
+        if slug == "slow":
+            assert release.wait(10)
+        elif ticks["fast"] == 3:
+            release.set()
+        return [f"tick {ticks[slug]}"]
+
+    _tick_all(monkeypatch, run_tick, ["slow", "fast"])
+    assert ticks == {"fast": 3, "slow": 1}
+    out = capsys.readouterr().out.splitlines()
+    assert sorted(out[:-1]) == ["fast: tick 1", "fast: tick 2", "fast: tick 3", "slow: tick 1"]
+    assert out[-1] == "herdr: swept"
+
+
+def test_swarms_that_finish_together_tick_once(monkeypatch, capsys):
+    ticks = []
+    _tick_all(monkeypatch, lambda store, slug: ticks.append(slug) or ["ok"], ["a", "b", "c"])
+    assert sorted(ticks) == ["a", "b", "c"]
