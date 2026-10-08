@@ -82,7 +82,7 @@ def pull_request(raw):
         raw["state"],
         iso_ms(raw["mergedAt"]) if raw.get("mergedAt") else None,
         min(pushes, default=None),
-        any(result in RED for result in results),
+        any(result in RED for result in results) or bool(unpassed_gate),
         _resolved(raw.get("gated"), checks, results, running) or bool(unpassed_gate),
         tuple(
             check.get("name") or check.get("context") or "a check"
@@ -297,7 +297,11 @@ def _pull_requests(mail, tasks, now_ms, github):
         elif found.state == "CLOSED":
             text = f"Your pull request {url} for {title} was closed without merging. Reopen it, open a new one, or block the task."
             sent += mail.send(f"{url}:closed", mail.engineer(task), text)
-        elif found.red and red_window(found.pushed_at, found.red_at, now_ms) is not None:
+        elif (
+            found.red
+            and (not found.unpassed_gate or found.failed)
+            and red_window(found.pushed_at, found.red_at, now_ms) is not None
+        ):
             text = (
                 f"Your pull request {url} for {title} has red checks and no push for twenty minutes. Fix them and push."
             )

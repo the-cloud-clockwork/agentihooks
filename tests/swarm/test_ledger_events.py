@@ -399,7 +399,7 @@ def test_a_head_with_only_skipped_checks_keeps_waiting(suites, gated):
     raw = {"state": "OPEN", "gated": gated, "statusCheckRollup": SKIPPED_ONLY, "checkSuites": suites}
     pull = ledger_events.pull_request(raw)
     assert pull.resolved is (gated and suites != [QUEUED_TESTS])
-    assert pull.red is False
+    assert pull.red is (gated and suites != [QUEUED_TESTS])
     raw["statusCheckRollup"] = SKIPPED_ONLY + [{"name": GATE, "conclusion": "SUCCESS"}]
     assert ledger_events.pull_request(raw).resolved is (suites != [QUEUED_TESTS])
 
@@ -462,7 +462,7 @@ def test_a_dead_required_gate_resolves_without_changing_red_reminder_fields(roll
     pull = ledger_events.pull_request(raw)
     assert pull.resolved is True
     assert pull.unpassed_gate == GATE
-    assert pull.red is False
+    assert pull.red is True
     assert pull.failed == ()
     assert pull.red_at is None
 
@@ -484,3 +484,32 @@ def test_a_skipped_gate_with_a_pending_check_does_not_end_the_wait(pending):
     pull = ledger_events.pull_request(raw)
     assert pull.resolved is False
     assert pull.unpassed_gate == ""
+
+
+@pytest.mark.parametrize("gate", [[], [{"name": GATE, "conclusion": "SKIPPED"}]])
+@pytest.mark.parametrize(
+    "failure", [[], [{"name": "unit", "conclusion": "FAILURE", "completedAt": "2026-10-07T17:00:01Z"}]]
+)
+def test_dead_gate_resolution_is_red_but_reminders_still_require_actual_failure(store, gate, failure):
+    raw = {
+        "state": "OPEN",
+        "gated": True,
+        "commits": [{"committedDate": "2026-10-07T17:00:00Z"}],
+        "statusCheckRollup": gate + failure,
+    }
+    pull = ledger_events.pull_request(raw)
+    assert pull.resolved is True
+    assert pull.red is True
+    assert pull.unpassed_gate == GATE
+    run(store, recorded())
+    now = (pull.red_at or pull.pushed_at) + 20 * MINUTE
+    run(store, in_pr(), now_ms=now, github=lambda url: pull)
+    expected = (
+        [
+            "Your pull request https://github.com/o/r/pull/9 for task t1 (Build the thing) "
+            "has red checks and no push for twenty minutes. Fix them and push."
+        ]
+        if failure
+        else []
+    )
+    assert texts(store, ENG_SEAT) == expected
