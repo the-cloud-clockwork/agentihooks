@@ -38,12 +38,11 @@ PROJECT_ID = re.compile(r"github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+|local:[A-Z
 
 
 class GrantRefused(SwarmError):
-    retry = "new_request"
-
     def __init__(self, error_class: str, message: str) -> None:
         super().__init__(message)
         self.error_class = error_class
-        self.operation_id = f"op-{uuid4().hex}"
+        self.operation_id = ""
+        self.retry = "same_request" if error_class == "dependency_unavailable" else "new_request"
 
     def detail(self) -> dict:
         return {
@@ -121,6 +120,8 @@ class LaunchAuthority:
 
     def issue(self, slug: str, execution_id: str, *, project_ids: list[str], brain_id: str, account: str) -> str:
         execution = self.store.execution(slug, execution_id)
+        if not _identifier(execution.task) or not _identifier(execution.seat):
+            self.refuse(slug, "invalid_request", "execution task or seat is not an identifier")
         if not isinstance(project_ids, list | tuple) or not project_ids:
             self.refuse(slug, "invalid_request", "a launch grant needs at least one project")
         if not all(_project(project) for project in project_ids):
@@ -129,10 +130,6 @@ class LaunchAuthority:
             self.refuse(slug, "invalid_request", "launch grant brain is not an identifier")
         if not _identifier(account):
             self.refuse(slug, "invalid_request", "launch grant account is not an identifier")
-        if self.redis.exists(self.store.key(slug, "launch-grants-disabled")):
-            self.refuse(slug, "forbidden_scope", "launch grants are disabled for this swarm")
-        if not self.current(slug, execution):
-            self.refuse(slug, "stale_generation", "execution is not the current attempt of its seat")
         now = int(self.clock())
         claims = {
             "schema_version": SCHEMA_VERSION,
@@ -152,17 +149,36 @@ class LaunchAuthority:
             "expires_at": _timestamp(now + self.ttl),
         }
         audit = {name: claims[name] for name in (*AUDIT, "execution_id", "generation", "issued_at", "expires_at")}
-        self.redis.hset(
-            self.store.key(slug, "launch-grants"), claims["grant_id"], json.dumps({**audit, "state": "issued"})
-        )
+        self.record(slug, execution, {**audit, "state": "issued"})
         return self.sign(claims)
+
+    def record(self, slug: str, execution: AgentRecord, audit: dict) -> None:
+        from redis.exceptions import WatchError
+
+        disabled = self.store.key(slug, "launch-grants-disabled")
+        for _ in range(WRITE_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(disabled, self.store.key(slug, "executions"))
+                    if pipe.exists(disabled):
+                        self.refuse(slug, "forbidden_scope", "launch grants are disabled for this swarm")
+                    occupant = self.store.execution_registry.occupants(slug, pipe).get(execution.seat)
+                    if not occupant or occupant.execution_id != execution.execution_id:
+                        self.refuse(slug, "stale_generation", "execution is not the current attempt of its seat")
+                    pipe.multi()
+                    pipe.hset(self.store.key(slug, "launch-grants"), audit["grant_id"], json.dumps(audit))
+                    pipe.execute()
+                    return
+                except WatchError:
+                    continue
+        raise GrantRefused("dependency_unavailable", "launch grants kept changing; the grant was not issued")
 
     def sign(self, claims: Mapping) -> str:
         payload = _encode(json.dumps(claims, sort_keys=True, separators=(",", ":")).encode())
         signed = f"{TOKEN_PREFIX}.{payload}"
         return f"{signed}.{_encode(hmac.new(self.key.secret, signed.encode(), hashlib.sha256).digest())}"
 
-    def verify(self, slug: str, token: str) -> dict:
+    def _verify(self, slug: str, token: str) -> dict:
         parts = token.split(".") if isinstance(token, str) else []
         if len(parts) != 3 or parts[0] != TOKEN_PREFIX:
             self.refuse(slug, "unauthenticated", "launch grant is malformed")
@@ -205,10 +221,17 @@ class LaunchAuthority:
             if name in body and (type(body[name]) is not type(claims[name]) or body[name] != claims[name]):
                 self.refuse(slug, "forbidden_scope", f"registration {name} is outside the launch grant")
 
-    def register(self, slug: str, token: str, body: object) -> Registration:
+    def register(self, slug: str, token: str, body: object, operation_id: str = "") -> Registration:
+        try:
+            return self.commit(slug, token, body)
+        except GrantRefused as error:
+            error.operation_id = operation_id
+            raise
+
+    def commit(self, slug: str, token: str, body: object) -> Registration:
         from redis.exceptions import WatchError
 
-        claims = self.verify(slug, token)
+        claims = self._verify(slug, token)
         self.check_body(slug, claims, body)
         parts = ("executions", "launch-registrations", "launch-grants", "launch-grants-disabled")
         keys = [self.store.key(slug, part) for part in parts]
@@ -219,7 +242,9 @@ class LaunchAuthority:
                     return self.admit(pipe, slug, claims)
                 except WatchError:
                     continue
-        raise SwarmError("launch registrations kept changing; registration was not committed")
+        raise GrantRefused(
+            "dependency_unavailable", "launch registrations kept changing; registration was not committed"
+        )
 
     def admit(self, pipe: Pipeline, slug: str, claims: dict) -> Registration:
         grants = self.store.key(slug, "launch-grants")
@@ -272,14 +297,10 @@ class LaunchAuthority:
                     return revoked
                 except WatchError:
                     continue
-        raise SwarmError("launch grants kept changing; revocation was not committed")
+        raise GrantRefused("dependency_unavailable", "launch grants kept changing; revocation was not committed")
 
     def enable(self, slug: str) -> None:
         self.redis.delete(self.store.key(slug, "launch-grants-disabled"))
-
-    def current(self, slug: str, execution: AgentRecord) -> bool:
-        occupant = self.store.execution_occupants(slug).get(execution.seat)
-        return bool(occupant) and occupant.execution_id == execution.execution_id
 
 
 def _identifier(value: object) -> bool:

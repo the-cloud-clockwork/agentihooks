@@ -400,21 +400,33 @@ def test_a_bad_grant_or_body_fails_before_any_registry_write(store, authority, c
     assert not store.redis.hgetall(store.key("fixture", "launch-registrations"))
 
 
-def test_a_refusal_carries_an_operation_id_and_retry_class(store, authority, execution):
-    with pytest.raises(GrantRefused) as first:
+def test_a_refusal_carries_the_request_operation_id_and_retry_class(store, authority, execution):
+    for operation_id in ("op-fixture-1", "op-fixture-1", "op-fixture-2"):
+        with pytest.raises(GrantRefused) as error:
+            authority.register("fixture", "bad", body(execution), operation_id)
+        assert error.value.detail() == {
+            "error_class": "unauthenticated",
+            "operation_id": operation_id,
+            "retry": "new_request",
+            "message": "launch grant is malformed",
+        }
+    with pytest.raises(GrantRefused) as error:
         authority.register("fixture", "bad", body(execution))
-    with pytest.raises(GrantRefused) as second:
-        authority.register("fixture", "bad", body(execution))
-    detail = first.value.detail()
-    assert detail == {
-        "error_class": "unauthenticated",
-        "operation_id": first.value.operation_id,
-        "retry": "new_request",
-        "message": "launch grant is malformed",
-    }
-    assert first.value.operation_id.startswith("op-")
-    assert len(first.value.operation_id) == 35
-    assert first.value.operation_id != second.value.operation_id
+    assert error.value.operation_id == ""
+    assert GrantRefused("dependency_unavailable", "fixture").retry == "same_request"
+
+
+def test_an_execution_outside_the_identifier_grammar_gets_no_grant(store, authority):
+    agent = AgentRecord(store.next_name("fixture", "eng"), "eng", "SV2 IDN/04", seat=FIXTURE["seat"], started_at=123)
+    execution = store.start_execution("fixture", agent)
+    before = protected(store)
+    with pytest.raises(GrantRefused) as error:
+        issue(authority, execution)
+    assert (error.value.error_class, str(error.value)) == (
+        "invalid_request",
+        "execution task or seat is not an identifier",
+    )
+    assert protected(store) == before
 
 
 def test_a_grant_is_valid_until_its_last_second(store, authority, clock, execution):
@@ -440,10 +452,10 @@ def test_a_retried_registration_returns_the_original_identity(store, authority, 
     assert str(error.value) == "registration project_ids is outside the launch grant"
 
 
-class Interrupted:
-    def __init__(self, pipe, when):
+class Hooked:
+    def __init__(self, pipe, hook):
         self.pipe = pipe
-        self.when = when
+        self.hook = hook
 
     def __enter__(self):
         self.pipe.__enter__()
@@ -456,14 +468,45 @@ class Interrupted:
         return getattr(self.pipe, name)
 
     def execute(self):
-        from redis.exceptions import ConnectionError as TransportLost
+        return self.hook(self.pipe)
 
-        if self.when == "before":
+
+def hook_pipelines(store, monkeypatch, hook):
+    real = store.redis.pipeline
+    calls = []
+
+    def pipeline(*args, **kwargs):
+        calls.append(1)
+        return Hooked(real(*args, **kwargs), hook)
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    return real, calls
+
+
+def interrupted(when):
+    from redis.exceptions import ConnectionError as TransportLost
+
+    def execute(pipe):
+        if when == "before":
             raise TransportLost("fixture transport lost before commit")
-        result = self.pipe.execute()
-        if self.when == "after":
-            raise TransportLost("fixture transport lost after commit")
-        return result
+        pipe.execute()
+        raise TransportLost("fixture transport lost after commit")
+
+    return execute
+
+
+def conflicting(failures):
+    from redis.exceptions import WatchError
+
+    left = [failures]
+
+    def execute(pipe):
+        if left[0]:
+            left[0] -= 1
+            raise WatchError("fixture conflict")
+        return pipe.execute()
+
+    return execute
 
 
 @pytest.mark.parametrize("when", ["before", "after"])
@@ -471,9 +514,8 @@ def test_an_interrupted_registration_recovers_on_retry(store, authority, clock, 
     from redis.exceptions import ConnectionError as TransportLost
 
     token = issue(authority, execution)
-    real = store.redis.pipeline
     before = protected(store)
-    monkeypatch.setattr(store.redis, "pipeline", lambda *a, **k: Interrupted(real(*a, **k), when))
+    real, _calls = hook_pipelines(store, monkeypatch, interrupted(when))
     with pytest.raises(TransportLost):
         authority.register("fixture", token, body(execution))
     monkeypatch.setattr(store.redis, "pipeline", real)
@@ -624,62 +666,63 @@ def test_a_minimal_body_registers_and_a_partial_body_is_still_checked(store, aut
     assert authority.register("fixture", token, minimal).execution_id == execution.execution_id
 
 
-class Flaky:
-    def __init__(self, pipe, failures):
-        self.pipe = pipe
-        self.failures = failures
-
-    def __enter__(self):
-        self.pipe.__enter__()
-        return self
-
-    def __exit__(self, *args):
-        return self.pipe.__exit__(*args)
-
-    def __getattr__(self, name):
-        return getattr(self.pipe, name)
-
-    def execute(self):
-        from redis.exceptions import WatchError
-
-        if self.failures[0]:
-            self.failures[0] -= 1
-            raise WatchError("fixture conflict")
-        return self.pipe.execute()
-
-
-def flaky(store, monkeypatch, failures):
-    real = store.redis.pipeline
-    counter = [failures]
-    calls = []
-
-    def pipeline(*args, **kwargs):
-        calls.append(1)
-        return Flaky(real(*args, **kwargs), counter)
-
-    monkeypatch.setattr(store.redis, "pipeline", pipeline)
-    return calls
-
-
-@pytest.mark.parametrize("operation", ["register", "disable"])
+@pytest.mark.parametrize("operation", ["register", "disable", "issue"])
 def test_writes_retry_a_concurrent_change_then_give_up(store, authority, execution, monkeypatch, operation):
     token = issue(authority, execution)
 
     def run():
         if operation == "register":
             return authority.register("fixture", token, body(execution)).execution_id
+        if operation == "issue":
+            return claims_of(issue(authority, execution))["execution_id"]
         return authority.disable("fixture")
 
-    calls = flaky(store, monkeypatch, 4)
-    assert run() == (execution.execution_id if operation == "register" else [claims_of(token)["grant_id"]])
+    _real, calls = hook_pipelines(store, monkeypatch, conflicting(4))
+    assert run() == ([claims_of(token)["grant_id"]] if operation == "disable" else execution.execution_id)
     assert len(calls) == 5
     authority.enable("fixture")
     execution = admit(store, "eng-2@fixture")
     token = issue(authority, execution)
-    calls = flaky(store, monkeypatch, 5)
-    with pytest.raises(SwarmError, match="kept changing"):
+    _real, calls = hook_pipelines(store, monkeypatch, conflicting(5))
+    with pytest.raises(GrantRefused, match="kept changing") as error:
         run()
+    assert (error.value.error_class, error.value.retry) == ("dependency_unavailable", "same_request")
     assert len(calls) == 5
+
+
+def test_a_grant_issued_while_disabling_is_refused(store, authority, execution, monkeypatch):
+    disabled = store.key("fixture", "launch-grants-disabled")
+
+    def disable_first(pipe):
+        if not store.redis.exists(disabled):
+            store.redis.set(disabled, ISSUED_AT)
+        return pipe.execute()
+
+    hook_pipelines(store, monkeypatch, disable_first)
+    with pytest.raises(GrantRefused) as error:
+        issue(authority, execution)
+    assert (error.value.error_class, str(error.value)) == (
+        "forbidden_scope",
+        "launch grants are disabled for this swarm",
+    )
+    assert not store.redis.hgetall(store.key("fixture", "launch-grants"))
+
+
+def test_a_grant_issued_while_its_execution_is_replaced_is_refused(store, authority, execution, monkeypatch):
+    replaced = []
+
+    def replace_first(pipe):
+        if not replaced:
+            monkeypatch.undo()
+            replaced.append(admit(store, FIXTURE["seat"], execution.execution_id))
+            hook_pipelines(store, monkeypatch, replace_first)
+        return pipe.execute()
+
+    hook_pipelines(store, monkeypatch, replace_first)
+    with pytest.raises(GrantRefused) as error:
+        issue(authority, execution)
+    assert error.value.error_class == "stale_generation"
+    assert not store.redis.hgetall(store.key("fixture", "launch-grants"))
 
 
 def test_disabling_lists_every_outstanding_grant_in_order(store, authority, execution):

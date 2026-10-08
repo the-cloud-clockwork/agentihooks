@@ -21,8 +21,10 @@ execution admitted through `RedisStore.start_execution` (SV2-IDN-02).
   signing key is a `LaunchKey` of at least 32 bytes held by the controller; workers never verify grants.
 - Each issue records a nonsecret audit row (`launch-grants`): grant, issuer, audience, key ID, execution,
   generation, times and state `issued`. Neither the token nor the key is stored.
-- The currency check is not part of a transaction with the audit write. A grant issued while its
-  execution is being replaced is refused at registration (`stale_generation`).
+- An execution whose task or seat falls outside the identifier grammar gets no grant (`invalid_request`).
+- The audit row is written in one watched transaction with the disable switch and the execution
+  history: a grant is refused while grants are disabled (`forbidden_scope`) or once its execution is no
+  longer the current attempt (`stale_generation`), even when either changes during the issue.
 
 ## Register
 
@@ -42,10 +44,12 @@ execution admitted through `RedisStore.start_execution` (SV2-IDN-02).
 | Execution already registered under another grant | `forbidden_scope` |
 | Grants disabled for the swarm | `forbidden_scope` |
 
-Every refusal happens before any registry write. A `GrantRefused` carries `error_class`, an
-`operation_id` and the retry class `new_request`: correcting the input takes a new valid request, never
-an implicit fallback. `detail()` is the sanitized form; it never contains the token, the key or another
-caller's resource. `launch_grant_rejections(store, slug)` counts refusals per error class, and
+Every refusal happens before any registry write. A `GrantRefused` carries `error_class`, the
+`operation_id` of the request (`register(..., operation_id)`, echoed so a retry can name it) and a retry
+class: `new_request` for every refusal, since correcting the input takes a new valid request and never
+an implicit fallback, and `same_request` for `dependency_unavailable`, raised when a watched transaction
+kept conflicting and nothing was written. `detail()` is the sanitized form; it never contains the token,
+the key or another caller's resource. `launch_grant_rejections(store, slug)` counts refusals per error class, and
 `launch_grant_rejections_total` sums them.
 
 The last four checks and the write run in one watched transaction over the execution history, the

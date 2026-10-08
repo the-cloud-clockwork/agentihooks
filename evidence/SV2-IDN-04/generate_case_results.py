@@ -26,6 +26,7 @@ INPUTS = (
     "scripts/swarm_v2/auth_context.py",
     "docs/swarm-v2/schemas/launch-grant.json",
     "tests/swarm/test_launch_grant.py",
+    "evidence/SV2-IDN-04/generate_case_results.py",
 )
 
 
@@ -170,6 +171,9 @@ def case_c() -> dict:
 
 
 def main() -> int:
+    if subprocess.run(["git", "diff", "--quiet", "HEAD", "--", *INPUTS], cwd=ROOT).returncode:
+        print("commit the case inputs first: results must name the commit that holds them")
+        return 2
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True
     ).stdout.strip()
