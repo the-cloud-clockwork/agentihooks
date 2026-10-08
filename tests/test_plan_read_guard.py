@@ -60,8 +60,9 @@ def bash(command):
 def test_whole_read_refused_and_names_the_command(ledger):
     reason = check(read(stored(ledger)), env(ledger))
     assert reason == (
-        "BLOCKED: plan artifacts are read only through `agentihooks plan read`, which prints this task's chunk with "
-        "ten lines of margin. Your chunk with its margin is lines 30 to 70; a read inside them passes."
+        "BLOCKED: read plan artifacts through `agentihooks plan read`, which prints this task's chunk with "
+        "ten lines of margin. Your chunk with its margin is lines 30 to 70; a Read with offset and limit or a "
+        "`sed -n 'A,Bp'` inside them also passes."
     )
 
 
@@ -145,10 +146,42 @@ def test_other_tools_and_bad_input_allowed(ledger):
     assert check({"tool_name": "Read", "tool_input": stored(ledger)}, env(ledger)) is None
 
 
-def test_missing_or_broken_ledger_allows(ledger):
-    assert check(read(stored(ledger)), env(ledger, AGENTIHOOKS_SWARM="absent")) is None
+def test_missing_or_broken_ledger_refuses(ledger):
+    assert check(read(stored(ledger)), env(ledger, AGENTIHOOKS_SWARM="absent"))
     (ledger / f"{SLUG}.json").write_text("{")
+    assert check(read(stored(ledger)), env(ledger))
+    (ledger / f"{SLUG}.json").write_text('{"artifacts": [{"plan": true}]}')
+    assert check(read(stored(ledger)), env(ledger))
+
+
+def test_ledger_without_plans_allows_media_reads(ledger):
+    (ledger / f"{SLUG}.json").write_text("{}")
     assert check(read(stored(ledger)), env(ledger)) is None
+
+
+def test_non_numeric_offset_refused(ledger):
+    assert check(read(stored(ledger), offset="abc", limit=5), env(ledger))
+    assert check(read(stored(ledger), offset=[40], limit=5), env(ledger))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat {root}/de''mo.media/*",
+        "cat {root}/*.media/*.md",
+        "cat {root}/*/*.md",
+        "grep -rn needle {root}",
+        "grep -rn needle {root}/",
+    ],
+)
+def test_spliced_globbed_and_recursive_reads_refused(ledger, command):
+    assert check(bash(command.format(root=ledger)), env(ledger))
+
+
+def test_ledger_root_search_refused_and_ledger_file_allowed(ledger):
+    assert check({"tool_name": "Grep", "tool_input": {"pattern": "x", "path": str(ledger)}}, env(ledger))
+    assert check(bash(f"cat {ledger}/{SLUG}.json"), env(ledger)) is None
+    assert check(read(str(ledger / f"{SLUG}.json")), env(ledger)) is None
 
 
 def test_reads_process_environment(ledger, monkeypatch):
