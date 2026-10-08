@@ -261,11 +261,21 @@ def test_condition_list_names_the_synthetic_tools_and_reports_a_misspelled_one(p
 def test_misspelled_names_only_tool_alternatives_close_to_a_synthetic_name():
     entry = {"path": "/c/pre-x.sh", "source": "bundle"}
     assert conditions.misspelled({**entry, "matcher": "write+bash.git+mcp+judge"}) is None
+    assert conditions.misspelled({**entry, "matcher": "inbox+ledger"}) is None
     assert conditions.misspelled({**entry, "matcher": "edit+judg"}) == {
         "path": "/c/pre-x.sh",
         "source": "bundle",
         "error": "unknown tool 'judg': did you mean the synthetic tool 'judge'?",
     }
-    assert conditions.misspelled({**entry, "matcher": "inbox_sent"})["error"] == (
+    assert conditions.misspelled({**entry, "matcher": "mcp+judge+inbox_sent"})["error"] == (
         "unknown tool 'inbox_sent': did you mean the synthetic tool 'inbox_send'?"
     )
+
+
+def test_condition_list_keeps_unparsed_files_next_to_misspelled_ones(project_filters):
+    (project_filters / "pre-bad.sh").write_text("echo x")
+    (project_filters / "pre-judg-x.filter.yaml").write_text(FILTER)
+    assert [(Path(i["path"]).name, i["error"]) for i in conditions.inventory(project_filters)["invalid"]] == [
+        ("pre-bad.sh", "expected <step>-<matcher>-<name>.<ext>"),
+        ("pre-judg-x.filter.yaml", "unknown tool 'judg': did you mean the synthetic tool 'judge'?"),
+    ]

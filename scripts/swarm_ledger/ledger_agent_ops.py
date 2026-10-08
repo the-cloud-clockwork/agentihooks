@@ -63,9 +63,10 @@ def check(op, task_ids=()):
 
 
 def _screened(text):
+    from hooks.context.conditions import LEDGER_WRITE
     from hooks.filters import check as filters
 
-    return filters.screen("ledger_write", text)
+    return filters.screen(LEDGER_WRITE, text)
 
 
 def _text(value):

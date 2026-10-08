@@ -28,7 +28,8 @@ from hooks.context import injection_trace, profile_chain, quarantine, tool_match
 STEPS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop"}
 _RUNNERS = {".sh": ["bash"], ".bash": ["bash"], ".py": [sys.executable]}
 FILTER_SUFFIX = ".filter.yaml"
-SYNTHETIC_TOOLS = ("judge", "ledger_write", "inbox_send")
+JUDGE, LEDGER_WRITE, INBOX_SEND = "judge", "ledger_write", "inbox_send"
+SYNTHETIC_TOOLS = (JUDGE, LEDGER_WRITE, INBOX_SEND)
 _INDEX_VERSION = 1
 _FRESH_NS = 2_000_000_000
 _CODE_ROOT = Path(__file__).resolve().parents[2]

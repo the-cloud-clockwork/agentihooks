@@ -17,6 +17,7 @@ import os
 import sys
 from dataclasses import asdict
 
+from hooks.context.conditions import INBOX_SEND
 from hooks.filters import check as filters
 from scripts.inbox import links
 from scripts.inbox.store import InboxError, InboxStore, connect
@@ -73,7 +74,7 @@ def cmd_send(store, me, args):
     fyi, words = informational(args.text)
     check_for_operator(args.address, " ".join(words))
     try:
-        text = filters.screen("inbox_send", " ".join(words))
+        text = filters.screen(INBOX_SEND, " ".join(words))
     except ValueError as exc:
         raise InboxError(str(exc)) from exc
     item = store.send(me, args.address, text, fyi=fyi, task=store.receiver_task(args.address))

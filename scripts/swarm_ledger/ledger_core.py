@@ -696,9 +696,10 @@ def apply_op(doc, op, ctx):
 def _screened(op):
     if not op["thread"].endswith("/comments"):
         return op["text"]
+    from hooks.context.conditions import LEDGER_WRITE
     from hooks.filters import check as filters
 
-    return filters.screen("ledger_write", op["text"])
+    return filters.screen(LEDGER_WRITE, op["text"])
 
 
 def check_op(op, task_ids=()):
