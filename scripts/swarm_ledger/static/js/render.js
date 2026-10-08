@@ -140,11 +140,17 @@ function rankPick(key, item) {
   return pick;
 }
 
+function difficultyLabel(item) {
+  if (!["S", "M", "L"].includes(item.difficulty)) return null;
+  const confidence = typeof item.difficulty_confidence === "number" ? `, confidence ${Math.round(item.difficulty_confidence * 100)}%` : "";
+  return h("span", { class: `difficulty difficulty-${item.difficulty}`, text: `size ${item.difficulty}`, title: `set by ${item.difficulty_source || "operator"}${confidence}` });
+}
+
 function taskRow(item, tasks) {
   const key = `tasks/${item.id}`;
   const waits = taskBlockers(item, tasks || []);
   const link = (url, label) => /^https?:\/\//.test(url || "") ? h("a", { href: url, target: "_blank", rel: "noopener", text: label }) : null;
-  const meta = h("div", { class: "task-meta" }, rankPick(key, item), h("span", { text: item.lane }), item.kind ? h("span", { class: "kind", text: item.kind }) : null,
+  const meta = h("div", { class: "task-meta" }, rankPick(key, item), difficultyLabel(item), h("span", { text: item.lane }), item.kind ? h("span", { class: "kind", text: item.kind }) : null,
     h("span", { text: item.state }),
     item.phase ? h("span", { text: item.phase }) : null,
     item.claimed_by ? h("span", { class: "claimed", text: `claimed by ${item.claimed_by}` }) : null,
