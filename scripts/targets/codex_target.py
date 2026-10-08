@@ -101,6 +101,17 @@ def codex_home(environ: Mapping[str, str] | None = None) -> Path:
     return Path(raw).expanduser() if raw else Path(env.get("HOME") or Path.home()) / ".codex"
 
 
+def _withdraw_model_catalog(doc) -> None:
+    """Drop the model catalog pin earlier releases wrote; codex serves only the models a pinned catalog lists."""
+    from hooks.config import AGENTIHOOKS_HOME
+
+    catalog = AGENTIHOOKS_HOME / "codex_model_catalog.json"
+    if doc.get("model_catalog_json") == str(catalog):
+        del doc["model_catalog_json"]
+    catalog.unlink(missing_ok=True)
+    (AGENTIHOOKS_HOME / "codex_context_highwater.json").unlink(missing_ok=True)
+
+
 def _is_ours(group: object, wrapper: Path) -> bool:
     hooks = group.get("hooks") if isinstance(group, dict) else None
     return isinstance(hooks, list) and any(
@@ -277,10 +288,7 @@ class CodexAdapter:
 
         config_path = home / "config.toml"
         doc = self._load_toml(config_path)
-        from hooks.context.codex_context_pin import catalog_path
-
-        if doc.get("model_catalog_json") == str(catalog_path()):
-            del doc["model_catalog_json"]
+        _withdraw_model_catalog(doc)
 
         # Native settings arrive already merged (base + bundle + profile chain).
         # Everything else is authored natively (profiles/_base/config.base.toml

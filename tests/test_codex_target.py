@@ -29,23 +29,28 @@ def assert_unambiguous(line: list[str]) -> None:
 
 class TestConfigToml:
     @pytest.mark.parametrize("existing", [None, "managed", "custom"])
-    def test_init_withdraws_only_automatic_model_catalog(self, adapter, existing):
-        from hooks.context.codex_context_pin import catalog_path, live_cache_path
+    def test_init_writes_no_model_catalog(self, adapter, existing):
+        from hooks import config
 
+        catalog = config.AGENTIHOOKS_HOME / "codex_model_catalog.json"
+        highwater = config.AGENTIHOOKS_HOME / "codex_context_highwater.json"
+        config.AGENTIHOOKS_HOME.mkdir(parents=True, exist_ok=True)
+        catalog.write_text(json.dumps({"models": [{"slug": "example", "max_context_window": 872000}]}))
+        highwater.write_text(json.dumps({"example": 872000}))
         home = codex_home()
         home.mkdir(parents=True, exist_ok=True)
-        live_cache_path().write_text(json.dumps({"models": [{"slug": "example", "max_context_window": 272000}]}))
-        config = home / "config.toml"
-        value = str(catalog_path()) if existing == "managed" else str(home / "custom.json")
+        config_toml = home / "config.toml"
+        value = str(catalog) if existing == "managed" else str(home / "custom.json")
         if existing:
-            config.write_text(f'model_catalog_json = "{value}"\n')
+            config_toml.write_text(f'model_catalog_json = "{value}"\n')
 
         adapter.write_settings({})
         adapter.write_settings({})
 
-        doc = adapter._load_toml(config)
+        doc = adapter._load_toml(config_toml)
         assert doc.get("model_catalog_json") == (value if existing == "custom" else None)
-        assert not catalog_path().exists()
+        assert not catalog.exists()
+        assert not highwater.exists()
 
     def test_list_value_is_managed_and_withdrawn(self, adapter):
         home = codex_home()
