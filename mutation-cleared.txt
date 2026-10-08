@@ -1882,5 +1882,9 @@
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_doctor_phrase__mutmut_9:790c064abbdf0cf00090b29d8b0741d3dfde0df5a5bec6a63c4fb9af83be78f9": {
     "reader": "Standards /root/standards_reader",
     "reason": "For event dictionaries, present text values follow identical code. Missing text normalizes to empty string versus xxxx; both differ from the fixed DOCTOR_PHRASE rig doctor stop, so neither queues a command. The fallback is not otherwise exposed or persisted. No alternate implementation or consumer found. Evidence: CI run 37692175970, mutant-map and parent symbol dumps. Adversarial Standards ruling."
+  },
+  "scripts/profiles/scaffold.py:scripts.profiles.scaffold.x_overlay_new__mutmut_38:8143335d4bf42677f71b9ed3a94c80c65c7cd1c576e964ad4c5abbec46ecf000": {
+    "reader": "Standards ov3 reader",
+    "reason": "Equivalent mutant. sort_keys has one reader in PyYAML 6.0.3, BaseRepresenter.represent_mapping, which tests if self.sort_keys; the Dumper and CDumper classes only forward the value, and the serializer, emitter, constructor and nodes never read it. None and False are both falsy, so both keep insertion order: safe_dump of the overlay manifest is byte identical for sort_keys False and None, also for a nested mapping and CSafeDumper. sort_keys True gives description, kind, name, wears, which the exact profile.yml text test kills. Evidence: CI run 37703337103 at 2df7d0a2. Adversarial Standards ruling."
   }
 }

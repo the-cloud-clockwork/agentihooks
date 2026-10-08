@@ -12,6 +12,17 @@ A bundle is a single external directory containing all your personal agentihooks
 ## Quick Start
 
 ```bash
+# No bundle yet: lay out an empty one, git init it and link it
+agentihooks bundle new ~/dev/my-tools
+
+# Add an overlay profile worn on a base role, then validate it
+agentihooks overlay new backtest-tuner --wears engineer
+agentihooks overlay check backtest-tuner
+
+# Commit it: a rendered agent records the bundle HEAD at render time; uncommitted edits are not in it
+git -C ~/dev/my-tools add README.md enforcements.json .claude profiles
+git -C ~/dev/my-tools commit -m "Add backtest-tuner overlay"
+
 # Link your bundle and install (one command)
 agentihooks init --bundle ~/dev/my-tools
 
@@ -44,7 +55,7 @@ my-tools/                                   <- the bundle directory
 └── profiles/
     ├── infra-ops/                           # Custom profile
     │   ├── CLAUDE.md                        # System prompt (at profile ROOT)
-    │   ├── profile.yml                      # name, description, otel config, allowedOverlays, claude launch config
+    │   ├── profile.yml                      # name, description, otel config, allowedOverlays, claude launch config; an overlay sets kind: overlay and wears: [base roles]
     │   ├── enforcements.json                # Profile enforcements
     │   └── .claude/
     │       ├── settings.overrides.json      # Per-profile settings overrides
