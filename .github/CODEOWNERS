@@ -1,7 +1,7 @@
 /.github/ @nestorcolt
 /.semgrep/ @nestorcolt
 /scripts/ci_mutation/ @nestorcolt
-/scripts/ci_wiring.py @nestorcolt
+/scripts/ci_*.py @nestorcolt
 /scripts/gates/ @nestorcolt
 /scripts/gate_* @nestorcolt
 /scripts/size_limits.py @nestorcolt
