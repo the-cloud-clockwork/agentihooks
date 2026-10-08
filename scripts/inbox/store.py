@@ -6,7 +6,7 @@ History entries are state transitions (a `state` key) or wake and escalation ste
 import json
 import time
 import uuid
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, fields, replace
 
 from scripts.inbox.seats import SeatRegistry, is_seat, master_of
 from scripts.swarm.keyspace import ROOT
@@ -461,9 +461,10 @@ def _order(item: Item) -> tuple[int, int, str]:
 def _item(raw, item_id):
     if not raw:
         raise InboxError(f"no message {item_id}")
+    known = {field.name for field in fields(Item)}
     return Item(
         **{
-            **raw,
+            **{key: value for key, value in raw.items() if key in known},
             "created_at": int(raw["created_at"]),
             "updated_at": int(raw["updated_at"]),
             "sequence": int(raw.get("sequence", 0)),
