@@ -269,6 +269,8 @@ jobs:
           python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
   sonar:
+    # Waiting on the shards here, not by polling the API, keeps pull request runs off the workflow token's hourly quota.
+    needs: [unit]
     runs-on: ubuntu-latest
     # Covers the 18 minute dev push wait, the 20 minute coverage deadline, the scan and the gate.
     timeout-minutes: 45
@@ -277,7 +279,6 @@ jobs:
     permissions:
       contents: read
       actions: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -323,13 +324,14 @@ jobs:
         id: queued
         if: github.event_name == 'merge_group'
         env:
-          GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.merge_group.head_ref }}
           BASE_REF: ${{ github.event.merge_group.base_ref }}
         run: |
           [[ "$HEAD_REF" =~ ^refs/heads/gh-readonly-queue/.+/pr-([0-9]+)-[0-9a-f]+$ ]]
           number="${BASH_REMATCH[1]}"
-          branch=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$number" --jq .head.ref)
+          head=$(git ls-remote origin "refs/pull/$number/head" | cut -f1)
+          branch=$(git ls-remote --heads origin | awk -v head="$head" '$1 == head { sub("refs/heads/", "", $2); print $2; exit }')
+          branch="${branch:-pr-$number}"
           echo "args=-Dsonar.pullrequest.key=$number -Dsonar.pullrequest.branch=$branch -Dsonar.pullrequest.base=${BASE_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
 
       # Sonar refuses an analysis dated before the project's latest one, so dev push scans run one at a time in push order.
@@ -363,11 +365,19 @@ jobs:
           fi
           echo "::warning::Older dev runs still hold Sonar after 18 minutes:$waiting; scanning anyway."
 
-      # Placed after every step that needs no coverage, so those overlap the unit shards.
+      - name: Download shard coverage
+        if: github.event_name != 'push'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-3.12-*
+          path: .coverage-shards
+
+      # A dev push may reuse the coverage of the pull request run that passed its tree, which only the API can reach.
       - name: Merge shard coverage
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/coverage/combine.sh "$GITHUB_RUN_ID" 8
+          GH_TOKEN: ${{ github.event_name == 'push' && github.token || '' }}
+          SOURCE: ${{ github.event_name == 'push' && github.run_id || '--downloaded' }}
+        run: bash .github/coverage/combine.sh "$SOURCE" 8
 
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@v6
@@ -411,6 +421,8 @@ jobs:
     permissions:
       contents: read
       actions: read
+    outputs:
+      tree: ${{ steps.tree.outputs.sha }}
     steps:
       - *lookup
 
@@ -418,6 +430,11 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         with:
           fetch-depth: 0
+
+      - name: Name the tested tree
+        id: tree
+        if: steps.lookup.outputs.skip != 'true'
+        run: echo "sha=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         if: steps.lookup.outputs.skip != 'true'
@@ -550,19 +567,17 @@ jobs:
     if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.unit.result == 'success' && needs.lint.result == 'success' && needs.shard-check.result == 'success' && needs.test-count.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve the tested tree
-        id: tree
+      - name: Write the tested tree
         env:
-          GH_TOKEN: ${{ github.token }}
+          TREE: ${{ needs.lint.outputs.tree }}
         run: |
-          tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq .tree.sha)
-          echo "sha=$tree" >> "$GITHUB_OUTPUT"
-          echo "$tree" > tree.txt
+          [[ "$TREE" =~ ^[0-9a-f]+$ ]]
+          echo "$TREE" > tree.txt
 
       - name: Record the passed tree
         uses: actions/upload-artifact@v4
         with:
-          name: tests-passed-${{ steps.tree.outputs.sha }}
+          name: tests-passed-${{ needs.lint.outputs.tree }}
           path: tree.txt
           retention-days: 7
           overwrite: true

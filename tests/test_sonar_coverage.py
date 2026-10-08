@@ -21,16 +21,16 @@ def test_sonar_uses_all_shards_without_running_tests_again():
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     jobs = workflow["jobs"]
     scan = jobs["sonar"]
-    assert "needs" not in scan
+    assert scan["needs"] == ["unit"]
     merge = next(step for step in scan["steps"] if step.get("name") == "Merge shard coverage")
     assert "pytest" not in merge["run"]
     assert "combine.sh" in merge["run"]
-    assert merge["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert merge["env"]["GH_TOKEN"] == "${{ github.event_name == 'push' && github.token || '' }}"
     assert "sonar" in jobs["gate-required"]["needs"]
     assert not (ROOT / ".github/workflows/sonar-scan.yml").exists()
 
 
-def test_sonar_setup_overlaps_the_shards_and_only_the_analysis_waits_for_coverage():
+def test_sonar_sets_up_before_merging_coverage():
     steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["sonar"]["steps"]
     names = [step.get("name") or step.get("uses") for step in steps]
     merge = names.index("Merge shard coverage")
