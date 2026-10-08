@@ -326,19 +326,19 @@ def test_a_finder_that_dies_silently_is_named_as_such(live, monkeypatch):
     )
 
 
-@pytest.mark.parametrize("lifetime", [30, 0])
-def test_an_overrun_kills_every_process_the_finder_started(monkeypatch, tmp_path, lifetime):
-    marker = tmp_path / "grandchild.pid"
+def test_an_overrun_kills_every_process_the_finder_started(monkeypatch, tmp_path):
+    marker = tmp_path / "grandchildren.pid"
     spawn = (
-        "import subprocess, sys, time; "
-        f"g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep({lifetime})']); "
-        f"open({str(marker)!r}, 'w').write(str(g.pid)); time.sleep(30)"
+        "import os, subprocess, sys, time; "
+        "g = [subprocess.Popen([sys.executable, '-c', f'import time; time.sleep({s})']) for s in (30, 0)]; "
+        f"open({str(marker)!r} + '.tmp', 'w').write(' '.join(str(p.pid) for p in g)); "
+        f"os.replace({str(marker)!r} + '.tmp', {str(marker)!r}); time.sleep(3)"
     )
     monkeypatch.setattr(ledger_task_duplicates, "CHILD", (sys.executable, "-c", spawn))
     monkeypatch.setattr(ledger_task_duplicates, "BUDGET_S", 2)
     with pytest.raises(subprocess.TimeoutExpired):
         ledger_task_duplicates.find({}, [])
-    assert exited(int(marker.read_text()), timeout=5)
+    assert all(exited(int(pid), timeout=5) for pid in marker.read_text().split())
 
 
 def exited(pid, timeout):
@@ -347,7 +347,9 @@ def exited(pid, timeout):
     except ProcessLookupError:
         return True
     try:
-        return bool(select.select([handle], [], [], timeout)[0])
+        waiter = select.poll()
+        waiter.register(handle, select.POLLIN)
+        return bool(waiter.poll(timeout * 1000))
     finally:
         os.close(handle)
 
