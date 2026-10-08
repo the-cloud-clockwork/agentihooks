@@ -108,11 +108,19 @@ def test_a_page_edit_landing_while_a_sync_runs_is_folded_in_on_the_next_read(rep
     assert repo.get_document(SLUG)["title"] == "Racing"
 
 
-def test_a_read_without_reconcile_does_not_fold_a_page_edit(repo):
+def test_a_read_without_reconcile_does_not_fold_a_page_edit(repo, loads):
     html_path = core.paths(SLUG)[0]
     html = html_path.read_text(encoding="utf-8")
     html_path.write_text(html.replace('"title": "Cached"', '"title": "Edited"', 1), encoding="utf-8")
     assert repo.get_document(SLUG, reconcile=False)["title"] == "Cached"
+    assert loads == []
+
+
+def test_a_sync_that_rewrites_nothing_still_serves_the_next_read(repo, loads):
+    file_repository.SYNCED.clear()
+    repo.get_document(SLUG)
+    repo.get_document(SLUG)
+    assert len(loads) == 1
 
 
 def test_a_removed_stored_document_is_not_served_from_the_last_sync(repo):
@@ -125,4 +133,17 @@ def test_a_read_syncs_again_once_an_hour_so_time_based_sweeps_still_run(repo, lo
     now = core.now_ms()
     monkeypatch.setattr(core, "now_ms", lambda: now + file_repository.SWEEP_MS)
     repo.get_document(SLUG)
+    assert len(loads) == 1
+
+
+class LaterClock:
+    def __getattr__(self, name):
+        return getattr(core, name)
+
+    def now_ms(self):
+        return core.now_ms() + file_repository.SWEEP_MS
+
+
+def test_the_hourly_sync_follows_the_repository_clock(repo, loads):
+    FileLedgerRepository(LaterClock()).get_document(SLUG)
     assert len(loads) == 1
