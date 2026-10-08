@@ -51,11 +51,16 @@ def test_a_newer_dev_push_never_cancels_a_running_dev_push_run():
     }
 
 
+ADOPT = (
+    'python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations --run-time "$RUN_TIME"'
+    " --hash durations.sha256"
+)
+
+
 def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run():
     steps = _workflow("test.yml")["jobs"]["unit"]["steps"]
     step = next(s for s in steps if s.get("name") == "Adopt latest dev durations")
-    assert step["run"].strip() == "python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations"
-    assert "env" not in step
+    assert step["run"].strip() == ADOPT
     assert steps.index(step) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
 
 
@@ -79,8 +84,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
         " || github.event.before || github.sha }}"
     )
     assert "run" not in restore
-    assert adopt["run"] == "python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations"
-    assert "env" not in adopt
+    assert adopt["run"] == ADOPT
 
 
 @pytest.mark.parametrize("bump,expected", [("patch", "2.17.1"), ("minor", "2.18.0"), ("major", "3.0.0")])
