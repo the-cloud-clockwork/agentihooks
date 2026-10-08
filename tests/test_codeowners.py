@@ -11,6 +11,7 @@ GATE_PATHS = [
     "scripts/ci_mutation/runner.py",
     "scripts/gates/base.py",
     "mutation-cleared.txt",
+    "mutation-clearances/005f4316465c072cd7257c335954818b44d26c1a35b07fd27e80e146376878c2.json",
     "delivery.yaml",
 ]
 
