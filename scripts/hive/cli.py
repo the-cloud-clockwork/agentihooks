@@ -1,4 +1,4 @@
-"""agentihooks hive invite|join|revoke|list|serve."""
+"""agentihooks hive invite|join|revoke|serve."""
 
 import argparse
 import json
@@ -7,11 +7,16 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from scripts.hive import auth, server
 
+if TYPE_CHECKING:
+    from redis import Redis
 
-def redis_client():
+
+def redis_client() -> "Redis":
     from scripts.swarm.store import redis_client as connect
 
     return connect()
@@ -22,6 +27,9 @@ def _home() -> Path:
 
 
 def _join(url: str, code: str) -> dict:
+    parts = urlsplit(url)
+    if parts.scheme != "https" and not server.is_loopback(parts.hostname or ""):
+        raise auth.HiveError("a join off loopback carries credentials, so the hive URL must be https")
     request = urllib.request.Request(
         url.rstrip("/") + server.JOIN_PATH,
         data=json.dumps({"code": code}).encode(),
@@ -32,14 +40,22 @@ def _join(url: str, code: str) -> dict:
         with urllib.request.urlopen(request, timeout=10) as response:
             return json.load(response)
     except urllib.error.HTTPError as exc:
-        raise auth.HiveError(json.load(exc)["error"]) from exc
+        try:
+            reason = json.load(exc)["error"]
+        except (ValueError, KeyError, TypeError):
+            reason = f"HTTP {exc.code}"
+        raise auth.HiveError(reason) from exc
+    except (urllib.error.URLError, OSError) as exc:
+        raise auth.HiveError(f"the hive at {url} is unreachable ({exc})") from exc
 
 
-def _serve(args) -> int:
+def _serve(args: argparse.Namespace) -> int:
     from scripts.swarm.store import redis_url
 
-    httpd = server.make_server(redis_client(), args.redis_url or redis_url(os.environ), args.host, args.port)
-    print(f"hive join endpoint on http://{args.host}:{httpd.server_address[1]}{server.JOIN_PATH}", flush=True)
+    tls = (args.tls_cert, args.tls_key) if args.tls_cert else None
+    httpd = server.make_server(redis_client(), args.redis_url or redis_url(os.environ), args.host, args.port, tls)
+    scheme = "https" if tls else "http"
+    print(f"hive join endpoint on {scheme}://{args.host}:{httpd.server_address[1]}{server.JOIN_PATH}", flush=True)
     httpd.serve_forever()
     return 0
 
@@ -52,11 +68,12 @@ def _parser() -> argparse.ArgumentParser:
     join.add_argument("url")
     join.add_argument("code")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
-    sub.add_parser("list", help="List hive members")
     serve = sub.add_parser("serve", help="Run the join endpoint")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8770)
     serve.add_argument("--redis-url", help="Redis URL members connect to; defaults to this host's")
+    serve.add_argument("--tls-cert", help="PEM certificate; required off loopback")
+    serve.add_argument("--tls-key", help="PEM private key for --tls-cert")
     return parser
 
 
@@ -72,9 +89,6 @@ def main(argv: list[str]) -> int:
         elif args.command == "revoke":
             auth.revoke(redis_client(), args.id)
             print(f"revoked {args.id}")
-        elif args.command == "list":
-            for member_id, name in sorted(auth.members(redis_client()).items()):
-                print(f"{member_id}\t{name}")
         else:
             return _serve(args)
     except auth.HiveError as exc:

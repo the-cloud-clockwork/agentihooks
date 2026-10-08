@@ -6627,7 +6627,6 @@ def main() -> None:
     )
     sub.add_parser("msg", help="Durable messages between sessions: send|inbox|read|close")
     sub.add_parser("recall", help="Recall archive of ledgers and swarms: reindex")
-    sub.add_parser("hive", help="Hive credentials for remote swarm hosts: invite|join|revoke|list|serve")
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"
     )

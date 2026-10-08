@@ -1,7 +1,10 @@
 import hashlib
+import json
 import stat
 import threading
 import time
+import urllib.error
+import urllib.request
 
 import fakeredis
 import pytest
@@ -91,9 +94,10 @@ def test_revoke_cuts_both_credentials(admin, fake):
     auth.revoke(admin, grant["id"])
 
     assert auth.ledger_member(admin, grant["ledger_credential"]) is None
+    assert admin.keys(f"{auth.PREFIX}:member:*") == [f"{auth.PREFIX}:member:{other['id']}"]
+    assert sorted(admin.acl_users()) == ["default", f"hive-{other['id']}"]
     with pytest.raises(redis_lib.exceptions.AuthenticationError):
         _as_user(fake, grant["redis_url"]).ping()
-    assert auth.members(admin) == {other["id"]: "desk"}
     assert auth.ledger_member(admin, other["ledger_credential"]) == other["id"]
 
 
@@ -153,7 +157,8 @@ def test_join_over_http_writes_the_env_file_and_prints_no_secret(admin, hive, tm
 
     out = capsys.readouterr().out
     env = dict(line.split("=", 1) for line in (tmp_path / "hive.env").read_text().splitlines())
-    (member_id,) = auth.members(admin)
+    (member_key,) = admin.keys(f"{auth.PREFIX}:member:*")
+    member_id = member_key.rpartition(":")[2]
     assert out == f"joined the hive as {member_id}; credentials are in {tmp_path / 'hive.env'}\n"
     assert env["AGENTIHOOKS_HIVE_ID"] == member_id
     assert env["AGENTIHOOKS_HIVE_URL"] == hive
@@ -174,31 +179,68 @@ def test_join_over_http_with_a_used_code_is_refused(admin, hive, tmp_path, monke
     assert not (tmp_path / "hive.env").exists()
 
 
-def test_the_join_endpoint_refuses_other_paths_and_bad_bodies(hive):
-    import json
-    import urllib.error
-    import urllib.request
+@pytest.mark.parametrize(
+    ("path", "body", "status", "error"),
+    [
+        ("/other", b'{"code": "x"}', 404, "not found"),
+        ("/hive/join", b"not json", 400, server.BAD_BODY),
+        ("/hive/join", b"{}", 400, server.BAD_BODY),
+        ("/hive/join", b'{"code": 1}', 400, server.BAD_BODY),
+        ("/hive/join", b'{"code": null}', 400, server.BAD_BODY),
+        ("/hive/join", b"[]", 400, server.BAD_BODY),
+        ("/hive/join", b'{"code": "' + b"x" * server.MAX_BODY + b'"}', 400, server.BAD_BODY),
+    ],
+)
+def test_the_join_endpoint_refuses_other_paths_and_bad_bodies(hive, path, body, status, error):
+    request = urllib.request.Request(hive + path, data=body, method="POST")
 
-    for path, body in (("/other", b"{}"), ("/hive/join", b"not json"), ("/hive/join", b"{}")):
-        request = urllib.request.Request(hive + path, data=body, method="POST")
-        with pytest.raises(urllib.error.HTTPError) as refused:
-            urllib.request.urlopen(request, timeout=5)
-        assert refused.value.code == (404 if path == "/other" else 400)
-        assert "error" in json.load(refused.value)
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(request, timeout=5)
+
+    assert refused.value.code == status
+    assert json.load(refused.value) == {"error": error}
 
 
-def test_cli_invite_list_and_revoke(admin, monkeypatch, capsys):
+def test_cli_invite_and_revoke(admin, monkeypatch, capsys):
     monkeypatch.setattr(cli, "redis_client", lambda: admin)
 
     assert cli.main(["invite", "laptop"]) == 0
     code = capsys.readouterr().out.strip()
     grant = auth.exchange(admin, code, PUBLIC)
-    assert cli.main(["list"]) == 0
-    assert capsys.readouterr().out == f"{grant['id']}\tlaptop\n"
     assert cli.main(["revoke", grant["id"]]) == 0
     assert capsys.readouterr().out == f"revoked {grant['id']}\n"
     assert cli.main(["revoke", grant["id"]]) == 1
     assert capsys.readouterr().err == f"hive revoke refused: no hive member {grant['id']}\n"
+
+
+def test_a_join_endpoint_off_loopback_needs_tls(admin):
+    with pytest.raises(auth.HiveError, match="needs --tls-cert and --tls-key$"):
+        server.make_server(admin, PUBLIC, "0.0.0.0", 0)
+
+
+@pytest.mark.parametrize(
+    ("url", "error"),
+    [
+        ("http://hive.example:8770", "a join off loopback carries credentials, so the hive URL must be https"),
+        ("http://127.0.0.1:9", "the hive at http://127.0.0.1:9 is unreachable"),
+    ],
+)
+def test_join_refuses_plain_http_off_loopback_and_reports_an_unreachable_hive(
+    tmp_path, monkeypatch, capsys, url, error
+):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+
+    assert cli.main(["join", url, "code"]) == 1
+
+    assert capsys.readouterr().err.startswith(f"hive join refused: {error}")
+    assert not (tmp_path / "hive.env").exists()
+
+
+@pytest.mark.parametrize(
+    ("host", "loopback"), [("127.0.0.1", True), ("localhost", True), ("0.0.0.0", False), ("", False)]
+)
+def test_is_loopback(host, loopback):
+    assert server.is_loopback(host) is loopback
 
 
 @pytest.mark.parametrize(

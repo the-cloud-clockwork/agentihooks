@@ -4,28 +4,49 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 run="hive-proof-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:12])')"
 image="$run:local"
+tls="$(mktemp -d)"
 cleanup() {
   docker rm -f "$run-redis" "$run-hive" "$run-member" >/dev/null 2>&1 || true
   docker network rm "$run" >/dev/null 2>&1 || true
   docker image rm "$image" >/dev/null 2>&1 || true
+  rm -r -- "$tls"
 }
 trap cleanup EXIT
 hive=(python -c "import sys; from scripts.hive.cli import main; sys.exit(main(sys.argv[1:]))")
 
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$run-hive" -addext "subjectAltName=DNS:$run-hive" \
+  -keyout "$tls/key.pem" -out "$tls/cert.pem" 2>/dev/null
+chmod 0755 "$tls"
+chmod 0644 "$tls/key.pem"
 docker build -q -t "$image" . >/dev/null
 docker network create "$run" >/dev/null
 docker run -d --name "$run-redis" --network "$run" redis:7-alpine >/dev/null
-docker run -d --name "$run-hive" --network "$run" \
+docker run -d --name "$run-hive" --network "$run" -v "$tls:/tls:ro" \
   -e AGENTIHOOKS_SWARM_REDIS_URL="redis://$run-redis:6379/0" \
-  "$image" "${hive[@]}" serve --host 0.0.0.0 --port 8770 >/dev/null
-docker run -d --name "$run-member" --network "$run" -e AGENTIHOOKS_DEPLOYMENT=compose "$image" sleep infinity >/dev/null
+  "$image" "${hive[@]}" serve --host 0.0.0.0 --port 8770 --tls-cert /tls/cert.pem --tls-key /tls/key.pem >/dev/null
+docker run -d --name "$run-member" --network "$run" -v "$tls/cert.pem:/tls/cert.pem:ro" \
+  -e AGENTIHOOKS_DEPLOYMENT=compose -e SSL_CERT_FILE=/tls/cert.pem "$image" sleep infinity >/dev/null
+ready=""
 for _ in $(seq 60); do
-  if docker logs "$run-hive" 2>&1 | grep -q "hive join endpoint"; then break; fi
+  logs="$(docker logs "$run-hive" 2>&1)"
+  if [[ $logs == *"hive join endpoint on https://"* ]]; then
+    ready=1
+    break
+  fi
   sleep 1
 done
+if [[ -z $ready ]]; then
+  printf 'the hive join endpoint never started:\n%s\n' "$logs" >&2
+  exit 1
+fi
 
+if docker exec "$run-member" "${hive[@]}" join "http://$run-hive:8770" "unused" 2>/dev/null; then
+  printf 'a plain http join off loopback was accepted\n' >&2
+  exit 1
+fi
+printf 'plain http join off loopback: refused\n'
 code="$(docker exec "$run-hive" "${hive[@]}" invite member)"
-joined="$(docker exec "$run-member" "${hive[@]}" join "http://$run-hive:8770" "$code")"
+joined="$(docker exec "$run-member" "${hive[@]}" join "https://$run-hive:8770" "$code")"
 printf 'member container: %s\n' "${joined%%;*}"
 member_id="${joined#joined the hive as }"
 member_id="${member_id%%;*}"
@@ -59,7 +80,7 @@ for command in (("FLUSHALL",), ("CONFIG", "GET", "maxmemory"), ("SET", "outside"
         raise SystemExit(f"{command[0]} was allowed for a hive member")
 PY
 
-if docker exec "$run-member" "${hive[@]}" join "http://$run-hive:8770" "$code" 2>/dev/null; then
+if docker exec "$run-member" "${hive[@]}" join "https://$run-hive:8770" "$code" 2>/dev/null; then
   printf 'a reused code joined\n' >&2
   exit 1
 fi
@@ -85,7 +106,7 @@ from scripts.hive import auth
 from scripts.swarm.store import redis_client
 
 client = redis_client()
-assert auth.members(client) == {}
+assert client.keys(f"{auth.PREFIX}:member:*") == []
 assert client.keys(f"{auth.PREFIX}:ledger:*") == []
 assert f"hive-{os.environ['MEMBER_ID']}" not in client.acl_users()
 print("after revoke: ledger credential and ACL user gone")
