@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from scripts.inbox.store import InboxStore
@@ -39,7 +40,12 @@ def apply(slug: str, store: RedisStore, decision: dict) -> list[str]:
         kind = level(row)
         life = f"{agent.name}:{agent.started_at}"
         previous = store.redis.hget(key, life)
-        if not kind or previous == kind or previous == "handoff":
+        if (
+            not kind
+            or previous == kind
+            or previous == "handoff"
+            or store.redis.hget(store.key(slug, "quota-warning-lives"), agent.name) == str(agent.started_at)
+        ):
             continue
         text = HANDOFF.format(slug=slug) if kind == "handoff" else HURRY
         InboxStore(store.redis).send("swarm", agent.name, text)
@@ -51,5 +57,7 @@ def apply(slug: str, store: RedisStore, decision: dict) -> list[str]:
 def refresh(
     slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, runtime: Runtime, now_ms: int
 ) -> list[str]:
+    from scripts.swarm import quota_handoff
+
     actions = capacity.apply(slug, config, store, ledger, runtime, now_ms)
-    return actions + apply(slug, store, capacity.read(store, slug))
+    return actions + quota_handoff.warn(slug, store, dict(os.environ)) + apply(slug, store, capacity.read(store, slug))

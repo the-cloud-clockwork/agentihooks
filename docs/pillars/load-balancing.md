@@ -141,6 +141,69 @@ waits or stops.
 A window whose reset time has passed counts as empty, so a waiting session is
 released by the reset itself.
 
+## Early swarm quota warnings
+
+The swarm tick checks its account quota readings and sends each unfinished agent
+one `QUOTA HANDOFF WARNING` through its inbox when either window reaches the
+warning threshold. Defaults are **90% of the week used** or **95% of the five hour
+window used**, for Claude and Codex accounts. Each known window is checked
+independently; an unknown window does not suppress a warning from the other one.
+Accounts with an unknown quota state do not trigger a warning. If both thresholds
+are reached, the warning names the week.
+
+These warnings give the agent time to finish its current step and write its
+Handoff v2 with the handoff skill. The agent submits the document with the quota
+reason, then stops:
+
+```bash
+agentihooks swarm "$SWARM" handoff "$HANDOFF_DOC" \
+  --reason quota
+```
+
+The warning itself neither blocks tools nor terminates the running agent. The
+hard quota policy above still applies at its separate thresholds. A quota handoff
+keeps the seat and task for the successor.
+
+### Successor account selection
+
+For a quota handoff, the tick excludes the predecessor's account and considers
+accounts allowed by the successor's lane, task reservation and required harness. A candidate
+must have a free session slot, a known quota state and at least one known window,
+with usage below the warning threshold in every known window. Accounts already
+at a warning threshold are excluded even
+when their normal launch cap still has room.
+
+Among eligible Claude accounts, the tick chooses the one with the most routing
+left: the smaller of its known five hour and weekly percentages left, or the
+weekly percentage alone when Codex reports only that window. Equal readings
+are resolved by account name. If no Claude account qualifies, it considers Codex
+accounts by the same ranking, provided the lane and required harness permit
+Codex and the profile has no required Claude only plugin. With no eligible
+account, successor placement fails; it does not launch on a draining account.
+
+### Worked example
+
+With the default settings, a Claude engineer on `work` has 10% of its week left
+and 60% of its five hour window left. Its weekly usage is exactly 90%, so it gets
+an early warning while still below the hard weekly threshold of 98% used. It
+finishes the current step, writes its Handoff v2 and submits it with `--reason
+quota`.
+
+Assume the lane permits both harnesses, no task reservation fixes the harness,
+the profile has no required Claude only plugin, and every candidate below has a
+free session slot and fresh readings:
+
+| Account | Harness | Five hour left | Weekly left | Selection |
+|---|---|---|---|---|
+| `work` | Claude | 60% | 10% | Excluded as the predecessor and already warned |
+| `personal` | Claude | 80% | 40% | Eligible with 40% routing left |
+| `spare` | Claude | 70% | 60% | Selected with 60% routing left |
+| `default` | Codex | Unknown | 85% | Eligible with 85% routing left; fallback if no Claude account qualifies |
+
+The successor takes the same seat and task on `spare`. If `personal` and `spare`
+also reach a warning threshold before placement, `default` is the eligible Codex
+fallback despite having more routing left than either Claude account initially.
+
 ## Handoff
 
 ```bash
@@ -191,6 +254,8 @@ workspace access token per `AH_CX_TOKEN_<slug>`.
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `AGENTIHOOKS_HANDOFF_WARN_WEEK_PCT` | `90` | Weekly used % that triggers an early swarm handoff warning |
+| `AGENTIHOOKS_HANDOFF_WARN_5H_PCT` | `95` | Five hour used % that triggers an early swarm handoff warning |
 | `AGENTIHOOKS_HANDOFF_WEEK_PCT` | `98` | 7-day used % that triggers the policy |
 | `AGENTIHOOKS_HANDOFF_5H_PCT` | `99` | 5-hour used % that triggers the policy |
 | `AGENTIHOOKS_HANDOFF_MIN_LEFT` | `20` | Routing left % a handoff target needs |
@@ -198,3 +263,9 @@ workspace access token per `AH_CX_TOKEN_<slug>`.
 | `QUOTA_POLICY_ENABLED` | `true` | Turn the quota policy off |
 
 Set them in the shell or in `~/.agentihooks/.env`.
+
+Warning thresholds must be positive and strictly below their corresponding hard
+handoff thresholds. For example, setting the weekly hard threshold to `92`
+requires a weekly warning threshold below `92`. The swarm rejects invalid
+threshold pairs. `QUOTA_POLICY_ENABLED` controls the hook's hard quota policy;
+it does not disable the swarm tick's early warnings.

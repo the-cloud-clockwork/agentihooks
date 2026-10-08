@@ -7,6 +7,7 @@ Each swarm keeps at most one master: an agent the operator talks to, which works
 import json
 import os
 import sys
+import threading
 from dataclasses import dataclass, field, replace
 from itertools import count
 from typing import Protocol
@@ -52,6 +53,8 @@ LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
 MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
+# Swarms tick in threads; two placing from one live session count overfill an account.
+PLACING = threading.Lock()
 DOWN_TOLD = "master down told"
 REDELIVERED = "the master went down before closing it; kept for the next master"
 MASTER_DOWN = (
@@ -72,7 +75,9 @@ NUDGE = (
 
 
 class SpawnError(RuntimeError):
-    pass
+    def __init__(self, message: str, status: str = "refused"):
+        super().__init__(message)
+        self.status = status
 
 
 @dataclass(frozen=True)
@@ -161,24 +166,25 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(grouping.group_pass, slug, config, store, ledger, doc)
     from scripts.swarm import quota_notice
 
-    actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
-    actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
-    actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, doc, now_ms)
-    if not sleeping:
-        actions += skip_refused(_codex_hook_order)
-        actions += skip_refused(_master_down, slug, config, store, ledger, runtime, now_ms)
-        actions += skip_refused(
-            tick_master.run,
-            slug,
-            config,
-            store,
-            ledger,
-            runtime,
-            now_ms,
-            lambda: _master(slug, config, store, runtime, now_ms),
-        )
-        if config.state == "running":
-            actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+    with PLACING:
+        actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
+        actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
+        actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, doc, now_ms)
+        if not sleeping:
+            actions += skip_refused(_codex_hook_order)
+            actions += skip_refused(_master_down, slug, config, store, ledger, runtime, now_ms)
+            actions += skip_refused(
+                tick_master.run,
+                slug,
+                config,
+                store,
+                ledger,
+                runtime,
+                now_ms,
+                lambda: _master(slug, config, store, runtime, now_ms),
+            )
+            if config.state == "running":
+                actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
     timing.call(_conversations, slug, store, runtime)
     timing.call(_session_models, slug, store)
     starting = {a.name for a in store.agents(slug) if a.lane == MASTER and a.state == "starting"}
@@ -277,6 +283,10 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
             continue
         if agent.name not in facts and agent.state != "retiring":
             continue
+        agent, followed = _follow(slug, store, runtime, agent, facts.get(agent.name, {}).get("rebound"))
+        actions.extend(followed)
+        if agent is None:
+            continue
         filled = live_binding.fill(agent, facts.get(agent.name, {}))
         if filled != agent:
             store.put_agent(slug, filled)
@@ -303,6 +313,24 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
         store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
         actions.append(f"retired {agent.name} after mismatched {fields}" + _drop(slug, store, ledger, rows, agent))
     return actions
+
+
+def _follow(slug, store, runtime, agent, pid):
+    if pid is None:
+        return agent, []
+    if (rebound := _rebind(slug, store, runtime, agent, pid)) is None:
+        return None, [f"held {agent.name} until one pane holds its resumed process {pid}"]
+    return rebound, [f"rebound {agent.name} to its resumed process {pid} in pane {rebound.pane_id}"]
+
+
+def _rebind(slug, store, runtime, agent, pid):
+    panes = [p for p, c in (runtime.conversations() or {}).items() if c and c == agent.conversation_id]
+    if len(panes) != 1:
+        return None
+    validation = {**agent.profile_decision.get("validation", {}), "pid": pid}
+    rebound = replace(agent, pane_id=panes[0], profile_decision={**agent.profile_decision, "validation": validation})
+    store.put_agent(slug, rebound)
+    return rebound
 
 
 def _ended(agent, rows):

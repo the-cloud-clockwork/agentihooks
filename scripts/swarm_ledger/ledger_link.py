@@ -1,5 +1,6 @@
 """The ledger page link handed to the operator, from the ledger server's configured host and port."""
 
+import http.client
 import json
 import os
 import urllib.error
@@ -62,11 +63,13 @@ def folder(environ=os.environ) -> Path:
     return Path(environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 
 
-def serving(timeout: float = 1) -> str | None:
+def serving(timeout: float = 1, url: str | None = None) -> str | None:
     try:
-        with urllib.request.urlopen(f"{base()}/healthz", timeout=timeout) as resp:
+        with urllib.request.urlopen(f"{url or base()}/healthz", timeout=timeout) as resp:
             body = json.loads(resp.read())
-    except (urllib.error.HTTPError, ValueError):
+    except http.client.RemoteDisconnected:
+        return None
+    except (urllib.error.HTTPError, http.client.HTTPException, ValueError):
         return ""
     except OSError:
         return None

@@ -70,6 +70,9 @@ class FakeStore:
     def pending_mail(self, me):
         return [i for i in self.inbox(me) if i.state == "pending"]
 
+    def redeliver(self, now, window):
+        return []
+
     def deliver(self, item_id, me):
         if self.items[item_id].state != "pending":
             return None

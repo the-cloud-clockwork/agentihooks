@@ -3299,7 +3299,7 @@ def _install_claude_persona(
     _prepend_bundle_claude_md(bundle_dir)
 
     # --- 5b. Append CI manifesto to ~/.claude/CLAUDE.md (memory channel) ---
-    _append_ci_manifesto_to_claude_md(bundle_dir)
+    _append_ci_manifesto_to_claude_md(bundle_dir, profile_dirs)
 
 
 # ---------------------------------------------------------------------------
@@ -4326,7 +4326,9 @@ def _symlink_dir_contents(
     _state_record_links(records)
 
 
-def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
+def _append_ci_manifesto_to_claude_md(
+    bundle_dir: Path | None = None, profile_dirs: list[tuple[str, Path]] | None = None
+) -> None:
     """Append every enabled bundle manifesto to ~/.claude/CLAUDE.md as a fenced block.
 
     The manifesto used to be injected at SessionStart via stdout, but Claude
@@ -4345,7 +4347,9 @@ def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
         return
     if not getattr(_cfg, "CI_MANIFESTO_ENABLED", True):
         return
-    manifesto_paths = [Path(path) for path in _cfg._resolve_manifesto_paths(bundle_dir)]
+    from scripts.profiles import manifestos
+
+    manifesto_paths = manifestos.paths(bundle_dir, profile_dirs or [])
     if not manifesto_paths:
         _cprint("  [--] No enabled manifestos found — skipping CLAUDE.md append.")
         return
@@ -4354,7 +4358,9 @@ def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
         # Nothing to append to — install_system_prompt handles its own write
         return
     bodies = [
-        f"<!-- manifesto: {path.name} -->\n{path.read_text().rstrip()}" for path in manifesto_paths if path.is_file()
+        f"<!-- manifesto: {path.name} -->\n{_cfg.manifesto_body(path).rstrip()}"
+        for path in manifesto_paths
+        if path.is_file()
     ]
     if not bodies:
         _cprint("  [--] No enabled manifestos found — skipping CLAUDE.md append.")
@@ -5579,6 +5585,7 @@ def cmd_claude(extra_args: list[str]) -> None:
     from scripts.claude_quota_balancer import (
         RoutingError,
         _cache_path,
+        _child_environment,
         credential_for_slug,
         discover_credentials,
         format_selection,
@@ -5645,10 +5652,9 @@ def cmd_claude(extra_args: list[str]) -> None:
         placement="forced" if route else "open",
     )
 
-    os.environ.pop("ANTHROPIC_API_KEY", None)
-    for name in [name for name in os.environ if name.startswith("AH_CC_TOKEN_")]:
-        if name != selected_credential.env_name:
-            os.environ.pop(name, None)
+    kept = _child_environment(selected_credential, os.environ)
+    for name in [name for name in os.environ if name not in kept and name != selected_credential.env_name]:
+        del os.environ[name]
     os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = selected_credential.token
     os.environ["AGENTIHOOKS_ROUTE_ACCOUNT"] = selected_credential.account
     print(
@@ -6466,6 +6472,10 @@ def main() -> None:
             raise SystemExit("usage: agentihooks skill eval [--agent {claude,codex}] -- <command>")
 
         raise SystemExit(skill_eval_main(_argv[2:]))
+    if _argv and _argv[0] == "manifestos":
+        from scripts.profiles.manifestos import main as manifestos_main
+
+        raise SystemExit(manifestos_main(_argv[1:]))
     if _argv and _argv[0] == "herdr":
         from scripts.herdr_setup import main as herdr_main
 

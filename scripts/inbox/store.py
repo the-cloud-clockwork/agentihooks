@@ -4,6 +4,7 @@ History entries are state transitions (a `state` key) or wake and escalation ste
 """
 
 import json
+import os
 import time
 import uuid
 from dataclasses import asdict, dataclass, fields, replace
@@ -15,7 +16,11 @@ from scripts.swarm.naming import NameRegistry
 PREFIX = f"{ROOT}:inbox"
 NOTIFY = f"{PREFIX}:notify"
 MOVE_ATTEMPTS = 3
-STATES = ("pending", "delivered", "read", "done", "blocked", "handed_off", "cancelled")
+STATES = ("pending", "delivered", "confirmed", "read", "done", "blocked", "handed_off", "cancelled")
+REDELIVER_ENV = "AGENTIHOOKS_INBOX_REDELIVER_S"
+DEFAULT_REDELIVER_S = 300
+REDELIVERED = "redelivered: never confirmed inside the redelivery window"
+REDELIVERER = "inbox"
 CLOSED = ("done", "blocked", "handed_off", "cancelled")
 CLOSE_KINDS = {"done": "done", "handoff": "handed_off", "blocked": "blocked", "cancel": "cancelled"}
 NEEDS_DETAIL = {"handoff": "the address the work went to", "blocked": "what it is blocked on"}
@@ -43,6 +48,11 @@ class Item:
 
 def now_ms():
     return time.time_ns() // 1_000_000
+
+
+def redelivery_ms(environ=None):
+    env = os.environ if environ is None else environ
+    return int(env.get(REDELIVER_ENV) or DEFAULT_REDELIVER_S) * 1000
 
 
 def close_reason(kind, detail=""):
@@ -133,12 +143,29 @@ class InboxStore:
             self.redis.zrem(self.key("open", address), *closed)
         return sorted((item for item in items if item.state not in CLOSED), key=_order)
 
+    def quiet(self, addresses: list[str]) -> set[str]:
+        """Addresses whose open index is current and holds nothing; any other needs open_items to tell."""
+        with self.redis.pipeline(transaction=False) as pipe:
+            for address in addresses:
+                pipe.sismember(self.key("open-indexed"), address)
+                pipe.get(self.key("open-size", address))
+                pipe.zcard(self.key("address", address))
+                pipe.zcard(self.key("open", address))
+            rows = pipe.execute()
+        return {
+            address
+            for address, (indexed, size, total, opened) in zip(addresses, zip(*[iter(rows)] * 4))
+            if _index_current(indexed, size, total) and not opened
+        }
+
     def _open_ids(self, address):
         from redis.exceptions import WatchError
 
-        if self.redis.sismember(self.key("open-indexed"), address) and int(
-            self.redis.get(self.key("open-size", address)) or -1
-        ) == self.redis.zcard(self.key("address", address)):
+        if _index_current(
+            self.redis.sismember(self.key("open-indexed"), address),
+            self.redis.get(self.key("open-size", address)),
+            self.redis.zcard(self.key("address", address)),
+        ):
             return self.redis.zrange(self.key("open", address), 0, -1)
         for _ in range(MOVE_ATTEMPTS):
             try:
@@ -292,6 +319,7 @@ class InboxStore:
             pipe.hset(key, mapping=_fields(moved))
             if moved.state in CLOSED or moved.address != item.address:
                 pipe.zrem(self.key("open", item.address), item_id)
+            pipe.zrem(self.key("delivered"), item_id)
             pipe.zrem(pending, item_id)
             if last:
                 pipe.srem(self.key("waiting"), item.address)
@@ -324,6 +352,82 @@ class InboxStore:
             return self._move(item_id, receiver, lambda item: (item.address,), "delivered", "", only_from=("pending",))
         except InboxError:
             return None
+
+    def confirm(self, item_id, receiver):
+        return self._move(
+            item_id, receiver, lambda item: (item.address,), "confirmed", "", only_from=("delivered", "read")
+        )
+
+    def confirm_shown(self, receiver, before):
+        """Confirm every item delivered to receiver before this hook event began: the session lived past it."""
+        receiver = self.names.resolve(receiver)
+        confirmed = []
+        for item_id in self.redis.zrangebyscore(self.key("delivered"), "-inf", before - 1):
+            if self.names.resolve(self._delivered_to(item_id)) != receiver:
+                continue
+            try:
+                item = self.confirm(item_id, receiver)
+            except InboxError:
+                continue
+            if item is not None:
+                confirmed.append(item)
+        return confirmed
+
+    def _delivered_to(self, item_id):
+        return next((e["by"] for e in reversed(self.history(item_id)) if e.get("state") == "delivered"), "")
+
+    def redeliver(self, now, window):
+        """Return each item delivered at least window ms ago and never confirmed to pending, for the next claim."""
+        cutoff = now - window
+        with self.redis.pipeline() as pipe:
+            pipe.exists(self.key("delivered", "built"))
+            pipe.zrangebyscore(self.key("delivered"), "-inf", cutoff)
+            built, stale = pipe.execute()
+        if not built:
+            self._build_delivered(cutoff)
+        return [item for item_id in stale if (item := self.requeue(item_id, REDELIVERER, REDELIVERED, cutoff))]
+
+    def _build_delivered(self, since):
+        """Index the items a store without the delivered index left delivered after since; older ones stay as they are."""
+        prefix = self.key("item", "")
+        for key in self.redis.scan_iter(match=prefix + "*"):
+            state, updated_at = self.redis.hmget(key, "state", "updated_at")
+            if state == "delivered" and int(updated_at) > since:
+                self.redis.zadd(self.key("delivered"), {key[len(prefix) :]: int(updated_at)})
+        self.redis.set(self.key("delivered", "built"), 1)
+
+    def requeue(self, item_id, by, reason, before=None):
+        """Return a delivered item to pending; None once it moved on, or was delivered again after before."""
+        from redis.exceptions import WatchError
+
+        for _ in range(MOVE_ATTEMPTS):
+            try:
+                return self._try_requeue(item_id, by, reason, before)
+            except WatchError:
+                continue
+        raise InboxError(f"message {item_id} changed meanwhile; run the command again")
+
+    def _try_requeue(self, item_id, by, reason, before):
+        key = self.key("item", item_id)
+        with self.redis.pipeline() as pipe:
+            pipe.watch(key)
+            raw = pipe.hgetall(key)
+            if raw and raw["state"] == "delivered" and before is not None and int(raw["updated_at"]) > before:
+                return None
+            pipe.multi()
+            pipe.zrem(self.key("delivered"), item_id)
+            if not raw or raw["state"] != "delivered":
+                pipe.execute()
+                return None
+            item = _item(raw, item_id)
+            moved = replace(item, state="pending", updated_at=now_ms(), reason=reason)
+            pipe.hset(key, mapping=_fields(moved))
+            pipe.zadd(self.key("pending", item.address), {item_id: item.created_at})
+            pipe.sadd(self.key("waiting"), item.address)
+            pipe.rpush(self.key("history", item_id), _entry("pending", by, reason, moved.updated_at))
+            pipe.publish(NOTIFY, item.address)
+            pipe.execute()
+            return moved
 
     def pending(self):
         if not self.redis.exists(self.key("waiting", "built")):
@@ -442,12 +546,20 @@ class InboxStore:
             pipe.hset(key, mapping=_fields(moved))
             if moved.state in CLOSED:
                 pipe.zrem(self.key("open", item.address), item_id)
+            if state == "delivered":
+                pipe.zadd(self.key("delivered"), {item_id: moved.updated_at})
+            else:
+                pipe.zrem(self.key("delivered"), item_id)
             pipe.zrem(pending, item_id)
             if last:
                 pipe.srem(self.key("waiting"), item.address)
             pipe.rpush(self.key("history", item_id), _entry(state, by, reason, moved.updated_at))
             pipe.execute()
             return moved
+
+
+def _index_current(indexed, size, total: int) -> bool:
+    return bool(indexed) and size is not None and int(size) == total
 
 
 def _fields(item):

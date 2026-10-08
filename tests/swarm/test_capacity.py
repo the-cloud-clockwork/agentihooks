@@ -4,6 +4,7 @@ from dataclasses import replace
 import pytest
 
 from scripts import claude_quota_balancer as balancer
+from scripts import session_bands
 from scripts.swarm import capacity
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import SpawnError, tick
@@ -376,8 +377,9 @@ def test_runtime_refuses_an_account_when_its_harness_has_no_free_seat(tmp_path):
 
     runtime = HerdrRuntime(home=tmp_path)
     runtime._quota_accounts = [account(sessions=3), account("cx", harness="codex")]
-    with pytest.raises(SpawnError, match="no claude account has placeable quota seats"):
+    with pytest.raises(SpawnError, match="no claude account has placeable quota seats") as error:
         runtime._quota_account("claude", None, None)
+    assert error.value.status == "unavailable"
     assert runtime._quota_account("codex", None, None).name == "cx"
 
 
@@ -647,8 +649,9 @@ def test_a_fixed_claude_task_never_falls_through_to_codex(tmp_path, monkeypatch,
         task["handoff_envelope"] = {
             "launch": {"profile": "planner", "harness": "claude", "model": "fable", "effort": "high"}
         }
-    with pytest.raises(SpawnError, match="^no claude account has placeable quota seats$"):
+    with pytest.raises(SpawnError, match="^no claude account has placeable quota seats$") as error:
         runtime.spawn(config, "plan", "planner@a1b2c3-0001", task)
+    assert error.value.status == "unavailable"
     assert seen == []
 
 
@@ -959,8 +962,9 @@ def test_master_affinity_cannot_fall_back_when_its_account_has_no_quota(tmp_path
     monkeypatch.setattr(module.affinity, "desired", lambda cfg: "codex")
     if planned:
         runtime._quota_tasks = {"p": "claude"}
-    with pytest.raises(SpawnError, match="^no codex account has placeable quota seats$"):
+    with pytest.raises(SpawnError, match="^no codex account has placeable quota seats$") as error:
         runtime.spawn(config, "master", "master@a1b2c3-0001", {"id": "p", "title": "Master", "profile": "master"})
+    assert error.value.status == "unavailable"
     assert seen == []
 
 
@@ -984,3 +988,16 @@ def test_capacity_places_ready_tasks_in_the_claim_order():
     )
     capacity.apply("sw", config, store, ledger, runtime, 1000)
     assert capacity.read(store, "sw")["tasks"] == {"deep": "claude"}
+
+
+def test_allocation_skips_a_harness_whose_only_room_is_on_accounts_the_handoff_cannot_take():
+    seats = [session_bands.Seat("claude", "a", 1, 0), session_bands.Seat("codex", "x", 5, 0)]
+    allocation, placements = capacity._allocate(
+        None,
+        {"eng": 0, "ci": 0, "plan": 0},
+        {"eng": 1, "ci": 1, "plan": 0},
+        seats,
+        {"eng": [("claude", "codex")], "ci": [("claude",)], "plan": []},
+        {"eng": {0: {("claude", "a")}}},
+    )
+    assert placements == {"eng": [{"index": 0, "harness": "claude", "account": "a"}], "ci": [], "plan": []}

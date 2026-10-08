@@ -75,7 +75,7 @@ def test_dequeue_removes_the_pull_request_then_reports_its_state():
         "entry": None,
     }
     command, _ = calls[1]
-    assert "dequeuePullRequest(input: {pullRequestId: $id})" in command[4]
+    assert "dequeuePullRequest(input: {id: $id})" in command[4]
     assert command[5:] == ["-f", "id=PR_one"]
     assert (
         calls[2][0] == calls[0][0] == ["gh", "api", "graphql", "-f", f"query={merge_queue.STATE}", "-f", f"url={URL}"]

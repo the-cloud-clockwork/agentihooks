@@ -62,7 +62,7 @@ def test_stage_records_separate_cpu_and_flushes_before_work(monkeypatch):
             "reaped_child_cpu_s": 7.0,
         },
     ]
-    assert who == [timing.resource.RUSAGE_SELF, timing.resource.RUSAGE_CHILDREN] * 2
+    assert who == [timing.resource.RUSAGE_THREAD, timing.resource.RUSAGE_CHILDREN] * 2
     assert output.flushed[-1] == output.getvalue()
     assert len(output.flushed) == 2
     assert timing.SWARM.get() is None
