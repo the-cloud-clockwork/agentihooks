@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_72:791eb21bdd03f0a31e75411b1b4b7f755067cc05eb9a8eec080f12cced5a4402": {
+    "reader": "Standards reader",
+    "reason": "None and False both take the same nonreconciling document-load branch, preserving state and media."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1agents__mutmut_25:ea5c6b4ef6b66c1873a7ee4bfd354110d2328bba5e4c298ef379069cd2c6a4ef": {
+    "reader": "Standards",
+    "reason": "Accepted generations for each canonical name are unique: admission monotonically allocates per seat under WATCH, names cannot span execution seats, and one hash field per immutable execution prevents a same name generation tie. Greater than or equal yields the same latest identity. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  }
+}

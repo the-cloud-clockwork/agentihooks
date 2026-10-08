@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_36:83433bd8fab11b4d51707086ab9f4f4b2c10c1709d7fbab24b49febca091226d": {
+    "reader": "Standards",
+    "reason": "The changed argument is unused by evaluate when the mutation rows are empty; its report is identical."
+  }
+}

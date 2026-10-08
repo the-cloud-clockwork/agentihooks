@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_43:afd32663a7e7a8fa9444fd808e43de580c635c606c22d29fc30397802f0f9f08": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  }
+}

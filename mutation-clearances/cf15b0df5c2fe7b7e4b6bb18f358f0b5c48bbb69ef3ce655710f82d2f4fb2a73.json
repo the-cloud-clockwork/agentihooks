@@ -1,0 +1,6 @@
+{
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_value__mutmut_17:c454c200db8310362b7683bbf61aaf6273820e1afa22f3036fb7e18cc8cd8b48": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None serialize the same masked embedded JSON."
+  }
+}

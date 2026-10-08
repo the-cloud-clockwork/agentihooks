@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_port_held__mutmut_7:f81d7fd245b87bb253cce437f7d57b97d3f88a2b187ad9fb823e14e3d471b215": {
+    "reader": "Standards",
+    "reason": "Linux SO_REUSEADDR treats both 1 and 2 as enabled. The independent reader observed getsockopt returning 1 and an occupied listener returning bind errno 98 for both values."
+  }
+}

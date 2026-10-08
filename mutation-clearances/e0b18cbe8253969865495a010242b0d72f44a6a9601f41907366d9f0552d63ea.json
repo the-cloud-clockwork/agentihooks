@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_44:3109c25d73e15796a7b1c20264ba57be851792db752b628513ad8b8d27f622f2": {
+    "reader": "Standards reader",
+    "reason": "The preflight validator checks op and id key presence but never their placeholder values; the authority check only special cases join. These values are never persisted."
+  }
+}
