@@ -295,6 +295,33 @@ def test_one_tick_after_binning_leaves_no_agent_and_no_space(env, state):
     assert (ledger.rows["t1"]["state"], ledger.rows["t2"]["state"]) == ("open", "open")
 
 
+def test_a_refused_reopen_on_the_bin_stop_path_skips_that_task_and_still_stops(env, capsys):
+    from scripts.swarm.ledger_client import LedgerRefused
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    update = ledger.update_task
+
+    def refuse_t1(slug, task_id, fields, by="swarm"):
+        if task_id == "t1":
+            raise LedgerRefused("ledger sw: server refused: 400 the ledger is in the bin")
+        return update(slug, task_id, fields, by)
+
+    ledger.update_task = refuse_t1
+    assert (ledger.rows["t1"]["state"], ledger.rows["t2"]["state"]) == ("claimed", "claimed")
+    ledger.bin = {"sw"}
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
+    assert store.agents("sw") == [] and rt.live == set() and rt.closed_spaces == ["sw"]
+    assert store.config("sw").state == "stopped"
+    assert (ledger.rows["t1"]["state"], ledger.rows["t2"]["state"]) == ("claimed", "open")
+    err = capsys.readouterr().err
+    assert (
+        "task t1 not reopened, the ledger refused its write: ledger sw: server refused: 400 the ledger is in the bin"
+        in err
+    )
+
+
 def test_a_binned_ledger_keeps_retiring_until_no_agent_is_left(env):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
