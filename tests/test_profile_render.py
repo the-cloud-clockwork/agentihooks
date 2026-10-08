@@ -401,9 +401,22 @@ def test_a_home_without_a_plugin_record_keeps_what_is_enabled_inside_it(world):
 
     out = render.render_claude("rb-role")
     _install_in_home(out, "local@m")
-    stamp = json.loads((out / render.STAMP).read_text())
-    stamp.pop("enabled_plugins")
-    (out / render.STAMP).write_text(json.dumps({**stamp, "plugins": {}}))
+    (out / render.PLUGINS).unlink()
+
+    out = render.render_claude("rb-role", force=True)
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"local@m": True}
+
+
+def test_a_home_without_a_stamp_still_drops_a_plugin_its_source_dropped(world):
+    from scripts.profiles import render
+
+    kit = world["bundle"] / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json"
+    _write(kit, json.dumps({"enabledPlugins": {"kit@m": True}}))
+    out = render.render_claude("rb-role")
+    _install_in_home(out, "local@m")
+    (out / render.STAMP).unlink()
+    _write(kit, json.dumps({}))
 
     out = render.render_claude("rb-role")
 

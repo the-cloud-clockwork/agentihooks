@@ -25,6 +25,7 @@ CODEX_STATE = ("auth.json", "sessions", "history.jsonl", "session_index.jsonl", 
 CODEX_INHERITED = ("model", "model_reasoning_effort", "service_tier", "notify", "projects")
 COPILOT_STATE = ("config.json", "settings.json", "agentihooks-hook.sh", "hooks", "session-state", "logs")
 STAMP = ".agentihooks-render.json"
+PLUGINS = ".agentihooks-plugins.json"
 KEY_SEPARATOR = "+"
 CHANNELS, BRAIN = "AGENTIHOOKS_BASE_CHANNELS", "brain"
 HEADER = "<!-- agentihooks rendered profile -->"
@@ -220,11 +221,12 @@ def _plugins(chain: list[str], layered: dict, kept: Sequence[str] = ()) -> dict[
     return plugins.allowed(plugins.carried(chain, operator.get("enabledPlugins") or {}), layered, kept)
 
 
-def _home_plugins(prior: Path | None) -> list[str]:
+def _home_plugins(prior: Path | None, computed: dict) -> list[str]:
     if prior is None:
         return []
     home = (_read_json(prior / "claude" / "settings.json") or {}).get("enabledPlugins") or {}
-    return plugins.kept(home, (_read_json(prior / "claude" / STAMP) or {}).get("enabled_plugins") or {})
+    written = _read_json(prior / "claude" / PLUGINS)
+    return plugins.kept(home, computed if written is None else written)
 
 
 def _channels(channels: str, dirs: list[tuple[str, Path]]) -> str:
@@ -363,7 +365,7 @@ def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) 
     prior = profile_dir(name, overlays)
     if not force and prior is not None and _claude_fresh(prior, current, required):
         return None
-    kept = _home_plugins(prior)
+    kept = _home_plugins(prior, current["enabled_plugins"])
     root = homes.fresh(rendered_root(), key, current)
     out = root / "claude"
     out.mkdir()
@@ -376,6 +378,7 @@ def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) 
         permissions = settings["permissions"]
         permissions["deny"] = [*permissions.get("deny", []), *deny]
     _i.save_json(out / "settings.json", settings)
+    _i.save_json(out / PLUGINS, current["enabled_plugins"])
     for subdir, keep in FEATURES:
         _relink(out / subdir, _features(subdir, keep, bundle, dirs))
     _atomic_write(out / "CLAUDE.md", _persona(root, "claude", bundle, dirs, current["chain"]))
