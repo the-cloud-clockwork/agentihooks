@@ -17,9 +17,8 @@ on:
         default: origin/dev
 
 concurrency:
-  group: tests-${{ github.ref }}
-  # A running dev push run publishes the merged durations every pull request shard downloads.
-  cancel-in-progress: ${{ github.event_name != 'push' }}
+  group: tests-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
