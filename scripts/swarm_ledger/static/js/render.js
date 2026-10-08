@@ -8,7 +8,7 @@ import { renderAlerts, renderNotifications, renderPriorities } from "./notices.j
 import { renderOutline } from "./outline.js";
 import { collapsible, markToggles } from "./folds.js";
 import { renderChat, renderChatBadge } from "./chat.js";
-import { renderSwarm, swarm } from "./swarm.js";
+import { inboxPending, renderSwarm, swarm } from "./swarm.js";
 import { readWorkspace } from "./api.js";
 import { firstPage, lazy, moreButton, wanted } from "./pages.js";
 
@@ -280,6 +280,7 @@ export function renderStats() {
   const leftText = gap ? `unknown · ${gap}${left === null ? "" : ` · prior ${span(left * 60000)}`}` : left === null ? "not set" : span(left * 60000);
   const last = (meta.events || []).reduce((m, e) => Math.max(m, e.at || 0), 0);
   const pct = total ? Math.round(100 * done / total) : 0;
+  const next = phases.find((p) => !p.done), counts = (swarm && swarm.tasks) || {}, figure = (value) => (swarm ? String(value || 0) : "—");
   const row = (label, value, extra) => h("div", { class: "stat", style: gap && label === "Time left" ? "grid-template-columns:75px minmax(0,1fr)" : "" }, h("dt", { text: label }), h("dd", {}, value, extra));
   $("stats").replaceChildren(
     row("Started", started ? when(started) : "—"),
@@ -287,6 +288,13 @@ export function renderStats() {
     row("Time left", leftText),
     row("Phases", `${done} / ${total} · ${pct}%`, h("div", { class: "bar" }, h("i", { style: `width:${pct}%` }))),
     row("Tasks", `${tasks.filter((t) => t.done || t.state === "done").length} / ${tasks.length}`),
+    row("Open", figure(counts.open)),
+    row("Claimed", figure(counts.claimed)),
+    row("In PR", figure(counts.pr)),
+    row("Blocked", figure(counts.blocked)),
+    row("Done today", figure(swarm && swarm.done_today)),
+    row("Next phase", next ? next.id : "—"),
+    row("Inbox pending", figure(swarm && inboxPending(swarm))),
     row("Follow-ups", `${upsDone} / ${ups.length}`),
     ...(out ? [row("Out of scope", String(out))] : []),
     row("Agents · 2 h", String(activeAgents())),

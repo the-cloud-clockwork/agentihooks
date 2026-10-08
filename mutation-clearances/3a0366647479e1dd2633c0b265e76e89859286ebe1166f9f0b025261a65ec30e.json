@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1receive__mutmut_3:47b0a5f5739a912849451da407cb6339e358d2d3c322d33c37aa97a1e532db78": {
+    "reader": "Standards",
+    "reason": "FileLedgerRepository.get_document branches on reconcile truthiness; False and None select the identical locked persisted-document read."
+  }
+}

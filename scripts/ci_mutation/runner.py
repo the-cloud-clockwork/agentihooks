@@ -11,6 +11,7 @@ from pathlib import Path
 
 import tomlkit
 
+from scripts.ci_mutation.clearances import load_clearances
 from scripts.ci_mutation.report import evaluate
 from scripts.ci_mutation.scope import select_tests
 
@@ -92,8 +93,7 @@ def mutate_files(
 def run_gate(root: Path, changes: dict[str, set[int]], output: Path, budget: float) -> dict:
     output.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + budget
-    clearances = root / "mutation-cleared.txt"
-    cleared = json.loads(clearances.read_text()) if clearances.exists() else {}
+    cleared = load_clearances(root)
     report = {"files": [], "not_mutated": [], "failed": False}
     rows, reasons, selected = {}, {}, {}
     for path, lines in changes.items():

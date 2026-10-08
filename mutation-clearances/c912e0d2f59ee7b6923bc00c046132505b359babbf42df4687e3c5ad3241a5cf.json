@@ -1,0 +1,6 @@
+{
+  "da526257151fd5ddd6013dadb840ddab1a801813b24fa10a1e895ba7399ac56d": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Upload constructs exactly the three keys declared in properties. There is no path for an extra property in this internally constructed dictionary; relaxing additionalProperties cannot change status, validation or upload delegation. Thirty-header-case extracted-function equivalence probe passed."
+  }
+}

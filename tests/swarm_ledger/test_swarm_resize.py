@@ -18,7 +18,7 @@ import new_ledger  # noqa: E402
 browser = chromium_browser
 SLUGS = ("resize-one-2026-10-06", "resize-two-2026-10-06")
 HEIGHT_ROWS = ("capacity-box", "swarm-row-work", "swarm-row-accounts", "health-box", "handoff-box")
-PAIRS = {"swarm-row-work": ("agents-box", "swarm-tasks-box"), "swarm-row-accounts": ("quota-box", "doctor-box")}
+PAIRS = {"swarm-row-work": ("agents-box", "overlays-box"), "swarm-row-accounts": ("quota-box", "doctor-box")}
 FINDINGS = [
     {
         "id": f"idle-claim/eng-{n}",
@@ -210,7 +210,7 @@ def test_panel_content_scrolls_inside_a_panel_smaller_than_its_content(visit):
     page = visit()
     page.drag("height", "health-box", dy=-120)
     page.drag("height", "swarm-row-work", dy=-120)
-    for panel in ("health-box", "agents-box", "swarm-tasks-box"):
+    for panel in ("health-box", "agents-box", "overlays-box"):
         fits = page.tab.eval_on_selector(f"#{panel}", "el => el.scrollHeight <= el.clientHeight + 1")
         assert fits, panel
     inner = page.tab.eval_on_selector("#health-box .sw-scroll", "el => [el.scrollHeight, el.clientHeight]")

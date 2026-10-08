@@ -14,6 +14,10 @@ class LedgerGone(SwarmError):
     pass
 
 
+class LedgerRefused(SwarmError):
+    pass
+
+
 def _ledger():
     if str(LEDGER_DIR) not in sys.path:
         sys.path.insert(0, str(LEDGER_DIR))
@@ -34,7 +38,8 @@ class LedgerClient:
         except ledger.Missing as exc:
             raise LedgerGone(str(exc)) from exc
         except SystemExit as exc:
-            raise SwarmError(f"ledger {slug}: {exc}") from exc
+            refused = str(exc).startswith("server refused: 4")
+            raise (LedgerRefused if refused else SwarmError)(f"ledger {slug}: {exc}") from exc
         if state.get("rejected"):
             detail = "; ".join(state.get("_meta", {}).get("warnings", [])) or str(state["rejected"])
             raise SwarmError(f"ledger {slug} refused: {detail}")
@@ -68,6 +73,9 @@ class LedgerClient:
 
     def comment(self, slug, task_id, text, by):
         self._call(slug, [_op("add", by, thread=f"tasks/{task_id}/comments", text=text)])
+
+    def capacity_comment(self, slug: str, task_id: str, text: str, at: int) -> None:
+        self.comment(slug, task_id, text, by="swarm")
 
     def set_phase(self, slug, phase_id, done, status):
         self._call(slug, [_op("set", "swarm", path=f"phases/{phase_id}/done", value=done, status=status)])

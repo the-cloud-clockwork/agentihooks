@@ -1,0 +1,6 @@
+{
+  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_49:377a6610a3c77277eda2730d2dcfaa2a237606aade63eceb93f0a3dec2b653d9": {
+    "reader": "Standards /root/standards",
+    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  }
+}

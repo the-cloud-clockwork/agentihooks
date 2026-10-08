@@ -3,7 +3,8 @@ import json
 import pytest
 
 from scripts.gates import Call, Gate, Who
-from scripts.gates.claim_stop import PLAIN, STREAK, ClaimStop, refusal, ruling
+from scripts.gates.base import Decision
+from scripts.gates.claim_stop import PLAIN, STREAK, ClaimStop, parked_by, refusal, ruling
 from scripts.gates.progress import Progress
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import idle
@@ -327,6 +328,46 @@ def test_a_task_not_held_in_claimed_or_pr_lets_the_stop_through(rig, fields):
 
 def test_a_task_missing_from_the_ledger_lets_the_stop_through(rig):
     assert rig.stop(Who(name=ME, swarm=SLUG, lane="eng", task="t9")).allowed
+
+
+def _finish(rig, name=ME):
+    rig.store.put_agent(SLUG, AgentRecord(name=name, lane="eng", task="t1", pane_id="p1", state="finished"))
+
+
+@pytest.mark.parametrize("dependency", ["claimed", "done"])
+def test_a_task_its_claimant_parked_and_handed_off_lets_the_stop_through(rig, dependency):
+    rig.ledger.rows["d0"] = {"id": "d0", "state": dependency}
+    rig.task.update(parked_on=["d0"])
+    _finish(rig)
+    rig.store.put_agent(SLUG, AgentRecord(name="engineer@100001-0002", lane="eng", task="t2", state="working"))
+    assert rig.stop() == Decision()
+    assert rig.store.redis.get(rig.store.key(SLUG, "stop-blocks", ME)) is None
+
+
+def test_a_working_successor_on_a_parked_task_owes_its_stop(rig):
+    rig.ledger.rows["d0"] = {"id": "d0", "state": "done"}
+    rig.task.update(parked_on=["d0"])
+    decision = rig.stop()
+    assert not decision.allowed and "you hold task t1 with no open pull request and no wait" in decision.reason
+
+
+def test_a_handed_off_claimant_with_nothing_parked_owes_its_stop(rig):
+    _finish(rig)
+    assert not rig.stop().allowed
+
+
+def test_only_the_stopping_agents_own_record_releases_a_parked_task(rig):
+    rig.task.update(parked_on=["d0"])
+    _finish(rig, "engineer@100001-0002")
+    assert not rig.stop().allowed
+
+
+def test_parked_by_reads_the_parked_list_and_the_callers_record(rig):
+    _finish(rig)
+    assert parked_by(rig.store, WHO, {"parked_on": ["d0"]})
+    assert not parked_by(rig.store, WHO, {"depends_on": ["d0"]})
+    assert not parked_by(rig.store, WHO, {"parked_on": []})
+    assert not parked_by(rig.store, Who(name=ME, swarm="other", lane="eng", task="t1"), {"parked_on": ["d0"]})
 
 
 def test_a_pull_request_github_cannot_read_lets_the_stop_through(rig):

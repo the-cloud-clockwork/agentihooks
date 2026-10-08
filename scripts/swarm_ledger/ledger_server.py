@@ -8,7 +8,7 @@ Usage:
 
 Env: LEDGER_DIR (default ~/development-ledger), LEDGER_HOST (127.0.0.1), LEDGER_PORT (8765),
 SWARM_PUBLIC_URL and SWARM_ALLOWED_HOSTS (comma list) beside loopback, SWARM_RELOAD=1 for code reload
-(--ensure sets it unless given).
+(--ensure sets it unless given), LEDGER_IMPECCABLE_LIVE=1 for the Impeccable live origin on a scratch server.
 Idempotent: --ensure on a running server only prints the URL.
 """
 
@@ -44,7 +44,7 @@ import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
-from scripts.swarm_ledger import server_lifetime  # noqa: E402
+from scripts.swarm_ledger import page_policy, server_lifetime  # noqa: E402
 from scripts.swarm_ledger.events import Hub  # noqa: E402
 from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
 from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
@@ -129,10 +129,7 @@ HEADS = {
     "home": ("", "Ledger", "Kind:kind", "Overview", ">Open:open", ">Done:done", "Swarm:swarm", ">Activity:at", ""),
     "bin": ("Ledger", "Kind", "Overview", ">Deleted", ">Left", ""),
 }
-PAGE_POLICY = (
-    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; "
-    "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
-)
+PAGE_POLICY = page_policy.policy(os.environ, core.LEDGER_DIR, PORT)
 STATIC_RE = re.compile(r"/static/([0-9a-f]{12})/((?:[a-z]+/)?[a-z_]+\.(js|css))")
 STATIC_TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8"}
 ASSET_HEADERS = {"Cache-Control": "public, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"}
@@ -326,12 +323,37 @@ def control_argv(body):
         if body["master_agent"] not in MASTER_AGENTS:
             raise ValueError(f"master_agent must be one of {', '.join(MASTER_AGENTS)}")
         pairs.append(f"master-agent={body['master_agent']}")
+    if "overlays" in body:
+        pairs += overlay_pairs(body["overlays"])
     if not pairs:
         raise ValueError(
             "set needs max_eng, max_ci, max_plan, codex_share, compact_limit, effort_min, effort_max, autonomy, "
-            "master_agent or gates"
+            "master_agent, overlays or gates"
         )
     return ["set", *pairs]
+
+
+def overlay_pairs(overlays):
+    from hooks.context.profile_chain import OVERLAY_CAP
+    from scripts.swarm.overlays import KEY, ROLES
+
+    name = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+    if (
+        not isinstance(overlays, dict)
+        or not overlays
+        or not all(
+            role in ROLES
+            and isinstance(names, list)
+            and len(set(names)) == len(names)
+            and all(isinstance(n, str) and name.fullmatch(n) for n in names)
+            for role, names in overlays.items()
+        )
+    ):
+        raise ValueError(f"overlays maps a base role of {', '.join(ROLES)} to a list of distinct overlay names")
+    for role, names in overlays.items():
+        if len(names) > OVERLAY_CAP:
+            raise ValueError(f"a role wears at most {OVERLAY_CAP} overlays; {role} was given {len(names)}")
+    return [f"{KEY}{role}={','.join(overlays[role])}" for role in ROLES if role in overlays]
 
 
 def gate_pairs(gates):

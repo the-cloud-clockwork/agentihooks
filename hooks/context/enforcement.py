@@ -35,6 +35,8 @@ from hooks.config import (
     ENFORCEMENT_MATCH_COUNTER_FILE,
 )
 from hooks.context import injection_trace, quarantine, tool_matcher
+from hooks.targets import codex_home, copilot_home, current_target
+from scripts.claude_config import claude_home
 
 
 def _store_path() -> Path:
@@ -193,6 +195,8 @@ def _load_profile_enforcements() -> list[dict]:
     profile = _get_active_profile()
     if not profile:
         return []
+    home = {"claude": claude_home, "codex": codex_home, "copilot": copilot_home}[current_target()]()
+    profile = ",".join([profile, *profile_chain.rendered_overlays(home)])
     entries = []
     for _name, profile_dir in profile_chain.rendered_dirs(_get_bundle_path(), profile, _get_linked_profiles()):
         entries.extend(_load_json_enforcements(profile_dir / "enforcements.json", "profile"))

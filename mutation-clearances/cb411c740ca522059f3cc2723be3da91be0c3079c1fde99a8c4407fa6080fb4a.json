@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_bin_action__mutmut_71:5c1b7315aad57f7cacd180726207b4523257d60a955accf17cb7ff00ff7e96ee": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The local error sentinel is initialized to None or empty string. Its only later use is truth testing in the final conditional dictionary expansion. Both are false; delete with active swarm overwrites error with exactly the same returned domain value in both versions. Neither original sentinel is otherwise read, logged, passed to the domain or returned, so responses, authorization and side effects are identical."
+  }
+}

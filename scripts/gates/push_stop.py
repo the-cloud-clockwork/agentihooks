@@ -88,6 +88,24 @@ def read(ledger, slug):
         return None
 
 
+def default_root():
+    return os.environ.get("WORKTREE_ROOT") or Path.home() / "dev" / "worktrees"
+
+
+def is_notice(item):
+    return item.sender == SENDER and item.text == TEMPLATE
+
+
+def left(name, exit_text):
+    """The close reason of a notice whose agent has gone, naming whether its branch reached origin."""
+    found = trees(default_root(), name)
+    if not found:
+        return f"{name} {exit_text}; its worktree was not found, so whether its branch was pushed is unknown"
+    held = [tree.branch for tree in found if tree.dirty or tree.unpushed]
+    branches = ", ".join(held or [tree.branch for tree in found])
+    return f"{name} {exit_text}; its branch {branches} was {'not ' if held else ''}pushed"
+
+
 class PushStop:
     name = "push-stop"
     default_mode = "enforce"
@@ -158,7 +176,7 @@ class PushStop:
                 inbox.close(item.id, SENDER, "done", SETTLED)
 
     def root(self):
-        return self._root or os.environ.get("WORKTREE_ROOT") or Path.home() / "dev" / "worktrees"
+        return self._root or default_root()
 
     def connect(self):
         if self._connect:

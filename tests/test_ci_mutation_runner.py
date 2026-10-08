@@ -1,4 +1,7 @@
+import signal
+import subprocess
 import sys
+import time
 
 import pytest
 
@@ -24,11 +27,23 @@ def test_missing_tests_fails_closed(tmp_path):
     assert report["not_mutated"] == [{"path": "hooks/unknown.py", "reason": "no matching or importing test modules"}]
 
 
-def test_process_timeout_returns_no_status_and_records_output(tmp_path):
+def test_process_timeout_returns_no_status_and_records_output(tmp_path, monkeypatch):
     log = tmp_path / "process.log"
-    code = "import time; print('started', flush=True); time.sleep(10)"
+    wait = subprocess.Popen.wait
+    started = []
+
+    def wait_for_output(process, timeout=None):
+        started.append(process)
+        deadline = time.monotonic() + 10
+        while timeout is not None and not log.read_text() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return wait(process, timeout)
+
+    monkeypatch.setattr(subprocess.Popen, "wait", wait_for_output)
+    code = "import time; time.sleep(0.5); print('started', flush=True); time.sleep(60)"
     assert run_process([sys.executable, "-c", code], tmp_path, 0.2, log) is None
     assert log.read_text() == "started\n"
+    assert started[0].returncode == -signal.SIGKILL
 
 
 def test_process_exit_status_is_preserved(tmp_path):
@@ -261,7 +276,9 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
         ]
 
 
-@pytest.mark.parametrize("changed,clearance,fails", [(2, False, True), (3, False, False), (2, True, False)])
+@pytest.mark.parametrize(
+    "changed,clearance,fails", [(2, False, True), (3, False, False), (2, True, False), (2, "folder", False)]
+)
 def test_gate_persists_full_mutation_evidence_and_respects_reader_clearance(
     tmp_path, monkeypatch, capsys, changed, clearance, fails
 ):
@@ -284,7 +301,14 @@ def test_gate_persists_full_mutation_evidence_and_respects_reader_clearance(
 
     monkeypatch.setattr("scripts.ci_mutation.runner.mutate_files", mutate)
     if clearance:
-        (tmp_path / "mutation-cleared.txt").write_text(
+        target = tmp_path / "mutation-cleared.txt"
+        if clearance == "folder":
+            import hashlib
+
+            key = "hooks/sample.py:hooks.sample.x_f__mutmut_1:abc"
+            target = tmp_path / "mutation-clearances" / f"{hashlib.sha256(key.encode()).hexdigest()}.json"
+            target.parent.mkdir()
+        target.write_text(
             json.dumps(
                 {
                     "hooks/sample.py:hooks.sample.x_f__mutmut_1:abc": {

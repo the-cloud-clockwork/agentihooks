@@ -1,14 +1,15 @@
 import { SLUG } from "./config.js";
 import { $, age, clock, h, span } from "./dom.js";
 import { writeSwarm } from "./api.js";
-import { inScope } from "./state.js";
-import { doc } from "./sync.js";
 import { renderStats } from "./render.js";
 import { renderChatTo } from "./chat.js";
 import { clearNoteError, renderControls, renderGates, showNote } from "./controls.js";
+import { firstPage, moreButton, wanted } from "./pages.js";
 
 const SESSION_CAP_MAX = 50;
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
+const ROLES = ["master", "engineer", "planner", "qa", "cicd"];
+const OVERLAY_CAP = 3;
 const VERDICTS = ["false-positive", "early-real", "established", "insufficient-evidence", "resolved"];
 const VERDICT_TEXT = { "false-positive": "FP", "early-real": "early real", established: "established", "insufficient-evidence": "insufficient", resolved: "resolved" };
 export let swarm = null;
@@ -16,6 +17,7 @@ let swarmReadError = false;
 export let pending = "";
 
 export let capDraft = {};
+export let overlayDraft = {};
 
 export function receiveSwarm(sw) {
   if (!sw) return swarmLost("no swarm for this ledger");
@@ -47,6 +49,7 @@ export async function swarmControl(body, op = body.action) {
     if (resp.ok) {
       swarm = await resp.json();
       if (op === "apply") capDraft = {};
+      if (op === "overlays") overlayDraft = {};
       showNote("queued", op);
     } else {
       showNote("error", op, (await resp.text()) || `server answered ${resp.status}`);
@@ -68,6 +71,17 @@ function idCell(text) {
 
 function cells(...values) {
   return h("tr", {}, ...values.map((v) => (v && v.nodeType ? h("td", {}, v) : h("td", { text: v == null || v === "" ? "—" : String(v) }))));
+}
+
+function moreRow(key, total, noun, columns, again) {
+  const cell = moreButton(key, total, noun, again, "td");
+  if (cell) cell.colSpan = columns;
+  return cell && h("tr", { class: "page-more" }, cell);
+}
+
+function withId(row, id) {
+  row.id = id;
+  return row;
 }
 
 function emptyRow(columns, text) {
@@ -92,7 +106,7 @@ function agentRows(sw, now) {
   const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
   return agents.map((a) => {
     const master = a.lane === "master";
-    return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
+    return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
       state: master && (a.status || "working") === "working" ? "live" : a.status || "working", promoted: !!a.promoted, age: a.started_at ? span(now - a.started_at) : "—" };
   });
 }
@@ -105,11 +119,39 @@ function agentActions(a) {
     h("button", { class: "sw-btn danger", type: "button", "data-terminate": a.name, "aria-label": `Terminate ${a.name}`, disabled: !!pending, text: "terminate" }));
 }
 
-function taskFigures(sw, d) {
-  const t = sw.tasks || {}, phases = inScope(d.phases), next = phases.find((p) => !p.done);
-  const inbox = (sw.agents || []).reduce((n, a) => n + (a.inbox || []).length, 0);
-  return [["open", t.open || 0], ["claimed", t.claimed || 0], ["in pr", t.pr || 0], ["blocked", t.blocked || 0], ["done today", sw.done_today || 0],
-    ["phases", `${phases.filter((p) => p.done).length} / ${phases.length}`], ["next phase", next ? next.id : "—"], ["inbox pending", inbox]];
+export function wornOverlays(sw, role) {
+  return overlayDraft[role] || (sw.config.overlays || {})[role] || [];
+}
+
+export function overlayChanges(sw) {
+  const changed = {};
+  for (const role of ROLES) if (role in overlayDraft && overlayDraft[role].join() !== ((sw.config.overlays || {})[role] || []).join()) changed[role] = overlayDraft[role];
+  return changed;
+}
+
+export function toggleOverlay(sw, role, name) {
+  const worn = wornOverlays(sw, role);
+  overlayDraft[role] = worn.includes(name) ? worn.filter((n) => n !== name) : worn.length < OVERLAY_CAP ? [...worn, name] : worn;
+}
+
+function overlayRow(sw, role) {
+  const worn = wornOverlays(sw, role);
+  const names = [...new Set([...(sw.overlays_available || []).filter((o) => (o.wears || []).includes(role)).map((o) => o.name), ...worn])];
+  return h("div", { class: "sw-ovl-row", role: "group", "aria-label": `Overlays the ${role} role wears` }, h("span", { class: "sw-cap-name", text: role }),
+    names.length ? h("div", { class: "sw-ctl" }, ...names.map((name) => h("button", { class: "sw-btn sw-mode", type: "button", "data-overlay-role": role, "data-overlay": name,
+      "aria-pressed": String(worn.includes(name)), disabled: !!pending || (!worn.includes(name) && worn.length >= OVERLAY_CAP), text: name })))
+      : h("span", { class: "sw-ovl-none", text: "no overlay in the bundle wears this role" }));
+}
+
+function renderOverlays(sw) {
+  const offered = (sw && sw.overlays_available) || [];
+  $("overlays-count").textContent = `${offered.length} offered · ${OVERLAY_CAP} max`;
+  $("swarm-overlays").replaceChildren(...(sw ? ROLES.map((role) => overlayRow(sw, role)) : []));
+  $("overlays-apply").disabled = !sw || !!pending || !Object.keys(overlayChanges(sw)).length;
+}
+
+export function inboxPending(sw) {
+  return (sw.agents || []).reduce((n, a) => n + (a.inbox || []).length, 0);
 }
 
 function percent(v) {
@@ -172,7 +214,8 @@ export function renderSwarm(sw) {
   renderControls();
   if ($("swarm").hidden) return renderStats();
   if (!sw) {
-    $("swarm-agents").replaceChildren(emptyRow(8, "No agents running. Start the swarm to work the open tasks."));
+    $("swarm-agents").replaceChildren(emptyRow(9, "No agents running. Start the swarm to work the open tasks."));
+    renderOverlays(sw);
     return;
   }
   const now = Date.now(), open = openFindings(sw);
@@ -182,10 +225,9 @@ export function renderSwarm(sw) {
   $("alert-live").replaceChildren(...liveCaps(sw).map((text) => h("span", { text })));
   const agents = agentRows(sw, now);
   $("agents-count").textContent = `${agents.length} live`;
-  $("swarm-agents").replaceChildren(...(agents.length ? agents.map((a) => cells(idCell(a.name), a.lane, a.profile, a.model,
-    a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—", a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state), a.age, agentActions(a))) : [emptyRow(8, "No agents running. Start the swarm to work the open tasks.")]));
-  $("tasks-open").textContent = `${(sw.tasks || {}).open || 0} open`;
-  kv("swarm-tasks", taskFigures(sw, doc));
+  $("swarm-agents").replaceChildren(...(agents.length ? agents.map((a) => cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model,
+    a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—", a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state), a.age, agentActions(a))) : [emptyRow(9, "No agents running. Start the swarm to work the open tasks.")]));
+  renderOverlays(sw);
   const quota = quotaRows(sw, now);
   $("quota-count").textContent = quotaCount(sw, quota.length, now);
   $("swarm-quota").replaceChildren(...(quota.length ? quota.map((q) => cells(idCell(q.account), q.harness, q.five, q.fiveReset, q.seven, q.sevenReset, sessionCell(q), q.master ? label("master", "master") : h("span")))
@@ -195,7 +237,7 @@ export function renderSwarm(sw) {
   const figures = doctorFigures(doctor, now);
   if (doctorOn(sw)) figures[0][1] = h("a", { href: "/" + doctor.slug, text: doctor.state });
   kv("swarm-doctor", figures);
-  if (!$("health").contains(document.activeElement)) renderHealth(sw.findings, now);
+  if (wanted.id || !$("health").contains(document.activeElement)) renderHealth(sw.findings, now);
   renderHandoffs(sw.handoffs || []);
   renderStats();
 }
@@ -203,7 +245,8 @@ export function renderSwarm(sw) {
 function renderHealth(findings, now = Date.now()) {
   const list = findings || [];
   $("health-count").textContent = `${list.length} open`;
-  $("health").replaceChildren(...(list.length ? list.map((f) => healthRow(f, now)) : [emptyRow(7, "No health findings. The swarm checks every minute.")]));
+  $("health").replaceChildren(...(list.length ? firstPage("health", list, (f) => `finding-${f.id}`).map((f) => withId(healthRow(f, now), `finding-${f.id}`))
+    : [emptyRow(7, "No health findings. The swarm checks every minute.")]), moreRow("health", list.length, "more findings", 7, () => renderHealth(swarm && swarm.findings)) || "");
 }
 
 function healthRow(f, now) {
@@ -218,9 +261,9 @@ function healthRow(f, now) {
 
 function renderHandoffs(rows) {
   $("handoff-count").textContent = `${rows.length} ${rows.length === 1 ? "seat" : "seats"}`;
-  $("swarm-handoffs").replaceChildren(...(rows.length ? rows.map((r) => cells(idCell(seatText(r.seat)), clock(r.at), r.reason,
+  $("swarm-handoffs").replaceChildren(...(rows.length ? firstPage("seats", rows, (r) => `seat-${r.seat}`).map((r) => withId(cells(idCell(seatText(r.seat)), clock(r.at), r.reason,
     r.continuity ? label(r.continuity) : "—", r.binding ? h("span", {}, label(r.binding), r.bound_at && ` ${clock(r.bound_at)}`) : "—",
     r.awaiting ? h("span", { class: "sw-ctl" }, ...["resume", "fresh"].map((choice) => h("button", { class: "sw-btn", type: "button",
-      "data-agent": r.awaiting, "data-restore-choice": choice, disabled: !!pending, text: choice }))) : r.successor ? idCell(r.successor) : "—"))
-    : [emptyRow(6, "No seats yet. Seats appear when agents start.")]));
+      "data-agent": r.awaiting, "data-restore-choice": choice, disabled: !!pending, text: choice }))) : r.successor ? idCell(r.successor) : "—"), `seat-${r.seat}`))
+    : [emptyRow(6, "No seats yet. Seats appear when agents start.")]), moreRow("seats", rows.length, "more seats", 6, () => renderHandoffs(rows)) || "");
 }

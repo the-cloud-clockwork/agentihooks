@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/commands.py:scripts.swarm.commands.x_submit__mutmut_8:8c71458fa9f1d9c5197acc7108b9cc639cd21f9d7fcfcf10ef532cf29569d18a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Legal submit inputs are command:str and argv:list[str]. Production producers are terminate_control and swarm_control with control_argv or fixed doctor/quota argv. JSON encodes nested arrays and strings, never object members, so the key separator is unused. Colons within argument strings remain contents; encoded payload and digest are identical for every legal input. Evidence: CI run 37692175970, mutant-map, production caller search and parent symbol dumps. Adversarial Standards ruling."
+  }
+}

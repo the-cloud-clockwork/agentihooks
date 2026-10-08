@@ -1,0 +1,6 @@
+{
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__aliased_project__mutmut_3:32a3aa01ec1dec573702eaa02a980fe2bd2d3351cb67cd5a5785f03d1e6e72ea": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "With the validated immutable JSON alias dictionary of n entries, every acyclic chain terminates within n edges, so both n+1 and n+2 bounds return the same terminal ID. A cyclic chain has no terminal; both bounds raise the same ValueError with the same message, and the extra dictionary read changes no state. Exhaustive three-key chain/cycle/start controls agreed for 500 combinations."
+  }
+}

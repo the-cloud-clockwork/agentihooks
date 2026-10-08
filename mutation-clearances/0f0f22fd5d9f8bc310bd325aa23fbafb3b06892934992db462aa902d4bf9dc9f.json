@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x_apply__mutmut_3:c17282c2288e4872deccebe95114c773a3098907548257657c614efd5596a4be": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Both concrete get_document implementations branch only on the truth value of reconcile: File uses if reconcile, SQLite uses if reconcile and files is not None. False and None select exactly the same non-reconciling path in each, with the same slug, lock/storage operations, document and exceptions. This changes no caller-visible result or mutation for either supported repository."
+  }
+}
