@@ -6,7 +6,11 @@ import re
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from functools import partial
 from pathlib import Path, PurePosixPath
+
+from scripts.swarm_v2.records import _replayed as _replay
+from scripts.swarm_v2.records import _write, digest
 
 SCHEMA = "swarm-v2-evidence-index/1"
 PLAN = "Swarm-v2.md"
@@ -37,6 +41,9 @@ RESULT = "a test or live canary result must be a GitHub Actions run or a text fi
 
 class EvidenceError(ValueError):
     pass
+
+
+_replayed = partial(_replay, error=EvidenceError)
 
 
 def _field(section: str, name: str) -> str:
@@ -233,33 +240,12 @@ def check(index: dict, plan: dict, root: Path | str) -> dict:
     }
 
 
-def digest(document: dict) -> str:
-    return hashlib.sha256(json.dumps(document, sort_keys=True).encode()).hexdigest()
-
-
-def _write(path: Path | str, index: dict) -> None:
-    path = Path(path)
-    tmp = path.with_name(path.name + ".tmp")
-    try:
-        tmp.write_text(json.dumps(index, indent=2) + "\n")
-        tmp.replace(path)
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
 @contextmanager
 def _locked(path: Path | str) -> Iterator[None]:
     path = Path(path)
     with path.with_name(f".{path.name}.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         yield
-
-
-def _replayed(index: dict, operation: str, sha256: str) -> dict | None:
-    done = next((o for o in index["operations"] if o["id"] == operation), None)
-    if done and done["sha256"] != sha256:
-        raise EvidenceError(f"operation {operation} was already recorded with different content")
-    return done
 
 
 def _commit(path: Path | str, index: dict, operation: str, sha256: str, result: dict) -> dict:
