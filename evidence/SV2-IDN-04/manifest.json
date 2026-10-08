@@ -1,0 +1,10 @@
+{
+  "tested_commit": "22c4036a08afbd87146d9bb59d4d33a3fc555df9",
+  "evidence_class": "local isolated fixture on an in-memory Redis with a fake clock; not live rollout proof",
+  "inputs": {
+    "tests/fixtures/swarm_v2/launch-grant.json": "68b7a534608034cceaf122a906a0c9e56492af340da3e87c71018afd0813e15b",
+    "scripts/swarm_v2/auth_context.py": "94697ef87223d660a9c56c105ebcce349d787da75218b8dedf11584288ceac4a",
+    "docs/swarm-v2/schemas/launch-grant.json": "8cb8ed60074f6e5f662d0be8dc22f116a46d7965836c97f74ed4add95de7dd70",
+    "tests/swarm/test_launch_grant.py": "e3c8e17b4314a8fc4409a53a30126aa6bbbb76eb0956d9ec565323de91fc93fe"
+  }
+}
