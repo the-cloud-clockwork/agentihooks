@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 
 import pytest
@@ -263,12 +264,13 @@ def test_effective_caps_are_exposed_in_status(monkeypatch):
 
     store = _store()
     store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
-    decision = {"effective": {"eng": 0, "ci": 0, "plan": 0}, "reason": "accounts are closed"}
-    store.redis.set(
-        store.key("sw", "quota-capacity"), '{"effective":{"eng":0,"ci":0,"plan":0},"reason":"accounts are closed"}'
-    )
+    decision = {"effective": {"eng": 0, "ci": 0, "plan": 0}, "reason": "accounts are closed", "accounts": []}
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps(decision))
     monkeypatch.setattr(status, "page_quota", lambda: {})
-    assert status.status_report(store, "sw", {"tasks": []})["quota_capacity"] == decision
+    assert status.status_report(store, "sw", {"tasks": []})["quota_capacity"] == {
+        **decision,
+        "lanes": ["eng", "ci", "plan"],
+    }
     assert capacity.status_line(decision) == "quota capacity eng 0 ci 0 plan 0 because accounts are closed"
 
 
@@ -482,10 +484,16 @@ def test_status_command_prints_the_capacity_reason(monkeypatch, capsys):
     ledger = FakeLedger([])
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     store.redis.set(
-        store.key("sw", "quota-capacity"), '{"effective":{"eng":0,"ci":0,"plan":0},"reason":"accounts are closed"}'
+        store.key("sw", "quota-capacity"),
+        '{"configured":{"eng":2,"ci":1,"plan":1},"effective":{"eng":0,"ci":0,"plan":0},'
+        '"reason":"accounts are closed","accounts":[],"at":0}',
     )
+    monkeypatch.setattr(cli, "now_ms", lambda: 3 * 60_000)
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
-    assert "quota capacity eng 0 ci 0 plan 0 because accounts are closed\n" in capsys.readouterr().out
+    assert (
+        "quota capacity eng 0 of 2, ci 0 of 1, plan 0 of 1, changed 3 minutes ago, because accounts are closed"
+        in capsys.readouterr().out.splitlines()
+    )
 
 
 def test_unplaceable_first_task_does_not_block_other_ready_work(monkeypatch, tmp_path):

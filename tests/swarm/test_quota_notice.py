@@ -31,7 +31,15 @@ def agent(store, **fields):
 def decision(five=90, week=90, **fields):
     return {
         "accounts": [
-            {"harness": "claude", "name": "a", "state": "NORMAL", "five_left": five, "week_left": week, **fields}
+            {
+                "harness": "claude",
+                "name": "a",
+                "state": "NORMAL",
+                "sessions": 1,
+                "five_left": five,
+                "week_left": week,
+                **fields,
+            }
         ]
     }
 
@@ -183,7 +191,7 @@ def test_tick_sends_notices_from_the_just_refreshed_accounts(store, monkeypatch)
     assert "quota refreshed" in actions
     assert f"sent {row.name} the quota hurry" in actions
     actions = tick("sw", store, ledger, runtime, 2000)
-    assert f"sent {row.name} the quota handoff" in actions
+    assert f"early quota handoff warning sent to {row.name}" in actions
     actions = tick("sw", store, ledger, runtime, 3000)
     assert not any("quota handoff" in text for text in actions)
     assert len(messages(store, row)) == 2
