@@ -5,7 +5,7 @@ import pytest
 
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
-from scripts import install, session_caps, skill_eval
+from scripts import install, operator_env, session_caps, skill_eval
 from scripts.session_caps import SessionCaps
 
 
@@ -24,6 +24,7 @@ def launch(monkeypatch):
     monkeypatch.setattr(skill_eval.os, "environ", environ)
     loader = Mock()
     monkeypatch.setattr(install, "_load_claude_runtime_env", loader)
+    monkeypatch.setattr(operator_env, "values", Mock(return_value={}))
     monkeypatch.setattr(skill_eval.shutil, "which", Mock(return_value="/usr/bin/claude"))
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"winner": 1, "peer": 3})
     monkeypatch.setattr(account_sessions, "max_sessions", Mock(return_value=3))
@@ -168,3 +169,54 @@ def test_account_proof_is_flushed_before_process_replacement(launch, monkeypatch
     with pytest.raises(RuntimeError, match="exec intercepted"):
         skill_eval.main(["claude", "-p", "evaluate"])
     assert buffer.getvalue() == b"[skill-eval] account=winner\n"
+
+
+def test_claude_evaluation_routes_over_the_operator_account_set(launch, capsys):
+    environ, loader, selector, execute, _ = launch
+    environ.pop("AH_CC_TOKEN_winner")
+    environ.pop("AH_CC_TOKEN_peer")
+    operator_env.values.return_value = {"AH_CC_TOKEN_winner": "test", "AH_CC_TOKEN_peer": "other", "PATH": "/bin"}
+
+    with pytest.raises(RuntimeError, match="exec intercepted"):
+        skill_eval.main(["--", "claude", "-p", "evaluate", "--model", "haiku"])
+
+    operator_env.values.assert_called_once_with(environ)
+    routed = selector.call_args.args[0]
+    assert routed["AH_CC_TOKEN_winner"] == "test"
+    assert routed["AH_CC_TOKEN_peer"] == "other"
+    assert routed["PATH"] == "/usr/bin"
+    child = execute.call_args.args[2]
+    assert child["CLAUDE_CODE_OAUTH_TOKEN"] == "test"
+    assert "AH_CC_TOKEN_peer" not in child
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "[skill-eval] account=winner\n"
+
+
+def test_codex_evaluation_does_not_load_the_operator_account_set(launch):
+    _, _, _, execute, _ = launch
+    with pytest.raises(RuntimeError, match="exec intercepted"):
+        skill_eval.main(["--agent", "codex", "--", "codex", "exec", "evaluate"])
+    operator_env.values.assert_not_called()
+
+
+@pytest.mark.parametrize("agent", ["claude", "codex"])
+def test_agentihooks_serves_skill_eval_as_a_subcommand(agent, launch, monkeypatch, capsys):
+    _, _, _, execute, _ = launch
+    command = [agent, "exec", "evaluate", "--model", "haiku"]
+    monkeypatch.setattr(install.sys, "argv", ["agentihooks", "skill", "eval", "--agent", agent, "--", *command])
+
+    with pytest.raises(RuntimeError, match="exec intercepted"):
+        install.main()
+
+    assert execute.call_args.args[:2] == (agent, command)
+    expected = "[skill-eval] account=winner\n" if agent == "claude" else ""
+    assert capsys.readouterr().err == expected
+
+
+def test_skill_eval_subcommand_names_itself_in_usage(launch, monkeypatch, capsys):
+    monkeypatch.setattr(install.sys, "argv", ["agentihooks", "skill", "eval"])
+    with pytest.raises(SystemExit) as error:
+        install.main()
+    assert error.value.code == 2
+    assert capsys.readouterr().err.startswith("usage: agentihooks skill eval ")

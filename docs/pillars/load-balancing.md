@@ -59,15 +59,20 @@ free slot.
 
 ## Skill evaluations
 
-Run Claude skill evaluations through `agentihooks-skill-eval` from the evaluation
-runner's directory. The wrapper loads the launch credentials, selects an account
-using the same quota and session cap rules as launches, and exports its OAuth token
-through the child environment. It exits with status 3 when no account can route.
+Run Claude skill evaluations through `agentihooks skill eval` from the evaluation
+runner's directory. It loads the full account set the way launches do: the launch
+credentials, then every variable the operator's shell loads through the agentienv
+block, so a Codex engineer with no account variables and a Claude session holding
+only its own token route across every account. Values pass by variable and are never
+printed. It then selects an account using the same quota and session cap rules as
+launches, and exports its OAuth token through the child environment. It exits with
+status 3 when no account can route. `agentihooks-skill-eval` remains as an alias
+console script with the same arguments.
 
 For the installed skill creator's trigger runner:
 
 ```bash
-agentihooks-skill-eval \
+agentihooks skill eval \
   --agent claude \
   -- python3 -m scripts.run_eval \
   --eval-set "$EVAL_SET" \

@@ -6461,6 +6461,11 @@ def main() -> None:
         from scripts.agents_quota import main as quota_main
 
         raise SystemExit(quota_main(_argv[1:]))
+    if _argv[:2] == ["skill", "eval"]:
+        from scripts.skill_eval import main as skill_eval_main
+
+        skill_eval_main(_argv[2:])
+        return
     if _argv and _argv[0] == "herdr":
         from scripts.herdr_setup import main as herdr_main
 
@@ -6611,6 +6616,7 @@ def main() -> None:
         help="Install and configure herdr, the terminal host for agents: status|install|configure|enable|disable",
     )
     sub.add_parser("quota", help="Quota left for every agent harness (Claude accounts and Codex)")
+    sub.add_parser("skill", help="Run skill evaluations with quota routed Claude authentication: eval -- <command>")
     sub.add_parser("serena", help="Run the Serena router: start|stop|restart|status|release <path>")
     sub.add_parser("ledger", help="Swarm ledger: agent CLI, or new|serve|watch|chat|decline <args>")
     sub.add_parser(

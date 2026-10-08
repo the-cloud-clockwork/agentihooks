@@ -6,11 +6,12 @@ import sys
 
 def claude_environment(command: list[str]) -> dict[str, str]:
     from hooks.context.account_sessions import max_sessions, sessions_by_account
-    from scripts import session_caps
+    from scripts import operator_env, session_caps
     from scripts.claude_quota_balancer import RoutingError, route_requires_fable, select_credential
     from scripts.install import _load_claude_runtime_env
 
     _load_claude_runtime_env()
+    operator_env.fill(os.environ)
     try:
         decision = select_credential(
             os.environ,
@@ -36,7 +37,9 @@ def claude_environment(command: list[str]) -> dict[str, str]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Run skill evaluations with quota routed Claude authentication")
+    parser = argparse.ArgumentParser(
+        prog="agentihooks skill eval", description="Run skill evaluations with quota routed Claude authentication"
+    )
     parser.add_argument("--agent", choices=("claude", "codex"), default="claude")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
