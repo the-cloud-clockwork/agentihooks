@@ -927,3 +927,93 @@ def test_a_claude_resume_asks_init_agent_for_the_inbox_channel(tmp_path, harness
     runtime.resume(config, agent, "you were restored")
     argv = seen["runs"][0]
     assert ("--inbox-channel" in argv[: argv.index("--")]) is named
+
+
+def test_has_capacity_asks_the_rotation_with_this_environment(tmp_path):
+    import os
+
+    from scripts import agent_choice
+
+    seen, reasons = [], iter(["rotation", agent_choice.ALL_FULL])
+    runtime = HerdrRuntime(
+        home=tmp_path, choose=lambda requested, environ: seen.append((requested, environ)) or ("claude", next(reasons))
+    )
+    assert runtime.has_capacity(None) is True
+    assert runtime.has_capacity(None) is False
+    assert seen[0] == ("", dict(os.environ))
+
+
+def test_quota_capacity_reads_this_environment_and_hands_demand_on(tmp_path, monkeypatch):
+    import os
+
+    from scripts.swarm import capacity
+
+    seen = {}
+    monkeypatch.setattr(
+        capacity, "accounts", lambda environ, now, refresh: seen.update(environ=environ, now=now, refresh=refresh) or []
+    )
+    monkeypatch.setattr(
+        capacity,
+        "calculate",
+        lambda config, rows, agents, demand, requirements: (
+            seen.update(demand=demand) or {"allocation": {}, "placements": {}}
+        ),
+    )
+    runtime = HerdrRuntime(home=tmp_path)
+    runtime.quota_capacity(None, [], 5.0, {"eng": 1})
+    assert seen == {"environ": dict(os.environ), "now": 5.0, "refresh": True, "demand": {"eng": 1}}
+    runtime.quota_capacity(None, [], 5.0, {"eng": 0})
+    assert seen["refresh"] is False
+
+
+def test_rotation_picks_the_fewest_session_seat_or_asks_choose(tmp_path):
+    from scripts import agent_choice
+    from scripts.swarm import capacity
+
+    calls = []
+    runtime = HerdrRuntime(
+        home=tmp_path, choose=lambda requested, environ: calls.append(requested) or ("codex", "requested")
+    )
+    assert runtime._rotation("", {}) == ("codex", "requested")
+    runtime._quota_accounts = [
+        capacity.Account("claude", "a", "OPEN", 2, 90, 90, 6),
+        capacity.Account("codex", "cx", "OPEN", 0, 90, 90, 6),
+    ]
+    assert runtime._rotation("", {}) == ("codex", "rotation")
+    assert runtime._rotation("claude", {}) == ("codex", "requested")
+    runtime._quota_accounts = [capacity.Account("codex", "cx", "CLOSED", 0, 90, 90, 0)]
+    assert runtime._rotation("", {}) == ("claude", agent_choice.ALL_FULL)
+    assert calls == ["", "claude"]
+
+
+def test_a_saved_account_is_kept_while_it_has_a_seat(tmp_path):
+    from scripts.swarm import capacity
+
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    saved = {
+        "profile": "engineer",
+        "harness": "claude",
+        "model": "opus",
+        "effort": "high",
+        "account": "old",
+        "model_source": "handoff",
+    }
+    runtime = HerdrRuntime(
+        home=tmp_path, run=run, choose=lambda requested, environ: (requested or "claude", "requested")
+    )
+    runtime._quota_accounts = [
+        capacity.Account("claude", "fresh", "OPEN", 0, 90, 90, 6),
+        capacity.Account("claude", "old", "OPEN", 3, 90, 90, 6),
+    ]
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    task = {"id": "t1", "title": "x", "profile": "engineer", "launch_assignment": saved}
+    runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task)
+    argv = seen["argv"]
+    assert argv[argv.index("--route") + 1] == "old"

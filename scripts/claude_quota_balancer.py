@@ -682,7 +682,9 @@ def select_credential(
         for result in results
         if result.account not in excluded and (cap := account_cap(result, timestamp, include_fable)) is not None
     }
-    reserve = {slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", str()).split(",") if slug.strip()}
+    reserve = {
+        slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", str()).split(",") if slug.strip()
+    }
     seat = session_bands.pick(seat for seat in seats.values() if seat.account not in reserve)
     seat = seat or session_bands.pick(seats.values())
     if seat is None:

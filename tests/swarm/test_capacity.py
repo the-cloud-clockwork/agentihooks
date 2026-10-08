@@ -96,6 +96,39 @@ def test_a_fresh_codex_reading_with_only_the_week_gets_the_top_band(monkeypatch)
     assert seen == [capacity.Account("codex", "a", "OPEN", 0, None, 90, 6)]
 
 
+def test_accounts_judge_every_window_at_the_given_time_and_pass_the_environment(monkeypatch):
+    from scripts.codex_quota import CodexQuota
+
+    now, env, calls = 1_000_000, {"AH": "1"}, []
+    claude = balancer.ProbeResult(
+        "a", "allowed", "NORMAL", 5.0, balancer.QuotaWindow(95.0, now + 100), balancer.QuotaWindow(90.0, now - 10)
+    )
+    codex = CodexQuota(now, "pro", balancer.QuotaWindow(40.0, now + 100), balancer.QuotaWindow(30.0, now - 10))
+    pool = [capacity.codex_router.CodexAccount("default")]
+    monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [])
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(now, claude)])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"x": 1})
+    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda environ: calls.append(("pool", environ)) or pool)
+    monkeypatch.setattr(
+        capacity.codex_router,
+        "fresh_quotas",
+        lambda p, environ, at: calls.append(("fresh", environ, at)) or {"default": codex},
+    )
+    monkeypatch.setattr(
+        capacity.codex_router, "quotas", lambda p, environ: calls.append(("quotas", [a.name for a in p], environ)) or {}
+    )
+    assert capacity.accounts(env, now) == [
+        capacity.Account("claude", "a", "OPEN", 0, 5.0, 100.0, 2),
+        capacity.Account("codex", "default", "OPEN", 0, 60.0, 100.0, 6),
+        capacity.Account("codex", "x", "UNKNOWN", 1, None, None, None),
+    ]
+    assert calls == [("pool", env), ("fresh", env, now), ("quotas", ["x"], env)]
+    calls.clear()
+    capacity.accounts(env, now, refresh=False)
+    assert calls[1] == ("quotas", ["default"], env)
+
+
 def test_a_stale_codex_reading_gets_no_seat(monkeypatch):
     from scripts import session_bands
     from scripts.codex_quota import CodexQuota
