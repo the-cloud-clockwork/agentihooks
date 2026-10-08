@@ -13,6 +13,11 @@ DOC = {
     "phases": [
         {"id": "p1", "title": "Seats and continuity", "done": True},
         {"id": "p2", "title": "Intent and plan", "done": False},
+        {"id": "p3", "title": "Dropped phase", "done": False, "out_of_scope": True},
+    ],
+    "questions": [
+        {"id": "q1", "text": "Still asked", "answers": []},
+        {"id": "q2", "text": "Dropped question", "answers": [], "out_of_scope": True},
     ],
     "tasks": [
         {"id": "t1", "title": "Shipped", "lane": "eng", "state": "done", "done": True},
@@ -154,3 +159,12 @@ def test_a_live_update_out_of_scope_drops_the_verdicts_and_back_in_scope_restore
     )
     assert verdicts(page, "#item-followups-f1") == ["Approve", "Deny"]
     assert verdicts(page, "#item-followups-f2") == ["Approve", "Deny"]
+
+
+def test_every_out_of_scope_item_list_hides_the_verdicts(ledger):
+    page, _ = ledger
+    assert verdicts(page, "#item-phases-p3") == []
+    assert verdicts(page, "#item-questions-q2") == []
+    assert scope_dot(page, "#item-phases-p3").get_attribute("aria-pressed") == "true"
+    assert scope_dot(page, "#item-questions-q2").get_attribute("aria-pressed") == "true"
+    assert verdicts(page, "#item-questions-q1") == ["Approve", "Deny"]
