@@ -60,7 +60,7 @@ Commit only the files this cycle touched, push `<name>`, open the PR with `--bas
 "$WT" done <name> --repo <repo-dir>
 ```
 
-Whoever submits the merge owns it until the PR state reads `MERGED`, then runs `done` for its worktree in that turn. Refuses a dirty worktree. Queued, open, closed without merge or unreadable PRs retain the remote branch and worktree, even with `--force`. A confirmed merged PR permits remote branch deletion before teardown. Then fetches the base branch and fast-forwards the primary checkout to `origin/<base>` when it is on a clean base branch, and names the blocker otherwise. Deletes the local branch when it is on the remote base branch or its PR into it merged; otherwise keeps it and says so. `--force` overrides the dirty and local branch checks only.
+Whoever submits the merge owns it until the PR state reads `MERGED`, then runs `done` for its worktree in that turn. Refuses a dirty worktree. Queued, open or unreadable PRs retain the remote branch and worktree, even with `--force`. A PR closed without merge is refused unless `--force`, which drops the worktree and local branch and keeps the remote branch. A confirmed merged PR permits remote branch deletion before teardown. Then fetches the base branch and fast-forwards the primary checkout to `origin/<base>` when it is on a clean base branch, and names the blocker otherwise. Deletes the local branch when it is on the remote base branch or its PR into it merged; otherwise keeps it and says so. `--force` overrides the dirty, closed without merge and local branch checks only.
 
 ## Base-direct
 
