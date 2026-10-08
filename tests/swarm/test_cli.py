@@ -10,6 +10,7 @@ from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
@@ -1779,7 +1780,8 @@ def test_restore_hands_the_runtime_to_restore_and_prints_every_agent_outcome(env
     assert [(r["name"], r["outcome"], r["reason"]) for r in printed["restored"]] == [
         ("engineer@a1b2c3-0001", "fresh", "no conversation id")
     ]
-    assert seen["runtime"] is rt
+    assert isinstance(seen["runtime"], RoutedRuntime)
+    assert seen["runtime"].herdr_runtime is rt
 
 
 @pytest.mark.parametrize("command", ["create", "start", "url"])
