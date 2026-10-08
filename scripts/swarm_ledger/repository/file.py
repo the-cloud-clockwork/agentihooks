@@ -20,6 +20,7 @@ class Synced(NamedTuple):
     stored: tuple | None
     sweep: int
     text: str
+    seeded: bool
 
 
 SYNCED: dict[Path, Synced] = {}
@@ -49,9 +50,36 @@ def cached_text(html_path, json_path, reconcile, core=core):
     return entry.text
 
 
-def load_state(json_path, seed, core=core):
-    if json_path.exists():
-        state = core.loads(json_path.read_text(encoding="utf-8"))
+def own_text(json_path, page):
+    entry = SYNCED.get(json_path)
+    if (
+        entry is None
+        or not entry.seeded
+        or shadow.enabled()
+        or entry.page != page
+        or entry.stored != signature(json_path)
+    ):
+        return None
+    return entry.text
+
+
+def read_seed(html, core=core):
+    try:
+        return core.parse_seed(html), None
+    except ValueError as exc:
+        return None, f"HTML seed unreadable, agent edits ignored until fixed: {exc}"
+
+
+def store(json_path, text, own, core=core):
+    if own is None:
+        core.write_if_changed(json_path, text)
+    elif text != own:
+        core.atomic_write(json_path, text)
+
+
+def load_state(json_path, seed, core=core, text=None):
+    if text is not None or json_path.exists():
+        state = core.loads(json_path.read_text(encoding="utf-8") if text is None else text)
         if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or "seeds" not in state["_meta"]:
             raise ValueError(f"{json_path} has no ledger _meta")
         meta = state.pop("_meta")
@@ -75,11 +103,9 @@ def sync(slug, changes=None, ops=None, gate=None, core=core):
     with core.LOCK, shadow.storage_lock(core.LEDGER_DIR):
         page = signature(html_path)
         html = html_path.read_text(encoding="utf-8")
-        try:
-            seed, seed_error = core.parse_seed(html), None
-        except ValueError as exc:
-            seed, seed_error = None, f"HTML seed unreadable, agent edits ignored until fixed: {exc}"
-        doc, meta, created = load_state(json_path, seed, core)
+        own = own_text(json_path, page)
+        seed, seed_error = (None, None) if own is not None else read_seed(html, core)
+        doc, meta, created = load_state(json_path, seed, core, own)
         ctx = core.Context(meta, core.now_ms())
         meta.setdefault("members", {})
         meta["created_at"] = core.earliest(meta, ctx.at)
@@ -118,14 +144,14 @@ def sync(slug, changes=None, ops=None, gate=None, core=core):
         meta["seeds"] = {k: v for k, v in meta["seeds"].items() if int(k) > meta["rev"] - core.SEEDS_KEPT}
         state = {**doc, "_meta": meta}
         text = core.pretty(state) + "\n"
-        core.write_if_changed(json_path, text)
+        store(json_path, text, own, core)
         stored = signature(json_path)
-        written = None if seed is None else core.rewrite_seed(html_path, html, doc, meta["rev"])
+        written = None if seed_error else core.rewrite_seed(html_path, html, doc, meta["rev"])
         if written is not None:
             page = stamp(written)
         shadow.persist(core.LEDGER_DIR, slug, state)
         if not ctx.refused:
-            SYNCED[json_path] = Synced(page, stored, ctx.at // SWEEP_MS, text)
+            SYNCED[json_path] = Synced(page, stored, ctx.at // SWEEP_MS, text, seed_error is None)
         return state, rejected
 
 
