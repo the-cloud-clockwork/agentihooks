@@ -177,8 +177,10 @@ class HerdrRuntime:
         return [row for row in self._quota_accounts if (row.harness, row.name) not in warned]
 
     def _quota_refusal(self, agent):
+        from scripts.swarm.capacity import warning
+
         warnings = "; ".join(
-            f"{harness} {name} is at its {window} quota warning"
+            f"{harness} {name} {warning(window)}"
             for (harness, name), window in self._quota_warned().items()
             if harness == agent
         )

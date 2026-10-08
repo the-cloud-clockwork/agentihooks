@@ -94,6 +94,10 @@ def free_seats(account: Account) -> int:
     return max(0, (account.cap or 0) - account.sessions)
 
 
+def warning(window: str) -> str:
+    return f"is at its {window} quota warning"
+
+
 def _harnesses(config, lane: str) -> tuple[str, ...]:
     requested = config.lanes.get(lane, {}).get("agent")
     if requested in {"claude", "codex"}:
@@ -182,9 +186,7 @@ def calculate(
     restricted = sorted({row.state.lower() for row in observations if row.state != "OPEN"})
     reason = "accounts have quota" if not restricted else "accounts are " + ", ".join(restricted)
     reason += f"; Claude has {placeable['claude']} free seats and Codex has {placeable['codex']} free seats"
-    reason += "".join(
-        f"; {harness} {name} is at its {window} quota warning" for (harness, name), window in warned.items()
-    )
+    reason += "".join(f"; {harness} {name} {warning(window)}" for (harness, name), window in warned.items())
     return {
         "configured": configured,
         "effective": effective,
