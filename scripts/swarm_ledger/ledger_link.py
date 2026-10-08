@@ -13,7 +13,9 @@ LOOPBACK = ("127.0.0.1", "localhost")
 
 
 def base(environ=os.environ) -> str:
-    if remote(environ) and environ.get("LEDGER_URL"):
+    if remote(environ):
+        if not environ.get("LEDGER_URL"):
+            raise SystemExit("a remote ledger client needs LEDGER_URL, the address of the hive ledger server")
         return environ["LEDGER_URL"].rstrip("/")
     host, port = address(environ)
     return f"http://{host}:{port}"

@@ -117,10 +117,11 @@ def test_a_remote_client_without_a_credential_is_refused(live, hive):
 
 
 def test_a_remote_client_without_ledger_url_is_refused():
-    with patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_LEDGER_AGENT_TOKEN": "launch-token"}):
-        os.environ.pop("LEDGER_URL")
-        with pytest.raises(SystemExit, match="LEDGER_URL"):
-            ledger.credentials(SLUG)
+    with pytest.raises(SystemExit, match="LEDGER_URL"):
+        ledger_link.base({"AGENTIHOOKS_DEPLOYMENT": "compose"})
+    with patch.dict(os.environ, REMOTE):
+        with pytest.raises(SystemExit, match="service writes"):
+            ledger.credentials(SLUG, service=True)
 
 
 def test_a_remote_client_never_starts_a_local_ledger_server():

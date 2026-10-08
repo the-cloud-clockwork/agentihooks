@@ -107,9 +107,9 @@ OBJECT_FORMS = {
 def credentials(slug, service=False):
     who = Who.from_env()
     if ledger_link.remote():
-        if not os.environ.get("LEDGER_URL"):
-            sys.exit("a remote ledger client needs LEDGER_URL, the address of the hive ledger server")
-        if service or not who.pinned:
+        if service:
+            sys.exit("a remote ledger client cannot make service writes; the operator credential stays on its host")
+        if not who.pinned:
             sys.exit("a remote ledger client needs a pinned agent identity; the operator credential stays on its host")
         token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or launch_token(slug, who.name)
         return {"X-Ledger-Token": token, "X-Ledger-Agent": who.name}
