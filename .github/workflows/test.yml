@@ -28,6 +28,10 @@ permissions:
 jobs:
   swarm-image:
     uses: ./.github/workflows/swarm-smoke.yml
+  semgrep:
+    uses: ./.github/workflows/semgrep.yml
+    with:
+      base: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
 
   unit:
     runs-on: ubuntu-latest
@@ -433,7 +437,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [unit, shard-check, test-count, lint, sonar, mutation, swarm-image]
+    needs: [unit, shard-check, test-count, lint, sonar, mutation, swarm-image, semgrep]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
