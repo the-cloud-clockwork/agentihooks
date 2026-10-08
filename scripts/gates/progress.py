@@ -4,7 +4,9 @@ import re
 import time
 from dataclasses import dataclass
 
-PREFIX = "agentihooks:swarm"
+from scripts.swarm.keyspace import ROOT
+
+PREFIX = f"{ROOT}:swarm"
 OUTCOME_COMMANDS = (
     ("pushed", re.compile(r"(?:^|[;&|(]\s*)git(?:\s+-C\s+\S+)?\s+push\b")),
     ("pull request opened", re.compile(r"(?:^|[;&|(]\s*)gh\s+pr\s+create\b")),

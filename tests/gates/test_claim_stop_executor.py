@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -93,7 +95,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         "FAKE_GH_ANSWER": str(answer),
     }
     client.hset(
-        f"agentihooks:swarm:{SLUG}:config",
+        f"{KEY_ROOT}:swarm:{SLUG}:config",
         mapping={"slug": SLUG, "repo": "/repo", "max_eng": 1, "max_ci": 0, "state": "running", "gates": "{}"},
     )
 
@@ -167,7 +169,7 @@ def test_a_stop_after_the_merge_is_blocked_and_one_on_pending_checks_passes_with
     rig.answer.write_text(json.dumps(PENDING))
     pending = rig.stop()
     assert pending.returncode == 0, pending.stderr
-    held = json.loads(rig.redis.get(f"agentihooks:swarm:{SLUG}:wait:{ME}"))
+    held = json.loads(rig.redis.get(f"{KEY_ROOT}:swarm:{SLUG}:wait:{ME}"))
     assert held["on"] == {"kind": "checks", "target": URL}
 
 
@@ -178,7 +180,7 @@ def test_a_tune_task_with_a_merged_fix_stops_on_its_measurement_wait_and_owes_it
     assert bare.returncode == 2
     assert f"your pull request {URL} merged, and tune task {rig.task} closes on its proof contract" in bare.stderr
     wait = {"until": 2**53, "reason": "after measurement", "at": 1}
-    rig.redis.set(f"agentihooks:swarm:{SLUG}:wait:{ME}", json.dumps(wait))
+    rig.redis.set(f"{KEY_ROOT}:swarm:{SLUG}:wait:{ME}", json.dumps(wait))
     waiting = rig.stop()
     assert waiting.returncode == 0, waiting.stderr
 
@@ -186,7 +188,7 @@ def test_a_tune_task_with_a_merged_fix_stops_on_its_measurement_wait_and_owes_it
 def test_observe_mode_lets_the_stop_through_and_logs_it(rig):
     rig.answer.write_text(json.dumps(MERGED))
     rig.set_task(state="pr", pr_url=URL)
-    rig.redis.hset(f"agentihooks:swarm:{SLUG}:config", "gates", json.dumps({"claim-stop": "observe"}))
+    rig.redis.hset(f"{KEY_ROOT}:swarm:{SLUG}:config", "gates", json.dumps({"claim-stop": "observe"}))
     passed = rig.stop({"AGENTIHOOKS_GATE_CLAIM_STOP": "enforce"})
     assert passed.returncode == 0, passed.stderr
     assert [(r["gate"], r["kind"]) for r in rig.rows()] == [("claim-stop", "observe")]
@@ -206,7 +208,7 @@ def test_a_child_session_started_inside_the_agent_leaves_its_task_and_record_alo
 
     store = RedisStore(rig.redis)
     store.put_agent(SLUG, AgentRecord(ME, "eng", rig.task, harness="claude"))
-    record = rig.redis.hget(f"agentihooks:swarm:{SLUG}:agents", ME)
+    record = rig.redis.hget(f"{KEY_ROOT}:swarm:{SLUG}:agents", ME)
     rig.set_task(state="pr", pr_url=URL)
     rig.answer.write_text(json.dumps(MERGED))
     launcher, claude, codex = _wrappers(rig.home / "procs")
@@ -214,7 +216,7 @@ def test_a_child_session_started_inside_the_agent_leaves_its_task_and_record_alo
         child = rig.stop(via=[launcher, claude, "/bin/bash", "-c", '"$@"; exit $?', "bash", codex])
         assert child.returncode == 0, child.stderr
     assert (rig.ledger_task()["state"], rig.ledger_task()["claimed_by"]) == ("pr", ME)
-    assert rig.redis.hget(f"agentihooks:swarm:{SLUG}:agents", ME) == record
+    assert rig.redis.hget(f"{KEY_ROOT}:swarm:{SLUG}:agents", ME) == record
     assert rig.rows() == []
     parent = rig.stop(via=[launcher, claude])
     assert parent.returncode == 2

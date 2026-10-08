@@ -6,6 +6,7 @@ import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import affinity, cli
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import status_report
 from scripts.swarm.store import MASTER, SwarmConfig
@@ -293,7 +294,7 @@ def test_the_order_is_one_record_under_the_swarm_key_with_every_field(store):
         "state": "ordered",
         "reason": "",
     }
-    assert store.redis.get("agentihooks:swarm:sw:master-affinity") is not None
+    assert store.redis.get(f"{KEY_ROOT}:swarm:sw:master-affinity") is not None
     assert "you run on claude." in item.text
 
 
@@ -312,7 +313,7 @@ def test_without_a_live_master_the_order_returns_what_is_pending_and_sends_nothi
     _master(store, lane="eng", name="engineer@a1b2c3-0002")
     assert affinity.order(store, "sw", 2) is None
     assert _orders(store) == []
-    store.redis.set("agentihooks:swarm:sw:master-affinity", '{"to": "codex", "state": "failed"}')
+    store.redis.set(f"{KEY_ROOT}:swarm:sw:master-affinity", '{"to": "codex", "state": "failed"}')
     assert affinity.order(store, "sw", 3) == {"to": "codex", "state": "failed"}
 
 
