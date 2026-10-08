@@ -53,6 +53,7 @@ class PullRequest:
     failed: tuple = ()
     head: str = ""
     red_at: int | None = None
+    unpassed_gate: str = ""
 
 
 def iso_ms(text):
@@ -76,12 +77,13 @@ def pull_request(raw):
     ]
     if not pushes and commits:
         pushes = [iso_ms(commits[-1]["committedDate"])]
+    unpassed_gate = _unpassed_gate(raw.get("gated"), checks, results, running)
     return PullRequest(
         raw["state"],
         iso_ms(raw["mergedAt"]) if raw.get("mergedAt") else None,
         min(pushes, default=None),
-        any(result in RED for result in results),
-        _resolved(raw.get("gated"), checks, results, running),
+        any(result in RED for result in results) or bool(unpassed_gate),
+        _resolved(raw.get("gated"), checks, results, running) or bool(unpassed_gate),
         tuple(
             check.get("name") or check.get("context") or "a check"
             for check, result in zip(checks, results)
@@ -89,12 +91,20 @@ def pull_request(raw):
         ),
         raw.get("headRefOid") or "",
         min(reds, default=None),
+        unpassed_gate,
     )
 
 
 def red_window(pushed_at, red_at, now_ms):
     start = max((mark for mark in (pushed_at, red_at) if mark is not None), default=None)
     return start if start is not None and now_ms - start >= RED_QUIET_MS else None
+
+
+def _unpassed_gate(gated, checks, results, running):
+    if not gated or running or any(result in PENDING for result in results):
+        return ""
+    gate = [result for check, result in zip(checks, results) if (check.get("name") or check.get("context")) == GATE]
+    return GATE if all(result == "SKIPPED" for result in gate) else ""
 
 
 def _resolved(gated, checks, results, running):
@@ -287,7 +297,11 @@ def _pull_requests(mail, tasks, now_ms, github):
         elif found.state == "CLOSED":
             text = f"Your pull request {url} for {title} was closed without merging. Reopen it, open a new one, or block the task."
             sent += mail.send(f"{url}:closed", mail.engineer(task), text)
-        elif found.red and red_window(found.pushed_at, found.red_at, now_ms) is not None:
+        elif (
+            found.red
+            and (not found.unpassed_gate or found.failed)
+            and red_window(found.pushed_at, found.red_at, now_ms) is not None
+        ):
             text = (
                 f"Your pull request {url} for {title} has red checks and no push for twenty minutes. Fix them and push."
             )

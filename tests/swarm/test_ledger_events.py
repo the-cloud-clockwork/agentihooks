@@ -398,13 +398,13 @@ def test_a_failed_check_waits_for_the_queued_run_before_resolving_red(conclusion
 def test_a_head_with_only_skipped_checks_keeps_waiting(suites, gated):
     raw = {"state": "OPEN", "gated": gated, "statusCheckRollup": SKIPPED_ONLY, "checkSuites": suites}
     pull = ledger_events.pull_request(raw)
-    assert pull.resolved is False
-    assert pull.red is False
+    assert pull.resolved is (gated and suites != [QUEUED_TESTS])
+    assert pull.red is (gated and suites != [QUEUED_TESTS])
     raw["statusCheckRollup"] = SKIPPED_ONLY + [{"name": GATE, "conclusion": "SUCCESS"}]
     assert ledger_events.pull_request(raw).resolved is (suites != [QUEUED_TESTS])
 
 
-@pytest.mark.parametrize("gate", [None, "PENDING", "SKIPPED", "CANCELLED", "TIMED_OUT"])
+@pytest.mark.parametrize("gate", [None, "PENDING", "CANCELLED", "TIMED_OUT"])
 def test_a_gate_that_has_not_passed_or_failed_keeps_the_head_unresolved(gate):
     rollup = SKIPPED_ONLY + [{"name": "unit", "conclusion": "SUCCESS"}, {"name": GATE, "conclusion": gate}]
     raw = {"state": "OPEN", "gated": True, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}
@@ -451,6 +451,65 @@ def test_a_failed_check_beside_a_pending_gate_resolves_red_once_runs_finish():
 def test_a_gate_check_counts_only_by_its_exact_name():
     rollup = [{"name": "Gate — Required later", "conclusion": "SUCCESS"}]
     raw = {"state": "OPEN", "gated": True, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}
-    assert ledger_events.pull_request(raw).resolved is False
+    assert ledger_events.pull_request(raw).unpassed_gate == GATE
     raw["statusCheckRollup"] = rollup + [{"context": GATE, "state": "SUCCESS"}]
     assert ledger_events.pull_request(raw).resolved is True
+
+
+@pytest.mark.parametrize("rollup", [[], SKIPPED_ONLY, [{"name": GATE, "conclusion": "SKIPPED"}]])
+def test_a_dead_required_gate_resolves_without_changing_red_reminder_fields(rollup):
+    raw = {"state": "OPEN", "gated": True, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}
+    pull = ledger_events.pull_request(raw)
+    assert pull.resolved is True
+    assert pull.unpassed_gate == GATE
+    assert pull.red is True
+    assert pull.failed == ()
+    assert pull.red_at is None
+
+
+@pytest.mark.parametrize("gated", [False, True])
+@pytest.mark.parametrize("gate", ["SUCCESS", None, "PENDING", "CANCELLED", "TIMED_OUT"])
+def test_an_unpassed_gate_is_only_a_missing_or_skipped_terminal_gate(gated, gate):
+    raw = {"state": "OPEN", "gated": gated, "statusCheckRollup": [{"context": GATE, "state": gate}]}
+    assert ledger_events.pull_request(raw).unpassed_gate == ""
+
+
+@pytest.mark.parametrize("pending", [None, "", "PENDING", "EXPECTED"])
+def test_a_skipped_gate_with_a_pending_check_does_not_end_the_wait(pending):
+    raw = {
+        "state": "OPEN",
+        "gated": True,
+        "statusCheckRollup": [{"name": GATE, "conclusion": "SKIPPED"}, {"context": "lint", "state": pending}],
+    }
+    pull = ledger_events.pull_request(raw)
+    assert pull.resolved is False
+    assert pull.unpassed_gate == ""
+
+
+@pytest.mark.parametrize("gate", [[], [{"name": GATE, "conclusion": "SKIPPED"}]])
+@pytest.mark.parametrize(
+    "failure", [[], [{"name": "unit", "conclusion": "FAILURE", "completedAt": "2026-10-07T17:00:01Z"}]]
+)
+def test_dead_gate_resolution_is_red_but_reminders_still_require_actual_failure(store, gate, failure):
+    raw = {
+        "state": "OPEN",
+        "gated": True,
+        "commits": [{"committedDate": "2026-10-07T17:00:00Z"}],
+        "statusCheckRollup": gate + failure,
+    }
+    pull = ledger_events.pull_request(raw)
+    assert pull.resolved is True
+    assert pull.red is True
+    assert pull.unpassed_gate == GATE
+    run(store, recorded())
+    now = (pull.red_at or pull.pushed_at) + 20 * MINUTE
+    run(store, in_pr(), now_ms=now, github=lambda url: pull)
+    expected = (
+        [
+            "Your pull request https://github.com/o/r/pull/9 for task t1 (Build the thing) "
+            "has red checks and no push for twenty minutes. Fix them and push."
+        ]
+        if failure
+        else []
+    )
+    assert texts(store, ENG_SEAT) == expected

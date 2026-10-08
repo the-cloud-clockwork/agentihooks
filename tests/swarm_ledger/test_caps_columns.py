@@ -1,9 +1,8 @@
-import json
 from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import show
+from tests.swarm_ledger.ledger_page import ledger_state, shell_html, show
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 DOC = {"title": "Caps columns", "overview": "o", "phases": []}
@@ -24,8 +23,8 @@ def browser():
 def caps_boxes(browser, width):
     tab = browser.new_page(viewport={"width": width, "height": 900})
     try:
-        html = TEMPLATE.read_text(encoding="utf-8").replace("__LEDGER_DATA__", json.dumps(DOC))
-        show(tab, html)
+        html = shell_html()
+        show(tab, html, ledger=ledger_state(DOC))
         return tab.evaluate(
             """() => {
               document.getElementById("swarm").hidden = false;

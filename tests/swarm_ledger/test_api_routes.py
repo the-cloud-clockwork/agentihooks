@@ -64,3 +64,28 @@ def test_only_a_stream_accept_header_turns_the_events_path_into_a_stream(monkeyp
     assert routes.dispatch(handler(), server) == {"data": []}
     assert routes.dispatch(handler("application/json"), server) == {"data": []}
     assert seen == [("stream", SLUG), ("collection", "events"), ("collection", "events")]
+
+
+def test_a_task_work_folder_read_answers_its_lines_with_their_revision():
+    server = SimpleNamespace(workspace_tails=lambda slug, task: {"latest_progress": f"{slug} {task}"})
+    data = {"latest_progress": f"{SLUG} t1"}
+    assert routes.workspace(server, SLUG, "t1") == {"data": data, "revision": resources.revision(data)}
+
+
+def test_an_unsafe_task_work_folder_answers_not_found():
+    def refuse(slug, task):
+        raise ValueError(task)
+
+    with pytest.raises(APIError) as caught:
+        routes.workspace(SimpleNamespace(workspace_tails=refuse), SLUG, "t 1")
+    assert (caught.value.status, caught.value.envelope()) == (
+        404,
+        {"error": {"code": "resource_missing", "message": "No such task work folder"}},
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "routed"), [("tasks/t1/workspace", True), ("tasks/t1/workspaces", False), ("x/tasks/t1/workspace", False)]
+)
+def test_only_the_exact_task_work_folder_path_reads_the_folder(path, routed):
+    assert bool(routes.WORKSPACE_RE.fullmatch(path)) is routed

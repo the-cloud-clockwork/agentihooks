@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="ledger-token" content="__LEDGER_TOKEN__">
+<meta name="ledger-page" content="__LEDGER_PAGE__">
+<meta name="ledger-slug" content="__LEDGER_SLUG__">
+<meta name="ledger-port" content="__LEDGER_PORT__">
+<title>__LEDGER_TITLE__</title>
+<link rel="icon" type="image/png" href="/favicon.ico">
+<link rel="stylesheet" href="/static/__LEDGER_PAGE__/palette.css">
+<link rel="stylesheet" href="/static/__LEDGER_PAGE__/css/ledger.css">
+<link rel="stylesheet" href="/static/__LEDGER_PAGE__/css/tooltips.css">
+</head>
+<body>
+<main>
+  <header>
+    <div class="masthead"><a class="logo-link" href="/" aria-label="HOME"><span class="logo" aria-hidden="true"></span></a><div>
+      <div class="title-row" id="title-row"><h1 id="title"></h1><button class="title-pen" id="title-edit" type="button" aria-label="Rename the ledger" title="Rename the ledger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button></div>
+      <form class="title-form" id="title-form" hidden><input id="title-input" type="text" maxlength="200" autocomplete="off" aria-label="Ledger title"><button class="link" type="submit">Save</button><button class="link" id="title-cancel" type="button">Cancel</button><div class="title-error" id="title-error" role="alert"></div></form>
+    </div></div>
+    <div class="status" id="status" role="status">loading</div>
+  </header>
+  <div class="banner" id="banner"></div>
+  <div class="closed-banner" id="closed-banner" role="status" hidden><span id="closed-label"></span> <button class="sw-btn" type="button" data-swarm="reopen">Reopen</button></div>
+<div class="workspace"><div id="icon-strip" aria-label="Page actions"></div><nav class="outline" id="outline" aria-label="Outline"></nav><div id="main-content"><details class="fold overview" id="overview-box" open><summary>Overview</summary><p id="overview"></p></details>  <div class="tabs" id="view-tabs" role="tablist" aria-label="Ledger views"><button class="tab" id="tab-ledger" role="tab" aria-controls="ledger" aria-selected="true">Ledger</button><button class="tab" id="tab-swarm" role="tab" aria-controls="swarm" aria-selected="false" tabindex="-1">Swarm</button></div>
+<div class="tab-body" id="ledger" role="tabpanel" aria-labelledby="tab-ledger"><div class="ledger-layout"><div class="col"><div class="sec-tools"><label class="jump-menu">Jump to <select id="jump-to" aria-label="Jump to section"></select></label><button class="link" type="button" id="sections-all"></button><button class="link" type="button" id="comments-all">Show all comments</button></div><section id="sec-priorities" data-outline="priorities"><details class="sources-box fold" id="prio-box"><summary>Priorities <span class="count" id="prio-count"></span></summary>
+    <div class="prio-head"><button class="link danger" id="prio-clear-all" type="button">Clear all</button></div><ul id="priorities"></ul></details></section>
+<section id="sec-notes" data-outline="notes"><details class="sources-box fold" id="notes-box" open><summary>Operator notes <span class="count" id="notes-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><div id="notes"></div></details></section>
+<section id="sec-questions" data-outline="questions"><details class="sources-box fold" id="questions-box" open><summary>Open questions <span class="count" id="questions-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="questions"></ol></details></section>
+<section id="sec-phases" data-outline="phases"><details class="sources-box fold" id="phases-box" open><summary>Plan phases <span class="count" id="phases-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="phases"></ol></details></section>
+<section id="sec-tasks" data-outline="tasks"><details class="sources-box fold" id="tasks-box"><summary>Swarm tasks <span class="count" id="tasks-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="tasks"></ol></details></section>
+<section id="sec-followups" data-outline="followups"><details class="sources-box fold" id="followups-box" open><summary>Follow-ups or blockers <span class="count" id="followups-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ul id="followups"></ul></details></section>
+<section id="sec-sources" data-outline="sources"><details class="sources-box fold" id="sources-box"><summary>Original sources <span class="count" id="sources-count"></span></summary><ul class="sources" id="sources"></ul></details></section>
+</div></div></div>
+
+<div class="tab-body" id="swarm" role="tabpanel" aria-labelledby="tab-swarm" hidden><div id="swarm-box">
+<div class="sw-row sw-head" id="swarm-head"><h2 class="sw-title"><span class="sw-word">Swarm</span><span class="sw-sep" aria-hidden="true">&middot;</span><span id="swarm-name"></span><span class="sw-sep" aria-hidden="true">&middot;</span><span class="sw-state" id="swarm-state"></span><span class="sw-sep" aria-hidden="true">&middot;</span><span class="sw-tick" id="swarm-tick"></span></h2>
+<div class="sw-actions"><div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">start</button><button class="sw-btn" type="button" data-swarm="pause">pause</button><button class="sw-btn" type="button" data-swarm="stop">stop</button><button class="sw-btn danger" type="button" data-swarm="stop_now">stop now</button><button class="sw-btn danger" type="button" data-swarm="close">close ledger</button></div>
+<div class="sw-ctl sw-modes" id="swarm-modes" role="group" aria-label="Autonomy"><button class="sw-btn sw-mode" type="button" data-autonomy="manual" aria-pressed="false">manual</button><button class="sw-btn sw-mode" type="button" data-autonomy="assist" aria-pressed="false">assist</button><button class="sw-btn sw-mode" type="button" data-autonomy="delegate" aria-pressed="false">delegate</button><button class="sw-btn sw-mode" type="button" data-autonomy="full" aria-pressed="false">full</button></div>
+<div class="sw-ctl sw-layout"><button class="sw-btn sw-reset" id="layout-reset" type="button" title="Restore the default panel sizes on every ledger" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>reset layout</button></div></div></div>
+<p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p>
+<div class="sw-row sw-alert" id="swarm-alert" hidden><span class="sw-alert-count" id="alert-count"></span><span class="sw-alert-kinds" id="alert-kinds"></span><span class="sw-live" id="alert-live"></span></div>
+<div class="sw-row sw-capacity" id="capacity-box"><span class="sw-label">Capacity</span>
+<div class="sw-caps"><div class="sw-cap"><span class="sw-cap-name">eng</span><button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower engineer cap">&minus;</button><label class="sw-field"><input class="sw-num" id="cap-eng" type="text" inputmode="numeric" autocomplete="off" data-cap="max_eng" aria-label="Engineer cap"></label><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise engineer cap">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">ci</span><button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower CI cap">&minus;</button><label class="sw-field"><input class="sw-num" id="cap-ci" type="text" inputmode="numeric" autocomplete="off" data-cap="max_ci" aria-label="CI cap"></label><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise CI cap">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">plan</span><button class="sw-btn sw-step" type="button" data-swarm="plan_down" aria-label="Lower planner cap">&minus;</button><label class="sw-field"><input class="sw-num" id="cap-plan" type="text" inputmode="numeric" autocomplete="off" data-cap="max_plan" aria-label="Planner cap"></label><button class="sw-btn sw-step" type="button" data-swarm="plan_up" aria-label="Raise planner cap">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">codex share</span><button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><label class="sw-field"><input class="sw-num" id="cap-codex" type="text" inputmode="numeric" autocomplete="off" data-cap="codex_share" aria-label="Codex share"><span class="sw-unit">%</span></label><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">compact limit</span><button class="sw-btn sw-step" type="button" data-swarm="compact_down" aria-label="Lower compact limit">&minus;</button><label class="sw-field"><input class="sw-num" id="cap-compact" type="text" inputmode="numeric" autocomplete="off" data-cap="compact_limit" aria-label="Compact limit"><span class="sw-unit">k</span></label><button class="sw-btn sw-step" type="button" data-swarm="compact_up" aria-label="Raise compact limit">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">effort min</span><button class="sw-btn sw-step" type="button" data-swarm="effort_min_down" aria-label="Lower effort floor">&minus;</button><label class="sw-field"><input class="sw-num" id="cap-effort_min" type="text" autocomplete="off" data-cap="effort_min" aria-label="Effort floor"></label><button class="sw-btn sw-step" type="button" data-swarm="effort_min_up" aria-label="Raise effort floor">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">effort max</span><button class="sw-btn sw-step" type="button" data-swarm="effort_max_down" aria-label="Lower effort ceiling">&minus;</button><label class="sw-field"><input class="sw-num" id="cap-effort_max" type="text" autocomplete="off" data-cap="effort_max" aria-label="Effort ceiling"></label><button class="sw-btn sw-step" type="button" data-swarm="effort_max_up" aria-label="Raise effort ceiling">+</button></div>
+<div class="sw-cap sw-affinity"><span class="sw-cap-name">master affinity</span><label class="sw-field"><select class="sw-num sw-select" id="cap-master_agent" data-cap="master_agent" aria-label="Master affinity"><option value="claude">Claude</option><option value="codex">Codex</option></select></label><span class="sw-unit sw-affinity-state" id="affinity-state" role="status"></span></div>
+<button class="sw-btn sw-apply" type="button" data-swarm="apply" aria-label="Apply capacity">apply</button></div>
+<span class="sw-label" id="gates-label" hidden>Gates</span><div class="sw-gates" id="swarm-gates" aria-labelledby="gates-label"></div><details class="fold sw-command-log" id="command-log" hidden><summary>Commands <span class="count" id="command-count"></span></summary><div id="command-rows"></div></details></div>
+<div class="sw-grip sw-grip-y" data-grip="height" data-row="capacity-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Capacity height" tabindex="0"></div>
+<div class="sw-row sw-pair" id="swarm-row-work"><div class="sw-block" id="agents-box"><div class="sw-blockhead"><h3>Agents</h3><span class="sw-count" id="agents-count"></span></div><div class="sw-scroll"><table class="sw-table" id="agents-table"><thead><tr><th>agent</th><th>lane</th><th>profile</th><th>model</th><th>task</th><th>state</th><th class="r">age</th><th><span class="sr-only">actions</span></th></tr></thead><tbody id="swarm-agents"></tbody></table></div></div>
+<div class="sw-grip sw-grip-x" data-grip="split" data-row="swarm-row-work" role="separator" aria-orientation="vertical" aria-label="Move the Agents and Tasks split" aria-valuemin="15" aria-valuemax="85" tabindex="0"></div><div class="sw-block" id="swarm-tasks-box"><div class="sw-blockhead"><h3>Tasks</h3><span class="sw-count" id="tasks-open"></span></div><dl class="sw-kv" id="swarm-tasks"></dl></div></div>
+<div class="sw-grip sw-grip-y" data-grip="height" data-row="swarm-row-work" role="separator" aria-orientation="horizontal" aria-label="Resize the Agents and Tasks height" tabindex="0"></div>
+<div class="sw-row sw-pair" id="swarm-row-accounts"><div class="sw-block" id="quota-box"><div class="sw-blockhead"><span class="sw-title"><h3>Quota</h3><button class="sw-btn sw-icon" id="quota-refresh" type="button" aria-label="Refresh quota" title="Probe every account now"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg></button></span><span class="sw-count" id="quota-count"></span></div><div class="sw-scroll"><table class="sw-table" id="quota-table"><thead><tr><th>account</th><th>harness</th><th class="r">5h left</th><th class="r">5h reset</th><th class="r">7d left</th><th class="r">7d reset</th><th class="r">sessions</th><th><span class="sr-only">routing</span></th></tr></thead><tbody id="swarm-quota"></tbody></table></div></div>
+<div class="sw-grip sw-grip-x" data-grip="split" data-row="swarm-row-accounts" role="separator" aria-orientation="vertical" aria-label="Move the Quota and Doctor split" aria-valuemin="15" aria-valuemax="85" tabindex="0"></div><div class="sw-block" id="doctor-box"><div class="sw-blockhead"><h3>Doctor</h3><span class="sw-count" id="doctor-state"></span></div><dl class="sw-kv" id="swarm-doctor"></dl><div class="sw-ctl sw-end"><button class="sw-btn" type="button" data-swarm="doctor_start">start doctor</button><button class="sw-btn danger" type="button" data-swarm="doctor_stop">stop doctor</button></div></div></div>
+<div class="sw-grip sw-grip-y" data-grip="height" data-row="swarm-row-accounts" role="separator" aria-orientation="horizontal" aria-label="Resize the Quota and Doctor height" tabindex="0"></div>
+<div class="sw-row sw-block" id="health-box"><div class="sw-blockhead"><h3>Health</h3><span class="sw-count" id="health-count"></span></div><div class="sw-scroll"><table class="sw-table" id="health-table"><thead><tr><th>finding</th><th>subject</th><th>evidence</th><th>threshold</th><th>seen</th><th>verdict</th><th>note</th></tr></thead><tbody id="health"></tbody></table></div></div>
+<div class="sw-grip sw-grip-y" data-grip="height" data-row="health-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Health height" tabindex="0"></div>
+<div class="sw-row sw-block" id="handoff-box"><div class="sw-blockhead"><h3>Handoff outcomes</h3><span class="sw-count" id="handoff-count"></span></div><div class="sw-scroll"><table class="sw-table" id="handoff-table"><thead><tr><th>seat</th><th>last handoff</th><th>reason</th><th>continuity</th><th>binding</th><th>successor</th></tr></thead><tbody id="swarm-handoffs"></tbody></table></div></div>
+<div class="sw-grip sw-grip-y" data-grip="height" data-row="handoff-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Handoff outcomes height" tabindex="0"></div>
+</div></div>
+
+</div><aside id="stats-column" class="side"><section><details class="sources-box fold" id="stats-box" open><summary>Stats<span class="sync-state end" id="stats-state"></span><button class="mini-sync" id="stats-sync" type="button" aria-label="Refresh stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg></button></summary><dl id="stats"></dl></details></section></aside></div>
+</main>
+<button class="sync" id="sync" type="button" title="Sync the crew" aria-label="Sync the crew">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
+  <span class="sync-badge" id="sync-badge" hidden></span>
+</button>
+<button class="sync fab-top" id="to-top" type="button" title="Back to top" aria-label="Back to top">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+</button>
+<a class="sync fab-home" id="home" href="/" title="HOME" aria-label="HOME">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg>
+</a>
+<button class="sync fab-outline" id="outline-toggle" type="button" title="Outline" aria-label="Outline" aria-expanded="false" aria-controls="outline">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="M4 6h.01"/><path d="M4 12h.01"/><path d="M4 18h.01"/></svg>
+</button>
+<button class="sync fab-bell" id="bell" type="button" title="Notifications" aria-label="Notifications" aria-expanded="false" aria-controls="notif">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+  <span class="sync-badge" id="bell-badge" hidden></span>
+</button>
+<button class="sync" id="alert-fab" type="button" title="Alerts" aria-label="Alerts" aria-expanded="false" aria-controls="alert-panel">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+  <span class="sync-badge" id="alert-badge" hidden></span>
+</button>
+<button class="sync fab-chat" id="chat-fab" type="button" title="Chat" aria-label="Chat" aria-expanded="false" aria-controls="chat-panel">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+  <span class="sync-badge" id="chat-badge" hidden></span>
+</button>
+<button class="sync" id="art-fab" type="button" title="Artifacts" aria-label="Artifacts" aria-expanded="false" aria-controls="art-panel">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+  <span class="sync-badge" id="art-badge" hidden></span>
+</button>
+<section class="notif" id="art-panel" role="dialog" aria-modal="false" aria-label="Artifacts" hidden><details class="sources-box fold panel-fold" id="art-fold" open>
+  <summary class="notif-head">Artifacts<span class="end"><button class="link" id="art-close" type="button">Close</button></span></summary>
+  <ul class="notif-list" id="art-list"></ul>
+  <p class="notif-meta art-trash-head" id="art-trash-head" hidden>Trash, each kept 30 days</p>
+  <ul class="notif-list" id="art-trash" aria-label="Artifact trash"></ul>
+</details></section>
+<section class="chat-panel" id="chat-panel" role="dialog" aria-modal="false" aria-label="Chat" hidden><details class="sources-box fold panel-fold" id="chat-fold" open>
+  <summary class="notif-head"><span id="chat-title">Chat</span><span class="end"><button class="link danger" id="chat-clear" type="button" hidden>Clear</button><button class="link" id="chat-size" type="button">Expand</button><button class="link" id="chat-close" type="button">Close</button></span></summary>
+  <div class="chat-log" id="chat-log" aria-live="polite"></div>
+  <div class="chat-compose"><div class="chat-to"><span id="chat-to-label">To</span><input type="hidden" id="chat-to" value=""><button type="button" id="chat-to-pick" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="chat-to-label chat-to-pick">master</button><div class="chat-to-menu" id="chat-to-menu" role="listbox" aria-labelledby="chat-to-label" hidden></div></div><textarea class="line" id="chat-input" rows="1" placeholder="Message&hellip;" aria-label="Chat message"></textarea>
+    <div class="hint">Enter to send &middot; Ctrl+Enter for a new line</div></div>
+</details></section>
+<section class="notif" id="notif" role="dialog" aria-modal="false" aria-label="Notifications" hidden><details class="sources-box fold panel-fold" id="notif-fold" open>
+  <summary class="notif-head">Notifications<span class="end"><button class="link danger" id="notif-clear-all" type="button">Clear all</button><button class="link" id="notif-close" type="button">Close</button></span></summary>
+  <ul class="notif-list" id="notifs"></ul>
+</details></section>
+<section class="notif" id="alert-panel" role="dialog" aria-modal="false" aria-label="Alerts" hidden><details class="sources-box fold panel-fold" id="alert-fold" open>
+  <summary class="notif-head">Alerts<span class="end"><button class="link" id="alert-close" type="button">Close</button></span></summary>
+  <ul class="notif-list" id="alerts"></ul>
+</details></section>
+<script src="/static/__LEDGER_PAGE__/tooltips.js"></script>
+<script type="module" src="/static/__LEDGER_PAGE__/js/main.js"></script>
+</body>
+</html>

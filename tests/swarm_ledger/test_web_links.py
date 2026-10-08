@@ -1,6 +1,6 @@
 import new_ledger
 
-from tests.swarm_ledger.ledger_page import show
+from tests.swarm_ledger.ledger_page import ledger_state, shell_html, show
 from tests.swarm_ledger.test_comment_author_lines import browser as browser
 
 ISSUE = "https://github.com/the-cloud-clockwork/agentihooks/issues/613"
@@ -28,7 +28,10 @@ def test_chat_and_comments_render_web_links_safely_and_open_a_new_tab(browser):
     with browser.new_context() as context:
         context.route("https://github.com/**", lambda route: route.fulfill(body="Issue page"))
         tab = context.new_page()
-        show(tab, new_ledger.render(doc, "web-links", 8765))
+        show(tab, shell_html(), ledger=ledger_state(doc))
+        for key in ("phases", "tasks", "questions", "followups"):
+            tab.locator(f"#sec-{key} button[data-comments]").click()
+        tab.locator("#chat-fab").click()
         bodies = tab.locator(".entry-body")
         assert bodies.count() == 5
         for body in bodies.all():
@@ -41,7 +44,6 @@ def test_chat_and_comments_render_web_links_safely_and_open_a_new_tab(browser):
                 assert anchor.get_attribute("href") == url
                 assert anchor.get_attribute("target") == "_blank"
                 assert set(anchor.get_attribute("rel").split()) >= {"noopener", "noreferrer"}
-        tab.evaluate('document.getElementById("chat-panel").hidden = false')
         with tab.expect_popup() as popup:
             tab.locator("#chat-log a").first.click()
         assert popup.value.url == ISSUE

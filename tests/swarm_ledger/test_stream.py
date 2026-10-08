@@ -74,7 +74,7 @@ def test_a_stream_starts_with_a_snapshot_then_sends_only_patches(live):
     _, snapshot, cursor = next_of(reader, {"snapshot"})
     assert cursor
     assert snapshot["swarm"] == {"config": {"state": "running"}}
-    assert snapshot["workspaces"] == {}
+    assert set(snapshot) == {"ledger", "swarm"}
     ledger = snapshot["ledger"]
     assert "seeds" not in ledger["_meta"] and "api_operations" not in ledger["_meta"]
     assert ledger["_meta"]["page_version"] == core.page_version()

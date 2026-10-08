@@ -1,9 +1,12 @@
 import json
+import re
 from types import ModuleType
 from urllib.parse import parse_qs, urlsplit
 
 from . import resources, schemas
 from .errors import APIError
+
+WORKSPACE_RE = re.compile(r"tasks/[\w.-]+/workspace")
 
 
 def body(handler: object, server: ModuleType) -> dict:
@@ -44,6 +47,8 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
             return events(handler, server, slug)
         if path == "swarm" or path.startswith("swarm/"):
             return resources.swarm_read(server.swarm_status(slug), path, query)
+        if WORKSPACE_RE.fullmatch(path):
+            return workspace(server, slug, path.split("/")[1])
         return resources.read(server.repository.get_document(slug), path, query)
     return ledger_operation(handler, server, slug, path, principal)
 
@@ -57,13 +62,21 @@ def events(handler: object, server: ModuleType, slug: str) -> None:
         raise APIError(410, "cursor_expired", "Cursor no longer retained; reconnect without it to reload") from None
 
 
+def workspace(server: ModuleType, slug: str, task_id: str) -> dict:
+    try:
+        tails = server.workspace_tails(slug, task_id)
+    except ValueError:
+        raise APIError(404, "resource_missing", "No such task work folder") from None
+    return {"data": tails, "revision": resources.revision(tails)}
+
+
 def global_resource(handler: object, server: ModuleType, parts: list) -> dict:
     from . import admin
 
     if parts == ["layout"]:
         return admin.layout(handler, server, None if handler.command == "GET" else body(handler, server))
     if handler.command == "GET" and parts[0] in ("ledgers", "bin"):
-        rows = server.ledger_summaries() if parts[0] == "ledgers" else server.bin_summaries()
+        rows = server.home_summaries() if parts[0] == "ledgers" else server.bin_summaries()
         if len(parts) == 2:
             item = next((row for row in rows if row["slug"] == parts[1]), None)
             if item is None:
