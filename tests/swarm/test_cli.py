@@ -2150,3 +2150,39 @@ def test_a_first_tick_that_dies_still_ends_the_extra_ticks(monkeypatch, capsys):
 
     with pytest.raises(SystemExit):
         _tick_all(monkeypatch, run_tick, ["fast", "slow"])
+
+
+def test_set_stores_the_scaling_settings_and_reports_them(env, capsys):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    assert run("sw", "set", "scaling=manual", "load-high=2.5", "load-low=0.5", "memory-per-agent=900") == 0
+    config = store.config("sw")
+    assert (config.scaling, config.load_high, config.load_low, config.memory_per_agent_mb) == ("manual", 2.5, 0.5, 900)
+    reported = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert [reported[key] for key in ("scaling", "load_high", "load_low", "memory_per_agent_mb")] == [
+        "manual",
+        2.5,
+        0.5,
+        900,
+    ]
+    assert run("sw", "scaling=auto") == 0
+    assert store.config("sw").scaling == "auto"
+
+
+@pytest.mark.parametrize("pair", ["load-low=3", "load-high=x", "memory-per-agent=-1", "scaling=sometimes"])
+def test_set_refuses_bad_scaling_settings(env, pair):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    before = store.config("sw")
+    assert run("sw", "set", pair) == 1
+    assert store.config("sw") == before
+
+
+def test_list_and_status_header_show_the_scaling_mode(env, capsys):
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "set", "scaling=manual")
+    capsys.readouterr()
+    run("list")
+    assert "\tscaling manual\t" in capsys.readouterr().out
+    run("sw", "status")
+    assert "  scaling manual  " in capsys.readouterr().out.splitlines()[0]
