@@ -110,7 +110,9 @@ class FileSettings(SettingsStore):
             data["settings"][key] = value
         data["history"].append(entry)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(data))
+        temp = self.path.with_suffix(".tmp")
+        temp.write_text(json.dumps(data))
+        temp.replace(self.path)
 
 
 def open_store(client: "Redis | None", environ: Mapping[str, str]) -> SettingsStore:
