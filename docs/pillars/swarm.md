@@ -147,7 +147,7 @@ A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an opt
 |---|---|
 | `role` | Replaces the lane's default role text in the agent's opening prompt; empty keeps the default. |
 | `cap` | The lane cap the swarm is created with. |
-| `agent` | `claude`, `codex` or `auto`; `claude` and `codex` always spawn that harness; `auto` picks the first agent in `AGENTIHOOKS_AGENT_PRIORITY` order with quota and a free session slot. Codex is one more account in the session rotation, judged on its week alone with the top band. |
+| `agent` | `claude`, `codex` or `auto`; `claude` and `codex` always spawn that harness; `auto` takes the harness of the account the session rotation picks: the eligible account with the fewest live sessions under its five hour band. Codex is one more account in the rotation, judged on its week alone with the top band. |
 | `model`, `effort` | Passed to init-agent for the lane's agents; `auto` keeps init-agent's default. The master lane ignores both: a master always launches on the frontier model at high effort for its harness, opus or gpt-6.1-sol. |
 | `kind` | The kind written to a task of this lane that has none when the tick claims it; `auto` writes nothing. |
 

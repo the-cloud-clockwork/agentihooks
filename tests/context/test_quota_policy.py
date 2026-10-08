@@ -111,9 +111,10 @@ def test_other_accounts_count_an_account_with_no_live_session_as_zero(monkeypatc
     beta = balancer.ProbeResult(
         "beta", "allowed", "NORMAL", 70.0, balancer.QuotaWindow(10.0, None), balancer.QuotaWindow(30.0, None)
     )
-    monkeypatch.setattr(balancer, "cached_observations", lambda: [(123.0, beta)])
+    observed = time.time()
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [(observed, beta), (observed - 901, beta)])
     [found] = qp._other_accounts({})
-    assert (found.sessions, found.observed_at) == (0, 123.0)
+    assert (found.sessions, found.observed_at) == (0, observed)
 
 
 def test_an_open_account_with_exactly_the_minimum_routing_left_wins_over_a_full_one():

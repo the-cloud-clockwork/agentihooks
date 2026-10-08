@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from scripts import agent_choice, herdr_host, init_agent
@@ -85,24 +87,28 @@ def test_one_claude_account_quota_comes_from_that_account_in_the_router_cache(mo
     def result(account, left):
         return ProbeResult(account, "allowed", "NORMAL", left, QuotaWindow(used=100 - left), QuotaWindow(used=0))
 
-    monkeypatch.setattr(
-        "scripts.claude_quota_balancer.cached_observations", lambda: [(0, result("a", 2.0)), (0, result("b", 40.0))]
-    )
+    now = time.time()
+    seen = [(now, result("a", 2.0)), (now, result("b", 40.0)), (now - 901, result("old", 90.0))]
+    monkeypatch.setattr("scripts.claude_quota_balancer.cached_observations", lambda: seen)
     assert agent_choice.account_has_quota("claude", "a", {}) is False
     assert agent_choice.account_has_quota("claude", "b", {}) is True
     assert agent_choice.account_has_quota("claude", "c", {}) is None
+    assert agent_choice.account_has_quota("claude", "old", {}) is None
 
 
-def test_one_codex_account_quota_uses_the_handoff_threshold(monkeypatch):
+def test_one_codex_account_quota_uses_its_week_band(monkeypatch):
     from scripts import codex_router
     from scripts.claude_quota_balancer import QuotaWindow
     from scripts.codex_quota import CodexQuota
 
-    seen = CodexQuota(observed_at=0, plan_type="pro", seven_day=QuotaWindow(used=98.0))
-    monkeypatch.setattr("scripts.codex_quota.latest_codex_quota", lambda environ=None, keep=None: seen)
+    now = time.time()
+    readings = {"seen": CodexQuota(observed_at=now, plan_type="pro", seven_day=QuotaWindow(used=95.1))}
+    monkeypatch.setattr("scripts.codex_quota.latest_codex_quota", lambda environ=None, keep=None: readings["seen"])
     assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is False
-    seen = CodexQuota(observed_at=0, plan_type="pro", seven_day=QuotaWindow(used=50.0))
+    readings["seen"] = CodexQuota(observed_at=now, plan_type="pro", seven_day=QuotaWindow(used=95.0))
     assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is True
+    readings["seen"] = CodexQuota(observed_at=now - 901, plan_type="pro", seven_day=QuotaWindow(used=50.0))
+    assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is None
     assert agent_choice.account_has_quota("codex", "nobody", {}) is None
 
 

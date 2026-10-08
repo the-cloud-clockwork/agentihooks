@@ -23,8 +23,6 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
     )
@@ -47,8 +45,6 @@ def test_spawn_stamps_the_launch_start_before_init_agent_runs(tmp_path, monkeypa
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
     )
@@ -72,8 +68,6 @@ def test_spawn_records_each_launch_step_and_the_host_load(tmp_path, monkeypatch)
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
     )
@@ -110,8 +104,6 @@ def test_a_task_profile_wins_over_the_lane_profile_at_spawn(tmp_path, lanes, tas
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes=lanes,
         autonomy="delegate",
     )
@@ -210,8 +202,6 @@ def test_spawn_records_the_model_and_effort_init_agent_launched_with(tmp_path):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
     )
@@ -231,8 +221,6 @@ def test_a_codex_spawn_records_the_model_and_effort_init_agent_launched_with(tmp
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
     )
@@ -313,8 +301,6 @@ def _spawn_seen(tmp_path, lanes, lane="eng"):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes=lanes,
         autonomy="delegate",
     )
@@ -363,8 +349,6 @@ def test_a_lane_pin_wins_over_an_opposite_saved_harness(tmp_path, monkeypatch, p
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=0,
-        codex_min_week_left=5,
         lanes={"eng": {"agent": pin, "effort": "auto"}},
         autonomy="delegate",
     )
@@ -477,8 +461,6 @@ def test_a_claude_only_profile_asks_the_plain_choice_for_claude_with_the_environ
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={"eng": {"agent": "auto"}},
         autonomy="delegate",
     )
@@ -574,8 +556,6 @@ def _resuming(tmp_path, reported, harness="claude"):
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="delegate",
     )
@@ -706,8 +686,6 @@ def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", e
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes=lanes if lanes is not None else {name: auto for name in ("eng", "ci", "plan", "master")},
         autonomy="delegate",
     )
@@ -898,8 +876,6 @@ def test_every_swarm_launch_subscribes_the_brain_overlay_its_profile_renders(
         repo=str(tmp_path),
         code="a1b2c3",
         compact_limit=0,
-        codex_share=None,
-        codex_min_week_left=0,
         lanes={},
         autonomy="full",
     )

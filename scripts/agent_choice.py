@@ -13,13 +13,14 @@ def account_has_quota(agent: str, account: str, environ: dict[str, str]) -> bool
 
         pool = [found for found in codex_router.routing_pool(environ) if found.name == account]
         quota = codex_router.quotas(pool, environ).get(account) if pool else None
-        if quota is None or quota.highest_used is None:
-            return None
-        return quota.highest_used < float(environ.get("AGENTIHOOKS_HANDOFF_WEEK_PCT") or 98)
-    from scripts.claude_quota_balancer import cached_observations, is_routable
+        cap = codex_router.account_cap(quota, time.time())
+        return None if cap is None else cap > 0
+    from scripts.claude_quota_balancer import account_cap, cached_observations
 
-    seen = [result for _, result in cached_observations() if _account(result) == account]
-    return is_routable(seen[-1]) if seen else None
+    now = time.time()
+    seen = [(at, result) for at, result in cached_observations() if _account(result) == account]
+    cap = account_cap(seen[-1][1], now) if seen and session_bands.fresh(seen[-1][0], now) else None
+    return None if cap is None else cap > 0
 
 
 def _account(result) -> str:

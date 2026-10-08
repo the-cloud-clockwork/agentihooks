@@ -167,6 +167,8 @@ def _other_accounts(sessions: dict[str, int]) -> list[Candidate]:
         week = _effective(result.seven_day.used, result.seven_day.resets_at, now)
         if five is None or week is None or result.provider_status == "rejected":
             continue
+        if not session_bands.fresh(observed_at, now):
+            continue
         cap = session_bands.cap(100.0 - five, 100.0 - week)
         candidates.append(Candidate(result.account, five, week, sessions.get(result.account, 0), observed_at, cap))
     return candidates

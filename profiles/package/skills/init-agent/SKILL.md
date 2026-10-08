@@ -42,10 +42,9 @@ reports `herdr_error`.
 
 Rules:
 
-- Without `--agent`, the launcher picks the first agent in
-  `AGENTIHOOKS_AGENT_PRIORITY` (default `claude,codex`) that has quota left and
-  prints `agent=` and `agent_reason=` (`priority`, or `fallthrough: claude has no
-  quota`). `--handoff` always opens Claude on another account.
+- Without `--agent`, the launcher takes the harness of the account with a free
+  session under its quota band and the fewest live sessions, and prints `agent=`
+  and `agent_reason=` (`rotation`). `--handoff` always opens Claude on another account.
 - Default herdr placement: a new tab in the caller's herdr workspace; outside
   herdr, a tab in the workspace named after the repository of `--dir`, created
   when missing.
