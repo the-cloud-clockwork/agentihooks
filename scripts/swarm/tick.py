@@ -22,6 +22,7 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
+    ci_speed,
     control_notifications,
     launch_check,
     lifetime,
@@ -154,6 +155,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     from scripts.swarm import capacity
 
     actions += _step(capacity.apply, slug, config, store, ledger, runtime, now_ms)
+    actions += _step(ci_speed.refresh, slug, config, store, now_ms)
     if not sleeping:
         actions += _step(_codex_hook_order)
         actions += _step(_master_down, slug, config, store, ledger, runtime, now_ms)
