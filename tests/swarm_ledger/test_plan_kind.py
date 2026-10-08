@@ -240,3 +240,18 @@ def test_workspace_rewrite_uses_utf8_in_an_ascii_locale(tmp_path):
         capture_output=True,
     )
     assert (tmp_path / "steering.md").read_bytes() == "# plan: ñ\n".encode("utf-8")
+
+
+def test_workspace_rewrite_keeps_unicode_with_an_ascii_default(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from scripts.swarm_ledger import ledger_workspace
+
+    write_text = Path.write_text
+
+    def ascii_default(path, text, encoding=None):
+        return write_text(path, text, encoding=encoding or "ascii")
+
+    monkeypatch.setattr(Path, "write_text", ascii_default)
+    ledger_workspace.rewrite({"id": "plan", "title": "ñ", "workspace": str(tmp_path)})
+    assert (tmp_path / "steering.md").read_bytes() == "# plan: ñ\n".encode("utf-8")
