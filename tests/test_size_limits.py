@@ -56,8 +56,27 @@ def test_offenders_in_excluded_or_ignored_folders_are_graded(tmp_path, folder):
 
 
 def test_a_python_script_without_an_extension_is_graded(tmp_path):
-    tree = _tree(tmp_path, {"bin/tool": f"#!/usr/bin/env python3\n{EIGHT_PARAMETERS}", "bin/run": "#!/bin/sh\n"})
-    assert size_limits.measure(tree) == {"bin/tool::planted": {"PLR0913": 8}}
+    tree = _tree(
+        tmp_path,
+        {
+            "bin/tool": f"#!/usr/bin/env python3\n{EIGHT_PARAMETERS}",
+            "bin/job": f"#!/usr/bin/env pypy3\n{EIGHT_PARAMETERS}",
+            "gui.pyw": EIGHT_PARAMETERS,
+            "bin/run": "#!/bin/sh\n",
+        },
+    )
+    assert size_limits.measure(tree) == {
+        "bin/tool::planted": {"PLR0913": 8},
+        "bin/job::planted": {"PLR0913": 8},
+        "gui.pyw::planted": {"PLR0913": 8},
+    }
+
+
+def test_a_tracked_file_missing_from_the_tree_is_red(tmp_path, capsys):
+    head = _recorded(tmp_path, {"mod.py": SEVEN_PARAMETERS, "gone.py": SEVEN_PARAMETERS})
+    (head / "gone.py").unlink()
+    assert size_limits.main(["--bootstrap", "--head", str(head)]) == 1
+    assert "gone.py" in capsys.readouterr().out
 
 
 def test_config_and_noqa_in_the_graded_tree_hide_nothing(tmp_path):
@@ -160,7 +179,10 @@ def test_size_runs_beside_unit_graded_by_the_base_with_the_pinned_ruff():
         'if [[ -f "$RUNNER_TEMP/grader/scripts/size_limits.py" ]]; then\n'
         '  cd "$RUNNER_TEMP/grader"\n'
         '  python -m scripts.size_limits --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
-        "else\n"
+        'elif [[ -z "$(git -C "$RUNNER_TEMP/grader" log -1 --format=%H -- scripts/size_limits.py)" ]]; then\n'
         '  python -m scripts.size_limits --bootstrap --head "$GITHUB_WORKSPACE"\n'
+        "else\n"
+        '  echo "::error::dev once carried scripts/size_limits.py and no longer does, so nothing trusted can grade."\n'
+        "  exit 1\n"
         "fi\n"
     )

@@ -32,11 +32,11 @@ def _ruff_version() -> str:
 
 
 def _python(path: Path) -> bool:
-    if path.suffix in (".py", ".pyi"):
+    if path.suffix in (".py", ".pyi", ".pyw"):
         return True
     with path.open("rb") as handle:
-        first = handle.readline()
-    return first.startswith(b"#!") and b"python" in first
+        first = handle.readline(256)
+    return first.startswith(b"#!") and (b"python" in first or b"pypy" in first)
 
 
 def files(tree: Path) -> list[Path]:
@@ -44,7 +44,7 @@ def files(tree: Path) -> list[Path]:
     if result.returncode != 0:
         raise GradeError(f"git ls-files failed in {tree}: {result.stderr.decode().strip()}")
     tracked = (tree / name for name in result.stdout.decode().split("\0") if name)
-    found = sorted(path for path in tracked if path.is_file() and not path.is_symlink() and _python(path))
+    found = sorted(path for path in tracked if _python(path))
     if not found:
         raise GradeError(f"no tracked Python files under {tree}")
     return found
