@@ -213,9 +213,9 @@ def cmd_list(store, args):
 def _tick_one(store, slug):
     try:
         for action in run_tick(store, slug):
-            print(f"{slug}: {action}", flush=True)
+            timing.emit(sys.stdout, f"{slug}: {action}")
     except Exception as exc:
-        print(f"{slug}: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
 
 
 def cmd_tick(store, args):

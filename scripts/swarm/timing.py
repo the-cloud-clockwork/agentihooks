@@ -12,6 +12,11 @@ from typing import Any
 SWARM = ContextVar("tick_swarm", default=None)
 
 
+def emit(stream, line: str) -> None:
+    stream.write(line + "\n")
+    stream.flush()
+
+
 @contextmanager
 def tick(slug: str) -> Iterator[None]:
     token = SWARM.set(slug)
@@ -38,7 +43,7 @@ def step(name: str) -> Iterator[None]:
         "step": name,
         "started": started,
     }
-    print(json.dumps(record), file=sys.stderr, flush=True)
+    emit(sys.stderr, json.dumps(record))
     outcome = "success"
     try:
         yield
@@ -56,7 +61,7 @@ def step(name: str) -> Iterator[None]:
             own_cpu_s=(own_end.ru_utime - own.ru_utime) + (own_end.ru_stime - own.ru_stime),
             reaped_child_cpu_s=(child_end.ru_utime - child.ru_utime) + (child_end.ru_stime - child.ru_stime),
         )
-        print(json.dumps(record), file=sys.stderr, flush=True)
+        emit(sys.stderr, json.dumps(record))
 
 
 def call(function: Callable, *args, **kwargs) -> Any:

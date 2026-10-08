@@ -1905,29 +1905,39 @@ def test_trace_plan_without_a_plan_names_the_file_and_format(env, capsys, monkey
 
 
 def _tick_all(monkeypatch, run_tick, slugs):
+    import os
     import types
 
     from scripts import herdr_gc, operator_env
 
+    filled, swept = [], []
     monkeypatch.setattr(timer, "installed_refusal", lambda: "")
-    monkeypatch.setattr(operator_env, "fill", lambda environ: None)
-    monkeypatch.setattr(herdr_gc, "run", lambda environ, now, apply: ["swept"])
+    monkeypatch.setattr(operator_env, "fill", lambda environ: filled.append(environ))
+    monkeypatch.setattr(cli, "now_ms", lambda: 77)
+    monkeypatch.setattr(herdr_gc, "run", lambda environ, now, apply: swept.append((environ, now, apply)) or ["swept"])
     monkeypatch.setattr(cli, "run_tick", run_tick)
-    cli.cmd_tick(types.SimpleNamespace(slugs=lambda: slugs), None)
+    store = types.SimpleNamespace(slugs=lambda: slugs)
+    cli.cmd_tick(store, None)
+    assert filled == [os.environ]
+    assert swept == [(dict(os.environ), 77, True)]
+    return store
 
 
 def test_the_tick_runs_every_swarm_at_the_same_time(monkeypatch, capsys):
     import threading
 
-    both = threading.Barrier(2, timeout=5)
+    both, seen = threading.Barrier(2, timeout=5), []
 
     def run_tick(store, slug):
         both.wait()
-        return [f"ticked with {threading.current_thread() is not threading.main_thread()}"]
+        seen.append((store, slug, threading.current_thread()))
+        return [f"ticked {slug}"]
 
-    _tick_all(monkeypatch, run_tick, ["a", "b"])
+    store = _tick_all(monkeypatch, run_tick, ["a", "b"])
+    assert sorted((s, slug) for s, slug, _ in seen) == [(store, "a"), (store, "b")]
+    assert threading.main_thread() not in {thread for _, _, thread in seen}
     out = capsys.readouterr().out.splitlines()
-    assert sorted(out[:2]) == ["a: ticked with True", "b: ticked with True"]
+    assert sorted(out[:2]) == ["a: ticked a", "b: ticked b"]
     assert out[2:] == ["herdr: swept"]
 
 
@@ -1935,9 +1945,9 @@ def test_a_failing_swarm_tick_leaves_the_others_and_the_sweep_running(monkeypatc
     def run_tick(store, slug):
         if slug == "a":
             raise ValueError("ledger down")
-        return ["ok"]
+        return [f"ok {slug}"]
 
     _tick_all(monkeypatch, run_tick, ["a", "b"])
     captured = capsys.readouterr()
-    assert captured.out.splitlines() == ["b: ok", "herdr: swept"]
+    assert captured.out.splitlines() == ["b: ok b", "herdr: swept"]
     assert captured.err == "a: ValueError: ledger down\n"
