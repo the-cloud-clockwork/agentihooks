@@ -66,7 +66,7 @@ def record_session(session_id: str, identity: ProjectIdentity | None) -> None:
         return
     if enabled():
         branch = _branch(identity.cwd) if identity else ""
-        _observe(session_id, _scope(identity, "", branch, os.environ), datetime.now(timezone.utc).isoformat())
+        _observe(session_id, _scope(identity, None, branch, os.environ), datetime.now(timezone.utc).isoformat())
     if not identity:
         return
     from hooks.context.broadcast import _file_lock
@@ -134,11 +134,11 @@ def _instant(value: object) -> datetime | None:
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
 
-def _read(path: Path | None) -> tuple[str, list[dict]]:
+def _read(path: Path) -> tuple[str, list[dict]]:
     try:
-        text = path.read_text(errors="replace") if path else ""
+        text = path.read_text(errors="replace")
     except OSError:
-        return "", []
+        text = ""
     rows = []
     for line in text.splitlines():
         try:
@@ -151,7 +151,8 @@ def _read(path: Path | None) -> tuple[str, list[dict]]:
 
 
 def transitions(session_id: str) -> list[dict]:
-    return _read(_scope_path(session_id))[1]
+    path = _scope_path(session_id)
+    return _read(path)[1] if path else []
 
 
 def _transition_id(session_id: str, at: str, scope: dict) -> str:
@@ -189,23 +190,19 @@ def record_scope(
 def _changes(latest: dict, values: dict, moment: datetime) -> bool:
     if moment < (_instant(latest.get("at")) or moment):
         raise ScopeRefused("transition is older than the latest accepted one")
-    revision, accepted = values["task_revision"], str(latest.get("task_revision") or "")
+    revision, accepted = values["task_revision"], str(latest.get("task_revision"))
     same_task = values["task"] and (latest.get("swarm"), latest.get("task")) == (values["swarm"], values["task"])
     if same_task and revision.isdigit() and accepted.isdigit() and int(revision) < int(accepted):
         raise ScopeRefused("task revision is older than the latest accepted one")
-    return any(latest.get(name, "") != value for name, value in values.items())
+    return any(latest.get(name) != value for name, value in values.items())
 
 
 def _scope_in(rows: list[dict], at: object) -> dict | None:
     moment = _instant(at)
     if moment is None:
         return None
-    current = None
-    for row in rows:
-        stamp = _instant(row.get("at"))
-        if stamp is not None and stamp <= moment:
-            current = row
-    return {name: str(current.get(name) or "") for name in SCOPE_FIELDS} if current else None
+    before = [row for row in rows if (stamp := _instant(row.get("at"))) is not None and stamp <= moment]
+    return {name: str(before[-1].get(name) or "") for name in SCOPE_FIELDS} if before else None
 
 
 def scope_at(session_id: str, at: object) -> dict | None:
@@ -229,12 +226,10 @@ def _attribution(rows: list[dict], event: Mapping, grant: SessionGrant | None) -
 
 
 def enabled(environ: Mapping[str, str] | None = None) -> bool:
-    return (os.environ if environ is None else environ).get("AGENTIHOOKS_SESSION_SCOPE", "1") != "0"
+    return (os.environ if environ is None else environ).get("AGENTIHOOKS_SESSION_SCOPE") != "0"
 
 
-def marker_scope(
-    session_id: str, marker: Mapping, grant: SessionGrant | None = None, *, replay: bool = False
-) -> dict | None:
+def marker_scope(session_id: str, marker: Mapping, grant: SessionGrant | None = None, *, replay: bool) -> dict | None:
     if not enabled():
         return None
     attrs = marker.get("attrs") or {}
@@ -263,7 +258,7 @@ def _branch(cwd: str) -> str:
     return _git(Path(cwd), "rev-parse", "--abbrev-ref", "HEAD") if cwd else ""
 
 
-def _scope(identity: ProjectIdentity | None, cwd: str, branch: str, env: Mapping[str, str]) -> dict:
+def _scope(identity: ProjectIdentity | None, cwd: str | None, branch: str, env: Mapping[str, str]) -> dict:
     return {
         **(identity.attributes() if identity else {"cwd": cwd}),
         "branch": branch,
@@ -280,12 +275,10 @@ def _observe(session_id: str, scope: dict, at: str) -> dict | None:
         return None
 
 
-def _entry_context(entry: object) -> tuple[str, str]:
-    if not isinstance(entry, dict):
-        return "", ""
+def _entry_context(entry: dict) -> tuple[str, object]:
     payload = entry.get("payload") if entry.get("type") == "turn_context" else entry
-    cwd = payload.get("cwd") if isinstance(payload, dict) else ""
-    return str(cwd or ""), str(entry.get("timestamp") or "")
+    cwd = payload.get("cwd") if isinstance(payload, dict) else None
+    return str(cwd or ""), entry.get("timestamp")
 
 
 def observe_transcript(session_id: str, transcript_path: str, environ: Mapping[str, str] | None = None) -> int:
@@ -299,6 +292,8 @@ def observe_transcript(session_id: str, transcript_path: str, environ: Mapping[s
     seen = (rows[-1].get("cwd"), rows[-1].get("branch", "")) if rows else None
     recorded = 0
     for entry in _load_entries(Path(transcript_path)):
+        if not isinstance(entry, dict):
+            continue
         cwd, at = _entry_context(entry)
         moment = _instant(at)
         if not cwd or moment is None or (after and moment < after):

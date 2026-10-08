@@ -180,13 +180,14 @@ IDENTITIES = {
 
 def test_transcript_observation_records_the_worktree_switch(home, monkeypatch):
     calls = []
+    env = {"AGENTIHOOKS_SWARM": "fixture", "AGENTIHOOKS_SWARM_TASK": "first", "AGENTIHOOKS_SWARM_LANE": "eng"}
 
-    def resolve(cwd, env=None):
+    def resolve(cwd, env_seen):
+        assert env_seen is env
         calls.append(cwd)
         return IDENTITIES.get(cwd)
 
     monkeypatch.setattr(project_sessions, "resolve_project", resolve)
-    env = {"AGENTIHOOKS_SWARM": "fixture", "AGENTIHOOKS_SWARM_TASK": "first", "AGENTIHOOKS_SWARM_LANE": "eng"}
     path = _transcript(home)
     assert observe_transcript("live", str(path), env) == 4
     rows = transitions("live")
@@ -196,18 +197,85 @@ def test_transcript_observation_records_the_worktree_switch(home, monkeypatch):
         ("two", "two"),
         ("beta", "main"),
     ]
+    assert rows[0]["cwd"] == "/scratch"
     assert {row["task"] for row in rows} == {"first"}
     assert calls == ["/scratch", "/work/alpha/one", "/work/alpha/two", "/work/beta"]
     assert observe_transcript("live", str(path), env) == 0
+    assert len(calls) == 4
     assert len(transitions("live")) == 4
     assert observe_transcript("live", str(home / "missing.jsonl"), env) == 0
+    assert observe_transcript("live", str(path), {**env, "AGENTIHOOKS_SESSION_SCOPE": "0"}) == 0
+
+
+def test_transcript_observation_skips_entries_without_a_folder_or_time(home, monkeypatch):
+    calls = []
+    monkeypatch.setattr(project_sessions, "resolve_project", lambda cwd, env: calls.append(cwd))
+    record_scope("skips", {"cwd": "/start"}, "2026-10-08T10:00:00+00:00")
+    entries = [
+        5,
+        {"type": "assistant", "timestamp": "2026-10-08T10:01:00Z"},
+        {"type": "turn_context", "timestamp": "2026-10-08T10:02:00Z", "payload": "not an object"},
+        {"type": "assistant", "timestamp": "not a time", "cwd": "/bad-time"},
+        {"type": "assistant", "timestamp": 7, "cwd": "/number-time"},
+        {"type": "assistant", "timestamp": "2026-10-08T09:00:00Z", "cwd": "/older"},
+        {"type": "assistant", "timestamp": "2026-10-08T10:00:00Z", "cwd": "/same-instant"},
+        {"type": "assistant", "timestamp": "2026-10-08T10:03:00Z", "cwd": "/later"},
+    ]
+    path = home / "skips.jsonl"
+    path.write_text("\n".join(json.dumps(entry) for entry in entries) + "\n")
+    assert observe_transcript("skips", str(path), {}) == 2
+    assert calls == ["/same-instant", "/later"]
+    assert [row["cwd"] for row in transitions("skips")] == ["/start", "/same-instant", "/later"]
+
+
+def test_codex_task_completion_markers_carry_their_time(home):
+    path = home / "rollout.jsonl"
+    entries = [
+        {"type": "session_meta", "timestamp": "2026-10-08T10:00:00Z", "payload": {"id": "s"}},
+        {
+            "type": "event_msg",
+            "timestamp": "2026-10-08T10:07:00Z",
+            "payload": {"type": "task_complete", "last_agent_message": "<!-- @lesson -->Codex.<!-- @/lesson -->"},
+        },
+    ]
+    path.write_text("\n".join(json.dumps(entry) for entry in entries) + "\n")
+    [marker] = _parse_transcript_for_markers(str(path), 20)
+    assert (marker["content"], marker["at"]) == ("Codex.", "2026-10-08T10:07:00Z")
+
+
+def test_marker_times_follow_their_own_record_after_many_short_records(home):
+    entries = [
+        {"type": "assistant", "timestamp": f"2026-10-08T10:{n:02d}:00Z", "message": {"content": "a"}} for n in range(12)
+    ]
+    entries.append(
+        {
+            "type": "assistant",
+            "timestamp": "2026-10-08T11:00:00Z",
+            "message": {"content": "<!-- @lesson -->M<!-- @/lesson -->"},
+        }
+    )
+    entries.append({"type": "assistant", "timestamp": "2026-10-08T12:00:00Z", "message": {"content": "b"}})
+    entries.append({"type": "assistant", "message": {"content": "<!-- @lesson -->No time.<!-- @/lesson -->"}})
+    entries.append(
+        {
+            "type": "user",
+            "timestamp": "2026-10-08T13:00:00Z",
+            "message": {"content": "<!-- @lesson -->User.<!-- @/lesson -->"},
+        }
+    )
+    path = home / "many.jsonl"
+    path.write_text("\n".join(json.dumps(entry) for entry in entries) + "\n")
+    markers = _parse_transcript_for_markers(str(path), 20)
+    assert [(m["content"], m.get("at")) for m in markers] == [("M", "2026-10-08T11:00:00Z"), ("No time.", None)]
+    assert "at" not in markers[1]
 
 
 def test_session_start_records_the_launch_scope(home, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "fixture")
     monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "first")
     monkeypatch.setenv("AGENTIHOOKS_SWARM_LANE", "eng")
-    monkeypatch.setattr(project_sessions, "_branch", lambda cwd: "one")
+    branches = {"/work/alpha/one": "one"}
+    monkeypatch.setattr(project_sessions, "_branch", lambda cwd: branches[cwd])
     identity = ProjectIdentity("alpha", "fixture/alpha", "one", "/work/alpha/one", "", "github.com/fixture/alpha")
     record_session("live", identity)
     record_session("live", identity)
@@ -219,7 +287,109 @@ def test_session_start_records_the_launch_scope(home, monkeypatch):
         "one",
     )
     record_session("live", None)
-    assert transitions("live")[-1]["project_id"] == ""
+    last = transitions("live")[-1]
+    assert (last["project_id"], last["cwd"], last["branch"], last["task"]) == ("", "", "", "first")
+
+
+def test_session_start_and_stop_stamp_utc_whatever_the_local_zone(home, monkeypatch):
+    import time
+    from contextlib import contextmanager
+    from datetime import datetime, timedelta, timezone
+
+    from hooks.context import brain_writer_hook
+
+    @contextmanager
+    def span_ctx(name, attrs):
+        class Span:
+            def set_attrs(self, values):
+                recorded.update(values)
+
+        yield Span()
+
+    recorded = {}
+    monkeypatch.setattr(project_sessions, "_branch", lambda cwd: "")
+    monkeypatch.setattr("hooks.config.BRAIN_WRITER_ENABLED", True)
+    monkeypatch.setattr("hooks.config.BRAIN_WRITER_MAX_MARKERS", 20)
+    monkeypatch.setattr("hooks.config.BRAIN_WRITER_OUTBOX", str(home / "outbox"))
+    monkeypatch.setattr("hooks.telemetry.span_ctx", span_ctx)
+    monkeypatch.setattr(brain_writer_hook, "_drain_outbox", lambda outbox: 0)
+    monkeypatch.setattr(brain_writer_hook, "_publish_to_http", lambda markers, sid: (len(markers), []))
+    try:
+        for zone in ("Etc/GMT-12", "Etc/GMT+12"):
+            name = "east" if "-" in zone else "west"
+            monkeypatch.setenv("TZ", zone)
+            time.tzset()
+            record_session(f"zone{name}", ProjectIdentity("alpha", "fixture/alpha", project_id="github.com/f/a"))
+            [row] = transitions(f"zone{name}")
+            assert abs(datetime.fromisoformat(row["at"]) - datetime.now(timezone.utc)) < timedelta(minutes=5)
+            session = f"stop{name}"
+            earlier = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+            later = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+            record_scope(session, FIXTURE["transitions"][0]["scope"], earlier)
+            record_scope(session, FIXTURE["transitions"][-1]["scope"], later)
+            late = "<!-- @lesson -->Late.<!-- @/lesson -->"
+            brain_writer_hook.write_markers(session, str(home / "none.jsonl"), late)
+            assert recorded["unattributed_session_events_total"] == 0
+    finally:
+        monkeypatch.delenv("TZ")
+        time.tzset()
+
+
+def test_refusals_name_their_reason(home):
+    _record_all("first")
+    reasons = []
+    for scope, at, grant in (
+        (FIXTURE["outside_grant"], "2026-10-08T11:00:00+00:00", GRANT),
+        ({"task": "x"}, "not a time", None),
+        ({"task": "x"}, "2026-10-08T09:00:00+00:00", None),
+        ({**FIXTURE["transitions"][-1]["scope"], "task_revision": "1"}, "2026-10-08T11:00:00+00:00", None),
+    ):
+        with pytest.raises(ScopeRefused) as refused:
+            record_scope("first", scope, at, grant)
+        reasons.append(str(refused.value))
+    assert reasons == [
+        "project is outside the session grant",
+        "transition time is not an ISO 8601 timestamp",
+        "transition is older than the latest accepted one",
+        "task revision is older than the latest accepted one",
+    ]
+
+
+def test_the_scope_log_is_locked_and_written_one_line_per_transition(home):
+    _record_all("first")
+    path = project_sessions._scope_path("first")
+    raw = path.read_text()
+    assert raw.startswith("{") and raw.endswith("}\n") and "\n\n" not in raw
+    assert path.with_name(path.name + ".lock").exists()
+    assert project_sessions._scope_path("") is None
+
+
+def test_marker_scope_paths(home):
+    fleet = {"attrs": {"share": "fleet"}}
+    assert project_sessions.marker_scope("nolog", fleet, replay=False) == {"attribution": "fleet"}
+    body, _ = _marker_request({"type": "signal", "content": "f", "attrs": {"share": "fleet", "project": "p"}}, "nolog")
+    assert body["attrs"]["attribution"] == "fleet" and "project" not in body["attrs"]
+    _record_all("first")
+    timed = {"at": "2026-10-08T10:05:00Z", "attrs": {}}
+    assert project_sessions.marker_scope("first", timed, replay=True)["worktree"] == "one"
+    assert project_sessions.marker_scope("first", {"attrs": {}}, replay=True) is None
+    claim = {"at": "2026-10-08T10:05:00Z", "attrs": {"project_id": "github.com/fixture/gamma"}}
+    assert project_sessions.marker_scope("first", claim, GRANT, replay=False) == {"attribution": "refused"}
+    preset = {
+        "type": "lesson",
+        "content": "p",
+        "at": "2026-10-08T10:05:00Z",
+        "attrs": {},
+        "scope": {"attribution": "fleet"},
+    }
+    assert _marker_request(preset, "first")[0]["attrs"]["attribution"] == "fleet"
+
+
+def test_legacy_markers_resolve_their_own_folder(home, monkeypatch):
+    seen = []
+    monkeypatch.setattr("hooks.context.project_identity.resolve_project", lambda cwd, env=None: seen.append(cwd))
+    _marker_request({"type": "lesson", "content": "x", "attrs": {"cwd": "/marker/folder"}}, "nolog", "/drain")
+    assert seen == ["/marker/folder"]
 
 
 def test_branch_is_read_from_git_only_for_a_folder(tmp_path):
@@ -441,8 +611,10 @@ def test_stop_reports_unattributed_markers(home, monkeypatch):
     monkeypatch.setattr(brain_writer_hook, "_drain_outbox", lambda outbox: 0)
     monkeypatch.setattr(brain_writer_hook, "_publish_to_http", lambda markers, sid: (len(markers), []))
     monkeypatch.setattr(project_sessions, "resolve_project", lambda cwd, env=None: IDENTITIES.get(cwd))
-    _record_all("stop")
+    for item in FIXTURE["transitions"][:3]:
+        record_scope("stop", item["scope"], item["at"])
     assert brain_writer_hook.write_markers("stop", str(_transcript(home)))["markers"] == 6
+    assert transitions("stop")[-1]["at"] == "2026-10-08T10:35:00Z"
     assert recorded["unattributed_session_events_total"] == 1
     late = "<!-- @lesson -->Late.<!-- @/lesson -->"
     record_scope("late", FIXTURE["transitions"][0]["scope"], "2000-01-01T00:00:00+00:00")

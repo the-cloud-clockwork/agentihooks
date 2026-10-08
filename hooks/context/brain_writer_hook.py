@@ -80,13 +80,13 @@ def _parse_transcript_for_markers(transcript_path: str, max_markers: int) -> lis
 
     all_text: list[str] = []
     starts: list[int] = []
-    stamps: list[str] = []
+    stamps: list[object] = []
     offset = 0
     for rec in iter_transcript_records(transcript_path):
         if rec.get("kind") in ("assistant_text", "turn_complete") and rec.get("text"):
             all_text.append(rec["text"])
             starts.append(offset)
-            stamps.append(str((rec.get("raw") or {}).get("timestamp") or ""))
+            stamps.append((rec.get("raw") or {}).get("timestamp"))
             offset += len(rec["text"]) + 1
 
     if not all_text:
@@ -324,7 +324,7 @@ def write_markers(session_id: str, transcript_path: str, last_message: str = "")
 
         from hooks.context.project_sessions import marker_scope, unattributed_session_events_total
 
-        markers = [{**m, "scope": marker_scope(session_id, m)} for m in markers]
+        markers = [{**m, "scope": marker_scope(session_id, m, replay=False)} for m in markers]
         scopes = [m["scope"] for m in markers if m["scope"] is not None]
         span.set_attrs({"unattributed_session_events_total": unattributed_session_events_total(scopes)})
 
