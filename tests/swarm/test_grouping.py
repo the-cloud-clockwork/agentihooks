@@ -149,8 +149,13 @@ def test_filter_groups_tasks_without_a_territory_in_the_same_phase_and_profile()
         (task("a", phase="p1"), task("b", territory=["docs"], phase="p1")),
     ],
 )
-def test_filter_pairs_tasks_without_a_territory_only_by_phase_and_profile(first, second):
+def test_filter_never_pairs_tasks_without_a_territory_outside_a_shared_phase_and_profile(first, second):
     assert grouping.candidates(doc(first, second)) == []
+
+
+def test_filter_caps_a_group_of_tasks_without_a_territory():
+    found = grouping.candidates(doc(*(task(f"x{n}", territory=[], phase="p1") for n in range(7))))
+    assert ids(found) == [["x0", "x1", "x2", "x3", "x4"], ["x5", "x6"]]
 
 
 def test_filter_caps_a_group_at_five_tasks():
