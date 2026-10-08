@@ -13,8 +13,14 @@ change has merged and passed its live proofs. Agents cannot mutate remote
 rulesets. From a checkout containing the reviewed payloads:
 
 ```bash
-gh api --method PUT repos/The-Cloud-Clockwork/agentihooks/rulesets/16090886 --input .github/rulesets/dev-no-delete.json
-gh api --method PUT repos/The-Cloud-Clockwork/agentihooks/rulesets/15122747 --input .github/rulesets/main-prod-lockdown.json
+gh api \
+  --method PUT \
+  repos/The-Cloud-Clockwork/agentihooks/rulesets/16090886 \
+  --input .github/rulesets/dev-no-delete.json
+gh api \
+  --method PUT \
+  repos/The-Cloud-Clockwork/agentihooks/rulesets/15122747 \
+  --input .github/rulesets/main-prod-lockdown.json
 ```
 
 Verify the effective rules and bypass lists:
