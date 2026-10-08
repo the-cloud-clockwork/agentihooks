@@ -1,0 +1,10 @@
+{
+  "not_gates": {
+    "test.yml/record-pass": "Records a passed tree so the dev push can reuse its pull request result; it grades nothing.",
+    "test.yml/refresh-durations": "Runs only on a dev push to publish measured test durations."
+  },
+  "outside_gate": {
+    "equivalence.yml": "Opt in replay of ledger storage and pages; the equivalence gate task wires it into the gate.",
+    "test-leaks.yml": "Hour long single process sweep that runs on a schedule; its pull request run only exercises its own workflow."
+  }
+}
