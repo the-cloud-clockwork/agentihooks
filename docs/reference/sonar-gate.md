@@ -12,7 +12,7 @@ agentihooks is bound to the `Delivery L2` gate, defined and bound in antoncore's
 | Duplicated lines | above 3 % |
 | Security hotspots reviewed | below 100 % |
 
-The job's `Hold the Delivery L2 binding` step reads the project's bound gate before the scan and fails unless it is `Delivery L2`, so a rebind on the server turns the job red. Gate thresholds change only through the antoncore config.
+The job's `Hold the Delivery L2 conditions` step reads the conditions the analysis was graded on (`api/qualitygates/project_status`) and fails unless they are exactly the five above, so a rebind or a loosened threshold on the server turns the job red. Sonar skips the coverage and duplication conditions on a change under 20 new lines. Gate thresholds change only through the antoncore config.
 
 ## False positives
 

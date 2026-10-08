@@ -305,19 +305,6 @@ jobs:
           done
           exit 1
 
-      # The gate action grades against whatever gate the server binds, so a silent rebind would loosen it.
-      - name: Hold the Delivery L2 binding
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: |
-          gate=$(curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $SONAR_TOKEN" \
-            "http://127.0.0.1:9000/api/qualitygates/get_by_project?project=agentihooks" | jq -r .qualityGate.name)
-          echo "Bound quality gate: $gate"
-          if [[ "$gate" != "Delivery L2" ]]; then
-            echo "::error::agentihooks is bound to '$gate', not Delivery L2."
-            exit 1
-          fi
-
       - name: Restore Sonar downloads
         uses: actions/cache@v4
         with:
@@ -387,11 +374,32 @@ jobs:
           SONAR_HOST_URL: http://127.0.0.1:9000
 
       - name: SonarQube Quality Gate
+        id: gate
         uses: sonarsource/sonarqube-quality-gate-action@v1
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://127.0.0.1:9000
+
+      # The gate action grades against whatever gate the server binds, so a silent rebind would loosen it.
+      - name: Hold the Delivery L2 conditions
+        if: always() && steps.gate.outcome != 'skipped'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          api() { curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $SONAR_TOKEN" "http://127.0.0.1:9000/api/$1"; }
+          task=$(sed -n 's/^ceTaskId=//p' .scannerwork/report-task.txt)
+          analysis=$(api "ce/task?id=$task" | jq -r .task.analysisId)
+          status=$(api "qualitygates/project_status?analysisId=$analysis")
+          jq -c .projectStatus <<<"$status"
+          graded=$(jq -r '.projectStatus.conditions[] | "\(.metricKey) \(.comparator) \(.errorThreshold)"' <<<"$status" | sort)
+          expected=$(printf '%s\n' "new_bugs GT 0" "new_coverage LT 80" "new_duplicated_lines_density GT 3" \
+            "new_security_hotspots_reviewed LT 100" "new_vulnerabilities GT 0" | sort)
+          if [[ "$graded" != "$expected" ]]; then
+            echo "::error::The analysis was not graded on the Delivery L2 conditions."
+            diff <(echo "$expected") <(echo "$graded") || true
+            exit 1
+          fi
 
       - name: Upload coverage and analysis evidence
         if: always()
