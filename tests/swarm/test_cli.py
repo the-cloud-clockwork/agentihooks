@@ -38,7 +38,7 @@ def env(monkeypatch, tmp_path):
     ledger.chat = lambda slug: [{"id": "old", "by": "operator", "at": 50, "text": "old talk"}]
     monkeypatch.setattr(cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
     ledger.pulls = {}
-    monkeypatch.setattr(cli, "pull_branch", lambda url: "")
+    monkeypatch.setattr(cli, "pull_branch", lambda url: ("", ""))
     monkeypatch.setattr(
         cli.ledger_events, "view", lambda url: ledger.pulls.get(url, PullRequest("MERGED", 1, 1, False))
     )
@@ -1313,34 +1313,59 @@ def test_a_git_call_that_cannot_run_is_a_clean_refusal(failure, step):
     assert str(refused.value) == f"git {step} could not run: {failure}"
 
 
-def test_the_pull_request_head_branch_is_read_from_github():
+HEAD_JSON = (
+    '{"headRefName": "engineer-a1b2c3-0001", "headRepository": {"name": "bundle"}, '
+    '"headRepositoryOwner": {"login": "fork-owner"}}'
+)
+
+
+def test_the_pull_request_head_branch_and_repository_are_read_from_github():
     calls = []
 
     def fake(argv, **kwargs):
         calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 0, '{"headRefName": "engineer-a1b2c3-0001"}', "")
+        return subprocess.CompletedProcess(argv, 0, HEAD_JSON, "")
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == "engineer-a1b2c3-0001"
-    assert calls == [(["gh", "pr", "view", "https://github.com/o/r/pull/3", "--json", "headRefName"], GIT_OPTS)]
+    head = cli.pull_branch("https://github.com/o/r/pull/3", run=fake)
+    assert head == ("engineer-a1b2c3-0001", "https://github.com/fork-owner/bundle")
+    fields = "headRefName,headRepository,headRepositoryOwner"
+    assert calls == [(["gh", "pr", "view", "https://github.com/o/r/pull/3", "--json", fields], GIT_OPTS)]
 
 
-@pytest.mark.parametrize("answer", [(1, '{"headRefName": "x"}'), (0, "not json"), (0, "{}")])
+@pytest.mark.parametrize(
+    "answer",
+    [
+        '{"headRefName": "x"}',
+        '{"headRefName": "x", "headRepository": null, "headRepositoryOwner": {"login": "o"}}',
+        '{"headRefName": "x", "headRepository": {"name": "r"}, "headRepositoryOwner": {"login": ""}}',
+        '{"headRefName": "x", "headRepository": {"name": ""}, "headRepositoryOwner": {"login": "o"}}',
+    ],
+)
+def test_a_pull_request_without_a_head_repository_gives_the_branch_alone(answer):
+    def fake(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, answer, "")
+
+    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("x", "")
+
+
+@pytest.mark.parametrize("answer", [(1, HEAD_JSON), (0, "not json"), (0, "{}")])
 def test_an_unreadable_pull_request_gives_no_branch(answer):
     def fake(argv, **kwargs):
         return subprocess.CompletedProcess(argv, answer[0], answer[1], "")
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ""
+    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("", "")
 
 
 def test_a_failing_github_call_gives_no_branch():
     def fake(argv, **kwargs):
         raise subprocess.TimeoutExpired(argv, 20)
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ""
+    assert cli.pull_branch("https://github.com/o/r/pull/3", run=fake) == ("", "")
 
 
 @pytest.mark.parametrize(
-    ("repo", "recorded"), [("git@github.com:o/r.git", {"branch_repo": "git@github.com:o/r.git"}), ("", {})]
+    ("repo", "recorded"),
+    [("git@github.com:o/r.git", {"branch_repo": "git@github.com:o/r.git"}), ("", {"branch_repo": ""})],
 )
 def test_swarm_branch_records_the_worktree_branch_on_the_agent_task(env, monkeypatch, capsys, repo, recorded):
     _, ledger, _ = env
@@ -1389,13 +1414,20 @@ def test_swarm_branch_writes_nothing_when_the_branch_is_refused(env, monkeypatch
 
 @pytest.mark.parametrize(
     ("head", "fields"),
-    [("engineer-a1b2c3-0001", {"branch": "engineer-a1b2c3-0001", "branch_repo": "https://github.com/o/r"}), ("", {})],
+    [
+        (
+            ("engineer-a1b2c3-0001", "https://github.com/f/r"),
+            {"branch": "engineer-a1b2c3-0001", "branch_repo": "https://github.com/f/r"},
+        ),
+        (("engineer-a1b2c3-0001", ""), {"branch": "engineer-a1b2c3-0001", "branch_repo": ""}),
+        (("", ""), {}),
+    ],
 )
 def test_swarm_pr_records_the_pull_request_head_branch(env, monkeypatch, capsys, head, fields):
     _, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    monkeypatch.setattr(cli, "pull_branch", lambda url: head if url == URL3 else "wrong")
+    monkeypatch.setattr(cli, "pull_branch", lambda url: head if url == URL3 else ("wrong", "wrong"))
     capsys.readouterr()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL3) == 0
     assert ledger.rows["t1"].get("branch") == fields.get("branch")

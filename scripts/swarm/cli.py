@@ -780,12 +780,23 @@ def worktree_branch(run=subprocess.run):
     return branch
 
 
+PULL_HEAD = "headRefName,headRepository,headRepositoryOwner"
+
+
 def pull_branch(url, run=subprocess.run):
     try:
-        done = run(["gh", "pr", "view", url, "--json", "headRefName"], capture_output=True, text=True, timeout=20)
-        return json.loads(done.stdout)["headRefName"] if done.returncode == 0 else ""
+        done = run(["gh", "pr", "view", url, "--json", PULL_HEAD], capture_output=True, text=True, timeout=20)
+        found = json.loads(done.stdout) if done.returncode == 0 else {}
+        return found["headRefName"], _head_repo(url, found)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        return "", ""
+
+
+def _head_repo(url, found):
+    owner, repo = found.get("headRepositoryOwner") or {}, found.get("headRepository") or {}
+    if not (owner.get("login") and repo.get("name")):
         return ""
+    return f"{url.split('/pull/')[0].rsplit('/', 2)[0]}/{owner['login']}/{repo['name']}"
 
 
 def origin_repo(run=subprocess.run):
@@ -796,8 +807,7 @@ def origin_repo(run=subprocess.run):
 def cmd_branch(store, args):
     agent = _worker(store, args)
     branch = worktree_branch()
-    repo = origin_repo()
-    fields = {"branch": branch, **({"branch_repo": repo} if repo else {})}
+    fields = {"branch": branch, "branch_repo": origin_repo()}
     LedgerClient().update_task(args.slug, agent.task, fields, by=agent.name)
     print(json.dumps({"task": agent.task, **fields}))
 
@@ -806,8 +816,8 @@ def cmd_pr(store, args):
     agent = _worker(store, args)
     config = store.config(args.slug)
     awaiting = "approval" if config.autonomy == ASSIST else ""
-    head = pull_branch(args.url)
-    branch = {"branch": head, "branch_repo": args.url.split("/pull/")[0]} if head else {}
+    head, repo = pull_branch(args.url)
+    branch = {"branch": head, "branch_repo": repo} if head else {}
     fields = {"pr_url": args.url, "state": "pr", "awaiting": awaiting, **branch}
     ledger = LedgerClient()
     checked = intent.stamp(args.slug, agent.task, args.url, ledger.state(args.slug), intent.mode_of(config), now_ms())

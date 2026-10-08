@@ -213,7 +213,7 @@ def test_park_resolves_read_first_addresses_against_this_swarm(parked, capsys, a
 def test_park_writes_the_open_dependencies_and_the_stacked_base(parked, capsys):
     _, ledger, _, shell, doc = parked
     assert park(doc) == 0
-    assert ("t1", {"parked_on": ["a"], "stacked_base": BASE}, AGENT) in ledger.updates
+    assert ("t1", {"parked_on": ["a"], "stacked_base": BASE, "parked_repos": []}, AGENT) in ledger.updates
     assert ledger.rows["t1"]["parked_on"] == ["a"] and ledger.rows["t1"]["stacked_base"] == BASE
     body = f"Parked on branch `eng-t1` until a (`eng-a`) merges. Stacked base `{BASE}`. {NOTE}"
     assert shell.calls == [
@@ -231,6 +231,7 @@ def test_park_writes_the_open_dependencies_and_the_stacked_base(parked, capsys):
         "task": "t1",
         "parked_on": ["a"],
         "stacked_base": BASE,
+        "parked_repos": [],
         "worktree_removed": TOP,
         "next": "stop now; the task waits on its branch",
     }
@@ -339,7 +340,7 @@ def test_park_fetches_a_dependency_branch_from_its_other_repository(parked, caps
         ["git", "status", "--porcelain"],
         *LOCATE,
         ["git", "remote", "get-url", "origin"],
-        ["git", "fetch", OTHER, "eng-a"],
+        ["git", "fetch", "--", OTHER, "eng-a"],
         ["git", "fetch", "origin", "dev"],
         ["git", "merge-base", "HEAD", "origin/dev"],
         ["git", "rev-list", "--count", BASE],
@@ -356,8 +357,8 @@ def test_park_fetches_a_dependency_in_the_same_repository_from_origin(parked, re
     _, ledger, _, shell, doc = parked
     ledger.rows["a"]["branch_repo"] = repo
     assert park(doc) == 0
-    assert ("t1", {"parked_on": ["a"], "stacked_base": BASE}, AGENT) in ledger.updates
-    assert "parked_repos" not in ledger.rows["t1"]
+    assert ("t1", {"parked_on": ["a"], "stacked_base": BASE, "parked_repos": []}, AGENT) in ledger.updates
+    assert ledger.rows["t1"]["parked_repos"] == []
     assert ["git", "remote", "get-url", "origin"] in shell.calls
     assert ["git", "fetch", "origin", "eng-a"] in shell.calls
     assert ["git", "merge-base", "HEAD", "origin/eng-a"] in shell.calls
@@ -367,25 +368,35 @@ def test_park_fetches_a_dependency_in_the_same_repository_from_origin(parked, re
 
 def test_park_names_each_other_repository_once_in_dependency_order(parked):
     _, ledger, _, shell, doc = parked
-    ledger.rows["b"].update({"state": "claimed", "branch_repo": OTHER})
+    ledger.rows["b"].update({"state": "claimed", "branch_repo": "git@github.com:O/bundle.git"})
     ledger.rows["c"] = {"id": "c", "title": "Docs", "state": "pr", "branch": "eng-c", "branch_repo": "/srv/docs.git"}
+    ledger.rows["d"] = {"id": "d", "title": "Plan", "state": "pr", "branch": "", "branch_repo": "/srv/plan.git"}
     ledger.rows["a"]["branch_repo"] = OTHER
-    ledger.rows["t1"]["depends_on"] = ["a", "b", "c"]
+    ledger.rows["t1"]["depends_on"] = ["a", "b", "c", "d"]
     assert park(doc) == 0
+    assert ledger.rows["t1"]["parked_on"] == ["a", "b", "c", "d"]
     assert ledger.rows["t1"]["parked_repos"] == [OTHER, "/srv/docs.git"]
     assert shell.calls.count(["git", "remote", "get-url", "origin"]) == 1
-    assert [c[2:] for c in shell.calls if c[:2] == ["git", "fetch"] and c[2] != "origin"] == [
+    assert [c[3:] for c in shell.calls if c[:3] == ["git", "fetch", "--"]] == [
         [OTHER, "eng-a"],
-        [OTHER, "eng-b"],
+        ["git@github.com:O/bundle.git", "eng-b"],
         ["/srv/docs.git", "eng-c"],
     ]
+
+
+def test_park_reads_no_origin_url_when_no_dependency_records_a_repository(parked):
+    _, ledger, _, shell, doc = parked
+    ledger.rows["b"].update({"state": "claimed", "branch": "", "branch_repo": OTHER})
+    assert park(doc) == 0
+    assert ["git", "remote", "get-url", "origin"] not in shell.calls
+    assert ledger.rows["t1"]["parked_repos"] == []
 
 
 @pytest.mark.parametrize(
     ("failing", "says"),
     [
         (("git", "remote", "get-url"), "cannot read the origin url"),
-        (("git", "fetch", OTHER), f"cannot fetch eng-a from {OTHER}"),
+        (("git", "fetch", "--"), f"cannot fetch eng-a from {OTHER}"),
         (("git", "fetch", "origin"), "cannot fetch dev"),
         (("git", "merge-base", "HEAD"), "the task shares no history with dev"),
     ],
@@ -404,6 +415,9 @@ def test_park_on_another_repository_refuses_when_a_command_fails(parked, capsys,
         ("ssh://git@github.com/o/r.git/", "github.com/o/r"),
         ("/srv/repos/docs.git", "/srv/repos/docs"),
         ("/srv/repos/docs.git/", "/srv/repos/docs"),
+        ("/srv/Repos/Docs.git", "/srv/Repos/Docs"),
+        ("https://github.com/o/gist.git", "github.com/o/gist"),
+        ("git@github.com:o/digit", "github.com/o/digit"),
     ],
 )
 def test_a_repository_key_ignores_scheme_user_case_and_suffix(url, key):
@@ -414,6 +428,11 @@ def test_a_repository_key_ignores_scheme_user_case_and_suffix(url, key):
     ("url", "public"),
     [
         ("https://user:token@github.com/o/r.git", "https://github.com/o/r.git"),
+        ("HTTPS://token@github.com/o/r", "HTTPS://github.com/o/r"),
+        ("ssh://git@github.com/o/r.git", "ssh://git@github.com/o/r.git"),
+        ("ssh://git:secret@host/o/r", "ssh://git@host/o/r"),
+        ("ssh://host/o/r", "ssh://host/o/r"),
+        ("https://user:p@ss@github.com/o/r", "https://github.com/o/r"),
         ("https://github.com/o/r", "https://github.com/o/r"),
         ("git@github.com:o/r.git", "git@github.com:o/r.git"),
         ("/srv/repos/docs.git", "/srv/repos/docs.git"),

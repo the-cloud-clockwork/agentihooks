@@ -69,8 +69,10 @@ def _open_dependencies(row, rows):
 
 
 def repo_key(url: str) -> str:
-    rest = url.lower().partition("://")[2] or url.lower()
-    host, slash, path = rest.partition("/")
+    scheme, sep, rest = url.partition("://")
+    if not sep and ":" not in url.partition("/")[0]:
+        return url.rstrip("/").removesuffix(".git")
+    host, slash, path = (rest if sep else url).lower().partition("/")
     rest = host.rpartition("@")[2].replace(":", "/", 1) + slash + path
     return rest.rstrip("/").removesuffix(".git")
 
@@ -80,7 +82,9 @@ def public_url(url: str) -> str:
     if not sep:
         return url
     host, slash, path = rest.partition("/")
-    return f"{scheme}://{host.rpartition('@')[2]}{slash}{path}"
+    user, at, place = host.rpartition("@")
+    kept = f"{user.partition(':')[0]}@" if at and not scheme.lower().startswith("http") else ""
+    return f"{scheme}://{kept}{place}{slash}{path}"
 
 
 def _foreign(open_):
@@ -94,7 +98,7 @@ def _base_of(dep, foreign):
     if dep not in foreign:
         _out(["git", "fetch", "origin", branch], f"cannot fetch {branch}")
         return _out(["git", "merge-base", "HEAD", f"origin/{branch}"], f"{branch} shares no history")
-    _out(["git", "fetch", dep["branch_repo"], branch], f"cannot fetch {branch} from {dep['branch_repo']}")
+    _out(["git", "fetch", "--", dep["branch_repo"], branch], f"cannot fetch {branch} from {dep['branch_repo']}")
     _out(["git", "fetch", "origin", "dev"], "cannot fetch dev")
     return _out(["git", "merge-base", "HEAD", "origin/dev"], "the task shares no history with dev")
 
@@ -140,8 +144,10 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     if row.get("issue_url"):
         body = _issue_body(row, open_, base, foreign)
         _out(["gh", "issue", "comment", row["issue_url"], "--body", body], "could not comment on the issue")
-    repos = list(dict.fromkeys(b["branch_repo"] for b in foreign))
-    fields = {"parked_on": [b["id"] for b in open_], "stacked_base": base, **({"parked_repos": repos} if repos else {})}
+    repos = {}
+    for dep in foreign:
+        repos.setdefault(repo_key(dep["branch_repo"]), dep["branch_repo"])
+    fields = {"parked_on": [b["id"] for b in open_], "stacked_base": base, "parked_repos": list(repos.values())}
     ledger.update_task(slug, agent.task, fields, by=agent.name)
     ledger.comment(slug, agent.task, _ledger_note(open_), by=agent.name)
     return fields, top
