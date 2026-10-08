@@ -440,6 +440,8 @@ def test_a_task_closed_done_during_a_tick_stays_done_and_is_not_claimed_again(st
 
 def test_an_open_task_closed_done_during_a_tick_spawns_no_agent(store):
     ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "eng"}]), FakeRuntime()
+    for row in ledger.rows.values():
+        row["difficulty"] = "M"
     ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("done", "")
@@ -507,7 +509,7 @@ def test_a_stalled_agents_open_items_follow_the_live_reopen_result(store, closed
 
 
 def test_a_task_closed_done_during_a_tick_is_not_blocked_by_the_claim_cap(store):
-    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}]), FakeRuntime()
+    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng", "difficulty": "M"}]), FakeRuntime()
     for _ in range(3):
         store.count_claim("sw", "t1")
     ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
