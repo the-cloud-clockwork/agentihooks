@@ -119,6 +119,7 @@ def test_supplied_paths_cannot_hide_patch_targets(task_home):
     allowed = str(task_home / "scratchpad" / "notes.md")
     denied = str(task_home / "repo" / "module.py")
     payload = patch_payload(task_home, [f"*** Delete File: {denied}"], {"file_path": allowed, "file_paths": [allowed]})
+    assert payload["tool_input"]["file_path"] == allowed
     assert payload["tool_input"]["file_paths"] == [denied]
     assert no_code_edits.deny_reason(payload, "planner", task_home)
 
