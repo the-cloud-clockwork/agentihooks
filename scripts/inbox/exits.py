@@ -15,6 +15,7 @@ BY = "swarm"
 def settle(inbox, name, seat, exit_text):
     """seat is where the work goes on, '' when nobody takes it up. A master's mail passes to its successor, or waits
     for one while none is spawned yet."""
+    from scripts.gates import push_stop
     from scripts.inbox.store import CLOSED
     from scripts.swarm.naming import NameRegistry
 
@@ -24,7 +25,9 @@ def settle(inbox, name, seat, exit_text):
     for item in inbox.inbox(name):
         if item.state in CLOSED:
             continue
-        if successor:
+        if push_stop.is_notice(item):
+            inbox.close(item.id, BY, "done", push_stop.left(name, exit_text))
+        elif successor:
             inbox.redirect(item.id, BY, successor, f"{name} {exit_text}; passed to {successor}, its successor", name)
         elif seat:
             inbox.redirect(item.id, BY, seat, f"{name} {exit_text}; moved to {seat} for its next occupant", name)
@@ -83,6 +86,21 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
             settle(inbox, name, outcome["seat"], outcome["reason"])
         else:
             settle(inbox, name, seat, "exited")
+    _settle_seat_notices(inbox, {seat for _, seat in store.seats.agent_seats(slug) if seat}, active)
+
+
+def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
+    """Push stop notices an earlier exit moved to a seat: closed once the agent that got them has gone."""
+    from scripts.gates import push_stop
+    from scripts.inbox.store import CLOSED
+
+    for seat in sorted(seats):
+        for item in inbox.inbox(seat):
+            if item.state in CLOSED or not push_stop.is_notice(item):
+                continue
+            got = next((entry["by"] for entry in inbox.history(item.id) if entry.get("state") == "delivered"), "")
+            if got and got not in active:
+                inbox.close(item.id, BY, "done", push_stop.left(got, "left its seat"))
 
 
 def _told(item, name, exit_text):

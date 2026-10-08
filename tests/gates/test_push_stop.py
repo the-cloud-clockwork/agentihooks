@@ -170,6 +170,79 @@ def test_a_later_stop_that_passes_closes_the_open_template_item_with_its_outcome
     assert rig.stop().allowed
 
 
+SEAT = "eng-1@demo"
+
+
+def refused_once(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    (rig.tree / "new").write_text("new\n")
+    assert not rig.stop().allowed
+    [item] = InboxStore(rig.store.redis).inbox(ME)
+    return item
+
+
+@pytest.mark.parametrize("seat", [SEAT, ""])
+def test_an_agent_leaving_with_unpushed_work_closes_its_notice_naming_the_branch_not_pushed(monkeypatch, rig, seat):
+    from scripts.inbox import exits
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(rig.root))
+    item = refused_once(rig)
+    inbox = InboxStore(rig.store.redis)
+    exits.settle(inbox, ME, seat, "handed off its seat")
+    closed = inbox.get(item.id)
+    assert (closed.address, closed.state) == (ME, "done")
+    assert closed.reason == f"done: {ME} handed off its seat; its branch {BRANCH} was not pushed"
+    assert inbox.inbox(SEAT) == []
+    assert inbox.pending_items("swarm") == []
+
+
+def test_an_agent_leaving_after_its_work_reached_origin_closes_its_notice_naming_the_branch_pushed(monkeypatch, rig):
+    from scripts.inbox import exits
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(rig.root))
+    item = refused_once(rig)
+    git(rig.tree, "add", "new")
+    git(rig.tree, "commit", "-m", "new")
+    git(rig.tree, "push", "origin", f"HEAD:refs/heads/{BRANCH}")
+    inbox = InboxStore(rig.store.redis)
+    exits.settle(inbox, ME, SEAT, "retired after the swarm idle limit")
+    closed = inbox.get(item.id)
+    assert closed.state == "done"
+    assert closed.reason == f"done: {ME} retired after the swarm idle limit; its branch {BRANCH} was pushed"
+    assert inbox.mailbox(SEAT) == []
+
+
+def test_an_agent_leaving_with_no_branch_of_its_own_closes_its_notice_saying_so(monkeypatch, rig, tmp_path):
+    from scripts.inbox import exits
+
+    item = refused_once(rig)
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "empty"))
+    inbox = InboxStore(rig.store.redis)
+    exits.settle(inbox, ME, SEAT, "exited")
+    assert inbox.get(item.id).reason == f"done: {ME} exited; no branch of its own was found"
+
+
+def test_other_mail_of_a_leaving_agent_still_moves_to_its_seat(monkeypatch, rig):
+    from scripts.inbox import exits
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(rig.root))
+    refused_once(rig)
+    inbox = InboxStore(rig.store.redis)
+    other = inbox.send("swarm", ME, "Your pull request checks failed.")
+    exits.settle(inbox, ME, SEAT, "handed off its seat")
+    assert [(item.id, item.state) for item in inbox.inbox(SEAT)] == [(other.id, "pending")]
+
+
+def test_a_live_agents_notice_stays_open_until_a_stop_passes(rig):
+    item = refused_once(rig)
+    assert InboxStore(rig.store.redis).get(item.id).state not in ("done", "cancelled")
+    assert not rig.stop().allowed
+    git(rig.tree, "add", "new")
+    git(rig.tree, "commit", "-m", "new")
+    assert rig.stop().allowed
+    assert InboxStore(rig.store.redis).get(item.id).reason == f"done: {push_stop.SETTLED}"
+
+
 def test_pushed_work_without_a_pull_request_or_a_line_since_the_push_is_refused(rig):
     rig.commit()
     decision = rig.stop()

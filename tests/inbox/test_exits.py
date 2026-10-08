@@ -85,3 +85,40 @@ def test_a_live_closed_task_withdraws_late_mail_even_after_an_exit_to_the_seat_w
     exits.sweep(inbox, "sw", store, lambda: {"t1": {"claimed_by": "sw-eng-1", "state": "blocked"}})
     assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("sw-eng-1", "cancelled")
     assert "blocked its task and exited" in inbox.get(item.id).reason
+
+
+def notice_moved_to_the_seat(inbox, store):
+    from scripts.gates.push_stop import TEMPLATE
+
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    item = inbox.send("swarm", "sw-eng-1", TEMPLATE)
+    inbox.deliver(item.id, "sw-eng-1")
+    inbox.redirect(item.id, "swarm", "eng-1@sw", "sw-eng-1 handed off its seat; moved to eng-1@sw", "sw-eng-1")
+    inbox.deliver(item.id, "sw-eng-1")
+    return item
+
+
+def test_the_sweep_closes_a_push_stop_notice_left_on_a_seat_by_an_agent_that_left(monkeypatch, redis, tmp_path):
+    from scripts.swarm.store import AgentRecord
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path))
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    item = notice_moved_to_the_seat(inbox, store)
+    store.put_agent("sw", AgentRecord(name="sw-eng-2", lane="eng", task="t2", seat="eng-1@sw"))
+    store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+    exits.sweep(inbox, "sw", store, dict)
+    closed = inbox.get(item.id)
+    assert (closed.address, closed.state) == ("eng-1@sw", "done")
+    assert closed.reason == "done: sw-eng-1 left its seat; no branch of its own was found"
+    assert [item.id for item in inbox.mailbox("sw-eng-2") if item.state != "done"] == []
+
+
+def test_the_sweep_leaves_a_seat_notice_open_while_its_agent_is_live(monkeypatch, redis, tmp_path):
+    from scripts.swarm.store import AgentRecord
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path))
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    item = notice_moved_to_the_seat(inbox, store)
+    store.put_agent("sw", AgentRecord(name="sw-eng-1", lane="eng", task="t1", seat="eng-1@sw"))
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).state == "delivered"
