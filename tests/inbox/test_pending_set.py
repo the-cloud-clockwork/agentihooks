@@ -77,7 +77,7 @@ def test_delivery_reads_only_the_pending_set_with_a_thousand_closed_items(redis,
     out = delivery.pending_context("s1", {"AGENTIHOOKS_AGENT_NAME": "bob"})
 
     assert item.id in out and "new work" in out
-    assert len(counting.calls) <= 5, counting.calls
+    assert len(counting.calls) <= 7, counting.calls
     assert seed.get(item.id).state == "delivered"
     assert len(store.inbox("bob")) == 1001
 
@@ -251,7 +251,7 @@ def test_the_wake_pass_reads_only_the_waiting_set_with_many_idle_addresses(redis
 
     assert [i.id for i in store.pending()] == [item.id]
     assert "scan_iter" not in counting.calls and "scan" not in counting.calls, counting.calls
-    assert len(counting.calls) <= 5, counting.calls
+    assert len(counting.calls) <= 7, counting.calls
 
 
 def test_back_fill_rebuilds_the_waiting_set_once(store):

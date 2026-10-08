@@ -5,6 +5,7 @@ Whichever path shows a write first marks it; the others skip it, so each write r
 
 import os
 
+from scripts.inbox.store import now_ms, redelivery_ms
 from scripts.swarm.keyspace import ROOT
 
 PREFIX = f"{ROOT}:inbox:seen"
@@ -60,6 +61,7 @@ def first_showing(marks, name, slug, events):
 
 def claim(store, me):
     """Deliver each item pending for me, its seat and aliases included; a ledger write already shown closes instead."""
+    store.redeliver(now_ms(), redelivery_ms())
     marks = SeenMarks(store.redis)
     shown = []
     for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me))):
