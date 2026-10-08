@@ -154,3 +154,63 @@ def test_hive_can_publish_an_empty_ledger(store):
     command_runner.publish(store, "sw", {})
     assert commands.workspaces(store, "sw") == {}
     assert commands.view(store, "sw")["tasks"] == {"open": 0, "claimed": 0, "blocked": 0, "pr": 0, "done": 0}
+
+
+def test_commands_carry_epoch_and_refuse_stale_submission(store):
+    from scripts.swarm import lease
+    from scripts.swarm.store import SwarmError
+
+    held = lease.acquire(store, "sw", commands.hive_id())
+    sent = commands.submit(store, "sw", "swarm", ["pause"])
+    assert sent["epoch"] == held.epoch
+    assert lease.release(store, "sw", held)
+    lease.acquire(store, "sw", commands.hive_id())
+    with pytest.raises(SwarmError) as error:
+        commands.submit(store, "sw", "swarm", ["pause"], epoch=held.epoch)
+    assert str(error.value) == "the controller lease is stale"
+    calls = []
+    assert commands.consume(store, "sw", commands.hive_id(), lambda row: calls.append(row) or "") == [
+        "control swarm failed"
+    ]
+    assert calls == []
+    assert commands.rows(store, "sw")[0]["error"] == "the controller lease is stale"
+
+
+@pytest.mark.parametrize("mode", ["compose", "distributed"])
+def test_controller_nonlocal_runs_tick_without_spawning(store, monkeypatch, mode):
+    from scripts.swarm import controller, lease
+
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", mode)
+    runtime = FakeRuntime()
+    ledger = FakeLedger([{"id": "task", "title": "Work", "state": "open", "phase": ""}])
+    store.update("sw", state="running", max_eng=1)
+    result = controller.run_once(store, ledger=ledger, runtime=runtime, messenger=FakeHerdr({}))
+    assert list(result) == ["sw"]
+    assert lease.current(store, "sw").owner == commands.hive_id()
+    assert runtime.spawned == []
+    assert runtime.masters == []
+    assert ledger.state("sw")["tasks"][0]["state"] == "open"
+
+
+def test_controller_fences_ledger_and_spawn_writes(store):
+    from scripts.swarm import controller, lease
+    from scripts.swarm.store import SwarmError
+
+    runtime = FakeRuntime()
+    ledger = FakeLedger([])
+    held = lease.acquire(store, "sw", "home")
+    guarded_ledger = controller.FencedLedger(store, "sw", held, ledger)
+    guarded_runtime = controller.FencedRuntime(store, "sw", held, runtime, True)
+    assert guarded_ledger.state("sw") == ledger.state("sw")
+    guarded_runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"})
+    assert runtime.tasks[0]["controller_epoch"] == 1
+    assert lease.release(store, "sw", held)
+    lease.acquire(store, "sw", "other")
+    for write in (
+        lambda: guarded_ledger.update_task("sw", "t", {"state": "claimed"}),
+        lambda: guarded_runtime.spawn(store.config("sw"), "eng", "two", {"id": "t"}),
+    ):
+        with pytest.raises(SwarmError) as error:
+            write()
+        assert str(error.value) == "the controller lease is stale"
+    assert len(runtime.spawned) == 1
