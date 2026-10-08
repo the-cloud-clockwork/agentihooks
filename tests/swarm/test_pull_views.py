@@ -7,6 +7,8 @@ import pytest
 from scripts.swarm.ledger_events import GATE, SENT_TTL_S, views
 from scripts.swarm.store import PREFIX
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 
 def resource(head="h1", state="OPEN"):
     return {
