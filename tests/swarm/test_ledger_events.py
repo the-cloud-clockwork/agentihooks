@@ -240,6 +240,165 @@ def test_a_red_notice_adds_to_the_notices_of_earlier_pull_requests(store):
     assert f"told {ENG_SEAT}: https://github.com/o/r/pull/9:red:" in told
 
 
+URL = "https://github.com/o/r/pull/9"
+
+
+def red_notice(store):
+    red = answer("open_red")
+    run(store, recorded())
+    run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE, github=lambda url: red)
+    [item] = InboxStore(store.redis).inbox(ENG_SEAT)
+    return red, item
+
+
+def red_index(store):
+    return store.redis.hgetall(store.key("sw", "red-notices"))
+
+
+def done_task():
+    return recorded(tasks=[{"id": "t1", "title": "Build the thing", "state": "done", "pr_url": URL}])
+
+
+@pytest.mark.parametrize(
+    ("settled", "reason"),
+    [
+        (answer("merged"), "merged"),
+        (answer("closed_unmerged"), "closed"),
+        (ledger_events.PullRequest("OPEN", None, 1, False, resolved=True, head="green"), "turned green"),
+    ],
+)
+def test_a_red_notice_closes_done_when_its_pull_request_settles(store, settled, reason):
+    red, item = red_notice(store)
+    assert red_index(store) == {item.id: URL}
+    asked = []
+    told = run(store, done_task(), now_ms=red.red_at + 21 * MINUTE, github=lambda u: asked.append(u) or settled)
+    inbox = InboxStore(store.redis)
+    closed = inbox.get(item.id)
+    assert (closed.state, closed.reason) == ("done", f"done: pull request {URL} {reason}")
+    assert f"closed the red notice {item.id}: {URL} {reason}" in told
+    assert asked == [URL]
+    last = inbox.history(item.id)[-1]
+    assert (last["state"], last["by"], last["reason"]) == ("done", "swarm", f"done: pull request {URL} {reason}")
+    assert red_index(store) == {}
+
+
+@pytest.mark.parametrize(
+    "still",
+    [
+        answer("open_red"),
+        ledger_events.PullRequest("OPEN", None, 1, False, resolved=False, head="running"),
+        ledger_events.PullRequest("OPEN", None, 1, True, resolved=True, head="red"),
+        None,
+    ],
+)
+def test_a_red_notice_stays_open_while_its_pull_request_is_red_or_unknown(store, still):
+    red, item = red_notice(store)
+    told = run(store, done_task(), now_ms=red.red_at + 21 * MINUTE, github=lambda url: still)
+    assert InboxStore(store.redis).get(item.id).state == "pending"
+    assert not [line for line in told if line.startswith("closed the red notice")]
+    assert red_index(store) == {item.id: URL}
+
+
+def test_a_red_notice_closes_after_its_engineer_record_is_dropped_and_other_notices_stay(store):
+    red, item = red_notice(store)
+    store.drop_agent("sw", "sw-eng-1")
+    inbox = InboxStore(store.redis)
+    other = inbox.send("swarm", ENG_SEAT, "Your wait on checks has ended.")
+    stranger = inbox.send("sw-eng-2", ENG_SEAT, item.text)
+    run(store, done_task(), now_ms=red.red_at + 21 * MINUTE, github=lambda url: answer("merged"))
+    assert inbox.get(item.id).state == "done"
+    assert inbox.get(other.id).state == "pending"
+    assert inbox.get(stranger.id).state == "pending"
+
+
+def test_a_red_notice_closed_by_its_reader_leaves_the_index_unasked(store):
+    red, item = red_notice(store)
+    inbox = InboxStore(store.redis)
+    inbox.close(item.id, "swarm", "done", "fixed")
+    asked = []
+    run(store, done_task(), now_ms=red.red_at + 21 * MINUTE, github=lambda url: asked.append(url) or answer("merged"))
+    assert inbox.get(item.id).reason == "done: fixed"
+    assert asked == []
+    assert red_index(store) == {}
+
+
+def test_a_red_notice_whose_close_races_stays_indexed_and_closes_next_pass(store, monkeypatch):
+    red, item = red_notice(store)
+    store.redis.hset(store.key("sw", "red-notices"), "gone", URL)
+
+    def changed_meanwhile(self, item_id, closer, kind, detail=""):
+        raise ledger_events.InboxError(f"message {item_id} changed meanwhile")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(InboxStore, "close", changed_meanwhile)
+        told = run(store, done_task(), now_ms=red.red_at + 21 * MINUTE, github=lambda url: answer("merged"))
+    assert not [line for line in told if line.startswith("closed the red notice")]
+    assert red_index(store) == {item.id: URL}
+    told = run(store, done_task(), now_ms=red.red_at + 22 * MINUTE, github=lambda url: answer("merged"))
+    assert told == [f"closed the red notice {item.id}: {URL} merged"]
+    assert red_index(store) == {}
+
+
+def test_open_red_notices_sent_before_the_index_are_found_once_at_their_seats(store):
+    inbox = InboxStore(store.redis)
+    text = f"Your pull request {URL} for task t1 (Build the thing) has red checks and no push for twenty minutes."
+    legacy = inbox.send("swarm", "eng-7@sw", text)
+    foreign = inbox.send("swarm", "eng-1@swx", text)
+    stranger = inbox.send("sw-eng-2", ENG_SEAT, text)
+    done = inbox.send("swarm", ENG_SEAT, text.replace("pull/9", "pull/8"))
+    inbox.close(done.id, "swarm", "done", "fixed")
+    asked = []
+    told = run(store, done_task(), github=lambda url: asked.append(url) or answer("merged"))
+    assert told == [f"closed the red notice {legacy.id}: {URL} merged"]
+    assert asked == [URL]
+    assert [inbox.get(i.id).state for i in (legacy, foreign, stranger)] == ["done", "pending", "pending"]
+    assert store.redis.exists(store.key("sw", "events-sent", "red-notices:backfill"))
+    late = inbox.send("swarm", "eng-7@sw", text)
+    run(store, done_task(), github=lambda url: answer("merged"))
+    assert inbox.get(late.id).state == "pending"
+
+
+def test_the_backfill_indexes_only_open_red_notices_from_the_swarm(store):
+    inbox = InboxStore(store.redis)
+    text = f"Your pull request {URL} for task t1 (Build the thing) has red checks and no push for twenty minutes."
+    legacy = inbox.send("swarm", ENG_SEAT, text)
+    inbox.send("sw-eng-2", ENG_SEAT, text)
+    inbox.send("swarm", ENG_SEAT, "Your wait on checks has ended.")
+    closed = inbox.send("swarm", ENG_SEAT, text)
+    inbox.close(closed.id, "swarm", "done", "fixed")
+    ledger_events._backfill_red_notices(ledger_events.Mail(inbox, store, "sw"))
+    assert red_index(store) == {legacy.id: URL}
+
+
+def test_a_red_pull_request_does_not_hold_back_the_notices_after_it(store):
+    red, item = red_notice(store)
+    inbox = InboxStore(store.redis)
+    later = "https://github.com/o/r/pull/8"
+    second = inbox.send("swarm", ENG_SEAT, item.text.replace(URL, later))
+    store.redis.hset(store.key("sw", "red-notices"), second.id, later)
+    views = {URL: red, later: answer("merged")}
+    run(store, done_task(), now_ms=red.red_at + 21 * MINUTE, github=views.get)
+    assert (inbox.get(item.id).state, inbox.get(second.id).state) == ("pending", "done")
+
+
+def test_a_gone_notice_does_not_hold_back_the_notices_after_it(store):
+    inbox = InboxStore(store.redis)
+    run(store, recorded())
+    store.redis.hset(store.key("sw", "red-notices"), "gone", URL)
+    after = inbox.send("swarm", ENG_SEAT, "Your pull request was red.")
+    store.redis.hset(store.key("sw", "red-notices"), after.id, URL)
+    run(store, done_task(), github=lambda url: answer("merged"))
+    assert inbox.get(after.id).state == "done"
+    assert red_index(store) == {}
+
+
+def test_one_pass_asks_github_once_per_pull_request(store):
+    red, item = red_notice(store)
+    asked = []
+    run(store, in_pr(), now_ms=red.red_at + 21 * MINUTE, github=lambda url: asked.append(url) or red)
+    assert asked == [URL]
+
+
 def test_an_old_commit_pushed_now_is_not_red_before_twenty_minutes_from_its_push_and_red(store):
     raw = json.loads((ANSWERS / "open_red.json").read_text())
     raw["commits"][0]["committedDate"] = "2026-10-04T23:40:12Z"
