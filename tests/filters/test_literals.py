@@ -58,6 +58,16 @@ def test_python_multiline_escaped_raw_and_nested_fstrings_keep_source_text():
     assert all(source[item["start"] : item["end"]] == item["text"] for item in findings)
 
 
+@pytest.mark.parametrize("separator", ["\u2028", "\u2029", "\v", "\f", "\r"])
+def test_python_literal_offsets_count_only_newline_as_a_source_line(separator):
+    from hooks.filters.finders.string_literals import find
+
+    source = f"label = 'first{separator}second'\nother = 'because quota'\n"
+    findings = find(source, "page.py", "Write")
+    assert [item["text"] for item in findings] == [f"first{separator}second", "because quota"]
+    assert all(source[item["start"] : item["end"]] == item["text"] for item in findings)
+
+
 def test_unknown_language_has_no_literals():
     from hooks.filters.finders.string_literals import find
 

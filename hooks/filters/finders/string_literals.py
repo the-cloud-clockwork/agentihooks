@@ -14,16 +14,18 @@ def _finding(text: str, start: int, end: int) -> dict:
 
 def _python(text: str) -> list[dict]:
     offsets = [0]
-    for line in text.splitlines(keepends=True):
-        offsets.append(offsets[-1] + len(line))
+    for line in text.split("\n")[:-1]:
+        offsets.append(offsets[-1] + len(line) + 1)
     findings = []
     stack = []
     try:
         tokens = tokenize.generate_tokens(io.StringIO(text).readline)
         for token in tokens:
+            kind = tokenize.tok_name[token.type]
+            if token.type != tokenize.STRING and kind not in {"FSTRING_START", "FSTRING_END"}:
+                continue
             start = offsets[token.start[0] - 1] + token.start[1]
             end = offsets[token.end[0] - 1] + token.end[1]
-            kind = tokenize.tok_name[token.type]
             if kind == "FSTRING_START":
                 stack.append(start + len(token.string))
             elif kind == "FSTRING_END":
