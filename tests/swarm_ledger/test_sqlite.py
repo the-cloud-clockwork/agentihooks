@@ -104,6 +104,18 @@ def test_an_import_that_does_not_export_its_source_stores_nothing(tmp_path, monk
     assert not store(tmp_path).exists("ledger")
 
 
+def test_a_refused_replacing_import_leaves_the_stored_ledger_readable(tmp_path, monkeypatch):
+    generations = iter(range(10, 20))
+    monkeypatch.setattr(sqlite.secrets, "randbits", lambda bits: next(generations))
+    repo = store(tmp_path)
+    repo.create("ledger", CONTENT)
+    real = repo._export
+    monkeypatch.setattr(repo, "_export", lambda connection, slug: real(connection, slug) and {"wrong": True})
+    with pytest.raises(ValueError, match="does not export"):
+        repo.import_document("ledger", document(), replace=True)
+    assert repo.get_document("ledger")["title"] == "Store"
+
+
 def test_one_operation_writes_only_the_rows_it_changed_and_no_file(tmp_path):
     repo = store(tmp_path)
     assert repo.create("ledger", CONTENT) is True
@@ -175,6 +187,22 @@ def test_a_second_writer_invalidates_the_first_writers_copy(tmp_path):
     second.apply_ops("ledger", ops=[chat(2)])
     state, _ = first.apply_ops("ledger", ops=[chat(3)])
     assert [m["id"] for m in state["chat"]] == ["m1", "m2", "m3"]
+
+
+def test_a_reader_of_an_older_revision_keeps_the_newer_copy_for_the_next_writer(tmp_path, monkeypatch):
+    repo = store(tmp_path)
+    repo.create("ledger", CONTENT)
+    repo.apply_ops("ledger", ops=[chat(1)])
+    with repo.connect() as reader, reader:
+        reader.execute("BEGIN")
+        reader.execute("SELECT generation FROM ledgers").fetchall()
+        repo.apply_ops("ledger", ops=[chat(2)])
+        assert [m["id"] for m in json.loads(repo._entry(reader, "ledger").text)["chat"]] == ["m1", "m2"]
+    assembled = []
+    monkeypatch.setattr(sqlite, "read_rows", lambda *a: assembled.append(a) or pytest.fail("reassembled"))
+    state, _ = repo.apply_ops("ledger", ops=[chat(3)])
+    assert [m["id"] for m in state["chat"]] == ["m1", "m2", "m3"]
+    assert assembled == []
 
 
 def test_partial_reads_return_only_the_named_parts(tmp_path):

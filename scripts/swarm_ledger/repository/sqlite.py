@@ -1,6 +1,7 @@
 import json
 import secrets
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -154,6 +155,7 @@ class SQLiteLedgerRepository:
         self.trace = None
         self._ready = set()
         self._cache = {}
+        self._guard = threading.Lock()
 
     @property
     def domain(self):
@@ -176,7 +178,7 @@ class SQLiteLedgerRepository:
         if domain is self.domain or self._path is not None:
             return self
         twin = SQLiteLedgerRepository(domain=domain)
-        twin._cache, twin._ready = self._cache, self._ready
+        twin._cache, twin._ready, twin._guard = self._cache, self._ready, self._guard
         return twin
 
     @contextmanager
@@ -203,19 +205,26 @@ class SQLiteLedgerRepository:
     def _key(self, slug):
         return str(self.path), slug
 
-    def _entry(self, connection, slug: str) -> Entry:
+    def _entry(self, connection, slug: str, latest: bool = False) -> Entry:
+        """The stored ledger; a reader whose snapshot predates a cached write gets that newer committed copy."""
         row = connection.execute("SELECT generation FROM ledgers WHERE slug=?", (slug,)).fetchone()
         if row is None:
             raise Missing(slug)
         cached = self._cache.get(self._key(slug))
-        if cached is not None and cached.generation == row[0]:
+        if cached is not None and (cached.generation == row[0] or not latest and cached.generation > row[0]):
             return cached
         state = assemble(read_rows(connection, slug))
         if "events" in state["_meta"]:
             state["_meta"]["events"] = read_events(connection, slug)
         entry = Entry(row[0], encode(state), state)
-        self._cache[self._key(slug)] = entry
+        self._remember(slug, entry, latest)
         return entry
+
+    def _remember(self, slug: str, entry: Entry, latest: bool = False) -> None:
+        with self._guard:
+            current = self._cache.get(self._key(slug))
+            if latest or current is None or current.generation < entry.generation:
+                self._cache[self._key(slug)] = entry
 
     def _adopt(self, slug: str | None = None) -> None:
         from . import legacy
@@ -256,18 +265,19 @@ class SQLiteLedgerRepository:
             try:
                 with connection:
                     connection.execute("BEGIN IMMEDIATE")
-                    entry = self._entry(connection, slug)
+                    entry = self._entry(connection, slug, latest=True)
                     state = json.loads(entry.text)
                     meta = state.pop("_meta")
                     rejected, ctx = mutation.apply(slug, state, meta, self.domain, changes, ops, gate)
                     state["_meta"] = meta
-                    text = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
+                    written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
             except BaseException:
                 self._cache.pop(self._key(slug), None)
                 raise
-        return json.loads(text), rejected
+            self._remember(slug, written, latest=True)
+        return json.loads(written.text), rejected
 
-    def _write(self, connection, slug: str, entry: Entry, state: dict, events: list) -> str:
+    def _write(self, connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
         old = {**entry.state, "_meta": {**entry.state["_meta"]}}
         new = {**state, "_meta": {**state["_meta"]}}
         for meta in (old["_meta"], new["_meta"]):
@@ -276,14 +286,12 @@ class SQLiteLedgerRepository:
         before, after = diff(old, new)
         write_rows(connection, slug, before, after)
         append_events(connection, slug, events, self.domain.EVENTS_KEPT)
-        generation = secrets.randbits(62)
+        generation = entry.generation + 1
         connection.execute(
             "UPDATE ledgers SET revision=?, generation=?, summary=?, touched_at=? WHERE slug=?",
             (state["_meta"]["rev"], generation, encode(summarize(slug, state)), self.domain.now_ms(), slug),
         )
-        text = encode(state)
-        self._cache[self._key(slug)] = Entry(generation, text, state)
-        return text
+        return Entry(generation, encode(state), state)
 
     def _insert(self, connection, slug: str, state: dict, token: str, seeds: dict | None = None) -> None:
         for table in PER_LEDGER:
@@ -334,6 +342,7 @@ class SQLiteLedgerRepository:
                 raise ValueError(f"ledger {slug} exists; import refuses to replace it")
             self._insert(connection, slug, stored, token or secrets.token_urlsafe(24), seeds)
             if self._export(connection, slug) != json.loads(encode(state)):
+                self._cache.pop(self._key(slug), None)
                 raise ValueError(f"imported ledger {slug} does not export to its source document")
 
     def _export(self, connection, slug: str) -> dict:
