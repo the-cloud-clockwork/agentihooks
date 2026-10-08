@@ -20,7 +20,7 @@ def test_ci_creates_no_commits_or_bot_pull_requests():
     for path in sorted([*folder.glob("*.yml"), *folder.glob("*.yaml")]):
         workflow = _workflow(path.name)
         for job in workflow["jobs"].values():
-            for step in job["steps"]:
+            for step in job.get("steps", []):
                 command = step.get("run", "")
                 assert "git commit" not in command
                 assert "HEAD:dev" not in command
