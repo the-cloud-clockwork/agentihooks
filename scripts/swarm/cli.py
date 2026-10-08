@@ -799,6 +799,8 @@ def cmd_pr(store, args):
 
 
 def cmd_merge(store, args):
+    if args.action != "state":
+        _worker(store, args)
     print(json.dumps(merge_queue.operate(args.action, args.url)))
 
 

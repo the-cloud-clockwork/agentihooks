@@ -66,9 +66,10 @@ The swarm ends a checked wait when the thing resolves and tells you through the 
 ## Close with the proof
 
 Merge on green checks and closed review. On a base branch with a merge queue,
-a merge only queues the pull request; it lands when the queue run passes. Queue
-it with `agentihooks swarm <slug> merge queue <url>`, which goes through the
-GitHub API and works with any gh, then wait with
+a merge only queues the pull request and it lands when the queue run passes, so
+do not merge there: queue it on green checks with
+`agentihooks swarm <slug> merge queue <url>`, which goes through the GitHub API
+and works with any gh, then wait with
 `agentihooks swarm <slug> wait --on merge <url>` and keep the worktree until it
 merges. `agentihooks swarm <slug> merge state <url>` reports whether it sits in
 the queue. GitHub refuses a push while the pull request sits in the queue. To

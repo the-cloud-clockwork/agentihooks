@@ -76,12 +76,18 @@ def test_dequeue_removes_the_pull_request_then_reports_its_state():
     assert command[5:] == ["-f", "id=PR_one"]
 
 
-@pytest.mark.parametrize("action", ["queue", "dequeue", "state"])
-def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, action):
+def swarm_of(lane):
     from types import SimpleNamespace
 
-    store = SimpleNamespace(names=SimpleNamespace(swarm_slug=lambda slug: slug))
-    monkeypatch.setattr(cli, "connect", lambda: store)
+    agent = SimpleNamespace(name="engineer@a1b2c3-0001", lane=lane, task="t1")
+    names = SimpleNamespace(swarm_slug=lambda slug: slug, resolve=lambda name: name)
+    return SimpleNamespace(names=names, agents=lambda slug: [agent])
+
+
+@pytest.mark.parametrize("action", ["queue", "dequeue", "state"])
+def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, action):
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     seen = []
 
     def operate(verb, url):
@@ -92,6 +98,24 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
     assert cli.main(["sw", "merge", action, URL]) == 0
     assert seen == [(action, URL)]
     assert capsys.readouterr().out == '{"queued": true}\n'
+
+
+@pytest.mark.parametrize("action", ["queue", "dequeue"])
+def test_cli_refuses_the_master_a_queue_change(monkeypatch, capsys, action):
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of("master"))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url: pytest.fail("the master changed the queue"))
+
+    assert cli.main(["sw", "merge", action, URL]) == 1
+    assert capsys.readouterr().err == "swarm: engineer@a1b2c3-0001 is the swarm master; the master works no task\n"
+
+
+def test_cli_lets_the_master_read_queue_state(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of("master"))
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url: {"queued": False})
+
+    assert cli.main(["sw", "merge", "state", URL]) == 0
+    assert capsys.readouterr().out == '{"queued": false}\n'
 
 
 def test_cli_refuses_an_unknown_queue_operation(capsys):

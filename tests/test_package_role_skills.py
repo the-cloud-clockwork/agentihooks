@@ -138,4 +138,10 @@ def test_engineer_guidance_dequeues_a_queued_pull_request_before_pushing_a_fix(s
 
     assert [step for step in steps if step not in text] == []
     assert [text.index(step) for step in steps] == sorted(text.index(step) for step in steps)
+
+
+@pytest.mark.parametrize("skill", [_skill("engineer"), ROLES / "engineer" / ".claude" / "rules" / "engineer-role.md"])
+def test_swarm_engineer_guidance_names_no_raw_gh_merge_or_dequeue_mutation(skill):
+    text = skill.read_text()
+
     assert [raw for raw in ("dequeuePullRequest", "gh pr merge") if raw in text] == []
