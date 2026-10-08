@@ -1,5 +1,5 @@
 {
-  "tested_commit": "bfecd6f7266a6167374e5db804fd4c47cd3f3098",
+  "tested_commit": "3ac0a48bca3750850d855221db7a9daa63e40024",
   "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI and the process reaper behind HerdrRuntime, the local process table and PID namespace are fixture values, and the remote backend is an in-memory fake; not live rollout proof",
   "then": "lost remote observation produces suspect status and cannot cause an unrelated local process kill",
   "runs": [
