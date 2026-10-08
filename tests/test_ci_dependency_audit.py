@@ -152,4 +152,5 @@ def test_dependabot_updates_pip_and_actions_weekly_into_dev_in_one_group_each():
         assert update["directory"] == "/"
         assert update["target-branch"] == "dev"
         assert update["schedule"]["interval"] == "weekly"
+        assert update["cooldown"] == {"default-days": 7}
         assert update["groups"] == {ecosystem: {"patterns": ["*"]}}
