@@ -1,0 +1,6 @@
+{
+  "88e3078bf07b8ecea71a08ebdd4a4387f2941cf0e339f9dc8ddf20d105c8399a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "MUTATION validation enforces every ops array item has type object before check_operations calls operation_schema. Removing only the second object check does not change any accepted or rejected HTTP input or envelope. Exported central schema and call order verify reachability; 205 generated object cases retained identical validity."
+  }
+}

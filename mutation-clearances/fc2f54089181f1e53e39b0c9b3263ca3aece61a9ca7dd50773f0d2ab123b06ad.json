@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/addresses.py:scripts.inbox.addresses.x_settle_unresolved__mutmut_6:3f6c79fa333f7b5e2d7bb17a56f8ba534cb5c9702c13ab9d8cbc4ebdf1a8797d": {
+    "reader": "Standards",
+    "reason": "The sole production caller passes InboxStore.pending(), sorted ascending by (created_at, sequence, id). Once an item is younger than the fixed window, every subsequent item is younger and performs no withdrawal or action append. Break and continue therefore process the same eligible items. Sorted creation-time sequences through length six were exhaustively compared with identical results."
+  }
+}

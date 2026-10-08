@@ -1,0 +1,6 @@
+{
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x__run__mutmut_20:4b483437b8ee003ff3bf7c2ed425068a19f81292e0dbe7aac9571d0062baec7c": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "Missing selected token defaults None and empty string are false; no native OAuth assignment occurs. Present selected tokens are unchanged."
+  }
+}

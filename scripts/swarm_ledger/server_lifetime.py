@@ -3,6 +3,8 @@ import os
 import threading
 from pathlib import Path
 
+from scripts.swarm_ledger import ledger_link
+
 
 def process(pid: int, proc: Path) -> dict | None:
     try:
@@ -21,7 +23,9 @@ def process(pid: int, proc: Path) -> dict | None:
 
 
 def shared(folder: Path, port: int) -> bool:
-    return folder.resolve() == (Path.home() / "development-ledger").resolve() and port == 8765
+    return (
+        ledger_link.shared_directory(environ={"LEDGER_DIR": str(folder)}) and port == ledger_link.address(environ={})[1]
+    )
 
 
 def owner(environ: dict, proc: Path = Path("/proc")) -> tuple[int, int] | None:

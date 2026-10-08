@@ -1,0 +1,6 @@
+{
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__send_pending__mutmut_6:d58b1f2dc2688f92de5df1510dd30b34bce4df837c85e483739026a0395ae193": {
+    "reader": "Standards reader",
+    "reason": "_batches produces an empty batch only as its terminal yield with empty specs; continue and break both end without exporting."
+  }
+}

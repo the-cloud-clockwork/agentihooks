@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x\u01c1IntentGate\u01c1decide__mutmut_44:d1deaec017faaa9dc241182a9d153f5db4b4de22a8d3a8fbba3f7b890f5007d7": {
+    "reader": "Standards reader",
+    "reason": "Missing coach_rounds compares either zero or one against two, both false. Present values and the separate displayed round fallback remain unchanged. Independently cleared against CI run 37680501547."
+  }
+}

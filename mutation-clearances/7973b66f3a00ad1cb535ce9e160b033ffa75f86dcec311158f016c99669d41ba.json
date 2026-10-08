@@ -1,0 +1,6 @@
+{
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_24:b812c17089aadba3febbd62310f765419c92eb2a0290e4ae22030d699f006db2": {
+    "reader": "Standards reader",
+    "reason": "HTTP field names are case insensitive; requests prepared headers preserve the same Content-Type lookup."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_12:828d31cc739947d900704d92e3787db2d2e1ebbdc6f3c7c7f15480c16d87f32b": {
+    "reader": "Standards",
+    "reason": "The confirmation pattern is matched with re.I, so upper casing its letters matches exactly the same footers."
+  }
+}

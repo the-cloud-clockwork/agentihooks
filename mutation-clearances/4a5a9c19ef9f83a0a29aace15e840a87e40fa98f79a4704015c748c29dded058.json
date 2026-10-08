@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/effort_range.py:scripts.swarm.effort_range.x_parse__mutmut_3:263bf3ec69ce3470d3ef19936de50aabb005e6ca3ba04cf56bf0ea01d528adf0": {
+    "reader": "Standards",
+    "reason": "Levels never contain a colon, so partition and rpartition yield the same refused or accepted pair."
+  }
+}
