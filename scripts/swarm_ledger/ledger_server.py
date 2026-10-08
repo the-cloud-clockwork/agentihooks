@@ -8,7 +8,7 @@ Usage:
 
 Env: LEDGER_DIR (default ~/development-ledger), LEDGER_HOST (127.0.0.1), LEDGER_PORT (8765),
 SWARM_PUBLIC_URL and SWARM_ALLOWED_HOSTS (comma list) beside loopback, SWARM_RELOAD=1 for code reload
-(--ensure sets it unless given).
+(--ensure sets it unless given), LEDGER_IMPECCABLE_LIVE=1 for the Impeccable live origin on a scratch server.
 Idempotent: --ensure on a running server only prints the URL.
 """
 
