@@ -1,7 +1,6 @@
 import json
 import os
 import signal
-import socket
 import subprocess
 import sys
 import time
@@ -35,10 +34,8 @@ def test_running_reads_a_process_reaped_mid_read_as_gone(monkeypatch):
 @pytest.mark.parametrize("ending", ["exit", "terminate", "kill"])
 @pytest.mark.parametrize("explicit_owner", [True, False])
 @pytest.mark.parametrize("mode", ["--ensure", "--serve"])
-def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owner, mode):
-    with socket.socket() as spare:
-        spare.bind(("127.0.0.1", 0))
-        port = spare.getsockname()[1]
+def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owner, mode, ledger_port):
+    port = ledger_port
     env = {
         **os.environ,
         "LEDGER_DIR": str(tmp_path),
@@ -85,7 +82,7 @@ def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owne
                 pass
 
 
-def test_detached_server_cleanup_accepts_a_process_reaped_after_the_running_check(tmp_path, monkeypatch):
+def test_detached_server_cleanup_accepts_a_process_reaped_after_the_running_check(tmp_path, monkeypatch, ledger_port):
     (tmp_path / ".server.pid").write_text("42")
     run = Mock()
     run.poll.return_value = 0
@@ -94,7 +91,7 @@ def test_detached_server_cleanup_accepts_a_process_reaped_after_the_running_chec
     kill = Mock(side_effect=ProcessLookupError(3, "No such process"))
     monkeypatch.setattr(os, "kill", kill)
 
-    test_detached_server_stops_when_its_run_ends(tmp_path, "exit", True, "--ensure")
+    test_detached_server_stops_when_its_run_ends(tmp_path, "exit", True, "--ensure", ledger_port)
 
     kill.assert_called_once_with(42, signal.SIGTERM)
 
