@@ -42,13 +42,18 @@ SWARM = {
     "handoffs": [{"seat": f"eng-{i}@proof", "at": i + 1, "reason": "recycle"} for i in range(ROWS)],
 }
 
+NEWEST = range(ROWS - 1, -1, -1)
+OLDEST = range(ROWS)
 PANELS = [
-    ("#bell", "#notifs", "more notifications"),
-    ("#alert-fab", "#alerts", "more alerts"),
-    ("#art-fab", "#art-list", "more artifacts"),
-    ("#art-fab", "#art-trash", "more trashed artifacts"),
+    ("#bell", "#notifs", "more notifications", [f"notice-n{i}" for i in NEWEST]),
+    ("#alert-fab", "#alerts", "more alerts", [f"alert-a{i}" for i in NEWEST]),
+    ("#art-fab", "#art-list", "more artifacts", [f"artifact-r{i}" for i in NEWEST]),
+    ("#art-fab", "#art-trash", "more trashed artifacts", [f"artifact-d{i}" for i in OLDEST]),
 ]
-TABLES = [("#health", "more findings"), ("#swarm-handoffs", "more seats")]
+TABLES = [
+    ("#health", "more findings", [f"finding-stale/eng-{i}" for i in OLDEST]),
+    ("#swarm-handoffs", "more seats", [f"seat-eng-{i}@proof" for i in OLDEST]),
+]
 DEEP_LINKS = ["notice-n0", "alert-a0", "artifact-r0", "artifact-d119", "finding-stale/eng-119", "seat-eng-119@proof"]
 
 
@@ -65,33 +70,33 @@ def page(browser):
     tab.close()
 
 
-def rows(page, box):
-    return page.locator(f"{box} > :not(.page-more)").count()
+def shown_ids(page, box):
+    return page.locator(f"{box} > :not(.page-more)").evaluate_all("rows => rows.map((row) => row.id)")
 
 
-def page_through(page, box, label):
+def page_through(page, box, label, ids):
     more = page.locator(f"{box} > .page-more button")
-    assert rows(page, box) == PAGE
+    assert shown_ids(page, box) == ids[:PAGE]
     assert more.text_content() == f"Show {PAGE} {label} · {ROWS - PAGE} left"
     more.click()
-    assert rows(page, box) == 2 * PAGE
+    assert shown_ids(page, box) == ids[: 2 * PAGE]
     more.click()
-    assert rows(page, box) == ROWS
+    assert shown_ids(page, box) == ids
     assert more.count() == 0
 
 
-@pytest.mark.parametrize(("opener", "box", "label"), PANELS)
-def test_an_open_panel_with_more_rows_than_one_page_renders_one_page(page, opener, box, label):
+@pytest.mark.parametrize(("opener", "box", "label", "ids"), PANELS)
+def test_an_open_panel_with_more_rows_than_one_page_renders_one_page(page, opener, box, label, ids):
     show(page, shell_html(), ledger=ledger_state(panels_doc()), swarm=SWARM)
     page.click(opener)
-    page_through(page, box, label)
+    page_through(page, box, label, ids)
 
 
-@pytest.mark.parametrize(("box", "label"), TABLES)
-def test_a_swarm_table_with_more_rows_than_one_page_renders_one_page(page, box, label):
+@pytest.mark.parametrize(("box", "label", "ids"), TABLES)
+def test_a_swarm_table_with_more_rows_than_one_page_renders_one_page(page, box, label, ids):
     show(page, shell_html(), ledger=ledger_state(panels_doc()), swarm=SWARM)
     page.get_by_role("tab", name="Swarm", exact=False).click()
-    page_through(page, box, label)
+    page_through(page, box, label, ids)
 
 
 @pytest.mark.parametrize("target", DEEP_LINKS)
@@ -102,6 +107,16 @@ def test_a_deep_link_past_the_first_page_opens_its_panel_and_reveals_the_row(pag
     loaded(page)
     row = page.locator(f"[id='{target}']")
     row.wait_for()
+    assert row.is_visible()
+
+
+def test_a_deep_link_reveals_its_finding_while_a_verdict_pick_has_focus(page):
+    show(page, shell_html(), ledger=ledger_state(panels_doc()), swarm=SWARM)
+    page.get_by_role("tab", name="Swarm", exact=False).click()
+    page.locator("#health .hl-pick").first.focus()
+    page.evaluate("() => { location.hash = 'finding-stale/eng-119'; }")
+    row = page.locator("[id='finding-stale/eng-119']")
+    row.wait_for(timeout=5000)
     assert row.is_visible()
 
 

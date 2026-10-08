@@ -246,7 +246,7 @@ function renderHealth(findings, now = Date.now()) {
   const list = findings || [];
   $("health-count").textContent = `${list.length} open`;
   $("health").replaceChildren(...(list.length ? firstPage("health", list, (f) => `finding-${f.id}`).map((f) => withId(healthRow(f, now), `finding-${f.id}`))
-    : [emptyRow(7, "No health findings. The swarm checks every minute.")]), moreRow("health", list.length, "more findings", 7, () => renderHealth(list, now)) || "");
+    : [emptyRow(7, "No health findings. The swarm checks every minute.")]), moreRow("health", list.length, "more findings", 7, () => renderHealth(swarm && swarm.findings)) || "");
 }
 
 function healthRow(f, now) {
