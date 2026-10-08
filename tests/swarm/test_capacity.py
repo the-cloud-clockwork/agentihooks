@@ -1051,3 +1051,15 @@ def test_a_claude_only_spawn_with_only_a_warned_account_refuses_naming_it(tmp_pa
         runtime.spawn(config, "plan", "planner@a1b2c3-0001", task)
     assert error.value.status == "unavailable"
     assert seen == []
+
+
+def test_a_recycle_successor_leaves_its_warned_saved_account_or_refuses_naming_it(tmp_path, monkeypatch):
+    saved = {"profile": "planner", "harness": "claude", "model": "fable", "effort": "high", "account": "w"}
+    task = {"id": "p", "title": "Continue", "handoff_envelope": {"reason": "recycle", "launch": saved}}
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account("w", left=5), account("b")])
+    runtime.spawn(config, "plan", "planner@a1b2c3-0001", task)
+    assert seen == [("p", "claude", "b")]
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account("w", left=5)])
+    with pytest.raises(SpawnError, match="^no claude account has placeable quota seats: claude w is at its week"):
+        runtime.spawn(config, "plan", "planner@a1b2c3-0002", task)
+    assert seen == []
