@@ -1,3 +1,4 @@
+import ast
 import importlib
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -15,12 +16,30 @@ def source_sizes(root: Path, files: list[str]) -> dict[str, int]:
     return {path: (root / path).stat().st_size for path in files}
 
 
-def assign_files(durations: dict[str, float], files: list[str], shards: int, sizes: dict[str, int]) -> list[list[str]]:
+def grouped_files(root: Path, files: list[str]) -> set[str]:
+    return {
+        path
+        for path in files
+        if any(
+            isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "xdist_group"
+            for node in ast.walk(ast.parse((root / path).read_text()))
+        )
+    }
+
+
+def assign_files(
+    durations: dict[str, float],
+    files: list[str],
+    shards: int,
+    sizes: dict[str, int],
+    grouped: set[str] | None = None,
+    workers: int = 1,
+) -> list[list[str]]:
     seconds = {path: sizes.get(path, 0) * SECONDS_PER_SOURCE_BYTE for path in files}
     for nodeid, duration in durations.items():
         path = nodeid.split("::", 1)[0]
         if path in seconds:
-            seconds[path] += duration
+            seconds[path] += duration * (workers if grouped and path in grouped else 1)
     loads = [0.0] * shards
     groups: list[list[str]] = [[] for _ in range(shards)]
     for path in sorted(files, key=lambda f: (-seconds[f], f)):

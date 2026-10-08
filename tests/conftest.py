@@ -15,6 +15,7 @@ from tests import installer_isolation, ledger_guard, swarm_v2_isolation
 from tests.shards import (
     assign_files,
     discover_test_files,
+    grouped_files,
     setup_nodes_in_parallel,
     slowest_first,
     source_sizes,
@@ -64,7 +65,17 @@ def _shard_files(config) -> frozenset[str]:
         index, shards = (int(part) for part in config.getoption("shard").split("/"))
         durations = json.loads((config.rootpath / ".test_durations").read_text())
         files = discover_test_files(config.rootpath)
-        files = assign_files(durations, files, shards, source_sizes(config.rootpath, files))[index - 1]
+        workers = getattr(getattr(config, "option", None), "numprocesses", None) or 1
+        if workers == "auto":
+            workers = os.cpu_count() or 1
+        files = assign_files(
+            durations,
+            files,
+            shards,
+            source_sizes(config.rootpath, files),
+            grouped_files(config.rootpath, files),
+            workers,
+        )[index - 1]
         config.stash[SHARD_FILES] = frozenset(files)
     return config.stash[SHARD_FILES]
 

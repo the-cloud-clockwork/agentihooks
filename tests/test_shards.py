@@ -49,6 +49,28 @@ def test_shards_balance_the_stored_durations_per_file():
     ]
 
 
+def test_serial_group_costs_are_not_divided_across_workers():
+    durations = {f"tests/test_{name}.py::t": seconds for name, seconds in zip("abcd", (5, 9, 5, 8))}
+    files = [f"tests/test_{name}.py" for name in "abcd"]
+    grouped = {files[0], files[2]}
+    assert assign_files(durations, files, 2, {}, grouped, 4) == [[files[0], files[1]], [files[2], files[3]]]
+    assert assign_files(durations, files, 2, {}, grouped, 1) == assign_files(durations, files, 2, {})
+
+
+def test_grouped_files_reads_real_markers_and_ignores_fixture_strings(tmp_path):
+    from tests.shards import grouped_files
+
+    sources = {
+        "module": 'import pytest\npytestmark = pytest.mark.xdist_group("redis")\n',
+        "function": 'import pytest\n@pytest.mark.xdist_group(name="sdk")\ndef test_x(): pass\n',
+        "fixture": "source = 'pytest.mark.xdist_group(\"fake\")'\n",
+        "plain": "def test_x(): pass\n",
+    }
+    for name, source in sources.items():
+        (tmp_path / f"{name}.py").write_text(source)
+    assert grouped_files(tmp_path, [f"{name}.py" for name in sources]) == {"module.py", "function.py"}
+
+
 def test_shards_weigh_source_size_since_every_worker_collects_the_whole_shard():
     durations = {"tests/test_a.py::t": 1.0, "tests/test_b.py::t": 1.0, "tests/test_c.py::t": 1.0}
     files = ["tests/test_a.py", "tests/test_b.py", "tests/test_c.py"]
@@ -75,6 +97,19 @@ def test_shard_option_weighs_source_size(tmp_path):
     config = SimpleNamespace(getoption=lambda name: "1/2", stash=pytest.Stash(), rootpath=tmp_path)
     ignored = {n for n in "abc" if conftest.pytest_ignore_collect(tmp_path / "tests" / f"test_{n}.py", config)}
     assert ignored == {"b", "c"}
+
+
+def test_shard_option_accounts_for_serial_worker_groups(tmp_path):
+    (tmp_path / "tests").mkdir()
+    for name in "abcd":
+        mark = 'pytestmark = pytest.mark.xdist_group("redis")\n' if name in "ac" else ""
+        (tmp_path / "tests" / f"test_{name}.py").write_text("import pytest\n" + mark)
+    durations = {f"tests/test_{name}.py::t": seconds for name, seconds in zip("abcd", (5, 9, 5, 8))}
+    (tmp_path / ".test_durations").write_text(json.dumps(durations))
+    config = SimpleNamespace(
+        getoption=lambda name: "1/2", stash=pytest.Stash(), rootpath=tmp_path, option=SimpleNamespace(numprocesses=4)
+    )
+    assert conftest._shard_files(config) == frozenset({"tests/test_a.py", "tests/test_b.py"})
 
 
 def test_shard_option_collects_only_that_shards_files(pytestconfig):
@@ -159,7 +194,11 @@ def _configured(monkeypatch, numprocesses, **extra):
 def test_the_controller_warms_its_shards_test_modules_once_per_worker(monkeypatch):
     calls, config = _configured(monkeypatch, 4)
     files = discover_test_files(_ROOT)
-    shard = sorted(assign_files(_stored_durations(), files, 4, source_sizes(_ROOT, files))[1])
+    shard = sorted(
+        assign_files(
+            _stored_durations(), files, 4, source_sizes(_ROOT, files), conftest.grouped_files(_ROOT, files), 4
+        )[1]
+    )
     assert calls == [([path.removesuffix(".py").replace("/", ".") for path in shard], 4)]
     reaped = []
     monkeypatch.setattr(conftest.os, "waitpid", lambda pid, flags: reaped.append(pid))
