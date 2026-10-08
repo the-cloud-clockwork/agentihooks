@@ -723,7 +723,7 @@ def _manifesto_skip_names() -> set[str]:
     return {manifesto_name(name) for name in raw.split(",") if name.strip()}
 
 
-_FRONT_MATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)^---[ \t]*(?:\r?\n|\Z)", re.S | re.M)
+_FRONT_MATTER = re.compile(r"\A---[ \t]*\n(.*?)^---[ \t]*(?:\n|\Z)", re.S | re.M)
 
 
 def _manifesto_front(text: str) -> tuple[dict, str]:
@@ -736,7 +736,7 @@ def _manifesto_front(text: str) -> tuple[dict, str]:
         data = yaml.safe_load(match.group(1))
     except yaml.YAMLError:
         return {}, text
-    return (data, text[match.end() :].lstrip("\r\n")) if isinstance(data, dict) else ({}, text)
+    return (data, text[match.end() :].lstrip("\n")) if isinstance(data, dict) else ({}, text)
 
 
 def manifesto_body(path: str | Path) -> str:
