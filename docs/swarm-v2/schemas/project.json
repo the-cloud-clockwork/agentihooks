@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:swarm-v2:project",
+  "title": "Project identity metadata and alias map 2.0",
+  "oneOf": [{"$ref": "#/$defs/identity"}, {"$ref": "#/$defs/alias_map"}],
+  "$defs": {
+    "git_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.-]*\\.[A-Za-z0-9.-]+/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"},
+    "project_id": {
+      "oneOf": [
+        {"$ref": "#/$defs/git_id"},
+        {"type": "string", "pattern": "^local:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+        {"const": "unknown"}
+      ]
+    },
+    "identity": {
+      "type": "object",
+      "required": ["project", "repo", "worktree", "cwd", "remote", "project_id"],
+      "additionalProperties": false,
+      "properties": {
+        "project": {"type": "string"},
+        "repo": {"type": "string"},
+        "worktree": {"type": "string"},
+        "cwd": {"type": "string"},
+        "remote": {"type": "string"},
+        "project_id": {"$ref": "#/$defs/project_id"}
+      }
+    },
+    "alias_map": {
+      "type": "object",
+      "required": ["schema_version", "aliases"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": "2.0"},
+        "aliases": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/git_id"},
+          "additionalProperties": {"$ref": "#/$defs/git_id"}
+        }
+      }
+    }
+  }
+}
