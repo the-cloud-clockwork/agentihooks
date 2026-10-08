@@ -310,6 +310,14 @@ key(s)" on every launch for any key it does not recognize. Legacy in-file
 that file into a scratch `COPILOT_HOME` authenticates it (proven live; the
 smoke script's live tier uses exactly this, never reading the file).
 
+**Role homes.** `agentihooks profile render <role> --target copilot` renders a
+`copilot` home beside the role's Claude home. Its `mcp-config.json` holds only
+the role chain's declared servers, translated by the adapter, so a role's
+`gateway-tools` entry names its `/toolset/<role>/mcp` address rather than the
+whole gateway catalogue. `copilot-instructions.md` links the role's
+`CLAUDE.md`; auth, settings, hooks and session state link to the operator's
+`~/.copilot`.
+
 ## §6 Transcript format
 
 `~/.copilot/session-state/<session-id>/events.jsonl`.

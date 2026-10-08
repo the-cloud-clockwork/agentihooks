@@ -768,10 +768,21 @@ class CopilotAdapter:
         doc = self._load_json(config_path)
         table = doc.get("mcpServers")
         table = dict(table) if isinstance(table, dict) else {}
+        entries = self.mcp_entries(servers)
+        table.update(entries)
+        added = list(entries)
 
+        doc["mcpServers"] = table
+        _atomic_write(config_path, json.dumps(doc, indent=2) + "\n")
+        if added:
+            record_managed_mcp(self.name, added)
+            _i._cprint(f"  [OK] Copilot MCP servers: {', '.join(added)}")
+
+    def mcp_entries(self, servers: dict) -> dict:
+        _i = _install_module()
         from hooks.secrets import scan as _scan_secrets
 
-        added: list[str] = []
+        table: dict = {}
         for name, spec in servers.items():
             spec = dict(spec)
             if drop_if_credentialed(name, spec, "mcp-config.json"):
@@ -874,13 +885,7 @@ class CopilotAdapter:
             entry.setdefault("oidc", False)
 
             table[name] = entry
-            added.append(name)
-
-        doc["mcpServers"] = table
-        _atomic_write(config_path, json.dumps(doc, indent=2) + "\n")
-        if added:
-            record_managed_mcp(self.name, added)
-            _i._cprint(f"  [OK] Copilot MCP servers: {', '.join(added)}")
+        return table
 
     def teardown(self) -> None:
         _i = _install_module()

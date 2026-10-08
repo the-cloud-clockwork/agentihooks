@@ -668,6 +668,62 @@ def test_codex_render_links_into_the_claude_profile(world):
     assert os.readlink(sources) == str(render.sources.path(out.parent.name, "claude", out.parent.parent))
 
 
+ROLE_TOOLSET = "http://gw.example/toolset/rb-role/mcp"
+WHOLE_CATALOGUE = "http://gw.example/mcp/"
+
+
+@pytest.fixture
+def copilot_gateway(world, monkeypatch):
+    monkeypatch.setenv("GW_KEY", "k-test")
+    whole = {"mcpServers": {"gateway-tools": {"type": "http", "url": WHOLE_CATALOGUE}}}
+    _write(world["home"] / ".copilot" / "mcp-config.json", json.dumps(whole))
+    toolset = {"type": "http", "url": ROLE_TOOLSET, "headers": {"Authorization": "Bearer ${GW_KEY}"}}
+    _declare(world, **{"gateway-tools": {**toolset, "default_tools_approval_mode": "approve"}})
+
+
+def test_copilot_render_names_the_role_toolset_not_the_whole_catalogue(world, copilot_gateway):
+    from scripts.profiles import render
+
+    out = render.render_copilot("rb-role")
+
+    assert out == (render.rendered_root() / "rb-role" / "copilot").resolve()
+    text = (out / "mcp-config.json").read_text()
+    assert json.loads(text)["mcpServers"]["gateway-tools"] == {
+        "type": "http",
+        "url": ROLE_TOOLSET,
+        "headers": {"Authorization": "Bearer k-test"},
+        "auth": False,
+        "oidc": False,
+    }
+    assert WHOLE_CATALOGUE not in text
+    operator = json.loads((world["home"] / ".copilot" / "mcp-config.json").read_text())
+    assert operator["mcpServers"]["gateway-tools"]["url"] == WHOLE_CATALOGUE
+
+
+def test_copilot_render_links_the_role_persona_and_operator_state(world, copilot_gateway):
+    from scripts.profiles import render
+
+    out = render.render_copilot("rb-role")
+
+    assert os.readlink(out / "copilot-instructions.md") == str(out.parent / "claude" / "CLAUDE.md")
+    for item in render.COPILOT_STATE:
+        assert os.readlink(out / item) == str(world["home"] / ".copilot" / item)
+    assert render.render_copilot("rb-role") is None
+    assert render.rendered_profiles("copilot") == ["rb-role"]
+    forced = render.render_copilot("rb-role", force=True)
+    assert forced != out and ROLE_TOOLSET in (forced / "mcp-config.json").read_text()
+    assert os.readlink(forced / "copilot-instructions.md") == str(forced.parent / "claude" / "CLAUDE.md")
+
+
+def test_profile_render_cli_renders_a_copilot_home(world, copilot_gateway, capsys):
+    from scripts.profiles import render
+
+    assert render.main(["render", "rb-role", "--target", "copilot"]) == 0
+
+    assert ROLE_TOOLSET in (render.rendered_root() / "rb-role" / "copilot" / "mcp-config.json").read_text()
+    assert "Rendered rb-role (copilot)" in capsys.readouterr().out
+
+
 def test_codex_master_replaces_monitor_instructions_without_changing_claude(world):
     from scripts.profiles import render
 
@@ -1418,8 +1474,8 @@ def test_stamp_names_bundle_commit_and_chain(world):
 def test_render_refuses_other_targets(world):
     from scripts.profiles import render
 
-    with pytest.raises(ValueError, match="^copilot per-run profiles are not supported$"):
-        render.render("copilot", "rb-role")
+    with pytest.raises(ValueError, match="^gemini per-run profiles are not supported$"):
+        render.render("gemini", "rb-role")
 
 
 def test_cli_renders_and_refuses(world, capsys):
@@ -1432,8 +1488,6 @@ def test_cli_renders_and_refuses(world, capsys):
     assert capsys.readouterr().out == "rb-role (claude) is up to date\n"
     assert render.main(["render", "rb-role", "--force"]) == 0
     assert capsys.readouterr().out.endswith(f"\nRendered rb-role (claude) → {out.resolve()}\n")
-    assert render.main(["render", "rb-role", "--target", "copilot"]) == 2
-    assert capsys.readouterr().err == "copilot per-run profiles are not supported\n"
     assert render.main(["render", "rb-missing", "--target", "codex"]) == 1
     assert capsys.readouterr().err == "ERROR: Profile 'rb-missing' not found\n"
 
@@ -1462,8 +1516,8 @@ def test_agentihooks_profile_dispatches_to_render(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["agentihooks", "profile", "render", "rb-role", "--target", "copilot"])
     with pytest.raises(SystemExit) as exc:
         install.main()
-    assert exc.value.code == 2
-    assert capsys.readouterr().err == "copilot per-run profiles are not supported\n"
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == "ERROR: Profile 'rb-role' not found\n"
 
 
 def test_agentihooks_help_lists_profile(monkeypatch, capsys):
