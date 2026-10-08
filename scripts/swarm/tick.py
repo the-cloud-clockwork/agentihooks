@@ -616,7 +616,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         task["stack_base"] = _stack_base(task, rows)
         task["overlaps"] = _sharing(task, rows)
         task["group"] = [
-            {key: rows[m].get(key, "") for key in ("id", "title", "description")}
+            {key: rows[m][key] for key in ("id", "title", "description")}
             for m in task.get("group_members") or []
             if m in rows
         ]

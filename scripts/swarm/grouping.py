@@ -7,7 +7,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import difficulty
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import Mail
-from scripts.swarm_ledger import ledger_groups, ledger_kinds, ledger_rank
+from scripts.swarm_ledger import ledger_groups, ledger_rank
 
 PER_TICK = 3
 MIN_CONFIDENCE = 0.6
@@ -51,8 +51,8 @@ def group_pass(slug, config, store, ledger, doc):
 
 
 def candidates(doc: dict) -> list[list[dict]]:
-    known = {t["id"]: t for t in doc.get("tasks", [])}
-    pool = sorted((t for t in known.values() if _eligible(t)), key=ledger_rank.order)
+    known = {t["id"]: t for t in doc["tasks"]}
+    pool = sorted((t for t in known.values() if _eligible(t, known)), key=ledger_rank.order)
     used, groups = set(), []
     for lead in pool:
         if lead["id"] in used:
@@ -84,15 +84,15 @@ def confirm(groups, doc):
 
 def state(groups, doc):
     return {
-        "overview": doc.get("overview", ""),
+        "overview": doc["overview"],
         "groups": [
             [
                 {
                     "id": t["id"],
-                    "title": t.get("title", ""),
-                    "description": t.get("description", ""),
-                    "difficulty": t.get("difficulty", ""),
-                    "territory": list(t.get("territory") or []),
+                    "title": t["title"],
+                    "description": t["description"],
+                    "difficulty": t["difficulty"],
+                    "territory": list(t["territory"]),
                 }
                 for t in group
             ]
@@ -123,16 +123,8 @@ def _propose(slug, ledger, mail, group):
     return [f"proposed grouping tasks {', '.join(members)} under {lead}"]
 
 
-def _eligible(task):
-    return (
-        task.get("state", "open") == "open"
-        and not task.get("claimed_by")
-        and not task.get("out_of_scope")
-        and not task.get("merged_into")
-        and not task.get("group_members")
-        and ledger_kinds.kind(task) in ledger_groups.GROUPED_KINDS
-        and task.get("difficulty") in ("S", "M")
-    )
+def _eligible(task, known):
+    return not task.get("out_of_scope") and not ledger_groups.refusal([task], known)
 
 
 def _near(lead, other):
@@ -147,7 +139,7 @@ def _on_page(territory):
 
 
 def _named(group):
-    return ", ".join(f"{t['id']} titled {t.get('title', '')}" for t in group)
+    return ", ".join(f"{t['id']} titled {t['title']}" for t in group)
 
 
 def _yes(noul):

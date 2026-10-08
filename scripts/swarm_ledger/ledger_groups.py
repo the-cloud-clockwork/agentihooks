@@ -42,7 +42,7 @@ def refusal(tasks: list[dict], known: dict) -> str:
     if len({(t.get("lane"), t.get("profile") or "", ledger_kinds.kind(t)) for t in tasks}) > 1:
         return "grouped tasks share the same lane, profile and kind"
     for t in tasks:
-        if t.get("state", "open") != "open" or t.get("claimed_by"):
+        if t["state"] != "open" or t.get("claimed_by"):
             return f"task {t['id']} is not open and unclaimed"
         if t.get("merged_into") or t.get("group_members"):
             return f"task {t['id']} is already grouped"
@@ -78,8 +78,8 @@ def apply(doc, op, ctx):
     from scripts.swarm.naming import lane_of
 
     lead_id = op["item"].split("/")[1]
-    known = {t["id"]: t for t in doc.get("tasks", [])}
-    if not {lead_id, *op["members"]} <= set(known):
+    known = {t["id"]: t for t in doc["tasks"]}
+    if any(task_id not in known for task_id in (lead_id, *op["members"])):
         return False
     if lane_of(op["by"]) in WORKER_LANES:
         ctx.refused.append(f"{op['by']} works in the {lane_of(op['by'])} lane and cannot set a task group")
@@ -94,5 +94,4 @@ def apply(doc, op, ctx):
         known[member]["merged_into"] = lead_id
         ctx.stamp(f"tasks/{member}/merged_into", op["by"])
     ctx.record(op["by"], "grouped", op["item"], text=", ".join(op["members"]))
-    ctx.dirty = True
     return True

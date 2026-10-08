@@ -1,6 +1,6 @@
 import pytest
 
-from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
+from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult, YesNo
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import grouping
@@ -149,8 +149,29 @@ def test_the_classifier_names_every_task_in_each_set(asked, store):
     grouping.group_pass("sw", config, store, GroupLedger([]), doc(task("a"), task("b")))
     state, questions, kw = calls[0]
     assert kw == {"purpose": "task-grouping"}
-    assert "a titled title a, b titled title b" in questions["group_0"].instructions
-    assert [t["description"] for t in state["groups"][0]] == ["spec a", "spec b"]
+    assert questions == {
+        "group_0": YesNo(
+            "Tasks a titled title a, b titled title b: is this one change surface that one pull request, one review "
+            "and one browser check cover?",
+            true="one change surface, one review and one browser check cover every task",
+            false="the tasks need separate changes, reviews or browser checks",
+        )
+    }
+    assert state == {
+        "overview": "o",
+        "groups": [
+            [
+                {
+                    "id": name,
+                    "title": f"title {name}",
+                    "description": f"spec {name}",
+                    "difficulty": "S",
+                    "territory": ["scripts/swarm/tick.py"],
+                }
+                for name in "ab"
+            ]
+        ],
+    }
 
 
 def test_delegate_applies_the_group_and_tells_the_master(asked, store):
@@ -160,7 +181,12 @@ def test_delegate_applies_the_group_and_tells_the_master(asked, store):
     actions = grouping.group_pass("sw", config, store, ledger, doc(task("a"), task("b"), task("c")))
     assert ledger.groups == [("a", ["b", "c"])] and ledger.priorities == []
     assert actions == ["grouped tasks b, c under a"]
-    assert "grouped tasks b, c under task a" in master_items(store)[0].text
+    told = master_items(store)[0]
+    assert told.fyi is True and told.text == (
+        "For your information: the swarm grouped tasks b, c under task a, whose agent delivers all of them in one "
+        "pull request."
+    )
+    assert store.redis.hget(store.key("sw", grouping.SEEN), "a,b,c") == "applied"
 
 
 def test_full_autonomy_applies_too(asked, store):
@@ -174,12 +200,17 @@ def test_full_autonomy_applies_too(asked, store):
 def test_lower_autonomy_raises_a_priority_and_asks_the_master(asked, store, autonomy):
     asked(0.9)
     ledger = GroupLedger([])
-    actions = grouping.group_pass("sw", store.update("sw", autonomy=autonomy), store, ledger, doc(task("a"), task("b")))
+    tasks = doc(task("a"), task("b"), task("c"))
+    actions = grouping.group_pass("sw", store.update("sw", autonomy=autonomy), store, ledger, tasks)
     assert ledger.groups == [] and ledger.priorities == [
-        ("tasks/a", "Group 2 small tasks into one pull request led by this task.")
+        ("tasks/a", "Group 3 small tasks into one pull request led by this task.")
     ]
-    assert actions == ["proposed grouping tasks b under a"]
-    assert "task group a b" in master_items(store)[0].text
+    assert actions == ["proposed grouping tasks b, c under a"]
+    assert master_items(store)[0].text == (
+        "The swarm proposes one pull request for tasks a and b, c, led by a. If the operator agrees, apply it with "
+        "agentihooks ledger --slug sw --as <your name> task group a b c."
+    )
+    assert store.redis.hget(store.key("sw", grouping.SEEN), "a,b,c") == "proposed"
 
 
 def test_a_set_is_asked_once(asked, store):
@@ -198,6 +229,14 @@ def test_a_set_the_classifier_does_not_confirm_is_declined_for_good(asked, store
     for _ in range(2):
         assert grouping.group_pass("sw", store.config("sw"), store, ledger, doc(task("a"), task("b"))) == []
     assert ledger.groups == [] and len(calls) == 1
+    assert store.redis.hget(store.key("sw", grouping.SEEN), "a,b") == "declined"
+
+
+def test_a_declined_set_goes_on_to_the_next_set(asked, store):
+    asked(0.1, 0.9)
+    ledger = GroupLedger([])
+    tasks = doc(task("a"), task("b"), task("c", territory=["docs"]), task("d", territory=["docs"]))
+    assert grouping.group_pass("sw", store.config("sw"), store, ledger, tasks) == ["grouped tasks d under c"]
 
 
 def test_confidence_at_the_floor_confirms(asked, store):

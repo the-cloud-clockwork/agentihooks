@@ -839,10 +839,10 @@ def cmd_done(store, args):
 
 
 def _close_members(ledger, slug, agent, lead, fields):
-    rows = {t["id"]: t for t in ledger.tasks(slug)} if lead.get("group_members") else {}
-    for member in lead.get("group_members") or []:
-        if rows.get(member, {}).get("state") != "done":
-            ledger.update_task(slug, member, fields, by=agent.name)
+    members = set(lead.get("group_members") or [])
+    for task in ledger.tasks(slug):
+        if task["id"] in members and task["state"] != "done":
+            ledger.update_task(slug, task["id"], fields, by=agent.name)
 
 
 def cmd_block(store, args):

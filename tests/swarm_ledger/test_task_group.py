@@ -69,7 +69,12 @@ def test_the_lead_lists_its_members_and_each_member_points_at_the_lead():
     assert found["t1"]["group_members"] == ["t2", "t3"]
     assert (found["t2"]["merged_into"], found["t3"]["merged_into"]) == ("t1", "t1")
     assert "merged_into" not in found["t1"] and "group_members" not in found["t4"]
-    assert state["_meta"]["events"][-1]["kind"] == "grouped"
+    event = state["_meta"]["events"][-1]
+    assert (event["by"], event["kind"], event["target"], event["text"]) == ("swarm", "grouped", "tasks/t1", "t2, t3")
+    stamps = state["_meta"]["stamps"]
+    assert [
+        stamps[path]["by"] for path in ("tasks/t1/group_members", "tasks/t2/merged_into", "tasks/t3/merged_into")
+    ] == ["swarm"] * 3
 
 
 def test_a_group_holds_at_most_five_tasks():
@@ -104,24 +109,30 @@ def test_an_l_task_never_joins_a_group():
 @pytest.mark.parametrize(
     "tasks, reason",
     [
-        ([task("a"), task("b", lane="ci")], "same lane, profile and kind"),
-        ([task("a"), task("b", profile="frontend")], "same lane, profile and kind"),
-        ([task("a"), task("b", state="claimed")], "open and unclaimed"),
-        ([task("a"), task("b", claimed_by=ENGINEER)], "open and unclaimed"),
-        ([task("a"), task("b", merged_into="z")], "already grouped"),
-        ([task("a", group_members=["z"]), task("b")], "already grouped"),
-        ([task("a", kind="ops"), task("b", kind="ops")], "code or ci"),
-        ([task("a"), task("b", difficulty=None)], "needs a difficulty"),
-        ([task("a"), task("b", depends_on=["a"])], "depends on"),
-        ([task("a", depends_on=["x"]), task("b")], "depends on"),
-        ([task("a"), task("b"), task("c"), task("d"), task("e"), task("f")], "at most 5 tasks"),
+        ([task("a"), task("b", lane="ci")], "grouped tasks share the same lane, profile and kind"),
+        ([task("a"), task("b", profile="frontend")], "grouped tasks share the same lane, profile and kind"),
+        ([task("a"), task("b", state="claimed")], "task b is not open and unclaimed"),
+        ([task("a"), task("b", claimed_by=ENGINEER)], "task b is not open and unclaimed"),
+        ([task("a"), task("b", merged_into="z")], "task b is already grouped"),
+        ([task("a", group_members=["z"]), task("b")], "task a is already grouped"),
+        ([task("a", kind="ops"), task("b", kind="ops")], "task a is not a code or ci task"),
+        ([task("a"), task("b", difficulty=None)], "task b needs a difficulty first"),
+        ([task("a"), task("b", depends_on=["a"])], "task b depends on task a"),
+        ([task("a", depends_on=["x"]), task("b")], "task a depends on task b"),
+        ([task("a"), task("b", depends_on=["x", "y"])], "task b depends on task a"),
+        ([task("a"), task("b", depends_on=["missing"])], "task b waits on task missing"),
+        ([task("a"), task("b"), task("c"), task("d"), task("e"), task("f")], "a group holds at most 5 tasks"),
         ([task("a"), task("b", difficulty="M")], "together they pass M"),
         ([task("a", difficulty="L")], "together they pass M"),
     ],
 )
 def test_the_refusal_names_why_tasks_cannot_group(tasks, reason):
-    known = {t["id"]: t for t in tasks} | {"x": task("x", depends_on=["b"])}
-    assert reason in ledger_groups.refusal(tasks, known)
+    chain = {
+        "x": task("x", depends_on=["b"] if tasks[0].get("depends_on") else ["a"]),
+        "y": task("y", depends_on=["z"]),
+    }
+    known = {t["id"]: t for t in tasks} | chain | {"z": task("z", state="done")}
+    assert ledger_groups.refusal(tasks, known) == reason
 
 
 def test_a_task_waiting_on_an_open_task_outside_the_group_is_refused():
@@ -139,7 +150,17 @@ def test_tasks_that_qualify_have_no_refusal():
 
 def test_a_lane_agent_cannot_group_tasks():
     state, rejected = group("t1", ["t2"], by=ENGINEER)
-    assert rejected == ["group-1"] and "cannot set a task group" in state["_meta"]["warnings"][-1]
+    assert rejected == ["group-1"]
+    assert state["_meta"]["warnings"][-1].endswith(f"{ENGINEER} works in the eng lane and cannot set a task group")
+
+
+def test_a_member_that_depends_on_the_lead_is_refused_by_the_ledger():
+    op = {"op": "task_add", "id": "seed-8", "by": "swarm", "task": "t8", "title": "task 8", "lane": "eng"}
+    core.sync(SLUG, ops=[{**op, "depends_on": ["t1"]}])
+    size("t8", "S")
+    state, rejected = group("t1", ["t8"])
+    assert rejected == ["group-1"]
+    assert state["_meta"]["warnings"][-1].endswith("tasks/t1 cannot lead this group: task t8 depends on task t1")
 
 
 def test_the_master_groups_tasks():
@@ -160,22 +181,29 @@ def test_a_grouped_task_cannot_join_a_second_group():
     assert rejected == ["group-2"] and rows(state)["t2"]["merged_into"] == "t1"
 
 
+BY = "task_group needs `by`, an agent name other than operator"
+SHAPE = "task_group takes only an id, by, an item tasks/<lead id> and members"
+MEMBERS = "members must list distinct task ids other than the lead"
+
+
 @pytest.mark.parametrize(
-    "op",
+    "op, message",
     [
-        {"op": "task_group", "id": "g", "by": "swarm", "item": "tasks/t1", "members": []},
-        {"op": "task_group", "id": "g", "by": "swarm", "item": "tasks/t1", "members": ["t1"]},
-        {"op": "task_group", "id": "g", "by": "swarm", "item": "tasks/t1", "members": ["t2", "t2"]},
-        {"op": "task_group", "id": "g", "by": "swarm", "item": "tasks/t1", "members": "t2"},
-        {"op": "task_group", "id": "g", "by": "swarm", "item": "phases/p1", "members": ["t2"]},
-        {"op": "task_group", "id": "g", "by": "operator", "item": "tasks/t1", "members": ["t2"]},
-        {"op": "task_group", "id": "g", "item": "tasks/t1", "members": ["t2"]},
-        {"op": "task_group", "id": "g", "by": "swarm", "item": "tasks/t1", "members": ["t2"], "extra": 1},
+        ({"op": "task_group", "id": "g", "by": "swarm", "item": "tasks/t1", "members": []}, MEMBERS),
+        ({"op": "task_group", "id": "g", "by": "swarm", "item": "tasks/t1", "members": ["t1"]}, MEMBERS),
+        ({"op": "task_group", "id": "g", "by": "swarm", "item": "tasks/t1", "members": ["t2", "t2"]}, MEMBERS),
+        ({"op": "task_group", "id": "g", "by": "swarm", "item": "tasks/t1", "members": "t2"}, MEMBERS),
+        ({"op": "task_group", "id": "g", "by": "swarm", "item": "tasks/t1", "members": ["-t2"]}, MEMBERS),
+        ({"op": "task_group", "id": "g", "by": "swarm", "item": "phases/p1", "members": ["t2"]}, SHAPE),
+        ({"op": "task_group", "id": "g", "by": "operator", "item": "tasks/t1", "members": ["t2"]}, BY),
+        ({"op": "task_group", "id": "g", "item": "tasks/t1", "members": ["t2"]}, BY),
+        ({"op": "task_group", "id": "g", "by": "swarm", "item": "tasks/t1", "members": ["t2"], "extra": 1}, SHAPE),
     ],
 )
-def test_a_malformed_group_op_is_refused(op):
-    with pytest.raises(ValueError):
-        core.check_op(op)
+def test_a_malformed_group_op_is_refused(op, message):
+    with pytest.raises(ValueError) as refused:
+        ledger_groups.check(op)
+    assert str(refused.value) == message
 
 
 def test_the_core_and_the_server_schema_know_the_group_op():
@@ -186,9 +214,15 @@ def test_the_core_and_the_server_schema_know_the_group_op():
     assert schemas.mismatched_field(schema, {**op, "members": "t2"}) == "members"
 
 
-def test_task_group_cli_sends_the_lead_and_its_members(monkeypatch):
+def test_task_group_cli_sends_the_lead_and_its_members(monkeypatch, capsys):
     sent = []
-    monkeypatch.setattr(ledger, "send", lambda args, kind, **f: sent.append((kind, f)))
+    monkeypatch.setattr(ledger, "send", lambda args, kind, **f: sent.append((args, kind, f)))
     args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", MASTER, "task", "group", "t1", "t2", "t3"])
     ledger.cmd_task(args)
-    assert sent == [("task_group", {"item": "tasks/t1", "members": ["t2", "t3"]})]
+    assert sent == [(args, "task_group", {"item": "tasks/t1", "members": ["t2", "t3"]})]
+    assert capsys.readouterr().out == '{"task": "t1", "group_members": ["t2", "t3"]}\n'
+
+
+def test_the_task_command_takes_only_add_set_or_group():
+    with pytest.raises(SystemExit):
+        ledger.build_parser().parse_args(["--slug", SLUG, "--as", MASTER, "task", "merge", "t1", "t2"])
