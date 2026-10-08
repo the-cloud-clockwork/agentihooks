@@ -88,7 +88,7 @@ def test_an_item_becomes_a_channel_event_tagged_with_its_id_and_sender(inbox):
     }
 
 
-def test_the_channel_pushes_an_item_a_newer_writer_stored_with_a_field_this_code_lacks(inbox):
+def test_claim_delivers_an_item_a_newer_writer_stored_with_a_field_this_code_lacks(inbox):
     item = inbox.send("operator", "bob", "a comment on your task")
     inbox.redis.hset(inbox.key("item", item.id), "added_later", "x")
     assert [channel.event(pushed) for pushed in channel.claim(inbox, "bob")] == [channel.event(inbox.get(item.id))]
