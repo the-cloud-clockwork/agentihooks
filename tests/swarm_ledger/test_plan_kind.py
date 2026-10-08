@@ -155,10 +155,11 @@ def test_a_slice_without_its_anchor_or_range_is_refused_by_name(plan_ledger):
     add(plan_ledger, "plan", lane="plan", kind="plan")
     add(plan_ledger, "first", plan_url=PLAN, plan_slice="first")
     add(plan_ledger, "second", plan_url=PLAN)
-    state, rejected = update(plan_ledger, state="done", proof={"slice": "first, second"})
+    add(plan_ledger, "third", plan_url=PLAN)
+    state, rejected = update(plan_ledger, state="done", proof={"slice": "first, second, third"})
     assert rejected == ["finish-plan"]
     assert state["tasks"][0]["state"] == "open"
-    assert state["_meta"]["warnings"] == ["tasks/plan slice tasks lack valid plan ranges or anchors: second"]
+    assert state["_meta"]["warnings"] == ["tasks/plan slice tasks lack valid plan ranges or anchors: second, third"]
 
 
 def test_ordinary_tasks_can_still_finish(plan_ledger):

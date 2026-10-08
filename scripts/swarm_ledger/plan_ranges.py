@@ -65,11 +65,11 @@ def _heading(line: str) -> tuple[int, str] | None:
 def phase_lines(text: str, phases: list[dict]) -> dict[str, str]:
     entries = sections(text)
     end = len(text.splitlines())
-    found = [_headings(entries, phase) for phase in phases]
-    if found == [[]] and end:
+    if len(phases) == 1 and end and not _headings(entries, phases[0]):
         return {phases[0]["id"]: f"1-{end}"}
     result = {}
-    for phase, matches in zip(phases, found, strict=True):
+    for phase in phases:
+        matches = _headings(entries, phase)
         if len(matches) != 1:
             raise ValueError(f"plan needs one heading for phase {phase['title']}")
         start, level = matches[0]
@@ -95,7 +95,9 @@ def slice_lines(text: str, name: str, phase_range: str) -> str:
     stop = next(
         (n for n, depth, line in entries if n > body and (ANCHOR.fullmatch(line) or 0 < depth <= level)), end + 1
     )
-    last = max(n for n in range(body, stop) if lines[n - 1].strip())
+    last = stop - 1
+    while not lines[last - 1].strip():
+        last -= 1
     return f"{first}-{last}"
 
 

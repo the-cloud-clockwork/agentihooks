@@ -236,14 +236,16 @@ def test_an_indented_fence_hides_its_headings():
 def test_headings_and_fences_follow_markdown():
     from scripts.swarm_ledger import plan_ranges
 
-    lines = ["####### seven", "#tight", "##", "## Ship ##", "# a #b", "# #", "  ### Indented"]
+    lines = ["####### seven", "#tight", "##", "## Ship ##", "# a #b", "# #", "  ### Indented", "###### Six", "# Box X"]
     text = "\n".join([*lines, "``", "## After two ticks", "~~~ text", "## Hidden", "~~~", "## Shown"]) + "\n"
     assert [(n, level, title) for n, level, title in plan_ranges.sections(text) if level] == [
         (4, 2, "Ship"),
         (5, 1, "a #b"),
         (6, 1, ""),
-        (9, 2, "After two ticks"),
-        (13, 2, "Shown"),
+        (8, 6, "Six"),
+        (9, 1, "Box X"),
+        (11, 2, "After two ticks"),
+        (15, 2, "Shown"),
     ]
 
 
