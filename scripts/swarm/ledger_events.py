@@ -98,7 +98,7 @@ def pull_request(raw):
         min(reds, default=None),
         unpassed_gate,
         raw.get("mergeQueueEntry") is not None,
-        bool(raw.get("gated")) and _gate(checks, results) == ["SUCCESS"],
+        bool(raw.get("gated")) and set(_gate(checks, results)) == {"SUCCESS"},
     )
 
 
@@ -110,7 +110,7 @@ def red_window(pushed_at, red_at, now_ms):
 def _unpassed_gate(gated, checks, results, running):
     if not gated or running or any(result in PENDING for result in results):
         return ""
-    gate = [result for check, result in zip(checks, results) if (check.get("name") or check.get("context")) == GATE]
+    gate = _gate(checks, results)
     return GATE if all(result == "SKIPPED" for result in gate) else ""
 
 
@@ -119,7 +119,7 @@ def _resolved(gated, checks, results, running):
         return True
     if not gated:
         return not running and "SUCCESS" in results and all(result in PASSED for result in results)
-    gate = [result for check, result in zip(checks, results) if (check.get("name") or check.get("context")) == GATE]
+    gate = _gate(checks, results)
     if any(result in FINAL_RED for result in gate):
         return True
     return "SUCCESS" in gate and not running and not any(result in PENDING for result in results)
