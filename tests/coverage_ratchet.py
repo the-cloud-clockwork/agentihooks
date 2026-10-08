@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -43,11 +43,12 @@ def executed(shards: list[Path]) -> dict[str, set[int]]:
     for shard in shards:
         data = CoverageData(basename=str(shard))
         data.read()
-        measured = [path for path in data.measured_files() if path.startswith(GRADED) and data.lines(path)]
+        measured = {path: data.lines(path) for path in data.measured_files() if path.startswith(GRADED)}
+        measured = {path: ran for path, ran in measured.items() if ran}
         if not measured:
             raise Unmeasured(f"shard {shard} measured no line under {', '.join(GRADED)}")
-        for path in measured:
-            lines.setdefault(path, set()).update(data.lines(path))
+        for path, ran in measured.items():
+            lines.setdefault(path, set()).update(ran)
     return lines
 
 
@@ -163,24 +164,28 @@ def dev_runs(repo: Path, base: str, shards: int, scratch: Path) -> Iterator[Meas
     with ThreadPoolExecutor(max_workers=8) as pool:
         runs = list(pool.map(lambda commit: _passed_run(repo, commit), commits))
     measured = [(commit, run) for commit, run in zip(commits, runs) if run]
-    fetch = _fetcher(repo, shards, scratch)
+    fetch = _fetcher(repo, shards, scratch, executed)
     first = next(((i, found) for i, pair in enumerate(measured) if (found := fetch(pair))), None)
     if first is None:
         return
     index, base = first
     yield base
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    # Reading coverage data holds the GIL, so threads only download and processes read.
+    with ThreadPoolExecutor(max_workers=8) as pool, ProcessPoolExecutor() as readers:
+        fetch = _fetcher(repo, shards, scratch, lambda files: readers.submit(executed, files).result())
         yield from filter(None, pool.map(fetch, measured[index + 1 : index + 1 + HISTORY]))
 
 
-def _fetcher(repo: Path, shards: int, scratch: Path) -> Callable[[tuple[str, str]], Measurement | None]:
+def _fetcher(
+    repo: Path, shards: int, scratch: Path, read: Callable[[list[Path]], dict[str, set[int]]]
+) -> Callable[[tuple[str, str]], Measurement | None]:
     def fetch(pair: tuple[str, str]) -> Measurement | None:
         commit, run = pair
         files = _download(run, shards, scratch / run)
         if not files:
             return None
-        print(f"dev {commit[:12]} measured by run {run}")
-        return Measurement(commit, executed(files), _show(repo, commit))
+        print(f"dev {commit[:12]} measured by run {run}", flush=True)
+        return Measurement(commit, read(files), _show(repo, commit))
 
     return fetch
 
