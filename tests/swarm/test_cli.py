@@ -1976,20 +1976,24 @@ def test_no_swarms_still_sweeps_herdr(monkeypatch, capsys):
 
 def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsys):
     import threading
+    import time
 
     monkeypatch.setattr(cli, "TICK_SECONDS", 0.5)
-    release, ticks = threading.Event(), {"fast": 0, "slow": 0}
+    release, ticks, starts = threading.Event(), {"fast": 0, "slow": 0}, []
 
     def run_tick(store, slug):
         ticks[slug] += 1
         if slug == "slow":
             assert release.wait(10)
-        elif ticks["fast"] == 3:
-            release.set()
+        else:
+            starts.append(time.monotonic())
+            if ticks["fast"] == 3:
+                release.set()
         return [f"tick {ticks[slug]}"]
 
     _tick_all(monkeypatch, run_tick, ["slow", "fast"])
     assert ticks == {"fast": 3, "slow": 1}
+    assert all(later - earlier >= 0.45 for earlier, later in zip(starts, starts[1:]))
     out = capsys.readouterr().out.splitlines()
     assert sorted(out[:-1]) == ["fast: tick 1", "fast: tick 2", "fast: tick 3", "slow: tick 1"]
     assert out[-1] == "herdr: swept"
@@ -1999,3 +2003,36 @@ def test_swarms_that_finish_together_tick_once(monkeypatch, capsys):
     ticks = []
     _tick_all(monkeypatch, lambda store, slug: ticks.append(slug) or ["ok"], ["a", "b", "c"])
     assert sorted(ticks) == ["a", "b", "c"]
+
+
+def test_a_quick_swarm_stops_its_extra_ticks_at_the_pass_deadline(monkeypatch, capsys):
+    import time
+
+    monkeypatch.setattr(cli, "TICK_SECONDS", 0.5)
+    monkeypatch.setattr(cli, "EXTRA_TICKS_UNTIL", 1.2)
+    ticks = {"fast": 0, "slow": 0}
+
+    def run_tick(store, slug):
+        ticks[slug] += 1
+        if slug == "slow":
+            time.sleep(2.0)
+        return []
+
+    _tick_all(monkeypatch, run_tick, ["slow", "fast"])
+    assert ticks == {"fast": 3, "slow": 1}
+
+
+def test_a_first_tick_that_dies_still_ends_the_extra_ticks(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "TICK_SECONDS", 0.05)
+    ticks = {"fast": 0}
+
+    def run_tick(store, slug):
+        if slug == "slow":
+            raise SystemExit(3)
+        ticks["fast"] += 1
+        if ticks["fast"] > 3:
+            pytest.fail("extra ticks went on after every first tick ended")
+        return []
+
+    with pytest.raises(SystemExit):
+        _tick_all(monkeypatch, run_tick, ["fast", "slow"])

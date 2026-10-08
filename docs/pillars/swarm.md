@@ -238,8 +238,10 @@ checked, who judges it) that the agent's prompt carries.
 
 ## The minute tick
 
-A systemd user timer (`agentihooks-swarm.timer`) runs `agentihooks swarm tick` every minute; nothing runs
-between ticks. `start` installs and enables it. Each tick, per swarm:
+A systemd user timer (`agentihooks-swarm.timer`) runs `agentihooks swarm tick` every minute. `start` installs
+and enables it. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
+again each minute, until every swarm's first tick of the pass ends or the pass reaches seven minutes. Each tick,
+per swarm:
 
 1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
 2. Free the tasks of agents whose pane is gone, or that stayed idle for 10 ticks. An idle agent is nudged at 3.
