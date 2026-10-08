@@ -11,12 +11,12 @@ _PLATFORMS = (
     ("CLAUDE_CODE_USE_VERTEX", "vertex"),
     ("CLAUDE_CODE_USE_FOUNDRY", "foundry"),
 )
-_OFF = frozenset({"", "0", "false"})
+_ON = frozenset({"1", "true", "yes", "on"})
 
 
 def provider(environ: Mapping[str, str]) -> str:
     for name, label in _PLATFORMS:
-        if environ.get(name, "").strip().lower() not in _OFF:
+        if environ.get(name, "").strip().lower() in _ON:
             return label
     if environ.get("ANTHROPIC_BASE_URL") and (environ.get("ANTHROPIC_AUTH_TOKEN") or environ.get("ANTHROPIC_API_KEY")):
         return "gateway"

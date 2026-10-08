@@ -5,7 +5,7 @@ from hooks.context.account_sessions import API_MARKER, TOKEN_PREFIX
 
 ANTHROPIC_HOST = "api.anthropic.com"
 _API_NAMES = frozenset({"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_BEDROCK_BASE_URL", API_MARKER})
-_API_PREFIXES = ("CLAUDE_CODE_USE_", "ANTHROPIC_VERTEX_")
+_API_PREFIXES = ("CLAUDE_CODE_USE_", "ANTHROPIC_VERTEX_", "ANTHROPIC_FOUNDRY_")
 
 
 def _api_name(name: str, value: str) -> bool:

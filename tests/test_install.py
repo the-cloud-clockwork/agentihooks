@@ -64,7 +64,7 @@ class TestClaudeRouting:
         assert "AH_CC_TOKEN_PEER" not in observed["environ"]
         assert "ANTHROPIC_API_KEY" not in observed["environ"]
 
-    def test_a_routed_launch_drops_every_api_credential(self, monkeypatch):
+    def test_a_routed_launch_drops_every_api_credential(self, monkeypatch, capsys):
         from scripts import claude_quota_balancer as balancer
 
         observed = {}
@@ -94,6 +94,8 @@ class TestClaudeRouting:
         assert observed["environ"]["CLAUDE_CODE_OAUTH_TOKEN"] == "winner-token"
         assert observed["environ"]["AGENTIHOOKS_ROUTE_ACCOUNT"] == "WINNER"
         assert not set(api) & set(observed["environ"])
+        captured = capsys.readouterr()
+        assert "gateway-token" not in captured.out + captured.err
 
     def test_cmd_claude_fails_closed_without_capacity(self, monkeypatch, capsys):
         from scripts import claude_quota_balancer as balancer

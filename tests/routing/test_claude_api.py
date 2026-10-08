@@ -19,6 +19,7 @@ def test_a_token_route_child_carries_no_api_credentials():
         "ANTHROPIC_BASE_URL": "https://gateway.example",
         "ANTHROPIC_BEDROCK_BASE_URL": "https://bedrock.example",
         "ANTHROPIC_VERTEX_PROJECT_ID": "project",
+        "ANTHROPIC_FOUNDRY_RESOURCE": SENTINEL,
         "CLAUDE_CODE_USE_BEDROCK": "1",
         API_MARKER: "1",
     }
@@ -52,6 +53,10 @@ def test_an_api_child_has_no_oauth_token_and_carries_the_route_marker():
         ({"CLAUDE_CODE_USE_BEDROCK": "1"}, "bedrock"),
         ({"CLAUDE_CODE_USE_VERTEX": "true"}, "vertex"),
         ({"CLAUDE_CODE_USE_FOUNDRY": "1"}, "foundry"),
+        ({"CLAUDE_CODE_USE_FOUNDRY": " Yes "}, "foundry"),
+        ({"CLAUDE_CODE_USE_BEDROCK": "ON"}, "bedrock"),
+        ({"CLAUDE_CODE_USE_BEDROCK": "off"}, ""),
+        ({"CLAUDE_CODE_USE_BEDROCK": "no"}, ""),
         ({"CLAUDE_CODE_USE_BEDROCK": "1", "ANTHROPIC_API_KEY": SENTINEL}, "bedrock"),
         ({"CLAUDE_CODE_USE_BEDROCK": "0", "CLAUDE_CODE_USE_VERTEX": "1"}, "vertex"),
         ({"ANTHROPIC_BASE_URL": "https://gateway.example", "ANTHROPIC_AUTH_TOKEN": SENTINEL}, "gateway"),
