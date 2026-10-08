@@ -35,6 +35,7 @@ from scripts.swarm import (
     retire_watch,
     session_model,
     tick_master,
+    time_left,
     timing,
 )
 from scripts.swarm import idle as idle_state
@@ -158,6 +159,7 @@ def tick(slug, store, ledger, runtime, now_ms):
 
     actions += skip_refused(capacity.apply, slug, config, store, ledger, runtime, now_ms)
     actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
+    actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, doc, now_ms)
     if not sleeping:
         actions += skip_refused(_codex_hook_order)
         actions += skip_refused(_master_down, slug, config, store, ledger, runtime, now_ms)

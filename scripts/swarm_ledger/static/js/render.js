@@ -275,6 +275,14 @@ function activeAgents() {
   return Object.values(seen).filter((at) => Date.now() - at < ACTIVE_MS).length;
 }
 
+export function timeLeftInputs(calc) {
+  if (!calc || !calc.tiers) return undefined;
+  const tiers = Object.entries(calc.tiers).map(([name, tier]) => `${name} ${tier.minutes}m from ${tier.samples} samples`).join(", ");
+  const slots = calc.slots === null ? "unobserved slots" : `${calc.slots} slots`;
+  const ci = calc.ci_minutes === null ? "no CI median yet" : `CI ${calc.ci_minutes}m a task`;
+  return `Larger of a ${calc.chain}m chain and ${calc.work}m of work over ${slots} · ${calc.remaining} tasks left · ${tiers} · ${ci}`;
+}
+
 export function renderStats() {
   const phases = inScope(doc.phases), ups = inScope(doc.followups), tasks = inScope(doc.tasks);
   const total = phases.length, done = phases.filter((p) => p.done).length, upsDone = ups.filter((f) => f.done).length;
@@ -282,12 +290,13 @@ export function renderStats() {
   const started = meta.created_at, elapsed = started ? Date.now() - started : null;
   const left = doc.time_left_minutes;
   const refresh = meta.stats_refresh;
-  const gap = refresh && refresh.calculation && refresh.calculation.gap;
+  const calc = (meta.time_left && meta.time_left.calculation) || (refresh && refresh.calculation);
+  const gap = calc && calc.gap;
   const leftText = gap ? `unknown · ${gap}${left === null ? "" : ` · prior ${span(left * 60000)}`}` : left === null ? "not set" : span(left * 60000);
   const last = (meta.events || []).reduce((m, e) => Math.max(m, e.at || 0), 0);
   const pct = total ? Math.round(100 * done / total) : 0;
   const next = phases.find((p) => !p.done), counts = (swarm && swarm.tasks) || {}, figure = (value) => (swarm ? String(value || 0) : "—");
-  const row = (label, value, extra) => h("div", { class: "stat", style: gap && label === "Time left" ? "grid-template-columns:75px minmax(0,1fr)" : "" }, h("dt", { text: label }), h("dd", {}, value, extra));
+  const row = (label, value, extra) => h("div", { class: "stat", title: label === "Time left" ? timeLeftInputs(calc) : undefined, style: gap && label === "Time left" ? "grid-template-columns:75px minmax(0,1fr)" : "" }, h("dt", { text: label }), h("dd", {}, value, extra));
   $("stats").replaceChildren(
     row("Started", started ? when(started) : "—"),
     row("Elapsed", elapsed === null ? "—" : span(elapsed)),
