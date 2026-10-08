@@ -609,7 +609,7 @@ def test_credential_parameters_have_readable_timing_identifiers():
         capture_output=True,
         text=True,
         check=True,
-        env={**os.environ, "PYTEST_ADDOPTS": ""},
+        env={**os.environ, "PYTEST_ADDOPTS": "", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": ""},
     )
     identifiers = [line for line in result.stdout.splitlines() if "::test_a_credential_value_is_refused[" in line]
     assert identifiers == [
