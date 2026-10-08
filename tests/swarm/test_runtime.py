@@ -1017,3 +1017,82 @@ def test_a_saved_account_is_kept_while_it_has_a_seat(tmp_path):
     runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task)
     argv = seen["argv"]
     assert argv[argv.index("--route") + 1] == "old"
+
+
+@pytest.mark.parametrize("harness,model", [("claude", "opus"), ("codex", "gpt-6.1-sol")])
+@pytest.mark.parametrize("reason,expected", [("quota", "fresh"), ("recycle", "old")])
+def test_handoff_account_selection_preserves_run_options(tmp_path, harness, model, reason, expected):
+    from scripts.swarm import capacity
+
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    saved = {
+        "profile": "engineer",
+        "harness": harness,
+        "model": model,
+        "effort": "high",
+        "account": "old",
+        "overlays": ["brain"],
+        "profile_decision": {"bundle_revision": "a" * 40},
+    }
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda requested, environ: (requested, "requested"))
+    runtime._quota_accounts = [
+        capacity.Account(harness, "old", "OPEN", 0, 5, 90, 2),
+        capacity.Account(harness, "fresh", "OPEN", 1, 90, 90, 6),
+    ]
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    task = {
+        "id": "t1",
+        "title": "x",
+        "handoff": "saved handoff",
+        "handoff_envelope": {"reason": reason, "seat": "eng-2@sw", "launch": saved},
+        "launch_assignment": saved,
+    }
+    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task)
+    argv = seen["argv"]
+    assert argv[argv.index("--route") + 1] == expected
+    assert argv[argv.index("--profile") + 1] == "engineer"
+    assert argv[argv.index("--overlay") + 1] == "brain"
+    assert argv[argv.index("--agent") + 1] == harness
+    if harness == "claude":
+        assert argv[argv.index("--model") + 1] == model
+        assert argv[argv.index("--effort") + 1] == "high"
+    else:
+        assert argv[argv.index("-m") + 1] == model
+        assert 'model_reasoning_effort="high"' in argv
+    assert placed.overlays == ["brain"]
+    assert task["handoff_envelope"]["seat"] == "eng-2@sw"
+
+
+@pytest.mark.parametrize("harness,model", [("claude", "opus"), ("codex", "gpt-6.1-sol")])
+def test_quota_handoff_without_another_account_keeps_the_handoff(tmp_path, harness, model):
+    from scripts.swarm import capacity
+    from scripts.swarm.tick import SpawnError
+
+    saved = {"profile": "engineer", "harness": harness, "model": model, "effort": "high", "account": "old"}
+    runtime = HerdrRuntime(
+        home=tmp_path,
+        run=lambda *args, **kwargs: pytest.fail("must not launch on the depleted account"),
+        choose=lambda requested, environ: (requested, "requested"),
+    )
+    runtime._quota_accounts = [capacity.Account(harness, "old", "OPEN", 0, 5, 90, 2)]
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    task = {
+        "id": "t1",
+        "title": "x",
+        "handoff": "saved handoff",
+        "handoff_envelope": {"reason": "quota", "seat": "eng-2@sw", "launch": saved},
+    }
+    with pytest.raises(SpawnError, match="no .* account has placeable quota seats"):
+        runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task)
+    assert task["handoff"] == "saved handoff"
+    assert task["handoff_envelope"]["launch"] == saved
+    assert runtime._quota_accounts[0].sessions == 0

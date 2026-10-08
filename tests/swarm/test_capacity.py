@@ -347,8 +347,8 @@ def test_runtime_refuses_an_account_when_its_harness_has_no_free_seat(tmp_path):
     runtime = HerdrRuntime(home=tmp_path)
     runtime._quota_accounts = [account(sessions=3), account("cx", harness="codex")]
     with pytest.raises(SpawnError, match="no claude account has placeable quota seats"):
-        runtime._quota_account("claude", None)
-    assert runtime._quota_account("codex", None).name == "cx"
+        runtime._quota_account("claude", None, None)
+    assert runtime._quota_account("codex", None, None).name == "cx"
 
 
 def test_failed_fresh_probe_does_not_leave_a_stale_healthy_account_placeable(monkeypatch):
@@ -736,9 +736,9 @@ def test_a_refused_ledger_write_is_skipped_and_spawning_still_runs(capsys):
     )
     actions = tick("sw", store, ledger, runtime, 1000)
     assert [task for _, _, task in runtime.spawned] == ["e"]
-    assert "skipped scripts.swarm.capacity.apply: the ledger refused its write" in actions
+    assert "skipped scripts.swarm.quota_notice.refresh: the ledger refused its write" in actions
     assert capsys.readouterr().err == (
-        "scripts.swarm.capacity.apply skipped, the ledger refused its write: "
+        "scripts.swarm.quota_notice.refresh skipped, the ledger refused its write: "
         "ledger sw: server refused: 400 by is allowed only on agent chat and comment entries\n"
     )
 

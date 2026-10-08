@@ -159,9 +159,9 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
     actions += skip_refused(grouping.release_pass, slug, store, ledger, doc)
     actions += skip_refused(grouping.group_pass, slug, config, store, ledger, doc)
-    from scripts.swarm import capacity
+    from scripts.swarm import quota_notice
 
-    actions += skip_refused(capacity.apply, slug, config, store, ledger, runtime, now_ms)
+    actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
     actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
     actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, doc, now_ms)
     if not sleeping:
