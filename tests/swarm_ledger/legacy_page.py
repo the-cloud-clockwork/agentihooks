@@ -3,9 +3,14 @@
 import html
 import re
 import secrets
+import sys
 from pathlib import Path
 
-from scripts.swarm_ledger import ledger_core
+from scripts.swarm_ledger import HERE
+
+sys.path.insert(0, str(HERE))
+
+from scripts.swarm_ledger import ledger_core  # noqa: E402
 
 
 def stored_token(page_path):
@@ -26,3 +31,11 @@ def render(doc, slug, port, token=None):
     }
     page = ledger_core.TEMPLATE.read_text(encoding="utf-8")
     return re.sub(r"__LEDGER_(TITLE|SLUG|PORT|TOKEN|DATA|PAGE)__", lambda m: values[m.group(1)], page)
+
+
+def store(folder, slug, doc):
+    """Store `doc` as ledger `slug` in the SQLite record of `folder`, as hooks and launch code read it."""
+    from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
+
+    state = {**doc, "_meta": {"rev": 1, **doc.get("_meta", {})}}
+    SQLiteLedgerRepository(Path(folder) / DATABASE).import_document(slug, state, replace=True)
