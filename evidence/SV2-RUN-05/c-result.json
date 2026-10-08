@@ -1,0 +1,16 @@
+{
+  "tested_commit": "a3e90281916d6c2d5d4d8bfecfeaaa7872a9a630",
+  "evidence_class": "isolated fakeredis and mocked command transports; no live terminal, Pod or UI rollout proof",
+  "passed": true,
+  "ui_reopen_is_read_only": true,
+  "replayed_identity_has_no_duplicate_effect": true,
+  "audit_survived_snapshot": true,
+  "disconnected_terminal": "unsupported",
+  "rollback_status_retained": "working",
+  "rollback_controls_hidden": true,
+  "durability": "execution registry, command journal, audit and counts survive; terminal transport remains disconnected",
+  "runtime_commands_by_outcome": {
+    "[\"kubernetes\", \"detach\", \"ok\"]": 2,
+    "[\"kubernetes\", \"attach\", \"unsupported\"]": 1
+  }
+}

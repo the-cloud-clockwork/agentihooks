@@ -1,0 +1,87 @@
+{
+  "tested_commit": "a3e90281916d6c2d5d4d8bfecfeaaa7872a9a630",
+  "evidence_class": "isolated fakeredis and mocked command transports; no live terminal, Pod or UI rollout proof",
+  "passed": true,
+  "independent_fixtures": [
+    {
+      "passed": true,
+      "task_running": true,
+      "saved_profile_removed": true,
+      "cooperative_stop_requested": true,
+      "authority_unchanged": true,
+      "other_backend_untouched": true,
+      "audit": [
+        {
+          "actor": {
+            "name": "fixture-operator",
+            "role": "operator",
+            "execution_id": "",
+            "generation": 0
+          },
+          "execution_id": "exe-83ebec135fd9486e9d099c244fea78ac",
+          "generation": 1,
+          "command": "detach",
+          "backend": "kubernetes",
+          "outcome": "ok"
+        },
+        {
+          "actor": {
+            "name": "fixture-operator",
+            "role": "operator",
+            "execution_id": "",
+            "generation": 0
+          },
+          "execution_id": "exe-83ebec135fd9486e9d099c244fea78ac",
+          "generation": 1,
+          "command": "cancel",
+          "backend": "kubernetes",
+          "outcome": "ok"
+        }
+      ],
+      "runtime_commands_by_outcome": {
+        "[\"kubernetes\", \"detach\", \"ok\"]": 1,
+        "[\"kubernetes\", \"cancel\", \"ok\"]": 1
+      }
+    },
+    {
+      "passed": true,
+      "task_running": true,
+      "saved_profile_removed": true,
+      "cooperative_stop_requested": true,
+      "authority_unchanged": true,
+      "other_backend_untouched": true,
+      "audit": [
+        {
+          "actor": {
+            "name": "fixture-operator",
+            "role": "operator",
+            "execution_id": "",
+            "generation": 0
+          },
+          "execution_id": "exe-9cf2d8d3dc5e48098b0f3fa76815fa01",
+          "generation": 1,
+          "command": "detach",
+          "backend": "kubernetes",
+          "outcome": "ok"
+        },
+        {
+          "actor": {
+            "name": "fixture-operator",
+            "role": "operator",
+            "execution_id": "",
+            "generation": 0
+          },
+          "execution_id": "exe-9cf2d8d3dc5e48098b0f3fa76815fa01",
+          "generation": 1,
+          "command": "cancel",
+          "backend": "kubernetes",
+          "outcome": "ok"
+        }
+      ],
+      "runtime_commands_by_outcome": {
+        "[\"kubernetes\", \"detach\", \"ok\"]": 1,
+        "[\"kubernetes\", \"cancel\", \"ok\"]": 1
+      }
+    }
+  ]
+}
