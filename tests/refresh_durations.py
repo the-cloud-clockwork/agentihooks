@@ -40,7 +40,7 @@ def ci_download(run_ids: list[str], folder: Path) -> None:
 
 def keep_newest(folder: Path, limit: int, keep: str | None = None) -> None:
     runs = sorted(
-        (path for path in folder.iterdir() if path.is_dir() and path.name.isdigit() and path.name != keep),
+        (path for path in folder.iterdir() if path.is_dir() and path.name.isdecimal() and path.name != keep),
         key=lambda path: int(path.name),
     )
     for path in runs[: max(len(runs) - limit + (keep is not None), 0)]:

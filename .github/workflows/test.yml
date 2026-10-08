@@ -261,7 +261,7 @@ jobs:
           fi
 
   sonar:
-    # Polling for shard coverage instead spends the workflow token's hourly API quota, which every run shares.
+    # Waits for the shards' coverage through needs; the API that could poll for it has an hourly quota every run shares.
     needs: [unit]
     runs-on: ubuntu-latest
     timeout-minutes: 15
