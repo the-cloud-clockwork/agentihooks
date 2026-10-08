@@ -4,7 +4,7 @@
   "integration_gate": "G1",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1838",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1843",
-  "tested_commit": "afbdcb1bcca20c1f8125a116ff812e28e92a6831",
+  "tested_commit": "a4c9bfe972d0ef15f7d9300f1c14a4585256c891",
   "plan_revision": "3bd4f4a6b01057b447cad15fa48c85802d3f78ee",
   "status": "implemented-not-live-qualified",
   "evidence_class": "mocked transport and isolated fakeredis; no live runtime or rollout proof",
@@ -19,10 +19,10 @@
   },
   "authority": "Controller-side service operates on previously admitted immutable execution identity and canonical seat generation. No display label grants authority. Worker-facing launch grant verification remains at the authenticated registration boundary; this service is not a public unauthenticated endpoint.",
   "states": {
-    "observed": "208 focused operations, preceding runtime, execution identity, store, collection speed and reload tests passed. Ruff check and format clean. RedisStore journal construction is lazy; a subprocess regression proves legacy construction leaves the new runtime service unloaded.",
+    "observed": "213 focused operations, preceding runtime, execution identity, store, collection speed and reload tests passed. Operations coverage: 169 statements, zero missed, 100 percent. Ruff check and format clean. Canonical digest has a literal SHA256 reference, nonfinite input is rejected, and transactions pass with a one connection Redis pool.",
     "accepted": "Acceptance A, B and C each pass twice on independent fixtures. Original Standards and Spec readers closed recovery isolation finding on 9305448c; no open findings.",
     "committed": "Implementation and fixture inputs committed on tested_commit; generated case manifests identify exact input hashes.",
-    "externally_verified": "CI run 37846250223 exposed collection speed, fakeredis group and imported folder reload regressions; local regression suites now pass after deferred imports. Final CI pending."
+    "externally_verified": "CI run 37847733472 on 94570b57 passed full unit suite, sonar, lint, size and integration jobs; mutation found 332 killed and 36 surviving variants. Canonical payload and one connection tests were added and redundant serialization was removed; renewed CI pending."
   },
   "cases": {
     "a": "evidence/SV2-RUN-03/a-result.json",
@@ -40,5 +40,6 @@
     "The service stores payload digests rather than prompts. Recovery classifies unresolved operations by observation; an absent operation requires the original request payload for explicit dispatch. Stale conflicts are returned as refused without changing old persisted entries; other entries continue recovery.",
     "When a later package integrates journal dispatch into the ledger server, its runtime folder must join the reload watcher. The trace-plan classifier excluded that integration from this package; proposed on the ledger. Legacy store construction does not load the new journal service."
   ],
-  "next_action": "Close independent reviews, qualify CI and merge into dev."
+  "next_action": "Close independent reviews, qualify CI and merge into dev.",
+  "mutation_resolution": "Canonical codec options and fixed diagnostic messages are module data. Redundant journal key sorting, duplicate nonfinite validation and recovery result clearing were removed. Added digest key order and literal hash, recorded action, nonfinite payload, single connection pool and empty stale result assertions. No mutation clearances used."
 }
