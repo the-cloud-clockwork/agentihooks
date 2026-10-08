@@ -731,13 +731,78 @@ def test_a_quota_notice_ends_with_the_life_it_was_sent_to(redis, seat):
 
 
 @pytest.mark.parametrize(
-    ("outcome", "state"), [("", "cancelled"), ("eng-1@sw", "pending")], ids=["finished", "handed off"]
+    ("outcome", "state", "reason"),
+    [
+        ("", "cancelled", "cancelled: sw-eng-1 finished its task and exited before closing it"),
+        ("eng-1@sw", "pending", "sw-eng-1 finished its task and exited; back to eng-1@sw for its next occupant"),
+    ],
+    ids=["finished", "handed off"],
 )
-def test_the_sweep_settles_seat_mail_a_settled_life_was_left_holding(redis, outcome, state):
+def test_the_sweep_settles_seat_mail_a_settled_life_was_left_holding(redis, outcome, state, reason):
     inbox, store = InboxStore(redis), RedisStore(redis)
     item = seat_notice_taken(inbox, store, "delivered")
     store.seats.record_exit("sw-eng-1", outcome, "finished its task and exited")
     store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+    assert inbox.open_items("sw-eng-1") == []
     exits.sweep(inbox, "sw", store, dict)
-    assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("eng-1@sw", state)
-    assert "sw-eng-1 finished its task and exited" in inbox.get(item.id).reason
+    after = inbox.get(item.id)
+    assert (after.address, after.state, after.reason) == ("eng-1@sw", state, reason)
+    assert inbox.history(item.id)[-1]["by"] == "swarm"
+
+
+def test_the_sweep_leaves_seat_mail_its_live_taker_holds(redis):
+    from scripts.swarm.store import AgentRecord
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    item = seat_notice_taken(inbox, store, "delivered")
+    store.seats.record_exit("sw-eng-1", "", "finished its task and exited")
+    store.put_agent("sw", AgentRecord(name="sw-eng-1", lane="eng", task="t1", seat="eng-1@sw"))
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).state == "delivered"
+
+
+def test_a_quota_notice_on_the_seat_ends_with_the_life_that_took_it(redis):
+    from scripts.swarm.quota_notice import HURRY
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    item = inbox.send("swarm", "eng-1@sw", HURRY)
+    inbox.deliver(item.id, "sw-eng-1")
+    exits.settle(inbox, "sw-eng-1", "eng-1@sw", "handed off its seat")
+    after = inbox.get(item.id)
+    assert (after.state, after.reason) == ("done", "done: sw-eng-1 handed off its seat; its quota notice ended with it")
+    assert inbox.history(item.id)[-1]["by"] == "swarm"
+
+
+def test_the_sender_of_seat_mail_a_finished_agent_took_is_told(redis):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    item = inbox.send("sw-eng-3", "eng-1@sw", "Review this change.")
+    inbox.deliver(item.id, "sw-eng-1")
+    exits.settle(inbox, "sw-eng-1", "", "finished its task and exited")
+    [notice] = inbox.pending_items("sw-eng-3")
+    told = exits._told(item, "sw-eng-1", "finished its task and exited")
+    assert (notice.sender, notice.text, notice.fyi) == ("swarm", told, True)
+
+
+@pytest.mark.parametrize("seat", ["", "eng-1@sw"], ids=["finished", "handed off"])
+@pytest.mark.parametrize("race", ["moved", "taken up"])
+def test_seat_mail_that_changed_hands_during_settlement_is_left_alone(redis, monkeypatch, seat, race):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    item = seat_notice_taken(inbox, store, "delivered")
+    redirect, move = inbox.redirect, "redirect" if seat else "withdraw"
+    original = getattr(inbox, move)
+
+    def change_hands_first(*args, **kwargs):
+        if race == "moved":
+            redirect(item.id, "swarm", "eng-9@sw", "moved meanwhile")
+        else:
+            store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+            inbox.read(item.id, "sw-eng-2")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(inbox, move, change_hands_first)
+    exits.settle(inbox, "sw-eng-1", seat, "exited")
+    after = inbox.get(item.id)
+    expected = ("eng-9@sw", "pending") if race == "moved" else ("eng-1@sw", "read")
+    assert (after.address, after.state) == expected
