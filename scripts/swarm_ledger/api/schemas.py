@@ -93,6 +93,7 @@ FIELDS = {
     "artifact_purge": "by",
     "alert_claim": "by target",
     "alert_close": "by target outcome",
+    "time_left": "by slots ci_minutes",
 }
 TYPES = {
     "long": {"type": "boolean"},
@@ -106,6 +107,8 @@ TYPES = {
     "unhandled": {"type": "integer", "minimum": 0},
     "gain": {"type": "number", "minimum": 0},
     "difficulty_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "slots": {"type": "integer", "minimum": 0},
+    "ci_minutes": {"type": ["number", "null"], "minimum": 0},
     "value": {"type": ["boolean", "integer"]},
     "fields": {"type": "object"},
     "contract": {"type": "object"},

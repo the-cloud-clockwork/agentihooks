@@ -77,6 +77,9 @@ class LedgerClient:
     def capacity_comment(self, slug: str, task_id: str, text: str, at: int) -> None:
         self.comment(slug, task_id, text, by="swarm")
 
+    def time_left(self, slug: str, slots: int, ci_minutes: float | None) -> None:
+        self._call(slug, [_op("time_left", "swarm", slots=slots, ci_minutes=ci_minutes)])
+
     def set_phase(self, slug, phase_id, done, status):
         self._call(slug, [_op("set", "swarm", path=f"phases/{phase_id}/done", value=done, status=status)])
 

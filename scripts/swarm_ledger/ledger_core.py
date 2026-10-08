@@ -32,6 +32,7 @@ import ledger_relay
 import ledger_size
 import ledger_sources
 import ledger_tasks
+import ledger_time_left
 import ledger_title
 import ledger_verdict
 
@@ -112,6 +113,7 @@ EXTENSION_OPS = {
         ledger_answer,
         ledger_verdict,
         ledger_alerts,
+        ledger_time_left,
     )
     for name in module.OPS
 }

@@ -151,6 +151,7 @@ class StatsSync(unittest.TestCase):
             {"id": "remaining", "state": "open", "done": False, "comments": []},
         ]
         state["time_left_minutes"] = 400
+        state["_meta"]["time_left"] = {"inputs": {"slots": 1, "ci_minutes": 35}}
         now = core.now_ms()
         state["_meta"]["events"].append({"kind": "task done", "target": "tasks/closed", "at": now})
         core.paths(SLUG)[1].write_text(core.json.dumps(state), encoding="utf-8")
