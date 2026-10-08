@@ -62,7 +62,7 @@ def scaling_refusal(config):
         return f"scaling must be one of {', '.join(SCALING)}"
     if not 0 < config.load_low <= config.load_high <= MAX_LOAD:
         return f"load low must be above 0 and at most load high, and load high at most {MAX_LOAD:g}"
-    if config.memory_per_agent_mb <= 0:
+    if type(config.memory_per_agent_mb) is not int or config.memory_per_agent_mb <= 0:
         return "memory per agent must be a whole number of MB above 0"
     return ""
 

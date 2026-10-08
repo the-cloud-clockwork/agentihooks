@@ -241,6 +241,8 @@ def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store)
         {"load_low": 5.0},
         {"scaling": "sometimes"},
         {"memory_per_agent_mb": 0},
+        {"memory_per_agent_mb": 0.5},
+        {"memory_per_agent_mb": True},
         {"load_high": 0.0, "load_low": 0.0},
     ],
 )
@@ -255,3 +257,11 @@ def test_update_refuses_bad_scaling_settings_and_keeps_the_stored_ones(store, ch
 def test_create_refuses_a_low_watermark_above_the_high_one(store):
     with pytest.raises(SwarmError, match="load low"):
         store.create(config(load_low=2.0, load_high=1.0))
+
+
+@pytest.mark.parametrize("memory", [0.5, True])
+def test_create_refuses_memory_that_cannot_round_trip(store, memory):
+    with pytest.raises(SwarmError, match="whole number"):
+        store.create(config(memory_per_agent_mb=memory))
+    assert store.redis.hgetall(store.key("smoke", "config")) == {}
+    assert store.slugs() == []
