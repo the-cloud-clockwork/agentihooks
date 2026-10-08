@@ -477,8 +477,8 @@ def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ())
     for item in COPILOT_STATE:
         _link(out / item, operator / item)
     # Copilot sends header values literally, so this file holds the resolved gateway credential.
-    _atomic_write(out / "mcp-config.json", json.dumps(config, indent=2) + "\n")
-    (out / "mcp-config.json").chmod(0o600)
+    with os.fdopen(os.open(out / "mcp-config.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
+        f.write(json.dumps(config, indent=2) + "\n")
     _install_module().save_json(out / STAMP, current)
     return out
 
