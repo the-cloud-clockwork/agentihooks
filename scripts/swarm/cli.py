@@ -101,6 +101,7 @@ from scripts.swarm.status import auto_snapshot, findings, status_report, task_co
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
 from scripts.swarm.tick import agent_status, primed, skip_refused, tick
 from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
+from scripts.swarm_v2.runtime.routed import routed
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -146,7 +147,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         )
         controls = timing.call(command_runner.consume, store, slug)
         if timing.call(ledger.binned, slug):
-            _, left = stop_now(store, slug, runtime or HerdrRuntime(), ledger)
+            _, left = stop_now(store, slug, runtime or routed(herdr=HerdrRuntime()), ledger)
             return [
                 f"the ledger is in the bin, still retiring {', '.join(left)}"
                 if left
@@ -173,7 +174,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
                 ledger,
                 store.config(slug),
             )
-        actions += timing.call(tick, slug, store, ledger, runtime or HerdrRuntime(), now_ms())
+        actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
         if store.config(slug).template == "doctor":
             from scripts.doctor import cli as doctor
 
@@ -332,7 +333,7 @@ def cmd_stop(store, args):
     if not args.now:
         _state(store, args, "stopping")
         return
-    config, left = stop_now(store, args.slug, HerdrRuntime(), LedgerClient())
+    config, left = stop_now(store, args.slug, routed(herdr=HerdrRuntime()), LedgerClient())
     print(json.dumps({"swarm": args.slug, "state": config.state, "still_running": left}))
 
 
@@ -375,7 +376,7 @@ def _retire_each(store, slug, runtime, agents):
 
 def cmd_close(store, args):
     store.config(args.slug)
-    runtime = HerdrRuntime()
+    runtime = routed(herdr=HerdrRuntime())
     live = runtime.live_names()
     by = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
     master = None if args.now else _live_master(store, args.slug, live)
@@ -403,7 +404,7 @@ def cmd_close(store, args):
 
 
 def cmd_reopen(store, args):
-    runtime = HerdrRuntime()
+    runtime = routed(herdr=HerdrRuntime())
     live = runtime.live_names()
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, live)
@@ -418,7 +419,7 @@ def cmd_reopen(store, args):
 
 
 def cmd_take_master(store, args):
-    runtime = HerdrRuntime()
+    runtime = routed(herdr=HerdrRuntime())
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, runtime.live_names())
     from scripts.gates import Who
@@ -445,7 +446,7 @@ def cmd_take_master(store, args):
 
 
 def cmd_master(store, args):
-    runtime = HerdrRuntime()
+    runtime = routed(herdr=HerdrRuntime())
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, runtime.live_names())
     launched = master_launch.up(store, args.slug, runtime, now_ms(), args.choice, input, print)
@@ -604,7 +605,7 @@ def cmd_snapshot(store, args):
 def cmd_restore(store, args):
     source = Path(args.source).expanduser() if args.source else snapshot.newest(args.slug)
     herdr = HerdrRuntime()
-    outcomes = snapshot.restore(store, args.slug, herdr.live_names(), source, runtime=herdr)
+    outcomes = snapshot.restore(store, args.slug, herdr.live_names(), source, runtime=routed(herdr=herdr))
     for action in run_tick(store, args.slug):
         print(action)
     state = store.config(args.slug).state
@@ -715,7 +716,7 @@ def cmd_rename(store, args):
     from scripts.swarm.rename import rename_swarm
 
     slugs = [args.slug] if getattr(args, "slug", "") else store.slugs()
-    ledger, runtime, failed = LedgerClient(), HerdrRuntime(), []
+    ledger, runtime, failed = LedgerClient(), routed(herdr=HerdrRuntime()), []
     for slug in slugs:
         store.ensure_code(slug)
         if not store.agents(slug):
@@ -1060,7 +1061,9 @@ def cmd_restore_decision(store, args):
     name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
     if name not in {"", "operator"} and _me(store, args).lane != MASTER:
         raise SwarmError("Only the master or operator can choose resume or fresh")
-    outcome = resume.decide(store, args.slug, args.agent, args.choice, HerdrRuntime(), now_ms(), LedgerClient())
+    outcome = resume.decide(
+        store, args.slug, args.agent, args.choice, routed(herdr=HerdrRuntime()), now_ms(), LedgerClient()
+    )
     print(json.dumps(asdict(outcome)))
 
 
