@@ -1,12 +1,15 @@
 """Screens task adds against the tasks the ledger already holds, before the locked apply takes the write lock."""
 
-from concurrent.futures import ThreadPoolExecutor, wait
+import json
+import subprocess
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
-from scripts.swarm_ledger import ledger_duplicates
-
+ROOT = Path(__file__).resolve().parents[2]
+CHILD = (sys.executable, "-m", "scripts.swarm_ledger.ledger_duplicates")
 BUDGET_S = 5.0
-WORKERS = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ledger-duplicates")
+UNCHECKED = "unchecked"
 TICK = "swarm"
 MINTED = ("plan", "release")
 REFUSAL = (
@@ -43,7 +46,7 @@ def screen(doc: dict, ops: list[dict]) -> Screen:
     found, why = _find(doc, adds)
     refused, warnings = {}, {}
     for op, match in zip(adds, found):
-        if match == ledger_duplicates.UNCHECKED:
+        if match == UNCHECKED:
             warnings[op["id"]] = UNCHECKED_WARNING.format(new=op["task"], why=why)
         elif match is not None:
             refused[op["id"]] = refusal(op, match)
@@ -56,28 +59,40 @@ def checked(op: dict) -> bool:
     return not (op["by"] == TICK and op["task"] in {f"{kind}-{op.get('phase', '')}" for kind in MINTED})
 
 
-def refusal(op: dict, match: ledger_duplicates.Match) -> str:
-    fate = "it is already built" if match.built else "it is on the ledger and will be built"
+def refusal(op: dict, match: dict) -> str:
+    fate = "it is already built" if match["state"] == "done" else "it is on the ledger and will be built"
     return REFUSAL.format(
         new=op["task"],
-        id=match.id,
-        title=match.title,
-        state=match.state,
-        rank=match.rank,
-        phase=match.phase_title or "none",
+        id=match["id"],
+        title=match["title"],
+        state=match["state"],
+        rank=match["rank"],
+        phase=match["phase_title"] or "none",
         fate=fate,
     )
 
 
+def find(doc: dict, adds: list[dict]) -> list:
+    request = json.dumps({"doc": doc, "kind": "task", "items": adds})
+    done = subprocess.run(CHILD, input=request, capture_output=True, text=True, timeout=BUDGET_S, check=True, cwd=ROOT)
+    return json.loads(done.stdout.splitlines()[-1])
+
+
 def _find(doc, adds):
-    future = WORKERS.submit(ledger_duplicates.find, doc, "task", adds)
-    if future not in wait([future], timeout=BUDGET_S).done:
-        future.cancel()
-        return [ledger_duplicates.UNCHECKED] * len(adds), SLOW.format(budget=BUDGET_S)
     try:
-        return future.result(), UNANSWERED
+        return find(doc, adds), UNANSWERED
+    except subprocess.TimeoutExpired:
+        why = SLOW.format(budget=BUDGET_S)
+    except subprocess.CalledProcessError as exc:
+        why = FAILED.format(error=_error(exc.stderr))
     except Exception as exc:
-        return [ledger_duplicates.UNCHECKED] * len(adds), FAILED.format(error=type(exc).__name__)
+        why = FAILED.format(error=type(exc).__name__)
+    return [UNCHECKED] * len(adds), why
+
+
+def _error(stderr):
+    lines = stderr.strip().splitlines()
+    return lines[-1].split(":", 1)[0] if lines else "no message"
 
 
 def _refuse(reason):

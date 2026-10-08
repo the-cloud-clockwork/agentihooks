@@ -1,12 +1,12 @@
 import inspect
 import json
-import threading
+import subprocess
+import sys
 import uuid
 from unittest.mock import patch
 
 import pytest
 
-from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 from scripts.swarm_ledger import ledger_duplicates, ledger_task_duplicates
 from tests.swarm_ledger.test_ledger_authority import MASTER, SLUG, admin_put, cli_ledger, core, new_ledger, send
@@ -30,23 +30,14 @@ UNANSWERED = (
 
 
 class Judge:
-    def __init__(self, yes=(), error=None, hold=None):
-        self.yes, self.error, self.hold, self.asked, self.lock_free = set(yes), error, hold, [], []
+    def __init__(self, yes=(), error=None, hold=0):
+        self.spec, self.asked, self.lock_free = json.dumps([sorted(yes), error, hold]), [], []
+        self.find = ledger_task_duplicates.find
 
-    def __call__(self, state, questions, *, purpose):
-        self.asked.append(purpose)
+    def __call__(self, doc, adds):
+        self.asked.append("ledger-duplicate")
         self.lock_free.append(core.LOCK.acquire(blocking=False) and (core.LOCK.release() or True))
-        if self.hold:
-            self.hold.wait(5)
-        if self.error:
-            raise self.error
-        return DecisionResult(
-            {
-                name: Answer("noul", noul=0.9 if any(f" {i} " in q.instructions for i in self.yes) else 0.05)
-                for name, q in questions.items()
-            },
-            "unit-test",
-        )
+        return self.find(doc, adds)
 
 
 @pytest.fixture
@@ -92,7 +83,10 @@ def task(task_id, title, phase, by=MASTER, **fields):
 
 
 def judged(monkeypatch, judge):
-    monkeypatch.setattr(ledger_duplicates, "decide", judge)
+    monkeypatch.setattr(
+        ledger_task_duplicates, "CHILD", (sys.executable, "-m", "tests.swarm_ledger.duplicate_child", judge.spec)
+    )
+    monkeypatch.setattr(ledger_task_duplicates, "find", judge)
     return judge
 
 
@@ -148,7 +142,7 @@ def test_the_not_duplicate_reason_skips_the_check_and_is_stored(live, monkeypatc
 
 
 def test_a_classifier_failure_lands_the_task_with_a_warning(live, monkeypatch):
-    judged(monkeypatch, Judge(yes={"t1"}, error=ClassifierUnavailable("down")))
+    judged(monkeypatch, Judge(yes={"t1"}, error="unavailable"))
     status, reply = operations(live, task("t9", REPEAT, live["phases"][0]))
     assert (status, reply["rejected"]) == (200, [])
     assert UNANSWERED in reply["_meta"]["warnings"]
@@ -156,13 +150,9 @@ def test_a_classifier_failure_lands_the_task_with_a_warning(live, monkeypatch):
 
 
 def test_a_classifier_past_its_budget_lands_the_task_with_a_warning(live, monkeypatch):
-    hold = threading.Event()
-    judged(monkeypatch, Judge(yes={"t1"}, hold=hold))
+    judged(monkeypatch, Judge(yes={"t1"}, hold=30))
     monkeypatch.setattr(ledger_task_duplicates, "BUDGET_S", 0.05)
-    try:
-        status, reply = operations(live, task("t9", REPEAT, live["phases"][0]))
-    finally:
-        hold.set()
+    status, reply = operations(live, task("t9", REPEAT, live["phases"][0]))
     assert (status, reply["rejected"]) == (200, [])
     assert (
         "the duplicate check did not run for task t9 because it took longer than 0.05 seconds, so it was added unchecked"
@@ -225,7 +215,7 @@ def test_the_cli_override_lands_with_its_reason(live, monkeypatch):
 
 
 def test_the_cli_prints_the_warning_when_the_check_did_not_run(live, monkeypatch, capsys):
-    judged(monkeypatch, Judge(error=ClassifierUnavailable("down")))
+    judged(monkeypatch, Judge(error="unavailable"))
     cli("t9", REPEAT, "--phase", live["phases"][0])
     assert UNANSWERED in capsys.readouterr().err
     assert stored("t9") is not None
@@ -237,7 +227,7 @@ def test_an_empty_not_duplicate_reason_is_refused(live):
 
 
 def test_a_broken_check_lands_the_task_naming_its_error(live, monkeypatch):
-    judged(monkeypatch, Judge(yes={"t1"}, error=KeyError("answers")))
+    judged(monkeypatch, Judge(yes={"t1"}, error="KeyError"))
     status, reply = operations(live, task("t9", REPEAT, live["phases"][0]))
     assert (status, reply["rejected"]) == (200, [])
     assert (
@@ -248,7 +238,7 @@ def test_a_broken_check_lands_the_task_naming_its_error(live, monkeypatch):
 
 
 def test_a_timeout_error_inside_the_check_is_named_not_counted_as_slow(live, monkeypatch):
-    judged(monkeypatch, Judge(yes={"t1"}, error=TimeoutError("socket")))
+    judged(monkeypatch, Judge(yes={"t1"}, error="TimeoutError"))
     status, reply = operations(live, task("t9", REPEAT, live["phases"][0]))
     assert (status, reply["rejected"]) == (200, [])
     assert (
@@ -278,3 +268,34 @@ def test_a_plan_id_from_any_writer_but_the_tick_is_checked(live, monkeypatch):
 
 def test_the_budget_leaves_the_cli_time_for_the_locked_apply():
     assert ledger_task_duplicates.BUDGET_S * 2 <= inspect.signature(cli_ledger.request).parameters["timeout"].default
+
+
+def test_the_server_marker_for_an_unchecked_add_matches_the_finder():
+    assert ledger_task_duplicates.UNCHECKED == ledger_duplicates.UNCHECKED
+
+
+def test_unreadable_finder_output_lands_the_task_naming_the_error(live, monkeypatch):
+    monkeypatch.setattr(ledger_task_duplicates, "CHILD", (sys.executable, "-c", "print('not json')"))
+    status, reply = operations(live, task("t9", REPEAT, live["phases"][0]))
+    assert (status, reply["rejected"]) == (200, [])
+    assert (
+        "the duplicate check did not run for task t9 because it failed with JSONDecodeError, so it was added unchecked"
+        in reply["_meta"]["warnings"]
+    )
+
+
+def test_a_finder_that_dies_silently_is_named_as_such(live, monkeypatch):
+    monkeypatch.setattr(ledger_task_duplicates, "CHILD", (sys.executable, "-c", "raise SystemExit(3)"))
+    status, reply = operations(live, task("t9", REPEAT, live["phases"][0]))
+    assert (
+        "the duplicate check did not run for task t9 because it failed with no message, so it was added unchecked"
+        in reply["_meta"]["warnings"]
+    )
+
+
+def test_the_server_never_loads_the_classifier_or_its_home_configuration():
+    probe = "import sys; from scripts.swarm_ledger import ledger_server; print(sorted(m for m in sys.modules if m.startswith(('hooks.classifier', 'hooks.config'))))"
+    out = subprocess.run(
+        [sys.executable, "-c", probe], cwd=ledger_task_duplicates.ROOT, capture_output=True, text=True, check=True
+    ).stdout
+    assert out.splitlines()[-1] == "[]"
