@@ -21,7 +21,7 @@
     "RedisStore.export and restore"
   ],
   "states": {
-    "observed": "Earlier focused suite passed 300 tests; latest focused identity, store and worker grouping suite passed 93; repository lint and format passed; final focused compatibility suite recorded in task proof.",
+    "observed": "320 focused checks passed; repository lint and format passed; actual preceding strict decoder rollback passed; eighteen surviving equivalents independently ruled.",
     "accepted": "two independent positive rejection and recovery fixtures passed; historical attempts and seat memory preserved; three identity conflicts counted in each negative fixture",
     "committed": "19c19494e9d8938aadae449b7cfbb9c47268c653",
     "externally_verified": "CI evidence is required before merge and is recorded on the pull request and task proof; no live Pod or rollout claim"
@@ -48,8 +48,8 @@
     "c": "evidence/SV2-IDN-02/c-result.json"
   },
   "reviews": {
-    "standards": "both admission race and strict reader findings closed at implementation commit; reviewer independently passed both regressions",
-    "spec": "old reader compatibility finding closed; no remaining findings"
+    "standards": "Source review closed; all eighteen surviving equivalent variants individually ruled with fingerprints and invariants",
+    "spec": "Closed after deterministic binding validation and final containment/concurrency test review; no findings"
   },
   "rollback_rehearsal": {
     "preceding_commit": "bc0fe91d",
@@ -69,7 +69,8 @@
   "ci": {
     "initial_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37710855941",
     "initial_head": "e6090d977bb6e23d3147afc4f41c4bc0c4328289",
-    "initial_result": "red: missing fakeredis test worker group and 103 mutation survivors; exact grouping correction and adversarial triage are committed; current head requires requalification"
+    "initial_result": "red: missing fakeredis test worker group and 103 mutation survivors; exact grouping correction and adversarial triage are committed; current head requires requalification",
+    "integration_repair": "Master announced integration green; snapshot repair merged into this branch; final CI pass pending"
   },
   "mutation": {
     "initial_counts": {
@@ -77,8 +78,15 @@
       "execution_survived": 103,
       "store_killed": 31
     },
-    "independently_cleared": 17,
-    "remaining": "additional diagnostic, boundary and race tests await CI kill evidence",
-    "job": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37710855941/job/113096181047"
+    "independently_cleared": 18,
+    "remaining": "zero unruled survivors; final head requires CI gate pass",
+    "job": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37710855941/job/113096181047",
+    "qualified_counts": {
+      "execution_killed": 532,
+      "execution_survived": 18,
+      "store_killed": 31
+    },
+    "qualification_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37712904872",
+    "qualification_head": "68e3610739a05d9ea6ec9c1936ddd46df49ae40c"
   }
 }
