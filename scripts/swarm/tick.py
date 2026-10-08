@@ -283,6 +283,10 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
             continue
         if agent.name not in facts and agent.state != "retiring":
             continue
+        agent, followed = _follow(slug, store, runtime, agent, facts.get(agent.name, {}).get("rebound"))
+        actions.extend(followed)
+        if agent is None:
+            continue
         filled = live_binding.fill(agent, facts.get(agent.name, {}))
         if filled != agent:
             store.put_agent(slug, filled)
@@ -309,6 +313,24 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
         store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
         actions.append(f"retired {agent.name} after mismatched {fields}" + _drop(slug, store, ledger, rows, agent))
     return actions
+
+
+def _follow(slug, store, runtime, agent, pid):
+    if pid is None:
+        return agent, []
+    if (rebound := _rebind(slug, store, runtime, agent, pid)) is None:
+        return None, [f"held {agent.name} until one pane holds its resumed process {pid}"]
+    return rebound, [f"rebound {agent.name} to its resumed process {pid} in pane {rebound.pane_id}"]
+
+
+def _rebind(slug, store, runtime, agent, pid):
+    panes = [p for p, c in (runtime.conversations() or {}).items() if c and c == agent.conversation_id]
+    if len(panes) != 1:
+        return None
+    validation = {**agent.profile_decision.get("validation", {}), "pid": pid}
+    rebound = replace(agent, pane_id=panes[0], profile_decision={**agent.profile_decision, "validation": validation})
+    store.put_agent(slug, rebound)
+    return rebound
 
 
 def _ended(agent, rows):

@@ -82,4 +82,4 @@ def test_the_shard_check_job_grades_the_budget_on_the_stored_durations():
     steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["shard-check"]["steps"]
     step = next(step for step in steps if step.get("run", "").startswith("python -m tests.shard_budget"))
     assert step["run"] == "python -m tests.shard_budget shard-durations/*/durations.json"
-    assert step["if"] == "steps.lookup.outputs.skip != 'true'"
+    assert "if" not in step

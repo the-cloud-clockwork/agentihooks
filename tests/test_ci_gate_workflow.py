@@ -110,14 +110,12 @@ def test_required_gate_is_red_unless_mutation_passed_or_was_not_due(mutation, ex
         assert "::error::" in result.stdout
 
 
-def test_passed_tree_lookup_skips_steps_without_skipping_required_jobs():
+def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
     jobs = _workflow()["jobs"]
     for name in ("unit", "lint"):
         job = jobs[name]
         assert "if" not in job
-        lookup, *steps = job["steps"]
-        assert lookup["if"] == "github.event_name == 'push'"
-        assert all("steps.lookup.outputs.skip != 'true'" in step["if"] for step in steps)
+        assert all("steps.lookup" not in step.get("if", "") for step in job["steps"])
     step = jobs["gate-required"]["steps"][0]
     result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],

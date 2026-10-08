@@ -21,6 +21,7 @@ ROOT = str(Path(__file__).resolve().parents[2])
 RECHECK_S = 5.0
 SETTLE_S = 1.0
 METHOD = "notifications/claude/channel"
+UNSHOWN = "the inbox channel could not show it"
 
 
 def launch_args(root=ROOT, python=sys.executable):
@@ -92,9 +93,15 @@ async def _push(store, me, write, ready, pubsub):
         await ready.wait()
         await anyio.sleep(SETTLE_S)
         while True:
-            for item in claim(store, me):
+            items = claim(store, me)
+            for index, item in enumerate(items):
                 note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
-                await write.send(SessionMessage(types.JSONRPCMessage(note)))
+                try:
+                    await write.send(SessionMessage(types.JSONRPCMessage(note)))
+                except BaseException:
+                    for unsent in items[index:]:
+                        store.requeue(unsent.id, me, UNSHOWN)
+                    raise
             await _recheck(store, me, pubsub)
     finally:
         pubsub.close()

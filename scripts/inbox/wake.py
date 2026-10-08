@@ -9,6 +9,7 @@ from dataclasses import replace
 from scripts.inbox import addresses
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
+from scripts.inbox.store import redelivery_ms
 from scripts.swarm import idle
 from scripts.swarm.delivery import READY, post
 from scripts.swarm.store import MASTER
@@ -66,7 +67,8 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
     master = (boss.seat or boss.name) if boss else ""
     marks = SeenMarks(inbox.redis)
     statuses, prompted = {}, set()
-    actions = addresses.settle_unresolved(inbox, names, inbox.pending(), now_ms, window)
+    actions = [f"redelivered message {item.id}" for item in inbox.redeliver(now_ms, redelivery_ms())]
+    actions += addresses.settle_unresolved(inbox, names, inbox.pending(), now_ms, window)
     doc = None
     for item in inbox.pending():
         item = replace(item, address=inbox.names.resolve(item.address), sender=inbox.names.resolve(item.sender))
