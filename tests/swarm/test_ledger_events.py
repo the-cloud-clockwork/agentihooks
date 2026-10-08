@@ -348,9 +348,33 @@ def test_open_red_notices_sent_before_the_index_are_found_once_at_their_seats(st
     assert told == [f"closed the red notice {legacy.id}: {URL} merged"]
     assert asked == [URL]
     assert [inbox.get(i.id).state for i in (legacy, foreign, stranger)] == ["done", "pending", "pending"]
+    assert store.redis.exists(store.key("sw", "events-sent", "red-notices:backfill"))
     late = inbox.send("swarm", "eng-7@sw", text)
     run(store, done_task(), github=lambda url: answer("merged"))
     assert inbox.get(late.id).state == "pending"
+
+
+def test_the_backfill_indexes_only_open_red_notices_from_the_swarm(store):
+    inbox = InboxStore(store.redis)
+    text = f"Your pull request {URL} for task t1 (Build the thing) has red checks and no push for twenty minutes."
+    legacy = inbox.send("swarm", ENG_SEAT, text)
+    inbox.send("sw-eng-2", ENG_SEAT, text)
+    inbox.send("swarm", ENG_SEAT, "Your wait on checks has ended.")
+    closed = inbox.send("swarm", ENG_SEAT, text)
+    inbox.close(closed.id, "swarm", "done", "fixed")
+    ledger_events._backfill_red_notices(ledger_events.Mail(inbox, store, "sw"))
+    assert red_index(store) == {legacy.id: URL}
+
+
+def test_a_red_pull_request_does_not_hold_back_the_notices_after_it(store):
+    red, item = red_notice(store)
+    inbox = InboxStore(store.redis)
+    later = "https://github.com/o/r/pull/8"
+    second = inbox.send("swarm", ENG_SEAT, item.text.replace(URL, later))
+    store.redis.hset(store.key("sw", "red-notices"), second.id, later)
+    views = {URL: red, later: answer("merged")}
+    run(store, done_task(), now_ms=red.red_at + 21 * MINUTE, github=views.get)
+    assert (inbox.get(item.id).state, inbox.get(second.id).state) == ("pending", "done")
 
 
 def test_one_pass_asks_github_once_per_pull_request(store):
