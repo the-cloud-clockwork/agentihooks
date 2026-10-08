@@ -201,7 +201,17 @@ def test_a_lapsed_bridge_cannot_submit_an_item_the_hook_path_delivered(store, di
     dispatcher.own("bob", "bridge-1")
     with pytest.raises(DispatchError) as refused:
         dispatcher.receipts.submitting(delivery.id, "bridge-1")
-    assert str(refused.value) == f"message {item.id} was delivered while its owner had lapsed"
+    assert str(refused.value) == f"message {item.id} is delivered for bob, not bob's to submit"
+    assert dispatcher.receipts.get(delivery.id).state == "reserved"
+
+
+def test_a_redirected_item_is_not_submitted_to_its_old_recipient(store, dispatcher):
+    item = store.send("alice", "bob", "hi")
+    [delivery] = dispatcher.reserve("bob", "bridge-1")
+    store.redirect(item.id, "swarm", "carol", "moved")
+    with pytest.raises(DispatchError) as refused:
+        dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    assert str(refused.value) == f"message {item.id} is pending for carol, not bob's to submit"
     assert dispatcher.receipts.get(delivery.id).state == "reserved"
 
 

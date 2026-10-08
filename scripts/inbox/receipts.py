@@ -68,10 +68,13 @@ class Receipts:
         return transact(self.redis, lambda pipe: self._submit(pipe, delivery_id, owner))
 
     def _submit(self, pipe, delivery_id, owner):
-        item = self._open(pipe, delivery_id, owner, ("reserved",)).item
-        pipe.watch(self.key("item", item))
-        if self.store.get(item).state != "pending":
-            raise DispatchError(f"message {item} was delivered while its owner had lapsed")
+        delivery = self._open(pipe, delivery_id, owner, ("reserved",))
+        pipe.watch(self.key("item", delivery.item))
+        item = self.store.get(delivery.item)
+        if item.state != "pending" or not self.store.acts_for(delivery.recipient, item.address, pipe):
+            raise DispatchError(
+                f"message {item.id} is {item.state} for {item.address}, not {delivery.recipient}'s to submit"
+            )
         return self._advance(pipe, delivery_id, owner, ("reserved",), "submitting")
 
     def accept(self, delivery_id, owner, evidence):
