@@ -605,6 +605,20 @@ def test_a_failed_gate_resolves_red(suites, conclusion):
     assert pull.failed == (GATE,)
 
 
+@pytest.mark.parametrize(
+    ("gated", "gate", "passed"), [(True, "SUCCESS", True), (True, "FAILURE", False), (False, "SUCCESS", False)]
+)
+def test_the_view_records_whether_the_required_gate_passed_beside_a_red_job(gated, gate, passed):
+    rollup = [{"name": "record pass", "conclusion": "FAILURE"}, {"name": GATE, "conclusion": gate}]
+    raw = {"state": "OPEN", "gated": gated, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}
+    pull = ledger_events.pull_request(raw)
+    assert (pull.red, pull.resolved, pull.gate_passed) == (True, True, passed)
+    raw["statusCheckRollup"] = [rollup[0], {"context": GATE, "state": gate}]
+    assert ledger_events.pull_request(raw).gate_passed is passed
+    raw["statusCheckRollup"] = rollup + [{"name": GATE, "conclusion": "SUCCESS"}]
+    assert ledger_events.pull_request(raw).gate_passed is passed
+
+
 def test_a_failed_check_beside_a_pending_gate_resolves_red_once_runs_finish():
     rollup = [{"name": "unit", "conclusion": "FAILURE"}, {"name": GATE, "conclusion": None}]
     raw = {"state": "OPEN", "gated": True, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}

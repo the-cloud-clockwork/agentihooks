@@ -54,6 +54,10 @@ function relayMark(entry) {
   return entry.relayed_by ? h("span", { text: `relayed from the ${entry.relayed_from} by ${entry.relayed_by}` }) : null;
 }
 
+function hisWords(entry) {
+  return entry.relayed_by && entry.quote ? h("div", { class: "his-words" }, h("span", { class: "label", text: "His words" }), h("blockquote", { text: entry.quote })) : null;
+}
+
 function entryView(path, entry, noun) {
   const mine = entry.by === "operator";
   if (entry.id in editing) {
@@ -68,7 +72,7 @@ function entryView(path, entry, noun) {
     } } }));
   const head = h("div", { class: "entry-head" }, h("span", { class: "who", text: mine ? "You" : entry.by === "earlier" ? "earlier notes" : entry.by }),
     relayMark(entry), h("span", { text: when(entry.at) }), entry.edited_at ? h("span", { text: "edited" }) : null, entry.sending ? h("span", { text: "sending" }) : null, actions);
-  return h("div", { class: "entry" + (mine ? " mine" : "") + (entry.sending ? " sending" : ""), id: path === "notes" ? `item-notes-${entry.id}` : false }, head, entryBody(entry.text), attachmentsView(entry.attachments),
+  return h("div", { class: "entry" + (mine ? " mine" : "") + (entry.sending ? " sending" : ""), id: path === "notes" ? `item-notes-${entry.id}` : false }, head, entryBody(entry.text), hisWords(entry), attachmentsView(entry.attachments),
     path === "notes" ? commentsView(`notes/${entry.id}`, entry.comments || []) : null);
 }
 

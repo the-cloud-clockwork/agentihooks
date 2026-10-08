@@ -88,7 +88,6 @@ jobs:
     timeout-minutes: 7
     permissions:
       contents: read
-      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -100,28 +99,12 @@ jobs:
           - {python-version: "3.11", shard: 7}
           - {python-version: "3.11", shard: 8}
     steps:
-      # A squash merge into an unmoved dev has the same tree as the merge commit
-      # its pull request tested, so the dev push run would repeat a passed run.
-      - &lookup
-        name: Look up a passed pull request run of this tree
-        id: lookup
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TREE: ${{ github.event.head_commit.tree_id }}
-        run: |
-          n=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tests-passed-$TREE" \
-            --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)] | length') || n=0
-          if [ "${n:-0}" -gt 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
-
       - uses: actions/checkout@v4
-        if: steps.lookup.outputs.skip != 'true'
         with:
           fetch-depth: 0
 
       - &python
         name: Set up Python ${{ matrix.python-version }}
-        if: steps.lookup.outputs.skip != 'true'
         id: python
         uses: actions/setup-python@v5
         with:
@@ -132,13 +115,11 @@ jobs:
       # scan modules loaded from the repo root.
       - &day
         name: Stamp the day
-        if: steps.lookup.outputs.skip != 'true'
         id: day
         run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
       - &venv
         name: Restore the test environment
-        if: steps.lookup.outputs.skip != 'true'
         id: venv
         uses: actions/cache@v4
         with:
@@ -147,7 +128,7 @@ jobs:
 
       - &uv
         name: Set up uv
-        if: steps.lookup.outputs.skip != 'true' && steps.venv.outputs.cache-hit != 'true'
+        if: steps.venv.outputs.cache-hit != 'true'
         uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.23"
@@ -160,32 +141,28 @@ jobs:
       # resolved to "command not found" while the packages were installed fine.
       - &install
         name: Install dependencies
-        if: steps.lookup.outputs.skip != 'true' && steps.venv.outputs.cache-hit != 'true'
+        if: steps.venv.outputs.cache-hit != 'true'
         run: |
           uv venv --python "${{ steps.python.outputs.python-path }}" "$HOME/venv"
           uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - &use-venv
         name: Use the test environment
-        if: steps.lookup.outputs.skip != 'true'
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
       - name: Restore latest dev durations
-        if: steps.lookup.outputs.skip != 'true'
         uses: actions/cache/restore@v4
         with:
           path: ~/dev-durations
           key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
 
       - name: Adopt latest dev durations
-        if: steps.lookup.outputs.skip != 'true'
         run: python -m tests.dev_durations ${{ matrix.python-version }} ~/dev-durations
 
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
       # are allowed to delete — never ran in CI at all.
       - name: Run tests
-        if: steps.lookup.outputs.skip != 'true'
         env:
           PYTHONUNBUFFERED: "1"
           PYTEST_ADDOPTS: ${{ matrix.python-version == '3.12' && format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini', github.workspace) || '-p no:pytest_cov' }}
@@ -193,7 +170,6 @@ jobs:
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
-        if: steps.lookup.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: durations-${{ matrix.python-version }}-${{ matrix.shard }}
@@ -202,7 +178,7 @@ jobs:
           overwrite: true
 
       - name: Upload coverage
-        if: steps.lookup.outputs.skip != 'true' && matrix.python-version == '3.12'
+        if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
@@ -217,29 +193,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      # Skips only when unit skipped too: a passed record landing mid-run must not skip the check of shards that ran.
-      - name: Look up whether unit skipped a passed tree
-        id: lookup
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TREE: ${{ github.event.head_commit.tree_id }}
-          VERSION: ${{ matrix.python-version }}
-        run: |
-          passed=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tests-passed-$TREE" \
-            --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)] | length') || passed=0
-          ran=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
-            --jq "[.artifacts[].name | select(startswith(\"durations-$VERSION-\"))] | length")
-          if [ "${passed:-0}" -gt 0 ] && [ "$ran" -eq 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
-
       - uses: actions/checkout@v4
-        if: steps.lookup.outputs.skip != 'true'
 
       - *python
       - *day
@@ -249,14 +208,12 @@ jobs:
       - *use-venv
 
       - name: Download shard durations
-        if: steps.lookup.outputs.skip != 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: durations-${{ matrix.python-version }}-*
           path: shard-durations
 
       - name: Check every collected test ran in exactly one shard
-        if: steps.lookup.outputs.skip != 'true'
         run: python -m tests.shard_check shard-durations/*/durations.json
 
   test-count:
@@ -264,16 +221,12 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      actions: read
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - *lookup
-
       - uses: actions/checkout@v4
-        if: steps.lookup.outputs.skip != 'true'
         with:
           fetch-depth: 0
 
@@ -285,14 +238,12 @@ jobs:
       - *use-venv
 
       - name: Check out the base revision
-        if: steps.lookup.outputs.skip != 'true'
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
         run: git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
 
       # The base revision's copy grades, so a pull request cannot loosen its own floor.
       - name: Hold the base revision's test count
-        if: steps.lookup.outputs.skip != 'true'
         run: |
           grader="$RUNNER_TEMP/base"
           [[ -f "$grader/tests/count_floor.py" ]] || grader="$GITHUB_WORKSPACE"
@@ -304,32 +255,24 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      actions: read
     steps:
-      - *lookup
-
       - uses: actions/checkout@v4
-        if: steps.lookup.outputs.skip != 'true'
         with:
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
-        if: steps.lookup.outputs.skip != 'true'
         with:
           python-version: "3.12"
 
       - name: Install ruff
-        if: steps.lookup.outputs.skip != 'true'
         run: python -m pip install ruff==0.15.12
 
       - name: Check out the base revision
-        if: steps.lookup.outputs.skip != 'true'
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
         run: git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
 
       - name: Check out the protected grader
-        if: steps.lookup.outputs.skip != 'true'
         run: |
           git fetch --no-tags origin dev
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
@@ -337,7 +280,6 @@ jobs:
       # dev's copy grades against the base's allowlist, so a pull request cannot loosen its own limits or allowlist.
       # The bootstrap branch runs only while dev's history has never carried the grader.
       - name: Hold the size and complexity limits
-        if: steps.lookup.outputs.skip != 'true'
         run: |
           if [[ -f "$RUNNER_TEMP/grader/scripts/size_limits.py" ]]; then
             cd "$RUNNER_TEMP/grader"
@@ -350,16 +292,14 @@ jobs:
           fi
 
   sonar:
-    # Polling for shard coverage instead spends the workflow token's hourly API quota, which every run shares.
+    # Waits for the shards' coverage through needs; the API that could poll for it has an hourly quota every run shares.
     needs: [unit]
     runs-on: ubuntu-latest
-    # Covers the 18 minute dev push wait, the 20 minute coverage deadline, the scan and the gate.
-    timeout-minutes: 45
+    timeout-minutes: 15
     env:
       SONAR_SCANNER_VERSION: 7.2.0.5079
     permissions:
       contents: read
-      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -418,52 +358,30 @@ jobs:
           [[ -n "$branch" && "$branch" != *$'\n'* ]] || branch="pr-$number"
           echo "args=-Dsonar.pullrequest.key=$number -Dsonar.pullrequest.branch=$branch -Dsonar.pullrequest.base=${BASE_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
 
-      # Sonar refuses an analysis dated before the project's latest one, so dev push scans run one at a time in push order.
-      - name: Wait for older dev analyses
+      # Sonar refuses an analysis dated before the project's latest one, so a dev push run that dev already moved past leaves the analysis to the newer run.
+      - name: Check dev still points at this commit
+        id: current
         if: github.event_name == 'push'
-        shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_NUMBER: ${{ github.run_number }}
+          SHA: ${{ github.sha }}
         run: |
-          for poll in {1..36}; do
-            waiting=""
-            unread=""
-            if runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?event=push&branch=dev&per_page=100" \
-              | jq -r --argjson number "$RUN_NUMBER" '.workflow_runs[] | select(.run_number < $number and .status != "completed") | .id'); then
-              for run in $runs; do
-                sonar=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" \
-                  | jq -r '[.jobs[] | select(.name == "sonar") | .status][0] // "absent"') || unread=yes
-                if [[ "$sonar" != "completed" ]]; then waiting="$waiting $run"; fi
-              done
-            else
-              unread=yes
-            fi
-            if [[ -z "$waiting" && -z "$unread" ]]; then exit 0; fi
-            echo "Waiting for the Sonar analysis of older dev runs:$waiting${unread:+ (runs API unreadable)}"
-            sleep 30
-          done
-          if [[ -n "$unread" ]]; then
-            echo "::error::The runs API stayed unreadable for 18 minutes."
-            exit 1
-          fi
-          echo "::warning::Older dev runs still hold Sonar after 18 minutes:$waiting; scanning anyway."
+          dev=$(git ls-remote origin refs/heads/dev)
+          [[ -n "$dev" ]]
+          if [[ "${dev%%[[:space:]]*}" == "$SHA" ]]; then echo "superseded=false" >> "$GITHUB_OUTPUT"; else echo "superseded=true" >> "$GITHUB_OUTPUT"; fi
 
       - name: Download shard coverage
-        if: github.event_name != 'push'
+        if: steps.current.outputs.superseded != 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: coverage-3.12-*
           path: .coverage-shards
 
-      # A dev push may reuse the coverage of the pull request run that passed its tree, which only the API can reach.
       - name: Merge shard coverage
-        env:
-          GH_TOKEN: ${{ github.event_name == 'push' && github.token || '' }}
-          SOURCE: ${{ github.event_name == 'push' && github.run_id || '--downloaded' }}
-        run: bash .github/coverage/combine.sh "$SOURCE" 8
+        if: steps.current.outputs.superseded != 'true'
+        run: bash .github/coverage/combine.sh --downloaded 8
 
       - name: SonarQube Scan
+        if: steps.current.outputs.superseded != 'true'
         uses: sonarsource/sonarqube-scan-action@v6
         with:
           scannerVersion: ${{ env.SONAR_SCANNER_VERSION }}
@@ -474,6 +392,7 @@ jobs:
 
       - name: SonarQube Quality Gate
         id: gate
+        if: steps.current.outputs.superseded != 'true'
         uses: sonarsource/sonarqube-quality-gate-action@v1
         timeout-minutes: 5
         env:
@@ -482,7 +401,7 @@ jobs:
 
       # The gate action grades against whatever gate the server binds, so a silent rebind would loosen it.
       - name: Hold the Delivery L2 conditions
-        if: always()
+        if: always() && steps.current.outputs.superseded != 'true'
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
@@ -511,7 +430,7 @@ jobs:
           fi
 
       - name: Upload coverage and analysis evidence
-        if: always()
+        if: always() && steps.current.outputs.superseded != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: sonar-report
@@ -536,24 +455,12 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     permissions:
       contents: read
-      actions: read
-    outputs:
-      tree: ${{ steps.tree.outputs.sha }}
     steps:
-      - *lookup
-
       - uses: actions/checkout@v4
-        if: steps.lookup.outputs.skip != 'true'
         with:
           fetch-depth: 0
 
-      - name: Name the tested tree
-        id: tree
-        if: steps.lookup.outputs.skip != 'true'
-        run: echo "sha=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
-
       - name: Set up Python
-        if: steps.lookup.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -561,20 +468,16 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install ruff
-        if: steps.lookup.outputs.skip != 'true'
         run: python -m pip install ruff>=0.4
 
       - name: Lint check
-        if: steps.lookup.outputs.skip != 'true'
         run: python -m ruff check hooks/ scripts/ tests/
 
       - name: Format check
-        if: steps.lookup.outputs.skip != 'true'
         run: python -m ruff format --check hooks/ scripts/ tests/
 
       - name: Select docs build
         id: docs
-        if: steps.lookup.outputs.skip != 'true'
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
         run: |
@@ -582,7 +485,7 @@ jobs:
           if [[ -s "$RUNNER_TEMP/docs-changes" ]]; then echo "build=true" >> "$GITHUB_OUTPUT"; fi
 
       - name: Build docs with Jekyll
-        if: steps.lookup.outputs.skip != 'true' && steps.docs.outputs.build == 'true'
+        if: steps.docs.outputs.build == 'true'
         uses: actions/jekyll-build-pages@v1
         with:
           source: ./
@@ -590,22 +493,21 @@ jobs:
 
       - name: Select artifact browser checks
         id: artifacts
-        if: steps.lookup.outputs.skip != 'true'
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
         run: bash .github/actions/browser-cache/select-artifacts.sh
 
       - name: Install Playwright for artifact checks
-        if: steps.lookup.outputs.skip != 'true' && steps.artifacts.outputs.browser == 'true'
+        if: steps.artifacts.outputs.browser == 'true'
         run: python -m pip install "playwright>=1.44.0" "orjson>=3.10"
 
       - name: Install the artifact viewer browser
-        if: steps.lookup.outputs.skip != 'true' && steps.artifacts.outputs.browser == 'true'
+        if: steps.artifacts.outputs.browser == 'true'
         timeout-minutes: 2
         uses: ./.github/actions/browser-cache
 
       - name: Artifact sanity checks
-        if: steps.lookup.outputs.skip != 'true' && steps.artifacts.outputs.browser == 'true'
+        if: steps.artifacts.outputs.browser == 'true'
         run: python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
 
   coverage-ratchet:
@@ -703,7 +605,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -721,14 +622,22 @@ jobs:
       - name: Install duration collection dependencies
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
+      - name: Restore recent shard durations
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/durations-samples
+          key: durations-samples-${{ github.sha }}
+          restore-keys: durations-samples-
+
+      - name: Download this run's shard durations
+        uses: actions/download-artifact@v4
+        with:
+          pattern: durations-3.*
+          path: ~/durations-samples/${{ github.run_id }}
+
       - name: Refresh measured durations
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TREE: ${{ github.event.head_commit.tree_id }}
         run: |
-          source_run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tests-passed-$TREE" \
-            --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)][0].workflow_run.id // empty')
-          python -m tests.refresh_durations --ci-run "${source_run:-$GITHUB_RUN_ID}" --ci 5
+          python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5
           test -s .test_durations
 
       - name: Publish merged durations
@@ -749,75 +658,11 @@ jobs:
           path: ~/dev-durations
           key: durations-merged-${{ github.sha }}
 
-  coverage-baseline:
-    needs: [gate-required, sonar]
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install coverage
-        run: python -m pip install "coverage>=7.4"
-
-      - name: Resolve baseline trees
-        id: tree
-        env:
-          PREVIOUS: ${{ github.event.before }}
-        run: |
-          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
-          echo "previous=$(git rev-parse "$PREVIOUS^{tree}")" >> "$GITHUB_OUTPUT"
-
-      - name: Restore measured coverage history
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/coverage-baseline
-          key: coverage-baseline-${{ steps.tree.outputs.previous }}
-
-      - name: Download this run's measured coverage
-        uses: actions/download-artifact@v4
-        with:
-          name: sonar-report
-          path: baseline-coverage
-
-      - name: Compute the coverage baseline
-        run: |
-          python -m tests.coverage_baseline --shards 8 \
-            --head-shards baseline-coverage/.coverage-shards \
-            --out "$HOME/coverage-baseline/baseline.json" \
-            --previous "$HOME/coverage-baseline/baseline.json"
-
-      - name: Save the passed dev coverage baseline
+      - name: Save recent shard durations
         uses: actions/cache/save@v4
         with:
-          path: ~/coverage-baseline
-          key: coverage-baseline-${{ steps.tree.outputs.tree }}
-
-  record-pass:
-    needs: [unit, lint, shard-check, test-count]
-    if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.unit.result == 'success' && needs.lint.result == 'success' && needs.shard-check.result == 'success' && needs.test-count.result == 'success' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Write the tested tree
-        env:
-          TREE: ${{ needs.lint.outputs.tree }}
-        run: |
-          [[ "$TREE" =~ ^[0-9a-f]+$ ]]
-          echo "$TREE" > tree.txt
-
-      - name: Record the passed tree
-        uses: actions/upload-artifact@v4
-        with:
-          name: tests-passed-${{ needs.lint.outputs.tree }}
-          path: tree.txt
-          retention-days: 7
-          overwrite: true
+          path: ~/durations-samples
+          key: durations-samples-${{ github.sha }}
 
   mutation:
     if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}

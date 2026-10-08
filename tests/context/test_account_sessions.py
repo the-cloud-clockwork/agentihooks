@@ -48,6 +48,22 @@ def test_account_comes_from_the_single_token_name():
     assert acc.environment_account({"AH_CC_TOKEN_alpha": ""}) == acc.UNROUTED
 
 
+def test_the_route_marker_attributes_an_api_session():
+    assert acc.account_from_names(iter(["HOME", acc.API_MARKER])) == acc.API_ACCOUNT == "api"
+    assert acc.account_from_names([acc.API_MARKER, "AH_CC_TOKEN_alpha"]) == "api"
+    assert acc.environment_account({acc.API_MARKER: "1", "HOME": "/home/u"}) == "api"
+    assert acc.environment_account({acc.API_MARKER: "", "AH_CC_TOKEN_alpha": "a"}) == "alpha"
+    assert acc.codex_account_from_names([acc.API_MARKER]) == acc.CODEX_DEFAULT
+    assert acc.codex_account_from_names([acc.API_MARKER, "AH_CX_TOKEN_one"]) == "one"
+
+
+def test_live_api_sessions_count_under_the_api_account(tmp_path):
+    root = tmp_path / "proc"
+    _proc(root, 200, "claude", 1, ["claude"], {acc.API_MARKER: "1", "HOME": "/home/u"})
+
+    assert acc.live_sessions(root) == {200: "api"}
+
+
 def test_agent_pid_skips_the_hook_shell(tmp_path):
     root = _tree(tmp_path)
 
