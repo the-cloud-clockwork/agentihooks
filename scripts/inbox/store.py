@@ -217,7 +217,9 @@ class InboxStore:
                     continue
         else:
             raise InboxError(f"aliases for {original} changed meanwhile")
-        items = [item for address in addresses + ([seat] if seat else []) for item in read(address)]
+        if seat and not self.seats.left(me, seat):
+            addresses.append(seat)
+        items = [item for address in addresses for item in read(address)]
         return sorted({item.id: item for item in items}.values(), key=_order)
 
     def acts_for(self, by, address, pipe=None):
