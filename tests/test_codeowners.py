@@ -68,6 +68,8 @@ def test_workflows_run_gate_modules():
 def test_every_rule_is_anchored_and_names_a_user_or_team():
     for pattern, owners in _rules():
         assert pattern.startswith("/"), pattern
+        assert "**" not in pattern and "?" not in pattern, pattern
+        assert pattern.endswith("/") or not (ROOT / pattern.lstrip("/")).is_dir(), pattern
         assert owners and all(OWNER.fullmatch(owner) for owner in owners), (pattern, owners)
 
 
