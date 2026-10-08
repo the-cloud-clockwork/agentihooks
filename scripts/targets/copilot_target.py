@@ -854,7 +854,7 @@ class CopilotAdapter:
                     entry["headers"] = clean_headers
             else:
                 continue
-            if spec.get("tools"):
+            if spec.get("tools") is not None:
                 clean_tools = []
                 for tool in spec["tools"]:
                     hits = _scan_secrets(scannable(str(tool)), mode="strict")
@@ -865,8 +865,7 @@ class CopilotAdapter:
                         )
                         continue
                     clean_tools.append(tool)
-                if clean_tools:
-                    entry["tools"] = clean_tools
+                entry["tools"] = clean_tools
             # Copilot-native fields a Claude .mcp.json cannot express. Passed
             # through when a native mcp-config layer supplies them:
             #   auth/oidc=false  — do NOT attempt OAuth for this server. Without

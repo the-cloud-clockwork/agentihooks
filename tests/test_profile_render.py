@@ -742,6 +742,16 @@ def test_copilot_render_keeps_a_declared_tool_allowlist(world, copilot_gateway):
     assert entry["excludeTools"] == ["x"]
 
 
+def test_copilot_render_keeps_an_empty_tool_allowlist_closed(world, copilot_gateway):
+    from scripts.profiles import render
+
+    _declare(world, lf={"type": "http", "url": "http://lf.example/mcp", "enabled_tools": []})
+
+    entry = json.loads((render.render_copilot("rb-role") / "mcp-config.json").read_text())["mcpServers"]["lf"]
+
+    assert entry["tools"] == []
+
+
 def test_init_re_renders_each_copilot_role_home(world, copilot_gateway, monkeypatch):
     from scripts.profiles import render
 
