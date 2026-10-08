@@ -2,7 +2,6 @@ import json
 import subprocess
 
 import pytest
-import yaml
 
 from tests import dev_durations
 
@@ -86,8 +85,14 @@ def test_main_adopts_the_downloaded_artifact_of_the_chosen_run(tmp_path, monkeyp
     assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 3.0, "t.py::b": 4.0}
 
 
-def test_unit_shards_adopt_dev_durations_through_the_script():
-    workflow = yaml.safe_load(open(dev_durations._ROOT / ".github/workflows/test.yml"))
-    step = next(s for s in workflow["jobs"]["unit"]["steps"] if s.get("name") == "Download latest dev durations")
-    assert step["run"].strip() == "python -m tests.dev_durations ${{ matrix.python-version }}"
-    assert step["env"] == {"GH_TOKEN": "${{ github.token }}"}
+def test_main_fails_the_shard_when_the_chosen_artifact_cannot_be_adopted(tmp_path, monkeypatch):
+    def download(run, folder):
+        (folder / ".test_durations").write_text("{}")
+        (folder / ".test_durations-3.12").write_text("{}")
+
+    monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(dev_durations, "source_run", lambda run_id: "9")
+    monkeypatch.setattr(dev_durations, "download", download)
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    with pytest.raises(ValueError):
+        dev_durations.main(["3.12"])
