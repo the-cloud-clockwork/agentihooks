@@ -125,9 +125,7 @@ def sync(slug, changes=None, ops=None, gate=None, core=core):
         if written is not None:
             page = stamp(written)
         shadow.persist(core.LEDGER_DIR, slug, state)
-        if ctx.refused:
-            SYNCED.pop(json_path, None)
-        else:
+        if not ctx.refused:
             SYNCED[json_path] = Synced(page, stored, ctx.at // SWEEP_MS, text)
         return state, rejected
 
