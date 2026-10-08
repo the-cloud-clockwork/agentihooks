@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "swarm.fullname" . }}-ledger-healthz
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  {{- include "swarm.podSecurity" . | nindent 2 }}
+  restartPolicy: Never
+  containers:
+    - name: healthz
+      image: {{ include "swarm.image" . }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      {{- include "swarm.containerSecurity" . | nindent 6 }}
+      env:
+        - name: LEDGER_URL
+          value: {{ include "swarm.ledgerUrl" . | quote }}
+      command:
+        - python
+        - -c
+        - |
+          import os, urllib.request
+          with urllib.request.urlopen(os.environ["LEDGER_URL"] + "/healthz", timeout=5) as response:
+              print("GET /healthz:", response.status, response.read().decode())
+              assert response.status == 200

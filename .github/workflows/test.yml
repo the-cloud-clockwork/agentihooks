@@ -36,6 +36,9 @@ jobs:
   brain-smoke:
     uses: ./.github/workflows/brain-smoke.yml
 
+  helm-kind:
+    uses: ./.github/workflows/helm-kind.yml
+
   wiring:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -604,7 +607,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [durations, unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, brain-smoke, wiring, semgrep, dependency-audit]
+    needs: [durations, unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, brain-smoke, helm-kind, wiring, semgrep, dependency-audit]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
