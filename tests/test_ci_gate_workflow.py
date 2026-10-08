@@ -18,7 +18,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     jobs = _workflow()["jobs"]
     gate = jobs["gate-required"]
     assert gate["name"] == "Gate — Required"
-    assert set(gate["needs"]) in ({"unit", "lint", "sonar"}, {"unit", "lint", "sonar", "mutation"})
+    assert set(gate["needs"]) == {"unit", "lint", "sonar", "mutation"}
     assert gate["if"] == "${{ always() }}"
     assert "needs" not in jobs["unit"]
     assert "needs" not in jobs["lint"]
@@ -41,9 +41,8 @@ def test_required_gate_rejects_every_non_success_result(unit, lint):
 def test_required_gate_is_red_unless_mutation_passed_or_was_not_due(mutation, expected):
     jobs = _workflow()["jobs"]
     gate = jobs["gate-required"]
-    if "mutation" not in gate["needs"]:
-        pytest.skip("Gate Required does not need mutation yet")
     step = gate["steps"][0]
+    assert jobs["mutation"]["if"].startswith("${{")
     assert step["env"]["MUTATION"] == jobs["mutation"]["if"]
     needs = {name: {"result": "success"} for name in ("unit", "lint", "sonar")}
     needs["mutation"] = {"result": mutation}
@@ -73,7 +72,7 @@ def test_passed_tree_lookup_skips_steps_without_skipping_required_jobs():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_mutation_runs_in_tests_without_delaying_the_required_gate():
+def test_mutation_runs_in_tests_beside_unit_and_lint():
     workflow = _workflow()
     job = workflow["jobs"]["mutation"]
     assert "needs" not in job

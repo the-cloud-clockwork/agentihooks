@@ -1883,8 +1883,72 @@
     "reader": "Standards /root/standards_reader",
     "reason": "For event dictionaries, present text values follow identical code. Missing text normalizes to empty string versus xxxx; both differ from the fixed DOCTOR_PHRASE rig doctor stop, so neither queues a command. The fallback is not otherwise exposed or persisted. No alternate implementation or consumer found. Evidence: CI run 37692175970, mutant-map and parent symbol dumps. Adversarial Standards ruling."
   },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__project_aliases__mutmut_26:22a9a06ae36882a722dc70af57dfab9710e9567a078e6a40c1c919dbb3ba2184": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "For the supported JSON alias-document contract, every non-string source or target fails canonical_remote string equality even when the early type guard changes OR to AND. The later check raises the identical ValueError before traversal or mutation. Adversarial JSON null, booleans, numbers, arrays, objects and strings produced identical outputs across 77 combinations. This ruling excludes arbitrary custom Python objects outside the JSON schema."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_13:101dc562aeb263d9acf918ddd1ef07936cbc0cd47bd996d6f066585d4649c7da": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Missing repo is used only as a truth operand before _registered_project. Empty string and None both select identity None, so the same outer fallback and output result."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_15:aadd7a110850759e45830328416c9e2a07059fca214ab2e9a2178c7442d1d180": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Omitting the dict get default changes only a missing repo from empty string to None. Both select identity None without any path operation, yielding the same fallback and output."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_20:117cb0adedb7e2ba99e15e8948e79dc66b212bac25190d65e20f679e3e8c341e": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The config-read exception fallback repo is used only as a truth operand. Empty string and None both select identity None and return None; no path operation consumes the changed value."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__folder_identity__mutmut_48:55ec008b803b50bf6aa404d43feae35ea5b651abc02cb9d295d614c8e6857cc3": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The private helper has no consumers outside this module (repository name-reference scan). Its two callers consume the result through truth tests or registration fallback; an unregistered non-Git folder yields public resolve_project None for either initial None or empty string. Git and scratch identities overwrite that initial value; explicit registration uses the same fallback identity. Six controlled public resolutions preserved every output or exact rejection."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__aliased_project__mutmut_3:32a3aa01ec1dec573702eaa02a980fe2bd2d3351cb67cd5a5785f03d1e6e72ea": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "With the validated immutable JSON alias dictionary of n entries, every acyclic chain terminates within n edges, so both n+1 and n+2 bounds return the same terminal ID. A cyclic chain has no terminal; both bounds raise the same ValueError with the same message, and the extra dictionary read changes no state. Exhaustive three-key chain/cycle/start controls agreed for 500 combinations."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__registered_project__mutmut_6:46937210a842340791e7c2d30c0351c635031647d4079897eb2e4528d449c8ed": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Missing registration changes only from empty string to None. _folder_identity consumes registered only as a truth operand, before regex validation or replacement; both skip registration and return the same observed Git, scratch or absent identity."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__registered_project__mutmut_8:bbeefdf6b1fa5d2960387163ac24e34d705f1e28179581d46d5404ba2b70f930": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Omitting the dict get default changes only missing registration from empty string to None. _folder_identity uses registered only as a truth operand before validation or replacement; every observed identity and rejection remains identical."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_3:60aa168a9212b953e6b9010b5f9d1bfac5b57fd631012259bfd9e3d1de423eb2": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Missing swarm binding changes only from empty string to None. The immediate not swarm guard returns None for both values before any config or filesystem access. Present binding values bypass either default identically."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_5:34b087b51bdef0f23c81013baeef05b44a4745fed9317f3006b435c0aa8b5ece": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Omitting dict get default changes only missing swarm binding from empty string to None. The immediate not swarm guard returns None in either case with identical absence of config access."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_21:101dc562aeb263d9acf918ddd1ef07936cbc0cd47bd996d6f066585d4649c7da": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Missing repo is used only as a truth operand before _registered_project. Empty string and None both select identity None, so the same outer fallback and output result."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_23:aadd7a110850759e45830328416c9e2a07059fca214ab2e9a2178c7442d1d180": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Omitting the dict get default changes only a missing repo from empty string to None. Both select identity None without any path operation, yielding the same fallback and output."
+  },
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_28:117cb0adedb7e2ba99e15e8948e79dc66b212bac25190d65e20f679e3e8c341e": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The config-read exception fallback repo is used only as a truth operand. Empty string and None both select identity None and return None; no path operation consumes the changed value."
+  },
   "scripts/profiles/scaffold.py:scripts.profiles.scaffold.x_overlay_new__mutmut_38:8143335d4bf42677f71b9ed3a94c80c65c7cd1c576e964ad4c5abbec46ecf000": {
     "reader": "Standards ov3 reader",
     "reason": "Equivalent mutant. sort_keys has one reader in PyYAML 6.0.3, BaseRepresenter.represent_mapping, which tests if self.sort_keys; the Dumper and CDumper classes only forward the value, and the serializer, emitter, constructor and nodes never read it. None and False are both falsy, so both keep insertion order: safe_dump of the overlay manifest is byte identical for sort_keys False and None, also for a nested mapping and CSafeDumper. sort_keys True gives description, kind, name, wears, which the exact profile.yml text test kills. Evidence: CI run 37703337103 at 2df7d0a2. Adversarial Standards ruling."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_30:e9e73925e70dabdb004ae0af81c513cd65016c79072920da9bd1bbd2f26cfffb": {
+    "reader": "Standards",
+    "reason": "ProfileDecision.bundle_revision is read only by the next line, which replaces a falsy value with overlays.revision(); None and the empty string are both falsy, so both take the same branch and store the same revision, and nothing reads the field before that line. Exact CI artifact mutant from run 37699550281."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_32:c2697e43a7a6e4085d4ac57d4ea6db1a961dd7f727f136d5e0517414c0dc64b5": {
+    "reader": "Standards",
+    "reason": "ProfileDecision.bundle_revision is read only by the next line, which replaces a falsy value with overlays.revision(); None and the empty string are both falsy, so both take the same branch and store the same revision, and nothing reads the field before that line. Exact CI artifact mutant from run 37699550281."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1spawn__mutmut_56:409a637151996c215b8cdad4ef75d9e362591c631aad7cd4c8c892d6fdbefa29": {
+    "reader": "Standards",
+    "reason": "The argument reaches only overlays.chosen through role_overlays or {} in profile_choice.choose, which normalizes None to an empty map before any read, so chosen sees the same defaults. Exact CI artifact mutant from run 37699550281."
   }
 }

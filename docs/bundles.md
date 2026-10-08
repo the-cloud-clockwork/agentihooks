@@ -7,6 +7,9 @@ nav_order: 9
 
 A bundle is a single external directory containing all your personal agentihooks customizations — custom profiles, MCP configs, skills, agents, commands, and rules. Agentihooks is the engine; the bundle is your data.
 
+For purpose built swarms, use [Swarm Overlays](overlays.md) or the packaged
+`swarm-maker` skill to add capabilities to the five base roles.
+
 > **Public example**: [`agentihooks-bundle-example`](https://github.com/The-Cloud-Clockwork/agentihooks-bundle-example) — a minimal, working bundle you can clone, inspect, and fork as the starting point for your own.
 
 ## Quick Start
