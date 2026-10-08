@@ -62,6 +62,7 @@ def test_a_raise_climbs_two_seats_each_tick_after_three_ticks_then_clears():
         previous = calculate({"eng": 2}, {"claude": 8}, 20, {}, previous)
         decisions.append(previous)
     assert [sum(d["ceilings"].values()) for d in decisions] == [2, 2, 4, 6, 8, 10]
+    assert [d["pending_raise"]["ticks"] for d in decisions] == [1, 2, 3, 3, 3, 0]
     assert decisions[-1]["pending_raise"] == {"target": None, "ticks": 0}
     assert decisions[-1]["reason"] == "Quota seats 8 (claude 8); host room 20; ceiling 10 of 10."
 
