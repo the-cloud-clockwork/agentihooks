@@ -6,6 +6,11 @@ name: Publish to PyPI
 # in parallel and race to upload the same artifact; one loses with PyPI 400 'File already exists'.
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Verify this already published version only; empty publishes the released tag
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -13,14 +18,18 @@ permissions:
 
 jobs:
   publish:
+    if: ${{ !inputs.version }}
     runs-on: ubuntu-latest
     environment: pypi
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Select the released tag
+        id: tag
         run: |
           if [[ "$GITHUB_REF" == refs/heads/main ]]; then
             tag=$(git tag --list 'v*' --sort=-version:refname | python3 -c 'import re, sys; print(next(t.strip() for t in sys.stdin if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+\n?", t)))')
@@ -28,7 +37,9 @@ jobs:
             git checkout --detach "$tag"
           else
             [[ "$GITHUB_REF" == refs/tags/v* ]]
+            tag=${GITHUB_REF#refs/tags/}
           fi
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@v5
         with:
@@ -42,3 +53,35 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  verify:
+    needs: publish
+    if: ${{ always() && (needs.publish.result == 'success' || (needs.publish.result == 'skipped' && inputs.version != '')) }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      VERSION: ${{ needs.publish.outputs.version || inputs.version }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Wait for PyPI to serve the version
+        run: |
+          for _ in $(seq 30); do
+            curl -fsS -o /dev/null "https://pypi.org/pypi/agentihooks/$VERSION/json" && exit 0
+            sleep 10
+          done
+          echo "::error::PyPI does not serve agentihooks $VERSION"
+          exit 1
+
+      - name: Install the version clean and check what it reports
+        run: |
+          python -m venv "$RUNNER_TEMP/clean"
+          for _ in $(seq 10); do
+            "$RUNNER_TEMP/clean/bin/pip" install --no-cache-dir "agentihooks==$VERSION" && break
+            sleep 15
+          done
+          reported=$("$RUNNER_TEMP/clean/bin/agentihooks" --version)
+          echo "reported: $reported"
+          test "$reported" = "agentihooks $VERSION"

@@ -126,3 +126,18 @@ def test_package_version_is_derived_from_git():
         s for s in _workflow("publish-pypi.yml")["jobs"]["publish"]["steps"] if s.get("uses") == "actions/checkout@v4"
     )
     assert checkout["with"]["fetch-depth"] == 0
+
+
+def test_publish_proves_the_published_version_installs_clean():
+    workflow = _workflow("publish-pypi.yml")
+    on = workflow.get("on", workflow.get(True))
+    assert "version" in on["workflow_dispatch"]["inputs"]
+    publish, verify = workflow["jobs"]["publish"], workflow["jobs"]["verify"]
+    assert publish["if"] == "${{ !inputs.version }}"
+    assert publish["outputs"]["version"]
+    assert verify["needs"] == "publish"
+    assert "environment" not in verify
+    script = "\n".join(s.get("run", "") for s in verify["steps"])
+    assert "https://pypi.org/pypi/agentihooks/$VERSION/json" in script
+    assert '"agentihooks==$VERSION"' in script
+    assert '"agentihooks $VERSION"' in script
