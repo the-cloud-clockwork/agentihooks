@@ -11,7 +11,7 @@ GATE_EVENTS = ("pull_request", "merge_group")
 FILTERED_EVENTS = ("pull_request", "push")
 FILTERS = ("paths", "paths-ignore", "types")
 CONFIG = ".github/gate-wiring.json"
-EVENT_ONLY = re.compile(r"(?:\$\{\{\s*)?github\.event_name == '(\w+)'(?:\s*\}\})?")
+EVENT_ONLY = re.compile(r"\$\{\{\s*github\.event_name == '(\w+)'\s*\}\}|github\.event_name == '(\w+)'")
 
 
 def triggers(workflow: dict) -> dict[str, dict]:
@@ -29,8 +29,8 @@ def needs_of(job: dict) -> set[str]:
 
 
 def on_pull_requests(job: dict) -> bool:
-    only = EVENT_ONLY.fullmatch(str(job.get("if", "")).strip())
-    return only is None or only.group(1) in PULL_REQUEST_EVENTS
+    only = EVENT_ONLY.fullmatch(str(job.get("if")).strip())
+    return only is None or (only.group(1) or only.group(2)) in PULL_REQUEST_EVENTS
 
 
 def load(root: Path) -> dict[str, dict]:

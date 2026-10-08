@@ -89,6 +89,8 @@ def test_a_stale_non_gate_is_red():
         ("${{ github.event_name == 'merge_group' }}", True),
         ("github.event_name == 'push' || github.event_name == 'pull_request'", True),
         ("github.event_name != 'push'", True),
+        ("${{ github.event_name == 'push'", True),
+        ("github.event_name == 'push' }}", True),
         ("always()", True),
         (None, True),
     ],

@@ -1,10 +1,10 @@
 {
   "not_gates": {
-    "test.yml/record-pass": "Records a passed tree so the dev push can reuse its pull request result; it grades nothing."
+    "test.yml/record-pass": "Uploads the passed tree artifact that lets the dev push skip unit and lint; it grades nothing, and its needs already cover the gates it records."
   },
   "outside_gate": {
     "equivalence.yml/ledger-equivalence": "Opt in replay of ledger storage and pages; the equivalence gate task wires it into the gate.",
-    "test-leaks.yml/one-process": "Hour long single process sweep that runs on a schedule; its pull request run only exercises its own workflow.",
+    "test-leaks.yml/one-process": "Hour long single process sweep that runs on a schedule; its pull request run only exercises its own workflow. Retired when the pull request trigger leaves test leaks, which a dispatch run replaces.",
     "test-leaks.yml/followup": "Opens follow up issues for the scheduled sweep and skips every pull request run."
   }
 }
