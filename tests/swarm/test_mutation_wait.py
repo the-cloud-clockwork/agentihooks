@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import idle, waits
+from scripts.swarm import cli, idle, waits
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_waits import ME, tick  # noqa: F401
 
@@ -35,7 +35,7 @@ def test_cli_wait_binds_the_branch_preflight_run(env, monkeypatch):  # noqa: F81
             ),
         ),
     )
-    assert run("sw", "--as", ME, "wait", "--on", "mutation", URL) == 0
+    assert cli.main(["sw", "--as", ME, "wait", "--on", "mutation", URL]) == 0
     assert idle.wait(store.redis, "sw", ME)["on"] == {
         "kind": "mutation",
         "target": URL,
@@ -67,6 +67,8 @@ def preflight(monkeypatch):
     )
 
     def api(args, **kwargs):
+        assert args[:2] == ["gh", "api"]
+        assert 0 < kwargs.get("timeout", float("inf")) <= 20
         state.requests.append(args[-1])
         if args[-1].endswith("/zip"):
             data = io.BytesIO()
@@ -77,7 +79,11 @@ def preflight(monkeypatch):
             output = json.dumps({"artifacts": [] if state.missing else state.artifacts})
         else:
             output = json.dumps(state.run)
-        return subprocess.CompletedProcess(args, 0, output)
+        if kwargs.get("text", False):
+            output = output.decode() if isinstance(output, bytes) else output
+        else:
+            output = output.encode() if isinstance(output, str) else output
+        return subprocess.CompletedProcess(args, 0, output if kwargs.get("capture_output") else None)
 
     monkeypatch.setattr(subprocess, "run", api)
     return state
@@ -177,7 +183,7 @@ def test_cli_refuses_an_unrelated_or_unbound_run(env, preflight, field, value, c
     run("sw", "start")
     ledger.tasks = lambda slug: list(ledger.rows.values())
     preflight.run[field] = value
-    assert run("sw", "--as", ME, "wait", "--on", "mutation", URL) == 1
+    assert cli.main(["sw", "--as", ME, "wait", "--on", "mutation", URL]) == 1
     assert "mutation" in capsys.readouterr().err
     assert idle.wait(store.redis, "sw", ME) is None
 
