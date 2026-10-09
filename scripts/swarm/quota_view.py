@@ -49,7 +49,13 @@ def lines(decision: dict, now_ms: int) -> list[str]:
         f"{lane} {decision['effective'][lane]} of {decision['configured'][lane]}" for lane in capacity.LANES
     )
     head = f"quota capacity {caps}, {_changed(decision['at'], now_ms)}, because {decision['reason']}"
-    return [head] + [_account_line(row, decision["accounts"]) for row in decision["accounts"]]
+    host = [host_line(decision["host"])] if "host" in decision else []
+    return [head] + host + [_account_line(row, decision["accounts"]) for row in decision["accounts"]]
+
+
+def host_line(host: dict) -> str:
+    room = "unknown" if host["room"] is None else host["room"]
+    return f"host room {room}: {host['reason']}"
 
 
 def page(decision: dict) -> dict:

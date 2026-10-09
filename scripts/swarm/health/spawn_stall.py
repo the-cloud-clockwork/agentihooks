@@ -44,10 +44,14 @@ def eligible(store, slug: str, ledger, at: int, runtime) -> bool:
         decision = reader(config, agents, at / 1000, demand, requirements, refresh=False)
     else:
         inputs = capacity.live_inputs(slug, store, ledger, dict(os.environ), at)
+        host = capacity.host_room(config, inputs)
         config, _ = capacity.autoscaled(config, inputs)
         decision = capacity.calculate(
             config, inputs.observations, inputs.agents, inputs.demand, requirements, warned=inputs.warned
         )
+        decision["host"] = host
+    if (decision.get("host") or {}).get("room") == 0:
+        return False
     return any(decision["placements"].values())
 
 

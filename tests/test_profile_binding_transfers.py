@@ -119,6 +119,41 @@ def test_handoff_refuses_to_clamp_saved_effort(launching):
     assert not calls
 
 
+def test_a_master_recycle_starts_inside_the_swarm_effort_range(launching):
+    engine, config, task, saved, calls = launching
+    saved.update(profile="master", harness="claude", effort="max")
+    task["handoff_envelope"]["reason"] = "recycle"
+    config.effort_min, config.effort_max = "medium", "high"
+    engine.spawn(config, "master", "master", task)
+    assert calls[-1][calls[-1].index("--effort") + 1] == "high"
+
+
+def test_a_master_quota_transfer_keeps_refusing_a_saved_effort_outside_the_range(launching):
+    from scripts.swarm import capacity
+
+    engine, config, task, saved, calls = launching
+    saved.update(profile="master", harness="claude", effort="max")
+    task["handoff_envelope"]["reason"] = "quota"
+    engine._quota_accounts = [capacity.Account("claude", "fresh", "OPEN", 0, 90, 90, 3)]
+    config.effort_min, config.effort_max = "medium", "high"
+    with pytest.raises(SpawnError, match="^unsupported transfer: saved effort is outside the current swarm range$"):
+        engine.spawn(config, "master", "master", task)
+    assert not calls
+
+
+@pytest.mark.parametrize(
+    ("saved", "lane", "quota", "expected"),
+    [
+        ({"effort": "max"}, "master", False, False),
+        ({"effort": "max"}, "master", True, True),
+        ({"effort": "max"}, "eng", False, True),
+        ({}, "eng", False, False),
+    ],
+)
+def test_only_a_master_recycle_gives_up_its_saved_effort(saved, lane, quota, expected):
+    assert runtime.preserves_effort(saved, lane, quota) is expected
+
+
 def test_resume_keeps_decision_and_replaces_the_old_binding_evidence(tmp_path):
     engine, config, agent, calls = _resuming(tmp_path, "c0ffee")
     decision = {"profile": "engineer", "source": "task", "validation": {"state": "old", "pid": 42}}

@@ -79,6 +79,10 @@ def _model_args(agent, chosen, environ, bounds, preserve=False):
     return model_flags(agent, _set(chosen.get("model")) or model, effort)
 
 
+def preserves_effort(saved: dict, lane: str, quota_transfer: bool) -> bool:
+    return bool(saved) and (lane != MASTER or quota_transfer)
+
+
 def _lane_default(lane, agent, chosen):
     if lane == MASTER:
         return model_pick.frontier(agent)
@@ -223,10 +227,12 @@ class HerdrRuntime:
             requirements = self._quota_preferring(requirements)
         warned = self._quota_warned()
         inputs = capacity.ScaleInputs(self._quota_accounts, agents, demand, self.host, self._quota_previous, warned)
-        config, scaled = capacity.autoscaled(config, inputs)
+        host = capacity.host_room(config, inputs)
+        config, scaled = capacity.autoscaled(config, inputs, host)
         decision = capacity.calculate(
             config, self._quota_accounts, agents, demand, requirements, accounts, warned=warned
         )
+        decision["host"] = capacity.granted(host, self._quota_previous, int(now * 1000))
         if scaled:
             decision["autoscale"] = scaled
         for task, reason in self._quota_held.items():
@@ -243,7 +249,7 @@ class HerdrRuntime:
             decision["tasks"] = dict(self._quota_tasks)
         return decision
 
-    def host(self) -> host_budget.HostSample:
+    def host(self) -> host_budget.HostSample | None:
         return host_budget.read_host()
 
     def quota_previous(self, decision: dict) -> None:
@@ -515,7 +521,13 @@ class HerdrRuntime:
                 *argv,
                 "--",
                 *route,
-                *_model_args(agent, picked.__dict__, environ, effort_range.of(config), preserve=bool(saved)),
+                *_model_args(
+                    agent,
+                    picked.__dict__,
+                    environ,
+                    effort_range.of(config),
+                    preserve=preserves_effort(saved, lane, quota_transfer),
+                ),
                 *mode,
             ],
             predecessor=_predecessor(task),
