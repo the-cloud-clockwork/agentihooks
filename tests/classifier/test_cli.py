@@ -155,7 +155,7 @@ def test_agentihooks_help_lists_both_commands(monkeypatch, capsys):
     out = " ".join(capsys.readouterr().out.split())
     for text in (
         "classify Ask the decision models typed questions: --state FILE --questions FILE",
-        "classifier Decision classifier records: stats [--purpose P]",
+        "classifier Decision classifier records: stats [--purpose P], eval NAME [--live N]",
     ):
         assert re.search(rf"(^|\s){re.escape(text)}($|\s)", out), text
 

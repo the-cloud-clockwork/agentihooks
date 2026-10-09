@@ -555,3 +555,11 @@ def test_the_tick_releases_members_of_a_stopped_lead(store):
     actions = tick("sw", store, ledger, FakeRuntime(), now_ms=1_000)
     assert ledger.ungrouped == ["a"]
     assert "released tasks b, c from task a: its lead is blocked and its agent let it go" in actions
+
+
+def test_grouping_confidence_is_read_from_its_definition(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_TASK_GROUPING_CONFIDENCE", "0.7")
+    assert grouping.MIN_CONFIDENCE == 0.7
+    with pytest.raises(AttributeError) as missing:
+        grouping.ABSENT
+    assert missing.value.args == ("ABSENT",)

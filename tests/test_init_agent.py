@@ -329,6 +329,14 @@ def test_handoff_refuses_changed_effort_policy_before_terminal_launch(monkeypatc
     )
 
 
+def test_a_master_handoff_launches_at_the_nearest_effort_inside_the_swarm_range(monkeypatch, tmp_path, capsys):
+    env = {"AGENTIHOOKS_SWARM_LANE": "master", "AGENTIHOOKS_SWARM_EFFORT_RANGE": "high:high"}
+    assert _handoff(monkeypatch, tmp_path, None, extra=["--dry-run"], env_extra=env) == 0
+    assert "effort=high\n" in capsys.readouterr().out
+    launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh"))
+    assert "--model opus --effort high" in launcher.read_text()
+
+
 def test_handoff_needs_a_handoff_document(monkeypatch, tmp_path, capsys):
     rc = init_agent.main(["--dir", str(tmp_path), "--handoff", "--dry-run"], {"HOME": str(tmp_path)})
 

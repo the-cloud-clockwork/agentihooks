@@ -1,5 +1,5 @@
-# syntax=docker/dockerfile:1
-FROM python:3.12-slim AS build
+# syntax=mirror.gcr.io/docker/dockerfile:1
+FROM mirror.gcr.io/library/python:3.12-slim AS build
 WORKDIR /build
 COPY pyproject.toml README.md ./
 RUN python -c 'import tomllib; print("\n".join(tomllib.load(open("pyproject.toml", "rb"))["project"]["optional-dependencies"]["ledger"]))' > ledger-requirements.txt
@@ -10,7 +10,7 @@ COPY profiles/ profiles/
 ARG VERSION=0.0.0
 RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$VERSION" /opt/venv/bin/pip install --no-cache-dir --no-deps .
 
-FROM python:3.12-slim
+FROM mirror.gcr.io/library/python:3.12-slim
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

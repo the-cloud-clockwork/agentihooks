@@ -10,8 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from scripts.inbox.seats import seat_address
-from scripts.inbox.store import InboxStore
-from scripts.swarm import control_notifications, ledger_host, notice_text, time_left
+from scripts.swarm import control_notifications, incidents, ledger_host, notice_text, time_left
 from scripts.swarm.ledger_client import LedgerGone, LedgerRefused
 from scripts.swarm.store import MASTER, SwarmError
 
@@ -134,20 +133,28 @@ def observe(
     sample = measure(ledger, slug, time_left.inputs_of(store, slug, runtime), clock)
     if sample is None:
         return []
+    down = store.redis.hget(incidents.key("ledger"), "watchdog")
+    bad = sample.slow or bool(down)
+    incidents.step(store.redis, "ledger", bad)
+    active = store.redis.hget(incidents.key("ledger"), "active") == "1"
+    raised = down or (
+        _raised(sample, (facts or ledger_host.facts)()) if active else "The ledger is slow or unavailable."
+    )
+    text = (raised if down else raised + PAUSED) if active else CLEARED.format(took=sample.took())
+    incidents.mail(store.redis, "ledger", master_address(store, slug), text, not active)
+    incidents.deliver(store.redis, "ledger", raised, CLEARED.format(took=sample.took()))
     held = state(store, slug)
-    slow = held.get("slow", 0) + 1 if sample.slow else 0
-    fast = 0 if sample.slow else held.get("fast", 0) + 1
+    slow = held.get("slow", 0) + 1 if bad else 0
+    fast = 0 if bad else held.get("fast", 0) + 1
     held.update(slow=slow, fast=fast)
     actions, notices = [], held.get("notices", [])
     if not held.get("alert") and slow >= PASSES:
-        text = _raised(sample, (facts or ledger_host.facts)())
-        InboxStore(store.redis).send(SENDER, master_address(store, slug), text + PAUSED)
+        text = raised
         notices = [*notices, for_operator(text)]
         held.update(alert=True, raised_at=now_ms)
         actions.append("raised the ledger slow alert")
     elif held.get("alert") and fast >= PASSES:
         text = CLEARED.format(took=sample.took())
-        InboxStore(store.redis).send(SENDER, master_address(store, slug), text, fyi=True)
         notices = [*notices, for_operator(text)]
         held.update(alert=False)
         actions.append("cleared the ledger slow alert")

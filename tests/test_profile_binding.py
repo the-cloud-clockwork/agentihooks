@@ -308,6 +308,24 @@ def test_supported_quota_transfer_preserves_resolved_run_options(monkeypatch):
         binding.continuation([], "codex")
 
 
+def test_only_a_master_quota_transfer_continues_with_an_effort_outside_the_swarm_range(monkeypatch):
+    env = {"AGENTIHOOKS_RUN_MODEL": "opus", "AGENTIHOOKS_RUN_EFFORT": "max"}
+    monkeypatch.setattr(binding, "process", lambda: (123, "claude", env, "original"))
+    swarm = {"AGENTIHOOKS_SWARM_EFFORT_RANGE": "medium:high"}
+    master = binding.continuation([], "claude", {**swarm, "AGENTIHOOKS_SWARM_LANE": "master"})
+    assert master == ["--model", "opus", "--effort", "max"]
+    with pytest.raises(ValueError) as error:
+        binding.continuation([], "claude", {**swarm, "AGENTIHOOKS_SWARM_LANE": "eng"})
+    assert str(error.value) == "unsupported quota transfer: saved effort is outside the current swarm range"
+
+
+def test_a_quota_transfer_compares_a_recorded_effort_from_the_other_scale_by_rank(monkeypatch):
+    env = {"AGENTIHOOKS_RUN_MODEL": "sol", "AGENTIHOOKS_RUN_EFFORT": "max"}
+    monkeypatch.setattr(binding, "process", lambda: (123, "codex", env, "original"))
+    swarm = {"AGENTIHOOKS_SWARM_EFFORT_RANGE": "medium:max", "AGENTIHOOKS_SWARM_LANE": "eng"}
+    assert binding.continuation([], "codex", swarm) == ["-m", "sol", "-c", 'model_reasoning_effort="xhigh"']
+
+
 @pytest.mark.parametrize("lane_agent", ["auto", "codex"])
 def test_swarm_handoff_keeps_profile_harness_model_effort_and_account(tmp_path, lane_agent):
     from types import SimpleNamespace

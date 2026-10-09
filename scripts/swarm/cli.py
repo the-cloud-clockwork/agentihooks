@@ -107,7 +107,7 @@ from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
 from scripts.swarm.store import ASSIST, AUTO_SCALING, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
-from scripts.swarm.tick import agent_status, primed, skip_refused, tick
+from scripts.swarm.tick import agent_status, primed, skip_refused, spawn_holds, tick
 from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
 from scripts.swarm_v2.runtime.routed import routed
 
@@ -148,7 +148,7 @@ def now_ms():
 
 @timing.instrument_tick
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
-    from scripts.swarm import command_runner, commands, controller, lease
+    from scripts.swarm import command_runner, commands, controller, incidents, lease
 
     ledger = ledger or LedgerClient()
     held = lease.acquire(store, slug, commands.hive_id())
@@ -169,7 +169,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         )
         from scripts.swarm.health import spawn_stall
 
-        restarted = timing.call(ledger_watchdog.watch, store, slug, ledger, runtime)
+        pressured = skip_refused(incidents.host_pressure, store, slug)
+        restarted = pressured + timing.call(ledger_watchdog.watch, store, slug, ledger, runtime)
         probed = restarted + timing.call(ledger_probe.observe, store, slug, ledger, runtime, now_ms())
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
             controls = timing.call(command_runner.consume, store, slug)
@@ -768,7 +769,7 @@ def cmd_status(store, args):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))
     from scripts.swarm import capacity, quota_view
 
-    for line in quota_view.lines(capacity.read(store, args.slug), now_ms()):
+    for line in quota_view.lines(capacity.read(store, args.slug), now_ms()) + spawn_holds(store, args.slug):
         print(line)
     print(_snapshot_line(auto_snapshot(config)))
     print(_affinity_line(affinity.report(store, args.slug, config, agents)))

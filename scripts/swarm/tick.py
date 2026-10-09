@@ -34,6 +34,7 @@ from scripts.swarm import (
     ledger_probe,
     lifetime,
     live_binding,
+    master_alarm,
     master_retire,
     master_start,
     master_wake,
@@ -58,6 +59,10 @@ STARTUP_GRACE_MS = 6 * 60 * 1000
 SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
+SPAWN_HOLD = "spawn-hold"
+HOST_SPENDS = f"{PREFIX}:host-spends"
+HOST_SPENDS_KEPT = 1000
+HOST_START_LAG_MS = 30 * 1000
 # Swarms tick in threads; two placing from one live session count overfill an account.
 PLACING = threading.Lock()
 DOWN_TOLD = "master down told"
@@ -133,6 +138,7 @@ class Runtime(Protocol):
 
 def tick(slug, store, ledger, runtime, now_ms):
     config = store.ensure_code(slug)
+    store.redis.delete(store.key(slug, SPAWN_HOLD))
     actions = []
     if config.state != "stopped" or _woken(slug, config, store, ledger):
         actions = skip_refused(_recover_master, slug, config, store, runtime, now_ms)
@@ -194,6 +200,7 @@ def tick(slug, store, ledger, runtime, now_ms):
             )
             if config.state == "running":
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+    actions += timing.call(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
     timing.call(_conversations, slug, store, runtime)
     timing.call(_session_models, slug, store)
     starting = {a.name for a in store.agents(slug) if a.lane == MASTER and a.state == "starting"}
@@ -657,6 +664,45 @@ def _held_for_master(slug, store, now_ms):
     return [f"holding spawns: swarm {s} waits on a session slot for its master" for s in others[:1]]
 
 
+def _host_full(slug, store, now_ms):
+    from scripts.swarm import capacity
+
+    host = capacity.read(store, slug).get("host") or {}
+    if host.get("room") is None:
+        return ""
+    recent = host_spent(store, host["granted_at"], now_ms)
+    if recent < host["room"]:
+        return ""
+    return f"host {host['limit']} room {host['room']}, {recent} spawned since it was granted: {host['reason']}"
+
+
+def host_spent(store, since_ms: int, now_ms: int) -> int:
+    return store.redis.zcount(HOST_SPENDS, since_ms - HOST_START_LAG_MS, now_ms)
+
+
+def _spend_host(store, name, now_ms):
+    store.redis.zadd(HOST_SPENDS, {name: now_ms})
+    store.redis.zremrangebyrank(HOST_SPENDS, 0, -HOST_SPENDS_KEPT - 1)
+
+
+def _hold(slug, store, text):
+    store.redis.set(store.key(slug, SPAWN_HOLD), text)
+    return text
+
+
+def spawn_holds(store, slug):
+    held = store.redis.get(store.key(slug, SPAWN_HOLD))
+    return [held] if held else []
+
+
+def _spawn_stop(slug, config, store, runtime, now_ms):
+    if not runtime.has_capacity(config):
+        return "every agent is at its session cap, waiting"
+    if host := _host_full(slug, store, now_ms):
+        return _hold(slug, store, f"holding spawns: {host}")
+    return ""
+
+
 def _record_spawn_failure(slug, store, record, error):
     if record_failure := timing.ON_FAILURE.get():
         record_failure(f"{__name__}._spawn", error)
@@ -673,8 +719,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     for lane, task in _spawn_order(slug, config, store, agents, rows, doc):
         if held:
             return actions + held
-        if not runtime.has_capacity(config):
-            return actions + ["every agent is at its session cap, waiting"]
+        if stop := _spawn_stop(slug, config, store, runtime, now_ms):
+            return actions + [stop]
         blocked = _lives_spent(slug, store, ledger, rows, task) or _held_back(slug, ledger, rows, runtime, task, now_ms)
         if blocked:
             actions.append(blocked)
@@ -737,6 +783,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         store.put_agent(slug, placed_record(record, placed))
         launch_check.begin(store, slug, record, now_ms)
         store.count_spawn(slug, placed.harness)
+        _spend_host(store, name, now_ms)
         store.clear_handoff(slug, task["id"])
         store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
         actions.append(f"spawned {name} for {task['id']}")
@@ -919,6 +966,8 @@ def _master(slug, config, store, runtime, now_ms):
     if not runtime.has_capacity(config):
         store.redis.hset(MASTER_WAITING, slug, now_ms)
         return ["no session slot for the master, waiting"]
+    if host := _host_full(slug, store, now_ms):
+        return [_hold(slug, store, f"holding the master spawn: {host}")]
     name = store.next_name(slug, MASTER, now_ms)
     record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, state="starting", seat=seat_address(slug, MASTER))
     store.put_agent(slug, record)
@@ -942,11 +991,13 @@ def _master(slug, config, store, runtime, now_ms):
         transfers.failed(store, slug, record)
         store.drop_agent(slug, name)
         affinity.failed(store, slug, str(exc))
+        master_alarm.failed(store, slug, f"master spawn failed: {exc}", now_ms)
         failed = master_start.read(store, slug)
         if failed.get("attempt") == 1:
             master_start.save(store, slug, {**failed, "name": "", "retry": True})
         return [f"master spawn failed: {exc}"]
     affinity.placed(store, slug, placed.harness)
+    _spend_host(store, name, now_ms)
     record = placed_record(record, placed)
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))

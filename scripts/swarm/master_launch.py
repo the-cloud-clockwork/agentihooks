@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from scripts import agent_choice
 from scripts.handoff import transfers
 from scripts.inbox.seats import seat_address
-from scripts.swarm import affinity, effort_range, launch_check, master_start, model_pick
+from scripts.swarm import affinity, capacity, effort_range, launch_check, master_start, model_pick
 from scripts.swarm.resume import blocker
 from scripts.swarm.snapshot import ledger_source
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
@@ -125,7 +125,7 @@ def fill(saved, config):
     """A saved launch with its empty keys filled: master profile, affinity or open seat harness, frontier model."""
     harness = saved.get("harness") or affinity.desired(config) or _open_seat()
     defaults = {"profile": _profile(config)}
-    if harness:
+    if harness in effort_range.EFFORTS:
         pick = model_pick.frontier(harness)
         defaults |= {
             "harness": harness,
@@ -162,6 +162,7 @@ def _new(store, slug, runtime, at):
         task = _filled(primed(store, slug, record.seat, task), config)
         master_start.begin(store, slug, name, task, at)
         affinity.handed_off(store, slug)
+        capacity.feed_spent(runtime, store, at)
         if reader := getattr(runtime, "quota_capacity", None):
             reader(config, store.agents(slug), at / 1000)
         placed = runtime.spawn(config, MASTER, name, task)

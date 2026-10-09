@@ -63,7 +63,9 @@ _BUILD_TOOLS = frozenset(
 )
 _TEST_TASK = re.compile(r"^(?:test|tests|coverage|mutation)(?:$|[:_.-])|^.*:test$")
 _PYTHON = re.compile(r"^(?:python[\d.]*|pypy[\d.]*)$")
-_PYTHON_TEST = re.compile(r"\b(?:pytest|unittest|tox|nox|mutmut|mutatest|mutpy)\b|scripts\.ci_mutation\b")
+_PYTHON_TEST = re.compile(
+    r"\b(?:pytest|unittest|tox|nox|mutmut|mutatest|mutpy)\b|scripts\.ci_mutation\b(?!\.clearances\b)"
+)
 _NODE_TEST = re.compile(r"\b(?:jest|vitest|mocha)\b|node:test")
 _LITERAL = (
     r"(?P<module>\b(?:require|import)\s*\(\s*|\b(?:from|import)\s*)?"

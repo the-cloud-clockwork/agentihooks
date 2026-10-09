@@ -6,6 +6,9 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
+from scripts.handoff import transfers
+from scripts.swarm.store import MASTER, SwarmError
+
 if TYPE_CHECKING:
     from scripts.swarm.store import RedisStore
 
@@ -48,3 +51,65 @@ def records(
             line for line in journal.stdout.splitlines() if line.startswith(f"{slug}: ") and "spawn failed" in line
         ],
     }
+
+
+def master_records(
+    store: RedisStore,
+    slug: str,
+    since: str | None = None,
+    run: Callable = subprocess.run,
+    *,
+    until: str | None = None,
+) -> dict:
+    """Without since, the journal is read from the last live master binding, else from the first master transfer,
+    else whole, so it spans the whole open outage."""
+    rows = [row for row in transfers.list_transfers(store, slug) if row["task"] == MASTER]
+    agents = [asdict(a) for a in store.agents(slug) if a.lane == MASTER]
+    if since is None:
+        bound = [r["binding"]["at"] for r in rows if r["binding"]["state"] == "live"]
+        bound += [a["started_at"] for a in agents if a["state"] == "working"]
+        start = max(bound) if bound else min((r["at"] for r in rows), default=None)
+        since = None if start is None else f"@{start / 1000:.3f}"
+    entries, error = _grep("master spawn failed", since, until, run)
+    return {
+        "slug": slug,
+        "transfers": rows,
+        "restored": [row for row in store.restored(slug) if row["lane"] == MASTER],
+        "agents": agents,
+        "journal": None if entries is None else [e for e in entries if e["message"].startswith(f"{slug}: ")],
+        "journal_error": error,
+    }
+
+
+def doctor_passes(doctor: str, since: str, until: str, run: Callable = subprocess.run) -> tuple[int, ...]:
+    entries, error = _grep(f"{doctor}: doctor pass", since, until, run)
+    if entries is None:
+        raise SwarmError(f"Doctor passes unavailable: {error}")
+    return tuple(e["at"] for e in entries)
+
+
+def _grep(pattern, since, until, run):
+    argv = [
+        "journalctl",
+        "--user",
+        "-u",
+        "agentihooks-swarm.service",
+        *(["--since", since] if since is not None else []),
+        *(["--until", until] if until is not None else []),
+        "-o",
+        "json",
+        "--output-fields=MESSAGE,_PID",
+        "-g",
+        pattern,
+        "--no-pager",
+    ]
+    try:
+        done = run(argv, capture_output=True, text=True, check=False, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+    if done.returncode and (done.stdout.strip() or done.stderr.strip()):
+        return None, f"journalctl exit {done.returncode}: {done.stderr.strip()}"
+    entries = (json.loads(line) for line in done.stdout.splitlines() if line.strip())
+    return [
+        {"at": int(e["__REALTIME_TIMESTAMP"]) // 1000, "pid": e["_PID"], "message": e["MESSAGE"]} for e in entries
+    ], ""

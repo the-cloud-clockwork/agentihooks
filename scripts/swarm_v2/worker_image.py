@@ -33,7 +33,10 @@ def load_lock(path: Path, architecture: str) -> dict:
         raise ValueError("unsupported lock schema")
     if architecture not in lock["architectures"]:
         raise ValueError("unsupported architecture")
-    if not re.fullmatch(r"python:[^@]+@sha256:[a-f0-9]{64}", lock["base_image"]):
+    if not re.fullmatch(
+        r"(?:public\.ecr\.aws/docker/library/)?python:[^@]+@sha256:[a-f0-9]{64}",
+        lock["base_image"],
+    ):
         raise ValueError("base image requires a sha256 digest")
     if checksum(path.with_name("requirements.lock")) != lock["requirements_sha256"]:
         raise ValueError("Python requirements checksum mismatch")
