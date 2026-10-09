@@ -88,6 +88,15 @@ details.phase-fold { margin: 0; }
 details.phase-fold > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; text-transform: none; letter-spacing: normal; color: var(--text); }
 details.phase-fold > summary::before { align-self: center; }
 .phase-state { font-size: var(--fs-meta); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-2); }
+.plan { padding: 10px 0; border-top: 1px solid var(--rule); }
+.plan:first-child { border-top: 0; padding-top: 0; }
+details.plan-fold > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; text-transform: none; letter-spacing: normal; color: var(--text); }
+details.plan-fold > summary::before { align-self: center; }
+.plan-title { font-size: var(--fs-item); font-weight: 700; }
+.plan-count { font-size: var(--fs-meta); letter-spacing: .06em; color: var(--accent); }
+.plan-phases { margin: 8px 0 0 22px; }
+.phase-slices { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 6px; font-size: var(--fs-meta); letter-spacing: .06em; color: var(--muted); }
+.phase-slices-label { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-2); }
 .task-proof dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 6px 0 0; }
 .task-proof dt { font-size: var(--fs-meta); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .task-proof dd { margin: 0; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
