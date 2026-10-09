@@ -1,7 +1,5 @@
 name: Mutation preflight
 
-# A task branch pushed before its pull request opens learns its surviving
-# mutants here, so the pull request needs one Tests run instead of a red round.
 on:
   push:
     branches-ignore: [dev, main, "gh-readonly-queue/**", "wip/**"]

@@ -86,6 +86,10 @@ def collect_results(path: Path) -> list[dict]:
     return rows
 
 
+def clearance_key(path: str, row: dict) -> str:
+    return f"{path}:{row['name']}:{row['fingerprint']}"
+
+
 def evaluate(path: str, rows: list[dict], changed: set[int], cleared: dict) -> dict:
     report = {
         "path": path,
@@ -104,7 +108,7 @@ def evaluate(path: str, rows: list[dict], changed: set[int], cleared: dict) -> d
         if not changed.intersection(row["lines"]):
             report["untouched_survivors"].append(row)
             continue
-        key = f"{path}:{row['name']}:{row['fingerprint']}"
+        key = clearance_key(path, row)
         if key in cleared:
             entry = cleared[key]
             if not entry.get("reader") or not entry.get("reason"):
@@ -118,7 +122,7 @@ def evaluate(path: str, rows: list[dict], changed: set[int], cleared: dict) -> d
 def survivor_text(report: dict) -> str:
     blocks = []
     for row in report["failures"]:
-        key = f"{report['path']}:{row['name']}:{row['fingerprint']}"
+        key = clearance_key(report["path"], row)
         lines = ", ".join(map(str, row["lines"]))
         if row["status"] in {"survived", "no tests"}:
             record = json.dumps({key: {"reader": "<reader>", "reason": "<reason>"}})
