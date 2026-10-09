@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        leg: [shard-a, shard-b, shard-c, shard-d, shard-e, shard-f, repeat-cov, repeat-nocov]
+        leg: [shard-a, shard-b, shard-c, shard-d, repeat-iostress]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,6 +52,7 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
           PROBE_DIAG: ${{ github.workspace }}/diag.jsonl
+          WATCH_REPEAT: "200"
           PYTEST_ADDOPTS: ${{ format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini -p tests.browser_coverage', github.workspace) }}
           PLAYWRIGHT_BROWSERS_PATH: ${{ format('{0}/.playwright', github.workspace) }}
           SHARD: 8/8
@@ -65,9 +66,10 @@ jobs:
         continue-on-error: true
         env:
           PROBE_DIAG: ${{ github.workspace }}/diag.jsonl
-          WATCH_REPEAT: "150"
-          COVOPTS: ${{ matrix.leg == 'repeat-cov' && format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini', github.workspace) || '-p no:pytest_cov' }}
-        run: python -m pytest $COVOPTS "tests/swarm_ledger/test_caps.py::Watch" -p no:anyio --tb=short -q 2>&1 | tail -20
+          WATCH_REPEAT: "300"
+        run: |
+          for i in 1 2 3 4; do (while true; do dd if=/dev/zero of="$RUNNER_TEMP/stress$i" bs=1M count=64 conv=fsync status=none; done) & done
+          python -m pytest -p no:pytest_cov "tests/swarm_ledger/test_caps.py::Watch" -p no:anyio --tb=short -q 2>&1 | tail -20
       - name: Diagnostics
         if: always()
         run: |
@@ -79,7 +81,7 @@ jobs:
           print("DIAG runs", len(rows), "timeouts", sum(r.get("result") == "timeout" for r in rows),
                 "latency_max", lat[-1] if lat else None, "latency_p50", lat[len(lat)//2] if lat else None)
           if rows:
-              keys = ("worker", "parent_mask", "parent_sigterm", "child_env", "child_status_before", "ready")
+              keys = ("worker", "parent_mask", "child_env", "ready", "io_at_beat", "io_after_half_second", "ledger_dir")
               print("DIAG first", json.dumps({k: rows[0].get(k) for k in keys}))
           for r in rows:
               if r.get("result") == "timeout" or r.get("latency", 0) > 1:

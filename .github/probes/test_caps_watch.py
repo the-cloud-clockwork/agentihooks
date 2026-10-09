@@ -144,6 +144,11 @@ class Watch(unittest.TestCase):
             record["ready"] = time.monotonic() - started
             record["child_status_before"] = status_lines(proc.pid)
             record["child_env"] = env_keys(proc.pid)
+            if attempt == 0:
+                record["io_at_beat"] = read(f"/proc/{proc.pid}/io").decode(errors="replace").split("\n")
+                time.sleep(0.5)
+                record["io_after_half_second"] = read(f"/proc/{proc.pid}/io").decode(errors="replace").split("\n")
+                record["ledger_dir"] = sorted(str(p.relative_to(core.LEDGER_DIR)) for p in core.LEDGER_DIR.rglob("*"))[:40]
             self.assertTrue(beat.exists())
             proc.send_signal(signal.SIGTERM)
             sent = time.monotonic()
@@ -154,6 +159,7 @@ class Watch(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 record["result"] = "timeout"
                 record["child_status_timeout"] = status_lines(proc.pid)
+                record["io_timeout"] = read(f"/proc/{proc.pid}/io").decode(errors="replace").split("\n")
                 record["wchan"] = read(f"/proc/{proc.pid}/wchan").decode(errors="replace")
                 record["children"] = subprocess.run(
                     ["ps", "--ppid", str(proc.pid), "-o", "pid,stat,wchan:30,cmd"], capture_output=True, text=True
