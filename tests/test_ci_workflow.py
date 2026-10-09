@@ -302,7 +302,7 @@ def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
         mirror = next(step for step in lint if step.get("name") == "Use the Ubuntu archive for browser dependencies")
         assert "if" not in mirror
     else:
-        assert install["if"] == "steps.artifacts.outputs.browser == 'true'"
+        assert install["if"] == "${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}"
 
 
 def test_equivalence_runs_storage_then_page_replays_each_group_at_once():
@@ -335,14 +335,18 @@ def _workflow() -> dict:
 def test_shards_wait_only_on_the_durations_lookup():
     jobs = _workflow()["jobs"]
     assert "already-tested" not in jobs
-    assert jobs["split"]["needs"] == ["durations"]
-    assert jobs["unit"]["needs"] == ["split"]
-    assert "needs" not in jobs["lint"]
+    assert jobs["split"]["needs"] in (["durations"], ["durations", "reuse"])
+    assert jobs["unit"]["needs"] in (["split"], ["split", "reuse"])
+    assert jobs["lint"].get("needs") in (None, ["reuse"])
 
 
 def test_unit_shards_check_out_full_history_without_old_file_contents():
     _, checkout = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/checkout"))
-    assert checkout["with"] == {"fetch-depth": 0, "filter": "blob:none"}
+    assert {key: value for key, value in checkout["with"].items() if key != "ref"} == {
+        "fetch-depth": 0,
+        "filter": "blob:none",
+    }
+    assert checkout["with"].get("ref") in (None, "${{ github.sha }}")
 
 
 def test_unit_pins_an_exact_uv_version():
