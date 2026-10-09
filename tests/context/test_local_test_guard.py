@@ -73,6 +73,12 @@ RUNNERS = [
     "prove",
     "python -c 'import pytest; pytest.main()'",
     "python -m scripts.ci_mutation",
+    "python3 -c \"import subprocess; subprocess.run(['pytest', '-q'])\"",
+    "python3 -c \"__import__('pytest').main()\"",
+    "python3 -c \"import runpy; runpy.run_module('pytest')\"",
+    "python3 - <<'EOF'\nimport os\nos.system('python -m pytest')\nEOF",
+    "node -e \"require('child_process').execSync('npx jest')\"",
+    "node -e \"require('node:test')\"",
 ]
 
 WRAPPERS = [
@@ -154,6 +160,30 @@ def test_explicit_true_allows_tests(value, monkeypatch):
     ],
 )
 def test_non_test_commands_pass(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "grep -n pytest .github/workflows/test.yml",
+        "grep -n '<<' .github/workflows/test.yml",
+        'grep -n "cat <<EOF" .github/workflows/test.yml',
+        "grep -c \\<\\< tests/test_a.py",
+        "awk '/<<EOF/,/^EOF/' .github/workflows/test.yml",
+        "sed -n '/pytest/,+3p' .github/workflows/test.yml",
+        "cat tests/context/test_local_test_guard.py",
+        "git show origin/dev:.github/workflows/test.yml | grep -n 'python -m pytest'",
+        "python3 -c \"import pathlib; p = pathlib.Path('t.yml'); p.write_text(p.read_text().replace('pytest -x', 'pytest -q'))\"",
+        "python3 - <<'EOF'\nfrom pathlib import Path\np = Path('.github/workflows/test.yml')\nold = '''run: python -m pytest -x'''\n"
+        'p.write_text(p.read_text().replace(old, "run: python -m pytest -q"))  # pytest\nEOF',
+        "node -e \"fs.writeFileSync('p.json', s.replace('jest', 'vitest')) // jest\"",
+    ],
+)
+def test_reads_and_quoted_runner_names_pass(command, monkeypatch):
     from hooks.context.local_test_guard import check_local_tests
 
     monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
