@@ -188,20 +188,32 @@ def test_a_pid_taken_by_another_program_during_the_stop_is_never_killed(tmp_path
     assert [call for call in host.calls if call[0] == "kill"] == [("kill", PID, signal.SIGTERM)]
 
 
-def test_a_refused_signal_or_a_server_gone_before_the_stop_still_starts_it(tmp_path):
+def test_a_server_gone_before_the_stop_is_still_started(tmp_path):
     host = Host(tmp_path)
-
-    def refused(pid, sig):
-        raise PermissionError(1, "Operation not permitted")
 
     def gone(pid, sig):
         raise ProcessLookupError
 
-    host.kill = refused
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == ""
     host.kill = gone
     assert ledger_watchdog.restart(host, PID, host.argv[:2]) == ""
-    assert [call[0] for call in host.calls] == ["run", "run"]
+    assert [call[0] for call in host.calls] == ["run"]
+
+
+def test_a_server_the_tick_may_not_signal_is_reported_and_never_started_again(store, tmp_path):
+    host = Host(tmp_path)
+    plant(host.proc, host.argv)
+    (host.folder / ".server.pid").write_text(str(PID))
+
+    def refused(pid, sig):
+        raise PermissionError(1, "Operation not permitted")
+
+    host.kill = refused
+    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == "[Errno 1] Operation not permitted"
+    assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) == [
+        "stopped the ledger server because its code changed on disk and it did not start again: "
+        "[Errno 1] Operation not permitted"
+    ]
+    assert host.calls == [] and store.redis.get(ledger_watchdog.STARTED_KEY) is None
 
 
 def test_a_start_that_fails_or_hangs_returns_its_error(tmp_path):

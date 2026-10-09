@@ -105,7 +105,7 @@ def why(folder: Path, pid: int, facts: dict) -> tuple[str, str] | None:
 def _signal(host: Host, pid: int, sig: int) -> None:
     try:
         host.kill(pid, sig)
-    except OSError:
+    except ProcessLookupError:
         pass
 
 
@@ -115,13 +115,16 @@ def _ours(pid: int, proc: Path) -> bool:
 
 
 def restart(host: Host, pid: int, command: list[str]) -> str:
-    _signal(host, pid, signal.SIGTERM)
-    for _ in range(round(STOP_WAIT_S / POLL_S)):
-        if not alive(pid, host.proc):
-            break
-        host.sleep(POLL_S)
-    if alive(pid, host.proc) and _ours(pid, host.proc):
-        _signal(host, pid, signal.SIGKILL)
+    try:
+        _signal(host, pid, signal.SIGTERM)
+        for _ in range(round(STOP_WAIT_S / POLL_S)):
+            if not alive(pid, host.proc):
+                break
+            host.sleep(POLL_S)
+        if alive(pid, host.proc) and _ours(pid, host.proc):
+            _signal(host, pid, signal.SIGKILL)
+    except PermissionError as exc:
+        return str(exc)
     try:
         done = host.run(
             [*command, "--ensure"],
