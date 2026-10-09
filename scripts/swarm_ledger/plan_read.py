@@ -46,15 +46,14 @@ def numbered(text: str, lines: str) -> list[tuple[int, str]]:
 
 
 def section(source: str, anchor: str) -> str:
-    entries = _ledger("plan_ranges").sections(source)
+    entries = [entry for entry in _ledger("plan_ranges").sections(source) if entry[1] or entry[2].strip()]
     tag = f'<a id="{anchor}"></a>'
-    after = next((i for i, (_, depth, line) in enumerate(entries) if not depth and line.strip() == tag), len(entries))
-    heading = next((i for i in range(after + 1, len(entries)) if entries[i][1]), None)
-    if heading is None:
+    at = next((i for i, (_, depth, line) in enumerate(entries) if not depth and line.strip() == tag), len(entries))
+    first, depth, _ = next(iter(entries[at + 1 :]), (0, 0, ""))
+    if not depth:
         return ""
-    first, depth, _ = entries[heading]
-    stop = next((n for n, d, _ in entries[heading + 1 :] if 0 < d <= depth), None)
-    rows = source.splitlines()[first - 1 : stop and stop - 1]
+    stop = next((n for n, d, _ in entries[at + 2 :] if 0 < d <= depth), None)
+    rows = source.splitlines()[first - 1 : stop - 1 if stop else None]
     while rows and (not rows[-1].strip() or ANCHOR.fullmatch(rows[-1].strip())):
         rows.pop()
     return "".join(f"{row}\n" for row in rows)
@@ -62,8 +61,9 @@ def section(source: str, anchor: str) -> str:
 
 def linked(source: str, lines: str) -> str:
     start, end = _ledger("plan_ranges").bounds(lines)
-    anchors = dict.fromkeys(LINK.findall("\n".join(source.splitlines()[start - 1 : end])))
-    return "".join(f"\n{text}" for anchor in anchors if (text := section(source, anchor)))
+    text = "\n".join(source.splitlines()[start - 1 : end])
+    anchors = dict.fromkeys(anchor for anchor in LINK.findall(text) if f'<a id="{anchor}"></a>' not in text)
+    return "".join(f"\n{case}" for anchor in anchors if (case := section(source, anchor)))
 
 
 def pointer(task: dict) -> str:

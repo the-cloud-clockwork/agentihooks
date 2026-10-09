@@ -194,13 +194,13 @@ def test_ledger_modules_load_with_the_ledger_folder_first_on_the_path(monkeypatc
 LINKED_PLAN = """# Plan
 ## Work
 ### W1
-- Positive: [A](#case-a).
-- Negative: [B](#case-b), again [A](#case-a).
+- Positive: [A](#case.a).
+- Negative: [B](#case-b), again [A](#case.a).
 - Recovery: [C](#case-c), gone [X](#missing), bare [D](#no-heading).
 ### W2
 - outside link [E](#case-e).
 ## Cases
-<a id="case-a"></a>
+<a id="case.a"></a>
 
 ### Case A
 - a body
@@ -234,12 +234,28 @@ def test_linked_appends_each_anchored_section_once_in_link_order():
     assert plan_read.linked(LINKED_PLAN, "3-6") == f"\n{CASE_A}\n{CASE_B}\n{CASE_C}"
 
 
+def test_linked_follows_only_links_inside_the_slice():
+    assert plan_read.linked(LINKED_PLAN, "4-4") == f"\n{CASE_A}"
+    assert plan_read.linked(LINKED_PLAN, "3-5") == f"\n{CASE_A}\n{CASE_B}"
+
+
+def test_linked_skips_a_section_anchored_inside_the_slice():
+    source = '## W\n- see [A](#ca) and [B](#cb)\n<a id="ca"></a>\n### A\n- a\n<a id="cb"></a>\n### B\n- b\n'
+    assert plan_read.linked(source, "1-5") == "\n### B\n- b\n"
+
+
 def test_linked_is_empty_for_a_slice_without_anchor_links():
     assert plan_read.linked(LINKED_PLAN, "1-2") == ""
 
 
 def test_section_runs_to_the_plan_end_without_a_later_heading():
-    assert plan_read.section('<a id="z"></a>\n## Z\n- z\n\n', "z") == "## Z\n- z\n"
+    assert plan_read.section('<a id="z"></a>\n## Z\n- z\n  \n<a id="y"></a>\n', "z") == "## Z\n- z\n"
+
+
+def test_section_is_empty_unless_a_heading_follows_the_anchor():
+    assert plan_read.section(LINKED_PLAN, "no-heading") == ""
+    assert plan_read.section(LINKED_PLAN, "missing") == ""
+    assert plan_read.section('<a id="x"></a>\n\nprose\n## Other\n- o\n', "x") == ""
 
 
 def test_task_read_appends_the_linked_cases_after_the_slice(tmp_path, monkeypatch, capsys):
