@@ -567,3 +567,99 @@ def test_ledger_page_shows_the_plan_link_on_a_task():
     page = page_source()
     assert '"pr_url", "plan_url", "done"' in page
     assert 'link(item.plan_url, "plan")' in page
+
+
+ROLLOUT = (
+    "# Rollout\n## Build\n<!-- slice: first -->\n### First\nOne\n<!-- slice: second -->\n### Second\n\n"
+    "## Ship\n<!-- slice: launch -->\n### Launch\nGo\n"
+)
+
+
+def published(slug, tmp_path, monkeypatch):
+    core.sync(slug, ops=[{"op": "phase_add", "id": "add-p2", "by": "planner", "phase": "p2", "title": "Ship"}])
+    core.sync(slug, ops=[{"op": "join", "id": "join-planner", "by": "planner", "role": "member"}])
+    plan = tmp_path / "plan.md"
+    plan.write_text(ROLLOUT, encoding="utf-8")
+    file = ledger_artifacts.store(slug, "plan.md", plan.read_bytes())
+    monkeypatch.setattr(ledger, "upload_artifact", lambda *a: file)
+    monkeypatch.setattr(
+        ledger.ledger_publish,
+        "publish",
+        lambda path, title, repo, artifact, issue_title: (artifact(path, title) and PLAN, "issue"),
+    )
+    cli(monkeypatch, slug, "publish-plan", str(plan), "--phase", "p1,p2")
+    return file, f"plan-{file['id'][:12]}"
+
+
+def test_publish_plan_creates_one_plan_its_phase_parents_and_a_slice_per_marker(plan_ledger, tmp_path, monkeypatch):
+    file, plan_id = published(plan_ledger, tmp_path, monkeypatch)
+    state = core.sync(plan_ledger)[0]
+    stored = f"{ledger.BASE}/artifacts/{plan_ledger}/{file['id']}"
+    assert state["plans"] == [{"id": plan_id, "title": "Rollout", "artifact": stored, "url": PLAN}]
+    assert [(phase["id"], phase["plan"]) for phase in state["phases"]] == [
+        ("p1", f"plans/{plan_id}"),
+        ("p2", f"plans/{plan_id}"),
+    ]
+    assert state["slices"] == [
+        {"id": f"{plan_id}.first", "phase": "phases/p1", "anchor": "first", "lines": "3-5"},
+        {"id": f"{plan_id}.second", "phase": "phases/p1", "anchor": "second", "lines": "6-7"},
+        {"id": f"{plan_id}.launch", "phase": "phases/p2", "anchor": "launch", "lines": "10-12"},
+    ]
+    assert state["tasks"] == []
+
+
+def test_publishing_the_same_plan_again_keeps_one_plan_and_its_slices(plan_ledger, tmp_path, monkeypatch):
+    published(plan_ledger, tmp_path, monkeypatch)
+    before = core.sync(plan_ledger)[0]
+    plan = tmp_path / "plan.md"
+    cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1,p2")
+    after = core.sync(plan_ledger)[0]
+    assert (after["plans"], after["slices"]) == (before["plans"], before["slices"])
+
+
+def test_a_task_added_with_a_plan_slice_lists_under_that_slice(plan_ledger, tmp_path, monkeypatch):
+    _, plan_id = published(plan_ledger, tmp_path, monkeypatch)
+    add(plan_ledger, "build", plan_slice="second")
+    state, rejected = add(plan_ledger, "ship", phase="p2", plan_slice="launch")
+    assert rejected == []
+    assert (task(state, "build")["slice"], task(state, "build")["plan_lines"]) == (f"slices/{plan_id}.second", "6-7")
+    assert (task(state, "ship")["slice"], task(state, "ship")["plan_lines"]) == (f"slices/{plan_id}.launch", "10-12")
+
+
+def test_a_plan_slice_in_a_phase_without_a_plan_sets_no_slice(plan_ledger):
+    anchored(plan_ledger, "one")
+    state, rejected = add(plan_ledger, "lone", plan_slice="one")
+    assert rejected == []
+    assert task(state, "lone")["plan_slice"] == "one"
+    assert "slice" not in task(state, "lone")
+
+
+def test_publish_plan_refuses_a_slice_name_repeated_across_its_phases(plan_ledger, tmp_path, monkeypatch, capsys):
+    core.sync(plan_ledger, ops=[{"op": "phase_add", "id": "add-p2", "by": "planner", "phase": "p2", "title": "Ship"}])
+    plan = tmp_path / "plan.md"
+    plan.write_text("## Build\n<!-- slice: one -->\n### A\n## Ship\n<!-- slice: one -->\n### B\n", encoding="utf-8")
+    monkeypatch.setattr(ledger.ledger_publish, "publish", lambda *a, **k: pytest.fail("published"))
+    with pytest.raises(SystemExit) as raised:
+        cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1,p2")
+    assert raised.value.code == "each slice marker needs its own name across the plan's phases: one"
+    assert capsys.readouterr().out == ""
+
+
+def test_republishing_a_revised_plan_over_its_slices_is_refused(plan_ledger, tmp_path, monkeypatch):
+    _, plan_id = published(plan_ledger, tmp_path, monkeypatch)
+    plan = tmp_path / "plan.md"
+    plan.write_text(ROLLOUT + "Then watch it\n", encoding="utf-8")
+    revised = ledger_artifacts.store(plan_ledger, "plan.md", plan.read_bytes())
+    monkeypatch.setattr(ledger, "upload_artifact", lambda *a: revised)
+    with pytest.raises(SystemExit) as raised:
+        cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1,p2")
+    assert "holds slices of another plan" in raised.value.code
+    phases = core.sync(plan_ledger)[0]["phases"]
+    assert [phase["plan"] for phase in phases] == [f"plans/{plan_id}"] * 2
+
+
+def test_anchors_of_an_empty_stored_plan_are_none(monkeypatch):
+    from scripts.swarm_ledger import plan_ranges
+
+    monkeypatch.setattr(plan_ranges, "stored_text", lambda ref, doc: "")
+    assert plan_ranges.anchors({}, {"plan_url": PLAN}) == []

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from scripts.init_agent import PREDECESSOR
 from scripts.profiles import binding, plugins
 from scripts.swarm import (
     affinity,
+    capacity,
     effort_range,
     host_budget,
     live_binding,
@@ -79,8 +81,8 @@ def _model_args(agent, chosen, environ, bounds, preserve=False):
     return model_flags(agent, _set(chosen.get("model")) or model, effort)
 
 
-def preserves_effort(saved: dict, lane: str, quota_transfer: bool) -> bool:
-    return bool(saved) and (lane != MASTER or quota_transfer)
+def preserves_effort(recorded: bool, lane: str) -> bool:
+    return recorded and lane != MASTER
 
 
 def _lane_default(lane, agent, chosen):
@@ -174,6 +176,7 @@ class HerdrRuntime:
         self.refusals = {}
         self.end, self.reap = reaper.retire, reaper.reap
         self._quota_previous = {}
+        self._host_spent = capacity.no_spawns
 
     def has_capacity(self, config):
         environ = dict(os.environ)
@@ -226,13 +229,16 @@ class HerdrRuntime:
         if requirements:
             requirements = self._quota_preferring(requirements)
         warned = self._quota_warned()
-        inputs = capacity.ScaleInputs(self._quota_accounts, agents, demand, self.host, self._quota_previous, warned)
-        host = capacity.host_room(config, inputs)
+        previous = self._quota_previous
+        inputs = capacity.ScaleInputs(
+            self._quota_accounts, agents, demand, self.host, previous, warned, self._host_spent, int(now * 1000)
+        )
+        host = capacity.granted(capacity.host_room(config, inputs), previous, inputs.now_ms)
         config, scaled = capacity.autoscaled(config, inputs, host)
         decision = capacity.calculate(
             config, self._quota_accounts, agents, demand, requirements, accounts, warned=warned
         )
-        decision["host"] = capacity.granted(host, self._quota_previous, int(now * 1000))
+        decision["host"] = host
         if scaled:
             decision["autoscale"] = scaled
         for task, reason in self._quota_held.items():
@@ -254,6 +260,9 @@ class HerdrRuntime:
 
     def quota_previous(self, decision: dict) -> None:
         self._quota_previous = decision
+
+    def quota_spent(self, counter: Callable[[int], int]) -> None:
+        self._host_spent = counter
 
     def quota_requirements(self, config: SwarmConfig, ready: dict) -> dict:
         from scripts.swarm.capacity import _harnesses
@@ -526,7 +535,7 @@ class HerdrRuntime:
                     picked.__dict__,
                     environ,
                     effort_range.of(config),
-                    preserve=preserves_effort(saved, lane, quota_transfer),
+                    preserve=preserves_effort(bool(saved), lane),
                 ),
                 *mode,
             ],
@@ -547,6 +556,8 @@ class HerdrRuntime:
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
         if not agent.profile:
             raise SpawnError("unsupported resume: original profile is missing", "unsupported")
+        if agent.harness not in effort_range.EFFORTS:
+            raise SpawnError(f"unsupported resume harness: {agent.harness}", "unsupported")
         argv = self._argv(
             config,
             agent.name,
@@ -565,7 +576,11 @@ class HerdrRuntime:
         )
         route = ["--route", agent.account] if agent.account else []
         model = _model_args(
-            agent.harness, picked.__dict__, dict(os.environ), effort_range.of(config), preserve=bool(agent.effort)
+            agent.harness,
+            picked.__dict__,
+            dict(os.environ),
+            effort_range.of(config),
+            preserve=preserves_effort(bool(agent.effort), agent.lane),
         )
         argv += ["--resume", agent.conversation_id, "--", *route, *model]
         placed = self._launch(config, agent.lane, agent.task, agent.name, argv)
