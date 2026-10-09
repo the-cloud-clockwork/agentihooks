@@ -222,6 +222,104 @@ def test_coach_mode_is_accepted_by_the_control_endpoint():
         control_argv({"action": "set", "gates": {"watch": "coach"}})
 
 
+def coach(tmp_path, pr, asked, verdict="fail", head=None, ledger=None, mail=None):
+    return intent.Check(
+        SLUG,
+        "coach",
+        NOW,
+        ledger or Ledger(),
+        mail or Mail(),
+        lambda url: pr,
+        lambda state: asked.append(state) or (verdict, "missing behavior"),
+        home=tmp_path,
+        head=head,
+    )
+
+
+def test_a_draft_is_not_judged_and_holds_merge_until_its_ready_head_is_judged(tmp_path):
+    asked, ledger, mail = [], Ledger(), Mail()
+    coach(tmp_path, {**PR, "head": "red", "draft": True}, asked, ledger=ledger, mail=mail).run(DOC)
+    assert asked == []
+    assert (ledger.updates, ledger.comments, mail.sent) == ([], [], [])
+    assert Verdicts(SLUG, "intent", tmp_path).read(TASK) == {
+        "verdict": "pending",
+        "reason": "intent check running",
+        "at": NOW,
+        "phase": "p8",
+    }
+    assert Verdicts(SLUG, "intent-coach", tmp_path).read(TASK) is None
+    assert not gate(tmp_path).allowed
+    coach(tmp_path, {**PR, "head": "ready", "draft": False}, asked, ledger=ledger, mail=mail).run(DOC)
+    assert len(asked) == 1
+    assert "fix round 1 of 2" in mail.sent[0][2]
+    assert Verdicts(SLUG, "intent-coach", tmp_path).read(TASK)["coach_rounds"] == 0
+
+
+def test_a_draft_after_a_judged_head_keeps_its_rounds(tmp_path):
+    asked = []
+    coach(tmp_path, {**PR, "head": "one"}, asked).run(DOC)
+    coach(tmp_path, {**PR, "head": "two", "draft": True}, asked).run(DOC)
+    mail = Mail()
+    coach(tmp_path, {**PR, "head": "three"}, asked, mail=mail).run(DOC)
+    assert len(asked) == 2
+    assert "fix round 2 of 2" in mail.sent[0][2]
+
+
+def corrected(**fields):
+    return {**DOC, "tasks": [{**DOC["tasks"][0], **fields}]}
+
+
+@pytest.mark.parametrize("use_head", [False, True])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"description": "Refuse merge and done on a failed check."},
+        {"title": "Intent gate"},
+        {"plan_lines": "3-5"},
+    ],
+)
+def test_a_corrected_task_on_a_final_head_is_judged_again_without_a_fix_round(tmp_path, change, use_head):
+    asked, head = [], (lambda url: "final") if use_head else None
+    coach(tmp_path, {**PR, "head": "final"}, asked, head=head).run(DOC)
+    coach(tmp_path, {**PR, "head": "final"}, asked, head=head).run(DOC)
+    assert len(asked) == 1
+    ledger, mail = Ledger(), Mail()
+    coach(tmp_path, {**PR, "head": "final"}, asked, "pass", head, ledger, mail).run(corrected(**change))
+    assert len(asked) == 2
+    record = Verdicts(SLUG, "intent", tmp_path).read(TASK)
+    assert (record["verdict"], record["coach_rounds"], record["head"]) == ("pass", 0, "final")
+    assert gate(tmp_path, f"agentihooks swarm {SLUG} done --pr x").allowed
+
+
+def test_a_corrected_phase_is_judged_again_on_the_same_head(tmp_path):
+    asked = []
+    coach(tmp_path, {**PR, "head": "final"}, asked).run(DOC)
+    phases = [DOC["phases"][0], {**DOC["phases"][1], "description": "Stop failures before merge."}]
+    coach(tmp_path, {**PR, "head": "final"}, asked).run({**DOC, "phases": phases})
+    assert len(asked) == 2
+
+
+def test_a_changed_plan_slice_text_is_judged_again_on_the_same_head(tmp_path, monkeypatch):
+    asked, plan = [], {"text": "line one"}
+    monkeypatch.setattr(intent.plan_read, "exact", lambda doc, task: plan["text"])
+    doc = corrected(plan_lines="1-1")
+    coach(tmp_path, {**PR, "head": "final"}, asked).run(doc)
+    coach(tmp_path, {**PR, "head": "final"}, asked).run(doc)
+    assert len(asked) == 1
+    plan["text"] = "line one corrected"
+    mail = Mail()
+    coach(tmp_path, {**PR, "head": "final"}, asked, mail=mail).run(doc)
+    assert len(asked) == 2
+    assert "fix round 1 of 2" in mail.sent[0][2]
+
+
+def test_a_proof_note_alone_does_not_rejudge_a_final_head(tmp_path):
+    asked = []
+    coach(tmp_path, {**PR, "head": "final"}, asked).run(DOC)
+    coach(tmp_path, {**PR, "head": "final"}, asked).run(corrected(proof={"command": "pytest"}))
+    assert len(asked) == 1
+
+
 @pytest.mark.parametrize("result", [None, "blank", "failed", "timeout", "error"])
 def test_unavailable_head_is_not_judged(tmp_path, result):
     import subprocess

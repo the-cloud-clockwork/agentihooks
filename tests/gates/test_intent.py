@@ -101,6 +101,7 @@ class TestGate:
             "cd x && /usr/bin/gh pr merge --rebase 9",
             f"agentihooks swarm {SLUG} done --pr {URL}",
             f"env A=1 agentihooks swarm {SLUG} done",
+            f"agentihooks swarm {SLUG} merge queue {URL}",
         ],
     )
     def test_a_failed_verdict_refuses_merge_and_done(self, tmp_path, command):
@@ -123,6 +124,9 @@ class TestGate:
             "agentihooks swarm demo pr x",
             "agentihooks swarm done",
             "agentihooks ledger demo done",
+            f"agentihooks swarm {SLUG} merge state {URL}",
+            f"agentihooks swarm {SLUG} merge dequeue {URL}",
+            f"agentihooks swarm {SLUG} queue merge {URL}",
             "git merge dev",
             "A=1; gh pr view 9",
         ],
@@ -345,19 +349,23 @@ class TestState:
         state = intent.state_of({**DOC, "phases": []}, DOC["tasks"][0], PR)
         assert (state["phase"], state["phase_intent"]) == ("", "")
 
-    @pytest.mark.parametrize("body,expected", [(None, ""), ("Closes 4", "Closes 4")])
-    def test_pr_view_reads_title_body_and_file_paths(self, body, expected):
-        raw = {"title": "T", "body": body, "files": [{"path": "a.py", "additions": 1}, {"path": "b.py"}]}
+    @pytest.mark.parametrize(
+        "body,expected,draft",
+        [(None, "", {}), ("Closes 4", "Closes 4", {"isDraft": False}), ("Closes 4", "Closes 4", {"isDraft": True})],
+    )
+    def test_pr_view_reads_title_body_file_paths_and_draft(self, body, expected, draft):
+        raw = {"title": "T", "body": body, "files": [{"path": "a.py", "additions": 1}, {"path": "b.py"}], **draft}
         ran = Ran((0, "abc123\n"), (0, json.dumps(raw)), (0, ""), (0, "abc123\n"))
         assert intent.pr_view(URL, run=ran) == {
             "head": "abc123",
             "title": "T",
             "body": expected,
             "files": ["a.py", "b.py"],
+            "draft": draft.get("isDraft", False),
             "reviewer_findings": {"reviews": [], "comments": [], "inline": []},
         }
         args, kwargs = ran.calls[1]
-        assert args == ["gh", "pr", "view", URL, "--json", "title,body,files,reviews,comments"]
+        assert args == ["gh", "pr", "view", URL, "--json", "title,body,files,reviews,comments,isDraft"]
         assert (kwargs["capture_output"], kwargs["text"], kwargs["timeout"]) == (True, True, intent.GH_TIMEOUT_SEC)
 
     @pytest.mark.parametrize("results", [[(1, "")], [(0, "nope")], [OSError("x")], [(0, json.dumps({"body": "b"}))]])
