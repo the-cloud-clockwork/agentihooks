@@ -85,7 +85,18 @@ def test_a_node_read_pages_its_subtree(large):
     assert [row["node"] for row in rows] == ["phases/p3", *(f"tasks/t3-{m}" for m in range(100))]
 
 
-def test_a_hierarchy_that_changes_between_pages_restarts_from_the_first_page(tmp_path):
+@pytest.fixture
+def pauses(monkeypatch):
+    seen = []
+    monkeypatch.setattr(api_client.time, "sleep", seen.append)
+    return seen
+
+
+def backoff(attempt, pause):
+    return api_client.BACKOFF * 2**attempt / 2 <= pause <= api_client.BACKOFF * 2**attempt
+
+
+def test_a_hierarchy_that_changes_between_pages_restarts_from_the_first_page(tmp_path, pauses):
     before = repository(tmp_path / "before", state(2, 80))
     after = repository(tmp_path / "after", state(2, 80, flip="claimed"))
     served = Served(before, after, after, after)
@@ -98,14 +109,16 @@ def test_a_hierarchy_that_changes_between_pages_restarts_from_the_first_page(tmp
         False,
         True,
     ]
+    assert len(pauses) == 1 and backoff(0, pauses[0])
 
 
-def test_a_hierarchy_that_keeps_changing_gives_up_with_the_conflict(tmp_path):
+def test_a_hierarchy_that_keeps_changing_gives_up_with_the_conflict(tmp_path, pauses):
     served = Served(repository(tmp_path / "a", state(2, 80)), repository(tmp_path / "b", state(2, 80, "pr")))
     with pytest.raises(urllib.error.HTTPError) as caught:
         served.collection(SLUG, "hierarchy")
     assert caught.value.code == 409
     assert len(served.paths) == 2 * (api_client.RETRIES + 1)
+    assert len(pauses) == api_client.RETRIES and all(backoff(n, pause) for n, pause in enumerate(pauses))
 
 
 class Inbox:

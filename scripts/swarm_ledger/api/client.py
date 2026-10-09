@@ -48,8 +48,10 @@ class ResourceClient:
                 rows, query = [], {"limit": 100}
                 if path.startswith("hierarchy"):
                     # The export snapshot holds no hierarchy, so a changed tree is walked again from its first page.
-                    if next(restarts) == RETRIES:
+                    attempt = next(restarts)
+                    if attempt == RETRIES:
                         raise replay from None
+                    time.sleep(random.uniform(BACKOFF * 2**attempt / 2, BACKOFF * 2**attempt))
                     continue
                 snapshot = self.request(slug, "swarm/export" if swarm else "export", {})["data"]
                 continue
