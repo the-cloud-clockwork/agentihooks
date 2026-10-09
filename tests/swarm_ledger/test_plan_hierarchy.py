@@ -240,6 +240,8 @@ def test_malformed_plan_ops_are_refused(op, error):
         ({"plans": [{"id": "a"}], "phases": [{"id": "p1", "plan": 3}]}, "phases/p1/plan must be str"),
         ({"plans": [{"id": "a"}, {"id": "a"}]}, "every plans item needs a unique id"),
         ({"plans": [1]}, "plans must be a list of objects"),
+        ({"plans": [{"id": ""}]}, "every plans item needs a unique id"),
+        ({"plans": [{"id": 5}]}, "every plans item needs a unique id"),
         ({"slices": 3}, "slices must be a list of objects"),
         ({"slices": [{"id": "a.x"}, {"id": "a.x"}]}, "every slices item needs a unique id"),
         ({"plans": [{"id": "a", "url": "ftp://x"}]}, "url must be an http or https link"),
@@ -347,6 +349,17 @@ def test_a_task_without_a_phase_is_refused_its_slice():
     doc = {"slices": [{"id": "a.x", "phase": "phases/p1", "anchor": "x"}]}
     assert ledger_plans.task_refusal(doc, {"id": "t1", "slice": "slices/a.x"}) == (
         "task t1 is in phase none but its slice slices/a.x belongs to phases/p1"
+    )
+
+
+def test_only_an_update_of_a_parent_field_checks_the_slice_link():
+    doc = {
+        "slices": [{"id": "a.x", "phase": "phases/p1", "anchor": "x"}],
+        "tasks": [{"id": "t1", "phase": "p2", "slice": "slices/a.x"}],
+    }
+    assert ledger_tasks._parent_refusal(doc, {"item": "tasks/t1", "fields": {"state": "done"}}) == ""
+    assert ledger_tasks._parent_refusal(doc, {"item": "tasks/t1", "fields": {"phase": "p2"}}) == (
+        "task t1 is in phase p2 but its slice slices/a.x belongs to phases/p1"
     )
 
 
