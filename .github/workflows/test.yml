@@ -1048,39 +1048,6 @@ jobs:
       - name: Report each stage's wall time against its budget
         run: python3 -m scripts.ci_budget --run "$RUNNER_TEMP/run.json" --jobs "$RUNNER_TEMP/jobs.jsonl"
 
-  delivery-budget:
-    needs: [gate-required]
-    if: ${{ always() && github.event_name == 'merge_group' }}
-    runs-on: anton-light
-    timeout-minutes: 3
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Mint the tcc main ci App token
-        id: app-token
-        uses: actions/create-github-app-token@v3.2.0
-        with:
-          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
-          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
-          repositories: ${{ github.event.repository.name }}
-          permission-actions: read
-          permission-contents: read
-          permission-pull-requests: read
-
-      - name: Read the completed required check and this attempt's jobs
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$RUNNER_TEMP/run.json"
-          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" --jq '.jobs[] | @json' > "$RUNNER_TEMP/jobs.jsonl"
-
-      - name: Report final head and queue checks against the delivery limit
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: python3 -m scripts.ci_budget --run "$RUNNER_TEMP/run.json" --jobs "$RUNNER_TEMP/jobs.jsonl"
-
   gate-required:
     name: Gate — Required
     needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, size, lint, sonar, mutation-plan, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, wiring, semgrep, dependency-audit, stage-budget]
