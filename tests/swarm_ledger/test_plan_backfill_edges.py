@@ -57,7 +57,7 @@ def test_guarded_slice_update_never_assigns_a_completed_task(legacy):
         "op": "task_update",
         "by": "planner",
         "item": "tasks/old",
-        "fields": {"plan_slice": "bal6"},
+        "fields": {"plan_slice": "absent"},
         "if_state": ["open"],
     }
     assert ledger_tasks.apply(doc, op, context()) is True
@@ -109,6 +109,36 @@ def test_task_add_without_any_plan_source_is_refused(plan_ledger):
     assert ledger_tasks.apply(doc, op, ctx) is False
     assert ctx.refused == ["publish a plan artifact for the phase before adding a plan slice"]
     assert doc["tasks"] == []
+
+
+def test_slice_update_without_any_source_preserves_the_task_and_names_the_refusal(plan_ledger):
+    doc = core.sync(plan_ledger)[0]
+    row = {"id": "old", "phase": "p1", "state": "open"}
+    doc["tasks"] = [row]
+    op = {"op": "task_update", "by": "planner", "item": "tasks/old", "fields": {"plan_slice": "bal6"}}
+    ctx = context()
+    assert ledger_tasks.apply(doc, op, ctx) is False
+    assert ctx.refused == ["publish a plan artifact for the phase before adding a plan slice"]
+    assert row == {"id": "old", "phase": "p1", "state": "open"}
+
+
+def test_missing_only_update_is_an_accepted_noop_for_an_existing_range(legacy):
+    doc = core.sync(legacy)[0]
+    row = {"id": "old", "phase": "p1", "state": "open", "plan_slice": "bal6", "plan_lines": "3-4"}
+    doc["tasks"] = [row]
+    op = {
+        "op": "task_update",
+        "by": "planner",
+        "item": "tasks/old",
+        "fields": {"plan_slice": "absent"},
+        "if_plan_lines_missing": True,
+    }
+    ctx = context()
+    assert ledger_tasks.apply(doc, op, ctx) is True
+    assert ctx.refused == []
+    assert ctx.dirty is False
+    assert row["plan_slice"] == "bal6"
+    assert row["plan_lines"] == "3-4"
 
 
 def test_phase_link_is_the_default_slice_source(legacy):
