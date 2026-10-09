@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import controller, lease
+from scripts.swarm import cli, controller, lease, timing
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
@@ -133,8 +133,6 @@ def test_a_tick_whose_lease_was_stolen_stops(store, clock):
 
 
 def test_run_tick_slower_than_the_lease_finishes(env, clock, monkeypatch):  # noqa: F811
-    from scripts.swarm import cli
-
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     started = clock[0]
@@ -149,3 +147,98 @@ def test_run_tick_slower_than_the_lease_finishes(env, clock, monkeypatch):  # no
     assert clock[0] - started > lease.TTL_MS
     assert lease.current(store, "sw").epoch == 1
     assert store.redis.get(store.key("sw", "last-tick"))
+
+
+def test_keep_tick_renews_the_lease_and_extends_the_tick_lock(store, clock):
+    held = lease.acquire(store, "sw", "home")
+    token = controller.take_tick_lock(store, "sw", held, 1000)
+    clock[0] = 150000
+    controller.keep_tick(store, "sw", held, token, 600000)
+    assert store.redis.pttl(store.key("sw", "tick-lock")) > 1000
+    assert store.redis.get(store.key("sw", "tick-lock")) == token
+    assert lease.current(store, "sw") == lease.Lease("home", 1, 330000)
+
+
+def test_keep_tick_refuses_a_tick_lock_it_no_longer_holds(store, clock):
+    held = lease.acquire(store, "sw", "home")
+    controller.take_tick_lock(store, "sw", held, 1000)
+    store.redis.set(store.key("sw", "tick-lock"), "another tick", px=1000)
+    with pytest.raises(SwarmError) as error:
+        controller.keep_tick(store, "sw", held, "this tick", 600000)
+    assert str(error.value) == "the tick lock is stale"
+    assert store.redis.pttl(store.key("sw", "tick-lock")) <= 1000
+
+
+def test_keep_tick_retries_a_conflicting_transaction(store, clock, monkeypatch):
+    held = lease.acquire(store, "sw", "home")
+    token = controller.take_tick_lock(store, "sw", held, 1000)
+    pipeline, conflicts = store.redis.pipeline, [1]
+
+    def interleaved():
+        pipe = pipeline()
+        execute = pipe.execute
+
+        def commit():
+            if conflicts and pipe.command_stack and pipe.command_stack[-1][0][0] == "PEXPIRE":
+                conflicts.pop()
+                store.redis.pexpire(store.key("sw", "tick-lock"), 1000)
+            return execute()
+
+        pipe.execute = commit
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", interleaved)
+    controller.keep_tick(store, "sw", held, token, 600000)
+    assert conflicts == []
+    assert store.redis.pttl(store.key("sw", "tick-lock")) > 1000
+
+
+def test_a_step_runs_the_before_step_hook_first():
+    calls = []
+    keeping = timing.BEFORE_STEP.set(lambda: calls.append("keep"))
+    try:
+        assert timing.call(lambda: calls.append("step") or "done") == "done"
+    finally:
+        timing.BEFORE_STEP.reset(keeping)
+    assert calls == ["keep", "step"]
+    timing.call(lambda: calls.append("free"))
+    assert calls == ["keep", "step", "free"]
+
+
+def test_run_tick_with_slow_steps_that_never_touch_the_ledger_finishes(env, clock, monkeypatch):  # noqa: F811
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    started = clock[0]
+
+    def slow(*args):
+        clock[0] += 120000
+        return []
+
+    for module, name in ((cli.progress, "checks_pass"), (cli.waits, "end_pass"), (cli.quiet, "quiet_pass")):
+        monkeypatch.setattr(module, name, slow)
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert clock[0] - started == 360000
+    assert lease.current(store, "sw").epoch == 1
+    assert not store.redis.exists(store.key("sw", "tick-lock"))
+    assert timing.BEFORE_STEP.get() is None
+
+
+def test_run_tick_stops_between_steps_when_another_controller_took_the_lease(env, clock, monkeypatch):  # noqa: F811
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    later = []
+
+    def stolen(*args):
+        clock[0] += lease.TTL_MS
+        lease.acquire(store, "sw", "other")
+        return []
+
+    monkeypatch.setattr(cli.progress, "checks_pass", stolen)
+    monkeypatch.setattr(cli.waits, "end_pass", lambda *args: later.append(args) or [])
+    with pytest.raises(SwarmError) as error:
+        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert str(error.value) == "the controller lease is stale"
+    assert later == []
+    assert lease.current(store, "sw").owner == "other"
+    assert not store.redis.exists(store.key("sw", "tick-lock"))
+    assert timing.BEFORE_STEP.get() is None

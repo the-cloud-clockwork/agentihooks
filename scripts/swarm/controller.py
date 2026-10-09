@@ -89,6 +89,25 @@ def release_tick_lock(store: RedisStore, slug: str, token: str) -> None:
             return
 
 
+def keep_tick(store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_ms: int) -> None:
+    from redis.exceptions import WatchError
+
+    lease.renew(store, slug, held)
+    key = store.key(slug, "tick-lock")
+    while True:
+        with store.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key)
+                if pipe.get(key) != token:
+                    raise SwarmError("the tick lock is stale")
+                pipe.multi()
+                pipe.pexpire(key, ttl_ms)
+                pipe.execute()
+                return
+            except WatchError:
+                continue
+
+
 def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None) -> dict:
     from scripts.swarm.cli import run_tick
 
