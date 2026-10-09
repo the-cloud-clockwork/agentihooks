@@ -1,10 +1,14 @@
+import io
 import json
 import subprocess
+import zipfile
+from types import SimpleNamespace
 
 import pytest
 
 from scripts.swarm import idle, waits
 from tests.swarm.test_cli import env, run  # noqa: F401
+from tests.swarm.test_waits import tick  # noqa: F401
 
 pytestmark = pytest.mark.unit
 URL = "https://github.com/org/repo/actions/runs/123"
@@ -39,3 +43,115 @@ def test_cli_wait_binds_the_branch_preflight_run(env, monkeypatch):  # noqa: F81
         "head": "first",
     }
     assert waits.resolution({"kind": "mutation", "target": URL, "head": "first"}, {}, None, None, None, False) == ""
+
+
+@pytest.fixture
+def preflight(monkeypatch):
+    state = SimpleNamespace(
+        run={
+            "path": ".github/workflows/mutation-preflight.yml",
+            "event": "push",
+            "head_sha": "first",
+            "status": "completed",
+            "conclusion": "success",
+        },
+        report={"files": [], "not_mutated": [], "failed": False},
+        missing=False,
+        requests=[],
+    )
+
+    def api(args, **kwargs):
+        state.requests.append(args[-1])
+        if args[-1].endswith("/zip"):
+            data = io.BytesIO()
+            with zipfile.ZipFile(data, "w") as zipped:
+                zipped.writestr("report.json", json.dumps(state.report))
+            output = data.getvalue()
+        elif "artifacts?" in args[-1]:
+            output = json.dumps(
+                {
+                    "artifacts": []
+                    if state.missing
+                    else [{"id": 7, "name": "mutation-preflight-report", "expired": False}]
+                }
+            )
+        else:
+            output = json.dumps(state.run)
+        return subprocess.CompletedProcess(args, 0, output)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    return state
+
+
+def test_the_tick_ends_a_clean_preflight_once(tick, preflight):  # noqa: F811
+    held = {**waits.on("mutation", URL), "head": "first"}
+    idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on=held)
+    assert tick.end() == [f"ended the wait of {ME}: mutation preflight {URL}, now green; no failing mutants"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert len(tick.told()) == 1
+    assert tick.end() == []
+
+
+def test_the_tick_names_every_failing_mutant_and_unmutated_file(tick, preflight):  # noqa: F811
+    preflight.run["conclusion"] = "failure"
+    preflight.report = {
+        "files": [
+            {
+                "path": "scripts/swarm/waits.py",
+                "failures": [
+                    {"name": "mutant_one", "status": "survived", "fingerprint": "aaa"},
+                    {"name": "mutant_two", "status": "no tests", "fingerprint": "bbb"},
+                ],
+            }
+        ],
+        "not_mutated": [{"path": "scripts/swarm/cli.py", "reason": "budget exhausted"}],
+        "failed": True,
+    }
+    held = {**waits.on("mutation", URL), "head": "first"}
+    idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on=held)
+    tick.end()
+    assert "now red" in tick.told()[0]
+    assert "scripts/swarm/waits.py:mutant_one:aaa (survived)" in tick.told()[0]
+    assert "scripts/swarm/waits.py:mutant_two:bbb (no tests)" in tick.told()[0]
+    assert "scripts/swarm/cli.py: budget exhausted" in tick.told()[0]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
+@pytest.mark.parametrize("status", ["queued", "in_progress"])
+def test_an_active_preflight_keeps_the_wait(tick, preflight, status):  # noqa: F811
+    preflight.run["status"] = status
+    held = {**waits.on("mutation", URL), "head": "first"}
+    idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on=held)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == held
+    assert tick.told() == []
+    assert len(preflight.requests) == 1
+
+
+def test_a_successful_run_without_a_mutation_report_ends_red(preflight):
+    preflight.missing = True
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert "now red; complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
+
+
+@pytest.mark.parametrize("conclusion", ["cancelled", "timed_out", "skipped"])
+def test_an_incomplete_run_ends_red_without_claiming_a_pass(preflight, conclusion):
+    preflight.run["conclusion"] = conclusion
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now red; run {conclusion}"
+    )
+    assert len(preflight.requests) == 1
+
+
+def test_an_unreadable_run_keeps_the_wait(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args, 1, ""))
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == ""
+
+
+@pytest.mark.parametrize("field,value", [("path", "tests.yml"), ("event", "pull_request"), ("head_sha", "other")])
+def test_a_run_that_changes_its_identity_ends_red(preflight, field, value):
+    preflight.run[field] = value
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert "run no longer matches" in waits.resolution(held, {}, None, None, None, False)
