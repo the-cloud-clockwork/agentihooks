@@ -78,8 +78,13 @@ docker compose exec -T -e AGENTIHOOKS_AGENT_NAME=host-agent swarm agentihooks ms
 inbox="$(docker exec "$run-member" agentihooks msg inbox)"
 printf 'member inbox: %s\n' "$inbox"
 [[ $inbox == *"hello from the host"* ]]
-sleep 5
-state="$(docker inspect -f '{{.State.Running}} {{.RestartCount}} {{.State.Health.Status}}' "$(docker compose ps -q controller)")"
+for _ in $(seq 30); do
+  state="$(docker inspect -f '{{.State.Running}} {{.RestartCount}} {{.State.Health.Status}}' "$(docker compose ps -q controller)")"
+  if [[ $state != *starting ]]; then
+    break
+  fi
+  sleep 2
+done
 if [[ $state != "true 0 healthy" ]]; then
   docker compose logs controller 2>&1 | grep -v swarm_tick_step | tail -5 >&2
   printf 'the controller is not up after taking the lease (running, restarts, health: %s)\n' "$state" >&2
