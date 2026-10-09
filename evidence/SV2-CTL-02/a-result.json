@@ -1,6 +1,6 @@
 {
   "case": "T-SV2-CTL-02-A",
-  "tested_commit": "7811e04ef4c9d065b9f8c45ab9ccb063a08a860a",
+  "tested_commit": "9d7d986ee4cf615064b2d74f3f51af09d5316b16",
   "runs": [
     {
       "case": "T-SV2-CTL-02-A",
@@ -9,9 +9,9 @@
       "input_sha256": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57",
       "observed": {
         "task_id": "task",
-        "holder": "engineer@e9b231-0002",
+        "holder": "engineer@f2c121-0002",
         "generation": 2,
-        "execution_id": "exe-2ca00b3d9740480c8f77108e0df389b4",
+        "execution_id": "exe-b821dae296ff4f1eacd31e6b140208ea",
         "execution_generation": 1,
         "lease_deadline_ms": 1200,
         "state": "active",
@@ -25,7 +25,7 @@
         "admitted"
       ],
       "rollback": "not exercised",
-      "tested_commit": "7811e04ef4c9d065b9f8c45ab9ccb063a08a860a"
+      "tested_commit": "9d7d986ee4cf615064b2d74f3f51af09d5316b16"
     },
     {
       "case": "T-SV2-CTL-02-A",
@@ -34,9 +34,9 @@
       "input_sha256": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57",
       "observed": {
         "task_id": "task",
-        "holder": "engineer@b1bea8-0002",
+        "holder": "engineer@743d06-0002",
         "generation": 2,
-        "execution_id": "exe-3335cb3968804f34882863b1332ac5fe",
+        "execution_id": "exe-42a1aa07c9c74573b6f431d1ce4cc2bf",
         "execution_generation": 1,
         "lease_deadline_ms": 1200,
         "state": "active",
@@ -50,7 +50,7 @@
         "admitted"
       ],
       "rollback": "not exercised",
-      "tested_commit": "7811e04ef4c9d065b9f8c45ab9ccb063a08a860a"
+      "tested_commit": "9d7d986ee4cf615064b2d74f3f51af09d5316b16"
     }
   ]
 }

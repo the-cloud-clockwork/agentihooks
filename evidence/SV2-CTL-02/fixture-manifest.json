@@ -1,6 +1,6 @@
 {
   "package": "SV2-CTL-02",
-  "tested_commit": "7811e04ef4c9d065b9f8c45ab9ccb063a08a860a",
+  "tested_commit": "9d7d986ee4cf615064b2d74f3f51af09d5316b16",
   "fixture": "tests/fixtures/swarm_v2/task-authority.json",
   "evidence_class": "mocked Redis with actual Lua interpreter",
   "runs": {
