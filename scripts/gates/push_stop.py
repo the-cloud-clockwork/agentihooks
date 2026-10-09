@@ -4,6 +4,7 @@ uncommitted changes, a push origin refused, or pushed work with no pull request 
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +22,11 @@ SETTLED = "a later stop passed with the work committed, on origin and recorded"
 PUSHED = "pushed"
 GITHUB_RE = re.compile(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
 GIT_TIMEOUT_S = 60
+PREPUSH = Path("scripts") / "ci_prepush" / "__init__.py"
+GATE_FAILED = (
+    "The pre push gate failed in {path}, so the stop hook did not push it. "
+    "Run python -m scripts.ci_prepush there, fix what fails and commit."
+)
 
 
 @dataclass(frozen=True)
@@ -59,6 +65,19 @@ def trees(root, name):
     own = re.compile(rf"{re.escape(plain(name))}(?:-\d+)?")
     found = (inspect(path, own) for path in sorted(Path(root).glob("*/*")) if own.fullmatch(path.name))
     return [tree for tree in found if tree is not None]
+
+
+def gated(tree):
+    """Whether the repo's pre push gate passes on HEAD: a repo without one passes, a stamped HEAD is not rerun."""
+    if not (tree.path / PREPUSH).is_file():
+        return True
+    from scripts.ci_prepush import passed
+
+    if passed(tree.path):
+        return True
+    return (
+        subprocess.run([sys.executable, "-m", "scripts.ci_prepush"], cwd=tree.path, capture_output=True).returncode == 0
+    )
 
 
 def push(tree):
@@ -124,9 +143,11 @@ class PushStop:
         task = next((t for t in doc["tasks"] if t.get("id") == who.task), None) if doc else {}
         if task is None or ledger_kinds.kind(task) == "plan":
             return Decision()
-        store, owed = self.connect(), False
+        store, owed, failed = self.connect(), False, []
         for tree in trees(self.root(), who.name):
-            if tree.unpushed and push(tree):
+            if tree.unpushed and not gated(tree):
+                failed.append(GATE_FAILED.format(path=tree.path))
+            elif tree.unpushed and push(tree):
                 self.record(store, ledger, who, tree)
             owed = owed or tree.dirty or (tree.unpushed and not self.on_origin(tree))
             owed = owed or (doc and tree.own and not task.get("pr_url") and self.unrecorded(store, doc, who))
@@ -134,7 +155,7 @@ class PushStop:
             self.settle(store, who)
             return Decision()
         self.notify(store, who)
-        return Decision.deny(TEMPLATE)
+        return Decision.deny(" ".join([TEMPLATE, *failed]))
 
     def on_origin(self, tree):
         return count(tree.path, "HEAD", "--not", "--remotes=origin") == 0

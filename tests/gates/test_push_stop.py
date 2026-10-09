@@ -5,7 +5,7 @@ import pytest
 
 from scripts.gates import Call, Gate, Who, push_stop
 from scripts.gates.progress import Progress
-from scripts.gates.push_stop import TEMPLATE, PushStop, count, record_text
+from scripts.gates.push_stop import GATE_FAILED, TEMPLATE, PushStop, count, record_text
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
 from scripts.swarm.naming import plain
@@ -464,3 +464,62 @@ def test_git_runs_in_the_worktree_with_a_timeout(monkeypatch):
 
 def test_a_count_git_cannot_answer_is_zero(tmp_path):
     assert count(tmp_path, "HEAD") == 0
+
+
+def install_gate(rig, code):
+    log = rig.root / "gate.log"
+    gate = rig.tree / "scripts" / "ci_prepush"
+    gate.mkdir(parents=True)
+    (rig.tree / "scripts" / "__init__.py").write_text("")
+    (gate / "__init__.py").write_text("")
+    (gate / "__main__.py").write_text(
+        "import os\n"
+        f"with open({str(log)!r}, 'a') as log:\n"
+        "    log.write(os.getcwd() + ' ' + os.environ.get('AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN', '') + '\\n')\n"
+        "print('gate output')\n"
+        f"raise SystemExit({code})\n"
+    )
+    git(rig.tree, "add", "scripts")
+    git(rig.tree, "commit", "-m", "gate")
+    return log
+
+
+def test_a_failing_pre_push_gate_keeps_the_branch_off_origin_and_names_the_worktree(monkeypatch, rig):
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 1)
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_FAILED.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+    assert rig.ledger.comments == []
+    assert log.read_text() == f"{rig.tree} \n"
+
+
+def test_a_passing_pre_push_gate_runs_in_the_worktree_with_the_local_test_setting_then_pushes(capfd, monkeypatch, rig):
+    monkeypatch.setenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", "true")
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 0)
+    capfd.readouterr()
+    assert rig.stop().allowed
+    assert rig.remote_head() == git(rig.tree, "rev-parse", "HEAD")
+    assert log.read_text() == f"{rig.tree} true\n"
+    assert capfd.readouterr().out == ""
+
+
+def test_a_head_the_gate_already_passed_is_pushed_without_running_it_again(rig):
+    from scripts.ci_prepush import stamp_path
+
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 1)
+    head = git(rig.tree, "rev-parse", "HEAD")
+    stamp_path(rig.tree).write_text(head)
+    assert rig.stop().allowed
+    assert rig.remote_head() == head
+    assert not log.exists()
+
+
+def test_the_failure_text_is_exact():
+    assert GATE_FAILED.format(path="/w") == (
+        "The pre push gate failed in /w, so the stop hook did not push it. "
+        "Run python -m scripts.ci_prepush there, fix what fails and commit."
+    )
