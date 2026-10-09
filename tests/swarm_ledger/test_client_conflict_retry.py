@@ -14,8 +14,11 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 CONFLICT = b'{"error": {"code": "revision_conflict", "message": "Resource changed since the expected revision"}}'
 
 
-def conflict():
-    return urllib.error.HTTPError("http://ledger.test", 409, "Conflict", {}, io.BytesIO(CONFLICT))
+def conflict(path=None):
+    body = json.loads(CONFLICT)
+    if path:
+        body["error"]["details"] = {"path": path}
+    return urllib.error.HTTPError("http://ledger.test", 409, "Conflict", {}, io.BytesIO(json.dumps(body).encode()))
 
 
 class Scripted(api_client.ResourceClient):
@@ -73,7 +76,7 @@ def test_a_conflict_past_five_retries_fails_naming_the_conflict(pauses):
     body = json.loads(error.value.read())["error"]
     assert body["code"] == "revision_conflict"
     assert body["message"] == f"Resource changed since the expected revision: {error.value.msg}"
-    assert error.value.msg == "revision conflict persisted after 5 retries on a batch guarding chat"
+    assert error.value.msg == "revision conflict on chat persisted after 5 retries"
     assert [path for path, _ in client.calls].count("operations") == 6
     assert len(pauses) == 5
 
@@ -101,12 +104,30 @@ def test_a_pinned_resource_sends_its_pin_and_is_not_retried(pauses):
 
 def test_a_pin_on_another_resource_survives_the_retries(pauses):
     pinned = {"op": "set", "id": "s-1", "path": "phases/p1/done", "value": True, "expected_revision": "p0"}
-    client = Scripted({"revision": "r0"}, conflict(), {"revision": "r1"}, {"applied": ["s-1", "m-1"]})
+    client = Scripted({"revision": "r0"}, conflict("chat"), {"revision": "r1"}, {"applied": ["s-1", "m-1"]})
     operations = [pinned, *chat_add()]
     client.mutate(SLUG, operations)
     posts = [payload["guards"] for path, payload in client.calls if path == "operations"]
     assert posts == [{"phases/p1": "p0", "chat": "r0"}, {"phases/p1": "p0", "chat": "r1"}]
     assert operations[0]["expected_revision"] == "p0"
+
+
+def test_a_conflict_on_a_pinned_resource_in_a_mixed_batch_is_not_retried(pauses):
+    pinned = {"op": "set", "id": "s-1", "path": "phases/p1/done", "value": True, "expected_revision": "p0"}
+    client = Scripted({"revision": "r0"}, conflict("phases/p1"))
+    with pytest.raises(urllib.error.HTTPError) as error:
+        client.mutate(SLUG, [pinned, *chat_add()])
+    assert json.loads(error.value.read())["error"]["details"] == {"path": "phases/p1"}
+    assert [path for path, _ in client.calls] == ["chat", "operations"]
+    assert pauses == []
+
+
+def test_the_exhausted_message_names_the_resource_the_server_reports(pauses):
+    replies = [reply for n in range(6) for reply in ({"revision": f"r{n}"}, conflict("chat"))]
+    with pytest.raises(urllib.error.HTTPError) as error:
+        Scripted(*replies).mutate(SLUG, [*chat_add(), {"op": "join", "id": "j-1", "by": "swarm"}])
+    assert error.value.msg == "revision conflict on chat persisted after 5 retries"
+    assert json.loads(error.value.read())["error"]["details"] == {"path": "chat"}
 
 
 def test_a_retry_reuses_the_operation_id_so_an_applied_write_is_not_duplicated(live):  # noqa: F811
@@ -153,7 +174,7 @@ class Crowded(api_client.ResourceClient):
 def test_a_burst_of_writers_reading_one_revision_all_land(live):  # noqa: F811
     from tests.swarm_ledger.test_ledger_authority import ledger
 
-    writers, conflicts, results = 6, [], {}
+    writers, conflicts, results = len(TITLES), [], {}
     barrier = threading.Barrier(writers, timeout=30)
 
     def add(n):

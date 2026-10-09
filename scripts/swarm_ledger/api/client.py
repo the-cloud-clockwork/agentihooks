@@ -70,7 +70,7 @@ class ResourceClient:
                 replay, error = failure(exc)
             if replay.code == 403 and "details" in error:
                 return error["details"]
-            if replay.code != 409 or error.get("code") != "revision_conflict" or not fetched:
+            if not retryable(replay, error, fetched):
                 raise replay
             if attempt == RETRIES:
                 raise exhausted(replay, error, fetched)
@@ -103,8 +103,16 @@ def failure(exc: urllib.error.HTTPError) -> tuple[urllib.error.HTTPError, dict]:
     return replay, error if isinstance(error, dict) else {}
 
 
+def retryable(replay: urllib.error.HTTPError, error: dict, fetched: set) -> bool:
+    if replay.code != 409 or error.get("code") != "revision_conflict":
+        return False
+    path = (error.get("details") or {}).get("path")
+    return path in fetched if path else bool(fetched)
+
+
 def exhausted(replay: urllib.error.HTTPError, error: dict, fetched: set) -> urllib.error.HTTPError:
-    message = f"revision conflict persisted after {RETRIES} retries on a batch guarding {', '.join(sorted(fetched))}"
+    where = (error.get("details") or {}).get("path") or ", ".join(sorted(fetched))
+    message = f"revision conflict on {where} persisted after {RETRIES} retries"
     detail = ": ".join(part for part in (error.get("message"), message) if part)
     body = json.dumps({"error": {**error, "message": detail}}).encode()
     return urllib.error.HTTPError(replay.url, replay.code, message, replay.hdrs, io.BytesIO(body))
