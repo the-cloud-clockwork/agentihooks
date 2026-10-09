@@ -171,6 +171,14 @@ def test_event_comparisons_use_either_quote_style_and_operand_order(quote, rever
     assert _check({"test.yml": _gate_workflow(extra=job)}, {}) == expected
 
 
+@pytest.mark.parametrize(
+    "condition",
+    ['github.event_name == \'push"', '"push\' == github.event_name'],
+)
+def test_mismatched_event_quotes_keep_the_job_on_the_pull_request_path(condition):
+    assert ci_wiring.on_pull_requests({"if": condition}) is True
+
+
 @pytest.mark.parametrize("field", ["reason", "owner", "expires"])
 @pytest.mark.parametrize("empty", ["", None])
 def test_an_exemption_missing_a_field_is_red(field, empty):
