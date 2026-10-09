@@ -135,9 +135,13 @@ def test_a_stage_without_a_budget_or_a_started_job_records_zero():
         {**_job(14, "custom", "00:40", "00:41", "01:00"), "started_at": None},
         _job(15, "custom (2)", "00:40", "02:00", "03:00", "skipped"),
         _job(16, "custom (3)", "00:40", "00:40", "01:00"),
+        {**_job(17, "unstarted", "00:40", "00:41", "01:00"), "started_at": None},
     ]
-    (stage,) = metrics_ci.rows("sw", RUN, jobs, {})[metrics_ci.STAGES]
-    assert (stage["stage"], stage["budget"], stage["pickup_s"]) == ("custom", 0, 0.0)
+    stages = {
+        row["stage"]: (row["budget"], row["pickup_s"])
+        for row in metrics_ci.rows("sw", RUN, jobs, {})[metrics_ci.STAGES]
+    }
+    assert stages == {"custom": (0, 0.0), "unstarted": (0, 0.0)}
 
 
 @pytest.fixture
