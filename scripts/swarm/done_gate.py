@@ -12,6 +12,10 @@ WORKERS = ("eng", "ci")
 MERGED = "MERGED"
 RECHECK_MS = 24 * 60 * 60_000
 SEEN_TTL_S = 2 * 24 * 3600
+REOPENED = (
+    "Reopened by the swarm: its pull request {url} is {state}, not merged. "
+    "A code task is done only when its pull request merges."
+)
 
 
 def refusal(task, url, github):
@@ -48,10 +52,7 @@ def recheck_pass(store, slug, doc, ledger, now_ms, github):
             continue
         state = found.state.lower()
         ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""})
-        text = (
-            f"Reopened by the swarm: its pull request {url} is {state}, not merged. "
-            "A code task is done only when its pull request merges."
-        )
+        text = REOPENED.format(url=url, state=state)
         ledger.comment(slug, task_id, text, by="swarm")
         actions.append(f"task {task_id} reopened, its pull request is {state}")
     return actions

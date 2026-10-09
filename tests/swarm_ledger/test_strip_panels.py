@@ -93,7 +93,7 @@ def test_an_open_panel_follows_its_icon_when_the_page_resizes_or_the_strip_scrol
     start = bell.bounding_box()["y"]
     tab.set_viewport_size({"width": {1440: 390, 390: 1440}[tab.viewport_size["width"]], "height": 320})
     moved = bell.bounding_box()["y"]
-    assert moved != start
+    assert moved == pytest.approx(start, abs=0.5)
     tab.wait_for_function(beside)
     assert strip.evaluate("el => el.scrollHeight > el.clientHeight")
     strip.evaluate("el => { el.scrollTop = 40; }")

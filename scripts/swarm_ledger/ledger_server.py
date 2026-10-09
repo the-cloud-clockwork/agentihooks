@@ -467,9 +467,9 @@ def relay_to_inbox(slug, state):
 
 
 def deliver_alerts(slug, state):
-    """Alerts raised by this sync go to the master's seat or the operator through the inbox."""
     meta = state["_meta"]
-    if not any(a.get("rev") == meta["rev"] for a in state.get("alerts", [])):
+    fresh = [a for a in state.get("alerts", []) if a.get("rev") == meta["rev"] and a["state"] == ledger_alerts.OPEN]
+    if not fresh:
         return []
     try:
         from scripts.inbox.store import connect
@@ -479,10 +479,21 @@ def deliver_alerts(slug, state):
         inbox = connect()
         live = [a for a in RedisStore(inbox.redis).agents(slug) if a.state != "finished"]
         master = operator_mail.master_address(slug, live)
-        return ledger_alerts.deliver(inbox, slug, state["alerts"], meta["rev"], master)
+        addresses = {a.name: a.seat or a.name for a in live}
+        alerts = [{**a, "target": addresses.get(a["target"], "master")} for a in fresh]
+        return ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"alert delivery for {slug}: {exc}\n")
         return []
+
+
+def expire_alerts() -> None:
+    at = core.now_ms()
+    for summary in ledger_summaries():
+        slug = summary["slug"]
+        state = repository.read(slug, "alerts")
+        if any(ledger_alerts.expired(alert, at) for alert in state.get("alerts", [])):
+            repository.apply_ops(slug)
 
 
 def doctor_phrase(slug, state):
@@ -893,6 +904,8 @@ def watch_ledgers(interval=2.0):
             sys.stderr.write(f"bin purge: {exc}\n")
         if passes % BIN_SWEEP_EVERY == 0:
             bin_closed_without_swarm()
+        if passes and passes % BIN_SWEEP_EVERY == 0:
+            expire_alerts()
         sample_streams()
         time.sleep(interval)
 

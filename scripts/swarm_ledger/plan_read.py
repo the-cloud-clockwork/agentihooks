@@ -8,6 +8,7 @@ The task defaults to AGENTIHOOKS_SWARM_TASK and the ledger to AGENTIHOOKS_SWARM.
 
 import argparse
 import os
+import re
 import sys
 from importlib import import_module
 
@@ -15,6 +16,8 @@ from scripts.swarm_ledger import HERE
 
 COMMAND = "agentihooks plan read"
 MARGIN = 10
+LINK = re.compile(r"\]\(#([\w.-]+)\)")
+ANCHOR = re.compile(r'<a id="[\w.-]+"></a>')
 
 
 def _ledger(name: str):
@@ -42,6 +45,31 @@ def numbered(text: str, lines: str) -> list[tuple[int, str]]:
     return [(number, row.strip()) for number, row in enumerate(text.splitlines(), start) if row.strip()]
 
 
+def section(source: str, anchor: str) -> str:
+    entries = [entry for entry in _ledger("plan_ranges").sections(source) if entry[1] or entry[2].strip()]
+    tag = f'<a id="{anchor}"></a>'
+    heading = next(
+        (i + 1 for i, (_, d, line) in enumerate(entries[:-1]) if not d and line.strip() == tag and entries[i + 1][1]),
+        None,
+    )
+    if heading is None:
+        return ""
+    first, depth, _ = entries[heading]
+    stop = next((n - 1 for n, d, _ in entries[heading + 1 :] if 0 < d <= depth), None)
+    rows = source.splitlines()[first - 1 : stop]
+    while rows and (not rows[-1].strip() or ANCHOR.fullmatch(rows[-1].strip())):
+        rows.pop()
+    return "".join(f"{row}\n" for row in rows)
+
+
+def linked(source: str, lines: str) -> str:
+    start, end = _ledger("plan_ranges").bounds(lines)
+    rows = source.splitlines()[start - 1 : end]
+    tags = {row.strip() for row in rows}
+    anchors = dict.fromkeys(a for row in rows for a in LINK.findall(row) if f'<a id="{a}"></a>' not in tags)
+    return "".join(f"\n{case}" for anchor in anchors if (case := section(source, anchor)))
+
+
 def pointer(task: dict) -> str:
     if not task.get("plan_lines"):
         return ""
@@ -55,13 +83,13 @@ def _sliced_task(doc: dict, slug: str, task_id: str | None) -> dict:
     task = next((t for t in doc.get("tasks", []) if t.get("id") == task_id), None)
     if task is None:
         raise ValueError(f"no task {task_id} in ledger {slug}")
-    if not task.get("plan_lines"):
-        raise ValueError(f"task {task_id} has no plan lines")
     return task
 
 
 def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str:
     task = {} if phase_id else _sliced_task(doc, slug, task_id)
+    if not phase_id and not task.get("plan_lines"):
+        return f"This task has no plan lines; its description is the whole spec.\n\n{task.get('description', '')}\n"
     from scripts.swarm_ledger import plan_packages
 
     phase_id = phase_id or task.get("phase")
@@ -76,7 +104,9 @@ def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str
         ref = {"artifact": url, "lines": task["plan_lines"]}
     if not ref:
         raise ValueError(f"phase {phase_id} has no plan range")
-    return chunk(_ledger("plan_ranges").stored_text(ref, doc), task.get("plan_lines") or ref["lines"])
+    source = _ledger("plan_ranges").stored_text(ref, doc)
+    lines = task.get("plan_lines") or ref["lines"]
+    return chunk(source, lines) + (linked(source, lines) if task else "")
 
 
 def main(argv=None, environ=None) -> int:

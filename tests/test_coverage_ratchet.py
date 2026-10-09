@@ -1,8 +1,10 @@
+import subprocess
 from pathlib import Path
 
 import pytest
 from coverage import CoverageData
 
+from tests import coverage_history
 from tests import coverage_ratchet as ratchet
 from tests.coverage_grade import HISTORY
 
@@ -70,6 +72,118 @@ def test_a_renamed_module_keeps_every_line_the_base_ran():
 def test_a_module_the_head_stopped_measuring_loses_every_line_it_still_has():
     base = _measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE})
     assert ratchet.grade({}, lambda path: SOURCE, iter([base])).lost == {"hooks/a.py": [1, 2, 3]}
+
+
+MOVED = SOURCE + "\n\ndef h():\n    return 0\n"
+REWRITTEN = "import os\n\n\n" + MOVED + "".join(f"\n\ndef g{n}():\n    return os.sep * {n}\n" for n in range(12))
+UNRELATED = "def other():\n    return 0\n"
+
+
+def test_a_module_moved_and_rewritten_pairs_with_the_added_module_sharing_its_definitions():
+    moves = ratchet.pair_moves({"hooks/a.py": MOVED}, {"hooks/z.py": UNRELATED, "scripts/b.py": REWRITTEN})
+    assert moves == {"hooks/a.py": "scripts/b.py"}
+
+
+def test_a_deleted_module_pairs_with_no_unrelated_added_module():
+    assert ratchet.pair_moves({"hooks/a.py": MOVED}, {"hooks/z.py": UNRELATED, "hooks/broken.py": "def ("}) == {}
+
+
+def _module(bodies: dict[str, str]) -> str:
+    return "import os\nimport sys\n" + "".join(f"\n\ndef {name}():\n    {body}\n" for name, body in bodies.items())
+
+
+def test_a_move_keeping_its_definitions_pairs_however_much_of_its_bodies_was_rewritten():
+    old = _module({f"step{n}": f"return {n}" for n in range(6)})
+    new = _module({f"step{n}": f"return {n}" if n < 2 else f"return os.sep * {n}" for n in range(6)})
+    assert ratchet.pair_moves({"hooks/a.py": old}, {"scripts/b.py": new}) == {"hooks/a.py": "scripts/b.py"}
+
+
+def test_a_lone_generic_name_or_a_minority_of_names_pairs_nothing():
+    old = _module({"main": "sys.exit(1)", "helper": "return 2", "other": "return 3"})
+    assert ratchet.pair_moves({"hooks/old.py": old}, {"scripts/new.py": _module({"main": "sys.exit(1)"})}) == {}
+    lone = _module({"main": "sys.exit(1)"})
+    assert ratchet.pair_moves({"hooks/old.py": lone}, {"scripts/new.py": _module({"main": "sys.exit(0)"})}) == {}
+
+
+def test_names_other_head_modules_also_define_never_pair_a_module():
+    old = _module({"main": "sys.exit(1)", "run": "return 1"})
+    new = _module({"main": "sys.exit(0)", "run": "return 0"})
+    elsewhere = _module({"main": "return 2", "run": "return 2"})
+    moves = ratchet.pair_moves({"hooks/old_cli.py": old}, {"scripts/new_cli.py": new}, [new, elsewhere])
+    assert moves == {}
+    assert ratchet.pair_moves({"hooks/old_cli.py": old}, {"scripts/new_cli.py": new}, [new]) == {
+        "hooks/old_cli.py": "scripts/new_cli.py"
+    }
+
+
+def _repo(tmp_path, files):
+    for name, text in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    for args in (["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c"]):
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+
+def test_a_move_rewritten_below_git_rename_similarity_is_followed(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    _repo(tmp_path, {"hooks/a.py": MOVED, "hooks/gone.py": UNRELATED, "tests/t.py": SOURCE})
+    for name in ("hooks/a.py", "hooks/gone.py", "tests/t.py"):
+        (tmp_path / name).unlink()
+    _repo(tmp_path, {"scripts/b.py": REWRITTEN, "tests/u.py": REWRITTEN})
+    listed = subprocess.run(
+        ["git", "-C", str(tmp_path), "diff", "--name-status", "-M", "HEAD~1", "HEAD"], capture_output=True, text=True
+    ).stdout
+    assert not any(line.startswith("R") for line in listed.splitlines())
+    assert coverage_history.renamed(tmp_path, "HEAD~1") == {"hooks/a.py": "scripts/b.py"}
+    base = _measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": MOVED})
+    head_source = {"scripts/b.py": REWRITTEN}.get
+    moved = coverage_history.renamed(tmp_path, "HEAD~1")
+    assert ratchet.grade({"scripts/b.py": {4, 5}}, head_source, iter([base]), moved).lost == {"hooks/a.py": [3]}
+
+
+@pytest.mark.parametrize("missing", [None, "first", "second"])
+@pytest.mark.parametrize("rewritten", [False, True])
+def test_a_split_module_grades_each_destination_by_its_own_definitions(tmp_path, missing, rewritten):
+    old = "def first():\n    return 1\n\ndef second():\n    return 1\n"
+    sources = {
+        f"hooks/{name}.py": ("import os\n" * 10 if rewritten else "") + f"def {name}():\n    return 1\n"
+        for name in ("first", "second")
+    }
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    _repo(tmp_path, {"hooks/old.py": old})
+    (tmp_path / "hooks/old.py").unlink()
+    _repo(tmp_path, sources)
+    moved = coverage_history.renamed(tmp_path, "HEAD~1")
+    base = _measure("b1", {"hooks/old.py": {1, 2, 4, 5}}, {"hooks/old.py": old})
+    offset = 10 if rewritten else 0
+    head = {path: {offset + 1} | ({offset + 2} if path != f"hooks/{missing}.py" else set()) for path in sources}
+    result = ratchet.grade(head, sources.get, iter([base]), moved)
+    assert result.lost == ({} if missing is None else {"hooks/old.py": [2 if missing == "first" else 5]})
+
+
+@pytest.mark.parametrize("missing", [None, "First", "Second"])
+def test_split_classes_keep_same_named_methods_with_their_own_class(missing):
+    sources = {
+        f"hooks/{name}.py": f"class {name}:\n    def run(self):\n        return 1\n" for name in ("First", "Second")
+    }
+    old = "\n".join(sources.values())
+    moved = ratchet.pair_moves({"hooks/old.py": old}, sources, sources.values())
+    base = _measure("b1", {"hooks/old.py": {1, 2, 3, 5, 6, 7}}, {"hooks/old.py": old})
+    head = {path: {1, 2} | ({3} if path != f"hooks/{missing}.py" else set()) for path in sources}
+    result = ratchet.grade(head, sources.get, iter([base]), moved)
+    assert result.lost == ({} if missing is None else {"hooks/old.py": [3 if missing == "First" else 7]})
+
+
+def test_split_definitions_inside_module_conditionals_keep_their_coverage():
+    sources = {
+        "hooks/first.py": "if True:\n    def first():\n        return 1\n",
+        "hooks/second.py": "def second():\n    return 2\n",
+    }
+    old = "\n".join(sources.values())
+    base = _measure("b1", {"hooks/old.py": {1, 2, 3, 5, 6}}, {"hooks/old.py": old})
+    moved = ratchet.pair_moves({"hooks/old.py": old}, sources, sources.values())
+    result = ratchet.grade({"hooks/first.py": {1, 2}, "hooks/second.py": {1, 2}}, sources.get, iter([base]), moved)
+    assert result.lost == {"hooks/old.py": [3]}
 
 
 def test_a_line_older_runs_missed_after_an_even_older_run_covered_it_is_cleared():
@@ -174,6 +288,15 @@ def test_the_report_lists_every_missed_line_and_every_lost_line(tmp_path):
     text = ratchet.report(result, {"hooks/a.py": [3, 4]}, {"hooks/a.py": 2}, {"hooks/a.py": 3})
     assert "hooks/a.py: covered 2 (base 3), missed 3, 4" in text
     assert "hooks/a.py:3 ran on base b1 and no head test runs it" in text
+
+
+def test_the_report_lists_only_lines_no_head_shard_ran(tmp_path):
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "hooks/a.py").write_text(SOURCE)
+    (tmp_path / "coverage-3.12-1").mkdir()
+    shard = _shard(tmp_path / "coverage-3.12-1/.coverage", {"hooks/a.py": [1, 2, 3]})
+    (tmp_path / "out").mkdir()
+    assert ratchet._missed(tmp_path, [shard], tmp_path / "out") == {"hooks/a.py": [4]}
 
 
 def test_a_failed_github_read_is_retried_before_the_gate_gives_up(monkeypatch):

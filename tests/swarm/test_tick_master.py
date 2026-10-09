@@ -102,6 +102,44 @@ def test_a_failed_forced_launch_promotes_one_live_engineer(store):  # noqa: F811
     assert len(mail(store, ENGINEER)) == 1
 
 
+def test_the_promotion_is_saved_before_its_notice(store):  # noqa: F811
+    import contextlib
+
+    from scripts.swarm.store import SwarmError
+
+    runtime, ledger = outage(store)
+
+    def notify(slug, text):
+        raise SwarmError("ledger sw: connection reset")
+
+    ledger.notify = notify
+    with contextlib.suppress(SwarmError):
+        tick("sw", store, ledger, runtime, 1 + DOWN)
+    assert tick_master.read(store, "sw")["promoted"] == ENGINEER
+    with contextlib.suppress(SwarmError):
+        tick("sw", store, ledger, runtime, 2 + DOWN)
+    assert len(mail(store, ENGINEER)) == 1
+
+
+def test_nobody_told_is_saved_before_its_notice(store):  # noqa: F811
+    import contextlib
+
+    from scripts.swarm.store import SwarmError
+
+    runtime, ledger = outage(store)
+    runtime.live.discard(ENGINEER)
+    store.drop_agent("sw", ENGINEER)
+    ledger.rows["t1"]["state"] = "done"
+
+    def notify(slug, text):
+        raise SwarmError("ledger sw: connection reset")
+
+    ledger.notify = notify
+    with contextlib.suppress(SwarmError):
+        tick("sw", store, ledger, runtime, 1 + DOWN)
+    assert tick_master.read(store, "sw")["nobody_told"] is True
+
+
 def test_a_finished_master_record_does_not_hold_off_the_promotion(store):  # noqa: F811
     runtime, ledger = outage(store)
     store.put_agent("sw", AgentRecord("master@a1b2c3-0099", MASTER, MASTER, state="finished", seat=MASTER_SEAT))

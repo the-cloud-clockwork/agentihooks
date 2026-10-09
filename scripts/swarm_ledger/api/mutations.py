@@ -35,7 +35,7 @@ class GuardedOperations:
                 raise APIError(428, "revision_required", "Every changed resource needs an expected revision")
             actual = resources.resource_revision({**doc, "_meta": ctx.meta}, path)
             if expected != actual:
-                raise APIError(409, "revision_conflict", "Resource changed since the expected revision")
+                raise APIError(409, "revision_conflict", "Resource changed since the expected revision", {"path": path})
         self.checked = True
 
     def check_controller(self, op: dict) -> None:
@@ -92,6 +92,7 @@ def apply(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
     state, rejected = server.repository.apply_ops(slug, ops=operations, gate=gate)
     server.relay_to_inbox(slug, state)
     server.doctor_phrase(slug, state)
+    server.deliver_alerts(slug, state)
     tasks = {op["item"].split("/")[1] for op in operations if op["op"] == "task_update"}
     rows = [resources.project(row) for row in state.get("tasks", []) if row["id"] in tasks]
     reply = {

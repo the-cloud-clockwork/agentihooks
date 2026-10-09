@@ -1,11 +1,17 @@
 import io
+import itertools
 import json
+import random
+import time
 import urllib.error
 import urllib.request
 import uuid
 from urllib.parse import quote, urlencode
 
 from . import resources, schemas
+
+RETRIES = 5
+BACKOFF = 0.25
 
 
 class ResourceClient:
@@ -55,30 +61,32 @@ class ResourceClient:
         return state
 
     def mutate(self, slug: str, operations: list) -> dict:
-        fetched = {schemas.target(operation) for operation in operations if not operation.get("expected_revision")}
-        try:
-            return self.send(slug, operations)
-        except urllib.error.HTTPError as exc:
-            replay, error = failure(exc)
-        if replay.code == 403 and "details" in error:
-            return error["details"]
-        if replay.code != 409 or error.get("code") != "revision_conflict" or not fetched:
-            raise replay
-        for operation in operations:
-            if schemas.target(operation) in fetched:
-                del operation["expected_revision"]
-        try:
-            return self.send(slug, operations)
-        except urllib.error.HTTPError as exc:
-            raise failure(exc)[0] from None
+        unpinned = [operation for operation in operations if not operation.get("expected_revision")]
+        pinned = {schemas.target(operation) for operation in operations if operation.get("expected_revision")}
+        fetched = {schemas.target(operation) for operation in unpinned} - pinned
+        for attempt in itertools.count():
+            try:
+                return self.send(slug, operations)
+            except urllib.error.HTTPError as exc:
+                replay, error = failure(exc)
+            if replay.code == 403 and "details" in error:
+                return error["details"]
+            if not retryable(replay, error, fetched):
+                raise replay
+            if attempt == RETRIES:
+                raise exhausted(replay, error, fetched)
+            for operation in unpinned:
+                operation.pop("expected_revision", None)
+            time.sleep(random.uniform(BACKOFF * 2**attempt / 2, BACKOFF * 2**attempt))
 
     def send(self, slug: str, operations: list) -> dict:
-        guards, ops = {}, []
+        pins = [operation for operation in reversed(operations) if operation.get("expected_revision")]
+        guards, ops = {schemas.target(operation): operation["expected_revision"] for operation in pins}, []
         operation_id = operations[0].setdefault("operation_id", uuid.uuid4().hex)
         for operation in operations:
             path = schemas.target(operation)
             if path not in guards:
-                guards[path] = operation.get("expected_revision") or self.request(slug, path)["revision"]
+                guards[path] = self.request(slug, path)["revision"]
             operation.setdefault("expected_revision", guards[path])
             ops.append(
                 {key: value for key, value in operation.items() if key not in ("expected_revision", "operation_id")}
@@ -94,3 +102,18 @@ def failure(exc: urllib.error.HTTPError) -> tuple[urllib.error.HTTPError, dict]:
     except (ValueError, KeyError, TypeError):
         return replay, {}
     return replay, error if isinstance(error, dict) else {}
+
+
+def retryable(replay: urllib.error.HTTPError, error: dict, fetched: set) -> bool:
+    if replay.code != 409 or error.get("code") != "revision_conflict":
+        return False
+    path = (error.get("details") or {}).get("path")
+    return path in fetched if path else bool(fetched)
+
+
+def exhausted(replay: urllib.error.HTTPError, error: dict, fetched: set) -> urllib.error.HTTPError:
+    where = (error.get("details") or {}).get("path") or ", ".join(sorted(fetched))
+    message = f"revision conflict on {where} persisted after {RETRIES} retries"
+    detail = ": ".join(part for part in (error.get("message"), message) if part)
+    body = json.dumps({"error": {**error, "message": detail}}).encode()
+    return urllib.error.HTTPError(replay.url, replay.code, message, replay.hdrs, io.BytesIO(body))

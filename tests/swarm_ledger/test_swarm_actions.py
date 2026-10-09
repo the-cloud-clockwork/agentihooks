@@ -41,10 +41,10 @@ def acts_opacity(page, name):
 def test_agents_table_has_a_profile_column(open_page):
     page = open_page(with_profiles())
     heads = page.tab.eval_on_selector_all("#agents-table thead th", "ths => ths.map(t => t.innerText.trim())")
-    assert heads[:7] == ["agent", "lane", "profile", "model", "task", "state", "age"]
-    assert [cells[:7] for cells in page.table("swarm-agents")] == [
-        ["master-1", "—", "master", "opus high", "—", "LIVE", "2h 0m"],
-        ["eng-58", "eng", "engineer", "opus high", "pb10", "IDLE", "1m"],
+    assert heads[:8] == ["agent", "lane", "profile", "overlays", "model", "task", "state", "age"]
+    assert [cells[:8] for cells in page.table("swarm-agents")] == [
+        ["master-1", "—", "master", "—", "opus high", "—", "LIVE", "2h 0m"],
+        ["eng-58", "eng", "engineer", "—", "opus high", "pb10", "IDLE", "1m"],
     ]
     assert [cells[2] for cells in open_page().table("swarm-agents")] == ["—", "—"]
 

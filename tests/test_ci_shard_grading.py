@@ -34,17 +34,17 @@ def test_shard_grader_never_restores_an_environment_written_by_head_tests():
 
 def test_head_collection_is_uploaded_once_per_interpreter_and_downloaded_as_data():
     jobs = _jobs()
-    unit = jobs["unit"]["steps"]
-    collect = next(step for step in unit if step.get("name") == "Record collected tests")
-    upload = next(step for step in unit if step.get("name") == "Upload collected tests")
-    assert collect["if"] == upload["if"] == "matrix.shard == 1 && github.event.pull_request.base.ref != 'main'"
-    assert 'collect("tests/")' in collect["run"]
-    assert 'Path("collected.json").write_text(json.dumps(nodeids))' in collect["run"]
+    split = jobs["split"]["steps"]
+    collect = next(step for step in split if step.get("name") == "Adopt latest dev durations")
+    upload = next(step for step in split if step.get("name") == "Upload collected tests")
+    assert upload["if"] == "github.event.pull_request.base.ref != 'main'"
+    assert collect["run"].endswith(" --collected collected.json")
     assert "--shard" not in collect["run"]
+    assert jobs["split"]["strategy"]["matrix"]["python-version"] == jobs["unit"]["strategy"]["matrix"]["python-version"]
     assert upload["with"]["name"] == "collected-${{ matrix.python-version }}"
     assert upload["with"]["path"] == "collected.json"
     assert upload["with"]["if-no-files-found"] == "error"
-    assert unit.index(collect) < unit.index(upload)
+    assert split.index(collect) < split.index(upload)
     steps = jobs["shard-check"]["steps"]
     download = next(step for step in steps if step.get("name") == "Download collected tests")
     check = next(step for step in steps if step.get("run", "").startswith("python -m tests.shard_check"))

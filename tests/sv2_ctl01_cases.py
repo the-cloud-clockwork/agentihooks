@@ -91,7 +91,7 @@ def case_b():
         assert former.acquire()
         attempt = former.admit(agent(store))
         candidate = agent(store)
-        clock[0] += lease.TTL_MS
+        clock[0] += lease.ttl_ms()
         assert replacement.acquire()
         assert former.ready and former.held is not None
         keys = [store.key("fixture", kind) for kind in ("executions", "controller-intents", "runtime-operations")]
@@ -132,7 +132,7 @@ def case_c():
         transport.lose_ack = True
         interrupted = former.execute(request(attempt))
         assert interrupted.phase is Phase.UNKNOWN
-        clock[0] += lease.TTL_MS
+        clock[0] += lease.ttl_ms()
         assert replacement.acquire()
         recovered = store.operation_journal.get("fixture", interrupted.operation_id)
         replay = replacement.execute(request(attempt))

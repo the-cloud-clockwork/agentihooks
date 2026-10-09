@@ -1211,7 +1211,11 @@ def test_sdk_preserves_explicit_stale_revision(live):
         client.mutate(SLUG, [operation])
     assert error.value.code == 409
     assert json.loads(error.value.read()) == {
-        "error": {"code": "revision_conflict", "message": "Resource changed since the expected revision"}
+        "error": {
+            "code": "revision_conflict",
+            "message": "Resource changed since the expected revision",
+            "details": {"path": "chat"},
+        }
     }
     assert operation["expected_revision"] == stale
     assert not any(row["id"] == "stale-explicit" for row in client.collection(SLUG, "chat"))
@@ -1501,7 +1505,13 @@ def test_metadata_guard_changes_only_with_its_content(live):
     }
     assert request(live, "POST", "operations", payload) == (
         409,
-        {"error": {"code": "revision_conflict", "message": "Resource changed since the expected revision"}},
+        {
+            "error": {
+                "code": "revision_conflict",
+                "message": "Resource changed since the expected revision",
+                "details": {"path": "metadata"},
+            }
+        },
     )
     assert request(live, "GET", "metadata")[1]["data"]["title"] == "Changed"
 

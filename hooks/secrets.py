@@ -60,7 +60,7 @@ _STANDARD_PATTERNS: list[_Pattern] = [
     ),
     _Pattern(
         "db_url_creds",
-        re.compile(r"(postgres|mysql|mongodb)://[^:]+:[^@]{4,}@", re.IGNORECASE),
+        re.compile(r"(postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?)://[^/\s:@]*:[^@\s]+@", re.IGNORECASE),
     ),
     _Pattern(
         "generic_secret",
@@ -95,10 +95,28 @@ _STRICT_PATTERNS: list[_Pattern] = [
 ]
 
 
+_MEMORY_PATTERNS: list[_Pattern] = [
+    _Pattern(
+        "secret_assignment",
+        re.compile(
+            r"(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|ACCESS_KEY)(?:[^\S\r\n]*(?:=(?!=)|:)[^\S\r\n]*"
+            r"""(?:["']?[^\s"'$<{]+)|["'][^\S\r\n]*:[^\S\r\n]*["'][^\s"'$<{]+)""",
+            re.IGNORECASE,
+        ),
+    ),
+]
+
+
 def _get_patterns(mode: str) -> list[_Pattern]:
     """Return the pattern list for the given secrets mode."""
     if mode == "off":
         return []
+    if mode == "memory":
+        return (
+            [pattern for pattern in _STANDARD_PATTERNS if pattern.name != "generic_secret"]
+            + _STRICT_PATTERNS
+            + _MEMORY_PATTERNS
+        )
     if mode == "strict":
         return _STANDARD_PATTERNS + _STRICT_PATTERNS
     # "warn" and "standard" both use the standard set

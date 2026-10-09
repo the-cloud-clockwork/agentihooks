@@ -102,18 +102,25 @@ def test_any_command_outside_the_reads_naming_a_production_key_fails(command):
     ],
     ids=["eval", "fcall"],
 )
-def test_a_script_fails_the_test_whatever_it_names(command):
-    client = _client()
-    before = len(redis_key_guard.written)
+def test_a_script_fails_the_test_whatever_it_names(command, monkeypatch):
+    import socket
 
-    with pytest.raises(redis_key_guard.ProductionKey) as refused:
-        client.execute_command(*command)
-    caught = redis_key_guard.written[before:]
-    del redis_key_guard.written[before:]
+    from redis import Redis
+
+    with socket.socket() as reserved:
+        reserved.bind(("127.0.0.1", 0))
+        client = Redis(host="127.0.0.1", port=reserved.getsockname()[1])
+        dispatched = []
+        monkeypatch.setattr(client, "_execute_command", lambda *args, **kwargs: dispatched.append(args))
+        before = len(redis_key_guard.written)
+        with pytest.raises(redis_key_guard.ProductionKey) as refused:
+            client.execute_command(*command)
+        caught = redis_key_guard.written[before:]
+        del redis_key_guard.written[before:]
 
     assert str(refused.value) == f"a test sent {command[0]}, which can reach production keys the guard cannot read"
     assert caught == [command[0]]
-    assert client.exists("agentihooks:swarm:x") == 0
+    assert dispatched == []
 
 
 def test_a_wipe_passes_on_fakeredis_and_fails_on_a_real_client():

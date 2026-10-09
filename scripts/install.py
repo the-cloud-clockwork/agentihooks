@@ -91,6 +91,7 @@ from urllib.request import url2pathname
 
 import yaml
 
+from scripts import balance_cli
 from scripts.claude_config import claude_home
 from scripts.claude_config import claude_json as claude_json_path
 from scripts.cli_delegates import delegated_cli
@@ -5668,8 +5669,11 @@ def cmd_balance(
     show_account_metadata: str = "",
     current: bool = False,
 ) -> int:
+    import time
+    from dataclasses import replace
+
     from hooks.context.account_sessions import sessions_by_account
-    from scripts.agents_quota import codex_table
+    from scripts.agents_quota import codex_table, tokenless_table
     from scripts.claude_quota_balancer import (
         RoutingError,
         ancestor_oauth_token,
@@ -5682,6 +5686,8 @@ def cmd_balance(
         is_routable,
         render_table,
     )
+    from scripts.routing import master_account, place
+    from scripts.routing.claude_api import ClaudeApiSource
 
     session_env = dict(os.environ)
     _load_claude_runtime_env()
@@ -5710,14 +5716,14 @@ def cmd_balance(
                 render_table(
                     list(rows.values()),
                     include_fable=include_fable,
-                    current=session.account,
                     observed=observed,
                     sessions=live,
+                    marks=master_account.row_marks(session.account),
                 )
             )
         return 0 if session.account else 1
     if not credentials:
-        print(codex_table())
+        print(tokenless_table(master_account.row_marks().master, live))
         print("agentihooks: no non-empty AH_CC_TOKEN_* variables found", file=sys.stderr)
         return 2
     if show_account_metadata:
@@ -5741,7 +5747,9 @@ def cmd_balance(
         timeout=timeout,
         claude_bin=shutil.which("claude") or "claude",
     )
-    print(render_table(results, include_fable=include_fable, sessions=live))
+    api, weight = place.api_side(ClaudeApiSource(live), "claude", os.environ, time.time())
+    api = [replace(slot, weight=weight) for slot in api]
+    print(render_table(results, include_fable=include_fable, sessions=live, api=api, marks=master_account.row_marks()))
     print(f"\nsource={source}")
     print(f"\n{codex_table()}")
     return 0 if any(is_routable(result) for result in results) else 1
@@ -6624,22 +6632,7 @@ def main() -> None:
     sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")
     sub.add_parser("overlay", help="Overlay profiles in the linked bundle: new NAME --wears ROLES | check NAME")
 
-    balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
-    balance_p.add_argument("--dry-run", action="store_true", help="Report routing state without launching Claude")
-    balance_p.add_argument("--fable", action="store_true", help="Include the separate Fable weekly quota")
-    balance_p.add_argument(
-        "--show-account-metadata",
-        metavar="SLUG",
-        default="",
-        help="Print every JSON event returned by a fresh probe for AH_CC_TOKEN_<SLUG>",
-    )
-    balance_p.add_argument("--refresh", action="store_true", help="Ignore the 60-second quota cache")
-    balance_p.add_argument(
-        "--current",
-        action="store_true",
-        help="Name the account this Claude session runs on; other accounts come from the quota cache",
-    )
-    balance_p.add_argument("--timeout", type=float, default=60, help="Per-account probe timeout in seconds")
+    balance_cli.add_parser(sub)
 
     ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
     ign_p.add_argument(
@@ -6959,15 +6952,7 @@ notes:
             extra = []
         cmd_claude(extra)
     elif args.command == "balance":
-        sys.exit(
-            cmd_balance(
-                include_fable=args.fable,
-                refresh=args.refresh,
-                timeout=args.timeout,
-                show_account_metadata=args.show_account_metadata,
-                current=args.current,
-            )
-        )
+        sys.exit(balance_cli.run(args, cmd_balance))
     elif args.command == "lint-claude":
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
         from scripts.claude_linter import format_report, lint_report

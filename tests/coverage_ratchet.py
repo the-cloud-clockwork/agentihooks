@@ -7,10 +7,10 @@ from pathlib import Path
 
 from coverage import Coverage, CoverageData
 
-from tests.coverage_grade import GRADED, Measurement, Result, Unmeasured, executed, grade, line_map
+from tests.coverage_grade import GRADED, Measurement, Result, Unmeasured, executed, grade, line_map, pair_moves
 from tests.coverage_history import dev_runs, git, renamed
 
-__all__ = ["Measurement", "Result", "Unmeasured", "executed", "grade", "line_map", "main", "report"]
+__all__ = ["Measurement", "Result", "Unmeasured", "executed", "grade", "line_map", "main", "pair_moves", "report"]
 
 
 def report(result: Result, missed: dict[str, list[int]], covered: dict[str, int], base_covered: dict[str, int]) -> str:
@@ -33,6 +33,7 @@ def _missed(head: Path, shards: list[Path], out: Path) -> dict[str, list[int]]:
         combined.update(part)
     combined.write()
     coverage = Coverage(data_file=combined.base_filename(), config_file=False)
+    coverage.set_option("run:relative_files", True)
     coverage.load()
     cwd = Path.cwd()
     os.chdir(head)

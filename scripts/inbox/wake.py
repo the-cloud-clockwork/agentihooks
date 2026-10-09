@@ -56,7 +56,9 @@ def decide(item, pane, history, now_ms, window):
     wakes = steps.count(WOKEN)
     if pane in READY and wakes < MAX_WAKES and (wakes == 0 or due):
         return WOKEN
-    return TO_MASTER if due and not item.ref.startswith("inbox-escalation:") and not item.fyi else None
+    return (
+        TO_MASTER if due and not item.ref.startswith(("inbox-escalation:", "spawn-stall:")) and not item.fyi else None
+    )
 
 
 def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):

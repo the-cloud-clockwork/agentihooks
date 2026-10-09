@@ -47,11 +47,12 @@ def _ask_api(
         except BackendFailure as failure:
             failures.append(decision_log.failure_record(backend.name, failure))
             if failure.skip_api:
-                break
+                down_cache.mark_down(failures)
+                return None
         except ClassifierRequestError as failure:
             failures.append(decision_log.failure_record(backend.name, failure))
             raise
-    if backends:
+    if len(backends) == len(settings.models):
         down_cache.mark_down(failures)
     return None
 

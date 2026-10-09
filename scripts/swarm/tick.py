@@ -33,6 +33,7 @@ from scripts.swarm import (
     live_binding,
     master_retire,
     master_start,
+    master_wake,
     phase_state,
     reaper,
     retire_watch,
@@ -46,7 +47,7 @@ from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
-from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig
+from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
@@ -146,6 +147,8 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(_reap, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(_strays, slug, config, store, runtime)
+    if config.state not in {"stopped", "stopping"}:
+        actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
     actions += skip_refused(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
     if config.state == "stopped":
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
@@ -368,6 +371,7 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
         launch_check.record(store, slug, agent, found, now_ms, elapsed)
         launch_check.forget(store, slug, agent.name)
         launch_check.clear_relaunched(store, slug, agent.task)
+        _settle_admission(slug, runtime, agent)
         actions.append(f"{agent.name} passed its launch check in {elapsed // 1000} seconds")
     return actions
 
@@ -642,6 +646,8 @@ def _held_for_master(slug, store, now_ms):
 
 
 def _record_spawn_failure(slug, store, record, error):
+    if record_failure := timing.ON_FAILURE.get():
+        record_failure(f"{__name__}._spawn", error)
     transfers.failed(store, slug, record)
     if not isinstance(error, SpawnError) or error.status != "unavailable":
         store.note_launch_failure(slug, record.task, str(error))
@@ -657,11 +663,13 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             return actions + held
         if not runtime.has_capacity(config):
             return actions + ["every agent is at its session cap, waiting"]
-        if blocked := _lives_spent(slug, store, ledger, rows, task):
+        blocked = _lives_spent(slug, store, ledger, rows, task) or _held_back(slug, ledger, rows, runtime, task, now_ms)
+        if blocked:
             actions.append(blocked)
             continue
         name = store.next_name(slug, lane, now_ms)
         if not store.claim(slug, task["id"], name, LEASE_MS):
+            _release_admission(slug, runtime, task)
             continue
         handoff = store.handoff(slug, task["id"])
         if handoff:
@@ -695,6 +703,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             live = ledger.update_task(slug, task["id"], fields, if_state=("open",))
             task.update(live)
             if live["claimed_by"] != name:
+                _release_admission(slug, runtime, task)
                 store.release(slug, task["id"], name)
                 store.drop_agent(slug, name)
                 actions.append(f"task {task['id']} is {live['state']} on the ledger, not claimed")
@@ -705,6 +714,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             task["transfer"] = transfers.attach(store, slug, record)
             placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
         except Exception as exc:
+            _release_admission(slug, runtime, task)
             _record_spawn_failure(slug, store, record, exc)
             actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
             if isinstance(exc, ProfileUnresolved):
@@ -735,6 +745,43 @@ def _spawn_order(slug, config, store, agents, rows, doc):
         ready = ready[: max(cap - busy, 0)]
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
     return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])]
+
+
+def _admission(runtime):
+    from scripts.swarm_v2.admission import PendingAdmission
+
+    gate = getattr(runtime, "admission", None)
+    return gate if isinstance(gate, PendingAdmission) else None
+
+
+def _held_back(slug, ledger, rows, runtime, task, now_ms):
+    from scripts.swarm_v2.admission import ADMITTED, IMPOSSIBLE, REPLAYED
+
+    gate = _admission(runtime)
+    if gate is None:
+        return ""
+    try:
+        decision = gate.admit(slug, [task], now_ms)[0]
+    except SwarmError as exc:
+        return f"task {task['id']} waits: {exc}"
+    if decision.outcome == IMPOSSIBLE:
+        return _unresolved(slug, ledger, rows, task["id"], decision.reason)
+    if decision.outcome not in (ADMITTED, REPLAYED):
+        return f"task {task['id']} waits: {decision.reason}"
+    task["admission"] = {"reservation": decision.reservation, "deadline_ms": decision.deadline_ms}
+    return ""
+
+
+def _settle_admission(slug, runtime, agent):
+    gate = _admission(runtime)
+    if gate is not None and (reservation := gate.held(slug, agent.task)):
+        gate.activate(slug, agent.task, reservation)
+
+
+def _release_admission(slug, runtime, task):
+    held = task.get("admission")
+    if held:
+        _admission(runtime).release(slug, task["id"], held["reservation"])
 
 
 def _unresolved(slug, ledger, rows, task_id, reason):
@@ -772,8 +819,8 @@ def _claim_cap(slug, store, ledger, rows, task):
     rows[task["id"]].update(live)
     if live["state"] != "blocked":
         return ""
-    ledger.comment(slug, task["id"], reason, by="swarm")
     store.reset_claims(slug, task["id"])
+    ledger.comment(slug, task["id"], reason, by="swarm")
     return f"blocked {task['id']}: {reason}"
 
 

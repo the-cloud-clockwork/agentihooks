@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker_home.py:scripts.swarm_v2.worker_home.x__write__mutmut_4:0b3cb909bec58156e245c866448e1586a8a2561d036feede66c488c39a087be0": {
+    "reader": "Standards reader for SV2-IMG-02",
+    "reason": "Write helper without the encoding keyword, whose Path.write_text default is None. CPython fixes the preferred encoding at interpreter start and both the worker image (python slim base, PEP 538 coercion to C.UTF-8) and every child worker_home spawns (LANG C.UTF-8) run UTF-8, so the default encoding names the same codec as the explicit utf-8; no test can tell them apart without restarting the interpreter under another locale."
+  }
+}

@@ -333,6 +333,7 @@ def test_an_empty_saved_assignment_launches_from_the_swarm_config(up, monkeypatc
     store.redis.hset(store.key("sw", "launch-assignments"), MASTER, json.dumps({"profile": "", "harness": ""}))
     store.put_handoff("sw", MASTER, "# Handoff v2\n## Next\nGo on.\n")
     answers(monkeypatch)
+    monkeypatch.setattr(master_launch.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     assert run("sw", "master", "up", "--new") == 0
     [(_, task)] = rt.masters
     launch = {"profile": "master", "harness": "claude", "model": "opus", "effort": "high"}
@@ -515,7 +516,10 @@ def test_the_refusals_read_exactly(up, monkeypatch, capsys):
     assert capsys.readouterr().err.strip() == "swarm: no master started"
 
 
-def test_fill_takes_every_empty_key_from_a_bare_config():
+def test_fill_takes_every_empty_key_from_a_bare_config(monkeypatch):
+    from scripts import agent_choice
+
+    monkeypatch.setattr(agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     bare = SwarmConfig("sw", "/repo", 0, 0)
     assert master_launch.fill({}, bare) == {"profile": "master", "harness": "claude", "model": "opus", "effort": "high"}
 

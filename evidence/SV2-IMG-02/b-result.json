@@ -2,7 +2,7 @@
   "attempts": [
     "a0"
   ],
-  "fixture": "9f731f86a7fb4ba0b7b52f9bbbc188cc",
+  "fixture": "737522fe99624e53abbefdda289f61ae",
   "fixture_manifest": {
     "fixture-claude/.claude/settings.overrides.json": "2443a0072e228b5cfd498a3891d92bd6e6ecc7cc3bd914a7ab4959d7c917b6d3",
     "fixture-claude/.mcp.json": "c5612b3e0ff1f6004aabeeb540ce52963aae186d6ad37ea7e027703ae90783ce",
@@ -33,10 +33,10 @@
     }
   },
   "startup_network": "none",
-  "tested_commit": "c56cb1713f5fa866919d108e46b22684e58a75aa",
+  "tested_commit": "a13a8857e8c8b6dc9af78dc628671a14277dea6a",
   "worker_profile_materialization_seconds": {
-    "interpreter": 0.184,
+    "interpreter": 0.356,
     "outcome": "refused",
-    "workstation": 1.235
+    "workstation": 2.078
   }
 }

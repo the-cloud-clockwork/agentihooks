@@ -41,4 +41,9 @@ def read(lines: str) -> str:
     from scripts.swarm_ledger import plan_read
 
     source = text()
-    return plan_read.chunk(source, shared_lines(source), margin=0) + "\n" + plan_read.chunk(source, lines)
+    return (
+        plan_read.chunk(source, shared_lines(source), margin=0)
+        + "\n"
+        + plan_read.chunk(source, lines)
+        + plan_read.linked(source, lines)
+    )

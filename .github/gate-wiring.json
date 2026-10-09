@@ -16,11 +16,6 @@
       "reason": "Grades the head's Gate Required wiring from the base branch on pull_request_target and reports its verdict as the Gate Required status, so the aggregator it guards cannot need it.",
       "owner": "ci-2@rig-grade-swarm",
       "expires": "2027-04-09"
-    },
-    "test-leaks.yml/one-process": {
-      "reason": "Hour long single process sweep that runs on a schedule; its pull request run only exercises its own workflow. Retired when the pull request trigger leaves test leaks, which a dispatch run replaces.",
-      "owner": "ci-1@rig-grade-swarm",
-      "expires": "2026-11-08"
     }
   }
 }

@@ -9,26 +9,32 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import KW_ONLY, dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hooks.context.account_sessions import API_ACCOUNT
 from scripts import session_bands
 from scripts.claude_config import claude_home
 from scripts.routing import claude_api, envs, place
 from scripts.routing.envs import subscription_child
-from scripts.routing.slots import API, SUBSCRIPTION, Slot
+from scripts.routing.slots import API, API_UNBOUNDED, INTERACTIVE, SUBSCRIPTION, Slot
+
+if TYPE_CHECKING:
+    from scripts.routing.master_account import MasterAccount
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
 HARNESS = "claude"
 OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 MAX_PROBE_WORKERS = 3
 CACHE_TTL_SECONDS = 60
+OPEN = "OPEN"
+NOT_APPLICABLE = "n/a"
+MASTERS_ONLY = "MASTERS"
 
 
 @dataclass(frozen=True)
@@ -92,6 +98,12 @@ class RouteDecision:
     @property
     def account(self) -> str:
         return API_ACCOUNT if self.kind == API else self.credential.account
+
+
+@dataclass(frozen=True)
+class RowMarks:
+    current: str = ""
+    master: "MasterAccount | None" = None
 
 
 class RoutingError(RuntimeError):
@@ -830,23 +842,69 @@ def _span(remaining: int) -> str:
 
 
 def _cap_text(cap: int | None) -> str:
-    return "?" if cap is None else str(cap)
+    if cap is None:
+        return "?"
+    return "none" if cap >= API_UNBOUNDED else str(cap)
+
+
+def _weight_text(weight: float | None) -> str:
+    return "-" if weight is None else f"{weight}%"
+
+
+def _api_line(slot: Slot, include_fable: bool, sessions: Mapping[str, int] | None, observed: bool) -> list[str]:
+    return [
+        "-",
+        f"{slot.account} ({slot.provider})",
+        API,
+        OPEN,
+        *([f"{slot.sessions}/{_cap_text(slot.cap)}"] if sessions is not None else []),
+        _weight_text(slot.weight),
+        _cap_text(slot.cap),
+        *[NOT_APPLICABLE] * (7 if include_fable else 5),
+        *(["-"] if observed else []),
+    ]
+
+
+def _account_text(account: str, marks: RowMarks) -> str:
+    text = f"{account} (current)" if marks.current and account == marks.current else account
+    return f"{text} {marks.master.marker}" if marks.master and marks.master.slug == account else text
+
+
+def _interactive_line(
+    master: "MasterAccount", include_fable: bool, sessions: Mapping[str, int] | None, observed: bool
+) -> list[str]:
+    return [
+        "-",
+        f"{master.slug} {master.marker}",
+        INTERACTIVE,
+        MASTERS_ONLY,
+        *([f"{sessions.get(master.slug, 0)}/?"] if sessions is not None else []),
+        _weight_text(None),
+        "?",
+        *[NOT_APPLICABLE] * (7 if include_fable else 5),
+        *(["-"] if observed else []),
+    ]
 
 
 def render_table(
     results: list[ProbeResult],
     now: int | None = None,
     include_fable: bool = False,
-    current: str = "",
     observed: Mapping[str, float] | None = None,
     sessions: Mapping[str, int] | None = None,
+    api: Sequence[Slot] = (),
+    marks: RowMarks = RowMarks(),
 ) -> str:
+    master = marks.master
     timestamp = int(time.time()) if now is None else now
     headers = [
         "#",
         "ACCOUNT",
+        "KIND",
         "STATE",
         *(["SESSIONS"] if sessions is not None else []),
+        "WEIGHT",
+        "CAP",
         "ROUTING LEFT",
         "5H LEFT",
         "5H RESET",
@@ -859,15 +917,15 @@ def render_table(
         headers.append("AGE")
     rows = []
     for rank, result in enumerate(rank_results(results, include_fable), 1):
+        cap = _cap_text(account_cap(result, timestamp, include_fable))
         row = [
             str(rank),
-            f"{result.account} (current)" if current and result.account == current else result.account,
+            _account_text(result.account, marks),
+            SUBSCRIPTION,
             result.state,
-            *(
-                [f"{sessions.get(result.account, 0)}/{_cap_text(account_cap(result, timestamp, include_fable))}"]
-                if sessions is not None
-                else []
-            ),
+            *([f"{sessions.get(result.account, 0)}/{cap}"] if sessions is not None else []),
+            _weight_text(None),
+            cap,
             _percent(result.margin),
             _percent(result.five_hour.remaining),
             _duration(result.five_hour.resets_at, timestamp),
@@ -880,6 +938,11 @@ def render_table(
             seen = observed.get(result.account)
             row.append("?" if seen is None else _span(max(0, timestamp - int(seen))))
         rows.append(row)
+    rows.extend(_api_line(slot, include_fable, sessions, observed is not None) for slot in api)
+    listed = {result.account for result in results}
+    interactive = master if master and master.kind == INTERACTIVE and master.slug not in listed else None
+    if interactive:
+        rows.append(_interactive_line(interactive, include_fable, sessions, observed is not None))
     widths = [max(len(headers[index]), *(len(row[index]) for row in rows)) for index in range(len(headers))]
     lines = ["  ".join(value.ljust(widths[index]) for index, value in enumerate(headers))]
     lines.append("  ".join("-" * width for width in widths))
@@ -887,7 +950,8 @@ def render_table(
     errors = [f"{result.account}: {result.error}" for result in rank_results(results, include_fable) if result.error]
     if errors:
         lines.extend(["", *errors])
-    known = {result.account for result in results}
+    known = {result.account for result in results} | {slot.account for slot in api}
+    known |= {interactive.slug} if interactive else set()
     unlisted = {account: count for account, count in (sessions or {}).items() if account not in known}
     if unlisted:
         lines.extend(["", *(f"{account}: {count} session(s)" for account, count in sorted(unlisted.items()))])
