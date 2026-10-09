@@ -118,7 +118,7 @@ def test_an_unchanged_later_task_restores_its_verdict_after_the_earlier_judgment
     doc = copy.deepcopy(DOC)
     doc["tasks"] = [{**DOC["tasks"][0], "id": f"t{i}", "pr_url": f"https://github.com/o/r/pull/{i}"} for i in range(2)]
     Verdicts("proof", "intent-coach", tmp_path).write(
-        "t1", "pass", "kept", 1, coach_rounds=0, head="same", url=doc["tasks"][1]["pr_url"]
+        "t1", "pass", "kept", 1, coach_rounds=0, head="same", url=doc["tasks"][1]["pr_url"], phase="p8"
     )
     writes, read = [], []
     write = Verdicts.write
