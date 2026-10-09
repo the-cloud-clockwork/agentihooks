@@ -971,12 +971,14 @@ def cmd_pr(store, args):
 
 def cmd_merge(store, args):
     if args.action != "state":
-        _worker(store, args)
+        agent = _worker(store, args)
+        done_gate.require_local(store, args.slug, agent.task)
     print(json.dumps(merge_queue.operate(args.action, args.url)))
 
 
 def cmd_done(store, args):
     agent = _worker(store, args)
+    done_gate.require_local(store, args.slug, agent.task)
     ledger = LedgerClient()
     row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
     proof = {key: getattr(args, f"proof_{key}") for key in ledger_kinds.PROOF_KEYS if getattr(args, f"proof_{key}")}

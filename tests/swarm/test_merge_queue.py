@@ -85,9 +85,14 @@ def test_dequeue_removes_the_pull_request_then_reports_its_state():
 def swarm_of(lane):
     from types import SimpleNamespace
 
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    metadata = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     agent = SimpleNamespace(name="engineer@a1b2c3-0001", lane=lane, task="t1")
     names = SimpleNamespace(swarm_slug=lambda slug: slug, resolve=lambda name: name)
-    return SimpleNamespace(names=names, agents=lambda slug: [agent])
+    return SimpleNamespace(names=names, agents=lambda slug: [agent], redis=metadata.redis, key=metadata.key)
 
 
 @pytest.mark.parametrize("action", ["queue", "dequeue", "state"])
@@ -104,6 +109,22 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
     assert cli.main(["sw", "merge", action, URL]) == 0
     assert seen == [(action, URL)]
     assert capsys.readouterr().out == '{"queued": true}\n'
+
+
+@pytest.mark.parametrize("action", ["queue", "dequeue"])
+def test_cli_refuses_distributed_final_mutations_before_provider_calls(monkeypatch, action):
+    state = swarm_of("eng")
+    monkeypatch.setattr(cli, "connect", lambda: state)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(merge_queue, "operate", lambda *args: pytest.fail("provider mutation"))
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    metadata = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    state.redis, state.key = metadata.redis, metadata.key
+    state.redis.set(state.key("sw", "task-authority", "t1"), "{}")
+    assert cli.main(["sw", "merge", action, URL]) == 1
 
 
 @pytest.mark.parametrize("action", ["queue", "dequeue"])

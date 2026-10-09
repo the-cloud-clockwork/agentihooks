@@ -109,6 +109,18 @@ def test_done_closes_the_task_and_marks_the_agent_finished(env, monkeypatch):
     assert store.claimant("sw", "t1") is None
 
 
+def test_done_refuses_distributed_task_before_proof_or_ledger_mutations(env, monkeypatch):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    store.redis.set(store.key("sw", "task-authority", "t1"), "{}")
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("provider read"))
+    assert run("sw", "done", "--pr", "https://github.com/o/r/pull/9") == 1
+    assert ledger.rows["t1"]["state"] == "claimed"
+    assert store.claimant("sw", "t1") == "engineer@a1b2c3-0001"
+
+
 def test_done_on_a_group_lead_closes_its_members_with_the_lead_pull_request(env, monkeypatch):
     store, ledger, _ = env
     ledger.rows["t1"]["group_members"] = ["t3", "t4"]

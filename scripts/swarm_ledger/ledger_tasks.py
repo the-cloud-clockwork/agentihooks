@@ -356,6 +356,11 @@ def _update(doc, op, ctx):
     others = [t for t in doc["tasks"] if t["id"] != task_id]
     if task is None or not _known(others, op["fields"].get("depends_on", []) + op["fields"].get("parked_on", [])):
         return False
+    if task_id in ctx.meta.get("outcomes", {}) and any(
+        key in op["fields"] for key in ("state", "proof", "pr_url", "claimed_by")
+    ):
+        ctx.refused.append("committed outcomes require controller reconciliation")
+        return False
     if op.get("if_state") and task.get("state", "open") not in op["if_state"]:
         return True
     if refusal := update_refusal(doc, op):
@@ -389,6 +394,38 @@ def _update(doc, op, ctx):
     for key in changed:
         ctx.stamp(f"{op['item']}/{key}", op["by"])
     ctx.dirty = ctx.dirty or bool(changed)
+    return True
+
+
+def complete_outcome(doc: dict, op: dict, ctx, outcome: dict, actor: str) -> bool:
+    from scripts.swarm_ledger.api.resources import revision
+
+    proposal = outcome["proposal"]
+    task_id = proposal["task_id"]
+    task = next((row for row in doc["tasks"] if row["id"] == task_id), None)
+    receipt = {"operation_id": outcome["operation_id"], "digest": revision(outcome)}
+    known = ctx.meta.get("outcomes", {}).get(task_id)
+    if task is None or op["item"] != f"tasks/{task_id}" or op["by"] != actor:
+        ctx.refused.append("outcome identity conflict")
+        return False
+    if known:
+        if known == receipt and task.get("state") == "done" and task.get("pr_url") == proposal["pr_url"]:
+            return True
+        ctx.refused.append("outcome receipt conflict")
+        return False
+    if (
+        revision(task) != proposal["task_revision"]
+        or task.get("claimed_by") != actor
+        or task.get("pr_url") != proposal["pr_url"]
+        or outcome["phase"] != "externally_verified"
+        or not outcome.get("merge_sha")
+    ):
+        ctx.refused.append("outcome revision or ownership conflict")
+        return False
+    if not _update(doc, op, ctx):
+        return False
+    ctx.meta.setdefault("outcomes", {})[task_id] = receipt
+    ctx.dirty = True
     return True
 
 

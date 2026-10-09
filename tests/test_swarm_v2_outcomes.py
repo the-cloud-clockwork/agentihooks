@@ -310,3 +310,46 @@ def test_pause_at_the_final_guard_keeps_the_proposal_retryable(fixture):
     provider.enqueue = original
     assert outcomes.integrate(token, proposal.generation)["phase"] == "externally_verified"
     assert len(provider.calls) == 1
+
+
+def test_verified_outcome_completes_the_authoritative_ledger_once(fixture, tmp_path):
+    from scripts.swarm_ledger.api.resources import revision
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+    from tests.swarm_ledger.test_tasks import core, new_ledger
+
+    outcomes, authority, token, proposal, provider, task, clock, start, agent = fixture
+    repository = SQLiteLedgerRepository(tmp_path / "ledger.sqlite", core)
+    content = {
+        "title": "Outcome fixture",
+        "overview": "Final outcome",
+        "sources": [],
+        "phases": [{"id": "p1", "title": "Controller", "description": "d"}],
+        "tasks": [
+            {
+                "id": proposal.task_id,
+                "title": "Outcome",
+                "lane": "eng",
+                "kind": "code",
+                "phase": "p1",
+                "state": "claimed",
+                "claimed_by": agent.name,
+                "pr_url": proposal.pr_url,
+            }
+        ],
+    }
+    repository.create_document(authority.slug, new_ledger.build_doc(content))
+    row = repository.get_document(authority.slug)["tasks"][0]
+    outcomes.read_task = lambda task_id: repository.get_document(authority.slug)["tasks"][0]
+    proposal = replace(proposal, task_revision=revision(row))
+    outcomes.propose(token, proposal)
+    result = outcomes.complete(token, proposal.generation, repository)
+    state = repository.get_document(authority.slug)
+    assert state["tasks"][0]["state"] == "done"
+    assert state["tasks"][0]["done"] is True
+    assert state["tasks"][0]["proof"] == proposal.proof
+    assert result["ledger_revision"] == state["_meta"]["rev"]
+    prior = state
+    replay = outcomes.complete(token, proposal.generation, repository)
+    assert repository.get_document(authority.slug) == prior
+    assert replay == result
+    assert len(provider.calls) == 1
