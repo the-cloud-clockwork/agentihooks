@@ -117,7 +117,8 @@ def _selection(slug, store, pending):
     return list(dict.fromkeys([*live, *fresh[:8], *batch]))
 
 
-def _record(slug, store, ledger, binding, task, repo, pull, read):
+def _record(slug, store, ledger, binding, details, pull, read):
+    repo, _, task = details
     known = store.key(slug, "delivery-budget-known")
     watching = store.key(slug, "delivery-budget-watching")
     if not pull["merged_at"]:
@@ -160,7 +161,7 @@ def refresh(
         repo, number, task = pending[binding]
         try:
             pull = read(f"repos/{repo}/pulls/{number}", ".")[0]
-            if _record(slug, store, ledger, binding, task, repo, pull, read):
+            if _record(slug, store, ledger, binding, pending[binding], pull, read):
                 actions.append("recorded merged task delivery budget")
         except defects.READ_ERRORS as exc:
             defects._skipped("reading merged task delivery", exc)
