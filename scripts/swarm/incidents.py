@@ -4,7 +4,6 @@ import sys
 from redis.exceptions import RedisError
 
 from scripts.inbox.store import InboxStore
-
 from scripts.swarm import push
 from scripts.swarm.store import PREFIX
 
