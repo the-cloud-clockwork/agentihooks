@@ -504,6 +504,31 @@ def test_quota_transfer_routes_to_best_account_and_preserves_profile(tmp_path, m
         assert "opus" not in seen[0]
 
 
+@pytest.mark.parametrize(
+    "target,flags", [("codex", ["-c", 'model_reasoning_effort="xhigh"']), ("claude", ["--effort", "max"])]
+)
+def test_a_quota_transfer_continues_its_saved_effort_at_the_equal_rank(tmp_path, monkeypatch, target, flags):
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
+    rt._quota_accounts = [account("old", state="DRAIN"), account("best", target, five=10, week=20)]
+    seen = []
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    monkeypatch.setattr(
+        rt,
+        "_launch",
+        lambda cfg, lane, task, name, argv, **kw: seen.append(argv) or runtime.Placed("pane", target, "best"),
+    )
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3", effort_max="max")
+    task = {
+        "id": "e",
+        "title": "Continue task",
+        "handoff": "Saved Handoff v2",
+        "handoff_envelope": {"reason": "quota", "launch": {**LAUNCH, "effort": "max"}},
+    }
+    rt.spawn(config, "eng", "engineer@a1b2c3-0002", task)
+    model = seen[0][seen[0].index("--") + 1 :]
+    assert model[model.index(flags[0]) : model.index(flags[0]) + 2] == flags
+
+
 @pytest.mark.parametrize("same_lane,pinned", [(False, False), (False, True), (True, True)])
 def test_quota_successor_uses_its_lane_reservation(tmp_path, monkeypatch, same_lane, pinned):
     rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
