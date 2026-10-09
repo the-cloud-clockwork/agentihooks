@@ -48,6 +48,16 @@ def _skill(role: str) -> Path:
     return ROLES / role / ".claude" / "skills" / ROLE_SKILLS[role] / "SKILL.md"
 
 
+def test_planner_guidance_nests_task_headings_with_slice_anchors():
+    text = " ".join(_skill("planner").read_text().split())
+
+    assert (
+        "Put each phase under a heading with its exact title, each task section "
+        "under a heading one level deeper, and one unique `<!-- slice: <id> -->` "
+        "anchor immediately before each task heading."
+    ) in text
+
+
 def _commands(text: str) -> list[str]:
     return [span for span in re.findall(r"`([^`\n]+)`", text) if span.startswith("agentihooks ")]
 

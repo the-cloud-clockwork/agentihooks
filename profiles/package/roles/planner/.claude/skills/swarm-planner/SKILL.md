@@ -38,11 +38,12 @@ first: the project intent, the phase intent and any send back note.
 
 ## Slice
 
-1. Write the slice as a markdown plan in the work folder. Use the phase title
-   as its heading and put one unique `<!-- slice: <id> -->` anchor immediately
-   before each task heading. The section ends at the next slice anchor or
-   heading of the same or higher level. Done when every task has an anchor
-   and a section stating its complete scope and proof.
+1. Write the slice as a markdown plan in the work folder. Put each phase under a
+   heading with its exact title, each task section under a heading one level
+   deeper, and one unique `<!-- slice: <id> -->` anchor immediately before each
+   task heading. The section ends at the next slice anchor or heading of the
+   same or higher level. Done when every task has an anchor and a section
+   stating its complete scope and proof.
 2. Publish it before adding tasks:
    `agentihooks ledger --slug <slug> --as <name> publish-plan <file> --phase <phase>`.
    Publication stores a plan artifact and computes the phase range. Done when
