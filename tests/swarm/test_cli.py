@@ -2099,7 +2099,7 @@ def test_a_failing_swarm_tick_leaves_the_others_and_the_sweep_running(monkeypatc
             raise ValueError("ledger down")
         return [f"ok {slug}"]
 
-    _tick_all(monkeypatch, run_tick, ["a", "b"])
+    _tick_all(monkeypatch, run_tick, ["a", "b"], tick_seconds=60)
     captured = capsys.readouterr()
     assert captured.out.splitlines() == ["b: ok b", "herdr: swept"]
     assert captured.err == "a: ValueError: ledger down\n"
