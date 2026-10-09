@@ -1,5 +1,6 @@
 import ledger_alerts
 import ledger_notifications
+import ledger_plans
 import ledger_priorities
 
 
@@ -27,6 +28,7 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
             ledger_alerts.raise_warning(
                 doc, ctx, (ledger_alerts.SYNC, text, ledger_alerts.writer(op, ctx), ledger_alerts.item(op)), []
             )
+    ledger_plans.drop_refused(doc, ordered_ops, rejected, ctx)
     ledger_artifacts.sweep(slug, doc, ctx)
     ledger_media.attach_paths(slug, doc, ctx.events)
     ledger_priorities.derive(doc, ctx)
