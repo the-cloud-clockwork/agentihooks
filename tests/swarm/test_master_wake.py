@@ -1,6 +1,5 @@
 from dataclasses import replace
 
-import fakeredis
 import pytest
 
 from scripts.inbox import wake
@@ -10,7 +9,7 @@ from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 START = 1_000
 WINDOW = 20 * 60 * 1_000
@@ -19,6 +18,8 @@ PROMPT = "Swarm backstop: run agentihooks msg inbox and work your Priorities. Wo
 
 @pytest.fixture
 def setup():
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0, state="paused"))
     master = AgentRecord("master@a1b2c3-0001", MASTER, "", pane_id="w1:m1", harness="claude", started_at=START)
