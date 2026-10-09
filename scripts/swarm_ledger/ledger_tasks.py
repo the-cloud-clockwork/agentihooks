@@ -5,7 +5,7 @@ import re
 import ledger_comments
 import ledger_kinds
 
-from scripts.swarm_ledger import ledger_rank
+from scripts.swarm_ledger import ledger_plans, ledger_rank
 
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -41,6 +41,7 @@ UPDATABLE = (
     "difficulty_source",
     "difficulty_confidence",
     "phase",
+    "slice",
 )
 BOOL_FIELDS = ("artifact",)
 DIFFICULTIES = ("S", "M", "L")
@@ -83,8 +84,8 @@ def check(op):
             raise ValueError("task_add needs task <id> and title")
         if op.get("lane") not in LANES:
             raise ValueError(f"lane must be one of {LANES}")
-        if not all(isinstance(op.get(key, ""), str) for key in ("phase", "description", "workspace")):
-            raise ValueError("phase, description and workspace must be strings")
+        if not all(isinstance(op.get(key, ""), str) for key in ("phase", "description", "workspace", "slice")):
+            raise ValueError("phase, description, workspace and slice must be strings")
         if "not_duplicate" in op and not (isinstance(op["not_duplicate"], str) and op["not_duplicate"].strip()):
             raise ValueError("not_duplicate must say in plain words why the task differs from the one it resembles")
         check_lists(op)
@@ -245,7 +246,7 @@ def _add(doc, op, ctx):
         "done": False,
         "comments": [],
     }
-    for key in ("gain", "contract", "workspace", "artifact", "profile", "overlays", "not_duplicate"):
+    for key in ("gain", "contract", "workspace", "artifact", "profile", "overlays", "not_duplicate", "slice"):
         if key in op:
             task[key] = op[key]
     if "rank" in op:
@@ -263,6 +264,9 @@ def _add(doc, op, ctx):
             ctx.refused.append(str(exc))
             return False
         task["plan_slice"] = op["plan_slice"]
+    if refusal := ledger_plans.task_refusal(doc, task):
+        ctx.refused.append(refusal)
+        return False
     tasks.append(task)
     ctx.record(op["by"], "added", f"tasks/{task['id']}", text=task["title"])
     return True
@@ -392,6 +396,9 @@ def _update(doc, op, ctx):
     fields = _update_fields(task, op["fields"])
     after = {**task, **fields}
     check_lane(after)
+    if refusal := ledger_plans.task_refusal(doc, after):
+        ctx.refused.append(refusal)
+        return False
     if after.get("state") == "done" and ledger_kinds.unmet(after):
         ctx.refused.append(f"{op['item']} cannot be done without its proof: {', '.join(ledger_kinds.unmet(after))}")
         return False
@@ -474,6 +481,8 @@ def _move_plan(doc: dict, task: dict, fields: dict, phase: dict) -> None:
     if "plan_url" not in fields and (fields.get("plan_slice") or task.get("plan_url") == source.get("plan_url")):
         fields["plan_url"] = phase.get("plan_url", "") if fields.get("plan_slice") else ""
     fields.setdefault("plan_slice", "")
+    if task.get("slice"):
+        fields.setdefault("slice", "")
 
 
 def _set_slice(doc: dict, op: dict, ctx) -> bool:
