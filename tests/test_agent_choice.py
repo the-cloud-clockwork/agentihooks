@@ -36,6 +36,20 @@ def test_no_free_seat_gives_claude_all_full(monkeypatch):
     assert agent_choice.choose("", {}) == ("claude", agent_choice.ALL_FULL)
 
 
+def test_the_rotation_pick_follows_the_api_split(monkeypatch):
+    from scripts.swarm import capacity
+
+    rows = [
+        capacity.Account("claude", "a", "OPEN", 1, 90, 90, 3),
+        capacity.Account("codex", "cx", "OPEN", 2, 90, 90, 3),
+        capacity.Account("codex", "api", "OPEN", 0, None, None, 10**6, kind="api", weight=0),
+    ]
+    monkeypatch.setattr(capacity, "accounts", lambda environ, now: rows)
+    assert agent_choice.choose("", {}) == ("claude", "rotation")
+    rows[2] = capacity.Account("codex", "api", "OPEN", 0, None, None, 10**6, kind="api", weight=100)
+    assert agent_choice.choose("", {}) == ("codex", "rotation")
+
+
 def test_init_agent_reports_the_chosen_agent(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
         agent_choice, "choose", lambda requested, environ: ("codex", "fallthrough: claude has no quota")

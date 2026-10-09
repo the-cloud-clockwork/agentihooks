@@ -109,7 +109,7 @@ def test_queued_merges_are_analysed_as_their_pull_request(tmp_path, head_ref, la
     assert "pull-requests" not in _workflow()["jobs"]["sonar"]["permissions"]
     assert "GH_TOKEN" not in step["env"]
     assert steps.index(step) < steps.index(scan)
-    assert scan["env"]["ARGS"] == "${{ steps.queued.outputs.args }}"
+    assert scan["env"]["ARGS"] == "${{ steps.queued.outputs.args || steps.dispatched.outputs.args }}"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     git = bin_dir / "git"
@@ -138,6 +138,38 @@ def test_queued_merges_are_analysed_as_their_pull_request(tmp_path, head_ref, la
     else:
         assert result.returncode == 0, result.stdout + result.stderr
         assert output.read_text() == f"args={args}\n"
+
+
+@pytest.mark.parametrize(
+    ("ref_name", "args"),
+    [
+        (
+            "diffcheck/plant-1",
+            "-Dsonar.pullrequest.key=dispatch-diffcheck-plant-1 -Dsonar.pullrequest.branch=diffcheck/plant-1 -Dsonar.pullrequest.base=dev",
+        ),
+        (
+            "feature-x",
+            "-Dsonar.pullrequest.key=dispatch-feature-x -Dsonar.pullrequest.branch=feature-x -Dsonar.pullrequest.base=dev",
+        ),
+        (
+            "a/b/c",
+            "-Dsonar.pullrequest.key=dispatch-a-b-c -Dsonar.pullrequest.branch=a/b/c -Dsonar.pullrequest.base=dev",
+        ),
+    ],
+)
+def test_dispatched_runs_are_analysed_as_a_pull_request_into_dev(tmp_path, ref_name, args):
+    steps = _workflow()["jobs"]["sonar"]["steps"]
+    step = next(s for s in steps if s.get("id") == "dispatched")
+    scan = next(s for s in steps if s.get("name") == "SonarQube Scan")
+    assert step["if"] == "github.event_name == 'workflow_dispatch' && github.ref_name != 'dev'"
+    assert step["env"] == {"REF_NAME": "${{ github.ref_name }}"}
+    assert steps.index(step) < steps.index(scan)
+    output = tmp_path / "output"
+    output.write_text("")
+    env = dict(os.environ, GITHUB_OUTPUT=str(output), REF_NAME=ref_name)
+    result = subprocess.run(["bash", "-eo", "pipefail", "-c", step["run"]], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert output.read_text() == f"args={args}\n"
 
 
 def test_secret_detection_includes_all_tracked_text_and_hidden_configuration():
