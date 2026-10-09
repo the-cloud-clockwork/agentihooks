@@ -1201,6 +1201,26 @@ def test_an_auto_swarm_holds_its_previous_host_room_between_the_watermarks(tmp_p
     assert "previous room" in second["reason"]
 
 
+def test_the_autoscale_command_reads_a_live_swarm_without_refreshing_quota(capsys, monkeypatch):
+    from scripts.swarm import cli, host_budget
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0))
+    stored = {"autoscale": {"ceilings": {"eng": 1, "ci": 0, "plan": 0}, "pending_raise": {"target": 12, "ticks": 2}}}
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps(stored))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([{"id": f"e{n}"} for n in range(4)]))
+    refreshes = []
+    observed = [account(cap=6), account("cx", harness="codex", cap=6)]
+    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: refreshes.append(refresh) or observed)
+    monkeypatch.setattr(host_budget, "read_host", _roomy_host)
+    cli.main(["sw", "autoscale", "--json"])
+    printed = json.loads(capsys.readouterr().out)
+    assert refreshes == [False]
+    assert printed["ceilings"]["eng"] > 1
+    assert json.loads(store.redis.get(store.key("sw", "quota-capacity"))) == stored
+
+
 def test_the_autoscale_command_prints_the_decision_for_a_fixture(tmp_path, capsys, monkeypatch):
     from scripts.swarm import cli
 
