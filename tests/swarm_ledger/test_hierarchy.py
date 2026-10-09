@@ -98,6 +98,11 @@ def test_project_skips_malformed_items_and_links():
     )
 
 
+def test_a_task_with_a_broken_slice_falls_back_to_its_phase():
+    state = {"plans": [{"id": "a", "plan": "plans/b"}], "tasks": [{"id": "t1", "phase": "p1", "slice": 7}]}
+    assert hierarchy.project(state) == ({"plans/a": ("plan", None, 0), "tasks/t1": ("task", "phases/p1", 0)}, set())
+
+
 def test_an_imported_ledger_with_malformed_items_stores_the_rest(tmp_path):
     copy = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
     copy.import_document("loose", {"tasks": [{"title": "no id"}, {"id": "t1"}], "_meta": {"rev": 1}})
@@ -210,6 +215,20 @@ def test_a_write_repairs_rows_that_drifted_at_the_same_count(repo):
         connection.execute("INSERT INTO work_nodes VALUES (?, 'tasks/ghost', 'task', NULL, 9)", (SLUG,))
     assert run(repo, "task_update", item="tasks/t1", fields={"depends_on": ["t2"]})[1] == []
     assert rows(repo) == hierarchy.project(repo.get_document(SLUG))
+
+
+def test_a_write_that_changes_no_relation_writes_no_hierarchy_row(repo):
+    statements = []
+    repo.trace = statements.append
+    assert repo.apply_ops(SLUG, ops=[{"op": "add", "id": "m1", "thread": "chat", "text": "hello"}])[1] == []
+    assert [s for s in statements if "work_" in s and not s.startswith("SELECT")] == []
+
+
+def test_rebuild_adopts_its_own_ledger(repo, monkeypatch):
+    adopted = []
+    monkeypatch.setattr(repo, "_adopt", adopted.append)
+    repo.rebuild(SLUG)
+    assert adopted == [SLUG]
 
 
 def test_restore_keeps_the_rows_and_purge_removes_them(repo, monkeypatch):

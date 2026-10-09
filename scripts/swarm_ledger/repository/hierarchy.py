@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS work_dependencies (ledger_slug TEXT NOT NULL, node_id
 CREATE INDEX IF NOT EXISTS work_dependencies_required ON work_dependencies(ledger_slug,requires_id);
 """
 KINDS = {"plans": "plan", "phases": "phase", "slices": "slice", "tasks": "task"}
+LINKS = {"phases": "plan", "slices": "phase", "tasks": "slice"}
 NODES = "SELECT node_id, kind, parent_id, position FROM work_nodes WHERE ledger_slug=?"
 DEPENDENCIES = "SELECT node_id, requires_id FROM work_dependencies WHERE ledger_slug=?"
 DELETE_NODE = "DELETE FROM work_nodes WHERE ledger_slug=? AND node_id=?"
@@ -21,14 +22,9 @@ def text(value) -> bool:
 
 
 def parent(collection: str, item: dict) -> str | None:
-    if collection == "phases":
-        found = item.get("plan")
-    elif collection == "slices":
-        found = item.get("phase")
-    elif collection == "tasks":
-        found = item.get("slice") or (f"phases/{item['phase']}" if text(item.get("phase")) else None)
-    else:
-        found = None
+    found = item.get(LINKS.get(collection))
+    if collection == "tasks" and not text(found) and text(item.get("phase")):
+        found = f"phases/{item['phase']}"
     return found if text(found) else None
 
 
