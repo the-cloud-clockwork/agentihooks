@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "fixture-codex-mcp": {"command": "python", "args": ["-m", "hooks.mcp"]}
+  }
+}

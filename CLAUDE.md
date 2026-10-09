@@ -18,6 +18,7 @@ $V/python -m pytest tests/test_hook_manager.py                 # single file
 $V/python -m pytest tests/test_config.py::TestSecretsMode -v   # single test
 $V/ruff check .                                                # lint
 $V/ruff format .                                               # format
+$V/python -m scripts.ci_prepush                                # before every push: lint, format, size, touched tests
 agentihooks init --profile anton                                       # global install
 ```
 

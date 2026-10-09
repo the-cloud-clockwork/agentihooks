@@ -14,6 +14,7 @@ from scripts.swarm.store import SwarmError
 KINDS = ("checks", "merge", "reply", "task")
 BARE_MAX_MINUTES = 60
 CHECKED_MINUTES = 12 * 60
+FRESH_MS = 5 * 60_000
 TASK_ENDS = ("done", "blocked")
 SENDER = "swarm"
 PULL_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
@@ -87,18 +88,31 @@ def target_problem(kind, target, mine, rows, get):
     return ""
 
 
-def resolution(held, rows, inbox, github):
+def merge_resolution(held, github, reread, fresh):
+    target = held["target"]
+    pull = github(target)
+    if pull is not None and pull.state == "OPEN" and not pull.queued:
+        pull = reread(target)
+    if pull is None:
+        return ""
+    if pull.state == "MERGED":
+        return f"pull request {target}, now merged"
+    if pull.state == "OPEN":
+        if pull.queued:
+            held["queued"] = True
+            return ""
+        if not pull.resolved or (fresh and not held.get("queued")):
+            return ""
+    return f"pull request {target}, now red; left the merge queue without merging; fix it and queue it again"
+
+
+def resolution(held, rows, inbox, github, reread, fresh):
     """What ended the wait, in plain words, or '' while it still holds."""
     kind, target = held["kind"], held["target"]
     if kind == "checks":
         return checks_resolution(held, github)
     if kind == "merge":
-        pull = github(target)
-        if pull is None or (pull.state == "OPEN" and pull.queued):
-            return ""
-        if pull.state == "MERGED":
-            return f"pull request {target}, now merged"
-        return f"pull request {target}, now red; left the merge queue without merging; fix it and queue it again"
+        return merge_resolution(held, github, reread, fresh)
     if kind == "task":
         if target not in rows:
             return f"task {target}, gone from the ledger"
@@ -111,16 +125,15 @@ def resolution(held, rows, inbox, github):
     return f"message {target}, now {item.state}" if item.state in CLOSED else ""
 
 
-def end_pass(store, slug, rows, inbox, github, now_ms):
+def end_pass(store, slug, rows, inbox, github, now_ms, reread):
     ended = []
     for agent in store.agents(slug):
         held = idle.wait(store.redis, slug, agent.name)
         if agent.state == "finished" or not (held and held.get("on")):
             continue
         previous = json.dumps(held)
-        head = held["on"].get("head")
-        outcome = resolution(held["on"], rows, inbox, github)
-        if (outcome or held["on"].get("head") != head) and not _save_wait(
+        outcome = resolution(held["on"], rows, inbox, github, reread, now_ms - held["at"] < FRESH_MS)
+        if (outcome or json.dumps(held) != previous) and not _save_wait(
             store.redis, slug, agent.name, previous, held, outcome, now_ms
         ):
             continue

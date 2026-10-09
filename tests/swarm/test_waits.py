@@ -135,14 +135,20 @@ def tick():
         held = {"kind": kind, "target": target, **({"head": "first"} if kind == "checks" else {})}
         idle.declare_wait(store.redis, "sw", ME, 10_000_000, "", 1, on=held)
 
-    def end(rows=None):
-        return waits.end_pass(store, "sw", rows or {}, inbox, pulls.get, 5_000)
+    fresh = {}
+
+    def reread(url):
+        return fresh[url] if url in fresh else pulls.get(url)
+
+    def end(rows=None, now=5_000):
+        return waits.end_pass(store, "sw", rows or {}, inbox, pulls.get, now, reread)
 
     def told():
         return [item.text for item in inbox.inbox("eng-1@sw")]
 
     rig = type("Rig", (), {})()
     rig.store, rig.inbox, rig.pulls, rig.hold, rig.end, rig.told = store, inbox, pulls, hold, end, told
+    rig.fresh = fresh
     return rig
 
 
@@ -201,12 +207,103 @@ def test_the_tick_accepts_a_merge_wait_only_after_the_pull_request_lands(tick):
     tick.hold("merge", URL)
     tick.pulls[URL] = PullRequest("OPEN", None, 1, False, resolved=True, queued=True)
     assert tick.end() == []
-    assert held(tick.store)["on"] == {"kind": "merge", "target": URL}
+    assert held(tick.store)["on"] == {"kind": "merge", "target": URL, "queued": True}
     tick.pulls[URL] = PullRequest("MERGED", 2, 1, False)
     assert tick.end() == [f"ended the wait of {ME}: pull request {URL}, now merged"]
     assert held(tick.store) is None
     assert f"Your wait on pull request {URL}, now merged has ended." in tick.told()[0]
     assert tick.end() == []
+
+
+LEFT = f"pull request {URL}, now red; left the merge queue without merging; fix it and queue it again"
+UNLISTED = PullRequest("OPEN", None, 1, False, resolved=True, head="first")
+LISTED = PullRequest("OPEN", None, 1, False, resolved=True, head="first", queued=True)
+
+
+def test_a_queue_read_that_lags_right_after_enqueue_keeps_the_merge_wait(tick):
+    tick.hold("merge", URL)
+    tick.pulls[URL] = UNLISTED
+    tick.fresh[URL] = LISTED
+    assert tick.end() == []
+    assert held(tick.store)["on"] == {"kind": "merge", "target": URL, "queued": True}
+    assert tick.told() == []
+
+
+def test_a_fresh_entry_not_yet_visible_stays_queued_until_its_grace_runs_out(tick):
+    tick.hold("merge", URL)
+    tick.pulls[URL] = UNLISTED
+    assert tick.end() == []
+    assert tick.end(now=waits.FRESH_MS) == []
+    assert held(tick.store)["on"] == {"kind": "merge", "target": URL}
+    assert tick.end(now=1 + waits.FRESH_MS) == [f"ended the wait of {ME}: {LEFT}"]
+    assert held(tick.store) is None
+
+
+def test_a_fresh_entry_grace_lasts_five_minutes():
+    assert waits.FRESH_MS == 300_000
+
+
+@pytest.mark.parametrize(
+    "pull, fresh, outcome",
+    [
+        (None, PullRequest("MERGED", 2, 1, False), ""),
+        (PullRequest("MERGED", 2, 1, False), LISTED, f"pull request {URL}, now merged"),
+        (LISTED, UNLISTED, ""),
+    ],
+)
+def test_the_merge_wait_rereads_only_an_open_pull_request_the_queue_does_not_list(pull, fresh, outcome):
+    on = {"kind": "merge", "target": URL}
+    assert waits.resolution(on, {}, None, {URL: pull}.get, {URL: fresh}.get, False) == outcome
+    assert on == {"kind": "merge", "target": URL, **({"queued": True} if pull is LISTED else {})}
+
+
+def test_a_seen_entry_gets_no_fresh_grace_once_the_queue_drops_it():
+    on = {"kind": "merge", "target": URL}
+    assert waits.resolution(on, {}, None, {URL: UNLISTED}.get, {URL: UNLISTED}.get, True) == ""
+    assert waits.resolution(on, {}, None, {URL: UNLISTED}.get, {URL: UNLISTED}.get, False) == LEFT
+    on["queued"] = True
+    assert waits.resolution(on, {}, None, {URL: UNLISTED}.get, {URL: UNLISTED}.get, True) == LEFT
+
+
+def test_a_merge_wait_holds_while_the_unlisted_pull_request_still_awaits_checks(tick):
+    tick.hold("merge", URL)
+    tick.pulls[URL] = LISTED
+    assert tick.end() == []
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, False, resolved=False, head="first")
+    assert tick.end() == []
+    assert held(tick.store)["on"] == {"kind": "merge", "target": URL, "queued": True}
+    assert tick.told() == []
+
+
+def test_a_pull_request_removed_after_a_failed_group_reports_left_once_the_reread_agrees(tick):
+    tick.hold("merge", URL)
+    tick.pulls[URL] = LISTED
+    assert tick.end() == []
+    tick.pulls[URL] = UNLISTED
+    tick.fresh[URL] = None
+    assert tick.end() == []
+    tick.fresh[URL] = UNLISTED
+    assert tick.end() == [f"ended the wait of {ME}: {LEFT}"]
+    assert held(tick.store) is None
+
+
+def test_a_reread_that_finds_the_pull_request_merged_reports_merged(tick):
+    tick.hold("merge", URL)
+    tick.pulls[URL] = UNLISTED
+    tick.fresh[URL] = PullRequest("MERGED", 2, 1, False)
+    assert tick.end() == [f"ended the wait of {ME}: pull request {URL}, now merged"]
+
+
+def test_the_tick_rereads_the_queue_with_an_uncached_view(started, monkeypatch):
+    from tests.swarm.test_delivery import FakeHerdr
+    from tests.swarm.test_tick import FakeRuntime
+
+    store, ledger = started
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 0
+    monkeypatch.setattr(cli.ledger_events, "tick_view", lambda *args: {URL: UNLISTED}.get)
+    monkeypatch.setattr(cli.ledger_events, "view", {URL: LISTED}.get)
+    cli.run_tick(store, "sw", ledger, FakeRuntime(), FakeHerdr({}))
+    assert held(store)["on"] == {"kind": "merge", "target": URL, "queued": True}
 
 
 def test_cli_records_a_checked_merge_wait_with_a_pull_request_url(started, capsys):
@@ -584,7 +681,7 @@ def test_a_push_or_missing_checks_during_resolution_keeps_the_wait(tick, confirm
         else None
     )
     replies = iter([current, latest])
-    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000) == []
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000, None) == []
     assert tick.told() == []
     assert idle.wait(tick.store.redis, "sw", ME)["on"]["head"] == (
         "second" if confirmation and confirmation[0] == "second" else "first"
@@ -875,7 +972,7 @@ def test_checks_resolution_uses_the_confirmed_current_head_result(tick):
             SimpleNamespace(state="OPEN", head="first", resolved=True, red=True, unpassed_gate=""),
         ]
     )
-    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000) == [
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000, None) == [
         f"ended the wait of {ME}: checks on {URL}, now red"
     ]
 
@@ -894,7 +991,7 @@ def test_the_tick_preserves_a_wait_redeclared_during_its_probe(tick, head, resol
         )
         return SimpleNamespace(state="OPEN", head=head, resolved=resolved, red=False, unpassed_gate="")
 
-    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, github, 5_000) == []
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, github, 5_000, None) == []
     assert idle.wait(tick.store.redis, "sw", ME) == {
         "until": 20_000_000,
         "reason": "new wait",
@@ -931,7 +1028,7 @@ def test_a_replaced_wait_does_not_stop_resolution_for_the_next_agent(tick):
         )
         return SimpleNamespace(state="OPEN", head="second", resolved=True, red=False, unpassed_gate="")
 
-    assert waits.end_pass(tick.store, "sw", {"t3": {"state": "done"}}, tick.inbox, github, 5_000) == [
+    assert waits.end_pass(tick.store, "sw", {"t3": {"state": "done"}}, tick.inbox, github, 5_000, None) == [
         f"ended the wait of {following}: task t3, now done"
     ]
     assert idle.wait(tick.store.redis, "sw", ME)["on"]["head"] == "third"

@@ -177,9 +177,14 @@ def test_done_waits_on_a_queued_pull_request_and_accepts_only_after_it_lands(env
         "at": 1000,
         "on": {"kind": "merge", "target": url},
     }
-    assert cli.waits.end_pass(store, "sw", ledger.rows, InboxStore(store.redis), ledger.pulls.get, 1000) == []
+    assert (
+        cli.waits.end_pass(store, "sw", ledger.rows, InboxStore(store.redis), ledger.pulls.get, 1000, ledger.pulls.get)
+        == []
+    )
     ledger.pulls[url] = PullRequest("MERGED", 2, 1, False)
-    ended = cli.waits.end_pass(store, "sw", ledger.rows, InboxStore(store.redis), ledger.pulls.get, 2000)
+    ended = cli.waits.end_pass(
+        store, "sw", ledger.rows, InboxStore(store.redis), ledger.pulls.get, 2000, ledger.pulls.get
+    )
     assert ended == [f"ended the wait of {name}: pull request {url}, now merged"]
     assert cli.idle.wait(store.redis, "sw", name) is None
     assert run("sw", "done") == 0
@@ -2075,6 +2080,25 @@ def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
     return store
 
 
+def test_the_host_tick_refuses_a_controller_tick_setting(monkeypatch):
+    import types
+
+    from scripts import operator_env
+
+    ticked = []
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "10")
+    monkeypatch.setattr(timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(operator_env, "fill", lambda environ: [])
+    monkeypatch.setattr(cli, "run_tick", lambda store, slug: ticked.append(slug))
+    with pytest.raises(SwarmError) as error:
+        cli.cmd_tick(types.SimpleNamespace(slugs=lambda: ["sw"]), None)
+    assert str(error.value) == (
+        "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
+        "and the host timer ticks every 60 seconds"
+    )
+    assert ticked == []
+
+
 def test_the_tick_runs_every_swarm_at_the_same_time(monkeypatch, capsys):
     import threading
 
@@ -2099,7 +2123,7 @@ def test_a_failing_swarm_tick_leaves_the_others_and_the_sweep_running(monkeypatc
             raise ValueError("ledger down")
         return [f"ok {slug}"]
 
-    _tick_all(monkeypatch, run_tick, ["a", "b"])
+    _tick_all(monkeypatch, run_tick, ["a", "b"], tick_seconds=60)
     captured = capsys.readouterr()
     assert captured.out.splitlines() == ["b: ok b", "herdr: swept"]
     assert captured.err == "a: ValueError: ledger down\n"
@@ -2155,7 +2179,7 @@ def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsy
 
 def test_swarms_that_finish_together_tick_once(monkeypatch, capsys):
     ticks = []
-    _tick_all(monkeypatch, lambda store, slug: ticks.append(slug) or ["ok"], ["a", "b", "c"])
+    _tick_all(monkeypatch, lambda store, slug: ticks.append(slug) or ["ok"], ["a", "b", "c"], tick_seconds=60)
     assert sorted(ticks) == ["a", "b", "c"]
 
 

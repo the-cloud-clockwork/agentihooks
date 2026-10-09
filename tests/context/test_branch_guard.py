@@ -2,6 +2,8 @@
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("outside_a_guarded_repository")
+
 
 class TestBranchGuard:
     """Test that git commands targeting main/master are blocked."""
@@ -292,3 +294,42 @@ class TestPrSignalResetsCounter:
             # Operator re-signal must reset it
             branch_guard.set_pr_signal(sid)
             assert branch_guard._get_pr_counter(sid) == 0
+
+
+class TestResolveCwd:
+    @pytest.mark.parametrize("quote", ['"', "'", ""])
+    def test_a_cd_prefix_names_the_directory(self, tmp_path, quote):
+        from hooks.context.branch_guard import _resolve_cwd
+
+        work = tmp_path / "workX"
+        work.mkdir()
+
+        assert _resolve_cwd(f"cd {quote}{work}{quote} && git push", "/") == str(work)
+
+    def test_a_cd_prefix_expands_home_and_variables(self, tmp_path, monkeypatch):
+        from hooks.context.branch_guard import _resolve_cwd
+
+        (tmp_path / "work").mkdir()
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("WORK_DIR", str(tmp_path / "work"))
+
+        assert _resolve_cwd("cd ~/work && git push", "/") == str(tmp_path / "work")
+        assert _resolve_cwd("cd $WORK_DIR && git push", "/") == str(tmp_path / "work")
+
+
+def test_a_push_of_a_head_that_skipped_the_cheap_gates_is_blocked(tmp_path):
+    import subprocess
+
+    from hooks.context.branch_guard import check_branch_guard
+    from hooks.hook_manager import BlockAction
+
+    (tmp_path / "scripts" / "ci_prepush").mkdir(parents=True)
+    (tmp_path / "scripts" / "ci_prepush" / "__init__.py").write_text("")
+    for args in (
+        ["init", "-q"],
+        ["-c", "user.email=t@x", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "b"],
+    ):
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True)
+
+    with pytest.raises(BlockAction, match="python -m scripts.ci_prepush"):
+        check_branch_guard({"tool_input": {"command": "git push origin HEAD"}, "cwd": str(tmp_path)})

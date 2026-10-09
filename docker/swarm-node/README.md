@@ -19,14 +19,36 @@ or credential store. Runtime homes are writable; templates and the environment
 are owned by root and read only to the worker user.
 
 The default command verifies and reports installed inventory without a network.
-The launch supervisor and native profile rendering belong to subsequent IMG
-packages. This image introduces no orchestration service or embedded database.
-The existing ledger service Dockerfile remains separate.
+The launch supervisor belongs to a subsequent IMG package.
+
+Before an attempt starts, `python -m scripts.swarm_v2.worker_home bootstrap`
+renders its Claude and Codex profiles into a private attempt home under
+`/home/worker/attempts/<attempt>`, one home per target, through the same target
+adapters `agentihooks init` uses. Only the selected profiles are copied in, and
+accounts are recorded as variable names, never values. Hook and MCP commands use
+the container interpreter. Every rendered setting except permission rules, every
+MCP server field and every Codex hook export is scanned: a path outside the
+attempt, the interpreter prefix or the agentihooks install fails bootstrap, as
+does any `..`, `~` or `$` path, and a noexec home volume when Codex is
+requested, because its hook wrapper must execute. Other relative paths are
+admitted. Rerunning an accepted request is a no-op, an interrupted one is
+rendered again from scratch, and a different request for an accepted attempt is
+refused. The execution record names the digest of each selected profile.
+Rollback selects the prior profile digest for new attempts; existing attempt
+homes are kept for recovery. Codex skips hooks it has not trusted; trusting them
+at launch belongs to the supervisor package SV2-IMG-03, so the smoke proves hook
+loading with trust bypassed. This image introduces no orchestration service or
+embedded database. The existing ledger service Dockerfile remains separate.
 
 After committing inputs, `bash docker/swarm-node/smoke.sh OUTPUT_DIRECTORY`
 builds an archived clean context, starts two independent containers with network
 disabled, rejects three invalid locks, rebuilds without cache and starts the
-retained image again. The output contains the build manifest, software inventory,
-profile hashes and package evidence. Production deployment and new attempt image
-selection remain with antoncore GitOps. Rollback retains the previously qualified
-image for new attempts; active attempts and durable task state are unchanged.
+retained image again. It also bootstraps the fixture profiles in
+`fixtures/profiles` inside fresh containers, runs `claude mcp list`, `codex mcp
+list`, `claude -p` and `codex exec` offline so their SessionStart hooks register
+the session, proves refusals, crash recovery and a profile rollback, and writes
+the SV2-IMG-02 evidence. The output contains the build manifest, software
+inventory, profile hashes and package evidence. Production deployment and new
+attempt image selection remain with antoncore GitOps. Rollback retains the
+previously qualified image for new attempts; active attempts and durable task
+state are unchanged.

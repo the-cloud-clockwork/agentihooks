@@ -375,6 +375,16 @@ class Context:
         self.at, self.rev = at, meta["rev"] + 1
         self.stamps, self.events = meta["stamps"], []
         self.meta, self.dirty, self.refused, self.dropped = meta, False, [], []
+        self.names = {}
+
+    def author(self, name: str) -> str:
+        if name not in self.names:
+            from scripts.swarm.naming import resolve_name
+
+            resolved = resolve_name(name)
+            self.names[name] = resolved
+            self.names[resolved] = resolved
+        return self.names[name]
 
     def record(self, by, kind, target, **extra):
         self.events.append({"rev": self.rev, "at": self.at, "by": by, "kind": kind, "target": target, **extra})
@@ -469,9 +479,7 @@ def record_sync(doc, op, ctx):
 
 def apply_op(doc, op, ctx):
     if "by" in op:
-        from scripts.swarm.naming import resolve_name
-
-        op = {**op, "by": resolve_name(op["by"])}
+        op = {**op, "by": ctx.author(op["by"])}
     if op["op"] in AGENT_OPS:
         import ledger_agent_ops
 

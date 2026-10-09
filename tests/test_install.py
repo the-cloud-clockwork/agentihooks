@@ -325,6 +325,34 @@ class TestClaudeRouting:
         assert "70%" in output
         assert "source=cached" in output
 
+    def test_cmd_balance_marks_the_declared_master_on_the_main_and_current_paths(self, monkeypatch, capsys):
+        from scripts import claude_quota_balancer as balancer
+        from scripts.routing import master_account
+        from scripts.routing.master_account import MasterAccount
+
+        credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")
+        result = balancer.ProbeResult(
+            "ALPHA", "allowed", "NORMAL", 70, balancer.QuotaWindow(used=20), balancer.QuotaWindow(used=30)
+        )
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [credential])
+        monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([result], "cached"))
+        monkeypatch.setattr(balancer, "cached_observations", lambda include_fable=False: [(1.0, result)])
+        monkeypatch.setattr(
+            balancer, "identify_session_account", lambda *args: balancer.SessionAccount("ALPHA", "token")
+        )
+        monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {})
+        monkeypatch.setattr(
+            master_account, "load", lambda environ: {"claude": MasterAccount("claude", "ALPHA", "max", "subscription")}
+        )
+
+        assert install.cmd_balance(include_fable=False, refresh=False, timeout=10) == 0
+        assert capsys.readouterr().out.splitlines()[2].split()[1:4] == ["ALPHA", "MASTER", "max"]
+        assert install.cmd_balance(include_fable=False, refresh=False, timeout=10, current=True) == 0
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[3].split()[1:5] == ["ALPHA", "(current)", "MASTER", "max"]
+
     def test_cmd_balance_lists_every_codex_account_even_without_claude_tokens(self, monkeypatch, capsys):
         from scripts import agents_quota
         from scripts import claude_quota_balancer as balancer
@@ -341,6 +369,24 @@ class TestClaudeRouting:
         lines = capsys.readouterr().out.splitlines()
         assert lines[1].split()[:5] == ["codex", "default", "subscription", "SIGNED_OUT", "0/?"]
         assert lines[2].split()[:5] == ["codex", "alpha", "subscription", "NORMAL", "2/6"]
+
+    def test_cmd_balance_without_claude_tokens_still_lists_an_interactive_master(self, monkeypatch, capsys):
+        from scripts import agents_quota
+        from scripts import claude_quota_balancer as balancer
+        from scripts.routing import master_account
+        from scripts.routing.master_account import MasterAccount
+
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [])
+        monkeypatch.setattr(agents_quota, "_codex", lambda now: [])
+        monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"home": 3})
+        monkeypatch.setattr(
+            master_account, "load", lambda environ: {"claude": MasterAccount("claude", "home", "max", "interactive")}
+        )
+
+        assert install.cmd_balance(include_fable=False, refresh=False, timeout=10) == 2
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[2].split()[:7] == ["-", "home", "MASTER", "max", "interactive", "MASTERS", "3/?"]
 
     def test_cmd_balance_lists_the_claude_api_slot_with_kind_weight_and_cap(self, monkeypatch, tmp_path, capsys):
         from scripts import agents_quota

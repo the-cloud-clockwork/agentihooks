@@ -121,6 +121,10 @@ def test_task_without_range_gets_no_window(ledger):
     assert "Your chunk" not in reason
 
 
+def test_plan_read_allowed_for_a_task_without_plan_lines(ledger):
+    assert check(bash("agentihooks plan read"), env(ledger, task="t2")) is None
+
+
 @pytest.mark.parametrize("lane", ["master", "plan", ""])
 def test_master_and_planner_lanes_allowed(ledger, lane):
     assert check(read(stored(ledger)), env(ledger, lane=lane)) is None
