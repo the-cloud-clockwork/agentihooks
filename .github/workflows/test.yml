@@ -294,6 +294,30 @@ jobs:
           PYTHON_VERSION: ${{ matrix.python-version }}
         run: python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256
 
+      - name: Record collected tests
+        if: matrix.shard == 1
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from tests.shard_check import collect
+
+          nodeids = collect("tests/")
+          if not nodeids:
+              raise SystemExit("Collection failed or found no tests")
+          Path("collected.json").write_text(json.dumps(nodeids))
+          PY
+
+      - name: Upload collected tests
+        if: matrix.shard == 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: collected-${{ matrix.python-version }}
+          path: collected.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
       # are allowed to delete — never ran in CI at all.
@@ -337,6 +361,9 @@ jobs:
         python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}
+          persist-credentials: false
 
       - *python
       - *day
@@ -351,8 +378,14 @@ jobs:
           pattern: durations-${{ matrix.python-version }}-*
           path: shard-durations
 
+      - name: Download collected tests
+        uses: actions/download-artifact@v4
+        with:
+          name: collected-${{ matrix.python-version }}
+          path: collected-data
+
       - name: Check every collected test ran in exactly one shard
-        run: python -m tests.shard_check shard-durations/*/durations.json
+        run: python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json
 
       - name: Check every shard's test time fits the fifteen minute budget
         run: python -m tests.shard_budget shard-durations/*/durations.json
