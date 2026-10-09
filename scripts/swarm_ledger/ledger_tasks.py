@@ -297,7 +297,7 @@ def update_refusal(doc, op):
         if field in op["fields"] and (refusal := rank_refusal(op["by"], field)):
             return refusal
     phase = op["fields"].get("phase")
-    if phase is not None and phase not in {p["id"] for p in doc.get("phases", [])}:
+    if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
     return ""
 
@@ -381,7 +381,7 @@ def _update(doc, op, ctx):
 
         ledger_workspace.rewrite(after)
     if "phase" in changed:
-        ctx.record(op["by"], "task moved", op["item"], text=f"{task.get('phase', '')} to {changed['phase']}")
+        ctx.record(op["by"], "task moved", op["item"], text=f"{task.get('phase') or 'no phase'} to {changed['phase']}")
     task.update(changed)
     if "state" in changed:
         task["done"] = changed["state"] == "done"

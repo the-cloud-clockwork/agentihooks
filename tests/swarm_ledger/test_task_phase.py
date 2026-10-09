@@ -41,6 +41,13 @@ def test_a_planning_seat_moves_a_task_to_another_phase_and_it_is_recorded(by):
     assert (event["by"], event["kind"], event["target"], event["text"]) == (by, "task moved", "tasks/t1", "p1 to p2")
 
 
+def test_a_task_with_no_phase_is_moved_into_one():
+    core.sync(SLUG, ops=[{"op": "task_add", "id": "seed-2", "by": "swarm", "task": "t2", "title": "b", "lane": "eng"}])
+    op = {"op": "task_update", "id": "move-2", "by": MASTER, "item": "tasks/t2", "fields": {"phase": "p2"}}
+    state, rejected = core.sync(SLUG, ops=[op])
+    assert rejected == [] and state["_meta"]["events"][-1]["text"] == "no phase to p2"
+
+
 def test_an_engineer_cannot_move_a_task():
     state, rejected = move(ENGINEER, "p2")
     assert rejected == ["move-1"] and phase_of(state) == "p1"
