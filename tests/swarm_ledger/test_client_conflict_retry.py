@@ -90,13 +90,23 @@ def test_a_conflict_without_a_server_message_names_only_the_retries(pauses):
     assert json.loads(error.value.read())["error"]["message"] == error.value.msg
 
 
-def test_a_pinned_operation_keeps_its_revision_across_retries(pauses):
+def test_a_pinned_resource_sends_its_pin_and_is_not_retried(pauses):
     pinned = {"op": "add", "id": "m-2", "thread": "chat", "text": "Pinned", "by": "swarm", "expected_revision": "p0"}
-    client = Scripted({"revision": "r0"}, conflict(), {"revision": "r1"}, {"applied": ["m-1", "m-2"]})
-    operations = [*chat_add(), pinned]
+    client = Scripted(conflict())
+    with pytest.raises(urllib.error.HTTPError):
+        client.mutate(SLUG, [*chat_add(), pinned])
+    assert [(path, payload["guards"]) for path, payload in client.calls] == [("operations", {"chat": "p0"})]
+    assert pauses == []
+
+
+def test_a_pin_on_another_resource_survives_the_retries(pauses):
+    pinned = {"op": "set", "id": "s-1", "path": "phases/p1/done", "value": True, "expected_revision": "p0"}
+    client = Scripted({"revision": "r0"}, conflict(), {"revision": "r1"}, {"applied": ["s-1", "m-1"]})
+    operations = [pinned, *chat_add()]
     client.mutate(SLUG, operations)
-    assert operations[1]["expected_revision"] == "p0"
-    assert [path for path, _ in client.calls] == ["chat", "operations", "chat", "operations"]
+    posts = [payload["guards"] for path, payload in client.calls if path == "operations"]
+    assert posts == [{"phases/p1": "p0", "chat": "r0"}, {"phases/p1": "p0", "chat": "r1"}]
+    assert operations[0]["expected_revision"] == "p0"
 
 
 def test_a_retry_reuses_the_operation_id_so_an_applied_write_is_not_duplicated(live):  # noqa: F811
@@ -143,7 +153,7 @@ class Crowded(api_client.ResourceClient):
 def test_a_burst_of_writers_reading_one_revision_all_land(live):  # noqa: F811
     from tests.swarm_ledger.test_ledger_authority import ledger
 
-    writers, conflicts, results = api_client.RETRIES + 1, [], {}
+    writers, conflicts, results = 6, [], {}
     barrier = threading.Barrier(writers, timeout=30)
 
     def add(n):

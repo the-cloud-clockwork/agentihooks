@@ -61,7 +61,8 @@ class ResourceClient:
 
     def mutate(self, slug: str, operations: list) -> dict:
         unpinned = [operation for operation in operations if not operation.get("expected_revision")]
-        fetched = {schemas.target(operation) for operation in unpinned}
+        pinned = {schemas.target(operation) for operation in operations if operation.get("expected_revision")}
+        fetched = {schemas.target(operation) for operation in unpinned} - pinned
         for attempt in range(RETRIES + 1):
             try:
                 return self.send(slug, operations)
@@ -78,12 +79,13 @@ class ResourceClient:
             time.sleep(random.uniform(BACKOFF * 2**attempt / 2, BACKOFF * 2**attempt))
 
     def send(self, slug: str, operations: list) -> dict:
-        guards, ops = {}, []
+        pins = [operation for operation in reversed(operations) if operation.get("expected_revision")]
+        guards, ops = {schemas.target(operation): operation["expected_revision"] for operation in pins}, []
         operation_id = operations[0].setdefault("operation_id", uuid.uuid4().hex)
         for operation in operations:
             path = schemas.target(operation)
             if path not in guards:
-                guards[path] = operation.get("expected_revision") or self.request(slug, path)["revision"]
+                guards[path] = self.request(slug, path)["revision"]
             operation.setdefault("expected_revision", guards[path])
             ops.append(
                 {key: value for key, value in operation.items() if key not in ("expected_revision", "operation_id")}
