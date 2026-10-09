@@ -21,8 +21,9 @@ app.kubernetes.io/component: {{ .component }}
 
 {{- define "swarm.image" -}}
 {{- $tag := toString .Values.image.tag -}}
-{{- if or (contains "@" .Values.image.repository) (contains "sha256" $tag) (regexMatch "^[0-9a-f]{40}$" $tag) -}}
-{{- fail "image.tag must be a floating tag such as dev, never a digest or commit hash" -}}
+{{- $floating := regexReplaceAll "@sha256:[0-9a-f]{64}$" $tag "" -}}
+{{- if or (contains "@" .Values.image.repository) (eq $floating "") (contains "@" $floating) (contains "sha256" $floating) (regexMatch "^[0-9a-f]{40}$" $floating) -}}
+{{- fail "image.tag must be a floating tag such as dev, never a digest or commit hash; only the image updater appends @sha256 to it" -}}
 {{- end -}}
 {{- printf "%s:%s" .Values.image.repository $tag -}}
 {{- end -}}
