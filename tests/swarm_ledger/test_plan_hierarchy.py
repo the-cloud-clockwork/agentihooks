@@ -443,3 +443,52 @@ def test_with_slice_reads_a_document_without_phases_or_slices(doc):
 def test_plan_and_slice_ids_come_from_the_file_and_the_anchor():
     assert ledger_plans.plan_id("0123456789abcdef.md") == "plan-0123456789ab"
     assert ledger_plans.slice_id("plan-a", "first") == "plan-a.first"
+
+
+@pytest.mark.parametrize(
+    ("phases", "events", "kept"),
+    [
+        ([{"id": "p1"}], [{"kind": "added", "target": "plans/b"}], ["a"]),
+        ([{"id": "p1", "plan": "plans/b"}], [{"kind": "added", "target": "plans/b"}], ["a", "b"]),
+        ([{"id": "p1"}], [{"kind": "changed", "target": "plans/b"}], ["a", "b"]),
+        ([{"id": "p1"}], [], ["a", "b"]),
+    ],
+)
+def test_a_refused_update_drops_only_an_unnamed_plan_this_batch_added(phases, events, kept):
+    doc = {"phases": phases, "plans": [{"id": "a"}, {"id": "b"}]}
+    ctx = Recorder()
+    ctx.events = [*events, {"kind": "added", "target": "tasks/t1"}]
+    ledger_plans.drop_unused(doc, "plans/b", ctx)
+    assert [row["id"] for row in doc["plans"]] == kept
+    assert ctx.events == [*([] if kept == ["a"] else events), {"kind": "added", "target": "tasks/t1"}]
+
+
+def test_resliced_names_changed_and_cleared_tasks_only_among_those_that_held_a_slice():
+    before = [{"id": "a", "slice": "slices/x.one"}, {"id": "b", "slice": "slices/x.two"}, {"id": "c"}]
+    before.append({"id": "e", "slice": "slices/y.one"})
+    after = [{"id": "a", "slice": "slices/y.one"}, {"id": "b"}, {"id": "c", "slice": "slices/y.one"}]
+    after += [{"id": "e", "slice": "slices/y.one"}, {"id": "f", "slice": "slices/y.one"}]
+    assert ledger_plans.resliced(before, after) == {"changed": ["a"], "cleared": ["b"]}
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        {"plans": [{"id": "a"}], "slices": [{"id": "a.x", "phase": "phases/p1", "anchor": "x"}]},
+        {"plans": [{"id": "b"}], "slices": [{"id": "b.x", "phase": "phases/p1", "anchor": "x"}]},
+        {"plans": [{"id": "a"}], "slices": [{"id": "b.x", "phase": "phases/p2", "anchor": "x"}]},
+    ],
+)
+def test_a_phase_keeps_its_slices_unless_it_holds_slices_of_an_earlier_plan(doc):
+    assert ledger_plans.moved(doc, {"id": "p1", "plan": "plans/a"}) == {}
+
+
+def test_settle_records_each_task_whose_slice_changed_or_cleared():
+    doc, ctx = (
+        {"tasks": [{"id": "a", "slice": "slices/x.1"}, {"id": "b", "slice": "slices/x.2"}, {"id": "c"}]},
+        Recorder(),
+    )
+    view = {"tasks": [{"id": "a", "slice": "slices/y.1"}, {"id": "b"}, {"id": "c"}], "slices": []}
+    ledger_plans.settle(doc, view, "planner", ctx)
+    assert (doc["tasks"], doc["slices"]) == (view["tasks"], [])
+    assert ctx.events == [("planner", "slice changed", "tasks/a", {}), ("planner", "slice cleared", "tasks/b", {})]
