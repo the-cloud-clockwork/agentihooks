@@ -1,4 +1,4 @@
-import { API, API_V1, EVENTS_API, LAYOUT_API, MEDIA_API, SLUG, TOKEN } from "./config.js";
+import { API, API_V1, EVENTS_API, LAYOUT_API, MEDIA_API, ROUTING_API, SLUG, TOKEN } from "./config.js";
 
 export function openEvents(cursor) {
   const headers = { Accept: "text/event-stream", "X-Ledger-Token": TOKEN };
@@ -29,6 +29,14 @@ export function readWorkspace(taskId) {
 
 export function readArtifact(id) {
   return fetch(artifactUrl(id));
+}
+
+export function readRouting() {
+  return fetch(ROUTING_API, { cache: "no-store" });
+}
+
+export function writeRouting(changes) {
+  return fetch(ROUTING_API, { method: "PATCH", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN, "X-Ledger-Slug": SLUG }, body: JSON.stringify(changes) });
 }
 
 export function readLayout() {

@@ -8,6 +8,9 @@ from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from scripts.ci_mutation.clearances import clearance_path
+from scripts.ci_mutation.mutant_shards import shard_names
+
 
 def parse_results(text: str) -> list[tuple[str, str]]:
     results = []
@@ -31,6 +34,20 @@ def mutation_lines(original: str, mutated: str, start: int) -> set[int]:
     return lines
 
 
+def mutation_diff(path: str, original: str, mutated: str, start: int) -> str:
+    before = original.splitlines()
+    after = mutated.splitlines()
+    lines = [f"--- {path}", "+++ mutant"]
+    for group in SequenceMatcher(a=before, b=after, autojunk=False).get_grouped_opcodes(1):
+        first, last = group[0], group[-1]
+        lines.append(f"@@ -{start + first[1]},{last[2] - first[1]} +{start + first[3]},{last[4] - first[3]} @@")
+        for tag, first, last, low, high in group:
+            lines += [f"{' ' if tag == 'equal' else '-'}{line}" for line in before[first:last]]
+            if tag != "equal":
+                lines += [f"+{line}" for line in after[low:high]]
+    return "\n".join(lines)
+
+
 def function_start(source: str, original: str, class_name: str | None) -> int:
     nodes = ast.parse(source).body
     if class_name is not None:
@@ -40,7 +57,7 @@ def function_start(source: str, original: str, class_name: str | None) -> int:
     return min([function.lineno] + [node.lineno for node in function.decorator_list])
 
 
-def collect_results(path: Path) -> list[dict]:
+def collect_results(path: Path, shard: tuple[int, int] = (0, 1)) -> list[dict]:
     import libcst as cst
     from mutmut.__main__ import (
         orig_function_and_class_names_from_key,
@@ -52,7 +69,9 @@ def collect_results(path: Path) -> list[dict]:
 
     text = subprocess.check_output([sys.executable, "-m", "mutmut", "results", "--all", "true"], text=True)
     prefix = get_mutant_name(path, "")
-    results = [(key, status) for key, status in parse_results(text) if key.rpartition(".")[0] + "." == prefix]
+    parsed = parse_results(text)
+    owned = shard_names([key for key, _ in parsed], shard)
+    results = [(key, status) for key, status in parsed if key in owned and key.rpartition(".")[0] + "." == prefix]
     module = read_mutants_module(path)
     source = path.read_text()
     rows = []
@@ -65,8 +84,13 @@ def collect_results(path: Path) -> list[dict]:
             start = function_start(source, original, class_name)
             row["lines"] = sorted(mutation_lines(original, mutated, start))
             row["fingerprint"] = hashlib.sha256((original + "\0" + mutated).encode()).hexdigest()
+            row["diff"] = mutation_diff(path.as_posix(), original, mutated, start)
         rows.append(row)
     return rows
+
+
+def clearance_key(path: str, row: dict) -> str:
+    return f"{path}:{row['name']}:{row['fingerprint']}"
 
 
 def evaluate(path: str, rows: list[dict], changed: set[int], cleared: dict) -> dict:
@@ -87,7 +111,7 @@ def evaluate(path: str, rows: list[dict], changed: set[int], cleared: dict) -> d
         if not changed.intersection(row["lines"]):
             report["untouched_survivors"].append(row)
             continue
-        key = f"{path}:{row['name']}:{row['fingerprint']}"
+        key = clearance_key(path, row)
         if key in cleared:
             entry = cleared[key]
             if not entry.get("reader") or not entry.get("reason"):
@@ -98,6 +122,21 @@ def evaluate(path: str, rows: list[dict], changed: set[int], cleared: dict) -> d
     return report
 
 
+def survivor_text(report: dict) -> str:
+    blocks = []
+    for row in report["failures"]:
+        key = clearance_key(report["path"], row)
+        lines = ", ".join(map(str, row["lines"]))
+        if row["status"] in {"survived", "no tests"}:
+            record = json.dumps({key: {"reader": "<reader>", "reason": "<reason>"}})
+            action = f"kill it with a test or clear it in {clearance_path(Path(), key).as_posix()} as {record}"
+        else:
+            action = "incomplete result: rerun the mutation run"
+        blocks.append(f"{row['status']} on lines {lines}: {key}\n{action}\n{row['diff']}")
+    return "\n\n".join(blocks)
+
+
 if __name__ == "__main__":
-    rows = {path: collect_results(Path(path)) for path in sys.argv[2:]}
+    shard = (int(sys.argv[2]), int(sys.argv[3]))
+    rows = {path: collect_results(Path(path), shard) for path in sys.argv[4:]}
     Path(sys.argv[1]).write_text(json.dumps(rows, indent=2) + "\n")

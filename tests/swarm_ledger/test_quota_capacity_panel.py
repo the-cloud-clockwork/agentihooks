@@ -101,6 +101,7 @@ def test_the_quota_table_heads_state_and_routing_and_the_box_holds_the_capacity_
     assert re.findall(r"<th[^>]*>(.*?)</th>", head) == [
         "account",
         "harness",
+        "kind",
         "state",
         "5h left",
         "5h reset",
@@ -108,11 +109,13 @@ def test_the_quota_table_heads_state_and_routing_and_the_box_holds_the_capacity_
         "7d reset",
         "routing",
         "sessions",
+        "weight",
+        "cap",
         '<span class="sr-only">master</span>',
     ]
     box = page.split('id="quota-box"', 1)[1].split('id="doctor-box"', 1)[0]
     assert 'id="quota-capacity"' in box
-    assert 'emptyRow(10, "No quota observed yet. Run agentihooks balance.")' in page
+    assert 'emptyRow(13, "No quota observed yet.")' in page
 
 
 def test_account_states_take_their_role_colour():
