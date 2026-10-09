@@ -93,6 +93,65 @@ def test_fixed_lane_responsibility_survives_without_classifier(monkeypatch, lane
     assert decision == profile_choice.ProfileDecision(expected, "lane", f"{lane} lane")
 
 
+CI_PROOF_TASKS = [
+    {
+        **TASK,
+        "kind": "troubleshoot",
+        "contract": {
+            "must": "Each alleged form is classified from CI evidence as actual runner execution or nonexecution",
+            "check": "Controlled CI invocation checks and guard results for the exact three reported forms",
+            "judge": "Independent Standards reader",
+        },
+    },
+    {
+        **TASK,
+        "kind": "troubleshoot",
+        "contract": {
+            "must": "Observed causal evidence explains the checkpoint supervision flake",
+            "check": "Compare the failed and passed jobs; reproduce controlled timing in CI only",
+            "judge": "Independent Standards reader",
+        },
+    },
+    {**TASK, "kind": "ops", "contract": {"must": "The probe branch ran", "check": "the CI run log"}},
+]
+
+
+@pytest.mark.parametrize("task", CI_PROOF_TASKS)
+def test_a_task_whose_proof_needs_a_pushed_ci_run_picks_engineer_without_a_model_call(monkeypatch, task):
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("CI proof task asked the classifier"))
+    decision = profile_choice.choose("sw", "eng", {"profile": "engineer"}, task, {})
+    assert decision == profile_choice.ProfileDecision(
+        "engineer",
+        "proof contract",
+        "proof needs a pushed CI run",
+        anchors=("task:t9", "phase:p1", "territory:scripts/swarm/tick.py", "territory:scripts/swarm_ledger/static"),
+    )
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        {**TASK, "kind": "troubleshoot", "contract": {"must": "the root cause is shown", "check": "the task proof"}},
+        {**TASK, "kind": "troubleshoot", "contract": {"must": "decisions agree", "check": "the decision log"}},
+        {**TASK, "kind": "troubleshoot", "contract": None},
+        {**TASK, "kind": "research", "description": "Read CI history", "contract": {"must": "a report", "check": ""}},
+        {**TASK, "kind": "code", "contract": {"must": "the CI run is green", "check": "CI"}},
+        {**TASK, "kind": "ci", "contract": {"must": "the CI run is green", "check": "CI"}},
+    ],
+)
+def test_a_task_whose_proof_needs_no_pushed_ci_run_asks_the_classifier(asked, ledger_file, task):
+    calls = asked("qa")
+    decision = profile_choice.choose("sw", "eng", {}, task, {})
+    assert (decision.profile, decision.source, len(calls)) == ("qa", "classifier", 1)
+
+
+def test_a_pinned_lane_or_task_profile_wins_over_a_ci_proof(monkeypatch):
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("pinned profile asked classifier"))
+    task = CI_PROOF_TASKS[0]
+    assert profile_choice.choose("sw", "eng", {}, {**task, "profile": "qa"}, {}).source == "task"
+    assert profile_choice.choose("sw", "eng", {"profile": "qa"}, task, {}).profile == "qa"
+
+
 def test_unpinned_engineering_task_asks_one_typed_choice_with_public_behaviour_and_intent(asked, ledger_file):
     calls = asked("frontend", confidence=0.83)
     decision = profile_choice.choose("sw", "eng", {"profile": "engineer"}, TASK, {})
