@@ -529,6 +529,27 @@ def test_a_quota_transfer_continues_its_saved_effort_at_the_equal_rank(tmp_path,
     assert model[model.index(flags[0]) : model.index(flags[0]) + 2] == flags
 
 
+def test_a_master_quota_transfer_to_codex_starts_its_saved_effort_inside_the_range(tmp_path, monkeypatch):
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
+    rt._quota_accounts = [account("old", state="DRAIN"), account("best", "codex", five=10, week=20)]
+    seen = []
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    monkeypatch.setattr(
+        rt,
+        "_launch",
+        lambda cfg, lane, task, name, argv, **kw: seen.append(argv) or runtime.Placed("pane", "codex", "best"),
+    )
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3")
+    task = {
+        "id": "master",
+        "title": "Continue task",
+        "handoff": "Saved Handoff v2",
+        "handoff_envelope": {"reason": "quota", "launch": {**LAUNCH, "effort": "max"}},
+    }
+    rt.spawn(config, "master", "master@a1b2c3-0002", task)
+    assert 'model_reasoning_effort="high"' in seen[0][seen[0].index("--") + 1 :]
+
+
 @pytest.mark.parametrize("same_lane,pinned", [(False, False), (False, True), (True, True)])
 def test_quota_successor_uses_its_lane_reservation(tmp_path, monkeypatch, same_lane, pinned):
     rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
