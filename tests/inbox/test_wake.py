@@ -93,6 +93,23 @@ def test_a_pane_that_is_not_idle_is_never_typed_into_and_escalates_after_one_win
     assert events(inbox, item.id) == ["escalated_master", "escalated_operator"] and len(ledger.followups) == 1
 
 
+@pytest.mark.parametrize("sender", ["swarm", "sw-eng-2"])
+def test_actionable_notices_escalate_without_typing_into_a_busy_pane(inbox, sender):
+    item = inbox.send(sender, "sw-eng-1", "finish the task")
+    herdr, ledger = FakeHerdr({"p1": "working"}), FakeLedger()
+    run(inbox, herdr, ledger, sent_at(item) + W - 1)
+    assert events(inbox, item.id) == []
+    run(inbox, herdr, ledger, sent_at(item) + W)
+    assert events(inbox, item.id) == ["escalated_master"]
+    (raised,) = inbox.inbox(MASTER_NAME)
+    assert raised.fyi is False
+    run(inbox, herdr, ledger, sent_at(item) + 2 * W)
+    assert events(inbox, item.id) == ["escalated_master", "escalated_operator"]
+    assert events(inbox, raised.id) == []
+    assert len(ledger.followups) == 1
+    assert herdr.prompts == []
+
+
 ORIGINAL_SENT = 1791220997780
 ORIGINAL_AGE = 540_000
 
@@ -111,7 +128,7 @@ ORIGINAL_AGE = 540_000
 def test_the_original_overdue_item_replayed_at_nine_minutes(pane, step):
     from types import SimpleNamespace
 
-    item = SimpleNamespace(state="pending", sender="sw-eng-2", fyi=False)
+    item = SimpleNamespace(state="pending", sender="sw-eng-2", fyi=False, ref="")
     history = [{"state": "pending", "by": "sw-eng-2", "reason": "", "at": ORIGINAL_SENT}]
     assert wake.decide(item, pane, history, ORIGINAL_SENT + ORIGINAL_AGE, W) == step
 
