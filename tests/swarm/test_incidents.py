@@ -438,7 +438,7 @@ def test_expired_delivery_owner_cannot_release_the_next_owner(store, monkeypatch
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(incidents.deliver, store.redis, "ledger", "outage", "recovered")
         assert first_entered.wait(5)
-        now[0] += 30
+        now[0] += 30.0005
         second = pool.submit(incidents.deliver, store.redis, "ledger", "outage", "recovered")
         try:
             assert second_entered.wait(5)
