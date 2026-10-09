@@ -110,3 +110,12 @@ def test_the_clients_together_write_headroom_times_the_live_peak_minute():
     per_minute = ledger_load.CLIENTS * 60 / ledger_load.write_every()
     assert per_minute == pytest.approx(ledger_load.LIVE_PEAK_WRITES_PER_MINUTE * ledger_load.HEADROOM)
     assert ledger_load.HEADROOM >= 2
+
+
+def test_every_client_reads_one_single_resource_a_second_that_the_ledger_holds():
+    doc = ledger_load.document(0)
+    held = {f"{name}/{item['id']}" for name in ("tasks", "phases", "followups") for item in doc[name]}
+    items = [ledger_load.single_items(n) for n in range(ledger_load.CLIENTS)]
+    assert ledger_load.READS_PER_SECOND == 1.0
+    assert items[1] == ["tasks/t100", "phases/p1", "followups/f-1"]
+    assert all(set(paths) <= held for paths in items)
