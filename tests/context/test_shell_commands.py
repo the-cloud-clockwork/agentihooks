@@ -108,14 +108,16 @@ def test_nesting_boundary_rejects_excess_and_keeps_ten_shells():
 def test_missing_heredoc_delimiter_is_invalid():
     from hooks.context.shell_commands import commands
 
-    with pytest.raises(ValueError, match="Missing heredoc delimiter"):
+    with pytest.raises(ValueError) as error:
         commands("bash <<")
+    assert str(error.value) == "Missing heredoc delimiter"
 
 
 @pytest.mark.parametrize(
     "command, expected",
     [
         ("env --split-string 'pytest -q' --maxfail 1", [["pytest", "-q", "--maxfail", "1"]]),
+        ("bash <<X\npytest\nX\necho done", [["pytest"], ["bash"], ["echo", "done"]]),
         ('echo "$()"', [["echo", "$()"]]),
         ("echo \"\" '$(pytest)'", [["echo", "", "$(pytest)"]]),
         ("echo " + "'" + "\\" + "'" + ' "$(pytest)"', [["echo", "\\", "$(pytest)"], ["pytest"]]),

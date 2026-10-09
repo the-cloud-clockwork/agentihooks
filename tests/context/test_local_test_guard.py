@@ -131,6 +131,7 @@ def test_explicit_true_allows_tests(value, monkeypatch):
         "python -m json.tool pytest",
         "python -m",
         "python -c",
+        "python -c pass pytest",
         "python -mjson.tool",
         "python app.py",
         "python test_app.txt",
