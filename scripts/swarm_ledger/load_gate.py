@@ -144,25 +144,33 @@ def duration() -> float:
     return (SWEEPS + 1) * ledger_server.BIN_SWEEP_EVERY * interval
 
 
-def busiest_window(samples: list[tuple[float, float]]) -> float:
-    busiest = 0.0
+def busiest_window(samples: list[tuple[float, float]]) -> float | None:
+    windows = []
     for start, cpu in samples:
         later = [(at, used) for at, used in samples if at - start >= CPU_WINDOW_S]
         if later:
             at, used = later[0]
-            busiest = max(busiest, (used - cpu) / (at - start))
-    return busiest
+            windows.append((used - cpu) / (at - start))
+    return max(windows, default=None)
 
 
-def verdict(writes: list[float], expected: int, cores: float, errors: list[str]) -> list[str]:
+def verdict(writes: list[float], expected: int, cores: float | None, errors: list[str]) -> list[str]:
     problems = [f"{len(errors)} requests failed, first: {errors[0]}"] if errors else []
     if len(writes) < MIN_WRITES * expected:
         problems.append(f"{len(writes)} writes completed of {expected} expected")
     if writes and (worst := p95(writes)) > WRITE_P95_S:
         problems.append(f"write p95 {worst:.3f}s exceeds {WRITE_P95_S}s")
-    if cores > CPU_CORES:
+    if cores is None:
+        problems.append(f"no {CPU_WINDOW_S}s window of server CPU was sampled")
+    elif cores > CPU_CORES:
         problems.append(f"server CPU held {cores:.2f} cores over {CPU_WINDOW_S}s, budget {CPU_CORES}")
     return problems
+
+
+def unexpired(folder: Path, at: int) -> list[str]:
+    """Alerts past their quiet hour that the expiry sweep should have closed during the load."""
+    doc = SQLiteLedgerRepository(folder / DATABASE).export_document(SLUG)
+    return [alert["id"] for alert in doc.get("alerts", []) if ledger_server.ledger_alerts.expired(alert, at)]
 
 
 def free_port() -> int:
@@ -224,23 +232,23 @@ def watcher(base: str, credentials: dict, deadline: float, results: dict) -> Non
     request = urllib.request.Request(
         f"{base}/api/v1/ledgers/{SLUG}/events", headers={**credentials, "Accept": "text/event-stream"}
     )
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(request, timeout=TIMEOUT_S) as stream:
-                while time.monotonic() < deadline and stream.read1(65536):
-                    pass
-        except TimeoutError:
-            continue
-        except Exception as exc:  # a dropped stream is a red request
-            results["errors"].append(f"event stream: {type(exc).__name__}: {exc}")
-            return
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as stream:
+            while time.monotonic() < deadline:
+                if not stream.read1(65536):
+                    raise ConnectionError("the server closed the stream before the load ended")
+    except Exception as exc:  # a dropped or silent stream is a red request
+        results["errors"].append(f"event stream: {type(exc).__name__}: {exc}")
 
 
-def sample_cpu(pid: int, deadline: float, samples: list) -> None:
-    while time.monotonic() < deadline:
-        samples.append((time.monotonic(), cpu_seconds(pid)))
-        time.sleep(1)
-    samples.append((time.monotonic(), cpu_seconds(pid)))
+def sample_cpu(pid: int, deadline: float, results: dict) -> None:
+    try:
+        while time.monotonic() < deadline:
+            results["cpu"].append((time.monotonic(), cpu_seconds(pid)))
+            time.sleep(1)
+        results["cpu"].append((time.monotonic(), cpu_seconds(pid)))
+    except Exception as exc:  # a lost sample leaves the CPU budget unproven
+        results["errors"].append(f"cpu sampler: {type(exc).__name__}: {exc}")
 
 
 def load(port: int, token: str, pid: int, seconds: float) -> dict:
@@ -260,7 +268,7 @@ def load(port: int, token: str, pid: int, seconds: float) -> dict:
         for n, entry in enumerate(apis)
     ]
     threads.append(threading.Thread(target=watcher, args=(base, {"X-Ledger-Token": token}, deadline, results)))
-    threads.append(threading.Thread(target=sample_cpu, args=(pid, deadline, results["cpu"])))
+    threads.append(threading.Thread(target=sample_cpu, args=(pid, deadline, results)))
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -286,6 +294,8 @@ def run(folder: Path) -> list[str]:
     problems = verdict(writes, expected, cores, results["errors"])
     if "Exception in thread" in (server_log := log_path.read_text()):
         problems.append("a ledger server background thread died")
+    if stale := unexpired(folder, core.now_ms()):
+        problems.append(f"the expiry sweep left {len(stale)} alerts past their quiet hour open")
     print(
         json.dumps(
             {
@@ -298,7 +308,7 @@ def run(folder: Path) -> list[str]:
                 "write_max_s": round(max(writes), 3) if writes else None,
                 "reads": len(results["reads"]),
                 "read_p95_s": round(p95(results["reads"]), 3) if results["reads"] else None,
-                "busiest_cores": round(cores, 3),
+                "busiest_cores": None if cores is None else round(cores, 3),
                 "errors": len(results["errors"]),
                 "budget": {"write_p95_s": WRITE_P95_S, "cores": CPU_CORES},
             }

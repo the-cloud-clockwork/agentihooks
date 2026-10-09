@@ -38,6 +38,20 @@ def test_cpu_is_judged_on_its_busiest_window_not_the_whole_run():
     assert load_gate.busiest_window(calm + burst) > load_gate.CPU_CORES
 
 
+def test_a_run_too_short_for_one_cpu_window_is_red():
+    assert load_gate.busiest_window([(0.0, 0.0), (1.0, 0.1)]) is None
+    assert any("no 10s window" in line for line in load_gate.verdict([0.1] * 100, 100, None, []))
+
+
+def test_alerts_past_their_quiet_hour_left_open_after_the_load_are_named(tmp_path, monkeypatch):
+    monkeypatch.setattr(load_gate, "TASKS", 20)
+    monkeypatch.setattr(load_gate, "LEDGER_BYTES", 0)
+    at = load_gate.ALERT_QUIET_MS * 10
+    load_gate.store(tmp_path, load_gate.full_size(at))
+    stale = load_gate.unexpired(tmp_path, at)
+    assert stale and all(alert_id.startswith("al-") for alert_id in stale)
+
+
 def test_the_load_covers_every_sweep_of_the_watch_loop_more_than_once():
     interval = inspect.signature(ledger_server.watch_ledgers).parameters["interval"].default
     period = ledger_server.BIN_SWEEP_EVERY * interval
