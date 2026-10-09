@@ -302,8 +302,8 @@ def test_done_task_is_observed_once_even_when_completion_precedes_the_tick(tmp_p
     monkeypatch.setattr(metrics_outbox, "post", lambda *args: (_ for _ in ()).throw(OSError("sink down")))
     configured = {"AGENTIHOOKS_METRICS_URL": "http://sink", "AGENTIHOOKS_METRICS_USER": "test"}
     snapshot = metrics_swarm.TickInput(store, state, [], view)
-    assert metrics.record_pass(SLUG, NOW + 6_000, 0, configured, snapshot) == []
-    assert metrics.record_pass(SLUG, NOW + 7_000, 0, configured, snapshot) == []
+    assert metrics.record_pass(SLUG, NOW + 6_000, 0, configured, snapshot) == ["metrics outbox failed: sink down"]
+    assert metrics.record_pass(SLUG, NOW + 7_000, 0, configured, snapshot) == ["metrics outbox failed: sink down"]
     assert calls == [TASK["pr_url"]]
     box = Outbox(spool, Settings("http://sink", "", ""))
     try:
