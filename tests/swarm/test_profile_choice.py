@@ -113,6 +113,7 @@ CI_PROOF_TASKS = [
         },
     },
     {**TASK, "kind": "ops", "contract": {"must": "The probe branch ran", "check": "the CI run log"}},
+    {**TASK, "kind": "tune", "contract": {"must": "the CI shard time moved", "check": "the task proof"}},
 ]
 
 
@@ -134,6 +135,8 @@ def test_a_task_whose_proof_needs_a_pushed_ci_run_picks_engineer_without_a_model
         {**TASK, "kind": "troubleshoot", "contract": {"must": "the root cause is shown", "check": "the task proof"}},
         {**TASK, "kind": "troubleshoot", "contract": {"must": "decisions agree", "check": "the decision log"}},
         {**TASK, "kind": "troubleshoot", "contract": None},
+        {**TASK, "kind": "troubleshoot", "contract": {"must": "a cause", "check": "the proof", "judge": "CI"}},
+        {key: value for key, value in TASK.items() if key != "kind"} | {"contract": {"must": "CI", "check": "CI"}},
         {**TASK, "kind": "research", "description": "Read CI history", "contract": {"must": "a report", "check": ""}},
         {**TASK, "kind": "code", "contract": {"must": "the CI run is green", "check": "CI"}},
         {**TASK, "kind": "ci", "contract": {"must": "the CI run is green", "check": "CI"}},

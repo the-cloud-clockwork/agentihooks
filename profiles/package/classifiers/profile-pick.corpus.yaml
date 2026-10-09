@@ -32,33 +32,33 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 248
+    latency_ms: 228
     answers:
       responsibility:
         type: choice
         choice: engineer
         confidence: 0.9227264731119427
   - source: jev-1.13
-    latency_ms: 300
-    answers:
-      responsibility:
-        type: choice
-        choice: engineer
-        confidence: 0.97
-  - source: haiku
-    latency_ms: 7342
-    answers:
-      responsibility:
-        type: choice
-        choice: engineer
-        confidence: 0.8
-  - source: luna
-    latency_ms: 14390
+    latency_ms: 290
     answers:
       responsibility:
         type: choice
         choice: engineer
         confidence: 0.99
+  - source: haiku
+    latency_ms: 6346
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.72
+  - source: luna
+    latency_ms: 5110
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.97
 - name: checkpoint_flake_ci_probe
   state:
     task: fx-30373668-cause
@@ -90,37 +90,37 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 250
+    latency_ms: 208
     answers:
       responsibility:
         type: choice
         choice: engineer
         confidence: 0.8111042701864835
   - source: jev-1.13
-    latency_ms: 260
+    latency_ms: 319
     answers:
       responsibility:
         type: choice
         choice: engineer
         confidence: 0.97
   - source: pplx-decider-v1-27b
-    latency_ms: 314
+    latency_ms: 301
     answers:
       responsibility:
         type: choice
         choice: engineer
         confidence: 0.7353447762834383
   - source: haiku
-    latency_ms: 7493
+    latency_ms: 6742
     answers:
       responsibility:
         type: choice
         choice: engineer
-        confidence: 0.8
+        confidence: 0.82
   - source: luna
-    latency_ms: 4609
+    latency_ms: 5365
     answers:
       responsibility:
         type: choice
         choice: engineer
-        confidence: 0.97
+        confidence: 0.98

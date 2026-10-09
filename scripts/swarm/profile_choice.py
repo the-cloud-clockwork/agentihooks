@@ -14,6 +14,7 @@ PURPOSE = "profile-pick"
 RESPONSIBILITIES = ("frontend", "engineer", "qa")
 HARNESS_ORDER = {"frontend": ("claude", "codex")}
 PULL_REQUEST_KINDS = ("code", "ci")
+PROOF_FIELDS = ("must", "check")
 CI_RUN = re.compile(r"\bCI\b")
 
 
@@ -56,7 +57,9 @@ def choose(
     elif lane != CLASSIFIED_LANE or pinned != DEFAULT_PROFILES[lane]:
         decision = ProfileDecision(pinned, "lane", f"{lane} lane")
     elif needs_ci_push(task):
-        decision = ProfileDecision("engineer", "proof contract", "proof needs a pushed CI run", anchors=anchors(task))
+        decision = ProfileDecision(
+            DEFAULT_PROFILES[CLASSIFIED_LANE], "proof contract", "proof needs a pushed CI run", anchors=anchors(task)
+        )
     else:
         decision = classify(slug, task, environ)
     if not installed(decision.profile):
@@ -71,9 +74,8 @@ def choose(
 
 
 def needs_ci_push(task: dict) -> bool:
-    contract = task.get("contract") or {}
-    proof = f"{contract.get('must', '')} {contract.get('check', '')}"
-    return task.get("kind", "code") not in PULL_REQUEST_KINDS and CI_RUN.search(proof) is not None
+    proof = (text for key, text in (task.get("contract") or {}).items() if key in PROOF_FIELDS)
+    return task.get("kind", "code") not in PULL_REQUEST_KINDS and any(CI_RUN.search(text) for text in proof)
 
 
 def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
@@ -87,7 +89,7 @@ def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
     result, floor = output.raw, output.thresholds["confidence"]
     answer = result.answers["responsibility"]
     confidence = answer.confidence if answer.confidence is not None else 0.0
-    if confidence < floor:
+    if output.verdicts["responsibility"] is None:
         return ProfileDecision(
             DEFAULT_PROFILES[CLASSIFIED_LANE],
             "lane default",
