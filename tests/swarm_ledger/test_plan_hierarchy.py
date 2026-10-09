@@ -246,3 +246,32 @@ def test_a_new_document_carries_empty_plan_collections():
     assert doc["plans"] == [] and doc["slices"] == []
     with pytest.raises(ValueError, match="^phase p1 names an unknown plan plans/a$"):
         core.validate({**doc, "phases": [{"id": "p1", "title": "P", "plan": "plans/a"}]})
+
+
+def test_a_task_naming_its_slice_needs_no_plan_slice_in_an_anchored_phase():
+    file = ledger_artifacts.store(SLUG, "plan.md", PLAN.encode())
+    artifact = f"http://127.0.0.1:8765/artifacts/{SLUG}/{file['id']}"
+    run("join", role="member")
+    run("artifact_add", task="", title="Plan", file=file, plan=True)
+    run("plan_add", plan="a", title="Plan", artifact=artifact)
+    assert run("phase_update", item="phases/p1", fields={"plan": "plans/a", "plan_url": artifact})[1] == []
+    assert run("slice_add", phase="phases/p1", anchor="first")[1] == []
+    _, rejected, refusal = run("task_add", task="t0", title="Build", lane="eng", phase="p1")
+    assert rejected and any(text.startswith("phase p1 has a plan with slice anchors") for text in refusal)
+    assert run("task_add", task="t1", title="Build", lane="eng", phase="p1", slice="slices/a.first")[1] == []
+
+
+def test_legacy_lines_and_plan_ref_are_checked_against_the_new_parents():
+    doc = {
+        "plans": [{"id": "a", "artifact": "http://host/artifacts/x/1", "url": ""}],
+        "slices": [{"id": "a.first", "phase": "phases/p1", "anchor": "first", "lines": "4-6"}],
+        "phases": [{"id": "p1", "plan": "plans/a"}],
+    }
+    task = {"id": "t1", "phase": "p1", "slice": "slices/a.first", "plan_lines": "4-5"}
+    assert ledger_plans.task_refusal(doc, task) == "task t1 plan_lines 4-5 differ from its slice lines 4-6"
+    assert ledger_plans.task_refusal(doc, {**task, "plan_lines": "4-6"}) == ""
+    phase = {"id": "p1", "plan": "plans/a", "plan_ref": {"artifact": "http://host/artifacts/x/2", "lines": "1-9"}}
+    assert (
+        ledger_plans.phase_refusal(doc, phase) == "phase p1 plan_ref http://host/artifacts/x/2 is not a link of plans/a"
+    )
+    assert ledger_plans.phase_refusal(doc, {**phase, "plan_ref": {"artifact": "http://host/artifacts/x/1"}}) == ""

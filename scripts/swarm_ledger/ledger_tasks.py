@@ -290,7 +290,7 @@ def add_refusal(tasks, op, appended):
 
 
 def unsliced_refusal(doc: dict, task: dict, by: str) -> str:
-    if task.get("plan_slice") or by == SWARM or ledger_kinds.kind(task) == "plan":
+    if task.get("plan_slice") or task.get("slice") or by == SWARM or ledger_kinds.kind(task) == "plan":
         return ""
     from scripts.swarm_ledger import plan_ranges
 

@@ -19,9 +19,8 @@ def check(op: dict) -> None:
     if op["op"] == "slice_add":
         if set(op) - {"op", "id", "by", "phase", "anchor"}:
             raise ValueError("slice_add takes only phase anchor")
-        if not isinstance(op.get("phase"), str) or not isinstance(op.get("anchor"), str):
-            raise ValueError("slice_add needs phase and an anchor")
-        if not ANCHOR_RE.fullmatch(op["anchor"]):
+        anchor = op.get("anchor")
+        if not isinstance(op.get("phase"), str) or not isinstance(anchor, str) or not ANCHOR_RE.fullmatch(anchor):
             raise ValueError("slice_add needs phase and an anchor")
         return
     if set(op) - {"op", "id", "by", "plan", "title", *LINKS}:
