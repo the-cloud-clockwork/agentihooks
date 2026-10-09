@@ -721,6 +721,148 @@ class TestPlanChunk:
         ]
 
 
+SLICE = "line 15\nline 16\nline 17\n"
+
+
+class TestPlanSource:
+    def test_the_chunk_is_read_from_the_task_plan_url_when_the_phase_has_no_range(self, planned):
+        planned["tasks"][0]["plan_url"] = planned["phases"][0].pop("plan_ref")["artifact"]
+        assert intent.state_of(planned, planned["tasks"][0], PR)["plan_chunk"] == SLICE
+
+    def test_the_chunk_is_read_from_the_phase_plan_url(self, planned):
+        planned["phases"][0]["plan_url"] = planned["phases"][0].pop("plan_ref")["artifact"]
+        assert intent.state_of(planned, planned["tasks"][0], PR)["plan_chunk"] == SLICE
+
+    def test_a_swarm_v2_package_slice_is_read_from_the_package_plan(self, monkeypatch):
+        from scripts.swarm_ledger import plan_packages
+
+        monkeypatch.setattr(plan_packages, "text", lambda: PLAN)
+        issue = "https://github.com/o/r/issues/7"
+        task = {**DOC["tasks"][0], "plan_lines": "15-17", "plan_slice": "SV2-CTL-04", "plan_url": issue}
+        assert intent.state_of({**DOC, "tasks": [task]}, task, PR)["plan_chunk"] == SLICE
+
+    def test_a_pass_cites_the_plan_lines_it_judged(self):
+        assert intent.judge(CHUNK_STATE, decide=chunk_classifier()) == (
+            "pass",
+            "the phase can use it as delivered at probability 0.90, judged against plan lines 15-17",
+        )
+
+
+TRACED = {
+    "plan_hash": "h1",
+    "pieces": [
+        {
+            "what": "read the slice",
+            "areas": ["scripts/gates/intent.py", "docs"],
+            "why": "the judge needs it",
+            "kept": True,
+        },
+        {"what": "a generator", "areas": ["power"], "why": "it lights the yard", "kept": False},
+        {"what": "cite the lines", "areas": ["docs"], "why": "the verdict names them", "kept": True},
+    ],
+}
+UNOPENED = {**DOC, "tasks": [{**{k: v for k, v in DOC["tasks"][0].items() if k != "pr_url"}, "state": "claimed"}]}
+PLANNED_REASON = "the phase can use it as delivered at probability 0.80"
+JUDGE = intent.judge
+
+
+def planned_ask(seen, usable=0.8):
+    def ask(state):
+        seen.append(state)
+        return JUDGE(state, classifier(usable))
+
+    return ask
+
+
+@pytest.fixture
+def asks(monkeypatch):
+    return lambda answer: monkeypatch.setattr(intent, "judge", answer)
+
+
+class TestPlanCheck:
+    def test_the_traced_plan_is_judged_before_the_pull_request_opens(self, tmp_path, asks):
+        seen = []
+        asks(planned_ask(seen))
+        checked = intent.plan_check(SLUG, UNOPENED, TASK, TRACED, "coach", NOW, home=tmp_path)
+        assert checked == {"verdict": "pass", "reason": PLANNED_REASON}
+        [state] = seen
+        assert state["pull_request_body"] == (
+            "- read the slice | scripts/gates/intent.py, docs | the judge needs it\n"
+            "- cite the lines | docs | the verdict names them\n"
+        )
+        assert state["changed_files"] == ["docs", "scripts/gates/intent.py"]
+        assert verdicts(tmp_path).read(TASK) == {
+            "verdict": "pass",
+            "reason": PLANNED_REASON,
+            "at": NOW,
+            "phase": "p8",
+            "planned": "h1",
+        }
+        [record] = [json.loads(line) for line in (tmp_path / SLUG / "gates" / "intent" / "history.jsonl").open()]
+        assert {k: record[k] for k in ("task", "agent", "at", "verdict", "reason", "purpose")} == {
+            "task": TASK,
+            "agent": ME,
+            "at": NOW,
+            "verdict": "pass",
+            "reason": PLANNED_REASON,
+            "purpose": "intent-check",
+        }
+        assert rows(tmp_path) == []
+
+    def test_the_same_plan_is_judged_once(self, tmp_path, asks):
+        seen = []
+        asks(planned_ask(seen))
+        first, again = (
+            intent.plan_check(SLUG, UNOPENED, TASK, TRACED, "coach", at, home=tmp_path) for at in (NOW, NOW + 5)
+        )
+        assert (len(seen), again, verdicts(tmp_path).read(TASK)["at"]) == (1, first, NOW)
+
+    @pytest.mark.parametrize("doc,mode", [(DOC, "coach"), (UNOPENED, "off"), ({**DOC, "tasks": []}, "coach")])
+    def test_an_open_pull_request_a_missing_task_or_the_gate_off_judges_nothing(self, tmp_path, asks, doc, mode):
+        seen = []
+        asks(planned_ask(seen))
+        assert intent.plan_check(SLUG, doc, TASK, TRACED, mode, NOW, home=tmp_path) is None
+        assert (seen, verdicts(tmp_path).read(TASK)) == ([], None)
+
+    def test_a_planned_pass_holds_nothing_after_the_first_push(self, tmp_path, asks, stamped):
+        asks(planned_ask([]))
+        intent.plan_check(SLUG, UNOPENED, TASK, TRACED, "coach", NOW, home=tmp_path)
+        assert intent.stamp(SLUG, TASK, URL, DOC, "coach", NOW + 5, home=tmp_path) == {"verdict": "pass", "body": True}
+        assert verdicts(tmp_path).read(TASK)["verdict"] == "pass"
+        gate = intent.IntentGate(clock=lambda: (NOW + 10) / 1000)
+        assert gate.decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path), "coach").allowed
+
+    @pytest.mark.parametrize("mode,kind", [("coach", "observe"), ("observe", "observe"), ("enforce", "deny")])
+    def test_a_planned_fail_is_logged_and_armed_pending_when_the_pull_request_opens(
+        self, tmp_path, asks, stamped, mode, kind
+    ):
+        asks(lambda state: ("fail", "the plan misses the slice"))
+        intent.plan_check(SLUG, UNOPENED, TASK, TRACED, mode, NOW, home=tmp_path)
+        logged = [(r["gate"], r["kind"], r["agent"], r["task"], r["tool"], r["reason"]) for r in rows(tmp_path)]
+        assert logged == [("intent", kind, ME, TASK, "", "the plan misses the slice")]
+        assert intent.stamp(SLUG, TASK, URL, DOC, mode, NOW + 5, home=tmp_path)["verdict"] == "pending"
+
+    def test_an_unchecked_plan_of_an_unclaimed_task_is_counted_in_the_gate_log(self, tmp_path, asks):
+        asks(lambda state: ("unchecked", "no answer"))
+        unclaimed = {**UNOPENED, "tasks": [{k: v for k, v in UNOPENED["tasks"][0].items() if k != "claimed_by"}]}
+        planned = intent.plan_check(SLUG, unclaimed, TASK, TRACED, "enforce", NOW, home=tmp_path)
+        assert planned == {"verdict": "unchecked", "reason": "no answer"}
+        logged = [(r["gate"], r["kind"], r["agent"], r["task"], r["tool"], r["reason"]) for r in rows(tmp_path)]
+        assert logged == [("intent", "count", "", TASK, "", "no answer")]
+        [record] = [json.loads(line) for line in (tmp_path / SLUG / "gates" / "intent" / "history.jsonl").open()]
+        assert record["agent"] == ""
+
+    def test_the_tick_still_judges_the_pull_request_after_a_planned_pass(self, tmp_path, asks):
+        asks(planned_ask([]))
+        intent.plan_check(SLUG, UNOPENED, TASK, TRACED, "enforce", NOW, home=tmp_path)
+        asks(JUDGE)
+        got = run_pass(tmp_path, usable=0.1)
+        assert got.viewed == [URL]
+        assert "planned" not in verdicts(tmp_path).read(TASK)
+        assert verdicts(tmp_path).read(TASK)["verdict"] == "fail"
+        assert not intent.IntentGate().decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path)).allowed
+
+
 def test_the_pass_keeps_the_tick_after_each_judged_pull_request(tmp_path):
     second = "https://github.com/o/r/pull/10"
     doc = {**DOC, "tasks": [*DOC["tasks"], {**DOC["tasks"][0], "id": "t2", "pr_url": second}]}
