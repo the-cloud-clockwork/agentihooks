@@ -19,7 +19,7 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
     rejected = core.apply_changes(doc, changes or [], ctx)
     ordered_ops = sorted(ops or [], key=lambda op: op["op"] == "stats_sync")
     unowned = len(ctx.refused)
-    held = (copy.deepcopy(doc), dict(ctx.stamps), len(ctx.events)) if ledger_plans.atomic(ordered_ops) else None
+    held = snapshot(doc, ctx) if ledger_plans.atomic(ordered_ops) else None
     kept, raised = len(rejected), []
     for op in ordered_ops:
         start = len(ctx.refused)
@@ -56,13 +56,19 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
     return rejected, ctx
 
 
+def snapshot(doc, ctx):
+    return copy.deepcopy(doc), dict(ctx.stamps), len(ctx.events), ctx.dirty, len(ctx.dropped)
+
+
 def roll_back(doc, ctx, held, ops, raised):
-    before, stamps, events = held
+    before, stamps, events, dirty, dropped = held
     doc.clear()
     doc.update(before)
     ctx.stamps.clear()
     ctx.stamps.update(stamps)
     del ctx.events[events:]
+    del ctx.dropped[dropped:]
+    ctx.dirty = dirty
     doc.setdefault("alerts", [])
     for warning in raised:
         ledger_alerts.raise_warning(doc, ctx, warning, [])

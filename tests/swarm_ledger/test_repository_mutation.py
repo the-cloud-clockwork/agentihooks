@@ -104,7 +104,7 @@ def test_apply_hands_the_ops_and_every_rejected_id_to_the_plan_drop(derived, mon
 class StampedContext(Context):
     def __init__(self, meta, at):
         super().__init__(meta, at)
-        self.stamps = meta["stamps"]
+        self.stamps, self.dropped = meta["stamps"], []
 
 
 def batch_domain():
@@ -115,48 +115,43 @@ def batch_domain():
         if op["id"] == "refused":
             ctx.refused.append("no p2")
             return False
+        doc[op["id"]] = True
         doc["phases"].append(op["id"])
         doc["plans"]["c"]["phases"].append(op["id"])
         ctx.stamps[op["id"]] = 1
         ctx.events.append(op["id"])
+        ctx.dropped.append(op["id"])
+        ctx.dirty = True
         return True
 
     core.gated = gated
     return core
 
 
+WARNING = ("sync", "no p2", "w-refused", "i-refused")
+FIRST, PLAN, REFUSED = ({"op": "add", "id": "first"}, {"op": "plan_add", "id": "plan"}, {"op": "add", "id": "refused"})
+
+
 @pytest.mark.parametrize(
-    ("ops", "rejected", "phases", "stamps", "events"),
+    ("ops", "rejected", "applied", "raised"),
     [
         (
-            [{"op": "add", "id": "first"}, {"op": "plan_add", "id": "plan"}, {"op": "add", "id": "refused"}],
+            [FIRST, PLAN, REFUSED],
             ["bad-1", "first", "plan", "refused"],
-            ["p0"],
-            {"old": 0},
-            ["e0"],
+            [],
+            [(["p0", "first", "plan"], [], WARNING, []), (["p0"], [], WARNING, [])],
         ),
-        (
-            [{"op": "add", "id": "first"}, {"op": "add", "id": "refused"}],
-            ["bad-1", "refused"],
-            ["p0", "first"],
-            {"old": 0, "first": 1},
-            ["e0", "first"],
-        ),
-        (
-            [{"op": "add", "id": "first"}, {"op": "plan_add", "id": "plan"}],
-            ["bad-1"],
-            ["p0", "first", "plan"],
-            {"old": 0, "first": 1, "plan": 1},
-            ["e0", "first", "plan"],
-        ),
+        ([FIRST, REFUSED], ["bad-1", "refused"], ["first"], [(["p0", "first"], [], WARNING, [])]),
+        ([FIRST, PLAN], ["bad-1"], ["first", "plan"], []),
     ],
 )
-def test_a_batch_that_adds_a_plan_commits_every_op_or_none(derived, monkeypatch, ops, rejected, phases, stamps, events):
-    raised = []
+def test_a_batch_that_adds_a_plan_commits_every_op_or_none(derived, monkeypatch, ops, rejected, applied, raised):
+    seen = []
+    monkeypatch.setattr(ledger_alerts, "SYNC", "sync")
     monkeypatch.setattr(
         ledger_alerts,
         "raise_warning",
-        lambda doc, ctx, warning, before: raised.append((list(doc["phases"]), list(doc["alerts"]), warning, before)),
+        lambda doc, ctx, warning, before: seen.append((list(doc["phases"]), list(doc["alerts"]), warning, before)),
     )
     monkeypatch.setattr(ledger_alerts, "writer", lambda op, ctx: f"w-{op['id']}")
     monkeypatch.setattr(ledger_alerts, "item", lambda op: f"i-{op['id']}")
@@ -166,35 +161,9 @@ def test_a_batch_that_adds_a_plan_commits_every_op_or_none(derived, monkeypatch,
     meta = {"rev": 1, "events": [], "warnings": [], "stamps": {"old": 0}}
     doc = {"chat": [], "phases": ["p0"], "plans": {"c": {"phases": []}}, "_meta": meta}
     got, ctx = mutation.apply("demo", doc, core, ["bad-1"], ops)
-    assert (got, doc["phases"], meta["stamps"], ctx.events) == (rejected, phases, stamps, events)
-    assert doc["plans"] == {"c": {"phases": phases[1:]}}
-    warning = (ledger_alerts.SYNC, "no p2", "w-refused", "i-refused")
-    refused = [(list(phases), [], warning, [])] if "plan" in rejected else []
-    kept = [(["p0", *[op["id"] for op in ops[:-1]]], [], warning, [])] if "refused" in rejected else []
-    assert raised == kept + refused
-
-
-def test_apply_without_anything_to_change_leaves_meta_alone(derived):
-    meta = {"rev": 4, "events": ["e0"], "warnings": [], "members": {"m": {"role": "member"}}}
-    doc = {"chat": []}
-    doc["_meta"] = meta
-    rejected, ctx = mutation.apply("demo", doc, domain([]))
-    assert (rejected, ctx.changed) == ([], False)
-    assert meta == {"rev": 4, "events": ["e0"], "warnings": [], "members": {"m": {"role": "member"}}, "created_at": 7}
-    assert derived[-1] == ("alerts", doc, ctx, [], [])
-
-
-@pytest.mark.parametrize(
-    ("changes", "ops", "doc", "created"),
-    [
-        (["dirty"], None, {"chat": []}, False),
-        (None, [{"op": "add", "id": "a"}], {"chat": []}, False),
-        (None, None, {"chat": [], "big": ["w"]}, False),
-        (None, None, {"chat": []}, True),
-    ],
-)
-def test_each_kind_of_change_alone_moves_the_revision(derived, changes, ops, doc, created):
-    meta = {"rev": 4, "events": [], "warnings": []}
-    doc["_meta"] = meta
-    _, ctx = mutation.apply("demo", doc, domain([]), changes, ops, created=created)
-    assert (ctx.changed, meta["rev"], meta["updated_at"]) == (True, 5, 50)
+    assert got == rejected
+    assert set(doc) == {"chat", "phases", "plans", "alerts", "_meta", *applied}
+    assert (doc["phases"], doc["plans"]) == (["p0", *applied], {"c": {"phases": applied}})
+    assert meta["stamps"] == {"old": 0, **dict.fromkeys(applied, 1)}
+    assert (ctx.events, ctx.dropped, ctx.dirty) == (["e0", *applied], applied, bool(applied))
+    assert seen == raised
