@@ -19,22 +19,27 @@ def read(store, slug: str) -> dict:
 
 
 def save(store, slug: str, state: dict) -> None:
+    timing.keep()
     store.redis.set(store.key(slug, "spawn-stall"), json.dumps(state))
 
 
-def eligible(store, slug: str, ledger, at: int) -> bool:
-    from scripts.swarm.tick import _ended
-
+def eligible(store, slug: str, ledger, at: int, runtime) -> bool:
     config = store.config(slug)
     if config.state != "running":
         return False
     try:
-        rows, ready = capacity.ready_work(slug, store, ledger.state(slug))
+        _, ready = capacity.ready_work(slug, store, ledger.state(slug))
+        inputs = capacity.live_inputs(slug, store, ledger, dict(os.environ), at)
     except LedgerGone:
         return False
-    agents = [agent for agent in store.agents(slug) if not _ended(agent, rows)]
-    observations = capacity.accounts(dict(os.environ), at / 1000, refresh=False)
-    decision = capacity.calculate(config, observations, agents, {lane: len(tasks) for lane, tasks in ready.items()})
+    requirements = None
+    if hasattr(runtime, "quota_requirements"):
+        prepared = {lane: [capacity._prepared(store, slug, task) for task in tasks] for lane, tasks in ready.items()}
+        requirements = runtime.quota_requirements(config, prepared)
+    config, _ = capacity.autoscaled(config, inputs)
+    decision = capacity.calculate(
+        config, inputs.observations, inputs.agents, inputs.demand, requirements, warned=inputs.warned
+    )
     return any(decision["placements"].values())
 
 
@@ -46,10 +51,10 @@ def launched(store, slug: str) -> int:
     )
 
 
-def observe(store, slug: str, ledger, at: int) -> dict:
+def observe(store, slug: str, ledger, at: int, runtime) -> dict:
     state = read(store, slug)
     last = launched(store, slug)
-    if not eligible(store, slug, ledger, at):
+    if not eligible(store, slug, ledger, at, runtime):
         state = {}
     elif "since" not in state or last > state["launch"]:
         state = {"since": at, "launch": last}
@@ -78,6 +83,7 @@ def deliver(store, slug: str, ledger, at: int) -> None:
     finding = found[0]
     text = f"Spawn stall on {slug}: {finding.summary}. " + "; ".join(finding.evidence)
     if "message" not in state:
+        timing.keep()
         item = inbox.send("swarm", seat_address(slug, "master"), text, ref=f"{REF}{slug}:{state['since']}")
         state.update(message=item.id, sent_at=at)
         save(store, slug, state)
@@ -89,7 +95,7 @@ def deliver(store, slug: str, ledger, at: int) -> None:
 
 
 @contextmanager
-def watch(store, slug: str, ledger, clock: Callable[[], int]) -> Iterator[None]:
+def watch(store, slug: str, ledger, clock: Callable[[], int], runtime) -> Iterator[None]:
     previous = None
 
     def failed(step, error):
@@ -98,6 +104,7 @@ def watch(store, slug: str, ledger, clock: Callable[[], int]) -> Iterator[None]:
             return
         previous = error
         failure = {"step": step, "error": f"{type(error).__name__}: {error}"}
+        timing.keep()
         store.redis.set(store.key(slug, "tick-failure"), json.dumps(failure))
 
     token = timing.ON_FAILURE.set(failed)
@@ -105,5 +112,5 @@ def watch(store, slug: str, ledger, clock: Callable[[], int]) -> Iterator[None]:
         yield
     finally:
         timing.ON_FAILURE.reset(token)
-        observe(store, slug, ledger, clock())
+        observe(store, slug, ledger, clock(), runtime)
         deliver(store, slug, ledger, clock())

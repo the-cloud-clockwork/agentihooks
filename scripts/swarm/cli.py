@@ -165,7 +165,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         )
         from scripts.swarm.health import spawn_stall
 
-        with spawn_stall.watch(store, slug, ledger, now_ms):
+        with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
             controls = timing.call(command_runner.consume, store, slug)
             if timing.call(ledger.binned, slug):
                 _, left = stop_now(store, slug, runtime or routed(herdr=HerdrRuntime()), ledger)

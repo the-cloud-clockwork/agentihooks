@@ -173,7 +173,7 @@ def test_failure_callback_is_restored_and_outer_steps_preserve_the_cause(stalled
         timing.call(broken)
 
     with timing.tick("sw"), pytest.raises(RuntimeError) as caught:
-        with spawn_stall.watch(store, "sw", ledger, lambda: clock[0]):
+        with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], stalled[2]):
             timing.call(outer)
     assert caught.value is error
     assert timing.ON_FAILURE.get() is None
@@ -202,10 +202,10 @@ def test_caught_spawn_failures_keep_the_error_without_resetting_the_clock(stalle
 
     store, ledger, _, clock, _ = stalled
     record = AgentRecord("failed", "eng", "t1", started_at=clock[0])
-    with timing.tick("sw"), spawn_stall.watch(store, "sw", ledger, lambda: clock[0]):
+    with timing.tick("sw"), spawn_stall.watch(store, "sw", ledger, lambda: clock[0], stalled[2]):
         tick._record_spawn_failure("sw", store, record, RuntimeError("forced launch failure"))
     clock[0] += 600_000
-    with timing.tick("sw"), spawn_stall.watch(store, "sw", ledger, lambda: clock[0]):
+    with timing.tick("sw"), spawn_stall.watch(store, "sw", ledger, lambda: clock[0], stalled[2]):
         pass
     (finding,) = spawn_stall.findings(store, "sw")
     assert finding.evidence[-1] == "Last failed step scripts.swarm.tick._spawn: RuntimeError: forced launch failure"
@@ -227,3 +227,43 @@ def test_eligibility_return_starts_a_fresh_ten_minute_interval(stalled):
     clock[0] += 1
     tick_failure(stalled)
     assert len(alarms(stalled)) == 1
+
+
+def test_task_specific_harness_restrictions_require_compatible_quota(stalled, monkeypatch):
+    from scripts.swarm.runtime import HerdrRuntime, plugins
+
+    store, ledger, runtime, clock, _ = stalled
+    ledger.rows["t1"]["profile"] = "frontend"
+    runtime.quota_requirements = HerdrRuntime().quota_requirements
+    monkeypatch.setattr(plugins, "claude_only", lambda profile: profile == "frontend")
+    account = capacity.Account("codex", "acct", "OPEN", 0, 80, 80, 6)
+    monkeypatch.setattr(capacity, "accounts", lambda *args, **kwargs: [account])
+    tick_failure(stalled)
+    clock[0] += 600_000
+    tick_failure(stalled)
+    assert alarms(stalled) == []
+    assert InboxStore(store.redis).pending_mail("master@sw") == []
+
+
+def test_lost_lease_prevents_failure_and_alarm_writes(stalled):
+    from scripts.swarm import timing
+    from scripts.swarm.store import SwarmError
+
+    store, ledger, _, clock, _ = stalled
+    tick_failure(stalled)
+    before = store.redis.get(store.key("sw", "tick-failure"))
+    error = SwarmError("the controller lease was lost")
+
+    def lost():
+        raise error
+
+    with timing.tick("sw"), pytest.raises(SwarmError) as caught:
+        with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], stalled[2]):
+            token = timing.BEFORE_STEP.set(lost)
+            try:
+                with timing.step("forced lost lease"):
+                    raise error
+            finally:
+                timing.BEFORE_STEP.reset(token)
+    assert caught.value is error
+    assert store.redis.get(store.key("sw", "tick-failure")) == before
