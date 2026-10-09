@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x_cmd_autoscale__mutmut_4:175a77a4f80df16db04cb1806e48ed704d26f921dacee510b90bb1bfcbb79e16": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "SwarmConfig has no constructor validation. The fallback slug is neither consumed by autoscaled nor printed; live_inputs receives args.slug directly. Setting the config slug to None changes no command output."
+  }
+}

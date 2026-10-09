@@ -1,12 +1,14 @@
 import json
 from collections.abc import Callable, Collection, Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, session_bands
 from scripts.routing import claude_api, codex_api, place
 from scripts.routing.slots import API, SUBSCRIPTION
+from scripts.swarm import autoscale, host_budget
+from scripts.swarm.store import AUTO_SCALING, SwarmConfig
 
 LANES = ("eng", "ci", "plan")
 LABELS = {"claude": "Claude", "codex": "Codex"}
@@ -204,6 +206,90 @@ def _allocate(
         effective[lane] += 1
 
 
+def _configured(config) -> dict:
+    return dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan), strict=True))
+
+
+def _busy(agents: list) -> dict:
+    return {lane: sum(a.lane == lane and a.state != "finished" for a in agents) for lane in LANES}
+
+
+def _open(observations: list[Account], warned: dict) -> list[Account]:
+    return [row for row in observations if (row.harness, row.name) not in warned]
+
+
+def _placeable(rows: list[Account]) -> dict:
+    return {
+        h: sum(free_seats(row) for row in rows if row.harness == h and row.kind != API) for h in ("claude", "codex")
+    }
+
+
+@dataclass(frozen=True)
+class ScaleInputs:
+    observations: list[Account]
+    agents: list
+    demand: dict | None
+    host: Callable[[], host_budget.HostSample]
+    previous: dict
+    warned: dict = field(default_factory=dict)
+
+
+def autoscaled(config: SwarmConfig, inputs: ScaleInputs) -> tuple[SwarmConfig, dict | None]:
+    if config.scaling != AUTO_SCALING:
+        return config, None
+    stored = inputs.previous.get("autoscale") or {}
+    thresholds = host_budget.Thresholds(config.load_high, config.load_low, config.memory_per_agent_mb)
+    room = host_budget.room(inputs.host(), thresholds, stored.get("host", {}).get("room"))
+    previous = {
+        "ceilings": stored.get("ceilings") or _configured(config),
+        "pending_raise": stored.get("pending_raise") or {"target": None, "ticks": 0},
+    }
+    demand = inputs.demand or dict.fromkeys(LANES, 0)
+    free = _placeable(_open(inputs.observations, inputs.warned))
+    decision = autoscale.calculate(_busy(inputs.agents), free, room.room, demand, previous)
+    caps = decision["ceilings"]
+    scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"])
+    return scaled, {**decision, "host": {"room": room.room, "reason": room.reason}}
+
+
+def ready_work(slug: str, store, doc: dict) -> tuple[dict, dict]:
+    from scripts.swarm.tick import _claimable, _launch_order
+
+    rows = {task["id"]: task for task in doc["tasks"]}
+    return rows, {lane: _launch_order(slug, store, _claimable(slug, store, rows, doc, lane)) for lane in LANES}
+
+
+def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleInputs:
+    from scripts.swarm import quota_handoff
+    from scripts.swarm.tick import _ended
+
+    rows, ready = ready_work(slug, store, ledger.state(slug))
+    observations = accounts(environ, now_ms / 1000, refresh=False)
+    thresholds = quota_handoff.Thresholds.from_env(environ)
+    warned = {
+        (row.harness, row.name): window for row in observations if (window := quota_handoff.trigger(row, thresholds))
+    }
+    agents = [agent for agent in store.agents(slug) if not _ended(agent, rows)]
+    demand = {lane: len(tasks) for lane, tasks in ready.items()}
+    return ScaleInputs(observations, agents, demand, host_budget.read_host, read(store, slug), warned)
+
+
+def fixture_inputs(readings: dict) -> ScaleInputs:
+    from scripts.swarm.store import AgentRecord
+
+    agents = [
+        AgentRecord(f"{lane}-{n}", lane, "") for lane, count in readings.get("live", {}).items() for n in range(count)
+    ]
+    sample = host_budget.HostSample(**readings["host"])
+    return ScaleInputs(
+        [Account(**row) for row in readings["accounts"]],
+        agents,
+        readings.get("demand"),
+        lambda: sample,
+        readings.get("previous", {}),
+    )
+
+
 def record(row: Account) -> dict:
     """The stored row; pool rows keep their pre-api fields so decisions without an api stay byte identical."""
     if row.kind == API:
@@ -225,17 +311,16 @@ def calculate(
     accounts: dict | None = None,
     warned: dict | None = None,
 ) -> dict:
-    configured = dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan), strict=True))
-    busy = {lane: sum(a.lane == lane and a.state != "finished" for a in agents) for lane in LANES}
+    configured = _configured(config)
+    busy = _busy(agents)
     effective = {lane: min(configured[lane], busy[lane]) for lane in LANES}
     limits = {
         lane: min(configured[lane], busy[lane] + demand[lane]) if demand is not None else configured[lane]
         for lane in LANES
     }
     warned = warned or {}
-    open_rows = [row for row in observations if (row.harness, row.name) not in warned]
-    pool = [row for row in open_rows if row.kind != API]
-    placeable = {h: sum(free_seats(row) for row in pool if row.harness == h) for h in ("claude", "codex")}
+    open_rows = _open(observations, warned)
+    placeable = _placeable(open_rows)
     allocation, placements = _allocate(config, effective, limits, offered(observations, warned), requirements, accounts)
     restricted = sorted({row.state.lower() for row in observations if row.state != "OPEN" and row.kind != API})
     reason = "accounts have quota" if not restricted else "accounts are " + ", ".join(restricted)
@@ -279,24 +364,24 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     if reader is None:
         return []
     from scripts.swarm.ledger_client import LedgerRefused
-    from scripts.swarm.tick import _claimable, _ended, _launch_order
+    from scripts.swarm.tick import _ended
 
-    doc = ledger.state(slug)
-    rows = {task["id"]: task for task in doc["tasks"]}
-    ready = {lane: _launch_order(slug, store, _claimable(slug, store, rows, doc, lane)) for lane in LANES}
+    rows, ready = ready_work(slug, store, ledger.state(slug))
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
     requirements = None
     if hasattr(runtime, "quota_requirements"):
         prepared = {lane: [_prepared(store, slug, task) for task in tasks] for lane, tasks in ready.items()}
         requirements = runtime.quota_requirements(config, prepared)
     agents = [agent for agent in store.agents(slug) if not _ended(agent, rows)]
+    previous = read(store, slug)
+    if hasattr(runtime, "quota_previous"):
+        runtime.quota_previous(previous)
     decision = reader(config, agents, now_ms / 1000, demand, requirements)
     decision["tasks"] = {
         ready[lane][slot["index"]]["id"]: slot["harness"]
         for lane, slots in decision["placements"].items()
         for slot in slots
     }
-    previous = read(store, slug)
     changed = any(previous.get(key) != decision[key] for key in ("configured", "effective", "reason"))
     decision["at"] = now_ms if changed else previous["at"]
     text = status_line(decision)

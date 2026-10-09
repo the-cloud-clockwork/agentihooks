@@ -109,6 +109,7 @@ def test_no_script_a_step_runs_calls_the_api():
         ".github/coverage/proxy.py",
         "deploy/helm/agentihooks-swarm/ci/kind-due.sh",
         "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh",
+        "docker/swarm-node/smoke.sh",
         "hooks/__main__.py",
         "hooks/hook_manager.py",
         "hooks/targets/normalizer.py",

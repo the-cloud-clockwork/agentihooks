@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_autoscaled__mutmut_48:eca1fa8b6ea6be10b158ce4e796f6b4931b0f904ddaa96cf91fe8a6ee9fafdae": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The fallback target=None prevents calculate from reading its ticks value. Changing zero to one cannot affect ceilings, pending state, or reason."
+  }
+}

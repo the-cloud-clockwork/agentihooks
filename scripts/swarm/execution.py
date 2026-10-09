@@ -125,7 +125,12 @@ class ExecutionRegistry:
         for _ in range(WRITE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(key)
+                    from scripts.swarm import lease
+
+                    pipe.watch(key, self.store.key(slug, "control-owner"))
+                    epoch = lease.EPOCH.get()
+                    if epoch is not None:
+                        lease.require_epoch(self.store, slug, epoch)
                     previous = self.occupants(slug, pipe).get(agent.seat)
                     if (previous.execution_id if previous else "") != previous_execution_id:
                         self.conflict(slug, "replacement does not match the current execution")
@@ -140,6 +145,13 @@ class ExecutionRegistry:
                         self.conflict(slug, "execution identity already exists")
                     pipe.multi()
                     self.write(pipe, slug, current)
+                    if epoch is not None:
+                        intent = {
+                            "execution_id": current.execution_id,
+                            "generation": current.generation,
+                            "controller_epoch": epoch,
+                        }
+                        pipe.hset(self.store.key(slug, "controller-intents"), current.execution_id, json.dumps(intent))
                     if previous and previous.name != current.name:
                         pipe.hdel(self.store.key(slug, "agents"), previous.name)
                     pipe.execute()

@@ -25,6 +25,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
         <= required
         | {
             "swarm-image",
+            "worker-image",
             "shard-check",
             "brain-smoke",
             "wiring",
