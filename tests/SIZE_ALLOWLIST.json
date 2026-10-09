@@ -142,9 +142,6 @@
  "scripts/ci_mutation/runner.py::run_gate": {
   "PLR0912": 14
  },
- "scripts/ci_mutation/selection.py::run_selected": {
-  "C901": 14
- },
  "scripts/claude_quota_balancer.py::collect_results": {
   "PLR0913": 8
  },
