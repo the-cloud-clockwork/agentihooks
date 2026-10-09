@@ -95,7 +95,10 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
         return {"scripts/sample.py": {2}}
 
     monkeypatch.setattr("scripts.ci_mutation.plan.discover_changes", discover)
-    monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes: (1601.4, 50, 0))
+    monkeypatch.setattr(
+        "scripts.ci_mutation.plan.estimate",
+        lambda root, changes: (1601.4, 50, 0) if (root, changes) == (tmp_path, {"scripts/sample.py": {2}}) else None,
+    )
     assert plan.main() == 0
     assert calls == [(tmp_path, "base", "HEAD")]
     assert output.read_text() == "shards=[0, 1, 2, 3]\n"
