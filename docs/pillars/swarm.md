@@ -272,7 +272,10 @@ Each tick, per swarm:
 11. Wake idle panes holding unread items, and climb the wake ladder for items nobody reads.
 12. Write the automatic snapshot when it is due.
 
-Each tick renews the controller lease for three minutes. Redis server time determines expiry. The owner comes
+Each tick renews the controller lease for three ticks. A tick is 60 seconds unless
+`AGENTIHOOKS_CONTROLLER_TICK_SECONDS` sets another interval of at least one second. Set it only on the controller
+of an `agentihooks controller run` install; `swarm tick` refuses to run with it set, because the host timer ticks
+every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
 
