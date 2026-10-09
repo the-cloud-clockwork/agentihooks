@@ -605,6 +605,7 @@ def test_publish_plan_creates_one_plan_its_phase_parents_and_a_slice_per_marker(
         {"id": f"{plan_id}.second", "phase": "phases/p1", "anchor": "second", "lines": "6-7"},
         {"id": f"{plan_id}.launch", "phase": "phases/p2", "anchor": "launch", "lines": "10-12"},
     ]
+    assert state["tasks"] == []
 
 
 def test_publishing_the_same_plan_again_keeps_one_plan_and_its_slices(plan_ledger, tmp_path, monkeypatch):
