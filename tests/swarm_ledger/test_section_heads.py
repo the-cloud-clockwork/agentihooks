@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, loaded, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
@@ -70,8 +70,19 @@ def open_page(browser, doc, init_script=None):
     serve_modules(context, ledger_state(doc))
     page = context.new_page()
     page.goto(URL)
-    loaded(page)
+    rendered(page)
     return context, page
+
+
+def rendered(page):
+    """The status line reads saved once the stream opens, so wait for the page's own first-state promise instead."""
+    page.wait_for_function(
+        """async () => {
+          const main = document.querySelector("script[type=module]").src;
+          await (await import(new URL("sync.js", main))).loaded;
+          return true;
+        }"""
+    )
 
 
 @pytest.fixture
@@ -160,13 +171,13 @@ def test_sections_state_survives_a_reload(tab):
     tab.click("#sections-all")
     settle(tab)
     tab.reload()
-    loaded(tab)
+    rendered(tab)
     assert sections(tab) == {"labels": ["Collapse all"], "open": [True] * len(SECTIONS)}
     tab.evaluate("() => { document.getElementById('notes-box').open = false; }")
     settle(tab)
     assert sections(tab)["labels"] == ["Collapse all"]
     tab.reload()
-    loaded(tab)
+    rendered(tab)
     folded = sections(tab)
     assert folded["open"][SECTIONS.index("notes-box")] is False
     assert folded["open"].count(True) == len(SECTIONS) - 1
@@ -178,7 +189,7 @@ def test_sections_toggle_works_when_storage_is_unavailable(browser):
     page.on("pageerror", lambda exc: errors.append(str(exc)))
     try:
         page.reload()
-        loaded(page)
+        rendered(page)
         assert counts(page) == EXPECTED
         page.click("#sections-all")
         settle(page)
