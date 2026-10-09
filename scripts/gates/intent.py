@@ -352,7 +352,7 @@ def _remember(slug, task, now_ms, state, answer, home):
     intent_history.append(slug, record, home)
 
 
-def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None, ask=None):
+def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
     task = next((t for t in doc["tasks"] if t.get("id") == task_id), None)
     if mode == "off" or task is None or task.get("pr_url"):
         return None
@@ -367,7 +367,7 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None, ask=None):
         "files": sorted({area for row in kept for area in row["areas"]}),
     }
     state = intent_history.prepare(state_of(doc, task, plan))
-    verdict, reason = (ask or judge)(state)
+    verdict, reason = judge(state)
     _remember(slug, task, now_ms, state, (verdict, reason), home)
     verdicts.write(task_id, verdict, reason, now_ms, phase=task.get("phase"), planned=traced["plan_hash"])
     who = Who(name=task.get("claimed_by", ""), task=task_id)
