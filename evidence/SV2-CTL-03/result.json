@@ -1,0 +1,50 @@
+{
+  "package": "SV2-CTL-03",
+  "dependency": "SV2-CTL-02",
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2047",
+  "tested_commit": "a885b2f2304b335cd6d3878e67b4205f57e0c50c",
+  "status": "fixture-qualified-awaiting-dependency-merge-and-ci",
+  "evidence_class": "Mocked Redis (fakeredis WATCH transactions) and a fake clock; empty fixture cluster; no Kubernetes, node autoscaler or provider call was made.",
+  "interfaces": [
+    "scripts.swarm_v2.admission.PendingAdmission.admit, activate, release, pending and pending_execution_admission_total",
+    "Policy: global pending cap, per swarm pending cap, reservation lifetime, approved templates and a default request profile",
+    "Decision outcomes admitted, replayed, deferred and impossible; counters also record expired, activated and released",
+    "scripts.swarm.tick._spawn consults a runtime admission when present: impossible tasks are blocked on the ledger with the reason, deferred tasks wait, a refused claim or failed spawn releases its reservation, the spawned task carries its reservation"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "redis": "WATCH, MULTI, sorted sets and hashes; no Lua and no server clock",
+    "compatibility": "A runtime without an admission attribute spawns exactly as before; the local herdr path is unchanged"
+  },
+  "authority": "Admission runs inside the controller tick, which already holds the SV2-CTL-01 lease. Actor and scope come from the swarm slug and the controller grant; no task, display label or provider name widens a cap.",
+  "states": {
+    "observed": "Cases A, B and C each passed twice from independent fake Redis state. Focused admission and tick tests passed.",
+    "accepted": "From zero remote capacity three of ten runnable tasks hold pending reservations, six are deferred in order, the impossible memory request is rejected and holds nothing.",
+    "committed": "Code and fixture inputs are at tested_commit.",
+    "externally_verified": "None: no Kubernetes runtime adapter carries an admission yet, and no live G3 deployment was exercised."
+  },
+  "validation": {
+    "command": "python -m pytest tests/test_swarm_v2_admission.py tests/swarm/test_tick.py -q -n 2 --cov=scripts.swarm_v2.admission --cov-report=term-missing",
+    "output": "166 passed in 8.29 seconds; admission 129 statements, zero missing, 100 percent coverage",
+    "lint": "ruff check passed on changed Python files",
+    "format": "ruff format check passed on changed Python files",
+    "limits": "tests/test_size_limits.py 33 passed; _spawn complexity 12 before and after, parameters unchanged at its allowlisted 8"
+  },
+  "cases": {
+    "a": "evidence/SV2-CTL-03/a-result.json",
+    "b": "evidence/SV2-CTL-03/b-result.json",
+    "c": "evidence/SV2-CTL-03/c-result.json",
+    "manifest": "evidence/SV2-CTL-03/manifest.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Set the global or swarm pending cap to zero: every new task is deferred with the reason distributed admission is set to zero, while a held reservation still activates so current attempts drain.",
+    "authoritative_objects": "The per swarm pending reservation hash and the global pending sorted set; the outcome counter is observational.",
+    "proof": "Case C admits with a zero cap policy over the same store, admits nothing and activates the held reservation."
+  },
+  "remaining_limitations": [
+    "No Kubernetes runtime adapter exists yet to carry a PendingAdmission and create the pending Pods; that adapter and the watch that calls activate belong to later packages.",
+    "Provider slots come from an injected source; the production source over account capacity is wired with the Kubernetes runtime.",
+    "Full CI and mutation have not run; the dependency SV2-CTL-02 is still open."
+  ]
+}

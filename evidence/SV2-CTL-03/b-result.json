@@ -1,0 +1,48 @@
+{
+  "tested_commit": "a885b2f2304b335cd6d3878e67b4205f57e0c50c",
+  "evidence_class": "mocked Redis and fake clock; no Kubernetes or provider calls",
+  "case": "T-SV2-CTL-03-B",
+  "passed": true,
+  "independent_runs": [
+    {
+      "case": "T-SV2-CTL-03-B",
+      "state": "passed",
+      "evidence_class": "mocked Redis and fake clock; empty fixture cluster; no Kubernetes or provider calls",
+      "input_sha256": "3365e522318eee022aa79d45c6367bb0ca6a49a7de650d364a35e1af83aefdc1",
+      "decisions": [
+        {
+          "task": "t04",
+          "outcome": "impossible",
+          "deadline_ms": 0,
+          "reason": "task t04 requests 65536 MiB memory and 1000 millicpu, more than every approved template (general 16384 MiB 4000 millicpu; compute 8192 MiB 8000 millicpu); lower the task resources or approve a larger template"
+        }
+      ],
+      "pending": [],
+      "pending_execution_admission_total": {
+        "impossible": 2,
+        "admitted": 1
+      },
+      "rollback": "not exercised"
+    },
+    {
+      "case": "T-SV2-CTL-03-B",
+      "state": "passed",
+      "evidence_class": "mocked Redis and fake clock; empty fixture cluster; no Kubernetes or provider calls",
+      "input_sha256": "3365e522318eee022aa79d45c6367bb0ca6a49a7de650d364a35e1af83aefdc1",
+      "decisions": [
+        {
+          "task": "t04",
+          "outcome": "impossible",
+          "deadline_ms": 0,
+          "reason": "task t04 requests 65536 MiB memory and 1000 millicpu, more than every approved template (general 16384 MiB 4000 millicpu; compute 8192 MiB 8000 millicpu); lower the task resources or approve a larger template"
+        }
+      ],
+      "pending": [],
+      "pending_execution_admission_total": {
+        "impossible": 2,
+        "admitted": 1
+      },
+      "rollback": "not exercised"
+    }
+  ]
+}

@@ -1,0 +1,166 @@
+{
+  "tested_commit": "a885b2f2304b335cd6d3878e67b4205f57e0c50c",
+  "evidence_class": "mocked Redis and fake clock; no Kubernetes or provider calls",
+  "case": "T-SV2-CTL-03-A",
+  "passed": true,
+  "independent_runs": [
+    {
+      "case": "T-SV2-CTL-03-A",
+      "state": "passed",
+      "evidence_class": "mocked Redis and fake clock; empty fixture cluster; no Kubernetes or provider calls",
+      "input_sha256": "3365e522318eee022aa79d45c6367bb0ca6a49a7de650d364a35e1af83aefdc1",
+      "decisions": [
+        {
+          "task": "t01",
+          "outcome": "admitted",
+          "deadline_ms": 301000,
+          "reason": ""
+        },
+        {
+          "task": "t02",
+          "outcome": "admitted",
+          "deadline_ms": 301000,
+          "reason": ""
+        },
+        {
+          "task": "t03",
+          "outcome": "admitted",
+          "deadline_ms": 301000,
+          "reason": ""
+        },
+        {
+          "task": "t04",
+          "outcome": "impossible",
+          "deadline_ms": 0,
+          "reason": "task t04 requests 65536 MiB memory and 1000 millicpu, more than every approved template (general 16384 MiB 4000 millicpu; compute 8192 MiB 8000 millicpu); lower the task resources or approve a larger template"
+        },
+        {
+          "task": "t05",
+          "outcome": "deferred",
+          "deadline_ms": 0,
+          "reason": "pending cap reached: 3 of 3 pending attempts for this swarm, 3 of 3 across swarms"
+        },
+        {
+          "task": "t06",
+          "outcome": "deferred",
+          "deadline_ms": 0,
+          "reason": "pending cap reached: 3 of 3 pending attempts for this swarm, 3 of 3 across swarms"
+        },
+        {
+          "task": "t07",
+          "outcome": "deferred",
+          "deadline_ms": 0,
+          "reason": "pending cap reached: 3 of 3 pending attempts for this swarm, 3 of 3 across swarms"
+        },
+        {
+          "task": "t08",
+          "outcome": "deferred",
+          "deadline_ms": 0,
+          "reason": "pending cap reached: 3 of 3 pending attempts for this swarm, 3 of 3 across swarms"
+        },
+        {
+          "task": "t09",
+          "outcome": "deferred",
+          "deadline_ms": 0,
+          "reason": "pending cap reached: 3 of 3 pending attempts for this swarm, 3 of 3 across swarms"
+        },
+        {
+          "task": "t10",
+          "outcome": "deferred",
+          "deadline_ms": 0,
+          "reason": "pending cap reached: 3 of 3 pending attempts for this swarm, 3 of 3 across swarms"
+        }
+      ],
+      "pending": [
+        "t01",
+        "t02",
+        "t03"
+      ],
+      "pending_execution_admission_total": {
+        "admitted": 3,
+        "impossible": 1,
+        "deferred": 6
+      },
+      "rollback": "not exercised"
+    },
+    {
+      "case": "T-SV2-CTL-03-A",
+      "state": "passed",
+      "evidence_class": "mocked Redis and fake clock; empty fixture cluster; no Kubernetes or provider calls",
+      "input_sha256": "3365e522318eee022aa79d45c6367bb0ca6a49a7de650d364a35e1af83aefdc1",
+      "decisions": [
+        {
+          "task": "t01",
+          "outcome": "admitted",
+          "deadline_ms": 301000,
+          "reason": ""
+        },
+        {
+          "task": "t02",
+          "outcome": "admitted",
+          "deadline_ms": 301000,
+          "reason": ""
+        },
+        {
+          "task": "t03",
+          "outcome": "admitted",
+          "deadline_ms": 301000,
+          "reason": ""
+        },
+        {
+          "task": "t04",
+          "outcome": "impossible",
+          "deadline_ms": 0,
+          "reason": "task t04 requests 65536 MiB memory and 1000 millicpu, more than every approved template (general 16384 MiB 4000 millicpu; compute 8192 MiB 8000 millicpu); lower the task resources or approve a larger template"
+        },
+        {
+          "task": "t05",
+          "outcome": "deferred",
+          "deadline_ms": 0,
+          "reason": "pending cap reached: 3 of 3 pending attempts for this swarm, 3 of 3 across swarms"
+        },
+        {
+          "task": "t06",
+          "outcome": "deferred",
+          "deadline_ms": 0,
+          "reason": "pending cap reached: 3 of 3 pending attempts for this swarm, 3 of 3 across swarms"
+        },
+        {
+          "task": "t07",
+          "outcome": "deferred",
+          "deadline_ms": 0,
+          "reason": "pending cap reached: 3 of 3 pending attempts for this swarm, 3 of 3 across swarms"
+        },
+        {
+          "task": "t08",
+          "outcome": "deferred",
+          "deadline_ms": 0,
+          "reason": "pending cap reached: 3 of 3 pending attempts for this swarm, 3 of 3 across swarms"
+        },
+        {
+          "task": "t09",
+          "outcome": "deferred",
+          "deadline_ms": 0,
+          "reason": "pending cap reached: 3 of 3 pending attempts for this swarm, 3 of 3 across swarms"
+        },
+        {
+          "task": "t10",
+          "outcome": "deferred",
+          "deadline_ms": 0,
+          "reason": "pending cap reached: 3 of 3 pending attempts for this swarm, 3 of 3 across swarms"
+        }
+      ],
+      "pending": [
+        "t01",
+        "t02",
+        "t03"
+      ],
+      "pending_execution_admission_total": {
+        "admitted": 3,
+        "impossible": 1,
+        "deferred": 6
+      },
+      "rollback": "not exercised"
+    }
+  ]
+}
