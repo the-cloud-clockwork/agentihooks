@@ -85,9 +85,9 @@ def test_it_matches_git_pushes_and_pull_request_opens_only():
 def test_actions_name_each_open_and_push_with_the_directory_it_runs_in():
     command = "cd /w && gh pr create --base dev; git -C sub push -u origin HEAD; gh pr ready 7"
     assert list(actions(command, "/home")) == [
-        ("open", Path("/w"), ["pr", "create", "--base", "dev"]),
+        ("open", Path("/w"), ()),
         ("push", Path("/w/sub"), ["-u", "origin", "HEAD"]),
-        ("open", Path("/w"), ["pr", "ready", "7"]),
+        ("open", Path("/w"), ()),
     ]
     assert list(actions("git -c a=b push", "/x")) == [("push", Path("/x"), [])]
 
@@ -233,3 +233,9 @@ def test_the_queue_refusal_names_the_dequeue():
         f"{URL} waits in the merge queue: a push now drops it. Dequeue first with agentihooks swarm demo merge "
         f"dequeue {URL}, then push"
     )
+
+
+def test_push_options_taking_a_value_are_not_read_as_the_remote(tree, tmp_path):
+    git(tree, "remote", "add", "fork", "https://github.com/o/elsewhere.git")
+    assert gate(pull()).decide(bash("git push -o ci.skip fork task", tree), ME, state(tmp_path)).allowed
+    assert destinations(tree, ["--push-option", "x", "origin", "HEAD:wip/y"]) == {"wip/y"}
