@@ -33,9 +33,10 @@ def test_a_task_with_no_mark_and_no_slice_is_still_refused(anchored):
     assert anchored["tasks"] == []
 
 
-def test_a_follow_up_task_naming_a_slice_is_refused(anchored):
+@pytest.mark.parametrize("named", [{"plan_slice": "first"}, {"slice": "slices/plan-a.first"}])
+def test_a_follow_up_task_naming_a_slice_is_refused(anchored, named):
     refused = ctx()
-    assert ledger_tasks._add(anchored, {**OP, "follow_up": True, "plan_slice": "first"}, refused) is False
+    assert ledger_tasks._add(anchored, {**OP, "follow_up": True, **named}, refused) is False
     assert refused.refused == ["task f1 is a follow up and names no slice: drop --plan-slice or --follow-up"]
     assert anchored["tasks"] == []
 
