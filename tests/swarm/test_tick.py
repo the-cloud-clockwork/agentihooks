@@ -564,6 +564,26 @@ def test_a_claimed_task_without_an_agent_is_reopened(store):
     assert "task t1 had no agent, reopened" in actions
 
 
+def test_a_task_blocked_on_dev_red_is_reopened_once_dev_tests_passes(store, monkeypatch):
+    from scripts.swarm import dev_red
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    ledger.comments = []
+    ledger.comment = lambda slug, task, text, by: ledger.comments.append((task, text, by))
+    store.update("sw", state="paused")
+    ledger.rows["t1"].update(state="blocked", claimed_by="engineer@a1b2c3-0009")
+    dev_red.hold(store.redis, "sw", "t1", 41)
+    read = []
+    monkeypatch.setattr(
+        dev_red, "latest", lambda repo, run=None: read.append(repo) or {"id": 42, "conclusion": "success"}
+    )
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert read == ["/repo"]
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+    assert ("t1", dev_red.REOPENED, "swarm") in ledger.comments
+    assert "task t1 reopened, dev Tests passed after the red run that blocked it" in actions
+
+
 def test_a_task_held_by_a_known_agent_is_not_reopened_as_an_orphan(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     store.update("sw", state="paused")
@@ -931,6 +951,13 @@ def test_a_first_life_has_no_reclaim_to_look_up(store, reclaims):
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert reclaims == [] and "reclaim" not in runtime.tasks[-1]
     assert store.reclaims("sw") == {}
+
+
+def test_a_reopened_task_with_a_branch_and_no_earlier_life_is_given_that_branch(store, reclaims):
+    ledger, runtime = FakeLedger([{"id": "t1", "branch": "feature-x"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert reclaims == [("/repo", [], "feature-x")]
+    assert runtime.tasks[-1]["reclaim"] == RECLAIMED
 
 
 def test_a_handed_off_task_keeps_its_handoff_continuation_and_takes_no_reclaim(store, reclaims):
@@ -1315,6 +1342,54 @@ def test_a_parked_task_waits_for_its_blocker_and_then_takes_a_finish_claim_with_
     assert spawned_ids(runtime) == ["t1", "t2"]
     assert runtime.tasks[-1]["handoff"] == "parked on its branch until t1 merges"
     assert runtime.tasks[-1]["stack_base"] == []
+
+
+def test_a_parked_task_takes_the_free_slot_the_tick_after_its_blocker_is_done_ahead_of_fresh_work(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger(
+        [
+            {"id": "t1", "state": "pr", "branch": "engineer-a1b2c3-0001"},
+            {"id": "fresh"},
+            {"id": "t2", "depends_on": ["t1"], "parked_on": ["t1"], "branch": "engineer-a1b2c3-0002"},
+        ]
+    )
+    runtime = FakeRuntime()
+    ledger.rows["t1"].update(state="done", done=True)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t2"] and ledger.rows["fresh"]["state"] == "open"
+
+
+def test_a_reopened_task_with_a_branch_is_claimed_before_fresh_work_even_when_its_territory_overlaps(store):
+    store.update("sw", max_eng=1)
+    ledger, runtime = FakeLedger([{"id": "t1", "territory": ["hooks"]}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    later = FakeLedger(
+        [
+            {"id": "fresh", "territory": ["docs"]},
+            {"id": "reopened", "branch": "engineer-a1b2c3-0003", "territory": ["hooks/x.py"]},
+        ]
+    )
+    ledger.rows.update(later.rows)
+    store.update("sw", max_eng=2)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1", "reopened"] and ledger.rows["fresh"]["state"] == "open"
+
+
+def test_a_fresh_task_of_a_higher_rank_still_goes_ahead_of_a_resumed_one(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger([{"id": "resumed", "branch": "engineer-a1b2c3-0004"}, {"id": "urgent", "rank": "urgent"}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["urgent"]
+
+
+def test_a_resumed_task_whose_launch_failed_takes_only_a_slot_left_over(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger([{"id": "resumed", "branch": "engineer-a1b2c3-0005"}, {"id": "fresh"}])
+    store.note_launch_failure("sw", "resumed", "canary timeout")
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["fresh"]
 
 
 @pytest.mark.parametrize(

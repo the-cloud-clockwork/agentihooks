@@ -133,7 +133,12 @@ def stamp(slug, task_id, url, doc, mode, now_ms, home=None):
     body = task is not None and stamp_body(url, doc, task)
     if mode == "off":
         return {"verdict": "off", "body": body}
-    Verdicts(slug, NAME, home).write(task_id, PENDING, RUNNING, now_ms)
+    verdicts = Verdicts(slug, NAME, home)
+    planned = verdicts.read(task_id)
+    if task is not None and planned and planned.get("planned") and planned["verdict"] == PASS:
+        if _same_phase(planned, task):
+            return {"verdict": PASS, "body": body}
+    verdicts.write(task_id, PENDING, RUNNING, now_ms)
     return {"verdict": PENDING, "body": body}
 
 
@@ -204,7 +209,7 @@ def _plan_chunk(doc, task):
     if not task.get("plan_lines"):
         return {}
     try:
-        text = plan_read.exact(doc, _phase(doc, task).get("plan_ref"), task["plan_lines"])
+        text = plan_read.exact(doc, task)
     except (ValueError, OSError):
         text = None
     return {"plan_lines": task["plan_lines"], "plan_chunk": text}
@@ -312,7 +317,8 @@ def judge(state, decide=decide):
     usable, weakens = answers["usable"].noul, answers["weakens"].noul
     chunk = _chunk_reasons(state, answers)
     if usable >= FAIL_LINE and weakens < WEAKEN_LINE and not chunk:
-        return PASS, f"the phase can use it as delivered at probability {usable:.2f}"
+        cited = f", judged against plan lines {state['plan_lines']}" if _rows(state) else ""
+        return PASS, f"the phase can use it as delivered at probability {usable:.2f}{cited}"
     lead = f"the phase can use this change at probability {usable:.2f}"
     reasons = [text for key, text in REASONS.items() if answers[key].noul < REASON_LINE]
     if weakens >= WEAKEN_LINE:
@@ -330,6 +336,50 @@ def fix_steps(slug: str) -> str:
         "add evidence that the phase can use it as delivered, commit and push the fix, "
         f"then run agentihooks swarm {slug} pr <url> for a new check."
     )
+
+
+def _fail_kind(mode):
+    return "deny" if mode == "enforce" else "observe"
+
+
+def _remember(slug, task, now_ms, state, answer, home):
+    verdict, reason = answer
+    record = {
+        "task": task["id"],
+        "agent": task.get("claimed_by", ""),
+        "at": now_ms,
+        "purpose": PURPOSE,
+        "verdict": verdict,
+        "reason": reason,
+        "classifier_input": intent_history.request(state, questions_for(state)),
+    }
+    intent_history.append(slug, record, home)
+
+
+def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
+    task = next((t for t in doc["tasks"] if t.get("id") == task_id), None)
+    if mode == "off" or task is None or task.get("pr_url"):
+        return None
+    verdicts = Verdicts(slug, NAME, home)
+    previous = verdicts.read(task_id)
+    if previous and previous.get("planned") == traced["plan_hash"] and _same_phase(previous, task):
+        return {"verdict": previous["verdict"], "reason": previous["reason"]}
+    kept = [row for row in traced["pieces"] if row["kept"]]
+    plan = {
+        "title": f"Traced plan for task {task_id}",
+        "body": "".join(f"- {row['what']} | {', '.join(row['areas'])} | {row['why']}\n" for row in kept),
+        "files": sorted({area for row in kept for area in row["areas"]}),
+    }
+    state = intent_history.prepare(state_of(doc, task, plan))
+    verdict, reason = judge(state)
+    _remember(slug, task, now_ms, state, (verdict, reason), home)
+    verdicts.write(task_id, verdict, reason, now_ms, phase=task.get("phase"), planned=traced["plan_hash"])
+    who = Who(name=task.get("claimed_by", ""), task=task_id)
+    if verdict == UNCHECKED:
+        log.append(slug, log.Row.of(NAME, "count", who, reason=reason), home)
+    elif verdict == FAIL:
+        log.append(slug, log.Row.of(NAME, _fail_kind(mode), who, reason=reason), home)
+    return {"verdict": verdict, "reason": reason}
 
 
 @dataclass(frozen=True)
@@ -361,7 +411,8 @@ class Check:
             if task.get("state") not in states or not task.get("pr_url"):
                 continue
             record = verdicts.read(task["id"])
-            if self.mode != "coach" and record and record["verdict"] != PENDING and _same_phase(record, task):
+            judged = record and record["verdict"] != PENDING and not record.get("planned")
+            if self.mode != "coach" and judged and _same_phase(record, task):
                 continue
             tasks.append((task, record))
         with ThreadPoolExecutor(max_workers=2) as workers:
@@ -399,19 +450,7 @@ class Check:
         rounds = min(previous["coach_rounds"] + (previous["verdict"] == FAIL), 2) if previous else 0
         state, (verdict, reason) = judgment.state, judgment.answer
         head = pr.get("head")
-        intent_history.append(
-            self.slug,
-            {
-                "task": task["id"],
-                "agent": task.get("claimed_by", ""),
-                "at": self.now_ms,
-                "purpose": PURPOSE,
-                "verdict": verdict,
-                "reason": reason,
-                "classifier_input": intent_history.request(state, questions_for(state)),
-            },
-            self.home,
-        )
+        _remember(self.slug, task, self.now_ms, state, judgment.answer, self.home)
         coached = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
         fields = {"phase": task.get("phase"), **coached}
         verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
@@ -456,8 +495,7 @@ class Check:
         )
 
     def _failed(self, task, who, reason, rounds=0):
-        kind = "deny" if self.mode == "enforce" else "observe"
-        log.append(self.slug, log.Row.of(NAME, kind, who, reason=reason), self.home)
+        log.append(self.slug, log.Row.of(NAME, _fail_kind(self.mode), who, reason=reason), self.home)
         if self.mode == "coach" and rounds >= 2:
             text = f"Intent remains unmet after two fix rounds: {reason}. The master must review this shortfall."
             key, ref = f"intent-shortfall:{task['id']}:{self.now_ms}", f"tasks/{task['id']}"

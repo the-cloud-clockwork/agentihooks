@@ -302,7 +302,7 @@ def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
         mirror = next(step for step in lint if step.get("name") == "Use the Ubuntu archive for browser dependencies")
         assert "if" not in mirror
     else:
-        assert install["if"] == "steps.artifacts.outputs.browser == 'true'"
+        assert install["if"] == "${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}"
 
 
 def test_equivalence_runs_storage_then_page_replays_each_group_at_once():
@@ -335,14 +335,18 @@ def _workflow() -> dict:
 def test_shards_wait_only_on_the_durations_lookup():
     jobs = _workflow()["jobs"]
     assert "already-tested" not in jobs
-    assert jobs["split"]["needs"] == ["durations"]
-    assert jobs["unit"]["needs"] == ["split"]
-    assert "needs" not in jobs["lint"]
+    assert jobs["split"]["needs"] in (["durations"], ["durations", "reuse"])
+    assert jobs["unit"]["needs"] in (["split"], ["split", "reuse"])
+    assert jobs["lint"].get("needs") in (None, ["reuse"])
 
 
 def test_unit_shards_check_out_full_history_without_old_file_contents():
     _, checkout = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/checkout"))
-    assert checkout["with"] == {"fetch-depth": 0, "filter": "blob:none"}
+    assert {key: value for key, value in checkout["with"].items() if key != "ref"} == {
+        "fetch-depth": 0,
+        "filter": "blob:none",
+    }
+    assert checkout["with"].get("ref") in (None, "${{ github.sha }}")
 
 
 def test_unit_pins_an_exact_uv_version():
@@ -697,7 +701,7 @@ def test_credential_parameters_have_readable_timing_identifiers():
 def test_mutation_job_runs_independently_and_keeps_its_evidence():
     spec = _mutation_workflow()
     job = spec["jobs"]["mutation"]
-    assert "needs" not in job
+    assert job["needs"] == "mutation-plan"
     assert job["timeout-minutes"] == 20
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout"))
@@ -705,7 +709,32 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
     assert checkout["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"
     run = next(step for step in steps if step.get("name") == "Mutate changed Python files")
     assert run["env"]["BASE"] == "${{ github.event.pull_request.base.sha }}"
-    assert run["run"] == 'python -m scripts.ci_mutation --base "$BASE" --budget 1080'
+    assert (
+        run["run"] == 'python -m scripts.ci_mutation --base "$BASE" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
+    )
     artifact = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact"))
     assert artifact["if"] == "always()"
     assert artifact["with"]["include-hidden-files"] is True
+    assert artifact["with"]["name"] == "mutation-report-${{ matrix.shard }}"
+
+
+def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
+    jobs = _mutation_workflow()["jobs"]
+    plan, mutation = jobs["mutation-plan"], jobs["mutation"]
+    assert "needs" not in plan
+    assert plan["if"] == mutation["if"]
+    assert plan["outputs"]["shards"] == "${{ steps.plan.outputs.shards }}"
+    step = next(step for step in plan["steps"] if step.get("id") == "plan")
+    assert step["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
+    assert step["env"]["BASE"] == "${{ github.event.pull_request.base.sha || inputs.base }}"
+    checkout = next(step for step in plan["steps"] if step.get("uses", "").startswith("actions/checkout"))
+    assert checkout["with"] == {"fetch-depth": 0, "ref": "${{ github.event.pull_request.head.sha }}"}
+    assert mutation["strategy"] == {
+        "fail-fast": False,
+        "matrix": {"shard": "${{ fromJSON(needs.mutation-plan.outputs.shards) }}"},
+    }
+    for name in ("Mutate changed Python files", "Mutate dispatched Python files"):
+        run = next(step for step in mutation["steps"] if step.get("name") == name)
+        assert run["env"]["SHARD"] == "${{ matrix.shard }}"
+        assert run["env"]["SHARDS"] == "${{ strategy.job-total }}"
+        assert run["run"].endswith('--budget 1080 --shard "$SHARD" --shards "$SHARDS"')

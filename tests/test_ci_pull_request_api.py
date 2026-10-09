@@ -144,6 +144,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_dependency_audit.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/browser.py",
+        "scripts/ci_mutation/plan.py",
         "scripts/ci_wiring.py",
         "scripts/packaging/compose-hive-smoke.sh",
         "scripts/packaging/hive-join-smoke.sh",
@@ -155,6 +156,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/coverage_ratchet.py",
         "tests/dev_durations.py",
         "tests/js_lcov.py",
+        "tests/ledger_load/gate.py",
         "tests/refresh_durations.py",
         "tests/shard_budget.py",
         "tests/shard_check.py",
@@ -373,7 +375,7 @@ def test_sonar_downloads_this_runs_coverage_after_the_shards():
     assert "bash .github/coverage/combine.sh --downloaded 8 ||" in merge["run"]
 
 
-@pytest.mark.parametrize("job", ["unit", "shard-check", "test-count", "size", "lint"])
+@pytest.mark.parametrize("job", ["unit", "shard-check", "test-count", "lint"])
 def test_a_dev_push_runs_every_step_of_the_job_itself(job):
     steps = _jobs()[job]["steps"]
     assert steps[0]["uses"] == "actions/checkout@v4"

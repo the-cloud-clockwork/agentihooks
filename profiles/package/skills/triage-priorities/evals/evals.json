@@ -25,5 +25,14 @@
       "reruns list_priorities.py after applying and stops when only kept or failed items remain open",
       "names the kept broker question in plain words in the final report"
     ]
+  },
+  {
+    "query": "triage priorities (the question tool is refused because the operator is not present)",
+    "files": [],
+    "expected_behavior": [
+      "never writes the priority prompts as plain chat text",
+      "says only one short line: type operator on to answer the questions here, or leave them in Priorities",
+      "clears no open priority and writes no plan for the refused round"
+    ]
   }
 ]

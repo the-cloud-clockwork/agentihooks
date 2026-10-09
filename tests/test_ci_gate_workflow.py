@@ -8,6 +8,20 @@ import yaml
 
 _ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.unit
+LINT_CONTROLS = [
+    "Lint check",
+    "Format check",
+    "Check every pull request job is a need of Gate Required",
+    "Hold the size and complexity limits",
+    "Fail on known vulnerabilities new against the base",
+]
+LINT_SETUP = [
+    "Install ruff",
+    "Install PyYAML",
+    "Set up uv",
+    "Check out the base revision",
+    "Check out the protected grader",
+]
 
 
 def _workflow():
@@ -35,14 +49,49 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "split",
             "kind-due",
             "helm-kind",
+            "ledger-load",
+            "mutation-plan",
+            "reuse",
+            "queue-baseline",
         }
     )
     assert gate["if"] == "${{ always() }}"
-    assert jobs["unit"]["needs"] == ["split"]
-    assert jobs["split"]["needs"] == ["durations"]
-    assert "needs" not in jobs["lint"]
+    assert jobs["unit"]["needs"] in (["split"], ["split", "reuse"])
+    assert jobs["split"]["needs"] in (["durations"], ["durations", "reuse"])
+    assert jobs["lint"].get("needs") in (None, ["reuse"])
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
+
+
+def test_cheap_gates_share_the_lint_job_and_each_grades_after_an_earlier_red():
+    jobs = _workflow()["jobs"]
+    assert not {"size", "wiring", "dependency-audit"} & set(jobs)
+    assert not {"size", "wiring", "dependency-audit"} & set(jobs["gate-required"]["needs"])
+    assert jobs["lint"]["timeout-minutes"] == 10
+    steps = {step.get("name"): step for step in jobs["lint"]["steps"]}
+    assert all("continue-on-error" not in step for step in steps.values())
+    names = list(steps)
+    assert all("if" not in steps[name] for name in LINT_SETUP)
+    after = names[names.index(LINT_CONTROLS[-1]) + 1 :]
+    assert after and all(steps[name]["if"].startswith("${{ !cancelled()") for name in after)
+
+
+@pytest.mark.parametrize("control", LINT_CONTROLS)
+def test_each_cheap_gate_grades_in_lint_after_its_setup_even_after_an_earlier_red(control):
+    names = [step.get("name") for step in _workflow()["jobs"]["lint"]["steps"]]
+    step = _workflow()["jobs"]["lint"]["steps"][names.index(control)]
+    assert step["if"] == "${{ !cancelled() }}"
+    assert max(names.index(name) for name in LINT_SETUP) < names.index(control)
+
+
+def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
+    jobs = _workflow()["jobs"]
+    graders = {"shard-check", "coverage-ratchet", "sonar"}
+    for name in graders:
+        needs = jobs[name]["needs"]
+        assert "unit" in needs
+        assert not graders & set(needs), f"{name} waits on another post shard grader"
+    assert graders <= set(jobs["gate-required"]["needs"])
 
 
 def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel():
@@ -90,7 +139,7 @@ def test_unit_matrix_does_not_fail_fast():
 
 def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
     job = _workflow()["jobs"]["test-count"]
-    assert "needs" not in job
+    assert job.get("needs") in (None, ["reuse"])
     assert (
         job["strategy"]["matrix"]["python-version"]
         == _workflow()["jobs"]["unit"]["strategy"]["matrix"]["python-version"]
@@ -114,7 +163,7 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
 def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
     jobs = _workflow()["jobs"]
     job = jobs["coverage-ratchet"]
-    assert job["needs"] == ["durations", "unit", "queue-baseline"]
+    assert job["needs"] in (["durations", "unit", "queue-baseline"], ["durations", "unit", "queue-baseline", "reuse"])
     download = next(step for step in job["steps"] if step.get("name") == "Download shard coverage")
     assert download["with"]["pattern"] == "coverage-3.12-*"
     grade = next(step for step in job["steps"] if step.get("name") == "Hold every line the base ran")
@@ -452,7 +501,10 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
     jobs = _workflow()["jobs"]
     for name in ("unit", "lint"):
         job = jobs[name]
-        assert "if" not in job
+        assert job.get("if") in (
+            None,
+            "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        )
         assert all("steps.lookup" not in step.get("if", "") for step in job["steps"])
     step = jobs["gate-required"]["steps"][0]
     result = subprocess.run(
@@ -467,7 +519,8 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
 def test_mutation_runs_in_tests_beside_unit_and_lint():
     workflow = _workflow()
     job = workflow["jobs"]["mutation"]
-    assert "needs" not in job
+    assert job["needs"] == "mutation-plan"
+    assert "needs" not in workflow["jobs"]["mutation-plan"]
     assert (
         job["if"]
         == "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}"
