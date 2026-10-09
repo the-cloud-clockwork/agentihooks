@@ -11,6 +11,9 @@ OPEN = {"id": "PR_one", "state": "OPEN", "headRefOid": "abc", "baseRefName": "de
 ENTRY = {"id": "MQ_one", "position": 2, "state": "AWAITING_CHECKS"}
 
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
 def runner(*responses):
     calls = []
     pending = iter(responses)
@@ -53,6 +56,17 @@ def runner(*responses):
         return subprocess.CompletedProcess(command, 0, response if isinstance(response, str) else json.dumps(response))
 
     return run, calls
+
+
+@pytest.fixture(autouse=True)
+def task_ledger(monkeypatch):
+    from types import SimpleNamespace
+
+    def tasks(slug):
+        assert slug == "sw"
+        return [{"id": "t1", "pr_url": URL}]
+
+    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=tasks))
 
 
 def test_state_reports_an_open_pull_request_without_a_queue_entry():
@@ -227,7 +241,6 @@ def test_queue_refuses_an_unknown_checked_base(log):
 
 def test_cli_registers_a_checks_wait_after_refreshing(monkeypatch, capsys):
     store = swarm_of("eng")
-    store.redis = object()
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setattr(
@@ -369,9 +382,14 @@ def test_dequeue_removes_the_pull_request_then_reports_its_state():
 def swarm_of(lane):
     from types import SimpleNamespace
 
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    metadata = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     agent = SimpleNamespace(name="engineer@a1b2c3-0001", lane=lane, task="t1")
     names = SimpleNamespace(swarm_slug=lambda slug: slug, resolve=lambda name: name)
-    return SimpleNamespace(names=names, agents=lambda slug: [agent])
+    return SimpleNamespace(names=names, agents=lambda slug: [agent], redis=metadata.redis, key=metadata.key)
 
 
 @pytest.mark.parametrize("action", ["queue", "dequeue", "state"])
@@ -388,6 +406,39 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
     assert cli.main(["sw", "merge", action, URL]) == 0
     assert seen == [(action, URL)]
     assert capsys.readouterr().out == '{"queued": true}\n'
+
+
+@pytest.mark.parametrize("action", ["queue", "dequeue"])
+def test_cli_refuses_distributed_final_mutations_before_provider_calls(monkeypatch, action):
+    state = swarm_of("eng")
+    monkeypatch.setattr(cli, "connect", lambda: state)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(merge_queue, "operate", lambda *args: pytest.fail("provider mutation"))
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    metadata = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    state.redis, state.key = metadata.redis, metadata.key
+    state.redis.set(state.key("sw", "task-authority", "t1"), "{}")
+    assert cli.main(["sw", "merge", action, URL]) == 1
+
+
+@pytest.mark.parametrize("same_link", [False, True])
+def test_cli_refuses_another_distributed_tasks_pull_request(monkeypatch, same_link):
+    from types import SimpleNamespace
+
+    state = swarm_of("eng")
+    rows = [
+        {"id": "t1", "pr_url": URL if same_link else "https://github.com/o/r/pull/8"},
+        {"id": "t2", "pr_url": URL},
+    ]
+    monkeypatch.setattr(cli, "connect", lambda: state)
+    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: rows))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(merge_queue, "operate", lambda *args: pytest.fail("foreign provider mutation"))
+    state.redis.set(state.key("sw", "task-authority", "t2"), "{}")
+    assert cli.main(["sw", "merge", "queue", URL]) == 1
 
 
 @pytest.mark.parametrize("action", ["queue", "dequeue"])

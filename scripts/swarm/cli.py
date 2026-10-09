@@ -979,6 +979,9 @@ def cmd_pr(store, args):
 
 def cmd_merge(store, args):
     agent = _worker(store, args) if args.action != "state" else None
+    if agent is not None:
+        done_gate.require_local(store, args.slug, agent.task)
+        done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
     result = merge_queue.operate(args.action, args.url)
     if result.get("waiting") == "checks":
         at = now_ms()
@@ -996,6 +999,7 @@ def cmd_merge(store, args):
 
 def cmd_done(store, args):
     agent = _worker(store, args)
+    done_gate.require_local(store, args.slug, agent.task)
     ledger = LedgerClient()
     row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
     proof = {key: getattr(args, f"proof_{key}") for key in ledger_kinds.PROOF_KEYS if getattr(args, f"proof_{key}")}
