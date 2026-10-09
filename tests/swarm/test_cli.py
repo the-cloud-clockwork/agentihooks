@@ -2155,7 +2155,7 @@ def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsy
 
 def test_swarms_that_finish_together_tick_once(monkeypatch, capsys):
     ticks = []
-    _tick_all(monkeypatch, lambda store, slug: ticks.append(slug) or ["ok"], ["a", "b", "c"])
+    _tick_all(monkeypatch, lambda store, slug: ticks.append(slug) or ["ok"], ["a", "b", "c"], tick_seconds=60)
     assert sorted(ticks) == ["a", "b", "c"]
 
 
