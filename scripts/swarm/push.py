@@ -9,9 +9,12 @@ def send(channel: str, message: str) -> bool:
     token = os.environ.get("AGENTIHOOKS_PUSH_TOKEN")
     if not url or not token:
         return False
+    endpoint = url.rstrip("/")
+    if not endpoint.endswith("/api/v1/push"):
+        endpoint = f"{endpoint}/api/v1/push"
     try:
         response = requests.post(
-            f"{url.rstrip('/')}/api/v1/push",
+            endpoint,
             headers={"Authorization": f"Bearer {token}"},
             json={"channel": channel, "message": message},
             timeout=5,
