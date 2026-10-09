@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 
 import fakeredis
 import pytest
@@ -39,9 +40,10 @@ def test_record_pass_writes_a_tick_row_with_the_node_path_and_flushes(spool, sen
     queries = [q for _, q, _ in sent]
     assert queries[0].startswith("CREATE TABLE IF NOT EXISTS swarm.ticks (")
     assert "actions Int64" in queries[0]
-    assert queries[1] == "INSERT INTO swarm.ticks FORMAT JSONEachRow"
-    assert sent[1][0] == metrics_outbox.Settings("http://ch:8123", "writer", "")
-    assert sent[1][2] == (
+    assert queries[1].startswith("ALTER TABLE swarm.ticks ADD COLUMN IF NOT EXISTS event_id String")
+    assert queries[2] == "INSERT INTO swarm.ticks FORMAT JSONEachRow"
+    assert sent[2][0] == metrics_outbox.Settings("http://ch:8123", "writer", "")
+    assert sent[2][2] == (
         b'{"event_id": "tick:sw:1800000000000", "ledger": "sw", "ts_ms": 1800000000000, '
         b'"plan": "", "phase": "", "slice": "", "task": "", "actions": 3}'
     )
@@ -70,7 +72,16 @@ def test_the_spool_is_closed_after_the_pass(spool, sent, monkeypatch):
     monkeypatch.setattr(metrics_outbox.Outbox, "close", lambda self: closed.append(self) or real(self))
     metrics.record_pass("sw", NOW, 0, ON)
     assert len(closed) == 1
-    sqlite3.connect(spool).execute("SELECT count(*) FROM spool").fetchone()
+    with closing(sqlite3.connect(spool)) as db:
+        assert db.execute("SELECT count(*) FROM spool").fetchone() == (1,)
+
+
+def test_an_unwritable_swarm_home_is_reported_and_never_stops_the_tick(tmp_path, monkeypatch, sent):
+    (tmp_path / "file").write_text("")
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: tmp_path / "file" / "swarm" / "outbox.sqlite")
+    result = metrics.record_pass("sw", NOW, 3, ON)
+    assert len(result) == 1
+    assert result[0].startswith("metrics outbox failed: ")
 
 
 def test_run_tick_records_metrics_after_the_priority_pass(monkeypatch):

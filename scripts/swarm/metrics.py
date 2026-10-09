@@ -22,6 +22,6 @@ def record_pass(slug, now_ms, actions, environ=os.environ):
             box.flush(now_ms)
         finally:
             box.close()
-    except sqlite3.Error as exc:
+    except (sqlite3.Error, OSError) as exc:
         return [f"metrics outbox failed: {exc}"]
     return []

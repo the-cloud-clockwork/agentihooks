@@ -89,7 +89,15 @@ def test_the_table_is_created_once_before_its_first_insert(box, sink):
     box.flush(NOW)
     box.append(TASKS, [row("e2")])
     box.flush(NOW)
-    ddl, insert, second = sink.queries
+    ddl, widen, insert, second = sink.queries
+    assert widen == (
+        "ALTER TABLE swarm.task_moves ADD COLUMN IF NOT EXISTS event_id String,"
+        " ADD COLUMN IF NOT EXISTS ledger String, ADD COLUMN IF NOT EXISTS ts_ms Int64,"
+        " ADD COLUMN IF NOT EXISTS plan String, ADD COLUMN IF NOT EXISTS phase String,"
+        " ADD COLUMN IF NOT EXISTS slice String, ADD COLUMN IF NOT EXISTS task String,"
+        " ADD COLUMN IF NOT EXISTS state String, ADD COLUMN IF NOT EXISTS age_ms Int64,"
+        " ADD COLUMN IF NOT EXISTS share Float64"
+    )
     assert ddl.startswith("CREATE TABLE IF NOT EXISTS swarm.task_moves (")
     assert "ENGINE = ReplacingMergeTree" in ddl
     assert ddl.endswith("ORDER BY (ledger, event_id)")
@@ -121,6 +129,47 @@ def test_a_replayed_event_id_is_spooled_once(box, sink):
     assert sink.rows[0]["state"] == "claimed"
 
 
+def test_a_batch_whose_reply_was_lost_is_resent_under_the_same_event_ids(box, sink):
+    box.append(TASKS, [row("e1"), row("e2")])
+    box.flush(NOW)
+    stored = list(sink.rows)
+    lost = Sink()
+    box.send = lambda settings, query, body: lost.send(settings, query, body) and False
+    box.append(TASKS, [row("e3")])
+    assert box.flush(NOW) == 0
+    box.send = sink.send
+    assert box.flush(NOW) == 1
+    assert [r["event_id"] for r in lost.rows] == ["e3"]
+    assert [r["event_id"] for r in sink.rows] == [*(r["event_id"] for r in stored), "e3"]
+    assert sink.rows[-1] == lost.rows[0]
+
+
+def test_the_create_is_remembered_across_outboxes(tmp_path, sink):
+    first = Outbox(tmp_path / "o.sqlite", SINK, sink.send)
+    first.append(TASKS, [row("e1")])
+    first.flush(NOW)
+    first.close()
+    second = Outbox(tmp_path / "o.sqlite", SINK, sink.send)
+    second.append(TASKS, [row("e2")])
+    second.flush(NOW)
+    second.close()
+    assert [q.split(" ")[0] for q in sink.queries] == ["CREATE", "ALTER", "INSERT", "INSERT"]
+
+
+def test_a_changed_table_is_created_again(tmp_path, sink):
+    box = Outbox(tmp_path / "o.sqlite", SINK, sink.send)
+    box.append(Table("grown"), [{k: row("e1")[k] for k in metrics_outbox.BASE_NAMES}])
+    box.flush(NOW)
+    box.append(
+        Table("grown", (("state", "String"),)), [{k: row("e2")[k] for k in (*metrics_outbox.BASE_NAMES, "state")}]
+    )
+    box.flush(NOW)
+    box.close()
+    assert [q.split(" ")[0] for q in sink.queries] == ["CREATE", "ALTER", "INSERT", "CREATE", "ALTER", "INSERT"]
+    assert "state String" in sink.queries[3]
+    assert sink.queries[4].endswith("ADD COLUMN IF NOT EXISTS task String, ADD COLUMN IF NOT EXISTS state String")
+
+
 def test_one_event_id_may_appear_in_two_tables(box, sink):
     box.append(TASKS, [row("e1")])
     box.append(Table("other"), [{k: row("e1")[k] for k in metrics_outbox.BASE_NAMES}])
@@ -143,7 +192,7 @@ def test_a_failed_batch_keeps_the_rest_waiting(box, sink, monkeypatch):
 
     def flaky(settings, query, body):
         calls.append(query)
-        return len(calls) < 3 and sink.send(settings, query, body)
+        return len(calls) < 4 and sink.send(settings, query, body)
 
     box.send = flaky
     assert box.flush(NOW) == 2
@@ -160,12 +209,14 @@ def test_a_failed_batch_keeps_the_rest_waiting(box, sink, monkeypatch):
         row("e1", extra="x"),
         row(""),
         row("e1", ledger=""),
-        row("e1", event_id=7),
+        row("e1") | {"event_id": 7},
         row("e1", ts_ms="soon"),
         row("e1", ts_ms=True),
         row("e1", ts_ms=0),
         row("e1", age_ms=1.5),
         row("e1", age_ms=False),
+        row("e1", age_ms=2**63),
+        row("e1", age_ms=-(2**63) - 1),
         row("e1", share="half"),
         row("e1", share=float("nan")),
         row("e1", share=float("inf")),
@@ -183,6 +234,11 @@ def test_whole_numbers_fill_a_float_column(box, sink):
     box.append(TASKS, [row("e1", share=1)])
     box.flush(NOW)
     assert sink.rows[0]["share"] == 1
+
+
+def test_int64_bounds_are_accepted(box, sink):
+    box.append(TASKS, [row("lo", age_ms=-(2**63)), row("hi", age_ms=2**63 - 1)])
+    assert box.flush(NOW) == 2
 
 
 def test_empty_node_path_parts_are_accepted(box, sink):
@@ -258,8 +314,15 @@ def test_settings_read_url_user_and_password():
         "AGENTIHOOKS_METRICS_PASSWORD": "pw",
     }
     assert metrics_outbox.settings(env) == Settings("http://ch:8123", "writer", "pw")
-    assert metrics_outbox.settings({"AGENTIHOOKS_METRICS_URL": "http://ch:8123"}) == Settings(
-        "http://ch:8123", "default", ""
+    assert metrics_outbox.settings({**env, "AGENTIHOOKS_METRICS_PASSWORD": ""}) == Settings(
+        "http://ch:8123", "writer", ""
+    )
+
+
+def test_settings_are_off_without_a_user():
+    assert metrics_outbox.settings({"AGENTIHOOKS_METRICS_URL": "http://ch:8123"}) is None
+    assert (
+        metrics_outbox.settings({"AGENTIHOOKS_METRICS_URL": "http://ch:8123", "AGENTIHOOKS_METRICS_USER": ""}) is None
     )
 
 
@@ -310,6 +373,11 @@ def test_post_reports_a_refused_insert(server):
     assert metrics_outbox.post(settings, "SELECT 1", b"") is False
 
 
+@pytest.mark.parametrize("url", ["ch:8123", "http://127.0.0.1:port", "http://127.0.0.1:1\n"])
+def test_post_reports_a_malformed_url(url):
+    assert metrics_outbox.post(Settings(url, "w", ""), "SELECT 1", b"") is False
+
+
 def test_post_reports_an_unreachable_sink():
     port = HTTPServer(("127.0.0.1", 0), Recorder)
     closed = port.server_port
@@ -323,4 +391,4 @@ def test_outbox_flushes_through_a_real_http_sink(tmp_path, server):
     box.append(TASKS, [row("e1")])
     assert box.flush(NOW) == 1
     box.close()
-    assert [json.loads(seen[3]) for seen in Recorder.seen[1:]] == [row("e1")]
+    assert [json.loads(seen[3]) for seen in Recorder.seen[2:]] == [row("e1")]
