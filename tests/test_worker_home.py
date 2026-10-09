@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import sys
 import tomllib
 from pathlib import Path
@@ -13,30 +14,13 @@ ENDPOINTS = {"AGENTIHOOKS_LEDGER_URL": "http://ledger.swarm.svc:8765", "BRAIN_UR
 ACCOUNTS = {"claude": "AH_CC_TOKEN_POOL_A", "codex": "AH_CX_TOKEN_POOL_B"}
 
 
-def write_profile(root: Path, name: str, target: str, server: str, hook: str | None = None) -> Path:
-    profile = root / name
-    native = profile / f".{target}"
-    native.mkdir(parents=True)
-    (profile / "CLAUDE.md").write_text(f"# {name}\n")
-    if target == "claude":
-        settings = {"enabledPlugins": {"fixture@market": True}, "env": {"FIXTURE_PROFILE": name}}
-        if hook:
-            settings["hooks"] = {"SessionStart": [{"hooks": [{"type": "command", "command": hook}]}]}
-        (native / "settings.overrides.json").write_text(json.dumps(settings))
-    else:
-        (native / "config.overrides.toml").write_text('model_reasoning_effort = "high"\n')
-    (profile / ".mcp.json").write_text(
-        json.dumps({"mcpServers": {server: {"command": "fixture-mcp", "args": ["--stdio"]}}})
-    )
-    return profile
+FIXTURES = Path(__file__).resolve().parents[1] / "docker" / "swarm-node" / "fixtures" / "profiles"
 
 
 @pytest.fixture
 def fixture(tmp_path):
     templates = tmp_path / "templates"
-    write_profile(templates, "fixture-claude", "claude", "fixture-claude-mcp")
-    write_profile(templates, "fixture-codex", "codex", "fixture-codex-mcp")
-    write_profile(templates, "fixture-workstation", "claude", "fixture-claude-mcp", f"{WORKSTATION_PYTHON} -m hooks")
+    shutil.copytree(FIXTURES, templates)
     volume = tmp_path / "volume"
     volume.mkdir()
     return templates, volume
@@ -214,6 +198,40 @@ def test_failed_render_removes_the_unstarted_attempt(fixture, monkeypatch):
         worker_home.bootstrap(request(templates, volume))
     assert str(error.value) == "claude render failed with exit 3"
     assert list(volume.iterdir()) == []
+
+
+class Mount:
+    def __init__(self, flags: int) -> None:
+        self.f_flag = flags
+
+
+@pytest.mark.parametrize(
+    ("profiles", "refused"), [({"codex": "fixture-codex"}, True), ({"claude": "fixture-claude"}, False)]
+)
+def test_a_noexec_volume_refuses_codex_whose_hook_wrapper_must_execute(fixture, monkeypatch, profiles, refused):
+    templates, volume = fixture
+    seen = []
+
+    def statvfs(path):
+        seen.append(path)
+        return Mount(os.ST_NOEXEC | os.ST_NOSUID)
+
+    monkeypatch.setattr(worker_home.os, "statvfs", statvfs)
+    if refused:
+        with pytest.raises(worker_home.BootstrapError) as error:
+            worker_home.bootstrap(request(templates, volume, profiles=profiles, accounts={}))
+        assert str(error.value) == "execution root is mounted noexec, so the codex hook wrapper cannot run"
+        assert seen == [volume]
+        assert list(volume.iterdir()) == []
+    else:
+        assert worker_home.bootstrap(request(templates, volume, profiles=profiles, accounts={}))["reused"] is False
+
+
+def test_an_exec_volume_with_other_flags_admits_codex(fixture, monkeypatch):
+    templates, volume = fixture
+    monkeypatch.setattr(worker_home.os, "statvfs", lambda path: Mount(os.ST_NOSUID | os.ST_NODEV))
+    record = worker_home.bootstrap(request(templates, volume, profiles={"codex": "fixture-codex"}, accounts={}))
+    assert record["homes"] == {"codex": "homes/codex"}
 
 
 def test_restarting_an_accepted_attempt_changes_nothing(fixture):

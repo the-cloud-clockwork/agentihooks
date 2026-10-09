@@ -90,6 +90,11 @@ def _validate(request: Request) -> None:
         raise BootstrapError(f"bootstrap must run as {request.uid}:{request.gid}")
 
 
+def _check_volume(request: Request) -> None:
+    if "codex" in request.profiles and os.statvfs(request.root).f_flag & os.ST_NOEXEC:
+        raise BootstrapError("execution root is mounted noexec, so the codex hook wrapper cannot run")
+
+
 def interpreter_prefix(interpreter: Path) -> Path:
     try:
         done = subprocess.run(
@@ -274,6 +279,7 @@ def _accepted(attempt: Path, digest: str) -> dict | None:
 
 def bootstrap(request: Request) -> dict:
     _validate(request)
+    _check_volume(request)
     for name in set(request.profiles.values()):
         _check_template(request.templates / name, name)
     roots = [request.root.resolve(), interpreter_prefix(request.interpreter), *code_roots(), *SYSTEM_ROOTS]
