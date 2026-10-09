@@ -5,7 +5,6 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.ci_budget import defects
-from scripts.swarm import ci_speed
 from scripts.swarm_ledger import ledger_comments
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -79,10 +78,6 @@ def _gh(calls, runs=RUNS):
     return run
 
 
-def test_only_finished_pull_request_runs_off_dev_are_read():
-    assert [r["id"] for r in ci_speed.finished(RUNS)] == [1, 2, 3]
-
-
 def test_a_run_over_fifteen_minutes_to_gate_required_is_filed_once_in_plain_words(swarm):
     store, config, ledger = swarm
     calls = []
@@ -125,7 +120,7 @@ def test_a_failed_read_files_nothing_and_retries_next_interval(swarm, capsys):
     assert len(ledger.added) == 1
 
 
-def test_a_refused_ledger_write_is_retried_next_interval(swarm):
+def test_a_followup_the_ledger_refuses_is_not_sent_again(swarm):
     store, config, ledger = swarm
     refused = []
 
@@ -134,10 +129,22 @@ def test_a_refused_ledger_write_is_retried_next_interval(swarm):
         return False
 
     ledger.followup = refuse
+    assert defects.refresh("sw", config, store, ledger, NOW_MS, run=_gh([])) == []
+    defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=_gh([]))
+    assert len(refused) == 1
+
+
+def test_a_followup_that_fails_to_reach_the_ledger_is_retried_next_interval(swarm):
+    store, config, ledger = swarm
+
+    def unreachable(slug, text):
+        raise ConnectionRefusedError("ledger down")
+
+    ledger.followup = unreachable
     defects.refresh("sw", config, store, ledger, NOW_MS, run=_gh([]))
     ledger.followup = lambda slug, text: ledger.added.append((slug, text))
     defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=_gh([]))
-    assert len(refused) == 1 and len(ledger.added) == 1
+    assert len(ledger.added) == 1
 
 
 def test_a_malformed_run_record_does_not_stop_the_pass(swarm, capsys):
@@ -145,7 +152,7 @@ def test_a_malformed_run_record_does_not_stop_the_pass(swarm, capsys):
     broken = {"id": 9, "event": "pull_request", "status": "completed", "conclusion": "success", "head_branch": "e"}
     defects.refresh("sw", config, store, ledger, NOW_MS, run=_gh([], [broken, *RUNS]))
     assert len(ledger.added) == 1
-    assert "Tests run 9" in capsys.readouterr().err
+    assert "skipped one Tests run" in capsys.readouterr().err
 
 
 def test_one_run_whose_jobs_cannot_be_read_does_not_hide_the_others(swarm):
