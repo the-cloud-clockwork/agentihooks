@@ -74,11 +74,11 @@ def test_a_ledger_without_warnings_raises_no_alert():
     assert make_ledger()["alerts"] == []
 
 
-def test_a_sync_refusal_becomes_an_alert_for_the_operator():
+def test_a_sync_refusal_becomes_an_alert_for_the_writer():
     make_ledger()
     state = refuse_a_plan()
     [alert] = state["alerts"]
-    assert (alert["source"], alert["target"], alert["state"]) == ("sync", "operator", "open")
+    assert (alert["source"], alert["target"], alert["state"]) == ("sync", "master", "open")
     assert alert["text"] in state["_meta"]["warnings"]
 
 
@@ -138,11 +138,11 @@ def test_each_new_alert_reaches_its_target_inbox_once(inbox):
     assert item.sender == ledger_alerts.SENDER
 
 
-def test_an_operator_alert_reaches_the_operator_inbox(inbox):
+def test_a_refusal_without_a_live_writer_reaches_the_master_inbox(inbox):
     make_ledger()
     state = refuse_a_plan()
     ledger_server.deliver_alerts(SLUG, state)
-    [item] = inbox.inbox("operator")
+    [item] = inbox.inbox(seat_address(SLUG, MASTER))
     assert state["alerts"][0]["text"] in item.text
 
 
@@ -345,5 +345,96 @@ def test_the_server_reply_delivers_new_alerts(inbox):
     handler.send = lambda code, body, ctype: None
     taken = {"op": "phase_append", "id": "plan", "by": "master", "phases": [{"phase": "p1", "title": "Taken"}]}
     handler.reply_state(SLUG, ops=[taken])
-    [item] = inbox.inbox("operator")
+    [item] = inbox.inbox(seat_address(SLUG, MASTER))
     assert "phase id p1 is already taken" in item.text
+
+
+def test_versioned_write_delivers_alert_once(inbox):
+    from scripts.swarm_ledger.api import mutations, resources
+
+    state = make_ledger()
+    op = {"op": "phase_append", "id": "plan", "by": "master", "phases": [{"phase": "p1", "title": "Taken"}]}
+    payload = {
+        "operation_id": "refused-plan",
+        "ops": [op],
+        "guards": {"phases": resources.resource_revision(state, "phases")},
+    }
+    mutations.apply(ledger_server, SLUG, "", payload)
+    mutations.apply(ledger_server, SLUG, "", payload)
+    items = inbox.inbox("master") + inbox.inbox(seat_address(SLUG, MASTER)) + inbox.inbox("operator")
+    assert len(items) == 1
+    assert "phase id p1 is already taken" in items[0].text
+
+
+@pytest.mark.parametrize("seat", ["eng-1", ""])
+def test_refusal_reaches_writer_seat_or_agent(inbox, seat):
+    make_ledger()
+    writer = "writer"
+    store = RedisStore(inbox.redis)
+    store.put_agent(SLUG, AgentRecord(name=writer, lane="eng", task="", seat=seat, state="working"))
+    state, rejected = sync(
+        [{"op": "phase_append", "id": "refusal", "by": writer, "phases": [{"phase": "p1", "title": "Taken"}]}]
+    )
+    assert rejected == ["refusal"]
+    ledger_server.deliver_alerts(SLUG, state)
+    address = seat_address(SLUG, seat) if seat else writer
+    assert len(inbox.inbox(address)) == 1
+    assert inbox.inbox("operator") == []
+    assert state["alerts"][0]["writer"] == writer
+
+
+def test_successful_retry_closes_only_same_writer_and_item():
+    make_ledger()
+    refused = {"op": "phase_append", "id": "refusal", "by": "writer", "phases": [{"phase": "p1", "title": "Taken"}]}
+    state, _ = sync([refused])
+    alert_id = state["alerts"][0]["id"]
+    sync([{"op": "phase_append", "id": "other", "by": "other", "phases": [{"phase": "p2", "title": "Second"}]}])
+    state, _ = sync(
+        [{"op": "phase_append", "id": "retry", "by": "writer", "phases": [{"phase": "p3", "title": "Third"}]}]
+    )
+    alert = next(a for a in state["alerts"] if a["id"] == alert_id)
+    assert alert["state"] == "done"
+    assert alert["outcome"] == "The writer succeeded on the same item."
+    assert alert["closed_by"] == "writer"
+    assert any(e["kind"] == "alert closed" for e in state["_meta"]["events"])
+
+
+def test_refusal_expires_one_hour_after_last_repeat(monkeypatch):
+    make_ledger()
+    clock = [10000000]
+    monkeypatch.setattr(core, "now_ms", lambda: clock[0])
+    op = {"op": "phase_append", "id": "refusal", "by": "writer", "phases": [{"phase": "p1", "title": "Taken"}]}
+    state, _ = sync([op])
+    alert_id = state["alerts"][0]["id"]
+    clock[0] += 3599999
+    state, _ = sync([op])
+    assert len(state["alerts"]) == 1
+    clock[0] += 3599999
+    state, _ = sync()
+    assert state["alerts"][0]["state"] == "open"
+    clock[0] += 1
+    state, _ = sync()
+    alert = next(a for a in state["alerts"] if a["id"] == alert_id)
+    assert alert["state"] == "done"
+    assert alert["outcome"] == "No repeat refusal for one hour."
+
+
+def test_server_sweep_expires_refusals_without_a_new_write(monkeypatch):
+    make_ledger()
+    state = refuse_a_plan()
+    monkeypatch.setattr(core, "now_ms", lambda: state["alerts"][0]["at"] + 3600000)
+    ledger_server.expire_alerts()
+    state = ledger_server.repository.get_document(SLUG)
+    assert state["alerts"][0]["state"] == "done"
+    assert state["alerts"][0]["outcome"] == "No repeat refusal for one hour."
+
+
+def test_successful_retry_in_one_batch_closes_new_refusal():
+    make_ledger()
+    state, _ = sync(
+        [
+            {"op": "phase_append", "id": "bad", "by": "writer", "phases": [{"phase": "p1", "title": "Taken"}]},
+            {"op": "phase_append", "id": "good", "by": "writer", "phases": [{"phase": "p2", "title": "New"}]},
+        ]
+    )
+    assert state["alerts"][0]["state"] == "done"

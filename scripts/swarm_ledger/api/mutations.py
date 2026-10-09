@@ -92,6 +92,7 @@ def apply(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
     state, rejected = server.repository.apply_ops(slug, ops=operations, gate=gate)
     server.relay_to_inbox(slug, state)
     server.doctor_phrase(slug, state)
+    server.deliver_alerts(slug, state)
     tasks = {op["item"].split("/")[1] for op in operations if op["op"] == "task_update"}
     rows = [resources.project(row) for row in state.get("tasks", []) if row["id"] in tasks]
     reply = {
