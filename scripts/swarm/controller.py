@@ -19,7 +19,7 @@ class FencedLedger:
             return value
 
         def call(*args, **kwargs):
-            lease.require(self.store, self.slug, self.held)
+            lease.renew(self.store, self.slug, self.held)
             with lease.fencing(self.held.epoch):
                 return value(*args, **kwargs)
 
@@ -35,11 +35,11 @@ class FencedRuntime:
         return getattr(self.runtime, name)
 
     def has_capacity(self, config) -> bool:
-        lease.require(self.store, self.slug, self.held)
+        lease.renew(self.store, self.slug, self.held)
         return self.spawning and self.runtime.has_capacity(config)
 
     def spawn(self, config, lane, name, task):
-        lease.require(self.store, self.slug, self.held)
+        lease.renew(self.store, self.slug, self.held)
         if not self.spawning:
             raise SwarmError("controller spawning is disabled in this deployment mode")
         return self.runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
