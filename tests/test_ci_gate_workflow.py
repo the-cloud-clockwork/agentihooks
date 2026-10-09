@@ -8,6 +8,20 @@ import yaml
 
 _ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.unit
+LINT_CONTROLS = [
+    "Lint check",
+    "Format check",
+    "Check every pull request job is a need of Gate Required",
+    "Hold the size and complexity limits",
+    "Fail on known vulnerabilities new against the base",
+]
+LINT_SETUP = [
+    "Install ruff",
+    "Install PyYAML",
+    "Set up uv",
+    "Check out the base revision",
+    "Check out the protected grader",
+]
 
 
 def _workflow():
@@ -44,6 +58,27 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     assert "needs" not in jobs["lint"]
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
+
+
+def test_cheap_gates_share_the_lint_job_and_each_grades_after_an_earlier_red():
+    jobs = _workflow()["jobs"]
+    assert not {"size", "wiring", "dependency-audit"} & set(jobs)
+    assert not {"size", "wiring", "dependency-audit"} & set(jobs["gate-required"]["needs"])
+    assert jobs["lint"]["timeout-minutes"] == 10
+    steps = {step.get("name"): step for step in jobs["lint"]["steps"]}
+    assert all("continue-on-error" not in step for step in steps.values())
+    names = list(steps)
+    assert all("if" not in steps[name] for name in LINT_SETUP)
+    after = names[names.index(LINT_CONTROLS[-1]) + 1 :]
+    assert after and all(steps[name]["if"].startswith("${{ !cancelled()") for name in after)
+
+
+@pytest.mark.parametrize("control", LINT_CONTROLS)
+def test_each_cheap_gate_grades_in_lint_after_its_setup_even_after_an_earlier_red(control):
+    names = [step.get("name") for step in _workflow()["jobs"]["lint"]["steps"]]
+    step = _workflow()["jobs"]["lint"]["steps"][names.index(control)]
+    assert step["if"] == "${{ !cancelled() }}"
+    assert max(names.index(name) for name in LINT_SETUP) < names.index(control)
 
 
 def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
