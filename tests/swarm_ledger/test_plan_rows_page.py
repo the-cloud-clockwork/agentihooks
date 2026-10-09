@@ -152,7 +152,7 @@ def test_the_phases_section_folds_and_refills_its_plan_rows(tab):
     assert tab.locator("#phases > li").count() == 0
     tab.click("#phases-box > summary")
     tab.wait_for_function("() => document.querySelectorAll('#phases > li.plan').length === 3")
-    assert [row["id"] for row in plan_rows(tab)][:1] == ["item-plans-hier"]
+    assert [row["id"] for row in plan_rows(tab)] == ["item-plans-hier", "item-plans-v2", "item-plans-standalone"]
 
 
 def test_the_outline_opens_a_folded_plan_to_reach_its_phase(tab):
