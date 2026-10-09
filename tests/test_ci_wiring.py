@@ -173,7 +173,7 @@ def test_event_comparisons_use_either_quote_style_and_operand_order(quote, rever
 
 @pytest.mark.parametrize(
     "condition",
-    ['github.event_name == \'push"', '"push\' == github.event_name'],
+    ["github.event_name == 'push\"", "\"push' == github.event_name"],
 )
 def test_mismatched_event_quotes_keep_the_job_on_the_pull_request_path(condition):
     assert ci_wiring.on_pull_requests({"if": condition}) is True
