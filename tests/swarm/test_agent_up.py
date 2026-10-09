@@ -131,8 +131,13 @@ def test_cli_master_up_still_brings_the_master(swarm, monkeypatch):
 
     seen = []
     monkeypatch.setattr(cli, "cmd_master", lambda store, args: seen.append((args.command, args.action)))
-    assert run("sw", "master", "up", "--new") == 0
+    assert run("sw", "master", "up") == 0
     assert seen == [("master", "up")]
+
+
+def test_cli_profile_up_refuses_extra_arguments(swarm):
+    with pytest.raises(SystemExit):
+        run("sw", "planner", "up", "--now")
 
 
 def test_exit_retires_an_operator_name_then_ends_its_session(swarm, monkeypatch, capsys):

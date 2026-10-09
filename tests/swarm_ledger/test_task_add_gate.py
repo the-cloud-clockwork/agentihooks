@@ -128,7 +128,7 @@ def test_a_planner_engineer_task_in_its_phase_does_not_count_as_planning():
 
 
 def test_the_refusal_is_empty_for_an_author_who_may_add():
-    assert ledger_tasks.add_refusal([], {"by": "master@abcdef-0001", "phase": "p1"}) == ""
+    assert ledger_tasks.add_refusal([], {"by": "master@abcdef-0001", "phase": "p1"}, set()) == ""
 
 
 def test_task_add_prints_the_server_refusal(monkeypatch):
