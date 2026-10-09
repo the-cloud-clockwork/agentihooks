@@ -5,8 +5,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
-
-from redis import Redis
+from typing import TYPE_CHECKING
 
 from hooks.context import account_sessions, broadcast
 from scripts import claude_quota_balancer as balancer
@@ -15,12 +14,15 @@ from scripts.hive import registry
 from scripts.routing import claude_api, codex_api
 from scripts.swarm.commands import hive_id
 
+if TYPE_CHECKING:
+    from redis import Redis
+
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
 UNIT = "agentihooks-hive.service"
 
 
-def beat(redis: Redis, local_id: str) -> None:
+def beat(redis: "Redis", local_id: str) -> None:
     report = observe()
     key = registry.key(local_id)
     with redis.pipeline() as pipe:
@@ -35,7 +37,7 @@ def beat(redis: Redis, local_id: str) -> None:
         pipe.execute()
 
 
-def run(redis: Redis) -> None:
+def run(redis: "Redis") -> None:
     local_id = hive_id()
     while True:
         started = time.monotonic()

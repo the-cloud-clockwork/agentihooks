@@ -1,16 +1,17 @@
 import json
 from unittest.mock import Mock
 
-import fakeredis
 import pytest
 
 from scripts.hive import daemon, registry
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 
 @pytest.fixture
 def redis():
+    import fakeredis
+
     return fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
 
 
@@ -153,6 +154,10 @@ def test_observe_selects_fields_and_never_publishes_credentials(redis, monkeypat
         "observed_at": 121,
     }
     assert report["quota"]["codex:default"]["observed_at"] is None
+    assert (
+        next(slot for slot in report["slots"] if slot["harness"] == "codex" and slot["account"] == "default")["cap"]
+        == 0
+    )
     assert {(slot["harness"], slot["account"], slot["kind"]) for slot in report["slots"]} >= {
         ("claude", "one", "subscription"),
         ("codex", "two", "subscription"),
@@ -386,7 +391,7 @@ def test_subscription_records_include_caps_unknown_readings_and_login(observatio
 
     balancer = observations
     result = balancer.ProbeResult(
-        "one", "allowed", "OK", 60, balancer.QuotaWindow(20, 1000), balancer.QuotaWindow(40, 2000)
+        "one", "allowed", "OK", 60, balancer.QuotaWindow(65, 1000), balancer.QuotaWindow(40, 2000)
     )
     balancer.cached_observations.return_value = [(120, result)]
     account = daemon.codex_router.CodexAccount("two", "AH_CX_TOKEN_two")
@@ -400,7 +405,7 @@ def test_subscription_records_include_caps_unknown_readings_and_login(observatio
         {"harness": "claude", "account": name, "kind": kind, "cap": cap}
         for name, kind, cap in sorted(
             [
-                ("one", "subscription", 6),
+                ("one", "subscription", 3),
                 ("unobserved", "subscription", 0),
                 (daemon.account_sessions.UNROUTED, "interactive", 0),
             ]
