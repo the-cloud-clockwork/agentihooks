@@ -75,7 +75,6 @@ def test_tab_choice_hash_keyboard_and_scroll_positions_survive_switches(tab):
     loaded(tab)
     assert tab.locator("#swarm").is_visible()
     tab.goto(URL + "#ledger")
-    loaded(tab)
     assert tab.locator("#ledger").is_visible()
     tab.get_by_role("tab", name="Ledger").focus()
     tab.locator("#main-content").evaluate("el => el.scrollTop = 600")
@@ -87,7 +86,6 @@ def test_tab_choice_hash_keyboard_and_scroll_positions_survive_switches(tab):
     tab.keyboard.press("End")
     assert tab.locator("#swarm").is_visible()
     tab.goto(URL + "#item-phases-p20")
-    loaded(tab)
     assert tab.locator("#ledger").is_visible()
     assert tab.locator("#item-phases-p20").is_visible()
 
