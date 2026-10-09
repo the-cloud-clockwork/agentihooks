@@ -29,6 +29,7 @@ from scripts.swarm import (
     difficulty,
     grouping,
     launch_check,
+    ledger_probe,
     lifetime,
     live_binding,
     master_retire,
@@ -503,7 +504,7 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     if state in {idle_state.WAITING, idle_state.WORKING}:
         store.put_agent(slug, replace(agent, idle_ticks=0))
         return []
-    if _operator_at_pane(slug, store, agent, observed, now_ms):
+    if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
         store.put_agent(slug, agent)
         return []
     idle = replace(agent, idle_ticks=agent.idle_ticks + 1)
