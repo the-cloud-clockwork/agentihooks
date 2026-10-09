@@ -209,7 +209,7 @@ def test_a_failed_batch_keeps_the_rest_waiting(box, sink, monkeypatch):
         row("e1", extra="x"),
         row(""),
         row("e1", ledger=""),
-        row("e1", event_id=7),
+        row("e1") | {"event_id": 7},
         row("e1", ts_ms="soon"),
         row("e1", ts_ms=True),
         row("e1", ts_ms=0),
