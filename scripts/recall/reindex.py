@@ -1,7 +1,8 @@
-import json
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
+
+from scripts.swarm_ledger.repository.sqlite import read_document, read_registry, read_slugs
 
 from .ledger import COLLECTIONS, THREADS, extract_ledger
 from .store import RecallStore
@@ -14,11 +15,7 @@ def ledger_dir(environ: Mapping[str, str]) -> Path:
 
 
 def binned(folder: Path) -> set[str]:
-    try:
-        found = json.loads((folder / ".bin.json").read_bytes())
-    except (OSError, ValueError):
-        return set()
-    return {slug for slug, at in found.items() if isinstance(at, int)} if isinstance(found, dict) else set()
+    return {slug for slug, at in read_registry(folder, "bin").items() if isinstance(at, int)}
 
 
 def _walk(item: dict, ref: str) -> list[str]:
@@ -49,11 +46,14 @@ def reindex(store: RecallStore, folder: Path, home: Path, slugs: list[str], incl
             result["skipped_binned"].append(slug)
             continue
         swarm_slug = slug if (home / "swarm" / slug).is_dir() else ""
+        document = read_document(folder, slug)
+        if document is None:
+            result["unreadable"].append(slug)
+            continue
         try:
-            document = json.loads((folder / f"{slug}.json").read_bytes())
             records = extract_ledger(slug, document, swarm_slug=swarm_slug)
             deleted = deleted_refs(document)
-        except (OSError, ValueError, AttributeError, KeyError, TypeError):
+        except (ValueError, AttributeError, KeyError, TypeError):
             result["unreadable"].append(slug)
             continue
         result["indexed"][slug] = asdict(store.sync(f"ledger/{slug}", records, deleted))
@@ -61,4 +61,4 @@ def reindex(store: RecallStore, folder: Path, home: Path, slugs: list[str], incl
 
 
 def all_slugs(folder: Path) -> list[str]:
-    return sorted(path.stem for path in folder.glob("*.json") if not path.name.startswith("."))
+    return read_slugs(folder)

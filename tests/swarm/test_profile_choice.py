@@ -1,4 +1,3 @@
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -6,6 +5,7 @@ import pytest
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
 from scripts.swarm import profile_choice, runtime, store, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
+from tests.swarm_ledger import legacy_page
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -65,11 +65,10 @@ def asked(monkeypatch):
 
 @pytest.fixture
 def ledger_file(monkeypatch, tmp_path):
-    path = tmp_path / "sw.json"
     phases = [{"id": "p0"}, {"id": "p1", "title": "Ordering", "description": "Operator ranks the queue"}, {"id": "p2"}]
-    path.write_text(json.dumps({"overview": "Swarm Design System", "phases": phases}))
-    monkeypatch.setattr(profile_choice, "ledger_path", lambda slug: {"sw": path}[slug])
-    return path
+    monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
+    legacy_page.store(tmp_path, "sw", {"overview": "Swarm Design System", "phases": phases})
+    return tmp_path
 
 
 def test_explicit_task_profile_wins_without_classifier(monkeypatch):
@@ -149,9 +148,8 @@ def test_bare_task_state_and_question_name_empty_fields(asked, ledger_file):
 def test_close_summary_is_not_parent_intent_and_missing_ledger_is_empty(monkeypatch, tmp_path):
     from scripts.swarm_ledger import ledger_close
 
-    path = tmp_path / "sw.json"
-    path.write_text(json.dumps({"overview": f"Intent {ledger_close.MARK} summary"}))
-    monkeypatch.setattr(profile_choice, "ledger_path", lambda slug: {"sw": path, "gone": tmp_path / "x.json"}[slug])
+    monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
+    legacy_page.store(tmp_path, "sw", {"overview": f"Intent {ledger_close.MARK} summary"})
     assert profile_choice.state("sw", {})["project_intent"] == "Intent"
     assert profile_choice.state("gone", {})["project_intent"] == ""
 

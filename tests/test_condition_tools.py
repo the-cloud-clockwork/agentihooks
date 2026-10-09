@@ -12,6 +12,7 @@ import pytest
 import hooks.hook_manager as hm
 from hooks.context import conditions, ledger_request, profile_chain
 from hooks.hook_manager import BlockAction
+from tests.swarm_ledger import legacy_page
 
 pytestmark = pytest.mark.unit
 
@@ -255,8 +256,7 @@ class TestWriteGuard:
         monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t1")
         members = {"master@a1-1": {"role": "orchestrator"}}
         tasks = [{"id": "t1", "comments": comments, **task}, {"id": "t2", "comments": []}]
-        ledger = {"tasks": tasks, "_meta": {"members": members}}
-        (tmp_path / "demo.json").write_text(json.dumps(ledger))
+        legacy_page.store(tmp_path, "demo", {"tasks": tasks, "_meta": {"members": members}})
 
     def test_an_operator_comment_on_the_agents_task_opens_it(self, tmp_path, monkeypatch):
         at = int(time.time() * 1000)
