@@ -31,7 +31,7 @@ def main():
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
     except OSError as exc:
-        sys.exit(f"ledger server not answering on {ledger.BASE}: {exc}")
+        sys.exit(f"ledger server not answering on {ledger.base()}: {exc}")
     if rejected:
         sys.exit(f"message rejected: {rejected}")
     print(json.dumps({"posted": op["id"]}))
