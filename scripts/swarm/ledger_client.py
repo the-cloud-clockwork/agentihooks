@@ -97,7 +97,7 @@ class LedgerClient:
     def comment(self, slug, task_id, text, by):
         self._write(slug, _op("add", by, thread=f"tasks/{task_id}/comments", text=text))
 
-def delivery_budget(self, slug: str, task_id: str, text: str) -> bool:
+    def delivery_budget(self, slug: str, task_id: str, text: str) -> bool:
         return self._write(slug, _op("add", "swarm", thread=f"tasks/{task_id}/comments", text=text)) is not False
 
     def capacity_comment(self, slug: str, task_id: str, text: str, at: int) -> None:
