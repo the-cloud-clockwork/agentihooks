@@ -616,7 +616,7 @@ def test_control_actions_validate_before_domain_execution(live):
 
 def test_item_revision_uses_canonical_utf8_content(live, monkeypatch):
     document = {"tasks": [{"title": "Café", "id": "t1"}], "_meta": {"rev": 1}}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    monkeypatch.setattr(server.repository, "read", lambda slug, *keys: document)
     assert request(live, "GET", "tasks/t1") == (
         200,
         {
@@ -2437,6 +2437,7 @@ def test_repository_optional_collections_have_empty_http_resources(live, monkeyp
 
     document = {"_meta": {}, "questions": [{"id": "q1"}]}
     monkeypatch.setattr(server.repository, "get_document", lambda slug: document)
+    monkeypatch.setattr(server.repository, "read", lambda slug, *keys: document)
     assert request(live, "GET", path) == (
         200,
         {"data": [], "revision": revision([]), "next_cursor": None},
