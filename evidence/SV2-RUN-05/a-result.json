@@ -1,5 +1,5 @@
 {
-  "tested_commit": "02a4510dd1304ab1a29900fe390b20f7f150d18f",
+  "tested_commit": "09798e586756b8f8b6d036adefaae6cac267ab57",
   "evidence_class": "isolated fakeredis and mocked command transports; no live terminal, Pod or UI rollout proof",
   "passed": true,
   "independent_fixtures": [
@@ -19,7 +19,7 @@
             "execution_id": "",
             "generation": 0
           },
-          "execution_id": "exe-15edc0c1ca7148d18a8bb133aeca5517",
+          "execution_id": "exe-022ef2d0d05e4399877ee71745436a1e",
           "generation": 1,
           "command": "detach",
           "backend": "kubernetes",
@@ -32,7 +32,7 @@
             "execution_id": "",
             "generation": 0
           },
-          "execution_id": "exe-15edc0c1ca7148d18a8bb133aeca5517",
+          "execution_id": "exe-022ef2d0d05e4399877ee71745436a1e",
           "generation": 1,
           "command": "cancel",
           "backend": "kubernetes",
@@ -60,7 +60,7 @@
             "execution_id": "",
             "generation": 0
           },
-          "execution_id": "exe-53c65301267c4ef9a7663b9dd36d6490",
+          "execution_id": "exe-d72c44ff336e4bb7b11036d19ea54719",
           "generation": 1,
           "command": "detach",
           "backend": "kubernetes",
@@ -73,7 +73,7 @@
             "execution_id": "",
             "generation": 0
           },
-          "execution_id": "exe-53c65301267c4ef9a7663b9dd36d6490",
+          "execution_id": "exe-d72c44ff336e4bb7b11036d19ea54719",
           "generation": 1,
           "command": "cancel",
           "backend": "kubernetes",

@@ -1,5 +1,5 @@
 {
-  "tested_commit": "02a4510dd1304ab1a29900fe390b20f7f150d18f",
+  "tested_commit": "09798e586756b8f8b6d036adefaae6cac267ab57",
   "evidence_class": "isolated fakeredis and mocked command transports; no live terminal, Pod or UI rollout proof",
   "passed": true,
   "intermediate_phase": "unknown",

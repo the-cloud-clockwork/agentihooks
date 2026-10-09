@@ -4,7 +4,7 @@
   "integration_gate": "G1",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1899",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1942",
-  "tested_commit": "02a4510dd1304ab1a29900fe390b20f7f150d18f",
+  "tested_commit": "09798e586756b8f8b6d036adefaae6cac267ab57",
   "status": "G1 command service fixture qualified; pull request checks pending",
   "evidence_class": "isolated fakeredis and mocked command transports; no live terminal, Pod or UI rollout proof",
   "interfaces": [
@@ -34,11 +34,12 @@
     "externally_verified": "None: no live terminal, Kubernetes, authenticated receiver or UI control proof at this stage."
   },
   "validation": {
-    "focused_tests": "157 passed in 2.29 seconds: command service, operation journal and accepted runtime protocol, two pytest workers",
+    "focused_tests": "171 passed in 4.45 seconds: command service, operation journal and accepted runtime protocol, two pytest workers",
     "lint": "ruff check passed for changed Python files",
     "format": "ruff format --check passed for changed Python files",
     "limits": "ruff complexity, branches, arguments and statements passed; size gate: 84 units over a limit, 84 on the base allowlist, 0 errors",
-    "continuous_integration": "Required tests and mutation tracked on pull request 1942; pending at report publication."
+    "continuous_integration": "Required tests and mutation tracked on pull request 1942; pending at report publication.",
+    "mutation": "Initial run 37869940025 killed 289 mutants and exposed 27 survivors. Boundary tests strengthened; Standards ruled three equivalents in individual clearances. Final required mutation result is tracked on pull request 1942."
   },
   "cases": {
     "a": "evidence/SV2-RUN-05/a-result.json",
@@ -59,8 +60,8 @@
     "Actual UI buttons and terminal profiles remain unchanged; later connected controls require the scratch-page visual proof and applicable live rollout evidence."
   ],
   "reviews": {
-    "Standards": "No service code findings; evidence refresh awaiting same reader re-review.",
-    "Spec": "No service behavior findings; interrupted recovery and current evidence fixes awaiting same reader re-review."
+    "Standards": "S2 closed; no code findings. Three exact equivalent mutant rulings retained in individual clearances; finished-master authority survivors require refusal tests now added.",
+    "Spec": "P1 and P2 closed; UNKNOWN recovery, deduplication, replacement fencing and current evidence verified. Additional mutation assertions retain the same public behavior."
   },
   "scope_decision": "Master confirmed G1 isolated qualification on 2026-10-09: mocked receivers and transports qualify here; production integration belongs to later rollout gates.",
   "dependency_evidence": "SV2-RUN-04 merged through pull request 1896; successor restacked command service onto origin/dev without conflicts.",
