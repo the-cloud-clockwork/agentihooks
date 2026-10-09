@@ -10,4 +10,4 @@ controller:
     failureThreshold: 2
   terminationGracePeriodSeconds: 1
   env:
-    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "10"
+    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "2"
