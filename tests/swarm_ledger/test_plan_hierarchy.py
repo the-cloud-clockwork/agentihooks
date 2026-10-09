@@ -168,13 +168,17 @@ def test_the_same_anchor_twice_in_one_plan_is_refused():
     assert rejected and "slice a.first already belongs to phases/p1" in refusal
 
 
-def test_a_phase_holding_slices_keeps_its_plan():
+def test_a_phase_moved_to_another_plan_drops_slices_whose_anchor_the_new_plan_lacks():
     plans("a", "b")
     link("p1", "plans/a")
     run("slice_add", phase="phases/p1", anchor="first")
-    _, rejected, refusal = link("p1", "plans/b")
-    assert rejected and "phase p1 holds slices of another plan: a.first" in refusal
-    assert link("p1", "plans/a")[1] == []
+    run("task_add", task="t1", title="Build", lane="eng", phase="p1", slice="slices/a.first")
+    state, rejected, _ = link("p1", "plans/b")
+    assert rejected == []
+    assert (state["phases"][0]["plan"], state["slices"]) == ("plans/b", [])
+    assert "slice" not in state["tasks"][0]
+    events = [(e["kind"], e["target"]) for e in state["_meta"]["events"] if e["kind"].startswith("slice")]
+    assert events == [("slice cleared", "tasks/t1")]
 
 
 def test_a_slice_needs_a_phase_with_a_plan():
