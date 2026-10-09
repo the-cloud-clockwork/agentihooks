@@ -24,6 +24,10 @@ plan_ledger = test_plan_kind.plan_ledger
 
 PLAN = "https://github.com/acme/app/issues/12"
 
+UNMARKED = (
+    "plan task sections need a slice marker above each heading, written as <!-- slice: name --> on its own line: {}"
+)
+
 
 def phase_plan(slug, url=PLAN, phase="p1"):
     op = {"op": "phase_update", "id": f"plan-{phase}", "by": "planner", "item": f"phases/{phase}"}
@@ -391,18 +395,17 @@ def test_publish_plan_refuses_a_multi_phase_plan_without_phase_headings(plan_led
     assert raised.value.code == "plan needs one heading for phase Ship"
 
 
-UNMARKED = (
-    "plan task sections need a slice marker on the line before each heading, written as "
-    "<!-- slice: name --> on its own line: {}"
-)
-
-
 @pytest.mark.parametrize(
     ("text", "phases", "missing"),
     [
-        ("# Plan\n## Build\n<!-- slice: first -->\n### First\nOne\n### Second\nTwo\n", "p1", "Second"),
-        ("# Plan\n## Build\n### First\n## Ship\n<!-- slice: s -->\n### Pack\n### Send\n", "p1,p2", "First, Send"),
-        ("intro\n# Plan\n## First\n\n<!-- slice: two -->\n## Two\n", "p1", "First"),
+        ("# Plan\n## Build\n<!-- slice: first -->\n### First\nOne\n### Second\nTwo\n", "p1", "Second on line 6"),
+        (
+            "# Plan\n## Build\n### First\n## Ship\n<!-- slice: s -->\n### Pack\n### Send\n",
+            "p1,p2",
+            "First on line 3, Send on line 7",
+        ),
+        ("intro\n# Plan\n## First\n\n<!-- slice: two -->\n## Two\n", "p1", "First on line 3"),
+        ("## First\nOne\n<!-- slice: two -->\n## Two\n", "p1", "First on line 1"),
     ],
 )
 def test_publish_plan_refuses_task_sections_without_a_slice_marker(
@@ -419,11 +422,19 @@ def test_publish_plan_refuses_task_sections_without_a_slice_marker(
     assert "plan_url" not in core.sync(plan_ledger)[0]["phases"][0]
 
 
-def test_publish_plan_takes_a_fully_marked_plan(plan_ledger, tmp_path, monkeypatch, capsys):
-    text = (
-        "# Plan\n## Build\nIntro\n<!-- slice: first -->\n\n### First\n#### Detail\n"
-        "```\n### Not a heading\n```\n<!-- slice: second -->\n### Second\n"
-    )
+@pytest.mark.parametrize(
+    ("text", "lines"),
+    [
+        (
+            "# Plan\n## Build\nIntro\n<!-- slice: first -->\n\n### First\n#### Detail\n"
+            "```\n### Not a heading\n```\n<!-- slice: second -->\n### Second\n",
+            "2-12",
+        ),
+        ("# Plan\n<!-- slice: one -->\n## One\n", "1-3"),
+        ("Plain steps\nwith no headings\n", "1-2"),
+    ],
+)
+def test_publish_plan_takes_a_fully_marked_plan(plan_ledger, tmp_path, monkeypatch, capsys, text, lines):
     plan = tmp_path / "plan.md"
     plan.write_text(text, encoding="utf-8")
     core.sync(plan_ledger, ops=[{"op": "join", "id": "join-planner", "by": "planner", "role": "member"}])
@@ -437,7 +448,7 @@ def test_publish_plan_takes_a_fully_marked_plan(plan_ledger, tmp_path, monkeypat
     cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1")
     url = f"{ledger.BASE}/artifacts/{plan_ledger}/{file['id']}"
     phase = core.sync(plan_ledger)[0]["phases"][0]
-    assert phase["plan_ref"] == {"artifact": url, "lines": "2-12"}
+    assert phase["plan_ref"] == {"artifact": url, "lines": lines}
     assert json.loads(capsys.readouterr().out) == {"plan_url": url, "published_to": "artifact", "phases": ["p1"]}
 
 
