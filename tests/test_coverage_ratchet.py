@@ -141,6 +141,39 @@ def test_a_move_rewritten_below_git_rename_similarity_is_followed(tmp_path):
     assert ratchet.grade({"scripts/b.py": {4, 5}}, head_source, iter([base]), moved).lost == {"hooks/a.py": [3]}
 
 
+@pytest.mark.parametrize("missing", [None, "first", "second"])
+@pytest.mark.parametrize("rewritten", [False, True])
+def test_a_split_module_grades_each_destination_by_its_own_definitions(tmp_path, missing, rewritten):
+    old = "def first():\n    return 1\n\ndef second():\n    return 1\n"
+    sources = {
+        f"hooks/{name}.py": ("import os\n" * 10 if rewritten else "") + f"def {name}():\n    return 1\n"
+        for name in ("first", "second")
+    }
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    _repo(tmp_path, {"hooks/old.py": old})
+    (tmp_path / "hooks/old.py").unlink()
+    _repo(tmp_path, sources)
+    moved = coverage_history.renamed(tmp_path, "HEAD~1")
+    base = _measure("b1", {"hooks/old.py": {1, 2, 4, 5}}, {"hooks/old.py": old})
+    offset = 10 if rewritten else 0
+    head = {path: {offset + 1} | ({offset + 2} if path != f"hooks/{missing}.py" else set()) for path in sources}
+    result = ratchet.grade(head, sources.get, iter([base]), moved)
+    assert result.lost == ({} if missing is None else {"hooks/old.py": [2 if missing == "first" else 5]})
+
+
+@pytest.mark.parametrize("missing", [None, "First", "Second"])
+def test_split_classes_keep_same_named_methods_with_their_own_class(missing):
+    sources = {
+        f"hooks/{name}.py": f"class {name}:\n    def run(self):\n        return 1\n" for name in ("First", "Second")
+    }
+    old = "\n".join(sources.values())
+    moved = ratchet.pair_moves({"hooks/old.py": old}, sources, sources.values())
+    base = _measure("b1", {"hooks/old.py": {1, 2, 3, 5, 6, 7}}, {"hooks/old.py": old})
+    head = {path: {1, 2} | ({3} if path != f"hooks/{missing}.py" else set()) for path in sources}
+    result = ratchet.grade(head, sources.get, iter([base]), moved)
+    assert result.lost == ({} if missing is None else {"hooks/old.py": [3 if missing == "First" else 7]})
+
+
 def test_a_line_older_runs_missed_after_an_even_older_run_covered_it_is_cleared():
     runs = [
         _measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE}),
