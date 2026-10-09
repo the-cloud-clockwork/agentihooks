@@ -127,6 +127,15 @@ def test_a_follow_up_already_flagged_for_the_operator_sends_the_master_no_notice
     assert "Retries need a cap" in notice
 
 
+def test_a_ledger_without_follow_ups_still_sends_its_notices(store):
+    run(store, recorded())
+    doc = recorded(AGENT_EVENTS[2:3])
+    del doc["followups"]
+    run(store, doc)
+    (notice,) = texts(store, MASTER_SEAT)
+    assert "Build the thing" in notice
+
+
 def test_the_cursor_is_kept_per_swarm(store):
     store.create(SwarmConfig("other", "/repo", max_eng=1, max_ci=0))
     run(store, recorded())
