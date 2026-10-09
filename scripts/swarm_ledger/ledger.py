@@ -97,39 +97,66 @@ from scripts.gates.base import Who
 from scripts.swarm_ledger import ledger_phases, ledger_task_duplicates
 from scripts.swarm_ledger.repository import repository
 
-BASE = ledger_link.base()
+BASE = "" if ledger_link.remote() else ledger_link.base()
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
     "contract": (ledger_kinds.CONTRACT_KEYS, "contract.must=M contract.check=C"),
 }
 
 
+def base():
+    return BASE or ledger_link.base()
+
+
 def credentials(slug, service=False):
-    token = core.read_token(repository.read_page(slug)) or ""
     who = Who.from_env()
+    if ledger_link.remote():
+        if service:
+            sys.exit("a remote ledger client cannot make service writes; the operator credential stays on its host")
+        if not who.pinned:
+            sys.exit("a remote ledger client needs a pinned agent identity; the operator credential stays on its host")
+        token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or launch_token(slug, who.name)
+        return {"X-Ledger-Token": token, "X-Ledger-Agent": who.name}
+    token = core.read_token(repository.read_page(slug)) or ""
     if service or not who.pinned:
         return {"X-Ledger-Token": token}
     return {"X-Ledger-Token": authority.agent_token(token, slug, who.name), "X-Ledger-Agent": who.name}
 
 
+def launch_token(slug, name):
+    from scripts.swarm_ledger.api.client import ResourceClient
+
+    credential = os.environ.get("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL")
+    if not credential:
+        sys.exit(
+            "a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential "
+            "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive join"
+        )
+    client = ResourceClient(base(), {"X-Hive-Credential": credential, "X-Ledger-Agent": name})
+    try:
+        return client.request(slug, "agent-token", {})["data"]["token"]
+    except urllib.error.HTTPError as exc:
+        sys.exit(f"the ledger server refused the hive credential: {exc.code}")
+
+
 def request(slug, ops=None, service=False, timeout=10):
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    client = ResourceClient(BASE, credentials(slug, service), timeout)
+    client = ResourceClient(base(), credentials(slug, service), timeout)
     return client.snapshot(slug) if ops is None else client.mutate(slug, ops)
 
 
 def resource(slug: str, path: str, service: bool = False, collection: bool = False) -> dict | list:
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    client = ResourceClient(BASE, credentials(slug, service))
+    client = ResourceClient(base(), credentials(slug, service))
     return client.collection(slug, path) if collection else client.request(slug, path)["data"]
 
 
 def export(slug: str, service: bool = False) -> dict:
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    return ResourceClient(BASE, credentials(slug, service)).request(slug, "export", {})["data"]
+    return ResourceClient(base(), credentials(slug, service)).request(slug, "export", {})["data"]
 
 
 class Missing(SystemExit):
@@ -144,7 +171,7 @@ def call(slug, ops=None, service=False):
     except OSError:
         if not repository.exists(slug):
             raise Missing(f"ledger {slug} does not exist") from None
-        if os.environ.get("LEDGER_AUTOSTART") != "0":
+        if os.environ.get("LEDGER_AUTOSTART") != "0" and not ledger_link.remote():
             subprocess.run(
                 [sys.executable, str(HERE / "ledger_server.py"), "--ensure"], check=False, capture_output=True
             )
@@ -153,7 +180,7 @@ def call(slug, ops=None, service=False):
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
     except OSError as exc:
-        sys.exit(f"ledger server not answering on {BASE}: {exc}")
+        sys.exit(f"ledger server not answering on {base()}: {exc}")
 
 
 def op(kind, args, /, **fields):
@@ -255,7 +282,7 @@ def upload_artifact(slug: str, name: str, path: str, request: dict) -> dict:
 
 def upload(slug: str, name: str, path: str, route: str, extra: dict) -> dict:
     req = urllib.request.Request(
-        f"{BASE}/api/v1/ledgers/{slug}/uploads/{route}",
+        f"{base()}/api/v1/ledgers/{slug}/uploads/{route}",
         data=Path(path).read_bytes(),
         headers={
             **credentials(slug),
@@ -312,7 +339,7 @@ def cmd_publish_plan(args):
         task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
         file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
         send(args, "artifact_add", task=task, title=title, file=file, plan=True)
-        stored["url"] = f"{BASE}/artifacts/{args.slug}/{file['id']}"
+        stored["url"] = f"{base()}/artifacts/{args.slug}/{file['id']}"
         return stored["url"]
 
     try:

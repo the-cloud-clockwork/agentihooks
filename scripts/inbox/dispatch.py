@@ -10,7 +10,7 @@ from dataclasses import replace
 
 from scripts.inbox.receipts import Delivery, DispatchError, Receipts, check_owner, delivery_fields, transact
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
-from scripts.inbox.store import close_reason, now_ms, owner_key
+from scripts.inbox.store import close_reason, now_ms, owner_key, owner_ttl_s
 
 SHOWN = "its ref was already accepted or shown"
 
@@ -40,9 +40,22 @@ class Dispatcher:
             if held and held != owner and not takeover:
                 raise DispatchError(f"{recipient} is delivered by {held}; take over to replace it")
             pipe.multi()
-            pipe.set(owner_key(recipient), owner)
+            pipe.set(owner_key(recipient), owner, ex=owner_ttl_s())
 
         transact(self.redis, claim, [owner_key(recipient)])
+
+    def renew(self, recipient, owner):
+        """Extend owner's hold on recipient; False when it no longer holds it, which a running pump must treat as lost."""
+        recipient = self.store.names.resolve(recipient)
+
+        def extend(pipe):
+            if pipe.get(owner_key(recipient)) != owner:
+                return False
+            pipe.multi()
+            pipe.expire(owner_key(recipient), owner_ttl_s())
+            return True
+
+        return transact(self.redis, extend, [owner_key(recipient)])
 
     def release(self, recipient, owner):
         recipient = self.store.names.resolve(recipient)
