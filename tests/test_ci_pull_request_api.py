@@ -17,7 +17,7 @@ WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 LOCAL_ONLY = {ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"}}
 TOKEN = re.compile(
     r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
-    r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)\w*(token|pat)"
+    r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)(_\w*|\w*(token|pat)\b)"
     r"|\$\{\{(?:(?!\}\})[\s\S])*?(?<![\w.'\"-])(secrets|github)\s*(\)|\}\})",
     re.IGNORECASE,
 )
@@ -44,8 +44,9 @@ def _all_jobs():
 def _all_steps():
     for name, job in _all_jobs():
         for key in ("env", "with", "secrets"):
-            if isinstance(job.get(key), dict) and TOKEN.search(_values(job[key])):
-                yield name, {"name": f"job {key}", "env": job[key]}, ROOT
+            values = {key: "${{ secrets }}"} if job.get(key) == "inherit" else job.get(key)
+            if isinstance(values, dict) and TOKEN.search(_values(values)):
+                yield name, {"name": f"job {key}", "env": values}, ROOT
         for step in job.get("steps", []):
             action = step.get("uses", "")
             if action.startswith("./.github/actions/"):
@@ -84,7 +85,7 @@ def test_no_step_on_any_event_holds_the_workflow_token_or_calls_the_api():
     [
         ({"with": {"token": "${{ github.token }}"}}, ["caller"]),
         ({"secrets": {"token": "${{ secrets.GITHUB_TOKEN }}"}}, ["caller"]),
-        ({"secrets": "inherit"}, []),
+        ({"secrets": "inherit"}, ["caller"]),
     ],
     ids=["with-input", "secrets-mapping", "secrets-inherit"],
 )
@@ -291,6 +292,7 @@ def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step
         {"env": {"ALL": "${{ secrets }}"}},
         {"env": {"GH_TOKEN": "${{ secrets.GHCR_TOKEN }}"}},
         {"with": {"token": "${{ secrets['GITHUBTOKEN'] }}"}},
+        {"env": {"KEY": "${{ secrets.GH_API_KEY }}"}},
     ],
     ids=[
         "gh-with-flags",
@@ -316,6 +318,7 @@ def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step
         "whole-secrets-context",
         "ghcr-secret",
         "github-secret-without-separator",
+        "gh-secret-not-named-token",
     ],
 )
 def test_each_way_of_reaching_the_api_is_an_offender(plant):
@@ -330,7 +333,7 @@ def test_each_way_of_reaching_the_api_is_an_offender(plant):
         "${{ toJSON(github.event) }}",
         "${{ secrets.SONAR_TOKEN }}",
         "${{ secrets['SONAR_TOKEN'] }}",
-        "${{ secrets.GITHUB_APP_ID }}",
+        "${{ secrets.GHOST_KEY }}",
         "${{ contains(github.ref, 'github') }}",
         "https://github.com/the-cloud-clockwork/agentihooks",
         'case "$host" in github) exit 0;; esac',
@@ -342,7 +345,7 @@ def test_each_way_of_reaching_the_api_is_an_offender(plant):
         "event-to-json",
         "other-secret",
         "bracketed-other-secret",
-        "github-named-other-secret",
+        "gh-prefixed-other-secret",
         "quoted-word",
         "url",
         "shell-case-label",
