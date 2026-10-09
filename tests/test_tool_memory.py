@@ -42,6 +42,120 @@ class TestToolMemory:
             assert "File not found" in entry["error"]
 
 
+@pytest.mark.parametrize("field", ["error", "input", "tool", "session", "ts"])
+def test_memory_rejects_credentials_before_storage_and_replay(tmp_path, field):
+    from hooks import tool_memory
+
+    credential = "synthetic" + "-credential"
+    entry = {"ts": "2026-10-09", "tool": "Bash", "error": "Error: unavailable", "input": "", "session": ""}
+    entry[field] = "redis://:" + credential + "@localhost:6379"
+    memory = tmp_path / "memory.ndjson"
+    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_banner") as banner:
+        tool_memory._append_entry(entry)
+        assert not memory.exists(), "credential entry was stored"
+        tool_memory._append_entries([entry])
+        assert not memory.exists(), "credential batch was stored"
+        memory.write_text(json.dumps(entry) + "\n")
+        tool_memory.inject_memory()
+        banner.assert_not_called()
+
+
+@pytest.mark.parametrize("field", ["error", "input", "tool", "session", "ts"])
+def test_legacy_credentials_never_replay(tmp_path, field):
+    from hooks import tool_memory
+
+    entry = {"ts": "2026-10-09", "tool": "Bash", "error": "Error: unavailable", "input": "", "session": ""}
+    entry[field] = "redis://:" + "synthetic" + "-credential@localhost:6379"
+    memory = tmp_path / "memory.ndjson"
+    memory.write_text(json.dumps(entry) + "\n")
+    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_banner") as banner:
+        tool_memory.inject_memory()
+        banner.assert_not_called()
+
+
+@pytest.mark.parametrize("source", ["output", "input"])
+def test_record_error_checks_credentials_before_truncation(tmp_path, source):
+    from hooks import tool_memory
+
+    credential = "synthetic" + "-credential"
+    text = "Error: " + "x" * 190 + " redis://:" + credential + "@localhost:6379"
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": text if source == "input" else "safe command"},
+        "tool_response": {"is_error": True, "content": text if source == "output" else "Error: failed"},
+    }
+    memory = tmp_path / "memory.ndjson"
+    with patch.object(tool_memory, "MEMORY_PATH", memory):
+        tool_memory.record_error(payload)
+        assert not memory.exists(), "credential output was stored"
+
+
+@pytest.mark.parametrize("source", ["output", "input"])
+def test_transcript_checks_credentials_before_truncation(tmp_path, source):
+    from hooks import tool_memory
+
+    text = "Error: " + "x" * 190 + " redis://:" + "synthetic" + "-credential@localhost:6379"
+    records = [
+        {
+            "kind": "tool_call",
+            "tool_use_id": "call",
+            "tool_name": "Bash",
+            "tool_input": {"command": text if source == "input" else "safe command"},
+        },
+        {
+            "kind": "tool_result",
+            "tool_use_id": "call",
+            "is_error": True,
+            "tool_result": text if source == "output" else "Error: failed",
+        },
+    ]
+    memory = tmp_path / "memory.ndjson"
+    with (
+        patch.object(tool_memory, "MEMORY_PATH", memory),
+        patch("hooks.memory.transcript_reader.iter_transcript_records", return_value=iter(records)),
+    ):
+        tool_memory.scan_transcript({"transcript_path": "synthetic.jsonl"})
+        assert not memory.exists(), "transcript credential was stored"
+
+
+def test_safe_entries_survive_contaminated_batch_and_rotation(tmp_path):
+    from hooks import tool_memory
+
+    safe = {"tool": "Bash", "error": "Error: safe guidance", "input": "safe command"}
+    unsafe = {"tool": "Bash", "error": "redis://:" + "synthetic" + "-credential@localhost:6379"}
+    memory = tmp_path / "memory.ndjson"
+    memory.write_text(json.dumps(unsafe) + "\n")
+    with patch.object(tool_memory, "MEMORY_PATH", memory), patch.object(tool_memory, "MAX_ENTRIES", 1):
+        tool_memory._append_entries([unsafe, safe])
+        assert memory.read_text().splitlines() == [json.dumps(safe, separators=(",", ":"))]
+        tool_memory._append_entry(safe)
+        assert memory.read_text().splitlines() == [json.dumps(safe, separators=(",", ":"))]
+        with patch("hooks.common.inject_banner") as banner:
+            tool_memory.inject_memory()
+        assert banner.call_count == 1
+        assert "safe guidance" in banner.call_args.args[1]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "PASSWORD=" + "synthetic" + "-credential",
+        "redis://:" + "x" + "@localhost:6379 # nosecret",
+        "rediss://user:" + "synthetic" + "-credential@localhost:6379",
+        "ghp_" + "a" * 36,
+        "Bearer " + "a" * 24,
+    ],
+)
+def test_memory_filters_secret_forms_with_scanning_disabled(tmp_path, text):
+    from hooks import tool_memory
+
+    entry = {"tool": "Bash", "error": "Error: " + text}
+    memory = tmp_path / "memory.ndjson"
+    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.config.SECRETS_MODE", "off"):
+        tool_memory._append_entry(entry)
+        assert not memory.exists(), "credential entry was stored"
+
+
 class TestIsErrorExplicitStatus:
     def test_file_tools_trust_only_explicit_flags(self):
         from hooks.tool_memory import _is_error, strict_detection

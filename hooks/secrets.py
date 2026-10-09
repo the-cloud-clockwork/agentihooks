@@ -60,7 +60,7 @@ _STANDARD_PATTERNS: list[_Pattern] = [
     ),
     _Pattern(
         "db_url_creds",
-        re.compile(r"(postgres|mysql|mongodb)://[^:]+:[^@]{4,}@", re.IGNORECASE),
+        re.compile(r"(postgres|mysql|mongodb|rediss?)://[^/\s:@]*:[^@\s]+@", re.IGNORECASE),
     ),
     _Pattern(
         "generic_secret",

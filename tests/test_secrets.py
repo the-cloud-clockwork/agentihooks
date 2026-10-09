@@ -114,6 +114,15 @@ class TestScan:
         assert scan(f"x = {key}  # NoSecret") == []
 
 
+@pytest.mark.parametrize("scheme", ["redis", "rediss"])
+@pytest.mark.parametrize("user", ["", "default"])
+@pytest.mark.parametrize("value", ["x", "synthetic" + "-credential"])
+def test_scan_redis_connection_credentials(scheme, user, value):
+    from hooks.secrets import scan
+
+    assert scan(f"{scheme}://{user}:{value}@localhost:6379", mode="strict") == ["db_url_creds"]
+
+
 class TestScanModes:
     """Tests for mode-aware scan() behavior."""
 
