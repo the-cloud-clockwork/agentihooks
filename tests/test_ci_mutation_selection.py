@@ -342,8 +342,11 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
     part = tmp_path / "stats/part-1.json"
     seen = []
 
-    def buckets(engine_runner, test_runner, shards, work):
+    test_runner = object()
+
+    def buckets(engine_runner, value, shards, work):
         assert engine_runner is runner
+        assert value is test_runner
         assert config.source_paths == [tmp_path / "mutants/scripts"]
         seen.append((shards, work))
         return [result]
@@ -368,7 +371,7 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
 
     def cli(args):
         if mode == "reuse":
-            assert runner.collect_or_load_stats(object()) is None
+            assert runner.collect_or_load_stats(test_runner) is None
             assert seen == []
             assert saved == [5]
             assert engine.tests_by_mangled_function_name == {
@@ -378,7 +381,7 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
             assert engine.duration_by_test == {"tests/test_sample.py::t": 1}
             raise SystemExit(7)
         with pytest.raises(SystemExit) as done:
-            runner.collect_or_load_stats(object())
+            runner.collect_or_load_stats(test_runner)
         assert done.value.code == 0
         assert config.source_paths == [Path("scripts/")]
         assert seen == ([] if mode == "empty" else [([["tests/test_b.py"]], tmp_path)])
@@ -402,6 +405,13 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
     with pytest.raises(SystemExit) as error:
         run_selected(selection, (0, 1), *stats)
     assert error.value.code == 7
+
+
+def test_selection_refuses_an_unknown_stats_mode_before_touching_mutmut():
+    from scripts.ci_mutation.selection import load_or_collect_stats
+
+    with pytest.raises(ValueError, match="^unknown mutation stats mode 'other'$"):
+        load_or_collect_stats(None, None, ["scripts/sample.py"], "other", ())
 
 
 def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_excluded(tmp_path, monkeypatch):
@@ -505,8 +515,8 @@ def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist
     (tmp_path / "tests").mkdir()
     files = [f"tests/test_{name}.py" for name in "abcdef"]
     for path in files:
-        (tmp_path / path).write_text("import pytest\n\npytestmark = pytest.mark.xdist_group('fakeredis')\n")
-    seconds = {"a": 9, "b": 7, "c": 5, "d": 3, "e": 2, "f": 1}
+        (tmp_path / path).write_text("import pytest\n\npytestmark = pytest.mark.xdist_group('shared-port')\n")
+    seconds = {"a": 1, "b": 2, "c": 3, "d": 5, "e": 7, "f": 9}
     (tmp_path / ".test_durations").write_text(
         json.dumps({f"tests/test_{name}.py::t": value for name, value in seconds.items()} | {"tests/x.py::t": 50})
     )
