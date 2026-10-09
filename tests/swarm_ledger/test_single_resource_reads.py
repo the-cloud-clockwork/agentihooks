@@ -1,11 +1,11 @@
 import pytest
 
-from scripts.swarm_ledger.api import resources
+from scripts.swarm_ledger.api import resources, routes
 from scripts.swarm_ledger.repository import repository, sqlite
 from tests.swarm_ledger.test_api_v1 import authority_live as _authority_live
 from tests.swarm_ledger.test_api_v1 import live as _live
 from tests.swarm_ledger.test_api_v1 import request
-from tests.swarm_ledger.test_ledger_authority import SLUG, core
+from tests.swarm_ledger.test_ledger_authority import SLUG, core, server
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 authority_live = _authority_live
@@ -68,6 +68,19 @@ def test_reads_beyond_one_item_still_load_the_whole_ledger(live, whole_loads, pa
     whole_loads.clear()
     assert request(live, "GET", path)[0] == status
     assert whole_loads[0] == ("document", SLUG)
+
+
+@pytest.mark.parametrize("path", ["tasks/t1/comments", "phases/p1/comments"])
+def test_a_thread_read_pages_with_its_query_from_the_partial_read(live, whole_loads, path):
+    seed()
+    core.sync(SLUG, ops=[{"op": "add", "id": f"more-{n}", "thread": path, "text": f"Note {n}"} for n in range(2)])
+    state = repository.get_document(SLUG)
+    whole_loads.clear()
+    reply = routes.ledger_read(server, SLUG, path, {"limit": 1})
+    assert whole_loads == []
+    assert reply == resources.read(state, path, {"limit": 1})
+    assert len(reply["data"]) == 1
+    assert reply["next_cursor"] == f"{reply['revision']}:1"
 
 
 def test_a_single_resource_read_answers_what_the_whole_ledger_read_answers(live):
