@@ -1,6 +1,7 @@
 """The intent check: the tick asks the classifier whether the phase can use a task's pull request as delivered, and the
 intent gate refuses merge and done while that answer is fail, or pending for under two minutes."""
 
+import hashlib
 import json
 import re
 import subprocess
@@ -32,6 +33,7 @@ PROOF_CHARS = 4000
 FAIL_COMMENT = "The intent check failed. The engineer has the verdict and the fix steps in the inbox."
 SHORTFALL_COMMENT = "Intent remains unmet after two fix rounds. The master must review this shortfall in the gate log."
 START, END = "<!-- agentihooks intent -->", "<!-- /agentihooks intent -->"
+MERGE_QUEUE = ["merge", "queue"]
 PULL = re.compile(r"github\.com/([^/]+)/([^/]+)/pull/(\d+)")
 SECTION = re.compile(f"{re.escape(START)}.*?{re.escape(END)}", re.S)
 TESTS_FIRST = f"{PURPOSE}-tests-first"
@@ -151,7 +153,7 @@ def pr_view(url, run=subprocess.run):
     if not before:
         return None
     try:
-        done = _gh(["gh", "pr", "view", url, "--json", "title,body,files,reviews,comments"], run)
+        done = _gh(["gh", "pr", "view", url, "--json", "title,body,files,reviews,comments,isDraft"], run)
         raw = json.loads(done.stdout) if done.returncode == 0 else None
         if raw is None:
             return None
@@ -171,6 +173,7 @@ def pr_view(url, run=subprocess.run):
             "title": title,
             "body": body,
             "files": files,
+            "draft": bool(raw.get("isDraft")),
             **diff,
             "reviewer_findings": {
                 "reviews": raw.get("reviews", []),
@@ -401,12 +404,24 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
     return {"verdict": verdict, "reason": reason}
 
 
+def _inputs(doc, task):
+    phase = _phase(doc, task)
+    judged = [task.get("title"), task.get("description"), task.get("phase"), phase.get("title")]
+    judged += [phase.get("description"), _plan_chunk(doc, task)]
+    return hashlib.sha256(json.dumps(judged, sort_keys=True).encode()).hexdigest()
+
+
+def _same_inputs(previous, inputs):
+    return previous.get("inputs", inputs) == inputs
+
+
 @dataclass(frozen=True)
 class _Judgment:
     pr: dict | None
     previous: dict | None
     state: dict | None
     answer: tuple[str, str] | None
+    inputs: str | None = None
 
 
 @dataclass(frozen=True)
@@ -448,31 +463,42 @@ class Check:
         return actions
 
     def _judge(self, doc, task):
-        previous = self._unmoved(task)
+        inputs = _inputs(doc, task) if self.mode == "coach" else None
+        previous = self._unmoved(task, inputs)
         if previous:
             return _Judgment(None, previous, None, None)
         pr = self.view(task["pr_url"])
         if pr is None or (self.mode == "coach" and not pr.get("head")):
             return None
+        if pr.get("draft"):
+            return _Judgment(pr, None, None, None)
         previous = self._coaching().read(task["id"]) if self.mode == "coach" else None
         previous = previous if previous and _same_phase(previous, task) else None
-        if previous and previous["head"] == pr.get("head"):
+        if previous and previous["head"] == pr.get("head") and _same_inputs(previous, inputs):
             return _Judgment(pr, previous, None, None)
         state = intent_history.prepare(state_of(doc, task, pr))
         if state.get("task_part") == "tests-first":
             state["pull_request_diff"] = intent_history.masked(pr.get("diff"))
-        return _Judgment(pr, previous, state, self.ask(state))
+        return _Judgment(pr, previous, state, self.ask(state), inputs)
 
     def _check(self, task, judgment, verdicts):
         previous, pr = judgment.previous, judgment.pr
+        if judgment.state is None and previous is None:
+            verdicts.write(task["id"], PENDING, RUNNING, self.now_ms, phase=task.get("phase"))
+            return []
         if judgment.state is None:
             self._keep(task, previous, verdicts)
             return []
-        rounds = min(previous["coach_rounds"] + (previous["verdict"] == FAIL), 2) if previous else 0
         state, (verdict, reason) = judgment.state, judgment.answer
         head = pr.get("head")
+        fixed = bool(previous) and previous["verdict"] == FAIL and previous["head"] != head
+        rounds = min(previous["coach_rounds"] + fixed, 2) if previous else 0
         _remember(self.slug, task, self.now_ms, state, judgment.answer, self.home)
-        coached = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
+        coached = (
+            {"coach_rounds": rounds, "head": head, "url": task["pr_url"], "inputs": judgment.inputs}
+            if self.mode == "coach"
+            else {}
+        )
         fields = {"phase": task.get("phase"), **coached}
         verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
         if self.mode == "coach":
@@ -490,7 +516,7 @@ class Check:
     def _coaching(self):
         return Verdicts(self.slug, "intent-coach", self.home)
 
-    def _unmoved(self, task):
+    def _unmoved(self, task, inputs):
         if self.mode != "coach" or self.head is None:
             return None
         previous = self._coaching().read(task["id"])
@@ -498,6 +524,7 @@ class Check:
             not previous
             or not previous.get("head")
             or not _same_phase(previous, task)
+            or not _same_inputs(previous, inputs)
             or previous["head"] != self.head(task["pr_url"])
         ):
             return None
@@ -544,7 +571,7 @@ def _gated(words):
     program, rest = PurePosixPath(words[index]).name, words[index + 1 :]
     if program == "gh":
         return rest[:2] == ["pr", "merge"]
-    return program == "agentihooks" and rest[:1] == ["swarm"] and rest[2:3] == ["done"]
+    return program == "agentihooks" and rest[:1] == ["swarm"] and (rest[2:3] == ["done"] or rest[2:4] == MERGE_QUEUE)
 
 
 class IntentGate:

@@ -248,7 +248,13 @@ def test_a_draft_is_not_judged_and_holds_merge_until_its_ready_head_is_judged(tm
         "phase": "p8",
     }
     assert Verdicts(SLUG, "intent-coach", tmp_path).read(TASK) is None
-    assert not gate(tmp_path).allowed
+    held = intent.IntentGate(clock=lambda: NOW / 1000).decide(
+        Call("Bash", {"command": f"agentihooks swarm {SLUG} merge queue x"}),
+        Who(name=ME, swarm=SLUG, task=TASK),
+        Verdicts(SLUG, "intent", tmp_path),
+        mode="coach",
+    )
+    assert not held.allowed
     coach(tmp_path, {**PR, "head": "ready", "draft": False}, asked, ledger=ledger, mail=mail).run(DOC)
     assert len(asked) == 1
     assert "fix round 1 of 2" in mail.sent[0][2]
