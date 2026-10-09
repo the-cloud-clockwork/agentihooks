@@ -1,7 +1,9 @@
 import re
 
+from scripts.swarm_ledger import ledger_plans
+
 OPS = ("phase_add", "phase_update", "phase_review", "phase_append")
-FIELDS = ("title", "description", "depends_on", "planning", "release", "plan_url", "plan_ref")
+FIELDS = ("title", "description", "depends_on", "planning", "release", "plan_url", "plan_ref", "plan")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 ID_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
@@ -16,7 +18,7 @@ def check_fields(fields: dict) -> None:
 
     if "plan_ref" in fields:
         plan_ranges.check_ref(fields["plan_ref"])
-    for key in ("title", "description"):
+    for key in ("title", "description", "plan"):
         if key in fields and not isinstance(fields[key], str):
             raise ValueError(f"{key} must be a string")
     if "depends_on" in fields and (
@@ -145,6 +147,8 @@ def append(doc: dict, op: dict, ctx) -> bool:
     ]
     try:
         validate(doc["phases"] + added)
+        for refusal in filter(None, (ledger_plans.phase_refusal(doc, phase) for phase in added)):
+            raise ValueError(refusal)
     except ValueError as exc:
         ctx.refused.append(str(exc))
         return False
@@ -177,6 +181,8 @@ def apply(doc: dict, op: dict, ctx) -> bool:
             from scripts.swarm_ledger import plan_ranges
 
             plan_ranges.check_phase_ref(doc, after)
+        if refusal := ledger_plans.phase_refusal(doc, after):
+            raise ValueError(refusal)
     except ValueError as exc:
         ctx.refused.append(str(exc))
         return False
