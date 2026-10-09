@@ -431,6 +431,7 @@ jobs:
     timeout-minutes: 15
     env:
       SONAR_SCANNER_VERSION: 7.2.0.5079
+      SONAR_SCANNER_SHA256: da9f4e64a3d555f08ce38b5469ebd91fe2b311af473f7001a5ee5c1fd58b004b
     permissions:
       contents: read
     steps:
@@ -465,6 +466,7 @@ jobs:
 
       # The merge runs while the proxy starts and the downloads restore; the scan waits for it below.
       - name: Merge shard coverage
+        id: merge
         if: steps.current.outputs.superseded != 'true'
         run: |
           (
@@ -473,6 +475,7 @@ jobs:
             echo "$status" > "$RUNNER_TEMP/combine.next"
             mv "$RUNNER_TEMP/combine.next" "$RUNNER_TEMP/combine.status"
           ) < /dev/null > "$RUNNER_TEMP/combine.log" 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
 
       - name: Start Cloudflare Access proxy
         id: proxy
@@ -522,14 +525,23 @@ jobs:
           echo "args=-Dsonar.pullrequest.key=$number -Dsonar.pullrequest.branch=$branch -Dsonar.pullrequest.base=${BASE_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
 
       - name: Wait for the coverage merge
-        if: steps.current.outputs.superseded != 'true'
+        if: always() && steps.current.outputs.superseded != 'true'
         timeout-minutes: 5
+        env:
+          MERGE_PID: ${{ steps.merge.outputs.pid }}
         run: |
-          until [[ -s "$RUNNER_TEMP/combine.status" ]]; do sleep 0.2; done
+          until [[ -s "$RUNNER_TEMP/combine.status" ]]; do
+            if ! kill -0 "$MERGE_PID" 2> /dev/null && [[ ! -s "$RUNNER_TEMP/combine.status" ]]; then
+              echo "::error::The coverage merge ended without a status."
+              cat "$RUNNER_TEMP/combine.log" 2> /dev/null || true
+              exit 1
+            fi
+            sleep 0.2
+          done
           cat "$RUNNER_TEMP/combine.log"
           exit "$(< "$RUNNER_TEMP/combine.status")"
 
-      # The scan action never finds its own tool cache entry, since a four part version is not semver.
+      # Runs the CLI directly: sonarqube-scan-action never finds its tool cache entry, since a four part version is not semver.
       - name: SonarQube Scan
         if: steps.current.outputs.superseded != 'true'
         env:
@@ -542,9 +554,10 @@ jobs:
             archive="$RUNNER_TEMP/sonar-scanner.zip"
             curl --fail --silent --show-error --location --retry 3 -o "$archive" \
               "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-$SONAR_SCANNER_VERSION-linux-x64.zip"
+            sha256sum --check --strict <<< "$SONAR_SCANNER_SHA256  $archive"
             unzip -q -o "$archive" -d "$RUNNER_TEMP"
-            mkdir -p "$(dirname "$scanner")"
-            mv "$RUNNER_TEMP/sonar-scanner-$SONAR_SCANNER_VERSION-linux-x64" "$scanner"
+            mkdir -p "$scanner"
+            cp -a "$RUNNER_TEMP/sonar-scanner-$SONAR_SCANNER_VERSION-linux-x64/." "$scanner/"
           fi
           read -ra extra <<< "$ARGS"
           "$scanner/bin/sonar-scanner" -Dsonar.projectBaseDir=. "${extra[@]}"
@@ -571,7 +584,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           set -o pipefail
-          api() { curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $SONAR_TOKEN" "http://127.0.0.1:9000/api/$1"; }
+          api() { curl --fail --silent --show-error --max-time 10 --retry 2 --retry-all-errors -H "Authorization: Bearer $SONAR_TOKEN" "http://127.0.0.1:9000/api/$1"; }
           task=$(sed -n 's/^ceTaskId=//p' .scannerwork/report-task.txt)
           [[ -n "$task" ]] || { echo "::error::No Sonar task id in report-task.txt."; exit 1; }
           while true; do
@@ -593,7 +606,7 @@ jobs:
           fi
           echo "Quality Gate has PASSED. $dashboard"
 
-      # The gate action grades against whatever gate the server binds, so a silent rebind would loosen it.
+      # The gate step grades against whatever gate the server binds, so a silent rebind would loosen it.
       - name: Hold the Delivery L2 conditions
         if: always() && steps.current.outputs.superseded != 'true'
         env:

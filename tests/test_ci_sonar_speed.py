@@ -1,3 +1,4 @@
+import hashlib
 import os
 import subprocess
 import zipfile
@@ -73,7 +74,7 @@ def test_a_failed_gate_or_background_task_is_red(tmp_path, statuses, gate):
     assert "::error::" in result.stdout
 
 
-def test_the_gate_step_replaces_the_five_second_gate_action():
+def test_the_gate_step_replaces_the_quality_gate_action():
     sonar = _sonar()
     assert not any("sonarqube-quality-gate-action" in step.get("uses", "") for step in sonar["steps"])
     gate = _step("SonarQube Quality Gate")
@@ -89,7 +90,7 @@ def _scanner_zip(path):
         archive.writestr(info, '#!/usr/bin/env bash\necho "$0 $*" > "$SCAN_LOG"\n')
 
 
-def _scan(tmp_path, cached):
+def _scan(tmp_path, cached, partial=False, checksum=None):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     tool_cache = tmp_path / "toolcache"
@@ -97,6 +98,8 @@ def _scan(tmp_path, cached):
     if cached:
         (scanner / "bin").mkdir(parents=True)
         _tool(scanner / "bin", "sonar-scanner", 'echo "$0 $*" > "$SCAN_LOG"')
+    if partial:
+        scanner.mkdir(parents=True)
     archive = tmp_path / "scanner.zip"
     _scanner_zip(archive)
     _tool(
@@ -115,6 +118,7 @@ def _scan(tmp_path, cached):
         RUNNER_TOOL_CACHE=str(tool_cache),
         RUNNER_TEMP=str(runner_temp),
         SONAR_SCANNER_VERSION=_VERSION,
+        SONAR_SCANNER_SHA256=checksum or hashlib.sha256(archive.read_bytes()).hexdigest(),
         ARGS="-Dsonar.pullrequest.key=7 -Dsonar.pullrequest.base=dev",
         SCAN_LOG=str(tmp_path / "scan"),
     )
@@ -141,6 +145,25 @@ def test_a_missing_scanner_is_downloaded_into_the_cached_path(tmp_path):
     assert (tmp_path / "scan").read_text().split()[0] == f"{scanner}/bin/sonar-scanner"
 
 
+def test_a_partly_restored_scanner_is_completed_in_place(tmp_path):
+    result, scanner, downloads = _scan(tmp_path, cached=False, partial=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "scan").read_text().split()[0] == f"{scanner}/bin/sonar-scanner"
+
+
+def test_a_scanner_archive_with_another_checksum_never_runs(tmp_path):
+    result, scanner, _ = _scan(tmp_path, cached=False, checksum="0" * 64)
+    assert result.returncode != 0
+    assert not (tmp_path / "scan").exists()
+    assert not (scanner / "bin").exists()
+
+
+def test_the_pinned_checksum_tracks_the_scanner_version():
+    env = _sonar()["env"]
+    assert env["SONAR_SCANNER_VERSION"] == _VERSION
+    assert env["SONAR_SCANNER_SHA256"] == "da9f4e64a3d555f08ce38b5469ebd91fe2b311af473f7001a5ee5c1fd58b004b"
+
+
 def test_the_node_runtime_is_restored_with_the_sonar_downloads():
     cache = _step("Restore Sonar downloads")
     assert "~/.sonar/js/node-runtime" in cache["with"]["path"].splitlines()
@@ -157,24 +180,42 @@ def _merge_tree(tmp_path, combine_body):
     return tree, temp, bin_dir
 
 
+def _start_merge(tree, temp, bin_dir):
+    output = temp / "output"
+    started = _run(_step("Merge shard coverage"), tree, bin_dir, RUNNER_TEMP=str(temp), GITHUB_OUTPUT=str(output))
+    assert started.returncode == 0, started.stdout + started.stderr
+    return output.read_text().strip().removeprefix("pid=")
+
+
+def _wait_merge(tree, temp, bin_dir, pid):
+    return _run(_step("Wait for the coverage merge"), tree, bin_dir, RUNNER_TEMP=str(temp), MERGE_PID=pid)
+
+
 def test_the_coverage_merge_runs_behind_the_setup_and_the_scan_waits_for_it(tmp_path):
     release = tmp_path / "release"
     tree, temp, bin_dir = _merge_tree(tmp_path, f'until [[ -e "{release}" ]]; do sleep 0.05; done\necho "merged $*"\n')
-    started = _run(_step("Merge shard coverage"), tree, bin_dir, RUNNER_TEMP=str(temp))
-    assert started.returncode == 0, started.stdout + started.stderr
+    pid = _start_merge(tree, temp, bin_dir)
+    assert pid.isdigit()
     assert not (temp / "combine.status").exists()
     release.touch()
-    waited = _run(_step("Wait for the coverage merge"), tree, bin_dir, RUNNER_TEMP=str(temp))
+    waited = _wait_merge(tree, temp, bin_dir, pid)
     assert waited.returncode == 0, waited.stdout + waited.stderr
     assert "merged --downloaded 8" in waited.stdout
 
 
 def test_a_failed_background_merge_fails_the_wait(tmp_path):
     tree, temp, bin_dir = _merge_tree(tmp_path, 'echo "::error::Missing coverage for shard 3"\nexit 3\n')
-    assert _run(_step("Merge shard coverage"), tree, bin_dir, RUNNER_TEMP=str(temp)).returncode == 0
-    waited = _run(_step("Wait for the coverage merge"), tree, bin_dir, RUNNER_TEMP=str(temp))
+    waited = _wait_merge(tree, temp, bin_dir, _start_merge(tree, temp, bin_dir))
     assert waited.returncode == 3
     assert "Missing coverage for shard 3" in waited.stdout
+
+
+@pytest.mark.parametrize("pid", ["", "999999999"], ids=["merge-never-started", "merge-died"])
+def test_a_merge_that_leaves_no_status_fails_the_wait_at_once(tmp_path, pid):
+    tree, temp, bin_dir = _merge_tree(tmp_path, "")
+    waited = _wait_merge(tree, temp, bin_dir, pid)
+    assert waited.returncode == 1
+    assert "::error::The coverage merge ended without a status." in waited.stdout
 
 
 def test_setup_and_evidence_upload_overlap_existing_waits():
@@ -194,5 +235,5 @@ def test_setup_and_evidence_upload_overlap_existing_waits():
     assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
     assert names.index("Check dev still points at this commit") < names.index("Download shard coverage")
     wait = _step("Wait for the coverage merge")
-    assert wait["if"] == "steps.current.outputs.superseded != 'true'"
+    assert wait["if"] == "always() && steps.current.outputs.superseded != 'true'"
     assert wait["timeout-minutes"] == 5
