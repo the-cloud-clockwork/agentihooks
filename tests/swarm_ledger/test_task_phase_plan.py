@@ -129,7 +129,7 @@ def test_replacement_slice_uses_the_destination_link_without_a_plan_reference():
     op = {
         "op": "artifact_add",
         "id": "destination",
-        "by": MASTER,
+        "by": "planner",
         "task": "",
         "title": "Plan",
         "file": file,
