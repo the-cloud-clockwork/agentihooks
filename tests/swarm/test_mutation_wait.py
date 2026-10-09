@@ -123,10 +123,13 @@ def test_the_tick_names_every_failing_mutant_and_unmutated_file(tick, preflight)
     held = {**waits.on("mutation", URL), "head": "first"}
     idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on=held)
     tick.end()
-    assert "now red" in tick.told()[0]
-    assert "scripts/swarm/waits.py:mutant_one:aaa (survived)" in tick.told()[0]
-    assert "scripts/swarm/waits.py:mutant_two:bbb (no tests)" in tick.told()[0]
-    assert "scripts/swarm/cli.py: budget exhausted" in tick.told()[0]
+    assert tick.told() == [
+        f"Your wait on mutation preflight {URL}, now red; "
+        "scripts/swarm/waits.py:mutant_one:aaa (survived); "
+        "scripts/swarm/waits.py:mutant_two:bbb (no tests); "
+        "scripts/swarm/cli.py: budget exhausted has ended. Pick task t1 back up: "
+        "agentihooks swarm sw done, block, or wait on the next thing."
+    ]
     assert idle.wait(tick.store.redis, "sw", ME) is None
 
 
@@ -186,7 +189,12 @@ def test_cli_refuses_an_unrelated_or_unbound_run(env, preflight, field, value, c
     ledger.tasks = lambda slug: list(ledger.rows.values())
     preflight.run[field] = value
     assert cli.main(["sw", "--as", ME, "wait", "--on", "mutation", URL]) == 1
-    assert "mutation" in capsys.readouterr().err
+    reason = (
+        "cannot read the mutation preflight head; retry the mutation wait"
+        if field == "head_sha"
+        else "wait on mutation needs a readable branch Mutation preflight run url"
+    )
+    assert capsys.readouterr().err.endswith(f"swarm: {reason}\n")
     assert idle.wait(store.redis, "sw", ME) is None
 
 
