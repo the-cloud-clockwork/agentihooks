@@ -43,11 +43,15 @@ def backstops(store):
     return [(item.address, item.text) for item in InboxStore(store.redis).inbox(SEAT) if item.sender == "swarm"]
 
 
-def close_backstops(store):
+def read_backstops(store):
     inbox = InboxStore(store.redis)
     for item in inbox.open_items(SEAT):
-        if item.sender == "swarm":
-            inbox.close(item.id, SEAT, "done")
+        if item.sender == "swarm" and item.state == "pending":
+            inbox.read(item.id, SEAT)
+
+
+def open_backstops(store):
+    return [item for item in InboxStore(store.redis).open_items(SEAT) if item.sender == "swarm"]
 
 
 def woke(name):
@@ -75,9 +79,10 @@ def test_idle_master_with_work_wakes_at_twenty_minutes_and_retries(setup, source
     assert backstops(store) == [(SEAT, PROMPT)]
     assert run(setup, START + 2 * WINDOW - 1) == []
     assert run(setup, START + 2 * WINDOW) == []
-    close_backstops(store)
+    read_backstops(store)
     assert run(setup, START + 2 * WINDOW + 1) == woke(master.name)
     assert backstops(store) == [(SEAT, PROMPT)] * 2
+    assert [item.state for item in open_backstops(store)] == ["pending"]
     assert sent == []
 
 
@@ -158,7 +163,7 @@ def test_retry_stops_when_waiting_work_is_resolved(setup):
     run(setup, START)
     run(setup, START + WINDOW)
     doc["followups"][0]["done"] = True
-    close_backstops(setup[0])
+    read_backstops(setup[0])
     assert run(setup, START + 2 * WINDOW) == []
     assert len(backstops(setup[0])) == 1
     assert sent == []
@@ -241,6 +246,7 @@ def test_an_ineligible_record_does_not_suppress_the_waiting_master(setup, reason
         run(setup, START + WINDOW)
         runtime.typed.clear()
         sent.clear()
+        read_backstops(store)
     assert run(setup, START + WINDOW + 1) == woke(second.name)
     assert backstops(store)[-1] == (SEAT, PROMPT)
     assert sent == []
@@ -296,6 +302,7 @@ def test_an_open_backstop_from_an_earlier_master_is_not_waiting_work(setup):
     doc["followups"] = [{"done": False}]
     run(setup, START)
     run(setup, START + WINDOW)
+    read_backstops(store)
     doc.clear()
     store.drop_agent("sw", first.name)
     second = replace(first, name="master@a1b2c3-0002", pane_id="w1:m2")
@@ -305,6 +312,25 @@ def test_an_open_backstop_from_an_earlier_master_is_not_waiting_work(setup):
     run(setup, START + WINDOW + 1)
     assert run(setup, START + 3 * WINDOW) == []
     assert len(backstops(store)) == 1
+    assert sent == []
+
+
+def test_a_replacement_master_gets_no_second_backstop_while_one_waits_unread(setup):
+    store, first, runtime, doc, sent = setup
+    doc["followups"] = [{"done": False}]
+    run(setup, START)
+    run(setup, START + WINDOW)
+    store.drop_agent("sw", first.name)
+    second = replace(first, name="master@a1b2c3-0002", pane_id="w1:m2")
+    store.put_agent("sw", second)
+    runtime.live = {second.name}
+    runtime.statuses[second.name] = "idle"
+    run(setup, START + WINDOW + 1)
+    assert run(setup, START + 3 * WINDOW) == []
+    read_backstops(store)
+    assert run(setup, START + 3 * WINDOW + 1) == woke(second.name)
+    assert len(backstops(store)) == 2
+    assert len(open_backstops(store)) == 1
     assert sent == []
 
 
@@ -326,4 +352,5 @@ def test_a_codex_master_gets_the_backstop_only_through_its_inbox(setup):
         wake.wake_now(inbox, "sw", [codex], herdr, at, wake.window_ms({}))
         wake.wake_pass(inbox, "sw", [codex], herdr, ledger, at, wake.window_ms({}))
     assert herdr.prompts == []
+    assert ledger.followups == []
     assert sent == []
