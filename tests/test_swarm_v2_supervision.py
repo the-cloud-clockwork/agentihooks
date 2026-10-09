@@ -127,7 +127,13 @@ def worker(tmp_path):
         environment = subprocess_environment()
         environment["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent)
         child = subprocess.Popen(
-            [sys.executable, "-m", "scripts.swarm_v2.supervision_runtime", str(attempt), str(path)],
+            [
+                sys.executable,
+                "-c",
+                "from scripts.swarm_v2.supervision_runtime import main; raise SystemExit(main())",
+                str(attempt),
+                str(path),
+            ],
             env=environment,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
