@@ -549,6 +549,13 @@ def test_master_launch_missed_measure_replays_the_recorded_outage(env, monkeypat
         return record
 
     monkeypatch.setattr(doctor.spawn_read, "master_records", read)
+    passed = []
+
+    def passes(slug, **kwargs):
+        passed.append((slug, kwargs))
+        return tuple(record["passes"])
+
+    monkeypatch.setattr(doctor.spawn_read, "doctor_passes", passes)
     if detectors == "before":
         monkeypatch.setattr(master_launches, "DETECTORS", (master_launches.journal_hour,))
     since, until = "2026-10-09T19:50Z", "2026-10-09T20:35Z"
@@ -556,7 +563,9 @@ def test_master_launch_missed_measure_replays_the_recorded_outage(env, monkeypat
     assert capsys.readouterr().out == f"master-launch-missed {count}\n"
     start = doctor._at_ms(since) - master_launches.JOURNAL_MS
     end = doctor._at_ms(until) + master_launches.MATCH_MS
-    assert seen == [(store, WATCHED, {"since": f"@{start / 1000:.3f}", "until": f"@{end / 1000:.3f}"})]
+    journal = {"since": f"@{start / 1000:.3f}", "until": f"@{end / 1000:.3f}"}
+    assert seen == [(store, WATCHED, journal)]
+    assert passed == [(DOCTOR, journal)]
 
 
 def test_master_launch_missed_measure_refuses_an_unreadable_journal(env, monkeypatch, capsys):
@@ -564,6 +573,7 @@ def test_master_launch_missed_measure_refuses_an_unreadable_journal(env, monkeyp
     capsys.readouterr()
     record = {"slug": WATCHED, "transfers": [], "restored": [], "agents": [], "journal": None, "journal_error": "gone"}
     monkeypatch.setattr(doctor.spawn_read, "master_records", lambda store, slug, **kwargs: record)
+    monkeypatch.setattr(doctor.spawn_read, "doctor_passes", lambda slug, **kwargs: ())
     assert doctor.main([WATCHED, "measure", "master-launch-missed"]) == 1
     output = capsys.readouterr()
     assert output.err == "doctor: master-launch-missed unavailable: gone\n"

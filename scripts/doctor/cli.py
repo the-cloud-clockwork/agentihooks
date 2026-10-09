@@ -254,11 +254,12 @@ def cmd_task(store, args):
 def cmd_measure(store, args):
     slug, doctor = _pair_of(store, args.slug)
     now = swarm.now_ms()
-    bounds = _spawn_bounds(args, now)
+    window = _window(args, now)
     if args.finding == master_launches.MISSED:
-        print(f"{args.finding} {_master_missed(store, slug, doctor, now, args)}")
+        print(f"{args.finding} {_master_missed(store, slug, doctor, now, window or (now - HOUR_MS, now))}")
         return
     if args.finding.startswith("failed-spawn/"):
+        bounds = {"since": _at(window[0]), "until": _at(window[1])} if window else {}
         found = spawns.failed(spawn_read.records(store, slug, now, **bounds))
         failed = []
     else:
@@ -268,26 +269,31 @@ def cmd_measure(store, args):
     print(f"{args.finding} {next((f.measure for f in found if f.id == args.finding), 0)}")
 
 
-def _master_missed(store, slug, doctor, now, args):
-    since, until = (
-        (_at_ms(args.since, "--since"), _at_ms(args.until, "--until")) if args.since else (now - HOUR_MS, now)
-    )
-    record = spawn_read.master_records(
-        store,
-        slug,
-        since=f"@{(since - master_launches.JOURNAL_MS) / 1000:.3f}",
-        until=f"@{min(until + master_launches.MATCH_MS, now) / 1000:.3f}",
-    )
-    judged = {k: json.loads(v) for k, v in store.redis.hgetall(loop.verdicts(store, doctor).key).items()}
-    cooldown = limits().cooldown_minutes * MINUTE_MS
-    return master_launches.missed(record, judged, cooldown, (since, until), master_launches.DETECTORS)
+def _at(ms):
+    return f"@{ms / 1000:.3f}"
 
 
-def _spawn_bounds(args: Namespace, now: int) -> dict:
+def _master_missed(store, slug, doctor, now, window):
+    since, until = window
+    journal = {
+        "since": _at(since - master_launches.JOURNAL_MS),
+        "until": _at(min(until + master_launches.MATCH_MS, now)),
+    }
+    record = spawn_read.master_records(store, slug, **journal)
+    replay = master_launches.Replay(
+        {k: json.loads(v) for k, v in store.redis.hgetall(loop.verdicts(store, doctor).key).items()},
+        limits().cooldown_minutes * MINUTE_MS,
+        loop.interval_minutes(os.environ) * MINUTE_MS,
+        spawn_read.doctor_passes(doctor, **journal),
+    )
+    return master_launches.missed(record, replay, window, master_launches.DETECTORS)
+
+
+def _window(args: Namespace, now: int) -> tuple[int, int] | None:
     if bool(args.since) != bool(args.until):
         raise SwarmError("--since and --until must be supplied together")
     if args.since is None:
-        return {}
+        return None
     if not args.finding.startswith("failed-spawn/") and args.finding != master_launches.MISSED:
         raise SwarmError(f"journal bounds are only supported for failed-spawn findings and {master_launches.MISSED}")
     since, until = _at_ms(args.since, "--since"), _at_ms(args.until, "--until")
@@ -295,7 +301,7 @@ def _spawn_bounds(args: Namespace, now: int) -> dict:
         raise SwarmError("--since must precede --until")
     if until > now:
         raise SwarmError("--until must not be in the future")
-    return {"since": f"@{since / 1000:.3f}", "until": f"@{until / 1000:.3f}"}
+    return since, until
 
 
 def _at_ms(text, flag="--at"):

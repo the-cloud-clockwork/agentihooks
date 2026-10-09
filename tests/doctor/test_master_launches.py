@@ -12,6 +12,7 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 ERROR = "unsupported transfer: saved effort is outside the current swarm range"
 COOLDOWN_MS = 60 * 60_000
+INTERVAL_MS = 10 * 60_000
 
 
 def outage():
@@ -144,13 +145,35 @@ def test_error_text_is_sanitized():
     assert len(attempt.error) <= master_launches.ERROR_CHARS
 
 
+def replay(record, verdicts=None):
+    return master_launches.Replay(
+        record["verdicts"] if verdicts is None else verdicts, COOLDOWN_MS, INTERVAL_MS, tuple(record["passes"])
+    )
+
+
 def test_missed_replay_counts_the_recorded_outage_before_and_none_after():
     record = outage()
-    verdicts = record["verdicts"]
     window = (min(failure_times(record)) - 1, max(failure_times(record)) + 1)
-    before = master_launches.missed(record, verdicts, COOLDOWN_MS, window, (master_launches.journal_hour,))
-    after = master_launches.missed(record, verdicts, COOLDOWN_MS, window, master_launches.DETECTORS)
+    before = master_launches.missed(record, replay(record), window, (master_launches.journal_hour,))
+    after = master_launches.missed(record, replay(record), window, master_launches.DETECTORS)
     assert (before, after) == (12, 0)
+
+
+def test_replay_judges_each_failure_at_the_next_recorded_pass_or_one_interval_later():
+    record = outage()
+    times = failure_times(record)
+    played = replay(record)
+    assert played.pass_after(times[0]) == min(record["passes"][0], times[0] + INTERVAL_MS)
+    assert played.pass_after(times[-1]) == record["passes"][2]
+    assert played.pass_after(record["passes"][-1] + 1) == record["passes"][-1] + 1 + INTERVAL_MS
+
+
+def test_missed_replay_counts_a_failure_the_doctor_never_passed_before_recovery():
+    record = outage()
+    times = failure_times(record)
+    window = (times[0] - 1, times[-1] + 1)
+    late = master_launches.Replay(record["verdicts"], COOLDOWN_MS, 10 * 60 * INTERVAL_MS, ())
+    assert master_launches.missed(record, late, window, master_launches.DETECTORS) == 12
 
 
 def test_missed_replay_ignores_verdicts_given_after_the_failure():
@@ -160,20 +183,36 @@ def test_missed_replay_ignores_verdicts_given_after_the_failure():
     late = {"verdict": {"at": times[-1] + 10**7, "measure": 99, "evidence": []}}
     verdicts = {**record["verdicts"], finding_id: late}
     window = (times[0] - 1, times[-1] + 1)
-    assert master_launches.missed(record, verdicts, COOLDOWN_MS, window, master_launches.DETECTORS) == 0
+    assert master_launches.missed(record, replay(record, verdicts), window, master_launches.DETECTORS) == 0
 
 
 def test_missed_replay_counts_only_failures_inside_the_window():
     record = outage()
     times = failure_times(record)
     window = (times[5] - 1, times[7] + 1)
-    assert master_launches.missed(record, record["verdicts"], COOLDOWN_MS, window, (master_launches.journal_hour,)) == 3
+    assert master_launches.missed(record, replay(record), window, (master_launches.journal_hour,)) == 3
 
 
 def test_missed_replay_refuses_an_unreadable_journal():
     record = {**outage(), "journal": None, "journal_error": "journalctl timed out"}
     with pytest.raises(master_launches.Unavailable, match="journalctl timed out"):
-        master_launches.missed(record, {}, COOLDOWN_MS, (0, 10**14), master_launches.DETECTORS)
+        master_launches.missed(record, replay(record, {}), (0, 10**14), master_launches.DETECTORS)
+
+
+def test_a_failed_row_without_a_retry_is_timed_from_its_attach_not_its_moving_binding_stamp():
+    row = {
+        "id": "a1",
+        "reason": "recycle",
+        "task": "master",
+        "successor": "master@x-2",
+        "at": 100,
+        "attached_at": 200,
+        "binding": {"state": "absent", "at": 900, "session": "master@x-2"},
+    }
+    record = {"slug": "sw", "transfers": [row], "restored": [], "agents": [], "journal": [], "journal_error": ""}
+    restamped = {**record, "transfers": [{**row, "binding": {**row["binding"], "at": 1900}}]}
+    assert [a.at for a in master_launches.attempts(record)] == [200]
+    assert master_launches.findings(record) == master_launches.findings(restamped)
 
 
 def _store_with_outage():
@@ -262,3 +301,25 @@ def test_master_reader_keeps_only_master_agents():
     store.put_agent("rig-grade-swarm", master)
     read = spawn_read.master_records(store, "rig-grade-swarm", run=_journal(record, []))
     assert read["agents"] == [asdict(master)]
+
+
+def test_doctor_passes_reads_the_logged_pass_times():
+    seen = []
+    line = json.dumps({"MESSAGE": "sw-doctor: doctor pass: 3 new findings", "__REALTIME_TIMESTAMP": "5000000"})
+
+    def run(argv, **kwargs):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, line + "\n", "")
+
+    assert spawn_read.doctor_passes("sw-doctor", "@1", "@2", run=run) == (5000,)
+    assert "sw-doctor: doctor pass" in seen[0]
+
+
+def test_doctor_passes_refuses_an_unreadable_journal():
+    from scripts.swarm.store import SwarmError
+
+    def run(argv, **kwargs):
+        raise FileNotFoundError("journalctl")
+
+    with pytest.raises(SwarmError, match="Doctor passes unavailable: FileNotFoundError: journalctl"):
+        spawn_read.doctor_passes("sw-doctor", "@1", "@2", run=run)

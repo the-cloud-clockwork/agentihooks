@@ -16,7 +16,7 @@ MISSED = "master-launch-missed"
 MATCH_MS = 60_000
 JOURNAL_MS = 3_600_000
 ERROR_CHARS = 300
-FAILED = re.compile(r"master spawn failed: (.+)")
+FAILED = re.compile(r"master spawn failed: (.+)", re.S)
 AWAITING = "awaiting-decision"
 PATHS = {"recycle": "recycle handoff", "restore": "native resume"}
 
@@ -33,7 +33,7 @@ class Attempt:
     error: str
 
 
-def sanitize(text):
+def sanitize(text: str) -> str:
     return " ".join(redact(text, mode="strict").split())[:ERROR_CHARS]
 
 
@@ -55,7 +55,7 @@ def _retried(rows):
 
 
 def _failed_at(row, retried):
-    return retried.get(row["id"]) or row["binding"].get("at") or row["at"]
+    return retried.get(row["id"]) or row.get("attached_at") or row["at"]
 
 
 def _take(lines, at, record):
@@ -68,7 +68,7 @@ def _take(lines, at, record):
     return match[2]
 
 
-def attempts(record):
+def attempts(record: dict) -> list[Attempt]:
     """Every failed master launch, oldest first, each with its error or why the error is unavailable."""
     lines, retried = sorted(_lines(record)), _retried(record["transfers"])
     resumes = {o["transfer"]: o for o in record["restored"] if o["lane"] == MASTER and o["outcome"] == AWAITING}
@@ -97,7 +97,7 @@ def _bound(record):
     ]
 
 
-def findings(record):
+def findings(record: dict) -> list[Finding]:
     last_bound = max(_bound(record), default=-1)
     failed = [a for a in attempts(record) if a.at > last_bound]
     if not failed:
@@ -124,7 +124,7 @@ def findings(record):
     ]
 
 
-def as_of(record, at):
+def as_of(record: dict, at: int) -> dict:
     """The record as the Doctor could read it at a moment: later rows, lines and bindings not yet written."""
     retried = _retried(record["transfers"])
 
@@ -142,13 +142,12 @@ def as_of(record, at):
     }
 
 
-def journal_hour(record, at):
-    """The failed-spawn detector as a Doctor pass ran it: master spawn failed lines from the last journal hour."""
+def journal_hour(record: dict, at: int) -> list[Finding]:
     lines = [line["message"] for line in record["journal"] if at - JOURNAL_MS <= line["at"] <= at]
     return spawns.failed({"slug": record["slug"], "actions": lines})
 
 
-def latest(record, at):
+def latest(record: dict, at: int) -> list[Finding]:
     return findings(record)
 
 
@@ -163,16 +162,30 @@ def _shown(finding, stored, at, cooldown_ms):
     return grew and at >= verdict["at"] + cooldown_ms
 
 
-def _covered(record, at, verdicts, cooldown_ms, detectors):
+@dataclass(frozen=True)
+class Replay:
+    """The verdicts as stored, and the Doctor passes the timer logged; a pass with no new finding logs nothing, so
+    the latest a failure waits for a pass is one interval."""
+
+    verdicts: dict
+    cooldown_ms: int
+    interval_ms: int
+    passes: tuple = ()
+
+    def pass_after(self, failed_at: int) -> int:
+        return min([p for p in self.passes if p >= failed_at] + [failed_at + self.interval_ms])
+
+
+def _covered(record, at, replay, detectors):
     return any(
-        _shown(f, verdicts.get(f.id), at, cooldown_ms)
+        _shown(f, replay.verdicts.get(f.id), at, replay.cooldown_ms)
         for detect in detectors
         for f in detect(record, at)
         if f.kind == KIND or f.id == OLD_ID
     )
 
 
-def missed(record, verdicts, cooldown_ms, window, detectors):
+def missed(record: dict, replay: Replay, window: tuple[int, int], detectors: tuple) -> int:
     """Failed master launches inside the window that no detector would put before the Doctor master at the pass
     after the failure, judged against the verdicts given before that pass."""
     if record["journal"] is None:
@@ -182,5 +195,5 @@ def missed(record, verdicts, cooldown_ms, window, detectors):
         1
         for a in attempts(record)
         if since <= a.at <= until
-        and not _covered(as_of(record, a.at + MATCH_MS), a.at + MATCH_MS, verdicts, cooldown_ms, detectors)
+        and not _covered(as_of(record, replay.pass_after(a.at)), replay.pass_after(a.at), replay, detectors)
     )

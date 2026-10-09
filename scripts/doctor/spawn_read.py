@@ -7,7 +7,7 @@ from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from scripts.handoff import transfers
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, SwarmError
 
 if TYPE_CHECKING:
     from scripts.swarm.store import RedisStore
@@ -61,7 +61,8 @@ def master_records(
     *,
     until: str | None = None,
 ) -> dict:
-    journal, error = _master_journal(slug, since, until, run)
+    entries, error = _grep("master spawn failed", since, until, run)
+    journal = None if entries is None else [e for e in entries if e["message"].startswith(f"{slug}: ")]
     return {
         "slug": slug,
         "transfers": [row for row in transfers.list_transfers(store, slug) if row["task"] == MASTER],
@@ -72,7 +73,14 @@ def master_records(
     }
 
 
-def _master_journal(slug, since, until, run):
+def doctor_passes(doctor: str, since: str, until: str, run: Callable = subprocess.run) -> tuple[int, ...]:
+    entries, error = _grep(f"{doctor}: doctor pass", since, until, run)
+    if entries is None:
+        raise SwarmError(f"Doctor passes unavailable: {error}")
+    return tuple(e["at"] for e in entries)
+
+
+def _grep(pattern, since, until, run):
     argv = [
         "journalctl",
         "--user",
@@ -85,7 +93,7 @@ def _master_journal(slug, since, until, run):
         "json",
         "--output-fields=MESSAGE,_PID",
         "-g",
-        "master spawn failed",
+        pattern,
         "--no-pager",
     ]
     try:
@@ -98,5 +106,4 @@ def _master_journal(slug, since, until, run):
     return [
         {"at": int(e["__REALTIME_TIMESTAMP"]) // 1000, "pid": e.get("_PID", ""), "message": e["MESSAGE"]}
         for e in entries
-        if e["MESSAGE"].startswith(f"{slug}: ")
     ], ""
