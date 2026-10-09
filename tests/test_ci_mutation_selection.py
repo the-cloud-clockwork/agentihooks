@@ -146,8 +146,8 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     selection.write_text(
         json.dumps(
             {
-                "scripts/sample.py": {"lines": [2, 5], "tests": ["tests/test_sample.py"]},
-                "hooks/other.py": {"lines": [], "tests": ["tests/test_other.py"]},
+                "scripts/sample.py": {"lines": [2, 5], "tests": ["tests/test_sample.py"], "shard": [1, 3]},
+                "hooks/other.py": {"lines": [], "tests": ["tests/test_other.py"], "shard": [1, 3]},
             }
         )
     )
@@ -296,7 +296,8 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
 
     calls = []
 
-    def selected(filename, source, lines):
+    def selected(filename, source, lines, shard):
+        assert shard == (1, 3)
         calls.append((filename, source, lines))
         return header + "observe()\ngenerated = True\n", ["selected"]
 
@@ -321,18 +322,38 @@ def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_
         Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
     )
     source = "def f(a, b):\n    return (\n        a\n        - b\n    )\n"
-    generated, names = selected_mutants("scripts/sample.py", source, {4})
+    generated, names = selected_mutants("scripts/sample.py", source, {4}, (0, 1))
     assert len(names) == 1
     assert "+ b" in generated
-    generated, names = selected_mutants("scripts/sample.py", source, {1})
+    generated, names = selected_mutants("scripts/sample.py", source, {1}, (0, 1))
     assert names == []
     assert "+ b" not in generated
     source = "def f():\n    return 1\n\ndef g():\n    return 2\n"
-    generated, names = selected_mutants("scripts/sample.py", source, {5})
+    generated, names = selected_mutants("scripts/sample.py", source, {5}, (0, 1))
     assert len(names) == 1
     assert all(name.startswith("x_g__") for name in names)
     with pytest.raises(PragmaParseError, match="scripts/sample.py"):
-        selected_mutants("scripts/sample.py", "# pragma: no mutate end\n", {1})
+        selected_mutants("scripts/sample.py", "# pragma: no mutate end\n", {1}, (0, 1))
+
+
+@pytest.mark.parametrize("total", [2, 3, 5])
+def test_shards_split_whole_functions_and_keep_the_unsharded_mutant_names(monkeypatch, total):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import selected_mutants
+
+    monkeypatch.setattr(
+        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
+    )
+    source = "".join(f"def f{n}(a, b):\n    return a - b + {n} * 2 > 1\n\n\n" for n in range(6))
+    changed = set(range(1, source.count("\n") + 1))
+    _, whole = selected_mutants("scripts/sample.py", source, changed, (0, 1))
+    shares = [selected_mutants("scripts/sample.py", source, changed, (index, total))[1] for index in range(total)]
+    assert sorted(name for share in shares for name in share) == sorted(whole)
+    assert sum(map(len, shares)) == len(whole) > 6
+    functions = [{name.rpartition("__mutmut_")[0] for name in share} for share in shares]
+    assert all(not first & second for i, first in enumerate(functions) for second in functions[i + 1 :])
+    assert all(shares)
 
 
 def test_selection_never_imports_the_mutants_tree_another_worker_is_writing(tmp_path, monkeypatch):
@@ -351,7 +372,7 @@ def test_selection_never_imports_the_mutants_tree_another_worker_is_writing(tmp_
     monkeypatch.syspath_prepend(str(tmp_path / "mutants"))
     for name in ("scripts", "scripts.ci_mutation", "scripts.ci_mutation.report"):
         monkeypatch.delitem(sys.modules, name, raising=False)
-    _, names = selected_mutants("scripts/sample.py", "def f(a, b):\n    return a - b\n", {2})
+    _, names = selected_mutants("scripts/sample.py", "def f(a, b):\n    return a - b\n", {2}, (0, 1))
     assert len(names) == 1
 
 
@@ -584,7 +605,9 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
     monkeypatch.setattr(os, "cpu_count", lambda: requested)
     monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(requested)))
     selection = tmp_path / "selection.json"
-    selection.write_text(json.dumps({"scripts/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]}}))
+    selection.write_text(
+        json.dumps({"scripts/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"], "shard": [0, 1]}})
+    )
     counts = []
     config = SimpleNamespace(source_paths=[], pytest_add_cli_args_test_selection=[])
     data = SimpleNamespace(exit_code_by_key={"selected": None}, load=lambda: None)
