@@ -11,9 +11,23 @@ def test_mean_test_seconds_reads_stored_timings_of_selected_files_only():
     assert plan.mean_test_seconds(durations, ["tests/test_new.py"]) == plan.UNTIMED_TEST_SECONDS
 
 
-@pytest.mark.parametrize(("seconds", "expected"), [(0, 1), (1, 1), (960, 1), (961, 2), (4800, 5), (10**6, 10)])
-def test_shard_count_fills_each_shard_to_its_target_and_stays_within_the_limit(seconds, expected):
-    assert plan.shard_count(seconds, 240, 10) == expected
+@pytest.mark.parametrize(
+    ("seconds", "mutants", "stats", "expected"),
+    [
+        (0, 0, 0, 1),
+        (1, 1, 0, 1),
+        (960, 500, 0, 1),
+        (961, 500, 0, 2),
+        (4800, 500, 0, 5),
+        (4800, 3, 0, 3),
+        (1000, 500, 460, 2),
+        (1001, 500, 460, 3),
+        (10, 500, 960, 10),
+        (10**6, 10**4, 0, 10),
+    ],
+)
+def test_shard_count_fills_each_shard_to_its_target_and_stays_within_the_limit(seconds, mutants, stats, expected):
+    assert plan.shard_count(seconds, mutants, stats, 240, 10) == expected
 
 
 def _project(tmp_path, durations):
@@ -31,15 +45,21 @@ def test_estimate_weighs_each_changed_line_mutant_by_its_selected_test_timings(t
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("mutmut.configuration._config", None)
-    _project(tmp_path, {"tests/test_sample.py::t": 0.4})
+    _project(tmp_path, {"tests/test_sample.py::t1": 0.2, "tests/test_sample.py::t2": 0.6, "tests/test_x.py::t": 9})
     source = (tmp_path / "scripts/sample.py").read_text()
     per_mutant = plan.MUTANT_SECONDS + plan.TEST_WEIGHT * 0.4
     for lines in ({2}, {2, 6}):
         _, mutations = changed_mutations("scripts/sample.py", source, lines)
-        assert plan.estimate(tmp_path, {"scripts/sample.py": lines}) == pytest.approx(len(mutations) * per_mutant)
-    assert plan.estimate(tmp_path, {"scripts/sample.py": {2, 6}}) > plan.estimate(tmp_path, {"scripts/sample.py": {2}})
-    assert plan.estimate(tmp_path, {"scripts/sample.py": {3}}) == 0
-    assert plan.estimate(tmp_path, {"scripts/plain.py": {1}}) == 0
+        seconds, mutants, stats = plan.estimate(tmp_path, {"scripts/sample.py": lines})
+        assert mutants == len(mutations) > 0
+        assert seconds == pytest.approx(mutants * per_mutant)
+        assert stats == pytest.approx(0.8)
+    assert (
+        plan.estimate(tmp_path, {"scripts/sample.py": {2, 6}})[1]
+        > plan.estimate(tmp_path, {"scripts/sample.py": {2}})[1]
+    )
+    assert plan.estimate(tmp_path, {"scripts/sample.py": {3}}) == (0, 0, 0)
+    assert plan.estimate(tmp_path, {"scripts/plain.py": {1}}) == (0, 0, 0)
 
 
 def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
@@ -54,11 +74,13 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
         return {"scripts/sample.py": {2}}
 
     monkeypatch.setattr("scripts.ci_mutation.plan.discover_changes", discover)
-    monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes: 1201)
+    monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes: (1601.4, 50, 0))
     assert plan.main() == 0
     assert calls == [(tmp_path, "base", "HEAD")]
     assert output.read_text() == "shards=[0, 1, 2, 3]\n"
-    assert capsys.readouterr().out == "Estimated mutation seconds: 1201\nMutation shards: 4\n"
+    assert capsys.readouterr().out == (
+        "Changed line mutants: 50\nEstimated mutation seconds: 1601, stats seconds: 0\nMutation shards: 4\n"
+    )
 
 
 def test_main_plans_one_shard_when_nothing_is_mutable(tmp_path, monkeypatch):

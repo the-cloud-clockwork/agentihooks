@@ -290,10 +290,12 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
         "-m",
         "scripts.ci_mutation.selection",
         str(tmp_path / "work/changed-lines.json"),
+        "1",
+        "4",
     ]
     assert json.loads((tmp_path / "work/changed-lines.json").read_text()) == {
-        "hooks/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"], "shard": [1, 4]},
-        "scripts/other.py": {"lines": [3, 4], "tests": ["tests/test_o.py"], "shard": [1, 4]},
+        "hooks/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]},
+        "scripts/other.py": {"lines": [3, 4], "tests": ["tests/test_o.py"]},
     }
     if len(commands) == 2:
         assert commands[1] == [
@@ -301,6 +303,8 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
             "-m",
             "scripts.ci_mutation.report",
             str(tmp_path / "work/results.json"),
+            "1",
+            "4",
             "hooks/sample.py",
             "scripts/other.py",
         ]

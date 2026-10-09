@@ -15,6 +15,8 @@ def main() -> int:
     parser.add_argument("--shard", type=int, default=0)
     parser.add_argument("--shards", type=int, default=1)
     args = parser.parse_args()
+    if not 0 <= args.shard < args.shards:
+        parser.error(f"--shard {args.shard} is outside 0 to {args.shards - 1}")
     os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     root = Path.cwd()
     changes = discover_changes(root, args.base, args.head)

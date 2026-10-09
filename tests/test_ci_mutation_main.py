@@ -1,6 +1,8 @@
 import ast
 from pathlib import Path
 
+import pytest
+
 from scripts.ci_mutation.__main__ import main
 
 
@@ -67,6 +69,17 @@ def test_cli_defaults_and_success(tmp_path, monkeypatch):
     monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", discover)
     monkeypatch.setattr("scripts.ci_mutation.__main__.run_gate", gate)
     assert main() == 0
+
+
+@pytest.mark.parametrize(("shard", "shards"), [("3", "3"), ("-1", "2"), ("0", "0")])
+def test_cli_refuses_a_shard_outside_its_matrix(tmp_path, monkeypatch, capsys, shard, shards):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["gate", "--shard", shard, "--shards", shards])
+    monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", lambda *args: pytest.fail("graded"))
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 2
+    assert f"--shard {shard} is outside 0 to" in capsys.readouterr().err
 
 
 def test_browser_preflight_skips_test_only_changes(tmp_path, monkeypatch, capsys):

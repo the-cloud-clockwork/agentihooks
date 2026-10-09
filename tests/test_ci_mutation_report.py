@@ -158,6 +158,37 @@ def test_report_maps_a_method_mutant_back_to_its_class(tmp_path, monkeypatch):
     assert collect_results(Path("hooks/sample.py"))[0]["lines"] == [3]
 
 
+def test_report_reads_only_the_mutants_its_shard_ran(tmp_path, monkeypatch):
+    import json
+
+    from scripts.ci_mutation.report import collect_results
+
+    for name in ("hooks", "scripts", "mutants/hooks"):
+        (tmp_path / name).mkdir(parents=True)
+    (tmp_path / "hooks/sample.py").write_text("def value(a):\n    return a + 7\n")
+    (tmp_path / "setup.cfg").write_text("[mutmut]\nsource_paths=hooks/\n")
+    (tmp_path / "mutants/hooks/sample.py").write_text(
+        "def x_value__mutmut_orig(a):\n    return a + 7\n"
+        "def x_value__mutmut_1(a):\n    return a - 7\n"
+        "def x_value__mutmut_2(a):\n    return a + 8\n"
+    )
+    meta = {
+        "exit_code_by_key": {"hooks.sample.x_value__mutmut_1": 1, "hooks.sample.x_value__mutmut_2": None},
+        "durations_by_key": {},
+        "estimated_durations_by_key": {},
+    }
+    (tmp_path / "mutants/hooks/sample.py.meta").write_text(json.dumps(meta))
+    monkeypatch.chdir(tmp_path)
+    assert [row["name"] for row in collect_results(Path("hooks/sample.py"))] == [
+        "hooks.sample.x_value__mutmut_1",
+        "hooks.sample.x_value__mutmut_2",
+    ]
+    assert collect_results(Path("hooks/sample.py"), (0, 2)) == [
+        {"name": "hooks.sample.x_value__mutmut_1", "status": "killed", "lines": [], "fingerprint": ""}
+    ]
+    assert [row["status"] for row in collect_results(Path("hooks/sample.py"), (1, 2))] == ["not checked"]
+
+
 @pytest.mark.parametrize("method", [False, True])
 def test_report_maps_overloaded_implementations_instead_of_stubs(tmp_path, monkeypatch, method):
     import json

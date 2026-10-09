@@ -5,13 +5,13 @@ import os
 import re
 import sys
 import tempfile
-import zlib
 from pathlib import Path
 from time import process_time
 
 from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_mutation.report import mutation_lines
+from scripts.ci_mutation.shards import shard_names
 
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 
@@ -37,27 +37,11 @@ def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[ob
     return module, selected
 
 
-def shard_share(filename: str, mutations: list, shard: tuple[int, int]) -> list:
-    index, total = shard
-    groups = {}
-    for mutation in mutations:
-        groups.setdefault(mutation.contained_by_top_level_function, []).append(mutation)
-    # Whole functions stay together so mutmut numbers each mutant as an unsharded run would, keeping clearance keys valid.
-    start = zlib.crc32(filename.encode()) % total
-    order = [(start + step) % total for step in range(total)]
-    loads = [0] * total
-    owner = {}
-    for function, members in sorted(groups.items(), key=lambda item: -len(item[1])):
-        owner[function] = min(order, key=loads.__getitem__)
-        loads[owner[function]] += len(members)
-    return [mutation for mutation in mutations if owner[mutation.contained_by_top_level_function] == index]
-
-
-def selected_mutants(filename: str, source: str, changed: set[int], shard: tuple[int, int]) -> tuple[str, list[str]]:
+def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str, list[str]]:
     from mutmut.mutation.file_mutation import combine_mutations_to_source
 
     module, selected = changed_mutations(filename, source, changed)
-    code, names = combine_mutations_to_source(module, shard_share(filename, selected, shard))
+    code, names = combine_mutations_to_source(module, selected)
     return code, list(names)
 
 
@@ -144,7 +128,7 @@ def worker_count(requested: int) -> int:
     return requested if os.environ.get("CI") else min(requested, 2)
 
 
-def run_selected(selection: Path) -> None:
+def run_selected(selection: Path, shard: tuple[int, int]) -> None:
     from mutmut import __main__ as runner
 
     if not os.environ.get("CI"):
@@ -154,8 +138,7 @@ def run_selected(selection: Path) -> None:
     related = set()
 
     def write_selected(*, out, source, filename):
-        change = changes[str(filename)]
-        code, names = selected_mutants(str(filename), source, set(change["lines"]), tuple(change["shard"]))
+        code, names = selected_mutants(str(filename), source, set(changes[str(filename)]["lines"]))
         bootstrap = (
             "import os as _mutmut_os\n"
             "from pathlib import Path as _mutmut_Path\n"
@@ -229,7 +212,16 @@ def run_selected(selection: Path) -> None:
                 return 1
         return run_tests(self, mutant_name=mutant_name, tests=tests)
 
+    collect_mutants = runner.collect_source_file_mutation_data
+
+    def collect_shard_mutants(*, mutant_names):
+        mutants, by_path = collect_mutants(mutant_names=mutant_names)
+        owned = shard_names([key for _, key, _ in mutants], shard)
+        return [mutant for mutant in mutants if mutant[1] in owned], by_path
+
     runner.collect_or_load_stats = collect_selected_stats
+    # Every shard generates the same mutants, so names and clearance keys match an unsharded run; each runs its share.
+    runner.collect_source_file_mutation_data = collect_shard_mutants
     # The forced fail control passes no tests and would otherwise rerun every selected module.
     runner.PytestRunner.run_tests = run_related_tests
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
@@ -240,4 +232,4 @@ def run_selected(selection: Path) -> None:
 
 
 if __name__ == "__main__":
-    run_selected(Path(sys.argv[1]))
+    run_selected(Path(sys.argv[1]), (int(sys.argv[2]), int(sys.argv[3])))

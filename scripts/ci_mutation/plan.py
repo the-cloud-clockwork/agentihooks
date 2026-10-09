@@ -7,7 +7,7 @@ from pathlib import Path
 from scripts.ci_mutation.scope import discover_changes, select_tests
 from scripts.ci_mutation.selection import changed_mutations
 
-# Fitted on pull request runs: each mutant costs a pytest start plus a few of its covering tests.
+# Fitted on Tests runs 37890680008 and 37877992114: a mutant costs a pytest start plus a few covering tests.
 MUTANT_SECONDS = 3.0
 TEST_WEIGHT = 5.0
 UNTIMED_TEST_SECONDS = 1.0
@@ -20,21 +20,29 @@ def mean_test_seconds(durations: dict[str, float], tests: list[str]) -> float:
     return sum(timings) / len(timings) if timings else UNTIMED_TEST_SECONDS
 
 
-def estimate(root: Path, changes: dict[str, set[int]]) -> float:
+def estimate(root: Path, changes: dict[str, set[int]]) -> tuple[float, int, float]:
     stored = root / ".test_durations"
     durations = json.loads(stored.read_text()) if stored.is_file() else {}
-    seconds = 0.0
+    seconds, mutants, tests = 0.0, 0, set()
     for path, lines in changes.items():
-        tests = select_tests(root, Path(path))
-        if not tests:
+        chosen = select_tests(root, Path(path))
+        if not chosen:
             continue
         _, mutations = changed_mutations(path, (root / path).read_text(), lines)
-        seconds += len(mutations) * (MUTANT_SECONDS + TEST_WEIGHT * mean_test_seconds(durations, tests))
-    return seconds
+        if not mutations:
+            continue
+        tests.update(chosen)
+        mutants += len(mutations)
+        seconds += len(mutations) * (MUTANT_SECONDS + TEST_WEIGHT * mean_test_seconds(durations, chosen))
+    stats = sum(duration for nodeid, duration in durations.items() if nodeid.partition("::")[0] in tests)
+    return seconds, mutants, stats
 
 
-def shard_count(seconds: float, target: float, limit: int) -> int:
-    return max(1, min(limit, math.ceil(seconds / (WORKERS * target))))
+def shard_count(seconds: float, mutants: int, stats: float, target: float, limit: int) -> int:
+    # Every shard repeats the stats run over all selected tests before mutating its share.
+    capacity = WORKERS * target - stats
+    wanted = math.ceil(seconds / capacity) if capacity > 0 else limit
+    return max(1, min(limit, mutants, wanted))
 
 
 def main() -> int:
@@ -45,9 +53,10 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=10)
     args = parser.parse_args()
     root = Path.cwd()
-    seconds = estimate(root, discover_changes(root, args.base, args.head))
-    count = shard_count(seconds, args.target, args.limit)
-    print(f"Estimated mutation seconds: {seconds:.0f}\nMutation shards: {count}")
+    seconds, mutants, stats = estimate(root, discover_changes(root, args.base, args.head))
+    count = shard_count(seconds, mutants, stats, args.target, args.limit)
+    print(f"Changed line mutants: {mutants}\nEstimated mutation seconds: {seconds:.0f}, stats seconds: {stats:.0f}")
+    print(f"Mutation shards: {count}")
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a") as stream:
             stream.write(f"shards={json.dumps(list(range(count)))}\n")

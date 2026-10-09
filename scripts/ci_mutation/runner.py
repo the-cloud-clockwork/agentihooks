@@ -89,16 +89,15 @@ def mutate_files(
     prepare_workspace(root, work, list(selected), tests)
     selection = work / "changed-lines.json"
     selection.write_text(
-        json.dumps(
-            {
-                path: {"lines": sorted(lines), "tests": chosen, "shard": list(shard)}
-                for path, (lines, chosen) in selected.items()
-            }
-        )
+        json.dumps({path: {"lines": sorted(lines), "tests": chosen} for path, (lines, chosen) in selected.items()})
     )
     log = work / "run.log"
+    shard_args = [str(part) for part in shard]
     status = run_process(
-        [sys.executable, "-m", "scripts.ci_mutation.selection", str(selection)], work, deadline - time.monotonic(), log
+        [sys.executable, "-m", "scripts.ci_mutation.selection", str(selection), *shard_args],
+        work,
+        deadline - time.monotonic(),
+        log,
     )
     if status is None:
         return {}, "over budget"
@@ -106,7 +105,7 @@ def mutate_files(
         return {}, f"mutmut failed with exit {status}; see {log}"
     result_path = work / "results.json"
     status = run_process(
-        [sys.executable, "-m", "scripts.ci_mutation.report", str(result_path), *selected],
+        [sys.executable, "-m", "scripts.ci_mutation.report", str(result_path), *shard_args, *selected],
         work,
         deadline - time.monotonic(),
         work / "report.log",
