@@ -39,12 +39,18 @@ STARTED_ROUTES = ("routed", "bare", "direct")
 AUTO = "auto"
 PICKED_LANES = ("eng", "ci")
 PLAN_MODE = ["--permission-mode", "plan"]
-CODEX_PLAN_MODE = [
-    "-c",
-    'permissions.planner={extends=":read-only", network={enabled=true}}',
-    "-c",
-    'default_permissions="planner"',
-]
+
+
+def codex_plan_mode(environ):
+    home = Path(environ.get("HOME") or Path.home())
+    ledger = Path(environ.get("LEDGER_DIR") or home / "development-ledger").expanduser()
+    roots = ", ".join(f'"{root}"="write"' for root in (ledger, home / ".agentihooks", home / "scratchpad"))
+    return [
+        "-c",
+        f'permissions.planner={{extends=":read-only", network={{enabled=true}}, filesystem={{{roots}}}}}',
+        "-c",
+        'default_permissions="planner"',
+    ]
 
 
 def _bin():
@@ -469,7 +475,7 @@ class HerdrRuntime:
             picked = timing.call(model_pick.pick, agent, {} if quota_transfer else chosen, task, environ)
         else:
             picked = _lane_default(lane, agent, {} if quota_transfer else chosen)
-        mode = {"claude": PLAN_MODE, "codex": CODEX_PLAN_MODE}.get(agent, []) if lane == "plan" else []
+        mode = {"claude": PLAN_MODE, "codex": codex_plan_mode(environ)}.get(agent, []) if lane == "plan" else []
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
         if hasattr(self, "_quota_accounts"):

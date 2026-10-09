@@ -1,10 +1,11 @@
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from scripts.swarm.reaper import Outcome
-from scripts.swarm.runtime import CODEX_PLAN_MODE, PLAN_MODE, HerdrRuntime
+from scripts.swarm.runtime import PLAN_MODE, HerdrRuntime, codex_plan_mode
 from scripts.swarm.store import AgentRecord, SwarmConfig
 from tests.swarm.profile_fixture import validated
 
@@ -400,14 +401,23 @@ def test_only_a_claude_planner_starts_in_plan_mode(tmp_path, lane, agent):
     assert "--permission-mode" not in _passed(_spawn_seen(tmp_path, {lane: {"agent": agent}}, lane=lane)["argv"])
 
 
-def test_a_codex_planner_starts_with_a_read_only_repo_and_network(tmp_path):
+def test_a_codex_planner_starts_with_a_read_only_repo_and_network(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", "/h")
+    monkeypatch.setenv("LEDGER_DIR", "/l")
     passed = _passed(_spawn_seen(tmp_path, {"plan": {"agent": "codex"}}, lane="plan")["argv"])
     assert passed[-4:] == [
         "-c",
-        'permissions.planner={extends=":read-only", network={enabled=true}}',
+        'permissions.planner={extends=":read-only", network={enabled=true}, '
+        'filesystem={"/l"="write", "/h/.agentihooks"="write", "/h/scratchpad"="write"}}',
         "-c",
         'default_permissions="planner"',
     ]
+
+
+def test_a_codex_planner_writes_the_default_ledger_folder(monkeypatch):
+    monkeypatch.setenv("HOME", "/h")
+    monkeypatch.delenv("LEDGER_DIR", raising=False)
+    assert '"/h/development-ledger"="write"' in codex_plan_mode(dict(os.environ))[1]
 
 
 @pytest.mark.parametrize(("lane", "agent"), [("eng", "codex"), ("ci", "codex"), ("plan", "claude")])
@@ -723,7 +733,7 @@ def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", e
         }
     runtime.spawn(config, lane, "agent@a1b2c3-0001", task)
     passed = _passed(seen["argv"])
-    for mode in (PLAN_MODE, CODEX_PLAN_MODE):
+    for mode in (PLAN_MODE, codex_plan_mode(dict(os.environ))):
         if passed[-len(mode) :] == mode:
             return passed[: -len(mode)]
     return passed
