@@ -171,6 +171,7 @@ def test_the_node_runtime_has_its_own_cache_so_the_downloads_entry_keeps_its_ver
     assert node["with"]["path"] == "~/.sonar/js/node-runtime"
     assert "${{ steps.proxy.outputs.version }}" in node["with"]["key"]
     assert "if" not in node
+    assert names.index("Start Cloudflare Access proxy") < names.index("Restore the SonarJS Node runtime")
     assert names.index("Restore the SonarJS Node runtime") < names.index("SonarQube Scan")
     assert "node-runtime" not in _step("Restore Sonar downloads")["with"]["path"]
 
