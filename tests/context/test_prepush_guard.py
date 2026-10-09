@@ -4,26 +4,33 @@ import subprocess
 
 import pytest
 
+from hooks.context import prepush_guard
 from hooks.context.prepush_guard import check_prepush
 from hooks.hook_manager import BlockAction
 from scripts import ci_prepush
+
+pytestmark = pytest.mark.usefixtures("outside_a_guarded_repository")
 
 
 def _git(root, *args):
     return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
-@pytest.fixture
-def repo(tmp_path):
-    root = tmp_path / "repo"
-    (root / "scripts" / "ci_prepush").mkdir(parents=True)
-    (root / "scripts" / "ci_prepush" / "__init__.py").write_text("")
+def _init(root, guarded=True):
+    root.mkdir(parents=True)
+    if guarded:
+        (root / "scripts" / "ci_prepush").mkdir(parents=True)
+        (root / "scripts" / "ci_prepush" / "__init__.py").write_text("")
     _git(root, "init", "-q", "-b", "work")
     _git(root, "config", "user.email", "t@example.com")
     _git(root, "config", "user.name", "t")
-    _git(root, "add", "scripts")
-    _git(root, "commit", "-q", "-m", "base")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "base")
     return root
+
+
+@pytest.fixture
+def repo(tmp_path):
+    return _init(tmp_path / "repo")
 
 
 def _bash(command, cwd):
@@ -34,6 +41,13 @@ def _stamp(root):
     ci_prepush.stamp_path(root).write_text(_git(root, "rev-parse", "HEAD") + "\n")
 
 
+def _message(root):
+    return (
+        f"BLOCKED: HEAD in {root} has not passed `python -m scripts.ci_prepush`. "
+        "Run it there, fix what fails, commit, and push once it passes."
+    )
+
+
 @pytest.mark.parametrize(
     "command",
     [
@@ -41,18 +55,41 @@ def _stamp(root):
         "git push -u origin HEAD",
         "git push origin work:work",
         "echo hi && git push --set-upstream origin work",
+        "if true; then git push origin HEAD; fi",
+        "env GIT_TRACE=0 git push origin HEAD",
+        "/usr/bin/git push origin HEAD",
+        "git -c user.name=x push origin HEAD",
+        "git push origin HEAD:work :stale",
+        "git push origin HEAD:feature/diffcheck/x",
     ],
 )
 def test_push_without_a_passing_run_is_blocked(repo, command):
-    with pytest.raises(BlockAction, match="python -m scripts.ci_prepush"):
+    with pytest.raises(BlockAction) as blocked:
         check_prepush(_bash(command, repo))
 
+    assert str(blocked.value) == _message(repo)
 
-def test_push_from_another_directory_resolves_the_repository(repo, tmp_path):
+
+def test_push_from_another_directory_resolves_the_repository(repo, tmp_path, monkeypatch):
+    monkeypatch.setenv("REPO_DIR", str(repo))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for command in (
+        f"cd {repo} && git push",
+        f"git -C {repo} push origin HEAD",
+        "git -C $REPO_DIR push origin HEAD",
+        "git -C ~/repo push origin HEAD",
+        "cd ~/repo && git push",
+        f"git -C {tmp_path} -C repo push",
+    ):
+        with pytest.raises(BlockAction):
+            check_prepush(_bash(command, tmp_path))
+
+
+def test_a_later_push_in_the_same_command_is_checked(repo, tmp_path):
+    other = _init(tmp_path / "other", guarded=False)
+
     with pytest.raises(BlockAction):
-        check_prepush(_bash(f"cd {repo} && git push", tmp_path))
-    with pytest.raises(BlockAction):
-        check_prepush(_bash(f"git -C {repo} push origin HEAD", tmp_path))
+        check_prepush(_bash(f"git -C {other} push && git push origin --delete old && git push", repo))
 
 
 def test_push_of_a_passing_head_is_allowed(repo):
@@ -76,10 +113,15 @@ def test_a_commit_after_the_run_blocks_again(repo):
         "git push origin -d work",
         "git push origin :work",
         "git push origin HEAD:diffcheck/plant",
+        "git push -u origin HEAD:refs/heads/diffcheck/plant",
         "git push --dry-run origin HEAD",
+        "git push -n origin HEAD",
         "git status",
+        "git -C . status",
+        "git",
         "git commit -m 'then git push'",
         "echo git push",
+        "cat <<'EOF' > notes.md\ngit push\nEOF",
     ],
 )
 def test_deletes_plants_dry_runs_and_other_commands_pass(repo, command):
@@ -87,12 +129,20 @@ def test_deletes_plants_dry_runs_and_other_commands_pass(repo, command):
 
 
 def test_a_repository_without_the_command_is_not_guarded(tmp_path):
-    root = tmp_path / "other"
-    root.mkdir()
-    _git(root, "init", "-q")
+    root = _init(tmp_path / "other", guarded=False)
 
     check_prepush(_bash("git push", root))
-    check_prepush(_bash("git push", tmp_path))
+    check_prepush(_bash("git push", tmp_path / "missing"))
+
+
+def test_a_guard_error_lets_the_push_through_and_is_logged(repo, monkeypatch):
+    logged = []
+    monkeypatch.setattr(prepush_guard, "_toplevel", lambda _: (_ for _ in ()).throw(OSError("no git")))
+    monkeypatch.setattr(prepush_guard, "log", lambda *args: logged.append(args))
+
+    check_prepush(_bash("git push", repo))
+
+    assert logged == [("prepush_guard failed", {"error": "no git"})]
 
 
 def test_pre_tool_use_runs_the_guard_on_bash(repo, monkeypatch):

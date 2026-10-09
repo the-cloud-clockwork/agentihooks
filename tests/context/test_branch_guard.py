@@ -3,9 +3,7 @@
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def _outside_a_guarded_repository(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+pytestmark = pytest.mark.usefixtures("outside_a_guarded_repository")
 
 
 class TestBranchGuard:
