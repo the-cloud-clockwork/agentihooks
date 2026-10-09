@@ -121,6 +121,47 @@ def test_a_replayed_event_id_is_spooled_once(box, sink):
     assert sink.rows[0]["state"] == "claimed"
 
 
+def test_a_batch_whose_reply_was_lost_is_resent_under_the_same_event_ids(box, sink):
+    box.append(TASKS, [row("e1"), row("e2")])
+    box.flush(NOW)
+    stored = list(sink.rows)
+    lost = Sink()
+    box.send = lambda settings, query, body: lost.send(settings, query, body) and False
+    box.append(TASKS, [row("e3")])
+    assert box.flush(NOW) == 0
+    box.send = sink.send
+    assert box.flush(NOW) == 1
+    assert [r["event_id"] for r in lost.rows] == ["e3"]
+    assert [r["event_id"] for r in sink.rows] == [*(r["event_id"] for r in stored), "e3"]
+    assert sink.rows[-1] == lost.rows[0]
+
+
+def test_the_create_is_remembered_across_outboxes(tmp_path, sink):
+    first = Outbox(tmp_path / "o.sqlite", SINK, sink.send)
+    first.append(TASKS, [row("e1")])
+    first.flush(NOW)
+    first.close()
+    second = Outbox(tmp_path / "o.sqlite", SINK, sink.send)
+    second.append(TASKS, [row("e2")])
+    second.flush(NOW)
+    second.close()
+    assert [q.split(" ")[0] for q in sink.queries] == ["CREATE", "INSERT", "INSERT"]
+
+
+def test_a_changed_table_is_created_again(tmp_path, sink):
+    box = Outbox(tmp_path / "o.sqlite", SINK, sink.send)
+    box.append(Table("grown"), [{k: row("e1")[k] for k in metrics_outbox.BASE_NAMES}])
+    box.flush(NOW)
+    box.append(
+        Table("grown", (("state", "String"),)), [{k: row("e2")[k] for k in (*metrics_outbox.BASE_NAMES, "state")}]
+    )
+    box.flush(NOW)
+    box.close()
+    creates = [q for q in sink.queries if q.startswith("CREATE")]
+    assert len(creates) == 2
+    assert "state String" in creates[1]
+
+
 def test_one_event_id_may_appear_in_two_tables(box, sink):
     box.append(TASKS, [row("e1")])
     box.append(Table("other"), [{k: row("e1")[k] for k in metrics_outbox.BASE_NAMES}])
@@ -258,8 +299,15 @@ def test_settings_read_url_user_and_password():
         "AGENTIHOOKS_METRICS_PASSWORD": "pw",
     }
     assert metrics_outbox.settings(env) == Settings("http://ch:8123", "writer", "pw")
-    assert metrics_outbox.settings({"AGENTIHOOKS_METRICS_URL": "http://ch:8123"}) == Settings(
-        "http://ch:8123", "default", ""
+    assert metrics_outbox.settings({**env, "AGENTIHOOKS_METRICS_PASSWORD": ""}) == Settings(
+        "http://ch:8123", "writer", ""
+    )
+
+
+def test_settings_are_off_without_a_user():
+    assert metrics_outbox.settings({"AGENTIHOOKS_METRICS_URL": "http://ch:8123"}) is None
+    assert (
+        metrics_outbox.settings({"AGENTIHOOKS_METRICS_URL": "http://ch:8123", "AGENTIHOOKS_METRICS_USER": ""}) is None
     )
 
 
@@ -308,6 +356,11 @@ def test_post_reports_a_refused_insert(server):
     Recorder.status = 500
     settings = Settings(f"http://127.0.0.1:{server.server_port}", "writer", "pw")
     assert metrics_outbox.post(settings, "SELECT 1", b"") is False
+
+
+@pytest.mark.parametrize("url", ["ch:8123", "http://127.0.0.1:port", "http://127.0.0.1:1\n"])
+def test_post_reports_a_malformed_url(url):
+    assert metrics_outbox.post(Settings(url, "w", ""), "SELECT 1", b"") is False
 
 
 def test_post_reports_an_unreachable_sink():
