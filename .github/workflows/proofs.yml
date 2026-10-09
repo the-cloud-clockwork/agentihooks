@@ -50,9 +50,6 @@ jobs:
   worker-image:
     if: inputs.proof == 'worker-image'
     uses: ./.github/workflows/swarm-node-smoke.yml
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   swarm-image:
     if: inputs.proof == 'swarm-image'
