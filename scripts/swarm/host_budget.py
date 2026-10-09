@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from hooks.context import account_sessions
+from scripts.swarm.store import SwarmConfig
 
 MEMORY_PER_AGENT_MB = 700
 LOAD_HIGH = 1.5
@@ -33,11 +34,11 @@ class Room:
     limit: str = ""
 
 
-def thresholds(config) -> Thresholds:
+def thresholds(config: SwarmConfig) -> Thresholds:
     return Thresholds(config.load_high, config.load_low, config.memory_per_agent_mb)
 
 
-def spawn_room(config, sample: HostSample | None, previous: int | None) -> Room:
+def spawn_room(config: SwarmConfig, sample: HostSample | None, previous: int | None) -> Room:
     if sample is None:
         return Room(None, "host unknown: the process files cannot be read, so spawns pass", UNKNOWN)
     return room(sample, thresholds(config), previous)

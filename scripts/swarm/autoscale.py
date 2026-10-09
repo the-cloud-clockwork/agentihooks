@@ -42,8 +42,8 @@ def calculate(
         room -= added
     ceilings["eng"] += room
     harnesses = ", ".join(f"{harness} {seats}" for harness, seats in sorted(free_seats.items()))
-    room = "unknown" if host_room is None else host_room
-    reason = f"Quota seats {seats} ({harnesses}); host room {room}; ceiling {total} of {target}"
+    host_text = "unknown" if host_room is None else host_room
+    reason = f"Quota seats {seats} ({harnesses}); host room {host_text}; ceiling {total} of {target}"
     if target > total:
         reason += (
             f"; raise held at tick {pending['ticks']} of 3"

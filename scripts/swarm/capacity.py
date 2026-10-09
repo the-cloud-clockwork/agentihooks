@@ -237,8 +237,10 @@ class ScaleInputs:
 
 def host_room(config: SwarmConfig, inputs: ScaleInputs) -> dict:
     stored = inputs.previous.get("host") or (inputs.previous.get("autoscale") or {}).get("host") or {}
-    found = host_budget.spawn_room(config, inputs.host(), stored.get("room"))
-    return {"room": found.room, "reason": found.reason, "limit": found.limit}
+    previous = stored["room"] if stored.get("room") is not None else stored.get("last")
+    found = host_budget.spawn_room(config, inputs.host(), previous)
+    host = {"room": found.room, "reason": found.reason, "limit": found.limit}
+    return host if found.room is not None else {**host, "last": previous}
 
 
 def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None) -> tuple[SwarmConfig, dict | None]:

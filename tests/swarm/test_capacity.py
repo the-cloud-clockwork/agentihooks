@@ -1177,6 +1177,7 @@ def test_a_manual_swarm_with_an_unreadable_host_stores_host_unknown(tmp_path, mo
         "room": None,
         "reason": "host unknown: the process files cannot be read, so spawns pass",
         "limit": "unknown",
+        "last": None,
     }
 
 
@@ -1205,8 +1206,31 @@ def test_an_auto_swarm_with_an_unknown_host_scales_on_quota_alone():
     previous = {"ceilings": {"eng": 1, "ci": 0, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}}
     expected = autoscale.calculate(capacity._busy(inputs.agents), free, None, inputs.demand, previous)
     assert decision["pending_raise"] == expected["pending_raise"] == {"target": 13, "ticks": 1}
-    assert "; host room unknown; " in decision["reason"]
-    assert decision["host"]["limit"] == "unknown"
+    assert (
+        decision["reason"]
+        == "Quota seats 10 (claude 6, codex 4); host room unknown; ceiling 1 of 13; raise held at tick 1 of 3."
+    )
+    assert decision["host"] == {
+        "room": None,
+        "reason": "host unknown: the process files cannot be read, so spawns pass",
+        "limit": "unknown",
+        "last": None,
+    }
+
+
+def test_an_unknown_tick_keeps_the_last_known_room_for_the_band_hold():
+    from scripts.swarm.host_budget import HostSample
+
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0)
+    unknown = capacity.ScaleInputs([], [], None, lambda: None, {"host": {"room": 4, "reason": "r", "limit": "load"}})
+    carried = capacity.host_room(config, unknown)
+    assert (carried["room"], carried["last"]) == (None, 4)
+    band = lambda: HostSample(load1=10.0, cpus=8, available_mb=64_000, agents=2)  # noqa: E731
+    after = capacity.host_room(config, capacity.ScaleInputs([], [], None, band, {"host": carried}))
+    assert after == {"room": 4, "reason": after["reason"], "limit": "load"}
+    assert after["reason"] == "one minute load 1.25 per CPU is between the watermarks, the previous room of 4 holds"
+    again = capacity.ScaleInputs([], [], None, lambda: None, {"host": carried})
+    assert capacity.host_room(config, again)["last"] == 4
 
 
 def _scaling_tick(store, ledger, rt, now_ms):

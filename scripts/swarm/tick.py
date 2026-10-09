@@ -59,6 +59,8 @@ SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
 SPAWN_HOLD = "spawn-hold"
+HOST_SPENDS = f"{PREFIX}:host-spends"
+HOST_SETTLE_MS = 2 * 60 * 1000
 # Swarms tick in threads; two placing from one live session count overfill an account.
 PLACING = threading.Lock()
 DOWN_TOLD = "master down told"
@@ -659,23 +661,22 @@ def _held_for_master(slug, store, now_ms):
     return [f"holding spawns: swarm {s} waits on a session slot for its master" for s in others[:1]]
 
 
-def _host_full(slug, store):
+def _host_full(slug, store, now_ms):
     from scripts.swarm import capacity
 
     host = capacity.read(store, slug).get("host") or {}
-    if host.get("room") is None or host["room"] > 0:
+    if host.get("room") is None:
         return ""
-    return f"host {host['limit']}, no room left: {host['reason']}"
+    recent = store.redis.zcount(HOST_SPENDS, now_ms - HOST_SETTLE_MS + 1, "+inf")
+    if recent < host["room"]:
+        return ""
+    minutes = HOST_SETTLE_MS // 60_000
+    return f"host {host['limit']} room {host['room']}, {recent} spawned in the last {minutes} minutes: {host['reason']}"
 
 
-def _spend_host(slug, store):
-    from scripts.swarm import capacity
-
-    decision = capacity.read(store, slug)
-    host = decision.get("host") or {}
-    if host.get("room"):
-        decision["host"] = {**host, "room": host["room"] - 1}
-        store.redis.set(store.key(slug, "quota-capacity"), json.dumps(decision))
+def _spend_host(store, name, now_ms):
+    store.redis.zadd(HOST_SPENDS, {name: now_ms})
+    store.redis.zremrangebyscore(HOST_SPENDS, "-inf", now_ms - HOST_SETTLE_MS)
 
 
 def _hold(slug, store, text):
@@ -688,10 +689,10 @@ def spawn_holds(store, slug):
     return [held] if held else []
 
 
-def _spawn_stop(slug, config, store, runtime):
+def _spawn_stop(slug, config, store, runtime, now_ms):
     if not runtime.has_capacity(config):
         return "every agent is at its session cap, waiting"
-    if host := _host_full(slug, store):
+    if host := _host_full(slug, store, now_ms):
         return _hold(slug, store, f"holding spawns: {host}")
     return ""
 
@@ -712,7 +713,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     for lane, task in _spawn_order(slug, config, store, agents, rows, doc):
         if held:
             return actions + held
-        if stop := _spawn_stop(slug, config, store, runtime):
+        if stop := _spawn_stop(slug, config, store, runtime, now_ms):
             return actions + [stop]
         blocked = _lives_spent(slug, store, ledger, rows, task) or _held_back(slug, ledger, rows, runtime, task, now_ms)
         if blocked:
@@ -776,7 +777,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         store.put_agent(slug, placed_record(record, placed))
         launch_check.begin(store, slug, record, now_ms)
         store.count_spawn(slug, placed.harness)
-        _spend_host(slug, store)
+        _spend_host(store, name, now_ms)
         store.clear_handoff(slug, task["id"])
         store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
         actions.append(f"spawned {name} for {task['id']}")
@@ -959,7 +960,7 @@ def _master(slug, config, store, runtime, now_ms):
     if not runtime.has_capacity(config):
         store.redis.hset(MASTER_WAITING, slug, now_ms)
         return ["no session slot for the master, waiting"]
-    if host := _host_full(slug, store):
+    if host := _host_full(slug, store, now_ms):
         return [_hold(slug, store, f"holding the master spawn: {host}")]
     name = store.next_name(slug, MASTER, now_ms)
     record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, state="starting", seat=seat_address(slug, MASTER))
@@ -989,7 +990,7 @@ def _master(slug, config, store, runtime, now_ms):
             master_start.save(store, slug, {**failed, "name": "", "retry": True})
         return [f"master spawn failed: {exc}"]
     affinity.placed(store, slug, placed.harness)
-    _spend_host(slug, store)
+    _spend_host(store, name, now_ms)
     record = placed_record(record, placed)
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))
