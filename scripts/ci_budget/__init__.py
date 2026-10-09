@@ -20,6 +20,7 @@ BUDGETS = {
     "sonar": 240,
     "coverage-ratchet": 90,
     "queue-baseline": 180,
+    "mutation-plan": 90,
     "mutation": 480,
     "worker-image": 300,
     "swarm-image": 180,

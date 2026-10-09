@@ -145,6 +145,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_dependency_audit.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/browser.py",
+        "scripts/ci_mutation/plan.py",
         "scripts/ci_wiring.py",
         "scripts/packaging/compose-hive-smoke.sh",
         "scripts/packaging/hive-join-smoke.sh",
