@@ -53,3 +53,10 @@ def test_push_keeps_the_configured_route_prefix(transport, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_PUSH_URL", "https://notifications.example/proxyX/")
     assert push.send("alerts", "Host pressure") is True
     assert transport.call_args.args == ("https://notifications.example/proxyX/api/v1/push",)
+
+
+@pytest.mark.parametrize("suffix", ["/api/v1/push", "/api/v1/push/"])
+def test_push_accepts_the_complete_route(transport, monkeypatch, suffix):
+    monkeypatch.setenv("AGENTIHOOKS_PUSH_URL", f"https://notifications.example{suffix}")
+    assert push.send("critical", "Ledger outage") is True
+    assert transport.call_args.args == ("https://notifications.example/api/v1/push",)
