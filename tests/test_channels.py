@@ -237,6 +237,54 @@ class TestBrainAdapter:
         refresh.assert_called_once_with()
         context.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "enabled, session, project, refreshed",
+        [
+            (True, "session", "project context", True),
+            (True, "session", None, False),
+            (True, "", "context", True),
+            (False, "session", "context", True),
+        ],
+    )
+    def test_session_start_refreshes_and_records_the_project(
+        self, enabled, session, project, refreshed, monkeypatch, tmp_path
+    ):
+        from unittest.mock import Mock
+
+        from hooks import config
+        from hooks.context import brain_adapter
+
+        monkeypatch.setattr(config, "BRAIN_ENABLED", enabled)
+        refresh = Mock(return_value=refreshed)
+        resolve = Mock(return_value=object())
+        record = Mock()
+        context = Mock(return_value=project)
+        inject = Mock()
+        monkeypatch.setattr(brain_adapter, "force_refresh", refresh)
+        monkeypatch.setattr("hooks.context.project_identity.resolve_project", resolve)
+        monkeypatch.setattr("hooks.context.project_sessions.record_session", record)
+        monkeypatch.setattr("hooks.context.project_cache.project_context", context)
+        monkeypatch.setattr("hooks.common.inject_context", inject)
+        cwd = str(tmp_path)
+
+        assert brain_adapter.inject_on_session_start(session, cwd) is (refreshed if enabled else False)
+
+        if enabled:
+            refresh.assert_called_once_with()
+        else:
+            refresh.assert_not_called()
+        if enabled and session:
+            resolve.assert_called_once_with(cwd)
+            record.assert_called_once_with(session, resolve.return_value)
+            context.assert_called_once_with(session, cwd)
+        else:
+            for callback in (resolve, record, context):
+                callback.assert_not_called()
+        if enabled and session and project:
+            inject.assert_called_once_with(project, skip_compression=True)
+        else:
+            inject.assert_not_called()
+
     def test_source_failure_preserves_existing_broadcasts(self):
         from hooks.context import brain_adapter
 
