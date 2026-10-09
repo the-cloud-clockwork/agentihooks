@@ -241,7 +241,6 @@ def test_queue_refuses_an_unknown_checked_base(log):
 
 def test_cli_registers_a_checks_wait_after_refreshing(monkeypatch, capsys):
     store = swarm_of("eng")
-    store.redis = object()
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setattr(
