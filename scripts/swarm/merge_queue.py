@@ -75,6 +75,12 @@ def checked_base(repo: str, head: str, run) -> str:
     records = runs["workflow_runs"]
     if not records or records[0]["conclusion"] != "success" or records[0]["head_sha"] != head:
         raise SwarmError("the current pull request head must pass Tests before queueing")
+    artifacts = rest(f"repos/{repo}/actions/runs/{records[0]['id']}/artifacts?per_page=100", run)["artifacts"]
+    named = {match[1] for item in artifacts if (match := re.fullmatch(r"checked-base-([0-9a-f]{40})", item["name"]))}
+    if len(named) > 1:
+        raise SwarmError("cannot establish the base of the green checks")
+    if named:
+        return named.pop()
     jobs = rest(f"repos/{repo}/actions/runs/{records[0]['id']}/jobs?per_page=100", run)["jobs"]
     job = next((job for job in jobs if job["name"] == "test-count (3.11)" and job["conclusion"] == "success"), None)
     if job is None:

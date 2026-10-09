@@ -540,6 +540,28 @@ jobs:
       - *install
       - *use-venv
 
+      # The queue freshness check reads this name, since pull request run metadata can change after the run.
+      - name: Name the checked base
+        id: checked-base
+        if: matrix.python-version == '3.11'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/checked-base"
+          base=$(git rev-parse --verify "$BASE^{commit}")
+          echo "$base" > "$RUNNER_TEMP/checked-base/base.txt"
+          echo "name=checked-base-$base" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the checked base
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.checked-base.outputs.name }}
+          path: ${{ runner.temp }}/checked-base/base.txt
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
       - name: Check out the base revision
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
