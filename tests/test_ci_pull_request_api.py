@@ -45,7 +45,7 @@ def _all_steps():
     for name, job in _all_jobs():
         for key in ("env", "with", "secrets"):
             if isinstance(job.get(key), dict) and TOKEN.search(_values(job[key])):
-                yield name, {"name": f"job {key}", key: job[key]}, ROOT
+                yield name, {"name": f"job {key}", "env": job[key]}, ROOT
         for step in job.get("steps", []):
             action = step.get("uses", "")
             if action.startswith("./.github/actions/"):
