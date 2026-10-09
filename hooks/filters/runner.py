@@ -7,6 +7,7 @@ from pathlib import PurePath
 
 from hooks import classifier
 from hooks.filters import extract, schema
+from hooks.filters.finders import scripts
 
 PURPOSE = "filter"
 YES_LINE = 0.5
@@ -35,16 +36,27 @@ def _applies(spec: schema.FilterSpec, tool_input: dict) -> bool:
     return bool(path) and any(fnmatch.fnmatch(path, glob) or fnmatch.fnmatch(name, glob) for glob in spec.paths)
 
 
-def find(spec: schema.FilterSpec, pieces: list[extract.Piece]) -> list[Finding]:
+def find(spec: schema.FilterSpec, pieces: list[extract.Piece], payload: dict | None = None) -> list[Finding]:
+    payload = payload or {}
     if spec.mode == "classifier":
         return [Finding(p.where, 0, len(p.text), p.text, "whole text") for p in pieces if p.text]
-    return [
-        Finding(piece.where, match.start(), match.end(), match.group(0), finder.reason)
-        for piece in pieces
-        for finder in spec.finders
-        for match in finder.pattern.finditer(piece.text)
-        if match.group(0)
-    ]
+    named = scripts.resolve(payload.get("cwd")) if any(f.script for f in spec.finders) else {}
+    path = extract.target_path(payload.get("tool_input") or {})
+    tool = payload.get("tool_name", "")
+    findings = []
+    for piece in pieces:
+        for finder in spec.finders:
+            if finder.script:
+                findings.extend(
+                    Finding(piece.where, **span) for span in scripts.run(finder.script, named, piece.text, path, tool)
+                )
+            else:
+                findings.extend(
+                    Finding(piece.where, match.start(), match.end(), match.group(0), finder.reason)
+                    for match in finder.pattern.finditer(piece.text)
+                    if match.group(0)
+                )
+    return findings
 
 
 def _intent(spec: schema.FilterSpec, tool_input: dict) -> str:
@@ -141,7 +153,7 @@ def run(entry: dict, step: str, payload: dict) -> dict:
     tool_input = payload.get("tool_input") or {}
     if not isinstance(tool_input, dict) or not _applies(spec, tool_input):
         return _passed()
-    findings = find(spec, extract.pieces(payload.get("tool_name"), tool_input))
+    findings = find(spec, extract.pieces(payload.get("tool_name"), tool_input), payload)
     try:
         confirmed = confirm(entry, spec, payload, findings) if findings else []
     except classifier.ClassifierInputError as error:
