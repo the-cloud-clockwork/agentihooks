@@ -130,12 +130,19 @@ def test_a_malformed_bundle_definition_is_refused_logged_and_falls_back(home, na
     assert _refusal(name) == [[{"model": "definition", "reason": reason}]]
 
 
-def test_a_bundle_question_that_cannot_be_built_is_refused_and_logged(home):
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("instructions", "{missing}", "cannot format classifier question: 'missing'"),
+        ("key", "Finding{index}", "question name 'Finding0' must match ^[a-z][a-z0-9_]{0,63}$"),
+    ],
+)
+def test_a_bundle_question_that_cannot_be_built_is_refused_and_logged(home, field, value, reason):
     package = yaml.safe_load((profile_chain.BUILT_IN_PROFILES / "package" / "classifiers" / "filter.yaml").read_text())
-    package["questions"][0]["instructions"] = "{missing}"
+    package["questions"][0][field] = value
     folder = home / "bundle" / ".claude" / "classifiers"
     folder.mkdir(parents=True)
     (folder / "filter.yaml").write_text(yaml.safe_dump(package))
     with patch.object(profile_chain, "read_state", return_value={"bundle": {"path": str(home / "bundle")}}):
         assert _filter({}) == "refused"
-    assert _refusal("filter") == [[{"model": "definition", "reason": "cannot format classifier question: 'missing'"}]]
+    assert _refusal("filter") == [[{"model": "definition", "reason": reason}]]
