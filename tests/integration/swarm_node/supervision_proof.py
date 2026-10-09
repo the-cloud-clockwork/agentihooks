@@ -336,7 +336,7 @@ def main():
         "package": "SV2-IMG-03",
         "tested_commit": args.tested_commit,
         "proof_commit": proof_commit,
-        "supported_versions": inventory["observed"],
+        "supported_versions": inventory["manifest"]["observed"],
         "mocked": False,
         "fixture_manifest": manifest,
         "startup_network": "none",
