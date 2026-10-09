@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import os
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
@@ -34,7 +35,9 @@ def phase_plan(doc: dict, phase: dict, slug: str) -> dict:
     artifact = (phase.get("plan_ref") or {}).get("artifact", "")
     url = phase.get("plan_url", "")
     current = next((row for row in plans if f"plans/{row['id']}" == phase.get("plan")), None)
-    if current is not None:
+    if current is not None and (
+        not (artifact or url) or current.get("artifact" if artifact else "url") == (artifact or url)
+    ):
         return current
     identity = artifact or url
     existing = next(
@@ -60,7 +63,8 @@ def phase_plan(doc: dict, phase: dict, slug: str) -> dict:
 
 
 def assign_phases(doc: dict, slug: str, conflicts: list) -> None:
-    for phase in doc.get("phases", []):
+    ordered = sorted(doc.get("phases", []), key=lambda row: not bool((row.get("plan_ref") or {}).get("artifact")))
+    for phase in ordered:
         plan = phase_plan(doc, phase, slug)
         address = f"plans/{plan['id']}"
         if phase.get("plan") and phase["plan"] != address:
@@ -75,6 +79,19 @@ def assign_phases(doc: dict, slug: str, conflicts: list) -> None:
 def task_slice(doc: dict, phase: dict, task: dict, conflicts: list) -> None:
     anchor = task.get("plan_slice")
     if not anchor:
+        if task.get("slice"):
+            row = next((item for item in doc["slices"] if f"slices/{item['id']}" == task["slice"]), None)
+            if row is None or row["phase"] != f"phases/{phase['id']}":
+                conflict(conflicts, "task_slice", f"tasks/{task['id']}", task["slice"], "")
+                task.pop("slice")
+        return
+    current = next((item for item in doc["slices"] if f"slices/{item['id']}" == task.get("slice")), None)
+    if (
+        current
+        and current["phase"] == f"phases/{phase['id']}"
+        and current.get("anchor") == anchor
+        and current.get("lines", "") == task.get("plan_lines", "")
+    ):
         return
     identifier = ledger_plans.slice_id(phase["plan"].split("/")[1], anchor)
     address = f"phases/{phase['id']}"
@@ -109,23 +126,64 @@ def assign_tasks(doc: dict, conflicts: list) -> None:
         task_slice(doc, phase, task, conflicts)
 
 
+def assign_unphased(doc: dict, slug: str, conflicts: list) -> None:
+    identifier = f"standalone-{digest(slug)}"
+    phases = doc.setdefault("phases", [])
+    for task in doc.get("tasks", []):
+        if task.get("phase"):
+            continue
+        if not any(row["id"] == identifier for row in phases):
+            phases.append({"id": identifier, "title": "Standalone", "done": False})
+        conflict(conflicts, "missing_phase", f"tasks/{task['id']}", task.get("phase"), f"phases/{identifier}")
+        task["phase"] = identifier
+
+
 def preview(doc: dict, slug: str) -> tuple[dict, dict]:
     after = copy.deepcopy(doc)
     after.setdefault("plans", [])
     after.setdefault("slices", [])
     conflicts = []
+    assign_unphased(after, slug, conflicts)
     assign_phases(after, slug, conflicts)
     assign_tasks(after, conflicts)
     report = {"applied": False, "before": counts(doc), "after": counts(after), "conflicts": conflicts}
     return after, report
 
 
+def commit(repo: store.SQLiteLedgerRepository, slug: str, by: str) -> dict:
+    with repo.domain.LOCK, repo.connect() as connection, connection:
+        connection.execute(store.BEGIN_IMMEDIATE)
+        entry = repo._entry(connection, slug)
+        after, report = preview(entry.state, slug)
+        ledger_plans.validate(after)
+        if any(row["kind"] == "missing_phase" and row["after"] is None for row in report["conflicts"]):
+            raise ValueError(json.dumps(report, sort_keys=True))
+        if after != entry.state:
+            meta = after["_meta"]
+            ctx = repo.domain.Context(meta, repo.domain.now_ms())
+            ctx.record(by, "backfilled", "hierarchy")
+            meta.update(rev=ctx.rev, updated_at=ctx.at)
+            meta["events"] = (meta["events"] + ctx.events)[-repo.domain.EVENTS_KEPT :]
+            written = repo._write(connection, slug, entry, after, ctx.events)
+        else:
+            written = entry
+            hierarchy.sync(connection, slug, after)
+        report["applied"] = True
+        report["drift"] = hierarchy.drift(hierarchy.stored(connection, slug), hierarchy.project(after))
+    repo._remember(slug, written)
+    return report
+
+
 def backfill(repo: store.SQLiteLedgerRepository, slug: str, by: str, apply: bool = False) -> dict:
+    if apply:
+        return commit(repo, slug, by)
     with store.read_only(repo.path.parent) as connection:
         if connection is None:
             raise store.Missing(slug)
         connection.execute("BEGIN")
-        doc = repo._entry(connection, slug).state
+        doc = store.assemble(store.read_rows(connection, slug))
+        if "_meta" not in doc:
+            raise store.Missing(slug)
         _, report = preview(doc, slug)
         report["drift"] = hierarchy.drift(hierarchy.stored(connection, slug), hierarchy.project(doc))
     return report
@@ -136,4 +194,7 @@ def run(args) -> None:
 
     if ledger_link.remote():
         raise SystemExit("hierarchy backfill must run on the local ledger host")
-    print(json.dumps(backfill(repository, args.slug, args.name, args.apply), sort_keys=True))
+    by = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    if args.apply and not by:
+        raise SystemExit("--as is required to apply the hierarchy backfill")
+    print(json.dumps(backfill(repository, args.slug, by, args.apply), sort_keys=True))
