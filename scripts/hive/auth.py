@@ -30,7 +30,7 @@ def _digest(secret: str) -> str:
 
 
 def invite(redis: "Redis", name: str) -> str:
-    code = secrets.token_urlsafe(16)
+    code = secrets.token_hex(16)
     redis.set(f"{PREFIX}:invite:{_digest(code)}", name, ex=INVITE_TTL_S)
     return code
 
