@@ -25,7 +25,7 @@ def test_columns_reach_the_window_bottom_in_both_views_after_a_pane_resize_and_a
     page.tab.set_viewport_size({"width": size[0], "height": size[1]})
     views_reach_the_bottom(page)
     page.drag("height", "health-box", dy=120)
-    saved(("health-box",))
+    saved(("health-box",), page)
     views_reach_the_bottom(page)
     page.reload()
     views_reach_the_bottom(page)
