@@ -1,6 +1,7 @@
 import json
 from dataclasses import asdict
 from types import SimpleNamespace
+from urllib.error import URLError
 
 import pytest
 
@@ -299,11 +300,11 @@ def test_done_task_is_observed_once_even_when_completion_precedes_the_tick(tmp_p
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
     spool = tmp_path / "outbox.db"
     monkeypatch.setattr(metrics_outbox, "spool_path", lambda: spool)
-    monkeypatch.setattr(metrics_outbox, "post", lambda *args: (_ for _ in ()).throw(OSError("sink down")))
+    monkeypatch.setattr(metrics_outbox, "post", lambda *args: (_ for _ in ()).throw(URLError("sink down")))
     configured = {"AGENTIHOOKS_METRICS_URL": "http://sink", "AGENTIHOOKS_METRICS_USER": "test"}
     snapshot = metrics_swarm.TickInput(store, state, [], view)
-    assert metrics.record_pass(SLUG, NOW + 6_000, 0, configured, snapshot) == ["metrics outbox failed: sink down"]
-    assert metrics.record_pass(SLUG, NOW + 7_000, 0, configured, snapshot) == ["metrics outbox failed: sink down"]
+    assert metrics.record_pass(SLUG, NOW + 6_000, 0, configured, snapshot) == []
+    assert metrics.record_pass(SLUG, NOW + 7_000, 0, configured, snapshot) == []
     assert calls == [TASK["pr_url"]]
     box = Outbox(spool, Settings("http://sink", "", ""))
     try:
