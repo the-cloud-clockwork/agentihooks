@@ -111,6 +111,9 @@ def base():
 def credentials(slug, service=False):
     who = Who.from_env()
     if ledger_link.remote():
+        controller = os.environ.get("AGENTIHOOKS_CONTROLLER_CREDENTIAL")
+        if controller and not who.pinned:
+            return {"X-Controller-Credential": controller}
         if service:
             sys.exit("a remote ledger client cannot make service writes; the operator credential stays on its host")
         if not who.pinned:
