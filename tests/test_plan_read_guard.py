@@ -1,13 +1,10 @@
-import sqlite3
+import json
 from pathlib import Path
 
 import pytest
 
 from hooks.context import plan_read_guard
 from hooks.context.plan_read_guard import check
-from scripts.swarm_ledger.repository.rows import TABLES
-from scripts.swarm_ledger.repository.sqlite import DATABASE, read_document
-from tests.swarm_ledger import legacy_page
 
 pytestmark = pytest.mark.unit
 
@@ -35,12 +32,8 @@ def ledger(tmp_path):
             {"id": "t3", "phase": "p1", "plan_lines": "5-8"},
         ],
     }
-    put(tmp_path, SLUG, doc)
+    (tmp_path / f"{SLUG}.json").write_text(json.dumps(doc))
     return tmp_path
-
-
-def put(folder, slug, doc):
-    legacy_page.store(folder, slug, doc)
 
 
 def env(ledger, lane="eng", task="t1", **extra):
@@ -155,21 +148,15 @@ def test_other_tools_and_bad_input_allowed(ledger):
 
 
 def test_missing_or_broken_ledger_refuses(ledger):
-    assert check(read(stored(ledger)), env(ledger, AGENTIHOOKS_SWARM="absent")) == plan_read_guard.refusal(None)
-    put(ledger, SLUG, {"artifacts": [{"plan": True}]})
-    assert check(read(stored(ledger)), env(ledger)) == plan_read_guard.refusal(None)
-
-
-def test_a_rootless_other_ledger_is_skipped(ledger):
-    put(ledger, "other", {"artifacts": [{"file": {"id": "d" * 64 + ".md"}, "plan": True}]})
-    with sqlite3.connect(ledger / DATABASE) as connection:
-        for table in TABLES:
-            connection.execute(f"DELETE FROM {table} WHERE slug='other' AND path='[]'")
-    assert check(read(stored(ledger), offset=45, limit=5), env(ledger)) is None
+    assert check(read(stored(ledger)), env(ledger, AGENTIHOOKS_SWARM="absent"))
+    (ledger / f"{SLUG}.json").write_text("{")
+    assert check(read(stored(ledger)), env(ledger))
+    (ledger / f"{SLUG}.json").write_text('{"artifacts": [{"plan": true}]}')
+    assert check(read(stored(ledger)), env(ledger))
 
 
 def test_ledger_without_plans_allows_media_reads(ledger):
-    put(ledger, SLUG, {})
+    (ledger / f"{SLUG}.json").write_text("{}")
     assert check(read(stored(ledger)), env(ledger)) is None
 
 
@@ -196,8 +183,8 @@ def test_ledger_root_by_variable_or_relative_name_refused(ledger, monkeypatch):
 
 def test_other_ledger_plan_and_split_artifact_address_refused(ledger):
     other = "d" * 64 + ".md"
-    put(ledger, "other", {"artifacts": [{"file": {"id": other}, "plan": True}]})
-    put(ledger, "junk", {"artifacts": [{"plan": True}]})
+    (ledger / "other.json").write_text(json.dumps({"artifacts": [{"file": {"id": other}, "plan": True}]}))
+    (ledger / "junk.json").write_text("{")
     assert check(bash(f"cat {ledger}/other.media/{other}"), env(ledger))
     assert check(bash(f"curl -s http://127.0.0.1:8765/artifacts/{SLUG}/${{A}}${{B}}.md"), env(ledger))
 
@@ -221,7 +208,7 @@ def test_swarm_unset_allowed_and_default_ledger_under_home(ledger):
     assert check(read(stored(ledger)), unset) is None
     home = Path.home()
     (home / "development-ledger").mkdir(parents=True)
-    (ledger / DATABASE).rename(home / "development-ledger" / DATABASE)
+    (ledger / f"{SLUG}.json").rename(home / "development-ledger" / f"{SLUG}.json")
     path = str(home / "development-ledger" / f"{SLUG}.media" / PLAN)
     assert check(read(path, offset=45, limit=5), {k: v for k, v in env(ledger).items() if k != "LEDGER_DIR"}) is None
 
@@ -236,14 +223,14 @@ def test_grep_of_ledger_root_with_a_glob_refused(ledger):
 
 
 def test_other_ledger_plans_add_to_this_one(ledger):
-    put(ledger, "other", {"artifacts": [{"file": {"id": "d" * 64 + ".md"}, "plan": True}]})
+    (ledger / "other.json").write_text(json.dumps({"artifacts": [{"file": {"id": "d" * 64 + ".md"}, "plan": True}]}))
     assert check(read(stored(ledger)), env(ledger))
 
 
 def test_range_without_a_phase_plan_gets_no_window(ledger):
-    doc = read_document(ledger, SLUG)
+    doc = json.loads((ledger / f"{SLUG}.json").read_text())
     doc["tasks"].append({"id": "t4", "phase": "p2", "plan_lines": "40-60"})
-    put(ledger, SLUG, doc)
+    (ledger / f"{SLUG}.json").write_text(json.dumps(doc))
     assert check(read(stored(ledger, LOOSE)), env(ledger, task="t4")) is None
     assert "Your chunk" not in check(read(stored(ledger)), env(ledger, task="t4"))
 

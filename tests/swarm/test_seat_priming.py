@@ -28,7 +28,7 @@ def test_the_successor_prompt_carries_the_chain_in_order(monkeypatch):
     order = [text.index(part) for part in ("handoff doc text", "latest recap text", "learned note text")]
     assert order == sorted(order) and order[-1] < text.index("older recap text")
     assert "eng-1@sw" in text
-    assert text.index("older recap text") < text.index("agentihooks ledger --slug sw show")
+    assert text.index("older recap text") < text.index("~/development-ledger/sw.json")
 
 
 def test_a_missing_recap_is_named_in_the_prompt():

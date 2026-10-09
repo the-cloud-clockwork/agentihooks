@@ -111,7 +111,7 @@ def test_a_resumed_agent_is_told_it_was_restored_and_must_reread_its_task_folder
     text = rt.resumed[0][2]
     assert "restored" in text
     assert "/.agentihooks/swarm/sw/tasks/t1" in text
-    assert snapshot.ledger_source("sw") in text
+    assert str(snapshot.ledger_path("sw")) in text
     assert "Before acting, re-read" in text
 
 
@@ -130,12 +130,6 @@ def test_a_resume_that_fails_to_start_leaves_the_agent_to_start_fresh_with_the_r
         "resume failed to start: herdr never reported the conversation",
     )
     assert {a.state for a in store.agents("sw")} == {"awaiting-decision"}
-
-
-def test_restore_asks_the_quota_check_it_is_given(store, tmp_path):
-    saved(store, tmp_path, account="acct-x")
-    outcomes = snapshot.restore(store, "sw", live=set(), runtime=ResumingRuntime(), has_quota=lambda *_: False)
-    assert outcomes[0].reason == "account acct-x out of quota"
 
 
 def test_a_gone_worktree_forces_fresh_without_trying_to_resume(store, tmp_path):

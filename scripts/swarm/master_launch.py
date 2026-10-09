@@ -8,7 +8,7 @@ from scripts.handoff import transfers
 from scripts.inbox.seats import seat_address
 from scripts.swarm import affinity, effort_range, launch_check, master_start, model_pick
 from scripts.swarm.resume import blocker
-from scripts.swarm.snapshot import ledger_source
+from scripts.swarm.snapshot import ledger_path
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import placed_record, primed
@@ -25,7 +25,7 @@ OFFER = "Start a new master instead? [y/N] "
 NONE_RECORDED = "no earlier master is recorded"
 RESUMED = (
     "The operator brought you back with agentihooks swarm {slug} master up as {name}, the master of this swarm. "
-    "Time passed and other agents may have moved the work. Before acting, re-read the ledger with {ledger} and your "
+    "Time passed and other agents may have moved the work. Before acting, re-read the ledger {ledger} and your "
     "inbox, then continue as master."
 )
 RECORD_FIELDS = {f.name for f in fields(AgentRecord)}
@@ -102,7 +102,7 @@ def _resume(store, slug, runtime, at, previous):
     config = store.ensure_code(slug)
     seat = seat_address(slug, MASTER)
     agent = replace(previous.agent, task=MASTER, seat=seat, profile=previous.agent.profile or _profile(config))
-    text = RESUMED.format(slug=slug, name=agent.name, ledger=ledger_source(slug))
+    text = RESUMED.format(slug=slug, name=agent.name, ledger=ledger_path(slug))
     placed = runtime.resume(config, agent, text)
     store.seats.occupy(seat, agent.name, at)
     record = replace(

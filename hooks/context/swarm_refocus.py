@@ -57,7 +57,7 @@ def refocus_context(session_id, event, environ=None):
     binding = _binding(env)
     if not (binding and session_id):
         return ""
-    ledger = _read_ledger(_ledger_dir(env), *binding)
+    ledger = _read_json(_ledger_dir(env) / f"{binding[0]}.json")
     block = (
         build_block(ledger, binding[1], _int(env, "AGENTIHOOKS_REFOCUS_MAX_CHARS", DEFAULT_MAX_CHARS)) if ledger else ""
     )
@@ -102,13 +102,6 @@ def _int(env, name, default):
 
 def _clip(text, limit):
     return text if len(text) <= limit else text[: max(0, limit - 1)].rstrip() + "…"
-
-
-def _read_ledger(folder, slug, task_id):
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
-
-    focus = ("priorities",) if task_id == "master" else (f"tasks/{task_id}",)
-    return read_ledger(folder, slug, "title", "overview", "phases", *focus)
 
 
 def _read_json(path):

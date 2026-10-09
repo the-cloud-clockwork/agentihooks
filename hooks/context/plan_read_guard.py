@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shlex
@@ -110,18 +111,20 @@ def _names_folder(text: str, root: Path) -> bool:
 
 
 def _plans(env, slug: str):
-    from scripts.swarm_ledger.repository.sqlite import read_ledger, read_ledgers
-
-    root, task_id = _ledger_dir(env), env.get("AGENTIHOOKS_SWARM_TASK")
-    doc = read_ledger(root, slug, "artifacts", "phases", *([f"tasks/{task_id}"] if task_id else []))
+    root = _ledger_dir(env)
+    doc = _load(root / f"{slug}.json")
     plans = _plan_ids(doc)
-    for other, found in read_ledgers(root, "artifacts").items():
-        if other != slug:
+    for path in root.glob("*.json"):
+        if path.stem != slug:
             try:
-                plans |= _plan_ids(found)
-            except (KeyError, TypeError, AttributeError):
+                plans |= _plan_ids(_load(path))
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
                 continue
-    return plans, _window(doc, task_id)
+    return plans, _window(doc, env.get("AGENTIHOOKS_SWARM_TASK"))
+
+
+def _load(path: Path) -> dict:
+    return json.loads(path.read_bytes())
 
 
 def _plan_ids(doc: dict) -> set[str]:

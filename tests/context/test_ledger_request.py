@@ -1,8 +1,8 @@
+import json
+
 import pytest
 
 from hooks.context import conditions, ledger_request, operator_words
-from scripts.swarm_ledger.repository.sqlite import DATABASE
-from tests.swarm_ledger import legacy_page
 
 pytestmark = pytest.mark.unit
 
@@ -23,7 +23,7 @@ def ledger(tmp_path):
             "tasks": [{"id": "t0", "comments": list(other)}, {"id": "t1", "comments": comments, **task}],
             "_meta": {"members": members},
         }
-        legacy_page.store(folder, "demo", doc)
+        (folder / "demo.json").write_text(json.dumps(doc))
         return env
 
     return write
@@ -104,7 +104,7 @@ def test_a_session_without_its_swarm_task_or_ledger_finds_nothing(ledger, tmp_pa
     assert find({k: v for k, v in env.items() if k != "AGENTIHOOKS_SWARM_TASK"}) is None
     assert find({**env, "AGENTIHOOKS_SWARM": ""}) is None
     assert find({**env, "AGENTIHOOKS_SWARM": "other"}) is None
-    (tmp_path / "ledgers" / DATABASE).unlink()
+    (tmp_path / "ledgers" / "demo.json").write_text("{not json")
     assert find(env) is None
 
 
@@ -113,16 +113,6 @@ def test_the_ledger_folder_defaults_to_the_home_development_ledger(tmp_path, mon
     folder.mkdir(parents=True)
     monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path / "home"))
     tasks = [{"id": "t1", "comments": [comment("c-1", REQUEST)]}]
-    legacy_page.store(folder, "demo", {"tasks": tasks, "_meta": {"members": {}}})
+    (folder / "demo.json").write_text(json.dumps({"tasks": tasks, "_meta": {"members": {}}}))
     env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_SWARM_TASK": "t1"}
     assert find(env) == ("ledger", "c-1")
-
-
-def test_the_ledger_read_takes_members_and_the_bound_task_or_every_task(ledger):
-    env = ledger([])
-    members = {"_meta": {"members": {MASTER: {"role": "orchestrator"}, "eng-1@demo": {"role": "member"}}}}
-    assert ledger_request._ledger(env) == dict(members, tasks=[{"id": "t1", "comments": []}])
-    unbound = {key: value for key, value in env.items() if key != "AGENTIHOOKS_SWARM_TASK"}
-    assert ledger_request._ledger(unbound) == dict(
-        members, tasks=[{"id": "t0", "comments": []}, {"id": "t1", "comments": []}]
-    )

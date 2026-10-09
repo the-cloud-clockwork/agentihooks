@@ -87,7 +87,7 @@ def _new_ledger():
 
 
 def _path(slug):
-    return _new_ledger().ledger_link.page_url(slug)
+    return str(_new_ledger().core.paths(slug)[1])
 
 
 def _create_ledger(doctor, slug, title):

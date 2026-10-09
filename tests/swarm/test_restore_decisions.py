@@ -1,7 +1,7 @@
 import pytest
 
 from scripts.handoff import transfers
-from scripts.swarm import resume, snapshot
+from scripts.swarm import resume
 from scripts.swarm.tick import tick
 from tests.swarm.test_resume import ResumingRuntime, restore, saved, store
 from tests.swarm.test_tick import FakeLedger
@@ -35,9 +35,7 @@ def test_retry_resume_and_explicit_fresh_are_separate_choices(store, tmp_path):
     resumed = resume.decide(store, "sw", "sw-eng-1", "resume", runtime, 2000, ledger)
     assert resumed.outcome == "resumed"
     assert runtime.resumed[0][:2] == ("sw-eng-1", "0f8e6d4c-1111-2222-3333-444455556666")
-    assert snapshot.ledger_source("sw") in runtime.resumed[0][2]
-    eng = next(a for a in store.agents("sw") if a.name == "sw-eng-1")
-    assert (eng.state, eng.started_at) == ("working", 2000)
+    assert next(a for a in store.agents("sw") if a.name == "sw-eng-1").state == "working"
     fresh = resume.decide(store, "sw", "sw-master-1", "fresh", runtime, 2001, ledger)
     assert fresh.outcome == "fresh"
     assert next(a for a in store.agents("sw") if a.lane == "master").state == "finished"

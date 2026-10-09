@@ -8,6 +8,7 @@ marked finished, so the next tick retires it, reopens its task and primes the su
 """
 
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -83,17 +84,8 @@ def recreate(store, slug, live):
         store.drop_agent(slug, agent.name)
 
 
-def ledger_source(slug):
-    """How an agent reads the ledger, as its prompts name it."""
-    from scripts.swarm.prompt import ledger_read
-
-    return ledger_read(slug)
-
-
-def stored_ledger(slug):
-    from scripts.swarm_ledger.repository import repository
-
-    return repository.export_document(slug) if repository.exists(slug) else None
+def ledger_path(slug):
+    return Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser() / f"{slug}.json"
 
 
 def worktrees(repo, names, run=subprocess.run):
@@ -110,12 +102,13 @@ def worktrees(repo, names, run=subprocess.run):
 
 def take(store, slug, now_ms, run=subprocess.run, target=None):
     config, state = store.config(slug), store.export(slug)
+    ledger = ledger_path(slug)
     doc = {
         "version": VERSION,
         "slug": slug,
         "taken_at": now_ms,
         "state": state,
-        "ledger": stored_ledger(slug),
+        "ledger": json.loads(ledger.read_text(encoding="utf-8")) if ledger.exists() else None,
         "worktrees": worktrees(config.repo, [a.name for a in store.agents(slug)], run),
     }
     target = target or path(slug)
@@ -140,10 +133,9 @@ def restore(store, slug, live, source=None, runtime=None, has_quota=resume.accou
         raise SwarmError(f"swarm {slug} still has live agents ({', '.join(running)}); stop it with stop --now first")
     store.restore(slug, doc["state"])
     store.update(slug, state="paused")
-    if doc["ledger"] is not None:
-        from scripts.swarm_ledger.repository import repository
-
-        if not repository.exists(slug):
-            repository.import_document(slug, doc["ledger"])
+    ledger = ledger_path(slug)
+    if doc["ledger"] is not None and not ledger.exists():
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_text(json.dumps(doc["ledger"]), encoding="utf-8")
     now_ms = int(time.time() * 1000) if now_ms is None else now_ms
-    return resume.reopen(store, slug, doc["worktrees"], runtime, now_ms, ledger_source(slug), has_quota)
+    return resume.reopen(store, slug, doc["worktrees"], runtime, now_ms, ledger, has_quota)

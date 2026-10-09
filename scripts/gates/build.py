@@ -5,6 +5,7 @@ task's territory on the ledger. Every edit before that verdict is refused. The t
 file outside any git work tree are exempt. An unchecked verdict lets every edit through, counted in the gate log.
 """
 
+import json
 import os
 import re
 import subprocess
@@ -56,17 +57,20 @@ def git_root(path):
 
 
 def task_territory(ledger_dir, slug, task):
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
-
-    doc = read_ledger(ledger_dir, slug, f"tasks/{task}") or {}
+    try:
+        doc = json.loads((Path(ledger_dir) / f"{slug}.json").read_text())
+    except (OSError, ValueError):
+        return []
     row = next((t for t in doc.get("tasks", []) if isinstance(t, dict) and t.get("id") == task), {})
     return list(row.get("territory") or [])
 
 
 def task_ids(ledger_dir: Path, slug: str) -> tuple[str, ...]:
-    from scripts.swarm_ledger.repository.sqlite import read_ids
-
-    return read_ids(ledger_dir, slug, "tasks")
+    try:
+        doc = json.loads((ledger_dir / f"{slug}.json").read_text())
+    except (OSError, ValueError):
+        return ()
+    return tuple(task["id"] for task in doc.get("tasks", []))
 
 
 def _git_commits(command, cwd):

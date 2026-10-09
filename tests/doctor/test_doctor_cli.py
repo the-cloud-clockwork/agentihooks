@@ -12,7 +12,6 @@ from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.status import status_report
 from scripts.swarm.store import RedisStore, SwarmError
-from scripts.swarm_ledger import ledger_link
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeRuntime
 
@@ -114,9 +113,9 @@ def test_a_proof_doctor_on_a_scratch_folder_needs_its_own_redis(env, monkeypatch
 def test_start_links_both_ledgers_starts_the_doctor_and_registers_peer_masters(env):
     store, rt, tmp = env
     assert doctor.main([WATCHED, "start"]) == 0
-    assert state(DOCTOR)["sources"] == [ledger_link.page_url(WATCHED)]
+    assert state(DOCTOR)["sources"] == [str(tmp / f"{WATCHED}.json")]
     assert state(DOCTOR)["size"] == "swarm"
-    assert state(WATCHED)["sources"] == [ledger_link.page_url(DOCTOR)]
+    assert state(WATCHED)["sources"] == [str(tmp / f"{DOCTOR}.json")]
     assert len(pointers(WATCHED)) == 1
     config = store.config(DOCTOR)
     assert (config.template, config.max_eng, config.max_ci) == ("doctor", 1, 0)
@@ -159,8 +158,8 @@ def test_start_on_a_ledger_name_at_the_swarm_name_limit_builds_a_valid_unique_do
     assert all(swarm_cli.SLUG_RE.match(slug) and slug.endswith("-doctor") for slug in doctors)
     long_doctor = store.peer(LONG)
     assert store.peer(long_doctor) == LONG
-    assert state(long_doctor)["sources"] == [ledger_link.page_url(LONG)]
-    assert state(LONG)["sources"] == [ledger_link.page_url(long_doctor)]
+    assert state(long_doctor)["sources"] == [str(tmp / f"{LONG}.json")]
+    assert state(LONG)["sources"] == [str(tmp / f"{long_doctor}.json")]
     [(name, task)] = [(n, t) for n, t in rt.masters if store.names.slug_of(n) == long_doctor]
     assert f"agentihooks doctor {LONG} verdict" in prompt.build_master(long_doctor, "/repo", name, task)
     capsys.readouterr()

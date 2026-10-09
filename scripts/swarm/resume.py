@@ -49,7 +49,7 @@ def blocker(agent, worktree, exists=os.path.isdir, has_quota=account_quota):
 
 
 def restored_text(slug, agent, ledger):
-    sources = f"the ledger, printed by {ledger}"
+    sources = f"the ledger {ledger}"
     if agent.lane != MASTER:
         folder = ledger_workspace.folder(slug, agent.task)
         sources = f"your task folder {folder} (steering.md, progress.md, proof.md) and {sources}"
@@ -144,7 +144,7 @@ def decide(store, slug: str, name: str, choice: str, runtime, now_ms: int, ledge
             transfer=previous["transfer"],
         )
     elif choice == "resume":
-        from scripts.swarm.snapshot import ledger_source
+        from scripts.swarm.snapshot import ledger_path
 
         worktrees = json.loads(store.redis.get(store.key(slug, "restore-worktrees")) or "{}")
         worktree = store.config(slug).repo if agent.lane == MASTER else worktrees.get(name, "")
@@ -153,7 +153,7 @@ def decide(store, slug: str, name: str, choice: str, runtime, now_ms: int, ledge
             slug,
             agent,
             worktree,
-            RestoreContext(runtime, now_ms, ledger_source(slug)),
+            RestoreContext(runtime, now_ms, ledger_path(slug)),
             transfers.get(store, slug, previous["transfer"]),
         )
     else:

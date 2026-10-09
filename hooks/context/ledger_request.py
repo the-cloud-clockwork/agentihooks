@@ -1,17 +1,20 @@
 """The operator's request on a swarm agent's own task: his comment on the ledger page, or the master's relay of
 words he typed in the master pane, honoured until that task is done or cancelled."""
 
+import json
 import os
+from pathlib import Path
 
 
 def _ledger(env):
-    from scripts.swarm_ledger.repository.folder import ledger_folder
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
-
-    slug, task_id = env.get("AGENTIHOOKS_SWARM"), env.get("AGENTIHOOKS_SWARM_TASK")
+    slug = env.get("AGENTIHOOKS_SWARM")
     if not slug:
         return {}
-    return read_ledger(ledger_folder(env), slug, "_meta.members", f"tasks/{task_id}" if task_id else "tasks") or {}
+    folder = Path(env.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
+    try:
+        return json.loads((folder / f"{slug}.json").read_bytes())
+    except (OSError, ValueError):
+        return {}
 
 
 def _closed(task):

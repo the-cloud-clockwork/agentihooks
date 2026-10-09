@@ -568,7 +568,7 @@ def test_a_resumed_master_without_launch_facts_keeps_its_own(up):
     assert store.seats.history("master@sw")[-1]["at"] == AT
     assert rt.configs == ["sw"]
     text = rt.resumed[0][4]
-    assert f"agentihooks swarm sw master up as {name}" in text and master_launch.ledger_source("sw") in text
+    assert f"agentihooks swarm sw master up as {name}" in text and str(master_launch.ledger_path("sw")) in text
     assert launched == master_launch.Launched(name, "w2:m4", "master@sw", master_launch.LAST)
 
 
