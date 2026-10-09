@@ -7,13 +7,11 @@ from dataclasses import dataclass, replace
 from pathlib import PurePath
 
 from hooks import classifier
+from hooks.classifier import definitions, runner
 from hooks.filters import extract, rounds, schema
 from hooks.filters.finders import scripts
 
 PURPOSE = "filter"
-YES_LINE = 0.5
-TRUE = "yes, the finding goes against the intent"
-FALSE = "no, the finding is fine"
 
 
 @dataclass(frozen=True)
@@ -76,14 +74,11 @@ def _intent(spec: schema.FilterSpec, tool_input: dict) -> str:
     return value if isinstance(value, str) and value else spec.intent
 
 
-def questions(spec: schema.FilterSpec, intent: str, findings: list[Finding]) -> dict:
+def _params(spec: schema.FilterSpec, intent: str, findings: list[Finding]) -> dict:
     return {
-        f"finding_{i}": classifier.YesNo(
-            f"{spec.question}\nIntent: {intent}\nFinding: {finding.text}\nReason: {finding.reason}\nContext: {finding.context}",
-            true=TRUE,
-            false=FALSE,
-        )
-        for i, finding in enumerate(findings)
+        "question": spec.question,
+        "intent": intent,
+        "findings": [{"text": f.text, "reason": f.reason, "context": f.context} for f in findings],
     }
 
 
@@ -99,7 +94,7 @@ def confirm(entry: dict, spec: schema.FilterSpec, payload: dict, findings: list[
         "intent": intent,
     }
     try:
-        result = classifier.decide(state, questions(spec, intent, findings), purpose=PURPOSE, fallbacks=[])
+        output = runner.run(PURPOSE, state, _params(spec, intent, findings), decider=classifier.decide)
     except classifier.ClassifierInputError:
         raise
     except classifier.ClassifierError as error:
@@ -110,7 +105,7 @@ def confirm(entry: dict, spec: schema.FilterSpec, payload: dict, findings: list[
             {"filter": entry["path"], "findings": len(findings), "error": str(error)},
         )
         return []
-    return [f for i, f in enumerate(findings) if result.answers[f"finding_{i}"].noul >= YES_LINE]
+    return [f for i, f in enumerate(findings) if output.verdicts[f"finding_{i}"]]
 
 
 def _listing(findings: list[Finding]) -> str:
@@ -247,3 +242,10 @@ def run(entry: dict, step: str, payload: dict) -> dict:
     if spec.action == "send-back":
         return _limited(entry, spec, payload, confirmed)
     return ACTIONS[spec.action](confirmed)
+
+
+def __getattr__(name):
+    if name in ("TRUE", "FALSE"):
+        question = definitions.load(PURPOSE).questions[0].question
+        return question.true if name == "TRUE" else question.false
+    raise AttributeError(name)
