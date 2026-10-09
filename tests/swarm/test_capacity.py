@@ -1345,7 +1345,15 @@ def test_autoscaled_seeds_from_the_configured_caps_and_an_idle_raise():
     from scripts.swarm import autoscale, host_budget
 
     config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, max_plan=0)
-    inputs = capacity.fixture_inputs({**_readings(), "previous": {}, "demand": None, "live": {}})
+    inputs = capacity.fixture_inputs(
+        {
+            **_readings(),
+            "previous": {},
+            "demand": None,
+            "live": {},
+            "host": {"load1": 0, "cpus": 8, "available_mb": 64000, "agents": 0},
+        }
+    )
     _, decision = capacity.autoscaled(config, inputs)
     room = host_budget.room(inputs.host(), host_budget.Thresholds(), None)
     previous = {"ceilings": {"eng": 2, "ci": 1, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}}
@@ -1425,9 +1433,13 @@ def test_the_autoscale_command_prints_exact_output_for_an_unknown_swarm(tmp_path
     store = _store()
     monkeypatch.setattr(cli, "connect", lambda: store)
     fixture = tmp_path / "readings.json"
-    fixture.write_text(json.dumps(_readings()))
     unknown = SwarmConfig("new", "", max_eng=0, max_ci=0)
-    readings = {**_readings(), "previous": {}, "live": {}}
+    readings = {
+        **_readings(),
+        "previous": {},
+        "live": {},
+        "host": {"load1": 0, "cpus": 8, "available_mb": 64000, "agents": 0},
+    }
     fixture.write_text(json.dumps(readings))
     _, decision = capacity.autoscaled(unknown, capacity.fixture_inputs(readings))
     cli.main(["new", "autoscale", "--fixture", str(fixture), "--json"])
