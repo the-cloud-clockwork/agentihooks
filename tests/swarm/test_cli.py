@@ -2005,12 +2005,24 @@ def test_trace_plan_judges_intent_on_the_kept_pieces_before_the_pull_request_ope
     run("sw", "start")
     plan = "- walls | doghouse | it shelters the dog\n- a generator | power | it powers a light\n"
     _, seen = _traced(env, monkeypatch, tmp_path, plan, 0.9, 0.1)
+    monkeypatch.setattr(cli, "now_ms", lambda: 4242)
     capsys.readouterr()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
     report = json.loads(capsys.readouterr().out)
     assert report["intent"] == {"verdict": "pass", "reason": "the phase can use it"}
     assert seen[1]["pull_request_body"] == "- walls | doghouse | it shelters the dog\n"
-    assert Verdicts("sw", "intent").read("t1")["verdict"] == "pass"
+    assert [Verdicts("sw", "intent").read("t1")[k] for k in ("verdict", "at")] == ["pass", 4242]
+
+
+def test_trace_plan_judges_no_intent_with_the_intent_gate_off(env, capsys, monkeypatch, tmp_path):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    store.update("sw", gates={"intent": "off"})
+    _, seen = _traced(env, monkeypatch, tmp_path, "- walls | doghouse | it shelters the dog\n", 0.9)
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
+    assert (json.loads(capsys.readouterr().out)["intent"], len(seen)) == (None, 1)
 
 
 def test_trace_plan_judges_no_intent_for_a_failed_plan(env, capsys, monkeypatch, tmp_path):
