@@ -85,14 +85,38 @@ def _expand(tokens: list[str], depth: int) -> list[list[str]]:
     return [tokens]
 
 
+def _heredoc_marker(line: str, quote: str | None) -> tuple[int | None, str | None]:
+    escaped = 0
+    for index, character in enumerate(line):
+        if index == escaped - 1:
+            continue
+        if character == "\\" and quote != "'":
+            escaped = index + 2
+        elif quote is None and line.startswith("<<", index):
+            return index, None
+        elif quote is None and character == "#" and (index == 0 or (line[index - 1].isspace() and index != escaped)):
+            return index, None
+        elif quote is None and line.startswith("$'", index):
+            quote, escaped = "$'", index + 2
+        elif quote and character == quote[-1]:
+            quote = None
+        elif quote is None and character in {"'", '"'}:
+            quote = character
+    return None, quote
+
+
 def _heredocs(command: str, depth: int) -> tuple[str, list[list[str]]]:
-    result, kept = [], []
+    result, kept, quote = [], [], None
     lines = iter(command.splitlines(keepends=True))
     for line in lines:
-        prefix, marker, tail = line.partition("<<")
-        if not marker:
+        start, quote = _heredoc_marker(line, quote)
+        if start is None:
             kept.append(line)
             continue
+        if line[start] == "#":
+            kept.append(line[:start] + "\n")
+            continue
+        prefix, tail = line[:start], line[start + 2 :]
         delimiters = shlex.split(tail.removeprefix("-"))
         if not delimiters:
             raise ValueError("Missing heredoc delimiter")
@@ -139,6 +163,7 @@ def commands(command: str, depth: int = 0) -> list[list[str]]:
     lexer = shlex.shlex(command, posix=True, punctuation_chars=_SEPARATORS)
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
+    lexer.commenters = ""
     result, words = heredoc_commands, []
     for token in lexer:
         if token and not token.strip(_SEPARATORS):

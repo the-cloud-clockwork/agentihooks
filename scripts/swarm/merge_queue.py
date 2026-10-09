@@ -86,12 +86,19 @@ def checked_base(repo: str, head: str, run) -> str:
     return bases.pop()
 
 
+def refreshed(repo: str, head: str, run) -> bool:
+    commit = rest(f"repos/{repo}/commits/{head}", run)
+    return (commit["committer"] or {}).get("login") == "web-flow" and commit["commit"]["message"].startswith(
+        "Merge branch 'dev' into "
+    )
+
+
 def refresh(url: str, raw: dict, run) -> bool:
     pull = graphql(FRESHNESS, {"url": url}, run)["resource"]
     repo = pull["repository"]["nameWithOwner"]
     base = checked_base(repo, raw["headRefOid"], run)
     current = graphql(FRESHNESS, {"url": url}, run)["resource"]["repository"]["ref"]["target"]["oid"]
-    if base == current:
+    if base == current or refreshed(repo, raw["headRefOid"], run):
         return False
     files = rest(f"repos/{repo}/compare/{base}...{current}", run)["files"]
     changed = len(files) >= 300 or any(

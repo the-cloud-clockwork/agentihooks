@@ -267,6 +267,7 @@ class Mail:
         live = [a for a in store.agents(slug) if a.state != "finished"]
         self.seats = {a.name: a.seat or a.name for a in live}
         boss = next((a for a in live if a.lane == MASTER), None)
+        self.has_master = boss is not None
         self.master = self.seats[boss.name] if boss else seat_address(slug, MASTER)
 
     def once(self, key, act):
@@ -306,6 +307,7 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github)
         + _settle_red_notices(mail, github)
+        + _priorities(mail, doc)
     )
 
 
@@ -440,6 +442,32 @@ def _followups(mail, doc, events, ledger, now_ms):
             ask = "Open half an hour without a decision: " + " ".join(followup["text"].split()[:ASK_WORDS])
             if mail.once(f"{target}:operator", lambda: ledger.priority(mail.slug, target, ask)):
                 sent.append(f"raised {target} to the operator")
+    return sent
+
+
+def _priorities(mail, doc):
+    key = mail.store.key(mail.slug, "priorities-sent")
+    rows = {p["item"]: p for p in doc.get("priorities", [])}
+    seen = mail.store.redis.smembers(key)
+    gone = seen - rows.keys()
+    if gone:
+        mail.store.redis.srem(key, *gone)
+    if not mail.has_master:
+        return []
+    marker = mail.store.key(mail.slug, "priorities-seeded")
+    seeding, sent = not mail.store.redis.exists(marker), []
+    for item, row in rows.items():
+        if item in seen or row.get("by") == SENDER or not _by_agent(mail, row):
+            continue
+        if not seeding:
+            text = (
+                f"New priority on ledger {mail.slug} for {item}: {row['text']}\n"
+                "Triage it: resolve it if the call is yours, else leave it for the operator."
+            )
+            mail.inbox.send(SENDER, mail.master, text, ref=f"{mail.slug}:priority:{item}")
+            sent.append(f"told {mail.master}: priority {item}")
+        mail.store.redis.sadd(key, item)
+    mail.store.redis.set(marker, 1)
     return sent
 
 
