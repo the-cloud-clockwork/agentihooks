@@ -29,9 +29,12 @@ jobs:
   swarm-image:
     uses: ./.github/workflows/swarm-smoke.yml
   semgrep:
-    uses: ./.github/workflows/semgrep.yml
+    uses: The-Cloud-Clockwork/.github/.github/workflows/semgrep-reusable.yml@main
     with:
       base: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+      configs: p/ci p/secrets p/python
+      # Actions are pinned to release tags by fleet policy, so the mutable tag rule only repeats it.
+      exclude_rules: yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
 
   brain-smoke:
     uses: ./.github/workflows/brain-smoke.yml

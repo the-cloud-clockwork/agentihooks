@@ -34,26 +34,18 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
 def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel():
     job = _workflow()["jobs"]["semgrep"]
     assert "needs" not in job
-    assert job["uses"] == "./.github/workflows/semgrep.yml"
+    assert job["uses"] == "The-Cloud-Clockwork/.github/.github/workflows/semgrep-reusable.yml@main"
     assert job["with"]["base"] == (
         "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || inputs.base }}"
     )
-    scan = yaml.safe_load((_ROOT / ".github/workflows/semgrep.yml").read_text())["jobs"]["scan"]
-    assert scan["steps"][0]["with"]["fetch-depth"] == 0
-    command = scan["steps"][-1]["run"].split()
-    assert {"p/ci", "p/secrets", "p/python"} == {command[i + 1] for i, a in enumerate(command) if a == "--config"}
-    assert command[command.index("--baseline-commit") + 1] == '"$BASE"'
-    assert {"--error", "--strict", "--verbose"} <= set(command)
-    assert int(command[command.index("--timeout") + 1]) >= 30
-    assert command[:2] == ["semgrep", "scan"]
-    assert not [s for s in ("||", "&&", ";", "exit") if s in scan["steps"][-1]["run"]]
-    assert not {"set", "--exclude", "--include"} & set(command)
-    assert [command[i + 1] for i, a in enumerate(command) if a == "--exclude-rule"] == [
+    assert set(job["with"]["configs"].split()) == {"p/ci", "p/secrets", "p/python"}
+    assert job["with"]["exclude_rules"].split() == [
         "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag"
     ]
-    assert all("if" not in step and "continue-on-error" not in step for step in scan["steps"])
-    assert not {"if", "continue-on-error"} & (set(scan) | set(job))
+    assert set(job["with"]) == {"base", "configs", "exclude_rules"}
+    assert not {"if", "continue-on-error"} & set(job)
+    assert not (_ROOT / ".github/workflows/semgrep.yml").exists()
 
 
 def test_no_workflow_run_script_embeds_an_expression_semgrep_cannot_parse():
