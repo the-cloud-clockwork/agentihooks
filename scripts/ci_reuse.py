@@ -102,7 +102,7 @@ def _authenticated(prefix, record, jobs):
     if len(attestations) != 1:
         return False
     log = _api(f"{prefix}/jobs/{attestations[0]['id']}/logs", binary=True).decode()
-    digests = re.findall(r"(?m)^\\S+ required-tree-sha256=([0-9a-f]{64})$", log)
+    digests = re.findall(r"(?m)^\S+ required-tree-sha256=([0-9a-f]{64})$", log)
     return digests == [_digest(record)]
 
 
