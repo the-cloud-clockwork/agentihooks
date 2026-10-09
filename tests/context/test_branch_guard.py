@@ -316,6 +316,13 @@ class TestResolveCwd:
         assert _resolve_cwd("cd ~/work && git push", "/") == str(tmp_path / "work")
         assert _resolve_cwd("cd $WORK_DIR && git push", "/") == str(tmp_path / "work")
 
+    def test_a_missing_payload_folder_falls_back_to_the_process_folder(self, tmp_path, monkeypatch):
+        from hooks.context.branch_guard import _resolve_cwd
+
+        monkeypatch.chdir(tmp_path)
+
+        assert _resolve_cwd("git commit -m x", str(tmp_path / "missing")) == str(tmp_path)
+
 
 def test_a_push_of_a_head_that_skipped_the_cheap_gates_is_blocked(tmp_path):
     import subprocess
