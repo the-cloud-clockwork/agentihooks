@@ -1,0 +1,20 @@
+{
+  "package": "SV2-CTL-02",
+  "tested_commit": "705f80a4ee817c4935bedf00387561250d5506fe",
+  "fixture": "tests/fixtures/swarm_v2/task-authority.json",
+  "evidence_class": "mocked Redis with actual Lua interpreter",
+  "runs": {
+    "a": {
+      "input_sha256": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57",
+      "independent_runs": 2
+    },
+    "b": {
+      "input_sha256": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57",
+      "independent_runs": 2
+    },
+    "c": {
+      "input_sha256": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57",
+      "independent_runs": 2
+    }
+  }
+}
