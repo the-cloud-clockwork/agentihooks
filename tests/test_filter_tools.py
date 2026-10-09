@@ -115,6 +115,12 @@ class TestFilterSignal:
             "what does the filter do?",
             "the classifier answered no",
             "update the docs about filters",
+            "fix the filter bug in the ledger search",
+            "edit the filter regex",
+            "replace the filter with a faster one",
+            "make the filter stricter",
+            "put a filter on the table",
+            "clear the classifier cache",
         ],
     )
     def test_does_not_arm(self, prompt):
@@ -129,6 +135,7 @@ class TestFinderFolders:
             ("Edit", {"file_path": "/b/.claude/conditions/_finders/slop.sh", "old_string": "a", "new_string": "b"}),
             ("Bash", {"command": "cp /tmp/x .agentihooks/conditions/_finders/slop.py"}),
             ("Bash", {"command": "rm ~/.agentihooks/conditions/_finders/slop.py"}),
+            ("Write", {"file_path": "/b/profiles/qa/.claude/conditions/_finders/slop.py", "content": "x"}),
         ],
     )
     def test_a_finder_write_needs_the_operator_gate(self, tool, tool_input):
@@ -172,6 +179,40 @@ class TestInventory:
                 "error": "mode must be one of finders, classifier, both, got 'sometimes'",
             }
         ]
+
+    def test_a_filter_that_is_not_text_is_listed_as_invalid(self, bundle):
+        folder = bundle / ".claude" / "conditions"
+        folder.mkdir(parents=True)
+        (folder / "pre-write-binary.filter.yaml").write_bytes(b"mode: \xff\xfe\n")
+        result = conditions.inventory()
+        assert result["conditions"] == []
+        assert [(i["path"], i["source"]) for i in result["invalid"]] == [
+            (str(folder / "pre-write-binary.filter.yaml"), "bundle")
+        ]
+        assert "utf-8" in result["invalid"][0]["error"]
+
+    def test_an_upper_case_suffix_is_read_as_a_filter(self, bundle):
+        folder = bundle / ".claude" / "conditions"
+        folder.mkdir(parents=True)
+        (folder / "pre-write-loud.FILTER.YAML").write_text("action: strip\n")
+        (entry,) = conditions.inventory()["conditions"]
+        assert entry["filter"] == {"mode": "both", "action": "strip", "max_rounds": 3}
+
+
+class TestCreatedFilterRuns:
+    def test_a_created_filter_flags_a_matching_write(self, bundle, tmp_path):
+        conditions.arm_gate(SID)
+        _create()
+        payload = {
+            "hook_event_name": "PreToolUse",
+            "session_id": SID,
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/repo/page.py", "content": "a TODO here"},
+            "cwd": str(tmp_path),
+        }
+        effect = conditions.pre_effect(payload)
+        assert effect.block is None
+        assert effect.contexts == ['[condition pre-write-slop.filter.yaml]\nfilter flagged:\n- "TODO": leftover marker']
 
 
 class TestMCPFilterTools:

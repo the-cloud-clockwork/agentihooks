@@ -633,10 +633,10 @@ _DETERMINER = rf"(?:{_ARTICLE}|new|another|one)"
 _NOT_A_NAME = (
     r"(?:about|after|and|are|at|before|by|for|from|how|if|in|into|is|of|on|or|to|what|when|where|which|who|why|with)"
 )
+_NAMED = rf"\s+(?:up\s+)?(?:{_DETERMINER}\s+)*(?:(?!(?:{_ARTICLE}|{_NOT_A_NAME})\b)[\w'\"`./-]+\s+){{0,4}}"
 _SIGNAL = re.compile(
-    r"\b(?:set|add|create|make|write|put|install|remove|clear|delete|drop|update|change|edit|replace|fix)"
-    rf"\s+(?:up\s+)?(?:{_DETERMINER}\s+)*"
-    rf"(?:(?!(?:{_ARTICLE}|{_NOT_A_NAME})\b)[\w'\"`./-]+\s+){{0,4}}(?:conditions?|filters?|classifiers?)\b",
+    r"\b(?:(?:set|add|create|make|write|put|install|remove|clear|delete|drop|update|change|edit|replace|fix)"
+    rf"{_NAMED}conditions?|(?:set|add|create|update|remove){_NAMED}(?:filters?|classifiers?))\b",
     re.IGNORECASE,
 )
 _CONDITION_TOOL = re.compile(r"(?:agentihooks|hooks[-_]utils).*condition_(?:set|clear)$", re.IGNORECASE)
@@ -961,7 +961,7 @@ def _with_filter_settings(entries: list[dict]) -> tuple[list[dict], list[dict]]:
         if entry["file"].lower().endswith(FILTER_SUFFIX):
             try:
                 spec = schema.load(entry["path"])
-            except schema.FilterSchemaError as error:
+            except ValueError as error:
                 invalid.append({"path": entry["path"], "source": entry["source"], "error": str(error)})
                 continue
             entry = {**entry, "filter": {"mode": spec.mode, "action": spec.action, "max_rounds": spec.max_rounds}}
