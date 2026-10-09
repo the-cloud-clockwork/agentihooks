@@ -8,19 +8,13 @@ from scripts.inbox.store import Item
 from scripts.swarm import capacity, grouping, notice_text, phase_planning, tick, trace_plan
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused, SwarmError, _ledger
 from scripts.swarm.store import SwarmConfig
+from scripts.swarm_ledger import ledger_comments
 
 NOISE = (
     "see scripts/swarm/tick.py at 03:45:16 UTC on 2026-10-09; run 37818444803; commit fa09b9d0 "
     "-> quota_handoff.warn (retry) — LABEL IN CAPS; delve deeper"
 )
 LONG = " ".join([NOISE] * 4)
-
-
-def _comments():
-    _ledger()
-    import ledger_comments
-
-    return ledger_comments
 
 
 def _worst_capacity():
@@ -65,11 +59,11 @@ def templates():
 
 @pytest.mark.parametrize(("name", "kind", "text"), templates(), ids=[t[0] for t in templates()])
 def test_every_swarm_notice_passes_the_servers_plain_words_check(name, kind, text):
-    assert _comments().problems(notice_text.plain(text, kind), kind) == []
+    assert ledger_comments.problems(notice_text.plain(text, kind), kind) == []
 
 
 def test_the_worst_capacity_status_would_be_refused_unformatted():
-    assert _comments().problems(_worst_capacity(), "comment")
+    assert ledger_comments.problems(_worst_capacity(), "comment")
 
 
 def test_plain_keeps_meaning_of_ordinary_text():
@@ -128,7 +122,7 @@ def test_client_formats_swarm_notices_through_the_server_check(monkeypatch, writ
     write(LedgerClient())
     (op,) = sent[0]
     assert op["text"] == notice_text.plain(LONG, kind)
-    assert _comments().problems(op["text"], kind) == []
+    assert ledger_comments.problems(op["text"], kind) == []
 
 
 def test_client_keeps_an_agents_own_comment_as_written(monkeypatch):
@@ -161,7 +155,8 @@ class _Redis(dict):
 
 
 class _Store:
-    redis = _Redis()
+    def __init__(self):
+        self.redis = _Redis()
 
     def key(self, slug, name):
         return f"{slug}:{name}"

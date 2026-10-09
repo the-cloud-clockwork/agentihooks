@@ -4,6 +4,7 @@ import sys
 import uuid
 from pathlib import Path
 
+from scripts.swarm import notice_text
 from scripts.swarm.store import SwarmError
 
 LEDGER_DIR = Path(__file__).resolve().parents[1] / "swarm_ledger"
@@ -76,8 +77,6 @@ class LedgerClient:
         self._call(slug, [{**_op("task_add", by), **fields}])
 
     def _notice(self, slug, op, kind):
-        from scripts.swarm import notice_text
-
         op = {**op, "text": notice_text.plain(op["text"], kind)}
         try:
             self._call(slug, [op])
