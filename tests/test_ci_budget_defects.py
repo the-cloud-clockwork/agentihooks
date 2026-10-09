@@ -45,7 +45,7 @@ def _job(name, created, completed, run_id=1):
 def _jobs(run_id, gate_end):
     return [
         _job("mutation", "00:05", "14:09", run_id),
-        _job("wiring", "00:05", "00:20", run_id),
+        _job("split", "00:05", "00:20", run_id),
         _job("Gate — Required", "14:10", gate_end, run_id),
     ]
 
@@ -150,9 +150,9 @@ def test_a_run_of_exactly_fifteen_minutes_is_inside_budget(swarm):
 
 
 def test_the_gate_itself_is_never_named_the_slowest_stage():
-    jobs = [_job("wiring", "00:05", "00:20"), _job("Gate — Required", "00:00", "16:00")]
+    jobs = [_job("kind-due", "00:05", "00:20"), _job("Gate — Required", "00:00", "16:00")]
     text = defects.defect(_run(1, "00:00", "16:00"), jobs)
-    assert "slowest stage wiring took 0 minutes 15 seconds against 1 minutes." in text
+    assert "slowest stage kind-due took 0 minutes 15 seconds against 1 minutes." in text
 
 
 def test_a_slowest_stage_without_a_budget_says_so():
