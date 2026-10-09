@@ -42,6 +42,8 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
         handler.headers.get("X-Ledger-Token"),
         handler.headers.get("X-Ledger-Agent"),
     )
+    if principal is None and server.authority.controller(handler.headers.get("X-Controller-Credential")):
+        principal = ""
     if principal is None:
         raise APIError(403, "forbidden", "Missing or wrong ledger credential")
     if handler.command == "GET":

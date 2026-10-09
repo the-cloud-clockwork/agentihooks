@@ -36,6 +36,10 @@ def hive_member(credential):
     return auth.ledger_member(store.redis_client(), credential) if credential else None
 
 
+def controller(credential):
+    return bool(credential) and auth.controller(store.redis_client(), credential)
+
+
 def refusal(name, op):
     if not name:
         return ""

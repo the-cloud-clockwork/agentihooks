@@ -14,7 +14,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 def setup():
     import fakeredis
 
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store = RedisStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
     store.create(SwarmConfig("proof", "/repo", max_eng=0, max_ci=0))
     name = store.names.next("proof", "master", at=1)
     master = AgentRecord(name, "master", "", seat="master@proof")
@@ -34,6 +34,19 @@ def close(setup, monkeypatch):
     monkeypatch.setattr(cli, "HerdrRuntime", FakeRuntime)
     monkeypatch.setattr(cli.snapshot, "take", lambda *args: "snapshot")
     return lambda: cli.cmd_close(store, Namespace(slug="proof", name="operator", now=True, note="Proof ended"))
+
+
+@pytest.mark.parametrize("params", [{}, {"host": "localhost", "port": 6379}])
+def test_setup_reads_no_key_another_fake_client_writes(setup, params):
+    import fakeredis
+
+    store, _, _ = setup
+    other = fakeredis.FakeRedis(decode_responses=True, **params)
+    other.set("stray", "1")
+    try:
+        assert store.redis.get("stray") is None
+    finally:
+        other.delete("stray")
 
 
 @pytest.mark.parametrize("action", ["stop", "close"])
@@ -120,7 +133,11 @@ def test_a_resumable_master_keeps_mail_after_retirement(setup, monkeypatch, stat
 
     store, inbox, master = setup
     monkeypatch.setattr("scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {})
+    monkeypatch.delenv("AGENTIHOOKS_INBOX_REDELIVER_S", raising=False)
+    clock = [1_000_000]
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: clock[0])
     item = inbox.send("operator", master.seat, "Resume work")
+    clock[0] += 1
     if state != "pending":
         getattr(inbox, "deliver" if state == "delivered" else "read")(item.id, master.name)
     history = inbox.history(item.id)
