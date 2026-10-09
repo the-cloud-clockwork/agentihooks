@@ -580,6 +580,7 @@ def test_a_repeated_refusal_persists_its_new_deadline(monkeypatch):
 
 @pytest.mark.parametrize("refused", [False, True])
 def test_write_with_fifty_alerts_stays_within_old_time_plus_margin(inbox, monkeypatch, refused):
+    import os
     import time
 
     from scripts.swarm_ledger.api import mutations, resources
@@ -619,7 +620,9 @@ def test_write_with_fifty_alerts_stays_within_old_time_plus_margin(inbox, monkey
     reply = mutations.apply(ledger_server, SLUG, "", {"operation_id": "timed", "ops": [op], "guards": guards})
     elapsed = time.perf_counter() - started
     assert reply["rejected"] == (["one"] if refused else [])
-    assert elapsed < 0.585293 + 0.150
+    # Mutation runs route every call through a trampoline, so wall time there says nothing about this bound.
+    if not os.environ.get("MUTANT_UNDER_TEST"):
+        assert elapsed < 0.585293 + 0.150
 
 
 def test_operation_author_is_resolved_once_per_write(monkeypatch):
