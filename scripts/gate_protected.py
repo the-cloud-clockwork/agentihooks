@@ -61,7 +61,7 @@ def _git(root: Path, *args: str) -> str:
 
 
 def load(root: Path, rev: str) -> tuple[dict[str, dict], dict]:
-    tracked = _git(root, "ls-tree", "-r", "-z", "--name-only", rev, "--", ".github").split("\0")
+    tracked = _git(root, "ls-tree", "-r", "-z", "--name-only", rev).split("\0")
     workflows = {
         Path(path).name: yaml.safe_load(_git(root, "show", f"{rev}:{path}")) or {}
         for path in tracked
