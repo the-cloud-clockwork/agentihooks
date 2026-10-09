@@ -118,7 +118,7 @@ class Outcomes:
             if prior.get("operation_id"):
                 operations[prior["operation_id"]] = prior
         for prior in operations.values():
-            if prior["phase"] not in ("unknown", "committed"):
+            if prior["phase"] not in ("unknown", "committed", "externally_verified"):
                 continue
             if (prior["provider_id"], prior["proposal"]["head_sha"], prior["proposal"]["pr_url"]) != (
                 outcome["provider_id"],
@@ -189,13 +189,18 @@ class Outcomes:
         state, rejected = repository.apply_ops(self.authority.slug, ops=[op], gate=gate)
         if rejected:
             raise SwarmError("the ledger outcome was refused")
+        self.authority.complete(token, generation, outcome)
         return {**outcome, "ledger_revision": state["_meta"]["rev"]}
 
     def _receipt(self, token: str, generation: int, outcome: dict):
         def check(pipe, scope, previous):
             self.authority._identity(scope, generation, previous)
-            if previous.state != "completed" or previous.result != outcome:
+            if previous.state != "completed":
+                self.authority._holder(scope, generation, previous)
+            if previous.result != outcome:
                 self._conflict()
+            if not self.integration_enabled:
+                raise SwarmError("final integration is paused")
             proof = outcome["proposal"]["proof"]
             if self.verify_proof(proof) is not True:
                 raise SwarmError("required proof artifacts are absent or unverified")
@@ -230,8 +235,7 @@ class Outcomes:
                 raise SwarmError("an accepted outcome is required")
             self._validate(Proposal(**previous.result["proposal"]), pull)
             outcome = change(previous.result)
-            state = "completed" if outcome["phase"] == "externally_verified" else previous.state
-            return replace(previous, result=outcome, state=state)
+            return replace(previous, result=outcome)
 
         return self.authority._write(token, "outcome_reconciled", update).result
 

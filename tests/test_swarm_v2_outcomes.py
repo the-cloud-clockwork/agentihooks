@@ -65,7 +65,7 @@ def test_lost_merge_response_is_reconciled_before_any_retry(fixture):
     assert recovered["phase"] == "externally_verified"
     assert recovered["merge_sha"] == "merged-commit"
     assert len(provider.calls) == 1
-    assert authority.current(proposal.task_id).state == "completed"
+    assert authority.current(proposal.task_id).state == "active"
 
 
 def test_replaced_attempt_cannot_propose_or_integrate(fixture):
@@ -339,7 +339,8 @@ def test_verified_outcome_completes_the_authoritative_ledger_once(fixture, tmp_p
     }
     document = new_ledger.build_doc(content)
     document["tasks"] = content["tasks"]
-    repository.create_document(authority.slug, document)
+    document, meta, _ = core.load_state(tmp_path / "seed.json", document)
+    repository.create_document(authority.slug, document, meta)
     row = repository.get_document(authority.slug)["tasks"][0]
     outcomes.read_task = lambda task_id: repository.get_document(authority.slug)["tasks"][0]
     proposal = replace(proposal, task_revision=revision(row))
@@ -348,6 +349,7 @@ def test_verified_outcome_completes_the_authoritative_ledger_once(fixture, tmp_p
     state = repository.get_document(authority.slug)
     assert state["tasks"][0]["state"] == "done"
     assert state["tasks"][0]["done"] is True
+    assert authority.current(proposal.task_id).state == "completed"
     assert state["tasks"][0]["proof"] == proposal.proof
     assert result["ledger_revision"] == state["_meta"]["rev"]
     prior = state
@@ -355,3 +357,38 @@ def test_verified_outcome_completes_the_authoritative_ledger_once(fixture, tmp_p
     assert repository.get_document(authority.slug) == prior
     assert replay == result
     assert len(provider.calls) == 1
+
+
+def test_ledger_completion_rejects_changed_revision_without_overwriting(fixture):
+    outcomes, authority, token, proposal, provider, task, *_ = fixture
+    outcomes.propose(token, proposal)
+    outcomes.integrate(token, proposal.generation)
+    task["description"] = "replacement instructions"
+    from scripts.swarm_ledger import ledger_tasks
+    from tests.swarm_ledger.test_tasks import core
+
+    doc = {"tasks": [dict(task)], "phases": []}
+    ctx = core.Context({"rev": 0, "stamps": {}}, 0)
+    op = {
+        "id": "completion",
+        "op": "task_update",
+        "item": f"tasks/{proposal.task_id}",
+        "by": authority.current(proposal.task_id).holder,
+        "fields": {"state": "done"},
+    }
+    before = json.loads(json.dumps(doc))
+    assert not ledger_tasks.complete_outcome(doc, op, ctx, authority.current(proposal.task_id).result, op["by"])
+    assert doc == before
+    assert ctx.refused == ["outcome revision or ownership conflict"]
+
+
+@pytest.mark.parametrize("case", ["positive", "negative", "recovery"])
+def test_package_acceptance_cases_repeat_independently(monkeypatch, tmp_path, case):
+    from tests import sv2_ctl05_cases
+
+    run = getattr(sv2_ctl05_cases, case)
+    first = run(monkeypatch, tmp_path / "first")
+    second = run(monkeypatch, tmp_path / "second")
+    assert first == second
+    assert first["outcome_conflicts_total"] == 0
+    assert set(sv2_ctl05_cases.manifest()) == {"outcome-attempts.json", "task-authority.json"}
