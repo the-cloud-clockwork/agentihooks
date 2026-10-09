@@ -31,7 +31,7 @@ class ResourceClient:
             return json.loads(response.read())
 
     def collection(self, slug: str, path: str) -> list:
-        rows, query, snapshot = [], {"limit": 100}, None
+        rows, query, snapshot, restarts = [], {"limit": 100}, None, itertools.count()
         swarm = path.startswith("swarm/")
         read = resources.swarm_read if swarm else resources.read
         while True:
@@ -45,8 +45,13 @@ class ResourceClient:
                 replay, error = failure(exc)
                 if replay.code != 409 or error.get("code") != "revision_conflict":
                     raise replay from None
-                snapshot = self.request(slug, "swarm/export" if swarm else "export", {})["data"]
                 rows, query = [], {"limit": 100}
+                if path.startswith("hierarchy"):
+                    # The export snapshot holds no hierarchy, so a changed tree is walked again from its first page.
+                    if next(restarts) == RETRIES:
+                        raise replay from None
+                    continue
+                snapshot = self.request(slug, "swarm/export" if swarm else "export", {})["data"]
                 continue
             rows.extend(reply["data"])
             if reply["next_cursor"] is None:
