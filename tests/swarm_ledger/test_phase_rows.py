@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, loaded, page_source, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, page_source, serve_modules, shell_html
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "scripts" / "swarm_ledger" / "template.html"
@@ -74,7 +74,7 @@ def context(browser):
 
 
 def rows(page):
-    loaded(page)
+    page.wait_for_selector("#phases > li .phase-state", state="attached")
     return page.evaluate(
         """() => [...document.querySelectorAll("#phases > li")].map((li) => {
           const fold = li.querySelector("details.phase-fold");

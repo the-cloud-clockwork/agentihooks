@@ -46,7 +46,7 @@ def tab(browser):
     serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     page.goto(URL)
-    loaded(page)
+    settle(page)
     yield page
     context.close()
 
@@ -71,6 +71,7 @@ def outline(tab):
 
 def settle(tab):
     loaded(tab)
+    tab.wait_for_selector("details[data-key]", state="attached")
     tab.wait_for_timeout(50)
 
 
