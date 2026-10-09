@@ -28,21 +28,20 @@ def estimate(root: Path, changes: dict[str, set[int]]) -> tuple[float, int, floa
         chosen = select_tests(root, Path(path))
         if not chosen:
             continue
-        _, mutations = changed_mutations(path, (root / path).read_text(), lines)
-        if not mutations:
-            continue
         tests.update(chosen)
-        mutants += len(mutations)
-        seconds += len(mutations) * (MUTANT_SECONDS + TEST_WEIGHT * mean_test_seconds(durations, chosen))
+        _, mutations = changed_mutations(path, (root / path).read_text(), lines)
+        # mutmut emits only mutants inside a function or method.
+        count = sum(1 for mutation in mutations if mutation.contained_by_top_level_function)
+        mutants += count
+        seconds += count * (MUTANT_SECONDS + TEST_WEIGHT * mean_test_seconds(durations, chosen))
     stats = sum(duration for nodeid, duration in durations.items() if nodeid.partition("::")[0] in tests)
     return seconds, mutants, stats
 
 
 def shard_count(seconds: float, mutants: int, stats: float, target: float, limit: int) -> int:
     # Every shard repeats the stats run over all selected tests before mutating its share.
-    capacity = WORKERS * target - stats
-    wanted = math.ceil(seconds / capacity) if capacity > 0 else limit
-    return max(1, min(limit, mutants, wanted))
+    capacity = max(WORKERS * target - stats, WORKERS * target / 2)
+    return max(1, min(limit, mutants, math.ceil(seconds / capacity)))
 
 
 def main() -> int:

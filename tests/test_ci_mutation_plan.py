@@ -22,7 +22,8 @@ def test_mean_test_seconds_reads_stored_timings_of_selected_files_only():
         (4800, 3, 0, 3),
         (1000, 500, 460, 2),
         (1001, 500, 460, 3),
-        (10, 500, 960, 10),
+        (10, 500, 960, 1),
+        (2000, 500, 5000, 5),
         (10**6, 10**4, 0, 10),
     ],
 )
@@ -34,7 +35,9 @@ def _project(tmp_path, durations):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["scripts/"]\n')
-    (tmp_path / "scripts/sample.py").write_text("def f(a, b):\n    return a - b\n\n\ndef g(a):\n    return a > 1\n")
+    (tmp_path / "scripts/sample.py").write_text(
+        "def f(a, b):\n    return a - b\n\n\ndef g(a):\n    return a > 1\n\n\nLIMIT = 5\n"
+    )
     (tmp_path / "scripts/plain.py").write_text("VALUE = 1\n")
     (tmp_path / "tests/test_sample.py").write_text("from scripts.sample import f\n")
     (tmp_path / ".test_durations").write_text(json.dumps(durations))
@@ -58,7 +61,9 @@ def test_estimate_weighs_each_changed_line_mutant_by_its_selected_test_timings(t
         plan.estimate(tmp_path, {"scripts/sample.py": {2, 6}})[1]
         > plan.estimate(tmp_path, {"scripts/sample.py": {2}})[1]
     )
-    assert plan.estimate(tmp_path, {"scripts/sample.py": {3}}) == (0, 0, 0)
+    assert plan.estimate(tmp_path, {"scripts/sample.py": {3}}) == (0, 0, pytest.approx(0.8))
+    assert changed_mutations("scripts/sample.py", source, {9})[1]
+    assert plan.estimate(tmp_path, {"scripts/sample.py": {9}}) == (0, 0, pytest.approx(0.8))
     assert plan.estimate(tmp_path, {"scripts/plain.py": {1}}) == (0, 0, 0)
 
 
