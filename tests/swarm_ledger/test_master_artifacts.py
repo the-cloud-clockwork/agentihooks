@@ -10,6 +10,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger_artifacts as artifacts
 from scripts.swarm_ledger import ledger_server as server
+from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.test_bin import make_ledger
 
 MASTER = "master@abcdef-0001"
@@ -25,7 +26,7 @@ def publication(ledger_dir, tmp_path, monkeypatch):
     monkeypatch.setattr(core, "LEDGER_DIR", folder)
     slug = "master-artifacts"
     html, _ = make_ledger(slug)
-    token = core.read_token(html.read_text())
+    token = legacy_page.stored_token(html)
     core.sync(slug, ops=[{"op": "join", "id": "join", "by": MASTER, "role": "orchestrator"}])
     core.sync(slug, ops=[{"op": "add", "id": "requested", "thread": "chat", "text": "Publish the audit summary"}])
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)

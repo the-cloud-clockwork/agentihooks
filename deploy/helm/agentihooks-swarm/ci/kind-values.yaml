@@ -1,0 +1,11 @@
+image:
+  repository: local/agentihooks-swarm
+  tag: dev
+  pullPolicy: Never
+controller:
+  livenessProbe:
+    initialDelaySeconds: 60
+    periodSeconds: 2
+    timeoutSeconds: 5
+    failureThreshold: 2
+  terminationGracePeriodSeconds: 1

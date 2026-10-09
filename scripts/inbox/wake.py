@@ -56,8 +56,7 @@ def decide(item, pane, history, now_ms, window):
     wakes = steps.count(WOKEN)
     if pane in READY and wakes < MAX_WAKES and (wakes == 0 or due):
         return WOKEN
-    # The swarm only sends escalations; the item each one raises keeps its own ladder to the operator.
-    return TO_MASTER if due and item.sender != BY and not item.fyi else None
+    return TO_MASTER if due and not item.ref.startswith("inbox-escalation:") and not item.fyi else None
 
 
 def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
@@ -92,7 +91,7 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
         elif step == TO_MASTER and master and receiver != boss.name:
-            raised = inbox.send(BY, master, _master_text(item))
+            raised = inbox.send(BY, master, _master_text(item), ref=f"inbox-escalation:{item.id}")
             inbox.note(item.id, TO_MASTER, BY, f"raised to {master} as message {raised.id}", now_ms)
             actions.append(f"raised message {item.id} to {master}")
         elif step in (TO_MASTER, TO_OPERATOR):

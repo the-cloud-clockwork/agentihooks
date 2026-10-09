@@ -1,5 +1,4 @@
 import argparse
-import json
 import sys
 import threading
 import time
@@ -18,6 +17,8 @@ from scripts.inbox import seen  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from scripts.swarm_ledger import watch_ledger  # noqa: E402
 from scripts.swarm_ledger.events import Expired, Hub, stream  # noqa: E402
+from scripts.swarm_ledger.repository import repository  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "watchstream-2026-01-01"
 
@@ -25,7 +26,7 @@ SLUG = "watchstream-2026-01-01"
 def make_ledger():
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
     html_path, json_path = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)
 
@@ -115,7 +116,7 @@ def test_stream_reads_the_snapshot_with_the_header_credential(live):
     name, data, cursor = next(frames)
     frames.close()
     assert name == "snapshot" and cursor
-    assert data["ledger"]["_meta"]["rev"] == json.loads(core.paths(SLUG)[1].read_text())["_meta"]["rev"]
+    assert data["ledger"]["_meta"]["rev"] == repository.get_document(SLUG)["_meta"]["rev"]
 
 
 def test_stream_raises_expired_for_a_lost_cursor(live):
@@ -148,7 +149,7 @@ def run_watch(monkeypatch, capsys, take, *flags):
 
 
 def test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop(live, monkeypatch, capsys):
-    start = json.loads(core.paths(SLUG)[1].read_text())["_meta"]["rev"]
+    start = repository.get_document(SLUG)["_meta"]["rev"]
     original = watch_ledger.Watch.take
     seen_names = []
 
@@ -173,7 +174,7 @@ def test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop
 
 
 def test_an_expired_cursor_reconnects_without_one_and_prints_nothing_twice(live, monkeypatch, capsys):
-    start = json.loads(core.paths(SLUG)[1].read_text())["_meta"]["rev"]
+    start = repository.get_document(SLUG)["_meta"]["rev"]
     server.repository.apply_ops(SLUG, ops=[note(3)])
     original = watch_ledger.Watch.take
     seen_names = []
@@ -225,29 +226,8 @@ def test_the_beat_file_is_touched_by_every_heartbeat(live, monkeypatch, capsys):
 def test_a_missing_ledger_exits_before_connecting(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["watch_ledger.py", "absent-2026-01-01"])
     monkeypatch.setattr(watch_ledger, "stream", lambda *a: pytest.fail("connected"))
-    with pytest.raises(SystemExit, match="no ledger JSON"):
+    with pytest.raises(SystemExit, match="no ledger absent-2026-01-01"):
         watch_ledger.main()
-
-
-def test_the_watcher_reads_the_ledger_file_only_to_check_it_exists(monkeypatch, capsys):
-    make_ledger()
-    reads = []
-    real_read = Path.read_text
-
-    def read_text(path, *a, **kw):
-        reads.append(path.name)
-        return real_read(path, *a, **kw)
-
-    snapshot = json.loads(core.paths(SLUG)[1].read_text())
-    monkeypatch.setattr(Path, "read_text", read_text)
-    monkeypatch.setattr(watch_ledger, "credentials", lambda slug: {"X-Ledger-Token": "t"})
-    frames = [("snapshot", {"ledger": snapshot}, "c0")] + [("heartbeat", {}, None)] * 5
-    monkeypatch.setattr(watch_ledger, "stream", lambda slug, cursor=None, headers=None: iter(frames))
-    monkeypatch.setattr(watch_ledger.time, "sleep", lambda seconds: (_ for _ in ()).throw(SystemExit))
-    monkeypatch.setattr(sys, "argv", ["watch_ledger.py", SLUG])
-    with pytest.raises(SystemExit):
-        watch_ledger.main()
-    assert f"{SLUG}.json" not in reads
 
 
 def test_the_watcher_connects_with_header_credentials_and_no_token_in_the_url(monkeypatch):

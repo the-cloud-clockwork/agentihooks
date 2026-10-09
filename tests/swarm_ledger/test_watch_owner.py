@@ -1,4 +1,3 @@
-import json
 import sys
 from pathlib import Path
 
@@ -12,6 +11,8 @@ import new_ledger  # noqa: E402
 import watch_ledger  # noqa: E402
 
 from scripts.inbox import seen  # noqa: E402
+from scripts.swarm_ledger.repository import repository  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "watchowner-2026-01-01"
 MASTER = "watchowner-master-1"
@@ -24,7 +25,7 @@ def ledger(monkeypatch):
     monkeypatch.setattr(seen, "marks_for", lambda slug, environ=None: None)
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
     html_path, json_path = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)
     core.sync(
@@ -37,7 +38,7 @@ def ledger(monkeypatch):
             {"op": "task_update", "id": "t-2", "by": MASTER, "item": "tasks/t1", "fields": {"claimed_by": ENG}},
         ],
     )
-    start = json.loads(core.paths(SLUG)[1].read_text())["_meta"]["rev"]
+    start = repository.get_document(SLUG)["_meta"]["rev"]
     core.sync(
         SLUG,
         ops=[
@@ -50,7 +51,7 @@ def ledger(monkeypatch):
 
 
 def file_snapshot(slug, cursor=None, headers=None):
-    yield "snapshot", {"ledger": json.loads(core.paths(slug)[1].read_text())}, "c0"
+    yield "snapshot", {"ledger": repository.get_document(slug)}, "c0"
 
 
 def watch(monkeypatch, capsys, start, *flags):
@@ -80,7 +81,7 @@ def test_all_still_prints_every_operator_event(ledger, monkeypatch, capsys):
 
 
 def test_the_stop_gate_owes_a_claimed_task_comment_to_its_claimer_not_the_master(ledger):
-    state = json.loads(core.paths(SLUG)[1].read_text())
+    state = repository.get_document(SLUG)
 
     def owed(name):
         return {e.get("id") for e in gate.unhandled_for(state["_meta"], name, state["tasks"])}

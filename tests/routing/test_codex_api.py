@@ -223,7 +223,9 @@ def test_an_api_launch_routes_forced_and_writes_nothing_to_the_profile_home(monk
     assert _bytes(home) == before and (home / "auth.json").is_symlink()
 
 
-@pytest.mark.skipif(shutil.which("codex") is None, reason="needs the codex CLI")
+@pytest.mark.skipif(
+    shutil.which("codex") is None and not os.environ.get("CODEX_CLI_REQUIRED"), reason="needs the codex CLI"
+)
 def test_an_api_child_runs_codex_exec_against_a_fake_responses_endpoint(monkeypatch, tmp_path):
     home = _profile_home(tmp_path)
     before = _bytes(home)

@@ -127,7 +127,9 @@ def agent_thread_op(thread, op, ctx, target, noun):
             ctx.refused.append(f"{by} message refused: {UNADDRESSED}")
             return False
         if not any(e["id"] == op["id"] for e in thread):
-            thread.append({"id": op["id"], "by": by, "at": ctx.at, "text": text})
+            from ledger_core import new_entry
+
+            thread.append(new_entry(op, by, ctx.at, text))
             if op.get("attachments"):
                 thread[-1]["attachments"] = op["attachments"]
             ctx.record(by, f"{noun} added", target, id=op["id"], text=text)

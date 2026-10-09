@@ -279,7 +279,7 @@ def test_the_planner_prompt_plans_with_the_operator_then_registers_the_plan_and_
         "You are planner@a1b2c3-0001, a planner profile agent the operator launched on swarm sw over the repo /repo "
         "with agentihooks swarm sw planner up. You hold no task and no lane slot, and the swarm never nudges or "
         "retires you. You answer to the operator in this pane: wait for his first message.",
-        f"The swarm ledger is {prompt.ledger_path('sw')}. Read it for context; change nothing on it until the "
+        f"Read the swarm ledger with {prompt.ledger_read('sw')} for context; change nothing on it until the "
         "operator accepts a plan.",
         'Other sessions reach you as inbox messages: answer one with agentihooks msg reply <id> "<text>" and reach '
         'the master with agentihooks msg send master@sw "<text>".',
@@ -312,7 +312,7 @@ def test_another_role_works_with_the_operator_and_exits_when_he_says_so():
         "retires you. You answer to the operator in this pane: wait for his first message."
     )
     assert lines[1] == (
-        f"The swarm ledger is {prompt.ledger_path('sw')}. Read it for context; change nothing on it unless the "
+        f"Read the swarm ledger with {prompt.ledger_read('sw')} for context; change nothing on it unless the "
         "operator asks."
     )
     assert lines[4:] == [

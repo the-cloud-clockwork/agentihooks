@@ -111,11 +111,11 @@ def test_the_seed_watcher_reloads_code_only_when_asked(monkeypatch, value, calls
     monkeypatch.setattr(server, "code_stamp", lambda: 42)
     monkeypatch.setattr(server, "reload_if_changed", Mock())
     monkeypatch.setattr(server.ledger_bin, "tidy", Mock())
-    monkeypatch.setattr(server.repository, "pages", lambda: [])
+    monkeypatch.setattr(server, "bin_closed_without_swarm", Mock())
     monkeypatch.setattr(server, "sample_streams", Mock())
     monkeypatch.setattr(server.time, "sleep", Mock(side_effect=Stop))
     with pytest.raises(Stop):
-        server.watch_seeds()
+        server.watch_ledgers()
     assert server.reload_if_changed.call_args_list == calls
 
 

@@ -2,6 +2,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import ledger_kinds, ledger_tasks, new_ledger
+from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.plan_slices import anchored
 
 PLAN = "https://github.com/acme/app/issues/1"
@@ -16,7 +17,7 @@ def plan_ledger(tmp_path, monkeypatch):
     html, json_path = core.paths("plan-proof")
     json_path.unlink(missing_ok=True)
     html.parent.mkdir(parents=True, exist_ok=True)
-    html.write_text(new_ledger.render(new_ledger.build_doc(content), "plan-proof", 8765))
+    html.write_text(legacy_page.render(new_ledger.build_doc(content), "plan-proof", 8765))
     core.sync("plan-proof")
     return "plan-proof"
 

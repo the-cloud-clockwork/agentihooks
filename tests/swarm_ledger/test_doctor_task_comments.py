@@ -9,6 +9,7 @@ import pytest
 from scripts.swarm_ledger import ledger_agent_ops, ledger_comments, new_ledger
 from scripts.swarm_ledger import ledger_core as validation
 from scripts.swarm_ledger import ledger_server as server
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 core = server.core
 
@@ -19,9 +20,9 @@ def ledger_page(monkeypatch):
     doc["tasks"] = [{"id": "fx-8be892c4-code", "title": "Inbox fix", "phase": "p1", "comments": []}]
     html_path, _ = core.paths("demo")
     html_path.parent.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(doc, "demo", server.PORT))
+    html_path.write_text(legacy_page.render(doc, "demo", server.PORT))
     core.sync("demo", ops=[{"op": "join", "id": "join", "by": "engineer"}])
-    token = core.read_token(html_path.read_text())
+    token = legacy_page.stored_token(html_path)
     monkeypatch.setattr(server, "relay_to_inbox", lambda *args: None)
     monkeypatch.setattr(server, "doctor_phrase", lambda *args: None)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
@@ -57,7 +58,8 @@ def test_registered_doctor_task_passes_server_validation(ledger_page, kind):
     status, state = ledger_page(op)
     assert status == 200, state
     assert state["rejected"] == []
-    entries = state["tasks"][0]["comments"] if kind == "comment" else state["followups"]
+    doc = server.repository.get_document("demo")
+    entries = doc["tasks"][0]["comments"] if kind == "comment" else doc["followups"]
     assert entries[-1]["text"] == text
 
 
@@ -131,7 +133,7 @@ def test_registered_task_context_preserves_long_chat_limit():
 def test_empty_ledger_write_retains_registered_tasks(ledger_page):
     status, state = ledger_page()
     assert status == 200, state
-    assert state["tasks"][0]["id"] == "fx-8be892c4-code"
+    assert server.repository.get_document("demo")["tasks"][0]["id"] == "fx-8be892c4-code"
 
 
 def test_plain_words_validation_keeps_the_default_chat_limit():
@@ -165,11 +167,13 @@ def test_audit_without_tasks_still_reports_real_hashes():
 
 
 def test_a_write_reconciles_the_ledger_once(ledger_page, monkeypatch):
-    from scripts.swarm_ledger.repository import file
+    from scripts.swarm_ledger.repository import repository
 
     calls = []
-    sync = file.sync
-    monkeypatch.setattr(file, "sync", lambda *args, **kwargs: calls.append(args) or sync(*args, **kwargs))
+    apply_ops = repository.apply_ops
+    monkeypatch.setattr(
+        repository, "apply_ops", lambda *args, **kwargs: calls.append(args) or apply_ops(*args, **kwargs)
+    )
     text = "Cut from the plan of task fx-8be892c4-code: more work"
     op = {"op": "add", "id": "once", "by": "engineer", "thread": "tasks/fx-8be892c4-code/comments", "text": text}
     status, state = ledger_page(op)

@@ -21,6 +21,7 @@ ENV = {
     "review_rounds": "AGENTIHOOKS_HEALTH_REVIEW_ROUNDS",
     "idle_ticks": "AGENTIHOOKS_HEALTH_IDLE_TICKS",
     "stale_minutes": "AGENTIHOOKS_HEALTH_STALE_MINUTES",
+    "stalled_minutes": "AGENTIHOOKS_HEALTH_STALLED_MINUTES",
     "watch_min": "AGENTIHOOKS_HEALTH_WATCH_MIN",
     "watch_ratio": "AGENTIHOOKS_HEALTH_WATCH_RATIO",
     "master_watch_min": "AGENTIHOOKS_HEALTH_MASTER_WATCH_MIN",
@@ -40,6 +41,7 @@ class Limits:
     review_rounds: int = 3
     idle_ticks: int = 3
     stale_minutes: int = 30
+    stalled_minutes: int = 10
     watch_min: int = 20
     watch_ratio: int = 5
     master_watch_min: int = 60
@@ -88,6 +90,7 @@ def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozen
         *failed_launches(events, tasks),
         *idle_with_claim(agents, tasks, limits, waiting),
         *waiting_on_input(agents, tasks),
+        *stalled(agents, limits),
         *stale_claims(agents, tasks, limits),
         *over_monitoring(activity, limits),
     ]
@@ -276,6 +279,25 @@ def waiting_on_input(agents: list[dict], tasks: dict[str, dict]) -> list[Finding
                 (f"prompt: {agent['input_prompt']}", f"task {_title(tasks, held['id'])} ({held['state']})"),
                 "more than 3 consecutive ticks waiting on input",
                 ticks,
+            )
+        )
+    return found
+
+
+def stalled(agents: list[dict], limits: Limits) -> list[Finding]:
+    found = []
+    for agent in agents:
+        minutes = agent.get("tool_quiet_minutes")
+        if agent.get("pane_state") != "working" or minutes is None or minutes < limits.stalled_minutes:
+            continue
+        found.append(
+            Finding(
+                "stalled",
+                agent["name"],
+                f"busy with no tool call for {minutes} minutes",
+                (f"pane working; task {agent.get('task', '')}",),
+                f"{limits.stalled_minutes} minutes without a tool call",
+                minutes,
             )
         )
     return found

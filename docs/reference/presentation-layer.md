@@ -22,19 +22,19 @@ The ledger pages, HOME and BIN form the presentation layer of agentihooks. Since
 | Concern | How it works now |
 |---|---|
 | Page load | Every page is a static shell of about 22 KB: `shell.html` for a ledger, `home.html` for HOME and BIN. A shell carries the page version, slug and token in meta tags and links its CSS and JS under `/static/<page version>/`, served with an immutable cache; it holds no ledger record and no inline script or style. Serving it never writes the record. Every HTML response carries an enforced Content-Security-Policy: scripts, styles, images and connections from the same origin only. |
-| Page rendering | The ledger page reads its metadata from `GET /api/v1/ledgers/{slug}` and its state from the event stream snapshot, then renders only what is visible: closed sections, folded comment threads, the Contract and proof fold and hidden panels render nothing until opened, lists show 50 items per page and threads the latest 50. Proof bodies load from `GET /api/v1/ledgers/{slug}/tasks/{id}/workspace` when their fold opens. A deep link `#item-<list>-<id>` opens the section and page that hold its target. HOME and BIN render their rows from `GET /api/v1/ledgers` and `/api/v1/bin`. `template.html` is only the format of the record file on disk. |
+| Page rendering | The ledger page reads its metadata from `GET /api/v1/ledgers/{slug}` and its state from the event stream snapshot, then renders only what is visible: closed sections, folded comment threads, the Contract and proof fold and hidden panels render nothing until opened, lists show 50 items per page and threads the latest 50. Proof bodies load from `GET /api/v1/ledgers/{slug}/tasks/{id}/workspace` when their fold opens. A deep link `#item-<list>-<id>` opens the section and page that hold its target. HOME and BIN render their rows from `GET /api/v1/ledgers` and `/api/v1/bin`. `template.html` is only the format of the ledger HTML files the import reads. |
 | Page code | Native ES modules under `static/js/` for the ledger page and `static/home/home.js` for HOME and BIN; stylesheets under `static/css/` beside `palette.css`. |
-| Operator write | The page sends `PUT /api/<slug>` with `{changes, ops}` and an `X-Ledger-Token`. The server replies with the whole document. |
-| Agent write | The `agentihooks ledger` CLI sends the same `PUT` through the server. `watch_ledger` follows the event stream: one snapshot, then patches. |
+| Operator write | The page sends `PUT /api/<slug>` with `{changes, ops}` and an `X-Ledger-Token`. The server answers with a bounded acknowledgment (applied and rejected ids, rev, warnings); the page takes the new state from the event stream. `GET /api/<slug>` is retired and answers 410. |
+| Agent write | The `agentihooks ledger` CLI sends schema checked operations to `POST /api/v1/ledgers/{slug}/operations`. `agentihooks ledger --slug <slug> show` prints the whole ledger for an agent to read. `watch_ledger` follows the event stream: one snapshot, then patches. |
 | Live refresh | Server push: each tab holds one `GET /api/v1/ledgers/{slug}/events` stream (fetch streaming, token in a header). It receives one snapshot of the ledger and the swarm status, then patches of them as they change, and a heartbeat every 5 s. The server samples swarm status once per ledger while a stream is open. Quota refresh keeps its own five minute cadence. |
-| State | The JSON file per ledger is the record (with `_meta`: rev, path stamps, a bounded event log, recent seeds). A copy lives in the HTML seed. Swarm, inbox and health live in Redis. `localStorage` keeps only per-viewer folds, layout and caches. |
-| Concurrency | One process, one global lock around read, reconcile, apply and write; atomic rename on write; optimistic merge by `_rev` against a window of past seeds. |
+| State | `ledgers.sqlite3` in the ledger folder is the record, behind `LedgerRepository`: one row per JSON value of each ledger (fields, collection items, threads), an append only event table, the page token and a summary row per ledger, and the bin and restore registries. No ledger JSON or HTML file is written. Hooks and gates read only the parts they need through a read only connection. Swarm, inbox and health live in Redis. `localStorage` keeps only per-viewer folds, layout and caches. |
+| Concurrency | One `BEGIN IMMEDIATE` transaction per mutation applies the ops, derived priorities, notifications and alerts, the revision and its events, then writes only the rows whose values changed. WAL lets readers run beside the writer; the in process lock only orders the server's own threads. A generation number per ledger tells each process when its cached copy is stale. |
 
 ## What limits it
 
 | Severity | Finding |
 |---|---|
-| P0 | Every op rewrites the whole document. One checkbox or chat line re-reads and re-writes megabytes of JSON and HTML under the global lock. |
+| Resolved | Every op rewrote the whole document. On a copy of the largest live ledger one chat line wrote 16.6 MB and took 0.73 s; now it writes about 150 KB of database pages and takes 0.09 s, and twenty writes from four threads wait 0.41 s at the median instead of 1.90 s. |
 | Resolved | Whole-document polling, replaced by the event stream: idle tabs and watchers transfer only heartbeats, and a change sends a patch of the changed items. |
 | P1 | One monolithic inline script with no module boundaries; behaviour cannot be tested in isolation from the page. |
 | P1 | HTML built by placeholder substitution in Python, with escaping done by hand at each call site. |
@@ -42,9 +42,9 @@ The ledger pages, HOME and BIN form the presentation layer of agentihooks. Since
 | P2 | CSS and JS are inlined per page rather than served as cacheable files. |
 | P2 | The ledger page response carries no Content-Security-Policy; only media and artifacts do. |
 | P2 | One static bearer token per ledger, embedded in the page. Host and origin checks are the real CSRF defence. |
-| P3 | A background thread scans every ledger HTML file every 2 s to catch hand edits. |
+| Resolved | The 2 s scan of every ledger HTML file and the merge of hand edited seeds are gone; agents change the ledger through the CLI. |
 
-Not yet measured: writes per minute in a busy swarm, and lock wait under concurrent agents. These numbers decide how urgent the P0 items are.
+Not yet measured: writes per minute in a busy swarm.
 
 ## Target
 
@@ -56,10 +56,9 @@ Not yet measured: writes per minute in a busy swarm, and lock wait under concurr
    ▼
  ledger server  (Python stdlib HTTP, one process)
    ├─ API layer: routes → handlers → validation (JSON schema per resource)
-   ├─ domain: ledger_core pure functions (apply_op, reconcile, validate)
+   ├─ domain: ledger_core pure functions (apply_op, apply_changes, validate)
    ├─ LedgerRepository (interface)
-   │     ├─ FileLedgerRepository     (today's files, step 2)
-   │     ├─ SqliteLedgerRepository   (WAL, step 3)
+   │     ├─ SQLiteLedgerRepository   (WAL, the record)
    │     └─ PostgresLedgerRepository (later, same interface)
    └─ swarm / inbox / health readers → Redis (unchanged)
 ```
@@ -89,17 +88,17 @@ Not yet measured: writes per minute in a busy swarm, and lock wait under concurr
 
 **Decision: SQLite first, behind `LedgerRepository`.** A later move to Postgres means a second implementation of the same interface plus a one-time data copy.
 
-Table sketch: `ledgers(slug, title, overview, size, rev, created_at, updated_at, closed_at)`, `phases(id, slug, title, description, depends_on, planning, done, position)`, `tasks(id, slug, phase_id, title, description, kind, lane, state, claimed_by, issue_url, pr_url, proof)`, `threads(id, slug, target, by, at, text, edited_at, deleted)` for comments, chat, notes and answers, `events(id, slug, rev, at, by, kind, target, payload)`, `seeds(slug, rev, doc)` for the merge window.
+Tables: `ledgers(slug, revision, generation, token, summary, touched_at)`; `fields`, `resources` and `threads(slug, path, parent, key, position, kind, value)`, one row per JSON value, where `resources` holds collection items and `threads` holds comments and answers; `events(slug, key, revision, position, value)`; `registry(slug, path, value)` for the bin and restore marks; `revisions`, `seed_base` and `seed_deltas` keep the seeds an imported ledger carried, read only by an explicit export.
 
-`LedgerRepository` methods follow what the server and CLI already do: `get_document`, `apply_ops`, `events_since`, `list_summaries`, `create`, `delete`, `restore`. The pure functions in `ledger_core` (`apply_op`, `apply_changes`, `reconcile_fields`, `reconcile_threads`, `validate`, `normalize`) stay as they are; only the file reads and writes move behind the interface.
+`LedgerRepository` methods: `get_document`, `read` (named parts only), `apply_ops`, `events_since`, `list_summaries`, `exists`, `token`, `create`, `delete`, `restore`, `export_document`, `import_document`. `agentihooks ledger storage export SLUG` and `import PATH` move a complete document in and out losslessly; an imported document must export equal to its source or nothing is stored. A ledger JSON or HTML file found in the ledger folder is imported once: it is first copied into `.imported/` and the copy checked byte for byte, then imported and verified, then removed. `agentihooks ledger storage cutover` does that for the whole folder.
 
 ## Migration (one PR per step, every step keeps today's pages working)
 
 1. **Split the page script into ES modules.** Move the inline script of `template.html` into `static/js/*.js` loaded as modules; same placeholders, same API. Proof: the existing browser tests pass unchanged.
-2. **Introduce `LedgerRepository` over the current files.** `FileLedgerRepository` wraps `load_state`, `sync` and `atomic_write`; the server and CLI call it. Proof: recorded requests return byte-identical responses before and after.
-3. **Add `SqliteLedgerRepository` and an import script.** Choose the repository by environment variable. Run SQLite in shadow mode (write both, read files) and compare `get_document` and `events_since` on live ledgers before switching reads. Shadow writes run only with `LEDGER_SQLITE_SHADOW=1`: on a multi-megabyte ledger each one costs about a second inside the server lock and stalls the shared server under write load, so they stay off until the cutover; `python -m scripts.swarm_ledger.storage_migration` imports and verifies on request.
+2. **Introduce `LedgerRepository` over the current files.** Done 2026-10-07.
+3. **Add `SqliteLedgerRepository` and an import script.** Done 2026-10-07 as a shadow; the shadow is retired by step 8.
 4. **Serve CSS and JS as files** with cache headers, and add a Content-Security-Policy to page responses. Done 2026-10-07.
-5. **Add `/api/v1` resources** beside the old `PUT /api/<slug>`, one area at a time (tasks first), with JSON schemas.
+5. **Add `/api/v1` resources** beside the old `PUT /api/<slug>`, one area at a time (tasks first), with JSON schemas. Done 2026-10-07.
 6. **Add the event stream** and move the page and `watch_ledger` off polling. Done 2026-10-07.
-7. **Make the pages static HTML** that load data from `/api/v1`; retire placeholder rendering and the HTML seed. Done 2026-10-07 for the served pages; the record file keeps its seed until step 8.
-8. **Retire the old endpoints and the per-ledger JSON files** once nothing reads them.
+7. **Make the pages static HTML** that load data from `/api/v1`; retire placeholder rendering and the HTML seed. Done 2026-10-07.
+8. **Retire the old endpoints and the per-ledger JSON files** once nothing reads them. Done 2026-10-08: SQLite is the record, every hook, gate, swarm and CLI reader goes through the repository, the whole document `GET /api/<slug>` is gone and the page write route answers with a bounded acknowledgment.

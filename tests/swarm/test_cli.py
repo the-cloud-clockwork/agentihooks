@@ -1120,7 +1120,7 @@ def test_agent_prompt_starts_by_reading_the_ledger_json(monkeypatch):
     monkeypatch.delenv("LEDGER_DIR")
 
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
-    assert text.index("~/development-ledger/sw.json") < text.index("Work it end to end")
+    assert text.index("agentihooks ledger --slug sw show") < text.index("Work it end to end")
 
 
 def test_status_json_gives_every_agent_a_status_and_its_model(env, capsys):

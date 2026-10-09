@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local ledger server: serves ~/development-ledger/<slug>.html and reads/writes <slug>.json.
+"""Local ledger server: serves the ledger pages and reads/writes the ledger records in ~/development-ledger.
 
 Usage:
   ledger_server.py --ensure   start it detached if it is not answering, print the base URL
@@ -45,6 +45,7 @@ from scripts.gates import talk  # noqa: E402
 from scripts.swarm_ledger import ledger_task_duplicates, page_policy, server_lifetime  # noqa: E402
 from scripts.swarm_ledger.events import Hub  # noqa: E402
 from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
+from scripts.swarm_ledger.repository import legacy  # noqa: E402
 from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
 
 HOST, PORT = ledger_link.address()
@@ -177,13 +178,9 @@ def index_page(view="home"):
 
 def page_for(slug):
     """The ledger shell: the page's metadata and asset links, read without writing; the records load over the API."""
-    page = repository.read_page(slug)
-    try:
-        title = repository.read_snapshot(slug).get("title") or slug
-    except (ValueError, OSError):
-        title = slug
+    title = repository.read(slug, "title").get("title") or slug
     values = {
-        "TOKEN": html.escape(core.read_token(page) or ""),
+        "TOKEN": html.escape(repository.token(slug) or ""),
         "PAGE": served_version(),
         "SLUG": html.escape(slug),
         "PORT": str(PORT),
@@ -500,7 +497,7 @@ def doctor_phrase(slug, state):
 
 
 def stream_resources(slug):
-    ledger = ledger_view(repository.get_document(slug, reconcile=False))
+    ledger = ledger_view(repository.get_document(slug))
     return {"ledger": ledger, "swarm": swarm_status(slug, ledger)}
 
 
@@ -570,7 +567,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403, "origin not allowed", "text/plain") or True
         if slug is not None:
             self.principal = authority.principal(
-                core.read_token(repository.read_page(slug)),
+                repository.token(slug),
                 slug,
                 self.headers.get("X-Ledger-Token"),
                 self.headers.get("X-Ledger-Agent"),
@@ -580,6 +577,7 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def reply_state(self, slug, changes=None, ops=None, refusals=None, screen=None):
+        """Apply a page save and answer with a bounded acknowledgment; the page takes state from the event stream."""
         refusals = refusals or {}
         screen = screen or ledger_task_duplicates.Screen()
         gate = talk.Budget(slug) if ops else None
@@ -596,17 +594,12 @@ class Handler(BaseHTTPRequestHandler):
             relay_to_inbox(slug, state)
             doctor_phrase(slug, state)
         deliver_alerts(slug, state)
-        state["_meta"] = {
-            **{k: v for k, v in state["_meta"].items() if k != "seeds"},
-            "page_version": core.page_version(),
-            "crew": ledger_gate.crew(state["_meta"]),
+        warnings = [*state["_meta"].get("warnings", []), *refusals.values(), *screen.warnings.values()]
+        reply = {
+            "applied": [op["id"] for op in ops or [] if op["id"] not in rejected],
+            "rejected": [*rejected, *refusals],
+            "_meta": {"rev": state["_meta"]["rev"], "warnings": [warning[:1000] for warning in warnings[:20]]},
         }
-        state["_meta"]["warnings"] = [
-            *state["_meta"].get("warnings", []),
-            *refusals.values(),
-            *screen.warnings.values(),
-        ]
-        reply = {**state, "rejected": [*rejected, *refusals]}
         return self.send(200, json.dumps(reply, ensure_ascii=False), "application/json")
 
     def do_OPTIONS(self):
@@ -655,7 +648,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.exists(slug):
             return self.send(404, "no such ledger", "text/plain")
         if route.startswith("/api/"):
-            return None if self.refused(slug) else self.reply_state(slug)
+            return self.send(410, f"read the ledger from /api/v1/ledgers/{slug}", "text/plain")
         return self.send(200, page_for(slug), "text/html; charset=utf-8")
 
     def put_swarm(self, slug):
@@ -760,7 +753,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
             except (ValueError, TypeError) as exc:
                 raise ledger_media.Refused(400, str(exc)) from exc
-            doc = repository.get_document(slug, reconcile=False)
+            doc = repository.get_document(slug)
             reason = authority.refusal(self.principal, op) or ledger_artifacts.refusal(doc, op, doc["_meta"]["members"])
             if reason:
                 raise ledger_media.Refused(403, reason)
@@ -778,7 +771,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.refused(slug):
             return None
         if agent or agents_only:
-            meta = repository.get_document(slug, reconcile=False)["_meta"]
+            meta = repository.read(slug, "_meta.members")["_meta"]
             if agent not in meta.get("members", {}):
                 return self.send(403, "agent must join this ledger before uploading", "text/plain")
         try:
@@ -856,7 +849,7 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 <= length <= MAX_BODY:
                 raise ValueError("body size out of range")
             body = core.loads(self.rfile.read(length) or b"{}")
-            state = repository.get_document(slug, reconcile=not core.paths(slug)[1].exists())
+            state = repository.get_document(slug)
             task_ids = tuple(task["id"] for task in state.get("tasks", []))
             changes, ops = core.check_body(body, task_ids)
             ledger_media.resolve(slug, ops)
@@ -888,8 +881,7 @@ def reloading(environ=os.environ) -> bool:
     return environ.get("SWARM_RELOAD") == "1"
 
 
-def watch_seeds(interval=2.0):
-    seen = {}
+def watch_ledgers(interval=2.0):
     started = code_stamp()
     reload = reloading()
     for passes in itertools.count():
@@ -901,21 +893,14 @@ def watch_seeds(interval=2.0):
             sys.stderr.write(f"bin purge: {exc}\n")
         if passes % BIN_SWEEP_EVERY == 0:
             bin_closed_without_swarm()
-        for path in repository.pages():
-            try:
-                mtime = path.stat().st_mtime
-                if seen.get(path) != mtime:
-                    seen[path] = mtime
-                    repository.get_document(path.stem)
-            except Exception as exc:  # the loop must outlive any one bad ledger
-                sys.stderr.write(f"skip {path.name}: {exc}\n")
         sample_streams()
         time.sleep(interval)
 
 
 def serve():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    threading.Thread(target=watch_seeds, daemon=True).start()
+    legacy.adopt(stored)
+    threading.Thread(target=watch_ledgers, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)
     PIDFILE.write_text(str(os.getpid()))

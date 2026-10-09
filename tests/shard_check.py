@@ -37,8 +37,23 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="fail unless every collected test ran in exactly one shard")
     parser.add_argument("durations", type=Path, nargs="+", help="the durations.json each shard stored")
     parser.add_argument("--tests", default="tests/")
+    parser.add_argument("--collected", type=Path, help="JSON test identifiers collected by the head run")
     args = parser.parse_args(argv)
-    collected = collect(args.tests)
+    if args.collected:
+        try:
+            collected = json.loads(args.collected.read_text())
+        except (OSError, ValueError) as error:
+            print(f"::error::Cannot read collected test data at {args.collected}: {error}")
+            return 1
+        if (
+            not isinstance(collected, list)
+            or not all(isinstance(nodeid, str) and nodeid for nodeid in collected)
+            or len(set(collected)) != len(collected)
+        ):
+            print(f"::error::Invalid collected test data at {args.collected}.")
+            return 1
+    else:
+        collected = collect(args.tests)
     if not collected:
         print(f"::error::Collecting {args.tests} failed or found no tests, so no shard can be graded.")
         return 1

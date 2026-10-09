@@ -262,6 +262,40 @@ def test_a_claim_quiet_under_the_limit_or_unmeasured_is_not_stale():
     assert run(ledger, [agent()]) == []
 
 
+def test_busy_agent_with_stale_tool_activity_is_reported_stalled():
+    ledger = {"tasks": [task("t1", state="claimed")]}
+    busy = {**agent(), "pane_state": "working", "tool_quiet_minutes": 10}
+    found = health.findings(ledger, [busy], {}, LIMITS)
+    assert [f.kind for f in found] == ["stalled"]
+    assert found[0].subject == WORKER
+    assert found[0].measure == 10
+    assert found[0].summary == "busy with no tool call for 10 minutes"
+    assert found[0].threshold == "10 minutes without a tool call"
+    assert found[0].evidence == ("pane working; task t1",)
+
+
+def test_stalled_busy_threshold_is_configurable_and_does_not_flag_other_panes():
+    limits = health.limits({"AGENTIHOOKS_HEALTH_STALLED_MINUTES": "4"})
+    ledger = {"tasks": [task("t1", state="claimed")]}
+    busy = {**agent(), "pane_state": "working", "tool_quiet_minutes": 4}
+    assert [f.kind for f in health.findings(ledger, [busy], {}, limits)] == ["stalled"]
+    for row in (
+        {**busy, "tool_quiet_minutes": 3},
+        {**busy, "tool_quiet_minutes": None},
+        {**busy, "pane_state": "idle"},
+        {**busy, "pane_state": "waiting"},
+    ):
+        assert health.findings(ledger, [row], {}, limits) == []
+
+
+def test_fresh_agent_does_not_hide_a_stalled_agent_and_taskless_evidence_stays_named():
+    fresh = {**agent("fresh"), "pane_state": "working", "tool_quiet_minutes": 1}
+    busy = {"name": "busy", "pane_state": "working", "tool_quiet_minutes": 10}
+    found = health.stalled([fresh, busy], LIMITS)
+    assert [f.subject for f in found] == ["busy"]
+    assert found[0].evidence == ("pane working; task ",)
+
+
 def test_over_monitoring_names_the_agent_and_its_counts():
     activity = {WORKER: {"watch": 40, "act": 3, "since": 21}}
     assert run({"tasks": [], "_meta": {"events": []}}, activity=activity) == [

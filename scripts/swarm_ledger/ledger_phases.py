@@ -54,25 +54,6 @@ def _visit(phase: str, graph: dict, chain: list[str], visited: set) -> None:
     visited.add(phase)
 
 
-def seed_graph_valid(phases: list[dict], base: list[dict], seed: list[dict], ctx) -> bool:
-    previous = {phase["id"]: phase for phase in base}
-    candidate = {phase["id"]: phase.copy() for phase in phases}
-    for phase in seed:
-        phase_id = phase["id"]
-        if phase_id not in candidate and phase_id not in previous:
-            candidate[phase_id] = phase.copy()
-        elif phase_id in candidate:
-            for key in FIELDS:
-                if key in phase and phase.get(key) != previous.get(phase_id, {}).get(key):
-                    candidate[phase_id][key] = phase[key]
-    try:
-        validate(list(candidate.values()))
-    except ValueError as exc:
-        ctx.refused.append(str(exc))
-        return False
-    return True
-
-
 def check(op: dict) -> None:
     by = op.get("by")
     if not isinstance(by, str) or not AUTHOR_RE.fullmatch(by):

@@ -28,7 +28,7 @@ from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
 from scripts.swarm.store import ASSIST, SwarmError
-from scripts.swarm.tick import agent_status
+from scripts.swarm.tick import STARTUP_GRACE_MS, agent_status
 from scripts.swarm_ledger import plan_shape
 from scripts.swarm_v2.runtime import observe
 
@@ -71,7 +71,7 @@ def findings(store, slug, config, tasks, events):
         ),
     ]
     quiet = quiet_gate.quiet_minutes(store.redis, slug, agents, {t["id"]: t for t in tasks}, now_ms())
-    rows = [{**a.__dict__, "quiet_minutes": quiet.get(a.name)} for a in agents]
+    rows = _health_rows(store, slug, agents, quiet, now_ms())
     return verdict_store(store, slug).visible(
         health.findings(
             {"tasks": tasks, "_meta": {"events": events}},
@@ -94,6 +94,26 @@ def findings(store, slug, config, tasks, events):
         now_ms(),
         limits.cooldown_minutes * 60_000,
     )
+
+
+def _health_rows(store, slug, agents, quiet, at):
+    latest = activity.last_events(slug)
+    rows = []
+    for agent in agents:
+        started = launch_check.session_started_at(agent)
+        last = max(latest.get(agent.name, 0), started)
+        minutes = (at - last) // health.MINUTE_MS if last else None
+        if at - started <= STARTUP_GRACE_MS or quiet_gate.declared_wait(store.redis, slug, agent.name, at):
+            minutes = None
+        rows.append(
+            {
+                **agent.__dict__,
+                "quiet_minutes": quiet.get(agent.name),
+                "tool_quiet_minutes": minutes,
+                "pane_state": store.redis.get(store.key(slug, "pane-state", agent.name)),
+            }
+        )
+    return rows
 
 
 def talk_since_outcome(store, slug, rows):

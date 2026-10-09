@@ -4,6 +4,8 @@ import re
 from types import ModuleType
 from urllib.parse import parse_qs, urlsplit
 
+from scripts.hive.auth import HiveError
+
 from . import resources, schemas
 from .errors import APIError
 
@@ -37,7 +39,7 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
     if path == "agent-token" and handler.command == "POST":
         return agent_token(handler, server, slug)
     principal = server.authority.principal(
-        server.core.read_token(server.repository.read_page(slug)),
+        server.repository.token(slug),
         slug,
         handler.headers.get("X-Ledger-Token"),
         handler.headers.get("X-Ledger-Agent"),
@@ -62,10 +64,16 @@ def agent_token(handler: object, server: ModuleType, slug: str) -> dict:
     agent = handler.headers.get("X-Ledger-Agent")
     if not agent:
         raise APIError(403, "forbidden", "An agent token names its agent in X-Ledger-Agent")
-    if server.authority.hive_member(handler.headers.get("X-Hive-Credential")) is None:
+    member = server.authority.hive_member(handler.headers.get("X-Hive-Credential"))
+    if member is None:
         raise APIError(403, "forbidden", "Missing or wrong hive credential")
-    admin = server.core.read_token(server.repository.read_page(slug))
-    return {"data": {"agent": agent, "token": server.authority.agent_token(admin, slug, agent)}}
+    if not server.authority.hive_agent(member, slug, agent):
+        raise APIError(403, "forbidden", "Agent is not placed on this member's hive")
+    try:
+        token = server.authority.hive_agent_token(member, slug, agent)
+    except HiveError as exc:
+        raise APIError(403, "forbidden", str(exc)) from exc
+    return {"data": {"agent": agent, "token": token}}
 
 
 def events(handler: object, server: ModuleType, slug: str) -> None:

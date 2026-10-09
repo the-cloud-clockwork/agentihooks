@@ -224,6 +224,22 @@ def test_the_first_hook_event_of_each_agent_is_kept_whatever_the_tool(tmp_path):
     assert activity.first_events("none", tmp_path / "missing") == {}
 
 
+def test_latest_tool_event_includes_unclassified_calls(tmp_path):
+    activity.record("Edit", {}, BOUND, tmp_path, now_ms=5000)
+    activity.record("Read", {}, BOUND, tmp_path, now_ms=9000)
+    assert activity.last_events("sw", tmp_path) == {"sw-eng-1": 9000}
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 0, "act": 1, "since": 0}}
+    assert activity.last_events("missing", tmp_path) == {}
+
+
+def test_invalid_latest_tool_timestamp_does_not_hide_later_agents(tmp_path):
+    folder = tmp_path / "sw"
+    folder.mkdir()
+    (folder / "a.last").write_text("broken")
+    (folder / "b.last").write_text("9000")
+    assert activity.last_events("sw", tmp_path) == {"b": 9000}
+
+
 def test_since_action_counts_only_the_watches_after_the_last_action():
     watch, act = {"kind": "watch", "at": 0}, {"kind": "act", "at": 0}
     assert activity.since_action([]) == 0

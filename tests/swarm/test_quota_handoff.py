@@ -681,3 +681,78 @@ def test_a_lane_pinned_to_claude_keeps_a_quota_handoff_off_codex(tmp_path):
         "no claude account can take the quota handoff from claude account old: "
         "claude old is the account handing off; codex cx is not a claude account"
     )
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+@pytest.mark.parametrize("five,week", [(None, None), (0, 0), (5, 10)])
+def test_api_quota_rows_never_trigger_a_subscription_warning(harness, five, week):
+    row = capacity.Account(harness, "api", "OPEN", 1, five, week, 3, kind="api")
+    assert quota_handoff.trigger(row, quota_handoff.Thresholds()) == ""
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_api_agents_receive_no_subscription_warning(harness):
+    import fakeredis
+
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    agent = AgentRecord("api-worker", "eng", "e", harness=harness, account="api", state="working")
+    storage.put_agent("sw", agent)
+    row = capacity.Account(harness, "api", "OPEN", 1, 0, 0, 3, kind="api")
+    storage.redis.set(storage.key("sw", "quota-capacity"), json.dumps({"accounts": [row.__dict__]}))
+    assert quota_handoff.warn("sw", storage, {}) == []
+    assert not InboxStore(storage.redis).pending_items(agent.name)
+    assert storage.redis.hgetall(storage.key("sw", "quota-warning-lives")) == {}
+
+
+@pytest.mark.parametrize("harness,allow_codex", [("claude", False), ("claude", True), ("codex", True)])
+@pytest.mark.parametrize("sessions,cap,eligible", [(0, 1, True), (1, 1, False), (0, 0, False), (999, 1000, True)])
+def test_api_successors_use_capacity_without_subscription_readings(harness, allow_codex, sessions, cap, eligible):
+    row = capacity.Account(harness, "api", "OPEN", sessions, None, None, cap, kind="api")
+    assert quota_handoff.successor([row], allow_codex, quota_handoff.Thresholds()) == (row if eligible else None)
+    assert quota_handoff.exclusion(row, quota_handoff.Thresholds()) == ("" if eligible else "has no free seats")
+
+
+def test_api_successors_preserve_harness_and_predecessor_restrictions():
+    api = capacity.Account("codex", "api", "OPEN", 0, None, None, 1, kind="api")
+    assert quota_handoff.successor([api], False, quota_handoff.Thresholds()) is None
+    assert quota_handoff.exclusion(api, quota_handoff.Thresholds(), ("codex", "api")) == "is the account handing off"
+    pool = account("token", harness="codex", five=0, week=0, sessions=0)
+    assert quota_handoff.successor([api, pool], True, quota_handoff.Thresholds()) == api
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_swarm_quota_transfer_routes_to_api_with_no_window_readings(tmp_path, monkeypatch, target):
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
+    rt._quota_accounts = [
+        account("old", state="DRAIN"),
+        capacity.Account(target, "api", "OPEN", 0, None, None, 3, kind="api"),
+    ]
+    rt._quota_cap, rt._quota_floor, rt._quota_share = 3, 5, 0
+    seen = []
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    monkeypatch.setattr(
+        rt,
+        "_launch",
+        lambda cfg, lane, task, name, argv, **kw: seen.append(argv) or runtime.Placed("pane", target, "api"),
+    )
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3")
+    task = {
+        "id": "e",
+        "title": "Continue task",
+        "handoff": "Saved Handoff v2",
+        "handoff_envelope": {
+            "reason": "quota",
+            "launch": {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "account": "old"},
+        },
+    }
+    placed = rt.spawn(config, "eng", "engineer@a1b2c3-0002", task)
+    assert (placed.harness, placed.account) == (target, "api")
+    assert _option(seen[0], "--route") == "api"
+    assert _option(seen[0], "--agent") == target
+    assert _option(seen[0], "--profile") == "engineer"
+
+
+def test_api_successor_ties_use_the_existing_account_name_order():
+    api = capacity.Account("claude", "api", "OPEN", 0, None, None, 1, kind="api")
+    token = account("aaa", five=0, week=0, sessions=0)
+    assert quota_handoff.successor([api, token], False, quota_handoff.Thresholds()) == token

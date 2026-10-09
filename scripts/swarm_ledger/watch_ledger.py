@@ -77,14 +77,14 @@ def say(text):
 class Watch:
     """What one watcher has printed so far, so a reconnect or reset never prints an event twice."""
 
-    def __init__(self, args, json_path, marks):
-        self.args, self.json_path, self.marks = args, json_path, marks
+    def __init__(self, args, source, marks):
+        self.args, self.source, self.marks = args, source, marks
         self.state, self.since = None, args.since_rev
         self.seed_error, self.warned = None, []
 
     def show(self, state):
         if self.state is None:
-            say(f"WATCHING {self.json_path} rev {state['_meta']['rev']}")
+            say(f"WATCHING {self.source} rev {state['_meta']['rev']}")
             if self.since is None:
                 self.since = state["_meta"]["rev"]
         self.state = state
@@ -153,11 +153,12 @@ def main():
     parser.add_argument("--as", dest="name")
     parser.add_argument("--since-rev", type=int)
     args = parser.parse_args()
-    json_path = core.paths(args.slug)[1]
-    if not json_path.exists():
-        sys.exit(f"no ledger JSON at {json_path}")
+    from scripts.swarm_ledger.repository import repository
+
+    if not repository.exists(args.slug):
+        sys.exit(f"no ledger {args.slug} in {core.LEDGER_DIR}")
     beat = core.watch_path(args.slug, args.name) if args.name else None
-    watch = Watch(args, json_path, seen.marks_for(args.slug) if args.name else None)
+    watch = Watch(args, f"ledger {args.slug}", seen.marks_for(args.slug) if args.name else None)
     if beat:
         atexit.register(beat.unlink, missing_ok=True)
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
