@@ -130,6 +130,17 @@ def test_the_exhausted_message_names_the_resource_the_server_reports(pauses):
     assert json.loads(error.value.read())["error"]["details"] == {"path": "chat"}
 
 
+def test_an_unnamed_conflict_names_every_fetched_resource_and_keeps_the_reply(pauses):
+    def unnamed():
+        return urllib.error.HTTPError("http://ledger.test/ops", 409, "Conflict", {"X-Seen": "1"}, io.BytesIO(CONFLICT))
+
+    replies = [reply for n in range(6) for reply in ({"revision": f"r{n}"}, {"revision": f"m{n}"}, unnamed())]
+    with pytest.raises(urllib.error.HTTPError) as error:
+        Scripted(*replies).mutate(SLUG, [*chat_add(), {"op": "join", "id": "j-1", "by": "swarm"}])
+    assert error.value.msg == "revision conflict on chat, members persisted after 5 retries"
+    assert (error.value.url, error.value.hdrs) == ("http://ledger.test/ops", {"X-Seen": "1"})
+
+
 def test_a_retry_reuses_the_operation_id_so_an_applied_write_is_not_duplicated(live):  # noqa: F811
     from tests.swarm_ledger.test_ledger_authority import ledger
 

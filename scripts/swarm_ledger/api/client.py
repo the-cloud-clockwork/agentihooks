@@ -1,4 +1,5 @@
 import io
+import itertools
 import json
 import random
 import time
@@ -63,7 +64,7 @@ class ResourceClient:
         unpinned = [operation for operation in operations if not operation.get("expected_revision")]
         pinned = {schemas.target(operation) for operation in operations if operation.get("expected_revision")}
         fetched = {schemas.target(operation) for operation in unpinned} - pinned
-        for attempt in range(RETRIES + 1):
+        for attempt in itertools.count():
             try:
                 return self.send(slug, operations)
             except urllib.error.HTTPError as exc:
