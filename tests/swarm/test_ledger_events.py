@@ -176,6 +176,22 @@ def test_a_new_priority_makes_one_master_item_naming_the_item_and_the_ask(store)
     assert texts(store, ENG_SEAT) == []
 
 
+def test_a_priority_on_a_follow_up_the_swarm_raised_for_the_operator_sends_the_master_no_notice(store):
+    raised = event(11, 100_000, "swarm", "added", "followups/f1", "A message to master@sw is still unread")
+    flagged = event(12, 100_000, "sw-eng-1", "added", "followups/f2", "Pick the release date")
+    doc = recorded(
+        [raised, flagged],
+        followups=[
+            {"id": "f1", "text": raised["text"], "comments": [], "done": False, "needs_operator": True},
+            {"id": "f2", "text": flagged["text"], "comments": [], "done": False, "needs_operator": True},
+        ],
+    )
+    run(store, dict(doc, priorities=[]))
+    doc["priorities"] = [priority(f"followups/{n}", "Decide: it", by="ledger") for n in ("f1", "f2")]
+    run(store, doc)
+    assert [i.ref for i in InboxStore(store.redis).inbox(MASTER_SEAT)] == ["sw:priority:followups/f2"]
+
+
 def test_priorities_open_before_the_first_pass_are_not_announced_and_later_ones_are(store):
     run(store, with_priorities(priority("questions/q1", "Answer: which port")))
     run(store, with_priorities(priority("questions/q1", "Answer: which port"), priority("tasks/t1", "Blocked: no key")))

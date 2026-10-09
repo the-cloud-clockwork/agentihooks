@@ -23,6 +23,9 @@ class Ledger:
         meta["rev"] += 1
         row = {"id": f"f{meta['rev']}", "text": text, "comments": [], "done": False}
         self.doc["followups"].append({**row, **({"needs_operator": True} if needs_operator else {})})
+        if needs_operator:
+            target = f"followups/{row['id']}"
+            self.doc.setdefault("priorities", []).append({"item": target, "text": "Decide: it", "by": "ledger"})
         added = {"rev": meta["rev"], "at": self.now, "by": "swarm", "kind": "added", "text": text}
         meta["events"].append({**added, "target": f"followups/{row['id']}"})
 
