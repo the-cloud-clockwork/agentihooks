@@ -2,10 +2,10 @@ import json
 
 import pytest
 
-from scripts.gates import claims, intent
+from scripts.gates import claims, intent, push_stop
 from scripts.inbox import wake
 from scripts.inbox.store import Item
-from scripts.swarm import capacity, grouping, notice_text, phase_planning, tick, trace_plan
+from scripts.swarm import capacity, done_gate, grouping, notice_text, phase_planning, priority_sweep, tick, trace_plan
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused, SwarmError, _ledger
 from scripts.swarm.store import SwarmConfig
 from scripts.swarm_ledger import ledger_comments
@@ -47,6 +47,9 @@ def templates():
         ("intent shortfall", "comment", intent.SHORTFALL_COMMENT),
         ("slice check", "comment", phase_planning._comment([NOISE] * 9, 12, tail=NOISE)),
         ("unread mail", "item", wake._operator_text(_unread())),
+        ("reopened", "comment", done_gate.REOPENED.format(url="https://github.com/o/r/pull/1961", state="closed")),
+        ("priority cleared", "comment", priority_sweep.CLEARED.format(reason=NOISE)),
+        ("pushed", "comment", push_stop.record_text("git@github.com:o/r.git", "engineer-323133-0768", "fa09b9d0" * 5)),
         ("raw noise", "comment", NOISE),
         ("long noise", "comment", LONG),
         ("long noise item", "item", LONG),
@@ -59,7 +62,9 @@ def templates():
 
 @pytest.mark.parametrize(("name", "kind", "text"), templates(), ids=[t[0] for t in templates()])
 def test_every_swarm_notice_passes_the_servers_plain_words_check(name, kind, text):
-    assert ledger_comments.problems(notice_text.plain(text, kind), kind) == []
+    shown = notice_text.plain(text, kind)
+    assert ledger_comments.problems(shown, kind) == []
+    assert (shown == notice_text.FALLBACK) == (name == "empty")
 
 
 def test_the_worst_capacity_status_would_be_refused_unformatted():
@@ -77,6 +82,7 @@ def test_plain_keeps_meaning_of_ordinary_text():
     [
         ("fixed fa09b9d0 here", "comment", "fixed here"),
         ("a ; b . c", "comment", "a, b. c"),
+        ("quota; ; retry,, deeper", "comment", "quota, retry, deeper"),
         ("; start;", "comment", "start"),
         ("quota->spawn and a=>b", "comment", "quota to spawn and a to b"),
         ("ready — merged – queued", "comment", "ready, merged, queued"),

@@ -11,6 +11,7 @@ SWAPS = (
     (re.compile(r"[()]"), ""),
     (re.compile(r"(?<=[a-z0-9])_(?=[a-z0-9])"), " "),
 )
+REPEATS = re.compile(r",{2,}")
 
 
 def plain(text: str, kind: str = "comment") -> str:
@@ -19,5 +20,5 @@ def plain(text: str, kind: str = "comment") -> str:
     for _, pattern in ledger_comments.RULES:
         text = pattern.sub(" ", text)
     words = " ".join(text.split()[: ledger_comments.LIMITS[kind]])
-    text = words.replace(" ,", ",").replace(" .", ".").strip(" ,")
+    text = REPEATS.sub(",", words.replace(" ,", ",").replace(" .", ".")).strip(" ,")
     return text if text and not ledger_comments.problems(text, kind) else FALLBACK

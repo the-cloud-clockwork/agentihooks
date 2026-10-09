@@ -450,9 +450,9 @@ class Check:
             text = f"Intent remains unmet after two fix rounds: {reason}. The master must review this shortfall."
             key, ref = f"intent-shortfall:{task['id']}:{self.now_ms}", f"tasks/{task['id']}"
             told = self.mail.send(key, self.mail.master, text, ref=ref)
-            self.ledger.comment(self.slug, task["id"], SHORTFALL_COMMENT, by="swarm")
             if task.get("state") == "claimed":
                 self.ledger.update_task(self.slug, task["id"], {"state": "pr"})
+            self.ledger.comment(self.slug, task["id"], SHORTFALL_COMMENT, by="swarm")
             return told
         if self.mode not in ("enforce", "coach"):
             return []

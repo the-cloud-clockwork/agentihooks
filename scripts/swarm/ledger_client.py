@@ -82,10 +82,12 @@ class LedgerClient:
             self._call(slug, [op])
         except LedgerRefused as exc:
             print(f"swarm notice dropped, the ledger refused it: {exc}", file=sys.stderr)
+            return False
+        return True
 
     def _write(self, slug, op, kind="comment"):
         if op.get("by") == "swarm":
-            self._notice(slug, op, kind)
+            return self._notice(slug, op, kind)
         else:
             self._call(slug, [op])
 
@@ -124,7 +126,7 @@ class LedgerClient:
         self._call(slug, [_op("notice", "swarm", text=text)])
 
     def followup(self, slug, text):
-        self._write(slug, _op("add_item", "swarm", list="followups", text=text), "item")
+        return self._write(slug, _op("add_item", "swarm", list="followups", text=text), "item")
 
     def priority(self, slug, item, text):
         self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")
