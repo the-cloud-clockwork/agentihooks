@@ -18,4 +18,4 @@ def normalize(text: str) -> str:
 
 
 def signature(test_id: str, message: str) -> str:
-    return hashlib.sha256(f"{test_id}\n{normalize(message)}".encode()).hexdigest()[:16]
+    return hashlib.sha256(f"{normalize(test_id)}\n{normalize(message)}".encode()).hexdigest()[:16]

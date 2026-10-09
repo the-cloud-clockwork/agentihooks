@@ -4,8 +4,8 @@ TEST = "tests/swarm/test_outbox.py::test_spool_survives"
 
 
 def test_the_same_failure_under_different_temporary_paths_shares_a_signature():
-    first = "AssertionError: assert '/tmp/pytest-of-runner/pytest-3/test_spool0/a.sqlite' == 'x'"
-    second = "AssertionError: assert '/tmp/pytest-of-runner/pytest-17/test_spool2/a.sqlite' == 'x'"
+    first = "AssertionError: assert '/tmp/tmpqxkvab/a.sqlite' == 'x'"
+    second = "AssertionError: assert '/tmp/tmpzwlmno/a.sqlite' == 'x'"
     assert test_signatures.signature(TEST, first) == test_signatures.signature(TEST, second)
 
 
@@ -41,3 +41,16 @@ def test_a_signature_is_a_short_stable_hex_digest():
     assert value == test_signatures.signature(TEST, "AssertionError: assert 7 == 9")
     assert len(value) == 16
     int(value, 16)
+
+
+def test_the_signature_of_a_known_failure_never_changes():
+    assert test_signatures.signature(TEST, "AssertionError: assert 1 == 2") == "c46577a6eab2a2c6"
+
+
+def test_a_seven_character_commit_and_edge_spaces_are_removed():
+    assert test_signatures.normalize("  AssertionError: head e5c54e6  ") == "AssertionError: head <hash>"
+
+
+def test_a_temporary_path_in_a_parametrized_test_id_shares_a_signature():
+    first = test_signatures.signature("tests/a.py::test_f[/tmp/tmpqxkvab/x]", "KeyError: 'k'")
+    assert first == test_signatures.signature("tests/a.py::test_f[/tmp/tmpzwlmno/x]", "KeyError: 'k'")

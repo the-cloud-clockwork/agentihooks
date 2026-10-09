@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scripts.swarm import metrics_ci, metrics_outbox
+from scripts.swarm import metrics_ci, metrics_outbox, test_signatures
 
 LOG = "\n".join(
     (
@@ -87,7 +87,7 @@ def test_failed_tests_are_rows_with_their_message_and_signature_once_each():
     }
     spool = next(row for row in failures if row["test_id"].endswith("test_spool"))
     assert spool["event_id"] == "ci-fail:7:2:11:tests/a_test.py::test_spool"
-    assert len(spool["signature"]) == 16
+    assert spool["signature"] == test_signatures.signature(spool["test_id"], spool["message"])
 
 
 def test_a_failure_without_a_summary_line_still_has_a_signature():
@@ -139,13 +139,19 @@ def test_a_stage_without_a_budget_or_a_started_job_records_zero():
     assert (stage["stage"], stage["budget"], stage["pickup_s"]) == ("custom", 0, 0.0)
 
 
-def test_ship_appends_rows_to_the_outbox_and_flushes(tmp_path, monkeypatch):
+@pytest.fixture
+def spool(tmp_path, monkeypatch):
+    path = tmp_path / "outbox.sqlite"
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: path)
+    return path
+
+
+def test_ship_appends_rows_to_the_outbox_and_flushes(spool, monkeypatch):
     sent = []
     monkeypatch.setattr(metrics_outbox, "post", lambda sink, query, body: sent.append((query, body)) or True)
-    path = tmp_path / "outbox.sqlite"
     rows = metrics_ci.rows("sw", RUN, JOBS, {11: LOG})
     env = {metrics_outbox.URL_ENV: "http://ch", metrics_outbox.USER_ENV: "ins"}
-    assert metrics_ci.ship(1_791_530_600_000, rows, env, path) == []
+    assert metrics_ci.ship(1_791_530_600_000, rows, env) == []
     inserts = [body for query, body in sent if query.startswith("INSERT INTO swarm.ci_failures")]
     assert [json.loads(line)["test_id"] for line in inserts[0].decode().splitlines()] == [
         "tests/a_test.py::test_spool",
@@ -153,15 +159,21 @@ def test_ship_appends_rows_to_the_outbox_and_flushes(tmp_path, monkeypatch):
     ]
 
 
-def test_ship_reports_an_outbox_it_cannot_open(tmp_path):
+def test_ship_reports_an_outbox_it_cannot_open(tmp_path, monkeypatch):
     blocker = tmp_path / "file"
     blocker.write_text("")
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: blocker / "outbox.sqlite")
     env = {metrics_outbox.URL_ENV: "http://ch", metrics_outbox.USER_ENV: "ins"}
-    (error,) = metrics_ci.ship(1, {}, env, blocker / "outbox.sqlite")
+    (error,) = metrics_ci.ship(1, {}, env)
     assert error.startswith("metrics outbox failed:")
 
 
 @pytest.mark.parametrize("env", [{}, {metrics_outbox.URL_ENV: "http://ch"}])
-def test_ship_does_nothing_while_the_sink_is_off(tmp_path, env):
-    assert metrics_ci.ship(1, {metrics_ci.RUNS: [{"bad": 1}]}, env, tmp_path / "o.sqlite") == []
-    assert not (tmp_path / "o.sqlite").exists()
+def test_ship_does_nothing_while_the_sink_is_off(spool, env):
+    assert metrics_ci.ship(1, {metrics_ci.RUNS: [{"bad": 1}]}, env) == []
+    assert not spool.exists()
+
+
+def test_a_run_whose_rows_break_their_table_is_refused():
+    with pytest.raises(ValueError, match="ci_runs.branch"):
+        metrics_ci.rows("sw", {**RUN, "head_branch": None}, JOBS, {})

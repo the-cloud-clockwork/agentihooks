@@ -127,7 +127,7 @@ def test_github_is_read_from_the_repository_over_the_window(swarm):
         "repos/{owner}/{repo}/actions/runs/1/jobs?per_page=100",
         "--paginate",
         "--jq",
-        defects.JOBS_JQ,
+        ".jobs[] | {id, name, created_at, started_at, completed_at, conclusion, html_url} | @json",
     ]
     assert kwargs == {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60}
 
@@ -307,6 +307,8 @@ def test_with_the_sink_set_each_finished_pull_request_and_dev_push_run_is_metere
         (22, "push", 420.0),
         (21, "pull_request", 600.0),
     ]
+    stages = [(r["run_id"], r["stage"]) for r in _inserted(sink, "ci_stages")]
+    assert sorted(stages) == [(21, "gate-required"), (21, "unit"), (22, "gate-required")]
     (failure,) = _inserted(sink, "ci_failures")
     assert (failure["test_id"], failure["job"]) == ("tests/a_test.py::test_spool", "unit (3.12, 1)")
     assert [c for c in calls if c.endswith("/logs")] == ["repos/{owner}/{repo}/actions/jobs/211/logs"]
@@ -391,3 +393,20 @@ def test_dev_push_runs_that_cannot_be_read_leave_pull_request_runs_metered(swarm
     defects.refresh("sw", config, store, ledger, NOW_MS, run=run, environ=SINK)
     assert "ci budget skipped reading dev push Tests runs: HTTP 503" in capsys.readouterr().err
     assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [21]
+
+
+def test_a_run_whose_rows_break_their_table_is_skipped_and_the_rest_ship(swarm, sink, capsys, monkeypatch):
+    store, config, ledger = swarm
+    monkeypatch.setitem(METERED_RUNS, 0, {**METERED_RUNS[0], "head_branch": None})
+    assert defects.refresh("sw", config, store, ledger, NOW_MS, run=_metered_gh([]), environ=SINK) == []
+    assert "ci budget skipped metering one Tests run: ci_runs.branch must be String" in capsys.readouterr().err
+    assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [22]
+
+
+def test_each_pass_meters_at_most_a_batch_of_runs(swarm, sink, monkeypatch):
+    store, config, ledger = swarm
+    monkeypatch.setattr(defects, "METER_BATCH", 1)
+    defects.refresh("sw", config, store, ledger, NOW_MS, run=_metered_gh([]), environ=SINK)
+    assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [21]
+    defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=_metered_gh([]), environ=SINK)
+    assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [21, 22]

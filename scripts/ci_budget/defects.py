@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 REFRESH_MS = 5 * 60_000
 WINDOW_S = 6 * 3600
 SEEN_TTL_S = 2 * 24 * 3600
+METER_BATCH = 20
 READ_ERRORS = (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError)
 JOBS_JQ = ".jobs[] | {id, name, created_at, started_at, completed_at, conclusion, html_url} | @json"
 
@@ -96,6 +97,8 @@ def _meter(slug, redis, runs, now_ms, log_of, jobs_of, environ):
     batches = {metrics_ci.RUNS: [], metrics_ci.STAGES: [], metrics_ci.FAILURES: []}
     marks = []
     for item in runs:
+        if len(marks) >= METER_BATCH:
+            break
         try:
             mark = key(slug, "metered", str(item["id"]), str(item["run_attempt"]))
             if redis.exists(mark):

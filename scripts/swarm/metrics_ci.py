@@ -119,15 +119,19 @@ def rows(slug: str, item: dict, jobs: list[dict], logs: dict) -> dict:
         if job.get("id") in logs
         for test_id, message in _failures(logs[job["id"]], job["name"]).items()
     ]
-    return {RUNS: [run_row], STAGES: stage_rows, FAILURES: failure_rows}
+    found = {RUNS: [run_row], STAGES: stage_rows, FAILURES: failure_rows}
+    for table, table_rows in found.items():
+        for row in table_rows:
+            table.check(row)
+    return found
 
 
-def ship(now_ms: int, batches: dict, environ, path=None) -> list[str]:
+def ship(now_ms: int, batches: dict, environ) -> list[str]:
     sink = metrics_outbox.settings(environ)
     if sink is None:
         return []
     try:
-        box = metrics_outbox.Outbox(path or metrics_outbox.spool_path(), sink)
+        box = metrics_outbox.Outbox(metrics_outbox.spool_path(), sink)
         try:
             for table, found in batches.items():
                 box.append(table, found)
