@@ -17,6 +17,10 @@ class Provider:
         self.lose_response = False
 
     def read(self, url):
+        from scripts.swarm.store import SwarmError
+
+        if url != self.pull.url:
+            raise SwarmError("outcome_conflict")
         return self.pull
 
     def enqueue(self, pull, operation_id, guard):
@@ -125,7 +129,7 @@ def test_pause_retains_proposal_for_review(fixture):
 
     accepted = outcomes.propose(token, proposal)
     outcomes.integration_enabled = False
-    with pytest.raises(SwarmError, match="paused"):
+    with pytest.raises(SwarmError, match="^final integration is paused$"):
         outcomes.integrate(token, proposal.generation)
     assert authority.current(proposal.task_id).result == accepted
     assert provider.calls == []
@@ -302,7 +306,7 @@ def test_pause_at_the_final_guard_keeps_the_proposal_retryable(fixture):
         return original(pull, operation_id, guard)
 
     provider.enqueue = pause_before_guard
-    with pytest.raises(SwarmError, match="paused"):
+    with pytest.raises(SwarmError, match="^final integration is paused$"):
         outcomes.integrate(token, proposal.generation)
     assert authority.current(proposal.task_id).result["phase"] == "accepted"
     assert provider.calls == []
@@ -351,6 +355,10 @@ def test_verified_outcome_completes_the_authoritative_ledger_once(fixture, tmp_p
     assert state["tasks"][0]["done"] is True
     assert authority.current(proposal.task_id).state == "completed"
     assert state["tasks"][0]["proof"] == proposal.proof
+    assert (
+        state["_meta"]["outcomes"][proposal.task_id]["digest"]
+        == "b6f69fb841b5bee5a01e3a6eef94590760133e5465e26a948cc84ea851cdc305"
+    )
     assert result["ledger_revision"] == state["_meta"]["rev"]
     prior = state
     replay = outcomes.complete(token, proposal.generation, repository)
@@ -495,6 +503,261 @@ def test_successor_finishes_authority_after_a_committed_ledger_response_is_lost(
     assert outcomes.authority.current(proposal.task_id).generation == 2
     assert outcomes.authority.current(proposal.task_id).state == "completed"
     assert len(outcomes.provider.calls) == 1
+
+
+def test_proposal_replay_keeps_one_accepted_journal_entry(fixture):
+    outcomes, authority, token, proposal, *_ = fixture
+    first = outcomes.propose(token, proposal)
+    journal = authority.journal(proposal.task_id)
+    assert outcomes.propose(token, proposal) == first
+    assert authority.journal(proposal.task_id) == journal
+    assert journal[-1]["event"] == "outcome_proposed"
+
+
+def test_integration_requires_an_accepted_proposal(fixture):
+    from scripts.swarm.store import SwarmError
+
+    outcomes, authority, token, proposal, provider, *_ = fixture
+    with pytest.raises(SwarmError, match="^an accepted outcome is required$"):
+        outcomes.integrate(token, proposal.generation)
+    assert provider.calls == []
+
+
+@pytest.mark.parametrize(
+    "proof",
+    [
+        {"artifact": "fixture://test-report", "sha": "tested-head"},
+        {"artifact": "fixture://test-report", "run": "fixture-run", "sha": "wrong"},
+    ],
+)
+def test_required_proof_fields_are_checked_before_the_artifact_verifier(fixture, proof):
+    from scripts.swarm.store import SwarmError
+
+    outcomes, authority, token, proposal, *_ = fixture
+    outcomes.verify_proof = lambda evidence: True
+    with pytest.raises(SwarmError, match="^required proof artifacts are absent or unverified$"):
+        outcomes.propose(token, replace(proposal, proof=proof))
+    assert authority.current(proposal.task_id).result == {}
+
+
+def test_expired_owner_cannot_reconcile_an_unchanged_unknown_outcome(fixture):
+    from scripts.swarm.store import SwarmError
+
+    outcomes, authority, token, proposal, provider, task, clock, *_ = fixture
+    outcomes.propose(token, proposal)
+
+    def lost(pull, operation_id, guard):
+        guard()
+        raise TimeoutError
+
+    provider.enqueue = lost
+    assert outcomes.integrate(token, proposal.generation)["phase"] == "unknown"
+    before = authority.current(proposal.task_id)
+    clock[0] += 30_001
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        outcomes.integrate(token, proposal.generation)
+    assert authority.current(proposal.task_id) == before
+
+
+def test_reconciliation_journals_exact_phase_events(fixture):
+    outcomes, authority, token, proposal, provider, *_ = fixture
+    outcomes.propose(token, proposal)
+    outcomes.integrate(token, proposal.generation)
+    events = [row["event"] for row in authority.journal(proposal.task_id)]
+    assert events == ["admitted", "outcome_proposed", "outcome_reconciled", "outcome_reconciled"]
+
+
+def test_github_provider_rejects_a_non_pr_resource_with_its_exact_error():
+    from scripts.swarm.store import SwarmError
+
+    provider = GitHubIntegration("example/repo", lambda query, variables: {"resource": None})
+    with pytest.raises(SwarmError, match="^GitHub URL does not identify a pull request$"):
+        provider.read("https://github.com/example/repo/pull/1")
+
+
+def test_github_provider_reports_absent_commit_identity_as_empty():
+    raw = {
+        "id": "PR_one",
+        "url": "https://github.com/example/repo/pull/1",
+        "headRefOid": "tested-head",
+        "baseRefName": "dev",
+        "state": "OPEN",
+        "mergeCommit": {},
+    }
+    provider = GitHubIntegration("example/repo", lambda query, variables: {"resource": raw})
+    assert provider.read(raw["url"]).merge_sha == ""
+
+
+def test_paused_verified_outcome_cannot_mark_the_ledger_done(monkeypatch, tmp_path):
+    from scripts.swarm.store import SwarmError
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    outcomes.integrate(token, proposal.generation)
+    before = repository.get_document(outcomes.authority.slug)
+    outcomes.integration_enabled = False
+    with pytest.raises(SwarmError, match="^final integration is paused$"):
+        outcomes.complete(token, proposal.generation, repository)
+    assert repository.get_document(outcomes.authority.slug) == before
+
+
+def test_scope_changed_during_final_verification_is_refused(monkeypatch, tmp_path):
+    from scripts.swarm.store import SwarmError
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    outcomes.integrate(token, proposal.generation)
+    original = outcomes.authority.authorize
+    changed = []
+
+    def authorize(worker_token):
+        scope = original(worker_token)
+        return replace(scope, project_ids=[]) if changed else scope
+
+    def verify(proof):
+        changed.append(True)
+        return proof == proposal.proof
+
+    outcomes.authority.authorize = authorize
+    outcomes.verify_proof = verify
+    before = repository.get_document(outcomes.authority.slug)
+    with pytest.raises(SwarmError, match="^forbidden_scope$"):
+        outcomes.complete(token, proposal.generation, repository)
+    assert repository.get_document(outcomes.authority.slug) == before
+
+
+def test_changed_revision_refusal_uses_the_ledger_operation_identity(monkeypatch, tmp_path):
+    from scripts.swarm.store import SwarmError
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    outcomes.integrate(token, proposal.generation)
+    repository.apply_ops(
+        outcomes.authority.slug,
+        ops=[
+            {
+                "id": "instructions",
+                "op": "task_update",
+                "item": f"tasks/{proposal.task_id}",
+                "by": outcomes.authority.current(proposal.task_id).holder,
+                "fields": {"description": "new instructions"},
+            }
+        ],
+    )
+    before = repository.get_document(outcomes.authority.slug)["tasks"][0]
+    with pytest.raises(SwarmError, match="^the ledger outcome was refused$"):
+        outcomes.complete(token, proposal.generation, repository)
+    assert repository.get_document(outcomes.authority.slug)["tasks"][0] == before
+    assert outcomes.authority.current(proposal.task_id).state == "active"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("state", "open"),
+        ("proof", {"run": "success"}),
+        ("pr_url", "https://github.com/example/repo/pull/2"),
+        ("claimed_by", "replacement"),
+    ],
+)
+def test_committed_outcome_fields_cannot_be_rewritten_by_legacy_updates(monkeypatch, tmp_path, field, value):
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    outcomes.complete(token, proposal.generation, repository)
+    before = repository.get_document(outcomes.authority.slug)["tasks"][0]
+    _, rejected = repository.apply_ops(
+        outcomes.authority.slug,
+        ops=[
+            {
+                "id": "legacy-rewrite",
+                "op": "task_update",
+                "item": f"tasks/{proposal.task_id}",
+                "by": outcomes.authority.current(proposal.task_id).holder,
+                "fields": {field: value},
+            }
+        ],
+    )
+    assert rejected == ["legacy-rewrite"]
+    assert repository.get_document(outcomes.authority.slug)["tasks"][0] == before
+
+
+def test_committed_outcome_allows_an_unprotected_description_update(monkeypatch, tmp_path):
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    outcomes.complete(token, proposal.generation, repository)
+    state, rejected = repository.apply_ops(
+        outcomes.authority.slug,
+        ops=[
+            {
+                "id": "description",
+                "op": "task_update",
+                "item": f"tasks/{proposal.task_id}",
+                "by": outcomes.authority.current(proposal.task_id).holder,
+                "fields": {"description": "verified result"},
+            }
+        ],
+    )
+    assert rejected == []
+    assert state["tasks"][0]["description"] == "verified result"
+
+
+def test_changed_committed_effect_cannot_reuse_its_ledger_receipt(monkeypatch, tmp_path):
+    from copy import deepcopy
+
+    from scripts.swarm_ledger import ledger_tasks
+    from tests import sv2_ctl05_cases
+    from tests.swarm_ledger.test_tasks import core
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    result = outcomes.complete(token, proposal.generation, repository)
+    source = repository.get_document(outcomes.authority.slug)
+    doc = deepcopy(source)
+    ctx = core.Context(doc.pop("_meta"), 0)
+    changed = {**result, "merge_sha": "another-commit"}
+    operation = {
+        "id": "different-effect",
+        "op": "task_update",
+        "item": f"tasks/{proposal.task_id}",
+        "by": outcomes.authority.current(proposal.task_id).holder,
+        "fields": {"state": "done", "pr_url": proposal.pr_url, "proof": proposal.proof},
+    }
+    before = deepcopy(doc)
+    assert not ledger_tasks.complete_outcome(doc, operation, ctx, changed, operation["by"])
+    assert ctx.refused == ["outcome receipt conflict"]
+    assert doc == before
+
+
+def test_completion_refuses_an_operation_of_another_kind(monkeypatch, tmp_path):
+    from copy import deepcopy
+
+    from scripts.swarm_ledger import ledger_tasks
+    from tests import sv2_ctl05_cases
+    from tests.swarm_ledger.test_tasks import core
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    result = outcomes.integrate(token, proposal.generation)
+    doc = repository.get_document(outcomes.authority.slug)
+    ctx = core.Context(doc.pop("_meta"), 0)
+    operation = {
+        "id": "wrong-kind",
+        "op": "task_add",
+        "item": f"tasks/{proposal.task_id}",
+        "by": outcomes.authority.current(proposal.task_id).holder,
+        "fields": {"state": "done", "pr_url": proposal.pr_url, "proof": proposal.proof},
+    }
+    before = deepcopy(doc)
+    assert not ledger_tasks.complete_outcome(doc, operation, ctx, result, operation["by"])
+    assert ctx.refused == ["outcome identity conflict"]
+    assert doc == before
 
 
 def test_replacement_during_final_proof_verification_rolls_back_the_ledger(monkeypatch, tmp_path):
