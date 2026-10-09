@@ -1,0 +1,18 @@
+version: 1
+purpose: model-pick
+fallbacks: cli
+questions:
+  - name: effort
+    type: score
+    instructions: How much reasoning does this task need?
+    levels:
+      - "{levels[0]}"
+      - "{levels[1]}"
+      - "{levels[2]}"
+      - "{levels[3]}"
+thresholds:
+  confidence: 0.6
+environment:
+  confidence: AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE
+rule:
+  type: code
