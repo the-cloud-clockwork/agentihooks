@@ -32,6 +32,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   edit chat|ITEM ENTRY TEXT           rewrite an entry (yours; the orchestrator: any agent's)
   delete chat|ITEM ENTRY...           delete entries (yours; the orchestrator: any agent's)
   audit                               list every agent text the filter refuses, the cleanup worklist
+  show                                print the whole ledger as JSON: every task, note, answer and comment (no --as needed)
   priority add ITEM TEXT              ask the operator: only what blocks on his answer, at most 20 words; ITEM may
                                       be phases/<id>, questions/<id>, followups/<id> or tasks/<id>. Unanswered
                                       questions, blocked tasks, merge approvals and flagged follow-ups show on their own
@@ -74,6 +75,7 @@ LEDGER_AUTOSTART=0 (never start a server on a failed request).
 """
 
 import argparse
+import functools
 import json
 import os
 import subprocess
@@ -101,6 +103,7 @@ from scripts.swarm_ledger import ledger_phases, ledger_task_duplicates
 from scripts.swarm_ledger.repository import repository
 
 BASE = "" if ledger_link.remote() else ledger_link.base()
+SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
     "contract": (ledger_kinds.CONTRACT_KEYS, "contract.must=M contract.check=C"),
@@ -123,7 +126,7 @@ def credentials(slug, service=False):
             sys.exit("a remote ledger client needs a pinned agent identity; the operator credential stays on its host")
         token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or launch_token(slug, who.name)
         return {"X-Ledger-Token": token, "X-Ledger-Agent": who.name}
-    token = core.read_token(repository.read_page(slug)) or ""
+    token = repository.token(slug) or ""
     if service or not who.pinned:
         return {"X-Ledger-Token": token}
     return {"X-Ledger-Token": authority.agent_token(token, slug, who.name), "X-Ledger-Agent": who.name}
@@ -241,6 +244,10 @@ def cmd_leave(args):
 def cmd_events(args):
     for event in mine(call(args.slug), args.name):
         print(watch_ledger.line(event))
+
+
+def cmd_show(args):
+    print(SHOW_JSON(call(args.slug)))
 
 
 def cmd_status(args):
@@ -719,6 +726,7 @@ def build_parser():
     delete.add_argument("target")
     delete.add_argument("entries", nargs="+")
     sub.add_parser("audit")
+    sub.add_parser("show")
     priority = sub.add_parser("priority")
     priority.add_argument("action", choices=["add", "clear"])
     priority.add_argument("values", nargs="*")
@@ -787,7 +795,7 @@ def main():
     if text := refusal(args.name, Who.from_env()):
         sys.exit(f"agentihooks ledger: {text}")
     args.name = resolve_name(args.name) if args.name else args.name
-    if not args.slug or not (args.name or args.command == "url"):
+    if not args.slug or not (args.name or args.command in ("url", "show")):
         sys.exit("--slug and --as are required")
     globals()[f"cmd_{args.command.replace('-', '_')}"](args)
 

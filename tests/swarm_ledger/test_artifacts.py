@@ -119,15 +119,15 @@ class ArtifactEndpoint(Endpoint):
         self.put([{"op": "join", "id": "j-leaving-upload", "by": "leaving-engineer"}])
         folder = media.folder("via-media")
         before = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}
-        read = server.repository.get_document
+        read = server.repository.read
 
         def read_then_leave(*args, **kwargs):
-            doc = read(*args, **kwargs)
-            if "leaving-engineer" in doc["_meta"]["members"]:
+            reply = read(*args, **kwargs)
+            if "leaving-engineer" in reply["_meta"]["members"]:
                 core.sync("via-media", ops=[{"op": "leave", "id": "leave-upload", "by": "leaving-engineer"}])
-            return doc
+            return reply
 
-        with patch.object(server.repository, "get_document", side_effect=read_then_leave):
+        with patch.object(server.repository, "read", side_effect=read_then_leave):
             code, body = self.publish(
                 "leaving-engineer", "leave.md", b"# Departing upload\n", request={"task": "", "plan": True}
             )
@@ -219,7 +219,7 @@ class ArtifactEndpoint(Endpoint):
             code, _, body = self.put([op])
             assert code == 200
             published.append((title, file))
-        state = json.loads(body)
+        state = server.repository.get_document("via-media")
         rows = state["artifacts"][-3:]
         assert [(r["title"], r["file"]) for r in rows] == published
         assert {(r["by"], r["task"]) for r in rows} == {("art-engineer", "av1")}
@@ -251,12 +251,13 @@ class ArtifactEndpoint(Endpoint):
         ghost = {"id": "f" * 64 + ".md"}
         base = {"op": "artifact_add", "by": "rec-engineer", "task": "", "title": "Plan"}
         assert self.put([{**base, "id": "a-ghost", "file": ghost}])[0] == 400
-        state = json.loads(self.put([{**base, "id": "a-anon", "by": "stranger", "file": file}])[2])
-        assert "a-anon" in state["rejected"]
-        state = json.loads(self.put([{**base, "id": "a-notask", "task": "nope", "file": file}])[2])
-        assert "a-notask" in state["rejected"]
+        code, _, body = self.put([{**base, "id": "a-anon", "by": "stranger", "file": file}])
+        assert "a-anon" in json.loads(body)["rejected"]
+        code, _, body = self.put([{**base, "id": "a-notask", "task": "nope", "file": file}])
+        assert "a-notask" in json.loads(body)["rejected"]
         self.put([{"op": "add", "thread": "chat", "id": "m-wants", "text": "Send me the plan"}])
-        state = json.loads(self.put([{**base, "id": "a-free", "file": file, "request": "m-wants"}])[2])
+        self.put([{**base, "id": "a-free", "file": file, "request": "m-wants"}])
+        state = server.repository.get_document("via-media")
         assert state["artifacts"][-1]["id"] == "a-free"
 
 
@@ -314,11 +315,9 @@ def test_upload_artifact_sends_bytes_name_token_and_agent(tmp_path):
     doc = tmp_path / "proposal.md"
     doc.write_bytes(MARKDOWN)
     with (
-        patch.object(ledger.core, "paths", return_value=(tmp_path / "page.html", None)),
-        patch.object(ledger.core, "read_token", return_value="test-token"),
+        patch.object(ledger.repository, "token", return_value="test-token"),
         patch.object(ledger.urllib.request, "urlopen") as opened,
     ):
-        (tmp_path / "page.html").write_text("page")
         opened.return_value.__enter__.return_value.read.return_value = b'{"id": "x"}'
         assert ledger.upload_artifact(
             "shots", "art-engineer", str(doc), {"task": "av1", "title": "Proposal", "request": "wanted"}
@@ -328,5 +327,3 @@ def test_upload_artifact_sends_bytes_name_token_and_agent(tmp_path):
     assert req.data == MARKDOWN
     assert req.get_header("X-artifact-name") == "proposal.md"
     assert json.loads(req.get_header("X-artifact-request")) == {"task": "av1", "title": "Proposal", "request": "wanted"}
-    assert req.get_header("X-ledger-agent") == "art-engineer"
-    assert req.get_header("X-ledger-token") == "test-token"

@@ -18,6 +18,8 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
+
 SLUG = "hook-2026-01-01"
 SID = "sess-1"
 JOIN = f"python3 {SCRIPTS}/ledger.py --slug {SLUG} --as boss join --role orchestrator"
@@ -56,7 +58,7 @@ def make_ledger(done=False):
     }
     html_path, json_path = core.paths(SLUG)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     state, _ = core.sync(SLUG)
     if done:
@@ -258,9 +260,16 @@ class Gate(unittest.TestCase):
         self.assertIsNone(hook("Stop"))
 
     def test_unreadable_ledger_fails_open(self):
+        from scripts.swarm_ledger.repository.sqlite import DATABASE
+
         ask("pending", 5)
-        core.paths(SLUG)[1].write_text("{not json", encoding="utf-8")
-        self.assertIsNone(hook("Stop"))
+        db = core.LEDGER_DIR / DATABASE
+        original = db.read_bytes()
+        db.write_bytes(b"not a database")
+        try:
+            self.assertIsNone(hook("Stop"))
+        finally:
+            db.write_bytes(original)
 
 
 if __name__ == "__main__":

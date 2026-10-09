@@ -23,9 +23,11 @@ from tests.swarm_ledger.test_sqlite import document
 
 def stored(tmp_path, state=None, registries=None):
     folder = tmp_path / "ledgers"
-    SQLiteLedgerRepository(folder / DATABASE).import_document(
-        "ledger", state or document(), registries=registries or {"bin": {"a": 1, "b": [2, 3]}}
-    )
+    repo = SQLiteLedgerRepository(folder / DATABASE)
+    repo.import_document("ledger", state or document())
+    with repo.connect() as connection, connection:
+        for name, entries in (registries or {"bin": {"a": 1, "b": [2, 3]}}).items():
+            repo.save_registry(connection, name, entries)
     return folder
 
 

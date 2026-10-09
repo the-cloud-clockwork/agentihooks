@@ -15,6 +15,7 @@ import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import (  # noqa: E402
     PAGE_URL,
     chromium,
@@ -100,7 +101,7 @@ def test_an_error_page_the_server_library_writes_carries_the_policy_too(base):
 
 def test_the_ledger_shell_holds_metadata_but_no_record_seed(base):
     _, _, body = get(f"{base}/{SLUG}")
-    token = core.read_token(core.paths(SLUG)[0].read_text())
+    token = legacy_page.stored_token(core.paths(SLUG)[0])
     assert f'<meta name="ledger-token" content="{token}">' in body
     assert f'<meta name="ledger-page" content="{core.page_version()}">' in body
     assert "<title>Shell &lt;ledger&gt;</title>" in body
@@ -118,12 +119,10 @@ def test_shell_size_does_not_grow_with_the_record(base):
 
 
 def test_serving_the_shell_never_writes_the_record_files(base):
-    html_path, json_path = core.paths(SLUG)
-    html_path.write_text(html_path.read_text().replace(core.page_version(), "000000000000"))
-    stamps = (html_path.stat().st_mtime_ns, json_path.stat().st_mtime_ns)
+    before = server.repository.get_document(SLUG)
     get(f"{base}/{SLUG}")
     get(base + "/")
-    assert (html_path.stat().st_mtime_ns, json_path.stat().st_mtime_ns) == stamps
+    assert server.repository.get_document(SLUG) == before
 
 
 def test_home_shell_lists_no_ledger_rows(base):
@@ -176,7 +175,7 @@ def test_an_asset_edit_changes_the_version_the_shell_links(tmp_path):
 
 
 def test_the_task_work_folder_reads_on_demand(base, monkeypatch):
-    token = core.read_token(core.paths(SLUG)[0].read_text())
+    token = legacy_page.stored_token(core.paths(SLUG)[0])
     monkeypatch.setattr(server, "workspace_tails", lambda slug, task: {"progress": f"{slug} {task} line"})
     status, _, body = get(f"{base}/api/v1/ledgers/{SLUG}/tasks/t1/workspace", **{"X-Ledger-Token": token})
     assert status == 200
@@ -184,7 +183,7 @@ def test_the_task_work_folder_reads_on_demand(base, monkeypatch):
 
 
 def test_an_unknown_work_folder_answers_not_found(base, monkeypatch):
-    token = core.read_token(core.paths(SLUG)[0].read_text())
+    token = legacy_page.stored_token(core.paths(SLUG)[0])
 
     def refuse(slug, task):
         raise ValueError("bad id")
@@ -226,7 +225,7 @@ def test_the_bin_shell_leaves_the_watermark_slot_empty(base):
 
 
 def test_the_shell_names_the_server_port_and_an_empty_token_when_the_record_has_none(base, monkeypatch):
-    monkeypatch.setattr(server.repository, "read_page", lambda slug: "<html></html>")
+    monkeypatch.setattr(server.repository, "token", lambda slug: None)
     page = server.page_for(SLUG)
     assert '<meta name="ledger-token" content="">' in page
     assert f'<meta name="ledger-port" content="{server.PORT}">' in page
@@ -236,7 +235,6 @@ def test_the_watch_loop_sweeps_the_bin_every_fifteenth_pass(monkeypatch):
     sweeps, passes = [], []
     monkeypatch.setattr(server, "bin_closed_without_swarm", lambda: sweeps.append(len(passes)))
     monkeypatch.setattr(server.ledger_bin, "tidy", lambda: None)
-    monkeypatch.setattr(server.repository, "pages", lambda: [])
     monkeypatch.setattr(server, "sample_streams", lambda: None)
     monkeypatch.setattr(server, "reloading", lambda: False)
 
@@ -247,15 +245,8 @@ def test_the_watch_loop_sweeps_the_bin_every_fifteenth_pass(monkeypatch):
 
     monkeypatch.setattr(server.time, "sleep", tick)
     with pytest.raises(StopIteration):
-        server.watch_seeds()
+        server.watch_ledgers()
     assert sweeps == [0, 15, 30]
-
-
-def test_upgrading_a_record_fills_every_placeholder(base):
-    new_ledger.upgrade_page(SLUG)
-    page = core.paths(SLUG)[0].read_text(encoding="utf-8")
-    assert "__LEDGER_" not in page
-    assert "<title>Shell &lt;ledger&gt;</title>" in page
 
 
 def history(copies):

@@ -1,5 +1,6 @@
 import json
 import threading
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 
@@ -7,6 +8,8 @@ import pytest
 
 from scripts.swarm_ledger import ledger, ledger_server, ledger_workspace, new_ledger
 from scripts.swarm_ledger import ledger_core as core
+from scripts.swarm_ledger.repository import repository
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "lean-reads-2026-01-01"
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -28,7 +31,7 @@ def make_ledger():
         }
     )
     html_path, json_path = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(doc, SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(doc, SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     return core.sync(SLUG)[0]
 
@@ -40,50 +43,10 @@ def say(n):
 def test_a_read_that_changes_nothing_writes_nothing():
     make_ledger()
     say(1)
-    html_path, json_path = core.paths(SLUG)
-    before = (json_path.stat().st_mtime_ns, html_path.stat().st_mtime_ns)
+    before = repository.get_document(SLUG)
     for _ in range(10):
         core.sync(SLUG)
-    assert (json_path.stat().st_mtime_ns, html_path.stat().st_mtime_ns) == before
-
-
-def test_storage_keeps_only_the_last_few_seeds_and_every_entry():
-    make_ledger()
-    for n in range(core.SEEDS_KEPT + 10):
-        say(n)
-    stored = json.loads(core.paths(SLUG)[1].read_text(encoding="utf-8"))
-    assert core.SEEDS_KEPT <= 5
-    assert len(stored["_meta"]["seeds"]) == core.SEEDS_KEPT
-    assert [m["text"] for m in stored["chat"]] == [f"note {n}" for n in range(core.SEEDS_KEPT + 10)]
-
-
-def test_an_html_seed_older_than_the_kept_seeds_reverts_nothing():
-    state = make_ledger()
-    html_path = core.paths(SLUG)[0]
-    stale = html_path.read_text(encoding="utf-8")
-    item = state["followups"][0]["id"]
-    core.sync(SLUG, changes=[{"path": f"followups/{item}/done", "value": True}])
-    for n in range(core.SEEDS_KEPT + 2):
-        say(n)
-    html_path.write_text(stale, encoding="utf-8")
-    state, _ = core.sync(SLUG)
-    assert state["followups"][0]["done"] is True
-    assert len(state["chat"]) == core.SEEDS_KEPT + 2
-    assert any("too old" in w for w in state["_meta"]["warnings"])
-
-
-def test_an_html_seed_without_a_revision_merges_against_the_current_ledger():
-    make_ledger()
-    say(1)
-    html_path = core.paths(SLUG)[0]
-    html = html_path.read_text(encoding="utf-8")
-    seed = core.parse_seed(html)
-    seed.pop("_rev")
-    seed["chat"].append({"id": "m2", "by": "eng", "text": "from the page copy"})
-    html_path.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], html), encoding="utf-8")
-    state, _ = core.sync(SLUG)
-    assert [m["text"] for m in state["chat"]] == ["note 1", "from the page copy"]
-    assert not any("too old" in w for w in state["_meta"]["warnings"])
+    assert repository.get_document(SLUG) == before
 
 
 @pytest.fixture
@@ -118,12 +81,11 @@ def test_the_page_read_leaves_published_work_folder_lines_to_the_task_read(serve
     store.create(SwarmConfig(SLUG, "/hive", 0, 0))
     commands.publish(store, SLUG, {}, {"t1": {"latest_progress": "red test seen"}})
     monkeypatch.setattr(ledger_server, "swarm_store", lambda: store)
-    token = core.read_token(core.paths(SLUG)[0].read_text(encoding="utf-8"))
+    token = legacy_page.stored_token(core.paths(SLUG)[0])
     request = urllib.request.Request(f"{served}/api/{SLUG}", headers={"X-Ledger-Token": token})
-    with urllib.request.urlopen(request) as response:
-        state = json.load(response)
-    assert "seeds" not in state["_meta"]
-    assert "workspace_tail" not in state["tasks"][0]
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(request)
+    assert error.value.code == 410
     request = urllib.request.Request(
         f"{served}/api/v1/ledgers/{SLUG}/tasks/t1/workspace", headers={"X-Ledger-Token": token}
     )
@@ -139,14 +101,6 @@ def test_the_agent_client_read_leaves_out_seeds_and_work_folder_tails(served):
     assert state["_meta"]["rev"] > 0 and state["_meta"]["events"]
 
 
-def test_the_stored_file_stays_indented_and_keeps_text_as_written():
-    make_ledger()
-    core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m1", "text": "café ready"}])
-    text = core.paths(SLUG)[1].read_text(encoding="utf-8")
-    assert text == json.dumps(json.loads(text), indent=2, ensure_ascii=False) + "\n"
-    assert "café ready" in text
-
-
 def test_an_agent_write_returns_the_agent_view_with_its_result(served):
     with_work_folder()
     state = ledger.call(SLUG, [{"op": "join", "id": "j1", "by": "eng"}])
@@ -155,9 +109,10 @@ def test_an_agent_write_returns_the_agent_view_with_its_result(served):
     assert "seeds" not in state["_meta"] and "tasks" not in state
 
 
-def test_the_agent_view_is_read_from_any_position_in_the_query(served):
+def test_the_whole_document_endpoint_is_gone_from_any_position_in_the_query(served):
     with_work_folder()
-    token = core.read_token(core.paths(SLUG)[0].read_text(encoding="utf-8"))
+    token = legacy_page.stored_token(core.paths(SLUG)[0])
     request = urllib.request.Request(f"{served}/api/{SLUG}?x=1&view=agent", headers={"X-Ledger-Token": token})
-    with urllib.request.urlopen(request) as response:
-        assert "workspace_tail" not in json.load(response)["tasks"][0]
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(request)
+    assert error.value.code == 410

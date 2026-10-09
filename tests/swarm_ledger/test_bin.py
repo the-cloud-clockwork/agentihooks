@@ -15,7 +15,8 @@ import new_ledger  # noqa: E402
 
 from scripts.swarm_ledger import ledger_bin  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
-from scripts.swarm_ledger.repository import bin_storage
+from scripts.swarm_ledger.repository import bin_storage, repository
+from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import browser_home
 
 DAY_MS = 24 * 60 * 60 * 1000
@@ -24,16 +25,12 @@ DAY_MS = 24 * 60 * 60 * 1000
 def make_ledger(slug, title="T", overview="O"):
     content = {"title": title, "overview": overview, "sources": [], "phases": [], "questions": [], "followups": []}
     html_path, json_path = core.paths(slug)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
     core.sync(slug)
     return html_path, json_path
 
 
 class BinState(unittest.TestCase):
-    def setUp(self):
-        core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-        ledger_bin.bin_path().unlink(missing_ok=True)
-
     def slugs(self):
         return {s["slug"] for s in server.ledger_summaries()}
 
@@ -46,7 +43,7 @@ class BinState(unittest.TestCase):
         self.assertEqual(binned["hide-me"]["overview"], "Hidden overview")
         self.assertEqual(binned["hide-me"]["days_left"], 28)
         self.assertEqual(binned["hide-me"]["deleted_at"], 1000)
-        self.assertTrue(core.paths("hide-me")[0].exists())
+        self.assertTrue(repository.exists("hide-me"))
 
     def test_restore_returns_the_ledger_to_home(self):
         make_ledger("bring-back")
@@ -56,20 +53,18 @@ class BinState(unittest.TestCase):
         self.assertNotIn("bring-back", ledger_bin.entries())
 
     def test_item_past_thirty_days_is_purged_for_good(self):
-        html_path, json_path = make_ledger("old-one")
+        make_ledger("old-one")
         ledger_bin.delete("old-one", now=0)
         purged = bin_storage.purge_expired(now=30 * DAY_MS + 1)
         self.assertEqual(purged, ["old-one"])
-        self.assertFalse(html_path.exists())
-        self.assertFalse(json_path.exists())
+        self.assertFalse(repository.exists("old-one"))
         self.assertNotIn("old-one", ledger_bin.entries())
 
     def test_item_under_thirty_days_is_kept(self):
-        html_path, json_path = make_ledger("young-one")
+        make_ledger("young-one")
         ledger_bin.delete("young-one", now=0)
         self.assertEqual(bin_storage.purge_expired(now=29 * DAY_MS), [])
-        self.assertTrue(html_path.exists())
-        self.assertTrue(json_path.exists())
+        self.assertTrue(repository.exists("young-one"))
         self.assertIn("young-one", ledger_bin.entries())
 
     def test_home_has_a_delete_control_per_row_and_the_bin_view_a_restore_control(self):
@@ -101,7 +96,7 @@ class BinEndpoint(unittest.TestCase):
         cls.httpd.server_close()
 
     def setUp(self):
-        ledger_bin.bin_path().unlink(missing_ok=True)
+        bin_storage.restore("via-http")
         no_swarm = patch.object(server, "swarm_status", return_value=None)
         no_swarm.start()
         self.addCleanup(no_swarm.stop)

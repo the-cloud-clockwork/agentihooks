@@ -13,11 +13,9 @@ browser = chromium_browser
 ROOT = Path(__file__).resolve().parents[2]
 LEDGER = ROOT / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(LEDGER))
-import ledger_core  # noqa: E402
 
 from scripts.swarm_ledger import ledger_core as core  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
-from scripts.swarm_ledger import new_ledger  # noqa: E402
 
 URL = "http://ledger.test/tips"
 CONTROLS = 'button, [role="tab"], [role="button"], [role="switch"], a.sync, a.fab'
@@ -348,24 +346,3 @@ def test_the_page_version_follows_the_tip_module(tmp_path):
         after = core.page_version()
     assert re.fullmatch(r"[0-9a-f]{12}", before)
     assert after != before
-
-
-def test_upgrading_a_ledger_page_inlines_the_tip_module():
-    content = {
-        "title": "T",
-        "overview": "o",
-        "sources": [],
-        "phases": [{"title": "p", "description": "d"}],
-        "questions": [],
-        "followups": [],
-    }
-    html_path, json_path = ledger_core.paths("tips-upgrade")
-    ledger_core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), "tips-upgrade", 8765))
-    json_path.unlink(missing_ok=True)
-    ledger_core.sync("tips-upgrade")
-    new_ledger.upgrade_page("tips-upgrade")
-    page = html_path.read_text()
-    assert "__LEDGER_" not in page
-    served_page = server.page_for("tips-upgrade")
-    assert f'<script src="/static/{core.page_version()}/tooltips.js"></script>' in served_page

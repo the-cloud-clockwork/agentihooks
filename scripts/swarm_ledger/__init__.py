@@ -7,7 +7,6 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 TOOLS = {
     "new": ("new_ledger", []),
-    "upgrade": ("new_ledger", ["--upgrade"]),
     "serve": ("ledger_server", []),
     "watch": ("watch_ledger", []),
     "chat": ("chat_ledger", []),

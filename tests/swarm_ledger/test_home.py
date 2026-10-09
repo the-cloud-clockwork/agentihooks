@@ -11,6 +11,7 @@ import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import chromium, rendered_home  # noqa: E402
 
 LEDGERS = {"alpha-2026-01-01": ("Alpha plan", "Alpha overview"), "beta-2026-01-02": ("Beta <plan>", "Beta overview")}
@@ -30,7 +31,7 @@ class Home(unittest.TestCase):
                 "followups": [],
             }
             html_path, _ = core.paths(slug)
-            html_path.write_text(new_ledger.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
+            html_path.write_text(legacy_page.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
         cls.browsers = contextlib.ExitStack()
         cls.browser = cls.browsers.enter_context(chromium())
 

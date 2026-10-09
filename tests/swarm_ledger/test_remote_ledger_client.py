@@ -55,9 +55,9 @@ def token_reply(live, **headers):
 
 
 def server_only(read_token):
-    def read(page):
+    def read(slug):
         assert threading.current_thread() is not threading.main_thread(), "the remote client read the page token"
-        return read_token(page)
+        return read_token(slug)
 
     return read
 
@@ -82,11 +82,11 @@ def test_non_local_mode_reaches_the_ledger_at_ledger_url():
 
 
 def test_a_remote_client_never_reads_the_page_token():
-    def refuse(_page):
+    def refuse(_slug):
         raise AssertionError("a remote client read the page token")
 
     with patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_LEDGER_AGENT_TOKEN": "launch-token"}):
-        with patch.object(ledger.core, "read_token", refuse):
+        with patch.object(ledger.repository, "token", refuse):
             assert ledger.credentials(SLUG) == {"X-Ledger-Token": "launch-token", "X-Ledger-Agent": WORKER}
 
 
@@ -114,7 +114,7 @@ def test_a_client_without_a_hive_credential_and_agent_is_refused(live, hive, hea
 def test_a_remote_client_with_a_hive_credential_joins_and_comments(live, hive):
     with patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": CREDENTIAL}):
         os.environ.pop("AGENTIHOOKS_LEDGER_AGENT_TOKEN", None)
-        with patch.object(ledger.core, "read_token", server_only(ledger.core.read_token)):
+        with patch.object(ledger.repository, "token", server_only(ledger.repository.token)):
             join = {"op": "join", "id": uuid.uuid4().hex, "by": WORKER}
             say = {
                 "op": "add",
@@ -232,8 +232,7 @@ def test_the_agent_token_route_answers_or_names_what_is_missing():
             hive_agent=lambda member, slug, name: (member, slug, name) == ("member-1", SLUG, WORKER),
             hive_agent_token=lambda member, slug, name: "issued-token",
         ),
-        core=SimpleNamespace(read_token=lambda page: f"admin-of-{page}"),
-        repository=SimpleNamespace(read_page=lambda slug: slug),
+        repository=SimpleNamespace(token=lambda slug: f"admin-of-{slug}"),
     )
     for headers, message in (
         ({"X-Hive-Credential": CREDENTIAL}, "An agent token names its agent in X-Ledger-Agent"),

@@ -6,6 +6,8 @@ import ledger_server
 import new_ledger
 import pytest
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
+
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 SLUG = "note-comments-2026-01-01"
@@ -16,7 +18,7 @@ def make_note(text="Keep replies under this note."):
         {"title": "Notes", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
     )
     doc["notes"] = [{"id": "n1", "by": "operator", "at": 1, "text": text}]
-    core.paths(SLUG)[0].write_text(new_ledger.render(doc, SLUG, 8765))
+    core.paths(SLUG)[0].write_text(legacy_page.render(doc, SLUG, 8765))
     core.paths(SLUG)[1].unlink(missing_ok=True)
     return core.sync(SLUG)[0]
 
@@ -114,7 +116,7 @@ def test_server_accepts_note_comment_and_agent_command_reply(inbox, monkeypatch,
     monkeypatch.setattr(ledger, "BASE", base)
     threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
     try:
-        token = core.read_token(core.paths(SLUG)[0].read_text())
+        token = legacy_page.stored_token(core.paths(SLUG)[0])
         request = urllib.request.Request(
             f"{base}/api/{SLUG}",
             data=json.dumps({"ops": [note_comment()]}).encode(),

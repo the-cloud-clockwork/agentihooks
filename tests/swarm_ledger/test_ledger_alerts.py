@@ -15,7 +15,7 @@ from scripts.inbox.seats import seat_address  # noqa: E402
 from scripts.inbox.store import InboxStore  # noqa: E402
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig  # noqa: E402
 from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
-from scripts.swarm_ledger.repository.file import sync as file_sync  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import page_source  # noqa: E402
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -26,7 +26,7 @@ SIZE_TEXT = "phase {} description has 120 words, limit 100"
 
 
 def sync(ops=None):
-    return file_sync(SLUG, ops=ops, core=core)
+    return core.sync(SLUG, ops=ops)
 
 
 def make_ledger(description="d"):
@@ -38,7 +38,7 @@ def make_ledger(description="d"):
     }
     html_path, json_path = core.paths(SLUG)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     state, _ = sync()
     return state

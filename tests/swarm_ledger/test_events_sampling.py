@@ -91,7 +91,7 @@ def test_one_ledger_failing_its_swarm_read_never_stops_the_others(folders, monke
 def test_idle_sampling_reads_no_ledger_document_and_sends_nothing(folders, monkeypatch):
     monkeypatch.setattr(server, "swarm_status", lambda slug, state=None: {"config": {"state": "running"}})
     server.HUB.open("s", lambda: {"ledger": LEDGER, "swarm": {"config": {"state": "running"}}})
-    snapshots = counted(monkeypatch, server.repository, "read_snapshot")
+    snapshots = counted(monkeypatch, server.repository, "read")
     documents = counted(monkeypatch, server.repository, "get_document")
     versions = counted(monkeypatch, server.core, "page_version")
     tails = counted(monkeypatch, ledger_workspace, "tails")
@@ -151,8 +151,8 @@ def test_stream_resources_loads_the_stored_view_without_reconciling(monkeypatch)
     calls = []
     state = {"tasks": [], "_meta": {"rev": 7}}
 
-    def get_document(slug, reconcile=True):
-        calls.append(("document", slug, reconcile))
+    def get_document(slug):
+        calls.append(("document", slug))
         return state
 
     monkeypatch.setattr(server.repository, "get_document", get_document)
@@ -161,7 +161,7 @@ def test_stream_resources_loads_the_stored_view_without_reconciling(monkeypatch)
     monkeypatch.setattr(server, "workspace_tails", lambda *a: calls.append(("tails", *a)))
     view = {**state, "view": True}
     assert server.stream_resources("s") == {"ledger": view, "swarm": "S"}
-    assert calls == [("document", "s", False), ("swarm", "s", view)]
+    assert calls == [("document", "s"), ("swarm", "s", view)]
 
 
 def test_sampling_leaves_work_folder_changes_to_the_lazy_read(folders, monkeypatch):
@@ -183,7 +183,7 @@ def test_swarm_status_reads_the_snapshot_only_without_a_given_state(monkeypatch)
     reads = []
     monkeypatch.setattr(server, "swarm_store", lambda: "store")
     monkeypatch.setattr(commands, "view", lambda store, slug: {"quota": "published"})
-    monkeypatch.setattr(server.repository, "read_snapshot", lambda slug: reads.append(slug))
+    monkeypatch.setattr(server.repository, "read", lambda slug: reads.append(slug))
     assert server.swarm_status("s", {"given": 1}) == {"quota": "published"}
     assert server.swarm_status("s") == {"quota": "published"}
     assert reads == []

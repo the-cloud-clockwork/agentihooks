@@ -68,7 +68,7 @@ class GuardedOperations:
 
 
 def apply(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
-    doc = server.repository.get_document(slug, reconcile=False)
+    doc = server.repository.get_document(slug)
     operations = schemas.check_operations(payload, server.core, tuple(t["id"] for t in doc.get("tasks", [])))
     refusals = [reason for op in operations if (reason := server.authority.refusal(principal, op))]
     if principal and payload.get("changes"):

@@ -64,22 +64,3 @@ def test_the_stored_ledger_is_written_with_the_fast_encoder(monkeypatch, tmp_pat
         core.seed_text({"title": "<b>"}, 3) == "\n" + stdlib({"_rev": 3, "title": "<b>"}).replace("<", "\\u003c") + "\n"
     )
     assert calls
-
-
-def test_a_sync_writes_the_stored_document_through_the_fast_encoder(ledger_dir, monkeypatch):
-    from scripts.swarm_ledger import new_ledger
-
-    monkeypatch.setattr(core, "LEDGER_DIR", ledger_dir)
-    slug = "pretty-2026-01-01"
-    doc = new_ledger.build_doc(
-        {"title": "Pretty", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    )
-    html_path, json_path = core.paths(slug)
-    html_path.write_text(new_ledger.render(doc, slug, 8765), encoding="utf-8")
-    json_path.unlink(missing_ok=True)
-    written = []
-    real = core.pretty
-    monkeypatch.setattr(core, "pretty", lambda value: written.append(value) or real(value))
-    state, _ = core.sync(slug, ops=[{"op": "add", "thread": "chat", "id": "m1", "text": "café"}])
-    assert any(value is not None and "_meta" in value for value in written if isinstance(value, dict))
-    assert json_path.read_text(encoding="utf-8") == stdlib(state) + "\n"

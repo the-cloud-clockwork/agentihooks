@@ -12,6 +12,7 @@ import pytest
 
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 from scripts.swarm_ledger import ledger, ledger_duplicates, ledger_task_duplicates, ledger_tasks
+from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.test_ledger_authority import (
     MASTER,
     SLUG,
@@ -62,10 +63,8 @@ def live(authority_live, monkeypatch):
             {"title": "Ledger page", "description": "Page layout"},
         ],
     }
-    page = new_ledger.render(new_ledger.build_doc(content), SLUG, authority_live["port"])
-    html, document = core.paths(SLUG)
-    html.write_text(page)
-    document.unlink(missing_ok=True)
+    page = legacy_page.render(new_ledger.build_doc(content), SLUG, authority_live["port"])
+    core.paths(SLUG)[0].write_text(page)
     state, _ = core.sync(SLUG)
     first, second = (phase["id"] for phase in state["phases"])
     seed = [

@@ -3,19 +3,17 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import ledger_core as core
 import ledger_media as media
 import pytest
 
 from scripts.swarm import prompt
 from scripts.swarm_ledger import ledger, ledger_gate, ledger_tasks
 from scripts.swarm_ledger import ledger_artifacts as artifacts
-from scripts.swarm_ledger import ledger_core as core
-from scripts.swarm_ledger.repository.file import FileLedgerRepository
+from scripts.swarm_ledger.repository import repository as storage
 from tests.swarm_ledger.test_artifacts import MARKDOWN
 from tests.swarm_ledger.test_bin import DAY_MS, make_ledger
 from tests.swarm_ledger.test_media import png
-
-storage = FileLedgerRepository(core)
 
 AGENT = "life-engineer"
 RULE = "proofs go on the task proof and the pull request"
@@ -382,10 +380,9 @@ class TestDetails:
         assert rejected == [] and (event["target"], event["id"], event["count"]) == ("artifacts", "p-lost", 1)
 
     def test_a_ledger_without_a_trash_gets_an_empty_one(self, slug):
-        _, json_path = core.paths(slug)
-        state = json.loads(json_path.read_text())
+        state = storage.export_document(slug)
         del state["artifact_trash"]
-        json_path.write_text(json.dumps(state))
+        core.paths(slug)[1].write_text(json.dumps(state))
         assert storage.apply_ops(slug)[0]["artifact_trash"] == []
 
     def test_operation_shapes_name_what_they_take(self):

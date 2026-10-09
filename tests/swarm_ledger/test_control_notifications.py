@@ -16,6 +16,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import cli
 from scripts.swarm.health.findings import Finding
 from tests.swarm.test_control_notifications import controls as controls
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 pytestmark = pytest.mark.unit
 
@@ -31,7 +32,7 @@ def page(controls, monkeypatch):
             "phases": [{"title": "Control proof", "description": "Observe notifications"}],
         },
     )
-    token = core.read_token(core.paths("demo")[0].read_text())
+    token = legacy_page.stored_token(core.paths("demo")[0])
     from scripts.swarm import command_runner
 
     monkeypatch.setattr(server, "swarm_store", lambda: store)

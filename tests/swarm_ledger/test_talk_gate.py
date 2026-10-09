@@ -6,6 +6,7 @@ from scripts.gates import progress, talk
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import new_ledger
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -23,7 +24,7 @@ def redis(tmp_path, monkeypatch):
     RedisStore(client).create(SwarmConfig(SLUG, "repo", 1, 1))
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
     html_path, _ = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     return client
 
@@ -245,7 +246,7 @@ def test_the_operator_lift_arms_the_talk_gate_beside_the_condition_gates(tmp_pat
     assert lift.SERVER_GATES == {talk.NAME}
 
 
-@pytest.mark.parametrize(("ops", "gated"), [([{"op": "ack"}], True), (None, False), ([], False)])
+@pytest.mark.parametrize(("ops", "gated"), [([{"op": "ack", "id": "ack-1"}], True), (None, False), ([], False)])
 def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
     from scripts.swarm_ledger import ledger_server
 
@@ -254,7 +255,7 @@ def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
     def sync(slug, changes=None, ops=None, gate=None):
         seen.append(gate)
         seen_changes.append(changes)
-        return {"_meta": {"members": {}}, "tasks": []}, []
+        return {"_meta": {"members": {}, "rev": 1}, "tasks": []}, []
 
     monkeypatch.setattr(ledger_server.repository, "apply_ops", sync)
     monkeypatch.setattr(ledger_server, "relay_to_inbox", lambda slug, state: [])
