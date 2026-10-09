@@ -504,6 +504,22 @@ jobs:
           done
           exit 1
 
+      - name: Hold the Delivery L2 binding
+        if: steps.current.outputs.superseded != 'true'
+        env:
+          SONAR_READ_TOKEN: ${{ secrets.SONAR_READ_TOKEN }}
+        run: |
+          set -o pipefail
+          : "${SONAR_READ_TOKEN:?SONAR_READ_TOKEN is not set}"
+          bound=$(curl --fail --silent --show-error --max-time 10 \
+            -H "Authorization: Bearer $SONAR_READ_TOKEN" \
+            "http://127.0.0.1:9000/api/qualitygates/get_by_project?project=agentihooks" | jq -er .qualityGate.name)
+          if [[ "$bound" != 'Delivery L2' ]]; then
+            echo "::error::Project agentihooks is bound to $bound; required Delivery L2."
+            exit 1
+          fi
+          echo "Project agentihooks is bound to Delivery L2"
+
       - name: Restore Sonar downloads
         uses: actions/cache@v4
         with:
