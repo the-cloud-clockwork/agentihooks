@@ -282,7 +282,7 @@ def test_the_grader_refuses_another_ruff_version(tmp_path, capsys, monkeypatch, 
     assert f"needs ruff {size_limits.RUFF_VERSION}, found {shown}, so it cannot grade" in capsys.readouterr().out
 
 
-def test_size_runs_beside_unit_graded_by_the_base_with_the_pinned_ruff():
+def test_size_runs_in_lint_graded_by_the_base_with_the_pinned_ruff():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     job = jobs["lint"]
     assert "size" not in jobs

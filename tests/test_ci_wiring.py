@@ -293,7 +293,7 @@ def test_triggers_reads_every_form():
     assert ci_wiring.triggers({}) == {}
 
 
-def test_the_tests_workflow_runs_wiring_and_brain_smoke_as_parallel_gate_needs():
+def test_the_tests_workflow_runs_wiring_in_lint_and_brain_smoke_as_gate_needs():
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     needs = set(workflow["jobs"]["gate-required"]["needs"])
     assert {"lint", "brain-smoke"} <= needs

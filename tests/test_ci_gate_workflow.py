@@ -49,6 +49,7 @@ def test_cheap_gates_share_the_lint_job_and_each_grades_after_an_earlier_red():
     jobs = _workflow()["jobs"]
     assert not {"size", "wiring", "dependency-audit"} & set(jobs)
     assert not {"size", "wiring", "dependency-audit"} & set(jobs["gate-required"]["needs"])
+    assert jobs["lint"]["timeout-minutes"] == 10
     steps = {step.get("name"): step for step in jobs["lint"]["steps"]}
     controls = [
         "Lint check",
@@ -67,7 +68,10 @@ def test_cheap_gates_share_the_lint_job_and_each_grades_after_an_earlier_red():
         "Check out the base revision",
         "Check out the protected grader",
     ]
+    assert all("if" not in steps[name] for name in setup)
     assert max(names.index(name) for name in setup) < min(names.index(name) for name in controls)
+    after = names[names.index(controls[-1]) + 1 :]
+    assert after and all(steps[name]["if"].startswith("${{ !cancelled()") for name in after)
 
 
 def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():

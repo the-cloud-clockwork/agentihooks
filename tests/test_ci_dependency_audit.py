@@ -181,7 +181,7 @@ def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def test_dependency_audit_is_a_parallel_need_of_gate_required_graded_by_the_base():
+def test_dependency_audit_is_a_lint_step_graded_by_the_base():
     jobs = _workflow()["jobs"]
     job = jobs["lint"]
     assert "dependency-audit" not in jobs
