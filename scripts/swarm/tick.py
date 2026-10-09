@@ -34,6 +34,7 @@ from scripts.swarm import (
     ledger_probe,
     lifetime,
     live_binding,
+    master_alarm,
     master_retire,
     master_start,
     master_wake,
@@ -194,6 +195,7 @@ def tick(slug, store, ledger, runtime, now_ms):
             )
             if config.state == "running":
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+    actions += skip_refused(master_alarm.run, slug, store, runtime)
     timing.call(_conversations, slug, store, runtime)
     timing.call(_session_models, slug, store)
     starting = {a.name for a in store.agents(slug) if a.lane == MASTER and a.state == "starting"}
@@ -942,6 +944,7 @@ def _master(slug, config, store, runtime, now_ms):
         transfers.failed(store, slug, record)
         store.drop_agent(slug, name)
         affinity.failed(store, slug, str(exc))
+        master_alarm.failed(store, slug, f"master spawn failed: {exc}")
         failed = master_start.read(store, slug)
         if failed.get("attempt") == 1:
             master_start.save(store, slug, {**failed, "name": "", "retry": True})

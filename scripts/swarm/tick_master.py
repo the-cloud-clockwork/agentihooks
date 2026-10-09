@@ -6,7 +6,7 @@ import os
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import master_start
+from scripts.swarm import master_alarm, master_start
 from scripts.swarm.store import MASTER
 
 KEY = "master-outage"
@@ -16,11 +16,13 @@ NO_HOOK = "the forced master launch reported no hook within two minutes"
 NO_LAUNCH = "no master launched"
 PROMPT = (
     "PROMOTED: swarm {slug} has had no live master for {minutes} minutes and the forced master launch failed: "
-    "{reason}. You stay {name} on task {task}, but until a master binds your only purpose is, in this order: "
+    "{reason}. The exact launch error: {error}. You stay {name} on task {task}, but until a master binds your only "
+    "purpose is, in this order: "
     "1. Bring the master back as soon as possible. The tick forces a new master launch every {minutes} minutes; read "
     "why it fails with agentihooks swarm {slug} status and journalctl --user -u agentihooks-swarm.service. "
-    "2. Fix the causes of the outage right away in code, each through your own pull request into dev, never as "
-    "follow ups. "
+    "2. Fix the causes of the outage right away in code: find where that error is raised and fix it through your own "
+    "pull request into dev, never as follow ups. Once it merges and wt.sh done syncs local dev, the next forced "
+    "launch runs the fixed code, or start one at once with agentihooks swarm {slug} master up --new. "
     "3. Throughout, tell the swarm and the operator what failed and what you are doing, with agentihooks swarm "
     '{slug} say "<text>" and agentihooks swarm {slug} say --to eng "<text>". '
     "You do not act as master: never answer chat as master, write tasks or steer the swarm. "
@@ -54,8 +56,10 @@ def promoted(store, slug) -> str:
     return read(store, slug).get("promoted", "")
 
 
-def prompt(slug, agent, reason, minutes) -> str:
-    return PROMPT.format(slug=slug, minutes=_shown(minutes), reason=reason, name=agent.name, task=agent.task)
+def prompt(slug, agent, reason, minutes, error) -> str:
+    return PROMPT.format(
+        slug=slug, minutes=_shown(minutes), reason=reason, error=error, name=agent.name, task=agent.task
+    )
 
 
 def status_line(state) -> str:
@@ -147,7 +151,8 @@ def _promote(slug, store, ledger, runtime, state, minutes, now_ms):
             ledger.notify(slug, NOBODY_NOTICE.format(minutes=_shown(minutes)))
         return state, actions + ["no live engineer to promote"]
     agent, reason = engineers[0], state["failure"]
-    InboxStore(store.redis).send(SENDER, agent.name, prompt(slug, agent, reason, minutes))
+    error = master_alarm.error(store, slug) or reason
+    InboxStore(store.redis).send(SENDER, agent.name, prompt(slug, agent, reason, minutes, error))
     store.seats.note(agent.seat, "promoted", reason, now_ms)
     store.seats.note(agent.seat, "message", "the promoted prompt", now_ms)
     store.seats.note(seat_address(slug, MASTER), "promoted", f"{agent.name}: {reason}", now_ms)
@@ -162,6 +167,7 @@ def _promote(slug, store, ledger, runtime, state, minutes, now_ms):
 
 def _ending(slug, store, state):
     store.redis.delete(store.key(slug, KEY))
+    master_alarm.clear(store, slug)
     return _engineer(store, slug, state.get("promoted"))
 
 

@@ -2,7 +2,7 @@ import pytest
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import tick_master
+from scripts.swarm import master_alarm, tick_master
 from scripts.swarm.status import status_report
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import SpawnError, tick
@@ -14,6 +14,7 @@ ENGINEER = "engineer@a1b2c3-0001"
 DOC = {"tasks": [], "_meta": {"events": []}}
 BROKEN = "master spawn failed: MCP_KEY_GATEWAY is unset"
 MASTER_SEAT = seat_address("sw", MASTER)
+NOTICE = master_alarm.NOTICE.format(slug="sw", error=BROKEN, name=ENGINEER)
 
 
 class BrokenMaster(FakeRuntime):
@@ -80,7 +81,7 @@ def test_a_master_down_five_minutes_is_launched_first_and_no_engineer_is_promote
     ]
     assert [m.state for m in masters(store)] == ["working"]
     assert tick_master.read(store, "sw") == {}
-    assert mail(store, ENGINEER) == []
+    assert mail(store, ENGINEER) == [("swarm", NOTICE)]
 
 
 def test_a_failed_forced_launch_promotes_one_live_engineer(store):  # noqa: F811
@@ -93,13 +94,16 @@ def test_a_failed_forced_launch_promotes_one_live_engineer(store):  # noqa: F811
         f"sent {ENGINEER} the promoted prompt",
     ]
     assert tick_master.read(store, "sw") == {"since": 1, "forced_at": 1 + DOWN, "failure": BROKEN, "promoted": ENGINEER}
-    assert mail(store, ENGINEER) == [("swarm", tick_master.prompt("sw", workers(store)[0], BROKEN, 5))]
+    assert mail(store, ENGINEER) == [
+        ("swarm", NOTICE),
+        ("swarm", tick_master.prompt("sw", workers(store)[0], BROKEN, 5, BROKEN)),
+    ]
     assert ledger.notes[-1] == tick_master.PROMOTED_NOTICE.format(minutes=5)
     seat = workers(store)[0].seat
     assert events(store, seat) == [("promoted", BROKEN, 1 + DOWN), ("message", "the promoted prompt", 1 + DOWN)]
     assert events(store, MASTER_SEAT) == [("promoted", f"{ENGINEER}: {BROKEN}", 1 + DOWN)]
     tick("sw", store, ledger, runtime, 2 + DOWN)
-    assert len(mail(store, ENGINEER)) == 1
+    assert len(mail(store, ENGINEER)) == 2
 
 
 def test_the_promotion_is_saved_before_its_notice(store):  # noqa: F811
@@ -118,7 +122,7 @@ def test_the_promotion_is_saved_before_its_notice(store):  # noqa: F811
     assert tick_master.read(store, "sw")["promoted"] == ENGINEER
     with contextlib.suppress(SwarmError):
         tick("sw", store, ledger, runtime, 2 + DOWN)
-    assert len(mail(store, ENGINEER)) == 1
+    assert len(mail(store, ENGINEER)) == 2
 
 
 def test_nobody_told_is_saved_before_its_notice(store):  # noqa: F811
@@ -158,14 +162,15 @@ def test_swarm_status_marks_the_promoted_engineer(store):  # noqa: F811
 def test_the_promoted_prompt_states_the_purpose_in_order(store):  # noqa: F811
     runtime, ledger = outage(store)
     agent = workers(store)[0]
-    assert tick_master.prompt("sw", agent, "master spawn failed: boom", 5) == (
+    assert tick_master.prompt("sw", agent, "master spawn failed: boom", 5, "master spawn failed: boom") == (
         "PROMOTED: swarm sw has had no live master for 5 minutes and the forced master launch failed: "
-        "master spawn failed: boom. You stay engineer@a1b2c3-0001 on task t1, but until a master binds your only "
-        "purpose is, in this order: "
+        "master spawn failed: boom. The exact launch error: master spawn failed: boom. You stay "
+        "engineer@a1b2c3-0001 on task t1, but until a master binds your only purpose is, in this order: "
         "1. Bring the master back as soon as possible. The tick forces a new master launch every 5 minutes; read why "
         "it fails with agentihooks swarm sw status and journalctl --user -u agentihooks-swarm.service. "
-        "2. Fix the causes of the outage right away in code, each through your own pull request into dev, never as "
-        "follow ups. "
+        "2. Fix the causes of the outage right away in code: find where that error is raised and fix it through your "
+        "own pull request into dev, never as follow ups. Once it merges and wt.sh done syncs local dev, the next "
+        "forced launch runs the fixed code, or start one at once with agentihooks swarm sw master up --new. "
         "3. Throughout, tell the swarm and the operator what failed and what you are doing, with agentihooks swarm "
         'sw say "<text>" and agentihooks swarm sw say --to eng "<text>". '
         "You do not act as master: never answer chat as master, write tasks or steer the swarm. "
