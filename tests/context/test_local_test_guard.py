@@ -264,13 +264,21 @@ CLEARANCE_WRITER = (
 )
 
 
-def test_native_clearance_writer_passes(monkeypatch):
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"cmd": CLEARANCE_WRITER},
+        {"command": CLEARANCE_WRITER},
+        {"cmd": "python3 -m scripts.ci_mutation.clearances"},
+    ],
+)
+def test_native_clearance_writer_passes(args, monkeypatch):
     from hooks.context.local_test_guard import check_local_tests
     from hooks.targets.normalizer import normalize_payload
 
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
     monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
-    check_local_tests(normalize_payload({"tool_name": "exec", "tool_input": {"cmd": CLEARANCE_WRITER}}))
+    check_local_tests(normalize_payload({"tool_name": "exec", "tool_input": args}))
 
 
 @pytest.mark.parametrize(
