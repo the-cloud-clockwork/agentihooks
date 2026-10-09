@@ -60,9 +60,9 @@ spec:
             - name: SWARM_RELOAD
               value: "0"
             - name: SWARM_PUBLIC_URL
-              value: {{ .Values.ledger.publicUrl | default (include "swarm.ledgerUrl" .) | quote }}
+              value: {{ .Values.ledger.publicUrl | default (ternary (printf "https://%s" .Values.ingress.host) (include "swarm.ledgerUrl" .) .Values.ingress.enabled) | quote }}
             - name: SWARM_ALLOWED_HOSTS
-              value: {{ printf "%s:%v,%s.%s:%v,%s.%s.svc:%v,%s.%s.svc.cluster.local:%v" $host $port $host .Release.Namespace $port $host .Release.Namespace $port $host .Release.Namespace $port | quote }}
+              value: {{ printf "%s:%v,%s.%s:%v,%s.%s.svc:%v,%s.%s.svc.cluster.local:%v%s" $host $port $host .Release.Namespace $port $host .Release.Namespace $port $host .Release.Namespace $port (ternary (printf ",%s" .Values.ingress.host) "" .Values.ingress.enabled) | quote }}
             {{- include "swarm.extraEnv" .Values.ledger.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
           readinessProbe:
