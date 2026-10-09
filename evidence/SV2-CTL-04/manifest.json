@@ -1,0 +1,11 @@
+{
+  "tested_commit": "5b5d88ea0710404dc9251c7110c22bccf3952acb",
+  "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 calls",
+  "inputs": {
+    "tests/fixtures/swarm_v2/reconcile-orphans.json": "6db69ad5ea15c2dd9b30e85f4d1cb3f7c63569605c595543ef5e84dd4e5a6d04",
+    "tests/sv2_ctl04_cases.py": "4de9d59d3999ab87d388f8fcec7ad0168ff1532c7d49c9b7772c7cf1def715c4",
+    "tests/test_swarm_v2_controller.py": "737a58624ca26bbb87c508f9bd428f39f9294a7e4826b214ee7d9d95ab026511",
+    "scripts/swarm_v2/controller.py": "4ae03875ec2cded7dbf89c801d67593626c67441d5608cbd48bad34267ff7ca1",
+    "scripts/swarm_v2/kubernetes/watch.py": "5ca671db6bf780d25a8ed50c7d7b7668626c5523f352d8714e64a5af9f12efb5"
+  }
+}

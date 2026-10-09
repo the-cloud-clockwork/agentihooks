@@ -1,0 +1,58 @@
+{
+  "tested_commit": "5b5d88ea0710404dc9251c7110c22bccf3952acb",
+  "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 calls",
+  "case": "T-SV2-CTL-04-B",
+  "passed": true,
+  "independent_runs": [
+    {
+      "case": "T-SV2-CTL-04-B",
+      "state": "passed",
+      "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 call",
+      "input_sha256": "6db69ad5ea15c2dd9b30e85f4d1cb3f7c63569605c595543ef5e84dd4e5a6d04",
+      "deleted_before_correction": [],
+      "protected_state_unchanged": true,
+      "unlabelled_lookalikes_listed": 0,
+      "quarantined": [
+        "uid-blank",
+        "uid-other-swarm",
+        "uid-twin-a",
+        "uid-twin-b"
+      ],
+      "deleted_after_corrected_labels": [
+        "uid-blank"
+      ],
+      "controller_orphans_by_class": {
+        "managed_orphan": 1,
+        "missing_pod": 0,
+        "foreign": 1,
+        "ambiguous": 2,
+        "terminating": 0
+      }
+    },
+    {
+      "case": "T-SV2-CTL-04-B",
+      "state": "passed",
+      "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 call",
+      "input_sha256": "6db69ad5ea15c2dd9b30e85f4d1cb3f7c63569605c595543ef5e84dd4e5a6d04",
+      "deleted_before_correction": [],
+      "protected_state_unchanged": true,
+      "unlabelled_lookalikes_listed": 0,
+      "quarantined": [
+        "uid-blank",
+        "uid-other-swarm",
+        "uid-twin-a",
+        "uid-twin-b"
+      ],
+      "deleted_after_corrected_labels": [
+        "uid-blank"
+      ],
+      "controller_orphans_by_class": {
+        "managed_orphan": 1,
+        "missing_pod": 0,
+        "foreign": 1,
+        "ambiguous": 2,
+        "terminating": 0
+      }
+    }
+  ]
+}
