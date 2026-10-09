@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -6,6 +7,8 @@ import pytest
 from scripts.hive import auth
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger import ledger_authority as authority
+from scripts.swarm_ledger.api import routes
+from scripts.swarm_ledger.api.errors import APIError
 from tests.swarm_ledger.test_ledger_authority import MASTER, SLUG, WORKER, send
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
@@ -46,13 +49,25 @@ def test_a_member_cannot_mint_for_an_unplaced_agent(live, hive, name):
     assert reply["error"]["code"] == "forbidden"
 
 
+def test_the_token_route_reports_an_unplaced_agent(hive):
+    _, grant = hive
+    handler = SimpleNamespace(headers={"X-Hive-Credential": grant["ledger_credential"], "X-Ledger-Agent": MASTER})
+    with pytest.raises(APIError) as refused:
+        routes.agent_token(handler, SimpleNamespace(authority=authority), SLUG)
+    assert refused.value.status == 403
+    assert refused.value.envelope() == {
+        "error": {"code": "forbidden", "message": "Agent is not placed on this member's hive"}
+    }
+
+
 @pytest.mark.parametrize("owner", ["", "other-member"])
 @pytest.mark.parametrize("name,lane,seat", [(WORKER, "eng", f"eng-1@{SLUG}"), (MASTER, "master", f"master@{SLUG}")])
 def test_a_member_cannot_mint_for_another_hives_agent(live, hive, owner, name, lane, seat):
     store, grant = hive
     store.start_execution(SLUG, AgentRecord(name, lane, "proof", seat=seat, hive=owner))
-    status, _ = mint(live, grant, name)
+    status, reply = mint(live, grant, name)
     assert status == 403
+    assert reply["error"] == {"code": "forbidden", "message": "Agent is not placed on this member's hive"}
 
 
 @pytest.mark.parametrize("name,lane", [(WORKER, "eng"), (MASTER, "master")])
@@ -163,7 +178,9 @@ def test_revoke_during_token_minting_is_refused(live, hive):
         return issue(redis, member, slug, name)
 
     with patch.object(auth, "issue_agent", side_effect=revoked):
-        assert mint(live, grant, WORKER)[0] == 403
+        status, reply = mint(live, grant, WORKER)
+    assert status == 403
+    assert reply["error"] == {"code": "forbidden", "message": "Hive membership was revoked"}
 
 
 @pytest.mark.parametrize("mode", ["compose", "distributed"])
