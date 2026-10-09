@@ -103,6 +103,8 @@ def test_actionable_notices_escalate_without_typing_into_a_busy_pane(inbox, send
     assert events(inbox, item.id) == ["escalated_master"]
     (raised,) = inbox.inbox(MASTER_NAME)
     assert raised.fyi is False
+    [note] = [e for e in inbox.history(item.id) if e.get("event") == "escalated_master"]
+    assert (note["by"], note["reason"]) == ("swarm", f"raised to {raised.address} as message {raised.id}")
     run(inbox, herdr, ledger, sent_at(item) + 2 * W)
     assert events(inbox, item.id) == ["escalated_master", "escalated_operator"]
     assert events(inbox, raised.id) == []

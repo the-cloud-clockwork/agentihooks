@@ -1,6 +1,7 @@
 """Mail left pending for a swarm agent that exits: moved to its seat when the work goes on, else withdrawn and its
 sender told."""
 
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -11,6 +12,7 @@ if TYPE_CHECKING:
 
 BY = "swarm"
 UNKNOWN_OWNER = "the agent it was sent to is unknown, so no branch was checked"
+LANE_SEAT = re.compile(r"(eng|ci|plan)-(\d+)@.+")
 
 
 def settle(inbox, name, seat, exit_text):
@@ -201,7 +203,7 @@ def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", activ
 
 
 def _settle_unfillable(inbox: "InboxStore", config, seats: set) -> None:
-    for seat in seats:
+    for seat in sorted(seats):
         why = _no_successor(seat, config)
         if not why:
             continue
@@ -228,13 +230,14 @@ def _withdraw_escalations(inbox: "InboxStore", item_id: str, seat: str) -> None:
 
 
 def _no_successor(seat: str, config) -> str:
-    caps = {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan}
-    lane, _, slot = seat.partition("@")[0].rpartition("-")
-    if lane not in caps or not slot.isdigit():
+    found = LANE_SEAT.fullmatch(seat)
+    if not found:
         return ""
     if config.state == "stopped":
         return "the swarm stopped"
-    return f"the {lane} lane cap is {caps[lane]}" if int(slot) > caps[lane] else ""
+    lane = found.group(1)
+    cap = {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan}[lane]
+    return f"the {lane} lane cap is {cap}" if int(found.group(2)) > cap else ""
 
 
 def _owner(inbox, item, seat):

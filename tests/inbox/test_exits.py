@@ -902,12 +902,23 @@ def test_seat_mail_moved_elsewhere_during_settlement_is_left_alone(redis, monkey
     inbox, store = InboxStore(redis), RedisStore(redis)
     store.create(SwarmConfig("sw", "/repo", 0, 0))
     item, _ = seat_mail(inbox, store, "eng-3@sw")
+    later = inbox.send("other", "eng-3@sw", "later contract")
     snapshot = inbox.open_items("eng-3@sw")
     inbox.redirect(item.id, "swarm", "eng-1@sw", "moved meanwhile")
     monkeypatch.setattr(inbox, "open_items", lambda address: snapshot if address == "eng-3@sw" else [])
     exits.sweep(inbox, "sw", store, dict)
     assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("eng-1@sw", "pending")
     assert inbox.pending_items("sender") == []
+    assert inbox.get(later.id).state == "cancelled"
+
+
+def test_a_seat_within_its_cap_does_not_stop_the_settling_of_a_later_seat(redis):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
+    kept, _ = seat_mail(inbox, store, "eng-1@sw")
+    settled, _ = seat_mail(inbox, store, "eng-3@sw")
+    exits.sweep(inbox, "sw", store, dict)
+    assert (inbox.get(kept.id).state, inbox.get(settled.id).state) == ("pending", "cancelled")
 
 
 def test_swarm_mail_on_a_seat_above_its_cap_is_settled_without_a_notice(redis):
@@ -934,6 +945,7 @@ def test_settling_unfillable_seat_mail_withdraws_its_open_master_escalation(redi
     withdrawn = inbox.get(raised.id)
     assert withdrawn.state == "cancelled"
     assert withdrawn.reason == f"cancelled: message {item.id} is closed, eng-1@sw can get no successor"
+    assert inbox.history(raised.id)[-1]["by"] == "swarm"
     assert inbox.get(answered.id).state == "done"
 
 
