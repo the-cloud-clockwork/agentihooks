@@ -39,7 +39,7 @@ done
 docker build -q -t "$image" . >/dev/null &
 build=$!
 trap finish EXIT
-kind create cluster --name "$cluster" --wait 120s
+kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" --wait 120s
 wait "$build"
 kind load docker-image "$image" --name "$cluster"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
