@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from scripts.swarm_v2.kubernetes.watch import BACKEND, CLASSES, Plan, Pod, PodView, Reconciler, owner_for
 from scripts.swarm_v2.runtime.operations import Observation, Operation, OperationRequest, Operations, OperationTransport
 
 
@@ -30,8 +31,11 @@ class Controller:
         transports: Iterable[OperationTransport],
         authorize: Callable[[], bool],
         admission_enabled: bool = True,
+        pods: PodView | None = None,
+        orphan_cleanup: bool = True,
     ) -> None:
         self.store, self.slug, self.authorize = store, slug, authorize
+        self.pods, self.reconciler = pods, Reconciler(owner_for(slug), orphan_cleanup)
         self.owner = f"controller-{uuid4().hex}"
         self.held = None
         self.ready = False
@@ -48,6 +52,7 @@ class Controller:
             return False
         with lease.fencing(self.held.epoch):
             self.operations.recover(self.slug)
+        self.reconcile()
         self._authority()
         self.reconciled_epoch = self.held.epoch
         self.ready = True
@@ -81,6 +86,26 @@ class Controller:
         if not self.ready or not self.admission_enabled:
             raise SwarmError("controller admission is disabled until reconciliation completes")
 
+    def reconcile(self) -> Plan | None:
+        self._authority()
+        if self.pods is None:
+            return None
+        occupants = self.store.execution_occupants(self.slug).values()
+        journals = {agent.execution_id for agent in occupants if agent.runtime_backend == BACKEND}
+        records = {agent.execution_id for agent in self.store.execution_registry.records(self.slug)}
+        plan = self.reconciler.plan(journals, self.pods.sync().pods(), records - journals)
+        for pod in plan.delete:
+            self._delete_orphan(pod)
+        self._authority()
+        self.store.redis.hset(self.store.key(self.slug, "controller-orphans"), mapping=plan.counts())
+        return plan
+
+    def _delete_orphan(self, pod: Pod) -> None:
+        if self.pods.source.read_pod(pod.name) != pod:
+            return
+        self._authority()
+        self.pods.source.delete_pod(pod.name, pod.uid)
+
     def admit(self, agent: AgentRecord, previous_execution_id: str = "") -> AgentRecord:
         self.require()
         with lease.fencing(self.held.epoch):
@@ -103,3 +128,8 @@ class Controller:
     def controller_leader_changes_total(self) -> int:
         self._authorize()
         return int(self.store.redis.get(self.store.key(self.slug, "controller-leader-changes")) or 0)
+
+    def controller_orphans_by_class(self) -> dict[str, int]:
+        self._authorize()
+        counts = self.store.redis.hgetall(self.store.key(self.slug, "controller-orphans"))
+        return {name: int(counts.get(name, 0)) for name in CLASSES}
