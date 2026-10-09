@@ -99,6 +99,7 @@ jobs:
         uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
 
       - name: Check out the base revision
@@ -123,6 +124,7 @@ jobs:
     outputs:
       key: ${{ steps.stored.outputs.cache-matched-key }}
       queued: ${{ steps.republished.outputs.queued }}
+      base: ${{ steps.base-run.outputs.sha }}
     steps:
       - name: Look up the base revision's dev durations
         id: stored
@@ -171,17 +173,28 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BASE: ${{ inputs.base }}
         run: |
-          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/${BASE#origin/}" --jq .sha)
-          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&head_sha=$sha&per_page=20" --jq '.workflow_runs[].id')
-          for run in $runs; do
+          filter="status=success"
+          if [[ "${BASE#origin/}" == "$GITHUB_REF_NAME" ]]; then
+            filter+="&head_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.parents[0].sha')"
+          elif [[ "${BASE#origin/}" != dev ]]; then
+            sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/${BASE#origin/}" --jq .sha)
+            if [[ "$sha" == "$GITHUB_SHA" ]]; then
+              sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.parents[0].sha')
+            fi
+            filter+="&head_sha=$sha"
+          fi
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&$filter&per_page=20" --jq '.workflow_runs[] | "\(.id) \(.head_sha)"')
+          while read -r run head; do
+            [[ -n "$run" ]] || continue
             kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
             if [[ "$kept" == *" durations-merged "* && "$kept" == *" coverage-baseline "* ]]; then
-              echo "Restoring dev durations and the coverage baseline of base $sha from dev push run $run"
+              echo "Restoring dev durations and the coverage baseline for base $BASE from passed dev push run $run on $head"
               echo "id=$run" >> "$GITHUB_OUTPUT"
+              echo "sha=$head" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-          done
-          echo "::error::No dev push Tests run on base $BASE ($sha) kept live durations-merged and coverage-baseline artifacts; pin a base whose dev push run passed and finished."
+          done <<< "$runs"
+          echo "::error::No passed dev push Tests run for base $BASE kept live durations-merged and coverage-baseline artifacts; pin a base whose dev push run passed and finished."
           exit 1
 
       - name: Download the dev durations
@@ -284,6 +297,7 @@ jobs:
         uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           # Downloading the wheels is faster than restoring a cache of them unpacked.
           enable-cache: false
 
@@ -429,6 +443,7 @@ jobs:
         uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
 
       - name: Install legacy grader dependencies
@@ -710,7 +725,6 @@ jobs:
           name: sonar-report
           path: |
             coverage.xml
-            .coverage-shards/
             .scannerwork/report-task.txt
           include-hidden-files: true
           if-no-files-found: error
@@ -845,7 +859,7 @@ jobs:
         run: python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
 
   coverage-ratchet:
-    needs: [unit, queue-baseline]
+    needs: [durations, unit, queue-baseline]
     if: ${{ !cancelled() && needs.unit.result == 'success' && (github.event_name != 'merge_group' || needs['queue-baseline'].result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -872,23 +886,63 @@ jobs:
       - name: Resolve the measured base tree
         id: base
         env:
-          DISPATCHED: ${{ inputs.base }}
+          DISPATCHED_BASE: ${{ needs.durations.outputs.base }}
           QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
         run: |
-          if [[ -n "$QUEUE_BASE" ]]; then
-            base="$QUEUE_BASE"
-          else
-            base=$(git rev-parse "${DISPATCHED:-HEAD^1}")
-          fi
+          base=$(git rev-parse "${QUEUE_BASE:-${DISPATCHED_BASE:-${PUSH_BEFORE:-HEAD^1}}}")
           echo "commit=$base" >> "$GITHUB_OUTPUT"
           echo "tree=$(git rev-parse "$base^{tree}")" >> "$GITHUB_OUTPUT"
 
       - name: Restore the exact coverage baseline
+        id: cached
         if: github.event_name != 'merge_group' && github.event_name != 'workflow_dispatch'
         uses: actions/cache/restore@v4
         with:
           path: ~/coverage-baseline
           key: coverage-baseline-${{ steps.base.outputs.tree }}
+
+      # The cache evicts a baseline seven days after its last read, and a dev commit the queue merged may get no push run,
+      # so a miss falls back to the artifact any passed run of the base kept.
+      - name: Mint the tcc main ci App token
+        id: app-token
+        if: steps.cached.outcome == 'success' && steps.cached.outputs.cache-hit != 'true'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-contents: read
+
+      - name: Find the run that published the base baseline
+        id: base-run
+        if: steps.app-token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BASE: ${{ steps.base.outputs.commit }}
+        run: |
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE&status=success&per_page=20" --jq '.workflow_runs[].id')
+          for run in $runs; do
+            kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
+            if [[ "$kept" -gt 0 ]]; then
+              echo "Restoring the coverage baseline of base $BASE from passed run $run"
+              echo "id=$run" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No passed Tests run on base $BASE kept a live coverage-baseline artifact."
+          exit 1
+
+      - name: Download the base baseline its run published
+        if: steps.base-run.outcome == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-baseline
+          path: ~/coverage-baseline
+          run-id: ${{ steps.base-run.outputs.id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ steps.app-token.outputs.token }}
 
       - name: Download the queue base coverage baseline
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
@@ -956,6 +1010,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
 
       - name: Install duration collection dependencies
@@ -1004,8 +1059,9 @@ jobs:
           key: durations-samples-${{ github.sha }}
 
   coverage-baseline:
-    needs: [gate-required, sonar]
-    if: ${{ !cancelled() && github.event_name == 'push' && needs['gate-required'].result == 'success' && needs.sonar.result == 'success' }}
+    needs: [unit, gate-required]
+    # Any measured dev push publishes: a skipped one leaves the next head with no base to grade against.
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.unit.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1059,7 +1115,7 @@ jobs:
           name: coverage-baseline
           path: ~/coverage-baseline
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90
           overwrite: true
 
   # A later queue entry's base is the earlier entry's merge commit, so the run that measured it may still be finishing.
@@ -1184,6 +1240,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
 
       - name: Install dependencies

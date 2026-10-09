@@ -86,11 +86,13 @@ def relay_to_page(inbox, slug, agents, ledger):
 def post(inbox, item, write):
     """Run the ledger write that shows an inbox item; a refusal closes only that item and tells its sender why."""
     try:
-        write()
+        refused = "the swarm notice was dropped" if write() is False else ""
     except SwarmError as exc:
-        inbox.close(item.id, item.address, "cancel", f"refused by the ledger page: {exc}")
+        refused = exc
+    if refused:
+        inbox.close(item.id, item.address, "cancel", f"refused by the ledger page: {refused}")
         if item.sender != BY:
-            inbox.send(BY, item.sender, REFUSED.format(id=item.id, reason=exc))
+            inbox.send(BY, item.sender, REFUSED.format(id=item.id, reason=refused))
         return False
     return True
 

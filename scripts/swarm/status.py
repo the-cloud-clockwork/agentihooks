@@ -101,8 +101,8 @@ def _health_rows(store, slug, agents, quiet, at):
     rows = []
     for agent in agents:
         started = launch_check.session_started_at(agent)
-        last = max(latest.get(agent.name, 0), started)
-        minutes = (at - last) // health.MINUTE_MS if last else None
+        last = latest.get(agent.name)
+        minutes = (at - max(last, started)) // health.MINUTE_MS if last is not None else None
         if at - started <= STARTUP_GRACE_MS or quiet_gate.declared_wait(store.redis, slug, agent.name, at):
             minutes = None
         rows.append(

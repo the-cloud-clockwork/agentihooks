@@ -1,7 +1,9 @@
+import ast
 import difflib
 import functools
 import itertools
-from collections.abc import Callable, Iterator
+from collections import Counter
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -52,6 +54,33 @@ def line_map(old: str, new: str) -> dict[int, int]:
         return {n: n for n in range(1, len(old_lines) + 1)}
     matcher = difflib.SequenceMatcher(None, old_lines, new_lines)
     return {a + k + 1: b + k + 1 for a, b, size in matcher.get_matching_blocks() for k in range(size)}
+
+
+def _defined(source: str) -> set[str]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    kinds = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+    return {node.name for node in ast.walk(tree) if isinstance(node, kinds) and not node.name.startswith("__")}
+
+
+def pair_moves(gone: dict[str, str], added: dict[str, str], head: Iterable[str] = ()) -> dict[str, str]:
+    defined = {path: _defined(new) for path, new in added.items()}
+    counts = Counter(name for source in head for name in _defined(source))
+    generic = {name for name, count in counts.items() if count > 1}
+    pairs = {}
+    for old_path, old in gone.items():
+        names = _defined(old) - generic
+        shared = {path: len(names & defined[path]) for path in added}
+        scored = [
+            (count, len(line_map(old, added[path])), path)
+            for path, count in shared.items()
+            if count >= 2 and 2 * count >= len(names)
+        ]
+        if scored:
+            pairs[old_path] = max(scored)[2]
+    return pairs
 
 
 def _lost(

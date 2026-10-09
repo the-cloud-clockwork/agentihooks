@@ -279,3 +279,17 @@ def test_synchronously_registered_master_is_working_and_clears_the_handoff(store
     tick("sw", store, ledger, runtime, 1)
     assert masters(store)[0].state == "working"
     assert store.handoff("sw", MASTER) == ""
+
+
+def test_the_alert_state_is_saved_before_the_notice(store):  # noqa: F811
+    from scripts.swarm import master_start
+    from scripts.swarm.store import SwarmError
+
+    class Raising:
+        def notify(self, slug, text):
+            raise SwarmError("ledger sw: connection reset")
+
+    master_start.save(store, "sw", {"name": "", "task": {}, "attempt": 2, "retry": True, "at": 0})
+    with pytest.raises(SwarmError):
+        master_start.observe("sw", store.config("sw"), store, Raising(), StartupRuntime(), DEADLINE)
+    assert master_start.read(store, "sw")["alerted"] is True

@@ -220,13 +220,15 @@ def save(folder, record):
     os.replace(staged, path)
 
 
-def _file_cuts(record, ledger, who, home):
-    for row in record["pieces"]:
-        key = _row_key(row)
-        if row["kept"] or key in record["filed"]:
-            continue
+def _cuts(record):
+    rows = [row for row in record["pieces"] if not row["kept"] and _row_key(row) not in record["filed"]]
+    record["filed"] += [_row_key(row) for row in rows]
+    return rows
+
+
+def _file_cuts(rows, ledger, who, home):
+    for row in rows:
         ledger.followup(who.swarm, followup_text(who.task, row["what"]))
-        record["filed"].append(key)
         gate_log.append(who.swarm, gate_log.Row.of(GATE.name, "count", who, reason=f"cut: {row['what']}"), home)
 
 
@@ -240,15 +242,16 @@ def run(folder, state, ledger, who, mode, home=None, now_ms=None):
     previous = load(folder)
     if previous.get("plan_hash") == plan_hash(pieces):
         return previous, False
-    record = trace(pieces, state, previous, now_ms)
+    record, cuts = trace(pieces, state, previous, now_ms), []
     if record["verdict"] == PASS:
-        _file_cuts(record, ledger, who, home)
+        cuts = _cuts(record)
     elif record["verdict"] == UNCHECKED:
         gate_log.append(who.swarm, gate_log.Row.of(GATE.name, "fail-open", who, reason=NO_ANSWER), home)
     elif mode in FAIL_KINDS:
         reason = " and ".join(record["reasons"])
         gate_log.append(who.swarm, gate_log.Row.of(GATE.name, FAIL_KINDS[mode], who, reason=reason), home)
     save(folder, record)
+    _file_cuts(cuts, ledger, who, home)
     block = record["verdict"] == FAIL and record["failures"] > RETURNS and mode == "enforce"
     return record, block
 
