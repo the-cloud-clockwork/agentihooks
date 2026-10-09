@@ -118,7 +118,7 @@ def findings(record: dict) -> list[Finding]:
     evidence = (
         f"error: {last.error}",
         f"attempt: {last.identity}, {last.path} at {_iso(last.at)}",
-        f"binding: no master bound since {_iso(first.at)}",
+        f"binding: no launched master bound since {_iso(first.at)}",
     )
     if record["journal"] is None:
         evidence += (f"fresh launch failures unavailable: {record['journal_error']}",)
@@ -174,7 +174,7 @@ def _shown(finding, verdict, at, cooldown_ms):
 @dataclass(frozen=True)
 class Replay:
     """The verdicts as stored, and the Doctor passes the timer logged; a pass with no new finding logs nothing, so
-    the latest a failure waits for a pass is one interval."""
+    the latest a failure waits for a pass is one interval, which can only judge it later and so count fewer missed."""
 
     verdicts: dict
     cooldown_ms: int

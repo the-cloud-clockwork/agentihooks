@@ -35,7 +35,7 @@ def test_recorded_outage_is_one_finding_with_the_real_error_attempt_and_missing_
     assert found.evidence[1].startswith("attempt: transfer ac248650")
     assert "master@323133-0092" in found.evidence[1]
     assert "recycle handoff" in found.evidence[1]
-    assert found.evidence[2].startswith("binding: no master bound since 2026-10-09 19:57")
+    assert found.evidence[2].startswith("binding: no launched master bound since 2026-10-09 19:57")
 
 
 def test_every_recorded_attempt_carries_its_journal_error():
