@@ -1,4 +1,9 @@
 import socket
+import sys
+
+from redis.exceptions import RedisError
+
+from scripts.inbox.store import InboxStore
 
 from scripts.swarm import push
 from scripts.swarm.store import PREFIX
@@ -14,6 +19,7 @@ if count >= 2 and ARGV[1] ~= tostring(active) then
     active = tonumber(ARGV[1])
     redis.call('HSET', KEYS[1], 'active', active)
     event = active == 1 and 'raised' or 'resolved'
+    if active == 1 then redis.call('HINCRBY', KEYS[1], 'generation', 1) end
     redis.call('RPUSH', KEYS[2], event)
 end
 return event
@@ -40,3 +46,44 @@ def deliver(redis, kind: str, raised: str, resolved: str) -> None:
             redis.lpop(f"{root}:outbox")
     finally:
         lock.release()
+
+
+def mail(redis, kind: str, address: str, text: str, resolved: bool = False) -> bool:
+    root = key(kind)
+    generation = int(redis.hget(root, "generation") or 0)
+    raised_key = f"{root}:mail:{address}:{generation}"
+    if resolved and not redis.exists(raised_key):
+        return False
+    mail_key = f"{raised_key}:resolved" if resolved else raised_key
+    if not redis.set(mail_key, 1, nx=True, ex=86400):
+        return False
+    InboxStore(redis).send("swarm", address, text, fyi=resolved)
+    return True
+
+
+def host_pressure(store, slug: str) -> list[str]:
+    from scripts.swarm import host_budget, ledger_probe
+
+    try:
+        sample = host_budget.read_host()
+        if sample is None:
+            return []
+        marks = host_budget.thresholds(store.config(slug))
+        bad = sample.load1 / sample.cpus > marks.load_high or sample.available_mb < marks.memory_per_agent_mb
+        step(store.redis, "pressure", bad)
+        raised = "Host pressure: load is above the high mark or memory is below one agent share."
+        resolved = "Host pressure resolved: load and available memory are within the host budget."
+        deliver(store.redis, "pressure", raised, resolved)
+        active = store.redis.hget(key("pressure"), "active") == "1"
+        if mail(
+            store.redis,
+            "pressure",
+            ledger_probe.master_address(store, slug),
+            raised if active else resolved,
+            not active,
+        ):
+            return ["raised the host pressure alert" if active else "cleared the host pressure alert"]
+        return []
+    except (OSError, RedisError):
+        print("host pressure check unavailable", file=sys.stderr)
+        return []
