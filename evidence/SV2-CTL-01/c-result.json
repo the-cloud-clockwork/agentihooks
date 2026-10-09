@@ -1,10 +1,8 @@
 {
-  "tested_commit": "bea45dd7bdc3e2043385bed57a513a0c68f36238",
-  "evidence_class": "Isolated fake Redis; two independent controller processes over TCP for case A; fake server time and mocked Kubernetes transport for cases B and C; no live rollout proof.",
   "passed": true,
   "confirmed_operation": {
-    "operation_id": "op-432bcf7926f058c7931cc0926eba1b6f",
-    "execution_id": "exe-cd267873b1ad4850912ebf89fee55b5f",
+    "operation_id": "op-4bad46337a975bf3904a5076d6968da9",
+    "execution_id": "exe-f70a81e733054fbba1eef0b7d296e29e",
     "generation": 1,
     "action": "spawn",
     "backend": "kubernetes",
@@ -23,7 +21,7 @@
   "rollback_admission_refused": true,
   "retained_intents": [
     {
-      "execution_id": "exe-cd267873b1ad4850912ebf89fee55b5f",
+      "execution_id": "exe-f70a81e733054fbba1eef0b7d296e29e",
       "generation": 1,
       "controller_epoch": 1
     }

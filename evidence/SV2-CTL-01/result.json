@@ -3,9 +3,9 @@
   "dependency": "SV2-RUN-05",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1939",
-  "pull_request": "",
-  "tested_commit": "bea45dd7bdc3e2043385bed57a513a0c68f36238",
-  "status": "service-fixture-qualified-awaiting-dependency-and-integration",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1968",
+  "tested_commit": "cc09b5dd8f69b2daaf26c71aca8c3c8f82691831",
+  "status": "service-fixture-qualified-awaiting-G3-integration",
   "evidence_class": "Isolated fake Redis; two independent controller processes over TCP for case A; fake server time and mocked Kubernetes transport for cases B and C; no live rollout proof.",
   "interfaces": [
     "Controller.acquire, renew, admit, execute, release, intents and controller_leader_changes_total",
@@ -26,7 +26,7 @@
     "externally_verified": "None: concrete runtime receiver fencing and live G3 rollout remain unverified."
   },
   "validation": {
-    "focused_tests": "212 passed in 6.85 seconds: controller, operation journal, lease, execution identity and observation",
+    "focused_tests": "226 passed in 6.84 seconds: controller, operation journal, lease, renewal, execution identity and observation; grouping and controller verification: 17 passed in 4.70 seconds",
     "lint": "ruff check and ruff format check passed on changed Python files",
     "limits": "84 units over limits, 84 base allowlist entries, zero errors"
   },
@@ -41,11 +41,10 @@
     "proof": "Case C retains confirmed operation and intents, refuses rollback admission, and observes exactly one external creation."
   },
   "remaining_limitations": [
-    "The lifecycle dependency remains open; the parked branch is not a package completion or G3 qualification.",
     "Controller is an injectable service. Existing local controller CLI remains the compatibility path; the later controller loop package must connect the new service to production scheduling and scoped credentials.",
     "A concrete transport must validate controller epoch and immutable execution identity at its external effect boundary. The fixture transport is mocked and no live Kubernetes or Anton deployment is claimed.",
-    "Full CI and mutation are deferred to the pull request after the dependency lands.",
-    "Journal admission epochs remain immutable after takeover. Concrete receiver dispatch must carry and validate the current controller authority separately from the original journal epoch."
+    "Journal admission epochs remain immutable after takeover. Concrete receiver dispatch must carry and validate the current controller authority separately from the original journal epoch.",
+    "Full CI and mutation validation are supplied by the linked integration pull request; live G3 rollout remains unverified."
   ],
   "reviews": {
     "Standards": "Constructor annotation findings fixed in tested commit; no open findings.",
