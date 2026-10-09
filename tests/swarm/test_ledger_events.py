@@ -114,6 +114,19 @@ def test_a_replay_of_the_same_ledger_makes_no_item(store):
     assert len(texts(store, MASTER_SEAT)) == 4
 
 
+def test_a_follow_up_already_flagged_for_the_operator_sends_the_master_no_notice(store):
+    run(store, recorded())
+    flagged = event(11, 100_000, "swarm", "added", "followups/f1", "A message to master@sw is still unread")
+    unflagged = event(12, 100_000, "swarm", "added", "followups/f2", "Retries need a cap")
+    rows = [
+        {"id": "f1", "text": flagged["text"], "comments": [], "done": False, "needs_operator": True},
+        {"id": "f2", "text": unflagged["text"], "comments": [], "done": False},
+    ]
+    run(store, recorded([flagged, unflagged], followups=rows))
+    (notice,) = texts(store, MASTER_SEAT)
+    assert "Retries need a cap" in notice
+
+
 def test_the_cursor_is_kept_per_swarm(store):
     store.create(SwarmConfig("other", "/repo", max_eng=1, max_ci=0))
     run(store, recorded())

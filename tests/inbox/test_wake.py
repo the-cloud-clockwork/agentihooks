@@ -27,10 +27,11 @@ class FakeHerdr:
 
 class FakeLedger:
     def __init__(self):
-        self.followups = []
+        self.followups, self.flagged = [], []
 
-    def followup(self, slug, text):
+    def followup(self, slug, text, needs_operator=False):
         self.followups.append((slug, text))
+        self.flagged.append(needs_operator)
 
 
 AGENTS = [
@@ -204,10 +205,10 @@ def test_a_refused_operator_notification_closes_that_item_and_the_pass_goes_on(i
     )
 
     class StrictLedger(FakeLedger):
-        def followup(self, slug, text):
+        def followup(self, slug, text, needs_operator=False):
             if "first" in text:
                 raise SwarmError("ledger sw refused: item refused: date '2026-10-05'")
-            super().followup(slug, text)
+            super().followup(slug, text, needs_operator)
 
     first = inbox.send("sw-eng-2", "sw-eng-1", "first message")
     second = inbox.send("sw-eng-2", "sw-eng-1", "second message")
@@ -267,6 +268,15 @@ def test_an_item_for_the_master_skips_straight_to_the_operator(inbox):
         run(inbox, herdr, ledger, t + n * W)
     assert herdr.prompts == [] and len(inbox.inbox(MASTER_NAME)) == 1 and len(ledger.followups) == 1
     assert events(inbox, item.id) == ["escalated_operator"]
+
+
+@pytest.mark.parametrize("address", ["sw-eng-1", MASTER_NAME])
+def test_the_operator_follow_up_is_flagged_for_the_operator(inbox, address):
+    item = inbox.send("sw-eng-2", address, "check the plan")
+    herdr, ledger = FakeHerdr({"p1": "working", "pm": "idle"}), FakeLedger()
+    for n in range(6):
+        run(inbox, herdr, ledger, sent_at(item) + n * W)
+    assert len(ledger.followups) == 1 and ledger.flagged == [True]
 
 
 @pytest.mark.parametrize("harness", ["", "claude", "codex"])
