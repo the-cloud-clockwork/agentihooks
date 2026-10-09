@@ -587,7 +587,14 @@ def _claimable(slug, store, rows, doc, lane):
 
 
 def _launch_order(slug, store, tasks):
-    return sorted(tasks, key=lambda task: (ledger_rank.order(task), bool(store.launch_failure(slug, task["id"]))))
+    return sorted(
+        tasks,
+        key=lambda task: (
+            ledger_rank.order(task),
+            not claim_order.resumed(task),
+            bool(store.launch_failure(slug, task["id"])),
+        ),
+    )
 
 
 def _unblocked(task, rows):
