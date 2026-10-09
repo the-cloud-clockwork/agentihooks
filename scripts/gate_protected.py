@@ -41,7 +41,18 @@ def _aggregator_problems(base: tuple[str, str, dict], head: tuple[str, str, dict
         f"The head's {GATE} changes its {field}; the protected branch grades with its own."
         for field in fields
         if base_job.get(field) != head_job.get(field)
+        and not (field == "steps" and base_id == "gate-required" and head_job.get("steps") == ci_reuse.gate_steps())
     ]
+
+
+def _reuse_problems(base: dict, head: dict) -> list[str]:
+    previous = base.get("reuse")
+    candidate = head.get("reuse")
+    if candidate is None:
+        return ["The head removes the protected reuse job."] if previous is not None else []
+    if candidate != previous and candidate != ci_reuse.reuse_job():
+        return ["The head changes the protected reuse job; the protected branch grades with its own."]
+    return []
 
 
 def grade(
@@ -53,6 +64,8 @@ def grade(
     if len(head_gates) != 1:
         return [f"The head holds {len(head_gates)} jobs named {GATE}; exactly one must be."]
     problems = _aggregator_problems(base_gates[0], head_gates[0])
+    file = base_gates[0][0]
+    problems += _reuse_problems(base_workflows[file]["jobs"], head_workflows[file]["jobs"])
     return problems + ci_wiring.check(head_workflows, _protected_config(base_config, head_config), today)
 
 
