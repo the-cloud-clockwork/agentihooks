@@ -55,6 +55,8 @@ class Decision:
 
 def requested(task: dict, default: Resources) -> Resources:
     asked = task.get("resources") or {}
+    if not isinstance(asked, dict):
+        raise ValueError("resources must be a mapping")
     need = Resources(int(asked.get("memory_mib", default.memory_mib)), int(asked.get("cpu_millis", default.cpu_millis)))
     if need.memory_mib <= 0 or need.cpu_millis <= 0:
         raise ValueError("resources must be positive")

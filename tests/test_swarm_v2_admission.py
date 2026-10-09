@@ -56,10 +56,15 @@ def test_requested_reads_task_resources_over_the_default():
     for bad in ({"memory_mib": 0}, {"cpu_millis": -1}):
         with pytest.raises(ValueError, match="^resources must be positive$"):
             requested({"id": "t", "resources": bad}, default)
+    for bad in (["memory_mib"], "8192"):
+        with pytest.raises(ValueError, match="^resources must be a mapping$"):
+            requested({"id": "t", "resources": bad}, default)
     assert requested({"id": "t", "resources": {"memory_mib": 1, "cpu_millis": 1}}, default) == Resources(1, 1)
 
 
-@pytest.mark.parametrize("bad", [{"memory_mib": "lots"}, {"cpu_millis": None}, {"memory_mib": 0}, {"cpu_millis": -5}])
+@pytest.mark.parametrize(
+    "bad", [{"memory_mib": "lots"}, {"cpu_millis": None}, {"memory_mib": 0}, {"cpu_millis": -5}, ["memory_mib"], "8192"]
+)
 def test_unreadable_resources_are_impossible_and_never_abort_the_batch(bad):
     store, gate, _ = make()
     got = gate.admit("a", [{"id": "bad", "resources": bad}, *ids("t1")], 0)
