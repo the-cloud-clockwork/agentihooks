@@ -111,7 +111,7 @@ def test_a_command_line_that_is_not_utf8_is_read_with_replacement_characters(tmp
 
 def test_a_status_value_holding_a_colon_still_reads(tmp_path):
     plant(tmp_path, [PYTHON])
-    (tmp_path / str(PID) / "status").write_text("Name:\tledger:server\nThreads:\t12\nVmRSS:\t 400 kB\n")
+    (tmp_path / str(PID) / "status").write_text("Name:\tledger:server\nThreads:\t12\nVmRSS:\t 400 kB:x\n")
     assert ledger_watchdog.seen(PID, tmp_path) == {"threads": 12, "rss_kb": 400, "argv": [PYTHON]}
 
 
