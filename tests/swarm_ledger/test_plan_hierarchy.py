@@ -393,3 +393,40 @@ def test_plan_ops_target_their_collections_and_artifacts_keep_a_boolean_plan():
     assert schemas.target({"op": "slice_add"}) == "slices"
     assert schemas.operation_schema("artifact_add")["properties"]["plan"] == {"type": "boolean"}
     assert schemas.operation_schema("plan_add")["properties"]["plan"]["type"] == "string"
+
+
+PLANNED = {
+    "phases": [{"title": "No id"}, {"id": "p1", "plan": "plans/plan-a"}, {"id": "p2"}],
+    "slices": [{"anchor": "x"}, {"id": "plan-a.first"}],
+}
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"phase": "p1", "plan_slice": "first", "slice": "slices/plan-a.other"},
+        {"phase": "p1", "plan_slice": ""},
+        {"phase": "p1"},
+        {"phase": "p2", "plan_slice": "first"},
+        {"phase": "p1", "plan_slice": "missing"},
+        {"phase": "p9", "plan_slice": "first"},
+    ],
+)
+def test_with_slice_leaves_fields_without_a_planned_slice_alone(fields):
+    assert ledger_plans.with_slice(PLANNED, fields) is fields
+
+
+def test_with_slice_names_the_slice_of_the_phase_plan():
+    fields = {"phase": "p1", "plan_slice": "first", "title": "Build"}
+    assert ledger_plans.with_slice(PLANNED, fields) == {**fields, "slice": "slices/plan-a.first"}
+
+
+@pytest.mark.parametrize("doc", [{}, {"phases": [{"id": "p1", "plan": "plans/plan-a"}]}])
+def test_with_slice_reads_a_document_without_phases_or_slices(doc):
+    fields = {"phase": "p1", "plan_slice": "first"}
+    assert ledger_plans.with_slice(doc, fields) is fields
+
+
+def test_plan_and_slice_ids_come_from_the_file_and_the_anchor():
+    assert ledger_plans.plan_id("0123456789abcdef.md") == "plan-0123456789ab"
+    assert ledger_plans.slice_id("plan-a", "first") == "plan-a.first"
