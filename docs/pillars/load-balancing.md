@@ -70,15 +70,15 @@ and its live sessions. Every source of credentials offers slots of one kind.
 | Kind | Harness | Account | Cap |
 |---|---|---|---|
 | `subscription` | Claude | each `AH_CC_TOKEN_<slug>` | its quota band (above) |
-| `subscription` | Codex | each `AH_CX_TOKEN_<slug>` | its weekly band |
-| `interactive` | Codex | the default `codex login`, named `default` | its weekly band |
+| `subscription` | Codex | each `AH_CX_TOKEN_<slug>` | 6 with 5% or more of the week left, else none; needs a reading under fifteen minutes old |
+| `interactive` | Codex | the default `codex login`, named `default` | the same as a Codex token |
 | `api` | Claude or Codex | `api`, one per harness when an endpoint is configured | `<harness>-api-max-sessions`, unbounded when unset |
 
 Subscription and interactive slots make up the pool. An api slot has no quota
-windows; only its session cap limits it. The slug `api` is reserved, so
-`AH_CC_TOKEN_api` and `AH_CX_TOKEN_api` are ignored. `agenti --route api` and
-`agentihooks codex --route api` force the api slot and fail when no endpoint is
-configured.
+windows; only its session cap limits it. The slug `api` is reserved: routing
+ignores `AH_CC_TOKEN_api` and `AH_CX_TOKEN_api`. `agenti --route api` and
+`agentihooks codex --route api` force the api slot, bypass its cap and weight,
+and fail when no endpoint is configured.
 
 ### Api detection per harness
 
@@ -86,14 +86,17 @@ Claude Code picks its credential by a fixed order: cloud provider variables,
 then `ANTHROPIC_AUTH_TOKEN`, then `ANTHROPIC_API_KEY`, then `apiKeyHelper`, then
 `CLAUDE_CODE_OAUTH_TOKEN`, then the `/login` subscription
 ([Claude Code authentication precedence](https://code.claude.com/docs/en/authentication#authentication-precedence)).
-The router offers a Claude api slot when the launch environment holds a
-credential that outranks the OAuth token:
+The router offers a Claude api slot only for these environments, each of which
+outranks the OAuth token:
 
 | Environment | Provider label |
 |---|---|
 | `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` set to `1`, `true`, `yes` or `on` | `bedrock`, `vertex`, `foundry` |
 | `ANTHROPIC_BASE_URL` on a host other than `api.anthropic.com`, with `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` | `gateway` |
 | `ANTHROPIC_API_KEY` alone | `anthropic-key` |
+
+`ANTHROPIC_AUTH_TOKEN` without a foreign `ANTHROPIC_BASE_URL` offers no slot, and
+an `apiKeyHelper` setting is not detected.
 
 Codex signs in with a ChatGPT login, an access token or an API key
 ([Codex authentication](https://developers.openai.com/codex/auth)). The router
@@ -119,6 +122,10 @@ live at that moment:
 3. Otherwise the launch goes to the api when
    `api_live / (api_live + pool_live + 1)` is below `weight / 100` and the api is
    below its cap; else to the pool.
+
+`api_live` is the live sessions on the api account; `pool_live` is the live
+sessions on every token account of that harness (the Codex default login
+included), whether or not the account currently offers a slot.
 
 Weight 0 keeps the api as an overflow for a full pool. Weight 100 sends every
 launch to the api while it has room. The share is recomputed from live sessions,
@@ -152,9 +159,11 @@ validation, closes the api side for that launch with a line on stderr
 
 A session on the api is never subject to the quota policy below: it is never
 handed off, made to wait or stopped. For a spent subscription session, an api
-slot below its cap is the successor of last resort: when no pool account
-qualifies as a handoff target, the policy hands off to the api instead of
-`QUOTA WAIT` or `QUOTA STOP`, unless the operator said "keep pushing".
+slot below its cap is the successor of last resort. Pool targets come first,
+including the least-used account with 5% or more routing left wherever the
+table below hands off to it; only where the policy would otherwise answer
+`QUOTA WAIT` or `QUOTA STOP` does it hand off to the api instead, unless the
+operator said "keep pushing".
 
 ## Environment isolation
 
@@ -187,20 +196,22 @@ line names the side:
 ```
 
 An unbounded api cap prints as `1000000` on the launch line and as `none` in the
-`CAP` column.
+`CAP` column. A forced launch prints `[agenti] account=api route=forced` for
+Claude and `sessions=<n>/?` for Codex.
 
 ## Routing settings
 
 Weights and api caps live in the routing settings store: a Redis hash when the
-swarm Redis answers, else `~/.agentihooks/routing-settings.json`. Every write
+swarm Redis answers, else `routing-settings.json` under `$AGENTIHOOKS_HOME`
+(default `~/.agentihooks`). Every write
 records its actor and time in the store's history.
 
 | Key | Values | Default | Meaning |
 |---|---|---|---|
 | `claude-api-weight`, `codex-api-weight` | integer 0 to 100 | `0` | Live share of the api side |
-| `claude-api-max-sessions`, `codex-api-max-sessions` | integer 0 or more | unset (unbounded) | Session cap of the api slot; `0` closes the api side |
-| `master-account-claude`, `master-account-codex` | account name | unset | Account declared for swarm masters |
-| `master-tier-claude`, `master-tier-codex` | tier name | unset | Tier declared for swarm masters |
+| `claude-api-max-sessions`, `codex-api-max-sessions` | integer 0 or more | unset (unbounded) | Session cap of the api slot; `0` closes the api side to placement (a forced `--route api` still launches) |
+| `master-account-claude`, `master-account-codex` | account name | unset | Account declared for swarm masters; stored and validated, read by no launch path yet |
+| `master-tier-claude`, `master-tier-codex` | tier name | unset | Tier declared for swarm masters; stored and validated, read by no launch path yet |
 
 ```bash
 agentihooks balance settings                     # every key with its value and the store in use
