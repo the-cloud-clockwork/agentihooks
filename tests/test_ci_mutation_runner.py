@@ -178,6 +178,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "Swarm-v2.md",
         "docker/swarm-node/",
         ".agentihooks/conditions/",
+        ".test_durations",
     ]
     assert config["tool"]["mutmut"]["pytest_add_cli_args"] == [
         "-q",
