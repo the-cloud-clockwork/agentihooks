@@ -400,3 +400,86 @@ def test_cached_proof_commits_do_not_fetch_from_the_network(full_source, tmp_pat
     assert "reused=true" in result.stdout
     commands = [json.loads(line) for line in trace.read_text().splitlines()]
     assert not any(command[0] == "fetch" for command in commands)
+
+
+def test_protected_metadata_records_the_exact_schema_and_utc_inputs(reuse_repo, tmp_path):
+    from datetime import UTC, datetime
+
+    root, base, head, _ = reuse_repo
+    output = tmp_path / "schema.json"
+    result = invoke(root, base, head, "pull_request", output)
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = {
+        "version": 1,
+        "run": 7,
+        "attempt": 1,
+        "event": "pull_request",
+        "commit": head,
+        "tree": git(root, "rev-parse", f"{head}^{{tree}}"),
+        "grader": base,
+        "reused": False,
+        "inputs": {
+            "base": git(root, "rev-parse", f"{base}^{{tree}}"),
+            "grader": git(root, "rev-parse", f"{base}^{{tree}}"),
+            "workflow": git(root, "rev-parse", f"{base}:.github"),
+            "day": datetime.now(UTC).date().isoformat(),
+        },
+    }
+    assert json.loads(output.read_text()) == expected
+    digest = hashlib.sha256(json.dumps(expected, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    assert (
+        result.stdout == f"required-tree-sha256={digest}\nreused=false\nrun=\nattempt=\ngrader={base}\nrecorded=true\n"
+    )
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_proof_requires_one_successful_protected_attestation(full_source, tmp_path, count):
+    root, base, _, queue, env, responses, _ = full_source
+    body = responses["repos/o/r/actions/runs/7/attempts/1/jobs?per_page=100&page=1"]
+    attestation = next(job for job in body["jobs"] if job["name"] == "reuse")
+    body["jobs"] = [job for job in body["jobs"] if job["name"] != "reuse"] + [attestation] * count
+    body["total_count"] = len(body["jobs"])
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    result = invoke(root, base, queue, "merge_group", tmp_path / "attestation.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=false" in result.stdout
+
+
+def test_a_later_valid_source_is_considered_after_an_incompatible_candidate(full_source, tmp_path):
+    root, base, _, queue, env, responses, _ = full_source
+    runs = responses["repos/o/r/actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=20"][
+        "workflow_runs"
+    ]
+    runs.insert(0, {**runs[0], "id": 8})
+    responses["repos/o/r/actions/runs/8/artifacts?per_page=100&page=1"] = responses[
+        "repos/o/r/actions/runs/7/artifacts?per_page=100&page=1"
+    ]
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    result = invoke(root, base, queue, "merge_group", tmp_path / "later.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=true" in result.stdout
+    assert "run=7" in result.stdout
+
+
+@pytest.mark.parametrize("size, reuse", [(65536, True), (65537, False)])
+def test_metadata_archive_size_has_an_exact_bound(full_source, tmp_path, size, reuse):
+    root, base, _, queue, env, responses, record = full_source
+    payload = json.dumps(record).encode()
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("provenance.json", payload + b" " * (size - len(payload)))
+    responses["repos/o/r/actions/artifacts/42/zip"] = {"binary": base64.b64encode(archive.getvalue()).decode()}
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    result = invoke(root, base, queue, "merge_group", tmp_path / "size.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"reused={str(reuse).lower()}" in result.stdout
+
+
+def test_canonical_proof_digest_ignores_dictionary_insertion_order(full_source, tmp_path):
+    root, base, _, queue, env, responses, record = full_source
+    reordered = dict(reversed(list(record.items())))
+    reordered["inputs"] = dict(reversed(list(record["inputs"].items())))
+    publish_record(env, responses, reordered)
+    result = invoke(root, base, queue, "merge_group", tmp_path / "order.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=true" in result.stdout
