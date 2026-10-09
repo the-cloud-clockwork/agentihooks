@@ -128,6 +128,19 @@ def test_a_master_recycle_starts_inside_the_swarm_effort_range(launching):
     assert calls[-1][calls[-1].index("--effort") + 1] == "high"
 
 
+@pytest.mark.parametrize(
+    ("saved", "lane", "quota", "expected"),
+    [
+        ({"effort": "max"}, "master", False, False),
+        ({"effort": "max"}, "master", True, True),
+        ({"effort": "max"}, "eng", False, True),
+        ({}, "eng", False, False),
+    ],
+)
+def test_only_a_master_recycle_gives_up_its_saved_effort(saved, lane, quota, expected):
+    assert runtime.preserves_effort(saved, lane, quota) is expected
+
+
 def test_resume_keeps_decision_and_replaces_the_old_binding_evidence(tmp_path):
     engine, config, agent, calls = _resuming(tmp_path, "c0ffee")
     decision = {"profile": "engineer", "source": "task", "validation": {"state": "old", "pid": 42}}
