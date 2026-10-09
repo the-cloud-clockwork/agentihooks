@@ -1,4 +1,5 @@
 import json
+import re
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -424,3 +425,123 @@ def test_every_packaged_corpus_replays_clean(name):
         for item in yaml.safe_load((PACKAGE / f"{name}.corpus.yaml").read_text())["cases"]
         if item["control"]
     )
+
+
+def one_line(text):
+    return " ".join(text.split())
+
+
+def has_line(out, text):
+    return re.search(rf"(^|\s){re.escape(text)}($|\s)", one_line(out)) is not None
+
+
+def test_eval_help_names_the_command_its_argument_and_the_live_flag(capsys):
+    with pytest.raises(SystemExit):
+        cli.classifier_main(["--help"])
+    assert has_line(capsys.readouterr().out, "eval Score a classifier against its corpus by replaying recorded samples")
+    with pytest.raises(SystemExit):
+        cli.classifier_main(["eval", "--help"])
+    out = capsys.readouterr().out
+    assert has_line(out, "usage: agentihooks classifier eval [-h] [--live N] name")
+    assert has_line(out, "name Classifier definition name")
+    assert has_line(out, "--live N Ask every live backend N times per case instead; never in CI")
+
+
+def test_eval_command_prints_indented_json_and_stamps_the_metrics_time(home, monkeypatch, capsys):
+    write_corpus(home, [case("typo", True, noul(0.9))])
+    stamps = []
+    monkeypatch.setattr(cli.time, "time", lambda: 1_800_000_000.5)
+    monkeypatch.setattr(evaluation, "record", lambda result, now_ms: stamps.append(now_ms) or [])
+    assert cli.classifier_main(["eval", "sample"]) == 0
+    out = capsys.readouterr().out
+    assert out == json.dumps(json.loads(out), indent=2) + "\n"
+    assert stamps == [1_800_000_000_500]
+
+
+def test_load_joins_several_missing_names_with_commas(definition_home):
+    raw = sample()
+    raw["questions"].append({"name": "reject", "type": "yesno", "instructions": "Reject?"})
+    write_definition(definition_home, raw)
+    both = {"accept": {"type": "noul", "noul": 0.9}, "reject": {"type": "noul", "noul": 0.1}}
+    good = {"source": "m", "latency_ms": 1, "answers": both}
+    for cases, message in (
+        ([{**case("typo", True, good), "expected": {}}], "case typo expected must name exactly: accept, reject"),
+        (
+            [{**case("typo", True, {**good, "answers": {}}), "expected": {"accept": True, "reject": False}}],
+            "case typo sample 0 answers must name exactly: accept, reject",
+        ),
+        ([{**case("typo", True, good), "extra": 1, "more": 2}], "unknown case keys: extra, more"),
+    ):
+        write_corpus(definition_home, cases)
+        with pytest.raises(corpus.CorpusError) as error:
+            evaluation.evaluate("sample")
+        assert str(error.value) == message
+
+
+def test_a_case_without_control_or_latency_defaults_to_a_plain_case_at_zero_milliseconds(home):
+    plain = {k: v for k, v in case("typo", True).items() if k != "control"}
+    sample_ = {k: v for k, v in noul(0.9).items() if k != "latency_ms"}
+    write_corpus(home, [{**plain, "samples": [sample_]}, case("quick", True, noul(0.9, latency=0))])
+    report = evaluation.evaluate("sample").report()
+    assert (report["controls"], report["wrong"]) == (0, 0)
+    assert report["latency_ms"] == {"p50": 0, "max": 0}
+
+
+def test_load_refuses_an_answer_that_is_not_a_mapping(home):
+    write_corpus(home, [case("typo", True, {**noul(0.9), "answers": {"accept": "yes"}})])
+    with pytest.raises(corpus.CorpusError) as error:
+        evaluation.evaluate("sample")
+    assert str(error.value) == "case typo sample 0 answer accept must be a noul answer"
+
+
+def test_a_score_range_may_be_a_single_point(definition_home):
+    raw = sample()
+    raw["questions"] = [{"name": "accept", "type": "score", "instructions": "How hard?", "levels": ["low", "high"]}]
+    raw["rule"] = {"type": "score", "threshold": "yes"}
+    write_definition(definition_home, raw)
+    answer = {"type": "score", "score": 0.5, "confidence": 0.9}
+    write_corpus(
+        definition_home, [case("exact", [0.5, 0.5], {"source": "m", "latency_ms": 1, "answers": {"accept": answer}})]
+    )
+    assert evaluation.evaluate("sample").report()["wrong"] == 0
+
+
+def test_replay_reports_the_middle_latency(home):
+    write_corpus(home, [case("typo", True, noul(0.9, latency=30), noul(0.9, latency=10), noul(0.9, latency=20))])
+    assert evaluation.evaluate("sample").report()["latency_ms"] == {"p50": 20, "max": 30}
+
+
+def test_live_formats_questions_with_the_case_parameters_and_times_each_call(definition_home, monkeypatch):
+    monkeypatch.delenv("CI", raising=False)
+    raw = sample()
+    raw["questions"][0]["instructions"] = "Accept {thing}?"
+    write_definition(definition_home, raw)
+    write_corpus(definition_home, [{**case("typo", True, noul(0.9)), "params": {"thing": "the typo fix"}}])
+    clock = iter([10.0, 12.5, 20.0, 20.25])
+    monkeypatch.setattr(evaluation.time, "monotonic", lambda: next(clock))
+    backend = StubBackend("haiku", 0.9)
+    result = evaluation.evaluate("sample", repeats=2, backends=[backend])
+    assert backend.calls[0].questions["accept"].instructions == "Accept the typo fix?"
+    assert [(item.sample, item.latency_ms) for item in result.outcomes] == [(0, 2500), (1, 250)]
+
+
+def test_live_backends_carry_the_configured_timeout_whatever_the_target(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_URL", "http://litellm:4000")
+    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_LITELLM_KEY", "test-key")
+    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_MODELS", "m1")
+    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_TIMEOUT_S", "7")
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    backends = evaluation.live_backends()
+    assert [backend.name for backend in backends] == ["m1", "haiku", "luna"]
+    assert backends[0].timeout_s == 7.0
+
+
+def test_metrics_rows_fall_back_to_the_local_ledger(home, tmp_path, monkeypatch):
+    spool = tmp_path / "metrics.sqlite"
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: spool)
+    monkeypatch.setattr(metrics_outbox, "post", lambda sink, query, body: True)
+    write_corpus(home, [case("typo", True, noul(0.9))])
+    environ = {key: value for key, value in ON.items() if key != "AGENTIHOOKS_SWARM"}
+    assert evaluation.record(evaluation.evaluate("sample"), 1_800_000_000_000, environ) == []
+    with closing(sqlite3.connect(spool)) as db:
+        assert [json.loads(row)["ledger"] for (row,) in db.execute("SELECT row FROM spool")] == ["local"]

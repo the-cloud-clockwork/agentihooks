@@ -10,7 +10,7 @@ from hooks.classifier.core import Backend
 from hooks.classifier.corpus import Case, CorpusError, load, path_for
 from hooks.classifier.definitions import Definition
 from hooks.classifier.errors import BackendFailure, ClassifierRequestError
-from hooks.classifier.fallbacks import cli_backends
+from hooks.classifier.fallbacks import ClaudeCliBackend, CodexCliBackend
 from hooks.classifier.result import Answer, DecisionRequest
 from hooks.classifier.runner import _verdict, questions_for
 from hooks.classifier.settings import api_configured
@@ -136,7 +136,7 @@ def live_backends() -> list[Backend]:
         if api_configured(settings)
         else []
     )
-    return [*api, *cli_backends("claude")]
+    return [*api, ClaudeCliBackend(), CodexCliBackend()]
 
 
 def _ask(backend: Backend, definition: Definition, case: Case) -> tuple[dict | None, int]:
