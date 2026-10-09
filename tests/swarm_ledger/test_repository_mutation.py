@@ -4,6 +4,7 @@ import ledger_alerts
 import ledger_artifacts
 import ledger_media
 import ledger_notifications
+import ledger_plans
 import ledger_priorities
 import pytest
 
@@ -89,6 +90,15 @@ def test_apply_folds_changes_and_ops_in_order_and_records_the_change(derived):
         "created_at": 7,
         "updated_at": 50,
     }
+
+
+def test_apply_hands_the_ops_and_every_rejected_id_to_the_plan_drop(derived, monkeypatch):
+    seen = []
+    monkeypatch.setattr(ledger_plans, "drop_refused", lambda *args: seen.append(args))
+    doc = {"chat": [], "_meta": {"rev": 1, "events": [], "warnings": []}}
+    ops = [{"op": "stats_sync", "id": "s"}, {"op": "add", "id": "refused"}]
+    rejected, ctx = mutation.apply("demo", doc, domain([]), ["bad-1"], ops, None)
+    assert seen == [(doc, [ops[1], ops[0]], ["bad-1", "refused"], ctx)]
 
 
 def test_apply_without_anything_to_change_leaves_meta_alone(derived):

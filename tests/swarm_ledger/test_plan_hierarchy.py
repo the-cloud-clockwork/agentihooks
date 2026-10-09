@@ -168,13 +168,17 @@ def test_the_same_anchor_twice_in_one_plan_is_refused():
     assert rejected and "slice a.first already belongs to phases/p1" in refusal
 
 
-def test_a_phase_holding_slices_keeps_its_plan():
+def test_a_phase_moved_to_another_plan_drops_slices_whose_anchor_the_new_plan_lacks():
     plans("a", "b")
     link("p1", "plans/a")
     run("slice_add", phase="phases/p1", anchor="first")
-    _, rejected, refusal = link("p1", "plans/b")
-    assert rejected and "phase p1 holds slices of another plan: a.first" in refusal
-    assert link("p1", "plans/a")[1] == []
+    run("task_add", task="t1", title="Build", lane="eng", phase="p1", slice="slices/a.first")
+    state, rejected, _ = link("p1", "plans/b")
+    assert rejected == []
+    assert (state["phases"][0]["plan"], state["slices"]) == ("plans/b", [])
+    assert "slice" not in state["tasks"][0]
+    events = [(e["kind"], e["target"]) for e in state["_meta"]["events"] if e["kind"].startswith("slice")]
+    assert events == [("slice cleared", "tasks/t1")]
 
 
 def test_a_slice_needs_a_phase_with_a_plan():
@@ -443,3 +447,89 @@ def test_with_slice_reads_a_document_without_phases_or_slices(doc):
 def test_plan_and_slice_ids_come_from_the_file_and_the_anchor():
     assert ledger_plans.plan_id("0123456789abcdef.md") == "plan-0123456789ab"
     assert ledger_plans.slice_id("plan-a", "first") == "plan-a.first"
+
+
+@pytest.mark.parametrize(
+    ("phases", "events", "kept", "left"),
+    [
+        ([{"id": "p1"}], [{"kind": "added", "target": "plans/b"}], ["a"], []),
+        (
+            [{"id": "p1", "plan": "plans/b"}],
+            [{"kind": "added", "target": "plans/b"}],
+            ["a", "b"],
+            [{"kind": "added", "target": "plans/b"}],
+        ),
+        (
+            [{"id": "p1"}],
+            [{"kind": "changed", "target": "plans/b"}],
+            ["a", "b"],
+            [{"kind": "changed", "target": "plans/b"}],
+        ),
+        ([{"id": "p1"}], [], ["a", "b"], []),
+    ],
+)
+def test_a_refused_update_drops_only_an_unnamed_plan_this_batch_added(phases, events, kept, left):
+    doc = {"phases": phases, "plans": [{"id": "a"}, {"id": "b"}]}
+    ctx = Recorder()
+    ctx.events = [*events, {"kind": "added", "target": "tasks/t1"}]
+    ledger_plans.drop_unused(doc, "plans/b", ctx)
+    assert [row["id"] for row in doc["plans"]] == kept
+    assert ctx.events == [*left, {"kind": "added", "target": "tasks/t1"}]
+
+
+def test_a_batch_whose_phase_update_is_rejected_before_it_applies_keeps_no_plan_it_added():
+    ops = [
+        {"op": "plan_add", "id": "add-c", "by": "planner", "plan": "c", "title": "Plan c"},
+        {"op": "phase_update", "id": "move-p9", "by": "planner", "item": "phases/p9", "fields": {"plan": "plans/c"}},
+    ]
+    state, rejected = core.sync(SLUG, ops=ops)
+    assert rejected == ["move-p9"]
+    assert state["plans"] == []
+    assert [e for e in state["_meta"]["events"] if e["target"] == "plans/c"] == []
+
+
+def test_drop_refused_drops_only_plans_named_by_rejected_phase_updates():
+    doc = {"phases": [{"id": "p1"}], "plans": [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}]}
+    ctx = Recorder()
+    ctx.events = [{"kind": "added", "target": f"plans/{plan}"} for plan in ("a", "b", "c", "d")]
+    ops = [
+        {"op": "phase_update", "id": "u1", "fields": {"plan": "plans/a"}},
+        {"op": "phase_update", "id": "u2", "fields": {"plan": "plans/b"}},
+        {"op": "plan_add", "id": "u3", "plan": "c"},
+        {"op": "phase_update", "id": "u4", "fields": {"title": "T"}},
+        {"op": "phase_add", "id": "u5", "phase": "p2", "plan": "plans/d"},
+    ]
+    ledger_plans.drop_refused(doc, ops, ["u1", "u3", "u4", "u5"], ctx)
+    assert [row["id"] for row in doc["plans"]] == ["b", "c"]
+    assert ctx.events == [{"kind": "added", "target": "plans/b"}, {"kind": "added", "target": "plans/c"}]
+
+
+def test_resliced_names_changed_and_cleared_tasks_only_among_those_that_held_a_slice():
+    before = [{"id": "a", "slice": "slices/x.one"}, {"id": "b", "slice": "slices/x.two"}, {"id": "c"}]
+    before.append({"id": "e", "slice": "slices/y.one"})
+    after = [{"id": "a", "slice": "slices/y.one"}, {"id": "b"}, {"id": "c", "slice": "slices/y.one"}]
+    after += [{"id": "e", "slice": "slices/y.one"}, {"id": "f", "slice": "slices/y.one"}]
+    assert ledger_plans.resliced(before, after) == {"changed": ["a"], "cleared": ["b"]}
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        {"plans": [{"id": "a"}], "slices": [{"id": "a.x", "phase": "phases/p1", "anchor": "x"}]},
+        {"plans": [{"id": "b"}], "slices": [{"id": "b.x", "phase": "phases/p1", "anchor": "x"}]},
+        {"plans": [{"id": "a"}], "slices": [{"id": "b.x", "phase": "phases/p2", "anchor": "x"}]},
+    ],
+)
+def test_a_phase_keeps_its_slices_unless_it_holds_slices_of_an_earlier_plan(doc):
+    assert ledger_plans.moved(doc, {"id": "p1", "plan": "plans/a"}) == {}
+
+
+def test_settle_records_each_task_whose_slice_changed_or_cleared():
+    doc, ctx = (
+        {"tasks": [{"id": "a", "slice": "slices/x.1"}, {"id": "b", "slice": "slices/x.2"}, {"id": "c"}]},
+        Recorder(),
+    )
+    view = {"tasks": [{"id": "a", "slice": "slices/y.1"}, {"id": "b"}, {"id": "c"}], "slices": []}
+    ledger_plans.settle(doc, view, "planner", ctx)
+    assert (doc["tasks"], doc["slices"]) == (view["tasks"], [])
+    assert ctx.events == [("planner", "slice changed", "tasks/a", {}), ("planner", "slice cleared", "tasks/b", {})]
