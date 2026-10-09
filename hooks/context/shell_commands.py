@@ -85,8 +85,8 @@ def _expand(tokens: list[str], depth: int) -> list[list[str]]:
     return [tokens]
 
 
-def _heredoc_marker(line: str, quote: str | None) -> tuple[int, str | None]:
-    index, escaped = 0, -1
+def _heredoc_marker(line: str, quote: str | None) -> tuple[int | None, str | None]:
+    index, escaped = 0, 0
     while index < len(line):
         character = line[index]
         if character == "\\" and quote != "'":
@@ -104,7 +104,7 @@ def _heredoc_marker(line: str, quote: str | None) -> tuple[int, str | None]:
         elif quote is None and character in {"'", '"'}:
             quote = character
         index += 1
-    return -1, quote
+    return None, quote
 
 
 def _heredocs(command: str, depth: int) -> tuple[str, list[list[str]]]:
@@ -112,7 +112,7 @@ def _heredocs(command: str, depth: int) -> tuple[str, list[list[str]]]:
     lines = iter(command.splitlines(keepends=True))
     for line in lines:
         start, quote = _heredoc_marker(line, quote)
-        if start < 0:
+        if start is None:
             kept.append(line)
             continue
         if line[start] == "#":

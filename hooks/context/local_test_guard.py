@@ -87,24 +87,18 @@ def local_tests_allowed() -> bool:
 def _code_runs_tests(source: str, runners: re.Pattern, comment: str) -> bool:
     code = re.sub(
         f"(?s){_LITERAL}|{re.escape(comment)}[^\\n]*",
-        lambda match: match[0] if match["module"] else " ",
+        lambda match: match[0] if match["module"] else match["q"],
         source,
     )
     return bool(runners.search(source if _LAUNCH.search(source) else code))
 
 
-def _inline_test(option: str, value: str) -> bool:
-    if option == "-m":
-        return bool(_PYTHON_TEST.search(value))
-    return _code_runs_tests(value, _PYTHON_TEST, "#")
-
-
 def _python_test(args: list[str]) -> bool:
     for index, arg in enumerate(args):
         if arg in {"-m", "-c"}:
-            if index + 1 < len(args) and _inline_test(arg, args[index + 1]):
+            if index + 1 < len(args) and _code_runs_tests(args[index + 1], _PYTHON_TEST, "#"):
                 return True
-        elif arg.startswith(("-m", "-c")) and _inline_test(arg[:2], arg[2:]):
+        elif arg.startswith(("-m", "-c")) and _code_runs_tests(arg[2:], _PYTHON_TEST, "#"):
             return True
     if any(arg.startswith(("-m", "-c")) for arg in args):
         return False
