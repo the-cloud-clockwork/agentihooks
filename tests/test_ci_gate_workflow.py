@@ -57,13 +57,16 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
 
 
 def test_no_workflow_run_script_embeds_an_expression_semgrep_cannot_parse():
-    embedded = [
-        (path.name, name, step.get("name"))
-        for path in sorted((_ROOT / ".github/workflows").glob("*.yml"))
-        for name, job in yaml.safe_load(path.read_text())["jobs"].items()
-        for step in job.get("steps", [])
-        if "${{" in step.get("run", "")
-    ]
+    paths = sorted((_ROOT / ".github").glob("workflows/*.yml")) + sorted(
+        (_ROOT / ".github").glob("actions/**/action.yml")
+    )
+    embedded = []
+    for path in paths:
+        document = yaml.safe_load(path.read_text())
+        steps = [step for job in document.get("jobs", {}).values() for step in job.get("steps", [])]
+        steps += document.get("runs", {}).get("steps", [])
+        embedded += [(path.name, step.get("name")) for step in steps if "${{" in step.get("run", "")]
+    assert len(paths) > 10
     assert embedded == []
 
 

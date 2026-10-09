@@ -29,8 +29,7 @@ jobs:
         run: python -m pip install semgrep==1.177.0
 
       # Actions are pinned to release tags by fleet policy, so the mutable tag rule only repeats it.
-      # The installer's taint rules pass the default 5 s on the runner, and a timed out baseline
-      # rule silently drops that rule's new findings, so strict fails on any timeout or partial parse.
+      # A rule that times out drops its new findings; the installer's taint rules passed the default 5 s.
       - name: Fail on findings new against the base
         env:
           BASE: ${{ inputs.base }}
