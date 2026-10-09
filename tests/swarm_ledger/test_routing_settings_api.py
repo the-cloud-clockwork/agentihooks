@@ -79,7 +79,7 @@ def test_a_read_answers_every_setting_with_its_revision(store):
 
 def test_the_operator_writes_weights_and_caps_and_null_clears_a_cap(store, monkeypatch):
     store.set("codex-api-max-sessions", 4, "operator", 1.0)
-    monkeypatch.setattr(routing.time, "time", lambda: 123.0)
+    monkeypatch.setattr(routing, "time", SimpleNamespace(time=lambda: 123.0))
     reply = routes.dispatch(request("PATCH", {"claude-api-weight": 25, "codex-api-max-sessions": None}), fake_server())
     assert reply["data"] == {"claude-api-weight": 25, "codex-api-weight": 0}
     assert store.all() == reply["data"]
