@@ -8,7 +8,7 @@ from pathlib import Path
 
 from hooks.classifier import decision_log
 from scripts.gates import log as gate_log
-from scripts.swarm import bottleneck, capacity, host_budget, metrics_outbox
+from scripts.swarm import capacity, host_budget, metrics_outbox
 from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import SPAWN_HOLD
 
@@ -26,6 +26,7 @@ HOST = metrics_outbox.Table(
         ("load_per_cpu", "Float64"),
         ("live_agents", "Int64"),
         ("held_spawns", "Int64"),
+        ("held_by", "String"),
         ("reason", "String"),
     ),
 )
@@ -221,6 +222,7 @@ def host_row(slug: str, now_ms: int, sample: host_budget.HostSample, quota: dict
         "load_per_cpu": sample.load1 / sample.cpus,
         "live_agents": sample.agents,
         "held_spawns": quota.get("held_spawns", 0),
+        "held_by": quota.get("held_by", ""),
         "reason": quota.get("reason", ""),
     }
 
@@ -323,7 +325,8 @@ def record_pass(
     quota = capacity.read(store, slug)
     hold = store.redis.get(store.key(slug, SPAWN_HOLD)) or ""
     live = [asdict(agent) for agent in store.agents(slug)]
-    quota["held_spawns"] = _held_spawns(store, slug, doc, quota, live, hold.startswith(bottleneck.HOST_HOLD))
+    quota["held_spawns"] = _held_spawns(store, slug, doc, quota, live, bool(hold))
+    quota["held_by"] = ("host" if hold else "quota") if quota["held_spawns"] else ""
     quota["reason"] = hold or quota.get("reason", "")
     reviews, classifiers = read_review_events(slug, box), read_classifier_calls(box)
     review_doc = {**doc, "_meta": {"events": [*doc.get("_meta", {}).get("events", []), *reviews.rows]}}

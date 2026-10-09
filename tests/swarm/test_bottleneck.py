@@ -10,8 +10,6 @@ pytestmark = pytest.mark.unit
 SLUG = "scratch"
 H = 3_600_000
 NOW = 10 * H
-HOST_REASON = "holding spawns: host load room 0, 3 spawned since it was granted: load is high"
-QUOTA_REASON = "accounts are limited; Claude has 0 free seats and Codex has 0 free seats"
 
 
 def rows(agent=(), delivery=(), ci=(), host=()):
@@ -31,6 +29,10 @@ def merge(task, at):
     return {"ledger": SLUG, "task": task, "kind": "merge", "ts_ms": int(at)}
 
 
+def opened(task, at):
+    return {"ledger": SLUG, "task": task, "kind": "pull_request_opened", "ts_ms": int(at)}
+
+
 def run(branch, created, ended, conclusion, queue_s=600.0):
     return {
         "ledger": SLUG,
@@ -42,12 +44,16 @@ def run(branch, created, ended, conclusion, queue_s=600.0):
     }
 
 
-def sample(at, held, reason):
-    return {"ledger": SLUG, "ts_ms": at, "held_spawns": held, "reason": reason}
+def sample(at, held, held_by):
+    return {"ledger": SLUG, "ts_ms": int(at), "held_spawns": held, "held_by": held_by}
 
 
-def every_five_minutes(start, end, held, reason):
-    return [sample(at, held, reason) for at in range(start, end, bottleneck.SAMPLE_GAP_MS)]
+def every_five_minutes(start, end, held, held_by):
+    return [sample(at, held, held_by) for at in range(start, end, bottleneck.SAMPLE_GAP_MS)]
+
+
+def seconds(engineering=0.0, ci=0.0, review=0.0, host=0.0, quota=0.0):
+    return {"engineering": engineering, "ci": ci, "review": review, "host": host, "quota": quota}
 
 
 TASK = {"id": "t1", "state": "done", "branch": "b1"}
@@ -58,8 +64,12 @@ def ci_heavy():
         agent=[claim("t1", 5 * H)],
         delivery=[merge("t1", 9.75 * H)],
         ci=[run("b1", 6.5 * H, 8 * H, "failure"), run("b1", 8.25 * H, 9.5 * H, "success")],
-        host=[sample(7 * H, 0, QUOTA_REASON)],
+        host=[sample(7 * H, 0, "")],
     )
+
+
+def open_task(task, state="pr"):
+    return [{"id": task, "state": state, "branch": f"b-{task}"}]
 
 
 def test_a_ci_heavy_window_names_ci_with_its_numbers():
@@ -67,96 +77,115 @@ def test_a_ci_heavy_window_names_ci_with_its_numbers():
     assert found == {
         "at": NOW,
         "window_hours": 4.0,
-        "seconds": {"engineering": 1800.0, "ci": 10800.0, "review": 900.0, "host": 0.0, "quota": 0.0},
+        "seconds": seconds(1800.0, 10800.0, 900.0),
         "total": 13500.0,
         "bottleneck": "ci",
     }
     assert bottleneck.line(found, NOW) == (
-        "bottleneck CI, push to green checks: 80 percent of 3.8 hours in the last 4 hours, measured 0 minutes ago;"
-        " engineering 13 percent, review and queue 7 percent, host held spawns 0 percent, quota held spawns 0 percent"
+        "bottleneck CI, push to green checks: 80 percent of 3.8 task hours in the last 4 hours, measured 0 minutes"
+        " ago; engineering 13 percent, review and queue 7 percent, host held spawns 0 percent, quota held spawns"
+        " 0 percent"
     )
 
 
 def test_a_host_held_window_names_host():
     found = bottleneck.report(
-        rows(
-            agent=[claim("t2", 9 * H)],
-            host=every_five_minutes(6 * H, NOW, 2, HOST_REASON),
-        ),
-        [{"id": "t2", "state": "claimed", "branch": "b2"}],
+        rows(agent=[claim("t2", 9 * H)], host=every_five_minutes(6 * H, NOW, 2, "host")),
+        open_task("t2", "claimed"),
         NOW,
     )
-    assert found["seconds"] == {"engineering": 3600.0, "ci": 0.0, "review": 0.0, "host": 28800.0, "quota": 0.0}
+    assert found["seconds"] == seconds(engineering=3600.0, host=28800.0)
     assert found["bottleneck"] == "host"
 
 
-def test_spawns_held_for_any_other_reason_count_as_quota():
-    found = bottleneck.report(rows(host=[sample(9 * H, 3, QUOTA_REASON)]), [], NOW)
-    assert found["seconds"]["quota"] == 900.0
+def test_spawns_held_by_quota_count_as_quota():
+    found = bottleneck.report(rows(host=[sample(9 * H, 3, "quota")]), [], NOW)
+    assert found["seconds"] == seconds(quota=900.0)
     assert found["bottleneck"] == "quota"
 
 
-def test_a_sample_covers_at_most_one_gap_and_stops_at_now():
-    found = bottleneck.report(
-        rows(host=[sample(7 * H, 1, HOST_REASON), sample(8 * H, 1, HOST_REASON), sample(NOW - 60_000, 1, HOST_REASON)]),
-        [],
-        NOW,
-    )
-    assert found["seconds"]["host"] == 660.0
+def test_a_sample_covers_at_most_one_gap_and_stops_at_now_in_any_row_order():
+    samples = [sample(NOW - 60_000, 1, "host"), sample(8 * H, 1, "host"), sample(7 * H, 1, "host")]
+    assert bottleneck.report(rows(host=samples), [], NOW)["seconds"] == seconds(host=660.0)
 
 
 def test_time_before_the_window_is_not_counted():
-    found = bottleneck.report(
-        rows(agent=[claim("t1", 2 * H)], delivery=[merge("t1", 7 * H)]),
-        [TASK],
-        NOW,
-    )
-    assert found["seconds"]["engineering"] == 3600.0
+    found = bottleneck.report(rows(agent=[claim("t1", 2 * H)], delivery=[merge("t1", 7 * H)]), [TASK], NOW)
+    assert found["seconds"] == seconds(engineering=3600.0)
+
+
+def test_a_task_wholly_before_the_window_adds_nothing():
+    found = bottleneck.report(rows(agent=[claim("t1", 2 * H)], delivery=[merge("t1", 3 * H)]), [TASK], NOW)
+    assert (found["total"], found["bottleneck"]) == (0.0, "")
 
 
 def test_an_open_task_before_its_first_run_finishes_counts_ci_from_its_pull_request():
-    opened = {"ledger": SLUG, "task": "t3", "kind": "pull_request_opened", "ts_ms": 8 * H}
+    found = bottleneck.report(rows(agent=[claim("t3", 7 * H)], delivery=[opened("t3", 8 * H)]), open_task("t3"), NOW)
+    assert found["seconds"] == seconds(3600.0, 7200.0)
+
+
+def test_the_first_claim_and_first_pull_request_since_it_bound_the_spans_in_any_row_order():
     found = bottleneck.report(
-        rows(agent=[claim("t3", 7 * H)], delivery=[opened]),
-        [{"id": "t3", "state": "pr", "branch": "b3"}],
+        rows(
+            agent=[claim("t3", 8 * H), claim("t3", 7 * H)],
+            delivery=[opened("t3", 9 * H), opened("t3", 6 * H), opened("t3", 8.5 * H)],
+        ),
+        open_task("t3"),
         NOW,
     )
-    assert found["seconds"] == {"engineering": 3600.0, "ci": 7200.0, "review": 0.0, "host": 0.0, "quota": 0.0}
+    assert found["seconds"] == seconds(5400.0, 5400.0)
 
 
 def test_a_green_run_then_a_red_run_keeps_ci_holding_until_the_next_green():
+    runs = [
+        run("b-t4", 8.5 * H, 9 * H, "success"),
+        run("b-t4", 7.75 * H, 8 * H, "failure"),
+        run("b-t4", 7 * H, 7.5 * H, "success"),
+    ]
+    found = bottleneck.report(rows(agent=[claim("t4", 6 * H)], ci=runs), open_task("t4"), NOW)
+    assert found["seconds"] == seconds(3600.0, 7200.0, 3600.0)
+
+
+def test_a_single_green_run_moves_the_task_to_review():
     found = bottleneck.report(
-        rows(
-            agent=[claim("t4", 6 * H)],
-            ci=[
-                run("b4", 7 * H, 7.5 * H, "success"),
-                run("b4", 7.75 * H, 8 * H, "failure"),
-                run("b4", 8.5 * H, 9 * H, "success"),
-            ],
-        ),
-        [{"id": "t4", "state": "pr", "branch": "b4"}],
+        rows(agent=[claim("t4", 6 * H)], ci=[run("b-t4", 7 * H, 8 * H, "success")]), open_task("t4"), NOW
+    )
+    assert found["seconds"] == seconds(3600.0, 3600.0, 7200.0)
+
+
+def test_a_cancelled_last_run_keeps_ci_holding_until_now():
+    found = bottleneck.report(
+        rows(agent=[claim("t4", 6 * H)], ci=[run("b-t4", 7 * H, 8 * H, "cancelled")]), open_task("t4"), NOW
+    )
+    assert found["seconds"] == seconds(3600.0, 10800.0)
+
+
+def test_a_run_created_at_the_claim_is_the_first_push():
+    found = bottleneck.report(
+        rows(agent=[claim("t1", 7 * H)], delivery=[merge("t1", 9 * H)], ci=[run("b1", 7 * H, 8 * H, "success")]),
+        [TASK],
         NOW,
     )
-    assert found["seconds"] == {"engineering": 3600.0, "ci": 7200.0, "review": 3600.0, "host": 0.0, "quota": 0.0}
+    assert found["seconds"] == seconds(0.0, 3600.0, 3600.0)
 
 
 def test_runs_before_the_claim_and_on_other_branches_are_ignored():
     found = bottleneck.report(
         rows(
             agent=[claim("t5", 8 * H)],
-            ci=[run("b5", 6 * H, 7 * H, "success"), run("other", 8.5 * H, 9 * H, "success")],
+            ci=[run("b-t5", 6 * H, 7 * H, "success"), run("other", 8.5 * H, 9 * H, "success")],
         ),
-        [{"id": "t5", "state": "claimed", "branch": "b5"}],
+        open_task("t5", "claimed"),
         NOW,
     )
-    assert found["seconds"]["engineering"] == 7200.0
+    assert found["seconds"] == seconds(engineering=7200.0)
     assert found["bottleneck"] == "engineering"
 
 
 def test_a_closed_task_without_a_merge_ends_at_its_last_agent_row():
     retire = {"ledger": SLUG, "task": "t6", "kind": "retire", "ts_ms": 8 * H}
     found = bottleneck.report(rows(agent=[claim("t6", 7 * H), retire]), [{"id": "t6", "state": "done"}], NOW)
-    assert found["seconds"]["engineering"] == 3600.0
+    assert found["seconds"] == seconds(engineering=3600.0)
 
 
 def test_an_empty_window_names_nothing():
@@ -172,7 +201,7 @@ def test_an_unmeasured_swarm_says_so():
 
 def test_ties_resolve_in_delivery_order():
     found = bottleneck.report(
-        rows(agent=[claim("t7", 8 * H)], host=[sample(NOW - 300_000, 24, HOST_REASON)]),
+        rows(agent=[claim("t7", 8 * H)], host=[sample(NOW - 300_000, 24, "host")]),
         [{"id": "t7", "state": "claimed"}],
         NOW,
     )
@@ -243,8 +272,10 @@ def test_read_is_empty_before_any_record(store):
 
 def test_the_line_reports_the_age_of_the_measure():
     found = bottleneck.report(ci_heavy(), [TASK], NOW)
-    assert bottleneck.line(found, NOW + 25 * 60_000).startswith(
-        "bottleneck CI, push to green checks: 80 percent of 3.8 hours in the last 4 hours, measured 25 minutes ago;"
+    assert bottleneck.line({**found, "seconds": seconds(1800.0, 10800.0, 0.0, 450.0, 450.0)}, NOW + 25 * 60_000) == (
+        "bottleneck CI, push to green checks: 80 percent of 3.8 task hours in the last 4 hours, measured 25 minutes"
+        " ago; engineering 13 percent, review and queue 0 percent, host held spawns 3 percent, quota held spawns"
+        " 3 percent"
     )
 
 

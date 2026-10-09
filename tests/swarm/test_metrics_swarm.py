@@ -308,13 +308,18 @@ def test_a_host_hold_counts_every_waiting_ready_task(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("hold", "reason", "held"),
+    ("hold", "ready_ids", "expected"),
     [
-        ("holding spawns: host load room 0, 2 spawned since it was granted: busy", None, 2),
-        (None, "accounts have quota", 1),
+        (
+            "holding the master spawn: host load room 0, 2 spawned since it was granted: busy",
+            ["a", "b", "c"],
+            ("holding the master spawn: host load room 0, 2 spawned since it was granted: busy", 2, "host"),
+        ),
+        (None, ["a", "b", "c"], ("accounts have quota", 1, "quota")),
+        (None, ["a"], ("accounts have quota", 0, "")),
     ],
 )
-def test_the_host_sample_names_a_live_host_hold_or_the_quota_reason(tmp_path, monkeypatch, hold, reason, held):
+def test_the_host_sample_names_who_holds_its_spawns(tmp_path, monkeypatch, hold, ready_ids, expected):
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -324,7 +329,7 @@ def test_the_host_sample_names_a_live_host_hold_or_the_quota_reason(tmp_path, mo
     if hold:
         store.redis.set(store.key(SLUG, "spawn-hold"), hold)
     ready = {lane: [] for lane in metrics_swarm.capacity.LANES}
-    ready["eng"] = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+    ready["eng"] = [{"id": task} for task in ready_ids]
     monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
     monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
@@ -335,7 +340,7 @@ def test_the_host_sample_names_a_live_host_hold_or_the_quota_reason(tmp_path, mo
     try:
         metrics_swarm.record_pass(box, SLUG, NOW, store, doc(), [], {})
         [row] = box.recent("host_samples", NOW)
-        assert (row["reason"], row["held_spawns"]) == (hold or reason, held)
+        assert (row["reason"], row["held_spawns"], row["held_by"]) == expected
     finally:
         box.close()
 
