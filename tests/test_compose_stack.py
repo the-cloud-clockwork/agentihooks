@@ -9,8 +9,14 @@ SERVICES = COMPOSE["services"]
 
 def test_controller_service_runs_the_controller_loop():
     controller = SERVICES["controller"]
-    assert controller["command"] == ["agentihooks", "controller", "run"]
+    assert controller["command"][-1].endswith("exec agentihooks controller run")
     assert controller["depends_on"]["redis"]["condition"] == "service_healthy"
+
+
+def test_controller_issues_its_ledger_service_credential_before_it_runs():
+    start = SERVICES["controller"]["command"][-1]
+    assert start.index("agentihooks hive controller") < start.index("export AGENTIHOOKS_CONTROLLER_CREDENTIAL")
+    assert "swarm:8765" in SERVICES["swarm"]["environment"]["SWARM_ALLOWED_HOSTS"]
 
 
 def test_redis_starts_from_an_acl_file_with_optional_tls():

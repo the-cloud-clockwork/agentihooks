@@ -26,13 +26,15 @@ if ! docker compose up --build --wait --wait-timeout 180; then
 fi
 
 slug="compose-proof"
-docker compose exec -T -e SLUG="$slug" controller python - <<'PY'
+docker compose exec -T -e SLUG="$slug" swarm python - <<'PY'
 import os
 
 from scripts.inbox.seats import SeatRegistry
 from scripts.swarm.store import SwarmConfig, connect
+from scripts.swarm_ledger.new_ledger import create
 
 store, slug = connect(), os.environ["SLUG"]
+create(slug, {"title": "Compose proof", "phases": [{"title": "Prove the compose stack"}]}, "swarm")
 store.create(SwarmConfig(slug, "/data", 1, 1))
 seats = SeatRegistry(store.redis)
 seats.occupy(f"master@{slug}", "host-agent", 0)

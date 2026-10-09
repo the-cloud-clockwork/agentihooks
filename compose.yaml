@@ -16,6 +16,7 @@ services:
       LEDGER_PORT: "8765"
       LEDGER_DIR: /data
       SWARM_RELOAD: "0"
+      SWARM_ALLOWED_HOSTS: swarm:8765
       SWARM_PUBLIC_URL: ${SWARM_PUBLIC_URL:-http://127.0.0.1:${SWARM_PORT:-8765}}
     volumes:
       - swarm-data:/data
@@ -26,7 +27,14 @@ services:
     restart: unless-stopped
   controller:
     image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
-    command: [agentihooks, controller, run]
+    command:
+      - sh
+      - -c
+      - >-
+        agentihooks hive controller >/dev/null
+        && . "$${AGENTIHOOKS_HOME:-$$HOME/.agentihooks}/controller/credential.env"
+        && export AGENTIHOOKS_CONTROLLER_CREDENTIAL
+        && exec agentihooks controller run
     environment:
       <<: *swarm-env
       LEDGER_URL: http://swarm:8765
