@@ -5,15 +5,10 @@ from pathlib import Path
 from hooks.common import log
 from hooks.hook_manager import BlockAction
 
-_PREFIXES = frozenset(
-    {"if", "then", "else", "elif", "do", "while", "until", "time", "exec", "nohup", "env", "command", "!", "{"}
-)
 _PASS_ARGS = frozenset({"--delete", "-d", "--dry-run", "-n"})
 
 
 def _push(tokens: list[str]) -> tuple[list[str], list[str]] | None:
-    while tokens and (tokens[0] in _PREFIXES or "=" in tokens[0] or tokens[0] == "timeout"):
-        tokens = tokens[2:] if tokens[0] == "timeout" else tokens[1:]
     if not tokens or Path(tokens[0]).name != "git":
         return None
     dirs, rest = [], tokens[1:]
@@ -41,14 +36,16 @@ def _toplevel(cwd: Path) -> Path | None:
 
 
 def _unpassed(payload: dict) -> Path | None:
-    from hooks.context._strip import strip_non_command_content
-    from hooks.context.branch_guard import _command_lines, _resolve_cwd
+    from hooks.context.branch_guard import _resolve_cwd
+    from hooks.context.shell_commands import commands
     from scripts.ci_prepush import passed
 
-    command = payload["tool_input"]["command"]
+    command = payload["tool_input"].get("command") or payload["tool_input"].get("cmd")
+    if not command:
+        return None
     cwd = Path(_resolve_cwd(command, payload.get("cwd")))
-    for line in _command_lines(strip_non_command_content(command)).splitlines():
-        push = _push(line.split())
+    for tokens in commands(command):
+        push = _push(tokens)
         if push is None or _exempt(push[1]):
             continue
         root = _toplevel(cwd.joinpath(*(os.path.expanduser(os.path.expandvars(path)) for path in push[0])))

@@ -95,7 +95,8 @@ def test_every_group_reached_after_the_deadline_is_reported_over_budget(tmp_path
 def test_a_failed_group_names_its_reason_for_every_file_and_later_groups_still_run(tmp_path, monkeypatch):
     calls = []
 
-    def mutate(root, work, selected, deadline):
+    def mutate(root, work, selected, deadline, shard):
+        assert shard == (0, 1)
         calls.append(list(selected))
         if "hooks/sample.py" in selected:
             return {}, "mutmut failed with exit 1"
@@ -276,7 +277,7 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
     monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", prepare)
     monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
     monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: 10)
-    rows, error = mutate_files(tmp_path, tmp_path / "work", selected, 20)
+    rows, error = mutate_files(tmp_path, tmp_path / "work", selected, 20, (1, 4))
     expected = reason
     if reason.startswith("mutmut failed"):
         expected += f"; see {tmp_path / 'work/run.log'}"
@@ -289,6 +290,8 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
         "-m",
         "scripts.ci_mutation.selection",
         str(tmp_path / "work/changed-lines.json"),
+        "1",
+        "4",
     ]
     assert json.loads((tmp_path / "work/changed-lines.json").read_text()) == {
         "hooks/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]},
@@ -300,6 +303,8 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
             "-m",
             "scripts.ci_mutation.report",
             str(tmp_path / "work/results.json"),
+            "1",
+            "4",
             "hooks/sample.py",
             "scripts/other.py",
         ]
@@ -317,9 +322,16 @@ def test_gate_persists_full_mutation_evidence_and_respects_reader_clearance(
     (tmp_path / "tests").mkdir()
     (tmp_path / "hooks/sample.py").write_text("def f():\n    return 1\n")
     (tmp_path / "tests/test_sample.py").write_text("pass\n")
-    row = {"name": "hooks.sample.x_f__mutmut_1", "status": "survived", "lines": [2], "fingerprint": "abc"}
+    row = {
+        "name": "hooks.sample.x_f__mutmut_1",
+        "status": "survived",
+        "lines": [2],
+        "fingerprint": "abc",
+        "diff": "-    return 1\n+    return 2",
+    }
 
-    def mutate(root, work, selected, deadline):
+    def mutate(root, work, selected, deadline, shard):
+        assert shard == (2, 3)
         assert root == tmp_path
         assert work.parent == tmp_path / "output"
         assert work.name.startswith("0-")
@@ -347,9 +359,15 @@ def test_gate_persists_full_mutation_evidence_and_respects_reader_clearance(
                 }
             )
         )
-    report = run_gate(tmp_path, {"hooks/sample.py": {changed}}, tmp_path / "output", 60)
+    report = run_gate(tmp_path, {"hooks/sample.py": {changed}}, tmp_path / "output", 60, (2, 3))
     assert report["failed"] is fails
     assert report["files"][0]["counts"] == {"survived": 1}
     assert report["not_mutated"] == []
     assert json.loads((tmp_path / "output/report.json").read_text()) == report
-    assert json.loads(capsys.readouterr().out) == report["files"][0]
+    first, _, survivors = capsys.readouterr().out.partition("\n")
+    assert json.loads(first) == report["files"][0]
+    if fails:
+        assert survivors.startswith("survived on lines 2: hooks/sample.py:hooks.sample.x_f__mutmut_1:abc\n")
+        assert survivors.endswith("\n-    return 1\n+    return 2\n")
+    else:
+        assert survivors == ""
