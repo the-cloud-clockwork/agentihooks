@@ -8,6 +8,7 @@ LANES = {"eng", "ci"}
 MARGIN = 10
 PLAN_ID = re.compile(r"[0-9a-f]{64}\.md")
 FOLDER = re.compile(r"\.media\b(?!/[0-9a-f]{64}\.)")
+ADDRESS = re.compile(r"(?://[^/\s]+|\$\{?\w+\}?)/artifacts/")
 SED_RANGE = re.compile(r"\s*sed\s+-n\s+(['\"]?)([1-9][0-9]*),([1-9][0-9]*)p\1\s+(\S+)\s*")
 FIELDS = {"Read": ("file_path",), "Grep": ("path", "glob"), "Bash": ("command",), "WebFetch": ("url",)}
 COMMAND = "agentihooks plan read"
@@ -98,7 +99,7 @@ def _ledger_dir(env) -> Path:
 
 
 def _names_folder(text: str, root: Path) -> bool:
-    if FOLDER.search(text) or ("/artifacts/" in text and "$" in text):
+    if FOLDER.search(text) or (ADDRESS.search(text) and "$" in text):
         return True
     for token in text.split():
         path = Path(os.path.expandvars(token)).expanduser()

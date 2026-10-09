@@ -202,6 +202,20 @@ def test_other_ledger_plan_and_split_artifact_address_refused(ledger):
     assert check(bash(f"curl -s http://127.0.0.1:8765/artifacts/{SLUG}/${{A}}${{B}}.md"), env(ledger))
 
 
+def test_github_artifact_download_allowed_and_ledger_address_by_variable_refused(ledger):
+    repo = "repos/the-cloud-clockwork/agentihooks"
+    assert check(bash(f"gh api {repo}/actions/artifacts/$ID/zip > mutation.zip"), env(ledger)) is None
+    assert (
+        check(
+            bash(f'curl -sL -H "Authorization: Bearer $T" https://api.github.com/{repo}/actions/artifacts/$ID/zip'),
+            env(ledger),
+        )
+        is None
+    )
+    assert check(bash(f"curl -s $LEDGER/artifacts/{SLUG}/${{A}}.md"), env(ledger))
+    assert check(bash(f"curl -s ${{LEDGER}}/artifacts/{SLUG}/$A"), env(ledger))
+
+
 def test_quoted_sed_path_in_range_allowed(ledger):
     assert check(bash(f"sed -n '35,65p' \"{stored(ledger)}\""), env(ledger)) is None
 
