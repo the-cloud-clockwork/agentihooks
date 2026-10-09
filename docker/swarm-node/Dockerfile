@@ -32,6 +32,7 @@ RUN python /opt/swarm-node/worker_image.py manifest --architecture "$TARGETARCH"
     && chmod a+x /opt/swarm-node/entrypoint.sh \
     && groupadd --gid 10001 worker \
     && useradd --uid 10001 --gid worker --create-home worker \
+    && chown worker:worker /home/worker \
     && rm -r /build
 USER 10001:10001
 WORKDIR /home/worker

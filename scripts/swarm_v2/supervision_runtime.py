@@ -118,7 +118,7 @@ class Supervisor:
                 return "termination" if self.stop else f"{role}_startup_failure"
         agent = native_command(self.launch.agent, self.launch.attempt, self.environment)
         command = [sys.executable, "-m", "scripts.swarm_v2.supervision_agent", *agent]
-        tab = self.herdr(["tab", "create", "--cwd", str(self.launch.attempt), "--no-focus"])
+        tab = self.herdr(["workspace", "create", "--cwd", str(self.launch.attempt), "--no-focus"])
         pane = tab["result"]["root_pane"]["pane_id"]
         self.herdr(["pane", "run", pane, shlex.join(command)])
         if not self.ready("agent", deadline):

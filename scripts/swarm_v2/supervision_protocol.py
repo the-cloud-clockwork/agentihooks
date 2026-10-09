@@ -18,12 +18,19 @@ def write(path: Path, document: dict) -> None:
         os.close(descriptor)
 
 
-def read(path: Path) -> dict:
+def decode(raw: bytes) -> dict:
     try:
-        value = json.loads(path.read_text())
-    except (OSError, ValueError):
+        value = json.loads(raw)
+    except ValueError:
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def read(path: Path) -> dict:
+    try:
+        return decode(path.read_bytes())
+    except OSError:
+        return {}
 
 
 def context() -> tuple[Path, dict]:
@@ -57,7 +64,7 @@ def checkpoint(attempt: Path, acknowledgement: dict, scope: dict) -> str | None:
         return None
     if hashlib.sha256(raw).hexdigest() != acknowledgement.get("sha256"):
         return None
-    manifest = read(path)
+    manifest = decode(raw)
     if not matches(manifest, scope) or manifest.get("status") != "complete":
         return None
     identifier = manifest.get("checkpoint_id")

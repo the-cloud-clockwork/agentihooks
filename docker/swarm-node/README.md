@@ -86,7 +86,12 @@ Build its Dockerfile from an immutable worker image and run
 prior qualified image, tested commit and an output directory. It proves two
 independent detachments, supervisor SIGKILL containment, bounded SIGTERM with
 late or missing acknowledgement, forced descendants and selecting the prior
-image for a new attempt. Production rollout remains with antoncore GitOps.
+image for a new attempt. The retained prior worker image has no supervisor;
+the first implementation rehearses its headless herdr compatibility path,
+launching a distinct bootstrapped attempt while checking the current attempt's
+process identity and homes and existing checkpoint files remain unchanged.
+Historical supervisor image rollback must be requalified when such an image
+exists. Production rollout remains with antoncore GitOps.
 
 After committing inputs, `bash docker/swarm-node/smoke.sh OUTPUT_DIRECTORY`
 builds an archived clean context, starts two independent containers with network

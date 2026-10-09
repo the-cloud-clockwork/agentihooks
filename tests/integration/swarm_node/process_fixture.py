@@ -24,12 +24,17 @@ def herdr(args):
                 if command[:2] == ["pane", "run"]:
                     subprocess.Popen(["bash", "-c", command[3]], stdin=subprocess.DEVNULL)
                 result = {"result": {"root_pane": {"pane_id": "fixture-pane"}}}
+                if command[:2] == ["tab", "create"]:
+                    result = {"error": "no workspace"}
                 connection.sendall(json.dumps(result).encode())
     else:
         with socket.socket(socket.AF_UNIX) as client:
             client.connect(path)
             client.sendall(json.dumps(args).encode())
-            print(client.recv(65536).decode())
+            result = json.loads(client.recv(65536))
+            print(json.dumps(result))
+            if "error" in result:
+                raise SystemExit(1)
 
 
 def process(role, mode):

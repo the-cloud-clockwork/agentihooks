@@ -275,3 +275,27 @@ def test_checkpoint_requires_matching_durable_manifest(tmp_path, fault):
 def test_launch_refusal_never_prints_user_input(capsys):
     assert main(["fixture"]) == 64
     assert "requires attempt directory" in capsys.readouterr().err
+
+
+def test_checkpoint_uses_the_exact_acknowledged_bytes(tmp_path, monkeypatch):
+    scope = {"authority": {"execution_id": "fixture"}, "incarnation": "current"}
+    path = tmp_path / "checkpoints/current/manifest.json"
+    path.parent.mkdir(parents=True)
+    write(path, {**scope, "status": "complete", "checkpoint_id": "acknowledged"})
+    raw = path.read_bytes()
+    receipt = {
+        **scope,
+        "status": "complete",
+        "manifest": "checkpoints/current/manifest.json",
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+    original = Path.read_bytes
+
+    def replace_after_read(file):
+        result = original(file)
+        if file == path:
+            write(path, {**scope, "status": "complete", "checkpoint_id": "unacknowledged"})
+        return result
+
+    monkeypatch.setattr(Path, "read_bytes", replace_after_read)
+    assert checkpoint(tmp_path, receipt, scope) == "acknowledged"

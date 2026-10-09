@@ -12,6 +12,7 @@ def main():
     mode = sys.argv[1]
     identifier = "exe-" + uuid.uuid4().hex
     base = Path("/home/worker/attempts")
+    base.mkdir(mode=0o700)
     request = Request(
         attempt=identifier,
         profiles={"codex": "fixture-codex"},
