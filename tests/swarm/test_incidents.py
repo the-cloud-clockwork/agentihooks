@@ -185,3 +185,36 @@ def test_concurrent_deliveries_send_one_push(store, monkeypatch):
         delivery.result(timeout=5)
     incidents.deliver(store.redis, "ledger", "outage", "recovered")
     assert sent.call_count == 1
+
+
+@pytest.mark.parametrize("bad_ticks", [1, 3])
+def test_watchdog_failures_and_fast_probes_form_one_incident_per_tick(store, monkeypatch, tmp_path, bad_ticks):
+    from scripts.swarm import cli, ledger_host, ledger_watchdog, push
+    from tests.swarm.test_delivery import FakeHerdr
+    from tests.swarm.test_ledger_watchdog import PID, Host, current, plant
+    from tests.swarm.test_tick import FakeRuntime
+
+    sent = Mock(return_value=True)
+    monkeypatch.setattr(push, "send", sent)
+    monkeypatch.setattr(ledger_host, "facts", lambda: {})
+    host = Host(tmp_path)
+    plant(host.proc, host.argv)
+    (host.folder / ".server.pid").write_text(str(PID))
+
+    def refused(pid, sig):
+        raise PermissionError("restart refused")
+
+    host.kill = refused
+    monkeypatch.setattr(ledger_watchdog, "default_host", lambda: host)
+    ledger, runtime = ProbedLedger(Clock()), FakeRuntime()
+    for _ in range(bad_ticks):
+        cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    expected = 0 if bad_ticks == 1 else 1
+    assert sent.call_count == expected
+    assert len(master_mail(store)) == expected
+    current(host, tmp_path)
+    cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    assert sent.call_count == expected
+    cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    assert sent.call_count == expected * 2
+    assert len(master_mail(store)) == expected * 2
