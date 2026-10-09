@@ -191,6 +191,8 @@ def test_memory_filters_secret_forms_with_scanning_disabled(tmp_path, text):
             "metadata": {"redis://:" + "synthetic" + "-credential@localhost:6379": "failed"},
         },
         {"error": "Error: unavailable", "metadata": {"note": "first line\nPASSWORD=" + "x"}},
+        {"error": "Error: unavailable", "metadata": {"redis://:" + "synthetic" + "-credential@localhost:6379": None}},
+        {"error": "Error: unavailable", "metadata": {"redis://:" + "synthetic" + "-credential@localhost:6379": {}}},
         {"error": "Error: unavailable", "metadata": {"PASSWORD": "x"}},
         {"error": "Error: unavailable", "metadata": ("PASSWORD=" + "x",)},
     ],
