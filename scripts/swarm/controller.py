@@ -130,7 +130,7 @@ def main(argv: list[str]) -> int:
                     print(f"{slug}: {action}", flush=True)
             if args.once:
                 return 0
-            time.sleep(lease.TICK_MS / 1000)
+            time.sleep(lease.tick_ms() / 1000)
     except SwarmError as exc:
         print(f"controller: {exc}", file=sys.stderr)
         return 1

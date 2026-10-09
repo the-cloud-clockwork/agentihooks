@@ -70,7 +70,7 @@ def test_renew_retries_a_conflicting_transaction(store, clock, monkeypatch):
         def commit():
             if conflicts:
                 conflicts.pop()
-                store.redis.pexpire(store.key("sw", "control-owner"), lease.TTL_MS)
+                store.redis.pexpire(store.key("sw", "control-owner"), lease.ttl_ms())
             return execute()
 
         pipe.execute = commit
@@ -102,14 +102,14 @@ def test_a_tick_slower_than_the_lease_keeps_writing(store, clock):
     for step in range(5):
         clock[0] += 120000
         assert ledger.update_task("sw", "t", {"step": step}) == "accepted"
-    assert clock[0] - 1000 > lease.TTL_MS
+    assert clock[0] - 1000 > lease.ttl_ms()
     assert runtime.has_capacity(store.config("sw")) is True
     clock[0] += 120000
     assert runtime.retire("one", homes=["home"]) == ("one", ["home"])
     clock[0] += 120000
     assert runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"}) == "placed"
     assert len(writes) == 5
-    assert lease.current(store, "sw") == lease.Lease("home", 1, clock[0] + lease.TTL_MS)
+    assert lease.current(store, "sw") == lease.Lease("home", 1, clock[0] + lease.ttl_ms())
 
 
 def test_a_tick_whose_lease_was_stolen_stops(store, clock):
@@ -121,7 +121,7 @@ def test_a_tick_whose_lease_was_stolen_stops(store, clock):
         store, "sw", held, SimpleNamespace(spawn=lambda *args: spawned.append(args), retire=spawned.append), True
     )
     ledger.update_task("sw", "t", {"step": 0})
-    clock[0] += lease.TTL_MS
+    clock[0] += lease.ttl_ms()
     stolen = lease.acquire(store, "sw", "other")
     for write in (
         lambda: ledger.update_task("sw", "t", {"step": 1}),
@@ -148,7 +148,7 @@ def test_run_tick_slower_than_the_lease_finishes(env, clock, monkeypatch):  # no
     monkeypatch.setattr(cli.phase_planning, "planning_pass", slow)
     monkeypatch.setattr(cli.wake, "wake_pass", slow)
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert clock[0] - started > lease.TTL_MS
+    assert clock[0] - started > lease.ttl_ms()
     assert lease.current(store, "sw").epoch == 1
     assert store.redis.get(store.key("sw", "last-tick"))
 
@@ -233,7 +233,7 @@ def test_run_tick_stops_between_steps_when_another_controller_took_the_lease(env
     later = []
 
     def stolen(*args):
-        clock[0] += lease.TTL_MS
+        clock[0] += lease.ttl_ms()
         lease.acquire(store, "sw", "other")
         return []
 
@@ -246,3 +246,40 @@ def test_run_tick_stops_between_steps_when_another_controller_took_the_lease(env
     assert lease.current(store, "sw").owner == "other"
     assert not store.redis.exists(store.key("sw", "tick-lock"))
     assert timing.BEFORE_STEP.get() is None
+
+
+def test_without_a_tick_setting_the_lease_lives_three_minute_long_ticks(store, clock, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
+    assert (lease.tick_ms(), lease.ttl_ms()) == (60000, 180000)
+    held = lease.acquire(store, "sw", "home")
+    assert held == lease.Lease("home", 1, 181000)
+    assert 179000 < store.redis.pttl(store.key("sw", "control-owner")) <= 180000
+
+
+def test_a_shorter_tick_shortens_the_lease_life_to_three_of_its_ticks(store, clock, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "2.5")
+    assert (lease.tick_ms(), lease.ttl_ms()) == (2500, 7500)
+    held = lease.acquire(store, "sw", "home")
+    assert held == lease.Lease("home", 1, 8500)
+    assert 7000 < store.redis.pttl(store.key("sw", "control-owner")) <= 7500
+    clock[0] = 5000
+    assert lease.renew(store, "sw", held) == lease.Lease("home", 1, 12500)
+    assert 7000 < store.redis.pttl(store.key("sw", "control-owner")) <= 7500
+
+
+def test_the_controller_sleeps_one_configured_tick_between_passes(store, monkeypatch):
+    import scripts.operator_env
+
+    slept = []
+
+    def sleep(seconds):
+        slept.append(seconds)
+        raise SwarmError("stopped after one pass")
+
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "4")
+    monkeypatch.setattr(scripts.operator_env, "fill", lambda environ: [])
+    monkeypatch.setattr(controller, "connect", lambda: store)
+    monkeypatch.setattr(controller, "run_once", lambda saved: {})
+    monkeypatch.setattr(controller.time, "sleep", sleep)
+    assert controller.main(["run"]) == 1
+    assert slept == [4.0]
