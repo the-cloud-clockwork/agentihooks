@@ -22,6 +22,8 @@ SETTLED = "a later stop passed with the work committed, on origin and recorded"
 PUSHED = "pushed"
 GITHUB_RE = re.compile(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
 GIT_TIMEOUT_S = 60
+# The Stop condition is killed at CONDITIONS_TIMEOUT_SEC (10 s): a gate still running then lets the stop through unpushed.
+GATE_TIMEOUT_S = 8
 PREPUSH = Path("scripts") / "ci_prepush" / "__init__.py"
 GATE_FAILED = (
     "The pre push gate failed in {path}, so the stop hook did not push it. "
@@ -67,7 +69,7 @@ def trees(root, name):
     return [tree for tree in found if tree is not None]
 
 
-def gated(tree):
+def gate_passes(tree):
     """Whether the repo's pre push gate passes on HEAD: a repo without one passes, a stamped HEAD is not rerun."""
     if not (tree.path / PREPUSH).is_file():
         return True
@@ -75,9 +77,17 @@ def gated(tree):
 
     if passed(tree.path):
         return True
-    return (
-        subprocess.run([sys.executable, "-m", "scripts.ci_prepush"], cwd=tree.path, capture_output=True).returncode == 0
-    )
+    try:
+        done = subprocess.run(
+            [sys.executable, "-m", "scripts.ci_prepush"],
+            cwd=tree.path,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=GATE_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    return done.returncode == 0
 
 
 def push(tree):
@@ -145,7 +155,7 @@ class PushStop:
             return Decision()
         store, owed, failed = self.connect(), False, []
         for tree in trees(self.root(), who.name):
-            if tree.unpushed and not gated(tree):
+            if tree.unpushed and not gate_passes(tree):
                 failed.append(GATE_FAILED.format(path=tree.path))
             elif tree.unpushed and push(tree):
                 self.record(store, ledger, who, tree)

@@ -1,4 +1,5 @@
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -523,3 +524,41 @@ def test_the_failure_text_is_exact():
         "The pre push gate failed in /w, so the stop hook did not push it. "
         "Run python -m scripts.ci_prepush there, fix what fails and commit."
     )
+
+
+def test_a_pre_push_gate_past_its_timeout_keeps_the_branch_off_origin(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    install_gate(rig, 0)
+    calls, run = [], subprocess.run
+
+    def spy(argv, **kwargs):
+        if argv[1:] == ["-m", "scripts.ci_prepush"]:
+            calls.append((argv[0], kwargs))
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return run(argv, **kwargs)
+
+    monkeypatch.setattr(push_stop.subprocess, "run", spy)
+    decision = rig.stop()
+    assert calls == [
+        (sys.executable, {"cwd": rig.tree, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "timeout": 8})
+    ]
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_FAILED.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+
+
+def test_a_pre_push_gate_killed_by_a_signal_keeps_the_branch_off_origin(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    install_gate(rig, "os.kill(os.getpid(), 9)")
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_FAILED.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+
+
+def test_a_pushed_head_with_dirty_files_never_runs_the_gate(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 1)
+    git(rig.tree, "push", "origin", f"HEAD:refs/heads/{BRANCH}")
+    (rig.tree / "readme").write_text("changed\n")
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, TEMPLATE)
+    assert not log.exists()
