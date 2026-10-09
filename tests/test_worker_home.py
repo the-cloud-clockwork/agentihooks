@@ -166,6 +166,10 @@ def test_profile_pointing_at_a_workstation_venv_fails_bootstrap(fixture):
         ("/usr/bin/env:/root/.ssh/id_rsa python -m hooks", "/root/.ssh/id_rsa"),
         ("../../../../home/operator/.venv/bin/python -m hooks", "../../../../home/operator/.venv/bin/python"),
         ("python -c 'import sys' https://brain.svc/x /etc/passwd", "/etc/passwd"),
+        (f"PYTHONPATH={sys.prefix}:file:///etc/shadow python -m hooks", "/etc/shadow"),
+        ("python -m hooks --config=file:///etc/x", "/etc/x"),
+        ("~/.venv/bin/python -m hooks", "~/.venv/bin/python"),
+        ("$HOME/.venv/bin/python -m hooks", "$HOME/.venv/bin/python"),
     ],
 )
 def test_hidden_or_relative_paths_in_a_hook_fail_bootstrap(fixture, command, offending):
@@ -190,6 +194,43 @@ def test_url_arguments_and_contained_relative_paths_are_admitted(fixture):
     assert record["profiles"] == {"claude": "fixture-workstation"}
 
 
+def test_a_workstation_path_in_a_settings_environment_value_fails_bootstrap(fixture):
+    templates, volume = fixture
+    settings = templates / "fixture-claude" / ".claude" / "settings.overrides.json"
+    document = json.loads(settings.read_text())
+    document["env"]["PATH"] = "/home/operator/dev/tcc-ecosystem/.venv/bin:/usr/bin"
+    settings.write_text(json.dumps(document))
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.bootstrap(request(templates, volume, profiles={"claude": "fixture-claude"}, accounts={}))
+    assert (
+        str(error.value)
+        == "claude environment value leaves the execution root: /home/operator/dev/tcc-ecosystem/.venv/bin"
+    )
+    assert list(volume.iterdir()) == []
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_a_workstation_path_in_an_mcp_environment_fails_bootstrap(fixture, target):
+    templates, volume = fixture
+    mcp = templates / f"fixture-{target}" / ".mcp.json"
+    document = json.loads(mcp.read_text())
+    document["mcpServers"][f"fixture-{target}-mcp"]["env"] = {"VIRTUAL_ENV": "/home/operator/.venv"}
+    mcp.write_text(json.dumps(document))
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.bootstrap(request(templates, volume, profiles={target: f"fixture-{target}"}, accounts={}))
+    assert str(error.value) == f"{target} MCP server leaves the execution root: /home/operator/.venv"
+    assert list(volume.iterdir()) == []
+
+
+def test_a_missing_execution_root_is_refused(fixture, tmp_path, capsys):
+    templates, _ = fixture
+    missing = tmp_path / "missing"
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.bootstrap(request(templates, missing))
+    assert str(error.value) == f"execution root not found: {missing}"
+    assert not missing.exists()
+
+
 def test_render_child_environment_points_into_the_attempt(monkeypatch, tmp_path):
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     monkeypatch.setenv("PYTHONPATH", "/opt/code")
@@ -198,14 +239,12 @@ def test_render_child_environment_points_into_the_attempt(monkeypatch, tmp_path)
     assert worker_home.child_environment(home, Path("/opt/venv/bin/python")) == {
         "PATH": "/usr/bin:/bin",
         "LANG": "C.UTF-8",
-        "PYTHONPATH": "/opt/code",
+        "PYTHONPATH": str(Path(worker_home.__file__).resolve().parents[2]),
         "HOME": str(home),
         "AGENTIHOOKS_HOME": str(home / ".agentihooks"),
         "AGENTIHOOKS_PYTHON": "/opt/venv/bin/python",
         "AGENTIHOOKS_MCP_TRANSPORT": "stdio",
     }
-    monkeypatch.delenv("PYTHONPATH")
-    assert "PYTHONPATH" not in worker_home.child_environment(home, Path("/opt/venv/bin/python"))
 
 
 def test_bootstrap_holds_an_exclusive_lock_on_the_volume(fixture, monkeypatch):
@@ -273,7 +312,7 @@ def test_failed_render_removes_the_unstarted_attempt(fixture, monkeypatch):
     assert list(volume.iterdir()) == []
 
 
-def Mount(flags: int) -> SimpleNamespace:
+def mount(flags: int) -> SimpleNamespace:
     return SimpleNamespace(f_flag=flags)
 
 
@@ -286,7 +325,7 @@ def test_a_noexec_volume_refuses_codex_whose_hook_wrapper_must_execute(fixture, 
 
     def statvfs(path):
         seen.append(path)
-        return Mount(os.ST_NOEXEC | os.ST_NOSUID)
+        return mount(os.ST_NOEXEC | os.ST_NOSUID)
 
     monkeypatch.setattr(worker_home.os, "statvfs", statvfs)
     if refused:
@@ -301,7 +340,7 @@ def test_a_noexec_volume_refuses_codex_whose_hook_wrapper_must_execute(fixture, 
 
 def test_an_exec_volume_with_other_flags_admits_codex(fixture, monkeypatch):
     templates, volume = fixture
-    monkeypatch.setattr(worker_home.os, "statvfs", lambda path: Mount(os.ST_NOSUID | os.ST_NODEV))
+    monkeypatch.setattr(worker_home.os, "statvfs", lambda path: mount(os.ST_NOSUID | os.ST_NODEV))
     record = worker_home.bootstrap(request(templates, volume, profiles={"codex": "fixture-codex"}, accounts={}))
     assert record["homes"] == {"codex": "homes/codex"}
 

@@ -24,24 +24,24 @@ def snapshot(root: Path) -> dict:
 def configuration(attempt: Path) -> dict:
     homes = attempt / "homes"
     docs = {
-        "claude": json.loads((homes / "claude/.claude/settings.json").read_text()),
-        "claude_mcp": json.loads((homes / "claude/.claude.json").read_text())["mcpServers"],
-        "codex": tomllib.loads((homes / "codex/.codex/config.toml").read_text()),
-        "codex_hooks": json.loads((homes / "codex/.codex/hooks.json").read_text()),
+        "claude": json.loads((homes / "claude/.claude/settings.json").read_text(encoding="utf-8")),
+        "claude_mcp": json.loads((homes / "claude/.claude.json").read_text(encoding="utf-8"))["mcpServers"],
+        "codex": tomllib.loads((homes / "codex/.codex/config.toml").read_text(encoding="utf-8")),
+        "codex_hooks": json.loads((homes / "codex/.codex/hooks.json").read_text(encoding="utf-8")),
     }
     return json.loads(json.dumps(docs).replace(str(attempt), "<attempt>"))
 
 
 def sessions(home: Path) -> dict:
-    registered = json.loads((home / ".agentihooks" / "active-sessions.json").read_text())
+    registered = json.loads((home / ".agentihooks" / "active-sessions.json").read_text(encoding="utf-8"))
     return {session: entry["cwd"] for session, entry in registered.items()}
 
 
 def positive(attempt: Path) -> dict:
-    record = json.loads(Path("/tmp/record.json").read_text())
+    record = json.loads(Path("/tmp/record.json").read_text(encoding="utf-8"))
     docs = configuration(attempt)
     loaded = {target: sessions(attempt / "homes" / target) for target in SERVERS}
-    listed = {target: Path(f"/tmp/{target}-mcp.txt").read_text() for target in SERVERS}
+    listed = {target: Path(f"/tmp/{target}-mcp.txt").read_text(encoding="utf-8") for target in SERVERS}
     missing = {t: [s for s in names if s not in listed[t]] for t, names in SERVERS.items()}
     assert record["reused"] is False
     assert all(list(found.values()) == ["/home/worker/work"] for found in loaded.values()), loaded
@@ -55,15 +55,15 @@ def positive(attempt: Path) -> dict:
 
 
 def rejection(attempts: Path) -> dict:
-    before, after = (json.loads(Path(f"/tmp/{name}.json").read_text()) for name in ("before", "after"))
+    before, after = (json.loads(Path(f"/tmp/{name}.json").read_text(encoding="utf-8")) for name in ("before", "after"))
     result = {
         name: {
-            "exit": int(Path(f"/tmp/{name}.exit").read_text()),
-            "stderr": Path(f"/tmp/{name}.err").read_text().strip(),
+            "exit": int(Path(f"/tmp/{name}.exit").read_text(encoding="utf-8")),
+            "stderr": Path(f"/tmp/{name}.err").read_text(encoding="utf-8").strip(),
         }
         for name in ("workstation", "interpreter")
     }
-    seconds = {name: round(int(Path(f"/tmp/{name}.ns").read_text()) / 1e9, 3) for name in result}
+    seconds = {name: round(int(Path(f"/tmp/{name}.ns").read_text(encoding="utf-8")) / 1e9, 3) for name in result}
     assert result["workstation"] == {
         "exit": 1,
         "stderr": "ERROR: claude hook command leaves the execution root: /home/operator/dev/tcc-ecosystem/.venv/bin/python",
@@ -77,13 +77,15 @@ def rejection(attempts: Path) -> dict:
         "refusals": result,
         "protected_state_unchanged": before == after,
         "attempts": ["a0"],
-        "refused_bootstrap_seconds": seconds,
+        "worker_profile_materialization_seconds": {"outcome": "refused", **seconds},
     }
 
 
 def rollback(attempts: Path) -> dict:
-    v1, v2, restored = (json.loads(Path(f"/tmp/{n}.json").read_text()) for n in ("v1", "v2", "rollback"))
-    before = json.loads(Path("/tmp/before.json").read_text())
+    v1, v2, restored = (
+        json.loads(Path(f"/tmp/{n}.json").read_text(encoding="utf-8")) for n in ("v1", "v2", "rollback")
+    )
+    before = json.loads(Path("/tmp/before.json").read_text(encoding="utf-8"))
     after = {path: entry for path, entry in snapshot(attempts).items() if not path.startswith("a3")}
     assert v1["profile_digests"] != v2["profile_digests"]
     assert restored["profile_digests"] == v1["profile_digests"]
@@ -126,12 +128,12 @@ def crash(attempts: Path, attempt: str) -> None:
 
 def recovery(attempts: Path) -> dict:
     first, second, restarted = (
-        json.loads(Path(f"/tmp/{n}.json").read_text()) for n in ("first", "second", "restarted")
+        json.loads(Path(f"/tmp/{n}.json").read_text(encoding="utf-8")) for n in ("first", "second", "restarted")
     )
-    before, after = (json.loads(Path(f"/tmp/{n}.json").read_text()) for n in ("before", "after"))
+    before, after = (json.loads(Path(f"/tmp/{n}.json").read_text(encoding="utf-8")) for n in ("before", "after"))
     clean, recovered = configuration(attempts / "clean"), configuration(attempts / "a2")
     assert second == {**first, "reused": True} and before == after
-    assert int(Path("/tmp/crash.exit").read_text()) == 137
+    assert int(Path("/tmp/crash.exit").read_text(encoding="utf-8")) == 137
     assert restarted["reused"] is False and recovered == clean
     return {
         "restart_reused": True,
@@ -149,7 +151,10 @@ def recovery(attempts: Path) -> dict:
 
 
 def noexec(attempts: Path) -> dict:
-    refusal = {"exit": int(Path("/tmp/noexec.exit").read_text()), "stderr": Path("/tmp/noexec.err").read_text().strip()}
+    refusal = {
+        "exit": int(Path("/tmp/noexec.exit").read_text(encoding="utf-8")),
+        "stderr": Path("/tmp/noexec.err").read_text(encoding="utf-8").strip(),
+    }
     assert refusal == {
         "exit": 1,
         "stderr": "ERROR: execution root is mounted noexec, so the codex hook wrapper cannot run",

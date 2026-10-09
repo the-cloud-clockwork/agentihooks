@@ -7,7 +7,7 @@ from pathlib import Path
 def main() -> None:
     output, fixture, revision, fixtures = Path(sys.argv[1]), sys.argv[2], sys.argv[3], Path(sys.argv[4])
     names = ("positive", "positive-second", "rejection", "recovery", "rollback", "noexec")
-    cases = {name: json.loads((output / f"profile-{name}.json").read_text()) for name in names}
+    cases = {name: json.loads((output / f"profile-{name}.json").read_text(encoding="utf-8")) for name in names}
     positive, second = cases["positive"], cases["positive-second"]
     assert positive["configuration"] == second["configuration"]
     assert cases["rejection"]["protected_state_unchanged"] is True
@@ -43,14 +43,16 @@ def main() -> None:
         "c": cases["recovery"],
     }
     for case, values in details.items():
-        (evidence / f"{case}-result.json").write_text(json.dumps(shared | values, indent=2, sort_keys=True) + "\n")
+        (evidence / f"{case}-result.json").write_text(
+            json.dumps(shared | values, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
     summary = shared | {
         "cases": ["A", "B", "C"],
         "status": "passed",
         "rollback_rehearsal": cases["rollback"],
         "production_rollout": "not exercised",
     }
-    (evidence / "result.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    (evidence / "result.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print("SV2-IMG-02 passed: both CLIs load their hooks and MCP servers offline, refusals, recovery and rollback")
 
 

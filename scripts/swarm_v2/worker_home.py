@@ -87,6 +87,8 @@ def _check_endpoints(request: Request) -> None:
 def _validate(request: Request) -> None:
     if not NAME.fullmatch(request.attempt):
         raise BootstrapError(f"invalid attempt id: {request.attempt}")
+    if request.root.is_symlink() or not request.root.is_dir():
+        raise BootstrapError(f"execution root not found: {request.root}")
     _check_profiles(request)
     _check_accounts(request)
     _check_endpoints(request)
@@ -100,10 +102,7 @@ def _check_volume(request: Request) -> None:
 
 
 def _environment() -> dict[str, str]:
-    env = {"PATH": os.environ.get("PATH", os.defpath), "LANG": "C.UTF-8"}
-    if os.environ.get("PYTHONPATH"):
-        env["PYTHONPATH"] = os.environ["PYTHONPATH"]
-    return env
+    return {"PATH": os.environ.get("PATH", os.defpath), "LANG": "C.UTF-8"}
 
 
 def interpreter_prefix(interpreter: Path) -> Path:
@@ -166,6 +165,7 @@ def child_command(attempt: Path, target: str) -> list[str]:
 def child_environment(home: Path, interpreter: Path) -> dict[str, str]:
     return {
         **_environment(),
+        "PYTHONPATH": str(Path(__file__).resolve().parents[2]),
         "HOME": str(home),
         "AGENTIHOOKS_HOME": str(home / ".agentihooks"),
         "AGENTIHOOKS_PYTHON": str(interpreter),
@@ -228,6 +228,7 @@ def _claude_commands(home: Path) -> dict[str, list[str]]:
     servers = json.loads((home / ".claude.json").read_text(encoding="utf-8")).get("mcpServers", {})
     return {
         "hook command": [*hooks, (settings.get("statusLine") or {}).get("command", "")],
+        "environment value": [shlex.quote(str(value)) for value in settings.get("env", {}).values()],
         "MCP server": [_server_text(spec) for spec in servers.values()],
     }
 
@@ -245,7 +246,18 @@ def _codex_commands(home: Path) -> dict[str, list[str]]:
 
 
 def _server_text(spec: dict) -> str:
-    return shlex.join([spec.get("command", ""), *spec.get("args", []), spec.get("cwd", "")])
+    values = [str(value) for value in (spec.get("env") or {}).values()]
+    return shlex.join([spec.get("command", ""), *spec.get("args", []), spec.get("cwd", ""), *values])
+
+
+def _pieces(word: str) -> list[str]:
+    pieces = []
+    for part in [p for item in word.split("=") for p in re.split(r":(?!//)", item)]:
+        if "://" not in part:
+            pieces.append(part)
+        elif urlsplit(part).scheme == "file":
+            pieces.append(urlsplit(part).path)
+    return pieces
 
 
 def _paths(text: str) -> list[str]:
@@ -253,14 +265,13 @@ def _paths(text: str) -> list[str]:
         words = shlex.split(text)
     except ValueError:
         words = text.split()
-    pieces = [part for word in words if "://" not in word for item in word.split("=") for part in item.split(":")]
-    return [piece for piece in pieces if "/" in piece]
+    return [piece for word in words for piece in _pieces(word) if "/" in piece]
 
 
 def _leaves(path: str, roots: list[Path]) -> bool:
     if path.startswith("/"):
         return _escapes(Path(os.path.normpath(path)), roots)
-    return ".." in Path(path).parts
+    return path.startswith("~") or "$" in path or ".." in Path(path).parts
 
 
 def _check_home(attempt: Path, target: str, roots: list[Path], owner: tuple[int, int]) -> None:

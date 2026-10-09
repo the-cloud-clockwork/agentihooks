@@ -26,10 +26,11 @@ renders its Claude and Codex profiles into a private attempt home under
 `/home/worker/attempts/<attempt>`, one home per target, through the same target
 adapters `agentihooks init` uses. Only the selected profiles are copied in, and
 accounts are recorded as variable names, never values. Hook and MCP commands use
-the container interpreter; a profile pointing at any path outside the attempt,
-the interpreter prefix or the agentihooks install fails bootstrap, as does a
+the container interpreter; a profile whose hooks, MCP servers or environment
+values point at any path outside the attempt, the interpreter prefix or the
+agentihooks install fails bootstrap, as does a `..`, `~` or `$` path, and a
 noexec home volume when Codex is requested, because its hook wrapper must
-execute. Rerunning an accepted request is a no-op, an interrupted one is
+execute. Other relative paths are admitted. Rerunning an accepted request is a no-op, an interrupted one is
 rendered again from scratch, and a different request for an accepted attempt is
 refused. The execution record names the digest of each selected profile.
 Rollback selects the prior profile digest for new attempts; existing attempt
