@@ -15,7 +15,12 @@ BESIDE = re.compile(r"\$\(dirname \"\$0\"\)|\$\{?GITHUB_ACTION_PATH\}?")
 WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # The documented local `--ci` download; the workflow passes `--samples` with `--ci 5`, so CI never calls these.
 LOCAL_ONLY = {ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"}}
-TOKEN = re.compile(r"github\.token|secrets\.(github|gh)_\w*", re.IGNORECASE)
+TOKEN = re.compile(
+    r"github\s*(\.\s*token\b|\[\s*['\"]token['\"]\s*\])"
+    r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)_\w*"
+    r"|(?<![\w.'\"-])(secrets|github)\s*(\)|\}\})",
+    re.IGNORECASE,
+)
 APP_TOKEN = "${{ steps.app-token.outputs.token }}"
 
 
@@ -252,6 +257,14 @@ def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step
         {"run": "gh run download 42 --dir out"},
         {"run": "curl https://api.github.com/rate_limit"},
         {"uses": "actions/download-artifact@v4", "with": {"github-token": "${{ secrets.GITHUB_TOKEN }}"}},
+        {"env": {"GH_TOKEN": "${{ secrets['GITHUB_TOKEN'] }}"}},
+        {"env": {"GH_TOKEN": '${{ secrets["GH_PAT"] }}'}},
+        {"env": {"GH_TOKEN": "${{ secrets [ 'github_token' ] }}"}},
+        {"run": "echo ${{ github['token'] }}"},
+        {"with": {"github-token": '${{ github["token"] }}'}},
+        {"env": {"ALL": "${{ toJSON(secrets) }}"}},
+        {"run": "echo '${{ tojson( github ) }}'"},
+        {"env": {"ALL": "${{ secrets }}"}},
     ],
     ids=[
         "gh-with-flags",
@@ -265,10 +278,43 @@ def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step
         "gh-run-download",
         "api-host",
         "cross-run-download",
+        "secret-in-brackets",
+        "secret-in-double-quoted-brackets",
+        "secret-in-spaced-brackets",
+        "github-token-in-brackets",
+        "github-token-in-double-quoted-brackets",
+        "secrets-context-to-json",
+        "github-context-to-json",
+        "whole-secrets-context",
     ],
 )
 def test_each_way_of_reaching_the_api_is_an_offender(plant):
     assert _holds_token(plant) or API_CALL.search(plant.get("run", ""))
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "${{ github.event_name }}",
+        "${{ github['event_name'] }}",
+        "${{ toJSON(github.event) }}",
+        "${{ secrets.SONAR_TOKEN }}",
+        "${{ secrets['SONAR_TOKEN'] }}",
+        "${{ contains(github.ref, 'github') }}",
+        "https://github.com/the-cloud-clockwork/agentihooks",
+    ],
+    ids=[
+        "event-name",
+        "bracketed-event-name",
+        "event-to-json",
+        "other-secret",
+        "bracketed-other-secret",
+        "quoted-word",
+        "url",
+    ],
+)
+def test_a_value_without_the_workflow_token_holds_none(value):
+    assert not _holds_token({"env": {"VALUE": value}, "run": f"echo '{value}'"})
 
 
 def test_sonar_downloads_this_runs_coverage_after_the_shards():
