@@ -209,8 +209,9 @@ class StubBackend:
         return DecisionResult({"accept": Answer("noul", noul=self.noul_value)}, self.name)
 
 
-def test_live_runs_are_refused_in_ci(home, monkeypatch):
-    monkeypatch.setenv("CI", "true")
+@pytest.mark.parametrize("value", ["true", ""])
+def test_live_runs_are_refused_in_ci(home, monkeypatch, value):
+    monkeypatch.setenv("CI", value)
     write_corpus(home, [case("typo", True, noul(0.9))])
     backend = StubBackend("haiku", 0.9)
     with pytest.raises(corpus.CorpusError) as error:

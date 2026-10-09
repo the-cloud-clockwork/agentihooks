@@ -275,7 +275,7 @@ def _ask(backend, definition: Definition, case: Case) -> tuple[dict | None, int]
 
 
 def live(definition: Definition, cases: tuple[Case, ...], backends: list, repeats: int) -> tuple[Outcome, ...]:
-    if os.environ.get("CI"):
+    if "CI" in os.environ:
         raise CorpusError("live classifier runs are refused in CI")
     outcomes = []
     for backend in backends:
