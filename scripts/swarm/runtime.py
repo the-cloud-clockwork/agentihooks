@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -174,6 +175,7 @@ class HerdrRuntime:
         self.refusals = {}
         self.end, self.reap = reaper.retire, reaper.reap
         self._quota_previous = {}
+        self._host_spent = None
 
     def has_capacity(self, config):
         environ = dict(os.environ)
@@ -226,7 +228,7 @@ class HerdrRuntime:
         if requirements:
             requirements = self._quota_preferring(requirements)
         warned = self._quota_warned()
-        spent = getattr(self, "_host_spent", capacity.no_spawns)
+        spent = self._host_spent or capacity.no_spawns
         previous = self._quota_previous
         inputs = capacity.ScaleInputs(
             self._quota_accounts, agents, demand, self.host, previous, warned, spent, int(now * 1000)
@@ -259,7 +261,7 @@ class HerdrRuntime:
     def quota_previous(self, decision: dict) -> None:
         self._quota_previous = decision
 
-    def quota_spent(self, counter) -> None:
+    def quota_spent(self, counter: Callable[[int], int]) -> None:
         self._host_spent = counter
 
     def quota_requirements(self, config: SwarmConfig, ready: dict) -> dict:

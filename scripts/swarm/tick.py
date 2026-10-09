@@ -674,7 +674,7 @@ def _host_full(slug, store, now_ms):
     return f"host {host['limit']} room {host['room']}, {recent} spawned since it was granted: {host['reason']}"
 
 
-def host_spent(store, since_ms, now_ms):
+def host_spent(store, since_ms: int, now_ms: int) -> int:
     return store.redis.zcount(HOST_SPENDS, since_ms - HOST_START_LAG_MS, now_ms)
 
 

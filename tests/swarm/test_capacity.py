@@ -7,7 +7,7 @@ from scripts import claude_quota_balancer as balancer
 from scripts import session_bands
 from scripts.swarm import capacity, notice_text
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm.tick import SpawnError, tick
+from scripts.swarm.tick import SpawnError, _spend_host, tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -1267,6 +1267,9 @@ def _band():
     return HostSample(load1=10.0, cpus=8, available_mb=64_000, agents=2)
 
 
+BAND_HOLDS = "one minute load 1.25 per CPU is between the watermarks, the previous room of 3 holds"
+
+
 def _granted(room=3):
     return {"room": room, "reason": "r", "limit": "load", "held": False, "granted_at": 1_000}
 
@@ -1289,7 +1292,7 @@ def test_repeated_readings_between_the_watermarks_never_raise_the_ceiling_past_t
             now_ms=61_000 + reading * 60_000,
         )
         _, decision = capacity.autoscaled(config, inputs)
-        assert decision["host"] == {**_granted(), "held": True, "reason": decision["host"]["reason"]}
+        assert decision["host"] == {**_granted(), "held": True, "reason": BAND_HOLDS}
         totals.append(sum(decision["ceilings"].values()))
         previous = {"host": decision["host"], "autoscale": decision}
         live += live < totals[-1]
@@ -1311,6 +1314,23 @@ def test_scale_inputs_default_to_no_spawns_at_time_zero():
     assert capacity.no_spawns(5_000) == 0
 
 
+def test_autoscaled_without_a_host_grants_a_fresh_room_at_the_reading_time():
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto")
+    asked = []
+    inputs = capacity.ScaleInputs(
+        [account(cap=6)],
+        [],
+        None,
+        _roomy_host,
+        {"host": _granted()},
+        spent=lambda since_ms: asked.append(since_ms) or 0,
+        now_ms=61_000,
+    )
+    _, decision = capacity.autoscaled(config, inputs)
+    assert (decision["host"]["held"], decision["host"]["granted_at"]) == (False, 61_000)
+    assert asked == [61_000]
+
+
 def test_quota_capacity_autoscales_on_the_room_left_since_it_was_first_granted(tmp_path, monkeypatch):
     rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=6), account("cx", harness="codex", cap=6)])
     rt.host = _band
@@ -1324,7 +1344,7 @@ def test_quota_capacity_autoscales_on_the_room_left_since_it_was_first_granted(t
     agents = [AgentRecord(f"eng-{n}", "eng", "") for n in range(4)]
     decision = rt.quota_capacity(config, agents, 100, {"eng": 9, "ci": 0, "plan": 0})
     assert asked == [1_000]
-    assert decision["host"] == {**_granted(), "held": True, "reason": decision["host"]["reason"]}
+    assert decision["host"] == {**_granted(), "held": True, "reason": BAND_HOLDS}
     assert decision["autoscale"]["host"] == decision["host"]
     assert decision["autoscale"]["pending_raise"] == {"target": 5, "ticks": 1}
 
@@ -1605,8 +1625,6 @@ def test_live_inputs_read_quota_without_a_refresh_and_count_ready_demand(monkeyp
     assert inputs.host is host_budget.read_host
     assert inputs.previous == stored
     assert inputs.warned == {("claude", "warned"): "week"}
-    from scripts.swarm.tick import _spend_host
-
     _spend_host(store, "now", 5_000)
     _spend_host(store, "after", 5_001)
     assert (inputs.now_ms, inputs.spent(5_000)) == (5_000, 1)
