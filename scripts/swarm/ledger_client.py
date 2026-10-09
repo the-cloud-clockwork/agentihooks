@@ -56,6 +56,9 @@ class LedgerClient:
     def state(self, slug):
         return self._call(slug)
 
+    def metadata(self, slug):
+        return self._resource(slug, "metadata")
+
     def tasks(self, slug):
         return self._resource(slug, "tasks", collection=True)
 
