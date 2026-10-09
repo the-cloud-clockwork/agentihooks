@@ -33,6 +33,7 @@ from scripts.swarm import (
     live_binding,
     master_retire,
     master_start,
+    master_wake,
     phase_state,
     reaper,
     retire_watch,
@@ -146,6 +147,8 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(_reap, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(_strays, slug, config, store, runtime)
+    if config.state not in {"stopped", "stopping"}:
+        actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
     actions += skip_refused(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
     if config.state == "stopped":
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
