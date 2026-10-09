@@ -396,9 +396,6 @@ def _update(doc, op, ctx):
     fields = _update_fields(task, op["fields"])
     after = {**task, **fields}
     check_lane(after)
-    if refusal := ledger_plans.task_refusal(doc, after):
-        ctx.refused.append(refusal)
-        return False
     if after.get("state") == "done" and ledger_kinds.unmet(after):
         ctx.refused.append(f"{op['item']} cannot be done without its proof: {', '.join(ledger_kinds.unmet(after))}")
         return False
@@ -520,4 +517,14 @@ def apply(doc, op, ctx):
         op = {**op, "fields": dict(op["fields"])}
     if not _set_slice(doc, op, ctx):
         return False
+    if refusal := _parent_refusal(doc, op):
+        ctx.refused.append(refusal)
+        return False
     return _update(doc, op, ctx)
+
+
+def _parent_refusal(doc: dict, op: dict) -> str:
+    task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), None)
+    if task is None or (op.get("if_state") and task.get("state", "open") not in op["if_state"]):
+        return ""
+    return ledger_plans.task_refusal(doc, {**task, **op["fields"]})
