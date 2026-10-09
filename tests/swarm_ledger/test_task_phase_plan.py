@@ -1,7 +1,8 @@
 import pytest
 
 from scripts.swarm_ledger import ledger_core as core
-from scripts.swarm_ledger import ledger_tasks, legacy_page, new_ledger
+from scripts.swarm_ledger import ledger_tasks, new_ledger
+from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.plan_slices import anchored
 
 SLUG = "phase-plan"
