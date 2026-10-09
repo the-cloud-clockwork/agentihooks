@@ -7,7 +7,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.runtime.operations import Observation, OperationRequest, Phase
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 
 class Transport:
