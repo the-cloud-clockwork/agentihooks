@@ -9,6 +9,12 @@ from tests import coverage_stability as stability
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parent.parent
+REPO = "owner/repo"
+
+
+@pytest.fixture(autouse=True)
+def _repository(monkeypatch):
+    monkeypatch.setenv("GITHUB_REPOSITORY", REPO)
 
 
 def _shards(root: Path, run: str, lines: dict[str, set[int]]) -> list[Path]:
@@ -38,7 +44,7 @@ class _GitHub:
             _shards(dest.parent, dest.name, self.runs[args[2]][1])
             return ""
         path = args[1]
-        if path.startswith(f"repos/{stability.REPO}/commits?sha=dev"):
+        if path.startswith(f"repos/{REPO}/commits?sha=dev"):
             return "\n".join(self.dev)
         if "/actions/workflows/test.yml/runs?head_sha=" in path:
             sha = path.split("head_sha=")[1].split("&")[0]
@@ -82,9 +88,11 @@ def test_runs_compares_the_raw_shard_databases_of_one_commit(tmp_path, monkeypat
     assert "hooks/amygdala_hook.py:42 ran in 11, missed in 12" in out
     assert "hooks/amygdala_hook.py:75" not in out
     downloads = [call for call in github.calls if call[:2] == ("run", "download")]
-    assert [call[call.index("--name") + 1 :: 2] for call in downloads] == [
-        tuple(f"coverage-3.12-{n}" for n in range(1, stability.SHARDS + 1))
-    ] * 2
+    names = [f"coverage-3.12-{n}" for n in range(1, stability.SHARDS + 1)]
+    for call in downloads:
+        assert call[call.index("--repo") + 1] == REPO
+        assert [value for flag, value in zip(call, call[1:]) if flag == "--name"] == names
+    assert len(downloads) == 2
 
 
 def test_runs_passes_when_every_line_ran_the_same_way(tmp_path, monkeypatch, capsys):
@@ -98,7 +106,8 @@ def test_runs_passes_when_every_line_ran_the_same_way(tmp_path, monkeypatch, cap
     ("runs", "ids", "message"),
     [
         ({"11": ("abc", {}), "12": ("def", {})}, ["11", "12"], "different commits"),
-        ({"11": ("abc", {})}, ["11"], "two or more runs"),
+        ({"11": ("abc", {})}, ["11"], "two or more distinct runs"),
+        ({"11": ("abc", {})}, ["11", "11"], "two or more distinct runs"),
     ],
 )
 def test_runs_that_cannot_be_compared_are_red(tmp_path, monkeypatch, capsys, runs, ids, message):
@@ -152,6 +161,7 @@ def test_the_scheduled_job_compares_the_newest_dev_runs_and_fails_on_any_differe
     assert "workflow_dispatch" in triggers
     assert sorted(triggers["pull_request"]["paths"]) == [
         ".github/workflows/coverage-stability.yml",
+        "tests/coverage_grade.py",
         "tests/coverage_stability.py",
     ]
     (job,) = workflow["jobs"].values()
