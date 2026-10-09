@@ -5,6 +5,7 @@ from contextlib import closing
 import pytest
 
 from scripts.swarm import cli, metrics, metrics_outbox
+from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.inbox.test_wake import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -46,6 +47,7 @@ def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, le
         "time_left_minutes": 14,
     }
     nodes = [{"node": "tasks/t", "kind": "task", "parent": None, "state": "claimed", "depth": 0}]
+    acks = []
 
     class Ledger:
         def state(self, slug):
@@ -55,6 +57,9 @@ def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, le
         def hierarchy(self, slug):
             assert slug == "sw"
             return nodes
+
+        def ack_events(self, slug, revision):
+            acks.append((slug, revision))
 
     monkeypatch.setattr(metrics, "LedgerClient", Ledger)
     monkeypatch.setattr(metrics.metrics_ledger, "record", ledger_collector)
@@ -75,11 +80,13 @@ def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, le
         for row in snapshots
     )
     assert received["INSERT INTO swarm.ticks FORMAT JSONEachRow"][0]["actions"] == 3
+    assert acks == [("sw", 1)]
 
 
-def test_an_unavailable_ledger_reports_the_error_and_still_flushes_ticks(spool, sent, monkeypatch):
+@pytest.mark.parametrize("error", [OSError("ledger unavailable"), LedgerRefused("ledger unavailable")])
+def test_an_unavailable_ledger_reports_the_error_and_still_flushes_ticks(spool, sent, monkeypatch, error):
     def refused(*args):
-        raise OSError("ledger unavailable")
+        raise error
 
     monkeypatch.setattr(metrics.metrics_ledger, "record", refused)
     assert metrics.record_pass("sw", NOW, 3, ON) == ["ledger metrics failed: ledger unavailable"]

@@ -38,6 +38,7 @@ def domain(calls, chat_kept=2, events_kept=2):
         warnings=lambda doc: list(doc.get("big", [])),
         CHAT_KEPT=chat_kept,
         EVENTS_KEPT=events_kept,
+        EVENTS_CEILING=events_kept * 5,
     )
 
 

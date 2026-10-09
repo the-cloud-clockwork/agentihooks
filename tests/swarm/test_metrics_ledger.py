@@ -37,6 +37,9 @@ class Ledger:
         self.calls.append(("hierarchy", slug))
         return deepcopy(self.nodes)
 
+    def ack_events(self, slug, revision):
+        self.calls.append(("ack", slug, revision))
+
     def move(self, state, revision, at):
         self.doc["tasks"][0]["state"] = state
         self.nodes[-1]["state"] = state

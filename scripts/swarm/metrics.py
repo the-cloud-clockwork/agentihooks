@@ -4,6 +4,7 @@ from collections.abc import Mapping
 
 from scripts.swarm import metrics_ledger, metrics_outbox
 from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.store import SwarmError
 
 TICKS = metrics_outbox.Table("ticks", (("actions", "Int64"),))
 
@@ -24,7 +25,7 @@ def record_pass(slug: str, now_ms: int, actions: int, environ: Mapping[str, str]
             box.append(TICKS, [tick_row(slug, now_ms, actions)])
             try:
                 metrics_ledger.record(box, slug, now_ms, LedgerClient())
-            except OSError as exc:
+            except (OSError, SwarmError) as exc:
                 errors.append(f"ledger metrics failed: {exc}")
             box.flush(now_ms)
         finally:

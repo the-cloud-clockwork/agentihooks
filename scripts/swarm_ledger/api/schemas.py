@@ -99,6 +99,7 @@ FIELDS = {
     "alert_claim": "by target",
     "alert_close": "by target outcome",
     "time_left": "by slots ci_minutes",
+    "events_ack": "by rev",
 }
 TYPES = {
     "long": {"type": "boolean"},

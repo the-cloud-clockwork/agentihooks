@@ -354,7 +354,7 @@ class SQLiteLedgerRepository:
         before, after = diff(*(without_events(document) for document in (entry.state, state)))
         write_rows(connection, slug, before, after)
         hierarchy.sync(connection, slug, state)
-        append_events(connection, slug, events, self.domain.EVENTS_KEPT)
+        append_events(connection, slug, events, len(state["_meta"]["events"]))
         generation = entry.generation + 1
         connection.execute(
             UPDATE,
