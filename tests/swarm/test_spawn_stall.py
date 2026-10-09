@@ -21,6 +21,13 @@ def stalled(env, monkeypatch):
     runtime.live.add(boss.name)
     account = capacity.Account("claude", "acct", "OPEN", 1, 80, 80, 6)
     monkeypatch.setattr(capacity, "accounts", lambda *args, **kwargs: [account])
+    original_state = ledger.state
+
+    def state(slug):
+        assert slug == "sw"
+        return original_state(slug)
+
+    ledger.state = state
     clock = [10_000_000]
     monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
     monkeypatch.setattr(inbox_store, "now_ms", lambda: clock[0])
@@ -62,10 +69,19 @@ def test_repeated_failed_tick_alarms_at_ten_minutes_and_names_the_step(stalled):
     tick_failure(stalled)
     (finding,) = alarms(stalled)
     assert finding["id"] == "spawn-stall/sw"
+    assert finding["summary"] == "No agent has launched for ten minutes"
+    assert finding["threshold"] == "ten minutes"
+    assert finding["evidence"][0] == "A lane has a free seat, quota and claimable work"
+    assert spawn_stall.findings(store, "sw")[0].measure == 1
     assert any("broken" in line and "forced phase failure" in line for line in finding["evidence"])
     mail = InboxStore(store.redis).pending_mail("master@sw")
     assert len(mail) == 1
-    assert "forced phase failure" in mail[0].text
+    assert mail[0].sender == "swarm"
+    assert mail[0].text == (
+        "Spawn stall on sw: No agent has launched for ten minutes. "
+        "A lane has a free seat, quota and claimable work; "
+        "Last failed step tests.swarm.test_spawn_stall.stalled.<locals>.broken: RuntimeError: forced phase failure"
+    )
     tick_failure(stalled)
     assert len(InboxStore(store.redis).pending_mail("master@sw")) == 1
 
@@ -122,8 +138,15 @@ def test_normal_findings_pass_sends_no_duplicate_alarm(stalled):
     clock[0] += 600_000
     tick_failure(stalled)
     inbox = InboxStore(store.redis)
-    assert ledger_events.findings_pass(inbox, store, "sw", alarms(stalled)) == []
-    assert len(inbox.pending_mail("master@sw")) == 1
+    other = {
+        "id": "idle/worker",
+        "kind": "idle",
+        "summary": "A worker is idle",
+        "verdict": None,
+    }
+    sent = ledger_events.findings_pass(inbox, store, "sw", alarms(stalled) + [other])
+    assert sent == ["told master@sw: finding:idle/worker:0"]
+    assert len(inbox.pending_mail("master@sw")) == 2
 
 
 @pytest.mark.parametrize("unavailable", ["paused", "stopped", "seat", "quota", "harness", "task"])
@@ -312,3 +335,96 @@ def test_lost_controller_lease_blocks_final_alarm_delivery(stalled, monkeypatch)
     assert store.redis.get(store.key("sw", "tick-failure")) == failure
     assert InboxStore(store.redis).pending_mail("master@sw") == []
     assert ledger.notes == []
+
+
+def test_capacity_reader_receives_demand_clock_and_previous_state_without_refresh(stalled):
+    import json
+
+    store, ledger, runtime, clock, _ = stalled
+    previous = {"at": 123, "effective": {"eng": 1, "ci": 0, "plan": 0}}
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps(previous))
+    received = []
+    runtime.quota_previous = received.append
+
+    def reader(config, agents, now, demand, requirements, *, refresh):
+        assert config.slug == "sw"
+        assert [agent.name for agent in agents] == ["boss"]
+        assert now == 10_000
+        assert demand == {"eng": 1, "ci": 1, "plan": 0}
+        assert requirements is None
+        assert refresh is False
+        return {"placements": {"eng": [{"harness": "claude", "account": "acct"}]}}
+
+    runtime.quota_capacity = reader
+    assert spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+    assert received == [previous]
+
+
+def test_a_missing_ledger_has_no_claimable_work(stalled, monkeypatch):
+    from scripts.swarm.ledger_client import LedgerGone
+
+    store, ledger, runtime, clock, _ = stalled
+
+    def missing(slug):
+        raise LedgerGone("no such scratch ledger")
+
+    monkeypatch.setattr(ledger, "state", missing)
+    assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+
+
+def test_a_busy_lane_has_no_free_seat(stalled):
+    store, ledger, runtime, clock, _ = stalled
+    ledger.rows["t2"].update(state="claimed", claimed_by="worker")
+    store.put_agent("sw", AgentRecord("worker", "eng", "t2", state="working"))
+    assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+
+
+@pytest.mark.parametrize("state", ["starting", "working"])
+def test_a_successful_master_launch_restarts_the_interval(stalled, state):
+    store, _, _, clock, _ = stalled
+    tick_failure(stalled)
+    clock[0] += 500_000
+    store.put_agent("sw", AgentRecord("boss", "master", "master", started_at=clock[0], state=state, seat="master@sw"))
+    tick_failure(stalled)
+    clock[0] += 599_999
+    tick_failure(stalled)
+    assert alarms(stalled) == []
+    clock[0] += 1
+    tick_failure(stalled)
+    assert len(alarms(stalled)) == 1
+
+
+def test_no_launch_is_reported_until_an_agent_actually_starts(stalled):
+    store, _, _, clock, _ = stalled
+    store.drop_agent("sw", "boss")
+    assert spawn_stall.launched(store, "sw") == 0
+    store.record_launch("sw", AgentRecord("pending", "eng", "t1", started_at=clock[0]), "pending")
+    store.put_agent("sw", AgentRecord("finished", "eng", "t1", started_at=clock[0], state="finished"))
+    assert spawn_stall.launched(store, "sw") == 0
+
+
+def test_a_stall_without_a_recorded_error_still_has_eligibility_evidence(stalled):
+    store, ledger, runtime, clock, _ = stalled
+    with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
+        pass
+    clock[0] += 600_000
+    with spawn_stall.watch(store, "sw", ledger, lambda: clock[0], runtime):
+        pass
+    (finding,) = spawn_stall.findings(store, "sw")
+    assert finding.evidence == ("A lane has a free seat, quota and claimable work",)
+
+
+def test_a_quota_warning_hold_is_not_available_capacity(stalled, monkeypatch):
+    store, ledger, runtime, clock, _ = stalled
+    account = capacity.Account("claude", "acct", "OPEN", 0, 80, 9, 6)
+    monkeypatch.setattr(capacity, "accounts", lambda *args, **kwargs: [account])
+    assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+
+
+def test_autoscaling_with_no_host_room_offers_no_launch_seat(stalled, monkeypatch):
+    from scripts.swarm import host_budget
+
+    store, ledger, runtime, clock, _ = stalled
+    store.update("sw", scaling="auto")
+    monkeypatch.setattr(host_budget, "read_host", lambda: host_budget.HostSample(100, 1, 0, 0))
+    assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
