@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, session_bands
-from scripts.routing import claude_api, codex_api, place, split
+from scripts.routing import claude_api, codex_api, place
 from scripts.routing.slots import API, SUBSCRIPTION
 
 LANES = ("eng", "ci", "plan")
@@ -115,14 +115,11 @@ def offered(rows: list[Account], closed: Collection[tuple[str, str]] = ()) -> li
 def _side(
     offered_seats: list[session_bands.Seat], harness: str, allowed: Callable[[session_bands.Seat], bool]
 ) -> session_bands.Seat | None:
-    api = [seat for seat in offered_seats if seat.harness == harness and seat.kind == API]
+    api = [seat for seat in offered_seats if seat.harness == harness and seat.kind == API and allowed(seat)]
     pool = [seat for seat in offered_seats if seat.harness == harness and seat.kind != API]
     weight = max((seat.weight or 0 for seat in api), default=0)
-    api_open = [seat for seat in api if allowed(seat)]
-    pool_open = [seat for seat in pool if seat.free and allowed(seat)]
-    api_live, pool_live = sum(seat.sessions for seat in api), sum(seat.sessions for seat in pool)
-    side = split.choose_side(api_open, pool_open, weight, api_live, pool_live, any(seat.free for seat in api_open))
-    return None if side is None else session_bands.pick(api_open if side == "api" else pool_open)
+    pool_live = sum(seat.sessions for seat in pool)
+    return place.place(api, [seat for seat in pool if allowed(seat)], weight, pool_live)
 
 
 def pick(
@@ -199,7 +196,7 @@ def _allocate(
         reserved = _reserved(limits, effective, options, cursors)
         eligible = [h for h in options[lane][index] if room(lane, index, h)]
         spare = [h for h in eligible if remaining[h] > reserved[h]] or eligible
-        seat = pick(held.values(), lambda s, lane=lane, index=index: s.harness in spare and usable(lane, index, s))
+        seat = pick(held.values(), lambda s: s.harness in spare and usable(lane, index, s))
         held[(seat.harness, seat.account)] = replace(seat, sessions=seat.sessions + 1)
         allocation[lane][seat.harness] += 1
         placements[lane].append({"index": index, "harness": seat.harness, "account": seat.account})

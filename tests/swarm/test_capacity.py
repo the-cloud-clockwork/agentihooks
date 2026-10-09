@@ -1205,6 +1205,15 @@ def test_a_lane_restricted_to_some_accounts_splits_on_every_live_session():
     assert capacity.pick(offered, lambda seat: seat.account == "b").account == "b"
 
 
+def test_an_observed_share_at_the_weight_still_sends_the_next_seat_to_the_api():
+    from scripts.swarm import quota_view
+
+    rows = [account("a", cap=6, sessions=3), api(sessions=1)]
+    decision = {"accounts": [capacity.record(row) for row in rows]}
+    assert quota_view.api_share(decision["accounts"][1], decision["accounts"]) == (25, 4)
+    assert capacity.pick(capacity.offered(rows)).account == "api"
+
+
 def test_sessions_on_full_accounts_weigh_in_the_api_share_of_a_spawn(tmp_path, monkeypatch):
     rows = [account("full", cap=4, sessions=4), account("a", cap=6), api(sessions=1)]
     runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, rows)
