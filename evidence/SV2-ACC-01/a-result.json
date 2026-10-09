@@ -1,0 +1,43 @@
+{
+  "package": "SV2-ACC-01",
+  "case": "T-SV2-ACC-01-A",
+  "tested_commit": "5c700c834a120384a7862b404f48ab8b779baeaf",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37937300304",
+  "fixture": "tests/fixtures/swarm_v2/fleet-registry.json: machines anton (local) and worker (kubernetes) share PID 4242 with start times 111 and 222; the worker registers through the renamed alias fixture-eng-1",
+  "fixture_clock": "build() patches time.time to the fixture clock; the registry clock reads the same list",
+  "independent_runs": 2,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_registry.py::test_local_and_remote_sessions_sharing_a_pid_coexist_in_one_registry[first]",
+      "job": 113843861171,
+      "output": "PASSED at 2026-10-09T13:36:01.5744454Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_registry.py::test_local_and_remote_sessions_sharing_a_pid_coexist_in_one_registry[second]",
+      "job": 113843861171,
+      "output": "PASSED at 2026-10-09T13:36:01.6484337Z"
+    },
+    {
+      "test": "tests/context/test_broadcast.py::TestSessionRegistry::test_heartbeat_never_judges_a_foreign_pid_and_suspects_only_silent_foreign_records",
+      "job": 113843861349,
+      "output": "PASSED at 2026-10-09T13:35:59.9765015Z"
+    },
+    {
+      "test": "tests/test_terminate_agent.py::test_a_record_from_another_process_namespace_never_claims_a_local_pid",
+      "job": 113843861247,
+      "output": "PASSED at 2026-10-09T13:36:42.0350534Z"
+    }
+  ],
+  "state_assertions": {
+    "registry_rows": "two session records with distinct keys for the same PID; seats eng-1@fixture and eng-2@fixture held",
+    "alias": "the worker record stores the canonical name; find(fixture-eng-1) returns it and NameRegistry keeps the alias",
+    "scoped_observation": "an anton process table without PID 4242 suspects only the anton record; the worker record stays live",
+    "broadcast": "the heartbeat never probes a foreign PID and only signals 0",
+    "terminate_agent": "a foreign record sharing a local PID never claims the local process"
+  },
+  "boundary": "Process observations judge only their own scope and only move a record to suspect; no record is deleted",
+  "cleanup": "fakeredis per test; no live resource mutations",
+  "fleet_registry_stale_records": {"first": 1, "second": 1, "dimension": "fixture fleet-registry.json, swarm fixture, after the anton table observation"},
+  "passed": true
+}

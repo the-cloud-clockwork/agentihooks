@@ -1,0 +1,73 @@
+{
+  "package": "SV2-ACC-01",
+  "dependency": ["SV2-CTL-05", "SV2-IDN-05"],
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2164",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2182",
+  "tested_commit": "5c700c834a120384a7862b404f48ab8b779baeaf",
+  "status": "mocked-acceptance-qualified",
+  "package_complete": false,
+  "evidence_class": "Scoped fixture launch grants from LaunchAuthority, fakeredis, fixture clock and frozen datetime; no live rollout. Live G3 qualification is separate.",
+  "interfaces": [
+    "scripts.swarm_v2.registry.FleetRegistry.register: grant-only registration; the seat comes from the validated launch grant, never the name; record and seat generations fenced; identical replay writes nothing; a closed record is never revived",
+    "FleetRegistry.heartbeat and close: require the record's own grant; a superseded or concurrently replaced record raises stale_generation",
+    "FleetRegistry.observe: judges only records of its own scope (backend, host, process namespace), only moves live to suspect, and judges nothing on an empty table",
+    "FleetRegistry.sweep: moves silent live records to suspect; nothing deletes records",
+    "FleetRegistry.visible: local records only while distributed launches are disabled (the rollback read)",
+    "FleetRegistry.find, seat, records, fleet_registry_stale_records; registry.session_key, encode, decode",
+    "hooks.context.broadcast: register_session stamps process_namespace; foreign_session; the heartbeat probes only local PIDs, revives the owner's suspect records, suspects silent foreign records after 300 s and still prunes at 24 h; get_active_sessions cleanup skips foreign records",
+    "scripts.terminate_agent.sessions: a record from another process namespace never claims a local PID"
+  ],
+  "supported_versions": {
+    "python": "3.11 and 3.12 unit shards passed in the linked CI run",
+    "coordination": "SV2-CTL launch grants (LaunchAuthority registration), execution generations and the NameRegistry alias records",
+    "persistence": "swarm export and restore carry the fleet-sessions and fleet-seats hashes and the alias keys",
+    "compatibility": "Unstamped session records stay local, so the existing local swarm keeps its behaviour (INV-R11)"
+  },
+  "states": {
+    "observed": "Process tables of the owning scope and owner heartbeats; observations only suspect a record",
+    "accepted": "Grant-validated registration at the current execution generation",
+    "committed": "Redis WATCH/MULTI transaction on the fleet-sessions and fleet-seats hashes",
+    "externally_verified": "None; no production writer and no live rollout yet"
+  },
+  "validation": {
+    "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37934418950 on the tests-only commit b8232c19 failed: the registry module did not exist",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37937300304",
+    "unit": "All twelve Python unit shards passed; case A ran twice on independent fixtures",
+    "lint": "CI lint passed",
+    "coverage": "CI coverage ratchet passed; Sonar new coverage 99.7 percent",
+    "mutation": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37936541372 passed on f156f98a; the 55 then 21 earlier survivors were killed by tests",
+    "sonar": "One python:S4828 hotspot on the signal 0 existence probe reviewed as safe",
+    "review": "Standards and Spec readers closed after three rounds",
+    "local": "No local tests or mutation ran; static prepush passed on 5c700c83"
+  },
+  "measurements": {
+    "fleet_registry_stale_records": {
+      "a": [1, 1],
+      "b": 0,
+      "c": 0
+    },
+    "dimension": "Each test has its own fakeredis swarm built from fleet-registry.json; a counts the anton record suspected by its own process table"
+  },
+  "cases": {
+    "a": "evidence/SV2-ACC-01/a-result.json",
+    "b": "evidence/SV2-ACC-01/b-result.json",
+    "c": "evidence/SV2-ACC-01/c-result.json",
+    "manifest": "evidence/SV2-ACC-01/manifest.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Read the registry through FleetRegistry.visible with distributed launches disabled (AGENTIHOOKS_RUNTIME_DISABLED names the remote backend, or the runtime backend is local)",
+    "test": "tests/test_swarm_v2_registry.py::test_local_only_reads_while_distributed_launches_are_disabled",
+    "job": 113843861171,
+    "output": "PASSED at 2026-10-09T13:36:01.7228186Z",
+    "data_safety": "Remote records stay stored untouched; rows are byte-equal before and after; the registry and session records are authoritative and never deleted as caches"
+  },
+  "remaining_limitations": [
+    "No production writer of the Redis registry exists yet; wiring it into the controller launch path belongs to the runtime and accounting packages (SV2-ACC-02 depends on this package)",
+    "A record whose process died without closing stays suspect until the controller path ends it",
+    "The default registry clock is the caller's host wall clock; the controller must inject its clock",
+    "The broadcast foreign-suspect window compares the owner's last_seen with the observer's clock; skew beyond 300 s misjudges it",
+    "active-sessions.json is assumed per host; unstamped legacy records are treated as local",
+    "find is a name lookup, not a rollback read"
+  ]
+}
