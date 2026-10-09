@@ -6,6 +6,7 @@ from hooks import config
 from hooks.classifier import definitions, runner
 from hooks.classifier.questions import Choice, Score, YesNo
 from hooks.context import profile_chain
+from scripts.swarm.effort_range import EFFORTS
 
 from .test_definitions import definition_home as definition_home
 from .test_definitions import sample, write_definition
@@ -108,6 +109,12 @@ def test_tick_definitions_reproduce_the_call_site_prompts(packaged, name, params
     assert (definition.purpose, definition.fallbacks, definition.rule.type) == (name, "cli", "code")
     assert definition.thresholds == thresholds
     assert runner.questions_for(definition, params) == questions
+
+
+@pytest.mark.parametrize("harness", sorted(EFFORTS))
+def test_model_pick_levels_cover_every_harness_effort(packaged, harness):
+    questions = runner.questions_for(definitions.load("model-pick", environ={}), {"levels": list(EFFORTS[harness])})
+    assert questions["effort"].levels == list(EFFORTS[harness])
 
 
 @pytest.mark.parametrize(

@@ -58,7 +58,7 @@ def classify(task: dict, doc: dict) -> dict:
         return sized(FALLBACK, "default", 0.0)
     raw = answer.confidence
     confidence = min(max(raw, 0.0), 1.0) if _real(raw) else 0.0
-    options = output.definition.questions[0].question.options
+    options = {spec.name: spec.question for spec in output.definition.questions}[QUESTION].options
     if confidence < output.thresholds["confidence"] or answer.choice not in options:
         return sized(FALLBACK, "default", confidence)
     return sized(answer.choice, "classifier", confidence)
