@@ -34,6 +34,7 @@ def repo(path, monkeypatch):
     repo = SQLiteLedgerRepository(path)
     monkeypatch.setattr(repo.domain, "EVENTS_KEPT", 3)
     monkeypatch.setattr(repo.domain, "EVENTS_CEILING", 6)
+    monkeypatch.setattr(repo.domain, "now_ms", lambda: NOW - 1000)
     repo.create("ledger", CONTENT)
     return repo
 
