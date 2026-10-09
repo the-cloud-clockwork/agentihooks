@@ -69,6 +69,7 @@ def test_the_hive_controller_command_writes_a_private_credential_the_server_acce
     name, _, credential = path.read_text().strip().partition("=")
     assert (name, path.stat().st_mode & 0o777) == ("AGENTIHOOKS_CONTROLLER_CREDENTIAL", 0o600)
     assert credential not in capsys.readouterr().out
+    assert path not in tmp_path.glob("*.env")
     assert authority.controller(credential)
 
 

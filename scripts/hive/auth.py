@@ -20,7 +20,8 @@ PREFIX = f"{ROOT}-hive"
 ACL_PATTERNS = (f"{ROOT}:*",)
 ACL_CATEGORIES = ("+@all", "-@admin", "-@dangerous")
 ENV_FILE = "hive.env"
-CONTROLLER_ENV_FILE = "controller.env"
+# Below the home, where the hooks' *.env autoload never puts it into other processes.
+CONTROLLER_ENV_FILE = "controller/credential.env"
 
 
 class HiveError(Exception):
