@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, serve_modules, shell_html
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
@@ -46,6 +46,7 @@ def tab(browser):
     serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     page.goto(URL)
+    loaded(page)
     yield page
     context.close()
 
@@ -69,6 +70,7 @@ def outline(tab):
 
 
 def settle(tab):
+    loaded(tab)
     tab.wait_for_timeout(50)
 
 

@@ -64,12 +64,12 @@ class Tab:
 
     def open(self, slug):
         self.tab.goto(f"{self.base}/{slug}#swarm")
-        self.tab.locator("#swarm-agents tr").first.wait_for(timeout=5000)
+        self.tab.locator("#swarm-overlays .sw-ovl-row").first.wait_for(timeout=5000)
         self.tab.wait_for_function("() => document.documentElement.dataset.layout === 'ready'", timeout=5000)
 
     def reload(self):
         self.tab.reload()
-        self.tab.locator("#swarm-agents tr").first.wait_for(timeout=5000)
+        self.tab.locator("#swarm-overlays .sw-ovl-row").first.wait_for(timeout=5000)
         self.tab.wait_for_function("() => document.documentElement.dataset.layout === 'ready'", timeout=5000)
 
     def box(self, element_id):
@@ -126,11 +126,11 @@ def visit(browser, base):
     layout.path().unlink(missing_ok=True)
 
 
-def saved(expected_rows, timeout=5.0):
+def saved(expected_rows, page=None, timeout=5.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         current = layout.read()
-        if set(current) == set(expected_rows):
+        if set(current) == set(expected_rows) and (page is None or current == (page.stored() or {})):
             return current
         time.sleep(0.05)
     return layout.read()
@@ -144,7 +144,7 @@ def test_each_height_handle_drags_and_the_size_survives_a_reload(visit):
     after = page.heights()
     for row in HEIGHT_ROWS:
         assert abs(after[row] - before[row] - (-30 if row == "health-box" else 40)) <= 2, (row, before, after)
-    server_side = saved(HEIGHT_ROWS)
+    server_side = saved(HEIGHT_ROWS, page)
     assert {row: server_side[row]["height"] for row in HEIGHT_ROWS} == pytest.approx(after, abs=1)
     page.reload()
     assert page.heights() == pytest.approx(after, abs=1)
@@ -174,7 +174,7 @@ def test_each_split_handle_moves_only_its_own_row_and_the_row_stays_full_width(v
         a, b = page.box(left), page.box(right)
         assert b["x"] + b["width"] == pytest.approx(page.box(row_id)["x"] + full, abs=1)
         assert a["x"] + a["width"] <= b["x"] + 1
-    assert {row: entry["split"] for row, entry in saved(PAIRS).items()} == {
+    assert {row: entry["split"] for row, entry in saved(PAIRS, page).items()} == {
         "swarm-row-work": pytest.approx(70, abs=1.5),
         "swarm-row-accounts": pytest.approx(30, abs=1.5),
     }
@@ -187,7 +187,7 @@ def test_a_second_ledger_and_a_fresh_browser_open_with_the_same_layout(visit):
     page = visit()
     page.drag("height", "health-box", dy=-40)
     page.drag("split", "swarm-row-work", dx=-80)
-    saved(("health-box", "swarm-row-work"))
+    saved(("health-box", "swarm-row-work"), page)
     sizes, share = page.heights(), page.share("swarm-row-work")
     page.open(SLUGS[1])
     assert page.heights() == pytest.approx(sizes, abs=1)
@@ -198,10 +198,28 @@ def test_a_second_ledger_and_a_fresh_browser_open_with_the_same_layout(visit):
     assert fresh.share("swarm-row-work") == pytest.approx(share, abs=0.5)
 
 
+def test_a_pause_mid_drag_still_leaves_the_final_split_on_the_server(visit):
+    page = visit()
+    handle = page.grip("split", "swarm-row-work")
+    handle.scroll_into_view_if_needed()
+    box = handle.bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    page.tab.mouse.move(x, y)
+    page.tab.mouse.down()
+    page.tab.mouse.move(x - 40, y)
+    page.tab.wait_for_timeout(400)
+    page.tab.mouse.move(x - 80, y)
+    page.tab.mouse.up()
+    assert saved(("swarm-row-work",), page) == page.stored()
+    share = page.share("swarm-row-work")
+    page.open(SLUGS[1])
+    assert page.share("swarm-row-work") == pytest.approx(share, abs=0.5)
+
+
 def test_local_storage_paints_the_layout_while_the_server_is_unreachable(visit):
     page = visit()
     page.drag("height", "handoff-box", dy=50)
-    saved(("handoff-box",))
+    saved(("handoff-box",), page)
     height = page.box("handoff-box")["height"]
     page.tab.route("**/api/layout", lambda route: route.abort())
     page.reload()
@@ -236,7 +254,7 @@ def test_arrow_keys_move_a_focused_handle(visit):
     assert page.share("swarm-row-accounts") == pytest.approx(share - 4, abs=1)
     page.tab.keyboard.press("ArrowRight")
     assert page.share("swarm-row-accounts") == pytest.approx(share - 2, abs=1)
-    assert set(saved(("handoff-box", "swarm-row-accounts"))) == {"handoff-box", "swarm-row-accounts"}
+    assert set(saved(("handoff-box", "swarm-row-accounts"), page)) == {"handoff-box", "swarm-row-accounts"}
     labels = page.tab.eval_on_selector_all(
         "[data-grip]",
         "gs => gs.map(g => [g.getAttribute('role'), g.getAttribute('aria-orientation'), g.tabIndex, !!g.getAttribute('aria-label')])",
@@ -271,12 +289,12 @@ def test_reset_layout_restores_the_defaults_everywhere(visit):
     for row in HEIGHT_ROWS:
         page.drag("height", row, dy=30)
     page.drag("split", "swarm-row-accounts", dx=120)
-    saved((*HEIGHT_ROWS,))
+    saved((*HEIGHT_ROWS,), page)
     assert page.tab.locator("#layout-reset").is_enabled()
     page.tab.locator("#layout-reset").click()
     assert page.heights() == pytest.approx(defaults, abs=1)
     assert {row: page.share(row) for row in PAIRS} == pytest.approx(shares, abs=0.5)
-    assert saved(()) == {}
+    assert saved((), page) == {}
     assert page.stored() is None
     assert page.tab.locator("#layout-reset").is_disabled()
     page.reload()
