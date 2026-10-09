@@ -85,14 +85,32 @@ def _expand(tokens: list[str], depth: int) -> list[list[str]]:
     return [tokens]
 
 
+def _heredoc_marker(line: str, quote: str | None) -> tuple[int, str | None]:
+    index = 0
+    while index < len(line):
+        character = line[index]
+        if character == "\\" and quote != "'":
+            index += 2
+            continue
+        if quote is None and line.startswith("<<", index):
+            return index, None
+        if character == quote:
+            quote = None
+        elif quote is None and character in {"'", '"'}:
+            quote = character
+        index += 1
+    return -1, quote
+
+
 def _heredocs(command: str, depth: int) -> tuple[str, list[list[str]]]:
-    result, kept = [], []
+    result, kept, quote = [], [], None
     lines = iter(command.splitlines(keepends=True))
     for line in lines:
-        prefix, marker, tail = line.partition("<<")
-        if not marker:
+        start, quote = _heredoc_marker(line, quote)
+        if start < 0:
             kept.append(line)
             continue
+        prefix, tail = line[:start], line[start + 2 :]
         delimiters = shlex.split(tail.removeprefix("-"))
         if not delimiters:
             raise ValueError("Missing heredoc delimiter")
