@@ -81,6 +81,14 @@ def test_live_sessions_count_interactive_claude_only(tmp_path):
     assert "secret" not in repr(sessions)
 
 
+def test_a_process_that_exits_mid_scan_is_skipped(tmp_path):
+    root = _tree(tmp_path)
+    (root / "108").mkdir()
+
+    assert 108 not in acc.live_sessions(root)
+    assert acc._cmdline(108, root) == []
+
+
 def test_handed_off_sessions_free_their_slot(tmp_path):
     root = _tree(tmp_path)
 

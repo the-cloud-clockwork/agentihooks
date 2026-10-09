@@ -80,10 +80,12 @@ def test_a_python_script_without_an_extension_is_graded(tmp_path):
 
 
 def test_a_tracked_file_missing_from_the_tree_is_red(tmp_path, capsys):
-    head = _recorded(tmp_path, {"mod.py": SEVEN_PARAMETERS, "gone.py": SEVEN_PARAMETERS})
+    base = _recorded(tmp_path / "base", {"mod.py": SEVEN_PARAMETERS})
+    head = _recorded(tmp_path / "head", {"mod.py": SEVEN_PARAMETERS, "gone.py": SEVEN_PARAMETERS})
     (head / "gone.py").unlink()
-    assert size_limits.main(["--bootstrap", "--head", str(head)]) == 1
-    assert "gone.py" in capsys.readouterr().out
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "gone.py" in out
 
 
 def test_config_and_noqa_in_the_graded_tree_hide_nothing(tmp_path):
@@ -145,14 +147,12 @@ def test_a_pull_request_cannot_allowlist_its_own_offender(tmp_path, capsys):
     assert _grade(base, head, capsys)[0] == 1
 
 
-def test_a_base_without_an_allowlist_is_red_unless_bootstrapping(tmp_path, capsys):
+def test_a_base_without_an_allowlist_is_red(tmp_path, capsys):
     base = _tree(tmp_path / "base", {"mod.py": SEVEN_PARAMETERS})
     head = _recorded(tmp_path / "head", {"mod.py": EIGHT_PARAMETERS})
     code, out = _grade(base, head, capsys)
     assert code == 1
     assert "the base has no tests/SIZE_ALLOWLIST.json" in out
-    assert size_limits.main(["--bootstrap", "--head", str(head)]) == 0
-    assert "Bootstrap: the head's own tests/SIZE_ALLOWLIST.json stands in" in capsys.readouterr().out
 
 
 def _function(name: str, lines: int) -> str:
@@ -190,12 +190,16 @@ def test_the_head_defaults_to_the_working_directory(tmp_path, monkeypatch):
     assert size_limits.load(tree) == {"mod.py::planted": {"PLR0913": 8}}
 
 
-def test_grading_without_a_base_or_bootstrap_is_refused(tmp_path, capsys):
+def test_grading_without_a_base_is_refused(tmp_path, capsys):
     with pytest.raises(SystemExit):
         size_limits.main(["--head", str(tmp_path)])
-    assert capsys.readouterr().err.endswith(
-        ": error: grading needs --base, or --bootstrap where the base predates the gate\n"
-    )
+    assert capsys.readouterr().err.endswith(": error: grading needs --base\n")
+
+
+def test_the_retired_bootstrap_flag_is_refused(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        size_limits.main(["--bootstrap", "--head", str(tmp_path)])
+    assert capsys.readouterr().err.endswith(": error: unrecognized arguments: --bootstrap\n")
 
 
 def test_a_tree_outside_git_or_without_python_cannot_be_graded(tmp_path):

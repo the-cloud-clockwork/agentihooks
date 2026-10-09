@@ -142,16 +142,19 @@ def _promote(slug, store, ledger, runtime, state, minutes, now_ms):
     )
     if not engineers:
         if not state.get("nobody_told"):
-            ledger.notify(slug, NOBODY_NOTICE.format(minutes=_shown(minutes)))
             state = {**state, "nobody_told": True}
+            _save(store, slug, state)
+            ledger.notify(slug, NOBODY_NOTICE.format(minutes=_shown(minutes)))
         return state, actions + ["no live engineer to promote"]
     agent, reason = engineers[0], state["failure"]
     InboxStore(store.redis).send(SENDER, agent.name, prompt(slug, agent, reason, minutes))
     store.seats.note(agent.seat, "promoted", reason, now_ms)
     store.seats.note(agent.seat, "message", "the promoted prompt", now_ms)
     store.seats.note(seat_address(slug, MASTER), "promoted", f"{agent.name}: {reason}", now_ms)
+    state = {**state, "promoted": agent.name}
+    _save(store, slug, state)
     ledger.notify(slug, PROMOTED_NOTICE.format(minutes=_shown(minutes)))
-    return {**state, "promoted": agent.name}, actions + [
+    return state, actions + [
         f"promoted {agent.name} to restore the master: {reason}",
         f"sent {agent.name} the promoted prompt",
     ]
