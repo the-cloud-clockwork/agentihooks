@@ -600,6 +600,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             if args.handoff
             else agent_choice.choose(args.agent, active_env)
         )
+        agent = agent or "claude"
         if args.handoff:
             from hooks.context.account_sessions import UNROUTED, environment_account
 

@@ -19,7 +19,7 @@ def harness_of(pid):
     from hooks.proc import _process, _target
 
     process = _process(pid, Path("/proc"))
-    return (_target(process) if process else "") or "claude"
+    return _target(process) if process else ""
 
 
 def argv_of(pid):
@@ -73,9 +73,9 @@ def take(store, slug, name, runtime, now_ms, replace_live=False):
     for agent in masters:
         if agent.name in own and agent.name != name:
             store.drop_agent(slug, agent.name)
-    harness = harness_of(pid)
-    model, effort = launch_model.read(harness, argv_of(pid))
     account, validated = launch_of(pid)
+    harness = harness_of(pid) or validated.get("harness", "")
+    model, effort = launch_model.read(harness, argv_of(pid)) if harness else ("", "")
     record = AgentRecord(
         name,
         MASTER,

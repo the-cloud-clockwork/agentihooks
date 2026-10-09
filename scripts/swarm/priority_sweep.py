@@ -19,6 +19,7 @@ CURSOR = "priority-cursor"
 PATH = re.compile(r"([a-z]+)/([^/]+)")
 RESOLVES = "the write resolves what the priority asks"
 WAITS = "the priority still waits"
+CLEARED = "Priority cleared by the swarm: {reason}."
 YES = 0.5
 OPERATOR = "operator"
 SELF = ("swarm", "ledger")
@@ -171,7 +172,7 @@ def _resolve(ledger, slug, row, write, reason):
         ledger.mark_done(slug, row["item"])
     if name == "questions" and write.by == OPERATOR and write.kind == "comment":
         ledger.answer_as_operator(slug, row["item"], write.text)
-    ledger.comment_item(slug, row["item"], f"Priority cleared by the swarm: {reason}.")
+    ledger.comment_item(slug, row["item"], CLEARED.format(reason=reason))
 
 
 def _cleared(row, reason):

@@ -52,10 +52,10 @@ def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, r
         return []
     if agent and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
         if not pending.get("retire_told"):
+            save(store, slug, {**pending, "retire_told": True})
             ledger.notify(
                 slug, "The master reported no hook and its launch could not be retired. Operator action is required."
             )
-            save(store, slug, {**pending, "retire_told": True})
         return [f"could not retire unreported master {agent.name}, retrying next tick"]
     if agent:
         transfers.failed(store, slug, agent)
@@ -63,9 +63,9 @@ def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, r
     if pending["attempt"] == 1 and not pending.get("retry"):
         save(store, slug, {**pending, "name": "", "retry": True, "at": at})
         return [f"lost {agent.name}"] if agent else ["master launch failed, retrying once"]
+    save(store, slug, {**pending, "alerted": True})
     ledger.notify(
         slug,
         "The master reported no hook within two minutes on either launch. Automatic retry is exhausted; operator action is required. The original handoff is retained.",
     )
-    save(store, slug, {**pending, "alerted": True})
     return ["master startup failed twice, raised to the operator"]

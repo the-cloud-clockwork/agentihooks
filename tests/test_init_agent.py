@@ -40,6 +40,7 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
     runtime = tmp_path / "runtime"
     _, profile_env = _profile(monkeypatch, tmp_path)
     prompt = "apostrophe ' quote \" semicolon ; and $(command)"
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
 
     monkeypatch.setattr(
         init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
@@ -888,6 +889,18 @@ def test_a_channel_dry_run_writes_the_negotiation_pin_into_its_launcher(monkeypa
     argv = ["--dir", str(tmp_path), "--agent", "claude", "--inbox-channel", "--dry-run"]
     assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 0
     launcher = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("launcher="))
+    lines = Path(launcher.split("=", 1)[1]).read_text().splitlines()
+    assert "export MCP_PROTOCOL_NEGOTIATION=legacy" in lines
+
+
+def test_a_hand_launch_with_no_account_launches_bare_claude_with_its_channel(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("", "every account is full"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
+    argv = ["--dir", str(tmp_path), "--inbox-channel", "--dry-run"]
+    assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert "agent=claude" in out
+    launcher = next(x for x in out if x.startswith("launcher="))
     lines = Path(launcher.split("=", 1)[1]).read_text().splitlines()
     assert "export MCP_PROTOCOL_NEGOTIATION=legacy" in lines
 
