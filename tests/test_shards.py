@@ -55,7 +55,15 @@ def test_shards_balance_the_stored_durations_per_file():
 
 
 def _committed(*args: str) -> str:
-    return subprocess.run(["git", *args], cwd=_ROOT, check=True, capture_output=True, text=True).stdout
+    root = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=_ROOT, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout
+
+
+def test_committed_reads_from_repository_root_in_nested_copy(monkeypatch):
+    monkeypatch.setattr(__name__ + "._ROOT", _ROOT / "tests")
+    assert _committed("ls-files", ".test_durations").split() == [".test_durations"]
 
 
 def _credential_shaped(nodeids):
@@ -321,6 +329,7 @@ def _warm_package(tmp_path, monkeypatch, files):
     for name, body in files.items():
         (package / f"{name}.py").write_text(body)
     monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
     return package
 
 

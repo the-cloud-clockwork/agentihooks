@@ -70,6 +70,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             "Swarm-v2.md",
             "docker/swarm-node/",
             ".agentihooks/conditions/",
+            ".test_durations",
         ],
         "pytest_add_cli_args_test_selection": tests,
         "pytest_add_cli_args": pytest_args,

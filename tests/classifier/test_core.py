@@ -61,8 +61,8 @@ class FakeFallback:
 def test_first_model_answers(monkeypatch):
     fake = _wire(monkeypatch, ALL_OK)
     result = decide("typo", QUESTIONS, purpose="test")
-    assert result.source == "pplx-decider-v1-27b"
-    assert [c["model"] for c in fake.calls] == ["pplx-decider-v1-27b"]
+    assert result.source == "liquid-d1"
+    assert [c["model"] for c in fake.calls] == ["liquid-d1"]
     assert fake.calls[0]["timeout"] == 5.0
     assert result.answers["trivial"].noul == 0.74
     assert result.latency_ms >= 0
@@ -77,21 +77,21 @@ def test_model_order_follows_the_variable(monkeypatch):
 
 @pytest.mark.parametrize("failure", [http_error(429), http_error(503), TimeoutError(), http_error(400, "context")])
 def test_failover_moves_to_the_next_model(monkeypatch, failure):
-    fake = _wire(monkeypatch, {**ALL_OK, "pplx-decider-v1-27b": failure})
-    assert decide("typo", QUESTIONS, purpose="test").source == "liquid-d1"
-    assert [c["model"] for c in fake.calls] == ["pplx-decider-v1-27b", "liquid-d1"]
+    fake = _wire(monkeypatch, {**ALL_OK, "liquid-d1": failure})
+    assert decide("typo", QUESTIONS, purpose="test").source == "jev-1.13"
+    assert [c["model"] for c in fake.calls] == ["liquid-d1", "jev-1.13"]
 
 
 def test_auth_failure_skips_every_api_model_to_the_fallback(monkeypatch):
-    fake = _wire(monkeypatch, {**ALL_OK, "pplx-decider-v1-27b": http_error(401)})
+    fake = _wire(monkeypatch, {**ALL_OK, "liquid-d1": http_error(401)})
     fallback = FakeFallback()
     result = decide("typo", QUESTIONS, purpose="test", fallbacks=[fallback])
-    assert [c["model"] for c in fake.calls] == ["pplx-decider-v1-27b"]
+    assert [c["model"] for c in fake.calls] == ["liquid-d1"]
     assert (result.source, result.calibrated, fallback.calls) == ("haiku", False, 1)
 
 
 def test_caller_bug_400_raises_and_never_falls_back(monkeypatch):
-    fake = _wire(monkeypatch, {**ALL_OK, "pplx-decider-v1-27b": http_error(400, "invalid_union")})
+    fake = _wire(monkeypatch, {**ALL_OK, "liquid-d1": http_error(400, "invalid_union")})
     fallback = FakeFallback()
     with pytest.raises(ClassifierRequestError):
         decide("typo", QUESTIONS, purpose="test", fallbacks=[fallback])
@@ -108,7 +108,6 @@ def test_invalid_input_raises_before_any_call(monkeypatch):
 
 
 def test_large_state_skips_models_whose_context_is_too_small(monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_MODELS", "liquid-d1,jev-1.13,pplx-decider-v1-27b")
     fake = _wire(monkeypatch, ALL_OK)
     result = decide("x" * 4 * 40_000, QUESTIONS, purpose="test")
     assert result.source == "pplx-decider-v1-27b"
@@ -154,7 +153,7 @@ def test_down_cache_expires_after_its_ttl(monkeypatch):
     os.utime(marker, (old, old))
     assert not down_cache.is_down(60)
     fake = _wire(monkeypatch, ALL_OK)
-    assert decide("typo", QUESTIONS, purpose="test").source == "pplx-decider-v1-27b"
+    assert decide("typo", QUESTIONS, purpose="test").source == "liquid-d1"
     assert len(fake.calls) == 1
 
 
@@ -168,10 +167,27 @@ def test_down_cache_holds_inside_its_ttl():
 
 
 def test_auth_failure_marks_the_down_cache(monkeypatch):
-    _wire(monkeypatch, {**ALL_OK, "pplx-decider-v1-27b": http_error(403)})
+    _wire(monkeypatch, {**ALL_OK, "liquid-d1": http_error(403)})
     with pytest.raises(ClassifierUnavailable):
         decide("typo", QUESTIONS, purpose="test")
     assert down_cache.is_down(120)
+
+
+def test_failure_of_only_the_large_context_model_leaves_the_api_up(monkeypatch):
+    fake = _wire(monkeypatch, {**ALL_OK, "pplx-decider-v1-27b": http_error(404)})
+    with pytest.raises(ClassifierUnavailable):
+        decide("x" * 4 * 40_000, QUESTIONS, purpose="test")
+    assert not down_cache.is_down(120)
+    assert decide("typo", QUESTIONS, purpose="test").source == "liquid-d1"
+    assert [c["model"] for c in fake.calls] == ["pplx-decider-v1-27b", "liquid-d1"]
+
+
+def test_refused_key_on_a_large_input_marks_the_down_cache(monkeypatch):
+    _wire(monkeypatch, {**ALL_OK, "pplx-decider-v1-27b": http_error(401)})
+    with pytest.raises(ClassifierUnavailable):
+        decide("x" * 4 * 40_000, QUESTIONS, purpose="test")
+    assert down_cache.is_down(120)
+    assert [f["model"] for f in down_cache.failures()] == ["pplx-decider-v1-27b"]
 
 
 def test_context_skip_of_every_model_is_not_an_outage(monkeypatch):
@@ -246,7 +262,7 @@ def test_decision_log_line_shape(monkeypatch):
         "api_down_cached",
     }
     assert line["purpose"] == "model-pick"
-    assert line["source"] == "pplx-decider-v1-27b"
+    assert line["source"] == "liquid-d1"
     assert line["calibrated"] is True
     assert line["cost"] == 0.000012
     assert line["answers"] == {"trivial": {"type": "noul", "noul": 0.74}}
@@ -258,10 +274,10 @@ def test_decision_log_line_shape(monkeypatch):
 
 
 def test_key_never_reaches_the_log_or_an_error(monkeypatch, caplog):
-    _wire(monkeypatch, {**ALL_OK, "pplx-decider-v1-27b": http_error(401, f"bad {KEY}"), "liquid-d1": ok()})
+    _wire(monkeypatch, {**ALL_OK, "liquid-d1": http_error(401, f"bad {KEY}"), "jev-1.13": ok()})
     with pytest.raises(ClassifierUnavailable) as err:
         decide({"task": "typo"}, QUESTIONS, purpose="test")
-    _wire(monkeypatch, {**ALL_OK, "pplx-decider-v1-27b": http_error(400, f"invalid {KEY}")})
+    _wire(monkeypatch, {**ALL_OK, "liquid-d1": http_error(400, f"invalid {KEY}")})
     down_cache.clear()
     with pytest.raises(ClassifierRequestError) as bug:
         decide({"task": "typo"}, QUESTIONS, purpose="test")

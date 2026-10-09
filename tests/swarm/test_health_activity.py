@@ -77,6 +77,22 @@ def test_the_pre_tool_hook_records_a_bound_session(monkeypatch, tmp_path):
     assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 1, "act": 0, "since": 1}}
 
 
+def test_native_codex_tool_boundary_refreshes_timestamp_even_when_unclassified(monkeypatch, tmp_path):
+    from hooks import hook_manager
+
+    for key, value in BOUND.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    monkeypatch.setattr(activity, "default_root", lambda: tmp_path)
+    activity.record("Read", {}, BOUND, tmp_path, now_ms=1)
+    hook_manager.on_pre_tool_use(
+        {"session_id": "s1", "tool_name": "functions.exec", "tool_input": {"code": "text(1)"}, "cwd": "/"}
+    )
+    assert activity.last_events("sw", tmp_path)["sw-eng-1"] > 1
+    assert activity.counts("sw", tmp_path) == {}
+
+
 def test_a_torn_line_is_skipped_and_the_rest_still_counts(tmp_path):
     (tmp_path / "sw").mkdir()
     (tmp_path / "sw" / "sw-eng-1.jsonl").write_text('{"kind": "watch"}\n{"kind": "wa\n{"kind": "act"}\n')

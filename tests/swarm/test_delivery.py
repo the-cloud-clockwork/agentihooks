@@ -151,6 +151,26 @@ def test_messages_left_in_the_old_outbox_move_into_the_inbox(store):
     assert not store.redis.exists(outbox)
 
 
+def test_a_dropped_swarm_notice_closes_the_item_and_tells_its_sender(store):
+    box = InboxStore(store.redis)
+    item = box.send("sw-eng-1", "operator", "the docs are merged")
+    assert delivery.post(box, item, lambda: False) is False
+    closed = box.get(item.id)
+    assert (closed.state, closed.reason) == (
+        "cancelled",
+        "cancelled: refused by the ledger page: the swarm notice was dropped",
+    )
+    [notice] = box.pending_items("sw-eng-1")
+    assert notice.text == delivery.REFUSED.format(id=item.id, reason="the swarm notice was dropped")
+
+
+def test_a_shown_item_stays_open_for_its_caller(store):
+    box = InboxStore(store.redis)
+    item = box.send("sw-eng-1", "operator", "the docs are merged")
+    assert delivery.post(box, item, lambda: None) is True
+    assert box.get(item.id).state == "pending"
+
+
 def test_an_outbox_entry_stays_when_moving_it_fails(store):
     class Down:
         def send(self, sender, address, text):

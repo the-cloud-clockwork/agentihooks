@@ -229,6 +229,45 @@ def test_brain_reader_pretool_dispatch(enabled, count, claim, monkeypatch):
         buffer.assert_not_called()
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_amygdala_user_prompt_dispatch(enabled, monkeypatch):
+    from unittest.mock import Mock
+
+    from hooks import config, hook_manager
+
+    monkeypatch.setattr(config, "AMYGDALA_ENABLED", enabled)
+    monkeypatch.setattr(config, "SECRETS_MODE", "off")
+    for flag in (
+        "QUOTA_POLICY_ENABLED",
+        "QUOTA_USAGE_INJECTION_ENABLED",
+        "CI_MANIFESTO_ENABLED",
+        "VOICE_ENABLED",
+        "CONTROLS_BYPASS_ENABLED",
+        "BROADCAST_ENABLED",
+    ):
+        monkeypatch.setattr(config, flag, False)
+    for name in (
+        "_confirm_inbox",
+        "_swarm_heartbeat",
+        "_operator_mode",
+        "_request_trace_flush",
+        "_inject_refocus",
+        "_inject_ledger_decision",
+    ):
+        monkeypatch.setattr(hook_manager, name, Mock())
+    monkeypatch.setattr("hooks.context.rules_refresh.maybe_inject", Mock())
+    monkeypatch.setattr("hooks.context.enforcement.get_user_prompt_enforcements", Mock(return_value=""))
+    check = Mock()
+    monkeypatch.setattr("hooks.context.amygdala_hook.check_amygdala", check)
+
+    hook_manager.on_user_prompt_submit({"session_id": "session", "prompt": "", "cwd": ""})
+
+    if enabled:
+        check.assert_called_once_with("session")
+    else:
+        check.assert_not_called()
+
+
 class TestBlockActionIntegration:
     """Integration tests: BlockAction propagates through main() with exit 2."""
 
