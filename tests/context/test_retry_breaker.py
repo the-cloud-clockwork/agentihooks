@@ -459,7 +459,7 @@ _PREPUSH_FAILED = (
 class TestNativeShellOutcomes:
     """Codex sends shell output as a bare string and Claude as a dict, neither with an exit code."""
 
-    _COMMAND = "/home/iamroot/dev/tcc-ecosystem/.venv/bin/python -m scripts.ci_prepush"
+    _COMMAND = "python -m scripts.ci_prepush"
 
     def _payload(self, response, session_id):
         return {

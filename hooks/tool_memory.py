@@ -84,8 +84,8 @@ FALSE_POSITIVE_PATTERNS = [
     "finding 0 errors",
 ]
 
-# Shell results carry no exit code on Codex or Claude, so a reported zero count is no failure evidence.
-_ZERO_COUNT_RE = re.compile(r"\b0 errors?\b")
+# Codex and Claude shell results carry no exit code.
+_ZERO_COUNT_RE = re.compile(r"(?<![\w.])0 errors?\b")
 
 # Their success responses echo file content, so any file mentioning "error"
 # or "not found" would read as a failure under string matching.
@@ -146,15 +146,16 @@ def _is_error(tool_result, strict=False):
             return False, ""
 
     # String pattern matching (Bash tools only — structured output)
-    result_str = _ZERO_COUNT_RE.sub("", str(tool_result).lower())
+    result_str = str(tool_result).lower()
 
     # Check false positives first
     for fp in FALSE_POSITIVE_PATTERNS:
         if fp in result_str:
             return False, ""
 
+    counted = _ZERO_COUNT_RE.sub("", result_str)
     for pattern in ERROR_PATTERNS:
-        if pattern in result_str:
+        if pattern in counted:
             return True, str(tool_result)[:200]
 
     return False, ""
