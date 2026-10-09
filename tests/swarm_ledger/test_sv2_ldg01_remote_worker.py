@@ -130,6 +130,15 @@ def test_a_remote_read_refused_with_a_client_error_is_not_retried(remote):
     sleep.assert_not_called()
 
 
+def test_a_refusal_body_that_is_not_utf8_is_shown_with_replacement_characters(remote):
+    error = urllib.error.HTTPError("u", 400, "Refused", {}, io.BytesIO(b"\xffbad"))
+    with (
+        patch.object(ledger, "request", side_effect=error),
+        pytest.raises(SystemExit, match="^server refused: 400 �bad$"),
+    ):
+        ledger.call(SLUG)
+
+
 def test_a_request_uses_the_bounded_timeout_by_default(remote):
     client = Mock()
     client.return_value.snapshot.return_value = {"tasks": []}

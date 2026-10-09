@@ -77,6 +77,7 @@ LEDGER_AUTOSTART=0 (never start a server on a failed request).
 import argparse
 import collections
 import functools
+import itertools
 import json
 import os
 import subprocess
@@ -235,16 +236,16 @@ def remote_call(slug, ops, service):
 
 
 def retried(read, attempts):
-    for attempt in range(1, attempts + 1):
+    for attempt in itertools.count(1):
         try:
             return read()
         except urllib.error.HTTPError as exc:
             if exc.code == 403 and CREDENTIAL_REFUSED in refusal_text(exc):
                 raise unauthenticated("the ledger server refused the credential") from None
-            if exc.code < 500 or attempt == attempts:
+            if exc.code < 500 or attempt >= attempts:
                 raise
         except OSError:
-            if attempt == attempts:
+            if attempt >= attempts:
                 raise
         time.sleep(REMOTE_READ_PAUSE * attempt)
 
