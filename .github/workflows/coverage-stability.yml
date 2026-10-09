@@ -11,6 +11,7 @@ on:
     branches: [dev]
     paths:
       - .github/workflows/coverage-stability.yml
+      - tests/coverage_grade.py
       - tests/coverage_stability.py
 
 concurrency:
