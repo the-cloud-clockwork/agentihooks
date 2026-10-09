@@ -50,10 +50,34 @@ def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
                 pipe.multi()
                 pipe.set(key, json.dumps(asdict(renewed)), px=TTL_MS)
                 pipe.set(epochs, epoch)
+                if held is None or held.expires_at <= at:
+                    pipe.incr(store.key(slug, "controller-leader-changes"))
                 pipe.execute()
                 return renewed if keeper == owner else None
             except WatchError:
                 continue
+
+
+def renew(store: RedisStore, slug: str, held: Lease) -> Lease | None:
+    from redis.exceptions import WatchError
+
+    key = store.key(slug, "control-owner")
+    for _ in range(8):
+        with store.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key)
+                raw, at = pipe.get(key), now_ms(store)
+                live = Lease(**json.loads(raw)) if raw and raw.startswith("{") else None
+                if live is None or live.expires_at <= at or (live.owner, live.epoch) != (held.owner, held.epoch):
+                    return None
+                renewed = Lease(held.owner, held.epoch, at + TTL_MS)
+                pipe.multi()
+                pipe.set(key, json.dumps(asdict(renewed)), px=TTL_MS)
+                pipe.execute()
+                return renewed
+            except WatchError:
+                continue
+    raise SwarmError("controller lease kept changing; renewal was not committed")
 
 
 def require(store: RedisStore, slug: str, held: Lease) -> None:
