@@ -22,12 +22,12 @@ jobs:
     outputs:
       open: ${{ steps.open.outputs.open }}
     steps:
-      - name: Skip when the branch already has an open pull request
+      - name: Skip when the branch already has an open pull request into dev
         id: open
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          count=$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f "head=$GITHUB_REPOSITORY_OWNER:$GITHUB_REF_NAME" --jq length)
+          count=$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f "head=$GITHUB_REPOSITORY_OWNER:$GITHUB_REF_NAME" --jq '[.[] | select(.base.ref == "dev")] | length')
           if [[ $count == 0 ]]; then echo open=false; else echo open=true; fi >> "$GITHUB_OUTPUT"
 
   mutation:

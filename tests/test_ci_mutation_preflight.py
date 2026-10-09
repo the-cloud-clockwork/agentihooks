@@ -27,6 +27,7 @@ def test_preflight_skips_a_branch_with_an_open_pull_request():
     assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
     assert "head=$GITHUB_REPOSITORY_OWNER:$GITHUB_REF_NAME" in step["run"]
     assert "state=open" in step["run"]
+    assert """--jq '[.[] | select(.base.ref == "dev")] | length'""" in step["run"]
     assert jobs["mutation"]["needs"] == "pull-request"
     assert jobs["mutation"]["if"] == "${{ needs.pull-request.outputs.open == 'false' }}"
 

@@ -38,7 +38,8 @@ def mutation_diff(path: str, original: str, mutated: str, start: int) -> str:
     after = mutated.splitlines()
     lines = [f"--- {path}", "+++ mutant"]
     for group in SequenceMatcher(a=before, b=after, autojunk=False).get_grouped_opcodes(1):
-        lines.append(f"@@ line {start + group[0][1]} @@")
+        first, last = group[0], group[-1]
+        lines.append(f"@@ -{start + first[1]},{last[2] - first[1]} +{start + first[3]},{last[4] - first[3]} @@")
         for tag, first, last, low, high in group:
             lines += [f"{' ' if tag == 'equal' else '-'}{line}" for line in before[first:last]]
             if tag != "equal":
@@ -119,8 +120,12 @@ def survivor_text(report: dict) -> str:
     for row in report["failures"]:
         key = f"{report['path']}:{row['name']}:{row['fingerprint']}"
         lines = ", ".join(map(str, row["lines"]))
-        clearance = clearance_path(Path(), key).as_posix()
-        blocks.append(f"{row['status']} on lines {lines}: {key}\nclearance file: {clearance}\n{row['diff']}")
+        if row["status"] in {"survived", "no tests"}:
+            record = json.dumps({key: {"reader": "<reader>", "reason": "<reason>"}})
+            action = f"kill it with a test or clear it in {clearance_path(Path(), key).as_posix()} as {record}"
+        else:
+            action = "incomplete result: rerun the mutation run"
+        blocks.append(f"{row['status']} on lines {lines}: {key}\n{action}\n{row['diff']}")
     return "\n\n".join(blocks)
 
 

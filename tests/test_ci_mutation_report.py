@@ -107,7 +107,9 @@ def test_report_keeps_the_unified_diff_of_every_unkilled_mutant(tmp_path, monkey
     (tmp_path / "mutants/hooks/sample.py.meta").write_text(json.dumps({**meta, "estimated_durations_by_key": {}}))
     monkeypatch.chdir(tmp_path)
     [row] = collect_results(Path("hooks/sample.py"))
-    assert row["diff"] == "--- hooks/sample.py\n+++ mutant\n@@ line 4 @@\n     first = 1\n-    return 7\n+    return 8"
+    assert (
+        row["diff"] == "--- hooks/sample.py\n+++ mutant\n@@ -4,2 +4,2 @@\n     first = 1\n-    return 7\n+    return 8"
+    )
 
 
 def test_survivor_text_prints_each_failure_with_its_diff_and_clearance_file():
@@ -122,17 +124,40 @@ def test_survivor_text_prints_each_failure_with_its_diff_and_clearance_file():
             "diff": "-a\n+b",
         },
         {"name": "hooks.sample.x_f__mutmut_2", "status": "no tests", "lines": [3, 4], "fingerprint": "d", "diff": "-c"},
+        {"name": "hooks.sample.x_f__mutmut_3", "status": "timeout", "lines": [5], "fingerprint": "e", "diff": "+e"},
     ]
     report = {"path": "hooks/sample.py", "failures": rows}
     key = "hooks/sample.py:hooks.sample.x_f__mutmut_1:abc"
     other = "hooks/sample.py:hooks.sample.x_f__mutmut_2:d"
     digest = hashlib.sha256(key.encode()).hexdigest()
     other_digest = hashlib.sha256(other.encode()).hexdigest()
+    shape = '{"reader": "<reader>", "reason": "<reason>"}'
     assert survivor_text(report) == (
-        f"survived on lines 2: {key}\nclearance file: mutation-clearances/{digest}.json\n-a\n+b\n\n"
-        f"no tests on lines 3, 4: {other}\nclearance file: mutation-clearances/{other_digest}.json\n-c"
+        f"survived on lines 2: {key}\nkill it with a test or clear it in mutation-clearances/{digest}.json"
+        f' as {{"{key}": {shape}}}\n-a\n+b\n\n'
+        f"no tests on lines 3, 4: {other}\nkill it with a test or clear it in"
+        f' mutation-clearances/{other_digest}.json as {{"{other}": {shape}}}\n-c\n\n'
+        "timeout on lines 5: hooks/sample.py:hooks.sample.x_f__mutmut_3:e\n"
+        "incomplete result: rerun the mutation run\n+e"
     )
     assert survivor_text({"path": "hooks/sample.py", "failures": []}) == ""
+
+
+def test_printed_clearance_record_clears_the_survivor(tmp_path):
+    import json
+
+    from scripts.ci_mutation.clearances import load_clearances
+    from scripts.ci_mutation.report import survivor_text
+
+    row = {"name": "hooks.sample.x_f__mutmut_1", "status": "survived", "lines": [2], "fingerprint": "abc", "diff": ""}
+    advice = survivor_text({"path": "hooks/sample.py", "failures": [row]}).splitlines()[1]
+    path, _, record = advice.removeprefix("kill it with a test or clear it in ").partition(" as ")
+    ruling = record.replace("<reader>", "Standards").replace("<reason>", "No observable effect")
+    (tmp_path / path).parent.mkdir()
+    (tmp_path / path).write_text(ruling)
+    cleared = load_clearances(tmp_path)
+    assert cleared == json.loads(ruling)
+    assert evaluate("hooks/sample.py", [row], {2}, cleared)["failures"] == []
 
 
 def test_survivor_diff_of_a_long_function_shows_only_the_changed_lines():
@@ -141,8 +166,8 @@ def test_survivor_diff_of_a_long_function_shows_only_the_changed_lines():
     before = ["def f():", *["    same = 1"] * 210, "    return 2"]
     after = ["def f():", "    same = 2", *["    same = 1"] * 210, "    return 3"]
     assert mutation_diff("hooks/a.py", "\n".join(before), "\n".join(after), 5) == (
-        "--- hooks/a.py\n+++ mutant\n@@ line 5 @@\n def f():\n+    same = 2\n     same = 1\n"
-        "@@ line 215 @@\n     same = 1\n-    return 2\n+    return 3"
+        "--- hooks/a.py\n+++ mutant\n@@ -5,2 +5,3 @@\n def f():\n+    same = 2\n     same = 1\n"
+        "@@ -215,2 +216,2 @@\n     same = 1\n-    return 2\n+    return 3"
     )
 
 
