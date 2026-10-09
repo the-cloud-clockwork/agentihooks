@@ -1,7 +1,7 @@
 import pytest
 
 from scripts.swarm_ledger import ledger_core as core
-from scripts.swarm_ledger import ledger_tasks, new_ledger
+from scripts.swarm_ledger import ledger_artifacts, ledger_tasks, new_ledger
 from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.plan_slices import anchored
 
@@ -95,7 +95,9 @@ def test_moving_phase_preserves_an_explicit_replacement_plan_link():
 
 @pytest.mark.parametrize("slice_name", ["new", "shared"])
 def test_moving_phase_recomputes_supplied_slice_from_the_new_phase_plan(slice_name):
-    state = anchored(SLUG, "new", "shared", phase="p2")
+    if slice_name == "shared":
+        assert update(plan_slice="shared")[1] == []
+    state = anchored(SLUG, "shared", "new", phase="p2")
     url = state["phases"][1]["plan_ref"]["artifact"]
     phase_plan("p2", url)
     state, rejected = update(phase="p2", plan_slice=slice_name)
@@ -103,7 +105,7 @@ def test_moving_phase_recomputes_supplied_slice_from_the_new_phase_plan(slice_na
     moved = task(state)
     assert moved["phase"] == "p2"
     assert moved["plan_slice"] == slice_name
-    assert moved["plan_lines"] == ("2-3" if slice_name == "new" else "4-5")
+    assert moved["plan_lines"] == ("4-5" if slice_name == "new" else "2-3")
     assert moved["plan_url"] == url
 
 
@@ -119,4 +121,34 @@ def test_a_refused_move_keeps_the_existing_plan_metadata():
     before = task(core.sync(SLUG)[0]).copy()
     state, rejected = update(phase="p2")
     assert rejected == ["move-phase"]
+    assert task(state) == before
+
+
+
+def test_replacement_slice_uses_the_destination_link_without_a_plan_reference():
+    file = ledger_artifacts.store(SLUG, "destination.md", b"# Plan\n<!-- slice: new -->\nBuild new feature\n")
+    op = {"op": "artifact_add", "id": "destination", "by": MASTER, "task": "", "title": "Plan", "file": file, "plan": True}
+    core.check_op(op)
+    assert core.sync(SLUG, ops=[op])[1] == []
+    url = f"http://127.0.0.1:8765/artifacts/{SLUG}/{file['id']}"
+    phase_plan("p2", url)
+    state, rejected = update(phase="p2", plan_slice="new")
+    assert rejected == []
+    assert task(state)["plan_slice"] == "new"
+    assert task(state)["plan_lines"] == "2-3"
+    assert task(state)["plan_url"] == url
+
+
+def test_moving_phase_discards_explicit_lines_without_a_replacement_slice():
+    state, rejected = update(phase="p2", plan_lines="8-9")
+    assert rejected == []
+    assert task(state).get("plan_lines", "") == ""
+    assert task(state).get("plan_slice", "") == ""
+
+
+def test_an_invalid_replacement_slice_keeps_the_original_task():
+    anchored(SLUG, "new", phase="p2")
+    before = task(core.sync(SLUG)[0]).copy()
+    state, rejected = update(phase="p2", plan_slice="missing")
+    assert rejected == ["move-phase-plan_slice"]
     assert task(state) == before

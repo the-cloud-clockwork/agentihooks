@@ -466,18 +466,30 @@ def complete_outcome(doc: dict, op: dict, ctx: object, outcome: dict, actor: str
     return True
 
 
+def _move_plan(doc: dict, task: dict, fields: dict, phase: dict) -> None:
+    if "phase" not in fields or fields["phase"] == task.get("phase"):
+        return
+    fields["plan_lines"] = ""
+    source = next((p for p in doc.get("phases", []) if p["id"] == task.get("phase")), {})
+    if "plan_url" not in fields and (fields.get("plan_slice") or task.get("plan_url") == source.get("plan_url")):
+        fields["plan_url"] = phase.get("plan_url", "") if fields.get("plan_slice") else ""
+    fields.setdefault("plan_slice", "")
+
+
 def _set_slice(doc: dict, op: dict, ctx) -> bool:
     fields = op["fields"]
-    if "plan_slice" not in fields:
-        return True
+    supplied_slice = "plan_slice" in fields
     task_id = op["item"].split("/")[1]
     task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
     if task is None or (op.get("if_state") and task.get("state", "open") not in op["if_state"]):
         return True
-    from scripts.swarm_ledger import plan_ranges
-
     target = fields.get("phase", task.get("phase"))
     phase = next((p for p in doc.get("phases", []) if p["id"] == target), {})
+    _move_plan(doc, task, fields, phase)
+    if not supplied_slice:
+        return True
+    from scripts.swarm_ledger import plan_ranges
+
     try:
         fields["plan_lines"] = plan_ranges.task_slice(
             doc, phase, fields["plan_slice"], fields.get("plan_url", task.get("plan_url", ""))
