@@ -51,6 +51,11 @@ redis:
       ephemeral-storage: 256Mi
 
 controller:
+  livenessProbe:
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
   env: {}
   resources:
     requests:

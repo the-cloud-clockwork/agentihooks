@@ -93,6 +93,7 @@ if [[ $restarts != 1 ]]; then
   printf 'the liveness probe never restarted the frozen controller (restarts: %s)\n' "$restarts" >&2
   exit 1
 fi
+printf 'liveness probe restarted the frozen controller\n'
 retaken=""
 for _ in $(seq 60); do
   held="$(read_lease)" || held="{}"
