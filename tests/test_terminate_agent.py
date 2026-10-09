@@ -100,6 +100,7 @@ def test_terminate_uses_process_group(monkeypatch):
 
 
 def test_terminate_waits_for_the_group_to_exit(monkeypatch):
+    from types import SimpleNamespace
     from unittest.mock import Mock
 
     from scripts import terminate_agent
@@ -108,9 +109,8 @@ def test_terminate_waits_for_the_group_to_exit(monkeypatch):
     alive = Mock(side_effect=[[item.process], [], [], []])
     monkeypatch.setattr(terminate_agent, "_alive", alive)
     monotonic = Mock(side_effect=[0.0, 0.0, 0.1])
-    monkeypatch.setattr(terminate_agent.time, "monotonic", monotonic)
     sleep = Mock()
-    monkeypatch.setattr(terminate_agent.time, "sleep", sleep)
+    monkeypatch.setattr(terminate_agent, "time", SimpleNamespace(monotonic=monotonic, sleep=sleep))
     kill = Mock()
     monkeypatch.setattr(terminate_agent.os, "killpg", kill)
 
