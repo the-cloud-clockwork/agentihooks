@@ -3,7 +3,7 @@
   "dependency": "SV2-CTL-03",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2050",
-  "tested_commit": "a3610af8acf974a2c378d1b26a9fccbd4f346635",
+  "tested_commit": "1fda038ec3f7aa89770c66d407427b01883820ea",
   "status": "fixture-qualified-awaiting-ci",
   "evidence_class": "Mocked Redis (fakeredis), a fake clock and a fake Pod source that emits list, watch, expired cursor, connection reset and deletion events; no Kubernetes API, node autoscaler or EC2 call was made.",
   "interfaces": [
@@ -21,18 +21,18 @@
   },
   "authority": "Every reconcile and every delete re-checks the scoped controller grant and the lease through the controller authority check. The owner label value derives from the swarm slug, never from a Pod name or display label. A Pod lacking the owner label is never listed; a Pod with another owner, an empty execution id or a twin for one execution is quarantined, never deleted. Case B revokes the grant mid run: reconcile refuses with the exact grant error and deletes nothing.",
   "states": {
-    "observed": "Cases A, B and C each passed twice from independent fake Redis servers and Pod sources with identical outputs. Controller, watch and size limit tests passed, 85 in total.",
+    "observed": "Cases A, B and C each passed twice from independent fake Redis servers and Pod sources with identical outputs. Controller, watch and size limit tests passed, 87 in total.",
     "accepted": "A restarted controller matches the existing managed Pod, deletes only the managed orphan and launches nothing; unlabelled lookalikes are never listed, foreign owners and ambiguous Pods leave protected state unchanged; an expired cursor or a connection reset relists, and a delayed deletion of an old incarnation leaves the newer Pod matched.",
     "committed": "Code and fixture inputs are at tested_commit.",
     "externally_verified": "None: no Kubernetes Pod source is wired and no live G3 deployment was exercised."
   },
   "validation": {
     "command": "python -m pytest tests/test_swarm_v2_controller.py tests/test_swarm_v2_watch.py tests/test_size_limits.py -q -n 2",
-    "output": "85 passed",
+    "output": "87 passed in the controller, watch and size limit modules, plus the evidence module, 205 in total after merging dev",
     "lint": "ruff check passed on changed Python files",
     "format": "ruff format check passed on changed Python files",
     "review": "Standards and Spec readers round one: superseded generation deletion, unmeasured case fields, missing connection reset and grant cases, unfenced count write, unused view owner and a same name fixture collision fixed with tests; the lease to delete window and the launch labelling are recorded as limitations; round two added a grant revoked between read and delete and a lease takeover inside the delete that leaves the new leader counts untouched, and unbundled the reconciler arguments; review closed after round three: the launch labelling Spec finding was upheld as follow up issue 2078, the lease to delete window was accepted by the Standards reader as a recorded residual",
-    "mutation": "Pending the pull request CI run"
+    "mutation": "First CI run 37901993432: 13 survivors (12 watch, 1 controller); 11 killed by new tests for per class accumulation, watch selector and cursor arguments and default orphan cleanup, 2 equivalent empty string defaults removed; next CI run qualifies"
   },
   "cases": {
     "a": "evidence/SV2-CTL-04/a-result.json",

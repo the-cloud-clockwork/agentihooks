@@ -158,11 +158,23 @@ ASK = (
     'agentihooks ledger --slug {slug} --as {name} question add "<the question in plain words>" '
     "and keep working; the master answers it or raises it to the operator."
 )
+MASTER_ASK = (
+    "The operator is not present in this pane, so the question tool is off. Never write the questions as chat text. "
+    "Say only one short line, type operator on to answer the questions here, or leave them in Priorities with "
+    'agentihooks ledger --slug {slug} --as {name} priority add <item> "<the ask in plain words>".'
+)
 
 
-def test_while_off_the_question_tool_is_refused_and_the_refusal_names_the_ledger_command():
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=100) == ASK.format(
+def test_while_off_the_master_is_told_one_operator_on_line_or_priorities():
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=100) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
+    )
+
+
+def test_while_off_a_non_master_is_refused_and_the_refusal_names_the_ledger_command():
+    env = {**SWARM, "AGENTIHOOKS_AGENT_NAME": "engineer@a1-master@"}
+    assert operator_mode.question_block("AskUserQuestion", "s1", env, now=100) == ASK.format(
+        slug="demo", name="engineer@a1-master@"
     )
 
 
@@ -202,7 +214,7 @@ def test_the_pre_tool_hook_blocks_the_question_tool_with_the_refusal(monkeypatch
     payload = {"session_id": "s9", "tool_name": "AskUserQuestion", "tool_input": {"questions": []}}
     with pytest.raises(hook_manager.BlockAction) as blocked:
         hook_manager.on_pre_tool_use(payload)
-    assert str(blocked.value) == ASK.format(slug="demo", name="master@a1-1")
+    assert str(blocked.value) == MASTER_ASK.format(slug="demo", name="master@a1-1")
 
 
 def test_the_pre_tool_hook_blocks_the_codex_question_tool_in_plan_and_default_mode(monkeypatch):
@@ -216,7 +228,7 @@ def test_the_pre_tool_hook_blocks_the_codex_question_tool_in_plan_and_default_mo
     )
     with pytest.raises(hook_manager.BlockAction) as blocked:
         hook_manager.on_pre_tool_use(payload)
-    assert str(blocked.value) == ASK.format(slug="demo", name="master@a1-1")
+    assert str(blocked.value) == MASTER_ASK.format(slug="demo", name="master@a1-1")
 
 
 def test_a_failing_question_check_is_logged_and_lets_the_call_through(monkeypatch):
@@ -289,7 +301,9 @@ def test_a_typed_prompt_uncaps_only_its_reply_turn(monkeypatch, capsys):
     assert expected in next_turn
     assert typed_notice not in next_turn
     assert [operator_mode.reminder("s1", SWARM) for _ in range(2)] == ["", expected]
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == ASK.format(slug="demo", name="master@a1-1")
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
+        slug="demo", name="master@a1-1"
+    )
 
 
 def test_a_typed_prompt_opens_the_question_tool_and_a_woken_turn_closes_it(monkeypatch, capsys):
@@ -301,7 +315,7 @@ def test_a_typed_prompt_opens_the_question_tool_and_a_woken_turn_closes_it(monke
         run_prompt(monkeypatch, capsys, "s1", woken)
         with pytest.raises(hook_manager.BlockAction) as blocked:
             hook_manager.on_pre_tool_use(payload)
-        assert str(blocked.value) == ASK.format(slug="demo", name="master@a1-1")
+        assert str(blocked.value) == MASTER_ASK.format(slug="demo", name="master@a1-1")
 
 
 def test_the_question_tool_follows_the_typed_turn_window(monkeypatch):
@@ -309,10 +323,10 @@ def test_the_question_tool_follows_the_typed_turn_window(monkeypatch):
         monkeypatch.setenv(key, value)
     operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100)
     assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=100 + WINDOW - 1) == ""
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=100 + WINDOW) == ASK.format(
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=100 + WINDOW) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
     )
-    assert operator_mode.question_block("AskUserQuestion", "", SWARM, now=101) == ASK.format(
+    assert operator_mode.question_block("AskUserQuestion", "", SWARM, now=101) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
     )
 
@@ -326,7 +340,7 @@ def test_the_typed_turn_notice_is_exact_and_operator_off_gives_only_the_away_not
         "Operator off: the operator is not present in this pane.\n" + REMINDER
     )
     assert [operator_mode.reminder("s1", SWARM, now=102) for _ in range(2)] == ["", REMINDER]
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=102) == ASK.format(
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=102) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
     )
 

@@ -15,13 +15,21 @@ def managed(name, execution_id, uid=None, deleting=False):
 class Source:
     def __init__(self, pods, version="10"):
         self.pods, self.version = {pod.uid: pod for pod in pods}, version
+<<<<<<< HEAD
         self.events, self.expire, self.lists = [], False, 0
+=======
+        self.events, self.expire, self.lists, self.watches = [], False, 0, []
+>>>>>>> origin/dev
 
     def list_pods(self, selector):
         self.lists += 1
         return list(self.pods.values()), self.version
 
     def watch_pods(self, selector, resource_version):
+<<<<<<< HEAD
+=======
+        self.watches.append((selector, resource_version))
+>>>>>>> origin/dev
         if self.expire:
             self.expire = False
             raise CursorExpired(resource_version)
@@ -120,6 +128,34 @@ def test_delayed_deletion_of_an_old_incarnation_keeps_the_new_one():
     view.sync()
     assert [pod.uid for pod in view.pods()] == ["new"]
     assert view.resource_version == "12"
+<<<<<<< HEAD
+=======
+    assert source.watches == [(watch.OWNER_LABEL, "10")]
+
+
+def test_every_class_accumulates_across_pods():
+    pods = [
+        Pod("blank-1", "uid-blank-1", {watch.OWNER_LABEL: OWNER}),
+        Pod("blank-2", "uid-blank-2", {watch.OWNER_LABEL: OWNER}),
+        managed("twin-1", "exec-t"),
+        managed("twin-2", "exec-t"),
+        managed("gone-1", "exec-d1", deleting=True),
+        managed("gone-2", "exec-d2", deleting=True),
+        managed("old-1", "exec-s1"),
+        managed("old-2", "exec-s2"),
+        managed("orphan-1", "exec-o1"),
+        managed("orphan-2", "exec-o2"),
+    ]
+    plan = Reconciler(OWNER, cleanup=True).plan(set(), pods, {"exec-s1", "exec-s2"})
+    assert plan.counts() == {
+        "managed_orphan": 2,
+        "missing_pod": 0,
+        "foreign": 0,
+        "ambiguous": 4,
+        "terminating": 2,
+        "superseded": 2,
+    }
+>>>>>>> origin/dev
 
 
 def test_restart_converges_to_the_same_plan():

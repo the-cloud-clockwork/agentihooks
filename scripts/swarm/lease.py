@@ -1,4 +1,5 @@
 import json
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -7,8 +8,25 @@ from dataclasses import asdict, dataclass
 from scripts.swarm.store import RedisStore, SwarmError
 
 TICK_MS = 60_000
-TTL_MS = 3 * TICK_MS
+TICK_REFUSAL = "AGENTIHOOKS_CONTROLLER_TICK_SECONDS must be at least 1 second"
 EPOCH = ContextVar("controller_epoch", default=None)
+
+
+def tick_ms() -> int:
+    seconds = os.environ.get("AGENTIHOOKS_CONTROLLER_TICK_SECONDS")
+    if not seconds:
+        return TICK_MS
+    try:
+        ms = round(float(seconds) * 1000)
+    except (ValueError, OverflowError) as exc:
+        raise SwarmError(TICK_REFUSAL) from exc
+    if ms < 1000:
+        raise SwarmError(TICK_REFUSAL)
+    return ms
+
+
+def ttl_ms() -> int:
+    return 3 * tick_ms()
 
 
 @dataclass(frozen=True)
@@ -46,9 +64,10 @@ def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
                 else:
                     epoch = int(pipe.get(epochs) or 0) + 1
                     keeper = raw if raw and held is None else owner
-                renewed = Lease(keeper, epoch, at + TTL_MS)
+                ttl = ttl_ms()
+                renewed = Lease(keeper, epoch, at + ttl)
                 pipe.multi()
-                pipe.set(key, json.dumps(asdict(renewed)), px=TTL_MS)
+                pipe.set(key, json.dumps(asdict(renewed)), px=ttl)
                 pipe.set(epochs, epoch)
                 if held is None or held.expires_at <= at:
                     pipe.incr(store.key(slug, "controller-leader-changes"))
@@ -73,9 +92,10 @@ def renew(store: RedisStore, slug: str, held: Lease) -> Lease:
             try:
                 pipe.watch(key)
                 require(store, slug, held)
-                renewed = Lease(held.owner, held.epoch, now_ms(store) + TTL_MS)
+                ttl = ttl_ms()
+                renewed = Lease(held.owner, held.epoch, now_ms(store) + ttl)
                 pipe.multi()
-                pipe.set(key, json.dumps(asdict(renewed)), px=TTL_MS)
+                pipe.set(key, json.dumps(asdict(renewed)), px=ttl)
                 pipe.execute()
                 return renewed
             except WatchError:

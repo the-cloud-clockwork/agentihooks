@@ -468,7 +468,8 @@ def relay_to_inbox(slug, state):
 
 def deliver_alerts(slug, state):
     meta = state["_meta"]
-    if not any(a.get("rev") == meta["rev"] for a in state.get("alerts", [])):
+    fresh = [a for a in state.get("alerts", []) if a.get("rev") == meta["rev"] and a["state"] == ledger_alerts.OPEN]
+    if not fresh:
         return []
     try:
         from scripts.inbox.store import connect
@@ -479,7 +480,7 @@ def deliver_alerts(slug, state):
         live = [a for a in RedisStore(inbox.redis).agents(slug) if a.state != "finished"]
         master = operator_mail.master_address(slug, live)
         addresses = {a.name: a.seat or a.name for a in live}
-        alerts = [{**a, "target": addresses.get(inbox.names.resolve(a["target"]), "master")} for a in state["alerts"]]
+        alerts = [{**a, "target": addresses.get(a["target"], "master")} for a in fresh]
         return ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"alert delivery for {slug}: {exc}\n")
@@ -490,7 +491,7 @@ def expire_alerts() -> None:
     at = core.now_ms()
     for summary in ledger_summaries():
         slug = summary["slug"]
-        state = repository.get_document(slug)
+        state = repository.read(slug, "alerts")
         if any(ledger_alerts.expired(alert, at) for alert in state.get("alerts", [])):
             repository.apply_ops(slug)
 
@@ -616,8 +617,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         if self.headers.get("Origin") == FILE_ORIGIN:
             self.send_header("Access-Control-Allow-Origin", FILE_ORIGIN)
-            self.send_header("Access-Control-Allow-Methods", "GET, PUT, POST")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent")
+            self.send_header("Access-Control-Allow-Methods", "GET, PUT, POST, PATCH")
+            self.send_header(
+                "Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent, X-Ledger-Slug"
+            )
             if self.headers.get("Access-Control-Request-Private-Network") == "true":
                 self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
@@ -836,6 +839,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, "not in the bin", "text/plain")
         return self.send(200, json.dumps({"binned": sorted(ledger_bin.entries()), **reply}), "application/json")
 
+    def do_PATCH(self):
+        from scripts.swarm_ledger import api
+
+        if not self.path.startswith("/api/v1/"):
+            return self.send(404, "not found", "text/plain")
+        return api.handle(self, sys.modules[__name__])
+
     def do_PUT(self):
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api
@@ -903,6 +913,7 @@ def watch_ledgers(interval=2.0):
             sys.stderr.write(f"bin purge: {exc}\n")
         if passes % BIN_SWEEP_EVERY == 0:
             bin_closed_without_swarm()
+        if passes and passes % BIN_SWEEP_EVERY == 0:
             expire_alerts()
         sample_streams()
         time.sleep(interval)

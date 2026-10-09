@@ -99,7 +99,7 @@ def test_paused_former_leader_and_delayed_renewal_cannot_mutate(fixture):
     store, (first, second), transport, clock, _ = fixture
     assert first.acquire()
     attempt = first.admit(agent(store))
-    clock[0] += lease.TTL_MS
+    clock[0] += lease.ttl_ms()
     assert second.acquire()
     before = store.redis.hgetall(store.key("fixture", "runtime-operations"))
     assert not first.renew()
@@ -120,7 +120,7 @@ def test_replacement_reconciles_confirmed_effect_before_admission(fixture):
     transport.lose_ack = True
     interrupted = first.execute(request(attempt))
     assert interrupted.phase is Phase.UNKNOWN
-    clock[0] += lease.TTL_MS
+    clock[0] += lease.ttl_ms()
     assert second.acquire()
     assert store.operation_journal.get("fixture", interrupted.operation_id).phase is Phase.APPLIED
     replay = second.execute(request(attempt))
@@ -232,7 +232,7 @@ def test_takeover_during_journal_transaction_refuses_stale_write(fixture, monkey
         def interrupted():
             if once[0]:
                 once[0] = False
-                clock[0] += lease.TTL_MS
+                clock[0] += lease.ttl_ms()
                 assert second.acquire()
             return execute()
 
@@ -257,7 +257,7 @@ def test_takeover_after_observation_prevents_external_apply(fixture, monkeypatch
         result = observe(operation)
         if once[0]:
             once[0] = False
-            clock[0] += lease.TTL_MS
+            clock[0] += lease.ttl_ms()
             assert second.acquire()
         return result
 
@@ -287,7 +287,7 @@ def test_direct_registry_rejects_stale_epoch(fixture):
     store, (first, second), _, clock, _ = fixture
     assert first.acquire()
     candidate = agent(store)
-    clock[0] += lease.TTL_MS
+    clock[0] += lease.ttl_ms()
     assert second.acquire()
     with lease.fencing(first.held.epoch), pytest.raises(SwarmError) as refused:
         execution.ExecutionRegistry(store).start("fixture", candidate, "")
@@ -312,7 +312,7 @@ def test_direct_registry_conflict_at_commit_leaves_only_current_authority(fixtur
             if once[0]:
                 once[0] = False
                 if conflict == "leadership":
-                    clock[0] += lease.TTL_MS
+                    clock[0] += lease.ttl_ms()
                     assert second.acquire()
                 else:
                     execution.ExecutionRegistry(store).start("fixture", successor, "")
@@ -462,7 +462,11 @@ def test_restart_converges_to_existing_pods_and_deletes_only_managed_orphans(fix
             watch.Pod("eng-3", "uid-other", watch.labels("agentihooks-swarm-other", "exec-x")),
         ]
     )
+<<<<<<< HEAD
     clock[0] += lease.TTL_MS
+=======
+    clock[0] += lease.ttl_ms()
+>>>>>>> origin/dev
     restarted = observed(store, transport, grant, pods)
     assert restarted.acquire()
     assert pods.deleted == [("eng-2", "uid-eng-2")]
@@ -481,11 +485,26 @@ def test_restart_converges_to_existing_pods_and_deletes_only_managed_orphans(fix
     assert again.delete == [] and pods.deleted == [("eng-2", "uid-eng-2")]
 
 
+<<<<<<< HEAD
+=======
+def test_orphan_cleanup_is_on_by_default(fixture):
+    store, _, transport, _, grant = fixture
+    pods = Pods([managed("eng-2", "exec-orphan")])
+    controller = Controller(store, "fixture", [transport], lambda: grant["allowed"], pods=watch.PodView(pods))
+    assert controller.acquire()
+    assert pods.deleted == [("eng-2", "uid-eng-2")]
+
+
+>>>>>>> origin/dev
 def test_journal_without_a_pod_is_reported_missing(fixture):
     store, (first, _), transport, clock, grant = fixture
     attempt = launched(store, first)
     restarted = observed(store, transport, grant, Pods([]))
+<<<<<<< HEAD
     clock[0] += lease.TTL_MS
+=======
+    clock[0] += lease.ttl_ms()
+>>>>>>> origin/dev
     assert restarted.acquire()
     assert restarted.reconcile().missing_pods == [attempt.execution_id]
     assert restarted.controller_orphans_by_class()["missing_pod"] == 1
@@ -522,7 +541,11 @@ def test_takeover_before_delete_refuses_the_delete(fixture):
     controller = observed(store, transport, grant, pods)
 
     def takeover():
+<<<<<<< HEAD
         clock[0] += lease.TTL_MS
+=======
+        clock[0] += lease.ttl_ms()
+>>>>>>> origin/dev
         assert second.acquire()
 
     pods.before_read = takeover
@@ -551,7 +574,11 @@ def test_takeover_during_delete_keeps_the_new_leader_counts(fixture):
     pods.pods = {"uid-eng-2": managed("eng-2", "exec-orphan")}
 
     def takeover():
+<<<<<<< HEAD
         clock[0] += lease.TTL_MS
+=======
+        clock[0] += lease.ttl_ms()
+>>>>>>> origin/dev
         assert second.acquire()
 
     pods.before_delete, pods.expire = takeover, True
@@ -565,7 +592,11 @@ def test_disabled_cleanup_keeps_orphans_while_matching_continues(fixture):
     store, (first, _), transport, clock, grant = fixture
     attempt = launched(store, first)
     pods = Pods([managed("eng-1", attempt.execution_id, uid="uid-live"), managed("eng-2", "exec-orphan")])
+<<<<<<< HEAD
     clock[0] += lease.TTL_MS
+=======
+    clock[0] += lease.ttl_ms()
+>>>>>>> origin/dev
     restarted = observed(store, transport, grant, pods, cleanup=False)
     assert restarted.acquire()
     assert pods.deleted == []
@@ -608,7 +639,11 @@ def test_live_pod_of_a_superseded_generation_is_kept(fixture):
     current = first.admit(agent(store), prior.execution_id)
     assert first.release()
     pods = Pods([managed("eng-1", prior.execution_id, uid="uid-prior")])
+<<<<<<< HEAD
     clock[0] += lease.TTL_MS
+=======
+    clock[0] += lease.ttl_ms()
+>>>>>>> origin/dev
     restarted = observed(store, transport, grant, pods)
     assert restarted.acquire()
     plan = restarted.reconcile()

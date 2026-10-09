@@ -182,7 +182,8 @@ def test_rows_run_header_alert_capacity_work_accounts_health_handoffs():
     assert positions == sorted(positions)
     assert 'class="fold sw-command-log" id="command-log"' in box
     assert '<details class="fold sw-fold" id="overlays-fold" open>' in box
-    box = re.sub(r'<details[^>]*id="(command-log|overlays-fold)".*?</details>', "", box, flags=re.S)
+    assert '<details class="fold sw-fold" id="quota-fold" open>' in box
+    box = re.sub(r'<details[^>]*id="(command-log|overlays-fold|quota-fold)".*?</details>', "", box, flags=re.S)
     for gone in ("crew", "needs-you", "swarm-figs", "swarm-work", "restore-box", "<section", "<details"):
         assert gone not in box, gone
 
@@ -515,6 +516,7 @@ def test_the_overlays_box_folds_on_its_header_and_remembers_it(open_page):
     assert page.tab.locator("#swarm-overlays").is_visible()
     page.tab.locator("#overlays-fold > summary").click()
     assert not page.tab.locator("#swarm-overlays").is_visible()
+    page.tab.wait_for_function("() => Object.values(localStorage).some((v) => v.includes('\"overlays-fold\":false'))")
     page.tab.reload()
     page.tab.locator("#swarm-agents tr").first.wait_for(timeout=3000)
     assert page.tab.eval_on_selector("#overlays-fold", "d => d.open") is False
@@ -573,9 +575,9 @@ def test_every_button_is_flat_at_rest(open_page):
 def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(open_page):
     page = open_page()
     assert page.table("swarm-quota") == [
-        ["tccgma", "claude", "—", "92%", "53m", "78%", "4d15h", "—", "2/6", ""],
-        ["luna", "claude", "—", "64%", "2h05m", "51%", "6d00h", "—", "1/4", "MASTER"],
-        ["default", "codex", "—", "—", "—", "61%", "3d10h", "—", "0/—", ""],
+        ["tccgma", "claude", "SUBSCRIPTION", "—", "92%", "53m", "78%", "4d15h", "—", "2", "—", "6", ""],
+        ["luna", "claude", "SUBSCRIPTION", "—", "64%", "2h05m", "51%", "6d00h", "—", "1", "—", "4", "MASTER"],
+        ["default", "codex", "SUBSCRIPTION", "—", "—", "—", "61%", "3d10h", "—", "0", "—", "—", ""],
     ]
     assert page.text("#quota-count").lower() == "3 accounts · probed 2m ago"
 
@@ -603,7 +605,7 @@ def test_the_quota_table_with_its_capacity_line_fits_its_box_at_1920(open_page):
     page = open_page(payload, 1920)
     scroll = page.tab.eval_on_selector("#quota-box .sw-scroll", "s => [s.scrollWidth, s.clientWidth]")
     assert scroll[0] == scroll[1]
-    assert page.table("swarm-quota")[0][2] == "CLOSED"
+    assert page.table("swarm-quota")[0][3] == "CLOSED"
     assert page.text("#quota-capacity").split("\n") == [
         "ENG 2 OF 4 · CI 1 OF 1 · PLAN 0 OF 1",
         "changed 7m ago",
@@ -613,13 +615,13 @@ def test_the_quota_table_with_its_capacity_line_fits_its_box_at_1920(open_page):
     assert abs(table["x"] - line["x"]) < 1
 
 
-def test_the_sessions_cell_reads_plain_value_over_cap(open_page):
+def test_the_sessions_cell_reads_the_plain_session_count(open_page):
     page = open_page()
     parts = page.tab.eval_on_selector_all(
         "#swarm-quota tr:first-child .sw-sessions-value",
         "els => els.map(e => [e.tagName, e.innerText])",
     )
-    assert parts == [["SPAN", "2/6"]]
+    assert parts == [["SPAN", "2"]]
 
 
 def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_page):

@@ -154,6 +154,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/coverage_baseline.py",
         "tests/coverage_ratchet.py",
         "tests/dev_durations.py",
+        "tests/js_lcov.py",
         "tests/refresh_durations.py",
         "tests/shard_budget.py",
         "tests/shard_check.py",
