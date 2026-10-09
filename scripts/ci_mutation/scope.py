@@ -58,6 +58,8 @@ def select_tests(root: Path, source: Path) -> list[str]:
     named = re.compile(rf"(?<![\w.]){re.escape(module)}(?!\w)")
     modules = {}
     for path in sorted((root / "tests").rglob("*.py")):
+        if not path.is_file():
+            continue
         text = path.read_text()
         modules[path] = (text, imported_names(text, path.relative_to(root).parent.parts))
     reaching = {

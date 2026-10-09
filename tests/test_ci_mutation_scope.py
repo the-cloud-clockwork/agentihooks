@@ -87,7 +87,7 @@ def test_a_helper_patching_the_module_by_name_selects_its_importers(tmp_path):
 def test_a_rewritten_test_module_is_selected_again(tmp_path):
     tests = tmp_path / "tests"
     tests.mkdir()
-    (tests / "test_late.py").write_text("pass\n")
+    (tests / "test_late.py").write_text("from hooks.context import aaaaaa\n")
     assert select_tests(tmp_path, Path("hooks/context/sample.py")) == []
     (tests / "test_late.py").write_text("from hooks.context import sample\n")
     assert select_tests(tmp_path, Path("hooks/context/sample.py")) == ["tests/test_late.py"]
