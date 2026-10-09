@@ -303,6 +303,21 @@ def test_block_on_dev_red_says_why_when_the_runs_cannot_be_read(env, capsys, mon
     assert store.redis.hgetall(dev_red.key("sw")) == {}
 
 
+def test_block_on_dev_red_names_an_error_without_stderr(env, capsys, monkeypatch):
+    from scripts.swarm import dev_red
+
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+
+    def missing(repo, run=None):
+        raise FileNotFoundError("no gh")
+
+    monkeypatch.setattr(dev_red, "latest", missing)
+    capsys.readouterr()
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev is red") == 1
+    assert capsys.readouterr().err == "swarm: cannot read the dev Tests runs: no gh\n"
+
+
 def test_a_plain_block_drops_an_earlier_dev_red_cause(env):
     from scripts.swarm import dev_red
 

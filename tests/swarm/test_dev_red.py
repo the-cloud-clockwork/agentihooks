@@ -89,9 +89,11 @@ def test_a_green_dev_run_at_or_after_the_red_one_reopens_the_task_and_comments(s
     store, config, ledger = swarm
     store.redis.hset(dev_red.key("sw"), "t1", "41")
     store.redis.hset(store.key("sw", "started-lives"), "t1", 3)
-    assert dev_red.reopen_pass("sw", config, store, ledger, ledger.rows, gh(runs, [])) == [
+    calls = []
+    assert dev_red.reopen_pass("sw", config, store, ledger, ledger.rows, gh(runs, calls)) == [
         "task t1 reopened, dev Tests passed after the red run that blocked it"
     ]
+    assert [kwargs["cwd"] for _, kwargs in calls] == ["/repo"]
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
     assert ledger.comments == [("sw", "t1", dev_red.REOPENED, "swarm")]
     assert (
@@ -117,6 +119,14 @@ def test_the_task_stays_blocked_while_dev_is_red(swarm, runs):
     assert ledger.rows["t1"]["state"] == "blocked"
     assert ledger.comments == []
     assert store.redis.hgetall(dev_red.key("sw")) == {"t1": "41"}
+
+
+@pytest.mark.parametrize("runs", [[{"id": 2, "conclusion": "failure"}], []])
+def test_no_green_run_reopens_even_the_lowest_red_run(swarm, runs):
+    store, config, ledger = swarm
+    store.redis.hset(dev_red.key("sw"), "t1", "1")
+    assert dev_red.reopen_pass("sw", config, store, ledger, ledger.rows, gh(runs, [])) == []
+    assert ledger.rows["t1"]["state"] == "blocked"
 
 
 @pytest.mark.parametrize("state", ["open", "claimed", "done"])
