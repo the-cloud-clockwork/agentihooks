@@ -11,6 +11,12 @@ SLUG = "demo-2026-01-01"
 FAKE = r"""#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
+if args[3:] == ["show"]:
+    path = os.path.join(os.environ["LEDGER_DIR"], args[2] + ".json")
+    if not os.path.exists(path):
+        sys.exit(f"ledger {args[2]} does not exist")
+    print(os.environ.get("FAKE_SHOW") or open(path).read())
+    sys.exit(0)
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(args) + "\n")
 command = args[5] if len(args) > 5 else ""
@@ -200,10 +206,18 @@ def test_list_clears_resolved_priorities_when_asked(env):
     ]
 
 
-def test_list_reports_a_missing_ledger_with_the_folder_it_read(env):
+def test_list_reports_a_missing_ledger_with_what_the_ledger_command_said(env):
     result = run(env, "list_priorities.py", "nope")
     assert result.returncode == 2
-    assert env["LEDGER_DIR"] in result.stderr
+    assert "ledger nope does not exist" in result.stderr
+    assert "agentihooks ledger list" in result.stderr
+
+
+def test_list_refuses_a_ledger_read_that_is_not_json(env):
+    result = run({**env, "FAKE_SHOW": "server busy"}, "list_priorities.py", SLUG)
+    assert result.returncode == 2
+    assert result.stderr.startswith(f"cannot read ledger {SLUG}: ")
+    assert "Traceback" not in result.stderr
 
 
 def write_plan(tmp_path, entries):
