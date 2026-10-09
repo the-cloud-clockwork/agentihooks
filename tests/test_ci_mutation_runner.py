@@ -176,10 +176,10 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "docs/",
         ".github/",
         "evidence/",
-        "Swarm-v2.md",
         "docker/swarm-node/",
         ".agentihooks/conditions/",
         ".test_durations",
+        "Swarm-v2.md",
     ]
     assert config["tool"]["mutmut"]["pytest_add_cli_args"] == [
         "-q",
@@ -209,6 +209,30 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
     assert not (work / "hooks/__pycache__").exists()
     assert not (work / "hooks/old.pyc").exists()
     assert (work / ".test_durations").read_text() == '{"tests/test_sample.py::t": 1.5}'
+
+
+def test_workspace_carries_the_repository_root_files_into_the_mutants_copy(tmp_path):
+    import tomllib
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "pyproject.toml").write_text('[project]\nreadme = "README.md"\n\n[tool.pytest.ini_options]\n')
+    copied = ("README.md", "LICENSE", "index.md", "compose.yaml", "sonar-project.properties", ".test_durations")
+    for name in (*copied, ".env", ".env.example", ".git"):
+        (root / name).write_text(name)
+    (tmp_path / "outside.txt").write_text("outside")
+    (root / "linked.md").symlink_to(tmp_path / "outside.txt")
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["scripts/other.py"], ["tests/test_ci_workflow.py"])
+    also_copy = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]["also_copy"]
+    assert [name for name in also_copy if not name.endswith("/")] == sorted(copied)
+    for name in copied:
+        assert (work / name).read_text() == name
+    for name in (".env", ".env.example", ".git", "linked.md"):
+        assert not (work / name).exists()
 
 
 def test_workspace_inside_a_copied_folder_is_not_copied_into_itself(tmp_path):
