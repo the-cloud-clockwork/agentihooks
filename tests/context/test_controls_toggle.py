@@ -109,6 +109,12 @@ class TestSetClear:
         assert not is_controls_disabled()
 
 
+@pytest.fixture
+def _outside_a_guarded_repository(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+
+@pytest.mark.usefixtures("_outside_a_guarded_repository")
 class TestBranchGuardIntegration:
     def _check(self, command: str, sid: str = "ctl-test-branch-uniq"):
         from hooks.context.branch_guard import check_branch_guard

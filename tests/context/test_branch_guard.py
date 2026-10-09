@@ -3,6 +3,11 @@
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _outside_a_guarded_repository(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+
 class TestBranchGuard:
     """Test that git commands targeting main/master are blocked."""
 
