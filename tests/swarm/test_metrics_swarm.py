@@ -298,6 +298,48 @@ def test_held_spawns_count_ready_tasks_with_room_but_without_placements(monkeypa
     assert metrics_swarm._held_spawns(None, SLUG, doc(), {}, [AGENT]) == 0
 
 
+def test_a_host_hold_counts_every_waiting_ready_task(monkeypatch):
+    ready = {lane: [] for lane in metrics_swarm.capacity.LANES}
+    ready["eng"] = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+    monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
+    quota = {"configured": {"eng": 3}, "placements": {"eng": [{"index": 0}]}}
+    assert metrics_swarm._held_spawns(None, SLUG, doc(), quota, [AGENT], host_held=True) == 2
+    assert metrics_swarm._held_spawns(None, SLUG, doc(), quota, [AGENT], host_held=False) == 1
+
+
+@pytest.mark.parametrize(
+    ("hold", "reason", "held"),
+    [
+        ("holding spawns: host load room 0, 2 spawned since it was granted: busy", None, 2),
+        (None, "accounts have quota", 1),
+    ],
+)
+def test_the_host_sample_names_a_live_host_hold_or_the_quota_reason(tmp_path, monkeypatch, hold, reason, held):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, ".", 0, 0))
+    decision = {"configured": {"eng": 3}, "placements": {"eng": [{"index": 0}]}, "reason": "accounts have quota"}
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(decision))
+    if hold:
+        store.redis.set(store.key(SLUG, "spawn-hold"), hold)
+    ready = {lane: [] for lane in metrics_swarm.capacity.LANES}
+    ready["eng"] = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+    monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
+    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    store.put_agent(SLUG, AgentRecord(**{**AGENT, "execution_id": ""}))
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        metrics_swarm.record_pass(box, SLUG, NOW, store, doc(), [], {})
+        [row] = box.recent("host_samples", NOW)
+        assert (row["reason"], row["held_spawns"]) == (hold or reason, held)
+    finally:
+        box.close()
+
+
 def test_done_task_is_observed_once_even_when_completion_precedes_the_tick(tmp_path, monkeypatch):
     import fakeredis
 
