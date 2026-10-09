@@ -20,6 +20,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(1, str(HERE.parents[1]))
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SESSIONS = LEDGER_DIR / ".sessions"
+GATE_READS = ("_meta.members", "_meta.events", "tasks", "phases", "followups", "policy")
 SHOWN = 5
 CLI = "agentihooks ledger"
 
@@ -266,8 +267,13 @@ def serve_ledgers():
     import ledger_link
 
     from scripts.swarm_ledger import server_lifetime
+    from scripts.swarm_ledger.repository.sqlite import DATABASE
 
-    if os.environ.get("LEDGER_AUTOSTART") == "0" or ledger_link.remote() or not any(LEDGER_DIR.glob("*.json")):
+    if (
+        os.environ.get("LEDGER_AUTOSTART") == "0"
+        or ledger_link.remote()
+        or (not (LEDGER_DIR / DATABASE).exists() and not any(LEDGER_DIR.glob("*.json")))
+    ):
         return
     try:
         address = ledger_link.address()
@@ -299,10 +305,11 @@ def dispatch(payload):
     handler = HANDLERS.get(payload.get("hook_event_name"))
     if session is None or handler is None:
         return
-    import ledger_core as core
     import ledger_gate
 
-    state = read_json(core.paths(session["slug"])[1])
+    from scripts.swarm_ledger.repository.sqlite import read_ledger
+
+    state = read_ledger(LEDGER_DIR, session["slug"], *GATE_READS)
     if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or ledger_gate.closed(state):
         return
     if session["name"] not in state["_meta"].get("members", {}):

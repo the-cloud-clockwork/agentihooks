@@ -186,6 +186,49 @@ def test_brain_reader_session_start_dispatch(enabled, brain_dispatch, monkeypatc
         inject.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "enabled, count, claim", [(True, 7, True), (True, 7, False), (True, 0, True), (False, 7, True)]
+)
+def test_brain_reader_pretool_dispatch(enabled, count, claim, monkeypatch):
+    from unittest.mock import Mock
+
+    from hooks import config, hook_manager
+    from hooks.targets import emitter
+
+    monkeypatch.setattr(config, "BRAIN_ENABLED", enabled)
+    monkeypatch.setattr(config, "SECRETS_MODE", "off")
+    for flag in (
+        "QUOTA_POLICY_ENABLED",
+        "QUOTA_USAGE_INJECTION_ENABLED",
+        "BROADCAST_ENABLED",
+        "ENFORCEMENT_INJECTION_ENABLED",
+        "RETRY_BREAKER_ENABLED",
+    ):
+        monkeypatch.setattr(config, flag, False)
+    monkeypatch.setattr("hooks.context.enforcement.increment_and_get_count", Mock(return_value=count))
+    monkeypatch.setattr("hooks.targets.capabilities.can_inject_context", Mock(return_value=claim))
+    monkeypatch.setattr("hooks.context.context_recycle.directive", Mock(return_value=None))
+    monkeypatch.setattr("hooks.lifecycle.guard.pretool", Mock(return_value=None))
+    monkeypatch.setattr("hooks.tool_memory.inject_memory", Mock())
+    for name in ("_inbox_blocks", "_refocus_blocks", "_wait_nudge_blocks"):
+        monkeypatch.setattr(hook_manager, name, Mock(return_value=[]))
+    refresh = Mock(return_value="brain refresh")
+    monkeypatch.setattr("hooks.context.brain_adapter.maybe_refresh_on_tool_call", refresh)
+    buffer = Mock()
+    monkeypatch.setattr(emitter, "buffer_context", buffer)
+
+    hook_manager.on_pre_tool_use({"session_id": "session", "tool_name": "Unknown", "tool_input": {}})
+
+    if enabled and count:
+        refresh.assert_called_once_with("session", count, claim_delivery=claim)
+    else:
+        refresh.assert_not_called()
+    if enabled and count and claim:
+        buffer.assert_called_once_with("brain refresh")
+    else:
+        buffer.assert_not_called()
+
+
 class TestBlockActionIntegration:
     """Integration tests: BlockAction propagates through main() with exit 2."""
 

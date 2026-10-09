@@ -1,4 +1,3 @@
-import json
 import os
 import signal
 import subprocess
@@ -11,6 +10,8 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
+
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "caps-2026-01-01"
 
@@ -26,7 +27,7 @@ def make_ledger():
     }
     html_path, json_path = core.paths(SLUG)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)
 
@@ -64,12 +65,13 @@ class EventsCap(unittest.TestCase):
         make_ledger()
 
     def test_events_are_capped_and_the_start_time_does_not_move(self):
-        html_path, json_path = core.paths(SLUG)
-        state = core.loads(json_path.read_text(encoding="utf-8"))
+        from scripts.swarm_ledger.repository import repository
+
+        state = repository.get_document(SLUG)
         state["_meta"]["events"] = [
             {"rev": i, "at": 1000 + i, "by": "operator", "kind": "checked", "target": "x"} for i in range(2500)
         ]
-        core.atomic_write(json_path, json.dumps(state))
+        repository.import_document(SLUG, state, replace=True)
 
         state, _ = core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m-cap", "text": "hi"}])
         self.assertEqual(len(state["_meta"]["events"]), 2000)

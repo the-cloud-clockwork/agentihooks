@@ -10,7 +10,7 @@ SLUG = "autostart-2026-01-01"
 
 @pytest.fixture
 def starts(monkeypatch, ledger_port):
-    monkeypatch.setattr(ledger, "repository", SimpleNamespace(exists=lambda slug: True, read_page=lambda slug: ""))
+    monkeypatch.setattr(ledger, "repository", SimpleNamespace(exists=lambda slug: True, token=lambda slug: "t"))
     monkeypatch.setattr(ledger, "BASE", f"http://127.0.0.1:{ledger_port}")
     seen = []
     monkeypatch.setattr(ledger.subprocess, "run", lambda *args, **kwargs: seen.append((args, kwargs)))

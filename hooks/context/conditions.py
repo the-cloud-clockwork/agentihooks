@@ -30,7 +30,7 @@ _RUNNERS = {".sh": ["bash"], ".bash": ["bash"], ".py": [sys.executable]}
 FILTER_SUFFIX = ".filter.yaml"
 JUDGE, LEDGER_WRITE, INBOX_SEND = "judge", "ledger_write", "inbox_send"
 SYNTHETIC_TOOLS = (JUDGE, LEDGER_WRITE, INBOX_SEND)
-_INDEX_VERSION = 1
+_INDEX_VERSION = 2
 _FRESH_NS = 2_000_000_000
 _CODE_ROOT = Path(__file__).resolve().parents[2]
 _UNSET = object()
@@ -112,7 +112,7 @@ def layer_dirs(state: dict, cwd: str | Path | None = None) -> tuple[list[tuple[s
     bundle = profile_chain.bundle_path(state)
     profile_csv = profile_chain.active_profile(state)
     linked = profile_chain.linked_profiles(state)
-    layers: list[tuple[str, Path]] = []
+    layers: list[tuple[str, Path]] = [("package", profile_chain.BUILT_IN_PROFILES / "package" / "conditions")]
     if bundle is not None:
         layers.append(("bundle", bundle / ".claude" / "conditions"))
     for name, profile_dir in profile_chain.profile_dirs(bundle, profile_csv, linked):

@@ -13,6 +13,10 @@ from unittest.mock import patch
 
 import pytest
 
+for _redis_name in list(os.environ):
+    if "REDIS" in _redis_name.upper():
+        os.environ.pop(_redis_name)
+
 from tests import installer_isolation, ledger_guard, redis_key_guard, swarm_v2_isolation
 from tests.shards import (
     FIRST_SHARD_FILES,
@@ -474,3 +478,18 @@ def sample_tool_use_event():
         "tool_name": "Write",
         "tool_input": {"file_path": "/tmp/test.txt", "content": "hello"},
     }
+
+
+@pytest.fixture(autouse=True)
+def _package_conditions_offline(tmp_path, monkeypatch):
+    from hooks.context import conditions
+
+    real_layers = conditions.layer_dirs
+
+    def isolated_layers(state, cwd=None):
+        layers, probed = real_layers(state, cwd)
+        return [
+            (source, tmp_path / "package-conditions" if source == "package" else path) for source, path in layers
+        ], probed
+
+    monkeypatch.setattr(conditions, "layer_dirs", isolated_layers)

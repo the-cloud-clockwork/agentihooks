@@ -19,6 +19,8 @@ from scripts.swarm.ledger_client import LedgerClient  # noqa: E402
 from scripts.swarm.store import SwarmError  # noqa: E402
 from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
 from scripts.swarm_ledger import ledger_authority as authority  # noqa: E402
+from scripts.swarm_ledger.repository import repository  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 server = ledger_server
 from tests.swarm_ledger.test_media import png  # noqa: E402
@@ -47,7 +49,7 @@ def live():
     port = httpd.server_address[1]
     host = f"127.0.0.1:{port}"
     content = {"title": "Authority", "phases": [{"title": "Proof", "description": "word " * 101}]}
-    page = new_ledger.render(new_ledger.build_doc(content), SLUG, port)
+    page = legacy_page.render(new_ledger.build_doc(content), SLUG, port)
     core.paths(SLUG)[0].write_text(page)
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     with (
@@ -111,6 +113,8 @@ def test_pinned_worker_transport_cannot_create_a_task_as_master(crew):
     assert "t1" not in tasks(ledger.request(SLUG))
     assert reply["_meta"]["warnings"] == [
         "phase p1 description has 101 words, limit 100",
+        f"{WORKER} works in the eng lane and cannot add tasks: propose the work with agentihooks ledger followup "
+        'add "<plain words>" and the master decides',
         f"{WORKER} cannot write as {MASTER}",
     ]
 
@@ -171,7 +175,8 @@ def test_the_operator_credential_keeps_full_administration(crew):
     headers = {"Content-Type": "application/json", "X-Ledger-Token": crew["admin"]}
     status, data, _ = send(crew, "PUT", f"/api/{SLUG}?view=agent", body, **headers)
     assert status == 200
-    assert json.loads(data)["phases"][0]["done"] is True
+    assert json.loads(data)["rejected"] == []
+    assert repository.get_document(SLUG)["phases"][0]["done"] is True
 
 
 def test_the_swarm_client_keeps_service_authority_inside_a_pinned_session(crew):
@@ -203,19 +208,19 @@ def test_the_swarm_client_binds_agent_authored_writes_to_the_session(crew):
 def test_a_credential_for_one_name_refuses_another_agent_header(crew):
     body = json.dumps({"ops": [operation("add", by=OTHER, thread="chat", to="operator", text="Header swap")]})
     headers = {"Content-Type": "application/json", **agent_headers(crew, WORKER, header=OTHER)}
-    before = core.paths(SLUG)[1].read_bytes()
+    before = repository.get_document(SLUG)
     refused = send(crew, "PUT", f"/api/{SLUG}?view=agent", body, **headers)
     assert refused == (403, b"missing or wrong ledger token", "text/plain")
-    assert core.paths(SLUG)[1].read_bytes() == before
+    assert repository.get_document(SLUG) == before
 
 
 def test_a_worker_cannot_send_page_changes(crew):
     body = json.dumps({"changes": [{"path": "title", "value": "Taken"}]})
     headers = {"Content-Type": "application/json", **agent_headers(crew, WORKER)}
-    before = core.paths(SLUG)[1].read_bytes()
+    before = repository.get_document(SLUG)
     refused = send(crew, "PUT", f"/api/{SLUG}?view=agent", body, **headers)
     assert refused == (403, b"page changes need the operator", "text/plain")
-    assert core.paths(SLUG)[1].read_bytes() == before
+    assert repository.get_document(SLUG) == before
 
 
 def test_administrative_swarm_controls_need_the_operator(crew):
@@ -293,8 +298,7 @@ def test_call_prints_the_refusal_when_the_retry_after_starting_the_server_is_ref
     assert str(exit_.value) == f"server refused: 400 {body.decode()}"
 
 
-def test_a_page_without_a_token_sends_an_empty_credential(live):
-    core.paths("tokenless")[0].write_text("<html></html>")
+def test_a_missing_ledger_sends_an_empty_credential(live):
     with patch.dict(os.environ, {"AGENTIHOOKS_SWARM": ""}):
         assert ledger.credentials("tokenless") == {"X-Ledger-Token": ""}
 

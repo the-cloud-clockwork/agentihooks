@@ -39,7 +39,7 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
     if path == "agent-token" and handler.command == "POST":
         return agent_token(handler, server, slug)
     principal = server.authority.principal(
-        server.core.read_token(server.repository.read_page(slug)),
+        server.repository.token(slug),
         slug,
         handler.headers.get("X-Ledger-Token"),
         handler.headers.get("X-Ledger-Agent"),

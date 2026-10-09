@@ -1,10 +1,13 @@
+import datetime
 import json
 from pathlib import Path
 
 import pytest
 
+from scripts.swarm import naming
 from scripts.swarm.store import DEFAULT_URL
 from scripts.swarm_ledger import ledger_creator, new_ledger
+from scripts.swarm_ledger.repository import repository
 
 pytestmark = pytest.mark.unit
 
@@ -43,7 +46,8 @@ def new(monkeypatch, tmp_path, folder, content, *extra, size="small"):
     argv = ["new", "--content", str(content), "--plan", str(plan), "--size", size, "--as", "tester", *extra]
     monkeypatch.setattr("sys.argv", argv)
     new_ledger.main()
-    return json.loads(next(folder.glob("creator-plan-*.json")).read_text())
+    slug = naming.plan_slug(plan, datetime.date.today().isoformat())
+    return repository.get_document(slug)
 
 
 def created(capsys):
@@ -56,7 +60,8 @@ def test_a_swarm_engineer_cannot_create_a_ledger_in_the_shared_folder(monkeypatc
     with pytest.raises(SystemExit) as refused:
         new(monkeypatch, tmp_path, shared(), 3)
     assert str(refused.value) == ledger_creator.CALLER
-    assert not shared().exists() or list(shared().iterdir()) == []
+    slug = naming.plan_slug(tmp_path / "creator-plan.md", datetime.date.today().isoformat())
+    assert not repository.exists(slug)
 
 
 @pytest.mark.parametrize("lane", ["master", "operator"])
@@ -155,7 +160,8 @@ def test_the_home_folder_on_another_port_keeps_the_shared_folder_rule(monkeypatc
     with pytest.raises(SystemExit) as refused:
         new(monkeypatch, tmp_path, shared(), 3)
     assert str(refused.value) == ledger_creator.CALLER
-    assert not shared().exists() or list(shared().iterdir()) == []
+    slug = naming.plan_slug(tmp_path / "creator-plan.md", datetime.date.today().isoformat())
+    assert not repository.exists(slug)
 
 
 def test_the_master_in_the_home_folder_on_another_port_gets_the_pinned_port(monkeypatch, tmp_path, capsys):

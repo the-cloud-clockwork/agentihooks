@@ -115,7 +115,8 @@ def test_two_findings_ask_one_classifier_call_with_two_questions(filters_dir, st
     first = call["questions"]["finding_0"]
     assert first.instructions == (
         "Does this finding go against the filter intent?\n"
-        "Intent: user facing text names no internal ids\nFinding: task flt1\nReason: names a task id"
+        "Intent: user facing text names no internal ids\nFinding: task flt1\nReason: names a task id\n"
+        "Context: task flt1 then task flt2"
     )
     assert (first.true, first.false) == (runner.TRUE, runner.FALSE)
     assert effect.block == (
@@ -178,7 +179,8 @@ def test_classifier_mode_asks_about_the_whole_text(filters_dir, stub):
     fake = stub(yes=True)
     effect = conditions.pre_effect(_write_call("leverage synergies"))
     assert [q.instructions for q in fake.calls[0]["questions"].values()] == [
-        "Does this finding go against the filter intent?\nIntent: no jargon\nFinding: leverage synergies\nReason: whole text"
+        "Does this finding go against the filter intent?\nIntent: no jargon\nFinding: leverage synergies\nReason: whole text\n"
+        "Context: leverage synergies"
     ]
     assert "leverage synergies" in effect.block
 
@@ -354,3 +356,29 @@ def test_a_filter_runs_in_process_and_hands_back_the_runner_result(monkeypatch):
     entry = {"file": "pre-any-x.filter.yaml", "path": "x"}
     assert conditions.execute(entry, "pre", {"tool_name": "Write"}, 1) == {"returncode": 0}
     assert seen == [(entry, "pre", {"tool_name": "Write"}, True)]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "value\n",
+        "value\nunrelated = 2\n",
+        "other = 1\nvalue\nunrelated = 2\n",
+        "\nvalue\nunrelated = 2\n",
+        "other = 1\nmiddle = 2\nvalue\nunrelated = 2\n",
+    ],
+)
+def test_a_newline_ending_finding_keeps_only_its_source_line(filters_dir, stub, text):
+    (filters_dir / "pre-write-lines.filter.yaml").write_text("finders:\n  - regex: 'value\\n'\n")
+    fake = stub()
+    conditions.pre_effect(_write_call(text))
+    question = fake.calls[0]["questions"]["finding_0"]
+    assert question.instructions.rsplit("\nContext: ", 1)[1] == "value"
+
+
+def test_newline_findings_keep_empty_and_nonempty_source_lines(filters_dir, stub):
+    (filters_dir / "pre-write-lines.filter.yaml").write_text("finders:\n  - regex: '\\n'\n")
+    fake = stub()
+    conditions.pre_effect(_write_call("\nunrelated = 2\n"))
+    questions = fake.calls[0]["questions"].values()
+    assert [question.instructions.rsplit("\nContext: ", 1)[1] for question in questions] == ["", "unrelated = 2"]

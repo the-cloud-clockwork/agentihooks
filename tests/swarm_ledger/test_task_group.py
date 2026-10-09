@@ -1,10 +1,10 @@
-import json
-
 import pytest
 
 from scripts.swarm_ledger import ledger, ledger_groups, ledger_tasks, new_ledger
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger.api import schemas
+from scripts.swarm_ledger.repository import repository
+from tests.swarm_ledger import legacy_page
 
 SLUG = "taskgroup-2026-01-01"
 MASTER = "master@abcdef-0001"
@@ -31,7 +31,7 @@ def ledger_dir(tmp_path, monkeypatch):
     monkeypatch.setitem(core.EXTENSION_OPS, "task_group", ledger_groups)
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
     html_path, _ = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     ops = [
         {"op": "task_add", "id": f"seed-{n}", "by": "swarm", "task": f"t{n}", "title": f"task {n}", "lane": "eng"}
         for n in range(1, 8)
@@ -258,10 +258,9 @@ def test_ungroup_clears_the_lead_and_every_member_pointing_at_it(with_ungroup):
 
 def test_ungroup_skips_a_member_missing_from_the_ledger(with_ungroup):
     group("t1", ["t2"])
-    path = core.paths(SLUG)[1]
-    doc = json.loads(path.read_text())
+    doc = repository.bound(core).export_document(SLUG)
     next(t for t in doc["tasks"] if t["id"] == "t1")["group_members"].append("t9")
-    path.write_text(json.dumps(doc))
+    repository.bound(core).import_document(SLUG, doc, replace=True)
     state, rejected = ungroup("t1")
     assert rejected == [] and "merged_into" not in rows(state)["t2"]
     assert state["_meta"]["events"][-1]["text"] == "t2"
@@ -269,10 +268,9 @@ def test_ungroup_skips_a_member_missing_from_the_ledger(with_ungroup):
 
 def test_ungroup_leaves_a_member_that_points_at_another_lead(with_ungroup):
     group("t1", ["t2", "t3"])
-    path = core.paths(SLUG)[1]
-    doc = json.loads(path.read_text())
+    doc = repository.bound(core).export_document(SLUG)
     next(t for t in doc["tasks"] if t["id"] == "t3")["merged_into"] = "t4"
-    path.write_text(json.dumps(doc))
+    repository.bound(core).import_document(SLUG, doc, replace=True)
     state, rejected = ungroup("t1")
     assert rejected == [] and rows(state)["t3"]["merged_into"] == "t4"
     assert state["_meta"]["events"][-1]["text"] == "t2"

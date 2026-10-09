@@ -5,9 +5,12 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
+import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
-from scripts.swarm_ledger.repository import file as storage
+from tests.swarm_ledger import legacy_page  # noqa: E402
+
+storage = core
 
 SLUG = "demo-2026-01-01"
 
@@ -24,7 +27,7 @@ def make_ledger():
     doc = new_ledger.build_doc(content)
     html_path, json_path = core.paths(SLUG)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(doc, SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(doc, SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     storage.sync(SLUG)
 
@@ -54,13 +57,34 @@ class ChatOps(unittest.TestCase):
         _, rejected = storage.sync(SLUG, ops=[{"op": "clear", "thread": "notes", "id": "c-3"}])
         self.assertEqual(rejected, ["c-3"])
 
+    def test_an_added_note_carries_an_empty_comments_thread(self):
+        state, rejected = storage.sync(SLUG, ops=[{"op": "add", "thread": "notes", "id": "n-1", "text": "Later"}])
+        self.assertEqual(rejected, [])
+        self.assertEqual(state["notes"][-1]["comments"], [])
+
+    def test_a_note_added_by_a_member_carries_an_empty_comments_thread(self):
+        storage.sync(SLUG, ops=[{"op": "join", "id": "j-1", "by": "eng"}])
+        state, rejected = storage.sync(
+            SLUG, ops=[{"op": "add", "thread": "notes", "id": "n-2", "by": "eng", "text": "Later"}]
+        )
+        self.assertEqual(rejected, [])
+        self.assertEqual(
+            state["notes"][-1],
+            {"id": "n-2", "by": "eng", "at": state["notes"][-1]["at"], "text": "Later", "comments": []},
+        )
+
+    def test_an_added_chat_line_has_no_comments_thread(self):
+        state, _ = storage.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m-9", "text": "hi"}])
+        self.assertEqual(state["chat"][-1]["id"], "m-9")
+        self.assertNotIn("comments", state["chat"][-1])
+
     def test_check_body_accepts_clear_without_text(self):
         core.check_body({"ops": [{"op": "clear", "thread": "chat", "id": "c-4"}]})
 
     def test_page_version_tracks_the_template(self):
         self.assertRegex(core.page_version(), r"^[0-9a-f]{12}$")
-        html = core.paths(SLUG)[0].read_text(encoding="utf-8")
-        self.assertEqual(core.PAGE_RE.search(html).group(1), core.page_version())
+        page = server.page_for(SLUG)
+        self.assertEqual(core.PAGE_RE.search(page).group(1), core.page_version())
 
 
 class Start(unittest.TestCase):

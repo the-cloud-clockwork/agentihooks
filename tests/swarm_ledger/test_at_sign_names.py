@@ -8,6 +8,8 @@ import ledger_core as core  # noqa: E402
 import ledger_gate  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
+
 SLUG = "atsign-2026-01-01"
 NAME = "engineer@a1b2c3-0002"
 
@@ -15,7 +17,7 @@ NAME = "engineer@a1b2c3-0002"
 def make_ledger():
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
     html_path, json_path = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)
 
