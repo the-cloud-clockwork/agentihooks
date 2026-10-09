@@ -66,7 +66,8 @@ def bounded(what, seconds=30):
     before = children()
     previous = signal.signal(signal.SIGALRM, expired)
     # Ends the worker, which xdist reports as a crash in this test, when SIGALRM cannot interrupt the wait.
-    faulthandler.dump_traceback_later(seconds + 10, exit=True)
+    watchdog = threading.Timer(seconds + 10, lambda: (faulthandler.dump_traceback(), os._exit(1)))
+    watchdog.start()
     try:
         signal.setitimer(signal.ITIMER_REAL, seconds)
         yield
@@ -79,8 +80,19 @@ def bounded(what, seconds=30):
             with suppress(ProcessLookupError, ChildProcessError):
                 os.kill(pid, signal.SIGKILL)
                 os.waitpid(pid, 0)
-        faulthandler.cancel_dump_traceback_later()
+        watchdog.cancel()
     assert not left, f"{what} left child processes running"
+
+
+def test_bounded_leaves_the_test_run_watchdog_armed(tmp_path):
+    with (tmp_path / "dump").open("w+") as dump:
+        faulthandler.dump_traceback_later(0.5, file=dump)
+        with bounded("nothing"):
+            pass
+        threading.Event().wait(1)
+        faulthandler.cancel_dump_traceback_later()
+        dump.seek(0)
+        assert "Timeout" in dump.read()
 
 
 def test_the_local_namespace_is_the_boot_id_and_the_pid_namespace_link(tmp_path):
