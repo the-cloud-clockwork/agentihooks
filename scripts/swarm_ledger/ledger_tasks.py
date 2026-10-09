@@ -530,6 +530,4 @@ def _parent_refusal(doc: dict, op: dict) -> str:
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), None)
     if task is None or not PARENT_FIELDS & set(op["fields"]):
         return ""
-    if op.get("if_state") and task.get("state", "open") not in op["if_state"]:
-        return ""
     return ledger_plans.task_refusal(doc, {**task, **op["fields"]})
