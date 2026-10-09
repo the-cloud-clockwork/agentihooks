@@ -898,7 +898,7 @@ def main():
     if text := refusal(args.name, Who.from_env()):
         sys.exit(f"agentihooks ledger: {text}")
     args.name = resolve_name(args.name) if args.name else args.name
-    if not args.slug or not (args.name or args.command in ("url", "show")):
+    if not args.slug or not (args.name or args.command in ("url", "show", "hierarchy")):
         sys.exit("--slug and --as are required")
     globals()[f"cmd_{args.command.replace('-', '_')}"](args)
 
