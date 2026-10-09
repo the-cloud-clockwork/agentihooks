@@ -545,6 +545,8 @@ class HerdrRuntime:
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
         if not agent.profile:
             raise SpawnError("unsupported resume: original profile is missing", "unsupported")
+        if agent.harness not in effort_range.EFFORTS:
+            raise SpawnError(f"unsupported resume harness: {agent.harness}", "unsupported")
         argv = self._argv(
             config,
             agent.name,

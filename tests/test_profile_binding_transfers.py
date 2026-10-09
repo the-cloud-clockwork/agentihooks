@@ -183,6 +183,15 @@ def test_a_master_resumed_into_its_own_conversation_starts_inside_the_swarm_effo
     assert launched[-2:] == (["--effort", "high"] if harness == "claude" else ["-c", 'model_reasoning_effort="high"'])
 
 
+@pytest.mark.parametrize("lane", ["master", "eng"])
+def test_a_resume_on_an_unknown_harness_is_refused_cleanly(tmp_path, lane):
+    engine, config, agent, seen = _resuming(tmp_path, "c0ffee", "copilot")
+    with pytest.raises(SpawnError) as error:
+        engine.resume(config, replace(agent, lane=lane, effort="max"), "you were restored")
+    assert (str(error.value), error.value.status) == ("unsupported resume harness: copilot", "unsupported")
+    assert not seen["runs"]
+
+
 def test_a_lane_resume_keeps_its_exact_recorded_effort(tmp_path):
     engine, config, agent, seen = _resuming(tmp_path, "c0ffee")
     config.effort_min, config.effort_max = "medium", "max"
