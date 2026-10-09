@@ -165,9 +165,9 @@ FIRST, PLAN, REFUSED = ({"op": "add", "id": "first"}, {"op": "plan_add", "id": "
             [FIRST, PLAN, REFUSED],
             ["bad-1", "first", "plan", "refused"],
             [],
-            [(["p0", "first", "plan"], 2, WARNING, []), (["p0"], 2, WARNING, [])],
+            [(["p0", "first", "plan"], [], 2, WARNING, []), (["p0"], [], 2, WARNING, [])],
         ),
-        ([FIRST, REFUSED], ["bad-1", "refused"], ["first"], [(["p0", "first"], 2, WARNING, [])]),
+        ([FIRST, REFUSED], ["bad-1", "refused"], ["first"], [(["p0", "first"], [], 2, WARNING, [])]),
         ([FIRST, PLAN], ["bad-1"], ["first", "plan"], []),
     ],
 )
@@ -177,7 +177,9 @@ def test_a_batch_that_adds_a_plan_commits_every_op_or_none(derived, monkeypatch,
     monkeypatch.setattr(
         ledger_alerts,
         "raise_warning",
-        lambda doc, ctx, warning, before: seen.append((list(doc["phases"]), ctx.rev, warning, before)),
+        lambda doc, ctx, warning, before: seen.append(
+            (list(doc["phases"]), list(doc["alerts"]), ctx.rev, warning, before)
+        ),
     )
     monkeypatch.setattr(ledger_alerts, "writer", lambda op, ctx: f"w-{op['id']}")
     monkeypatch.setattr(ledger_alerts, "item", lambda op: f"i-{op['id']}")
