@@ -19,6 +19,11 @@ def test_controller_issues_its_ledger_service_credential_before_it_runs():
     assert SERVICES["swarm"]["environment"]["SWARM_ALLOWED_HOSTS"] == "swarm:8765,${SWARM_ALLOWED_HOSTS:-}"
 
 
+def test_controller_reads_unhealthy_once_a_swarm_lease_goes_stale():
+    probe = SERVICES["controller"]["healthcheck"]["test"][-1]
+    assert "lease.current" in probe and "slugs()" in probe
+
+
 def test_redis_starts_from_an_acl_file_with_optional_tls():
     start = (ROOT / "deploy/compose/redis/start.sh").read_text()
     assert "--aclfile" in start

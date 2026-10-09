@@ -42,10 +42,19 @@ services:
     volumes:
       - ${SWARM_TLS_DIR:-./deploy/compose/tls}:/tls:ro
     healthcheck:
-      test: [CMD, python, -c, "from scripts.swarm.store import connect; connect()"]
-      interval: 10s
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          from scripts.swarm import lease; from scripts.swarm.store import connect;
+          store = connect(); stale = [slug for slug in store.slugs() if not lease.current(store, slug)];
+          assert not stale, f"no live controller lease for {stale}"
+      interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 70s
+      start_interval: 5s
     depends_on:
       redis:
         condition: service_healthy
