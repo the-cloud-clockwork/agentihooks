@@ -38,6 +38,9 @@ jobs:
   brain-smoke:
     uses: ./.github/workflows/brain-smoke.yml
 
+  ledger-load:
+    uses: ./.github/workflows/ledger-load.yml
+
   kind-due:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -984,7 +987,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep]
+    needs: [durations, split, unit, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
