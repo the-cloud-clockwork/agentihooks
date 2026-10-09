@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, serve_modules, shell_html
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
@@ -70,6 +70,7 @@ def open_page(browser, doc, init_script=None):
     serve_modules(context, ledger_state(doc))
     page = context.new_page()
     page.goto(URL)
+    loaded(page)
     return context, page
 
 
@@ -159,13 +160,13 @@ def test_sections_state_survives_a_reload(tab):
     tab.click("#sections-all")
     settle(tab)
     tab.reload()
-    settle(tab)
+    loaded(tab)
     assert sections(tab) == {"labels": ["Collapse all"], "open": [True] * len(SECTIONS)}
     tab.evaluate("() => { document.getElementById('notes-box').open = false; }")
     settle(tab)
     assert sections(tab)["labels"] == ["Collapse all"]
     tab.reload()
-    settle(tab)
+    loaded(tab)
     folded = sections(tab)
     assert folded["open"][SECTIONS.index("notes-box")] is False
     assert folded["open"].count(True) == len(SECTIONS) - 1
@@ -177,7 +178,7 @@ def test_sections_toggle_works_when_storage_is_unavailable(browser):
     page.on("pageerror", lambda exc: errors.append(str(exc)))
     try:
         page.reload()
-        settle(page)
+        loaded(page)
         assert counts(page) == EXPECTED
         page.click("#sections-all")
         settle(page)
