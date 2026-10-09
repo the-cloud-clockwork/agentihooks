@@ -12,7 +12,7 @@
   ],
   "checks": {
     "complexity": "C901 and PLR0913 clean on worker_home",
-    "focused_pytest": "70 passed in tests/test_worker_home.py and tests/test_swarm_node_profile_child.py, two workers; worker_home line coverage 99 percent",
+    "focused_pytest": "95 passed in tests/test_worker_home.py and tests/test_swarm_node_profile_child.py, two workers",
     "format": "passed",
     "lint": "passed",
     "spec_review": "three rounds; round three finding fixed with a test",
@@ -21,9 +21,9 @@
   "code_evidence": {
     "issue_url": "https://github.com/the-cloud-clockwork/agentihooks/issues/2018",
     "pull_request_url": "https://github.com/the-cloud-clockwork/agentihooks/pull/2028",
-    "tested_commit": "c56cb1713f5fa866919d108e46b22684e58a75aa"
+    "tested_commit": "a13a8857e8c8b6dc9af78dc628671a14277dea6a"
   },
-  "fixture": "9f731f86a7fb4ba0b7b52f9bbbc188cc",
+  "fixture": "737522fe99624e53abbefdda289f61ae",
   "fixture_manifest": {
     "fixture-claude/.claude/settings.overrides.json": "2443a0072e228b5cfd498a3891d92bd6e6ecc7cc3bd914a7ab4959d7c917b6d3",
     "fixture-claude/.mcp.json": "c5612b3e0ff1f6004aabeeb540ce52963aae186d6ad37ea7e027703ae90783ce",
@@ -87,5 +87,5 @@
     "codex": "0.162.0",
     "python": "3.12.12"
   },
-  "tested_commit": "c56cb1713f5fa866919d108e46b22684e58a75aa"
+  "tested_commit": "a13a8857e8c8b6dc9af78dc628671a14277dea6a"
 }
