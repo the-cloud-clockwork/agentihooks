@@ -1,0 +1,306 @@
+version: 1
+notes: 'Seeded from the classifier decision log: each case state was rebuilt from its ledger and its samples are the answers
+  the decision log recorded for that state digest. Expected verdicts were written by a reader that saw only the state and
+  the question, never the thresholds or the rule.'
+cases:
+- name: now-do-a-plan-sparkling-pumpkin-2026-10-02-auto-questions-q1
+  state:
+    item: Rolling out the router (B2) restarts every crew session once, after its current turn. Do it during the fleet-qitp
+      freeze, or hold B2 until the freeze ends?
+    priority: 'Answer: Rolling out the router (B2) restarts every crew session once, after its current turn. Do it…'
+    write:
+      by: bundle-dev
+      kind: comment
+      text: 'Practical answer while you decide: the crew sessions running now were launched before the restart marker existed,
+        so the router rollout will not restart them. They move to the router whenever they are next restarted by hand. Only
+        sessions launched from now on are refreshed automatically.'
+  params:
+    kind: comment
+    subject: Rolling out the router (B2) restarts every crew session once, after its current turn. Do it during the fleet-qitp
+      freeze, or hold B2 until the freeze ends?
+    priority: 'Answer: Rolling out the router (B2) restarts every crew session once, after its current turn. Do it…'
+  expected:
+    resolves: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 250
+    answers:
+      resolves:
+        type: noul
+        noul: 0.4378235137849365
+  notes: state digest 63272468f2701791, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package
+- name: okay-we-re-going-to-mossy-rabin-2026-10-05-auto-followups-add_item-85b8a48e1d
+  state:
+    item: Gateway drift check shows four drifts. The atlas agent key file grants 35 agentibridge and agentibrain tools whose
+      servers are missing from its server list, so they never reach the live key.
+    priority: 'Decide: Gateway drift check shows four drifts. The atlas agent key file grants 35 agentibridge and agentibrain…'
+    write:
+      by: okay-we-re-going-to-mossy-rabin-2026-10-05-master-1
+      kind: comment
+      text: 'Your agent''s key is a door pass. It lists 35 rooms, the brain and bridge tools, but those rooms are not on the
+        building map, so the door never opens. Pick one: add them to the map, or cross them off the pass.'
+  params:
+    kind: comment
+    subject: Gateway drift check shows four drifts. The atlas agent key file grants 35 agentibridge and agentibrain tools
+      whose servers are missing from its server list, so they never reach the live key.
+    priority: 'Decide: Gateway drift check shows four drifts. The atlas agent key file grants 35 agentibridge and agentibrain…'
+  expected:
+    resolves: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 224
+    answers:
+      resolves:
+        type: noul
+        noul: 0.7981867777396212
+  notes: state digest 4d15a28fbecac982, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package
+- name: okay-we-re-going-to-mossy-rabin-2026-10-05-auto-followups-add_item-d09de973a6
+  state:
+    item: The installed GitHub CLI cannot edit a pull request body because it requests the retired classic projects field.
+      The REST update worked. Update the declared CLI dependency so routine pull request edits avoid this failed call.
+    priority: 'Decide: The installed GitHub CLI cannot edit a pull request body because it requests the retired classic…'
+    write:
+      by: okay-we-re-going-to-mossy-rabin-2026-10-05-master-1
+      kind: comment
+      text: 'Needs you: the GitHub CLI here is version 2.4 from 2022, installed by Ubuntu, and upgrading needs sudo. The install
+        steps are in the master pane.'
+  params:
+    kind: comment
+    subject: The installed GitHub CLI cannot edit a pull request body because it requests the retired classic projects field.
+      The REST update worked. Update the declared CLI dependency so routine pull request edits avoid this failed call.
+    priority: 'Decide: The installed GitHub CLI cannot edit a pull request body because it requests the retired classic…'
+  expected:
+    resolves: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 245
+    answers:
+      resolves:
+        type: noul
+        noul: 0.18242552380635632
+  notes: state digest ba9e67dbd6a8c312, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it
+- name: okay-we-re-going-to-mossy-rabin-2026-10-05-auto-followups-add_item-a5a642ab31
+  state:
+    item: antoncore deploys rebuild every image on the Atlas host because its registry login is denied, so pulls of fresh
+      images fail. notebooklm spent ten minutes rebuilding there. A working registry token would make each deploy a pull.
+    priority: 'Decide: antoncore deploys rebuild every image on the Atlas host because its registry login is denied, so…'
+    write:
+      by: okay-we-re-going-to-mossy-rabin-2026-10-05-master-1
+      kind: comment
+      text: 'Needs you: the Atlas host''s container registry login is refused, so every deploy rebuilds images for minutes.
+        Issue a fresh registry token into the secret store; an engineer then switches deploys to pulls.'
+  params:
+    kind: comment
+    subject: antoncore deploys rebuild every image on the Atlas host because its registry login is denied, so pulls of fresh
+      images fail. notebooklm spent ten minutes rebuilding there. A working registry token would make each deploy a pull.
+    priority: 'Decide: antoncore deploys rebuild every image on the Atlas host because its registry login is denied, so…'
+  expected:
+    resolves: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 251
+    answers:
+      resolves:
+        type: noul
+        noul: 0.679178673200285
+  notes: state digest f5c941b6104ae0bd, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package
+- name: rearchitecture-v3-2026-10-02-priority-d29dbadcb6
+  state:
+    item: Arming the bracket geometry gate is a setting on the traded risk group. It needs the operator's value.
+    priority: Give the value for the bracket geometry gate on the traded risk group, or leave it off.
+    write:
+      by: refactor-orchestrator-g
+      kind: comment
+      text: Not done. Arming the gate is a value on the traded risk group, which the operator sets.
+  params:
+    kind: comment
+    subject: Arming the bracket geometry gate is a setting on the traded risk group. It needs the operator's value.
+    priority: Give the value for the bracket geometry gate on the traded risk group, or leave it off.
+  expected:
+    resolves: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 230
+    answers:
+      resolves:
+        type: noul
+        noul: 0.02442309342702589
+  notes: state digest f616c82ece38e6d2, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it
+- name: rearchitecture-v3-2026-10-02-priority-7c34a25acf
+  state:
+    item: Live and backtest place the premarket target differently after a fill. The operator decides which side to align.
+    priority: After a fill, should the backtest place the premarket target the way live does, or live like the backtest?
+    write:
+      by: refactor-orchestrator-g
+      kind: comment
+      text: Live sets the sell target before the buy fills, from the last price, so a five dollar close aims at five fifty
+        even if we paid five twenty. The backtest waits for the fill and aims ten percent above it, five seventy two. Live
+        matches the broker.
+  params:
+    kind: comment
+    subject: Live and backtest place the premarket target differently after a fill. The operator decides which side to align.
+    priority: After a fill, should the backtest place the premarket target the way live does, or live like the backtest?
+  expected:
+    resolves: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 247
+    answers:
+      resolves:
+        type: noul
+        noul: 0.9149009607937928
+  notes: state digest 36c6099ec7f6c5b7, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it
+- name: rearchitecture-v3-2026-10-02-priority-db350f728b
+  state:
+    item: 'The seven replay and backtest S3 calls have no guard of their own against the AWS endpoint: if the MinIO endpoint
+      variable is removed for the documented rollback, they go to the AWS bucket that still exists.'
+    priority: Add a guard so backtest storage calls refuse the real cloud endpoint if the local storage setting is removed?
+    write:
+      by: refactor-orchestrator-g
+      kind: comment
+      text: Recorded, not worked. Found while clearing the seven Sonar bucket owner issues. Waiting on the operator's word.
+  params:
+    kind: comment
+    subject: 'The seven replay and backtest S3 calls have no guard of their own against the AWS endpoint: if the MinIO endpoint
+      variable is removed for the documented rollback, they go to the AWS bucket that still exists.'
+    priority: Add a guard so backtest storage calls refuse the real cloud endpoint if the local storage setting is removed?
+  expected:
+    resolves: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 249
+    answers:
+      resolves:
+        type: noul
+        noul: 0.0001313518000008236
+  notes: state digest afb0f2d12e413712, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it
+- name: rearchitecture-v3-2026-10-02-priority-e9e5528f8a
+  state:
+    item: 'Fix: EDGAR number-word patterns match Unicode look-alikes that then read as no value; make them ASCII-only.'
+    priority: After the filing parser fix, refetch the cached filings so old values are read again, yes or no?
+    write:
+      by: refactor-orchestrator-g
+      kind: comment
+      text: Not started. The fix forces a refetch of every cached filing, so it waits on the operator's yes or no.
+  params:
+    kind: comment
+    subject: 'Fix: EDGAR number-word patterns match Unicode look-alikes that then read as no value; make them ASCII-only.'
+    priority: After the filing parser fix, refetch the cached filings so old values are read again, yes or no?
+  expected:
+    resolves: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 259
+    answers:
+      resolves:
+        type: noul
+        noul: 0.23370635691404026
+  notes: state digest 2d2d86ae471c5622, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it
+- name: rearchitecture-v3-2026-10-02-priority-8e479829de
+  state:
+    item: A maintenance window control key still names the broker outside the adapters. Rename it together with its registry
+      row.
+    priority: Allow a matching worker repo change so the broker maintenance window setting can be renamed in both repos?
+    write:
+      by: refactor-orchestrator-g
+      kind: comment
+      text: Held. The rename needs a matching change in the worker repo, which waits on the operator's word on the priorities
+        list.
+  params:
+    kind: comment
+    subject: A maintenance window control key still names the broker outside the adapters. Rename it together with its registry
+      row.
+    priority: Allow a matching worker repo change so the broker maintenance window setting can be renamed in both repos?
+  expected:
+    resolves: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 230
+    answers:
+      resolves:
+        type: noul
+        noul: 0.348645162405387
+  notes: state digest bd90632df85624a5, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it
+- name: rig-grade-swarm-doctor-priority-365247e55c
+  state:
+    item: Swarm agents now skip the dependency restart and pick up a change only at their successor. This differs from the
+      init agent restart doctrine. Accept it or ask for a swarm aware restart.
+    priority: Accept swarm agents skipping the dependency restart? I advise yes; the restart killed agents.
+    write:
+      by: master@d44a5a-0048
+      kind: comment
+      text: 'Master advice: accept it now, because the restart was killing agents. If a change must reach running agents,
+        add a later task that asks each one to hand off at its next stop.'
+  params:
+    kind: comment
+    subject: Swarm agents now skip the dependency restart and pick up a change only at their successor. This differs from
+      the init agent restart doctrine. Accept it or ask for a swarm aware restart.
+    priority: Accept swarm agents skipping the dependency restart? I advise yes; the restart killed agents.
+  expected:
+    resolves: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 231
+    answers:
+      resolves:
+        type: noul
+        noul: 0.9867771774699747
+  notes: state digest 24175d18391b1b90, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it
+- name: rig-grade-swarm-doctor-auto-tasks-fx-8df17d5f-tune
+  state:
+    item: Move the number behind the task cost finding
+    priority: 'Blocked: quota capacity eng 2 ci 0 plan 0 because accounts are closed, Claude has 3 free…'
+    write:
+      by: swarm
+      kind: comment
+      text: quota capacity eng 2 ci 0 plan 0 because accounts are closed, Claude has 3 free seats and Codex has 0 free seats,
+        claude nctcc is at its week quota warning, claude tccgma is at its week quota warning, codex default is at its week
+        quota warning
+  params:
+    kind: comment
+    subject: Move the number behind the task cost finding
+    priority: 'Blocked: quota capacity eng 2 ci 0 plan 0 because accounts are closed, Claude has 3 free…'
+  expected:
+    resolves: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 234
+    answers:
+      resolves:
+        type: noul
+        noul: 0.7981867873410141
+  notes: state digest 765ba2ac7efc4a93, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it
+- name: rig-grade-swarm-doctor-auto-tasks-t55
+  state:
+    item: One swarm timer pass fits inside its one minute interval again
+    priority: 'Blocked: Its successor t66 met the number: thirty one main swarm passes in thirty minutes against twenty…'
+    write:
+      by: master@d44a5a-0049
+      kind: comment
+      text: 'Its successor t66 met the number: thirty one main swarm passes in thirty minutes against twenty five.'
+  params:
+    kind: comment
+    subject: One swarm timer pass fits inside its one minute interval again
+    priority: 'Blocked: Its successor t66 met the number: thirty one main swarm passes in thirty minutes against twenty…'
+  expected:
+    resolves: true
+  samples:
+  - source: liquid-d1
+    latency_ms: 225
+    answers:
+      resolves:
+        type: noul
+        noul: 0.9496693659780479
+  notes: state digest 36ac68846e305755, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it

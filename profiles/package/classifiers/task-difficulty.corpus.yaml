@@ -7,20 +7,20 @@ cases:
   state:
     task: vctx3
     title: Pack context within explicit budgets
-    description: 'Swarm v2 work package SV2-CTX-03, tier 7 of 8. Spec: read section SV2-CTX-03 of /home/iamroot/dev/tcc-ecosystem/agentihooks/Swarm-v2.md
+    description: 'Swarm v2 work package SV2-CTX-03, tier 7 of 8. Spec: read section SV2-CTX-03 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
       (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
       rollback and completion, plus sections 1 to 3. Repository: agentibrain-kernel. Integration gate: G6. Intended change:
       Deliver enough useful evidence without overwhelming every agent''s context window. Required fixture: Oversized arc,
       duplicate lesson texts, conflicting decisions, and a very small token budget. Name SV2-CTX-03 in the pull request. antoncore
-      changes go through GitOps, never live patches. Priority: Anton compute first, because the operator''s workstation memory
+      changes go through GitOps, never live patches. Priority: Atlas compute first, because the operator''s workstation memory
       is the bottleneck.'
     kind: code
     profile: engineer
     territory:
     - swarm v2 CTX
-    phase_intent: 'Swarm v2, tier 7: scoped active brains: Tier 7 of 8 of Swarm v2, ordered so the swarm can run on Anton
+    phase_intent: 'Swarm v2, tier 7: scoped active brains: Tier 7 of 8 of Swarm v2, ordered so the swarm can run on Atlas
       compute first. Project scoped brain feeds, graph retrieval, task context, consultation gates and personal and swarm
-      brains. Spec for every task here: /home/iamroot/dev/tcc-ecosystem/agentihooks/Swarm-v2.md, one section per work package.
+      brains. Spec for every task here: /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md, one section per work package.
       Authorized repos: agentihooks, agentibrain-kernel, antoncore.'
   params:
     id: vctx3
@@ -39,25 +39,25 @@ cases:
           S: 0.02
           M: 0.85
           L: 0.13
-  notes: state digest 9d774b7a3a311ca4
+  notes: state digest 9d774b7a3a311ca4; internal names masked for the package
 - name: rig-grade-swarm-vcap5
   state:
     task: vcap5
     title: Integrate drain protection and cost-aware scale-down
-    description: 'Swarm v2 work package SV2-CAP-05, tier 5 of 8. Spec: read section SV2-CAP-05 of /home/iamroot/dev/tcc-ecosystem/agentihooks/Swarm-v2.md
+    description: 'Swarm v2 work package SV2-CAP-05, tier 5 of 8. Spec: read section SV2-CAP-05 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
       (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
       rollback and completion, plus sections 1 to 3. Repository: antoncore. Integration gate: G10. Intended change: Preserve
       active work while ensuring idle swarm capacity can disappear. Required fixture: Active task, completed task with stale
       annotation, real notice simulation, and abrupt node loss. Name SV2-CAP-05 in the pull request. antoncore changes go
-      through GitOps, never live patches. Priority: Anton compute first, because the operator''s workstation memory is the
+      through GitOps, never live patches. Priority: Atlas compute first, because the operator''s workstation memory is the
       bottleneck.'
     kind: code
     profile: engineer
     territory:
     - swarm v2 CAP
-    phase_intent: 'Swarm v2, tier 5: scale on Anton capacity, masters scale: Tier 5 of 8 of Swarm v2, ordered so the swarm
-      can run on Anton compute first. ASG capacity reuse, checkpoints for Spot, several masters with a private channel, health
-      and controls for a distributed swarm. Spec for every task here: /home/iamroot/dev/tcc-ecosystem/agentihooks/Swarm-v2.md,
+    phase_intent: 'Swarm v2, tier 5: scale on Atlas capacity, masters scale: Tier 5 of 8 of Swarm v2, ordered so the swarm
+      can run on Atlas compute first. ASG capacity reuse, checkpoints for Spot, several masters with a private channel, health
+      and controls for a distributed swarm. Spec for every task here: /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md,
       one section per work package. Authorized repos: agentihooks, agentibrain-kernel, antoncore.'
   params:
     id: vcap5
@@ -76,13 +76,13 @@ cases:
           S: 0.02
           M: 0.18
           L: 0.8
-  notes: state digest 61c4748331bab27b
+  notes: state digest 61c4748331bab27b; internal names masked for the package
 - name: rig-grade-swarm-tc111
   state:
     task: tc111
     title: Ledger priority, item and stat rows read as separate tiles
     description: With the palette fill alone the priority, item and stat rows merge into one band. Give them a small gap and
-      side padding in the ledger stylesheet, then the raised bay fill, so each reads as its own tile like the Anton landing.
+      side padding in the ledger stylesheet, then the raised bay fill, so each reads as its own tile like the Atlas landing.
       Browser check at 1920 by 1080 on a scratch ledger. Done when the pull request merges with before and after screenshots
       on the task proof.
     kind: code
@@ -108,7 +108,7 @@ cases:
           S: 0.8
           M: 0.17
           L: 0.03
-  notes: state digest 33b3901040689046
+  notes: state digest 33b3901040689046; internal names masked for the package
 - name: rig-grade-swarm-dur10
   state:
     task: dur10
@@ -147,19 +147,19 @@ cases:
   state:
     task: vsec1
     title: Create minimal controller and worker RBAC
-    description: 'Swarm v2 work package SV2-SEC-01, tier 3 of 8. Spec: read section SV2-SEC-01 of /home/iamroot/dev/tcc-ecosystem/agentihooks/Swarm-v2.md
+    description: 'Swarm v2 work package SV2-SEC-01, tier 3 of 8. Spec: read section SV2-SEC-01 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
       (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
       rollback and completion, plus sections 1 to 3. Repository: antoncore. Integration gate: G3. Intended change: Separate
-      control-plane object management from coding-worker permissions. Required fixture: Controller, worker, operator-viewer,
+      control-board object management from coding-worker permissions. Required fixture: Controller, worker, operator-viewer,
       and unrelated service-account credentials. Name SV2-SEC-01 in the pull request. antoncore changes go through GitOps,
-      never live patches. Priority: Anton compute first, because the operator''s workstation memory is the bottleneck.'
+      never live patches. Priority: Atlas compute first, because the operator''s workstation memory is the bottleneck.'
     kind: code
     profile: engineer
     territory:
     - swarm v2 SEC
     phase_intent: 'Swarm v2, tier 3: worker image, filesystem and isolation: Tier 3 of 8 of Swarm v2, ordered so the swarm
-      can run on Anton compute first. The worker image, the worker Pod template, private homes and worktrees, scoped credentials
-      and Firecracker microVM isolation. Spec for every task here: /home/iamroot/dev/tcc-ecosystem/agentihooks/Swarm-v2.md,
+      can run on Atlas compute first. The worker image, the worker Pod template, private homes and worktrees, scoped credentials
+      and Firecracker microVM isolation. Spec for every task here: /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md,
       one section per work package. Authorized repos: agentihooks, agentibrain-kernel, antoncore.'
   params:
     id: vsec1
@@ -178,7 +178,7 @@ cases:
           S: 0.02
           M: 0.08
           L: 0.9
-  notes: state digest 3a8e2b0050573345
+  notes: state digest 3a8e2b0050573345; internal names masked for the package
 - name: rig-grade-swarm-tc78
   state:
     task: tc78
@@ -253,19 +253,19 @@ cases:
   state:
     task: vprf5
     title: Qualify gate overhead and rollout concurrency
-    description: 'Swarm v2 work package SV2-PRF-05, tier 8 of 8. Spec: read section SV2-PRF-05 of /home/iamroot/dev/tcc-ecosystem/agentihooks/Swarm-v2.md
+    description: 'Swarm v2 work package SV2-PRF-05, tier 8 of 8. Spec: read section SV2-PRF-05 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
       (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
       rollback and completion, plus sections 1 to 3. Repository: agentihooks. Integration gate: G10. Intended change: Define
       a safe measured operating envelope for the first distributed release. Required fixture: Small staged cohorts with an
       intentionally slowed brain and archive backend. Name SV2-PRF-05 in the pull request. antoncore changes go through GitOps,
-      never live patches. Priority: Anton compute first, because the operator''s workstation memory is the bottleneck.'
+      never live patches. Priority: Atlas compute first, because the operator''s workstation memory is the bottleneck.'
     kind: code
     profile: engineer
     territory:
     - swarm v2 PRF
     phase_intent: 'Swarm v2, tier 8: validation, migration and release: Tier 8 of 8 of Swarm v2, ordered so the swarm can
-      run on Anton compute first. Cross repository validation, retention, retiring the old transcript service, runbooks and
-      final acceptance. Spec for every task here: /home/iamroot/dev/tcc-ecosystem/agentihooks/Swarm-v2.md, one section per
+      run on Atlas compute first. Cross repository validation, retention, retiring the old transcript service, runbooks and
+      final acceptance. Spec for every task here: /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md, one section per
       work package. Authorized repos: agentihooks, agentibrain-kernel, antoncore.'
   params:
     id: vprf5
@@ -284,7 +284,7 @@ cases:
           S: 0.02
           M: 0.35
           L: 0.63
-  notes: state digest ce2b8b57957c765b
+  notes: state digest ce2b8b57957c765b; internal names masked for the package
 - name: rig-grade-swarm-tc105
   state:
     task: tc105
@@ -358,20 +358,20 @@ cases:
   state:
     task: vsec4
     title: Secure operator terminal attachment
-    description: 'Swarm v2 work package SV2-SEC-04, tier 3 of 8. Spec: read section SV2-SEC-04 of /home/iamroot/dev/tcc-ecosystem/agentihooks/Swarm-v2.md
+    description: 'Swarm v2 work package SV2-SEC-04, tier 3 of 8. Spec: read section SV2-SEC-04 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
       (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
       rollback and completion, plus sections 1 to 3. Repository: antoncore. Integration gate: G3. Intended change: Give the
       operator interactive visibility without sharing cluster or host administration credentials. Required fixture: Valid
       operator certificate, expired certificate, untrusted server, and replaced execution endpoint. Name SV2-SEC-04 in the
-      pull request. antoncore changes go through GitOps, never live patches. Priority: Anton compute first, because the operator''s
+      pull request. antoncore changes go through GitOps, never live patches. Priority: Atlas compute first, because the operator''s
       workstation memory is the bottleneck.'
     kind: code
     profile: engineer
     territory:
     - swarm v2 SEC
     phase_intent: 'Swarm v2, tier 3: worker image, filesystem and isolation: Tier 3 of 8 of Swarm v2, ordered so the swarm
-      can run on Anton compute first. The worker image, the worker Pod template, private homes and worktrees, scoped credentials
-      and Firecracker microVM isolation. Spec for every task here: /home/iamroot/dev/tcc-ecosystem/agentihooks/Swarm-v2.md,
+      can run on Atlas compute first. The worker image, the worker Pod template, private homes and worktrees, scoped credentials
+      and Firecracker microVM isolation. Spec for every task here: /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md,
       one section per work package. Authorized repos: agentihooks, agentibrain-kernel, antoncore.'
   params:
     id: vsec4
@@ -390,7 +390,7 @@ cases:
           S: 0.02
           M: 0.13
           L: 0.85
-  notes: state digest 981bb36e84787ee2
+  notes: state digest 981bb36e84787ee2; internal names masked for the package
 - name: rig-grade-swarm-hy7
   state:
     task: hy7

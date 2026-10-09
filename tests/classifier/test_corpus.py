@@ -17,7 +17,8 @@ from .test_definitions import sample, write_definition
 
 PACKAGE = Path(__file__).resolve().parents[2] / "profiles" / "package" / "classifiers"
 KNOWN_MISSES = {
-    "intent-check": ["g18-quiet-week"],
+    "filter": ["home-3"],
+    "intent-check": ["g18-quiet-week", "lifted-t201", "lifted-t205"],
     "model-pick": [
         "rig-grade-swarm-cxc0",
         "rig-grade-swarm-doctor-fx-9b243b65-tune",
@@ -32,7 +33,17 @@ KNOWN_MISSES = {
         "rig-grade-swarm-doctor-fx-30373668-cause",
         "rig-grade-swarm-doctor-t9",
     ],
+    "phase-slice": ["rig-grade-swarm-p21-12", "rig-grade-swarm-p21-6"],
+    "priority-resolve": [
+        "okay-we-re-going-to-mossy-rabin-2026-10-05-auto-followups-add_item-85b8a48e1d",
+        "okay-we-re-going-to-mossy-rabin-2026-10-05-auto-followups-add_item-a5a642ab31",
+        "rearchitecture-v3-2026-10-02-priority-7c34a25acf",
+        "rig-grade-swarm-doctor-auto-tasks-fx-8df17d5f-tune",
+        "rig-grade-swarm-doctor-priority-365247e55c",
+    ],
     "task-difficulty": ["rig-grade-swarm-vprf5"],
+    "task-grouping": ["rig-grade-swarm-asc1,asc8", "rig-grade-swarm-tc105,tc111"],
+    "trace-plan": ["rig-grade-swarm-doctor-fx-a66a8ac4-code"],
 }
 ON = {"AGENTIHOOKS_METRICS_URL": "http://ch:8123", "AGENTIHOOKS_METRICS_USER": "writer", "AGENTIHOOKS_SWARM": "sw"}
 

@@ -1,0 +1,495 @@
+version: 1
+notes: 'Seeded from the classifier decision log: each case state was rebuilt from its ledger and its samples are the answers
+  the decision log recorded for that state digest. Expected verdicts were written by a reader that saw only the state and
+  the question, never the thresholds or the rule.'
+cases:
+- name: home-0
+  state:
+    filter: pre-edit+write+multiedit-ui_slop.filter.yaml
+    tool: Write
+    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/home.html
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+  params:
+    question: Does this finding go against the filter intent?
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+    findings:
+    - text: en
+      reason: user-facing literal
+      context: <html lang="en">
+    - text: width=device-width,initial-scale=1
+      reason: user-facing literal
+      context: <meta name=viewport content='width=device-width,initial-scale=1'>
+    - text: __HOME_HEADING__
+      reason: user-facing literal
+      context: <title>__HOME_HEADING__</title>
+  expected:
+    finding_0: false
+    finding_1: false
+    finding_2: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 262
+    answers:
+      finding_0:
+        type: noul
+        noul: 0.10669059962643358
+      finding_1:
+        type: noul
+        noul: 0.46879062662624377
+      finding_2:
+        type: noul
+        noul: 0.10669060530721626
+  notes: state digest 3a790fd2cfbbf821, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package
+- name: home-3
+  state:
+    filter: pre-edit+write+multiedit-ui_slop.filter.yaml
+    tool: Write
+    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/home.html
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+  params:
+    question: Does this finding go against the filter intent?
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+    findings:
+    - text: stylesheet
+      reason: user-facing literal
+      context: <link rel="stylesheet" href="/static/__HOME_PAGE__/palette.css">
+    - text: /static/__HOME_PAGE__/palette.css
+      reason: user-facing literal
+      context: <link rel="stylesheet" href="/static/__HOME_PAGE__/palette.css">
+    - text: stylesheet
+      reason: user-facing literal
+      context: <link rel="stylesheet" href="/static/__HOME_PAGE__/css/home.css">
+  expected:
+    finding_0: false
+    finding_1: false
+    finding_2: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 238
+    answers:
+      finding_0:
+        type: noul
+        noul: 0.29421497216298875
+      finding_1:
+        type: noul
+        noul: 0.5
+      finding_2:
+        type: noul
+        noul: 0.33458944125318596
+  notes: state digest 3a790fd2cfbbf821, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package
+- name: home-6
+  state:
+    filter: pre-edit+write+multiedit-ui_slop.filter.yaml
+    tool: Write
+    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/home.html
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+  params:
+    question: Does this finding go against the filter intent?
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+    findings:
+    - text: /static/__HOME_PAGE__/css/home.css
+      reason: user-facing literal
+      context: <link rel="stylesheet" href="/static/__HOME_PAGE__/css/home.css">
+    - text: stylesheet
+      reason: user-facing literal
+      context: <link rel="stylesheet" href="/static/__HOME_PAGE__/css/tooltips.css">
+    - text: /static/__HOME_PAGE__/css/tooltips.css
+      reason: user-facing literal
+      context: <link rel="stylesheet" href="/static/__HOME_PAGE__/css/tooltips.css">
+  expected:
+    finding_0: false
+    finding_1: false
+    finding_2: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 251
+    answers:
+      finding_0:
+        type: noul
+        noul: 0.45326184801538616
+      finding_1:
+        type: noul
+        noul: 0.3775406407835203
+      finding_2:
+        type: noul
+        noul: 0.37754066879814546
+  notes: state digest 3a790fd2cfbbf821, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package
+- name: home-9
+  state:
+    filter: pre-edit+write+multiedit-ui_slop.filter.yaml
+    tool: Write
+    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/home.html
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+  params:
+    question: Does this finding go against the filter intent?
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+    findings:
+    - text: '
+
+        __HOME_WATERMARK__'
+      reason: user-facing literal
+      context: '<link rel="stylesheet" href="/static/__HOME_PAGE__/css/tooltips.css">
+
+        __HOME_WATERMARK__<main class="__HOME_VIEW__"><header><a class="logo-link" href="/" aria-label="HOME"><span class="logo"
+        aria-hidden="true"></span></a><span class="brand">agentihooks</span><h1>__HOME_HEADING__</h1>__HOME_TOTAL__</header><div
+        class="panel"><div class="row head">__HOME_HEAD__</div><ul id="rows"></ul></div></main>__HOME_FAB__'
+    - text: __HOME_VIEW__
+      reason: user-facing literal
+      context: __HOME_WATERMARK__<main class="__HOME_VIEW__"><header><a class="logo-link" href="/" aria-label="HOME"><span
+        class="logo" aria-hidden="true"></span></a><span class="brand">agentihooks</span><h1>__HOME_HEADING__</h1>__HOME_TOTAL__</header><div
+        class="panel"><div class="row head">__HOME_HEAD__</div><ul id="rows"></ul></div></main>__HOME_FAB__
+    - text: logo-link
+      reason: user-facing literal
+      context: __HOME_WATERMARK__<main class="__HOME_VIEW__"><header><a class="logo-link" href="/" aria-label="HOME"><span
+        class="logo" aria-hidden="true"></span></a><span class="brand">agentihooks</span><h1>__HOME_HEADING__</h1>__HOME_TOTAL__</header><div
+        class="panel"><div class="row head">__HOME_HEAD__</div><ul id="rows"></ul></div></main>__HOME_FAB__
+  expected:
+    finding_0: false
+    finding_1: false
+    finding_2: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 249
+    answers:
+      finding_0:
+        type: noul
+        noul: 0.29421497216298875
+      finding_1:
+        type: noul
+        noul: 0.25683200276421697
+      finding_2:
+        type: noul
+        noul: 0.29421497216298875
+  notes: state digest 3a790fd2cfbbf821, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package
+- name: shell-0
+  state:
+    filter: pre-edit+write+multiedit-ui_slop.filter.yaml
+    tool: Write
+    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/shell.html
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+  params:
+    question: Does this finding go against the filter intent?
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+    findings:
+    - text: en
+      reason: user-facing literal
+      context: <html lang="en">
+    - text: utf-8
+      reason: user-facing literal
+      context: <meta charset="utf-8">
+    - text: viewport
+      reason: user-facing literal
+      context: <meta name="viewport" content="width=device-width, initial-scale=1">
+  expected:
+    finding_0: false
+    finding_1: false
+    finding_2: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 253
+    answers:
+      finding_0:
+        type: noul
+        noul: 0.1480471980316895
+      finding_1:
+        type: noul
+        noul: 0.21206882427645699
+      finding_2:
+        type: noul
+        noul: 0.16451644651115205
+  notes: state digest f1be1dd60f8a094f, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package
+- name: shell-3
+  state:
+    filter: pre-edit+write+multiedit-ui_slop.filter.yaml
+    tool: Write
+    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/shell.html
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+  params:
+    question: Does this finding go against the filter intent?
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+    findings:
+    - text: width=device-width, initial-scale=1
+      reason: user-facing literal
+      context: <meta name="viewport" content="width=device-width, initial-scale=1">
+    - text: ledger-token
+      reason: user-facing literal
+      context: <meta name="ledger-token" content="__LEDGER_TOKEN__">
+    - text: __LEDGER_TOKEN__
+      reason: user-facing literal
+      context: <meta name="ledger-token" content="__LEDGER_TOKEN__">
+  expected:
+    finding_0: false
+    finding_1: false
+    finding_2: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 240
+    answers:
+      finding_0:
+        type: noul
+        noul: 0.3923368301671084
+      finding_1:
+        type: noul
+        noul: 0.06754669489377622
+      finding_2:
+        type: noul
+        noul: 0.1919328141803125
+  notes: state digest f1be1dd60f8a094f, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package
+- name: shell-6
+  state:
+    filter: pre-edit+write+multiedit-ui_slop.filter.yaml
+    tool: Write
+    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/shell.html
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+  params:
+    question: Does this finding go against the filter intent?
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+    findings:
+    - text: ledger-page
+      reason: user-facing literal
+      context: <meta name="ledger-page" content="__LEDGER_PAGE__">
+    - text: __LEDGER_PAGE__
+      reason: user-facing literal
+      context: <meta name="ledger-page" content="__LEDGER_PAGE__">
+    - text: ledger-slug
+      reason: user-facing literal
+      context: <meta name="ledger-slug" content="__LEDGER_SLUG__">
+  expected:
+    finding_0: false
+    finding_1: false
+    finding_2: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 257
+    answers:
+      finding_0:
+        type: noul
+        noul: 0.17328819739040088
+      finding_1:
+        type: noul
+        noul: 0.2814055953761018
+      finding_2:
+        type: noul
+        noul: 0.18242553269617778
+  notes: state digest f1be1dd60f8a094f, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package
+- name: shell-9
+  state:
+    filter: pre-edit+write+multiedit-ui_slop.filter.yaml
+    tool: Write
+    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/shell.html
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+  params:
+    question: Does this finding go against the filter intent?
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+    findings:
+    - text: __LEDGER_SLUG__
+      reason: user-facing literal
+      context: <meta name="ledger-slug" content="__LEDGER_SLUG__">
+    - text: ledger-port
+      reason: user-facing literal
+      context: <meta name="ledger-port" content="__LEDGER_PORT__">
+    - text: __LEDGER_PORT__
+      reason: user-facing literal
+      context: <meta name="ledger-port" content="__LEDGER_PORT__">
+  expected:
+    finding_0: false
+    finding_1: false
+    finding_2: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 249
+    answers:
+      finding_0:
+        type: noul
+        noul: 0.22270013882530884
+      finding_1:
+        type: noul
+        noul: 0.1480471980316895
+      finding_2:
+        type: noul
+        noul: 0.3923368301671084
+  notes: state digest f1be1dd60f8a094f, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package
+- name: template-0
+  state:
+    filter: pre-edit+write+multiedit-ui_slop.filter.yaml
+    tool: Write
+    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/template.html
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+  params:
+    question: Does this finding go against the filter intent?
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+    findings:
+    - text: en
+      reason: user-facing literal
+      context: <html lang="en">
+    - text: utf-8
+      reason: user-facing literal
+      context: <meta charset="utf-8">
+    - text: ledger-token
+      reason: user-facing literal
+      context: <meta name="ledger-token" content="__LEDGER_TOKEN__">
+  expected:
+    finding_0: false
+    finding_1: false
+    finding_2: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 274
+    answers:
+      finding_0:
+        type: noul
+        noul: 0.12592277795604903
+      finding_1:
+        type: noul
+        noul: 0.30735801686526387
+      finding_2:
+        type: noul
+        noul: 0.07585818419975078
+  notes: state digest 06ad8472dfbf72c0, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package
+- name: template-3
+  state:
+    filter: pre-edit+write+multiedit-ui_slop.filter.yaml
+    tool: Write
+    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/template.html
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+  params:
+    question: Does this finding go against the filter intent?
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+    findings:
+    - text: __LEDGER_TOKEN__
+      reason: user-facing literal
+      context: <meta name="ledger-token" content="__LEDGER_TOKEN__">
+    - text: ledger-page
+      reason: user-facing literal
+      context: <meta name="ledger-page" content="__LEDGER_PAGE__">
+    - text: __LEDGER_PAGE__
+      reason: user-facing literal
+      context: <meta name="ledger-page" content="__LEDGER_PAGE__">
+  expected:
+    finding_0: false
+    finding_1: false
+    finding_2: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 249
+    answers:
+      finding_0:
+        type: noul
+        noul: 0.25683200276421697
+      finding_1:
+        type: noul
+        noul: 0.18242553269617778
+      finding_2:
+        type: noul
+        noul: 0.2120687844377551
+  notes: state digest 06ad8472dfbf72c0, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package
+- name: template-6
+  state:
+    filter: pre-edit+write+multiedit-ui_slop.filter.yaml
+    tool: Write
+    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/template.html
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+  params:
+    question: Does this finding go against the filter intent?
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+    findings:
+    - text: ledger-slug
+      reason: user-facing literal
+      context: <meta name="ledger-slug" content="__LEDGER_SLUG__">
+    - text: __LEDGER_SLUG__
+      reason: user-facing literal
+      context: <meta name="ledger-slug" content="__LEDGER_SLUG__">
+    - text: ledger-port
+      reason: user-facing literal
+      context: <meta name="ledger-port" content="__LEDGER_PORT__">
+  expected:
+    finding_0: false
+    finding_1: false
+    finding_2: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 264
+    answers:
+      finding_0:
+        type: noul
+        noul: 0.2568320141409155
+      finding_1:
+        type: noul
+        noul: 0.2689414330889798
+      finding_2:
+        type: noul
+        noul: 0.10669058826486906
+  notes: state digest 06ad8472dfbf72c0, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package
+- name: template-9
+  state:
+    filter: pre-edit+write+multiedit-ui_slop.filter.yaml
+    tool: Write
+    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/template.html
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+  params:
+    question: Does this finding go against the filter intent?
+    intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
+      detail nobody asked for.
+    findings:
+    - text: __LEDGER_PORT__
+      reason: user-facing literal
+      context: <meta name="ledger-port" content="__LEDGER_PORT__">
+    - text: __LEDGER_TITLE__
+      reason: user-facing literal
+      context: <title>__LEDGER_TITLE__</title>
+    - text: 'This file stores the ledger record. Open the ledger at '
+      reason: user-facing literal
+      context: <p>This file stores the ledger record. Open the ledger at <a href="http://127.0.0.1:__LEDGER_PORT__/__LEDGER_SLUG__">http://127.0.0.1:__LEDGER_PORT__/__LEDGER_SLUG__</a>.</p>
+  expected:
+    finding_0: false
+    finding_1: false
+    finding_2: true
+  samples:
+  - source: liquid-d1
+    latency_ms: 256
+    answers:
+      finding_0:
+        type: noul
+        noul: 0.24508502416032488
+      finding_1:
+        type: noul
+        noul: 0.1066905825840872
+      finding_2:
+        type: noul
+        noul: 0.743168019989179
+  notes: state digest 06ad8472dfbf72c0, state rebuilt from the ledger on 2026-10-10 and asked once so the decision log recorded
+    it; internal names masked for the package

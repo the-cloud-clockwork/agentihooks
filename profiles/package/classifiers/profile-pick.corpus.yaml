@@ -299,9 +299,9 @@ cases:
       frontend, backend and infrastructure use engineer, planning uses planner, and independent stress verification uses qa.
       Explicit task profiles prevail. Verify actual mounted profiles and classifier decisions at every launch and handoff,
       not labels alone. Keep continuous correlated logs and Langfuse traces throughout each job and make missing, stale or
-      misattributed telemetry visible. Target project is https://langfuse.homeofanton.com/project/cmuucj51s0001rk07jrqvrp5x.
-      Include minimal Langfuse read capability for master and QA, ongoing detector coverage, and an independent QA pass after
-      implementation. Master approves the plan under delegate autonomy.'
+      misattributed telemetry visible. Target project is https://telemetry.example/project Include minimal Langfuse read capability
+      for master and QA, ongoing detector coverage, and an independent QA pass after implementation. Master approves the plan
+      under delegate autonomy.'
   params:
     id: rt3
     title: A finished agent is always retired, its lane slot freed at once, and a failed retire is flagged
@@ -321,7 +321,7 @@ cases:
           qa: 0.0
           split: 0.0
           unresolved: 0.0
-  notes: state digest 7e1b64a4473a7c33
+  notes: state digest 7e1b64a4473a7c33; internal names masked for the package
 - name: rig-grade-swarm-doctor-t26
   state:
     task: t26
@@ -330,7 +330,7 @@ cases:
       each render stamp a fresh profile home and never rewrite a home with live sessions; they merged and are pulled into
       the main checkout. The task cost number on the old finding cannot move because it is a finished session''s usage. Before:
       task mp2 paid two whole context cache rewrites, about six hundred eighty thousand tokens, and two running Codex sessions
-      failed their profile check with persona changed since render after a bundle manifesto change. After the first render
+      failed their profile check with persona changed since render after a bundle doctrine change. After the first render
       that changes settings or rules after the merge, run the drops script from the render fix task''s work folder over the
       five minutes after it, and count running sessions in both swarms that fail their profile check with persona changed
       in the hour after it. Target zero for both. Do not trigger a render yourself on the shared homes; wait for one with
@@ -361,7 +361,7 @@ cases:
           qa: 0.92
           split: 0.01
           unresolved: 0.02
-  notes: state digest 8aa5aefa0a695176
+  notes: state digest 8aa5aefa0a695176; internal names masked for the package
 - name: rig-grade-swarm-doctor-t74
   state:
     task: t74

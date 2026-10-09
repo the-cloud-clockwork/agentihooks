@@ -133,12 +133,12 @@ cases:
 - name: rig-grade-swarm-vidn2
   state:
     title: Separate logical agents from execution attempts
-    description: 'Swarm v2 work package SV2-IDN-02, tier 1 of 8. Spec: read section SV2-IDN-02 of /home/iamroot/dev/tcc-ecosystem/agentihooks/Swarm-v2.md
+    description: 'Swarm v2 work package SV2-IDN-02, tier 1 of 8. Spec: read section SV2-IDN-02 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
       (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
       rollback and completion, plus sections 1 to 3. Repository: agentihooks. Integration gate: G1. Intended change: Keep
       seat continuity while giving every replacement process an immutable execution incarnation. Required fixture: One seat
       with three sequential attempts and two Pods sharing a human display label. Name SV2-IDN-02 in the pull request. antoncore
-      changes go through GitOps, never live patches. Priority: Anton compute first, because the operator''s workstation memory
+      changes go through GitOps, never live patches. Priority: Atlas compute first, because the operator''s workstation memory
       is the bottleneck.'
     kind: code
     territory_size: 1
@@ -168,7 +168,7 @@ cases:
           '1': medium
           '2': high
           '3': xhigh
-  notes: state digest a53cb64d4dd464ba
+  notes: state digest a53cb64d4dd464ba; internal names masked for the package
 - name: rig-grade-swarm-doctor-t14
   state:
     title: Measure non master replies to whole swarm chat lines after the fix is live
