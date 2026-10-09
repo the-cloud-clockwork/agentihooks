@@ -20,6 +20,7 @@ PENDING = ".bootstrap-pending"
 NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 VARIABLE = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
 SYSTEM_ROOTS = (Path("/usr/bin"), Path("/bin"), Path("/usr/local/bin"))
+PROBE_SECONDS = 30
 SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*")
 
 
@@ -102,6 +103,18 @@ def _check_volume(request: Request) -> None:
         raise BootstrapError("execution root is mounted noexec, so the codex hook wrapper cannot run")
 
 
+def _text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _write(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8")
+
+
+def _json(document: object) -> str:
+    return json.dumps(document, indent=2, sort_keys=True) + "\n"
+
+
 def _environment() -> dict[str, str]:
     return {"PATH": os.environ.get("PATH", os.defpath), "LANG": "C.UTF-8"}
 
@@ -114,7 +127,7 @@ def interpreter_prefix(interpreter: Path) -> Path:
             env=_environment(),
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=PROBE_SECONDS,
         )
     except OSError:
         done = None
@@ -175,16 +188,17 @@ def child_environment(home: Path, interpreter: Path) -> dict[str, str]:
 
 
 def render(attempt: Path, target: str) -> None:
-    pending = json.loads((attempt / PENDING).read_text(encoding="utf-8"))
+    pending = json.loads(_text(attempt / PENDING))
     home = attempt / "homes" / target
-    with (attempt / "run" / f"render-{target}.log").open("w", encoding="utf-8") as log:
-        done = subprocess.run(
-            child_command(attempt, target),
-            cwd=home,
-            env=child_environment(home, Path(pending["request"]["interpreter"])),
-            stdout=log,
-            stderr=subprocess.STDOUT,
-        )
+    done = subprocess.run(
+        child_command(attempt, target),
+        cwd=home,
+        env=child_environment(home, Path(pending["request"]["interpreter"])),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    _write(attempt / "run" / f"render-{target}.log", done.stdout)
     if done.returncode:
         raise BootstrapError(f"{target} render failed with exit {done.returncode}")
 
@@ -195,7 +209,7 @@ def materialize(attempt: Path, target: str) -> None:
     from scripts.targets._common import _install_module
 
     _i = _install_module()
-    request = json.loads((attempt / PENDING).read_text(encoding="utf-8"))["request"]
+    request = json.loads(_text(attempt / PENDING))["request"]
     name = request["profiles"][target]
     dirs = _i._resolve_profile_chain(name)
     if not dirs or dirs[0][0] != name:
@@ -232,8 +246,8 @@ def _strings(value: object) -> list[str]:
 
 
 def _claude_surfaces(home: Path) -> dict[str, list[str]]:
-    settings = json.loads((home / ".claude" / "settings.json").read_text(encoding="utf-8"))
-    servers = json.loads((home / ".claude.json").read_text(encoding="utf-8")).get("mcpServers", {})
+    settings = json.loads(_text(home / ".claude" / "settings.json"))
+    servers = json.loads(_text(home / ".claude.json")).get("mcpServers")
     surfaces = {f"setting {key}": _strings(value) for key, value in settings.items() if key != "permissions"}
     return surfaces | {"MCP server": _strings(servers)}
 
@@ -252,12 +266,12 @@ def _wrapper(text: str) -> tuple[list[str], list[str]]:
 
 def _codex_surfaces(home: Path) -> dict[str, list[str]]:
     codex = home / ".codex"
-    config = tomllib.loads((codex / "config.toml").read_text(encoding="utf-8"))
-    hooks = json.loads((codex / "hooks.json").read_text(encoding="utf-8"))["hooks"]
-    exports, commands = _wrapper((codex / "agentihooks-hook.sh").read_text(encoding="utf-8"))
+    config = tomllib.loads(_text(codex / "config.toml"))
+    hooks = json.loads(_text(codex / "hooks.json"))["hooks"]
+    exports, commands = _wrapper(_text(codex / "agentihooks-hook.sh"))
     surfaces = {f"setting {key}": _strings(value) for key, value in config.items() if key != "mcp_servers"}
     return surfaces | {
-        "MCP server": _strings(config.get("mcp_servers", {})),
+        "MCP server": _strings(config.get("mcp_servers")),
         "hook command": _strings(hooks) + commands,
         "environment value": exports,
     }
@@ -317,7 +331,7 @@ def _seed(attempt: Path, request: Request) -> None:
     for target in request.profiles:
         state = attempt / "homes" / target / ".agentihooks"
         state.mkdir(parents=True, mode=0o700)
-        (state / "state.json").write_text(json.dumps({"linked_profiles": linked}, indent=2) + "\n", encoding="utf-8")
+        _write(state / "state.json", _json({"linked_profiles": linked}))
 
 
 def _accepted(attempt: Path, digest: str) -> dict | None:
@@ -325,7 +339,7 @@ def _accepted(attempt: Path, digest: str) -> dict | None:
         return None
     record = attempt / RECORD
     if record.is_file():
-        accepted = json.loads(record.read_text(encoding="utf-8"))
+        accepted = json.loads(_text(record))
         if accepted["digest"] != digest:
             raise BootstrapError(f"attempt {attempt.name} was accepted from a different request")
         return {**accepted, "reused": True}
@@ -360,8 +374,7 @@ def _materialize_attempt(request: Request, profiles: dict[str, str], roots: list
     started = time.monotonic()
     attempt.mkdir(mode=0o700)
     try:
-        pending = {"digest": digest, "request": _document(request)}
-        (attempt / PENDING).write_text(json.dumps(pending), encoding="utf-8")
+        _write(attempt / PENDING, _json({"request": _document(request)}))
         for folder in ("run", "tmp"):
             (attempt / folder).mkdir(mode=0o700)
         _seed(attempt, request)
@@ -373,7 +386,7 @@ def _materialize_attempt(request: Request, profiles: dict[str, str], roots: list
         raise
     record = _record(request, digest, profiles, time.monotonic() - started)
     staged = attempt / f"{RECORD}.tmp"
-    staged.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write(staged, _json(record))
     staged.replace(attempt / RECORD)
     (attempt / PENDING).unlink()
     return {**record, "reused": False}
@@ -404,7 +417,7 @@ def _pairs(values: list[str], flag: str) -> dict[str, str]:
     return pairs
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m scripts.swarm_v2.worker_home")
     commands = parser.add_subparsers(dest="command", required=True)
     start = commands.add_parser("bootstrap")
@@ -420,7 +433,11 @@ def main(argv: list[str] | None = None) -> int:
     child = commands.add_parser("render")
     child.add_argument("attempt", type=Path)
     child.add_argument("target", choices=TARGETS)
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     try:
         if args.command == "render":
             materialize(args.attempt, args.target)
@@ -436,7 +453,7 @@ def main(argv: list[str] | None = None) -> int:
             uid=args.uid,
             gid=args.gid,
         )
-        print(json.dumps(bootstrap(request), indent=2, sort_keys=True))
+        print(_json(bootstrap(request)), end="")
     except BootstrapError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
