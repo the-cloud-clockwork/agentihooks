@@ -9,7 +9,7 @@ import scripts.swarm_v2.registry as registry
 from hooks.proc import Process
 from scripts.swarm.store import SwarmError
 from scripts.swarm_v2.auth_context import GrantRefused
-from scripts.swarm_v2.registry import CLOSED, EXITED, LIVE, SUSPECT, FleetRegistry, Scope, Session
+from scripts.swarm_v2.registry import CLOSED, LIVE, SUSPECT, FleetRegistry, Scope, Session
 from tests.sv2_ctl02_cases import build
 
 pytestmark = pytest.mark.unit
@@ -143,23 +143,23 @@ def test_local_and_remote_sessions_sharing_a_pid_coexist_in_one_registry(world, 
 
     assert world.fleet.observe(scope("anton"), {PID: process(111)}) == 0
     assert world.fleet.observe(scope("anton"), GONE) == 1
-    assert world.states() == {"sess-anton": EXITED, "sess-worker": LIVE}
+    assert world.states() == {"sess-anton": SUSPECT, "sess-worker": LIVE}
     assert world.fleet.observe(scope("anton"), GONE) == 0
-    assert world.fleet.fleet_registry_stale_records() == 0
+    assert world.fleet.fleet_registry_stale_records() == 1
 
 
 def test_a_pid_reused_with_another_start_time_exits_only_the_record_of_that_machine(world):
     world.two_machines()
 
     assert world.fleet.observe(scope("anton"), {PID: process(222)}) == 1
-    assert world.states() == {"sess-anton": EXITED, "sess-worker": LIVE}
+    assert world.states() == {"sess-anton": SUSPECT, "sess-worker": LIVE}
 
 
 def test_a_remote_observation_judges_only_remote_records(world):
     world.two_machines()
 
     assert world.fleet.observe(scope("worker"), GONE) == 1
-    assert world.states() == {"sess-anton": LIVE, "sess-worker": EXITED}
+    assert world.states() == {"sess-anton": LIVE, "sess-worker": SUSPECT}
 
 
 def test_an_unreadable_process_table_judges_nothing(world):
@@ -187,34 +187,43 @@ def test_a_silent_record_turns_suspect_and_is_never_deleted(world):
     assert world.fleet.fleet_registry_stale_records() == 0
     world.clock[0] += INPUTS["stale_after_ms"] + 1
     assert world.fleet.sweep() == 2
-    assert world.fleet.observe(scope("anton"), GONE) == 1
-    assert world.states() == {"sess-anton": EXITED, "sess-worker": SUSPECT}
+    assert world.fleet.observe(scope("anton"), GONE) == 0
+    assert world.states() == {"sess-anton": SUSPECT, "sess-worker": SUSPECT}
 
 
 def test_default_clock_and_stale_window(world):
     fleet = FleetRegistry(world.store, SLUG, world.authority.authorize)
     anton, token = world.start(seat="eng-1@fixture")
 
-    assert fleet.register(session("anton", anton), token).heartbeat_ms == world.clock[0]
+    record = fleet.register(replace(session("anton", anton), name="", state=SUSPECT), token)
+    assert (record.name, record.state, record.heartbeat_ms) == ("", LIVE, world.clock[0])
     world.clock[0] += registry.STALE_AFTER_MS
     assert fleet.sweep() == 0
     world.clock[0] += 1
     assert fleet.sweep() == 1
 
 
-def test_an_exited_or_closed_record_is_not_revived(world):
-    local, _, _ = world.two_machines()
-    world.fleet.observe(scope("anton"), GONE)
-    assert world.fleet.close(scope("worker"), "sess-worker", world.tokens["worker"]).state == CLOSED
+def test_a_closed_record_is_not_revived(world):
+    local, remote, _ = world.two_machines()
 
-    for machine in ("anton", "worker"):
+    for machine, record in (("anton", local), ("worker", remote)):
+        assert world.fleet.close(scope(machine), record.session_id, world.tokens[machine]).state == CLOSED
         with pytest.raises(SwarmError, match="^session_ended$"):
             world.beat(machine)
     with pytest.raises(SwarmError, match="^session_ended$"):
         world.fleet.register(replace(local, state=LIVE, heartbeat_ms=0), world.tokens["anton"])
     world.clock[0] += INPUTS["stale_after_ms"] + 1
     assert world.fleet.sweep() == 0
-    assert world.states() == {"sess-anton": EXITED, "sess-worker": CLOSED}
+    assert world.states() == {"sess-anton": CLOSED, "sess-worker": CLOSED}
+
+
+def test_replaying_a_suspect_registration_writes_nothing(world):
+    local, _, _ = world.two_machines()
+    world.fleet.observe(scope("anton"), GONE)
+    before = world.rows()
+
+    assert world.fleet.register(replace(local, state=LIVE, heartbeat_ms=0), world.tokens["anton"]).state == SUSPECT
+    assert world.rows() == before
 
 
 def test_heartbeat_and_close_need_the_grant_of_the_record(world):
@@ -233,15 +242,13 @@ def test_heartbeat_and_close_need_the_grant_of_the_record(world):
     assert world.rows() == before
 
 
-def test_a_session_without_an_execution_beats_without_a_grant(world):
+def test_a_session_without_a_grant_cannot_register(world):
     plain = Session("sess-plain", scope("anton"), PID, 111, "claude")
-    record = world.fleet.register(replace(plain, state=SUSPECT))
-    assert (record.name, record.seat, record.state) == ("", "", LIVE)
-    assert world.rows()[1] == {}
-    world.clock[0] += 5
 
-    assert world.fleet.heartbeat(scope("anton"), "sess-plain").heartbeat_ms == world.clock[0]
-    assert world.fleet.close(scope("anton"), "sess-plain").state == CLOSED
+    for attempt in (plain, replace(plain, state=SUSPECT)):
+        with pytest.raises(SwarmError, match="^forbidden_scope$"):
+            world.fleet.register(attempt)
+    assert world.rows() == ({}, {})
 
 
 def test_a_superseded_attempt_cannot_beat_its_successor_record(world):
@@ -258,6 +265,25 @@ def test_a_superseded_attempt_cannot_beat_its_successor_record(world):
     with pytest.raises(SwarmError, match="^forbidden_scope$"):
         fenced.heartbeat(scope("anton"), "sess-anton", old_token)
     assert world.rows() == before
+
+
+def test_a_record_replaced_after_its_grant_check_is_not_beaten(world, monkeypatch):
+    local, _, _ = world.two_machines()
+    newer = replace(local, generation=local.generation + 1)
+    sessions = world.store.key(SLUG, "fleet-sessions")
+    checked = world.fleet._grant
+
+    def check_then_replace(*args):
+        grant = checked(*args)
+        world.store.redis.hset(sessions, local.key(), registry.encode(newer))
+        return grant
+
+    monkeypatch.setattr(world.fleet, "_grant", check_then_replace)
+    world.clock[0] += 5
+
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        world.beat("anton")
+    assert [record for record in world.fleet.records() if record.key() == local.key()] == [newer]
 
 
 def test_local_only_reads_while_distributed_launches_are_disabled(world):
@@ -370,7 +396,7 @@ def test_recovery_from_persisted_state_keeps_aliases_and_generations(world):
     before = world.rows()
     assert world.fleet.register(session("worker", new), new_token) == current
     assert world.rows() == before
-    with pytest.raises(SwarmError, match="^stale_generation$"):
+    with pytest.raises(SwarmError, match="^forbidden_scope$"):
         world.fleet.register(session("worker", old, INPUTS["alias"]))
     with pytest.raises(GrantRefused, match="^launch grant is for a superseded execution$"):
         world.fleet.register(session("worker", old, INPUTS["alias"]), old_token)
@@ -390,6 +416,8 @@ def test_an_older_generation_cannot_take_a_seat_a_newer_one_holds(world):
 
     with pytest.raises(SwarmError, match="^stale_generation$"):
         fenced.register(stale, old_token)
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        fenced.register(replace(stale, session_id="sess-new"), old_token)
     with pytest.raises(SwarmError, match="^forbidden_scope$"):
         fenced.register(replace(stale, seat="eng-2@fixture"), old_token)
     assert world.rows() == before
@@ -412,11 +440,11 @@ def test_a_changed_registration_at_the_same_generation_is_a_conflict(world):
     before = world.rows()
 
     with pytest.raises(SwarmError, match="^registration_conflict$"):
-        world.fleet.register(replace(local, pid=PID + 1, seat=""))
+        world.fleet.register(replace(local, pid=PID + 1), world.tokens["anton"])
     assert world.rows() == before
 
 
-def test_an_exited_record_keeps_its_seat_against_another_grant(world):
+def test_a_suspect_record_keeps_its_seat_against_another_grant(world):
     anton, token = world.start(seat="eng-1@fixture")
     world.fleet.register(session("anton", anton), token)
     world.fleet.observe(scope("anton"), GONE)
@@ -429,7 +457,7 @@ def test_an_exited_record_keeps_its_seat_against_another_grant(world):
     assert world.rows() == before
 
 
-def test_an_exited_session_resumed_on_a_new_pid_registers_again(world):
+def test_a_suspect_session_resumed_on_a_new_pid_registers_again(world):
     anton, token = world.start(seat="eng-1@fixture")
     first = world.fleet.register(session("anton", anton), token)
     world.fleet.observe(scope("anton"), GONE)
@@ -440,25 +468,27 @@ def test_an_exited_session_resumed_on_a_new_pid_registers_again(world):
     assert (resumed.key(), resumed.pid, resumed.state, resumed.heartbeat_ms) == (first.key(), PID + 1, LIVE, 1001)
     assert world.fleet.records() == [resumed]
     with pytest.raises(SwarmError, match="^registration_conflict$"):
-        world.fleet.register(replace(session("anton", anton), pid=PID + 2))
+        world.fleet.register(replace(session("anton", anton), pid=PID + 2), token)
 
 
 def test_writes_retry_a_watch_conflict_and_give_up_after_their_attempts(world, monkeypatch):
     world.two_machines()
+    third, third_token = world.start(seat="eng-3@fixture")
+    world.authority.authorize(third_token)
     flaky = Flaky(world.store.redis, 1)
     monkeypatch.setattr(world.store, "redis", flaky)
-    world.clock[0] += INPUTS["stale_after_ms"] + 1
 
-    assert world.fleet.sweep() == 2
+    assert world.fleet.observe(scope("anton"), GONE) == 1
     assert flaky.failures == 0
+    world.clock[0] += INPUTS["stale_after_ms"] + 1
     flaky.failures = registry.WRITE_ATTEMPTS
     with pytest.raises(SwarmError, match="^dependency_unavailable$"):
-        world.fleet.observe(scope("anton"), GONE)
+        world.fleet.sweep()
     flaky.failures = registry.WRITE_ATTEMPTS
     with pytest.raises(SwarmError, match="^dependency_unavailable$"):
-        world.fleet.register(Session("sess-new", scope("anton"), PID, 111, "claude"))
+        world.fleet.register(replace(session("anton", third), session_id="sess-new"), third_token)
     assert flaky.failures == 0
-    assert world.states() == {"sess-anton": SUSPECT, "sess-worker": SUSPECT}
+    assert world.states() == {"sess-anton": SUSPECT, "sess-worker": LIVE}
 
 
 def test_a_seat_taken_meanwhile_fences_the_retried_registration(world, monkeypatch):
@@ -475,15 +505,17 @@ def test_a_seat_taken_meanwhile_fences_the_retried_registration(world, monkeypat
 
 
 def test_a_session_written_meanwhile_fences_the_retried_registration(world, monkeypatch):
-    plain = Session("sess-plain", scope("anton"), PID, 111, "claude")
+    anton, token = world.start(seat="eng-1@fixture")
+    world.authority.authorize(token)
+    mine = session("anton", anton)
+    newer = replace(mine, generation=anton.generation + 4)
     sessions = world.store.key(SLUG, "fleet-sessions")
-    newer = registry.encode(replace(plain, generation=5))
-    intruder = Intruder(world.store.redis, lambda r: r.hset(sessions, plain.key(), newer))
+    intruder = Intruder(world.store.redis, lambda r: r.hset(sessions, mine.key(), registry.encode(newer)))
     monkeypatch.setattr(world.store, "redis", intruder)
 
     with pytest.raises(SwarmError, match="^stale_generation$"):
-        world.fleet.register(plain)
-    assert world.fleet.records() == [replace(plain, generation=5)]
+        world.fleet.register(mine, token)
+    assert world.fleet.records() == [newer]
 
 
 def test_a_record_round_trips_through_its_stored_document():

@@ -442,12 +442,23 @@ class TestSessionRegistry:
 
         from hooks.context.broadcast import _load_sessions, _save_sessions, heartbeat_sessions
 
+        live_pid, foreign_pid = 4100, 7
+        signals = []
+
+        def kill(pid, signal):
+            signals.append((pid, signal))
+            if pid != live_pid:
+                raise ProcessLookupError(pid)
+
         sessions_file = broadcast_dir / "active-sessions.json"
         records = self._sessions_at(
             sessions_file,
             {
                 "local": ("here", "alive", 10),
+                "local-second-dead": ("here", "handed_off", 10),
                 "local-suspect": ("here", "suspect", 400),
+                "local-handed-off-live": ("here", "handed_off", 10),
+                "local-closed": ("here", "closed", 10),
                 "remote-boundary": ("there", "alive", 300),
                 "remote-silent": ("there", "alive", 301),
                 "remote-handed-off": ("there", "handed_off", 301),
@@ -456,30 +467,51 @@ class TestSessionRegistry:
                 "remote-unstamped": ("there", "alive", None),
             },
         )
-        records["local-suspect"]["pid"] = os.getpid()
-        records["legacy"] = {"status": "alive", "pid": os.getpid(), "last_seen": FROZEN_NOW.isoformat()}
-        records["remote-statusless"] = {
-            "pid": 7,
-            "process_namespace": "there",
-            "last_seen": "2026-10-09T11:54:59+00:00",
-        }
+        for sid in ("local-suspect", "local-handed-off-live"):
+            records[sid]["pid"] = live_pid
+        for sid in ("remote-boundary", "remote-silent", "remote-handed-off", "remote-unstamped"):
+            records[sid]["pid"] = foreign_pid
+        seen = FROZEN_NOW.isoformat()
+        records["legacy"] = {"status": "alive", "pid": live_pid, "last_seen": seen}
+        records["local-statusless"] = {"pid": live_pid, "process_namespace": "here", "last_seen": seen}
+        records["local-pidless"] = {"status": "alive", "process_namespace": "here", "last_seen": seen}
+        records["local-bad-pid"] = {"status": "alive", "pid": "x", "process_namespace": "here", "last_seen": seen}
+        silent = "2026-10-09T11:54:59+00:00"
+        records["remote-statusless"] = {"pid": foreign_pid, "process_namespace": "there", "last_seen": silent}
         started = (FROZEN_NOW - timedelta(seconds=301)).isoformat()
-        records["remote-started"] = {"status": "alive", "pid": 7, "process_namespace": "there", "started_at": started}
-        records["remote-garbled"] = {"status": "alive", "pid": 7, "process_namespace": "there", "last_seen": "garbage"}
+        records["remote-started"] = {
+            "status": "alive",
+            "pid": foreign_pid,
+            "process_namespace": "there",
+            "started_at": started,
+        }
+        records["remote-garbled"] = {
+            "status": "alive",
+            "pid": foreign_pid,
+            "process_namespace": "there",
+            "last_seen": "garbage",
+        }
         with (
             patch("hooks.context.broadcast._sessions_path", return_value=sessions_file),
             patch("hooks.context.broadcast._local_namespace", return_value="here"),
             patch("hooks.context.broadcast.datetime", Frozen),
+            patch("hooks.context.broadcast.os.kill", kill),
         ):
             _save_sessions(records)
             summary = heartbeat_sessions()
             sessions = _load_sessions()
 
-        assert summary == {"alive": 2, "flipped_dead": 1, "pruned": 1, "suspect": 4, "total": 11}
+        assert summary == {"alive": 3, "flipped_dead": 4, "pruned": 1, "suspect": 4, "total": 17}
         assert {sid: info.get("status") for sid, info in sessions.items()} == {
             "local": "dead",
+            "local-second-dead": "dead",
             "local-suspect": "alive",
+            "local-handed-off-live": "handed_off",
+            "local-closed": "closed",
             "legacy": "alive",
+            "local-statusless": "alive",
+            "local-pidless": "dead",
+            "local-bad-pid": "dead",
             "remote-boundary": "alive",
             "remote-silent": "suspect",
             "remote-handed-off": "suspect",
@@ -491,12 +523,14 @@ class TestSessionRegistry:
         }
         assert sessions["local-suspect"]["last_seen"] == "2026-10-09T12:00:00Z"
         assert sessions["remote-silent"]["last_seen"] == records["remote-silent"]["last_seen"]
+        assert {signal for _, signal in signals} == {0}
+        assert foreign_pid not in {pid for pid, _ in signals}
 
     def test_heartbeat_leaves_a_quiet_foreign_registry_unwritten(self, broadcast_dir):
         from hooks.context.broadcast import heartbeat_sessions
 
         sessions_file = broadcast_dir / "active-sessions.json"
-        self._sessions_at(sessions_file, {"remote": ("there", "alive", 10)})
+        self._sessions_at(sessions_file, {"remote": ("there", "alive", 10), "local": ("here", "closed", 10)})
         written = sessions_file.read_text()
         with (
             patch("hooks.context.broadcast._sessions_path", return_value=sessions_file),
@@ -513,7 +547,7 @@ class TestSessionRegistry:
         from hooks.context.broadcast import get_active_sessions
 
         sessions_file = broadcast_dir / "active-sessions.json"
-        self._sessions_at(sessions_file, {"local": ("here", "alive", 10), "remote": ("there", "alive", 10)})
+        self._sessions_at(sessions_file, {"remote": ("there", "alive", 10), "local": ("here", "alive", 10)})
         with (
             patch("hooks.context.broadcast._sessions_path", return_value=sessions_file),
             patch("hooks.context.broadcast._local_namespace", return_value="here"),

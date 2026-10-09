@@ -14,7 +14,7 @@ from scripts.swarm.store import MASTER, RedisStore, SwarmError
 from scripts.swarm_v2.auth_context import Registration
 from scripts.swarm_v2.runtime.base import LOCAL, RuntimeRouter
 
-LIVE, SUSPECT, EXITED, CLOSED = "live", "suspect", "exited", "closed"
+LIVE, SUSPECT, CLOSED = "live", "suspect", "closed"
 STALE_AFTER_MS = 90_000
 WRITE_ATTEMPTS = 5
 
@@ -90,7 +90,7 @@ class FleetRegistry:
         return grant
 
     def _seat(self, session: Session, name: str, token: str) -> str:
-        seat = self._grant(token, session.execution_id, session.generation).seat_id if token else ""
+        seat = self._grant(token, session.execution_id, session.generation).seat_id
         if session.seat and session.seat != seat:
             raise SwarmError("forbidden_scope")
         if lane_of(name) == MASTER and seat != seat_address(self.slug, MASTER):
@@ -98,18 +98,16 @@ class FleetRegistry:
         return seat
 
     @staticmethod
-    def _replaceable(existing: Session, record: Session, granted: bool) -> bool:
+    def _replaceable(existing: Session, record: Session) -> bool:
         """False for a replay; raises when the stored record may not be replaced by this registration."""
         if existing.identity() == record.identity():
-            if existing.state in (EXITED, CLOSED):
+            if existing.state == CLOSED:
                 raise SwarmError("session_ended")
             return False
         if existing.generation > record.generation:
             raise SwarmError("stale_generation")
         if existing.generation == record.generation and (existing.state == LIVE or existing.seat != record.seat):
             raise SwarmError("registration_conflict")
-        if not granted:
-            raise SwarmError("forbidden_scope")
         return True
 
     def register(self, session: Session, token: str = "") -> Session:
@@ -124,7 +122,7 @@ class FleetRegistry:
                 try:
                     pipe.watch(self.sessions, self.seats)
                     raw = pipe.hget(self.sessions, key)
-                    if raw and not self._replaceable(decode(raw), record, bool(token)):
+                    if raw and not self._replaceable(decode(raw), record):
                         return decode(raw)
                     held = json.loads(pipe.hget(self.seats, seat) or "null") if seat else None
                     if held and (held["generation"], held["execution_id"]) != (record.generation, record.execution_id):
@@ -173,8 +171,7 @@ class FleetRegistry:
         if not raw:
             raise SwarmError("unknown_session")
         found = decode(raw)
-        if found.execution_id:
-            self._grant(token, found.execution_id, found.generation)
+        self._grant(token, found.execution_id, found.generation)
 
         def owned(record: Session) -> Session:
             if (record.execution_id, record.generation) != (found.execution_id, found.generation):
@@ -183,7 +180,7 @@ class FleetRegistry:
 
         return self._update(owned, {key})[0]
 
-    def heartbeat(self, scope: Scope, session_id: str, token: str = "") -> Session:
+    def heartbeat(self, scope: Scope, session_id: str, token: str) -> Session:
         def beat(record: Session) -> Session:
             if record.state not in (LIVE, SUSPECT):
                 raise SwarmError("session_ended")
@@ -191,22 +188,23 @@ class FleetRegistry:
 
         return self._one(scope, session_id, token, beat)
 
-    def close(self, scope: Scope, session_id: str, token: str = "") -> Session:
+    def close(self, scope: Scope, session_id: str, token: str) -> Session:
         return self._one(scope, session_id, token, lambda record: replace(record, state=CLOSED))
 
     def observe(self, scope: Scope, table: Mapping[int, Process]) -> int:
-        """Exit this scope's sessions whose process is gone or whose PID now names another start; other scopes'
-        records are never judged by this process table, and an empty table (an unreadable /proc) judges nothing."""
+        """Suspect this scope's live sessions whose process is gone or whose PID now names another start. A process
+        table is supporting evidence: it never ends a record, never judges another scope, and judges nothing when
+        empty (an unreadable /proc)."""
         if not table:
             return 0
 
         def judge(record: Session) -> Session | None:
-            if record.scope != scope or record.state not in (LIVE, SUSPECT):
+            if record.scope != scope or record.state != LIVE:
                 return None
             found = table.get(record.pid)
             if found is not None and found.start_time == record.pid_start:
                 return None
-            return replace(record, state=EXITED)
+            return replace(record, state=SUSPECT)
 
         return len(self._update(judge))
 

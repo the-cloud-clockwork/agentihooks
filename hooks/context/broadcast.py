@@ -896,26 +896,25 @@ def heartbeat_sessions() -> dict:
         return _heartbeat_locked()
 
 
-def _probe(info: dict, now_iso: str, summary: dict) -> bool:
-    status = info.get("status", "alive")
-    pid = info.get("pid", 0)
-    if status not in ("alive", "handed_off", "suspect"):
-        return False
-    alive = False
+def _pid_alive(pid: object) -> bool:
     try:
-        if pid:
-            os.kill(int(pid), 0)
-            alive = True
+        os.kill(int(pid), 0)
     except (OSError, ValueError):
-        alive = False
-    if alive:
+        return False
+    return True
+
+
+def _probe(info: dict, now_iso: str) -> str:
+    """The status a local liveness probe leaves on the record; empty when the record is not probed."""
+    status = info.get("status", "alive")
+    if status not in ("alive", "handed_off", "suspect"):
+        return ""
+    if info.get("pid") and _pid_alive(info["pid"]):
         info["last_seen"] = now_iso
         info["status"] = "alive" if status == "suspect" else status
-        summary["alive"] += info["status"] == "alive"
     else:
         info["status"] = "dead"
-        summary["flipped_dead"] += 1
-    return True
+    return info["status"]
 
 
 def _heartbeat_locked() -> dict:
@@ -944,7 +943,10 @@ def _heartbeat_locked() -> dict:
                 summary["suspect"] += 1
                 changed = True
             continue
-        changed = _probe(info, now_iso, summary) or changed
+        probed = _probe(info, now_iso)
+        summary["alive"] += probed == "alive"
+        summary["flipped_dead"] += probed == "dead"
+        changed = changed or bool(probed)
 
     for sid in prune:
         del sessions[sid]
