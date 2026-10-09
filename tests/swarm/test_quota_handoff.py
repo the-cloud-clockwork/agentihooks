@@ -750,3 +750,9 @@ def test_swarm_quota_transfer_routes_to_api_with_no_window_readings(tmp_path, mo
     assert _option(seen[0], "--route") == "api"
     assert _option(seen[0], "--agent") == target
     assert _option(seen[0], "--profile") == "engineer"
+
+
+def test_api_successor_ties_use_the_existing_account_name_order():
+    api = capacity.Account("claude", "api", "OPEN", 0, None, None, 1, kind="api")
+    token = account("aaa", five=0, week=0, sessions=0)
+    assert quota_handoff.successor([api, token], False, quota_handoff.Thresholds()) == token

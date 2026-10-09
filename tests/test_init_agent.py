@@ -928,17 +928,17 @@ def test_a_codex_launch_restores_the_approved_hook_order_before_codex_starts(
     assert first == "herdr" or path.stat().st_mtime_ns == untouched
 
 
-@pytest.mark.parametrize("source,target", [("claude", "claude"), ("codex", "codex")])
+@pytest.mark.parametrize("source,target", [(None, "claude"), ("claude", "claude"), ("codex", "codex")])
 @pytest.mark.parametrize("route", [["--route", "api"], ["--route=api"]])
 @pytest.mark.parametrize("explicit", [False, True])
 def test_api_handoff_launches_the_requested_harness(monkeypatch, tmp_path, capsys, source, target, route, explicit):
     binding, profile_env = _profile(monkeypatch, tmp_path, target)
     original = {
         **profile_env,
-        "AGENTIHOOKS_RUN_MODEL": "opus" if source == "claude" else "gpt-6.1-sol",
+        "AGENTIHOOKS_RUN_MODEL": "opus" if target == "claude" else "gpt-6.1-sol",
         "AGENTIHOOKS_RUN_EFFORT": "medium",
     }
-    monkeypatch.setattr(binding, "process", lambda: (123, source, original, "alpha"))
+    monkeypatch.setattr(binding, "process", lambda: (123, target, original, "alpha"))
     monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
     monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
     result = init_agent.main(
@@ -958,13 +958,14 @@ def test_api_handoff_launches_the_requested_harness(monkeypatch, tmp_path, capsy
         {
             "HOME": str(tmp_path),
             "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
-            "AGENTIHOOKS_TARGET": source,
+            **({"AGENTIHOOKS_TARGET": source} if source else {}),
             **profile_env,
         },
     )
     assert result == 0
     report = capsys.readouterr().out
     assert f"agent={target}\n" in report
+    assert "agent_reason=handoff\n" in report
     launcher = next(line.split("=", 1)[1] for line in report.splitlines() if line.startswith("launcher="))
     command = Path(launcher).read_text()
     assert f" {target} " in command

@@ -396,6 +396,7 @@ def test_api_slot_replaces_stop_and_wait_only_with_room(five, week, sessions, ca
     baseline = _decide(five, week, [])
     decision = _decide(five, week, [api])
     assert decision.action == (expected or baseline.action)
+    assert decision.trigger == baseline.trigger
     assert (decision.target.account if decision.target else None) == ("api" if expected else None)
     text = qp.render(decision, "session", "/repo")
     assert "--route api" in text if expected else "--route api" not in text
@@ -445,3 +446,56 @@ def test_evaluate_detects_api_for_its_harness(monkeypatch, harness, available, l
     assert (decision.target.account if decision.target else None) == ("api" if expected == "handoff" else None)
     if expected == "handoff":
         assert f"--agent {harness}" in qp.render(decision, "subscription", "/repo")
+
+
+@pytest.mark.parametrize("five,week", [(80, 0), (0, 80)])
+def test_configured_handoff_threshold_excludes_exactly_spent_targets(five, week):
+    decision = qp.decide(
+        account="alpha",
+        five_used=100,
+        week_used=100,
+        five_reset=None,
+        week_reset=None,
+        others=[_c("beta", five, week)],
+        push=False,
+        five_pct=80,
+        week_pct=80,
+    )
+    assert decision.action == "stop"
+
+
+def test_subscription_handoff_command_preserves_the_launcher_arguments():
+    import shlex
+
+    from scripts.init_agent import _parser
+
+    text = qp.render(_decide(10, 98.5, [_c("beta", 0, 0)]), "session", "/repo")
+    command = next(line.removeprefix("2. Run: ") for line in text.splitlines() if line.startswith("2. Run: "))
+    parsed = _parser().parse_args(shlex.split(command)[2:])
+    assert parsed.handoff
+    assert parsed.agent == ""
+    assert parsed.claude_args == []
+
+
+@pytest.mark.parametrize("harness", [None, "claude", "codex"])
+def test_api_slot_uses_its_harness_settings_namespace(tmp_path, monkeypatch, harness):
+    from scripts.routing import claude_api, codex_api, place
+    from scripts.routing.settings import FileSettings
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    if harness is None:
+        monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
+    else:
+        monkeypatch.setenv("AGENTIHOOKS_TARGET", harness)
+    monkeypatch.setattr(place, "_client", lambda env: None)
+    monkeypatch.setattr(claude_api, "provider", lambda env: "test")
+    monkeypatch.setattr(codex_api, "provider", lambda env: "test")
+    monkeypatch.setattr("hooks.context.account_sessions.codex_sessions_by_account", lambda: {"api": 2})
+    settings = FileSettings(tmp_path / "routing-settings.json")
+    settings.set("claude-api-max-sessions", 3, "operator", time.time())
+    settings.set("codex-api-max-sessions", 4, "operator", time.time())
+    (candidate,) = qp._api_accounts({"api": 1})
+    assert candidate.account == "api"
+    assert candidate.sessions == (2 if harness == "codex" else 1)
+    assert candidate.cap == (4 if harness == "codex" else 3)
+    assert (candidate.five_used, candidate.week_used) == (None, None)
