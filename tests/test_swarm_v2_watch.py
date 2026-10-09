@@ -15,21 +15,14 @@ def managed(name, execution_id, uid=None, deleting=False):
 class Source:
     def __init__(self, pods, version="10"):
         self.pods, self.version = {pod.uid: pod for pod in pods}, version
-<<<<<<< HEAD
-        self.events, self.expire, self.lists = [], False, 0
-=======
         self.events, self.expire, self.lists, self.watches = [], False, 0, []
->>>>>>> origin/dev
 
     def list_pods(self, selector):
         self.lists += 1
         return list(self.pods.values()), self.version
 
     def watch_pods(self, selector, resource_version):
-<<<<<<< HEAD
-=======
         self.watches.append((selector, resource_version))
->>>>>>> origin/dev
         if self.expire:
             self.expire = False
             raise CursorExpired(resource_version)
@@ -128,8 +121,6 @@ def test_delayed_deletion_of_an_old_incarnation_keeps_the_new_one():
     view.sync()
     assert [pod.uid for pod in view.pods()] == ["new"]
     assert view.resource_version == "12"
-<<<<<<< HEAD
-=======
     assert source.watches == [(watch.OWNER_LABEL, "10")]
 
 
@@ -155,7 +146,6 @@ def test_every_class_accumulates_across_pods():
         "terminating": 2,
         "superseded": 2,
     }
->>>>>>> origin/dev
 
 
 def test_restart_converges_to_the_same_plan():

@@ -50,11 +50,7 @@ class Rig:
         return attempt.execution_id
 
     def restart(self, cleanup=True):
-<<<<<<< HEAD
-        self.clock[0] += lease.TTL_MS
-=======
         self.clock[0] += lease.ttl_ms()
->>>>>>> origin/dev
         controller = self.controller(cleanup)
         assert controller.acquire()
         return controller
