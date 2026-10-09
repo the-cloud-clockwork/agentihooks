@@ -92,21 +92,17 @@ def _log(repo_dir: str, job_id: int, run: Callable) -> str:
     ).stdout
 
 
-def _meter(slug, repo_dir, redis, listed, since_s, now_ms, run, jobs_of, environ):
-    try:
-        listed = listed + ci_speed.read_runs(repo_dir, since_s, run, event="push")
-    except READ_ERRORS as exc:
-        _skipped("reading dev push Tests runs", exc)
+def _meter(slug, redis, runs, now_ms, log_of, jobs_of, environ):
     batches = {metrics_ci.RUNS: [], metrics_ci.STAGES: [], metrics_ci.FAILURES: []}
     marks = []
-    for item in metrics_ci.metered(listed):
+    for item in runs:
         try:
             mark = key(slug, "metered", str(item["id"]), str(item["run_attempt"]))
             if redis.exists(mark):
                 continue
             jobs = jobs_of(item["id"])
             logs = {
-                job["id"]: _log(repo_dir, job["id"], run)
+                job["id"]: log_of(job["id"])
                 for job in jobs
                 if job.get("conclusion") == "failure" and job["name"] != ci_budget.GATE
             }
@@ -165,5 +161,10 @@ def refresh(
             continue
         redis.set(seen, now_ms, ex=SEEN_TTL_S)
     if metrics_outbox.settings(environ) is not None:
-        actions += _meter(slug, config.repo, redis, listed, since_s, now_ms, run, jobs_of, environ)
+        try:
+            listed = listed + ci_speed.read_runs(config.repo, since_s, run, event="push")
+        except READ_ERRORS as exc:
+            _skipped("reading dev push Tests runs", exc)
+        runs = metrics_ci.metered(listed)
+        actions += _meter(slug, redis, runs, now_ms, lambda job_id: _log(config.repo, job_id, run), jobs_of, environ)
     return actions
