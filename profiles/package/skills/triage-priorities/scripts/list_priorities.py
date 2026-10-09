@@ -21,12 +21,12 @@ GROUP_ORDER = ("questions", "approvals", "blocked", "follow ups", "phases", "tas
 
 
 def load(slug):
-    done = subprocess.run(["agentihooks", "ledger", "--slug", slug, "show"], capture_output=True, text=True)
     try:
+        done = subprocess.run(["agentihooks", "ledger", "--slug", slug, "show"], capture_output=True, text=True)
         if done.returncode:
             raise ValueError((done.stderr or done.stdout).strip())
         return json.loads(done.stdout)
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
         sys.exit(f"cannot read ledger {slug}: {exc}. Check the slug with: agentihooks ledger list")
 
 

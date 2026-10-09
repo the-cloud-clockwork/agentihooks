@@ -220,6 +220,13 @@ def test_list_refuses_a_ledger_read_that_is_not_json(env):
     assert "Traceback" not in result.stderr
 
 
+def test_list_reports_a_missing_agentihooks_command_without_a_traceback(env):
+    result = run({**env, "PATH": ""}, "list_priorities.py", SLUG)
+    assert result.returncode == 2
+    assert result.stderr.startswith(f"cannot read ledger {SLUG}: ")
+    assert "Traceback" not in result.stderr
+
+
 def write_plan(tmp_path, entries):
     path = tmp_path / "plan.json"
     path.write_text(json.dumps(entries))
