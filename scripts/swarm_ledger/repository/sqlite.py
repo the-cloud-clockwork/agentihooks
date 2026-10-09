@@ -223,6 +223,7 @@ class SQLiteLedgerRepository:
         self.trace = None
         self._ready = set()
         self._cache = {}
+        self._loads = {}
         self._guard = threading.Lock()
 
     @property
@@ -246,7 +247,7 @@ class SQLiteLedgerRepository:
         if domain is self.domain or self._path is not None:
             return self
         twin = SQLiteLedgerRepository(domain=domain)
-        twin._cache, twin._ready, twin._guard = self._cache, self._ready, self._guard
+        twin._cache, twin._loads, twin._ready, twin._guard = self._cache, self._loads, self._ready, self._guard
         return twin
 
     @contextmanager
@@ -281,12 +282,20 @@ class SQLiteLedgerRepository:
         cached = self._cache.get(self._key(slug))
         if cached is not None and cached.generation >= row[0]:
             return cached
-        state = assemble(read_rows(connection, slug))
-        if "events" in state["_meta"]:
-            state["_meta"]["events"] = read_events(connection, slug)
-        entry = Entry(row[0], encode(state), state)
-        self._remember(slug, entry)
+        with self._loading(slug):
+            cached = self._cache.get(self._key(slug))
+            if cached is not None and cached.generation >= row[0]:
+                return cached
+            state = assemble(read_rows(connection, slug))
+            if "events" in state["_meta"]:
+                state["_meta"]["events"] = read_events(connection, slug)
+            entry = Entry(row[0], encode(state), state)
+            self._remember(slug, entry)
         return entry
+
+    def _loading(self, slug: str) -> threading.Lock:
+        with self._guard:
+            return self._loads.setdefault(self._key(slug), threading.Lock())
 
     def _remember(self, slug: str, entry: Entry) -> None:
         with self._guard:
