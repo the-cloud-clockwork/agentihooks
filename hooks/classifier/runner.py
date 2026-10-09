@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from hooks.classifier import decide, decision_log
@@ -78,17 +79,33 @@ def _verdict(answer: Answer, definition: Definition) -> object:
     return answer.choice if rule.type == "choice" else answer.score
 
 
-def run(name: str, state: object, params: dict | None = None, harness: str | None = None) -> RunResult:
-    definition = load(name)
+def run(
+    name: str,
+    state: object,
+    params: dict | None = None,
+    harness: str | None = None,
+    *,
+    decider: Callable[..., DecisionResult] | None = None,
+    environ: dict | None = None,
+) -> RunResult:
+    try:
+        definition = load(name, environ=environ)
+    except DefinitionError as exc:
+        with decision_log.record_context(definition=name):
+            decision_log.append(name, state, None, 0, [decision_log.failure_record("definition", exc)])
+        raise
     questions = questions_for(definition, params)
+    options = {
+        "purpose": definition.purpose,
+        "harness": harness,
+        "fallbacks": None if definition.fallbacks == "cli" else [],
+    }
+    if decider is None:
+        decider = decide
+    else:
+        options = {key: value for key, value in options.items() if value is not None}
     with decision_log.record_context(definition=definition.name, definition_digest=definition.digest):
-        result = decide(
-            state,
-            questions,
-            purpose=definition.purpose,
-            harness=harness,
-            fallbacks=None if definition.fallbacks == "cli" else [],
-        )
+        result = decider(state, questions, **options)
     verdicts = (
         {}
         if definition.rule.type == "code"
