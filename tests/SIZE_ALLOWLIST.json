@@ -167,7 +167,7 @@
   "PLR0912": 27
  },
  "scripts/install.py": {
-  "file-lines": 7068
+  "file-lines": 7067
  },
  "scripts/install.py::_clean_state_dir": {
   "C901": 14,
