@@ -835,13 +835,13 @@ jobs:
       - name: Download this run's measured coverage
         uses: actions/download-artifact@v4
         with:
-          name: sonar-report
+          pattern: coverage-3.12-*
           path: baseline-coverage
 
       - name: Compute the coverage baseline
         run: |
           python -m tests.coverage_baseline --shards 8 \
-            --head-shards baseline-coverage/.coverage-shards \
+            --head-shards baseline-coverage \
             --out "$HOME/coverage-baseline/baseline.json" \
             --previous "$HOME/coverage-baseline/baseline.json"
 

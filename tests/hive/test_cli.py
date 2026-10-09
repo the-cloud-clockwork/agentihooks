@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.hive import auth, cli, server
+from scripts.hive import auth, cli, registry, server
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -180,7 +180,7 @@ def test_is_loopback_refuses_a_missing_host():
 def test_the_default_home_is_dot_agentihooks(monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
 
-    assert cli._home() == Path.home() / ".agentihooks"
+    assert registry.home() == Path.home() / ".agentihooks"
 
 
 def test_help_names_every_command_and_option(monkeypatch, capsys):
@@ -198,6 +198,9 @@ def test_help_names_every_command_and_option(monkeypatch, capsys):
         "Exchange a join code for credentials in hive.env",
         "Delete a member's ledger credential and Redis user",
         "Run the join endpoint",
+        "Set name, ui, ephemeral, roles, prefer, max-agents as key=value",
+        "Print a hive's record as JSON",
+        "One line per hive with its liveness",
     ):
         assert f" {text}\n" in top
     for text in (
