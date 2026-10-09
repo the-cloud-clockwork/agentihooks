@@ -85,7 +85,7 @@ def holding(store, slug: str) -> bool:
     return bool(state(store, slug).get("alert"))
 
 
-def _master_address(store, slug: str) -> str:
+def master_address(store, slug: str) -> str:
     boss = control_notifications.master(store, slug)
     return (boss.seat or boss.name) if boss else seat_address(slug, MASTER)
 
@@ -141,13 +141,13 @@ def observe(
     actions, notices = [], held.get("notices", [])
     if not held.get("alert") and slow >= PASSES:
         text = _raised(sample, (facts or ledger_host.facts)())
-        InboxStore(store.redis).send(SENDER, _master_address(store, slug), text + PAUSED)
+        InboxStore(store.redis).send(SENDER, master_address(store, slug), text + PAUSED)
         notices = [*notices, for_operator(text)]
         held.update(alert=True, raised_at=now_ms)
         actions.append("raised the ledger slow alert")
     elif held.get("alert") and fast >= PASSES:
         text = CLEARED.format(took=sample.took())
-        InboxStore(store.redis).send(SENDER, _master_address(store, slug), text, fyi=True)
+        InboxStore(store.redis).send(SENDER, master_address(store, slug), text, fyi=True)
         notices = [*notices, for_operator(text)]
         held.update(alert=False)
         actions.append("cleared the ledger slow alert")

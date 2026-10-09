@@ -80,8 +80,20 @@ pipelines. A plan item that is not a code change (ops, troubleshooting, tuning,
 research) is an `eng` task with a kind and a proof contract: read
 [work-beyond-code.md](work-beyond-code.md) for the kind and the contract.
 
+Each task gets its own chunk of the plan. In the plan file, put each manual
+phase under a heading with its exact title, each task section under a heading
+one level deeper, and one unique `<!-- slice: <id> -->` anchor naming the task
+immediately before each task heading; the section ends at the next anchor or heading of the same or higher
+level. Publish it for the manual phases before adding their tasks:
+
 ```bash
-agentihooks ledger --slug <slug> task add <id> "<title>" --lane eng|ci --phase <phase> --description "<seam and done condition>" \
+agentihooks ledger --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>
+```
+
+Then add each task with its anchor; the ledger computes its plan lines:
+
+```bash
+agentihooks ledger --slug <slug> task add <id> "<title>" --lane eng|ci --phase <phase> --plan-slice <id> --description "<seam and done condition>" \
   [--depends-on <id>,<id>] [--territory <path or area>,<path or area>] \
   [--kind ci] [--kind ops|troubleshoot|tune|research --must "<true when done>" --check "<how>" --judge "<who>"]
 ```
@@ -99,8 +111,9 @@ from the parked branch, runs `swarm restack` and finishes it. Territory only
 orders claims: tasks clear of running work go first. Add the tasks a task waits
 on first; an unknown id is refused.
 
-Done when every manual phase has at least one task, every automatic phase has
-no tasks, every task names its done condition, and every task beyond code
+Done when every manual phase shows its published plan and has at least one
+task, every automatic phase has no tasks, every task carries its plan slice and
+names its done condition, and every task beyond code
 carries its kind with `--must`, `--check` and `--judge`.
 
 ## 4. Create and start
