@@ -17,7 +17,7 @@ WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 LOCAL_ONLY = {ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"}}
 TOKEN = re.compile(
     r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
-    r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)_\w*"
+    r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)(_\w*|\w*(token|pat)(?![a-z]))"
     r"|\$\{\{(?:(?!\}\})[\s\S])*?(?<![\w.'\"-])(secrets|github)\s*(\)|\}\})",
     re.IGNORECASE,
 )
@@ -35,17 +35,18 @@ def _jobs() -> dict:
 def _all_jobs():
     for name, job in _jobs().items():
         called = job.get("uses", "")
+        yield name, job
         if called.startswith("./.github/workflows/"):
             for inner, inner_job in _workflow(Path(called).name)["jobs"].items():
                 yield f"{name}/{inner}", inner_job
-        else:
-            yield name, job
 
 
 def _all_steps():
     for name, job in _all_jobs():
-        if TOKEN.search(_values(job.get("env"))):
-            yield name, {"name": "job env", "env": job["env"]}, ROOT
+        for key in ("env", "with", "secrets"):
+            values = {key: "${{ secrets }}"} if job.get(key) == "inherit" else job.get(key)
+            if isinstance(values, dict) and TOKEN.search(_values(values)):
+                yield name, {"name": f"job {key}", "env": values}, ROOT
         for step in job.get("steps", []):
             action = step.get("uses", "")
             if action.startswith("./.github/actions/"):
@@ -76,6 +77,23 @@ def _offends(step: dict) -> bool:
 def test_no_step_on_any_event_holds_the_workflow_token_or_calls_the_api():
     offenders = [f"{job}: {step.get('name') or step.get('uses')}" for job, step, _ in _all_steps() if _offends(step)]
     assert offenders == []
+
+
+@pytest.mark.parametrize("called", ["./.github/workflows/called.yml", "o/r/.github/workflows/called.yml@v1"])
+@pytest.mark.parametrize(
+    ("passed", "offenders"),
+    [
+        ({"with": {"token": "${{ github.token }}"}}, ["caller"]),
+        ({"secrets": {"token": "${{ secrets.GITHUB_TOKEN }}"}}, ["caller"]),
+        ({"secrets": "inherit"}, ["caller"]),
+    ],
+    ids=["with-input", "secrets-mapping", "secrets-inherit"],
+)
+def test_a_reusable_workflow_call_passing_the_workflow_token_is_an_offender(monkeypatch, called, passed, offenders):
+    caller = {"uses": called, **passed}
+    monkeypatch.setitem(globals(), "_jobs", lambda: {"caller": caller})
+    monkeypatch.setitem(globals(), "_workflow", lambda name: {"jobs": {"inner": {"steps": []}}})
+    assert [job for job, step, _ in _all_steps() if _offends(step)] == offenders
 
 
 def _called(text: str, here: Path):
@@ -272,6 +290,10 @@ def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step
         {"env": {"ALL": "${{ toJSON(secrets) }}"}},
         {"run": "echo '${{ tojson( github ) }}'"},
         {"env": {"ALL": "${{ secrets }}"}},
+        {"env": {"GH_TOKEN": "${{ secrets.GHCR_TOKEN }}"}},
+        {"with": {"token": "${{ secrets['GITHUBTOKEN'] }}"}},
+        {"env": {"KEY": "${{ secrets.GH_API_KEY }}"}},
+        {"env": {"GH_TOKEN": "${{ secrets.GHCR_TOKEN_V2 }}"}},
     ],
     ids=[
         "gh-with-flags",
@@ -295,6 +317,10 @@ def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step
         "secrets-context-to-json",
         "github-context-to-json",
         "whole-secrets-context",
+        "ghcr-secret",
+        "github-secret-without-separator",
+        "gh-secret-not-named-token",
+        "ghcr-secret-with-suffix",
     ],
 )
 def test_each_way_of_reaching_the_api_is_an_offender(plant):
@@ -309,6 +335,7 @@ def test_each_way_of_reaching_the_api_is_an_offender(plant):
         "${{ toJSON(github.event) }}",
         "${{ secrets.SONAR_TOKEN }}",
         "${{ secrets['SONAR_TOKEN'] }}",
+        "${{ secrets.GHOST_KEY }}",
         "${{ contains(github.ref, 'github') }}",
         "https://github.com/the-cloud-clockwork/agentihooks",
         'case "$host" in github) exit 0;; esac',
@@ -320,6 +347,7 @@ def test_each_way_of_reaching_the_api_is_an_offender(plant):
         "event-to-json",
         "other-secret",
         "bracketed-other-secret",
+        "gh-prefixed-other-secret",
         "quoted-word",
         "url",
         "shell-case-label",
