@@ -175,6 +175,38 @@ def test_a_threshold_override_through_the_environment_changes_the_intent_verdict
     )
 
 
+def test_the_intent_rule_gives_pass_fail_or_unchecked_and_rejects_with_fail():
+    assert (intent.RULE.values, intent.RULE.rejections) == (
+        {"verdict": ("pass", "fail", "unchecked")},
+        {"verdict": "fail"},
+    )
+
+
+def test_each_intent_threshold_is_read_by_its_own_key(monkeypatch):
+    for key, value in {"REASON": "0.2", "WEAKEN": "0.7", "CHUNK": "0.4"}.items():
+        monkeypatch.setenv(f"AGENTIHOOKS_CLASSIFIER_INTENT_CHECK_{key}", value)
+    state = {
+        "task": "T",
+        "task_text": "do",
+        "phase": "P",
+        "phase_intent": "use",
+        "plan_lines": "1-1",
+        "plan_chunk": "row\n",
+    }
+    decide = answered(
+        delivers=0.3, reachable=0.1, weakens=0.6, underdelivers=0.45, overdelivers=0.3, misses_line_1=0.45
+    )
+    verdict, reason = intent.judge(state, decide=decide)
+    assert verdict == "fail"
+    assert reason == (
+        "the phase can use this change at probability 0.90; nothing in the change may let the phase reach it; "
+        "the change may leave out something plan lines 1-1 ask "
+        "for, at probability 0.45; What would meet intent: Deliver T: do. The phase must be able to use it for P: use. "
+        "Wire the production entrypoint for T and prove an invocation delivers P: use. Deliver what plan lines 1-1 ask "
+        'for and the change leaves out: line 1 "row".'
+    )
+
+
 def tiny(after_control, after_case):
     def case(name, control, expected, before, after):
         answers = {"usable": after, "delivers": 0.9, "reachable": 0.9, "weakens": 0.0}

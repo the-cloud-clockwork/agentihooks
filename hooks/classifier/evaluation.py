@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from hooks.classifier import definitions
 from hooks.classifier.api import DecisionsApiBackend
 from hooks.classifier.core import Backend
-from hooks.classifier.corpus import Case, CorpusError, load, path_for, questions, rule_of
+from hooks.classifier.corpus import Case, CorpusError, case_questions, load, path_for, rule_of
 from hooks.classifier.definitions import Definition
 from hooks.classifier.errors import BackendFailure, ClassifierRequestError
 from hooks.classifier.fallbacks import ClaudeCliBackend, CodexCliBackend
@@ -151,7 +151,7 @@ def live_backends() -> list[Backend]:
 def _ask(backend: Backend, definition: Definition, case: Case) -> tuple[dict | None, int]:
     started = time.monotonic()
     try:
-        asked = questions(definition, rule_of(definition), case.state, case.params)
+        asked = case_questions(definition, rule_of(definition), case.state, case.params)
         result = backend.decide(DecisionRequest(case.state, asked))
         verdicts = _verdicts(definition, case, result.answers)
     except (BackendFailure, ClassifierRequestError):

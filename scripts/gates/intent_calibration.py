@@ -20,7 +20,7 @@ def side(cases, outcomes):
     }
 
 
-def measure(cases, definition=None):
+def measure(cases: tuple[corpus.Case, ...], definition: definitions.Definition | None = None) -> dict:
     definition = definitions.load(intent.PURPOSE) if definition is None else definition
     before = side(cases, evaluation.baseline(cases))
     after = side(cases, evaluation.replay(definition, cases))

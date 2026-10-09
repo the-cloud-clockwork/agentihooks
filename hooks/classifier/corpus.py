@@ -35,8 +35,8 @@ class Case:
     expected: dict
     control: bool
     samples: tuple[Sample, ...]
-    baseline: tuple[dict, ...] = ()
-    notes: object = None
+    baseline: tuple[dict, ...]
+    notes: object
 
 
 def path_for(name: str) -> Path:
@@ -110,7 +110,7 @@ def _sample(case: str, index: int, raw: object, questions: dict[str, Question]) 
     return Sample(source, latency, {key: Answer.from_wire(answers[key]) for key in questions})
 
 
-def questions(definition: Definition, rule: CodeRule | None, state: object, params: dict) -> dict[str, Question]:
+def case_questions(definition: Definition, rule: CodeRule | None, state: object, params: dict) -> dict[str, Question]:
     return questions_for(definition, params) if rule is None else rule.questions(definition, state, params)
 
 
@@ -124,7 +124,7 @@ def _case(definition: Definition, rule: CodeRule | None, raw: object) -> Case:
     params = raw.get("params", {})
     if not isinstance(params, dict):
         raise CorpusError(f"case {name} params must be a mapping")
-    asked = questions(definition, rule, raw["state"], params)
+    asked = case_questions(definition, rule, raw["state"], params)
     expected = _expected(definition, rule, name, raw.get("expected"), asked)
     control = raw.get("control", False)
     if not isinstance(control, bool):

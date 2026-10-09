@@ -276,14 +276,12 @@ def _chunk_steps(state, answers, thresholds):
     return steps
 
 
-def remediation(state: dict, answers: dict, thresholds: dict | None = None) -> str:
+def remediation(state: dict, answers: dict, thresholds: dict) -> str:
     if state.get("task_part") == "tests-first":
         return (
             "What would meet intent: Accept both old and new gate states in the preparatory tests "
             "without changing gate behaviour. Deliver the gate implementation in the later pull request."
         )
-    if thresholds is None:
-        thresholds = definitions.load(PURPOSE).thresholds
     steps = []
     if state.get("task_text"):
         task = f"{state['task']}: {state['task_text']}"
