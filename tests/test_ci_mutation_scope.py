@@ -93,6 +93,13 @@ def test_a_rewritten_test_module_is_selected_again(tmp_path):
     assert select_tests(tmp_path, Path("hooks/context/sample.py")) == ["tests/test_late.py"]
 
 
+def test_a_folder_named_like_a_module_is_skipped(tmp_path):
+    tests = tmp_path / "tests"
+    (tests / "a.py").mkdir(parents=True)
+    (tests / "test_b.py").write_text("from hooks.context import sample\n")
+    assert select_tests(tmp_path, Path("hooks/context/sample.py")) == ["tests/test_b.py"]
+
+
 def test_diff_discovers_only_changed_source_python_files(tmp_path):
     import subprocess
 
