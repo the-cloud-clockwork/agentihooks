@@ -425,7 +425,7 @@ class TestCheckPass:
     def test_a_fail_under_enforce_returns_the_task_to_its_agent(self, tmp_path):
         verdicts(tmp_path).write(TASK, "pending", "intent check running", NOW - 5)
         got = run_pass(tmp_path)
-        assert verdicts(tmp_path).read(TASK) == {"verdict": "fail", "reason": FAIL_REASON, "at": NOW}
+        assert verdicts(tmp_path).read(TASK) == {"verdict": "fail", "reason": FAIL_REASON, "at": NOW, "phase": "p8"}
         assert got.viewed == [URL]
         assert got.ledger.updates == [(SLUG, TASK, {"state": "claimed"}, "swarm")]
         assert got.ledger.comments == [(SLUG, TASK, FAIL_COMMENT, "swarm")]
@@ -455,6 +455,20 @@ class TestCheckPass:
         assert [(r["kind"], r["agent"], r["reason"]) for r in rows(tmp_path)] == [("observe", ME, FAIL_REASON)]
         assert got.actions == [f"task {TASK} intent check fail"]
 
+    def test_a_verdict_judged_under_another_phase_is_judged_again(self, tmp_path):
+        run_pass(tmp_path)
+        assert verdicts(tmp_path).read(TASK)["phase"] == "p8"
+        moved = {**DOC, "tasks": [{**DOC["tasks"][0], "phase": "p1"}]}
+        got = run_pass(tmp_path, usable=0.9, doc=moved)
+        assert got.viewed == [URL]
+        record = verdicts(tmp_path).read(TASK)
+        assert (record["verdict"], record["phase"]) == ("pass", "p1")
+
+    def test_a_verdict_under_the_same_phase_is_not_judged_again(self, tmp_path):
+        run_pass(tmp_path)
+        got = run_pass(tmp_path, usable=0.9)
+        assert (got.viewed, verdicts(tmp_path).read(TASK)["verdict"]) == ([], "fail")
+
     def test_off_skips_the_check(self, tmp_path):
         got = run_pass(tmp_path, mode="off")
         assert (got.actions, got.viewed, verdicts(tmp_path).read(TASK)) == ([], [], None)
@@ -465,6 +479,7 @@ class TestCheckPass:
             "verdict": "pass",
             "reason": "the phase can use it as delivered at probability 0.90",
             "at": NOW,
+            "phase": "p8",
         }
         assert (got.ledger.updates, got.mail.sent, rows(tmp_path)) == ([], [], [])
         assert got.actions == [f"task {TASK} intent check pass"]
