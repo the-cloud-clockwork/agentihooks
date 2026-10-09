@@ -489,16 +489,17 @@ def test_a_batch_whose_phase_update_is_rejected_before_it_applies_keeps_no_plan_
 
 
 def test_drop_refused_drops_only_plans_named_by_rejected_phase_updates():
-    doc = {"phases": [{"id": "p1"}], "plans": [{"id": "a"}, {"id": "b"}, {"id": "c"}]}
+    doc = {"phases": [{"id": "p1"}], "plans": [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}]}
     ctx = Recorder()
-    ctx.events = [{"kind": "added", "target": f"plans/{plan}"} for plan in ("a", "b", "c")]
+    ctx.events = [{"kind": "added", "target": f"plans/{plan}"} for plan in ("a", "b", "c", "d")]
     ops = [
         {"op": "phase_update", "id": "u1", "fields": {"plan": "plans/a"}},
         {"op": "phase_update", "id": "u2", "fields": {"plan": "plans/b"}},
         {"op": "plan_add", "id": "u3", "plan": "c"},
         {"op": "phase_update", "id": "u4", "fields": {"title": "T"}},
+        {"op": "phase_add", "id": "u5", "phase": "p2", "plan": "plans/d"},
     ]
-    ledger_plans.drop_refused(doc, ops, ["u1", "u3", "u4"], ctx)
+    ledger_plans.drop_refused(doc, ops, ["u1", "u3", "u4", "u5"], ctx)
     assert [row["id"] for row in doc["plans"]] == ["b", "c"]
     assert ctx.events == [{"kind": "added", "target": "plans/b"}, {"kind": "added", "target": "plans/c"}]
 

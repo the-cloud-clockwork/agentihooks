@@ -199,8 +199,8 @@ def drop_unused(doc: dict, address: object, ctx) -> None:
 
 def drop_refused(doc: dict, ops: list[dict], rejected: list[str], ctx) -> None:
     for op in ops:
-        if op["op"] == "phase_update" and op["id"] in rejected:
-            drop_unused(doc, op["fields"].get("plan"), ctx)
+        if op["op"] in ("phase_add", "phase_update") and op["id"] in rejected:
+            drop_unused(doc, op.get("fields", op).get("plan"), ctx)
 
 
 def resliced(before: list[dict], after: list[dict]) -> dict:
