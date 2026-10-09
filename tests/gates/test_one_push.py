@@ -281,7 +281,7 @@ def test_the_open_refusal_names_both_readers_when_neither_ran():
 
 
 def test_a_session_with_a_task_but_no_swarm_is_never_held(tree, tmp_path):
-    who = Who(name="ci@1-1", lane="ci", task="t1")
+    who = Who(name=ME.name, lane="ci", task="t1")
     assert gate(pull()).decide(bash("git push; gh pr create --base dev", tree), who, state(tmp_path)).allowed
 
 
