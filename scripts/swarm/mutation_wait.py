@@ -3,6 +3,7 @@ import json
 import re
 import subprocess
 import zipfile
+from datetime import datetime
 
 from scripts.swarm.store import SwarmError
 
@@ -37,13 +38,16 @@ def bind(target: str) -> str:
     return run["head_sha"]
 
 
-def _report(target):
+def _report(target, started_at):
     repo, number = RUN_URL.fullmatch(target).groups()
+    since = datetime.fromisoformat(started_at)
     artifacts = _api(f"repos/{repo}/actions/runs/{number}/artifacts?per_page=100")
     matching = [
         artifact
         for artifact in artifacts["artifacts"]
-        if artifact["name"] == "mutation-preflight-report" and not artifact["expired"]
+        if artifact["name"] == "mutation-preflight-report"
+        and not artifact["expired"]
+        and datetime.fromisoformat(artifact["created_at"]) >= since
     ]
     artifact = max(matching, key=lambda row: row["id"])
     archive = _api(f"repos/{repo}/actions/artifacts/{artifact['id']}/zip", binary=True)
@@ -65,7 +69,7 @@ def resolution(held: dict) -> str:
     if run.get("conclusion") != "success" and run.get("conclusion") != "failure":
         return f"{outcome}, now red; run {run.get('conclusion')}"
     try:
-        report = _report(target)
+        report = _report(target, run["run_started_at"])
         failures = [
             f"{file['path']}:{failure['name']}:{failure['fingerprint']} ({failure['status']})"
             for file in report["files"]

@@ -238,3 +238,18 @@ def test_a_skipped_rerun_cannot_reuse_the_previous_attempts_report(preflight):
     preflight.run["run_started_at"] = "2026-10-09T10:02:00Z"
     held = {**waits.on("mutation", URL), "head": "first"}
     assert "complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
+
+
+def test_a_report_created_at_the_attempt_start_can_pass(preflight):
+    preflight.run["run_started_at"] = "2026-10-09T10:01:00Z"
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now green; no failing mutants"
+    )
+
+
+@pytest.mark.parametrize("stamp", [None, "unreadable"])
+def test_an_attempt_without_a_readable_start_cannot_pass(preflight, stamp):
+    preflight.run["run_started_at"] = stamp
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert "complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
