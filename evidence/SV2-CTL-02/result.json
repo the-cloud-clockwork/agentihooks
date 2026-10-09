@@ -51,8 +51,8 @@
     "Replaying retained claim journal recovers coordination state. Loss of the authoritative journal is not reconstructed from a compatibility string claim."
   ],
   "reviews": {
-    "Standards": "Integrated base closed; scoped review of worker expiry and fixture import changes pending.",
-    "Spec": "Worker credential expiry race reproduced and corrected; scoped re-review pending."
+    "Standards": "Integrated base and scoped credential expiry plus fixture import changes closed at 9d7d986e; no open findings.",
+    "Spec": "Worker credential expiry finding resolved at 9d7d986e; independent eight focused checks passed; no open findings. Live G3 wiring remains unverified."
   },
   "dependency_pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1968"
 }
