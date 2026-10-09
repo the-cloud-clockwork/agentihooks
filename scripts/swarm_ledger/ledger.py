@@ -654,6 +654,12 @@ def cmd_plan_backfill(args):
     plan_backfill.run(args)
 
 
+def cmd_hierarchy(args) -> None:
+    from scripts.swarm_ledger import hierarchy_backfill
+
+    hierarchy_backfill.run(args)
+
+
 def cmd_task(args):
     if args.action == "add":
         if args.id == "-":
@@ -783,6 +789,8 @@ def build_parser():
     artifact.add_argument("--request", help="id of the operator chat line or comment that asked for the file")
     sub.add_parser("artifact-purge")
     sub.add_parser("plan-backfill", help="compute missing plan lines for linked unfinished tasks")
+    hierarchy = sub.add_parser("hierarchy").add_subparsers(dest="action", required=True)
+    hierarchy.add_parser("backfill").add_argument("--apply", action="store_true")
     phase = sub.add_parser("phase")
     phase.add_argument("id")
     phase.add_argument("state")
