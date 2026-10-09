@@ -1190,9 +1190,9 @@ def test_an_auto_swarm_reads_the_host_once_and_autoscales_on_the_stored_room(tmp
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto")
     decision = rt.quota_capacity(config, [], 100, {"eng": 1, "ci": 0, "plan": 0})
     assert readings == [None]
-    stored = {key: value for key, value in decision["host"].items() if key != "granted_at"}
+    stored = decision["host"]
     assert decision["autoscale"]["host"] == stored
-    assert (stored["room"], stored["limit"]) == (46, "load")
+    assert (stored["room"], stored["limit"], stored["granted_at"]) == (46, "load", 100_000)
 
 
 def test_the_stored_top_level_host_room_wins_over_the_autoscale_copy():
@@ -1230,6 +1230,7 @@ def test_an_auto_swarm_with_an_unknown_host_scales_on_quota_alone():
         "limit": "unknown",
         "held": False,
         "last": None,
+        "granted_at": 0,
     }
 
 
@@ -1534,7 +1535,7 @@ def test_autoscaled_uses_the_swarm_watermarks_and_the_stored_state():
     expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, inputs.demand, previous)
     assert decision == {
         **expected,
-        "host": {"room": room.room, "reason": room.reason, "limit": room.limit, "held": room.held},
+        "host": {"room": room.room, "reason": room.reason, "limit": room.limit, "held": room.held, "granted_at": 0},
     }
     assert "below the low watermark" in room.reason
     caps = decision["ceilings"]
@@ -1563,7 +1564,7 @@ def test_autoscaled_seeds_from_the_configured_caps_and_an_idle_raise():
     expected = autoscale.calculate(capacity._busy(inputs.agents), free, room.room, zero, previous)
     assert decision == {
         **expected,
-        "host": {"room": room.room, "reason": room.reason, "limit": room.limit, "held": room.held},
+        "host": {"room": room.room, "reason": room.reason, "limit": room.limit, "held": room.held, "granted_at": 0},
     }
 
 
@@ -1674,7 +1675,8 @@ def test_quota_capacity_hands_autoscale_its_previous_state_and_warnings(tmp_path
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
     demand = {"eng": 1, "ci": 0, "plan": 0}
     rt.quota_capacity(config, [], 100, demand)
-    assert seen == [capacity.ScaleInputs(observed, [], demand, rt.host, previous, {("claude", "warned"): "week"})]
+    warned = {("claude", "warned"): "week"}
+    assert seen == [capacity.ScaleInputs(observed, [], demand, rt.host, previous, warned, capacity.no_spawns, 100_000)]
 
 
 def api(harness="claude", weight=25, sessions=0, cap=10**6):

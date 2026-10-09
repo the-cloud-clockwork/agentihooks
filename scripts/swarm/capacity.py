@@ -225,6 +225,10 @@ def _placeable(rows: list[Account]) -> dict:
     }
 
 
+def no_spawns(since_ms: int) -> int:
+    return 0
+
+
 @dataclass(frozen=True)
 class ScaleInputs:
     observations: list[Account]
@@ -233,6 +237,8 @@ class ScaleInputs:
     host: Callable[[], host_budget.HostSample | None]
     previous: dict
     warned: dict = field(default_factory=dict)
+    spent: Callable[[int], int] = no_spawns
+    now_ms: int = 0
 
 
 def host_room(config: SwarmConfig, inputs: ScaleInputs) -> dict:
@@ -249,10 +255,17 @@ def granted(host: dict, previous: dict, now_ms: int) -> dict:
     return {**host, "granted_at": since}
 
 
+def unspent(host: dict, spent: Callable[[int], int]) -> int | None:
+    """The room less the spawns since it was granted, counted as the spawn gate counts them."""
+    if host["room"] is None:
+        return None
+    return max(0, host["room"] - spent(host["granted_at"]))
+
+
 def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None) -> tuple[SwarmConfig, dict | None]:
     if config.scaling != AUTO_SCALING:
         return config, None
-    host = host or host_room(config, inputs)
+    host = host or granted(host_room(config, inputs), inputs.previous, inputs.now_ms)
     stored = inputs.previous.get("autoscale") or {}
     previous = {
         "ceilings": stored.get("ceilings") or _configured(config),
@@ -260,7 +273,7 @@ def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = Non
     }
     demand = inputs.demand or dict.fromkeys(LANES, 0)
     free = _placeable(_open(inputs.observations, inputs.warned))
-    decision = autoscale.calculate(_busy(inputs.agents), free, host["room"], demand, previous)
+    decision = autoscale.calculate(_busy(inputs.agents), free, unspent(host, inputs.spent), demand, previous)
     caps = decision["ceilings"]
     scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"])
     return scaled, {**decision, "host": host}
@@ -285,7 +298,14 @@ def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleIn
     }
     agents = [agent for agent in store.agents(slug) if not _ended(agent, rows)]
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
-    return ScaleInputs(observations, agents, demand, host_budget.read_host, read(store, slug), warned)
+    spent = spawn_counter(store, now_ms)
+    return ScaleInputs(observations, agents, demand, host_budget.read_host, read(store, slug), warned, spent, now_ms)
+
+
+def spawn_counter(store, now_ms: int) -> Callable[[int], int]:
+    from scripts.swarm.tick import host_spent
+
+    return lambda since_ms: host_spent(store, since_ms, now_ms)
 
 
 def fixture_inputs(readings: dict) -> ScaleInputs:
@@ -390,6 +410,8 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     previous = read(store, slug)
     if hasattr(runtime, "quota_previous"):
         runtime.quota_previous(previous)
+    if hasattr(runtime, "quota_spent"):
+        runtime.quota_spent(spawn_counter(store, now_ms))
     decision = reader(config, agents, now_ms / 1000, demand, requirements)
     decision["tasks"] = {
         ready[lane][slot["index"]]["id"]: slot["harness"]

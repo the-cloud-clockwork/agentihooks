@@ -668,10 +668,14 @@ def _host_full(slug, store, now_ms):
     host = capacity.read(store, slug).get("host") or {}
     if host.get("room") is None:
         return ""
-    recent = store.redis.zcount(HOST_SPENDS, host["granted_at"] - HOST_START_LAG_MS, now_ms)
+    recent = host_spent(store, host["granted_at"], now_ms)
     if recent < host["room"]:
         return ""
     return f"host {host['limit']} room {host['room']}, {recent} spawned since it was granted: {host['reason']}"
+
+
+def host_spent(store, since_ms, now_ms):
+    return store.redis.zcount(HOST_SPENDS, since_ms - HOST_START_LAG_MS, now_ms)
 
 
 def _spend_host(store, name, now_ms):

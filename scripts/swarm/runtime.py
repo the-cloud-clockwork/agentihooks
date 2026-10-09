@@ -226,13 +226,17 @@ class HerdrRuntime:
         if requirements:
             requirements = self._quota_preferring(requirements)
         warned = self._quota_warned()
-        inputs = capacity.ScaleInputs(self._quota_accounts, agents, demand, self.host, self._quota_previous, warned)
-        host = capacity.host_room(config, inputs)
+        spent = getattr(self, "_host_spent", capacity.no_spawns)
+        previous = self._quota_previous
+        inputs = capacity.ScaleInputs(
+            self._quota_accounts, agents, demand, self.host, previous, warned, spent, int(now * 1000)
+        )
+        host = capacity.granted(capacity.host_room(config, inputs), previous, inputs.now_ms)
         config, scaled = capacity.autoscaled(config, inputs, host)
         decision = capacity.calculate(
             config, self._quota_accounts, agents, demand, requirements, accounts, warned=warned
         )
-        decision["host"] = capacity.granted(host, self._quota_previous, int(now * 1000))
+        decision["host"] = host
         if scaled:
             decision["autoscale"] = scaled
         for task, reason in self._quota_held.items():
@@ -254,6 +258,9 @@ class HerdrRuntime:
 
     def quota_previous(self, decision: dict) -> None:
         self._quota_previous = decision
+
+    def quota_spent(self, counter) -> None:
+        self._host_spent = counter
 
     def quota_requirements(self, config: SwarmConfig, ready: dict) -> dict:
         from scripts.swarm.capacity import _harnesses
