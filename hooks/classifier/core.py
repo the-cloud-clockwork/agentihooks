@@ -41,17 +41,19 @@ def _ask_api(
         failures.extend(down_cache.failures())
         return None
     backends = api_backends(request, settings)
+    refused = False
     for backend in backends:
         try:
             return backend.decide(request)
         except BackendFailure as failure:
             failures.append(decision_log.failure_record(backend.name, failure))
             if failure.skip_api:
+                refused = True
                 break
         except ClassifierRequestError as failure:
             failures.append(decision_log.failure_record(backend.name, failure))
             raise
-    if backends:
+    if backends and (refused or len(backends) == len(settings.models)):
         down_cache.mark_down(failures)
     return None
 

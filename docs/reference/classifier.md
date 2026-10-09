@@ -60,9 +60,10 @@ context is smaller than the estimated input (4 characters per token) is skipped.
 | any other 400 | `ClassifierRequestError`: the caller sent a bad request; no fallback |
 | 401 or 403 | every API model is skipped (they share one key) |
 
-When every API model fails, a marker holds the API down for
+When every configured API model fails, or the key is refused, a marker holds the API down for
 `AGENTIHOOKS_CLASSIFIER_DOWN_TTL_S` seconds, so hook callers pay no timeout on every
-tool call. The marker retains the failed models and their reasons.
+tool call. A large input that fails on the only model wide enough for it leaves the
+API up for the next call. The marker retains the failed models and their reasons.
 
 The default fallback uses Haiku for Claude and Luna for Codex. `harness` selects
 it explicitly; otherwise `AGENTIHOOKS_TARGET` selects it, with Claude the default
