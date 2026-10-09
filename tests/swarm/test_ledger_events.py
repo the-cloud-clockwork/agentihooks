@@ -158,7 +158,7 @@ def test_a_new_priority_makes_one_master_item_naming_the_item_and_the_ask(store)
     assert texts(store, ENG_SEAT) == []
 
 
-def test_priorities_open_before_the_first_pass_make_no_item(store):
+def test_priorities_open_before_the_first_pass_are_not_announced_and_later_ones_are(store):
     run(store, with_priorities(priority("questions/q1", "Answer: which port")))
     run(store, with_priorities(priority("questions/q1", "Answer: which port"), priority("tasks/t1", "Blocked: no key")))
     (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
@@ -186,7 +186,7 @@ def test_a_priority_raised_again_after_it_cleared_makes_a_new_item(store):
     assert len(texts(store, MASTER_SEAT)) == 2
 
 
-def test_a_priority_the_master_added_makes_no_item(store):
+def test_a_priority_the_master_added_is_not_announced_beside_an_agent_ask(store):
     run(store, with_priorities())
     run(store, with_priorities(priority("phases/p1", "Approve the plan", by="sw-master-1"), priority("tasks/t1", "Go")))
     (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
@@ -223,6 +223,18 @@ def test_a_swarm_with_no_live_master_gets_no_priority_item_until_a_master_return
     store.put_agent("sw", AgentRecord("sw-master-2", MASTER, MASTER, seat=MASTER_SEAT))
     run(store, with_priorities(row))
     assert len(texts(store, MASTER_SEAT)) == 1
+
+
+def test_a_priority_cleared_during_a_master_gap_is_announced_when_raised_again(store):
+    row = priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")
+    run(store, with_priorities())
+    run(store, with_priorities(row))
+    store.drop_agent("sw", "sw-master-1")
+    run(store, with_priorities())
+    run(store, with_priorities(row))
+    store.put_agent("sw", AgentRecord("sw-master-2", MASTER, MASTER, seat=MASTER_SEAT))
+    run(store, with_priorities(row))
+    assert len(texts(store, MASTER_SEAT)) == 2
 
 
 def open_followup(added_at, **fields):

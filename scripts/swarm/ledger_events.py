@@ -454,10 +454,10 @@ def _priorities(mail, doc):
         mail.store.redis.srem(key, *gone)
     if not mail.has_master:
         return []
-    seeding = mail.store.redis.set(mail.store.key(mail.slug, "priorities-seeded"), 1, nx=True)
-    sent = []
+    marker = mail.store.key(mail.slug, "priorities-seeded")
+    seeding, sent = not mail.store.redis.exists(marker), []
     for item, row in rows.items():
-        if item in seen or row["by"] == SENDER or not _by_agent(mail, row):
+        if item in seen or row.get("by") == SENDER or not _by_agent(mail, row):
             continue
         if not seeding:
             text = (
@@ -467,6 +467,7 @@ def _priorities(mail, doc):
             mail.inbox.send(SENDER, mail.master, text, ref=f"{mail.slug}:priority:{item}")
             sent.append(f"told {mail.master}: priority {item}")
         mail.store.redis.sadd(key, item)
+    mail.store.redis.set(marker, 1)
     return sent
 
 
