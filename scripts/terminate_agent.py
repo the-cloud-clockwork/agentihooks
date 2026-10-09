@@ -75,7 +75,9 @@ def sessions(
     result = []
     registered_pids = set()
     for session_id, info in records.items():
-        if info.get("status") not in {"alive", "handed_off"} or foreign_session(info, here):
+        if info.get("status") not in {"alive", "handed_off"}:
+            continue
+        if foreign_session(info, here):
             continue
         try:
             pid = int(info.get("pid", 0))

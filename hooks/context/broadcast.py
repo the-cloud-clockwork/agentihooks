@@ -872,23 +872,22 @@ def _local_namespace() -> str:
 
 
 def foreign_session(info: dict, namespace: str) -> bool:
-    """A record from another process namespace: its PID names nothing in this process table."""
+    """A stamped record this process table cannot judge: another namespace, or an unreadable local one."""
     recorded = info.get("process_namespace") or ""
-    return bool(recorded and namespace) and recorded != namespace
+    return bool(recorded) and recorded != namespace
 
 
-def _mark_suspect(info: dict, now_dt: datetime, summary: dict) -> bool:
+def _silent(info: dict, now_dt: datetime) -> bool:
     if info.get("status", "alive") not in ("alive", "handed_off"):
         return False
+    stamp = info.get("last_seen") or info.get("started_at")
+    if not stamp:
+        return False
     try:
-        seen = _parse_iso(info.get("last_seen") or info.get("started_at") or "")
+        seen = _parse_iso(stamp)
     except ValueError:
         return False
-    if (now_dt - seen).total_seconds() <= SESSION_SUSPECT_SECONDS:
-        return False
-    info["status"] = "suspect"
-    summary["suspect"] += 1
-    return True
+    return (now_dt - seen).total_seconds() > SESSION_SUSPECT_SECONDS
 
 
 def heartbeat_sessions() -> dict:
@@ -897,22 +896,38 @@ def heartbeat_sessions() -> dict:
         return _heartbeat_locked()
 
 
+def _probe(info: dict, now_iso: str, summary: dict) -> bool:
+    status = info.get("status", "alive")
+    pid = info.get("pid", 0)
+    if status not in ("alive", "handed_off", "suspect"):
+        return False
+    alive = False
+    try:
+        if pid:
+            os.kill(int(pid), 0)
+            alive = True
+    except (OSError, ValueError):
+        alive = False
+    if alive:
+        info["last_seen"] = now_iso
+        info["status"] = "alive" if status == "suspect" else status
+        summary["alive"] += info["status"] == "alive"
+    else:
+        info["status"] = "dead"
+        summary["flipped_dead"] += 1
+    return True
+
+
 def _heartbeat_locked() -> dict:
     sessions = _load_sessions()
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat().replace("+00:00", "Z")
-    summary = {"alive": 0, "flipped_dead": 0, "pruned": 0, "suspect": 0, "total": 0}
+    summary = {"alive": 0, "flipped_dead": 0, "pruned": 0, "suspect": 0}
     prune: list[str] = []
     changed = False
     here = _local_namespace()
 
     for sid, info in list(sessions.items()):
-        status = info.get("status", "alive")
-        pid = info.get("pid", 0)
-        if foreign_session(info, here):
-            changed = _mark_suspect(info, now_dt, summary) or changed
-            continue
-
         ts_str = info.get("last_seen") or info.get("started_at")
         if ts_str:
             try:
@@ -923,22 +938,13 @@ def _heartbeat_locked() -> dict:
             except ValueError:
                 pass
 
-        if status in ("alive", "handed_off"):
-            alive = False
-            try:
-                if pid:
-                    os.kill(int(pid), 0)
-                    alive = True
-            except (OSError, ValueError):
-                alive = False
-            if alive:
-                info["last_seen"] = now_iso
-                summary["alive"] += status == "alive"
+        if foreign_session(info, here):
+            if _silent(info, now_dt):
+                info["status"] = "suspect"
+                summary["suspect"] += 1
                 changed = True
-            else:
-                info["status"] = "dead"
-                summary["flipped_dead"] += 1
-                changed = True
+            continue
+        changed = _probe(info, now_iso, summary) or changed
 
     for sid in prune:
         del sessions[sid]
@@ -971,7 +977,9 @@ def get_active_sessions(cleanup: bool = False, include_all: bool = False) -> dic
             here = _local_namespace()
             for sid, info in sessions.items():
                 pid = info.get("pid")
-                if not pid or info.get("status") in ("dead", "closed", "superseded") or foreign_session(info, here):
+                if not pid or info.get("status") in ("dead", "closed", "superseded"):
+                    continue
+                if foreign_session(info, here):
                     continue
                 try:
                     os.kill(pid, 0)

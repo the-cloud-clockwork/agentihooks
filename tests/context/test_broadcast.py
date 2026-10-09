@@ -1,9 +1,18 @@
 """Tests for hooks.context.broadcast."""
 
 import os
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
+
+FROZEN_NOW = datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc)
+
+
+class Frozen(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return FROZEN_NOW
 
 
 @pytest.fixture()
@@ -404,7 +413,8 @@ class TestSessionRegistry:
             ({"process_namespace": "here"}, "here", False),
             ({}, "here", False),
             ({"process_namespace": None}, "here", False),
-            ({"process_namespace": "there"}, "", False),
+            ({"process_namespace": "there"}, "", True),
+            ({}, "", False),
         ],
     )
     def test_only_a_record_from_another_known_namespace_is_foreign(self, info, namespace, foreign):
@@ -413,53 +423,74 @@ class TestSessionRegistry:
         assert foreign_session(info, namespace) is foreign
 
     def _sessions_at(self, sessions_file, ages):
-        from datetime import datetime, timedelta, timezone
+        from datetime import timedelta
 
         from hooks.context.broadcast import _save_sessions
 
-        now = datetime.now(timezone.utc)
         records = {}
         for sid, (namespace, status, age) in ages.items():
             record = {"status": status, "pid": 2**22 + 7, "process_namespace": namespace}
             if age is not None:
-                record["last_seen"] = (now - timedelta(seconds=age)).isoformat()
+                record["last_seen"] = (FROZEN_NOW - timedelta(seconds=age)).isoformat()
             records[sid] = record
         with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
             _save_sessions(records)
+        return records
 
     def test_heartbeat_never_judges_a_foreign_pid_and_suspects_only_silent_foreign_records(self, broadcast_dir):
-        from hooks.context.broadcast import _load_sessions, heartbeat_sessions
+        from datetime import timedelta
+
+        from hooks.context.broadcast import _load_sessions, _save_sessions, heartbeat_sessions
 
         sessions_file = broadcast_dir / "active-sessions.json"
-        self._sessions_at(
+        records = self._sessions_at(
             sessions_file,
             {
                 "local": ("here", "alive", 10),
-                "remote-fresh": ("there", "alive", 290),
-                "remote-silent": ("there", "alive", 310),
-                "remote-handed-off": ("there", "handed_off", 310),
-                "remote-closed": ("there", "closed", 310),
+                "local-suspect": ("here", "suspect", 400),
+                "remote-boundary": ("there", "alive", 300),
+                "remote-silent": ("there", "alive", 301),
+                "remote-handed-off": ("there", "handed_off", 301),
+                "remote-closed": ("there", "closed", 301),
                 "remote-old": ("there", "alive", 90000),
                 "remote-unstamped": ("there", "alive", None),
             },
         )
+        records["local-suspect"]["pid"] = os.getpid()
+        records["legacy"] = {"status": "alive", "pid": os.getpid(), "last_seen": FROZEN_NOW.isoformat()}
+        records["remote-statusless"] = {
+            "pid": 7,
+            "process_namespace": "there",
+            "last_seen": "2026-10-09T11:54:59+00:00",
+        }
+        started = (FROZEN_NOW - timedelta(seconds=301)).isoformat()
+        records["remote-started"] = {"status": "alive", "pid": 7, "process_namespace": "there", "started_at": started}
+        records["remote-garbled"] = {"status": "alive", "pid": 7, "process_namespace": "there", "last_seen": "garbage"}
         with (
             patch("hooks.context.broadcast._sessions_path", return_value=sessions_file),
             patch("hooks.context.broadcast._local_namespace", return_value="here"),
+            patch("hooks.context.broadcast.datetime", Frozen),
         ):
+            _save_sessions(records)
             summary = heartbeat_sessions()
             sessions = _load_sessions()
 
-        assert summary == {"alive": 0, "flipped_dead": 1, "pruned": 0, "suspect": 3, "total": 7}
-        assert {sid: info["status"] for sid, info in sessions.items()} == {
+        assert summary == {"alive": 2, "flipped_dead": 1, "pruned": 1, "suspect": 4, "total": 11}
+        assert {sid: info.get("status") for sid, info in sessions.items()} == {
             "local": "dead",
-            "remote-fresh": "alive",
+            "local-suspect": "alive",
+            "legacy": "alive",
+            "remote-boundary": "alive",
             "remote-silent": "suspect",
             "remote-handed-off": "suspect",
             "remote-closed": "closed",
-            "remote-old": "suspect",
             "remote-unstamped": "alive",
+            "remote-statusless": "suspect",
+            "remote-started": "suspect",
+            "remote-garbled": "alive",
         }
+        assert sessions["local-suspect"]["last_seen"] == "2026-10-09T12:00:00Z"
+        assert sessions["remote-silent"]["last_seen"] == records["remote-silent"]["last_seen"]
 
     def test_heartbeat_leaves_a_quiet_foreign_registry_unwritten(self, broadcast_dir):
         from hooks.context.broadcast import heartbeat_sessions
@@ -470,6 +501,7 @@ class TestSessionRegistry:
         with (
             patch("hooks.context.broadcast._sessions_path", return_value=sessions_file),
             patch("hooks.context.broadcast._local_namespace", return_value="here"),
+            patch("hooks.context.broadcast.datetime", Frozen),
             patch("hooks.context.broadcast._save_sessions") as save,
         ):
             assert heartbeat_sessions()["suspect"] == 0

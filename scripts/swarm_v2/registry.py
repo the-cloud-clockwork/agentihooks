@@ -12,6 +12,7 @@ from scripts.inbox.seats import seat_address
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, RedisStore, SwarmError
 from scripts.swarm_v2.auth_context import Registration
+from scripts.swarm_v2.runtime.base import LOCAL, RuntimeRouter
 
 LIVE, SUSPECT, EXITED, CLOSED = "live", "suspect", "exited", "closed"
 STALE_AFTER_MS = 90_000
@@ -41,14 +42,18 @@ class Session:
     heartbeat_ms: int = 0
 
     def key(self) -> str:
-        return hashlib.sha256(json.dumps([asdict(self.scope), self.session_id]).encode()).hexdigest()[:32]
+        return session_key(self.scope, self.session_id)
 
     def identity(self) -> "Session":
         return replace(self, state=LIVE, heartbeat_ms=0)
 
 
+def session_key(scope: Scope, session_id: str) -> str:
+    return hashlib.sha256(json.dumps([asdict(scope), session_id]).encode()).hexdigest()[:32]
+
+
 def encode(record: Session) -> str:
-    return json.dumps(asdict(record), sort_keys=True)
+    return json.dumps(asdict(record))
 
 
 def decode(raw: str) -> Session:
@@ -76,20 +81,36 @@ class FleetRegistry:
         self.sessions = store.key(slug, "fleet-sessions")
         self.seats = store.key(slug, "fleet-seats")
 
+    def _grant(self, token: str, execution_id: str, generation: int) -> Registration:
+        grant = self.authorize(token) if token else None
+        if not isinstance(grant, Registration) or grant.swarm_id != self.slug:
+            raise SwarmError("forbidden_scope")
+        if (grant.execution_id, grant.generation) != (execution_id, generation):
+            raise SwarmError("forbidden_scope")
+        return grant
+
     def _seat(self, session: Session, name: str, token: str) -> str:
-        seat = ""
-        if token:
-            grant = self.authorize(token)
-            if not isinstance(grant, Registration) or grant.swarm_id != self.slug:
-                raise SwarmError("forbidden_scope")
-            if (grant.execution_id, grant.generation) != (session.execution_id, session.generation):
-                raise SwarmError("forbidden_scope")
-            seat = grant.seat_id
+        seat = self._grant(token, session.execution_id, session.generation).seat_id if token else ""
         if session.seat and session.seat != seat:
             raise SwarmError("forbidden_scope")
         if lane_of(name) == MASTER and seat != seat_address(self.slug, MASTER):
             raise SwarmError("forbidden_scope")
         return seat
+
+    @staticmethod
+    def _replaceable(existing: Session, record: Session, granted: bool) -> bool:
+        """False for a replay; raises when the stored record may not be replaced by this registration."""
+        if existing.identity() == record.identity():
+            if existing.state in (EXITED, CLOSED):
+                raise SwarmError("session_ended")
+            return False
+        if existing.generation > record.generation:
+            raise SwarmError("stale_generation")
+        if existing.generation == record.generation and (existing.state == LIVE or existing.seat != record.seat):
+            raise SwarmError("registration_conflict")
+        if not granted:
+            raise SwarmError("forbidden_scope")
+        return True
 
     def register(self, session: Session, token: str = "") -> Session:
         name = self.store.names.resolve(session.name) if session.name else ""
@@ -103,17 +124,8 @@ class FleetRegistry:
                 try:
                     pipe.watch(self.sessions, self.seats)
                     raw = pipe.hget(self.sessions, key)
-                    existing = decode(raw) if raw else None
-                    if existing and existing.identity() == record.identity():
-                        return existing
-                    if existing and existing.generation > record.generation:
-                        raise SwarmError("stale_generation")
-                    if (
-                        existing
-                        and existing.generation == record.generation
-                        and (existing.state == LIVE or existing.seat != record.seat)
-                    ):
-                        raise SwarmError("registration_conflict")
+                    if raw and not self._replaceable(decode(raw), record, bool(token)):
+                        return decode(raw)
                     held = json.loads(pipe.hget(self.seats, seat) or "null") if seat else None
                     if held and (held["generation"], held["execution_id"]) != (record.generation, record.execution_id):
                         if held["generation"] >= record.generation:
@@ -122,7 +134,7 @@ class FleetRegistry:
                     pipe.hset(self.sessions, key, encode(record))
                     if seat:
                         owner = {"execution_id": record.execution_id, "generation": record.generation, "session": key}
-                        pipe.hset(self.seats, seat, json.dumps(owner, sort_keys=True))
+                        pipe.hset(self.seats, seat, json.dumps(owner))
                     pipe.execute()
                     return record
                 except WatchError:
@@ -155,26 +167,38 @@ class FleetRegistry:
                     continue
         raise SwarmError("dependency_unavailable")
 
-    def _one(self, scope: Scope, session_id: str, change: Callable[[Session], Session]) -> Session:
-        key = Session(session_id, scope, 0, 0, "").key()
-        if not self.store.redis.hexists(self.sessions, key):
+    def _one(self, scope: Scope, session_id: str, token: str, change: Callable[[Session], Session]) -> Session:
+        key = session_key(scope, session_id)
+        raw = self.store.redis.hget(self.sessions, key)
+        if not raw:
             raise SwarmError("unknown_session")
-        return self._update(change, {key})[0]
+        found = decode(raw)
+        if found.execution_id:
+            self._grant(token, found.execution_id, found.generation)
 
-    def heartbeat(self, scope: Scope, session_id: str) -> Session:
+        def owned(record: Session) -> Session:
+            if (record.execution_id, record.generation) != (found.execution_id, found.generation):
+                raise SwarmError("stale_generation")
+            return change(record)
+
+        return self._update(owned, {key})[0]
+
+    def heartbeat(self, scope: Scope, session_id: str, token: str = "") -> Session:
         def beat(record: Session) -> Session:
             if record.state not in (LIVE, SUSPECT):
                 raise SwarmError("session_ended")
             return replace(record, state=LIVE, heartbeat_ms=self.clock())
 
-        return self._one(scope, session_id, beat)
+        return self._one(scope, session_id, token, beat)
 
-    def close(self, scope: Scope, session_id: str) -> Session:
-        return self._one(scope, session_id, lambda record: replace(record, state=CLOSED))
+    def close(self, scope: Scope, session_id: str, token: str = "") -> Session:
+        return self._one(scope, session_id, token, lambda record: replace(record, state=CLOSED))
 
     def observe(self, scope: Scope, table: Mapping[int, Process]) -> int:
         """Exit this scope's sessions whose process is gone or whose PID now names another start; other scopes'
-        records are never judged by this process table."""
+        records are never judged by this process table, and an empty table (an unreadable /proc) judges nothing."""
+        if not table:
+            return 0
 
         def judge(record: Session) -> Session | None:
             if record.scope != scope or record.state not in (LIVE, SUSPECT):
@@ -197,6 +221,11 @@ class FleetRegistry:
     def records(self, backends: Collection[str] | None = None) -> list[Session]:
         found = [decode(raw) for raw in self.store.redis.hvals(self.sessions)]
         return [record for record in found if backends is None or record.scope.backend in backends]
+
+    def visible(self, environ: Mapping[str, str]) -> list[Session]:
+        """Local records only while distributed launches are disabled; remote records stay stored untouched."""
+        local = RuntimeRouter.from_environ((), environ).spawn_backend() == LOCAL
+        return self.records(backends={LOCAL} if local else None)
 
     def find(self, name: str) -> list[Session]:
         canonical = self.store.names.resolve(name)
