@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import fulfill_events, is_events, ledger_state, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events, ledger_state, loaded, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -44,6 +44,7 @@ def tab(browser):
     page = context.new_page()
     page.on("pageerror", lambda error: print(str(error)))
     page.goto(URL)
+    loaded(page)
     yield page
     context.close()
 
@@ -68,10 +69,13 @@ def test_tab_choice_hash_keyboard_and_scroll_positions_survive_switches(tab):
     assert not tab.locator("#ledger").is_visible()
     assert tab.url.endswith("#swarm")
     tab.reload()
+    loaded(tab)
     assert tab.locator("#swarm").is_visible()
     tab.goto(URL)
+    loaded(tab)
     assert tab.locator("#swarm").is_visible()
     tab.goto(URL + "#ledger")
+    loaded(tab)
     assert tab.locator("#ledger").is_visible()
     tab.get_by_role("tab", name="Ledger").focus()
     tab.locator("#main-content").evaluate("el => el.scrollTop = 600")
@@ -83,6 +87,7 @@ def test_tab_choice_hash_keyboard_and_scroll_positions_survive_switches(tab):
     tab.keyboard.press("End")
     assert tab.locator("#swarm").is_visible()
     tab.goto(URL + "#item-phases-p20")
+    loaded(tab)
     assert tab.locator("#ledger").is_visible()
     assert tab.locator("#item-phases-p20").is_visible()
 
@@ -126,9 +131,11 @@ def test_global_comment_choice_survives_reload_and_the_next_click_collapses(tab)
     }
     tab.route("**/api/**", lambda route: fulfill_events(route, doc, SWARM))
     tab.reload()
+    loaded(tab)
     tab.locator("#comments-all").click()
     assert tab.locator("#comments-all").text_content() == "Hide all comments"
     tab.reload()
+    loaded(tab)
     assert tab.locator("#comments-all").text_content() == "Hide all comments"
     tab.locator("#comments-all").click()
     assert tab.locator("#comments-all").text_content() == "Show all comments"

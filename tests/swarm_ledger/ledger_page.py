@@ -77,8 +77,14 @@ def show(tab, html, url=PAGE_URL, ledger=None, swarm=None):
 
 
 def loaded(tab):
-    """Wait until the page applied the stream's first ledger state."""
-    tab.wait_for_function("() => document.getElementById('status').textContent !== 'loading'")
+    """Wait until the page applied the stream's first ledger state: the status line reads saved once the stream opens."""
+    tab.wait_for_function(
+        """async () => {
+          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+          await (await import(new URL("sync.js", main))).loaded;
+          return true;
+        }"""
+    )
 
 
 def page_source():
