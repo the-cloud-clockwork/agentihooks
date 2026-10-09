@@ -50,6 +50,9 @@ def edits():
     def add_top(s):
         s["extension"] = [{"id": "x", "comments": [{"id": "c", "text": "z"}]}]
 
+    def rename_key(s):
+        s["_meta"]["stamps"] = {"z": {"at": 1}}
+
     def nothing(s):
         pass
 
@@ -64,6 +67,7 @@ def edits():
         retype,
         duplicate_edit,
         add_top,
+        rename_key,
         nothing,
     ]
 
@@ -93,3 +97,29 @@ def test_one_field_edit_touches_one_row():
 
 def test_unchanged_document_touches_no_rows():
     assert diff(base(), base()) == ({}, {})
+
+
+@pytest.mark.parametrize("edit", edits(), ids=lambda edit: edit.__name__)
+def test_diff_rows_are_the_rows_flatten_stores(edit):
+    old = base()
+    new = copy.deepcopy(old)
+    edit(new)
+    before, after = diff(old, new)
+    stored, wanted = flatten(old), flatten(new)
+    assert before == {path: stored[path] for path in before}
+    assert after == {path: wanted[path] for path in after}
+
+
+def test_a_field_edit_reads_and_writes_only_its_own_row():
+    old = base()
+    new = copy.deepcopy(old)
+    new["tasks"][0]["title"] = "changed"
+    before, after = diff(old, new)
+    path = '["tasks",["id","t1",0],"title"]'
+    assert (list(before), list(after)) == ([path], [path])
+
+
+@pytest.mark.parametrize(("old", "new"), [({"a": 1}, ["x"]), ([], {}), ({"x": []}, {"x": {}})])
+def test_a_container_of_another_type_replaces_every_row(old, new):
+    before, after = diff(old, new)
+    assert (before, after) == (flatten(old), flatten(new))
