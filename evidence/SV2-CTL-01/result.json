@@ -1,0 +1,54 @@
+{
+  "package": "SV2-CTL-01",
+  "dependency": "SV2-RUN-05",
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1939",
+  "pull_request": "",
+  "tested_commit": "bea45dd7bdc3e2043385bed57a513a0c68f36238",
+  "status": "service-fixture-qualified-awaiting-dependency-and-integration",
+  "evidence_class": "Isolated fake Redis; two independent controller processes over TCP for case A; fake server time and mocked Kubernetes transport for cases B and C; no live rollout proof.",
+  "interfaces": [
+    "Controller.acquire, renew, admit, execute, release, intents and controller_leader_changes_total",
+    "Redis server-time Lease and persistent monotonic epoch",
+    "ExecutionRegistry.start atomically records the admission intent and epoch",
+    "Operation.controller_epoch preserves the original command admission epoch; takeover recovery validates the current leader epoch"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "journal": "Existing journal entries lacking controller_epoch decode with None; unscoped local behavior remains supported",
+    "coordination": "Existing swarm export and restore retain controller-intents, runtime-operations and controller-leader-changes keys"
+  },
+  "authority": "A trusted scoped controller credential callback authorizes every public authority operation. Each service instance uses a generated unique incarnation identity as lease owner. Display labels confer no authority.",
+  "states": {
+    "observed": "All three isolated acceptance cases passed; case A repeats two real controller processes against a new fake Redis TCP server per fixture. Authoritative execution, intent and journal state is checked.",
+    "accepted": "One leader admits a generation; its epoch is recorded atomically on the intent and journal.",
+    "committed": "Implementation and fixtures committed at tested_commit; fixture input digests retained in manifest.",
+    "externally_verified": "None: concrete runtime receiver fencing and live G3 rollout remain unverified."
+  },
+  "validation": {
+    "focused_tests": "212 passed in 6.85 seconds: controller, operation journal, lease, execution identity and observation",
+    "lint": "ruff check and ruff format check passed on changed Python files",
+    "limits": "84 units over limits, 84 base allowlist entries, zero errors"
+  },
+  "cases": {
+    "a": "evidence/SV2-CTL-01/a-result.json",
+    "b": "evidence/SV2-CTL-01/b-result.json",
+    "c": "evidence/SV2-CTL-01/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Construct one Controller with admission_enabled false. It acquires and reconciles but refuses new admission and command dispatch.",
+    "authoritative_objects": "Execution registry, persistent epoch counter, controller admission intents and operation journal are retained.",
+    "proof": "Case C retains confirmed operation and intents, refuses rollback admission, and observes exactly one external creation."
+  },
+  "remaining_limitations": [
+    "The lifecycle dependency remains open; the parked branch is not a package completion or G3 qualification.",
+    "Controller is an injectable service. Existing local controller CLI remains the compatibility path; the later controller loop package must connect the new service to production scheduling and scoped credentials.",
+    "A concrete transport must validate controller epoch and immutable execution identity at its external effect boundary. The fixture transport is mocked and no live Kubernetes or Anton deployment is claimed.",
+    "Full CI and mutation are deferred to the pull request after the dependency lands.",
+    "Journal admission epochs remain immutable after takeover. Concrete receiver dispatch must carry and validate the current controller authority separately from the original journal epoch."
+  ],
+  "reviews": {
+    "Standards": "Constructor annotation findings fixed in tested commit; no open findings.",
+    "Spec": "No open service or fixture findings; acceptance reports reviewed; production integration remains unverified."
+  }
+}
