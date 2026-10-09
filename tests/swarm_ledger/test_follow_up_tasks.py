@@ -1,8 +1,10 @@
+import json
 from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_ledger import ledger, ledger_tasks, plan_ranges
+from scripts.swarm import phase_state, slice_check
+from scripts.swarm_ledger import ledger, ledger_tasks, plan_backfill, plan_ranges
 
 OP = {"op": "task_add", "id": "a", "by": "master", "task": "f1", "title": "Follow up", "lane": "eng", "phase": "p1"}
 
@@ -72,3 +74,25 @@ def test_the_task_add_schema_takes_a_boolean_follow_up_mark():
     with pytest.raises(APIError) as error:
         schemas.validate(schema, {**OP, "follow_up": "yes"})
     assert (error.value.status, error.value.code) == (400, "schema_invalid")
+
+
+def test_a_follow_up_task_lists_under_its_phase(anchored):
+    anchored["phases"][0].update(planning="auto", review={"state": "pending"})
+    assert ledger_tasks._add(anchored, {**OP, "follow_up": True}, ctx()) is True
+    anchored["tasks"].append({"id": "plan-p1", "phase": "p1", "kind": "plan", "state": "done"})
+    assert phase_state.report(anchored)[0] == ("p1", "in_review", ["f1"])
+
+
+def test_a_follow_up_task_linking_the_plan_needs_no_plan_lines():
+    follow_up = {"id": "f1", "phase": "p1", "plan_url": "https://example.com/plan", "follow_up": True}
+    unmarked = {**follow_up, "id": "t2", "follow_up": False}
+    doc = {"phases": [{"id": "p1"}], "tasks": [follow_up, unmarked]}
+    assert slice_check._unlined({"id": "p1"}, doc) == ["Task t2 links the plan but has no plan lines."]
+
+
+def test_backfill_gives_a_follow_up_task_no_slice(monkeypatch, capsys):
+    doc = {"tasks": [{"id": "f1", "state": "open", "plan_url": "https://example.com/plan", "follow_up": True}]}
+    monkeypatch.setattr(ledger, "call", lambda slug: doc)
+    monkeypatch.setattr(ledger, "send", lambda *args, **kwargs: pytest.fail("a follow up task takes no slice"))
+    plan_backfill.run(SimpleNamespace(slug="proof"))
+    assert json.loads(capsys.readouterr().out) == {"updated": [], "missing": []}
