@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import io
 import json
 import os
@@ -192,3 +193,89 @@ def test_a_full_pass_includes_every_dynamic_mutation_shard(full_source, tmp_path
     result = invoke(root, base, queue, "merge_group", tmp_path / "dynamic.json", env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=true" in result.stdout
+
+
+def publish_record(env, responses, record):
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("provenance.json", json.dumps(record))
+    responses["repos/o/r/actions/artifacts/42/zip"] = {"binary": base64.b64encode(archive.getvalue()).decode()}
+    digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    log = f"2026-10-09T11:00:00.000Z required-tree-sha256={digest}\n"
+    responses["repos/o/r/actions/jobs/91/logs"] = {"binary": base64.b64encode(log.encode()).decode()}
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [("version", 0), ("event", "push"), ("reused", True), ("run", 8), ("attempt", 2), ("tree", "different")],
+)
+def test_incompatible_authenticated_source_metadata_runs_fully(full_source, tmp_path, field, value):
+    root, base, _, queue, env, responses, record = full_source
+    record[field] = value
+    publish_record(env, responses, record)
+    result = invoke(root, base, queue, "merge_group", tmp_path / "different.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=false" in result.stdout
+
+
+@pytest.mark.parametrize("field", ["base", "grader", "workflow", "day"])
+def test_any_changed_trusted_grading_input_runs_fully(full_source, tmp_path, field):
+    root, base, _, queue, env, responses, record = full_source
+    record["inputs"][field] = "different"
+    publish_record(env, responses, record)
+    result = invoke(root, base, queue, "merge_group", tmp_path / "inputs.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=false" in result.stdout
+
+
+@pytest.mark.parametrize("name", ["reuse", "unit (3.11, 1)", "unit (3.12, 1)", "lint", "Gate — Required"])
+@pytest.mark.parametrize("outcome", ["failure", "skipped", "cancelled", None])
+def test_every_required_source_job_must_have_passed(full_source, tmp_path, name, outcome):
+    root, base, _, queue, env, responses, _ = full_source
+    jobs = responses["repos/o/r/actions/runs/7/attempts/1/jobs?per_page=100&page=1"]["jobs"]
+    next(job for job in jobs if job["name"] == name)["conclusion"] = outcome
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    result = invoke(root, base, queue, "merge_group", tmp_path / "failed.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=false" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "kind", ["missing-unit", "missing-metadata", "expired-metadata", "expired-coverage", "bad-archive", "missing-log"]
+)
+def test_unavailable_source_evidence_runs_fully(full_source, tmp_path, kind):
+    root, base, _, queue, env, responses, _ = full_source
+    if kind == "missing-unit":
+        body = responses["repos/o/r/actions/runs/7/attempts/1/jobs?per_page=100&page=1"]
+        body["jobs"] = [job for job in body["jobs"] if job["name"] != "unit (3.12, 1)"]
+        body["total_count"] = len(body["jobs"])
+    elif kind == "bad-archive":
+        responses["repos/o/r/actions/artifacts/42/zip"] = {"binary": base64.b64encode(b"invalid").decode()}
+    elif kind == "missing-log":
+        responses.pop("repos/o/r/actions/jobs/91/logs")
+    else:
+        body = responses["repos/o/r/actions/runs/7/artifacts?per_page=100&page=1"]
+        if kind == "missing-metadata":
+            body["artifacts"] = [item for item in body["artifacts"] if item["name"] != "required-tree-1"]
+            body["total_count"] = len(body["artifacts"])
+        else:
+            name = "coverage-3.12-1" if kind == "expired-coverage" else "required-tree-1"
+            next(item for item in body["artifacts"] if item["name"] == name)["expired"] = True
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    result = invoke(root, base, queue, "merge_group", tmp_path / "missing.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=false" in result.stdout
+
+
+@pytest.mark.parametrize("field, value", [("event", "push"), ("status", "in_progress"), ("conclusion", "failure")])
+def test_a_source_run_must_be_a_completed_successful_required_run(full_source, tmp_path, field, value):
+    root, base, _, queue, env, responses, _ = full_source
+    source = responses["repos/o/r/actions/workflows/test.yml/runs?event=pull_request&status=success&per_page=20"][
+        "workflow_runs"
+    ][0]
+    source[field] = value
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    result = invoke(root, base, queue, "merge_group", tmp_path / "run.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=false" in result.stdout
