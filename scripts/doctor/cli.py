@@ -105,7 +105,7 @@ def _link(ledger, slug, doctor):
     ledger.add_source(doctor, _path(slug), BY)
     if _path(doctor) not in ledger.state(slug).get("sources", []):
         ledger.add_source(slug, _path(doctor), BY)
-        ledger.say(slug, POINTER, by="swarm")
+        ledger.notify(slug, POINTER)
 
 
 def _pair(store, slug, doctor):
@@ -298,7 +298,7 @@ def cmd_rates(store, args):
 
 def cmd_intervene(store, args):
     slug, doctor = _pair_of(store, args.slug)
-    ctx = interventions.Context(store, swarm.LedgerClient(), slug, doctor, _name())
+    ctx = interventions.Context(store, swarm.LedgerClient(), slug, doctor)
     print(json.dumps({"intervention": args.action, "logged": interventions.apply(ctx, args.action, args)}))
 
 
