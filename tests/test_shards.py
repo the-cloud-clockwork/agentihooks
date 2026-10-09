@@ -329,6 +329,7 @@ def _warm_package(tmp_path, monkeypatch, files):
     for name, body in files.items():
         (package / f"{name}.py").write_text(body)
     monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
     return package
 
 
