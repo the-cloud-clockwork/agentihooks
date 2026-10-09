@@ -1,6 +1,7 @@
 import importlib.util
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -130,6 +131,71 @@ for kind in ('node', 'browser'):
     }
     assert all(int(line.attrib["hits"]) > 0 for line in report.findall(".//line"))
     assert (tmp_path / "lcov.info").exists()
+
+
+_RENDEZVOUS = """
+import sys
+import time
+from pathlib import Path
+
+def meet(mine, theirs, failure):
+    Path(mine).touch()
+    deadline = time.monotonic() + 5
+    while not Path(theirs).exists():
+        if time.monotonic() > deadline:
+            sys.exit(failure)
+        time.sleep(0.05)
+"""
+
+
+def _stubbed_combine_tree(tmp_path, lcov_exit=0):
+    shutil.copytree(ROOT / ".github/coverage", tmp_path / ".github/coverage")
+    for shard in range(1, 3):
+        report = tmp_path / ".coverage-shards" / f"coverage-3.12-{shard}" / ".coverage"
+        report.parent.mkdir(parents=True)
+        report.write_text("data")
+    (tmp_path / "coverage").mkdir()
+    (tmp_path / "coverage/__init__.py").write_text("")
+    (tmp_path / "coverage/__main__.py").write_text(
+        _RENDEZVOUS
+        + """
+if sys.argv[1] == "xml":
+    meet("xml.started", "lcov.started", "the JS conversion never ran beside the XML")
+    Path("coverage.xml").write_text("<coverage/>")
+elif sys.argv[1] == "report":
+    print("TOTAL")
+"""
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/js_lcov.py").write_text(
+        _RENDEZVOUS
+        + f"""
+meet("lcov.started", "xml.started", "the XML never ran beside the JS conversion")
+Path("lcov.info").write_text("")
+sys.exit({lcov_exit})
+"""
+    )
+    return subprocess.run(
+        ["bash", str(tmp_path / ".github/coverage/combine.sh"), "--downloaded", "2"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_the_js_conversion_runs_beside_the_python_coverage_xml(tmp_path):
+    result = _stubbed_combine_tree(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "coverage.xml").exists()
+    assert (tmp_path / "lcov.info").exists()
+    assert "TOTAL" in result.stdout
+
+
+def test_a_failed_js_conversion_fails_the_merge(tmp_path):
+    result = _stubbed_combine_tree(tmp_path, lcov_exit=3)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert (tmp_path / "coverage.xml").exists()
 
 
 def test_coverage_options_do_not_reach_nested_test_runners(tmp_path):
