@@ -16,7 +16,7 @@ def test_controller_service_runs_the_controller_loop():
 def test_controller_issues_its_ledger_service_credential_before_it_runs():
     start = SERVICES["controller"]["command"][-1]
     assert start.index("agentihooks hive controller") < start.index("export AGENTIHOOKS_CONTROLLER_CREDENTIAL")
-    assert "swarm:8765" in SERVICES["swarm"]["environment"]["SWARM_ALLOWED_HOSTS"]
+    assert SERVICES["swarm"]["environment"]["SWARM_ALLOWED_HOSTS"] == "swarm:8765,${SWARM_ALLOWED_HOSTS:-}"
 
 
 def test_redis_starts_from_an_acl_file_with_optional_tls():
