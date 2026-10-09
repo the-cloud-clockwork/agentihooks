@@ -1,0 +1,60 @@
+{
+  "package": "SV2-CTL-05",
+  "dependency": "SV2-CTL-04",
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2079",
+  "tested_commit": "dd73d2a973b8759d5ccb9d98aa7ca05d7494b478",
+  "pull_request": null,
+  "status": "candidate-incomplete",
+  "package_complete": false,
+  "evidence_class": "Mocked Redis with fakeredis, scoped fixture grants, a fake clock and a fake integration provider. GitHub adapter responses are mocked. No protected branch or deployed system was mutated by these tests.",
+  "interfaces": [
+    "Proposal binds task generation, task revision, pull request URL, tested head and evidence artifact",
+    "Outcomes.propose validates a scoped worker grant, current owner, task revision, pull request identity and verified proof before journalling the proposal",
+    "Outcomes.integrate reserves a single dispatch and requires current ownership at the provider boundary; it distinguishes accepted, unknown, committed queue admission and externally verified merge outcomes",
+    "GitHubIntegration reads actual pull request and merge commit fields, limits operations to the configured repository and dev branch, enqueues the observed expected head and invokes the controller guard immediately before the mutation",
+    "Outcomes.outcome_conflicts_total reports proposal, task revision and pull request conflicts",
+    "require_local rejects distributed final mutations for tasks with authority or claim journal records; command wiring is unfinished"
+  ],
+  "supported_versions": {
+    "python": "Runtime minimum is 3.11; candidate tests ran on Python 3.12.13",
+    "coordination": "Existing TaskAuthority scoped grants, task generations, server time, claim journal and Redis transaction fencing",
+    "provider": "Existing GitHub expectedHeadOid enqueue operation; adapter transport supplied by the controller",
+    "compatibility": "Existing local done gate behavior remains covered by its unchanged tests"
+  },
+  "states": {
+    "observed": "Two attempts propose outcomes for the same task; the replaced attempt is rejected and its ambiguous provider operation is retained for current-owner reconciliation",
+    "accepted": "Verified artifact, run identity and tested head are bound to the proposal and persisted in the task claim journal",
+    "committed": "The fixture provider queue operation has an acknowledged queue identity; task authority remains active",
+    "externally_verified": "Mocked PR MERGED state and merge commit permit current-generation task authority completion. No live G3 evidence exists."
+  },
+  "validation": {
+    "command": "python -m pytest tests/test_swarm_v2_outcomes.py tests/swarm/test_done_gate.py -q with Redis URL and password variables unset",
+    "output": "57 passed in 1.64s",
+    "lint": "ruff check passed for the four changed Python files",
+    "format": "ruff format check passed for all four changed Python files after the final pause correction",
+    "complexity": "C901, PLR0912, PLR0913 and PLR0915 passed with complexity twelve, branches twelve and seven arguments",
+    "size": "84 units over a limit, 84 on the base allowlist, 0 errors against a freshly fetched origin dev base",
+    "review": "Standards reader closed the reproduced final guard pause defect on dd73d2a9. Spec reader judged the candidate parkable and package integration incomplete.",
+    "ci": "No workflow run was returned for the pushed branch before a pull request",
+    "mutation": "Pending pull request CI; no local mutation run was made"
+  },
+  "measurements": {
+    "outcome_conflicts_total": "Changed task revision fixture increments the counter to one",
+    "lost_merge_response_dispatches": 1,
+    "stale_attempt_provider_dispatches": 0
+  },
+  "rollback_rehearsal": {
+    "action": "Set Outcomes.integration_enabled false; retain accepted proposals for review without starting provider mutations",
+    "proof": "Both ordinary pause and pause immediately before the provider guard preserve a retryable accepted proposal; resume dispatches once. Truly ambiguous provider timeouts remain unknown and are never blindly replayed.",
+    "authoritative_objects": "TaskClaim records and claim journal, scoped launch registrations, authoritative ledger task revision, and provider PR and merge commit state are retained"
+  },
+  "remaining_limitations": [
+    "Candidate APIs are not wired into controller service worker outcome endpoints or legacy merge and done dispatchers",
+    "The authoritative ledger done transaction and task revision bridge are unfinished; task authority completion is exercised only in isolation",
+    "Linked acceptance case definitions were not printed by plan read; requested from the master but not received, so named acceptance cases are not claimed qualified",
+    "The final authorization check and provider HTTP mutation are separate operations; provider level atomic generation fencing is not claimed",
+    "Ambiguous operations with no observable provider effect remain pending for explicit reconciliation rather than being retried",
+    "G3 deployed validation, telemetry export, full suite, coverage and mutation qualification remain pending"
+  ]
+}
