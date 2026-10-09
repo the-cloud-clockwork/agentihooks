@@ -109,10 +109,13 @@ class Budget:
         return done
 
     def _exempt(self, doc, by, ctx):
+        from scripts.swarm.naming import NameRegistry
+
         return (
             owes(ctx.meta, by, doc["tasks"])
             or lifted(ctx.meta, by, ctx.at)
             or agent_lifted(self.slug, by, NAME, self.home, ctx.at / 1000)
+            or bool(NameRegistry(self._redis).entry(by).get("operator"))
         )
 
     def _marks(self):

@@ -50,7 +50,21 @@ def refusal(name, op):
         return f"{name} cannot write as {by}"
     if op["op"] == "join" and op.get("role", "member") != "member" and lane_of(resolve_name(name)) != "master":
         return f"{name} cannot join as {op['role']}"
+    if op["op"] == "claim":
+        return claim_refusal(resolve_name(name))
     return ""
+
+
+def claim_refusal(by):
+    from redis import RedisError
+
+    from scripts.swarm.naming import NameRegistry
+
+    try:
+        launched = NameRegistry(store.redis_client()).entry(by).get("operator")
+    except RedisError:
+        return ""
+    return f"{by} was launched with swarm profile up and claims no item" if launched else ""
 
 
 def fence(slug: str, epoch: int) -> None:
