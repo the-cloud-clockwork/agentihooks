@@ -161,6 +161,11 @@ def test_a_slowest_stage_without_a_budget_says_so():
     assert "slowest stage brand-new took 13 minutes 55 seconds with no budget." in text
 
 
+def test_a_skipped_gate_still_ends_the_measured_run():
+    gate = {**_job("Gate — Required", "14:10", "16:08"), "conclusion": "skipped"}
+    assert defects.defect(RUNS[0], [*JOBS[1][:2], gate]) == TEXT
+
+
 def test_a_failed_read_files_nothing_and_retries_next_interval(swarm, capsys):
     store, config, ledger = swarm
 
