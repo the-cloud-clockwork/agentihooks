@@ -979,3 +979,6 @@ def _settle(slug, config, store, ledger, rows, doc):
     waiting = {0: "", 1: ", one blocked task waits for you"}.get(blocked, f", {blocked} blocked tasks wait for you")
     ledger.notify(slug, "The swarm has no task left to start" + waiting)
     return ["drained"]
+
+
+# mutation stats measurement
