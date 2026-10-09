@@ -73,6 +73,35 @@ RUNNERS = [
     "prove",
     "python -c 'import pytest; pytest.main()'",
     "python -m scripts.ci_mutation",
+    "python3 -c \"import subprocess; subprocess.run(['pytest', '-q'])\"",
+    "python3 -c \"__import__('pytest').main()\"",
+    "python3 -c \"import runpy; runpy.run_module('pytest')\"",
+    "python3 - <<'EOF'\nimport os\nos.system('python -m pytest')\nEOF",
+    "node -e \"require('child_process').execSync('npx jest')\"",
+    "node -e \"require('node:test')\"",
+    "python3 -c \"getattr(__builtins__, '__import__')('pytest').main()\"",
+    "python3 -c \"vars(__builtins__)['__import__']('unittest').main()\"",
+    "node -e \"const M = require('mocha'); new M().run()\"",
+    "node -e \"require('jest-cli').run()\"",
+    "node -e \"require('vitest/node').startVitest('unit')\"",
+    "python3 -c \"import os; getattr(os, 'system')('python -m pytest')\"",
+    "python3 -c \"eval(\\\"__import__('os').system('python -m pytest')\\\")\"",
+    "node -e \"require('child_process')['exec']('npx jest')\"",
+    'node -e "new Function(\'require(\\"child_process\\").execSync(\\"npx jest\\")\')()"',
+    "python3 - $'\\' ' <<EOF\nimport pytest; pytest.main(); print(\"'\")  # \"\nEOF",
+    "# don't\npython3 - <<'EOF'\nimport pytest; pytest.main(); print(\"'\")  # \"\nEOF",
+    "cd tests # run them\npytest -q",
+    "echo a#b\npytest -q",
+    "echo \\ #x; pytest -q",
+    "node -e \"import('vitest/node').then(v => v.startVitest('unit'))\"",
+    "node --input-type=module -e \"import M from 'mocha'; await new M().run()\"",
+    "python3 -c \"import asyncio; asyncio.run(asyncio.create_subprocess_shell('python -m pytest'))\"",
+    "python3 -c \"eval('import pytest; pytest.main()')\"",
+    "python3 -c \"exec(compile('import pytest; pytest.main()', 'x', 'exec'))\"",
+    'node -e "eval(\'require(\\"mocha\\").run()\')"',
+    "node -e \"const m = 'mocha'; new (require(m))().run()\"",
+    "node -e \"require('vm').runInThisContext('require(\\\"jest\\\").run()')\"",
+    "node --input-type=module -e \"import { startVitest } from 'vitest/node'; await startVitest('unit')\"",
 ]
 
 WRAPPERS = [
@@ -154,6 +183,45 @@ def test_explicit_true_allows_tests(value, monkeypatch):
     ],
 )
 def test_non_test_commands_pass(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "grep -n pytest .github/workflows/test.yml",
+        "grep -n '<<' .github/workflows/test.yml",
+        'grep -n "cat <<EOF" .github/workflows/test.yml',
+        "grep -c \\<\\< tests/test_a.py",
+        "awk '/<<EOF/,/^EOF/' .github/workflows/test.yml",
+        "sed -n '/pytest/,+3p' .github/workflows/test.yml",
+        "cat tests/context/test_local_test_guard.py",
+        "git show origin/dev:.github/workflows/test.yml | grep -n 'python -m pytest'",
+        "python3 -c \"import pathlib; p = pathlib.Path('t.yml'); p.write_text(p.read_text().replace('pytest -x', 'pytest -q'))\"",
+        "python3 - <<'EOF'\nfrom pathlib import Path\np = Path('.github/workflows/test.yml')\nold = '''run: python -m pytest -x'''\n"
+        'p.write_text(p.read_text().replace(old, "run: python -m pytest -q"))  # pytest\nEOF',
+        "node -e \"fs.writeFileSync('p.json', s.replace('jest', 'vitest')) // jest\"",
+        "python3 -c \"print('pytest')\"",
+        "python3 -c \"import pathlib; p = pathlib.Path('ecosystem.yml'); p.write_text(p.read_text().replace('pytest -x', 'pytest -q'))\"",
+        "python3 -c \"print(open('pytest.ini').read())\"",
+        "node -e \"console.log('jest')\"",
+        "echo ok #c; pytest -q",
+        " # ok; pytest -q",
+        "# ok; pytest -q\necho done",
+        "python3 -c'print(1)  # pytest'",
+        "cat 'a\\' <<EOF\npytest\nEOF",
+        "cat \\\\'x' <<EOF\npytest\nEOF",
+        "cat $'a' <<EOF\npytest\nEOF",
+        "python3 -c \"'" + "\\\\" * 80 + '"',
+        "echo \"don't\" # it's\ncat <<EOF\npytest\nEOF",
+        "grep -n '^<<<<<<< \\|^=======\\|^>>>>>>> ' .github/workflows/test.yml",
+        'git show HEAD:tests/test_a.py | grep -c "<<<<<<< HEAD"',
+    ],
+)
+def test_reads_and_quoted_runner_names_pass(command, monkeypatch):
     from hooks.context.local_test_guard import check_local_tests
 
     monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
