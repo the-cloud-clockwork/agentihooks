@@ -1,4 +1,3 @@
-import json
 from copy import deepcopy
 
 import pytest
@@ -48,7 +47,7 @@ class Ledger:
 
 
 def read(box, table):
-    return [json.loads(row) for (row,) in box.db.execute("SELECT row FROM spool WHERE tbl=? ORDER BY ts_ms", (table,))]
+    return sorted(box.recent(table, NOW + 1000), key=lambda row: row["ts_ms"])
 
 
 def test_four_task_states_become_distinct_rows_with_the_hierarchy_path(tmp_path):
