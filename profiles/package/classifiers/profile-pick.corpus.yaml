@@ -1,0 +1,126 @@
+version: 1
+cases:
+- name: mutation_runner_forms_ci_probe
+  state:
+    task: t85
+    title: Local test guard blocks supported mutation runner forms
+    description: 'Parent: Doctor Fix verifies alleged enforcement gaps before changing the operator''s local run
+      policy. The clearance writer owner confirms that the supported workflow module runners are all refused. It
+      only probed classification of three alternative forms, and has not verified actual execution: a __main__ file
+      path, running the ci_mutation module from the scripts directory, and importlib importing a name built by joining
+      strings. An import alone may be metadata work rather than runner execution. These are hypotheses, not three
+      confirmed escapes. Verify in CI whether each supported environment form actually invokes mutation execution,
+      and whether the unchanged guard refuses it. Do not run a probe, test or mutation on this host. Preserve allowed
+      metadata-only imports and clearance writes. If a real supported runner escape is proven, file the exact input,
+      evidence and smallest separate correction; if none is proven, close with that evidence and change no code.
+      Done when independent Standards review accepts the observed classification and execution facts and any real
+      correction is filed.'
+    kind: troubleshoot
+    territory:
+    - hooks/context
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall
+      short, fixes the system with proof and applies each fix to the running swarm. Its master and the master of
+      the watched swarm keep each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before
+      and after.'
+  params:
+    id: t85
+    title: Local test guard blocks supported mutation runner forms
+  expected:
+    responsibility: engineer
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 248
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.9227264731119427
+  - source: jev-1.13
+    latency_ms: 300
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.97
+  - source: haiku
+    latency_ms: 7342
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.8
+  - source: luna
+    latency_ms: 14390
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.99
+- name: checkpoint_flake_ci_probe
+  state:
+    task: fx-30373668-cause
+    title: Find the cause of the flaky tests finding
+    description: 'Parent: Doctor Fix proves the cause of verified flaky CI before repair, preserving the watched
+      operator plan. Observed Tests run 37995813007 on head 9a3fb9c8e9ec7ea90c442866a1e62e1e02deaa5e: attempt one
+      job 114041777986 failed Run tests in test_sigterm_during_tool_reports_observed_checkpoint[complete-complete].
+      child.wait(timeout=8) returned 75 instead of 0; report reason termination, checkpoint_status incomplete, quiescence
+      clean, agent/exporter/herdr child exits all -15. Attempt two job 114043338065 passed the same case. PR 2246
+      changes classifier code and is merged; its files do not include this supervision case. Diagnose checkpoint
+      acknowledgement, child readiness and termination timing with controlled CI reproductions; these are hypotheses
+      until proven. Preserve bounded shutdown and the complete versus incomplete exit contract. This differs from
+      the existing ledger watcher SIGTERM timeout. No local tests, mutation, live service repointing or weakening
+      assertions. Done when independent Standards review accepts causal evidence and files the smallest correction
+      on the paired code task.'
+    kind: troubleshoot
+    territory: []
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall
+      short, fixes the system with proof and applies each fix to the running swarm. Its master and the master of
+      the watched swarm keep each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before
+      and after.'
+  params:
+    id: fx-30373668-cause
+    title: Find the cause of the flaky tests finding
+  expected:
+    responsibility: engineer
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 250
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.8111042701864835
+  - source: jev-1.13
+    latency_ms: 260
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.97
+  - source: pplx-decider-v1-27b
+    latency_ms: 314
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.7353447762834383
+  - source: haiku
+    latency_ms: 7493
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.8
+  - source: luna
+    latency_ms: 4609
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.97

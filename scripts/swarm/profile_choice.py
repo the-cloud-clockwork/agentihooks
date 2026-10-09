@@ -1,6 +1,7 @@
 """The typed profile decision made before every swarm launch: explicit task profile, fixed lane, else the classifier."""
 
 import os
+import re
 from dataclasses import asdict, dataclass, replace
 
 from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
@@ -12,6 +13,8 @@ CLASSIFIED_LANE = "eng"
 PURPOSE = "profile-pick"
 RESPONSIBILITIES = ("frontend", "engineer", "qa")
 HARNESS_ORDER = {"frontend": ("claude", "codex")}
+PULL_REQUEST_KINDS = ("code", "ci")
+CI_RUN = re.compile(r"\bCI\b")
 
 
 class ProfileUnresolved(RuntimeError):
@@ -52,6 +55,8 @@ def choose(
         decision = ProfileDecision(task["profile"], "task", "explicit task profile")
     elif lane != CLASSIFIED_LANE or pinned != DEFAULT_PROFILES[lane]:
         decision = ProfileDecision(pinned, "lane", f"{lane} lane")
+    elif needs_ci_push(task):
+        decision = ProfileDecision("engineer", "proof contract", "proof needs a pushed CI run", anchors=anchors(task))
     else:
         decision = classify(slug, task, environ)
     if not installed(decision.profile):
@@ -63,6 +68,12 @@ def choose(
         return replace(decision, overlays=overlays.chosen(decision.profile, task, role_overlays or {}))
     except ValueError as exc:
         raise ProfileUnresolved(f"task {task.get('id')} overlays are refused: {exc}") from exc
+
+
+def needs_ci_push(task: dict) -> bool:
+    contract = task.get("contract") or {}
+    proof = f"{contract.get('must', '')} {contract.get('check', '')}"
+    return task.get("kind", "code") not in PULL_REQUEST_KINDS and CI_RUN.search(proof) is not None
 
 
 def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
