@@ -3,8 +3,8 @@
   "dependency": "SV2-CTL-02",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2047",
-  "tested_commit": "a86cb62794abe29ae7c773c1972814f54ed079b6",
-  "status": "fixture-qualified-awaiting-dependency-merge-and-ci",
+  "tested_commit": "8a463694d048100bc55a3eb9d7d22d4d970e9235",
+  "status": "fixture-qualified-awaiting-ci",
   "evidence_class": "Mocked Redis (fakeredis WATCH transactions) and a fake clock; empty fixture cluster; no Kubernetes, node autoscaler or provider call was made.",
   "interfaces": [
     "scripts.swarm_v2.admission.PendingAdmission.admit, activate, release, held, pending and pending_execution_admission_total",
@@ -27,10 +27,11 @@
   },
   "validation": {
     "command": "python -m pytest tests/test_swarm_v2_admission.py tests/swarm/test_tick.py tests/swarm/test_launch_check.py tests/test_size_limits.py -q -n 2 --cov=scripts.swarm_v2.admission --cov-report=term-missing",
-    "output": "admission tests 38 passed after the non mapping resources fix; with tick, launch check and size limit tests 286 passed at 0b4ecf6a; admission 142 statements, 100 percent coverage",
+    "output": "admission, suite speed, tick and launch check tests 264 passed after the mutation fixes; admission 143 statements, 100 percent coverage",
     "lint": "ruff check passed on changed Python files",
     "format": "ruff format check passed on changed Python files",
-    "limits": "Only the allowlisted parameter count of _spawn (8) exceeds a limit, unchanged; complexity and branches within 12"
+    "limits": "Only the allowlisted parameter count of _spawn (8) exceeds a limit, unchanged; complexity and branches within 12",
+    "mutation": "First CI run 37898294535: 20 survivors (4 tick, 16 admission); each killed by a new test or removed by restructuring an equivalent literal; next CI run qualifies"
   },
   "cases": {
     "a": "evidence/SV2-CTL-03/a-result.json",
@@ -49,6 +50,7 @@
     "Provider slots come from an injected source; the production source over account capacity is wired with the Kubernetes runtime.",
     "pending_execution_admission_total is a per swarm Redis hash read through a method; no telemetry exporter emits it yet.",
     "An exception raised between a claim and the spawn try block leaves the reservation held until it expires, as the claim itself is held today.",
-    "Full CI and mutation have not run; the dependency SV2-CTL-02 is still open."
-  ]
+    "Mutation qualification of the fixes is pending the next CI run."
+  ],
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2052"
 }
