@@ -73,6 +73,33 @@ def test_legacy_credentials_never_replay(tmp_path, field):
         banner.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "REDIS_PASSWORD=" + "x",
+        "PASSWORD=" + "synthetic.credential",
+        "postgresql://user:" + "synthetic" + "-credential@localhost:5432",
+        "mongodb+srv://user:" + "synthetic" + "-credential@localhost:27017",
+    ],
+)
+def test_memory_drops_short_assignments_and_connection_aliases(tmp_path, text):
+    from hooks import tool_memory
+
+    memory = tmp_path / "memory.ndjson"
+    with patch.object(tool_memory, "MEMORY_PATH", memory):
+        tool_memory.record_error(
+            {
+                "tool_name": "Bash",
+                "tool_response": {"is_error": True, "content": "Error: " + text},
+            }
+        )
+        assert not memory.exists(), "credential error was stored"
+    memory.write_text(json.dumps({"tool": "Bash", "error": text}) + "\n")
+    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_banner") as banner:
+        tool_memory.inject_memory()
+        banner.assert_not_called()
+
+
 @pytest.mark.parametrize("source", ["output", "input"])
 def test_record_error_checks_credentials_before_truncation(tmp_path, source):
     from hooks import tool_memory

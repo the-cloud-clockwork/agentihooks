@@ -160,7 +160,7 @@ def _contains_secret(value: object) -> bool:
     from hooks.secrets import iter_strings, redact
 
     text = json.dumps(value, ensure_ascii=False) + "\n" + "\n".join(iter_strings(value))
-    return redact(text, mode="strict") != text
+    return redact(text, mode="memory") != text
 
 
 # ---------------------------------------------------------------------------
