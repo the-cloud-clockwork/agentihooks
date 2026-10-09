@@ -37,6 +37,8 @@ def repo(tmp_path):
             "tests/sub/helpers.py": "H = 1\n",
             "tests/sub/test_gamma.py": "G = 1\n",
             "tests/sub/test_delta.py": "D = 1\n",
+            "tests/sub/deep/test_epsilon.py": "E = 1\n",
+            "tests/helpers.py": "R = 1\n",
             "tests/SIZE_ALLOWLIST.json": '{"base": {}}\n',
         },
         "base",
@@ -63,12 +65,22 @@ def test_tests_for_selects_changed_tests_and_importers_grouped_by_directory(repo
     ]
 
 
-def test_a_changed_test_helper_selects_the_tests_beside_it(repo):
+def test_a_changed_test_helper_selects_the_tests_beside_and_below_it(repo):
     _commit(repo, {"tests/sub/helpers.py": "H = 2\n"}, "helper")
 
     assert ci_prepush.tests_for(repo, ci_prepush.changed(repo, "base")) == [
         "tests/sub/test_delta.py",
         "tests/sub/test_gamma.py",
+        "tests/sub/deep/test_epsilon.py",
+    ]
+
+
+def test_a_root_test_helper_selects_only_the_root_tests(repo):
+    _commit(repo, {"tests/helpers.py": "R = 2\n"}, "root helper")
+
+    assert ci_prepush.tests_for(repo, ci_prepush.changed(repo, "base")) == [
+        "tests/test_alpha.py",
+        "tests/test_beta.py",
     ]
 
 
@@ -193,14 +205,28 @@ def test_the_default_base_is_fetched_from_origin_dev(repo, tmp_path):
     _git(tmp_path, "init", "-q", "--bare", str(origin))
     _git(repo, "remote", "add", "origin", str(origin))
     _git(repo, "push", "-q", "origin", "dev")
+    _git(repo, "fetch", "-q", "origin")
     _git(repo, "checkout", "-q", "-b", "work")
     _commit(repo, {"scripts/beta.py": "B = 3\n"}, "change")
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", "-q", "-b", "dev", str(origin), str(other))
+    _git(other, "config", "user.email", "t@example.com")
+    _git(other, "config", "user.name", "t")
+    _commit(other, {"README.md": "moved\n"}, "dev moves")
+    _git(other, "tag", "v9")
+    _git(other, "push", "-q", "origin", "dev", "HEAD:refs/heads/side", "v9")
     runner = _Runner()
 
     assert ci_prepush.run(repo, ci_prepush.BASE, runner) == 0
 
     assert runner.calls[-1][0][-1] == "tests/test_beta.py"
-    assert _git(repo, "rev-parse", "origin/dev") == _git(repo, "rev-parse", "dev")
+    assert _git(repo, "rev-parse", "origin/dev") == _git(other, "rev-parse", "HEAD")
+    assert _git(repo, "branch", "-r") == "origin/dev"
+    assert _git(repo, "tag") == ""
+
+
+def test_the_stamp_lives_in_the_git_dir(repo):
+    assert ci_prepush.stamp_path(repo) == repo.resolve() / ".git" / "ci_prepush"
 
 
 def test_passed_is_false_outside_a_repository(tmp_path):

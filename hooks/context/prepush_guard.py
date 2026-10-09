@@ -12,8 +12,8 @@ _PASS_ARGS = frozenset({"--delete", "-d", "--dry-run", "-n"})
 
 
 def _push(tokens: list[str]) -> tuple[list[str], list[str]] | None:
-    while tokens and (tokens[0] in _PREFIXES or "=" in tokens[0]):
-        tokens = tokens[1:]
+    while tokens and (tokens[0] in _PREFIXES or "=" in tokens[0] or tokens[0] == "timeout"):
+        tokens = tokens[2:] if tokens[0] == "timeout" else tokens[1:]
     if not tokens or Path(tokens[0]).name != "git":
         return None
     dirs, rest = [], tokens[1:]
@@ -30,7 +30,7 @@ def _exempt(args: list[str]) -> bool:
         return True
     refspecs = [arg for arg in args if not arg.startswith("-")][1:]
     return bool(refspecs) and all(
-        spec.startswith(":") or spec.rpartition(":")[2].removeprefix("refs/heads/").startswith("diffcheck/")
+        spec.startswith(":") or spec.split(":")[-1].removeprefix("refs/heads/").startswith("diffcheck/")
         for spec in refspecs
     )
 

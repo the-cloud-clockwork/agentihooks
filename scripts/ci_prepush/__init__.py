@@ -45,7 +45,8 @@ def tests_for(root: Path, names: list[str]) -> list[str]:
         if path.parts[0] == "tests" and path.name.startswith("test_"):
             selected.add(name)
         elif path.parts[0] == "tests":
-            selected.update(found.relative_to(root).as_posix() for found in (root / path.parent).glob("test_*.py"))
+            pattern = "test_*.py" if path.parent == Path("tests") else "**/test_*.py"
+            selected.update(found.relative_to(root).as_posix() for found in (root / path.parent).glob(pattern))
         selected.update(select_tests(root, path))
     return sorted(selected, key=lambda name: (Path(name).parent.as_posix(), name))
 
@@ -73,7 +74,7 @@ def run(root: Path, base: str, execute: Callable[..., subprocess.CompletedProces
         print("ci_prepush: commit or set aside the tracked changes first; the gates grade HEAD.")
         return 1
     if base == BASE:
-        _git(root, "fetch", "--no-tags", "--quiet", "origin", "dev")
+        _git(root, "fetch", "--no-tags", "origin", "dev")
     env = {name: value for name, value in os.environ.items() if "REDIS" not in name}
     failed = []
     with tempfile.TemporaryDirectory() as grade:
@@ -86,7 +87,7 @@ def run(root: Path, base: str, execute: Callable[..., subprocess.CompletedProces
         print(f"ci_prepush: {', '.join(failed)} failed; fix them, commit and run again before pushing.")
         return 1
     head = _git(root, "rev-parse", "HEAD")
-    stamp.write_text(head + "\n")
+    stamp.write_text(head)
     print(f"ci_prepush: every cheap gate passed on {head[:12]}; push it.")
     return 0
 

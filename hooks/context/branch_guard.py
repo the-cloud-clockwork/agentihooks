@@ -432,7 +432,7 @@ def _resolve_cwd(command: str, payload_cwd: str) -> str:
     """Return the effective cwd — honors `cd <path> && ...` prefix in command."""
     m = _CD_PREFIX_PATTERN.match(command)
     if m:
-        path = os.path.expanduser(m.group(1).strip('"').strip("'"))
+        path = os.path.expanduser(os.path.expandvars(m.group(1).strip('"').strip("'")))
         if os.path.isdir(path):
             return path
     if payload_cwd and os.path.isdir(payload_cwd):

@@ -58,6 +58,7 @@ def _message(root):
         "if true; then git push origin HEAD; fi",
         "env GIT_TRACE=0 git push origin HEAD",
         "/usr/bin/git push origin HEAD",
+        "timeout 300 git push origin HEAD",
         "git -c user.name=x push origin HEAD",
         "git push origin HEAD:work :stale",
         "git push origin HEAD:feature/diffcheck/x",
@@ -70,6 +71,15 @@ def test_push_without_a_passing_run_is_blocked(repo, command):
     assert str(blocked.value) == _message(repo)
 
 
+@pytest.mark.parametrize(
+    "prefix",
+    ["if", "then", "else", "elif", "do", "while", "until", "time", "exec", "nohup", "env", "command", "!", "{", "A=1"],
+)
+def test_every_shell_prefix_is_looked_through(repo, prefix):
+    with pytest.raises(BlockAction):
+        check_prepush(_bash(f"{prefix} git push origin HEAD", repo))
+
+
 def test_push_from_another_directory_resolves_the_repository(repo, tmp_path, monkeypatch):
     monkeypatch.setenv("REPO_DIR", str(repo))
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -79,10 +89,14 @@ def test_push_from_another_directory_resolves_the_repository(repo, tmp_path, mon
         "git -C $REPO_DIR push origin HEAD",
         "git -C ~/repo push origin HEAD",
         "cd ~/repo && git push",
-        f"git -C {tmp_path} -C repo push",
+        "cd $REPO_DIR && git push",
     ):
         with pytest.raises(BlockAction):
             check_prepush(_bash(command, tmp_path))
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    with pytest.raises(BlockAction):
+        check_prepush(_bash(f"git -C {tmp_path} -C repo push", elsewhere))
 
 
 def test_a_later_push_in_the_same_command_is_checked(repo, tmp_path):
@@ -121,6 +135,7 @@ def test_a_commit_after_the_run_blocks_again(repo):
         "git",
         "git commit -m 'then git push'",
         "echo git push",
+        "make push",
         "cat <<'EOF' > notes.md\ngit push\nEOF",
     ],
 )
