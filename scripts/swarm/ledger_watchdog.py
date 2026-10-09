@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import ledger_host, ledger_probe, time_left
+from scripts.swarm import incidents, ledger_host, ledger_probe, time_left
 from scripts.swarm.ledger_client import LedgerGone, LedgerRefused
 from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import server_code
@@ -203,14 +203,19 @@ def watch(store, slug: str, ledger, runtime, host: Host | None = None) -> list[s
     facts = seen(pid, host.proc) if pid is not None else None
     command = launch(pid, facts["argv"], host.proc) if facts else None
     found = why(host.folder, pid, facts) if command else None
-    if found is None or not _claimed(store, host.folder, pid, found[0]):
+    if found is None:
+        if command:
+            store.redis.hdel(incidents.key("ledger"), "watchdog")
+        return []
+    if not _claimed(store, host.folder, pid, found[0]):
         return []
     kind, reason = found
     if error := restart(host, pid, command):
-        if store.redis.get(DOWN_KEY) != str(pid):
-            _mail(store, slug, DOWN_TEXT.format(why=reason, error=error))
-            store.redis.set(DOWN_KEY, pid, px=DOWN_MS)
+        text = DOWN_TEXT.format(why=reason, error=error)
+        store.redis.hset(incidents.key("ledger"), "watchdog", text)
+        store.redis.set(DOWN_KEY, pid, px=DOWN_MS)
         return [f"the ledger server needed a restart because {reason}, and the restart failed: {error}"]
+    store.redis.hdel(incidents.key("ledger"), "watchdog")
     store.redis.set(STARTED_KEY, str(ledger_host.server_pid(host.folder)))
     return (
         _runaway(store, slug, ledger, reason) if kind == RUNAWAY else _stale(store, slug, ledger, runtime, host.clock)
