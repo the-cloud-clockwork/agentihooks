@@ -84,6 +84,28 @@ def test_a_down_sink_is_tried_once_per_flush(box, sink):
     assert len(sink.queries) == 1
 
 
+def test_a_failed_insert_stops_the_flush_before_other_tables(box, sink):
+    other = Table("other")
+    box.append(TASKS, [row("e1")])
+    box.append(other, [{k: row("e2")[k] for k in metrics_outbox.BASE_NAMES}])
+    box.flush(NOW)
+    sink.queries.clear()
+    sink.up = False
+    box.append(TASKS, [row("e3")])
+    box.append(other, [{k: row("e4")[k] for k in metrics_outbox.BASE_NAMES}])
+    assert box.flush(NOW) == 0
+    assert len(sink.queries) == 1
+
+
+def test_the_spool_waits_on_a_busy_lock(tmp_path, sink, monkeypatch):
+    seen = []
+    real = sqlite3.connect
+    monkeypatch.setattr(metrics_outbox.sqlite3, "connect", lambda path, **kw: seen.append(kw) or real(path, **kw))
+    Outbox(tmp_path / "o.sqlite", SINK, sink.send).close()
+    assert seen == [{"timeout": metrics_outbox.LOCK_TIMEOUT_S}]
+    assert metrics_outbox.LOCK_TIMEOUT_S == 10
+
+
 def test_the_table_is_created_once_before_its_first_insert(box, sink):
     box.append(TASKS, [row("e1")])
     box.flush(NOW)
@@ -319,6 +341,11 @@ def test_settings_read_url_user_and_password():
     )
 
 
+def test_settings_strip_only_trailing_slashes():
+    env = {"AGENTIHOOKS_METRICS_URL": "http://ch:8123/sinkX//", "AGENTIHOOKS_METRICS_USER": "writer"}
+    assert metrics_outbox.settings(env).url == "http://ch:8123/sinkX"
+
+
 def test_settings_are_off_without_a_user():
     assert metrics_outbox.settings({"AGENTIHOOKS_METRICS_URL": "http://ch:8123"}) is None
     assert (
@@ -365,6 +392,28 @@ def test_post_sends_the_query_body_and_credentials(server):
     query, user, key, body = Recorder.seen[0]
     assert query == {"query": ["INSERT INTO swarm.t FORMAT JSONEachRow"]}
     assert (user, key, body) == ("writer", "pw", b'{"a":1}')
+
+
+def test_post_gives_up_after_its_timeout(monkeypatch):
+    seen = []
+
+    class Reply:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(
+        metrics_outbox.urllib.request, "urlopen", lambda request, **kw: seen.append((request, kw)) or Reply()
+    )
+    assert metrics_outbox.post(Settings("http://ch:8123", "w", "k"), "SELECT 1", b"") is True
+    request, kw = seen[0]
+    assert kw == {"timeout": metrics_outbox.TIMEOUT_S}
+    assert metrics_outbox.TIMEOUT_S == 3
+    assert request.get_method() == "POST"
 
 
 def test_post_reports_a_refused_insert(server):
