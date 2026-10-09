@@ -1,5 +1,6 @@
 import os
 import re
+import shlex
 import subprocess
 import tomllib
 from pathlib import Path
@@ -41,6 +42,19 @@ def _grade(base: Path, head: Path, capsys) -> tuple[int, str]:
 def test_the_grader_pins_the_ruff_the_tests_install():
     dev = tomllib.loads((_ROOT / "pyproject.toml").read_text())["project"]["optional-dependencies"]["dev"]
     assert f"ruff=={size_limits.RUFF_VERSION}" in dev
+
+
+def test_every_workflow_installs_the_pinned_ruff():
+    installs = {}
+    for workflow in sorted((_ROOT / ".github/workflows").glob("*.y*ml")):
+        for name, job in (yaml.safe_load(workflow.read_text()).get("jobs") or {}).items():
+            for step in job.get("steps", []):
+                for line in step.get("run", "").splitlines():
+                    if "pip install" in line and "ruff" in line:
+                        words = shlex.split(line)
+                        installs[f"{workflow.name}:{name}"] = [w for w in words if w.startswith("ruff")]
+    assert {"test.yml:lint", "test.yml:size"} <= installs.keys()
+    assert {job: specs for job, specs in installs.items() if specs != [f"ruff=={size_limits.RUFF_VERSION}"]} == {}
 
 
 def test_a_planted_eight_parameter_function_is_red(tmp_path, capsys):
