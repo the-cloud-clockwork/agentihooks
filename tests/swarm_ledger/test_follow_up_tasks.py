@@ -60,4 +60,15 @@ def test_task_add_sends_the_follow_up_mark_only_when_given(monkeypatch, argv, ex
     ledger.cmd_task(args)
     op, fields = sent[0]
     assert op == "task_add"
-    assert {k: v for k, v in fields.items() if k == "follow_up"} == expected
+    assert fields.get("follow_up") == expected.get("follow_up")
+
+
+def test_the_task_add_schema_takes_a_boolean_follow_up_mark():
+    from scripts.swarm_ledger.api import schemas
+    from scripts.swarm_ledger.api.errors import APIError
+
+    schema = schemas.operation_schema("task_add")
+    assert schemas.validate(schema, {**OP, "follow_up": True}) is None
+    with pytest.raises(APIError) as error:
+        schemas.validate(schema, {**OP, "follow_up": "yes"})
+    assert (error.value.status, error.value.code) == (400, "schema_invalid")
