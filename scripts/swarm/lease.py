@@ -13,7 +13,15 @@ EPOCH = ContextVar("controller_epoch", default=None)
 
 def tick_ms() -> int:
     seconds = os.environ.get("AGENTIHOOKS_CONTROLLER_TICK_SECONDS")
-    return round(float(seconds) * 1000) if seconds else TICK_MS
+    if not seconds:
+        return TICK_MS
+    try:
+        ms = round(float(seconds) * 1000)
+    except (ValueError, OverflowError):
+        ms = 0
+    if ms < 1000:
+        raise SwarmError("AGENTIHOOKS_CONTROLLER_TICK_SECONDS must be at least 1 second")
+    return ms
 
 
 def ttl_ms() -> int:

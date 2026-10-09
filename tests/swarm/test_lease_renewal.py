@@ -267,6 +267,19 @@ def test_a_shorter_tick_shortens_the_lease_life_to_three_of_its_ticks(store, clo
     assert 7000 < store.redis.pttl(store.key("sw", "control-owner")) <= 7500
 
 
+@pytest.mark.parametrize("seconds", ["abc", "0", "-5", "0.999", "nan", "inf"])
+def test_a_tick_setting_below_one_second_or_not_a_number_is_refused(seconds, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", seconds)
+    with pytest.raises(SwarmError) as error:
+        lease.tick_ms()
+    assert str(error.value) == "AGENTIHOOKS_CONTROLLER_TICK_SECONDS must be at least 1 second"
+
+
+def test_a_one_second_tick_is_the_shortest_allowed(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "1")
+    assert lease.ttl_ms() == 3000
+
+
 def test_the_controller_sleeps_one_configured_tick_between_passes(store, monkeypatch):
     import scripts.operator_env
 
