@@ -236,7 +236,7 @@ jobs:
   split:
     needs: [durations]
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 7
     permissions:
       contents: read
     strategy:
@@ -245,6 +245,8 @@ jobs:
         python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - &python
         name: Set up Python ${{ matrix.python-version }}
@@ -324,7 +326,7 @@ jobs:
             durations.sha256
           include-hidden-files: true
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
           overwrite: true
 
       - name: Upload collected tests

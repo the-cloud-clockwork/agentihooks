@@ -151,24 +151,23 @@ def test_collection_splits_the_suite_across_processes_without_assertion_rewritin
     from tests import duration_coverage
 
     (tmp_path / "tests/sub").mkdir(parents=True)
-    for path in ("tests/test_a.py", "tests/test_b.py", "tests/sub/test_c.py"):
+    files = ["tests/sub/test_c.py", "tests/test_a.py", "tests/test_b.py"]
+    for path in files:
         (tmp_path / path).write_text("")
     calls = []
 
     def collect(args, **kwargs):
         options = args[args.index("--collect-only") :]
-        paths = args[3 : args.index("--collect-only")]
-        calls.append(paths)
+        assert args[3] == "tests/"
         assert options[:5] == ["--collect-only", "-q", "--assert=plain", "-p", "no:cacheprovider"]
-        return subprocess.CompletedProcess(
-            args, 0, "".join(f"{path}::test_{i}\n" for path in paths for i in (1, 2)), ""
-        )
+        kept = [path for path in files if f"--ignore={path}" not in args]
+        calls.append(kept)
+        output = "".join(f"{path}::test_{i}\n" for path in kept for i in (1, 2))
+        return subprocess.CompletedProcess(args, 0 if kept != ["tests/test_a.py"] else 5, output, "")
 
     monkeypatch.setattr(duration_coverage.os, "cpu_count", lambda: 2)
     monkeypatch.setattr(duration_coverage.subprocess, "run", collect)
-    assert duration_coverage.collected_tests(tmp_path) == [
-        f"{path}::test_{i}" for path in ("tests/sub/test_c.py", "tests/test_a.py", "tests/test_b.py") for i in (1, 2)
-    ]
+    assert duration_coverage.collected_tests(tmp_path) == [f"{path}::test_{i}" for path in files for i in (1, 2)]
     assert sorted(calls) == [["tests/sub/test_c.py", "tests/test_b.py"], ["tests/test_a.py"]]
 
 
@@ -180,7 +179,7 @@ def test_a_failed_collection_process_fails_the_whole_collection(tmp_path, monkey
         (tmp_path / path).write_text("")
 
     def collect(args, **kwargs):
-        failed = "tests/test_b.py" in args
+        failed = "--ignore=tests/test_a.py" in args
         return subprocess.CompletedProcess(args, int(failed), "" if failed else "tests/test_a.py::t\n", "broken b")
 
     monkeypatch.setattr(duration_coverage.os, "cpu_count", lambda: 2)
