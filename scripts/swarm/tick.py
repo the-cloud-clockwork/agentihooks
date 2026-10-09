@@ -673,6 +673,15 @@ def spawn_hold(store, slug):
     return store.redis.get(store.key(slug, SPAWN_HOLD)) or ""
 
 
+def _spawn_stop(slug, config, store, runtime, now_ms):
+    if not runtime.has_capacity(config):
+        return "every agent is at its session cap, waiting"
+    if host := _host_full(slug, store, now_ms):
+        store.redis.set(store.key(slug, SPAWN_HOLD), f"holding spawns: {host}")
+        return f"holding spawns: {host}"
+    return ""
+
+
 def _record_spawn_failure(slug, store, record, error):
     if record_failure := timing.ON_FAILURE.get():
         record_failure(f"{__name__}._spawn", error)
@@ -690,11 +699,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     for lane, task in _spawn_order(slug, config, store, agents, rows, doc):
         if held:
             return actions + held
-        if not runtime.has_capacity(config):
-            return actions + ["every agent is at its session cap, waiting"]
-        if host := _host_full(slug, store, now_ms):
-            store.redis.set(store.key(slug, SPAWN_HOLD), f"holding spawns: {host}")
-            return actions + [f"holding spawns: {host}"]
+        if stop := _spawn_stop(slug, config, store, runtime, now_ms):
+            return actions + [stop]
         blocked = _lives_spent(slug, store, ledger, rows, task) or _held_back(slug, ledger, rows, runtime, task, now_ms)
         if blocked:
             actions.append(blocked)
