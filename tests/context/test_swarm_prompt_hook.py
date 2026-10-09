@@ -94,7 +94,7 @@ def test_post_tool_use_hands_every_harness_call_to_the_outcome_record(monkeypatc
     assert [p["tool_input"] for p in seen] == [{"command": "git push"}]
 
 
-def test_a_codex_push_payload_records_the_outcome_end_to_end(monkeypatch):
+def test_a_normalized_codex_push_records_the_outcome_through_the_hook(monkeypatch):
     import fakeredis
 
     from hooks.targets.normalizer import normalize_payload
