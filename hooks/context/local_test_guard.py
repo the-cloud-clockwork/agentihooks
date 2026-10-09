@@ -64,11 +64,11 @@ _BUILD_TOOLS = frozenset(
 _TEST_TASK = re.compile(r"^(?:test|tests|coverage|mutation)(?:$|[:_.-])|^.*:test$")
 _PYTHON = re.compile(r"^(?:python[\d.]*|pypy[\d.]*)$")
 _PYTHON_TEST = re.compile(r"\b(?:pytest|unittest|tox|nox|mutmut|mutatest|mutpy)\b|scripts\.ci_mutation\b")
-_NODE_TEST = re.compile(r"\b(?:jest|vitest|mocha)\b")
-_NODE_TEST_MODULE = re.compile(
-    r"\b(?:require|import)\(\s*['\"`](?:node:test|[^'\"`]*\b(?:jest|vitest|mocha)\b[^'\"`]*)['\"`]"
+_NODE_TEST = re.compile(r"\b(?:jest|vitest|mocha)\b|node:test")
+_LITERAL = (
+    r"(?P<module>\b(?:require|import)\s*\(\s*|\b(?:from|import)\s*)?"
+    r"(?P<q>\"{3}|'{3}|[\"'`])(?:\\.|(?!(?P=q))[^\\])*(?P=q)"
 )
-_LITERAL = r"(\"{3}|'{3}|[\"'`])(?:\\.|(?!\1)[^\\])*\1"
 _LAUNCH = re.compile(
     r"\b(?:subprocess|system|popen|spawn\w*|exec\w*|run_module|run_path|__import__|import_module|child_process)\b"
 )
@@ -83,7 +83,11 @@ def local_tests_allowed() -> bool:
 
 
 def _code_runs_tests(source: str, runners: re.Pattern, comment: str) -> bool:
-    code = re.sub(f"(?s){_LITERAL}|{re.escape(comment)}[^\\n]*", " ", source)
+    code = re.sub(
+        f"(?s){_LITERAL}|{re.escape(comment)}[^\\n]*",
+        lambda match: match[0] if match["module"] else " ",
+        source,
+    )
     return bool(runners.search(source if _LAUNCH.search(source) else code))
 
 
@@ -117,8 +121,7 @@ def _test_command(tokens: list[str]) -> bool:
         return _python_test(args)
     if name == "node":
         return any(arg == "--test" or arg.startswith("--test=") for arg in args) or (
-            any(arg in {"-e", "--eval"} for arg in args)
-            and (bool(_NODE_TEST_MODULE.search(" ".join(args))) or _code_runs_tests(" ".join(args), _NODE_TEST, "//"))
+            any(arg in {"-e", "--eval"} for arg in args) and _code_runs_tests(" ".join(args), _NODE_TEST, "//")
         )
     if name == "ruby":
         return "rspec" in args

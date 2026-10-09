@@ -94,6 +94,8 @@ RUNNERS = [
     "echo a#b\npytest -q",
     "echo \\ #x; pytest -q",
     "node -e \"import('vitest/node').then(v => v.startVitest('unit'))\"",
+    "node --input-type=module -e \"import M from 'mocha'; await new M().run()\"",
+    "node --input-type=module -e \"import { startVitest } from 'vitest/node'; await startVitest('unit')\"",
 ]
 
 WRAPPERS = [
