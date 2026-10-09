@@ -12,7 +12,7 @@ from pathlib import Path
 import tomlkit
 
 from scripts.ci_mutation.clearances import load_clearances
-from scripts.ci_mutation.report import evaluate
+from scripts.ci_mutation.report import evaluate, survivor_text
 from scripts.ci_mutation.scope import select_tests
 
 IDENTITY = "scripts/ci_mutation/identity.py"
@@ -162,6 +162,7 @@ def run_gate(
         else:
             print(f"{path}: no mutable functions", flush=True)
         if result["failures"]:
+            print(survivor_text(result))
             report["failed"] = True
     (output / "report.json").write_text(json.dumps(report) + "\n")
     return report
