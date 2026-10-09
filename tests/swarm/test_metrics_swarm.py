@@ -310,6 +310,7 @@ def test_a_host_hold_counts_every_waiting_ready_task(monkeypatch):
 @pytest.mark.parametrize(
     ("hold", "ready_ids", "expected"),
     [
+        ("", [], ("", 0, "")),
         (
             "holding the master spawn: host load room 0, 2 spawned since it was granted: busy",
             ["a", "b", "c"],
@@ -325,7 +326,8 @@ def test_the_host_sample_names_who_holds_its_spawns(tmp_path, monkeypatch, hold,
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, ".", 0, 0))
     decision = {"configured": {"eng": 3}, "placements": {"eng": [{"index": 0}]}, "reason": "accounts have quota"}
-    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(decision))
+    if hold != "":
+        store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(decision))
     if hold:
         store.redis.set(store.key(SLUG, "spawn-hold"), hold)
     ready = {lane: [] for lane in metrics_swarm.capacity.LANES}

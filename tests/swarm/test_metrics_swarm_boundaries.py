@@ -185,7 +185,7 @@ def test_quota_and_classifier_unknowns_keep_observed_values_and_canonical_verdic
     assert row["five_left"] == 0.0 and row["five_known"] == 1
     assert row["week_left"] == -1.0 and row["week_known"] == 0
     host = metrics_swarm.host_row(SLUG, NOW, HostSample(0.0, 1, 0, 0), {})
-    assert host["held_spawns"] == 0 and host["reason"] == ""
+    assert host["held_spawns"] == 0 and host["reason"] == "" and host["held_by"] == ""
     call = {
         "_source_id": "record",
         "ts": "2027-01-15T08:00:00+00:00",

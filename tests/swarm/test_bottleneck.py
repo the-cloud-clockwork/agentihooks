@@ -132,7 +132,7 @@ def test_an_open_task_before_its_first_run_finishes_counts_ci_from_its_pull_requ
 def test_the_first_claim_and_first_pull_request_since_it_bound_the_spans_in_any_row_order():
     found = bottleneck.report(
         rows(
-            agent=[claim("t3", 8 * H), claim("t3", 7 * H)],
+            agent=[claim("t3", 7 * H), claim("t3", 8 * H)],
             delivery=[opened("t3", 9 * H), opened("t3", 6 * H), opened("t3", 8.5 * H)],
         ),
         open_task("t3"),
@@ -189,8 +189,43 @@ def test_runs_before_the_claim_and_on_other_branches_are_ignored():
 
 def test_a_closed_task_without_a_merge_ends_at_its_last_agent_row():
     retire = {"ledger": SLUG, "task": "t6", "kind": "retire", "ts_ms": 8 * H}
-    found = bottleneck.report(rows(agent=[claim("t6", 7 * H), retire]), [{"id": "t6", "state": "done"}], NOW)
+    found = bottleneck.report(rows(agent=[retire, claim("t6", 7 * H)]), [{"id": "t6", "state": "done"}], NOW)
     assert found["seconds"] == seconds(engineering=3600.0)
+
+
+def test_a_run_ending_at_the_first_push_is_green_at_once():
+    found = bottleneck.report(
+        rows(agent=[claim("t4", 7 * H)], delivery=[opened("t4", 8 * H)], ci=[run("b-t4", 6.5 * H, 8 * H, "success")]),
+        open_task("t4"),
+        NOW,
+    )
+    assert found["seconds"] == seconds(3600.0, 0.0, 7200.0)
+
+
+def test_a_red_run_ending_at_the_merge_keeps_ci_holding_to_the_merge():
+    runs = [run("b1", 7 * H, 8 * H, "success"), run("b1", 8.5 * H, 9 * H, "failure")]
+    found = bottleneck.report(rows(agent=[claim("t1", 6 * H)], delivery=[merge("t1", 9 * H)], ci=runs), [TASK], NOW)
+    assert found["seconds"] == seconds(3600.0, 7200.0, 0.0)
+
+
+def test_the_first_of_two_green_runs_ends_ci():
+    runs = [run("b-t4", 7 * H, 7.5 * H, "success"), run("b-t4", 8 * H, 8.5 * H, "success")]
+    found = bottleneck.report(rows(agent=[claim("t4", 6 * H)], ci=runs), open_task("t4"), NOW)
+    assert found["seconds"] == seconds(3600.0, 1800.0, 9000.0)
+
+
+def test_every_task_and_every_span_adds_to_its_share():
+    found = bottleneck.report(
+        rows(agent=[claim("t5", 8 * H), claim("t6", 9 * H)]),
+        [*open_task("t5", "claimed"), *open_task("t6", "claimed")],
+        NOW,
+    )
+    assert found["seconds"] == seconds(engineering=10800.0)
+
+
+def test_shares_and_total_keep_a_tenth_of_a_second():
+    found = bottleneck.report(rows(host=[sample(NOW - 1_234, 1, "quota")]), [], NOW)
+    assert (found["seconds"], found["total"]) == (seconds(quota=1.2), 1.2)
 
 
 def test_an_empty_window_names_nothing():
@@ -243,8 +278,9 @@ def test_record_writes_a_bottleneck_row_and_the_feed_from_this_ledgers_rows(tmp_
         }
         for name, table in tables.items():
             mine = [stored(table, row, n) for n, row in enumerate(found[name])]
-            theirs = [{**row, "ledger": "other", "event_id": row["event_id"] + ":other"} for row in mine]
-            box.append(table, mine + theirs)
+            box.append(table, mine)
+        held = stored(metrics_swarm.HOST, sample(9 * H, 50, "host"), 99)
+        box.append(metrics_swarm.HOST, [{**held, "ledger": "other"}])
         recorded = bottleneck.record(box, store, SLUG, NOW, [TASK])
         assert recorded == bottleneck.report(ci_heavy(), [TASK], NOW)
         assert bottleneck.read(store, SLUG) == recorded
