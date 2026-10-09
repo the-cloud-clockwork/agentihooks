@@ -329,7 +329,7 @@ def fix_steps(slug: str) -> str:
 
 @dataclass(frozen=True)
 class _Judgment:
-    pr: dict
+    pr: dict | None
     previous: dict | None
     state: dict | None
     answer: tuple[str, str] | None
@@ -355,20 +355,26 @@ class Check:
             states = ("pr", "claimed") if self.mode == "coach" else ("pr",)
             if task.get("state") not in states or not task.get("pr_url"):
                 continue
-            record = verdicts.read(task["id"]) or verdicts.write(task["id"], PENDING, RUNNING, self.now_ms)
-            if self.mode != "coach" and record["verdict"] != PENDING:
+            record = verdicts.read(task["id"])
+            if self.mode != "coach" and record and record["verdict"] != PENDING:
                 continue
-            if not self._keep_if_unmoved(task, verdicts):
-                tasks.append(task)
+            tasks.append((task, record))
         with ThreadPoolExecutor(max_workers=2) as workers:
-            pending = [(task, workers.submit(copy_context().run, self._judge, doc, task)) for task in tasks]
-            for task, future in pending:
+            pending = [
+                (task, record, workers.submit(copy_context().run, self._judge, doc, task)) for task, record in tasks
+            ]
+            for task, record, future in pending:
+                if not record:
+                    verdicts.write(task["id"], PENDING, RUNNING, self.now_ms)
                 judgment = future.result()
                 if judgment is not None:
                     actions += self._check(task, judgment, verdicts)
         return actions
 
     def _judge(self, doc, task):
+        previous = self._unmoved(task)
+        if previous:
+            return _Judgment(None, previous, None, None)
         pr = self.view(task["pr_url"])
         if pr is None or (self.mode == "coach" and not pr.get("head")):
             return None
@@ -416,14 +422,13 @@ class Check:
     def _coaching(self):
         return Verdicts(self.slug, "intent-coach", self.home)
 
-    def _keep_if_unmoved(self, task, verdicts):
+    def _unmoved(self, task):
         if self.mode != "coach" or self.head is None:
-            return False
+            return None
         previous = self._coaching().read(task["id"])
         if not previous or not previous.get("head") or previous["head"] != self.head(task["pr_url"]):
-            return False
-        self._keep(task, previous, verdicts)
-        return True
+            return None
+        return previous
 
     def _keep(self, task, previous, verdicts):
         verdicts.write(

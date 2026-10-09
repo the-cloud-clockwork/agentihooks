@@ -112,3 +112,34 @@ def test_the_pool_bound_is_two_workers(tmp_path, monkeypatch):
     )
     check.run(DOC)
     assert bounds == [2]
+
+
+def test_an_unchanged_later_task_restores_its_verdict_after_the_earlier_judgment(tmp_path, monkeypatch):
+    doc = copy.deepcopy(DOC)
+    doc["tasks"] = [{**DOC["tasks"][0], "id": f"t{i}", "pr_url": f"https://github.com/o/r/pull/{i}"} for i in range(2)]
+    Verdicts("proof", "intent-coach", tmp_path).write(
+        "t1", "pass", "kept", 1, coach_rounds=0, head="same", url=doc["tasks"][1]["pr_url"]
+    )
+    writes, read = [], []
+    write = Verdicts.write
+
+    def recorded(self, subject, verdict, *args, **kwargs):
+        if self.gate == "intent":
+            writes.append(subject)
+        return write(self, subject, verdict, *args, **kwargs)
+
+    monkeypatch.setattr(Verdicts, "write", recorded)
+    check = intent.Check(
+        "proof",
+        "coach",
+        123,
+        Ledger(),
+        Mail(),
+        lambda url: read.append(url) or {**PR, "head": "new"},
+        lambda state: ("pass", "ok"),
+        home=tmp_path,
+        head=lambda url: "same" if url.endswith("/1") else "new",
+    )
+    check.run(doc)
+    assert writes == ["t0", "t0", "t1", "t1"]
+    assert read == [doc["tasks"][0]["pr_url"]]
