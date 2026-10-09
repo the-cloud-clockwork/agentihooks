@@ -1214,6 +1214,44 @@ def test_an_observed_share_at_the_weight_still_sends_the_next_seat_to_the_api():
     assert capacity.pick(capacity.offered(rows)).account == "api"
 
 
+def test_accounts_ask_each_harness_api_side_with_the_environment_and_time(monkeypatch):
+    calls = []
+
+    def api_side(source, harness, environ, now):
+        calls.append((type(source).__name__, harness, environ, now))
+        return [], 0
+
+    monkeypatch.setattr(capacity.place, "api_side", api_side)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
+    capacity.accounts({"A": "1"}, 100)
+    assert calls == [
+        ("ClaudeApiSource", "claude", {"A": "1"}, 100),
+        ("CodexApiSource", "codex", {"A": "1"}, 100),
+    ]
+
+
+def test_allocation_honours_the_account_restriction_of_each_lane_seat():
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    rows = [account("a"), account("b", sessions=1)]
+    decision = capacity.calculate(config, rows, [], accounts={"eng": {0: {("claude", "b")}}})
+    assert decision["placements"]["eng"] == [{"index": 0, "harness": "claude", "account": "b"}]
+
+
+def test_reason_names_every_api_side_and_a_closed_one_without_a_weight():
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    closed = capacity.Account("codex", "api", "CLOSED", 1, None, None, 0, kind="api")
+    assert capacity.calculate(config, [account("a"), api(), closed], [])["reason"].endswith(
+        "; Claude api is open at weight 25; Codex api is closed"
+    )
+
+
+def test_an_account_at_its_quota_warning_never_takes_the_spawn_pick(tmp_path, monkeypatch):
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account("w", left=5), account("b", sessions=1)])
+    assert runtime._quota_account("claude", None, None).name == "b"
+
+
 def test_sessions_on_full_accounts_weigh_in_the_api_share_of_a_spawn(tmp_path, monkeypatch):
     rows = [account("full", cap=4, sessions=4), account("a", cap=6), api(sessions=1)]
     runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, rows)

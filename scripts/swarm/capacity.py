@@ -58,7 +58,7 @@ def _claude(environ: dict, now: float) -> list[Account]:
 
 def _api(source, harness: str, environ: dict, now: float) -> list[Account]:
     found, weight = place.api_side(source, harness, environ, now)
-    live = source.sessions.get(account_sessions.API_ACCOUNT, 0)
+    live = source.sessions.get(account_sessions.API_ACCOUNT)
     if not found:
         return [Account(harness, account_sessions.API_ACCOUNT, "CLOSED", live, None, None, 0, kind=API)] if live else []
     return [
@@ -117,7 +117,7 @@ def _side(
 ) -> session_bands.Seat | None:
     api = [seat for seat in offered_seats if seat.harness == harness and seat.kind == API and allowed(seat)]
     pool = [seat for seat in offered_seats if seat.harness == harness and seat.kind != API]
-    weight = max((seat.weight or 0 for seat in api), default=0)
+    weight = sum(seat.weight for seat in api if seat.weight)
     pool_live = sum(seat.sessions for seat in pool)
     return place.place(api, [seat for seat in pool if allowed(seat)], weight, pool_live)
 

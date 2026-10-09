@@ -89,3 +89,8 @@ def test_each_api_line_shows_its_harness_share_against_its_weight():
 def test_the_page_carries_each_api_share():
     accounts = quota_view.page(API_DECISION)["accounts"]
     assert [account.get("share") for account in accounts] == [None, None, 25, 0]
+
+
+def test_the_api_share_rounds_the_api_percent_of_its_harness_sessions():
+    rows = [row("a", sessions=1), api_row(sessions=3), row("cx", sessions=5, harness="codex")]
+    assert quota_view.api_share(rows[1], rows) == (75, 4)
