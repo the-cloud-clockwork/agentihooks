@@ -45,7 +45,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
 
 
-def test_post_shard_graders_start_together_and_the_gate_needs_each():
+def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
     jobs = _workflow()["jobs"]
     graders = {"shard-check", "coverage-ratchet", "sonar"}
     for name in graders:

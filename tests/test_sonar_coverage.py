@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -148,7 +149,7 @@ def meet(mine, theirs, failure):
 """
 
 
-def _stubbed_combine_tree(tmp_path, lcov_exit=0, xml_exit=0):
+def _stubbed_combine_tree(tmp_path, lcov_exit=0, xml_exit=0, lcov_late=0):
     shutil.copytree(ROOT / ".github/coverage", tmp_path / ".github/coverage")
     for shard in range(1, 3):
         report = tmp_path / ".coverage-shards" / f"coverage-3.12-{shard}" / ".coverage"
@@ -173,6 +174,7 @@ elif sys.argv[1] == "report":
         _RENDEZVOUS
         + f"""
 meet("lcov.started", "xml.started", "the XML never ran beside the JS conversion")
+time.sleep({lcov_late})
 Path("lcov.info").write_text("")
 sys.exit({lcov_exit})
 """
@@ -200,10 +202,12 @@ def test_a_failed_js_conversion_fails_the_merge(tmp_path):
     assert (tmp_path / "coverage.xml").exists()
 
 
-def test_a_failed_python_xml_fails_the_merge(tmp_path):
-    result = _stubbed_combine_tree(tmp_path, xml_exit=4)
+def test_a_failed_python_xml_fails_the_merge_and_stops_the_js_conversion(tmp_path):
+    result = _stubbed_combine_tree(tmp_path, xml_exit=4, lcov_late=2)
     assert result.returncode == 4, result.stdout + result.stderr
     assert not (tmp_path / "coverage.xml").exists()
+    time.sleep(3)
+    assert not (tmp_path / "lcov.info").exists()
 
 
 def test_coverage_options_do_not_reach_nested_test_runners(tmp_path):
