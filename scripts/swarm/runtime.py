@@ -74,7 +74,7 @@ def _model_args(agent, chosen, environ, bounds, preserve=False):
     model, effort = model_effort(agent, [], environ)
     saved = _set(chosen.get("effort")) or effort
     effort = effort_range.clamp(agent, saved, bounds)
-    if preserve and effort != saved:
+    if preserve and effort_range.rank(effort) != effort_range.rank(saved):
         raise SpawnError("unsupported transfer: saved effort is outside the current swarm range", "unsupported")
     return model_flags(agent, _set(chosen.get("model")) or model, effort)
 
@@ -387,7 +387,11 @@ class HerdrRuntime:
             **saved,
             "harness": account.harness,
             "account": account.name,
-            **({"model": ""} if account.harness != saved["harness"] else {}),
+            **(
+                {"model": "", "effort": effort_range.named(account.harness, saved["effort"])}
+                if account.harness != saved["harness"]
+                else {}
+            ),
         }
 
     def _saved_choice(self, saved, profile, quota_transfer, environ):
@@ -505,6 +509,8 @@ class HerdrRuntime:
             picked = timing.call(model_pick.pick, agent, {} if quota_transfer else chosen, task, environ)
         else:
             picked = _lane_default(lane, agent, {} if quota_transfer else chosen)
+        if saved.get("effort"):
+            picked = replace(picked, effort=saved["effort"])
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
