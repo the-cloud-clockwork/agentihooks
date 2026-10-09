@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 
-from hooks.classifier import ClassifierUnavailable, Score, decide
+from hooks.classifier import ClassifierUnavailable, decide, runner
 from scripts.swarm.effort_range import EFFORTS
+
+PURPOSE = "model-pick"
 
 
 @dataclass(frozen=True)
@@ -27,21 +29,24 @@ def pick(harness: str, lane: dict, task: dict, environ: dict) -> ModelPick:
     if default.effort != "auto" or floor not in levels:
         return default
     try:
-        result = decide(
+        output = runner.run(
+            PURPOSE,
             {
                 "title": task.get("title", ""),
                 "description": task.get("description", ""),
                 "kind": task.get("kind", "code"),
                 "territory_size": len(task.get("territory", [])),
             },
-            {"effort": Score("How much reasoning does this task need?", list(levels))},
-            purpose="model-pick",
-            harness=harness,
+            {"levels": list(levels)},
+            harness,
+            decider=decide,
+            environ=environ,
         )
     except ClassifierUnavailable:
         return default
+    result = output.raw
     answer = result.answers["effort"]
-    if answer.confidence < float(environ.get("AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE", "0.6")):
+    if answer.confidence < output.thresholds["confidence"]:
         return ModelPick(default.model, default.effort, result.source, answer.confidence)
     raised = max(levels.index(floor), round(max(0, min(3, answer.score))))
     return ModelPick(default.model, levels[raised], result.source, answer.confidence)

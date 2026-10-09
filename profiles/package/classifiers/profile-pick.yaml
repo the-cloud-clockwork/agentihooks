@@ -1,0 +1,28 @@
+version: 1
+purpose: profile-pick
+fallbacks: cli
+questions:
+  - name: responsibility
+    type: choice
+    instructions: >-
+      Task {id} "{title}": which responsibility owns the public behavior this task changes? Judge what a user or
+      caller observes changing, from the description, parent intent and territory, never from keywords or file
+      names. Mixed interface and backend work follows the public behavior changed.
+    options:
+      frontend: >-
+        A product interface behavior: what a person sees or does on a page, panel, control or layout, including a
+        product interaction such as claim ordering or ranking from a view, even when Python code implements it.
+      engineer: >-
+        Backend or infrastructure behavior: services, APIs, command lines, hooks, runtimes, storage, deployment or
+        CI plumbing, with no change to what a person sees or does in a product interface.
+      qa: >-
+        Independent verification: stress testing or proving work that others built, producing evidence rather
+        than changing behavior.
+      split: Two or more unrelated public responsibilities bundled in one task that should become separate tasks.
+      unresolved: The task does not say enough about the public behavior it changes to decide.
+thresholds:
+  confidence: 0.6
+environment:
+  confidence: AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE
+rule:
+  type: code

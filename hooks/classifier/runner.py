@@ -90,14 +90,17 @@ def run(
 ) -> RunResult:
     definition = load(name, environ=environ)
     questions = questions_for(definition, params)
+    options = {
+        "purpose": definition.purpose,
+        "harness": harness,
+        "fallbacks": None if definition.fallbacks == "cli" else [],
+    }
+    if decider is None:
+        decider = decide
+    else:
+        options = {key: value for key, value in options.items() if value is not None}
     with decision_log.record_context(definition=definition.name, definition_digest=definition.digest):
-        result = (decide if decider is None else decider)(
-            state,
-            questions,
-            purpose=definition.purpose,
-            harness=harness,
-            fallbacks=None if definition.fallbacks == "cli" else [],
-        )
+        result = decider(state, questions, **options)
     verdicts = (
         {}
         if definition.rule.type == "code"

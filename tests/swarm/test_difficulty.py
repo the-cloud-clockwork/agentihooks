@@ -324,3 +324,11 @@ def test_written_sizes_pass_the_ledger_task_check(fields):
     from scripts.swarm_ledger import ledger
 
     ledger.ledger_tasks.check({"op": "task_update", "by": "swarm", "item": "tasks/t1", "fields": dict(fields)})
+
+
+def test_difficulty_confidence_is_read_from_its_definition(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_TASK_DIFFICULTY_CONFIDENCE", "0.7")
+    assert difficulty.MIN_CONFIDENCE == 0.7
+    with pytest.raises(AttributeError) as missing:
+        difficulty.ABSENT
+    assert missing.value.args == ("ABSENT",)

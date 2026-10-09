@@ -13,8 +13,9 @@ from hooks.classifier.questions import Choice, Question, Score, YesNo, validate
 from hooks.context import profile_chain
 
 NAME = re.compile(r"[a-z][a-z0-9_-]*\Z")
+VARIABLE = re.compile(r"[A-Z][A-Z0-9_]*\Z")
 QUESTION_FIELDS = {"name", "type", "instructions", "true", "false", "options", "levels", "each"}
-FIELDS = {"version", "purpose", "fallbacks", "questions", "thresholds", "rule"}
+FIELDS = {"version", "purpose", "fallbacks", "questions", "thresholds", "environment", "rule"}
 
 
 class DefinitionError(ClassifierInputError):
@@ -42,6 +43,7 @@ class Definition:
     questions: tuple[QuestionSpec, ...]
     thresholds: dict[str, float]
     rule: VerdictRule
+    environment: dict[str, str]
     digest: str = ""
 
 
@@ -127,6 +129,20 @@ def _thresholds(raw: object) -> dict[str, float]:
     return {_identifier(key, "threshold key"): _probability(value, key) for key, value in raw.items()}
 
 
+def _variables(raw: object, thresholds: dict) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        raise DefinitionError("environment must be a mapping")
+    variables = {}
+    for key, value in raw.items():
+        if key not in thresholds:
+            raise DefinitionError(f"environment key {key} must name a defined threshold")
+        variable = _text(value, "environment variable")
+        if not VARIABLE.fullmatch(variable):
+            raise DefinitionError(f"invalid environment variable: {variable}")
+        variables[key] = variable
+    return variables
+
+
 def _rule(raw: object, questions: tuple[QuestionSpec, ...], thresholds: dict) -> VerdictRule:
     raw = _mapping(raw, {"type", "threshold"}, "rule")
     kind = raw.get("type")
@@ -154,7 +170,8 @@ def _parse(name: str, raw: object) -> Definition:
     questions = _questions(raw.get("questions"))
     thresholds = _thresholds(raw.get("thresholds", {}))
     rule = _rule(raw.get("rule"), questions, thresholds)
-    return Definition(name, purpose, fallbacks, questions, thresholds, rule)
+    environment = _variables(raw.get("environment", {}), thresholds)
+    return Definition(name, purpose, fallbacks, questions, thresholds, rule, environment)
 
 
 def _read(name: str, path: Path) -> Definition:
@@ -194,6 +211,8 @@ def _environment(definition: Definition, environ: dict | None = None) -> Definit
     thresholds = dict(definition.thresholds)
     for key, value in thresholds.items():
         raw = environ.get(prefix + key.upper().replace("-", "_"))
+        if raw is None and key in definition.environment:
+            raw = environ.get(definition.environment[key])
         if raw is not None:
             try:
                 value = float(raw)
