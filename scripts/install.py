@@ -5576,11 +5576,6 @@ def _claude_command(claude_bin: str, extra_args: list[str]) -> list[str]:
 
 
 def cmd_claude(extra_args: list[str]) -> None:
-    """Route to the healthiest Claude account, then replace this process with Claude.
-
-    The api endpoint or the account with a free place under its session band and the
-    fewest live sessions wins, split by the api weight; --route forces one account or api.
-    """
     import fcntl
 
     from hooks.context.account_sessions import sessions_by_account
@@ -5623,6 +5618,10 @@ def cmd_claude(extra_args: list[str]) -> None:
     route_lock = route_lock_path.open("a+", encoding="utf-8")
     fcntl.flock(route_lock, fcntl.LOCK_EX)
     try:
+        if route == "interactive":
+            from scripts.routing import interactive
+
+            return interactive.launch_claude(claude_bin, extra_args, os.environ, report)
         decision = (
             forced(os.environ, route)
             if route

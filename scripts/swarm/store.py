@@ -102,6 +102,7 @@ class AgentRecord:
     runtime_target: dict = field(default_factory=dict)
     launch_timings: dict = field(default_factory=dict)
     hive: str = ""
+    route_kind: str = "subscription"
 
 
 class RedisStore:

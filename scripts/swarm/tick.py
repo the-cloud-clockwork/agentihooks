@@ -97,6 +97,7 @@ class Placed:
     launched_at: int = 0
     overlays: list = field(default_factory=list)
     launch_timings: dict = field(default_factory=dict)
+    route_kind: str = "subscription"
 
 
 class Ledger(Protocol):
@@ -812,6 +813,7 @@ def placed_record(record, placed):
         launched_at=placed.launched_at or record.started_at,
         overlays=placed.overlays,
         launch_timings=placed.launch_timings,
+        route_kind=placed.route_kind,
         state="working",
     )
 

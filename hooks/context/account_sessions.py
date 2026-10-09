@@ -14,16 +14,23 @@ CODEX_TOKEN_PREFIX = "AH_CX_TOKEN_"
 CODEX_DEFAULT = "default"
 UNROUTED = "unrouted"
 API_MARKER = "AH_ROUTE_API"
+INTERACTIVE_PREFIX = "AH_ROUTE_INTERACTIVE_"
 API_ACCOUNT = "api"
 _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "fish", "ksh"})
 _PROC = Path("/proc")
 
 
 def account_from_names(names: Iterable[str], prefix: str = TOKEN_PREFIX) -> str:
-    """API_ACCOUNT under the route marker, else the one slug among names carrying ``prefix``; UNROUTED when there is none or more than one."""
     names = list(names)
     if API_MARKER in names:
         return API_ACCOUNT
+    interactive = {
+        name.removeprefix(INTERACTIVE_PREFIX)
+        for name in names
+        if name.startswith(INTERACTIVE_PREFIX) and name != INTERACTIVE_PREFIX
+    }
+    if interactive:
+        return interactive.pop() if len(interactive) == 1 else UNROUTED
     slugs = {name.removeprefix(prefix) for name in names if name.startswith(prefix) and name != prefix}
     return slugs.pop() if len(slugs) == 1 else UNROUTED
 
