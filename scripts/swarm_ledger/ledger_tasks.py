@@ -216,7 +216,7 @@ def _add(doc, op, ctx):
         return False
     if not _known(tasks, op.get("depends_on", [])):
         return False
-    appended = {p["id"] for p in doc["phases"] if p.get("added_by") == op["by"]}
+    appended = {p["id"] for p in doc.get("phases", []) if p.get("added_by") == op["by"]}
     if refusal := add_refusal(tasks, op, appended):
         ctx.refused.append(refusal)
         return False
