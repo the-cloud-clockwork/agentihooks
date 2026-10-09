@@ -517,6 +517,12 @@ class HerdrRuntime:
             overlays=agent.overlays,
         )
 
+    def operator(self, config, name, profile, text):
+        """Open a claude session for the operator in the swarm's space, bound to the swarm with no task or lane slot."""
+        argv = self._argv(config, name, "claude", text, f"{name}.md", profile)
+        model = _model_args("claude", model_pick.frontier("claude").__dict__, dict(os.environ), effort_range.of(config))
+        return self._launch(config, naming.OPERATOR, "", name, [*argv, "--", *model])
+
     def _holds(self, pane_id, conversation_id):
         for _ in range(RESUME_CHECKS):
             if (self.conversations() or {}).get(pane_id) == conversation_id:

@@ -36,10 +36,9 @@ def test_sonar_is_required_on_dev_and_main_pull_requests():
 def test_sonar_restores_downloads_before_every_scan():
     steps = _workflow()["jobs"]["sonar"]["steps"]
     scan_index = next(i for i, step in enumerate(steps) if step.get("name") == "SonarQube Scan")
-    cache = next(step for step in steps[:scan_index] if step.get("uses") == "actions/cache@v4")
+    cache = next(step for step in steps[:scan_index] if step.get("name") == "Restore Sonar downloads")
     assert set(cache["with"]["path"].splitlines()) == {
         "~/.sonar/cache",
-        "~/.sonar/js/node-runtime",
         "${{ runner.tool_cache }}/sonar-scanner-cli",
     }
     key = cache["with"]["key"]

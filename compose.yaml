@@ -1,30 +1,108 @@
+x-swarm-env: &swarm-env
+  AGENTIHOOKS_DEPLOYMENT: ${AGENTIHOOKS_DEPLOYMENT:-compose}
+  AGENTIHOOKS_SWARM_REDIS_URL: ${SWARM_REDIS_SCHEME:-redis}://swarm:${SWARM_REDIS_PASSWORD:?set SWARM_REDIS_PASSWORD, see deploy/compose/.env.example}@redis:6379/0
+  SSL_CERT_FILE: ${SWARM_CA_FILE:-/etc/ssl/certs/ca-certificates.crt}
+
 services:
   swarm:
     image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
     build: .
     ports:
-      - "127.0.0.1:${SWARM_PORT:-8765}:8765"
+      - "${SWARM_BIND:-127.0.0.1}:${SWARM_PORT:-8765}:8765"
     environment:
+      <<: *swarm-env
+      AGENTIHOOKS_DEPLOYMENT: local
       LEDGER_HOST: 0.0.0.0
       LEDGER_PORT: "8765"
       LEDGER_DIR: /data
-      SWARM_AUTH_MODE: local
       SWARM_RELOAD: "0"
-      SWARM_PUBLIC_URL: "http://127.0.0.1:${SWARM_PORT:-8765}"
-      AGENTIHOOKS_SWARM_REDIS_URL: redis://redis:6379/0
+      SWARM_ALLOWED_HOSTS: swarm:8765,${SWARM_ALLOWED_HOSTS:-}
+      SWARM_PUBLIC_URL: ${SWARM_PUBLIC_URL:-http://127.0.0.1:${SWARM_PORT:-8765}}
     volumes:
       - swarm-data:/data
+      - ${SWARM_TLS_DIR:-./deploy/compose/tls}:/tls:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+  controller:
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    command:
+      - sh
+      - -c
+      - >-
+        agentihooks hive controller >/dev/null
+        && . "$${AGENTIHOOKS_HOME:-$$HOME/.agentihooks}/controller/credential.env"
+        && export AGENTIHOOKS_CONTROLLER_CREDENTIAL
+        && exec agentihooks controller run
+    environment:
+      <<: *swarm-env
+      LEDGER_URL: http://swarm:8765
+      SWARM_HIVE_ID: ${SWARM_HIVE_ID:-compose-controller}
+    volumes:
+      - ${SWARM_TLS_DIR:-./deploy/compose/tls}:/tls:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          from scripts.swarm import lease; from scripts.swarm.store import connect;
+          store = connect(); stale = [slug for slug in store.slugs() if not lease.current(store, slug)];
+          assert not stale, f"no live controller lease for {stale}"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 70s
+      start_interval: 5s
+    depends_on:
+      redis:
+        condition: service_healthy
+      swarm:
+        condition: service_healthy
+    restart: unless-stopped
+  hive:
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    profiles: [join]
+    command:
+      - agentihooks
+      - hive
+      - serve
+      - --host=0.0.0.0
+      - --redis-url=${SWARM_MEMBER_REDIS_URL:-${SWARM_REDIS_SCHEME:-redis}://redis:6379/0}
+      - --tls-cert=/tls/cert.pem
+      - --tls-key=/tls/key.pem
+    ports:
+      - "${SWARM_BIND:-127.0.0.1}:${SWARM_HIVE_PORT:-8770}:8770"
+    environment:
+      <<: *swarm-env
+    volumes:
+      - ${SWARM_TLS_DIR:-./deploy/compose/tls}:/tls:ro
+    healthcheck:
+      test: [CMD, python, -c, "import socket; socket.create_connection(('127.0.0.1', 8770), 2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     depends_on:
       redis:
         condition: service_healthy
     restart: unless-stopped
   redis:
-    image: redis:7-alpine
-    command: [redis-server, --appendonly, "yes"]
+    image: redis:7
+    command: [bash, /compose/start.sh]
+    ports:
+      - "${SWARM_BIND:-127.0.0.1}:${SWARM_REDIS_PORT:-6379}:6379"
+    environment:
+      SWARM_REDIS_PASSWORD: ${SWARM_REDIS_PASSWORD:?set SWARM_REDIS_PASSWORD, see deploy/compose/.env.example}
+      SWARM_REDIS_SCHEME: ${SWARM_REDIS_SCHEME:-redis}
     volumes:
       - redis-data:/data
+      - ./deploy/compose/redis:/compose:ro
+      - ${SWARM_TLS_DIR:-./deploy/compose/tls}:/tls:ro
+    tmpfs:
+      - /run/swarm-tls
     healthcheck:
-      test: [CMD, redis-cli, ping]
+      test: [CMD, bash, /compose/healthcheck.sh]
       interval: 5s
       timeout: 3s
       retries: 5
