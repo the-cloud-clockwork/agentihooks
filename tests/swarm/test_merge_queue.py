@@ -124,6 +124,8 @@ def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
         {**AUTHORED, "commit": {"message": "Merge branch 'dev' into ci-1"}},
         {**REFRESHED, "commit": {"message": "Merge pull request #3 from o/side"}},
         {**REFRESHED, "committer": None},
+        {**REFRESHED, "commit": {"message": "Merge branch 'dev' intoci-1"}},
+        {**REFRESHED, "commit": {"message": "Merge branch 'dev' from o/side"}},
     ],
 )
 def test_queue_refreshes_changed_grading_inputs_before_enqueueing(changed, head):
@@ -236,7 +238,7 @@ def test_queue_enqueues_a_green_refreshed_head_although_dev_moved_again():
 
 @pytest.mark.parametrize("conclusion", [None, "failure"])
 def test_queue_still_blocks_a_red_refreshed_head(conclusion):
-    run, calls = refreshed_head_runner(conclusion)
+    run, calls = refreshed_head_runner(conclusion, REFRESHED)
     with pytest.raises(SwarmError, match="^the current pull request head must pass Tests before queueing$"):
         merge_queue.operate("queue", URL, run)
     assert not any("enqueuePullRequest(input:" in str(call[0]) or "update-branch" in str(call[0]) for call in calls)
