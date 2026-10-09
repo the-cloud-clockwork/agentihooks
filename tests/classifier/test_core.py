@@ -182,6 +182,14 @@ def test_failure_of_only_the_large_context_model_leaves_the_api_up(monkeypatch):
     assert [c["model"] for c in fake.calls] == ["pplx-decider-v1-27b", "liquid-d1"]
 
 
+def test_refused_key_on_a_large_input_marks_the_down_cache(monkeypatch):
+    _wire(monkeypatch, {**ALL_OK, "pplx-decider-v1-27b": http_error(401)})
+    with pytest.raises(ClassifierUnavailable):
+        decide("x" * 4 * 40_000, QUESTIONS, purpose="test")
+    assert down_cache.is_down(120)
+    assert [f["model"] for f in down_cache.failures()] == ["pplx-decider-v1-27b"]
+
+
 def test_context_skip_of_every_model_is_not_an_outage(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_MODELS", "jev-1.13")
     _wire(monkeypatch, ALL_OK)
