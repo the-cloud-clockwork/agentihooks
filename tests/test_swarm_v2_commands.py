@@ -427,3 +427,109 @@ def test_authenticator_must_return_an_explicit_typed_role_and_identity(fixture, 
     assert result.status == "refused"
     assert result.detail == "authenticated operator or current master required"
     assert remote.calls == local.calls == []
+
+
+@pytest.mark.parametrize(
+    ("case", "status", "backend", "detail"),
+    [
+        ("unauthenticated", "refused", "", "authenticated operator or current master required"),
+        ("invalid", "refused", "", "invalid runtime command"),
+        ("stale", "refused", "", "execution generation is stale"),
+        ("unavailable", "unavailable", "kubernetes", "selected backend is unavailable"),
+        ("unsupported", "unsupported", "kubernetes", "command is unsupported by the selected backend"),
+        ("conflict", "refused", "kubernetes", "runtime command conflicts with current authority"),
+    ],
+)
+def test_refusal_preserves_command_target_and_exact_reason(fixture, case, status, backend, detail):
+    store, agent, remote, local, service = fixture
+    command = request(agent, Action.CANCEL)
+    credential = ""
+    if case == "unauthenticated":
+        credential = "unknown"
+    elif case == "invalid":
+        command = replace(command, generation=0)
+    elif case == "stale":
+        command = replace(command, generation=agent.generation + 1)
+    elif case == "unavailable":
+        service = Commands(store, [local], service.authenticate)
+    elif case == "unsupported":
+        remote.commands = frozenset()
+    elif case == "conflict":
+        assert service.execute("fixture", replace(command, action=Action.DETACH), "").ok
+    result = service.execute("fixture", command, credential)
+    assert result.operation == command.action
+    assert result.status == status
+    assert result.backend == backend
+    assert result.detail == detail
+    assert not local.calls
+
+
+def test_authentication_receives_the_requested_swarm_scope(fixture):
+    store, agent, remote, local, service = fixture
+    calls = []
+
+    def authenticate(slug, credential):
+        calls.append((slug, credential))
+        return Principal("scoped-operator", Role.OPERATOR) if (slug, credential) == ("fixture", "scoped") else None
+
+    service = Commands(store, [remote, local], authenticate)
+    assert service.controls("fixture", agent.seat, "scoped").execution_id == agent.execution_id
+    assert service.execute("fixture", request(agent, Action.CANCEL), "scoped").ok
+    assert calls == [("fixture", "scoped")] * 3
+
+
+@pytest.mark.parametrize("invalid", ["role", "generation", "execution", "name"])
+def test_authentication_rejects_a_mismatched_registered_master(fixture, invalid):
+    store, agent, remote, local, service = fixture
+    master = store.start_execution(
+        "fixture",
+        AgentRecord(store.next_name("fixture", "master"), "master", "", seat="master@fixture"),
+    )
+    principal = Principal(master.name, Role.MASTER, master.execution_id, master.generation)
+    fields = {"role": "master", "generation": True, "execution": "another-execution", "name": "another-master"}
+    field = "execution_id" if invalid == "execution" else invalid
+    service = Commands(store, [remote, local], lambda slug, credential: replace(principal, **{field: fields[invalid]}))
+    result = service.execute("fixture", request(agent, Action.FORCE_STOP), "")
+    assert result.status == "refused"
+    assert result.detail == "authenticated operator or current master required"
+    assert remote.calls == local.calls == []
+
+
+def test_answer_delivers_the_exact_terminal_payload(fixture, monkeypatch):
+    store, agent, remote, local, service = fixture
+    apply = remote.apply_operation
+    received = []
+
+    def deliver(operation, payload):
+        received.append(payload)
+        return apply(operation, payload)
+
+    monkeypatch.setattr(remote, "apply_operation", deliver)
+    assert service.execute("fixture", request(agent, Action.ANSWER, text="fixture answer"), "").ok
+    assert received == [{"command": "answer", "text": "fixture answer"}]
+    assert local.calls == []
+
+
+def test_audit_retrieves_every_command_in_order(fixture):
+    store, agent, remote, local, service = fixture
+    actions = (Action.ATTACH, Action.DETACH, Action.DRAIN)
+    for action in actions:
+        assert service.execute("fixture", request(agent, action, action.value), "").ok
+    assert [row["command"] for row in service.audit("fixture")] == list(actions)
+
+
+def test_finished_master_loses_command_and_control_authority(fixture):
+    store, agent, remote, local, service = fixture
+    master = store.start_execution(
+        "fixture",
+        AgentRecord(store.next_name("fixture", "master"), "master", "", seat="master@fixture"),
+    )
+    principal = Principal(master.name, Role.MASTER, master.execution_id, master.generation)
+    service = Commands(store, [remote, local], lambda slug, credential: principal)
+    assert service.controls("fixture", agent.seat, "").execution_id == agent.execution_id
+    store.execution_registry.update("fixture", replace(master, state="finished"))
+    assert service.controls("fixture", agent.seat, "") is None
+    result = service.execute("fixture", request(agent, Action.FORCE_STOP), "")
+    assert result.status == "refused"
+    assert result.detail == "authenticated operator or current master required"
+    assert remote.calls == local.calls == []
