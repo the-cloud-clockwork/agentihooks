@@ -5,7 +5,7 @@ import pytest
 
 from scripts import claude_quota_balancer as balancer
 from scripts import session_bands
-from scripts.swarm import capacity
+from scripts.swarm import capacity, notice_text
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import SpawnError, tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -316,7 +316,7 @@ def test_placements_rotate_the_account_with_fewest_sessions_within_one_tick():
     ]
 
 
-def test_failed_capacity_comment_is_retried_without_losing_the_decision():
+def test_a_failed_capacity_comment_never_loses_the_saved_decision():
     store = _store()
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
     store.create(config)
@@ -328,14 +328,14 @@ def test_failed_capacity_comment_is_retried_without_losing_the_decision():
     ledger.comment = lambda *args, **kw: (_ for _ in ()).throw(RuntimeError("ledger unavailable"))
     with pytest.raises(RuntimeError, match="ledger unavailable"):
         capacity.apply("sw", config, store, ledger, runtime, 1000)
-    assert capacity.read(store, "sw") == {}
+    assert capacity.read(store, "sw")["at"] == 1000
     comments = []
     ledger.comment = lambda *args, **kw: comments.append((args, kw))
-    assert len(capacity.apply("sw", config, store, ledger, runtime, 2000)) == 1
-    assert len(comments) == 1
+    assert capacity.apply("sw", config, store, ledger, runtime, 2000) == []
+    assert comments == []
 
 
-def test_refused_capacity_comment_keeps_the_fresh_decision():
+def test_refused_capacity_comment_keeps_the_fresh_decision(capsys):
     from scripts.swarm.ledger_client import LedgerRefused
 
     store = _store()
@@ -352,8 +352,8 @@ def test_refused_capacity_comment_keeps_the_fresh_decision():
         raise LedgerRefused("plain words refused")
 
     ledger.capacity_comment = refuse
-    with pytest.raises(LedgerRefused, match="plain words refused"):
-        capacity.apply("sw", config, store, ledger, runtime, 1000)
+    assert len(capacity.apply("sw", config, store, ledger, runtime, 1000)) == 1
+    assert capsys.readouterr().err == "swarm notice dropped, the ledger refused it: plain words refused\n"
     assert capacity.read(store, "sw")["tasks"] == {"e": "claude"}
     assert capacity.read(store, "sw")["at"] == 1000
 
@@ -822,7 +822,7 @@ def test_warned_capacity_comment_passes_the_ledger_schema(monkeypatch):
     ledger_core.check_op(op)
 
 
-def test_a_refused_ledger_write_is_skipped_and_spawning_still_runs(capsys):
+def test_a_refused_swarm_notice_is_dropped_and_the_quota_step_still_runs(capsys):
     from scripts.swarm.ledger_client import LedgerRefused
 
     store = _store()
@@ -840,9 +840,10 @@ def test_a_refused_ledger_write_is_skipped_and_spawning_still_runs(capsys):
     )
     actions = tick("sw", store, ledger, runtime, 1000)
     assert [task for _, _, task in runtime.spawned] == ["e"]
-    assert "skipped scripts.swarm.quota_notice.refresh: the ledger refused its write" in actions
+    assert not any(action.startswith("skipped") for action in actions)
+    assert capacity.read(store, "sw")["at"] == 1000
     assert capsys.readouterr().err == (
-        "scripts.swarm.quota_notice.refresh skipped, the ledger refused its write: "
+        "swarm notice dropped, the ledger refused it: "
         "ledger sw: server refused: 400 by is allowed only on agent chat and comment entries\n"
     )
 
@@ -970,7 +971,7 @@ def test_capacity_apply_preserves_saved_options_and_controller_evidence(tmp_path
     assert capacity.read(store, "sw")["effective"] == {"eng": 2, "ci": 0, "plan": 0}
     assert len(result) == len(calls) == 1
     assert calls[0]["by"] == "swarm"
-    assert calls[0]["text"] == result[0] and calls[0]["thread"] == "tasks/fixed/comments"
+    assert calls[0]["text"] == notice_text.plain(result[0]) and calls[0]["thread"] == "tasks/fixed/comments"
 
 
 def test_legacy_runtime_without_quota_reader_performs_no_capacity_work():

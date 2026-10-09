@@ -75,8 +75,23 @@ class LedgerClient:
     def add_task(self, slug, fields, by):
         self._call(slug, [{**_op("task_add", by), **fields}])
 
+    def _notice(self, slug, op, kind):
+        from scripts.swarm import notice_text
+
+        op = {**op, "text": notice_text.plain(op["text"], kind)}
+        try:
+            self._call(slug, [op])
+        except LedgerRefused as exc:
+            print(f"swarm notice dropped, the ledger refused it: {exc}", file=sys.stderr)
+
+    def _write(self, slug, op, kind="comment"):
+        if op.get("by") == "swarm":
+            self._notice(slug, op, kind)
+        else:
+            self._call(slug, [op])
+
     def comment(self, slug, task_id, text, by):
-        self._call(slug, [_op("add", by, thread=f"tasks/{task_id}/comments", text=text)])
+        self._write(slug, _op("add", by, thread=f"tasks/{task_id}/comments", text=text))
 
     def capacity_comment(self, slug: str, task_id: str, text: str, at: int) -> None:
         self.comment(slug, task_id, text, by="swarm")
@@ -88,7 +103,7 @@ class LedgerClient:
         self._call(slug, [_op("set", "swarm", path=f"phases/{phase_id}/done", value=done, status=status)])
 
     def comment_phase(self, slug, phase_id, text, by):
-        self._call(slug, [_op("add", by, thread=f"phases/{phase_id}/comments", text=text)])
+        self._write(slug, _op("add", by, thread=f"phases/{phase_id}/comments", text=text))
 
     def review_phase(self, slug, phase_id, state, by="swarm", note="", override=None):
         fields = {"item": f"phases/{phase_id}", "state": state, **({"note": note} if note else {})}
@@ -110,10 +125,10 @@ class LedgerClient:
         self._call(slug, [_op("notice", "swarm", text=text)])
 
     def followup(self, slug, text):
-        self._call(slug, [_op("add_item", "swarm", list="followups", text=text)])
+        self._write(slug, _op("add_item", "swarm", list="followups", text=text), "item")
 
     def priority(self, slug, item, text):
-        self._call(slug, [_op("priority", "swarm", item=item, text=text)])
+        self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")
 
     def group_tasks(self, slug, lead, members):
         self._call(slug, [_op("task_group", "swarm", item=f"tasks/{lead}", members=list(members))])
@@ -125,7 +140,7 @@ class LedgerClient:
         self._call(slug, [_op("priority_clear", "swarm", target=priority_id, reason=reason)])
 
     def comment_item(self, slug, item, text):
-        self._call(slug, [_op("add", "swarm", thread=f"{item}/comments", text=text)])
+        self._write(slug, _op("add", "swarm", thread=f"{item}/comments", text=text))
 
     def mark_done(self, slug, item):
         self._call(slug, [_op("set", "swarm", path=f"{item}/done", value=True)])
