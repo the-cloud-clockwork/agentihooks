@@ -15,6 +15,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import (
     affinity,
     drain_watch,
+    idle,
     launch_check,
     live_binding,
     overlays,
@@ -29,8 +30,10 @@ from scripts.swarm.naming import swarm_name
 from scripts.swarm.store import ASSIST, SwarmError
 from scripts.swarm.tick import agent_status
 from scripts.swarm_ledger import plan_shape
+from scripts.swarm_v2.runtime import observe
 
 DEFAULT_COMPACT_LIMIT = 600
+UNCLASSIFIED = "unclassified"
 
 
 def now_ms():
@@ -159,6 +162,27 @@ def shape_report(tasks: list[dict], max_eng: int) -> dict:
         return {"error": str(exc)}
 
 
+def observation(store, slug, agent):
+    found = observe.stored(store, slug, agent.execution_id) if agent.execution_id else None
+    if found:
+        return {
+            "state": found.state.value,
+            "terminal": found.terminal.value,
+            "failure": found.failure.value,
+            "confidence": found.confidence.value,
+            "needs_operator": found.needs_operator,
+            "observed_at": found.observed_at,
+            "confirmed_at": found.confirmed_at,
+            "sources": found.sources,
+        }
+    beat = idle.heartbeat(store.redis, slug, agent.name)
+    if not beat:
+        return {"state": UNCLASSIFIED, "observed_at": None, "sources": {}}
+    at = beat["at"] / 1000
+    heartbeat = {"reading": observe.Reading.OK.value, "observed_at": at, "value": beat["state"]}
+    return {"state": UNCLASSIFIED, "observed_at": at, "sources": {observe.Source.HEARTBEAT.value: heartbeat}}
+
+
 def status_report(store, slug, state):
     from scripts.swarm import capacity
 
@@ -180,6 +204,7 @@ def status_report(store, slug, state):
                 "status": agent_status(a),
                 "promoted": a.name == promotion.get("promoted"),
                 "state_since": int(store.redis.hget(store.key(slug, "state-since"), a.name) or 0),
+                "observation": observation(store, slug, a),
                 "gates": active.get(a.name, []),
                 "inbox": [
                     {"text": item.text, "sender": item.sender, "state": item.state}
