@@ -314,6 +314,91 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     assert error.value.code == 7
 
 
+@pytest.mark.parametrize("mode", ["collect", "reuse", "empty"])
+def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, monkeypatch, mode):
+    from collections import defaultdict
+
+    from scripts.ci_mutation.selection import run_selected
+    from scripts.ci_mutation.stats import load_parts
+
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("os.sched_getaffinity", lambda pid: {0, 1})
+    selection = tmp_path / "lines.json"
+    selection.write_text(json.dumps({"scripts/sample.py": {"lines": [2], "tests": ["tests/test_sample.py"]}}))
+    data = SimpleNamespace(exit_code_by_key={} if mode == "empty" else {"m": None}, load=lambda: None)
+    config = SimpleNamespace(
+        source_paths=[Path("scripts/")], pytest_add_cli_args_test_selection=["tests/test_sample.py"]
+    )
+    engine = SimpleNamespace(tests_by_mangled_function_name=defaultdict(set), duration_by_test={}, stats_time=None)
+    result = {
+        "status": 0,
+        "tests": {"scripts.sample.x_f": ["tests/test_sample.py::t"], "scripts.other.x_g": ["tests/test_o.py::t"]},
+        "durations": {"tests/test_sample.py::t": 1},
+        "cpu": 2,
+    }
+    shared = tmp_path / "shared.json"
+    shared.write_text(json.dumps([result, {"status": 0, "tests": {}, "durations": {}, "cpu": 3}]))
+    part = tmp_path / "stats/part-1.json"
+    seen = []
+
+    def buckets(engine_runner, test_runner, shards, work):
+        assert engine_runner is runner
+        assert config.source_paths == [tmp_path / "mutants/scripts"]
+        seen.append((shards, work))
+        return [result]
+
+    def bucket_split(root, files, count):
+        assert (root, files) == (tmp_path, ["tests/test_sample.py"])
+        return [[f"tests/test_{n}.py"] for n in range(count)]
+
+    class PytestRunner:
+        def run_tests(self, *, mutant_name, tests):
+            return 0
+
+    saved = []
+    runner = SimpleNamespace(
+        SourceFileMutationData=lambda *, path: data,
+        Config=SimpleNamespace(get=lambda: config),
+        PytestRunner=PytestRunner,
+        collect_source_file_mutation_data=lambda *, mutant_names: ([], {}),
+        mutmut=engine,
+        save_stats=lambda: saved.append(engine.stats_time),
+    )
+
+    def cli(args):
+        if mode == "reuse":
+            assert runner.collect_or_load_stats(object()) is None
+            assert seen == []
+            assert saved == [5]
+            assert engine.tests_by_mangled_function_name == {
+                "scripts.sample.x_f": {"tests/test_sample.py::t"},
+                "scripts.other.x_g": set(),
+            }
+            assert engine.duration_by_test == {"tests/test_sample.py::t": 1}
+            raise SystemExit(7)
+        with pytest.raises(SystemExit) as done:
+            runner.collect_or_load_stats(object())
+        assert done.value.code == 0
+        assert config.source_paths == [Path("scripts/")]
+        assert seen == ([] if mode == "empty" else [([["tests/test_1.py"], ["tests/test_4.py"]], tmp_path)])
+        assert load_parts(part.parent, "key") == ([] if mode == "empty" else [result], "")
+        assert saved == []
+        raise SystemExit(7)
+
+    runner.cli = cli
+    monkeypatch.setattr("scripts.ci_mutation.selection.run_stats_buckets", buckets)
+    monkeypatch.setattr("scripts.ci_mutation.selection.stats_shards", bucket_split)
+    monkeypatch.setitem(sys.modules, "mutmut", SimpleNamespace(__main__=runner))
+    monkeypatch.setitem(sys.modules, "mutmut.__main__", runner)
+    for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
+        monkeypatch.setitem(sys.modules, name, sys.modules[name])
+    stats = ["reuse", str(shared)] if mode == "reuse" else ["collect", str(part), "key", "1", "3"]
+    with pytest.raises(SystemExit) as error:
+        run_selected(selection, (0, 1), *stats)
+    assert error.value.code == 7
+
+
 def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_excluded(tmp_path, monkeypatch):
     from mutmut.configuration import Config
     from mutmut.mutation.pragma_handling import PragmaParseError

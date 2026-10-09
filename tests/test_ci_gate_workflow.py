@@ -36,6 +36,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "kind-due",
             "helm-kind",
             "mutation-plan",
+            "mutation-stats",
         }
     )
     assert gate["if"] == "${{ always() }}"
@@ -300,16 +301,18 @@ def test_required_gate_is_red_when_the_durations_lookup_did_not_succeed(duration
     assert (result.returncode == 0) == (durations == "success"), result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("job", ["mutation", "mutation-plan", "mutation-stats"])
 @pytest.mark.parametrize("mutation", ["success", "failure", "skipped", "cancelled"])
 @pytest.mark.parametrize("expected", ["true", "false", ""])
-def test_required_gate_is_red_unless_mutation_passed_or_was_not_due(mutation, expected):
+def test_required_gate_is_red_unless_mutation_passed_or_was_not_due(job, mutation, expected):
     jobs = _workflow()["jobs"]
     gate = jobs["gate-required"]
     step = gate["steps"][0]
-    assert jobs["mutation"]["if"].startswith("${{")
-    assert step["env"]["MUTATION"] == jobs["mutation"]["if"]
+    assert job in gate["needs"]
+    assert jobs[job]["if"].startswith("${{")
+    assert step["env"]["MUTATION"] == jobs[job]["if"]
     needs = {name: {"result": "success"} for name in ("unit", "lint", "sonar")}
-    needs["mutation"] = {"result": mutation}
+    needs[job] = {"result": mutation}
     env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION=expected)
     result = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
     passes = mutation == "success" or (mutation == "skipped" and expected == "false")
@@ -478,7 +481,8 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
 def test_mutation_runs_in_tests_beside_unit_and_lint():
     workflow = _workflow()
     job = workflow["jobs"]["mutation"]
-    assert job["needs"] == "mutation-plan"
+    assert job["needs"] == ["mutation-plan", "mutation-stats"]
+    assert workflow["jobs"]["mutation-stats"]["needs"] == "mutation-plan"
     assert "needs" not in workflow["jobs"]["mutation-plan"]
     assert (
         job["if"]
