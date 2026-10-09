@@ -1,12 +1,12 @@
 import json
-from pathlib import Path
 
 import pytest
+import yaml
 
+from hooks.classifier import corpus, definitions, evaluation
 from hooks.classifier.decision_log import state_digest
 from scripts.gates import intent, intent_calibration
 
-CORPUS = Path(__file__).parents[1] / "fixtures" / "intent_calibration.json"
 PHASE = (
     "Plan chunks: agents read only their slice of the plan: Operator top priority. Every planner plan is stored as a "
     "ledger artifact. Each phase points at its plan and each task at a line range computed by code from slice "
@@ -19,30 +19,50 @@ CONTROLS_BEFORE = ["dq1-no-callsite", "dq1-off", "g18-draft", "g18-off", "pn1-of
 
 
 @pytest.fixture
-def corpus():
-    return json.loads(CORPUS.read_text())
+def definition():
+    return definitions.load(intent.PURPOSE)
 
 
-def test_every_case_is_an_exact_input_labelled_by_both_readers(corpus):
-    for case in corpus["cases"]:
-        assert state_digest(case["state"]) == case["input_digest"]
-        assert case["expected"] in ("pass", "fail")
-        assert set(case["labels"]) == {"standards", "spec"}
-        assert all(case["labels"].values())
-        assert case["control"] is (case["expected"] == "fail" and not case["id"].startswith("retained-"))
-        questions = list(intent.questions_for(case["state"]))
-        assert [list(sample["answers"]) for sample in case["samples"]["after"]] == [questions] * 3
-        assert len(case["samples"]["before"]) == 3
+@pytest.fixture
+def raw():
+    return yaml.safe_load(corpus.path_for(intent.PURPOSE).read_text())
 
 
-def test_retained_cases_replay_the_exact_classifier_input(corpus):
-    retained = [case for case in corpus["cases"] if case["provenance"] == "retained exact masked classifier input"]
-    assert [case["id"] for case in retained] == ["retained-t10", "retained-t55", "retained-nd5", "retained-tc22"]
-    assert [case["expected"] for case in retained] == ["pass", "fail", "pass", "pass"]
+@pytest.fixture
+def cases(definition):
+    return corpus.load(definition, corpus.path_for(intent.PURPOSE))
 
 
-def test_the_weakens_and_chunk_questions_lower_wrong_verdicts_and_keep_every_control(corpus):
-    assert intent_calibration.measure(corpus) == {
+def write(tmp_path, raw):
+    path = tmp_path / "intent-check.corpus.yaml"
+    path.write_text(yaml.safe_dump(raw))
+    return path
+
+
+def verdicts(definition, case):
+    return [item.verdicts["verdict"] for item in evaluation.replay(definition, (case,))]
+
+
+def test_every_case_is_an_exact_input_labelled_by_both_readers(cases):
+    for case in cases:
+        assert state_digest(case.state) == case.notes["input_digest"]
+        assert case.expected["verdict"] in ("pass", "fail")
+        assert set(case.notes["labels"]) == {"standards", "spec"}
+        assert all(case.notes["labels"].values())
+        assert case.control is (case.expected["verdict"] == "fail" and not case.name.startswith("retained-"))
+        questions = list(intent.questions_for(case.state))
+        assert [list(sample.answers) for sample in case.samples] == [questions] * 3
+        assert len(case.baseline) == 3
+
+
+def test_retained_cases_replay_the_exact_classifier_input(cases):
+    retained = [case for case in cases if case.notes["provenance"] == "retained exact masked classifier input"]
+    assert [case.name for case in retained] == ["retained-t10", "retained-t55", "retained-nd5", "retained-tc22"]
+    assert [case.expected["verdict"] for case in retained] == ["pass", "fail", "pass", "pass"]
+
+
+def test_the_weakens_and_chunk_questions_lower_wrong_verdicts_and_keep_every_control(cases, definition):
+    assert intent_calibration.measure(cases, definition) == {
         "cases": 19,
         "controls": 10,
         "before": {
@@ -70,25 +90,32 @@ def test_the_weakens_and_chunk_questions_lower_wrong_verdicts_and_keep_every_con
     }
 
 
-def test_the_plan_chunk_cases_pass_the_exact_pull_request_and_fail_the_missing_and_added_ones(corpus):
-    cases = {case["id"]: case for case in corpus["cases"] if "plan_chunk" in case["state"]}
-    assert {cid: intent_calibration.verdicts(case, "after") for cid, case in cases.items()} == {
+def test_the_eval_replay_gives_the_calibration_counts(definition):
+    report = evaluation.evaluate(intent.PURPOSE).report()
+    measured = intent_calibration.measure(corpus.load(definition, corpus.path_for(intent.PURPOSE)), definition)
+    assert (report["mode"], report["cases"], report["controls"], report["samples"]) == ("replay", 19, 10, 57)
+    assert (report["wrong"], report["wrong_cases"]) == (measured["after"]["wrong"], measured["after"]["wrong_cases"])
+    assert report["held_controls"] == measured["after"]["controls_rejected"]
+
+
+def test_the_plan_chunk_cases_pass_the_exact_pull_request_and_fail_the_missing_and_added_ones(cases, definition):
+    chunked = {case.name: case for case in cases if "plan_chunk" in case.state}
+    assert {name: verdicts(definition, case) for name, case in chunked.items()} == {
         "chunk-exact": ["pass"] * 3,
         "chunk-missing": ["fail"] * 3,
         "chunk-added": ["fail"] * 3,
     }
-    assert {cid: intent_calibration.verdicts(case, "before") for cid, case in cases.items()} == {
-        cid: ["pass"] * 3 for cid in cases
+    assert {name: [item["verdict"] for item in case.baseline] for name, case in chunked.items()} == {
+        name: ["pass"] * 3 for name in chunked
     }
 
 
-def test_the_chunk_failures_quote_the_lines_missed_or_exceeded(corpus):
-    cases = {case["id"]: case for case in corpus["cases"]}
-    first = cases["chunk-missing"]["samples"]["after"][0]["answers"]
-    missed = intent.judge(cases["chunk-missing"]["state"], decide=intent_calibration.recorded(first))[1]
-    first = cases["chunk-added"]["samples"]["after"][0]["answers"]
-    exceeded = intent.judge(cases["chunk-added"]["state"], decide=intent_calibration.recorded(first))[1]
-    rows = cases["chunk-added"]["state"]["plan_chunk"].splitlines()
+def test_the_chunk_failures_quote_the_lines_missed_or_exceeded(cases, definition):
+    named = {case.name: case for case in cases}
+    missed, exceeded = (
+        evaluation.replay(definition, (named[name],))[0].verdicts["reason"] for name in ("chunk-missing", "chunk-added")
+    )
+    rows = named["chunk-added"].state["plan_chunk"].splitlines()
     every = ", ".join(f'line {number} "{row}"' for number, row in enumerate(rows, 50))
     remove = f"Remove the scope beyond plan lines 50-56, which ask only for {every}."
     deliver = (
@@ -98,40 +125,50 @@ def test_the_chunk_failures_quote_the_lines_missed_or_exceeded(corpus):
     assert exceeded.endswith(f"the pull request merges.. The phase must be able to use it for {PHASE}. {remove}")
 
 
-def test_losing_a_control_is_not_a_calibration(corpus):
-    control = next(case for case in corpus["cases"] if case["id"] == "pn1-off")
-    control["samples"]["after"][0]["answers"] = {"usable": 0.9, "delivers": 0.9, "reachable": 0.9, "weakens": 0.1}
-    result = intent_calibration.measure(corpus)
+def test_losing_a_control_is_not_a_calibration(raw, definition, tmp_path):
+    control = next(case for case in raw["cases"] if case["name"] == "pn1-off")
+    accepted = {"usable": 0.9, "delivers": 0.9, "reachable": 0.9, "weakens": 0.1}
+    control["samples"][0]["answers"] = {key: {"type": "noul", "noul": value} for key, value in accepted.items()}
+    result = intent_calibration.measure(corpus.load(definition, write(tmp_path, raw)), definition)
     assert (result["after"]["wrong"], "pn1-off" in result["after"]["controls_rejected"]) == (3, False)
     assert result["calibrated"] is False
 
 
-def test_no_fewer_wrong_verdicts_is_not_a_calibration(corpus):
-    for case in corpus["cases"]:
-        neutral = {"weakens": 0.0, "underdelivers": 0.0, "overdelivers": 0.0}
-        case["samples"]["after"] = [{"answers": {**s["answers"], **neutral}} for s in case["samples"]["before"]]
-    result = intent_calibration.measure(corpus)
-    assert (result["before"]["wrong"], result["after"]["wrong"], result["calibrated"]) == (15, 15, False)
+def test_no_fewer_wrong_verdicts_is_not_a_calibration(raw, definition, tmp_path):
+    for case in raw["cases"]:
+        case["baseline"] = [{"verdict": "fail" if case["expected"]["verdict"] == "pass" else "pass"}] * 3
+        case["control"] = False
+    result = intent_calibration.measure(corpus.load(definition, write(tmp_path, raw)), definition)
+    assert (result["before"]["wrong"], result["after"]["wrong"], result["calibrated"]) == (57, 2, True)
+    for case in raw["cases"]:
+        case["baseline"] = [{"verdict": case["expected"]["verdict"]}] * 3
+    result = intent_calibration.measure(corpus.load(definition, write(tmp_path, raw)), definition)
+    assert (result["before"]["wrong"], result["after"]["wrong"], result["calibrated"]) == (0, 2, False)
 
 
 def tiny(after_control, after_case):
-    def case(cid, control, expected, before, after):
+    def case(name, control, expected, before, after):
+        answers = {"usable": after, "delivers": 0.9, "reachable": 0.9, "weakens": 0.0}
         return {
-            "id": cid,
+            "name": name,
             "control": control,
-            "expected": expected,
+            "expected": {"verdict": expected},
             "state": {},
-            "samples": {
-                "before": [{"verdict": before}],
-                "after": [{"answers": {"usable": after, "delivers": 0.9, "reachable": 0.9, "weakens": 0.0}}],
-            },
+            "baseline": [{"verdict": before}],
+            "samples": [
+                {"source": "unrecorded", "answers": {key: {"type": "noul", "noul": v} for key, v in answers.items()}}
+            ],
         }
 
-    return {"cases": [case("c", True, "fail", "fail", after_control), case("p", False, "pass", "fail", after_case)]}
+    return {
+        "version": 1,
+        "cases": [case("c", True, "fail", "fail", after_control), case("p", False, "pass", "fail", after_case)],
+    }
 
 
-def test_the_same_controls_with_fewer_wrong_verdicts_is_a_calibration():
-    assert intent_calibration.measure(tiny(0.1, 0.9)) == {
+def test_the_same_controls_with_fewer_wrong_verdicts_is_a_calibration(definition, tmp_path):
+    cases = corpus.load(definition, write(tmp_path, tiny(0.1, 0.9)))
+    assert intent_calibration.measure(cases) == {
         "cases": 2,
         "controls": 1,
         "before": {"samples": 2, "wrong": 1, "wrong_cases": ["p"], "controls_rejected": ["c"]},
@@ -140,14 +177,14 @@ def test_the_same_controls_with_fewer_wrong_verdicts_is_a_calibration():
     }
 
 
-def test_main_prints_the_measurement_of_the_default_corpus(corpus, capsys):
+def test_main_prints_the_measurement_of_the_packaged_corpus(cases, definition, capsys):
     assert intent_calibration.main([]) == 0
-    assert capsys.readouterr().out == json.dumps(intent_calibration.measure(corpus), indent=1) + "\n"
+    assert capsys.readouterr().out == json.dumps(intent_calibration.measure(cases, definition), indent=1) + "\n"
 
 
-def test_main_reads_the_corpus_named_on_the_command_line(tmp_path, monkeypatch, capsys):
-    path = tmp_path / "corpus.json"
-    path.write_text(json.dumps(tiny(0.1, 0.9)))
+def test_main_reads_the_corpus_named_on_the_command_line(definition, tmp_path, monkeypatch, capsys):
+    path = write(tmp_path, tiny(0.1, 0.9))
     monkeypatch.setattr("sys.argv", ["intent_calibration", str(path)])
     assert intent_calibration.main() == 0
-    assert capsys.readouterr().out == json.dumps(intent_calibration.measure(tiny(0.1, 0.9)), indent=1) + "\n"
+    expected = intent_calibration.measure(corpus.load(definition, path), definition)
+    assert capsys.readouterr().out == json.dumps(expected, indent=1) + "\n"
