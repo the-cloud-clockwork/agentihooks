@@ -107,13 +107,17 @@ def run_case(image, mode, output, kill=False):
         root = observed["root"]
         if kill:
             start = time.monotonic()
-            docker(
-                "exec",
-                container,
-                "python",
-                "-c",
-                f"import json,os,signal; from pathlib import Path; c=json.loads(Path({root!r}, 'context.json').read_text()); assert c['process_namespace']==os.readlink('/proc/self/ns/pid'); os.kill(c['supervisor_pid'],signal.SIGKILL)",
-            )
+            try:
+                docker(
+                    "exec",
+                    container,
+                    "python",
+                    "-c",
+                    f"import json,os,signal; from pathlib import Path; c=json.loads(Path({root!r}, 'context.json').read_text()); assert c['process_namespace']==os.readlink('/proc/self/ns/pid'); os.kill(c['supervisor_pid'],signal.SIGKILL)",
+                )
+            except subprocess.CalledProcessError as exc:
+                if exc.returncode != 137:
+                    raise
         else:
             before = docker(
                 "exec",
