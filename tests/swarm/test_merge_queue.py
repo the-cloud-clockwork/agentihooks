@@ -29,7 +29,11 @@ def runner(*responses):
 def task_ledger(monkeypatch):
     from types import SimpleNamespace
 
-    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: [{"id": "t1", "pr_url": URL}]))
+    def tasks(slug):
+        assert slug == "sw"
+        return [{"id": "t1", "pr_url": URL}]
+
+    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=tasks))
 
 
 def test_state_reports_an_open_pull_request_without_a_queue_entry():

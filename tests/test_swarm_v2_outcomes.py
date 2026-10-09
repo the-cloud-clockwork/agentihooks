@@ -44,7 +44,12 @@ def fixture(monkeypatch):
     provider = Provider(PullRequest(task["pr_url"], "PR_one", inputs["head_sha"], "dev", "OPEN"))
     proof = inputs["proof"]
     proposal = Proposal(agent.task, claim.generation, revision(task), task["pr_url"], inputs["head_sha"], proof)
-    outcomes = Outcomes(authority, lambda task_id: dict(task), provider, lambda evidence: evidence == proof)
+    outcomes = Outcomes(
+        authority,
+        lambda task_id: dict(task) if task_id == task["id"] else {},
+        provider,
+        lambda evidence: evidence == proof,
+    )
     return outcomes, authority, token, proposal, provider, task, clock, start, agent
 
 
@@ -116,7 +121,7 @@ def test_changed_task_revision_is_refused_at_final_boundary(fixture):
 
     outcomes.propose(token, proposal)
     task["description"] = "new instructions"
-    with pytest.raises(SwarmError, match="outcome_conflict"):
+    with pytest.raises(SwarmError, match="^outcome_conflict$"):
         outcomes.integrate(token, proposal.generation)
     assert provider.calls == []
     assert authority.current(proposal.task_id).state == "active"
@@ -208,7 +213,7 @@ def test_changed_pr_identity_is_refused_before_provider_write(fixture, field, va
 
     outcomes.propose(token, proposal)
     provider.pull = replace(provider.pull, **{field: value})
-    with pytest.raises(SwarmError, match="outcome_conflict"):
+    with pytest.raises(SwarmError, match="^outcome_conflict$"):
         outcomes.integrate(token, proposal.generation)
     assert provider.calls == []
 
@@ -254,6 +259,7 @@ def test_github_provider_compares_the_head_and_guards_the_final_enqueue():
             calls.append("enqueue")
             raw["mergeQueueEntry"] = {"id": "queue-entry"}
             return {}
+        assert variables == {"url": url}
         return {"resource": dict(raw)}
 
     provider = GitHubIntegration("example/repo", graphql)
@@ -585,7 +591,7 @@ def test_github_provider_reports_absent_commit_identity_as_empty():
         "mergeCommit": {},
     }
     provider = GitHubIntegration("example/repo", lambda query, variables: {"resource": raw})
-    assert provider.read(raw["url"]).merge_sha == ""
+    assert provider.read(raw["url"]) == PullRequest(raw["url"], "PR_one", "tested-head", "dev", "OPEN")
 
 
 def test_paused_verified_outcome_cannot_mark_the_ledger_done(monkeypatch, tmp_path):
@@ -783,3 +789,185 @@ def test_replacement_during_final_proof_verification_rolls_back_the_ledger(monke
         outcomes.complete(token, proposal.generation, repository)
     assert repository.get_document(outcomes.authority.slug) == before
     assert outcomes.authority.current(proposal.task_id).generation == 2
+
+
+def test_proposal_task_scope_is_refused_exactly(fixture):
+    from scripts.swarm.store import SwarmError
+
+    outcomes, authority, token, proposal, provider, *_ = fixture
+    with pytest.raises(SwarmError, match="^forbidden_scope$"):
+        outcomes.propose(token, replace(proposal, task_id="another-task"))
+    assert authority.current(proposal.task_id).result == {}
+    assert provider.calls == []
+
+
+def test_independent_generations_receive_distinct_operation_identities(fixture):
+    outcomes, authority, token, proposal, provider, task, clock, start, agent = fixture
+    first = outcomes.propose(token, proposal)
+    clock[0] += 30_001
+    _, successor_token = start(previous=agent.execution_id)
+    claim = authority.admit(successor_token, 30_000)
+    second = outcomes.propose(successor_token, replace(proposal, generation=claim.generation))
+    assert first["operation_id"] != second["operation_id"]
+    assert provider.calls == []
+
+
+def test_successor_inherits_a_queued_effect_past_an_earlier_accepted_proposal(fixture, monkeypatch):
+    outcomes, authority, token, proposal, provider, task, clock, start, agent = fixture
+    outcomes.propose(token, proposal)
+    clock[0] += 30_001
+    successor, next_token = start(previous=agent.execution_id)
+    claim = authority.admit(next_token, 30_000)
+    second = replace(proposal, generation=claim.generation)
+    outcomes.propose(next_token, second)
+
+    def enqueue(pull, operation_id, guard):
+        guard()
+        provider.calls.append(operation_id)
+        provider.pull = replace(pull, queue_id="queued-once")
+        return provider.pull
+
+    monkeypatch.setattr(provider, "enqueue", enqueue)
+    queued = outcomes.integrate(next_token, claim.generation)
+    assert queued["phase"] == "committed"
+    clock[0] += 30_001
+    _, final_token = start(previous=successor.execution_id)
+    final = authority.admit(final_token, 30_000)
+    inherited = outcomes.propose(final_token, replace(proposal, generation=final.generation))
+    assert inherited["operation_id"] == queued["operation_id"]
+    assert inherited["phase"] == "committed"
+    assert outcomes.integrate(final_token, final.generation)["queue_id"] == "queued-once"
+    assert provider.calls == [queued["operation_id"]]
+
+
+def test_dispatch_identity_is_present_and_bound_to_the_provider_operation(fixture):
+    outcomes, authority, token, proposal, provider, *_ = fixture
+    accepted = outcomes.propose(token, proposal)
+    provider.lose_response = True
+    unknown = outcomes.integrate(token, proposal.generation)
+    assert isinstance(unknown["dispatch"], str)
+    assert len(unknown["dispatch"]) == 32
+    assert provider.calls == [accepted["operation_id"]]
+
+
+def test_final_guard_refuses_an_operation_already_admitted_to_the_queue(fixture, monkeypatch):
+    from scripts.swarm.store import SwarmError
+
+    outcomes, authority, token, proposal, provider, *_ = fixture
+    outcomes.propose(token, proposal)
+
+    def enqueue(pull, operation_id, guard):
+        provider.pull = replace(pull, queue_id="another-response")
+        assert outcomes.integrate(token, proposal.generation)["phase"] == "committed"
+        guard()
+        provider.calls.append(operation_id)
+        return provider.pull
+
+    monkeypatch.setattr(provider, "enqueue", enqueue)
+    with pytest.raises(SwarmError, match="^outcome_conflict$"):
+        outcomes.integrate(token, proposal.generation)
+    assert provider.calls == []
+    assert outcomes.outcome_conflicts_total() == 1
+
+
+def test_revoked_proof_cannot_complete_an_already_verified_outcome(monkeypatch, tmp_path):
+    from scripts.swarm.store import SwarmError
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    outcomes.integrate(token, proposal.generation)
+    outcomes.verify_proof = lambda proof: False
+    before = repository.get_document(outcomes.authority.slug)
+    with pytest.raises(SwarmError, match="^required proof artifacts are absent or unverified$"):
+        outcomes.complete(token, proposal.generation, repository)
+    assert repository.get_document(outcomes.authority.slug) == before
+
+
+def test_completion_without_observed_merge_uses_the_exact_refusal(monkeypatch, tmp_path):
+    from scripts.swarm.store import SwarmError
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    outcomes.provider.lose_response = True
+    with pytest.raises(SwarmError, match="^the provider outcome is not externally verified$"):
+        outcomes.complete(token, proposal.generation, repository)
+    assert outcomes.read_task(proposal.task_id)["state"] == "claimed"
+
+
+def test_completion_during_provider_observation_refuses_the_missing_proposal(fixture, monkeypatch):
+    from scripts.swarm.store import SwarmError
+
+    outcomes, authority, token, proposal, provider, *_ = fixture
+    outcomes.propose(token, proposal)
+    original = provider.read
+
+    def read(url):
+        authority.complete(token, proposal.generation, {})
+        return original(url)
+
+    monkeypatch.setattr(provider, "read", read)
+    with pytest.raises(SwarmError, match="^an accepted outcome is required$"):
+        outcomes.integrate(token, proposal.generation)
+    assert provider.calls == []
+
+
+def test_reconciliation_after_ledger_completion_checks_the_current_revision(monkeypatch, tmp_path):
+    from scripts.swarm.store import SwarmError
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    outcomes.complete(token, proposal.generation, repository)
+    with pytest.raises(SwarmError, match="^outcome_conflict$"):
+        outcomes.integrate(token, proposal.generation)
+    assert outcomes.read_task(proposal.task_id)["state"] == "done"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"claimed_by": "another-owner"},
+        {"pr_url": "https://github.com/example/repo/pull/2"},
+        {"phase": "committed"},
+        {"merge_sha": ""},
+        {"missing_task": True},
+    ],
+)
+def test_authoritative_completion_refuses_incomplete_or_mismatched_effects(monkeypatch, tmp_path, change):
+    from copy import deepcopy
+
+    from scripts.swarm_ledger import ledger_tasks
+    from scripts.swarm_ledger.api.resources import revision
+    from tests import sv2_ctl05_cases
+    from tests.swarm_ledger.test_tasks import core
+
+    outcomes, repository, token, proposal, *_ = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    result = outcomes.integrate(token, proposal.generation)
+    doc = repository.get_document(outcomes.authority.slug)
+    ctx = core.Context(doc.pop("_meta"), 0)
+    actor = outcomes.authority.current(proposal.task_id).holder
+    if change.get("missing_task"):
+        doc["tasks"] = []
+        expected = "outcome identity conflict"
+    else:
+        for key, value in change.items():
+            if key in ("claimed_by", "pr_url"):
+                doc["tasks"][0][key] = value
+                result["proposal"]["task_revision"] = revision(doc["tasks"][0])
+            else:
+                result[key] = value
+        expected = "outcome revision or ownership conflict"
+    operation = {
+        "id": "invalid-effect",
+        "op": "task_update",
+        "item": f"tasks/{proposal.task_id}",
+        "by": actor,
+        "fields": {"state": "done", "pr_url": proposal.pr_url, "proof": proposal.proof},
+    }
+    before = deepcopy(doc)
+    assert not ledger_tasks.complete_outcome(doc, operation, ctx, result, actor)
+    assert ctx.refused == [expected]
+    assert doc == before
