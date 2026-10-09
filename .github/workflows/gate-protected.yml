@@ -1,6 +1,7 @@
 name: Gate Protected
 
-# Runs the base branch's copy of this file and its grader; the head is fetched only as git data and never executed.
+# GitHub runs pull_request_target from the default branch's copy of this file, so it acts once a release carries it to main.
+# The grader and its baseline come from the pull request's base branch; the head is fetched only as git data and never executed.
 on:
   pull_request_target:
     branches: [dev]
@@ -35,6 +36,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
           persist-credentials: false
 
