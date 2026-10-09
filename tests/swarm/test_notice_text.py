@@ -2,15 +2,18 @@ import json
 
 import pytest
 
-from scripts.gates import claims
-from scripts.swarm import capacity, grouping, notice_text, trace_plan
-from scripts.swarm.ledger_client import LedgerClient, LedgerRefused, _ledger
+from scripts.gates import claims, intent
+from scripts.inbox import wake
+from scripts.inbox.store import Item
+from scripts.swarm import capacity, grouping, notice_text, phase_planning, tick, trace_plan
+from scripts.swarm.ledger_client import LedgerClient, LedgerRefused, SwarmError, _ledger
 from scripts.swarm.store import SwarmConfig
 
 NOISE = (
     "see scripts/swarm/tick.py at 03:45:16 UTC on 2026-10-09; run 37818444803; commit fa09b9d0 "
     "-> quota_handoff.warn (retry) — LABEL IN CAPS; delve deeper"
 )
+LONG = " ".join([NOISE] * 4)
 
 
 def _comments():
@@ -36,13 +39,24 @@ def _worst_capacity():
     return capacity.status_line(decision)
 
 
+def _unread():
+    return Item("i1", "engineer@323133-0768", "master@rig-grade-swarm", LONG, "pending", 0, 0)
+
+
 def templates():
     return [
         ("capacity status", "comment", _worst_capacity()),
         ("claim cap", "comment", claims.refusal(9, NOISE, NOISE, "rig-grade-swarm", "stall1")),
         ("group proposal", "priority", grouping.PROPOSE.format(n=12)),
         ("plan followup", "item", trace_plan.followup_text("stall1", NOISE)),
+        ("intent failed", "comment", intent.FAIL_COMMENT),
+        ("intent shortfall", "comment", intent.SHORTFALL_COMMENT),
+        ("slice check", "comment", phase_planning._comment([NOISE] * 9, 12, tail=NOISE)),
+        ("unread mail", "item", wake._operator_text(_unread())),
         ("raw noise", "comment", NOISE),
+        ("long noise", "comment", LONG),
+        ("long noise item", "item", LONG),
+        ("long noise priority", "priority", LONG),
         ("raw noise item", "item", NOISE),
         ("raw noise priority", "priority", NOISE),
         ("empty", "comment", ""),
@@ -62,6 +76,24 @@ def test_plain_keeps_meaning_of_ordinary_text():
     assert notice_text.plain("accounts have quota; Claude has 2 free seats; Codex has 1") == (
         "accounts have quota, Claude has 2 free seats, Codex has 1"
     )
+
+
+@pytest.mark.parametrize(
+    ("text", "kind", "expected"),
+    [
+        ("fixed fa09b9d0 here", "comment", "fixed here"),
+        ("a ; b . c", "comment", "a, b. c"),
+        ("; start;", "comment", "start"),
+        ("quota->spawn and a=>b", "comment", "quota to spawn and a to b"),
+        ("ready — merged – queued", "comment", "ready, merged, queued"),
+        ("held (for now) by quota_handoff", "comment", "held for now by quota handoff"),
+        (" ".join(["word"] * 30), "priority", " ".join(["word"] * 20)),
+        (" ".join(["word"] * 60), "item", " ".join(["word"] * 40)),
+        (" ".join(["word"] * 60), "comment", " ".join(["word"] * 50)),
+    ],
+)
+def test_plain_reshapes_text_exactly(text, kind, expected):
+    assert notice_text.plain(text, kind) == expected
 
 
 def test_plain_falls_back_when_nothing_is_left():
@@ -84,18 +116,18 @@ def _capture(monkeypatch, refuse=False):
 @pytest.mark.parametrize(
     ("write", "kind"),
     [
-        (lambda c: c.comment("sw", "t1", NOISE, by="swarm"), "comment"),
-        (lambda c: c.comment_phase("sw", "p1", NOISE, by="swarm"), "comment"),
-        (lambda c: c.comment_item("sw", "followups/f1", NOISE), "comment"),
-        (lambda c: c.followup("sw", NOISE), "item"),
-        (lambda c: c.priority("sw", "tasks/t1", NOISE), "priority"),
+        (lambda c: c.comment("sw", "t1", LONG, by="swarm"), "comment"),
+        (lambda c: c.comment_phase("sw", "p1", LONG, by="swarm"), "comment"),
+        (lambda c: c.comment_item("sw", "followups/f1", LONG), "comment"),
+        (lambda c: c.followup("sw", LONG), "item"),
+        (lambda c: c.priority("sw", "tasks/t1", LONG), "priority"),
     ],
 )
 def test_client_formats_swarm_notices_through_the_server_check(monkeypatch, write, kind):
     sent = _capture(monkeypatch)
     write(LedgerClient())
     (op,) = sent[0]
-    assert op["text"] == notice_text.plain(NOISE, kind)
+    assert op["text"] == notice_text.plain(LONG, kind)
     assert _comments().problems(op["text"], kind) == []
 
 
@@ -162,3 +194,44 @@ def test_capacity_saves_its_decision_and_drops_a_refused_notice(monkeypatch):
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
     actions = capacity.apply("sw", config, store, _RefusingLedger(), _Runtime(), 1000)
     assert actions == [capacity.status_line(json.loads(store.redis["sw:quota-capacity"]))]
+
+
+class _CapStore:
+    def __init__(self):
+        self.lives = claims.CAP
+
+    def claims(self, slug, task_id):
+        return self.lives
+
+    def config(self, slug):
+        return SwarmConfig("sw", "/repo", max_eng=1, max_ci=1)
+
+    def handoff_envelope(self, slug, task_id):
+        return None
+
+    def launch_failure(self, slug, task_id):
+        return None
+
+    def reset_claims(self, slug, task_id):
+        self.lives = 0
+
+
+class _CapLedger:
+    def __init__(self, store):
+        self.store, self.seen = store, []
+
+    def update_task(self, slug, task_id, fields, if_state=()):
+        return {"id": task_id, "state": "blocked"}
+
+    def comment(self, slug, task_id, text, by):
+        self.seen.append(self.store.lives)
+        raise SwarmError("ledger sw: connection reset")
+
+
+def test_claim_cap_resets_claims_before_its_notice(monkeypatch):
+    monkeypatch.setattr(tick.gate_log, "append", lambda *a, **k: None)
+    store = _CapStore()
+    ledger = _CapLedger(store)
+    with pytest.raises(SwarmError):
+        tick._claim_cap("sw", store, ledger, {"t1": {"id": "t1"}}, {"id": "t1"})
+    assert (ledger.seen, store.lives) == ([0], 0)

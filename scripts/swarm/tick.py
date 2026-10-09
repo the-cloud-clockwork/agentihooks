@@ -771,8 +771,8 @@ def _claim_cap(slug, store, ledger, rows, task):
     rows[task["id"]].update(live)
     if live["state"] != "blocked":
         return ""
-    ledger.comment(slug, task["id"], reason, by="swarm")
     store.reset_claims(slug, task["id"])
+    ledger.comment(slug, task["id"], reason, by="swarm")
     return f"blocked {task['id']}: {reason}"
 
 
