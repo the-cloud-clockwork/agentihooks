@@ -21,7 +21,18 @@ PY
 }
 trap cleanup EXIT
 
-docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$revision" \
+build=(docker build)
+cache=()
+if [[ -n "${WORKER_IMAGE_CACHE:-}" ]]; then
+    build=(docker buildx build --load)
+    mkdir -p "$WORKER_IMAGE_CACHE"
+    cache=(--cache-to "type=local,dest=$WORKER_IMAGE_CACHE-new,mode=max")
+    if [[ -f "$WORKER_IMAGE_CACHE/index.json" ]]; then
+        cache+=(--cache-from "type=local,src=$WORKER_IMAGE_CACHE")
+    fi
+fi
+
+"${build[@]}" "${cache[@]}" --platform linux/amd64 --build-arg SOURCE_REVISION="$revision" \
     -f "$context/docker/swarm-node/Dockerfile" -t "$image" "$context" > "$output/build.log" 2>&1
 for attempt in first second; do
     docker run --rm --network none --read-only \
@@ -64,7 +75,7 @@ else:
     lock['tools']['herdr']['sha256']='0'*64
 path.write_text(json.dumps(lock))
 PY
-    if docker build --platform linux/amd64 -f "$context/docker/swarm-node/Dockerfile" \
+    if "${build[@]}" --platform linux/amd64 -f "$context/docker/swarm-node/Dockerfile" \
         -t "$rejected" "$context" > "$output/$rejection.log" 2>&1; then
         echo "rejection fixture unexpectedly built: $rejection" >&2
         exit 1
@@ -75,7 +86,7 @@ PY
     fi
 done
 mv "$context/docker/swarm-node/versions.original" "$context/docker/swarm-node/versions.lock"
-docker build --no-cache --platform linux/amd64 --build-arg SOURCE_REVISION="$revision" \
+"${build[@]}" --no-cache --platform linux/amd64 --build-arg SOURCE_REVISION="$revision" \
     -f "$context/docker/swarm-node/Dockerfile" -t "$rebuild" "$context" > "$output/rebuild.log" 2>&1
 docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 \
     --tmpfs /tmp "$rebuild" > "$output/rebuild.json"

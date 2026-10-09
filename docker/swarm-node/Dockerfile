@@ -2,7 +2,6 @@ ARG BASE_IMAGE=python:3.12.12-slim-bookworm@sha256:2986c55feb36e6cae00fa1fefb454
 FROM ${BASE_IMAGE}
 ARG BASE_IMAGE
 ARG TARGETARCH
-ARG SOURCE_REVISION=unknown
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -26,6 +25,7 @@ COPY scripts/ scripts/
 COPY profiles/ profiles/
 RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS=0.0.0 pip install --no-cache-dir --no-deps --no-build-isolation .
 COPY profiles/ /opt/agentihooks/templates/
+ARG SOURCE_REVISION=unknown
 RUN python /opt/swarm-node/worker_image.py manifest --architecture "$TARGETARCH" --source-revision "$SOURCE_REVISION" \
     && chmod -R a-w /opt/agentihooks/templates /opt/swarm-node /opt/venv \
     && groupadd --gid 10001 worker \

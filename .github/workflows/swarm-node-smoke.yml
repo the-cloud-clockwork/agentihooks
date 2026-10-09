@@ -13,8 +13,19 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: actions/cache@v4
+        with:
+          path: ~/scratchpad/worker-image-cache
+          key: worker-image-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/swarm-node/Dockerfile', 'docker/swarm-node/*.lock') }}-${{ github.sha }}
+          restore-keys: |
+            worker-image-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/swarm-node/Dockerfile', 'docker/swarm-node/*.lock') }}-
       - name: Prove clean worker builds and offline startup
-        run: bash docker/swarm-node/smoke.sh "$HOME/scratchpad/worker-image-evidence"
+        run: |
+          export WORKER_IMAGE_CACHE="$HOME/scratchpad/worker-image-cache"
+          bash docker/swarm-node/smoke.sh "$HOME/scratchpad/worker-image-evidence"
+          rm -r "$WORKER_IMAGE_CACHE"
+          mv "$WORKER_IMAGE_CACHE-new" "$WORKER_IMAGE_CACHE"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
