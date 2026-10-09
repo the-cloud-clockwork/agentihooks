@@ -20,7 +20,8 @@ PASSES = 2
 SENDER = "swarm"
 TEXT_KEPT = 280
 TIMED_OUT, NO_ANSWER, SERVER_ERROR = "timed out", "gave no answer", "answered with a server error"
-FAILED = (OSError, SwarmError, SystemExit, http.client.HTTPException)
+REFUSED_5XX = "server refused: 5"
+FAILED = (OSError, ValueError, SwarmError, SystemExit, http.client.HTTPException)
 RAISED = (
     "The ledger server is slow: two swarm passes in a row took {took}. Server {cpu}, {started}. Newest on dev{newest}."
 )
@@ -48,6 +49,8 @@ def _failure(exc: BaseException) -> str:
         return SERVER_ERROR if exc.code >= 500 else ""
     if isinstance(exc, (LedgerRefused, LedgerGone)):
         return ""
+    if REFUSED_5XX in str(exc):
+        return SERVER_ERROR
     return TIMED_OUT if isinstance(exc, TimeoutError) or TIMED_OUT in str(exc) else NO_ANSWER
 
 

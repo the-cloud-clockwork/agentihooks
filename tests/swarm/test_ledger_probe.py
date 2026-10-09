@@ -99,6 +99,10 @@ def test_a_timeout_or_no_answer_is_a_failed_pass_and_a_refusal_is_an_answer():
     assert (refused.failure, refused.slow) == ("", False)
     ledger.write_error = LedgerGone("ledger sw does not exist")
     assert ledger_probe.measure(ledger, "sw", {}, clock).failure == ""
+    ledger.write_error = SwarmError("ledger sw: server refused: 503 busy")
+    assert ledger_probe.measure(ledger, "sw", {}, clock).failure == "answered with a server error"
+    ledger.write_error = SwarmError("ledger sw: server refused: 409 stale")
+    assert ledger_probe.measure(ledger, "sw", {}, clock).failure == "gave no answer"
 
 
 @pytest.mark.parametrize(
@@ -111,6 +115,7 @@ def test_a_timeout_or_no_answer_is_a_failed_pass_and_a_refusal_is_an_answer():
         (SystemExit("a remote ledger client needs a token"), "gave no answer"),
         (IncompleteRead(b"half"), "gave no answer"),
         (ConnectionResetError(), "gave no answer"),
+        (ValueError("Expecting value: line 1 column 1"), "gave no answer"),
     ],
 )
 def test_a_read_failure_is_classified_in_plain_words(error, failure):
