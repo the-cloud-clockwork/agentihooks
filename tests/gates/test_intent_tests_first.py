@@ -1,9 +1,12 @@
+import json
+import subprocess
 from types import SimpleNamespace
 
 import pytest
 
 from hooks.classifier import YesNo
 from scripts.gates import intent
+from tests.gates.test_intent import WHO, bash, check, verdicts
 
 DECLARATION = "Task part: tests-first"
 DOC = {
@@ -119,3 +122,67 @@ def test_declared_part_reads_the_actual_diff_from_the_same_head():
     pr = intent.pr_view("https://github.com/org/repo/pull/1", run=run)
     assert pr["diff"] == "+assert result in {old_state, new_state}"
     assert ["gh", "pr", "diff", "https://github.com/org/repo/pull/1"] in calls
+
+
+def pull_request_runner(diff, failure=None, moved=False):
+    heads = iter(["head", "moved" if moved else "head"])
+
+    def run(args, **kwargs):
+        if args[1:3] == ["pr", "view"]:
+            output = json.dumps(
+                {"title": "Tests first", "body": DECLARATION, "files": [{"path": "tests/gates/test_required.py"}]}
+            )
+        elif args[1:3] == ["pr", "diff"]:
+            if isinstance(failure, Exception):
+                raise failure
+            return SimpleNamespace(returncode=failure or 0, stdout=diff)
+        elif ".head.sha" in args:
+            output = next(heads)
+        else:
+            output = ""
+        return SimpleNamespace(returncode=0, stdout=output)
+
+    return run
+
+
+def checked_part(tmp_path, runner, seen):
+    task = {**TASK, "id": WHO.task, "state": "pr", "pr_url": "https://github.com/org/repo/pull/1"}
+    doc = {**DOC, "tasks": [task]}
+    check(
+        tmp_path,
+        view=lambda url: intent.pr_view(url, run=runner),
+        ask=lambda value: intent.judge(value, decide=classifier(seen)),
+    ).run(doc)
+    return verdicts(tmp_path).read(WHO.task)
+
+
+@pytest.mark.parametrize("failure", [1, subprocess.TimeoutExpired("gh", 30), OSError("unavailable")])
+def test_failed_diff_retrieval_records_failure_and_denies_merge_after_the_grace_period(tmp_path, failure):
+    seen = []
+    record = checked_part(tmp_path, pull_request_runner("", failure=failure), seen)
+    assert record["verdict"] == "fail"
+    assert "complete pull request diff" in record["reason"]
+    assert not seen
+    decision = intent.IntentGate(clock=lambda: 1e15).decide(bash("gh pr merge 1 --squash"), WHO, verdicts(tmp_path))
+    assert not decision.allowed
+
+
+def test_production_check_judges_a_complete_large_diff_before_the_history_bound(tmp_path):
+    diff = "+assert result in {old_state, new_state}\n" * 300 + "+last assertion\n"
+    seen = []
+    record = checked_part(tmp_path, pull_request_runner(diff), seen)
+    assert record["verdict"] == "pass"
+    assert seen[0][0]["pull_request_diff"] == diff
+
+
+def test_a_push_during_preparatory_diff_retrieval_discards_the_snapshot():
+    assert (
+        intent.pr_view("https://github.com/org/repo/pull/1", run=pull_request_runner("+old and new", moved=True))
+        is None
+    )
+
+
+def test_compatibility_and_gate_change_thresholds_allow_the_valid_side():
+    assert (
+        intent.judge(state(), decide=classifier([], accepts_both_states=0.5, changes_gate_behavior=0.49))[0] == "pass"
+    )
