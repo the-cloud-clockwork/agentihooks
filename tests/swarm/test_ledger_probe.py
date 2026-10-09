@@ -337,9 +337,12 @@ def test_the_swarm_timer_pass_runs_the_probe(store, monkeypatch):
         def metadata(self, slug):
             raise TimeoutError("timed out")
 
+        def time_left(self, slug, slots, ci_minutes):
+            self.written = (slots, ci_minutes)
+
     ledger, runtime = TimingOut([]), FakeRuntime()
     cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     assert not ledger_probe.holding(store, "sw")
     actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     assert "raised the ledger slow alert" in actions
-    assert any("timed out" in text for text in master_mail(store))
+    assert any("timed out" in text for text in master_mail(store)) and ledger.written == (None, None)
