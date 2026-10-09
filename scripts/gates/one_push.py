@@ -25,8 +25,8 @@ MATCHED = re.compile(r"\bpush\b|\bpr\s+(?:create|ready)\b")
 
 def _git_args(here, args):
     while args and args[0].startswith("-"):
-        if args[0] == "-C" and len(args) > 1:
-            here = here / Path(args[1]).expanduser()
+        for value in args[1:2] if args[0] == "-C" else ():
+            here = here / Path(value).expanduser()
         args = args[2:] if args[0] in VALUED else args[1:]
     return here, args
 
@@ -87,7 +87,7 @@ def destinations(path, args):
     """The branches a push writes: each refspec's destination, the current branch for HEAD or no refspec."""
     current = git(path, "branch", "--show-current").stdout.strip()
     specs = positionals(args)[1:]
-    ends = [spec.lstrip("+").split(":")[-1].removeprefix("refs/heads/") for spec in specs] or [""]
+    ends = [spec.lstrip("+").rpartition(":")[2].removeprefix("refs/heads/") for spec in specs] or [""]
     return {current if end in ("", "HEAD") else end for end in ends}
 
 
@@ -144,8 +144,8 @@ class OnePush:
         return open_refusal(who.swarm, missing, held) if missing or held else ""
 
     def pushing(self, who, where, args):
-        task = next((t for t in self.ledger().tasks(who.swarm) if t.get("id") == who.task), None) or {}
-        found = PULL_REPO.search(task.get("pr_url") or "")
+        task = next((t for t in self.ledger().tasks(who.swarm) if t.get("id") == who.task), {})
+        found = PULL_REPO.search(str(task.get("pr_url")))
         if not found:
             return ""
         repo = repo_of(where, args)

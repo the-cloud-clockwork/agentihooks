@@ -48,7 +48,7 @@ class Ledger:
         self.pr_url, self.branch = pr_url, branch
 
     def tasks(self, slug):
-        return [{"id": "t1", "pr_url": self.pr_url, "branch": self.branch}]
+        return [{"id": "t1", "pr_url": self.pr_url, "branch": self.branch}] if slug == "demo" else []
 
 
 def pull(state="OPEN", red=False, running=True, queued=False):
@@ -58,7 +58,9 @@ def pull(state="OPEN", red=False, running=True, queued=False):
 
 
 def gate(found=None, pr_url=URL, target="claude", branch="task"):
-    return OnePush(ledger=lambda: Ledger(pr_url, branch), github=lambda url: found, target=target)
+    return OnePush(
+        ledger=lambda: Ledger(pr_url, branch), github=lambda url: found if url == pr_url else None, target=target
+    )
 
 
 def bash(command, cwd):
@@ -239,3 +241,55 @@ def test_push_options_taking_a_value_are_not_read_as_the_remote(tree, tmp_path):
     git(tree, "remote", "add", "fork", "https://github.com/o/elsewhere.git")
     assert gate(pull()).decide(bash("git push -o ci.skip fork task", tree), ME, state(tmp_path)).allowed
     assert destinations(tree, ["--push-option", "x", "origin", "HEAD:wip/y"]) == {"wip/y"}
+
+
+def test_git_options_before_the_command_are_skipped_and_a_bare_dash_c_names_nothing():
+    assert list(actions("git --no-pager -C sub push origin", "/x")) == [("push", Path("/x/sub"), ["origin"])]
+    assert list(actions("git -C", "/x")) == []
+    assert list(actions("git push", None)) == [("push", Path("."), [])]
+    assert list(actions("FOO=1; git push", "/x")) == [("push", Path("/x"), [])]
+
+
+def test_untracked_files_do_not_hold_an_open_and_a_folder_outside_git_holds_nothing(tree, tmp_path):
+    reviewed(tmp_path, "standards-reader", "spec-reader")
+    (tree / "notes.txt").write_text("scratch\n")
+    assert gate().decide(bash("gh pr create --base dev", tree), ME, state(tmp_path)).allowed
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert gate().decide(bash("gh pr create --base dev", plain), ME, state(tmp_path)).allowed
+
+
+def test_a_trailing_valued_option_and_a_forced_refspec_still_name_the_branch(tree):
+    assert destinations(tree, ["origin", "+task", "-o"]) == {"task"}
+
+
+def test_a_remote_url_in_another_case_still_names_the_pull_request_repo(tree, tmp_path):
+    assert not gate(pull()).decide(bash("git push https://github.com/O/R.git task", tree), ME, state(tmp_path)).allowed
+
+
+def test_the_open_refusal_names_both_readers_when_neither_ran():
+    assert open_refusal("demo", ["standards-reader", "spec-reader"], "") == (
+        "open the pull request once review closes, so one push carries it: launch the standards-reader and "
+        "spec-reader sub-agents on the committed diff and close its findings. A draft pull request for a block stays "
+        'allowed: gh pr create --draft, then agentihooks swarm demo block "<why>"'
+    )
+
+
+def test_a_session_with_a_task_but_no_swarm_is_never_held(tree, tmp_path):
+    who = Who(name="ci@1-1", lane="ci", task="t1")
+    assert gate(pull()).decide(bash("git push", tree), who, state(tmp_path)).allowed
+
+
+def test_a_push_passes_when_the_ledger_has_no_such_task(tree, tmp_path):
+    other = Who(name="ci@323133-0001", swarm="demo", lane="ci", task="t9")
+    assert gate(pull()).decide(bash("git push", tree), other, state(tmp_path)).allowed
+
+
+@pytest.mark.parametrize(("environ", "allowed"), [({"AGENTIHOOKS_TARGET": "codex"}, True), ({}, False)])
+def test_the_harness_comes_from_the_environment_and_defaults_to_claude(tree, tmp_path, monkeypatch, environ, allowed):
+    monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
+    for key, value in environ.items():
+        monkeypatch.setenv(key, value)
+    found = OnePush(ledger=lambda: Ledger(), github=lambda url: None)
+    assert found.target() == environ.get("AGENTIHOOKS_TARGET", "claude")
+    assert found.decide(bash("gh pr create --base dev", tree), ME, state(tmp_path)).allowed is allowed
