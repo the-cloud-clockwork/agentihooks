@@ -4,6 +4,7 @@ import os
 from scripts import agents_quota, codex_quota
 from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
 from scripts.codex_router import CodexAccount
+from scripts.routing.slots import API, API_UNBOUNDED, Slot
 
 
 def _event(ts: str, primary: dict | None, secondary: dict | None = None, plan: str = "pro") -> str:
@@ -76,8 +77,11 @@ def test_rows_list_every_claude_account_and_codex():
     assert table[0].split() == [
         "AGENT",
         "ACCOUNT",
+        "KIND",
         "STATE",
         "SESSIONS",
+        "WEIGHT",
+        "CAP",
         "5H",
         "LEFT",
         "5H",
@@ -88,10 +92,86 @@ def test_rows_list_every_claude_account_and_codex():
         "RESET",
         "SOURCE",
     ]
-    assert table[1].split()[:8] == ["claude", "ncgma", "NORMAL", "2/6", "95%", "16m", "60%", "2h13m"]
-    assert table[2].split()[:6] == ["codex", "default", "NORMAL", "1/6", "?", "?"]
+    assert table[1].split()[:11] == [
+        "claude",
+        "ncgma",
+        "subscription",
+        "NORMAL",
+        "2/6",
+        "-",
+        "6",
+        "95%",
+        "16m",
+        "60%",
+        "2h13m",
+    ]
+    assert table[2].split()[:9] == ["codex", "default", "subscription", "NORMAL", "1/6", "-", "6", "?", "?"]
     assert table[2].endswith("session-log 2m ago")
-    assert table[3].split() == ["codex", "alpha", "UNKNOWN", "0/?", "?", "?", "?", "?", "no", "session", "log"]
+    assert table[3].split() == [
+        "codex",
+        "alpha",
+        "subscription",
+        "UNKNOWN",
+        "0/?",
+        "-",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "no",
+        "session",
+        "log",
+    ]
+
+
+def test_an_api_row_is_open_with_its_weight_cap_and_provider():
+    slot = Slot("codex", "api", 4, 1, kind=API, weight=30, provider="openai")
+    unbounded = Slot("claude", "api", API_UNBOUNDED, 2, kind=API, weight=0, provider="gateway")
+    rows = [agents_quota.api_row(slot), agents_quota.api_row(unbounded)]
+    assert rows[0] == agents_quota.QuotaRow(
+        "codex", "api", "OPEN", 1, None, None, None, "openai", cap=4, kind="api", weight=30
+    )
+    table = agents_quota.render(rows, now=1000).splitlines()
+    assert table[1].split() == ["codex", "api", "api", "OPEN", "1/4", "30%", "4", "n/a", "n/a", "n/a", "n/a", "openai"]
+    assert table[2].split() == [
+        "claude",
+        "api",
+        "api",
+        "OPEN",
+        "2/none",
+        "0%",
+        "none",
+        "n/a",
+        "n/a",
+        "n/a",
+        "n/a",
+        "gateway",
+    ]
+
+
+def test_api_rows_carry_the_weight_from_the_routing_settings(monkeypatch):
+    from scripts.routing import place
+
+    source = object()
+    slot = Slot("codex", "api", 3, 1, kind=API, provider="openai")
+    calls = []
+    monkeypatch.setattr(place, "api_side", lambda *args: calls.append(args) or ([slot], 25))
+    [row] = agents_quota.api_rows(source, "codex", 50.0)
+    assert (row.kind, row.weight, row.cap, row.sessions, row.source) == ("api", 25, 3, 1, "openai")
+    assert calls == [(source, "codex", agents_quota.os.environ, 50.0)]
+    monkeypatch.setattr(place, "api_side", lambda *args: ([], 0))
+    assert agents_quota.api_rows(source, "codex", 50.0) == []
+
+
+def test_quota_json_rows_carry_kind_and_weight(monkeypatch, capsys):
+    sub = agents_quota.QuotaRow("codex", "default", "NORMAL", 0, 90.0, 80.0, None, "log", cap=6)
+    api = agents_quota.api_row(Slot("codex", "api", 4, 1, kind=API, weight=30, provider="openai"))
+    monkeypatch.setattr(agents_quota, "_claude", lambda refresh, timeout: [])
+    monkeypatch.setattr(agents_quota, "_codex", lambda now: [sub, api])
+    assert agents_quota.main(["--json"]) == 0
+    rows = json.loads(capsys.readouterr().out)
+    assert [(row["kind"], row["weight"]) for row in rows] == [("subscription", None), ("api", 30)]
 
 
 def test_a_claude_row_with_no_or_a_stale_reading_time_shows_no_cap():
@@ -181,7 +261,41 @@ def test_quota_json_lists_every_row(monkeypatch, capsys):
             "five_hour_resets_at": None,
             "observed_at": None,
             "cap": None,
+            "kind": "subscription",
+            "weight": None,
         }
+    ]
+
+
+def test_every_quota_reader_appends_the_api_row_of_its_harness(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer, codex_router, install
+
+    seen = []
+
+    def api_rows(source, harness, now):
+        seen.append((type(source).__name__, dict(source.sessions), harness))
+        return [agents_quota.api_row(Slot(harness, "api", 2, 1, kind=API, weight=10, provider="p"))]
+
+    agents_quota._page_cache.clear()
+    monkeypatch.setattr(agents_quota, "api_rows", api_rows)
+    monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+    monkeypatch.setattr(claude_quota_balancer, "discover_credentials", lambda environ: [])
+    monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: [])
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"api": 1})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"api": 3})
+    monkeypatch.setattr(codex_router, "accounts", lambda environ: [])
+    monkeypatch.setattr(codex_router, "routing_pool", lambda environ: [])
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
+    assert [(row.agent, row.kind) for row in agents_quota._claude(False, 1.0)] == [("claude", "api")]
+    assert [(row.agent, row.kind) for row in agents_quota._codex(5.0)] == [("codex", "api")]
+    rows = agents_quota.page_quota(now=100.0)["rows"]
+    assert [(row["agent"], row["kind"], row["weight"]) for row in rows] == [("claude", "api", 10), ("codex", "api", 10)]
+    assert seen == [
+        ("ClaudeApiSource", {"api": 1}, "claude"),
+        ("CodexApiSource", {"api": 3}, "codex"),
+        ("ClaudeApiSource", {"api": 1}, "claude"),
+        ("CodexApiSource", {"api": 3}, "codex"),
     ]
 
 

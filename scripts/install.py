@@ -5668,6 +5668,9 @@ def cmd_balance(
     show_account_metadata: str = "",
     current: bool = False,
 ) -> int:
+    import time
+    from dataclasses import replace
+
     from hooks.context.account_sessions import sessions_by_account
     from scripts.agents_quota import codex_table
     from scripts.claude_quota_balancer import (
@@ -5682,6 +5685,8 @@ def cmd_balance(
         is_routable,
         render_table,
     )
+    from scripts.routing import place
+    from scripts.routing.claude_api import ClaudeApiSource
 
     session_env = dict(os.environ)
     _load_claude_runtime_env()
@@ -5741,10 +5746,69 @@ def cmd_balance(
         timeout=timeout,
         claude_bin=shutil.which("claude") or "claude",
     )
-    print(render_table(results, include_fable=include_fable, sessions=live))
+    api, weight = place.api_side(ClaudeApiSource(live), "claude", os.environ, time.time())
+    api = [replace(slot, weight=weight) for slot in api]
+    print(render_table(results, include_fable=include_fable, sessions=live, api=api))
     print(f"\nsource={source}")
     print(f"\n{codex_table()}")
     return 0 if any(is_routable(result) for result in results) else 1
+
+
+def _routing_settings():
+    from scripts.routing import place
+    from scripts.routing.settings import open_store
+
+    return open_store(place._client(os.environ), os.environ)
+
+
+def _setting_text(value: object) -> str:
+    return "unset" if value is None else str(value)
+
+
+def _setting_pair(pair: str) -> tuple[str, object]:
+    from scripts.routing.settings import VALIDATORS
+
+    key, sep, text = pair.partition("=")
+    if not sep:
+        raise ValueError(f"expected KEY=VALUE, got {pair}")
+    if key not in VALIDATORS:
+        raise ValueError(f"unknown routing setting {key}")
+    if text.lower() in ("none", "null", ""):
+        return key, None
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        value = text
+    if not VALIDATORS[key](value):
+        raise ValueError(f"invalid value for {key}: {text}")
+    return key, value
+
+
+def cmd_balance_set(pairs: list[str], now: float | None = None) -> int:
+    import time
+
+    try:
+        changes = [_setting_pair(pair) for pair in pairs]
+    except ValueError as exc:
+        print(f"agentihooks balance set: {exc}", file=sys.stderr)
+        return 2
+    store = _routing_settings()
+    actor = os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
+    at = time.time() if now is None else now
+    for key, value in changes:
+        before = store.get(key)
+        store.set(key, value, actor, at)
+        print(f"{key}: {_setting_text(before)} -> {_setting_text(store.get(key))}")
+    return 0
+
+
+def cmd_balance_settings() -> int:
+    from scripts.routing.settings import VALIDATORS
+
+    values = _routing_settings().all()
+    for key in VALIDATORS:
+        print(f"{key}={_setting_text(values.get(key))}")
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -6640,6 +6704,10 @@ def main() -> None:
         help="Name the account this Claude session runs on; other accounts come from the quota cache",
     )
     balance_p.add_argument("--timeout", type=float, default=60, help="Per-account probe timeout in seconds")
+    balance_sub = balance_p.add_subparsers(dest="balance_command")
+    balance_set_p = balance_sub.add_parser("set", help="Write routing settings: set KEY=VALUE ... (VALUE none clears)")
+    balance_set_p.add_argument("pairs", nargs="+", metavar="KEY=VALUE")
+    balance_sub.add_parser("settings", help="List every routing setting key with its value")
 
     ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
     ign_p.add_argument(
@@ -6958,6 +7026,10 @@ notes:
         except ValueError:
             extra = []
         cmd_claude(extra)
+    elif args.command == "balance" and args.balance_command == "set":
+        sys.exit(cmd_balance_set(args.pairs))
+    elif args.command == "balance" and args.balance_command == "settings":
+        sys.exit(cmd_balance_settings())
     elif args.command == "balance":
         sys.exit(
             cmd_balance(
