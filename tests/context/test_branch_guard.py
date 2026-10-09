@@ -2,7 +2,6 @@
 
 import pytest
 
-
 pytestmark = pytest.mark.usefixtures("outside_a_guarded_repository")
 
 
