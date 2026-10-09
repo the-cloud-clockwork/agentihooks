@@ -241,12 +241,15 @@ def test_quiesce_excludes_exporter_and_bounds_descendants(supervisor, monkeypatc
         assert send.call_args_list[1].args == (remaining, signal.SIGKILL)
 
 
+@pytest.mark.parametrize("already_reaped", [False, True])
 @pytest.mark.parametrize("clean,identifier", [(True, "checkpoint"), (True, None), (False, None)])
-def test_drain_reports_acknowledged_material_only(supervisor, monkeypatch, clean, identifier):
+def test_drain_reports_acknowledged_material_only(supervisor, monkeypatch, clean, identifier, already_reaped):
     monkeypatch.setattr(supervisor, "quiesce", lambda: clean)
     supervisor.stop = signal.SIGTERM
     supervisor.exits.update(agent=0)
-    supervisor.reaped.update({123, 321})
+    supervisor.reaped.add(321)
+    if already_reaped:
+        supervisor.reaped.add(123)
     protocol.write(supervisor.root / "agent.json", {**supervisor.scope, "pid": 123})
     acknowledgement = {**supervisor.scope, "status": "complete"}
     protocol.write(supervisor.root / "exporter.checkpoint.json", acknowledgement)
