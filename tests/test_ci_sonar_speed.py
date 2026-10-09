@@ -250,11 +250,12 @@ def test_sonar_evidence_does_not_upload_shard_databases_twice():
     upload = _step("Upload coverage and analysis evidence")
     assert upload["with"]["path"].splitlines() == [
         "coverage.xml",
+        "lcov.info",
         ".scannerwork/report-task.txt",
     ]
     assert upload["if"] == "always() && steps.current.outputs.superseded != 'true'"
     assert upload["with"]["if-no-files-found"] == "error"
     unit = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]
     shards = next(step for step in unit["steps"] if step.get("name") == "Upload coverage")
-    assert shards["with"]["path"] == ".coverage"
+    assert shards["with"]["path"].splitlines() == [".coverage", "js-coverage/"]
     assert shards["with"]["include-hidden-files"] is True

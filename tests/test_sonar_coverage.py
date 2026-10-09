@@ -103,6 +103,11 @@ for shard in range(1, 5):
         runpy.run_path(f'{package}/part_{shard}.py')
     cov.stop()
     cov.save()
+(folder / 'js-coverage').mkdir()
+(folder / 'js-coverage' / 'sources').mkdir(parents=True)
+(folder / 'js-coverage' / 'sources' / 's.js').write_text('void 0;\\n')
+for kind in ('node', 'browser'):
+    (folder / 'js-coverage' / f'capture-{kind}-1.json').write_text('{"result": [{"source": "s", "functions": [{"ranges": [{"startOffset": 0, "endOffset": 7, "count": 1}]}]}]}')
 """
     subprocess.run(
         [sys.executable, "-c", generator, str(ROOT / ".github/coverage/coverage.ini")],
@@ -124,6 +129,7 @@ for shard in range(1, 5):
         f"{package}/part_{shard}.py" for package in ("hooks", "scripts") for shard in range(1, 5)
     }
     assert all(int(line.attrib["hits"]) > 0 for line in report.findall(".//line"))
+    assert (tmp_path / "lcov.info").exists()
 
 
 def test_coverage_options_do_not_reach_nested_test_runners(tmp_path):
