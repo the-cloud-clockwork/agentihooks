@@ -213,6 +213,15 @@ def test_a_configured_confidence_floor_keeps_the_default_below_it(monkeypatch):
     assert (picked.model, picked.effort, picked.confidence) == ("auto", "max", 0.7)
 
 
+def test_a_legacy_floor_outside_zero_to_one_keeps_its_old_effect(monkeypatch):
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision(score=3, confidence=0.9))
+    lane = {"model": "auto", "effort": "auto"}
+    picked = model_pick.pick("claude", lane, {}, {"AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE": "1.5"})
+    assert picked == model_pick.ModelPick("auto", "auto", "pplx-decider-v1-27b", 0.9)
+    picked = model_pick.pick("claude", lane, {}, {"AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE": "nan"})
+    assert picked == model_pick.ModelPick("auto", "max", "pplx-decider-v1-27b", 0.9)
+
+
 def test_caller_error_is_not_hidden(monkeypatch):
     from hooks.classifier import ClassifierRequestError
 

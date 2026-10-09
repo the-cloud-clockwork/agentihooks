@@ -1,3 +1,4 @@
+import math
 from unittest.mock import patch
 
 import pytest
@@ -129,8 +130,12 @@ def test_legacy_threshold_variables_yield_to_the_classifier_variable(packaged, n
     assert definitions.load(name, environ={legacy: "0.75"}).thresholds == {"confidence": 0.75}
     assert definitions.load(name, environ={legacy: "0.75", current: "0.7"}).thresholds == {"confidence": 0.7}
     assert definitions.load(name, environ={current: "0.65"}).thresholds == {"confidence": 0.65}
+    assert definitions.load(name, environ={legacy: "1.5"}).thresholds == {"confidence": 1.5}
+    assert math.isnan(definitions.load(name, environ={legacy: "nan"}).thresholds["confidence"])
     with pytest.raises(definitions.DefinitionError, match="threshold confidence must be between zero and one"):
         definitions.load(name, environ={legacy: "much"})
+    with pytest.raises(definitions.DefinitionError, match="threshold confidence must be between zero and one"):
+        definitions.load(name, environ={legacy: "0.5", current: "1.5"})
 
 
 def test_definition_environment_names_its_legacy_variables(definition_home):

@@ -210,6 +210,13 @@ def test_an_answer_without_confidence_takes_the_lane_default(asked):
     assert decision.responsibility.endswith("answered frontend with confidence 0.00, below the floor 0.00")
 
 
+def test_a_legacy_floor_above_one_takes_the_lane_default(asked):
+    asked("frontend", confidence=0.99)
+    decision = profile_choice.choose("sw", "eng", {}, TASK, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "1.5"})
+    assert (decision.profile, decision.source, decision.confidence) == ("engineer", "lane default", 0.99)
+    assert decision.responsibility.endswith("answered frontend with confidence 0.99, below the floor 1.50")
+
+
 def test_pinned_task_profile_wins_over_a_low_confidence_answer(asked):
     calls = asked("frontend", confidence=0.1)
     decision = profile_choice.choose("sw", "eng", {}, {**TASK, "profile": "qa"}, {})
