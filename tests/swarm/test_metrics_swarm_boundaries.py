@@ -331,6 +331,67 @@ def test_all_row_families_enter_the_outbox_and_replay_without_loss(box, tmp_path
     ]
 
 
+def test_late_events_without_named_metadata_do_not_reuse_an_ended_owner():
+    old = {**AGENT, "ended_at": NOW + 1, "reason": "retired"}
+    claim = {key: value for key, value in event("task claimed", NOW + 4).items() if key != "by"}
+    rows = metrics_swarm.agent_rows(SLUG, doc([claim]), [old])
+    assert rows[-1]["agent"] == ""
+    assert rows[1]["reason"] == "retired"
+    unrelated = {**AGENT, "name": "XXXX", "task": "other", "started_at": NOW + 2}
+    rows = metrics_swarm.delivery_rows(
+        SLUG,
+        doc(),
+        [AGENT, unrelated],
+        {TASK["pr_url"]: SimpleNamespace(state="MERGED", merged_at=NOW + 4)},
+    )
+    assert rows[0]["agent"] == "worker"
+    active_claim = {key: value for key, value in event("task claimed", NOW + 4).items() if key != "by"}
+    pr = {key: value for key, value in event("task pr", NOW + 4).items() if key != "by"}
+    assert metrics_swarm.agent_rows(SLUG, doc([active_claim]), [AGENT, unrelated])[-1]["agent"] == "worker"
+    assert metrics_swarm.delivery_rows(SLUG, doc([pr]), [AGENT, unrelated], {})[0]["agent"] == "worker"
+
+
+def test_review_identity_ignores_the_snapshot_author():
+    first = {**event("review round", NOW), "review_id": "r"}
+    second = {**first, "by": "replacement"}
+    rows = metrics_swarm.delivery_rows(SLUG, doc([first, second]), [AGENT], {})
+    assert rows[0]["event_id"] == rows[1]["event_id"]
+
+
+def test_controller_gate_and_handoff_events_keep_temporal_owner_and_distinct_ids():
+    gates = [
+        {"at": NOW + i, "gate": gate, "kind": "count", "agent": "controller", "task": "t", "reason": gate}
+        for i, gate in enumerate(["idle-ticks", "idle-ticks", "reruns", "reruns"], 1)
+    ]
+    agents, delivery = metrics_swarm.gate_rows(SLUG, doc(), [AGENT], gates)
+    assert len({row["event_id"] for row in agents}) == 2
+    assert len({row["event_id"] for row in delivery}) == 2
+    for row in agents + delivery:
+        assert row["agent"] == "worker"
+        assert_node(row)
+    transfer = {"id": "t", "task": "t", "predecessor": "controller", "at": NOW + 1, "reason": "recycle"}
+    assert metrics_swarm.signal_rows(SLUG, doc(), [AGENT], [transfer], [])[0]["agent"] == "worker"
+    replacement = {**AGENT, "name": "replacement", "started_at": NOW + 1}
+    transfer = {**transfer, "predecessor": "worker", "at": NOW + 2}
+    assert metrics_swarm.signal_rows(SLUG, doc(), [AGENT, replacement], [transfer], [])[0]["agent"] == "worker"
+
+
+def test_opened_pull_rows_do_not_suppress_merge_observation(box):
+    opened = metrics_swarm.delivery_rows(SLUG, doc([event("task pr", NOW)]), [AGENT], {})
+    box.append(metrics_swarm.DELIVERY, opened)
+    calls = []
+    source = metrics_swarm.TickInput(None, doc(), [], lambda url: calls.append(url) or url)
+    assert metrics_swarm.pull_rows(box, NOW, source) == {TASK["pr_url"]: TASK["pr_url"]}
+    assert calls == [TASK["pr_url"]]
+
+
+def test_ready_tasks_in_an_unconfigured_lane_are_not_held_spawns(monkeypatch):
+    ready = {lane: [] for lane in metrics_swarm.capacity.LANES}
+    ready["eng"] = [{"id": "t"}]
+    monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
+    assert metrics_swarm._held_spawns(None, SLUG, doc(), {}, []) == 0
+
+
 def test_local_window_includes_its_boundary_and_excludes_older_rows(box, tmp_path, monkeypatch):
     import fakeredis
 
