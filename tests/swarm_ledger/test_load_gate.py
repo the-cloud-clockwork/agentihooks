@@ -1,3 +1,5 @@
+import inspect
+
 import pytest
 
 from scripts.swarm_ledger import ledger_server, load_gate
@@ -11,7 +13,7 @@ def test_p95_is_the_nearest_rank_sample():
 
 
 def test_writes_and_cpu_within_budget_pass():
-    assert load_gate.verdict([0.1] * 100, load_gate.CPU_CORES, []) == []
+    assert load_gate.verdict([0.1] * 100, 100, load_gate.CPU_CORES, []) == []
 
 
 @pytest.mark.parametrize(
@@ -20,17 +22,39 @@ def test_writes_and_cpu_within_budget_pass():
         ([0.1] * 94 + [load_gate.WRITE_P95_S + 0.01] * 6, 0.2, [], "write p95"),
         ([0.1] * 100, load_gate.CPU_CORES + 0.01, [], "server CPU"),
         ([0.1] * 100, 0.2, ["ci@ab0000-0001: timed out"], "requests failed"),
-        ([], 0.2, [], "no write completed"),
+        ([], 0.2, [], "writes completed"),
+        ([0.1] * 89, 0.2, [], "writes completed"),
     ],
 )
-def test_a_broken_budget_or_a_failed_request_is_red(writes, cores, errors, problem):
-    problems = load_gate.verdict(writes, cores, errors)
+def test_a_broken_budget_a_failed_request_or_a_shortfall_is_red(writes, cores, errors, problem):
+    problems = load_gate.verdict(writes, 100, cores, errors)
     assert any(problem in line for line in problems)
 
 
+def test_cpu_is_judged_on_its_busiest_window_not_the_whole_run():
+    calm = [(float(t), 0.2 * t) for t in range(60)]
+    burst = [(60.0 + t, calm[-1][1] + 1.5 * (t + 1)) for t in range(load_gate.CPU_WINDOW_S + 1)]
+    assert load_gate.busiest_window(calm) == pytest.approx(0.2)
+    assert load_gate.busiest_window(calm + burst) > load_gate.CPU_CORES
+
+
 def test_the_load_covers_every_sweep_of_the_watch_loop_more_than_once():
-    period = ledger_server.BIN_SWEEP_EVERY * 2.0
+    interval = inspect.signature(ledger_server.watch_ledgers).parameters["interval"].default
+    period = ledger_server.BIN_SWEEP_EVERY * interval
     assert load_gate.duration() >= load_gate.SWEEPS * period + period / 2
+
+
+def test_the_gate_refuses_to_run_outside_ci(monkeypatch, tmp_path):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    with pytest.raises(SystemExit, match="CI only"):
+        load_gate.main(["--folder", str(tmp_path)])
+
+
+def test_some_open_alerts_are_past_their_quiet_hour_so_the_expiry_sweep_has_work():
+    at = 10 * load_gate.ALERT_QUIET_MS
+    alerts = [load_gate.alert(n, at) for n in range(load_gate.ALERTS)]
+    assert any(ledger_server.ledger_alerts.expired(alert, at) for alert in alerts)
+    assert not all(ledger_server.ledger_alerts.expired(alert, at) for alert in alerts if alert["state"] == "open")
 
 
 def test_the_generated_ledger_reaches_the_target_size(monkeypatch):

@@ -1,9 +1,4 @@
-"""A scratch ledger server on a ledger the size of the live one, written and read by ten clients at once.
-
-CI fails when write p95 or the server's CPU breaks its budget, so a slow ledger change never merges. The ledger
-size, the load and the budgets are the constants below; the run lasts long enough to cover every background sweep
-of the watch loop at least twice.
-"""
+"""Ten clients write and read a scratch ledger server holding a ledger the size of the live one; red past budget."""
 
 import argparse
 import inspect
@@ -14,15 +9,16 @@ import os
 import socket
 import subprocess
 import sys
-import tempfile
 import threading
 import time
-import urllib.error
+import urllib.request
 import uuid
 from pathlib import Path
+from typing import TextIO
 
 from scripts.swarm_ledger import ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
+from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 
 authority, core = ledger_server.authority, ledger_server.core
 SLUG = "load-gate"
@@ -40,7 +36,10 @@ TIMEOUT_S = 10.0
 SWEEPS = 2
 WRITE_P95_S = 2.0
 CPU_CORES = 1.0
+CPU_WINDOW_S = 10
+MIN_WRITES = 0.9
 SERVER_WAIT_S = 60.0
+ALERT_QUIET_MS = 3_600_000
 WORDS = "the swarm keeps every task with its comments proof and the work that landed for the operator".split()
 
 
@@ -80,7 +79,7 @@ def alert(n: int, at: int) -> dict:
         "rev": 1,
         "writer": f"ci@ab0000-{n % CLIENTS:04d}",
         "item": f"tasks/t{n}",
-        "last_refused_at": at,
+        "last_refused_at": at - ALERT_QUIET_MS if n % 4 == 0 else at,
     }
 
 
@@ -112,7 +111,6 @@ def size(doc: dict) -> int:
 
 
 def full_size(at: int) -> dict:
-    """The generated ledger, its task descriptions padded until the whole document reaches LEDGER_BYTES."""
     short = size(document(at))
     words = max(0, math.ceil((LEDGER_BYTES - short) / TASKS / (len(" ".join(WORDS)) / len(WORDS) + 1)))
     while size(doc := document(at, text(words))) < LEDGER_BYTES:
@@ -121,8 +119,6 @@ def full_size(at: int) -> dict:
 
 
 def store(folder: Path, doc: dict) -> str:
-    from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
-
     repository = SQLiteLedgerRepository(folder / DATABASE)
     repository.import_document(SLUG, doc)
     return repository.token(SLUG)
@@ -139,24 +135,33 @@ def cpu_seconds(pid: int) -> float:
 
 
 def write_every() -> float:
-    """Each client's seconds between writes, so all clients together write HEADROOM times the live peak minute."""
+    """Each client's seconds between writes: all clients together write HEADROOM times the live peak minute."""
     return CLIENTS * 60 / (LIVE_PEAK_WRITES_PER_MINUTE * HEADROOM)
 
 
 def duration() -> float:
-    """Long enough for the watch loop's slowest sweep to run SWEEPS times during the load."""
     interval = inspect.signature(ledger_server.watch_ledgers).parameters["interval"].default
     return (SWEEPS + 1) * ledger_server.BIN_SWEEP_EVERY * interval
 
 
-def verdict(writes: list[float], cores: float, errors: list[str]) -> list[str]:
+def busiest_window(samples: list[tuple[float, float]]) -> float:
+    busiest = 0.0
+    for start, cpu in samples:
+        later = [(at, used) for at, used in samples if at - start >= CPU_WINDOW_S]
+        if later:
+            at, used = later[0]
+            busiest = max(busiest, (used - cpu) / (at - start))
+    return busiest
+
+
+def verdict(writes: list[float], expected: int, cores: float, errors: list[str]) -> list[str]:
     problems = [f"{len(errors)} requests failed, first: {errors[0]}"] if errors else []
-    if not writes:
-        return [*problems, "no write completed"]
-    if p95(writes) > WRITE_P95_S:
-        problems.append(f"write p95 {p95(writes):.3f}s exceeds {WRITE_P95_S}s")
+    if len(writes) < MIN_WRITES * expected:
+        problems.append(f"{len(writes)} writes completed of {expected} expected")
+    if writes and (worst := p95(writes)) > WRITE_P95_S:
+        problems.append(f"write p95 {worst:.3f}s exceeds {WRITE_P95_S}s")
     if cores > CPU_CORES:
-        problems.append(f"server CPU averaged {cores:.2f} cores, budget {CPU_CORES}")
+        problems.append(f"server CPU held {cores:.2f} cores over {CPU_WINDOW_S}s, budget {CPU_CORES}")
     return problems
 
 
@@ -166,7 +171,7 @@ def free_port() -> int:
         return probe.getsockname()[1]
 
 
-def start_server(folder: Path, port: int, log) -> subprocess.Popen:
+def start_server(folder: Path, port: int, log: TextIO) -> subprocess.Popen:
     env = {**os.environ, "LEDGER_DIR": str(folder), "LEDGER_PORT": str(port), "SWARM_RELOAD": "0"}
     server = subprocess.Popen(
         [sys.executable, ledger_server.__file__, "--serve"], env=env, stdout=log, stderr=log, stdin=subprocess.DEVNULL
@@ -184,6 +189,15 @@ def start_server(folder: Path, port: int, log) -> subprocess.Popen:
     raise SystemExit(f"ledger server did not listen on port {port} within {SERVER_WAIT_S}s")
 
 
+def stop_server(server: subprocess.Popen) -> None:
+    server.terminate()
+    try:
+        server.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        server.kill()
+        server.wait()
+
+
 def client(api: ResourceClient, name: str, item: str, start: float, deadline: float, results: dict) -> None:
     for n in itertools.count():
         began = start + n * write_every()
@@ -193,19 +207,45 @@ def client(api: ResourceClient, name: str, item: str, start: float, deadline: fl
         op = {"op": "add", "thread": f"{item}/comments", "id": f"c-{uuid.uuid4().hex[:10]}", "by": name}
         try:
             sent = time.monotonic()
-            api.mutate(SLUG, [{**op, "text": f"Load check write {n} landed."}])
+            reply = api.mutate(SLUG, [{**op, "text": f"Load check write {n} landed."}])
+            if rejected := (reply.get("data") or reply).get("rejected"):
+                raise ValueError(f"write rejected: {rejected}")
             results["writes"].append(time.monotonic() - sent)
             read = time.monotonic()
             api.request(SLUG, item)
             api.request(SLUG, "tasks?limit=100")
             results["reads"].append(time.monotonic() - read)
-        except (OSError, urllib.error.URLError, ValueError) as exc:
-            results["errors"].append(f"{name}: {exc}")
+        except Exception as exc:  # every failure is a red request, whatever raised it
+            results["errors"].append(f"{name}: {type(exc).__name__}: {exc}")
 
 
-def load(port: int, token: str, seconds: float) -> dict:
+def watcher(base: str, credentials: dict, deadline: float, results: dict) -> None:
+    """The operator's page: one event stream held open through the load, as the live page holds it."""
+    request = urllib.request.Request(
+        f"{base}/api/v1/ledgers/{SLUG}/events", headers={**credentials, "Accept": "text/event-stream"}
+    )
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(request, timeout=TIMEOUT_S) as stream:
+                while time.monotonic() < deadline and stream.read1(65536):
+                    pass
+        except TimeoutError:
+            continue
+        except Exception as exc:  # a dropped stream is a red request
+            results["errors"].append(f"event stream: {type(exc).__name__}: {exc}")
+            return
+
+
+def sample_cpu(pid: int, deadline: float, samples: list) -> None:
+    while time.monotonic() < deadline:
+        samples.append((time.monotonic(), cpu_seconds(pid)))
+        time.sleep(1)
+    samples.append((time.monotonic(), cpu_seconds(pid)))
+
+
+def load(port: int, token: str, pid: int, seconds: float) -> dict:
     base = f"http://127.0.0.1:{port}"
-    results = {"writes": [], "reads": [], "errors": []}
+    results = {"writes": [], "reads": [], "errors": [], "cpu": []}
     apis = []
     for n in range(CLIENTS):
         name = f"ci@ab0000-{n:04d}"
@@ -219,6 +259,8 @@ def load(port: int, token: str, seconds: float) -> dict:
         threading.Thread(target=client, args=(*entry, began + n * write_every() / CLIENTS, deadline, results))
         for n, entry in enumerate(apis)
     ]
+    threads.append(threading.Thread(target=watcher, args=(base, {"X-Ledger-Token": token}, deadline, results)))
+    threads.append(threading.Thread(target=sample_cpu, args=(pid, deadline, results["cpu"])))
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -231,17 +273,19 @@ def run(folder: Path) -> list[str]:
     token = store(folder, doc)
     print(f"ledger {SLUG}: {len(doc['tasks'])} tasks, {size(doc)} bytes", flush=True)
     port = free_port()
-    with (folder / "server.log").open("w") as log:
+    seconds = duration()
+    log_path = folder / "server.log"
+    with log_path.open("w") as log:
         server = start_server(folder, port, log)
         try:
-            seconds = duration()
-            cpu, wall = cpu_seconds(server.pid), time.monotonic()
-            results = load(port, token, seconds)
-            cores = (cpu_seconds(server.pid) - cpu) / (time.monotonic() - wall)
+            results = load(port, token, server.pid, seconds)
         finally:
-            server.terminate()
-            server.wait(timeout=10)
-    writes, reads = results["writes"], results["reads"]
+            stop_server(server)
+    writes, cores = results["writes"], busiest_window(results["cpu"])
+    expected = CLIENTS * math.ceil(seconds / write_every())
+    problems = verdict(writes, expected, cores, results["errors"])
+    if "Exception in thread" in (server_log := log_path.read_text()):
+        problems.append("a ledger server background thread died")
     print(
         json.dumps(
             {
@@ -252,28 +296,30 @@ def run(folder: Path) -> list[str]:
                 "write_p50_s": round(sorted(writes)[len(writes) // 2], 3) if writes else None,
                 "write_p95_s": round(p95(writes), 3) if writes else None,
                 "write_max_s": round(max(writes), 3) if writes else None,
-                "reads": len(reads),
-                "read_p95_s": round(p95(reads), 3) if reads else None,
-                "server_cores": round(cores, 3),
+                "reads": len(results["reads"]),
+                "read_p95_s": round(p95(results["reads"]), 3) if results["reads"] else None,
+                "busiest_cores": round(cores, 3),
                 "errors": len(results["errors"]),
                 "budget": {"write_p95_s": WRITE_P95_S, "cores": CPU_CORES},
             }
         ),
         flush=True,
     )
-    return verdict(writes, cores, results["errors"])
+    if problems:
+        print(server_log[-4000:])
+    return problems
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--folder", type=Path, help="scratch ledger folder, default a new temporary one")
+    parser.add_argument("--folder", type=Path, required=True, help="an empty scratch ledger folder")
     args = parser.parse_args(argv)
-    folder = args.folder or Path(tempfile.mkdtemp(prefix="ledger-load-"))
-    folder.mkdir(parents=True, exist_ok=True)
-    problems = run(folder)
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        sys.exit("the ledger load gate runs in CI only: it loads the machine for a minute and a half")
+    args.folder.mkdir(parents=True, exist_ok=True)
+    problems = run(args.folder)
     for problem in problems:
         print(f"::error::{problem}")
-    print((folder / "server.log").read_text()[-4000:] if problems else "ledger writes stayed within budget")
     return 1 if problems else 0
 
 
