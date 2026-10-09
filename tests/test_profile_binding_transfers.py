@@ -119,6 +119,15 @@ def test_handoff_refuses_to_clamp_saved_effort(launching):
     assert not calls
 
 
+def test_a_master_recycle_starts_inside_the_swarm_effort_range(launching):
+    engine, config, task, saved, calls = launching
+    saved.update(profile="master", harness="claude", effort="max")
+    task["handoff_envelope"]["reason"] = "recycle"
+    config.effort_min, config.effort_max = "medium", "high"
+    engine.spawn(config, "master", "master", task)
+    assert calls[-1][calls[-1].index("--effort") + 1] == "high"
+
+
 def test_resume_keeps_decision_and_replaces_the_old_binding_evidence(tmp_path):
     engine, config, agent, calls = _resuming(tmp_path, "c0ffee")
     decision = {"profile": "engineer", "source": "task", "validation": {"state": "old", "pid": 42}}
