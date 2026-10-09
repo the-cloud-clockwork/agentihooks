@@ -1,4 +1,5 @@
 import argparse
+import functools
 import json
 import re
 import subprocess
@@ -171,9 +172,36 @@ def gh(issues, created=PLAN):
             if issues is None:
                 return subprocess.CompletedProcess(argv, 1, "", "fatal: not a git repository")
             return subprocess.CompletedProcess(argv, 0, json.dumps({"hasIssuesEnabled": issues}), "")
+        if argv[:3] == ["gh", "issue", "list"]:
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
         return subprocess.CompletedProcess(argv, 0, f"Creating issue in acme/app\n\n{created}\n", "")
 
     return run, calls
+
+
+class Tracker:
+    def __init__(self):
+        self.rows = []
+        self.calls = []
+
+    def run(self, argv, **kwargs):
+        assert kwargs == {"capture_output": True, "text": True}
+        self.calls.append(argv)
+        verb = argv[2]
+        if argv[1] == "repo":
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"hasIssuesEnabled": True}), "")
+        if verb == "list":
+            return subprocess.CompletedProcess(argv, 0, json.dumps(self.rows), "")
+        if verb == "create":
+            url = f"https://github.com/acme/app/issues/{12 + len(self.rows)}"
+            self.rows.append({"url": url, "state": "OPEN", "body": argv[argv.index("--body") + 1]})
+            return subprocess.CompletedProcess(argv, 0, f"{url}\n", "")
+        row = next(r for r in self.rows if r["url"] == argv[3])
+        row["state"] = "CLOSED" if verb == "close" else "OPEN"
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def states(self):
+        return [row["state"] for row in self.rows]
 
 
 @pytest.mark.parametrize("issues", [False, None])
@@ -200,6 +228,19 @@ def test_publish_opens_an_issue_where_the_repo_has_issues():
     assert (url, where) == (PLAN, "issue")
     assert calls[0] == ["gh", "repo", "view", "acme/app", "--json", "hasIssuesEnabled"]
     assert calls[1] == [
+        "gh",
+        "issue",
+        "list",
+        "--state",
+        "all",
+        "--search",
+        f'"{stored}" in:body',
+        "--json",
+        "url,state,body",
+        "--repo",
+        "acme/app",
+    ]
+    assert calls[2] == [
         "gh",
         "issue",
         "create",
@@ -240,6 +281,7 @@ def test_publish_opens_an_issue_in_the_current_repo_without_a_repo_name():
     assert published == (PLAN, "issue")
     assert calls == [
         ["gh", "repo", "view", "--json", "hasIssuesEnabled"],
+        ["gh", "issue", "list", "--state", "all", "--search", '"link" in:body', "--json", "url,state,body"],
         ["gh", "issue", "create", "--title", "Build", "--body", "Build\n\nlink"],
     ]
 
@@ -470,8 +512,8 @@ def stub_publish(monkeypatch, titles):
         return PLAN, "issue"
 
     monkeypatch.setattr(ledger.ledger_publish, "publish", publish)
+    monkeypatch.setattr(ledger.ledger_publish, "close_issue", lambda url: titles.append(f"closed {url}"))
     monkeypatch.setattr(ledger, "upload_artifact", lambda *a: {"id": f"{'d' * 64}.md"})
-    monkeypatch.setattr(ledger, "send", lambda *a, **k: None)
 
 
 @pytest.mark.parametrize(
@@ -495,7 +537,7 @@ def test_publish_plan_exits_with_the_ledger_warnings(tmp_path, monkeypatch, stat
     with pytest.raises(SystemExit) as raised:
         ledger.cmd_publish_plan(args)
     assert raised.value.code == message
-    assert titles == ["Plan for phases p1, p2"]
+    assert titles == ["Plan for phases p1, p2", f"closed {PLAN}"]
 
 
 def test_publish_plan_names_a_sent_op_the_ledger_refused_without_a_reason(tmp_path, monkeypatch):
@@ -503,7 +545,7 @@ def test_publish_plan_names_a_sent_op_the_ledger_refused_without_a_reason(tmp_pa
     plan.write_text("# Rollout\nfirst\n", encoding="utf-8")
     stub_publish(monkeypatch, [])
     phases = {"phases": [{"id": "p1", "title": "One"}]}
-    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: {"rejected": [ops[0]["id"]]} if ops else phases)
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: {"rejected": [ops[1]["id"]]} if ops else phases)
     args = ledger.build_parser().parse_args(
         ["--slug", "s", "--as", "planner", "publish-plan", str(plan), "--phase", "p1"]
     )
@@ -597,18 +639,24 @@ REVISED = (
 )
 
 
-def published(slug, tmp_path, monkeypatch):
+def published(slug, tmp_path, monkeypatch, issues=None):
     core.sync(slug, ops=[{"op": "phase_add", "id": "add-p2", "by": "planner", "phase": "p2", "title": "Ship"}])
     core.sync(slug, ops=[{"op": "join", "id": "join-planner", "by": "planner", "role": "member"}])
     plan = tmp_path / "plan.md"
     plan.write_text(ROLLOUT, encoding="utf-8")
     file = ledger_artifacts.store(slug, "plan.md", plan.read_bytes())
     monkeypatch.setattr(ledger, "upload_artifact", lambda *a: file)
-    monkeypatch.setattr(
-        ledger.ledger_publish,
-        "publish",
-        lambda path, title, repo, artifact, issue_title: (artifact(path, title) and PLAN, "issue"),
-    )
+    if issues is None:
+        monkeypatch.setattr(
+            ledger.ledger_publish,
+            "publish",
+            lambda path, title, repo, artifact, issue_title: (artifact(path, title) and PLAN, "issue"),
+        )
+        monkeypatch.setattr(ledger.ledger_publish, "close_issue", lambda url: None)
+    else:
+        for name in ("publish", "close_issue"):
+            real = getattr(ledger.ledger_publish, name)
+            monkeypatch.setattr(ledger.ledger_publish, name, functools.partial(real, run=issues.run))
     cli(monkeypatch, slug, "publish-plan", str(plan), "--phase", "p1,p2")
     return file, f"plan-{file['id'][:12]}"
 
@@ -745,6 +793,121 @@ def test_a_publish_with_one_phase_refused_changes_no_phase_slice_plan_or_task(pl
     assert [row["id"] for row in after["plans"]] == [old]
     new = f"plans/{ledger_plans.plan_id(revised['id'])}"
     assert [e for e in after["_meta"]["events"] if e["target"] == new] == []
+
+
+def refuse_plans(monkeypatch, refusing):
+    refusal = ledger_plans.phase_refusal
+    monkeypatch.setattr(
+        ledger_plans,
+        "phase_refusal",
+        lambda doc, phase: "phase refused" if refusing and phase.get("plan") else refusal(doc, phase),
+    )
+
+
+def verbs(issues):
+    return [argv[2] for argv in issues.calls if argv[1] == "issue"]
+
+
+def test_a_refused_publish_closes_its_issue_and_leaves_no_artifact(plan_ledger, tmp_path, monkeypatch):
+    issues = Tracker()
+    refuse_plans(monkeypatch, [True])
+    with pytest.raises(SystemExit) as raised:
+        published(plan_ledger, tmp_path, monkeypatch, issues)
+    assert raised.value.code == "phase refused"
+    assert issues.states() == ["CLOSED"]
+    assert issues.calls[-1] == ["gh", "issue", "close", PLAN, "--reason", "not planned"]
+    state = core.sync(plan_ledger)[0]
+    assert (state["artifacts"], state.get(ledger_artifacts.TRASH, [])) == ([], [])
+    assert [e for e in state["_meta"]["events"] if e["kind"].startswith("artifact")] == []
+
+
+def test_a_retry_after_a_refused_publish_reopens_its_issue(plan_ledger, tmp_path, monkeypatch):
+    issues = Tracker()
+    refusing = [True]
+    refuse_plans(monkeypatch, refusing)
+    with pytest.raises(SystemExit):
+        published(plan_ledger, tmp_path, monkeypatch, issues)
+    refusing.clear()
+    cli(monkeypatch, plan_ledger, "publish-plan", str(tmp_path / "plan.md"), "--phase", "p1,p2")
+    assert issues.states() == ["OPEN"]
+    assert verbs(issues) == ["list", "create", "close", "list", "reopen"]
+    state = core.sync(plan_ledger)[0]
+    assert [phase["plan_url"] for phase in state["phases"]] == [PLAN, PLAN]
+    assert [(row["plan"], row["by"]) for row in state["artifacts"]] == [(True, "planner")]
+
+
+def test_a_refused_republish_keeps_the_issue_its_published_plan_links(plan_ledger, tmp_path, monkeypatch):
+    issues = Tracker()
+    published(plan_ledger, tmp_path, monkeypatch, issues)
+    refuse_plans(monkeypatch, [True])
+    with pytest.raises(SystemExit):
+        cli(monkeypatch, plan_ledger, "publish-plan", str(tmp_path / "plan.md"), "--phase", "p1,p2")
+    assert issues.states() == ["OPEN"]
+    assert verbs(issues) == ["list", "create", "list"]
+    assert len(core.sync(plan_ledger)[0]["artifacts"]) == 1
+
+
+def test_publish_reuses_the_open_issue_that_carries_the_stored_plan():
+    issues = Tracker()
+    stored = "http://127.0.0.1:8765/artifacts/demo/x.md"
+    issues.rows = [
+        {"url": f"{PLAN}0", "state": "CLOSED", "body": f"Old\n\n{stored}"},
+        {"url": f"{PLAN}9", "state": "OPEN", "body": "Plan\n\nhttp://127.0.0.1:8765/artifacts/demo/y.md"},
+        {"url": PLAN, "state": "OPEN", "body": f"Plan\n\n{stored}"},
+    ]
+    published = ledger_publish.publish("plan.md", "Plan", "", lambda *a: stored, issues.run, issue_title="Plan")
+    assert published == (PLAN, "issue")
+    assert issues.states() == ["CLOSED", "OPEN", "OPEN"]
+    assert verbs(issues) == ["list"]
+
+
+def test_publish_reopens_a_closed_issue_that_carries_the_stored_plan():
+    issues = Tracker()
+    stored = "http://127.0.0.1:8765/artifacts/demo/x.md"
+    issues.rows = [{"url": PLAN, "state": "CLOSED", "body": f"Plan\n\n{stored}"}]
+    published = ledger_publish.publish("plan.md", "Plan", "", lambda *a: stored, issues.run, issue_title="Plan")
+    assert published == (PLAN, "issue")
+    assert issues.calls[-1] == ["gh", "issue", "reopen", PLAN]
+    assert issues.states() == ["OPEN"]
+
+
+@pytest.mark.parametrize("verb", ["list", "reopen", "close"])
+def test_an_issue_command_that_fails_names_its_verb(verb):
+    issues = Tracker()
+    issues.rows = [{"url": PLAN, "state": "CLOSED", "body": "Plan\n\nlink"}]
+
+    def run(argv, **kwargs):
+        if argv[2] == verb:
+            return subprocess.CompletedProcess(argv, 1, "", "HTTP 403\n")
+        return issues.run(argv, **kwargs)
+
+    with pytest.raises(ledger_publish.PublishError) as raised:
+        if verb == "close":
+            ledger_publish.close_issue(PLAN, run)
+        else:
+            ledger_publish.publish("plan.md", "Plan", "", lambda *a: "link", run, issue_title="Plan")
+    assert str(raised.value) == f"gh issue {verb} failed: HTTP 403"
+
+
+def test_a_refused_publish_whose_issue_will_not_close_still_names_the_refusal(tmp_path, monkeypatch, capsys):
+    plan = tmp_path / "plan.md"
+    plan.write_text("# Rollout\nfirst\n", encoding="utf-8")
+    stub_publish(monkeypatch, [])
+
+    def close(url):
+        raise ledger_publish.PublishError(f"gh issue close failed: {url}")
+
+    monkeypatch.setattr(ledger.ledger_publish, "close_issue", close)
+    phases = {"phases": [{"id": "p1", "title": "One"}]}
+    refused = {"rejected": ["x"], "_meta": {"warnings": ["phase refused"]}}
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: refused if ops else phases)
+    args = ledger.build_parser().parse_args(
+        ["--slug", "s", "--as", "planner", "publish-plan", str(plan), "--phase", "p1"]
+    )
+    with pytest.raises(SystemExit) as raised:
+        ledger.cmd_publish_plan(args)
+    assert raised.value.code == "phase refused"
+    assert capsys.readouterr().err == f"gh issue close failed: {PLAN}\n"
 
 
 def test_anchors_of_an_empty_stored_plan_are_none(monkeypatch):
