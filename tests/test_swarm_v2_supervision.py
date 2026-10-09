@@ -78,9 +78,32 @@ def wait_for(path, child):
         if path.exists():
             return json.loads(path.read_text())
         if child.poll() is not None:
-            raise AssertionError(f"supervisor exited before {path.name}: {child.returncode}")
+            result_path = path.parent / "result.json"
+            outcome = json.loads(result_path.read_text()) if result_path.exists() else {}
+            detail = {key: outcome.get(key) for key in ("reason", "failure_class", "failure_stage")}
+            raise AssertionError(f"supervisor exited before {path.name}: {child.returncode}; {detail}")
         time.sleep(0.02)
     raise AssertionError(f"no {path.name} receipt")
+
+
+def subprocess_environment():
+    environment = {key: value for key, value in os.environ.items() if "REDIS" not in key}
+    if environment.get("MUTANT_UNDER_TEST") == "stats":
+        environment.pop("MUTANT_UNDER_TEST")
+    return environment
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("stats", None),
+        ("fail", "fail"),
+        ("scripts.swarm_v2.supervision.x_mutant_1", "scripts.swarm_v2.supervision.x_mutant_1"),
+    ],
+)
+def test_subprocess_keeps_actual_mutant_and_fail_sentinel(monkeypatch, value, expected):
+    monkeypatch.setenv("MUTANT_UNDER_TEST", value)
+    assert subprocess_environment().get("MUTANT_UNDER_TEST") == expected
 
 
 @pytest.fixture
@@ -101,7 +124,7 @@ def worker(tmp_path):
     def start(**changes):
         spec.update(changes)
         path.write_text(json.dumps(spec))
-        environment = {k: v for k, v in os.environ.items() if "REDIS" not in k}
+        environment = subprocess_environment()
         environment["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent)
         child = subprocess.Popen(
             [sys.executable, "-m", "scripts.swarm_v2.supervision_runtime", str(attempt), str(path)],
