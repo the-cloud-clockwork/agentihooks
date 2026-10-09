@@ -6,7 +6,6 @@ from pathlib import Path
 import fakeredis
 import pytest
 
-from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.auth_context import LaunchAuthority, LaunchKey
 from scripts.swarm_v2.authority import TaskAuthority
@@ -20,7 +19,6 @@ def build(monkeypatch):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(inputs["swarm"], "agentihooks", 2, 0))
     clock = [inputs["clock_ms"]]
-    monkeypatch.setattr(lease, "now_ms", lambda store: clock[0])
     monkeypatch.setattr("time.time", lambda: clock[0] / 1000)
     controller = Controller(store, inputs["swarm"], [], lambda: True)
     assert controller.acquire()
