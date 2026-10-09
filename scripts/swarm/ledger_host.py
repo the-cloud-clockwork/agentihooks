@@ -3,11 +3,13 @@
 import os
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 PROC = Path("/proc")
 SAMPLE_S = 0.5
+GIT_TIMEOUT_S = 5
 
 
 def folder(environ: dict) -> Path:
@@ -26,7 +28,12 @@ def _stat(pid: int, proc: Path) -> tuple[int, int]:
     return int(tail[11]) + int(tail[12]), int(tail[19])
 
 
-def server(pid: int | None, proc: Path = PROC, sleep=time.sleep, hertz: int = os.sysconf("SC_CLK_TCK")) -> dict:
+def server(
+    pid: int | None,
+    proc: Path = PROC,
+    sleep: Callable[[float], None] = time.sleep,
+    hertz: int = os.sysconf("SC_CLK_TCK"),
+) -> dict:
     if pid is None:
         return {"cpu": None, "started_minutes": None}
     try:
@@ -43,12 +50,16 @@ def server(pid: int | None, proc: Path = PROC, sleep=time.sleep, hertz: int = os
 
 
 def newest_on_dev(repo: Path = REPO, now: float | None = None) -> dict:
-    found = subprocess.run(
-        ["git", "-C", str(repo), "log", "-1", "--format=%ct%x09%s", "origin/dev"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        found = subprocess.run(
+            ["git", "-C", str(repo), "log", "-1", "--format=%ct%x09%s", "origin/dev"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=GIT_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {"newest": None, "merged_minutes": None}
     stamp, _, subject = found.stdout.strip().partition("\t")
     if found.returncode or not stamp.isdigit():
         return {"newest": None, "merged_minutes": None}

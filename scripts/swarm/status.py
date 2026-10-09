@@ -74,7 +74,7 @@ def findings(store, slug, config, tasks, events):
     ]
     quiet = quiet_gate.quiet_minutes(store.redis, slug, agents, {t["id"]: t for t in tasks}, now_ms())
     rows = _health_rows(store, slug, agents, quiet, now_ms())
-    found = verdict_store(store, slug).visible(
+    found = (
         health.findings(
             {"tasks": tasks, "_meta": {"events": events}},
             rows,
@@ -93,13 +93,11 @@ def findings(store, slug, config, tasks, events):
         + retire_watch.findings(store, slug)
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
-        + spawn_stall.findings(store, slug),
-        now_ms(),
-        limits.cooldown_minutes * 60_000,
+        + spawn_stall.findings(store, slug)
     )
     if ledger_probe.holding(store, slug):
-        return [f for f in found if f["kind"] not in PAUSED_WHILE_SLOW]
-    return found
+        found = [f for f in found if f.kind not in PAUSED_WHILE_SLOW]
+    return verdict_store(store, slug).visible(found, now_ms(), limits.cooldown_minutes * 60_000)
 
 
 def _health_rows(store, slug, agents, quiet, at):

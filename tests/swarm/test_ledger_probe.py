@@ -1,8 +1,11 @@
+from http.client import IncompleteRead
+from urllib.error import HTTPError
+
 import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import ledger_probe
-from scripts.swarm.ledger_client import LedgerRefused
+from scripts.swarm.ledger_client import LedgerGone, LedgerRefused
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
@@ -85,12 +88,37 @@ def test_a_timeout_or_no_answer_is_a_failed_pass_and_a_refusal_is_an_answer():
     ledger = ProbedLedger(clock)
     ledger.read_error = TimeoutError("timed out")
     sample = ledger_probe.measure(ledger, "sw", {}, clock)
-    assert sample.slow and "timed out" in sample.failure and ledger.writes == [(None, None)]
-    ledger.read_error, ledger.write_error = None, SwarmError("ledger sw: ledger server not answering: timed out")
-    assert "not answering" in ledger_probe.measure(ledger, "sw", {}, clock).failure
+    assert (sample.failure, sample.slow, ledger.writes) == ("timed out", True, [(None, None)])
+    ledger.read_error = None
+    ledger.write_error = SwarmError("ledger sw: ledger server not answering on http://127.0.0.1:8765: timed out")
+    assert ledger_probe.measure(ledger, "sw", {}, clock).failure == "timed out"
+    ledger.write_error = SwarmError("ledger sw: ledger server not answering: Connection refused")
+    assert ledger_probe.measure(ledger, "sw", {}, clock).failure == "gave no answer"
     ledger.write_error = LedgerRefused("ledger sw refused: stale")
     refused = ledger_probe.measure(ledger, "sw", {}, clock)
     assert (refused.failure, refused.slow) == ("", False)
+    ledger.write_error = LedgerGone("ledger sw does not exist")
+    assert ledger_probe.measure(ledger, "sw", {}, clock).failure == ""
+
+
+@pytest.mark.parametrize(
+    ("error", "failure"),
+    [
+        (HTTPError("http://ledger", 404, "missing", {}, None), ""),
+        (HTTPError("http://ledger", 499, "client", {}, None), ""),
+        (HTTPError("http://ledger", 500, "broken", {}, None), "answered with a server error"),
+        (HTTPError("http://ledger", 503, "busy", {}, None), "answered with a server error"),
+        (SystemExit("a remote ledger client needs a token"), "gave no answer"),
+        (IncompleteRead(b"half"), "gave no answer"),
+        (ConnectionResetError(), "gave no answer"),
+    ],
+)
+def test_a_read_failure_is_classified_in_plain_words(error, failure):
+    clock = Clock()
+    ledger = ProbedLedger(clock)
+    ledger.read_error = error
+    sample = ledger_probe.measure(ledger, "sw", {}, clock)
+    assert (sample.failure, sample.slow, len(ledger.writes)) == (failure, bool(failure), 1)
 
 
 def test_a_ledger_without_the_probe_calls_is_not_measured(store):
@@ -109,8 +137,11 @@ def test_one_slow_pass_raises_nothing_and_two_in_a_row_raise_the_alert(store):
     [mail] = master_mail(store)
     for words in ("read 6.0 seconds", "write 7.5 seconds", "CPU 182 percent", "started 74 minutes ago"):
         assert words in mail
-    assert "Run the cheap CI gates before every push, merged to dev 9 minutes ago" in mail
-    assert ledger.notes and "read 6.0 seconds" in ledger.notes[0]
+    assert "Newest on dev merged 9 minutes ago: Run the cheap CI gates before every push." in mail
+    assert mail.endswith("Idle and stale claim checks and nudges pause until two fast passes.")
+    [note] = ledger.notes
+    assert note.startswith("The ledger server is slow: two swarm passes in a row took read 6.0 seconds and write 7.5")
+    assert "CPU 182 percent, started 74 minutes ago" in note and "pause" not in note
     assert observe(store, ledger, clock) == [] and len(master_mail(store)) == 1 and len(ledger.notes) == 1
 
 
@@ -129,12 +160,13 @@ def test_two_failed_passes_raise_the_alert_naming_the_failure(store):
     clock = Clock()
     ledger = ProbedLedger(clock)
     ledger.read_error = TimeoutError("timed out")
-    ledger.write_error = SwarmError("ledger sw: ledger server not answering: timed out")
-    ledger.notify_error = SwarmError("ledger sw: ledger server not answering: timed out")
+    ledger.write_error = SwarmError("ledger sw: ledger server not answering on http://127.0.0.1:8765: timed out")
+    ledger.notify_error = OSError("connection refused")
     observe(store, ledger, clock)
     assert observe(store, ledger, clock) == ["raised the ledger slow alert"]
     [mail] = master_mail(store)
-    assert "timed out" in mail and ledger.notes == []
+    assert "write 0.1 seconds, and the ledger timed out. Server CPU" in mail and ledger.notes == []
+    assert "127.0.0.1" not in mail and "ledger sw" not in mail
 
 
 def test_the_operator_notice_is_retried_each_pass_until_the_ledger_takes_it(store):
@@ -186,6 +218,55 @@ def test_the_operator_notice_is_in_plain_words(store):
     from scripts.swarm_ledger import ledger_comments
 
     assert not any(pattern.search(ledger.notes[0]) for _, pattern in ledger_comments.RULES)
+
+
+def test_the_operator_notice_keeps_every_fact_within_the_panel_limit(store):
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=12.25, write_s=20.5)
+    ledger.write_error = TimeoutError("timed out")
+    subject = "Keep a merge wait queued while a fresh queue entry is not yet visible " * 4
+    for _ in range(2):
+        ledger_probe.observe(
+            store, "sw", ledger, FakeRuntime(), 1_000, clock=clock, facts=lambda: {**FACTS, "newest": subject}
+        )
+    [note] = ledger.notes
+    assert len(note) == ledger_probe.TEXT_KEPT
+    for words in ("read 12.2 seconds", "write 20.5 seconds", "timed out", "CPU 182 percent", "started 74 minutes ago"):
+        assert words in note
+    assert "Newest on dev merged 9 minutes ago: Keep a merge wait" in note
+
+
+def test_unknown_server_facts_are_named_unknown(store):
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=6.0)
+    unknown = {"cpu": None, "started_minutes": None, "newest": None, "merged_minutes": None}
+    for _ in range(2):
+        ledger_probe.observe(store, "sw", ledger, FakeRuntime(), 1_000, clock=clock, facts=lambda: unknown)
+    [mail] = master_mail(store)
+    assert "Server CPU unknown, start time unknown. Newest on dev unknown." in mail
+
+
+def test_a_cpu_reading_is_shown_in_whole_percent(store):
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=6.0)
+    for _ in range(2):
+        ledger_probe.observe(store, "sw", ledger, FakeRuntime(), 1_000, clock=clock, facts=lambda: {**FACTS, "cpu": 0})
+    assert "Server CPU 0 percent, started 74 minutes ago." in master_mail(store)[0]
+
+
+@pytest.mark.parametrize("error", [LedgerRefused("ledger sw refused: not plain words"), LedgerGone("gone")])
+def test_a_notice_the_ledger_refuses_is_dropped_so_later_notices_still_land(store, error):
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=6.0)
+    ledger.notify_error = error
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    assert ledger_probe.state(store, "sw")["notices"] == []
+    ledger.notify_error, ledger.read_s = None, 0.1
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    [note] = ledger.notes
+    assert note.startswith("The ledger server answers fast again")
 
 
 def raise_alert(store):
@@ -250,9 +331,6 @@ def test_the_swarm_timer_pass_runs_the_probe(store, monkeypatch):
     class TimingOut(FakeLedger):
         def metadata(self, slug):
             raise TimeoutError("timed out")
-
-        def time_left(self, slug, slots, ci_minutes):
-            raise SwarmError("ledger sw: ledger server not answering: timed out")
 
     ledger, runtime = TimingOut([]), FakeRuntime()
     cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))

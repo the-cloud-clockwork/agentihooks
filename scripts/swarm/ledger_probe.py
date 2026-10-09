@@ -1,25 +1,30 @@
 """Each swarm timer pass times one ledger read and one write. Two slow or failed passes in a row raise the ledger slow
 alert to the master's inbox and the operator's notifications; two fast passes clear it."""
 
+import http.client
 import json
+import sys
 import time
 import urllib.error
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import control_notifications, ledger_host, notice_text
+from scripts.swarm import control_notifications, ledger_host, notice_text, time_left
 from scripts.swarm.ledger_client import LedgerGone, LedgerRefused
 from scripts.swarm.store import MASTER, SwarmError
 
 SLOW_S = 5.0
 PASSES = 2
 SENDER = "swarm"
-ANSWERED = (LedgerRefused, LedgerGone, urllib.error.HTTPError)
+TEXT_KEPT = 280
+TIMED_OUT, NO_ANSWER, SERVER_ERROR = "timed out", "gave no answer", "answered with a server error"
+FAILED = (OSError, SwarmError, SystemExit, http.client.HTTPException)
 RAISED = (
-    "The ledger server is slow: two swarm passes in a row took {took}. Server {cpu}, {started}. Idle and stale claim "
-    "checks and nudges pause until two fast passes. Newest on dev: {newest}."
+    "The ledger server is slow: two swarm passes in a row took {took}. Server {cpu}, {started}. Newest on dev{newest}."
 )
+PAUSED = " Idle and stale claim checks and nudges pause until two fast passes."
 CLEARED = "The ledger server answers fast again: two swarm passes took {took}. Idle and stale claim checks resume."
 
 
@@ -35,21 +40,27 @@ class Sample:
 
     def took(self) -> str:
         took = f"read {self.read_s:.1f} seconds and write {self.write_s:.1f} seconds"
-        return f"{took}, failing with {self.failure}" if self.failure else took
+        return f"{took}, and the ledger {self.failure}" if self.failure else took
 
 
-def _timed(call, clock) -> tuple[float, str]:
+def _failure(exc: BaseException) -> str:
+    if isinstance(exc, urllib.error.HTTPError):
+        return SERVER_ERROR if exc.code >= 500 else ""
+    if isinstance(exc, (LedgerRefused, LedgerGone)):
+        return ""
+    return TIMED_OUT if isinstance(exc, TimeoutError) or TIMED_OUT in str(exc) else NO_ANSWER
+
+
+def _timed(call: Callable[[], object], clock: Callable[[], float]) -> tuple[float, str]:
     started = clock()
     try:
         call()
-    except ANSWERED:
-        pass
-    except (OSError, SwarmError) as exc:
-        return clock() - started, str(exc) or type(exc).__name__
+    except FAILED as exc:
+        return clock() - started, _failure(exc)
     return clock() - started, ""
 
 
-def measure(ledger, slug: str, inputs: dict, clock=time.monotonic) -> Sample | None:
+def measure(ledger, slug: str, inputs: dict, clock: Callable[[], float] = time.monotonic) -> Sample | None:
     read, write = getattr(ledger, "metadata", None), getattr(ledger, "time_left", None)
     if read is None or write is None:
         return None
@@ -83,23 +94,33 @@ def _raised(sample: Sample, facts: dict) -> str:
         if facts.get("started_minutes") is not None
         else "start time unknown"
     )
-    newest = (
-        f"{facts['newest']}, merged to dev {facts['merged_minutes']} minutes ago" if facts.get("newest") else "unknown"
-    )
+    newest = f" merged {facts['merged_minutes']} minutes ago: {facts['newest']}" if facts.get("newest") else " unknown"
     return RAISED.format(took=sample.took(), cpu=cpu, started=started, newest=newest)
+
+
+def for_operator(text: str) -> str:
+    return notice_text.plain(text, "chat")[:TEXT_KEPT]
 
 
 def _delivered(ledger, slug: str, text: str) -> bool:
     try:
-        ledger.notify(slug, notice_text.plain(text, "chat"))
-    except (OSError, SwarmError):
+        ledger.notify(slug, text)
+    except (LedgerRefused, LedgerGone) as exc:
+        print(f"ledger slow notice dropped: {exc}", file=sys.stderr)
+    except FAILED:
         return False
     return True
 
 
-def observe(store, slug, ledger, runtime, now_ms, clock=time.monotonic, facts=None) -> list[str]:
-    from scripts.swarm import time_left
-
+def observe(
+    store,
+    slug: str,
+    ledger,
+    runtime,
+    now_ms: int,
+    clock: Callable[[], float] = time.monotonic,
+    facts: Callable[[], dict] | None = None,
+) -> list[str]:
     sample = measure(ledger, slug, time_left.inputs_of(store, slug, runtime), clock)
     if sample is None:
         return []
@@ -107,18 +128,19 @@ def observe(store, slug, ledger, runtime, now_ms, clock=time.monotonic, facts=No
     slow = held.get("slow", 0) + 1 if sample.slow else 0
     fast = 0 if sample.slow else held.get("fast", 0) + 1
     held.update(slow=slow, fast=fast)
-    actions, text = [], ""
+    actions, text, mail = [], "", ""
     if not held.get("alert") and slow >= PASSES:
         text = _raised(sample, (facts or ledger_host.facts)())
+        mail = text + PAUSED
         held.update(alert=True, raised_at=now_ms)
         actions.append("raised the ledger slow alert")
     elif held.get("alert") and fast >= PASSES:
-        text = CLEARED.format(took=sample.took())
+        text = mail = CLEARED.format(took=sample.took())
         held.update(alert=False, cleared_at=now_ms)
         actions.append("cleared the ledger slow alert")
     if text:
-        InboxStore(store.redis).send(SENDER, _master_address(store, slug), text, fyi=not held["alert"])
-        held["notices"] = [*held.get("notices", []), text]
+        InboxStore(store.redis).send(SENDER, _master_address(store, slug), mail, fyi=not held["alert"])
+        held["notices"] = [*held.get("notices", []), for_operator(text)]
     while held.get("notices") and _delivered(ledger, slug, held["notices"][0]):
         held["notices"] = held["notices"][1:]
     store.redis.set(_key(store, slug), json.dumps(held))

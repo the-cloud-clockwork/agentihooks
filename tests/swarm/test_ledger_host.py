@@ -20,6 +20,15 @@ def test_server_cpu_is_sampled_and_its_age_read_from_proc(tmp_path):
     assert ledger_host.server(42, tmp_path, sleep, 100) == {"cpu": 182, "started_minutes": 15}
 
 
+def test_server_cpu_rounds_and_its_age_floors_to_whole_minutes(tmp_path):
+    write_stat(tmp_path, 42, 1_000, 18_000)
+    (tmp_path / "uptime").write_text("1259.99 900.00\n")
+    assert ledger_host.server(42, tmp_path, lambda s: write_stat(tmp_path, 42, 1_092, 18_000), 60) == {
+        "cpu": 307,
+        "started_minutes": 15,
+    }
+
+
 def test_an_unknown_or_vanished_server_reports_unknown(tmp_path):
     unknown = {"cpu": None, "started_minutes": None}
     assert ledger_host.server(None, tmp_path, lambda s: None, 100) == unknown
