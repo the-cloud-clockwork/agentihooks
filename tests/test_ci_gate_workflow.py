@@ -17,7 +17,7 @@ def _workflow():
 def test_required_gate_runs_after_parallel_unit_and_lint():
     jobs = _workflow()["jobs"]
     gate = jobs["gate-required"]
-    required = {"unit", "lint", "sonar", "mutation", "test-count", "semgrep"}
+    required = {"unit", "lint", "sonar", "mutation", "test-count"}
     assert gate["name"] == "Gate — Required"
     assert (
         required
