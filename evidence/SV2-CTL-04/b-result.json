@@ -1,5 +1,5 @@
 {
-  "tested_commit": "68baedf57ffb2096eff2b91faf41ec117b84b5dc",
+  "tested_commit": "a3610af8acf974a2c378d1b26a9fccbd4f346635",
   "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 calls",
   "case": "T-SV2-CTL-04-B",
   "passed": true,
