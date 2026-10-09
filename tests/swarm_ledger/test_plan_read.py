@@ -91,10 +91,10 @@ def test_chunk_keeps_the_plan_lines_verbatim():
 
 def test_exact_is_the_range_without_margin_and_refuses_an_empty_one(slug):
     doc = SQLiteLedgerRepository(core.LEDGER_DIR / DATABASE).read(slug, "phases", "artifacts")
-    ref = doc["phases"][0]["plan_ref"]
-    assert plan_read.exact(doc, ref, "15-17") == numbered(15, 17)
+    task = {"phase": doc["phases"][0]["id"], "plan_lines": "15-17"}
+    assert plan_read.exact(doc, task) == numbered(15, 17)
     with pytest.raises(ValueError) as caught:
-        plan_read.exact(doc, ref, "45-46")
+        plan_read.exact(doc, {**task, "plan_lines": "45-46"})
     assert str(caught.value) == "plan lines 45-46 hold no text"
 
 
