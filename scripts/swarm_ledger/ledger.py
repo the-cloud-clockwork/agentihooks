@@ -659,6 +659,8 @@ def cmd_task(args):
             lists["contract"] = contract
         if args.artifact:
             lists["artifact"] = True
+        if args.follow_up:
+            lists["follow_up"] = True
         options = (
             ("kind", args.kind),
             ("profile", args.profile),
@@ -844,6 +846,9 @@ def build_parser():
     task.add_argument("--overlays", help="comma separated overlays this task's agent wears, at most three")
     task.add_argument("--rank", help="queue rank: urgent, high, normal (default) or low; next means urgent")
     task.add_argument("--plan-slice", default="", help="task slice anchor; computes its plan lines")
+    task.add_argument(
+        "--follow-up", action="store_true", help="a follow up task: no slice in a sliced phase, judged by its text"
+    )
     task.add_argument("--plan", default="", help="link to the published plan; default the phase's plan link")
     task.add_argument("--difficulty", choices=ledger_tasks.DIFFICULTIES, help="task size: S, M or L")
     task.add_argument(

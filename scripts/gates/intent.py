@@ -222,7 +222,7 @@ def _proof_notes(task, proof_chars):
 
 
 def _plan_chunk(doc, task):
-    if not task.get("plan_lines"):
+    if not task.get("plan_lines") or task.get("follow_up"):
         return {}
     try:
         text = plan_read.exact(doc, task)
