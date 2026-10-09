@@ -141,6 +141,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "hooks/hook_manager.py",
         "hooks/targets/normalizer.py",
         "scripts/brain-smoke",
+        "scripts/ci_budget/__main__.py",
         "scripts/ci_dependency_audit.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/browser.py",
