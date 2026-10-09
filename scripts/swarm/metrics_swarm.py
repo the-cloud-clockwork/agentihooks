@@ -251,7 +251,7 @@ def classifier_rows(calls: list, host: str) -> list[dict]:
                 {},
             ),
             "host": host,
-            "definition": source.get("definition", source["purpose"]),
+            "definition": source.get("definition") or source["purpose"],
             "backend": source["source"] or "",
             "latency_ms": source["latency_ms"],
             "verdict": json.dumps(source["answers"], sort_keys=True),

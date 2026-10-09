@@ -200,6 +200,22 @@ def test_classifier_calls_are_host_scoped_with_stable_source_ids():
     assert metrics_swarm.classifier_rows([call, call], "machine") == rows
 
 
+def test_nullable_classifier_metadata_keeps_legacy_purpose_and_failed_backend():
+    call = {
+        "ts": "2027-01-15T08:00:00+00:00",
+        "purpose": "intent",
+        "definition": None,
+        "source": None,
+        "latency_ms": 1,
+        "answers": {},
+    }
+    rows = metrics_swarm.classifier_rows([call, {**call, "definition": "named", "source": "api"}], "machine")
+    assert [(row["definition"], row["backend"]) for row in rows] == [("intent", ""), ("named", "api")]
+    assert rows[0]["verdict"] == "{}"
+    for row in rows:
+        assert metrics_swarm.CLASSIFIERS.check(row) is None
+
+
 def test_unknown_claim_duration_is_not_invented():
     pulls = {TASK["pr_url"]: SimpleNamespace(state="MERGED", merged_at=NOW + 4_000)}
     row = metrics_swarm.delivery_rows(SLUG, doc(), [AGENT], pulls)[0]
