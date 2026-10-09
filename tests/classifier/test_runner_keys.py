@@ -32,7 +32,7 @@ def test_a_key_template_names_each_expanded_question(definition_home):
         ],
     )
     questions = runner.questions_for(definition, {"x": "Same?", "pairs": [{"new": 3}, {"new": 5}]})
-    assert questions == {"new_3_at_0": YesNo("Same?"), "new_5_at_1": YesNo("Same?")}
+    assert questions == {"new_3_at_0": YesNo("Same?", "Yes", "No"), "new_5_at_1": YesNo("Same?", "Yes", "No")}
 
 
 def test_a_key_template_names_an_unexpanded_question_from_the_parameters(definition_home):
@@ -52,7 +52,7 @@ def test_questions_over_the_same_list_expand_element_by_element(definition_home)
     )
     questions = runner.questions_for(definition, {"tasks": ["t1", "t2"], "more": ["m1"]})
     assert list(questions) == ["size_0", "serves_0", "size_1", "serves_1", "head", "other_0"]
-    assert questions["serves_1"] == YesNo("Serves t2?")
+    assert questions["serves_1"] == YesNo("Serves t2?", "Yes", "No")
     assert questions["size_0"] == Score("Size t1?", ["a", "b"])
 
 
