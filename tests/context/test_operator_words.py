@@ -30,7 +30,7 @@ def test_a_quote_matches_the_words_as_typed_and_not_their_upper_case_spelling():
 def test_words_are_kept_per_agent_under_the_state_home(tmp_path, monkeypatch):
     monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path / "fresh" / "home")
     assert operator_words.record("Master A/b c", "ship it", now=100)
-    assert [p.name for p in (tmp_path / "fresh" / "home" / "operator_words").iterdir()] == ["Master_A_b_c.json"]
+    assert [p.name for p in (tmp_path / "fresh" / "home" / "operator_words").iterdir()] == ["words.sqlite3"]
     assert operator_words.matching("Master A/b c", "ship it", now=101) == "ship it"
 
 
@@ -114,11 +114,28 @@ def test_other_tools_empty_answers_and_unnamed_sessions_record_nothing():
     assert not operator_words.heard_answer(answer, {}, now=100)
 
 
-def test_only_the_latest_entries_are_kept():
-    for n in range(operator_words.ROWS_KEPT + 1):
-        operator_words.record("master@a1-1", f"word{n} said", now=100 + n)
-    assert operator_words.matching("master@a1-1", "word0 said", within=None) == ""
-    assert operator_words.matching("master@a1-1", f"word{operator_words.ROWS_KEPT} said", within=None)
+def test_the_five_hundred_and_first_oldest_prompt_still_relays():
+    from scripts.swarm_ledger import ledger_relay
+
+    for n in range(501):
+        operator_words.heard_prompt(f"word{n} said", ENV, now=100 + n)
+    assert ledger_relay.verified("master@a1-1", "word0 said") == "word0 said"
+    assert ledger_relay.verified("master@a1-1", "word500 said") == "word500 said"
+
+
+def test_line_hash_lookup_obeys_names_and_the_window():
+    operator_words.record("master@a1-1", "Preface\nShip  it\nEnd", now=100)
+    operator_words.record("master@a1-1", "Ship it\nLatest", now=101)
+    with operator_words._store() as connection:
+        assert operator_words._line_match(connection, "master@a1-1", "ship it", None) == ("Ship it\nLatest",)
+        assert operator_words._line_match(connection, "master@a1-1", "ship it", 101) is None
+        assert operator_words._line_match(connection, "master@a1-1", "ship it", 100) == ("Ship it\nLatest",)
+        assert operator_words._line_match(connection, "master@a1-1", "ship", None) is None
+        assert operator_words._line_match(connection, "master@b2-1", "ship it", None) is None
+
+
+def test_each_line_is_indexed_with_its_sha256_hash():
+    assert operator_words._hash("ship it") == "bef4261f394bf71fd2b565cd76396ac9ed7953f9110c69ee49d7a82871238fbf"
 
 
 def test_words_outside_the_window_are_kept_and_found_with_no_window():
