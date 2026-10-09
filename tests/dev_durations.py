@@ -26,11 +26,10 @@ def adopt(folder: Path, version: str) -> dict[str, float]:
     return {**_durations(folder / ".test_durations"), **(_durations(measured) if measured.exists() else {})}
 
 
-def _choose(version: str, restored: Path) -> None:
+def _choose(version: str, restored: Path, collected: list[str]) -> None:
     committed = _ROOT / f".test_durations-{version}"
     if not committed.is_file():
         committed = _ROOT / ".test_durations"
-    collected = collected_tests(_ROOT)
     if (restored / ".test_durations").is_file():
         durations = adopt(restored, version)
         try:
@@ -63,8 +62,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("version", help="the Python version whose durations this shard splits on")
     parser.add_argument("restored", type=Path, help="the folder the dev durations cache restored into")
     parser.add_argument("--hash", type=Path, help="where to write the sha256 of the durations this shard splits on")
+    parser.add_argument(
+        "--collected", type=Path, help="where to write the test identifiers the coverage check collected"
+    )
     args = parser.parse_args(argv)
-    _choose(args.version, args.restored)
+    collected = collected_tests(_ROOT)
+    _choose(args.version, args.restored, collected)
+    if args.collected:
+        args.collected.write_text(json.dumps(collected))
     if args.hash:
         args.hash.write_text(hashlib.sha256((_ROOT / ".test_durations").read_bytes()).hexdigest() + "\n")
 

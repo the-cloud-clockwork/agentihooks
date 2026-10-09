@@ -51,21 +51,27 @@ def test_a_newer_dev_push_never_cancels_a_running_dev_push_run():
     }
 
 
-ADOPT = 'python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256'
+ADOPT = (
+    'python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 --collected collected.json'
+)
 ADOPT_ENV = {"PYTHON_VERSION": "${{ matrix.python-version }}"}
 
 
 def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run():
-    steps = _workflow("test.yml")["jobs"]["unit"]["steps"]
-    step = next(s for s in steps if s.get("name") == "Adopt latest dev durations")
+    jobs = _workflow("test.yml")["jobs"]
+    step = next(s for s in jobs["split"]["steps"] if s.get("name") == "Adopt latest dev durations")
     assert step["run"].strip() == ADOPT
     assert step["env"] == ADOPT_ENV
-    assert steps.index(step) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
+    steps = jobs["unit"]["steps"]
+    download = next(s for s in steps if s.get("name") == "Download the durations this run splits on")
+    assert download["with"] == {"name": "split-${{ matrix.python-version }}"}
+    assert steps.index(download) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
+    assert jobs["unit"]["needs"] == ["split"]
 
 
 def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     jobs = _workflow("test.yml")["jobs"]
-    steps = jobs["unit"]["steps"]
+    steps = jobs["split"]["steps"]
     restore = next(s for s in steps if s.get("name") == "Restore latest dev durations")
     adopt = next(s for s in steps if s.get("name") == "Adopt latest dev durations")
     refresh = jobs["refresh-durations"]
@@ -81,7 +87,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert restore["with"]["key"] == "${{ needs.durations.outputs.key }}"
     assert restore["if"] == "needs.durations.outputs.key != ''"
     assert restore["with"]["fail-on-cache-miss"] is True
-    assert jobs["unit"]["needs"] == ["durations"]
+    assert jobs["split"]["needs"] == ["durations"]
     lookup = jobs["durations"]["steps"][0]
     assert jobs["durations"]["outputs"] == {
         "key": "${{ steps.stored.outputs.cache-matched-key }}",
@@ -98,7 +104,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
         " || github.event.before || github.sha }}",
         "lookup-only": True,
     }
-    assert "durations" in jobs["gate-required"]["needs"]
+    assert {"durations", "split"} <= set(jobs["gate-required"]["needs"])
     assert "run" not in restore
     assert adopt["run"] == ADOPT
     assert adopt["env"] == ADOPT_ENV

@@ -335,7 +335,8 @@ def _workflow() -> dict:
 def test_shards_wait_only_on_the_durations_lookup():
     jobs = _workflow()["jobs"]
     assert "already-tested" not in jobs
-    assert jobs["unit"]["needs"] == ["durations"]
+    assert jobs["split"]["needs"] == ["durations"]
+    assert jobs["unit"]["needs"] == ["split"]
     assert "needs" not in jobs["lint"]
 
 
@@ -510,8 +511,16 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
 
 
 def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
-    _, adopt = _unit_step_index(lambda s: s.get("name") == "Adopt latest dev durations")
-    assert adopt["run"].endswith(" --hash durations.sha256")
+    jobs = _workflow()["jobs"]
+    adopt = next(s for s in jobs["split"]["steps"] if s.get("name") == "Adopt latest dev durations")
+    upload = next(s for s in jobs["split"]["steps"] if s.get("name") == "Upload the chosen durations")
+    assert " --hash durations.sha256 " in adopt["run"]
+    assert upload["with"]["path"].split() == [".test_durations", "durations.sha256"]
+    assert upload["with"]["include-hidden-files"] is True
+    _, download = _unit_step_index(lambda s: s.get("name") == "Download the durations this run splits on")
+    assert download["with"] == {"name": upload["with"]["name"]}
+    _, store = _unit_step_index(lambda s: s.get("name") == "Upload durations")
+    assert "durations.sha256" in store["with"]["path"].split()
 
 
 def test_ci_samples_are_one_per_shard_file_without_the_xdist_group_suffix(tmp_path):
