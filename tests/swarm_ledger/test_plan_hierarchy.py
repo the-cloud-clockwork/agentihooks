@@ -258,7 +258,16 @@ def test_a_task_naming_its_slice_needs_no_plan_slice_in_an_anchored_phase():
     assert run("slice_add", phase="phases/p1", anchor="first")[1] == []
     _, rejected, refusal = run("task_add", task="t0", title="Build", lane="eng", phase="p1")
     assert rejected and any(text.startswith("phase p1 has a plan with slice anchors") for text in refusal)
-    assert run("task_add", task="t1", title="Build", lane="eng", phase="p1", slice="slices/a.first")[1] == []
+    state, rejected, _ = run("task_add", task="t1", title="Build", lane="eng", phase="p1", slice="slices/a.first")
+    assert rejected == []
+    assert (state["tasks"][-1]["plan_slice"], state["tasks"][-1]["plan_lines"]) == ("first", "4-6")
+    run("task_add", task="t2", title="Build", lane="eng", phase="p1", plan_slice="second")
+    _, rejected, refusal = run("task_update", item="tasks/t2", fields={"slice": "slices/a.second"})
+    assert rejected and "task t2 names an unknown slice slices/a.second" in refusal
+    run("slice_add", phase="phases/p1", anchor="second")
+    state, rejected, _ = run("task_update", item="tasks/t2", fields={"slice": "slices/a.second"})
+    assert rejected == []
+    assert state["tasks"][-1]["plan_lines"] == "7-9"
 
 
 def test_legacy_lines_and_plan_ref_are_checked_against_the_new_parents():

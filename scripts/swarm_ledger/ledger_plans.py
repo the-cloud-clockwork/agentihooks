@@ -125,6 +125,13 @@ def task_refusal(doc: dict, task: dict) -> str:
     return ""
 
 
+def with_plan_slice(doc: dict, fields: dict) -> dict:
+    row = next((s for s in doc.get("slices", []) if f"slices/{s.get('id')}" == fields.get("slice")), {})
+    if not row.get("lines") or "plan_slice" in fields:
+        return fields
+    return {**fields, "plan_slice": row["anchor"]}
+
+
 def apply(doc: dict, op: dict, ctx) -> bool:
     if op["op"] == "plan_add":
         refusal = add_plan(doc, op, ctx)
