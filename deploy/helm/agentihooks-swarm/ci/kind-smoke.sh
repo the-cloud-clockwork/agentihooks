@@ -24,14 +24,18 @@ finish() {
 helm lint --strict "$chart"
 helm lint --strict "$chart" -f "$chart/ci/kind-values.yaml"
 docker build -q -t "$image" . >/dev/null
-kind create cluster --name "$cluster" --wait 120s
 trap finish EXIT
+kind create cluster --name "$cluster" --wait 120s
 kind load docker-image "$image" --name "$cluster"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
 
 kubectl exec "$ledger_pod" -- env AGENTIHOOKS_DEPLOYMENT=local python -c "from scripts.swarm.store import SwarmConfig, connect; from scripts.swarm_ledger.new_ledger import create; create('$slug', {'title': 'Kind proof', 'phases': [{'title': 'Prove the Helm chart'}]}, 'swarm'); connect().create(SwarmConfig('$slug', '/data', 0, 0, state='paused')); print('ledger and swarm $slug registered, no lease bound')"
 hive="$(kubectl get deployment "$release-controller" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="SWARM_HIVE_ID")].value}')"
+if [[ -z $hive ]]; then
+  printf 'the controller deployment sets no SWARM_HIVE_ID\n' >&2
+  exit 1
+fi
 read_lease() {
   kubectl exec "$ledger_pod" -- python -c "import json, dataclasses; from scripts.swarm import lease; from scripts.swarm.store import connect; held = lease.current(connect(), '$slug'); print(json.dumps(dataclasses.asdict(held) if held else {}))"
 }
@@ -41,7 +45,7 @@ expiry_of() { python3 -c 'import json, sys; print(json.loads(sys.argv[1]).get("e
 held=""
 first=""
 for _ in $(seq 60); do
-  held="$(read_lease)"
+  held="$(read_lease)" || held="{}"
   if [[ "$(owner_of "$held")" == "$hive" ]]; then
     first="$held"
     break
@@ -56,7 +60,7 @@ printf 'controller lease: %s\n' "$first"
 
 renewed=""
 for _ in $(seq 60); do
-  held="$(read_lease)"
+  held="$(read_lease)" || held="{}"
   if [[ "$(owner_of "$held")" == "$hive" && "$(expiry_of "$held")" -gt "$(expiry_of "$first")" ]]; then
     renewed="$held"
     break

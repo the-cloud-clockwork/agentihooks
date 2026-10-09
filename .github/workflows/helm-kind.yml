@@ -20,7 +20,10 @@ jobs:
       - name: Install kind
         run: |
           if ! kind version; then
-            curl -fsSLo kind "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64"
+            curl -fsSLo kind-linux-amd64 "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64"
+            curl -fsSLo kind.sha256sum "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64.sha256sum"
+            sha256sum -c kind.sha256sum
+            mv kind-linux-amd64 kind
             sudo install -m 0755 kind /usr/local/bin/kind
             kind version
           fi
