@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.handoff.envelope import REASONS
 from scripts.swarm import runtime
 from scripts.swarm.tick import SpawnError
 from tests.swarm.profile_fixture import validated
@@ -128,30 +129,79 @@ def test_a_master_recycle_starts_inside_the_swarm_effort_range(launching):
     assert calls[-1][calls[-1].index("--effort") + 1] == "high"
 
 
-def test_a_master_quota_transfer_keeps_refusing_a_saved_effort_outside_the_range(launching):
+def _quota_ready(engine, reason):
     from scripts.swarm import capacity
 
+    if reason == "quota":
+        engine._quota_accounts = [capacity.Account("claude", "fresh", "OPEN", 0, 90, 90, 3)]
+
+
+def _launched_effort(calls):
+    return calls[-1][calls[-1].index("--effort") + 1]
+
+
+@pytest.mark.parametrize("reason", REASONS)
+def test_a_master_envelope_saved_at_max_starts_at_high_for_every_reason(launching, reason):
     engine, config, task, saved, calls = launching
     saved.update(profile="master", harness="claude", effort="max")
-    task["handoff_envelope"]["reason"] = "quota"
-    engine._quota_accounts = [capacity.Account("claude", "fresh", "OPEN", 0, 90, 90, 3)]
+    task["handoff_envelope"]["reason"] = reason
+    _quota_ready(engine, reason)
     config.effort_min, config.effort_max = "medium", "high"
+    engine.spawn(config, "master", "master", task)
+    assert _launched_effort(calls) == "high"
+
+
+@pytest.mark.parametrize("reason", REASONS)
+def test_a_lane_handoff_keeps_its_exact_saved_effort_for_every_reason(launching, reason):
+    engine, config, task, saved, calls = launching
+    saved.update(harness="claude", effort="max")
+    task["handoff_envelope"]["reason"] = reason
+    _quota_ready(engine, reason)
+    config.effort_min, config.effort_max = "medium", "max"
+    engine.spawn(config, "eng", "worker", task)
+    assert _launched_effort(calls) == "max"
+    config.effort_max = "high"
     with pytest.raises(SpawnError, match="^unsupported transfer: saved effort is outside the current swarm range$"):
-        engine.spawn(config, "master", "master", task)
-    assert not calls
+        engine.spawn(config, "eng", "worker", task)
+
+
+def test_a_master_relaunch_after_an_outage_starts_inside_the_swarm_effort_range(launching):
+    engine, config, task, saved, calls = launching
+    assignment = {"profile": "master", "harness": "claude", "model": "opus", "effort": "max", "account": "original"}
+    master = {"id": "master", "title": "Master", "launch_assignment": assignment}
+    config.effort_min, config.effort_max = "medium", "high"
+    engine.spawn(config, "master", "master", master)
+    assert _launched_effort(calls) == "high"
+
+
+@pytest.mark.parametrize(("harness", "recorded"), [("claude", "max"), ("codex", "xhigh")])
+def test_a_master_resumed_into_its_own_conversation_starts_inside_the_swarm_effort_range(tmp_path, harness, recorded):
+    engine, config, agent, seen = _resuming(tmp_path, "c0ffee", harness)
+    config.effort_min, config.effort_max = "medium", "high"
+    engine.resume(config, replace(agent, lane="master", task="master", effort=recorded), "you were restored")
+    launched = seen["runs"][0]
+    assert launched[-2:] == (["--effort", "high"] if harness == "claude" else ["-c", 'model_reasoning_effort="high"'])
+
+
+def test_a_lane_resume_keeps_its_exact_recorded_effort(tmp_path):
+    engine, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    config.effort_min, config.effort_max = "medium", "max"
+    engine.resume(config, replace(agent, effort="max"), "you were restored")
+    assert seen["runs"][0][-2:] == ["--effort", "max"]
 
 
 @pytest.mark.parametrize(
-    ("saved", "lane", "quota", "expected"),
+    ("recorded", "lane", "expected"),
     [
-        ({"effort": "max"}, "master", False, False),
-        ({"effort": "max"}, "master", True, True),
-        ({"effort": "max"}, "eng", False, True),
-        ({}, "eng", False, False),
+        (True, "master", False),
+        (True, "eng", True),
+        (True, "ci", True),
+        (False, "eng", False),
+        (False, "master", False),
     ],
 )
-def test_only_a_master_recycle_gives_up_its_saved_effort(saved, lane, quota, expected):
-    assert runtime.preserves_effort(saved, lane, quota) is expected
+def test_only_a_lane_keeps_its_recorded_effort(recorded, lane, expected):
+    assert runtime.preserves_effort(recorded, lane) is expected
 
 
 def test_resume_keeps_decision_and_replaces_the_old_binding_evidence(tmp_path):

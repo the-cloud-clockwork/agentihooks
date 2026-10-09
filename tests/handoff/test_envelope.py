@@ -1,5 +1,6 @@
 import json
 import subprocess
+from dataclasses import replace
 
 import pytest
 
@@ -123,6 +124,34 @@ def test_the_envelope_carries_every_fact_the_runtime_holds(store):
             "overlays": [],
         },
     }
+
+
+@pytest.mark.parametrize(("harness", "session", "recorded"), [("claude", "max", "high"), ("codex", "xhigh", "high")])
+def test_a_master_envelope_records_its_launch_effort_inside_the_swarm_range(store, harness, session, recorded):
+    master = AgentRecord("master@a1b2c3-0001", "master", "master", harness=harness, effort=session)
+    envelope = build(store, "sw", master, "recycle", [], 0, run=lambda argv, **_: _done(code=1))
+    assert envelope["launch"]["effort"] == recorded
+    assert envelope["launch"]["harness"] == harness
+
+
+def test_a_master_envelope_follows_the_configured_swarm_range(store):
+    store.update("sw", effort_min="low", effort_max="medium")
+    master = AgentRecord("master@a1b2c3-0001", "master", "master", harness="claude", effort="max")
+    envelope = build(store, "sw", master, "recycle", [], 0, run=lambda argv, **_: _done(code=1))
+    assert envelope["launch"]["effort"] == "medium"
+
+
+@pytest.mark.parametrize(("harness", "effort"), [("copilot", "max"), ("claude", "")])
+def test_a_master_envelope_keeps_an_effort_it_cannot_rank(store, harness, effort):
+    master = AgentRecord("master@a1b2c3-0001", "master", "master", harness=harness, effort=effort)
+    envelope = build(store, "sw", master, "recycle", [], 0, run=lambda argv, **_: _done(code=1))
+    assert envelope["launch"]["effort"] == effort
+
+
+def test_a_lane_envelope_records_its_exact_launch_effort(store):
+    agent = replace(_agent(), harness="claude", effort="max")
+    envelope = build(store, "sw", agent, "recycle", [], 0, run=_run([]))
+    assert envelope["launch"]["effort"] == "max"
 
 
 def test_facts_the_runtime_cannot_find_are_named_unknown(store):
