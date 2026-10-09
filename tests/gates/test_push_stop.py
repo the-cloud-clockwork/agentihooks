@@ -546,7 +546,9 @@ def test_a_pre_push_gate_past_its_timeout_is_killed_with_its_children_and_keeps_
     pid = rig.root / "child.pid"
     slow = (
         "import subprocess, time\n"
-        "child = subprocess.Popen(['sleep', '30'])\n"
+        "import sys\n"
+        "stubborn = 'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(300)'\n"
+        "child = subprocess.Popen([sys.executable, '-c', stubborn])\n"
         f"open({str(pid)!r}, 'w').write(str(child.pid))\n"
         "time.sleep(30)\n"
     )

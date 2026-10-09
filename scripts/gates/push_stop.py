@@ -24,7 +24,7 @@ SETTLED = "a later stop passed with the work committed, on origin and recorded"
 PUSHED = "pushed"
 GITHUB_RE = re.compile(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
 GIT_TIMEOUT_S = 60
-# Under the Stop condition's kill, with room for the pushes: a gate still running at the kill lets the stop through.
+# Two seconds under the Stop condition's kill: a gate still running at the kill lets the stop through unpushed.
 GATE_TIMEOUT_S = CONDITIONS_TIMEOUT_SEC - 2
 PREPUSH = Path("scripts") / "ci_prepush" / "__init__.py"
 GATE_FAILED = (
