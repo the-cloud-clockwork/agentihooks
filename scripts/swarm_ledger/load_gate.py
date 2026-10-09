@@ -34,7 +34,6 @@ ALERTS = 50
 COMMENTS = 3
 LEDGER_BYTES = 5_000_000
 CLIENTS = 10
-PACE_S = 1.0
 LIVE_PEAK_WRITES_PER_MINUTE = 29
 HEADROOM = 4
 TIMEOUT_S = 10.0
@@ -186,25 +185,22 @@ def start_server(folder: Path, port: int, log) -> subprocess.Popen:
 
 
 def client(api: ResourceClient, name: str, item: str, start: float, deadline: float, results: dict) -> None:
-    time.sleep(max(0.0, start - time.monotonic()))
-    write_at = start
     for n in itertools.count():
-        began = time.monotonic()
+        began = start + n * write_every()
+        time.sleep(max(0.0, began - time.monotonic()))
         if began >= deadline:
             return
+        op = {"op": "add", "thread": f"{item}/comments", "id": f"c-{uuid.uuid4().hex[:10]}", "by": name}
         try:
-            if began >= write_at:
-                op = {"op": "add", "thread": f"{item}/comments", "id": f"c-{uuid.uuid4().hex[:10]}", "by": name}
-                api.mutate(SLUG, [{**op, "text": f"Load check write {n} landed."}])
-                results["writes"].append(time.monotonic() - began)
-                write_at += write_every()
+            sent = time.monotonic()
+            api.mutate(SLUG, [{**op, "text": f"Load check write {n} landed."}])
+            results["writes"].append(time.monotonic() - sent)
             read = time.monotonic()
             api.request(SLUG, item)
             api.request(SLUG, "tasks?limit=100")
             results["reads"].append(time.monotonic() - read)
         except (OSError, urllib.error.URLError, ValueError) as exc:
             results["errors"].append(f"{name}: {exc}")
-        time.sleep(max(0.0, began + PACE_S - time.monotonic()))
 
 
 def load(port: int, token: str, seconds: float) -> dict:
