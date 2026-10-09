@@ -4,6 +4,8 @@ import re
 
 KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research", "plan")
 CONTRACT_KEYS = ("must", "check", "judge")
+CONTRACT_FLAGS = ("push",)
+FLAG_VALUES = ("yes", "no")
 PROOF_KEYS = ("command", "output", "root_cause", "evidence", "fix", "filed", "finding", "slice")
 LINK_RE = re.compile(r"^https?://[^\s]+$")
 NEEDS = {
@@ -22,7 +24,7 @@ def kind(task):
 def check(fields):
     if fields.get("kind", "code") not in KINDS:
         raise ValueError(f"kind must be one of {KINDS}")
-    for key, allowed in (("contract", CONTRACT_KEYS), ("proof", PROOF_KEYS)):
+    for key, allowed in (("contract", CONTRACT_KEYS + CONTRACT_FLAGS), ("proof", PROOF_KEYS)):
         value = fields.get(key, {})
         if (
             not isinstance(value, dict)
@@ -30,6 +32,8 @@ def check(fields):
             or not all(isinstance(v, str) for v in value.values())
         ):
             raise ValueError(f"{key} must be an object of strings with keys among {allowed}")
+    if any(fields.get("contract", {}).get(flag, "no") not in FLAG_VALUES for flag in CONTRACT_FLAGS):
+        raise ValueError(f"contract {', '.join(CONTRACT_FLAGS)} must be yes or no")
 
 
 def unmet(task):

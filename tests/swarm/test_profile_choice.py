@@ -93,27 +93,16 @@ def test_fixed_lane_responsibility_survives_without_classifier(monkeypatch, lane
     assert decision == profile_choice.ProfileDecision(expected, "lane", f"{lane} lane")
 
 
+CONTRACT = {
+    "must": "Each alleged form is classified from CI evidence as actual runner execution or nonexecution",
+    "check": "Controlled CI invocation checks and guard results for the exact three reported forms",
+    "judge": "Independent Standards reader",
+}
 CI_PROOF_TASKS = [
-    {
-        **TASK,
-        "kind": "troubleshoot",
-        "contract": {
-            "must": "Each alleged form is classified from CI evidence as actual runner execution or nonexecution",
-            "check": "Controlled CI invocation checks and guard results for the exact three reported forms",
-            "judge": "Independent Standards reader",
-        },
-    },
-    {
-        **TASK,
-        "kind": "troubleshoot",
-        "contract": {
-            "must": "Observed causal evidence explains the checkpoint supervision flake",
-            "check": "Compare the failed and passed jobs; reproduce controlled timing in CI only",
-            "judge": "Independent Standards reader",
-        },
-    },
-    {**TASK, "kind": "ops", "contract": {"must": "The probe branch ran", "check": "the CI run log"}},
-    {**TASK, "kind": "tune", "contract": {"must": "the CI shard time moved", "check": "the task proof"}},
+    {**TASK, "kind": "troubleshoot", "contract": {**CONTRACT, "push": "yes"}},
+    {**TASK, "kind": "ops", "contract": {"push": "yes"}},
+    {**TASK, "kind": "code", "contract": {"must": "m", "check": "c", "push": "yes"}},
+    {key: value for key, value in TASK.items() if key != "kind"} | {"contract": {"push": "yes"}},
 ]
 
 
@@ -132,17 +121,13 @@ def test_a_task_whose_proof_needs_a_pushed_ci_run_picks_engineer_without_a_model
 @pytest.mark.parametrize(
     "task",
     [
-        {**TASK, "kind": "troubleshoot", "contract": {"must": "the root cause is shown", "check": "the task proof"}},
-        {**TASK, "kind": "troubleshoot", "contract": {"must": "decisions agree", "check": "the decision log"}},
+        {**TASK, "kind": "troubleshoot", "contract": CONTRACT},
+        {**TASK, "kind": "troubleshoot", "contract": {**CONTRACT, "push": "no"}},
         {**TASK, "kind": "troubleshoot", "contract": None},
-        {**TASK, "kind": "troubleshoot", "contract": {"must": "a cause", "check": "the proof", "judge": "CI"}},
-        {key: value for key, value in TASK.items() if key != "kind"} | {"contract": {"must": "CI", "check": "CI"}},
-        {**TASK, "kind": "research", "description": "Read CI history", "contract": {"must": "a report", "check": ""}},
-        {**TASK, "kind": "code", "contract": {"must": "the CI run is green", "check": "CI"}},
-        {**TASK, "kind": "ci", "contract": {"must": "the CI run is green", "check": "CI"}},
+        {**TASK, "kind": "troubleshoot", "contract": {"push": "Yes"}},
     ],
 )
-def test_a_task_whose_proof_needs_no_pushed_ci_run_asks_the_classifier(asked, ledger_file, task):
+def test_a_task_without_the_push_field_still_asks_the_classifier(asked, ledger_file, task):
     calls = asked("qa")
     decision = profile_choice.choose("sw", "eng", {}, task, {})
     assert (decision.profile, decision.source, len(calls)) == ("qa", "classifier", 1)

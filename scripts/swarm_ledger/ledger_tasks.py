@@ -375,6 +375,8 @@ def slice_refusal(item: str, plan: dict, doc: dict) -> str:
 
 
 def _update_fields(task: dict, fields: dict) -> dict:
+    if "contract" in fields:
+        fields = {**fields, "contract": {**(task.get("contract") or {}), **fields["contract"]}}
     if ledger_kinds.kind(task) == "plan" and fields.get("kind", "plan") != "plan" and "lane" not in fields:
         return {**fields, "lane": "eng"}
     return fields

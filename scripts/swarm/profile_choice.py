@@ -1,7 +1,6 @@
 """The typed profile decision made before every swarm launch: explicit task profile, fixed lane, else the classifier."""
 
 import os
-import re
 from dataclasses import asdict, dataclass, replace
 
 from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
@@ -13,9 +12,6 @@ CLASSIFIED_LANE = "eng"
 PURPOSE = "profile-pick"
 RESPONSIBILITIES = ("frontend", "engineer", "qa")
 HARNESS_ORDER = {"frontend": ("claude", "codex")}
-PULL_REQUEST_KINDS = ("code", "ci")
-PROOF_FIELDS = ("must", "check")
-CI_RUN = re.compile(r"\bCI\b")
 
 
 class ProfileUnresolved(RuntimeError):
@@ -74,8 +70,7 @@ def choose(
 
 
 def needs_ci_push(task: dict) -> bool:
-    proof = (text for key, text in (task.get("contract") or {}).items() if key in PROOF_FIELDS)
-    return task.get("kind", "code") not in PULL_REQUEST_KINDS and any(CI_RUN.search(text) for text in proof)
+    return (task.get("contract") or {}).get("push") == "yes"
 
 
 def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
