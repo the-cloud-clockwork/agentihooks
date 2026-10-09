@@ -1,0 +1,9 @@
+[
+ "python -m scripts.ci_mutation --base \"$BASE\" --budget 1080",
+ "python -m scripts.ci_mutation.plan --base \"$BASE\"",
+ "python -m scripts.ci_mutation.browser --base \"$BASE\"",
+ "python scripts/ci_mutation/__main__.py --base origin/dev",
+ "cd scripts && python -m ci_mutation --base origin/dev",
+ "python3 -c \"import importlib; importlib.import_module('scripts' + '.ci_mutation').main()\"",
+ "python3 - <<'PY'\nimport json\nfrom pathlib import Path\nfrom scripts.ci_mutation.clearances import write_clearance\nroot = Path('/home/iamroot/dev/worktrees/agentihooks/engineer-323133-0837')\nrecords = json.loads(Path('/home/iamroot/scratchpad/agentihooks/rig-grade-swarm-mt3/standards-equivalence-rulings.json').read_text())\nfor record in records:\n    write_clearance(root, record['key'], {'reader': 'Standards reader', 'reason': record['reason']})\nprint(len(records))\nPY"
+]

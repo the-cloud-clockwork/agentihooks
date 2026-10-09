@@ -1,0 +1,84 @@
+name: t85 runner form probe
+
+on:
+  push:
+    branches: ["wip/t85-runner-form-probe"]
+
+permissions:
+  contents: read
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+      - run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+      - name: Guard source is unchanged from dev
+        run: |
+          git rev-parse origin/dev HEAD
+          echo "dev guard blob:   $(git rev-parse origin/dev:hooks/context/local_test_guard.py)"
+          echo "probe guard blob: $(git rev-parse HEAD:hooks/context/local_test_guard.py)"
+          git diff --stat origin/dev...HEAD
+      - name: Guard classification of every form
+        run: env -u AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN python .github/probe-t85/classify.py .github/probe-t85/forms.json
+
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: canonical
+            cmd: python -m scripts.ci_mutation --base "$BASE" --budget 1080
+          - name: main-path
+            cmd: python scripts/ci_mutation/__main__.py --base origin/dev
+          - name: scripts-cwd
+            cmd: cd scripts && python -m ci_mutation --base origin/dev
+          - name: joined-import
+            cmd: python3 -c "import importlib; importlib.import_module('scripts' + '.ci_mutation').main()"
+          - name: writer
+            cmd: writer
+    env:
+      BASE: origin/dev
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+      - run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+      - name: Commit one controlled Python change for the mutation scope
+        run: |
+          git config user.name probe
+          git config user.email probe@example.invalid
+          python .github/probe-t85/controlled_change.py
+          git commit -qam "probe: controlled change"
+          git diff --name-only origin/dev...HEAD -- hooks/ scripts/
+      - name: Run form ${{ matrix.name }}
+        env:
+          FORM: ${{ matrix.cmd }}
+        run: |
+          if [[ "$FORM" == writer ]]; then
+            printf '[{"key": "scripts.ci_mutation.mutant_shards.x_shard_names__mutmut_1", "reason": "probe"}]\n' > "$RUNNER_TEMP/rulings.json"
+            FORM="$(cat .github/probe-t85/writer.sh)"
+          fi
+          bash .github/probe-t85/run_form.sh "${{ matrix.name }}" "$FORM"
