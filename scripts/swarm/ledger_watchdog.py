@@ -11,6 +11,7 @@ from pathlib import Path
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import ledger_host, ledger_probe, time_left
+from scripts.swarm.ledger_client import LedgerGone, LedgerRefused
 from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import server_code
 
@@ -143,6 +144,8 @@ def writes(ledger, slug: str, inputs: dict, clock: Callable[[], float]) -> list[
         started, failed = clock(), False
         try:
             ledger.time_left(slug, inputs.get("slots"), inputs.get("ci_minutes"))
+        except (LedgerRefused, LedgerGone):
+            pass
         except ledger_probe.FAILED:
             failed = True
         took.append((clock() - started, failed))
@@ -182,9 +185,12 @@ def _stale(store, slug: str, ledger, runtime, clock: Callable[[], float]) -> lis
 def _claimed(store, folder: Path, pid: int, kind: str) -> bool:
     if kind == STALE and store.redis.get(STARTED_KEY) == str(pid) and not server_code.recorded(folder, pid):
         return False
-    if kind == RUNAWAY and not store.redis.set(RUNAWAY_KEY, pid, nx=True, px=RUNAWAY_MS):
+    if not store.redis.set(LOCK_KEY, pid, nx=True, px=LOCK_MS):
         return False
-    return bool(store.redis.set(LOCK_KEY, pid, nx=True, px=LOCK_MS))
+    if kind == RUNAWAY and not store.redis.set(RUNAWAY_KEY, pid, nx=True, px=RUNAWAY_MS):
+        store.redis.delete(LOCK_KEY)
+        return False
+    return True
 
 
 def watch(store, slug: str, ledger, runtime, host: Host | None = None) -> list[str]:

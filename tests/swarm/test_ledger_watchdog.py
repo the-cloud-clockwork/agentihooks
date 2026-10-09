@@ -6,6 +6,7 @@ import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import ledger_probe, ledger_watchdog
+from scripts.swarm.ledger_client import LedgerGone, LedgerRefused
 from scripts.swarm.store import PREFIX, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import server_code
 from tests.swarm.test_ledger_probe import Clock, ProbedLedger
@@ -227,6 +228,10 @@ def test_writes_are_timed_three_times_and_failures_named():
     assert (took, ledger.writes) == ([(0.5, False)] * 3, [(2, 9.0)] * 3)
     ledger.write_error = SwarmError("ledger sw: ledger server not answering: timed out")
     assert ledger_watchdog.writes(ledger, "sw", {}, clock) == [(0.5, True)] * 3
+    ledger.write_error = LedgerRefused("ledger sw refused: not a seat")
+    assert ledger_watchdog.writes(ledger, "sw", {}, clock) == [(0.5, False)] * 3
+    ledger.write_error = LedgerGone("ledger sw does not exist")
+    assert ledger_watchdog.writes(ledger, "sw", {}, clock) == [(0.5, False)] * 3
     assert ledger_watchdog.described([(0.1, False), (2.04, False), (2.5, True)]) == (
         "0.1 seconds, 2.0 seconds and failed after 2.5 seconds"
     )
@@ -323,6 +328,15 @@ def test_a_runaway_restart_waits_out_its_cooldown(store, tmp_path):
     store.redis.set(ledger_watchdog.RUNAWAY_KEY, 1)
     assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) == []
     assert host.calls == [] and store.redis.get(ledger_watchdog.LOCK_KEY) is None
+
+
+def test_a_runaway_claim_that_loses_the_lock_keeps_its_cooldown_free(store, tmp_path):
+    host = Host(tmp_path)
+    plant(host.proc, host.argv, threads=400)
+    current(host, tmp_path)
+    store.redis.set(ledger_watchdog.LOCK_KEY, 1)
+    assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) == []
+    assert store.redis.get(ledger_watchdog.RUNAWAY_KEY) is None and host.calls == []
 
 
 def test_a_failed_operator_notice_is_logged_and_the_restart_still_counts(store, tmp_path, capsys):
