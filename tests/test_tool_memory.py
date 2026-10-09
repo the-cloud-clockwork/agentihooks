@@ -183,6 +183,62 @@ def test_memory_filters_secret_forms_with_scanning_disabled(tmp_path, text):
         assert not memory.exists(), "credential entry was stored"
 
 
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {
+            "error": "Error: unavailable",
+            "metadata": {"redis://:" + "synthetic" + "-credential@localhost:6379": "failed"},
+        },
+        {"error": "Error: unavailable", "metadata": {"note": "first line\nPASSWORD=" + "x"}},
+        {"error": "Error: unavailable", "metadata": {"PASSWORD": "x"}},
+        {"error": "Error: unavailable", "metadata": ("PASSWORD=" + "x",)},
+    ],
+)
+def test_memory_scans_nested_keys_and_multiline_values(tmp_path, entry):
+    from hooks import tool_memory
+
+    memory = tmp_path / "memory.ndjson"
+    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_banner") as banner:
+        tool_memory._append_entry(entry)
+        assert not memory.exists(), "nested credential entry was stored"
+        memory.write_text(json.dumps(entry) + "\n")
+        tool_memory.inject_memory()
+        banner.assert_not_called()
+
+
+def test_memory_preserves_separate_safe_fields(tmp_path):
+    from hooks import tool_memory
+
+    entry = {"tool": "Bash", "error": "Error: unavailable", "input": "PASSWORD=", "session": "safe session"}
+    memory = tmp_path / "memory.ndjson"
+    with patch.object(tool_memory, "MEMORY_PATH", memory):
+        tool_memory._append_entry(entry)
+        assert tool_memory._read_entries() == [entry]
+
+
+def test_transcript_preserves_safe_errors_after_credentials(tmp_path):
+    from hooks import tool_memory
+
+    records = [
+        {
+            "kind": "tool_result",
+            "is_error": True,
+            "tool_result": "Error: redis://:" + "synthetic" + "-credential@localhost:6379",
+        },
+        {"kind": "tool_result", "is_error": True, "tool_result": "Error: unavailable"},
+    ]
+    memory = tmp_path / "memory.ndjson"
+    with (
+        patch.object(tool_memory, "MEMORY_PATH", memory),
+        patch("hooks.memory.transcript_reader.iter_transcript_records", return_value=iter(records)),
+    ):
+        tool_memory.scan_transcript({"transcript_path": "synthetic.jsonl"})
+        entries = tool_memory._read_entries()
+        assert len(entries) == 1
+        assert entries[0]["error"] == "Error: unavailable"
+
+
 class TestIsErrorExplicitStatus:
     def test_file_tools_trust_only_explicit_flags(self):
         from hooks.tool_memory import _is_error, strict_detection

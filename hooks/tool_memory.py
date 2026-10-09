@@ -157,10 +157,18 @@ def _is_error(tool_result, strict=False):
 
 
 def _contains_secret(value: object) -> bool:
-    from hooks.secrets import iter_strings, redact
+    from hooks.secrets import redact
 
-    text = json.dumps(value, ensure_ascii=False) + "\n" + "\n".join(iter_strings(value))
-    return redact(text, mode="memory") != text
+    if isinstance(value, dict):
+        return any(
+            _contains_secret(key)
+            or _contains_secret(item)
+            or (isinstance(item, str) and _contains_secret(f"{key}={item}"))
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_contains_secret(item) for item in value)
+    return isinstance(value, str) and redact(value, mode="memory") != value
 
 
 # ---------------------------------------------------------------------------
