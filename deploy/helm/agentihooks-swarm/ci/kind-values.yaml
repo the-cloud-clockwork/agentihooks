@@ -2,6 +2,9 @@ image:
   repository: local/agentihooks-swarm
   tag: dev
   pullPolicy: Never
+redis:
+  image:
+    repository: mirror.gcr.io/library/redis
 controller:
   livenessProbe:
     initialDelaySeconds: 10
