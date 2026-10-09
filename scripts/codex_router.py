@@ -24,8 +24,8 @@ from hooks.context.account_sessions import (
 )
 from scripts import codex_quota, session_bands
 from scripts.codex_quota import CodexQuota
-from scripts.routing import codex_api, envs
-from scripts.routing.slots import INTERACTIVE, SUBSCRIPTION, Slot
+from scripts.routing import codex_api, envs, place
+from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
 
 TOKEN_ENV = envs.CODEX_TOKEN_ENV
 PROBE_ARGS = ["exec", "--json", "--skip-git-repo-check", "Reply with the single word ok."]
@@ -224,8 +224,9 @@ def select(
     sessions: Mapping[str, int],
     now: float,
     route: str = "",
+    environ: Mapping[str, str] | None = None,
 ) -> tuple[CodexAccount, str, session_bands.Seat | None]:
-    """The signed in account with a free place under its band and the fewest sessions."""
+    """Split launches between the api and the account pool by weight, then take the free seat with the fewest sessions."""
     if route:
         for account in pool:
             if account.name == route:
@@ -233,9 +234,13 @@ def select(
         available = ", ".join(account.name for account in pool)
         raise RoutingError(f"Codex account '{route}' not found; available: {available}")
     by_name = {account.name: account for account in pool}
-    seat = session_bands.pick(CodexAccountSource(sessions=sessions).offer(pool, quotas, now))
+    api, weight = place.api_side(codex_api.CodexApiSource(sessions), "codex", environ or {}, now)
+    pool_live = sum(sessions.get(account.name, 0) for account in pool)
+    seat = place.place(api, CodexAccountSource(sessions=sessions).offer(pool, quotas, now), weight, pool_live)
     if seat is None:
         raise RoutingError("no signed in Codex account has a fresh reading and a free session under its quota band")
+    if seat.kind == API:
+        return api_account(environ or {}), "open", seat
     return by_name[seat.account], "open", seat
 
 
@@ -305,7 +310,7 @@ def _route(environ: Mapping[str, str], route: str, run: Callable) -> tuple[Codex
     pool = source.pool(environ)
     now = time.time()
     found = source.readings(pool, environ, now)
-    account, placement, seat = select(pool, found, sessions, now, route)
+    account, placement, seat = select(pool, found, sessions, now, route, environ)
     return account, placement, sessions.get(account.name, 0), str(seat.cap) if seat else "?"
 
 
