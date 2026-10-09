@@ -143,7 +143,7 @@ def test_unit_matrix_runs_one_shard_per_split():
         )
     assert coverage_shards > plain_shards > 1
     merge = next(step for step in workflow["jobs"]["sonar"]["steps"] if step.get("name") == "Merge shard coverage")
-    assert merge["run"].split()[-1] == str(coverage_shards)
+    assert re.search(r"combine\.sh --downloaded (\d+) ", merge["run"]).group(1) == str(coverage_shards)
     assert "--splits" not in command
 
 
