@@ -409,3 +409,16 @@ def test_apply_reports_a_clear_that_left_the_priority_listed(env, tmp_path):
             "error": "applied, but clearing its priority failed: server refused",
         }
     ]
+
+
+REFUSED_ROUND = (
+    "   Never write the prompts as chat text. When `AskUserQuestion` is refused because the operator is not present, "
+    "say only one short line, type operator on to answer the questions here, or leave them in Priorities; "
+    "keep every priority and end the run. Done when that one line is sent and every priority is still listed."
+)
+
+
+def test_a_refused_round_sends_one_operator_on_line_and_keeps_every_priority():
+    body = (SCRIPTS.parent / "SKILL.md").read_text()
+
+    assert [line for line in body.splitlines() if "type operator on" in line] == [REFUSED_ROUND]
