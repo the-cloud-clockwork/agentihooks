@@ -200,8 +200,10 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
             test_calls.append((mutant_name, tests))
             return 9
 
+    mutants = [(data, f"scripts.sample.x_f__mutmut_{n}", None) for n in range(1, 8)]
     runner = SimpleNamespace(
         collect_or_load_stats=None,
+        collect_source_file_mutation_data=lambda *, mutant_names: (mutants, mutant_names),
         SourceFileMutationData=mutation_data,
         Config=SimpleNamespace(get=lambda: config),
         PytestRunner=PytestRunner,
@@ -260,6 +262,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         assert runner.PytestRunner().run_tests(mutant_name=None, tests=[]) == 9
         assert runner.collect_or_load_stats(test_runner) is None
         assert collected == [True]
+        assert runner.collect_source_file_mutation_data(mutant_names=("m",)) == ([mutants[1], mutants[4]], ("m",))
         assert config.source_paths == [Path("hooks/")]
         assert engine.tests_by_mangled_function_name == {
             "scripts.sample.x_f": {"tests/test_sample.py::test_slow"},
@@ -307,7 +310,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
         monkeypatch.setitem(sys.modules, name, sys.modules[name])
     with pytest.raises(SystemExit) as error:
-        run_selected(selection)
+        run_selected(selection, (1, 3))
     assert error.value.code == 7
 
 
@@ -333,6 +336,18 @@ def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_
     assert all(name.startswith("x_g__") for name in names)
     with pytest.raises(PragmaParseError, match="scripts/sample.py"):
         selected_mutants("scripts/sample.py", "# pragma: no mutate end\n", {1})
+
+
+@pytest.mark.parametrize("total", [1, 2, 3, 7])
+def test_shards_split_every_mutant_name_exactly_once_and_evenly(total):
+    from scripts.ci_mutation.mutant_shards import shard_names
+
+    names = [f"scripts.sample.x_f{n % 3}__mutmut_{n}" for n in range(1, 21)]
+    shares = [shard_names(reversed(names), (index, total)) for index in range(total)]
+    assert set().union(*shares) == set(names)
+    assert sum(map(len, shares)) == len(names)
+    assert max(map(len, shares)) - min(map(len, shares)) <= 1
+    assert shares == [shard_names(names, (index, total)) for index in range(total)]
 
 
 def test_selection_never_imports_the_mutants_tree_another_worker_is_writing(tmp_path, monkeypatch):
@@ -590,6 +605,7 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
     data = SimpleNamespace(exit_code_by_key={"selected": None}, load=lambda: None)
     engine = SimpleNamespace(tests_by_mangled_function_name={})
     runner = SimpleNamespace(
+        collect_source_file_mutation_data=None,
         SourceFileMutationData=lambda **kwargs: data,
         Config=SimpleNamespace(get=lambda: config),
         PytestRunner=type("PytestRunner", (), {"run_tests": lambda *args, **kwargs: 0}),
@@ -610,7 +626,7 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
     monkeypatch.setitem(sys.modules, "mutmut", SimpleNamespace(__main__=runner))
     for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
         monkeypatch.setitem(sys.modules, name, sys.modules[name])
-    run_selected(selection)
+    run_selected(selection, (0, 1))
     assert counts == [expected]
     output = capsys.readouterr().out
     assert output == ("" if ci else "Local mutation worker cap: 2 (mutation and stats)\n")
