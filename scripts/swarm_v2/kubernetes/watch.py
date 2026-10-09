@@ -88,7 +88,7 @@ class Reconciler:
     def plan(self, journals: Iterable[str], pods: Iterable[Pod], superseded: Iterable[str] = ()) -> Plan:
         journals, superseded, plan, by_execution = set(journals), set(superseded), Plan(), {}
         for pod in pods:
-            execution_id = pod.labels.get(EXECUTION_LABEL, "")
+            execution_id = pod.labels.get(EXECUTION_LABEL)
             if pod.labels.get(OWNER_LABEL) != self.owner:
                 plan.observed["foreign"] += 1
                 plan.quarantine.append(pod)

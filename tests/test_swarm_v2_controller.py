@@ -481,6 +481,14 @@ def test_restart_converges_to_existing_pods_and_deletes_only_managed_orphans(fix
     assert again.delete == [] and pods.deleted == [("eng-2", "uid-eng-2")]
 
 
+def test_orphan_cleanup_is_on_by_default(fixture):
+    store, _, transport, _, grant = fixture
+    pods = Pods([managed("eng-2", "exec-orphan")])
+    controller = Controller(store, "fixture", [transport], lambda: grant["allowed"], pods=watch.PodView(pods))
+    assert controller.acquire()
+    assert pods.deleted == [("eng-2", "uid-eng-2")]
+
+
 def test_journal_without_a_pod_is_reported_missing(fixture):
     store, (first, _), transport, clock, grant = fixture
     attempt = launched(store, first)
