@@ -320,6 +320,7 @@ class Project:
 
     def __call__(self, path, params):
         if path == "projects":
+            assert params == {}
             if self.name is None:
                 raise ConnectionError("refused")
             return {"data": [{"id": "p", "name": self.name}]}
@@ -385,3 +386,17 @@ def test_genuine_missing_and_unattributed_traces_stay_detected_in_the_swarm_proj
     found = traces.findings(data, traces.Limits())
     assert [f.subject for f in found if f.kind == "untraced session"] == ["s-ci-1", "s-eng-0"]
     assert [f.subject for f in found if f.kind == "telemetry misattributed"] == ["s-ci-1.5.unattributed"]
+
+
+def test_working_agents_without_traces_in_a_project_that_holds_the_swarm_stay_misattributed(tmp_path, monkeypatch):
+    from scripts.doctor import registry, traces
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+    project = Project("agent-swarm", [_tagged("s-eng-0", "c0")])
+    data = traces_read.record("s", HISTORICAL, WORKING, 10**9, project, home=tmp_path)
+    assert data["reader"]["failures"] == []
+    found = traces.findings(data, traces.Limits())
+    assert sorted(f.subject for f in found if f.kind == "telemetry misattributed") == [
+        "s-ci-1.5.unattributed",
+        "s-eng-1.5.unattributed",
+    ]
