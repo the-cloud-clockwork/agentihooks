@@ -73,7 +73,27 @@ def test_push_without_a_passing_run_is_blocked(repo, command):
 
 @pytest.mark.parametrize(
     "prefix",
-    ["if", "then", "else", "elif", "do", "while", "until", "time", "exec", "nohup", "env", "command", "!", "{", "A=1"],
+    [
+        "if",
+        "then",
+        "else",
+        "elif",
+        "do",
+        "while",
+        "until",
+        "time",
+        "exec",
+        "nohup",
+        "env",
+        "command",
+        "!",
+        "{",
+        "A=1",
+        "timeout -s TERM -k 5s 30s",
+        "sudo -u worker",
+        "nice -n 10",
+        "env -u UNUSED A=1",
+    ],
 )
 def test_every_shell_prefix_is_looked_through(repo, prefix):
     with pytest.raises(BlockAction):

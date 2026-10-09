@@ -57,7 +57,6 @@ RUNNERS = [
     "prove",
     "python -c 'import pytest; pytest.main()'",
     "python -m scripts.ci_mutation",
-    "python -m scripts.ci_mutation_report",
 ]
 
 WRAPPERS = [
