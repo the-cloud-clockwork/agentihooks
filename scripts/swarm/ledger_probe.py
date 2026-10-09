@@ -133,18 +133,23 @@ def observe(
     sample = measure(ledger, slug, time_left.inputs_of(store, slug, runtime), clock)
     if sample is None:
         return []
-    incidents.step(store.redis, "ledger", sample.slow)
+    down = store.redis.hget(incidents.key("ledger"), "watchdog")
+    bad = sample.slow or bool(down)
+    incidents.step(store.redis, "ledger", bad)
     active = store.redis.hget(incidents.key("ledger"), "active") == "1"
-    text = _raised(sample, (facts or ledger_host.facts)()) + PAUSED if active else CLEARED.format(took=sample.took())
+    raised = down or (
+        _raised(sample, (facts or ledger_host.facts)()) if active else "The ledger is slow or unavailable."
+    )
+    text = (raised if down else raised + PAUSED) if active else CLEARED.format(took=sample.took())
     incidents.mail(store.redis, "ledger", master_address(store, slug), text, not active)
-    incidents.deliver(store.redis, "ledger", "The ledger is slow or unavailable.", CLEARED.format(took=sample.took()))
+    incidents.deliver(store.redis, "ledger", raised, CLEARED.format(took=sample.took()))
     held = state(store, slug)
-    slow = held.get("slow", 0) + 1 if sample.slow else 0
-    fast = 0 if sample.slow else held.get("fast", 0) + 1
+    slow = held.get("slow", 0) + 1 if bad else 0
+    fast = 0 if bad else held.get("fast", 0) + 1
     held.update(slow=slow, fast=fast)
     actions, notices = [], held.get("notices", [])
     if not held.get("alert") and slow >= PASSES:
-        text = _raised(sample, (facts or ledger_host.facts)())
+        text = raised
         notices = [*notices, for_operator(text)]
         held.update(alert=True, raised_at=now_ms)
         actions.append("raised the ledger slow alert")

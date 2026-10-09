@@ -1,9 +1,17 @@
+from __future__ import annotations
+
 import socket
 import sys
+from typing import TYPE_CHECKING
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import push
 from scripts.swarm.store import PREFIX
+
+if TYPE_CHECKING:
+    from redis import Redis
+
+    from scripts.swarm.store import RedisStore
 
 STEP = """
 local active = tonumber(redis.call('HGET', KEYS[1], 'active') or '0')
@@ -27,7 +35,7 @@ MAIL = """
 local generation = tonumber(redis.call('HGET', KEYS[1], 'generation') or '0')
 local active = redis.call('HGET', KEYS[1], 'active') == '1'
 local field = ARGV[1]
-if field == 'raised' and not active then generation = generation + 1 end
+if field == 'raised' and not active then return 0 end
 local value = tostring(generation)
 if field == 'resolved' and redis.call('HGET', KEYS[2], 'raised') ~= value then return 0 end
 if redis.call('HGET', KEYS[2], field) == value then return 0 end
@@ -40,12 +48,12 @@ def key(kind: str) -> str:
     return f"{PREFIX}:host:{socket.gethostname()}:incident:{kind}"
 
 
-def step(redis, kind: str, bad: bool) -> str:
+def step(redis: Redis, kind: str, bad: bool) -> str:
     root = key(kind)
     return redis.eval(STEP, 2, root, f"{root}:outbox", int(bad))
 
 
-def deliver(redis, kind: str, raised: str, resolved: str) -> None:
+def deliver(redis: Redis, kind: str, raised: str, resolved: str) -> None:
     root = key(kind)
     lock = redis.lock(f"{root}:delivery", timeout=10, blocking=False)
     if not lock.acquire():
@@ -58,7 +66,7 @@ def deliver(redis, kind: str, raised: str, resolved: str) -> None:
         lock.release()
 
 
-def mail(redis, kind: str, address: str, text: str, resolved: bool = False) -> bool:
+def mail(redis: Redis, kind: str, address: str, text: str, resolved: bool = False) -> bool:
     root = key(kind)
     field = "resolved" if resolved else "raised"
     if not redis.eval(MAIL, 2, root, f"{root}:mail:{address}", field):
@@ -67,7 +75,7 @@ def mail(redis, kind: str, address: str, text: str, resolved: bool = False) -> b
     return True
 
 
-def host_pressure(store, slug: str) -> list[str]:
+def host_pressure(store: RedisStore, slug: str) -> list[str]:
     from redis.exceptions import RedisError
 
     from scripts.swarm import host_budget, ledger_probe

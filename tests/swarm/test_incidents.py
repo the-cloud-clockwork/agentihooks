@@ -71,12 +71,14 @@ def test_watchdog_outage_shares_probe_push_and_resolves(store, monkeypatch, tmp_
     (host.folder / ".server.pid").write_text(str(PID))
     clock = Clock()
     ledger = ProbedLedger(clock)
-    incidents.step(store.redis, "ledger", True)
     ledger_watchdog.watch(store, "sw", ledger, FakeRuntime(), host)
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
     assert sent.call_count == 1
     assert sent.call_args.args[0] == "critical"
     assert "restart failed" in sent.call_args.args[1]
     assert len(master_mail(store)) == 1
+    store.redis.hdel(incidents.key("ledger"), "watchdog")
     observe(store, ledger, clock)
     observe(store, ledger, clock)
     assert sent.call_count == 2
