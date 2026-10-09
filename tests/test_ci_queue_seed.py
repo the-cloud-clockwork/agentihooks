@@ -370,7 +370,7 @@ def dispatch_lookup(tmp_path):
         'printf "%s\\n" "$@" >> "$ARGS"\n'
         'case "$2" in\n'
         '  */commits/*) [[ -z "$FAIL_COMMIT" ]] || exit 1; body="{\\"sha\\": \\"$FAKE_SHA\\"}" ;;\n'
-        '  */runs\\?*) body=$(printf "%s\\n" $FAKE_RUNS | jq -R --arg sha "$FAKE_SHA" "$RUN_OF"'
+        '  */runs\\?*) body=$(printf "%s\\n" $FAKE_RUNS | grep . | jq -R --arg sha "$FAKE_SHA" "$RUN_OF"'
         ' | jq -s --arg q "&${2#*\\?}&" "$LISTED") ;;\n'
         '  */runs/*/artifacts*) run="${2#*/runs/}"; run="${run%%/*}"; v="KEPT_$run"; body="${!v:-[]}"'
         '; body="{\\"artifacts\\": $body}" ;;\n'
@@ -422,7 +422,7 @@ def test_dispatch_on_dev_restores_the_newest_passed_dev_push_run(dispatch_lookup
         "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs"
         "?branch=dev&event=push&status=success&per_page=20"
     ) in args
-    assert "222" in result.stdout
+    assert "from passed dev push run 222" in result.stdout
 
 
 def test_dispatch_on_a_pinned_commit_restores_its_passed_dev_push_run(dispatch_lookup):
@@ -430,7 +430,7 @@ def test_dispatch_on_a_pinned_commit_restores_its_passed_dev_push_run(dispatch_l
     result, output, args = dispatch_lookup(
         base=pinned,
         sha=pinned,
-        runs=f"444:{pinned}: 111:{pinned}:success 222:{'b' * 40}:success",
+        runs=f"444:{pinned}: 222:{'b' * 40}:success 111:{pinned}:success",
         run444="durations-merged coverage-baseline",
         run111="durations-merged coverage-baseline",
         run222="durations-merged coverage-baseline",

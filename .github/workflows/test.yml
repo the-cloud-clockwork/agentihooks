@@ -180,12 +180,12 @@ jobs:
           for run in $runs; do
             kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
             if [[ "$kept" == *" durations-merged "* && "$kept" == *" coverage-baseline "* ]]; then
-              echo "Restoring dev durations and the coverage baseline of base $BASE from passed dev push run $run"
+              echo "Restoring dev durations and the coverage baseline for base $BASE from passed dev push run $run"
               echo "id=$run" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           done
-          echo "::error::No passed dev push Tests run for base $BASE kept live durations-merged and coverage-baseline artifacts."
+          echo "::error::No passed dev push Tests run for base $BASE kept live durations-merged and coverage-baseline artifacts; pin a base whose dev push run passed and finished."
           exit 1
 
       - name: Download the dev durations
