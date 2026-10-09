@@ -105,13 +105,13 @@ def test_a_malformed_ledger_is_unreadable_and_the_rest_indexed(home, capsys):
     folder = Path(home["LEDGER_DIR"])
     write(folder, "idless", document("Idless", [{"title": "no id"}]))
     write(folder, "nameless", document("Nameless", [{"id": "t1", "comments": [{"text": "no id"}]}]))
-    write(folder, "rootless", document("Rootless"))
+    write(folder, "absent-root", document("Rootless"))
     with sqlite3.connect(folder / DATABASE) as connection:
         for table in TABLES:
-            connection.execute(f"DELETE FROM {table} WHERE slug='rootless' AND path='[]'")
+            connection.execute(f"DELETE FROM {table} WHERE slug='absent-root' AND path='[]'")
     code, out = run(home, "--all", capsys=capsys)
     assert code == 0
-    assert out["unreadable"] == ["idless", "nameless", "rootless"]
+    assert out["unreadable"] == ["absent-root", "idless", "nameless"]
     assert list(out["indexed"]) == ["alpha"]
     assert store(home).match("Idless") == []
 
