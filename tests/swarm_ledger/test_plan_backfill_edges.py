@@ -76,6 +76,48 @@ def test_slice_update_resolves_a_new_source_link_in_the_same_write(legacy):
     assert row["plan_url"] == url
 
 
+def test_task_add_resolves_its_explicit_link_without_a_phase_plan(legacy):
+    doc = core.sync(legacy)[0]
+    url = doc["phases"][0]["plan_url"]
+    doc["phases"] = []
+    op = {
+        "op": "task_add",
+        "by": "planner",
+        "task": "new",
+        "title": "New",
+        "lane": "eng",
+        "plan_url": url,
+        "plan_slice": "bal6",
+    }
+    assert ledger_tasks.apply(doc, op, context()) is True
+    assert doc["tasks"][0]["plan_lines"] == "3-4"
+    assert doc["tasks"][0]["plan_url"] == url
+
+
+def test_task_add_without_any_plan_source_is_refused(plan_ledger):
+    doc = core.sync(plan_ledger)[0]
+    op = {
+        "op": "task_add",
+        "by": "planner",
+        "task": "new",
+        "title": "New",
+        "lane": "eng",
+        "phase": "p1",
+        "plan_slice": "bal6",
+    }
+    ctx = context()
+    assert ledger_tasks.apply(doc, op, ctx) is False
+    assert ctx.refused == ["publish a plan artifact for the phase before adding a plan slice"]
+    assert doc["tasks"] == []
+
+
+def test_phase_link_is_the_default_slice_source(legacy):
+    from scripts.swarm_ledger import plan_ranges
+
+    doc = core.sync(legacy)[0]
+    assert plan_ranges.task_slice(doc, doc["phases"][0], "bal6") == "3-4"
+
+
 def test_backfill_respects_the_task_phase_when_slice_names_repeat(legacy, monkeypatch, capsys):
     doc = core.sync(legacy)[0]
     source = "# Plan\n## One\n<!-- slice: work -->\n### Task\nOne\n## Two\n<!-- slice: work -->\n### Task\nTwo\n"
