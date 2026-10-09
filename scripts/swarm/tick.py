@@ -588,7 +588,14 @@ def _claimable(slug, store, rows, doc, lane):
 
 
 def _launch_order(slug, store, tasks):
-    return sorted(tasks, key=lambda task: (ledger_rank.order(task), bool(store.launch_failure(slug, task["id"]))))
+    return sorted(
+        tasks,
+        key=lambda task: (
+            ledger_rank.order(task),
+            bool(store.launch_failure(slug, task["id"])),
+            not claim_order.resumed(task),
+        ),
+    )
 
 
 def _unblocked(task, rows):
@@ -675,7 +682,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         handoff = store.handoff(slug, task["id"])
         if handoff:
             task["handoff"] = handoff
-        elif lives := store.earlier_lives(slug, task["id"]):
+        elif (lives := store.earlier_lives(slug, task["id"])) or task.get("branch"):
             task["reclaim"] = reclaim(config.repo, lives, task.get("branch") or "")
             store.put_reclaim(slug, name, task["reclaim"])
         task["stack_base"] = _stack_base(task, rows)

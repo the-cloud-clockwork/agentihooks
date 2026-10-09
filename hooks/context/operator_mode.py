@@ -25,6 +25,11 @@ ASK_REFUSAL = (
     'agentihooks ledger --slug {slug} --as {name} question add "<the question in plain words>" '
     "and keep working; the master answers it or raises it to the operator."
 )
+MASTER_ASK_REFUSAL = (
+    "The operator is not present in this pane, so the question tool is off. Never write the questions as chat text. "
+    "Say only one short line, type operator on to answer the questions here, or leave them in Priorities with "
+    'agentihooks ledger --slug {slug} --as {name} priority add <item> "<the ask in plain words>".'
+)
 
 
 def _path(session_id):
@@ -107,7 +112,8 @@ def question_block(tool_name, session_id, environ=None, now=None):
     if tool_name != QUESTION_TOOL or _heard(session_id, env, now):
         return ""
     slug, name = _binding(env, session_id)
-    return ASK_REFUSAL.format(slug=slug, name=name)
+    refusal = MASTER_ASK_REFUSAL if name.startswith("master@") else ASK_REFUSAL
+    return refusal.format(slug=slug, name=name)
 
 
 def _heard(session_id, environ, now):
