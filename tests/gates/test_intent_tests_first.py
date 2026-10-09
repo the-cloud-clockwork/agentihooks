@@ -110,7 +110,7 @@ def test_declared_part_reads_the_actual_diff_from_the_same_head():
             output = '{"title":"Tests first","body":"Task part: tests-first","files":[{"path":"tests/gates/test_required.py"}]}'
         elif args[1:3] == ["pr", "diff"]:
             output = "+assert result in {old_state, new_state}"
-        elif "headRefOid" in args:
+        elif ".head.sha" in args:
             output = "head\n"
         else:
             output = ""

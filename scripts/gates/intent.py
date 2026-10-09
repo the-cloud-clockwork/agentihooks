@@ -84,6 +84,10 @@ def mode_of(config):
     return chosen if chosen in MODES else DEFAULT_MODE
 
 
+def _tests_first(body: str) -> bool:
+    return "Task part: tests-first" in body.splitlines()
+
+
 def _phase(doc, task):
     return next((p for p in doc["phases"] if p.get("id") == task.get("phase")), {})
 
@@ -180,6 +184,12 @@ def pr_view(url, run=subprocess.run):
         comments = _gh(["gh", "api", "--paginate", "--jq", ".[] | @json", path], run)
         if comments.returncode:
             return None
+        diff = {}
+        if _tests_first(body):
+            patch = _gh(["gh", "pr", "diff", url], run)
+            if patch.returncode:
+                return None
+            diff = {"diff": patch.stdout}
         head = pr_head(url, run)
         if not head or head != before:
             return None
@@ -188,6 +198,7 @@ def pr_view(url, run=subprocess.run):
             "title": title,
             "body": body,
             "files": files,
+            **diff,
             "reviewer_findings": {
                 "reviews": raw.get("reviews", []),
                 "comments": raw.get("comments", []),
@@ -229,11 +240,14 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
         "proof": task.get("proof") or {},
         "proof_notes": _proof_notes(task, proof_chars),
         "reviewer_findings": pr.get("reviewer_findings", {}),
+        **({"task_part": "tests-first", "pull_request_diff": pr.get("diff")} if _tests_first(pr["body"]) else {}),
         **_plan_chunk(doc, task),
     }
 
 
 def _rows(state):
+    if state.get("task_part") == "tests-first":
+        return []
     text = state.get("plan_chunk")
     return plan_read.numbered(text, state["plan_lines"]) if isinstance(text, str) else []
 
@@ -246,7 +260,51 @@ def _missed(number, row):
     )
 
 
+def _tests_first_questions() -> dict[str, YesNo]:
+    scope = (
+        "Judge only the declared tests first part of this pull request. "
+        "The task text and plan describe the later gate change and remain context, "
+        "not implementation required in this part. Read pull_request_diff as evidence. "
+    )
+    criteria = {
+        "usable": (
+            "Can the phase use these compatible preparatory tests before the later gate change?",
+            "The tests first part is useful preparation.",
+            "The tests first part is unusable preparation.",
+        ),
+        "delivers": (
+            "Does this part add or update tests for the task's old and new gate states?",
+            "The preparatory tests deliver this part.",
+            "The preparatory tests do not deliver this part.",
+        ),
+        "reachable": (
+            "Can CI run the preparatory tests before the later gate change?",
+            "CI can run the preparatory tests now.",
+            "CI cannot run the preparatory tests now.",
+        ),
+        "weakens": (
+            "Does this preparatory change weaken the phase's existing guarantees?",
+            "The preparatory change weakens existing guarantees.",
+            "The preparatory change preserves existing guarantees.",
+        ),
+        "accepts_both_states": (
+            "Do the changed tests accept both the old and new gate states required by the task?",
+            "The tests accept both old and new gate states.",
+            "The tests reject either the old or new gate state.",
+        ),
+        "changes_gate_behavior": (
+            "Does any change in the diff alter gate behaviour, including gate code, "
+            "workflow configuration or executable graders within the tests directory?",
+            "The diff changes gate behaviour.",
+            "The diff only prepares compatible tests and changes no gate behaviour.",
+        ),
+    }
+    return {key: YesNo(scope + question, yes, no) for key, (question, yes, no) in criteria.items()}
+
+
 def questions_for(state):
+    if state.get("task_part") == "tests-first":
+        return _tests_first_questions()
     rows = _rows(state)
     if not rows:
         return {key: question for key, question in QUESTIONS.items() if key not in CHUNK_QUESTIONS}
@@ -290,6 +348,11 @@ def _chunk_steps(state, answers):
 
 
 def remediation(state: dict, answers: dict) -> str:
+    if state.get("task_part") == "tests-first":
+        return (
+            "What would meet intent: Accept both old and new gate states in the preparatory tests "
+            "without changing gate behaviour. Deliver the gate implementation in the later pull request."
+        )
     steps = []
     if state.get("task_text"):
         task = f"{state['task']}: {state['task_text']}"
@@ -308,12 +371,23 @@ def remediation(state: dict, answers: dict) -> str:
 
 
 def judge(state, decide=decide):
-    if state.get("plan_lines") and not isinstance(state.get("plan_chunk"), str):
+    preparatory = state.get("task_part") == "tests-first"
+    if preparatory and not isinstance(state.get("pull_request_diff"), str):
+        return FAIL, "the tests first part requires a complete pull request diff to judge gate behaviour"
+    if not preparatory and state.get("plan_lines") and not isinstance(state.get("plan_chunk"), str):
         return UNCHECKED, f"the plan chunk for lines {state['plan_lines']} could not be read"
     try:
         answers = decide(state, questions_for(state), purpose=PURPOSE).answers
     except ClassifierError:
         return UNCHECKED, "the classifier did not answer"
+    if preparatory:
+        faults = []
+        if answers["accepts_both_states"].noul < REASON_LINE:
+            faults.append("the preparatory tests may not accept both old and new gate states")
+        if answers["changes_gate_behavior"].noul >= WEAKEN_LINE:
+            faults.append("the tests first part may change gate behaviour")
+        if faults:
+            return FAIL, "; ".join([*faults, remediation(state, answers)])
     usable, weakens = answers["usable"].noul, answers["weakens"].noul
     chunk = _chunk_reasons(state, answers)
     if usable >= FAIL_LINE and weakens < WEAKEN_LINE and not chunk:
