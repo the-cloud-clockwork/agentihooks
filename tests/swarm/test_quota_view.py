@@ -67,3 +67,25 @@ def test_the_page_reads_each_account_routing_and_the_lane_order():
             {**row("main", "UNKNOWN", 0, None, None, "codex"), "routing": None},
         ],
     }
+
+
+def api_row(harness="claude", sessions=1, weight=25, state="OPEN"):
+    return {**row("api", state, sessions, None, None, harness), "kind": "api", "weight": weight}
+
+
+API_DECISION = {
+    **DECISION,
+    "accounts": [row("alpha", sessions=2), row("beta", sessions=1), api_row(), api_row("codex", 0, None, "CLOSED")],
+}
+
+
+def test_each_api_line_shows_its_harness_share_against_its_weight():
+    assert quota_view.lines(API_DECISION, 1_000_000)[3:] == [
+        "quota account claude api  open  api share 25% of 4 sessions against weight 25%  sessions 1",
+        "quota account codex api  closed  api share 0% of 0 sessions against no weight  sessions 0",
+    ]
+
+
+def test_the_page_carries_each_api_share():
+    accounts = quota_view.page(API_DECISION)["accounts"]
+    assert [account.get("share") for account in accounts] == [None, None, 25, 0]

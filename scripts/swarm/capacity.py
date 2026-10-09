@@ -4,8 +4,11 @@ from dataclasses import dataclass, replace
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, session_bands
+from scripts.routing import claude_api, codex_api, place
+from scripts.routing.slots import API, SUBSCRIPTION
 
 LANES = ("eng", "ci", "plan")
+LABELS = {"claude": "Claude", "codex": "Codex"}
 
 
 @dataclass(frozen=True)
@@ -18,6 +21,8 @@ class Account:
     week_left: float | None
     cap: int | None = None
     week_resets_at: int | None = None
+    kind: str = SUBSCRIPTION
+    weight: int | None = None
 
 
 def _left(window: balancer.QuotaWindow, now: float) -> float | None:
@@ -43,9 +48,22 @@ def _claude(environ: dict, now: float) -> list[Account]:
             Account("claude", result.account, _state(cap), counts.get(result.account, 0), five, week, cap, reset)
         )
     rows += [
-        Account("claude", name, "UNKNOWN", count, None, None) for name, count in counts.items() if name not in observed
+        Account("claude", name, "UNKNOWN", count, None, None)
+        for name, count in counts.items()
+        if name not in observed and name != account_sessions.API_ACCOUNT
     ]
-    return rows
+    return rows + _api(claude_api.ClaudeApiSource(counts), "claude", environ, now)
+
+
+def _api(source, harness: str, environ: dict, now: float) -> list[Account]:
+    found, weight = place.api_side(source, harness, environ, now)
+    live = source.sessions.get(account_sessions.API_ACCOUNT, 0)
+    if not found:
+        return [Account(harness, account_sessions.API_ACCOUNT, "CLOSED", live, None, None, 0, kind=API)] if live else []
+    return [
+        Account(harness, slot.account, _state(slot.cap), slot.sessions, None, None, slot.cap, kind=API, weight=weight)
+        for slot in found
+    ]
 
 
 def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
@@ -57,7 +75,7 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     live = [
         codex_router.CodexAccount(name, f"AH_CX_TOKEN_{name}")
         for name in counts
-        if name not in known and name != "default"
+        if name not in known and name not in {"default", account_sessions.API_ACCOUNT}
     ]
     found.update(codex_router.quotas(live, environ))
     rows = []
@@ -68,7 +86,7 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
         week = _left(quota.seven_day, now) if quota else None
         reset = session_bands.upcoming(quota.seven_day.resets_at, now) if quota else None
         rows.append(Account("codex", account.name, _state(cap), counts.get(account.name, 0), five, week, cap, reset))
-    return rows
+    return rows + _api(codex_api.CodexApiSource(counts), "codex", environ, now)
 
 
 def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
@@ -76,18 +94,39 @@ def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
     return _claude(environ, now) + _codex(environ, now, refresh)
 
 
+def _seat(row: Account, cap: int) -> session_bands.Seat:
+    return session_bands.Seat(
+        row.harness,
+        row.name,
+        cap,
+        row.sessions,
+        session_bands.spend_by(row.five_left, row.week_resets_at),
+        kind=row.kind,
+        weight=row.weight,
+    )
+
+
 def seats(rows: list[Account]) -> list[session_bands.Seat]:
-    return [
-        session_bands.Seat(
-            row.harness,
-            row.name,
-            row.cap,
-            row.sessions,
-            session_bands.spend_by(row.five_left, row.week_resets_at),
-        )
-        for row in rows
-        if row.cap is not None
-    ]
+    return [_seat(row, row.cap) for row in rows if row.cap is not None]
+
+
+def offered(rows: list[Account], closed=()) -> list[session_bands.Seat]:
+    """Every row as a seat, closed and unknown rows at cap 0, so their live sessions weigh in the api share."""
+    return [_seat(row, 0 if row.cap is None or (row.harness, row.name) in closed else row.cap) for row in rows]
+
+
+def _side(offered_seats: list[session_bands.Seat], harness: str) -> session_bands.Seat | None:
+    api = [seat for seat in offered_seats if seat.harness == harness and seat.kind == API]
+    pool = [seat for seat in offered_seats if seat.harness == harness and seat.kind != API]
+    weight = max((seat.weight or 0 for seat in api), default=0)
+    return place.place(api, pool, weight, sum(seat.sessions for seat in pool))
+
+
+def pick(offered_seats) -> session_bands.Seat | None:
+    """The split side of each harness, then the free seat with the fewest sessions across harnesses."""
+    offered_seats = list(offered_seats)
+    harnesses = dict.fromkeys(seat.harness for seat in offered_seats)
+    return session_bands.pick(seat for harness in harnesses if (seat := _side(offered_seats, harness)))
 
 
 def free_seats(account: Account) -> int:
@@ -155,12 +194,24 @@ def _allocate(
         reserved = _reserved(limits, effective, options, cursors)
         eligible = [h for h in options[lane][index] if room(lane, index, h)]
         spare = [h for h in eligible if remaining[h] > reserved[h]] or eligible
-        seat = session_bands.pick(s for s in held.values() if s.harness in spare and usable(lane, index, s))
+        seat = pick(s for s in held.values() if s.harness in spare and usable(lane, index, s))
         held[(seat.harness, seat.account)] = replace(seat, sessions=seat.sessions + 1)
         allocation[lane][seat.harness] += 1
         placements[lane].append({"index": index, "harness": seat.harness, "account": seat.account})
         cursors[lane] += 1
         effective[lane] += 1
+
+
+def record(row: Account) -> dict:
+    """The stored row; pool rows keep their pre-api fields so decisions without an api stay byte identical."""
+    if row.kind == API:
+        return dict(row.__dict__)
+    return {key: value for key, value in row.__dict__.items() if key not in {"kind", "weight"}}
+
+
+def _api_reason(row: Account) -> str:
+    weight = "" if row.weight is None else f" at weight {row.weight}"
+    return f"; {LABELS[row.harness]} api is {row.state.lower()}{weight}"
 
 
 def calculate(
@@ -181,18 +232,20 @@ def calculate(
     }
     warned = warned or {}
     open_rows = [row for row in observations if (row.harness, row.name) not in warned]
-    placeable = {h: sum(free_seats(row) for row in open_rows if row.harness == h) for h in ("claude", "codex")}
-    allocation, placements = _allocate(config, effective, limits, seats(open_rows), requirements, accounts)
+    pool = [row for row in open_rows if row.kind != API]
+    placeable = {h: sum(free_seats(row) for row in pool if row.harness == h) for h in ("claude", "codex")}
+    allocation, placements = _allocate(config, effective, limits, offered(observations, warned), requirements, accounts)
     restricted = sorted({row.state.lower() for row in observations if row.state != "OPEN"})
     reason = "accounts have quota" if not restricted else "accounts are " + ", ".join(restricted)
     reason += f"; Claude has {placeable['claude']} free seats and Codex has {placeable['codex']} free seats"
     reason += "".join(f", {harness} {name} {warning(window)}" for (harness, name), window in warned.items())
+    reason += "".join(_api_reason(row) for row in observations if row.kind == API)
     return {
         "configured": configured,
         "effective": effective,
         "placeable": placeable,
         "reason": reason,
-        "accounts": [row.__dict__ for row in observations],
+        "accounts": [record(row) for row in observations],
         "allocation": allocation,
         "placements": placements,
     }
