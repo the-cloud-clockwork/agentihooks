@@ -19,6 +19,8 @@ jobs:
           - 4317:4317
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5

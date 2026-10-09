@@ -171,3 +171,11 @@ def test_overwritten_metadata_cannot_claim_the_planted_tree_passed(full_source, 
     result = invoke(root, base, plant, "merge_group", tmp_path / "forged.json", env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=false" in result.stdout
+
+
+def test_the_required_workflow_uses_the_protected_canonical_aggregation():
+    from scripts import ci_reuse
+
+    workflow = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())
+    assert workflow["jobs"]["gate-required"]["steps"] == ci_reuse.gate_steps()
+    assert workflow["jobs"]["reuse"] == ci_reuse.reuse_job()

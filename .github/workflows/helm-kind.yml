@@ -17,6 +17,8 @@ jobs:
       KIND_VERSION: v0.27.0
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - name: Install kind
         run: |
           if ! kind version; then

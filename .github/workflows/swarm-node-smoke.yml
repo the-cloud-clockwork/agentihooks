@@ -13,6 +13,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - name: Prove clean worker builds and offline startup
         run: bash docker/swarm-node/smoke.sh "$HOME/scratchpad/worker-image-evidence"
       - uses: actions/upload-artifact@v4
