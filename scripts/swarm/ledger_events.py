@@ -60,6 +60,7 @@ class PullRequest:
     unpassed_gate: str = ""
     queued: bool = False
     gate_passed: bool = False
+    running: bool = False
 
 
 def iso_ms(text):
@@ -100,6 +101,7 @@ def pull_request(raw):
         unpassed_gate,
         raw.get("mergeQueueEntry") is not None,
         bool(raw.get("gated")) and set(_gate(checks, results)) == {"SUCCESS"},
+        running or any(result in PENDING for result in results),
     )
 
 
