@@ -16,7 +16,7 @@ WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # The documented local `--ci` download; the workflow passes `--samples` with `--ci 5`, so CI never calls these.
 LOCAL_ONLY = {ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"}}
 TOKEN = re.compile(
-    r"github\s*(\.\s*token\b|\[\s*['\"]token['\"]\s*\])"
+    r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
     r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)_\w*"
     r"|(?<![\w.'\"-])(secrets|github)\s*(\)|\}\})",
     re.IGNORECASE,
