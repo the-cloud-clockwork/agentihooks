@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Swarm waits accept branch mutation preflight runs and report every failing
+  mutant when the run finishes.
 - Shared `read-docs` skill answers operator questions from matching published
   documentation sections and proposes follow ups for missing answers.
 

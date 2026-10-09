@@ -38,6 +38,68 @@ def test_package_initializer_selects_ordinary_package_imports(tmp_path):
     ]
 
 
+def test_tests_reaching_the_module_through_test_helpers_are_selected(tmp_path):
+    swarm = tmp_path / "tests" / "swarm"
+    swarm.mkdir(parents=True)
+    (swarm / "__init__.py").write_text("")
+    (swarm / "test_cli.py").write_text("from scripts.swarm import cli\n\n\ndef run():\n    return cli\n")
+    (swarm / "cases.py").write_text("from .test_cli import run\n")
+    (swarm / "test_kinds.py").write_text("from tests.swarm.test_cli import run\n")
+    (swarm / "test_chain.py").write_text("from tests.swarm import cases\n")
+    (swarm / "test_relative.py").write_text("from . import cases\n")
+    (swarm / "test_other.py").write_text("from scripts.swarm import prompt\n")
+    assert select_tests(tmp_path, Path("scripts/swarm/cli.py")) == [
+        "tests/swarm/test_chain.py",
+        "tests/swarm/test_cli.py",
+        "tests/swarm/test_kinds.py",
+        "tests/swarm/test_relative.py",
+    ]
+
+
+def test_a_change_reached_only_through_a_helper_selects_the_indirect_test(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "commands_cases.py").write_text("import hooks.context.commands as commands\nimport tests.loop_cases\n")
+    (tests / "loop_cases.py").write_text("from tests import commands_cases\n")
+    (tests / "test_indirect.py").write_text("import tests.loop_cases\n")
+    (tests / "test_unrelated.py").write_text("import tests.other_cases\n")
+    (tests / "other_cases.py").write_text("from hooks.context import other\n")
+    assert select_tests(tmp_path, Path("hooks/context/commands.py")) == ["tests/test_indirect.py"]
+
+
+def test_parent_relative_imports_and_prefixed_names_resolve_exactly(tmp_path):
+    nested = tmp_path / "tests" / "a" / "b"
+    nested.mkdir(parents=True)
+    (tmp_path / "tests" / "a" / "c.py").write_text("from scripts.swarm import cli\n")
+    (nested / "test_parent.py").write_text("from ..c import run\n")
+    (nested / "test_client.py").write_text("import scripts.swarm.client\n")
+    assert select_tests(tmp_path, Path("scripts/swarm/cli.py")) == ["tests/a/b/test_parent.py"]
+
+
+def test_a_helper_patching_the_module_by_name_selects_its_importers(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "patches.py").write_text('from unittest import mock\n\nquiet = mock.patch("scripts.swarm.cli.run")\n')
+    (tests / "test_patched.py").write_text("from tests.patches import quiet\n")
+    assert select_tests(tmp_path, Path("scripts/swarm/cli.py")) == ["tests/test_patched.py"]
+
+
+def test_a_rewritten_test_module_is_selected_again(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_late.py").write_text("from hooks.context import aaaaaa\n")
+    assert select_tests(tmp_path, Path("hooks/context/sample.py")) == []
+    (tests / "test_late.py").write_text("from hooks.context import sample\n")
+    assert select_tests(tmp_path, Path("hooks/context/sample.py")) == ["tests/test_late.py"]
+
+
+def test_a_folder_named_like_a_module_is_skipped(tmp_path):
+    tests = tmp_path / "tests"
+    (tests / "a.py").mkdir(parents=True)
+    (tests / "test_b.py").write_text("from hooks.context import sample\n")
+    assert select_tests(tmp_path, Path("hooks/context/sample.py")) == ["tests/test_b.py"]
+
+
 def test_diff_discovers_only_changed_source_python_files(tmp_path):
     import subprocess
 
