@@ -33,7 +33,7 @@ ERROR_KEPT = 200
 RUNAWAY, STALE = "runaway", "stale"
 RUNAWAY_TEXT = "The ledger server was restarted because {why}."
 SLOW_TEXT = "The ledger server restarted on new code and its writes are slow: {took}."
-DOWN_TEXT = "The ledger server was stopped because {why} and did not start again: {error}."
+DOWN_TEXT = "The ledger server needed a restart because {why}, and the restart failed: {error}."
 
 
 class Host:
@@ -209,7 +209,7 @@ def watch(store, slug: str, ledger, runtime, host: Host | None = None) -> list[s
     kind, reason = found
     if error := restart(host, pid, command):
         _mail(store, slug, DOWN_TEXT.format(why=reason, error=error))
-        return [f"stopped the ledger server because {reason} and it did not start again: {error}"]
+        return [f"the ledger server needed a restart because {reason}, and the restart failed: {error}"]
     store.redis.set(STARTED_KEY, ledger_host.server_pid(host.folder) or "")
     return (
         _runaway(store, slug, ledger, reason) if kind == RUNAWAY else _stale(store, slug, ledger, runtime, host.clock)

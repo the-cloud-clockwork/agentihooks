@@ -210,7 +210,7 @@ def test_a_server_the_tick_may_not_signal_is_reported_and_never_started_again(st
     host.kill = refused
     assert ledger_watchdog.restart(host, PID, host.argv[:2]) == "[Errno 1] Operation not permitted"
     assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) == [
-        "stopped the ledger server because its code changed on disk and it did not start again: "
+        "the ledger server needed a restart because its code changed on disk, and the restart failed: "
         "[Errno 1] Operation not permitted"
     ]
     assert host.calls == [] and store.redis.get(ledger_watchdog.STARTED_KEY) is None
@@ -299,10 +299,10 @@ def test_a_server_that_does_not_start_again_alerts_the_master(store, tmp_path):
     (host.folder / ".server.pid").write_text(str(PID))
     ledger = ProbedLedger(Clock())
     assert ledger_watchdog.watch(store, "sw", ledger, FakeRuntime(), host) == [
-        "stopped the ledger server because its code changed on disk and it did not start again: port 8765 busy"
+        "the ledger server needed a restart because its code changed on disk, and the restart failed: port 8765 busy"
     ]
     assert master_mail(store) == [
-        "The ledger server was stopped because its code changed on disk and did not start again: port 8765 busy."
+        "The ledger server needed a restart because its code changed on disk, and the restart failed: port 8765 busy."
     ]
     assert ledger.writes == [] and store.redis.get(ledger_watchdog.STARTED_KEY) is None
 
