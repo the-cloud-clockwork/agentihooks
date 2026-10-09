@@ -232,5 +232,6 @@ def load(name: str, *, environ: dict | None = None) -> Definition:
     if paths[0].is_file() and existing[-1] != paths[0]:
         _overrides(_read(name, paths[0]), definition)
     definition = _environment(definition, environ)
-    digest = hashlib.sha256(json.dumps(asdict(definition), sort_keys=True).encode()).hexdigest()
+    effective = {key: value for key, value in asdict(definition).items() if key != "environment"}
+    digest = hashlib.sha256(json.dumps(effective, sort_keys=True).encode()).hexdigest()
     return replace(definition, digest=digest)
