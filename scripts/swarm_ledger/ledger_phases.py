@@ -186,7 +186,6 @@ def apply(doc: dict, op: dict, ctx) -> bool:
             raise ValueError(refusal)
     except ValueError as exc:
         ctx.refused.append(str(exc))
-        ledger_plans.drop_unused(doc, fields.get("plan"), ctx)
         return False
     ledger_plans.settle(doc, view, op["by"], ctx)
     target = f"phases/{phase_id}"

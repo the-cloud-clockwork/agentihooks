@@ -151,8 +151,6 @@ def slice_id(plan: str, anchor: str) -> str:
 
 
 def moved(doc: dict, phase: dict) -> dict:
-    """The slices and tasks once phase moves to its plan: the phase's slices of an earlier plan give way to one per
-    marker of the new range, and each of their tasks follows its anchor or loses its slice."""
     address = f"phases/{phase['id']}"
     plan = next((row for row in doc["plans"] if f"plans/{row['id']}" == phase.get("plan")), None)
     held = {f"slices/{row['id']}": row["anchor"] for row in doc["slices"] if row.get("phase") == address}
@@ -192,7 +190,6 @@ def settle(doc: dict, view: dict, by: str, ctx) -> None:
 
 
 def drop_unused(doc: dict, address: object, ctx) -> None:
-    """Drop a plan this batch added once the update that would have named it is refused and no phase names it."""
     added = [event for event in ctx.events if event["kind"] == "added" and event["target"] == address]
     if not added or any(phase.get("plan") == address for phase in doc["phases"]):
         return
@@ -200,8 +197,13 @@ def drop_unused(doc: dict, address: object, ctx) -> None:
     ctx.events[:] = [event for event in ctx.events if event not in added]
 
 
+def drop_refused(doc: dict, ops: list[dict], rejected: list[str], ctx) -> None:
+    for op in ops:
+        if op["op"] == "phase_update" and op["id"] in rejected:
+            drop_unused(doc, op["fields"].get("plan"), ctx)
+
+
 def resliced(before: list[dict], after: list[dict]) -> dict:
-    """The tasks whose slice a publish changed or cleared, by id."""
     held = {task["id"]: task.get("slice") for task in before if task.get("slice")}
     changed = [task for task in after if task["id"] in held and task.get("slice") != held[task["id"]]]
     return {

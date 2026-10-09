@@ -450,21 +450,57 @@ def test_plan_and_slice_ids_come_from_the_file_and_the_anchor():
 
 
 @pytest.mark.parametrize(
-    ("phases", "events", "kept"),
+    ("phases", "events", "kept", "left"),
     [
-        ([{"id": "p1"}], [{"kind": "added", "target": "plans/b"}], ["a"]),
-        ([{"id": "p1", "plan": "plans/b"}], [{"kind": "added", "target": "plans/b"}], ["a", "b"]),
-        ([{"id": "p1"}], [{"kind": "changed", "target": "plans/b"}], ["a", "b"]),
-        ([{"id": "p1"}], [], ["a", "b"]),
+        ([{"id": "p1"}], [{"kind": "added", "target": "plans/b"}], ["a"], []),
+        (
+            [{"id": "p1", "plan": "plans/b"}],
+            [{"kind": "added", "target": "plans/b"}],
+            ["a", "b"],
+            [{"kind": "added", "target": "plans/b"}],
+        ),
+        (
+            [{"id": "p1"}],
+            [{"kind": "changed", "target": "plans/b"}],
+            ["a", "b"],
+            [{"kind": "changed", "target": "plans/b"}],
+        ),
+        ([{"id": "p1"}], [], ["a", "b"], []),
     ],
 )
-def test_a_refused_update_drops_only_an_unnamed_plan_this_batch_added(phases, events, kept):
+def test_a_refused_update_drops_only_an_unnamed_plan_this_batch_added(phases, events, kept, left):
     doc = {"phases": phases, "plans": [{"id": "a"}, {"id": "b"}]}
     ctx = Recorder()
     ctx.events = [*events, {"kind": "added", "target": "tasks/t1"}]
     ledger_plans.drop_unused(doc, "plans/b", ctx)
     assert [row["id"] for row in doc["plans"]] == kept
-    assert ctx.events == [*([] if kept == ["a"] else events), {"kind": "added", "target": "tasks/t1"}]
+    assert ctx.events == [*left, {"kind": "added", "target": "tasks/t1"}]
+
+
+def test_a_batch_whose_phase_update_is_rejected_before_it_applies_keeps_no_plan_it_added():
+    ops = [
+        {"op": "plan_add", "id": "add-c", "by": "planner", "plan": "c", "title": "Plan c"},
+        {"op": "phase_update", "id": "move-p9", "by": "planner", "item": "phases/p9", "fields": {"plan": "plans/c"}},
+    ]
+    state, rejected = core.sync(SLUG, ops=ops)
+    assert rejected == ["move-p9"]
+    assert state["plans"] == []
+    assert [e for e in state["_meta"]["events"] if e["target"] == "plans/c"] == []
+
+
+def test_drop_refused_drops_only_plans_named_by_rejected_phase_updates():
+    doc = {"phases": [{"id": "p1"}], "plans": [{"id": "a"}, {"id": "b"}, {"id": "c"}]}
+    ctx = Recorder()
+    ctx.events = [{"kind": "added", "target": f"plans/{plan}"} for plan in ("a", "b", "c")]
+    ops = [
+        {"op": "phase_update", "id": "u1", "fields": {"plan": "plans/a"}},
+        {"op": "phase_update", "id": "u2", "fields": {"plan": "plans/b"}},
+        {"op": "plan_add", "id": "u3", "plan": "c"},
+        {"op": "phase_update", "id": "u4", "fields": {"title": "T"}},
+    ]
+    ledger_plans.drop_refused(doc, ops, ["u1", "u3", "u4"], ctx)
+    assert [row["id"] for row in doc["plans"]] == ["b", "c"]
+    assert ctx.events == [{"kind": "added", "target": "plans/b"}, {"kind": "added", "target": "plans/c"}]
 
 
 def test_resliced_names_changed_and_cleared_tasks_only_among_those_that_held_a_slice():
