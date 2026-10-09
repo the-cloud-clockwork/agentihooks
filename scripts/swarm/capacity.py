@@ -230,27 +230,32 @@ class ScaleInputs:
     observations: list[Account]
     agents: list
     demand: dict | None
-    host: Callable[[], host_budget.HostSample]
+    host: Callable[[], host_budget.HostSample | None]
     previous: dict
     warned: dict = field(default_factory=dict)
 
 
-def autoscaled(config: SwarmConfig, inputs: ScaleInputs) -> tuple[SwarmConfig, dict | None]:
+def host_room(config: SwarmConfig, inputs: ScaleInputs) -> dict:
+    stored = inputs.previous.get("host") or (inputs.previous.get("autoscale") or {}).get("host") or {}
+    found = host_budget.spawn_room(config, inputs.host(), stored.get("room"))
+    return {"room": found.room, "reason": found.reason, "limit": found.limit}
+
+
+def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None) -> tuple[SwarmConfig, dict | None]:
     if config.scaling != AUTO_SCALING:
         return config, None
+    host = host or host_room(config, inputs)
     stored = inputs.previous.get("autoscale") or {}
-    thresholds = host_budget.Thresholds(config.load_high, config.load_low, config.memory_per_agent_mb)
-    room = host_budget.room(inputs.host(), thresholds, stored.get("host", {}).get("room"))
     previous = {
         "ceilings": stored.get("ceilings") or _configured(config),
         "pending_raise": stored.get("pending_raise") or {"target": None, "ticks": 0},
     }
     demand = inputs.demand or dict.fromkeys(LANES, 0)
     free = _placeable(_open(inputs.observations, inputs.warned))
-    decision = autoscale.calculate(_busy(inputs.agents), free, room.room, demand, previous)
+    decision = autoscale.calculate(_busy(inputs.agents), free, host["room"], demand, previous)
     caps = decision["ceilings"]
     scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"])
-    return scaled, {**decision, "host": {"room": room.room, "reason": room.reason}}
+    return scaled, {**decision, "host": host}
 
 
 def ready_work(slug: str, store, doc: dict) -> tuple[dict, dict]:

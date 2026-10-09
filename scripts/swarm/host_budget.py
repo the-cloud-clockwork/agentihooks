@@ -8,6 +8,7 @@ from hooks.context import account_sessions
 MEMORY_PER_AGENT_MB = 700
 LOAD_HIGH = 1.5
 LOAD_LOW = 1.0
+LOAD, MEMORY, UNKNOWN = "load", "memory", "unknown"
 
 
 @dataclass(frozen=True)
@@ -27,8 +28,19 @@ class HostSample:
 
 @dataclass(frozen=True)
 class Room:
-    room: int
+    room: int | None
     reason: str
+    limit: str = ""
+
+
+def thresholds(config) -> Thresholds:
+    return Thresholds(config.load_high, config.load_low, config.memory_per_agent_mb)
+
+
+def spawn_room(config, sample: HostSample | None, previous: int | None) -> Room:
+    if sample is None:
+        return Room(None, "host unknown: the process files cannot be read, so spawns pass", UNKNOWN)
+    return room(sample, thresholds(config), previous)
 
 
 def memory_room(sample: HostSample, thresholds: Thresholds) -> int:
@@ -48,35 +60,38 @@ def room(sample: HostSample, thresholds: Thresholds = Thresholds(), previous: in
     memory = memory_room(sample, thresholds)
     memory_text = f"{sample.available_mb} MB available memory fits {memory} at {thresholds.memory_per_agent_mb} MB each"
     if per_cpu > thresholds.load_high:
-        return Room(0, f"{load} is above the high watermark {thresholds.load_high:.2f}, no room")
+        return Room(0, f"{load} is above the high watermark {thresholds.load_high:.2f}, no room", LOAD)
     if per_cpu >= thresholds.load_low:
         held = previous or 0
         if memory < held:
-            return Room(memory, f"{load} is between the watermarks; {memory_text}, below the previous room of {held}")
-        return Room(held, f"{load} is between the watermarks, the previous room of {held} holds")
+            return Room(
+                memory, f"{load} is between the watermarks; {memory_text}, below the previous room of {held}", MEMORY
+            )
+        return Room(held, f"{load} is between the watermarks, the previous room of {held} holds", LOAD)
     projected = load_room(sample, thresholds)
     if projected is not None and projected < memory:
         return Room(
             projected,
             f"{load} is below the low watermark; {sample.agents} live agents project load to the high watermark "
             f"after {projected} more",
+            LOAD,
         )
-    return Room(memory, f"{load} is below the low watermark; {memory_text}")
+    return Room(memory, f"{load} is below the low watermark; {memory_text}", MEMORY)
 
 
 def _mem_available_mb(proc: Path) -> int:
     for line in (proc / "meminfo").read_text().splitlines():
         if line.startswith("MemAvailable:"):
             return int(line.split()[1]) // 1024
-    return 0
+    raise ValueError("meminfo has no MemAvailable line")
 
 
-def read_host(proc: Path = Path("/proc")) -> HostSample:
+def read_host(proc: Path = Path("/proc")) -> HostSample | None:
     agents = len(account_sessions.live_sessions(proc)) + account_sessions.live_codex_sessions(proc)
     cpus = os.cpu_count() or 1
     try:
         load1 = float((proc / "loadavg").read_text().split()[0])
         available_mb = _mem_available_mb(proc)
     except (OSError, ValueError, IndexError):
-        return HostSample(load1=0.0, cpus=cpus, available_mb=0, agents=agents)
+        return None
     return HostSample(load1=load1, cpus=cpus, available_mb=available_mb, agents=agents)

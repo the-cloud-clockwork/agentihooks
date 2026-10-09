@@ -58,6 +58,7 @@ STARTUP_GRACE_MS = 6 * 60 * 1000
 SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
+SPAWN_HOLD = "spawn-hold"
 # Swarms tick in threads; two placing from one live session count overfill an account.
 PLACING = threading.Lock()
 DOWN_TOLD = "master down told"
@@ -657,6 +658,21 @@ def _held_for_master(slug, store, now_ms):
     return [f"holding spawns: swarm {s} waits on a session slot for its master" for s in others[:1]]
 
 
+def _host_full(slug, store, now_ms):
+    from scripts.swarm import capacity
+
+    host = capacity.read(store, slug).get("host") or {}
+    if host.get("room") is None:
+        return ""
+    if sum(a.started_at == now_ms for a in store.agents(slug)) < host["room"]:
+        return ""
+    return f"host {host['limit']}, room {host['room']} is used: {host['reason']}"
+
+
+def spawn_hold(store, slug):
+    return store.redis.get(store.key(slug, SPAWN_HOLD)) or ""
+
+
 def _record_spawn_failure(slug, store, record, error):
     if record_failure := timing.ON_FAILURE.get():
         record_failure(f"{__name__}._spawn", error)
@@ -670,11 +686,15 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents, actions = store.agents(slug), []
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
+    store.redis.delete(store.key(slug, SPAWN_HOLD))
     for lane, task in _spawn_order(slug, config, store, agents, rows, doc):
         if held:
             return actions + held
         if not runtime.has_capacity(config):
             return actions + ["every agent is at its session cap, waiting"]
+        if host := _host_full(slug, store, now_ms):
+            store.redis.set(store.key(slug, SPAWN_HOLD), f"holding spawns: {host}")
+            return actions + [f"holding spawns: {host}"]
         blocked = _lives_spent(slug, store, ledger, rows, task) or _held_back(slug, ledger, rows, runtime, task, now_ms)
         if blocked:
             actions.append(blocked)
@@ -919,6 +939,8 @@ def _master(slug, config, store, runtime, now_ms):
     if not runtime.has_capacity(config):
         store.redis.hset(MASTER_WAITING, slug, now_ms)
         return ["no session slot for the master, waiting"]
+    if host := _host_full(slug, store, now_ms):
+        return [f"holding the master spawn: {host}"]
     name = store.next_name(slug, MASTER, now_ms)
     record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, state="starting", seat=seat_address(slug, MASTER))
     store.put_agent(slug, record)

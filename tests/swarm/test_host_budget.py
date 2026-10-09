@@ -83,29 +83,6 @@ def test_load_without_live_agents_leaves_memory_as_the_limit():
     assert host_budget.room(_sample(load1=5.0, available_mb=2800), LIMITS).room == 4
 
 
-def test_meminfo_without_available_memory_gives_zero_room(tmp_path, monkeypatch):
-    (tmp_path / "loadavg").write_text("1.00 1.00 1.00 1/100 1\n")
-    (tmp_path / "meminfo").write_text("MemTotal:       20480000 kB\n")
-    monkeypatch.setattr(host_budget.account_sessions, "live_sessions", lambda proc: {})
-    monkeypatch.setattr(host_budget.account_sessions, "live_codex_sessions", lambda proc: 0)
-
-    sample = host_budget.read_host(tmp_path)
-
-    assert sample.available_mb == 0
-    assert host_budget.room(sample, LIMITS).room == 0
-
-
-def test_unreadable_proc_gives_zero_room(tmp_path, monkeypatch):
-    monkeypatch.setattr(host_budget.os, "cpu_count", lambda: None)
-    monkeypatch.setattr(host_budget.account_sessions, "live_sessions", lambda proc: {})
-    monkeypatch.setattr(host_budget.account_sessions, "live_codex_sessions", lambda proc: 0)
-
-    sample = host_budget.read_host(tmp_path)
-
-    assert sample == HostSample(load1=0.0, cpus=1, available_mb=0, agents=0)
-    assert host_budget.room(sample, LIMITS).room == 0
-
-
 def test_memory_room_counts_only_whole_agents():
     assert host_budget.memory_room(_sample(load1=0.0, available_mb=2500), LIMITS) == 3
     assert host_budget.memory_room(_sample(load1=0.0, available_mb=500), LIMITS) == 0

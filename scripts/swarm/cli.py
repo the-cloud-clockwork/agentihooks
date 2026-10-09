@@ -106,7 +106,7 @@ from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
 from scripts.swarm.store import ASSIST, AUTO_SCALING, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
-from scripts.swarm.tick import agent_status, primed, skip_refused, tick
+from scripts.swarm.tick import agent_status, primed, skip_refused, spawn_hold, tick
 from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
 from scripts.swarm_v2.runtime.routed import routed
 
@@ -761,6 +761,8 @@ def cmd_status(store, args):
 
     for line in quota_view.lines(capacity.read(store, args.slug), now_ms()):
         print(line)
+    if hold := spawn_hold(store, args.slug):
+        print(hold)
     print(_snapshot_line(auto_snapshot(config)))
     print(_affinity_line(affinity.report(store, args.slug, config, agents)))
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
