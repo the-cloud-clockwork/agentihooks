@@ -1,0 +1,99 @@
+name: Probe checkpoint flake
+
+on:
+  push:
+    branches: [wip/engineer-d44a5a-0237-probe]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {leg: control-late, delay: "0.6", checkpoint: "0.4", ack: complete, repeat: "20", stress: none, cov: "no"}
+          - {leg: baseline, delay: "0.1", checkpoint: "0.4", ack: complete, repeat: "300", stress: none, cov: "no"}
+          - {leg: coverage, delay: "0.1", checkpoint: "0.4", ack: complete, repeat: "300", stress: none, cov: "yes"}
+          - {leg: stress-cpu, delay: "0.1", checkpoint: "0.4", ack: complete, repeat: "300", stress: cpu, cov: "yes"}
+          - {leg: stress-io, delay: "0.1", checkpoint: "0.4", ack: complete, repeat: "300", stress: io, cov: "yes"}
+          - {leg: candidate-cpu, delay: "0.1", checkpoint: "5", ack: complete, repeat: "300", stress: cpu, cov: "yes"}
+          - {leg: candidate-io, delay: "0.1", checkpoint: "5", ack: complete, repeat: "300", stress: io, cov: "yes"}
+          - {leg: stale-cpu, delay: "0.1", checkpoint: "0.4", ack: stale, repeat: "100", stress: cpu, cov: "yes"}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9a3fb9c8e9ec7ea90c442866a1e62e1e02deaa5e
+          fetch-depth: 0
+          filter: blob:none
+      - uses: actions/checkout@v4
+        with:
+          path: probe-src
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          pip install uv
+          uv venv "$HOME/venv"
+          uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
+          echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+      - name: Place the probe
+        run: |
+          cp probe-src/.github/probes/test_checkpoint_probe.py tests/test_checkpoint_probe.py
+          cp probe-src/.github/probes/probe_process_fixture.py tests/probe_process_fixture.py
+          python -m pip show pytest-cov 2>/dev/null | head -2 || true
+          nproc
+      - name: Run the leg
+        continue-on-error: true
+        env:
+          PYTHONUNBUFFERED: "1"
+          PROBE_DIAG: ${{ github.workspace }}/diag.jsonl
+          PROBE_DELAY: ${{ matrix.delay }}
+          PROBE_CHECKPOINT: ${{ matrix.checkpoint }}
+          PROBE_ACK: ${{ matrix.ack }}
+          PROBE_REPEAT: ${{ matrix.repeat }}
+          COV: ${{ matrix.cov }}
+          STRESS: ${{ matrix.stress }}
+        run: |
+          if [[ "$STRESS" == cpu ]]; then for i in $(seq 8); do (while :; do :; done) & done; fi
+          if [[ "$STRESS" == io ]]; then for i in 1 2 3 4; do (while :; do dd if=/dev/zero of="$RUNNER_TEMP/stress$i" bs=1M count=64 conv=fsync status=none; done) & done; fi
+          if [[ "$COV" == yes ]]; then ADD="--cov=hooks --cov=scripts --cov-report= --cov-config=$GITHUB_WORKSPACE/.github/coverage/coverage.ini"; else ADD="-p no:pytest_cov"; fi
+          python -m pytest $ADD tests/test_checkpoint_probe.py -n 4 --tb=line -q -p no:anyio -o faulthandler_timeout=60 2>&1 | tail -15
+      - name: Diagnostics
+        if: always()
+        env:
+          LEG: ${{ matrix.leg }}
+        run: |
+          python - <<'PY'
+          import json, os
+          path = os.path.join(os.environ["GITHUB_WORKSPACE"], "diag.jsonl")
+          rows = [json.loads(line) for line in open(path)] if os.path.exists(path) else []
+          leg = os.environ["LEG"]
+          def pct(values, q):
+              values = sorted(v for v in values if v is not None)
+              return values[min(len(values) - 1, int(q * len(values)))] if values else None
+          bad = [r for r in rows if r["rc"] != (75 if leg.startswith("stale") else 0)]
+          good = [r for r in rows if r not in bad]
+          print("DIAG", leg, "runs", len(rows), "unexpected", len(bad))
+          for label, group in (("good", good), ("bad", bad)):
+              for key in ("ack_after_quiesced", "result_after_quiesced", "slowest_heartbeat", "total"):
+                  values = [r[key] for r in group]
+                  print("DIAG", leg, label, key, "p50", pct(values, 0.5), "p99", pct(values, 0.99), "max", pct(values, 1.0))
+              seen = [r["events"].get("seen_quiesced") for r in group]
+              print("DIAG", leg, label, "seen_quiesced p50", pct(seen, 0.5), "max", pct(seen, 1.0))
+          signature = lambda r: (r["rc"], r["reason"], r["checkpoint_status"], r["quiescence"], json.dumps(r["child_exits"], sort_keys=True))
+          counts = {}
+          for r in rows:
+              counts[signature(r)] = counts.get(signature(r), 0) + 1
+          for key, count in sorted(counts.items(), key=lambda kv: -kv[1]):
+              print("DIAG", leg, "signature", count, key)
+          late = [r for r in rows if r["ack_after_quiesced"] is None or r["ack_after_quiesced"] > r["checkpoint"]]
+          print("DIAG", leg, "late_or_absent_ack", len(late), "of_which_unexpected", sum(r in bad for r in late),
+                "unexpected_with_on_time_ack", sum(r not in late for r in bad))
+          for r in bad[:15]:
+              print("DIAG case", json.dumps(r))
+          PY
