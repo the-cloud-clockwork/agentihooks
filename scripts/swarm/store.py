@@ -93,6 +93,7 @@ class AgentRecord:
     profile_decision: dict = field(default_factory=dict)
     input_prompt: str = ""
     input_ticks: int = 0
+    pane_state: str = ""
     choice: str = ""
     launched_at: int = 0
     overlays: list = field(default_factory=list)

@@ -480,6 +480,7 @@ def agent_status(agent):
 
 def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     observed = runtime.observe(agent)
+    agent = replace(agent, pane_state=observed.state)
     if observed.state == idle_state.WAITING:
         title = observed.prompt_title or "Waiting on input"
         ticks = agent.input_ticks + 1 if agent.input_prompt == title else 1

@@ -37,3 +37,39 @@ def test_started_lives_still_raise_the_proof_loop_finding():
     found = findings(store, "sw", store.config("sw"), [{"id": "t1", "title": "Repair launch"}], [])
     assert [(f["kind"], f["subject"]) for f in found] == [("proof loop", "t1")]
     assert "started 4 times (3 reruns)" in found[0]["evidence"]
+
+
+def test_busy_tool_stall_is_reported_until_a_new_tool_call_or_named_wait(monkeypatch, tmp_path):
+    import fakeredis
+
+    from scripts.swarm import idle
+    from scripts.swarm.health import activity
+    from scripts.swarm.store import AgentRecord
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0)
+    store.create(config)
+    at = 1_000_000
+    name = "engineer@a1b2c3-0001"
+    store.put_agent("sw", AgentRecord(name, "eng", "t1", started_at=at - 11 * 60_000))
+    monkeypatch.setattr(activity, "default_root", lambda: tmp_path)
+    monkeypatch.setattr("scripts.swarm.status.now_ms", lambda: at)
+    monkeypatch.setattr("scripts.swarm.status.live_binding.findings", lambda *a: [])
+    monkeypatch.setattr("scripts.swarm.status.retire_watch.findings", lambda *a: [])
+    monkeypatch.setattr("scripts.swarm.status.launch_check.findings", lambda *a: [])
+    ledger, runtime = FakeLedger([{"id": "t1", "state": "claimed", "claimed_by": name}]), FakeRuntime()
+    runtime.live.add(name)
+    env = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": name}
+    activity.record("Read", {}, env, tmp_path, now_ms=at - 10 * 60_000)
+    from scripts.swarm.tick import _watch_idle
+
+    _watch_idle("sw", store, ledger, runtime, ledger.tasks("sw"), store.agents("sw")[0], at)
+    assert store.agents("sw")[0].pane_state == "working"
+    found = findings(store, "sw", config, ledger.tasks("sw"), [])
+    assert "stalled" in [f["kind"] for f in found]
+    idle.declare_wait(store.redis, "sw", name, at + 60_000, "checks", at)
+    assert "stalled" not in [f["kind"] for f in findings(store, "sw", config, ledger.tasks("sw"), [])]
+    idle.end_wait(store.redis, "sw", name, at)
+    activity.record("Read", {}, env, tmp_path, now_ms=at)
+    assert "stalled" not in [f["kind"] for f in findings(store, "sw", config, ledger.tasks("sw"), [])]
+    assert runtime.nudged == [] and runtime.killed == []

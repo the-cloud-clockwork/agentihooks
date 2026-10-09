@@ -64,6 +64,7 @@ def record(tool_name, tool_input, environ=None, root=None, now_ms=None):
     if not first.exists():
         folder.mkdir(parents=True, exist_ok=True)
         first.write_text(str(at), encoding="utf-8")
+    (folder / f"{name}.last").write_text(str(at), encoding="utf-8")
     kind = classify(tool_name, tool_input)
     if not kind:
         return
@@ -141,6 +142,17 @@ def first_events(slug, root=None):
     folder = Path(root or default_root()) / slug
     found = {}
     for path in sorted(folder.glob("*.first")) if folder.is_dir() else []:
+        try:
+            found[path.stem] = int(path.read_text(encoding="utf-8"))
+        except ValueError:
+            continue
+    return found
+
+
+def last_events(slug: str, root=None) -> dict[str, int]:
+    folder = Path(root or default_root()) / slug
+    found = {}
+    for path in sorted(folder.glob("*.last")) if folder.is_dir() else []:
         try:
             found[path.stem] = int(path.read_text(encoding="utf-8"))
         except ValueError:
