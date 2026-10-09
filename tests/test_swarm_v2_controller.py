@@ -2,6 +2,7 @@ from dataclasses import replace
 
 import pytest
 
+import scripts.swarm.execution as execution
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.controller import Controller
@@ -133,6 +134,7 @@ def test_rollback_disables_admission_and_preserves_history(fixture):
     attempt = first.admit(agent(store))
     operation = first.execute(request(attempt))
     assert first.release()
+    assert first.ready is False
     rollback = Controller(store, "fixture", [transport], lambda: grant["allowed"], admission_enabled=False)
     assert rollback.acquire()
     with pytest.raises(SwarmError):
@@ -209,6 +211,7 @@ def test_failed_renewal_disables_mutations_even_after_connection_recovers(fixtur
     monkeypatch.setattr(lease, "renew", fail)
     with pytest.raises(ConnectionError):
         first.renew()
+    assert first.ready is False
     with pytest.raises(SwarmError):
         first.admit(agent(store))
     assert transport.creations == 0
@@ -261,6 +264,133 @@ def test_takeover_after_observation_prevents_external_apply(fixture, monkeypatch
     with pytest.raises(SwarmError):
         first.execute(request(attempt))
     assert transport.creations == 0
+
+
+def test_direct_registry_admission_records_exact_intent(fixture):
+    store, (first, _), _, _, _ = fixture
+    assert first.acquire()
+    candidate = agent(store)
+    with lease.fencing(first.held.epoch):
+        attempt = execution.ExecutionRegistry(store).start("fixture", candidate, "")
+    assert first.intents() == [
+        {
+            "execution_id": attempt.execution_id,
+            "generation": attempt.generation,
+            "controller_epoch": first.held.epoch,
+        }
+    ]
+    assert store.execution_registry.records("fixture") == [attempt]
+
+
+def test_direct_registry_rejects_stale_epoch(fixture):
+    store, (first, second), _, clock, _ = fixture
+    assert first.acquire()
+    candidate = agent(store)
+    clock[0] += lease.TTL_MS
+    assert second.acquire()
+    with lease.fencing(first.held.epoch), pytest.raises(SwarmError) as refused:
+        execution.ExecutionRegistry(store).start("fixture", candidate, "")
+    assert str(refused.value) == "the controller lease is stale"
+    assert first.intents() == []
+    assert store.execution_registry.records("fixture") == []
+
+
+@pytest.mark.parametrize("conflict", ("leadership", "seat"))
+def test_direct_registry_conflict_at_commit_leaves_only_current_authority(fixture, monkeypatch, conflict):
+    store, (first, second), _, clock, _ = fixture
+    assert first.acquire()
+    candidate, successor = agent(store), agent(store)
+    original = store.redis.pipeline
+    once = [True]
+
+    def pipeline():
+        pipe = original()
+        execute = pipe.execute
+
+        def interrupted():
+            if once[0]:
+                once[0] = False
+                if conflict == "leadership":
+                    clock[0] += lease.TTL_MS
+                    assert second.acquire()
+                else:
+                    execution.ExecutionRegistry(store).start("fixture", successor, "")
+            return execute()
+
+        pipe.execute = interrupted
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    with lease.fencing(first.held.epoch), pytest.raises(SwarmError):
+        execution.ExecutionRegistry(store).start("fixture", candidate, "")
+    records = store.execution_registry.records("fixture")
+    assert len(records) == (1 if conflict == "seat" else 0)
+    assert all(record.name == successor.name for record in records)
+    assert len(first.intents()) == len(records)
+
+
+def test_unacquired_controller_refuses_authority_and_reports_no_leader_changes(fixture):
+    _, (first, _), _, _, _ = fixture
+    assert first.ready is False
+    assert first.reconciled_epoch is None
+    assert not first.renew()
+    assert not first.release()
+    assert first.controller_leader_changes_total() == 0
+    with pytest.raises(SwarmError) as refused:
+        first.require()
+    assert str(refused.value) == "the controller lease is absent"
+
+
+def test_reconciliation_holds_admission_disabled_inside_its_epoch(fixture, monkeypatch):
+    _, (first, _), _, _, _ = fixture
+    assert first.acquire()
+
+    def recover(slug):
+        assert slug == "fixture"
+        assert first.ready is False
+        assert first.reconciled_epoch is None
+        assert lease.EPOCH.get() == first.held.epoch
+        with pytest.raises(SwarmError) as refused:
+            first.require()
+        assert str(refused.value) == "controller admission is disabled until reconciliation completes"
+
+    monkeypatch.setattr(first.operations, "recover", recover)
+    assert first.acquire()
+    assert first.ready is True
+
+
+def test_scoped_grant_refusal_preserves_exact_error(fixture):
+    _, (first, _), _, _, grant = fixture
+    grant["allowed"] = False
+    with pytest.raises(SwarmError) as refused:
+        first.acquire()
+    assert str(refused.value) == "a scoped controller grant is required"
+
+
+def test_controller_replacement_forwards_prior_execution_identity(fixture):
+    store, (first, _), _, _, _ = fixture
+    assert first.acquire()
+    prior = first.admit(agent(store))
+    current = first.admit(agent(store), prior.execution_id)
+    assert current.generation == prior.generation + 1
+    assert store.execution_registry.occupants("fixture")[current.seat] == current
+    assert len(first.intents()) == 2
+
+
+def test_fenced_transport_preserves_command_payload(fixture, monkeypatch):
+    store, (first, _), transport, _, _ = fixture
+    assert first.acquire()
+    attempt = first.admit(agent(store))
+    command = request(attempt)
+    original = transport.apply_operation
+
+    def apply(operation, payload):
+        assert payload == command.payload
+        return original(operation, payload)
+
+    monkeypatch.setattr(transport, "apply_operation", apply)
+    assert first.execute(command).phase is Phase.APPLIED
+    assert transport.creations == 1
 
 
 @pytest.mark.parametrize("case", ("case_a", "case_b", "case_c"))
