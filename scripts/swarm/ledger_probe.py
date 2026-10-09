@@ -29,7 +29,6 @@ PAUSED = " Idle and stale claim checks and nudges pause until two fast passes."
 CLEARED = "The ledger server answers fast again: two swarm passes took {took}. Idle and stale claim checks resume."
 
 
-
 @dataclass(frozen=True)
 class Sample:
     read_s: float
