@@ -422,3 +422,11 @@ def test_a_pane_the_operator_prompted_inside_the_quiet_window_is_left_alone(inbo
 def test_the_quiet_window_comes_from_the_environment():
     assert wake.quiet_ms({}) == wake.DEFAULT_QUIET_S * 1000
     assert wake.quiet_ms({wake.QUIET_ENV: "30"}) == 30_000
+
+
+def test_the_raised_master_item_reads_back_from_its_escalation_note():
+    note = wake.raised_note("master@sw", "abc123def456")
+    assert note == "raised to master@sw as message abc123def456"
+    assert wake.raised_id({"event": wake.TO_MASTER, "reason": note}) == "abc123def456"
+    assert wake.raised_id({"event": wake.WOKEN, "reason": note}) == ""
+    assert wake.raised_id({"state": "pending", "reason": note}) == ""

@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.inbox import exits
+from scripts.inbox import exits, wake
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
@@ -820,13 +820,13 @@ def seat_mail(inbox, store, seat, sender="sender", text="contract\nsecond line")
 
 
 @pytest.mark.parametrize(("lane", "cap"), [("eng", 2), ("ci", 1), ("plan", 0)])
-@pytest.mark.parametrize("state", ["pending", "delivered"])
+@pytest.mark.parametrize("state", ["pending", "delivered", "read"])
 def test_seat_mail_above_its_lane_cap_is_settled_and_its_sender_told(redis, lane, cap, state):
     inbox, store = InboxStore(redis), RedisStore(redis)
     store.create(SwarmConfig("sw", "/repo", 2, 1, max_plan=0))
     item, occupant = seat_mail(inbox, store, f"{lane}-3@sw")
-    if state == "delivered":
-        inbox.deliver(item.id, occupant)
+    if state != "pending":
+        getattr(inbox, "deliver" if state == "delivered" else "read")(item.id, occupant)
     exits.sweep(inbox, "sw", store, dict)
     closed = inbox.get(item.id)
     assert (closed.address, closed.state) == (f"{lane}-3@sw", "cancelled")
@@ -924,8 +924,8 @@ def test_settling_unfillable_seat_mail_withdraws_its_open_master_escalation(redi
     inbox.close(answered.id, "swarm", "done", "answered")
     raised = inbox.send("swarm", "master@sw", "nobody read it", ref=f"inbox-escalation:{item.id}")
     inbox.note(item.id, "woken", "swarm", "prompted sw-eng-1 to read its inbox", 2)
-    inbox.note(item.id, "escalated_master", "swarm", f"raised to master@sw as message {answered.id}", 3)
-    inbox.note(item.id, "escalated_master", "swarm", f"raised to master@sw as message {raised.id}", 4)
+    inbox.note(item.id, wake.TO_MASTER, "swarm", wake.raised_note("master@sw", answered.id), 3)
+    inbox.note(item.id, wake.TO_MASTER, "swarm", wake.raised_note("master@sw", raised.id), 4)
     exits.sweep(inbox, "sw", store, dict)
     withdrawn = inbox.get(raised.id)
     assert withdrawn.state == "cancelled"

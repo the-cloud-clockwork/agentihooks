@@ -220,11 +220,10 @@ def _settle_unfillable(inbox: "InboxStore", config, seats: set) -> None:
 
 
 def _withdraw_escalations(inbox: "InboxStore", item_id: str, seat: str) -> None:
-    from scripts.inbox.wake import TO_MASTER
+    from scripts.inbox.wake import raised_id
 
     for entry in inbox.history(item_id):
-        if entry.get("event") == TO_MASTER:
-            raised = entry["reason"].rpartition(" ")[2]
+        if raised := raised_id(entry):
             inbox.withdraw(raised, BY, f"cancelled: message {item_id} is closed, {seat} can get no successor")
 
 
