@@ -893,6 +893,18 @@ def test_a_channel_dry_run_writes_the_negotiation_pin_into_its_launcher(monkeypa
     assert "export MCP_PROTOCOL_NEGOTIATION=legacy" in lines
 
 
+def test_a_hand_launch_with_no_account_launches_bare_claude_with_its_channel(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("", "every account is full"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
+    argv = ["--dir", str(tmp_path), "--inbox-channel", "--dry-run"]
+    assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert "agent=claude" in out
+    launcher = next(x for x in out if x.startswith("launcher="))
+    lines = Path(launcher.split("=", 1)[1]).read_text().splitlines()
+    assert "export MCP_PROTOCOL_NEGOTIATION=legacy" in lines
+
+
 def _codex_hooks(home, first):
     ours = {"hooks": [{"type": "command", "command": str(home / "agentihooks-hook.sh")}]}
     herdr = {"hooks": [{"command": "bash herdr-agent-state.sh session", "timeout": 10, "type": "command"}]}
