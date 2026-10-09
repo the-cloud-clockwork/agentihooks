@@ -72,8 +72,10 @@ class Sources:
         while at < len(lines):
             runs = [(self.run_at(lines, at, name, start), name, start) for name, start in self.index.get(lines[at], ())]
             length = max((run[0] for run in runs), default=0)
+            longest = [run for run in runs if run[0] == length]
             if length and sum(len(text) for text in lines[at : at + length]) >= MIN_MATCH_CHARS:
-                for _, name, start in (run for run in runs if run[0] == length):
+                if len(longest) == 1:
+                    _, name, start = longest[0]
                     for offset in range(length):
                         if hits[at + offset] is not None:
                             self.hits[name][start + offset] += hits[at + offset]
@@ -106,7 +108,8 @@ def main() -> int:
     totals, kinds = {}, set()
     for capture in captures:
         for entry in json.loads(capture.read_text(encoding="utf-8"))["result"]:
-            kinds.add(capture.name.split("-")[1])
+            if entry["functions"]:
+                kinds.add(capture.name.split("-")[1])
             stored = capture.parent / "sources" / f"{entry['source']}.js"
             script = stored.read_bytes().decode("utf-8")
             hits = line_hits(script, entry["functions"])

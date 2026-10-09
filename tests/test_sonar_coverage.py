@@ -107,7 +107,7 @@ for shard in range(1, 5):
 (folder / 'js-coverage' / 'sources').mkdir(parents=True)
 (folder / 'js-coverage' / 'sources' / 's.js').write_text('void 0;\\n')
 for kind in ('node', 'browser'):
-    (folder / 'js-coverage' / f'capture-{kind}-1.json').write_text('{"result": [{"source": "s", "functions": []}]}')
+    (folder / 'js-coverage' / f'capture-{kind}-1.json').write_text('{"result": [{"source": "s", "functions": [{"ranges": [{"startOffset": 0, "endOffset": 7, "count": 1}]}]}]}')
 """
     subprocess.run(
         [sys.executable, "-c", generator, str(ROOT / ".github/coverage/coverage.ini")],

@@ -147,6 +147,9 @@ def test_a_report_missing_either_kind_of_recorded_run_is_red(tmp_path, recorded,
     captures = tmp_path / "captures"
     captures.mkdir()
     (captures / "capture-browser-empty.json").write_text('{"result": []}')
+    (captures / "sources").mkdir()
+    (captures / "sources" / "stand-in.js").write_text("void 0;\n")
+    (captures / "capture-node-no-ranges.json").write_text('{"result": [{"source": "stand-in", "functions": []}]}')
     for kind in recorded:
         stand_in(captures, kind)
     result = convert(tmp_path, captures, tmp_path / "lcov.info")
@@ -155,7 +158,7 @@ def test_a_report_missing_either_kind_of_recorded_run_is_red(tmp_path, recorded,
     assert not (tmp_path / "lcov.info").exists()
 
 
-def test_code_two_page_files_share_counts_in_both(tmp_path):
+def test_code_two_page_files_share_counts_in_neither(tmp_path):
     for name in ("a", "b"):
         page = tmp_path / f"scripts/swarm_ledger/static/js/{name}.js"
         page.parent.mkdir(parents=True, exist_ok=True)
@@ -166,7 +169,7 @@ def test_code_two_page_files_share_counts_in_both(tmp_path):
     assert convert(tmp_path, captures, tmp_path / "lcov.info").returncode == 0
     (line,) = numbered("return sum;").values()
     files = records(tmp_path / "lcov.info")
-    assert files["scripts/swarm_ledger/static/js/a.js"][line] == files["scripts/swarm_ledger/static/js/b.js"][line] == 1
+    assert files["scripts/swarm_ledger/static/js/a.js"][line] == files["scripts/swarm_ledger/static/js/b.js"][line] == 0
 
 
 def test_the_coverage_shards_capture_node_runs_and_sonar_imports_the_report():
@@ -232,3 +235,22 @@ def test_a_browser_page_leaves_the_scripts_it_ran_and_their_lines_count(tmp_path
     for text in ("return doubled.length;", "return value + 1;"):
         (line,) = numbered(text).values()
         assert hits[line] == 0, text
+
+
+@pytest.mark.parametrize(
+    "outcome, reason, after",
+    [
+        ("skipped", "no chromium: Executable doesn't exist", "failed"),
+        ("skipped", "needs a live Redis", "skipped"),
+        ("passed", None, "passed"),
+    ],
+    ids=["browser-missing", "other-skip", "passed"],
+)
+def test_a_page_test_that_cannot_launch_chromium_fails_while_coverage_is_recorded(outcome, reason, after):
+    from types import SimpleNamespace
+
+    from tests import browser_coverage
+
+    report = SimpleNamespace(outcome=outcome, skipped=outcome == "skipped", longrepr=("f.py", 1, f"Skipped: {reason}"))
+    browser_coverage.failed_launch(report)
+    assert report.outcome == after

@@ -9,6 +9,8 @@ import os
 import uuid
 from pathlib import Path
 
+import pytest
+
 WATCHED = {}
 
 
@@ -83,6 +85,18 @@ def patches(folder: Path):
         (BrowserContext, "close", close_context),
         (Browser, "close", close_browser),
     ]
+
+
+def failed_launch(report) -> None:
+    if report.skipped and "no chromium" in str(report.longrepr):
+        report.outcome = "failed"
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    if os.environ.get("JS_COVERAGE_DIR"):
+        failed_launch(outcome.get_result())
 
 
 def pytest_configure(config):
