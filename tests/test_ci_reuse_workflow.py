@@ -29,6 +29,7 @@ def test_required_gate_reuses_only_complete_queue_evidence(event, reuse_result, 
     needs = {name: {"result": "skipped"} for name in jobs["gate-required"]["needs"]}
     needs["reuse"] = {"result": reuse_result, "outputs": {"reused": "true", "run": source_run}}
     needs["queue-baseline"] = {"result": baseline_result}
+    needs["stage-budget"] = {"result": "success"}
     result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],
         env=dict(os.environ, NEEDS=json.dumps(needs), REUSED="true", EVENT=event, MUTATION="false"),
@@ -51,6 +52,7 @@ def test_a_reused_queue_rejects_failed_or_executed_suites(failed):
     needs = {name: {"result": "skipped"} for name in jobs["gate-required"]["needs"]}
     needs["reuse"] = {"result": "success", "outputs": {"reused": "true", "run": "12345"}}
     needs["queue-baseline"] = {"result": "success"}
+    needs["stage-budget"] = {"result": "success"}
     needs[failed]["result"] = "failure"
     result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],
