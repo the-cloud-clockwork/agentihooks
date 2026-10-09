@@ -1,3 +1,4 @@
+import os
 import re
 import subprocess
 import tomllib
@@ -269,3 +270,12 @@ def test_size_runs_beside_unit_graded_by_the_base_with_the_pinned_ruff():
         "  exit 1\n"
         "fi\n"
     )
+
+
+def test_size_refuses_a_dev_without_its_grader(tmp_path):
+    grade = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["size"]["steps"][-1]
+    (tmp_path / "grader").mkdir()
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), GITHUB_WORKSPACE=str(tmp_path))
+    result = subprocess.run(["bash", "-e", "-c", grade["run"]], env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "dev carries no scripts/size_limits.py, so nothing trusted can grade." in result.stdout

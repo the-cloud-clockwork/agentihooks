@@ -193,6 +193,25 @@ def test_main_passes_a_clean_head(repo, capsys):
     assert "0 protected gate problems" in capsys.readouterr().out
 
 
+def test_main_reads_declarations_from_the_protected_tip(repo, capsys):
+    workflow = _workflow()
+    workflow["jobs"]["slow"] = {"runs-on": "ubuntu-latest"}
+    expired = {"not_gates": {"test.yml/slow": {**_entry(), "expires": "2000-01-01"}}}
+    _commit(repo, {"test.yml": workflow}, expired, "base")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = copy.deepcopy(workflow)
+    head["jobs"]["audit"] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["gate"]["needs"].append("audit")
+    behind = _commit(repo, {"test.yml": head}, expired, "add audit")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", behind]) == 1
+    assert "test.yml/slow expired on 2000-01-01." in capsys.readouterr().out
+    _commit(
+        repo, {"test.yml": workflow}, {"not_gates": {"test.yml/slow": {**_entry(), "expires": "2999-01-01"}}}, "renew"
+    )
+    assert gate_protected.main(["--root", str(repo), "--head", behind]) == 0
+
+
 def test_main_reads_yaml_workflows_only_and_runs_without_a_wiring_file(repo, monkeypatch, capsys):
     _commit(repo, {"test.yaml": _workflow()}, {}, "base")
     (repo / ".github/gate-wiring.json").unlink()
