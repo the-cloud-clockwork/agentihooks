@@ -146,17 +146,27 @@ def strip(step: str, payload: dict, findings: list[Finding]) -> dict:
 ACTIONS = {"send-back": send_back, "flag": flag}
 
 
-def _round_comment(findings: list[Finding], count: int) -> None:
+def _comment_text(entry: dict, findings: list[Finding], count: int) -> str:
+    from scripts.swarm_ledger.ledger_comments import LIMITS, RULES
+
+    name = entry["file"].removesuffix(".filter.yaml")
+    text = f"Filter {name} passed after {count} send backs. Findings: "
+    text += " ".join(f"{finding.text}: {finding.reason}." for finding in findings)
+    for _, pattern in RULES:
+        text = pattern.sub("flagged text", text)
+    text = text.replace("-", " ").replace("(", " ").replace(";", " ")
+    return " ".join(text.split()[: LIMITS["comment"]])
+
+
+def _round_comment(entry: dict, findings: list[Finding], count: int) -> None:
     from hooks.common import log
     from scripts.swarm.ledger_client import LedgerClient
 
     slug = os.environ.get("AGENTIHOOKS_SWARM")
     task = os.environ.get("AGENTIHOOKS_SWARM_TASK")
     if slug and task:
-        text = f"Filter passed after {count} send backs. Findings: "
-        text += " ".join(f"{finding.text}: {finding.reason}." for finding in findings)
         try:
-            LedgerClient().comment(slug, task, text, by="swarm")
+            LedgerClient().comment(slug, task, _comment_text(entry, findings, count), by="swarm")
         except Exception as error:
             log("filter ledger comment failed", {"error": str(error)})
 
@@ -175,7 +185,7 @@ def _round_flag(entry: dict, payload: dict, target: str, findings: list[Finding]
             "findings": [{"text": f.text, "reason": f.reason} for f in findings],
         },
     )
-    _round_comment(findings, count)
+    _round_comment(entry, findings, count)
     return context
 
 

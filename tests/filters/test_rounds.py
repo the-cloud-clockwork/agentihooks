@@ -68,7 +68,7 @@ def test_exhausted_rounds_comment_on_current_swarm_task(filtered, monkeypatch):
     comment.assert_called_once_with(
         "proof-swarm",
         "filter-task",
-        "Filter passed after 3 send backs. Findings: because accounts have quota: explanation tail.",
+        "Filter pre write tail passed after 3 send backs. Findings: because accounts have quota: explanation tail.",
         by="swarm",
     )
 
@@ -197,7 +197,10 @@ def test_mixed_synthetic_targets_show_exhausted_findings_while_others_send_back(
     payload["tool_input"]["evidence"] = ["because accounts have quota"]
     result = runner.run(filtered, "pre", payload)
     assert result["returncode"] == 2
-    assert "filter flagged: passed after 3 send-backs" in result["stderr"]
+    assert result["stderr"] == (
+        'filter sent the text back:\n- "because accounts have quota": explanation tail\n'
+        'filter flagged: passed after 3 send-backs\n- "because accounts have quota": explanation tail'
+    )
 
 
 def test_conditions_surface_fourth_write_as_flag_context(filtered, filters_dir):
@@ -251,3 +254,118 @@ def test_strip_fallback_send_backs_are_capped(filtered, monkeypatch):
     result = runner.run(filtered, "pre", write_call())
     assert result["returncode"] == 0
     assert "passed after 3 send-backs" in json.loads(result["stdout"])["context"]
+
+
+def test_swarm_comment_accepts_finding_paths_and_code_names(filtered, monkeypatch):
+    from pathlib import Path
+
+    from scripts.swarm_ledger.ledger_comments import check
+
+    path = Path(filtered["path"])
+    path.write_text("mode: finders\nfinders:\n  - regex: /repo/page.py\n    reason: code_name\n")
+    accepted = []
+
+    def comment(self, slug, task, text, by):
+        check(text, "comment")
+        accepted.append(text)
+
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.comment", comment)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-swarm")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "filter-task")
+    for _ in range(4):
+        result = runner.run(filtered, "pre", write_call("/repo/page.py"))
+    assert result["returncode"] == 0
+    assert accepted == ["Filter pre write tail passed after 3 send backs. Findings: /repo/flagged text: flagged text."]
+    assert json.loads(result["stdout"])["context"] == (
+        'filter flagged: passed after 3 send-backs\n- "/repo/page.py": code_name'
+    )
+
+
+def test_missing_session_and_agent_are_reported_as_empty(filtered, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    log = Mock()
+    monkeypatch.setattr("hooks.common.log", log)
+    payload = write_call(session="")
+    for _ in range(4):
+        result = runner.run(filtered, "pre", payload)
+    assert result["returncode"] == 0
+    assert log.call_args.args[1]["session_id"] == ""
+
+
+def test_multiple_synthetic_targets_have_separate_flag_contexts(filtered):
+    payload = {
+        "session_id": "session",
+        "tool_name": "ledger_write",
+        "tool_input": {"text": "because accounts have quota", "evidence": ["because accounts have quota"]},
+    }
+    for _ in range(3):
+        assert runner.run(filtered, "pre", payload)["returncode"] == 2
+    result = runner.run(filtered, "pre", payload)
+    assert result["returncode"] == 0
+    assert json.loads(result["stdout"])["context"] == (
+        'filter flagged: passed after 3 send-backs\n- "because accounts have quota": explanation tail\n'
+        'filter flagged: passed after 3 send-backs\n- "because accounts have quota": explanation tail'
+    )
+
+
+def test_comment_lists_multiple_findings(filtered, monkeypatch):
+    comment = Mock()
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.comment", comment)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-swarm")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "filter-task")
+    payload = write_call("because accounts have quota and because accounts have quota")
+    for _ in range(4):
+        result = runner.run(filtered, "pre", payload)
+    assert result["returncode"] == 0
+    comment.assert_called_once_with(
+        "proof-swarm",
+        "filter-task",
+        "Filter pre write tail passed after 3 send backs. Findings: because accounts have quota: explanation tail. "
+        "because accounts have quota: explanation tail.",
+        by="swarm",
+    )
+
+
+@pytest.mark.parametrize(
+    "text, rendered",
+    [
+        ("some-text", "some text"),
+        ("(some) (text)", "some) text)"),
+        ("some;text;", "some text "),
+    ],
+)
+def test_comment_removes_forbidden_punctuation(filtered, monkeypatch, text, rendered):
+    from pathlib import Path
+
+    from scripts.swarm_ledger.ledger_comments import check
+
+    path = Path(filtered["path"])
+    path.write_text("mode: finders\nfinders:\n  - regex: .+\n    reason: finding\n")
+    comment = Mock()
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.comment", comment)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-swarm")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "filter-task")
+    for _ in range(4):
+        runner.run(filtered, "pre", write_call(text))
+    expected = f"Filter pre write tail passed after 3 send backs. Findings: {rendered}: finding."
+    assert comment.call_args.args[2] == expected
+    check(expected, "comment")
+
+
+def test_long_comment_fits_ledger_word_limit(filtered, monkeypatch):
+    from pathlib import Path
+
+    from scripts.swarm_ledger.ledger_comments import check
+
+    path = Path(filtered["path"])
+    path.write_text("mode: finders\nfinders:\n  - regex: .+\n    reason: finding\n")
+    comment = Mock()
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.comment", comment)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-swarm")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "filter-task")
+    for _ in range(4):
+        runner.run(filtered, "pre", write_call("word " * 80))
+    text = comment.call_args.args[2]
+    assert len(text.split()) == 50
+    assert text == "Filter pre write tail passed after 3 send backs. Findings: " + " ".join(["word"] * 40)
+    check(text, "comment")

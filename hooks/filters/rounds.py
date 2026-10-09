@@ -46,4 +46,4 @@ def reset(entry: dict, payload: dict, target: str) -> None:
     if path.exists():
         with path.open("r+") as counter:
             fcntl.flock(counter, fcntl.LOCK_EX)
-            counter.truncate(0)
+            counter.truncate()
