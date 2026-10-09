@@ -153,11 +153,11 @@ class PushStop:
 
         remote = git(tree.path, "remote", "get-url", "origin").stdout.strip()
         head = git(tree.path, "rev-parse", "HEAD").stdout.strip()
+        Progress(store.redis, who.swarm).outcome(who.name, PUSHED, self.now())
         try:
             ledger.comment(who.swarm, who.task, record_text(remote, tree.branch, head), by=SENDER)
         except SwarmError:
             pass
-        Progress(store.redis, who.swarm).outcome(who.name, PUSHED, self.now())
 
     def notify(self, store, who):
         from scripts.inbox.store import CLOSED, InboxStore

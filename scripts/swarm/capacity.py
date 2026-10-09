@@ -1,4 +1,5 @@
 import json
+import sys
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field, replace
 
@@ -385,6 +386,7 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     changed = any(previous.get(key) != decision[key] for key in ("configured", "effective", "reason"))
     decision["at"] = now_ms if changed else previous["at"]
     text = status_line(decision)
+    store.redis.set(store.key(slug, "quota-capacity"), json.dumps(decision))
     if changed and rows:
         task = next((row for row in rows.values() if not row.get("done")), next(iter(rows.values())))
         try:
@@ -392,8 +394,6 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
                 ledger.capacity_comment(slug, task["id"], text, now_ms)
             else:
                 ledger.comment(slug, task["id"], text, by="swarm")
-        except LedgerRefused:
-            store.redis.set(store.key(slug, "quota-capacity"), json.dumps(decision))
-            raise
-    store.redis.set(store.key(slug, "quota-capacity"), json.dumps(decision))
+        except LedgerRefused as exc:
+            print(f"swarm notice dropped, the ledger refused it: {exc}", file=sys.stderr)
     return [text] if changed else []
