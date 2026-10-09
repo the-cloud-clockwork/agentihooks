@@ -40,9 +40,10 @@ def test_record_pass_writes_a_tick_row_with_the_node_path_and_flushes(spool, sen
     queries = [q for _, q, _ in sent]
     assert queries[0].startswith("CREATE TABLE IF NOT EXISTS swarm.ticks (")
     assert "actions Int64" in queries[0]
-    assert queries[1] == "INSERT INTO swarm.ticks FORMAT JSONEachRow"
-    assert sent[1][0] == metrics_outbox.Settings("http://ch:8123", "writer", "")
-    assert sent[1][2] == (
+    assert queries[1].startswith("ALTER TABLE swarm.ticks ADD COLUMN IF NOT EXISTS event_id String")
+    assert queries[2] == "INSERT INTO swarm.ticks FORMAT JSONEachRow"
+    assert sent[2][0] == metrics_outbox.Settings("http://ch:8123", "writer", "")
+    assert sent[2][2] == (
         b'{"event_id": "tick:sw:1800000000000", "ledger": "sw", "ts_ms": 1800000000000, '
         b'"plan": "", "phase": "", "slice": "", "task": "", "actions": 3}'
     )

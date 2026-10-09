@@ -33,16 +33,17 @@ SPOOL = (
     "CREATE TABLE IF NOT EXISTS spool (tbl TEXT NOT NULL, event_id TEXT NOT NULL, ts_ms INTEGER NOT NULL,"
     " row TEXT NOT NULL, shipped INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (tbl, event_id))",
     "CREATE INDEX IF NOT EXISTS spool_pending ON spool (shipped, tbl)",
-    "CREATE TABLE IF NOT EXISTS tables (name TEXT PRIMARY KEY, ddl TEXT NOT NULL, created INTEGER NOT NULL DEFAULT 0)",
+    "CREATE TABLE IF NOT EXISTS tables"
+    " (name TEXT PRIMARY KEY, ddl TEXT NOT NULL, widen TEXT NOT NULL, created INTEGER NOT NULL DEFAULT 0)",
 )
 APPEND = "INSERT OR IGNORE INTO spool (tbl, event_id, ts_ms, row) VALUES (?, ?, ?, ?)"
 REMEMBER = (
-    "INSERT INTO tables (name, ddl) VALUES (?, ?)"
-    " ON CONFLICT (name) DO UPDATE SET ddl = excluded.ddl, created = 0 WHERE ddl != excluded.ddl"
+    "INSERT INTO tables (name, ddl, widen) VALUES (?, ?, ?) ON CONFLICT (name) DO UPDATE"
+    " SET ddl = excluded.ddl, widen = excluded.widen, created = 0 WHERE ddl != excluded.ddl"
 )
 CREATED = "UPDATE tables SET created = 1 WHERE name = ?"
 WAITING = (
-    "SELECT DISTINCT spool.tbl, tables.ddl, tables.created FROM spool JOIN tables ON tables.name = spool.tbl"
+    "SELECT DISTINCT spool.tbl, tables.ddl, tables.widen, tables.created FROM spool JOIN tables ON tables.name = spool.tbl"
     " WHERE shipped = 0"
 )
 BATCH_ROWS = "SELECT event_id, row FROM spool WHERE tbl = ? AND shipped = 0 ORDER BY ts_ms, event_id LIMIT ?"
@@ -52,7 +53,7 @@ RECENT = "SELECT row FROM spool WHERE tbl = ? AND ts_ms >= ? ORDER BY ts_ms, eve
 
 
 def _is_int(value):
-    return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(value, int) and not isinstance(value, bool) and -(2**63) <= value < 2**63
 
 
 def _is_float(value):
@@ -90,6 +91,10 @@ class Table:
             f"CREATE TABLE IF NOT EXISTS {DATABASE}.{self.name} ({columns}, {TIME_COLUMN})"
             " ENGINE = ReplacingMergeTree ORDER BY (ledger, event_id)"
         )
+
+    def widen(self):
+        columns = ", ".join(f"ADD COLUMN IF NOT EXISTS {column} {kind}" for column, kind in (*BASE, *self.columns))
+        return f"ALTER TABLE {DATABASE}.{self.name} {columns}"
 
     def check(self, row):
         schema = dict((*BASE, *self.columns))
@@ -143,13 +148,13 @@ class Outbox:
         for row in rows:
             table.check(row)
         with self.db:
-            self.db.execute(REMEMBER, (table.name, table.ddl()))
+            self.db.execute(REMEMBER, (table.name, table.ddl(), table.widen()))
             self.db.executemany(APPEND, [(table.name, row["event_id"], row["ts_ms"], json.dumps(row)) for row in rows])
 
     def flush(self, now_ms):
         shipped = 0
-        for name, ddl, created in self.db.execute(WAITING).fetchall():
-            sent, reached = self._ship(name, ddl, created)
+        for name, ddl, widen, created in self.db.execute(WAITING).fetchall():
+            sent, reached = self._ship(name, (ddl, widen), created)
             shipped += sent
             if not reached:
                 break
@@ -157,9 +162,9 @@ class Outbox:
             self.db.execute(PRUNE, (now_ms - DAY_MS,))
         return shipped
 
-    def _ship(self, name, ddl, created):
+    def _ship(self, name, schema, created):
         if not created:
-            if not self.send(self.sink, ddl, b""):
+            if not all(self.send(self.sink, statement, b"") for statement in schema):
                 return 0, False
             with self.db:
                 self.db.execute(CREATED, (name,))
