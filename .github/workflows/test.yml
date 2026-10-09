@@ -1316,7 +1316,7 @@ jobs:
           PYTHONUNBUFFERED: "1"
           PART: ${{ matrix.part }}
           PARTS: ${{ strategy.job-total }}
-        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"
+        run: mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation --base "$BASE" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"
 
       - name: Upload mutation stats part
         uses: actions/upload-artifact@v4
@@ -1324,8 +1324,9 @@ jobs:
           name: mutation-stats-${{ matrix.part }}
           path: .mutation-stats/
           include-hidden-files: true
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 1
+          overwrite: true
 
       - name: Upload stats evidence
         if: failure()
@@ -1335,6 +1336,7 @@ jobs:
           path: .mutation-gate/
           include-hidden-files: true
           retention-days: 7
+          overwrite: true
 
   mutation:
     needs: [mutation-plan, mutation-stats]

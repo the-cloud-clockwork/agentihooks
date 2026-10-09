@@ -756,14 +756,20 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     assert collect["env"]["PART"] == "${{ matrix.part }}"
     assert collect["env"]["PARTS"] == "${{ strategy.job-total }}"
     assert collect["run"] == (
-        'python -m scripts.ci_mutation --base "$BASE" --budget 1080'
-        ' --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"'
+        'mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation'
+        ' --base "$BASE" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"'
     )
     upload = stats["steps"][len(setup) + 1]
     assert upload["uses"] == "actions/upload-artifact@v4"
     assert upload["with"]["name"] == "mutation-stats-${{ matrix.part }}"
     assert upload["with"]["path"] == ".mutation-stats/"
     assert upload["with"]["include-hidden-files"] is True
+    assert upload["with"]["if-no-files-found"] == "error"
+    assert upload["with"]["overwrite"] is True
+    evidence = stats["steps"][len(setup) + 2]
+    assert evidence["if"] == "failure()"
+    assert evidence["with"]["name"] == "mutation-evidence-stats-${{ matrix.part }}"
+    assert evidence["with"]["overwrite"] is True
     names = [step.get("name") for step in mutation["steps"]]
     download = mutation["steps"][names.index("Download the shared mutation stats")]
     assert names.index("Download the shared mutation stats") < names.index("Mutate changed Python files")
