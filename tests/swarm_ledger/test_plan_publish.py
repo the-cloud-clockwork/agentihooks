@@ -24,6 +24,10 @@ plan_ledger = test_plan_kind.plan_ledger
 
 PLAN = "https://github.com/acme/app/issues/12"
 
+UNMARKED = (
+    "plan task sections need a slice marker above each heading, written as <!-- slice: name --> on its own line: {}"
+)
+
 
 def phase_plan(slug, url=PLAN, phase="p1"):
     op = {"op": "phase_update", "id": f"plan-{phase}", "by": "planner", "item": f"phases/{phase}"}
@@ -389,6 +393,73 @@ def test_publish_plan_refuses_a_multi_phase_plan_without_phase_headings(plan_led
     with pytest.raises(SystemExit) as raised:
         cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1,p2")
     assert raised.value.code == "plan needs one heading for phase Ship"
+
+
+@pytest.mark.parametrize(
+    ("text", "phases", "missing"),
+    [
+        ("# Plan\n## Build\n<!-- slice: first -->\n### First\nOne\n### Second\nTwo\n", "p1", "Second on line 6"),
+        (
+            "# Plan\n## Build\n### First\n## Ship\n<!-- slice: s -->\n### Pack\n### Send\n",
+            "p1,p2",
+            "First on line 3, Send on line 7",
+        ),
+        ("intro\n# Plan\n## First\n\n<!-- slice: two -->\n## Two\n", "p1", "First on line 3"),
+        ("## First\nOne\n<!-- slice: two -->\n## Two\n", "p1", "First on line 1"),
+        ("# Plan\n## Build the page\n### First\nSteps\n### Second\nSteps\n", "p1", "Build the page on line 2"),
+        ("# Plan\n## First\nOne\n", "p1", "First on line 2"),
+        ("# Plan\n## Build\n### First\nOne\n", "p1", "First on line 3"),
+    ],
+)
+def test_publish_plan_refuses_task_sections_without_a_slice_marker(
+    plan_ledger, tmp_path, monkeypatch, capsys, text, phases, missing
+):
+    core.sync(plan_ledger, ops=[{"op": "phase_add", "id": "add-p2", "by": "planner", "phase": "p2", "title": "Ship"}])
+    plan = tmp_path / "plan.md"
+    plan.write_text(text, encoding="utf-8")
+    monkeypatch.setattr(ledger.ledger_publish, "publish", lambda *a, **k: pytest.fail("published"))
+    with pytest.raises(SystemExit) as raised:
+        cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", phases)
+    assert raised.value.code == UNMARKED.format(missing)
+    assert capsys.readouterr().out == ""
+    assert "plan_url" not in core.sync(plan_ledger)[0]["phases"][0]
+
+
+@pytest.mark.parametrize(
+    ("text", "lines"),
+    [
+        (
+            "# Plan\n## Build\nIntro\n<!-- slice: first -->\n  \n### First\n#### Detail\n"
+            "```\n### Not a heading\n```\n<!-- slice: second -->\n### Second\n",
+            "2-12",
+        ),
+        ("# Plan\n<!-- slice: one -->\n## One\n", "1-3"),
+        ("Plain steps\nwith no headings\n", "1-2"),
+    ],
+)
+def test_publish_plan_takes_a_fully_marked_plan(plan_ledger, tmp_path, monkeypatch, capsys, text, lines):
+    plan = tmp_path / "plan.md"
+    plan.write_text(text, encoding="utf-8")
+    core.sync(plan_ledger, ops=[{"op": "join", "id": "join-planner", "by": "planner", "role": "member"}])
+    file = ledger_artifacts.store(plan_ledger, "plan.md", plan.read_bytes())
+    monkeypatch.setattr(ledger, "upload_artifact", lambda *a: file)
+    monkeypatch.setattr(
+        ledger.ledger_publish,
+        "publish",
+        lambda path, title, repo, artifact, issue_title: (artifact(path, title), "artifact"),
+    )
+    cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1")
+    url = f"{ledger.BASE}/artifacts/{plan_ledger}/{file['id']}"
+    phase = core.sync(plan_ledger)[0]["phases"][0]
+    assert phase["plan_ref"] == {"artifact": url, "lines": lines}
+    assert json.loads(capsys.readouterr().out) == {"plan_url": url, "published_to": "artifact", "phases": ["p1"]}
+
+
+def test_a_standalone_task_adds_without_a_plan_or_a_slice(plan_ledger):
+    state, rejected = add(plan_ledger, "standalone")
+    assert rejected == []
+    added = task(state, "standalone")
+    assert "plan_url" not in added and "plan_slice" not in added and "plan_lines" not in added
 
 
 def stub_publish(monkeypatch, titles):
