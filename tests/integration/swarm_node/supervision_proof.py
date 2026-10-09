@@ -1,11 +1,14 @@
 import argparse
+import fcntl
 import hashlib
 import json
 import os
 import pty
 import select
 import shlex
+import struct
 import subprocess
+import termios
 import time
 import uuid
 from pathlib import Path
@@ -57,6 +60,7 @@ def herdr_argv(container, root):
 
 def terminal_disconnect(container, root):
     master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
     command = herdr_argv(container, root)
     command[2:2] = ["--interactive", "--tty", "--env", "TERM=xterm-256color"]
     viewer = subprocess.Popen(command, stdin=slave, stdout=slave, stderr=slave)
@@ -301,6 +305,11 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
+    inventory = json.loads(
+        docker("run", "--rm", "--network", "none", args.image, "python", "/opt/swarm-node/worker_image.py", "report")
+    )
+    assert inventory["manifest"]["source_revision"] == args.tested_commit
+    proof_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=Path(__file__).parent, text=True).strip()
     positive = [run_case(args.image, "complete", args.output) for _ in range(2)]
     negative = run_case(args.image, "complete", args.output, kill=True)
     recovery = [run_case(args.image, mode, args.output) for mode in ("late", "missing", "forced")]
@@ -318,6 +327,8 @@ def main():
     shared = {
         "package": "SV2-IMG-03",
         "tested_commit": args.tested_commit,
+        "proof_commit": proof_commit,
+        "supported_versions": inventory["observed"],
         "mocked": False,
         "fixture_manifest": manifest,
         "startup_network": "none",
