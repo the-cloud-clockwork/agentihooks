@@ -98,9 +98,16 @@ def intent(doc, task_id):
 
 
 def _row(piece, probability, off_intent):
-    ruling = all(is_clearance(area) for area in piece.areas)
-    kept = ruling or probability is None or probability >= off_intent
+    kept = _kept(_ruling(piece.areas), probability, off_intent)
     return {"what": piece.what, "areas": list(piece.areas), "why": piece.why, "probability": probability, "kept": kept}
+
+
+def _ruling(areas) -> bool:
+    return all(is_clearance(area) for area in areas)
+
+
+def _kept(ruling, probability, off_intent) -> bool:
+    return ruling or probability is None or probability >= off_intent
 
 
 def _row_key(row):
@@ -118,7 +125,10 @@ def _known(previous, pieces):
 
 def _params(fresh, start, sized):
     return {
-        "pieces": [{"slot": start + i, "number": start + i + 1, "what": piece.what} for i, piece in enumerate(fresh)],
+        "pieces": [
+            {"slot": start + i, "number": start + i + 1, "what": piece.what, "ruling": _ruling(piece.areas)}
+            for i, piece in enumerate(fresh)
+        ],
         "sized": [{}] if sized else [],
     }
 
@@ -141,8 +151,13 @@ def failures(rows, size, too_big):
 
 
 def _verdicts(definition, state, params, answers):
+    if not params["sized"]:
+        return {"verdict": PASS}
     off_intent = definition.thresholds["off_intent"]
-    rows = [{"kept": answers[f"piece_{piece['slot']}"].noul >= off_intent} for piece in params["pieces"]]
+    rows = [
+        {"kept": _kept(piece["ruling"], answers[f"piece_{piece['slot']}"].noul, off_intent)}
+        for piece in params["pieces"]
+    ]
     size = _size(answers["size"], levels(definition))
     return {"verdict": FAIL if failures(rows, size, definition.thresholds["too_big_confidence"]) else PASS}
 

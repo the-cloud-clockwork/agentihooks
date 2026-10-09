@@ -4,7 +4,7 @@ import math
 import re
 from concurrent.futures import ThreadPoolExecutor
 
-from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
+from hooks.classifier import Answer, ClassifierError, code_rules, decide, definitions, runner
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm_ledger import ledger_kinds
 
@@ -60,7 +60,7 @@ def classify(task: dict, doc: dict) -> dict:
     return sized(choice, "classifier", confidence) if choice else sized(FALLBACK, "default", confidence)
 
 
-def picked(definition, answer, thresholds) -> tuple[str | None, float]:
+def picked(definition: definitions.Definition, answer: Answer, thresholds: dict) -> tuple[str | None, float]:
     raw = answer.confidence
     confidence = min(max(raw, 0.0), 1.0) if _real(raw) else 0.0
     options = {spec.name: spec.question for spec in definition.questions}[QUESTION].options

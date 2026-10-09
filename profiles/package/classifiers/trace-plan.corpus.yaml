@@ -390,6 +390,7 @@ cases:
       number: 1
       what: Fix terminal notices, settle terminal seat and orphan mail, preserve resumable seats, distinguish sent age and
         backlog with red tests, and measure equal new timer finding cohorts without rewriting history
+      ruling: false
     sized:
     - {}
   expected:
@@ -801,12 +802,15 @@ cases:
     - slot: 0
       number: 1
       what: Report CI reruns only above RerunBudget().cap and name that limit in findings
+      ruling: false
     - slot: 1
       number: 2
       what: Cover below, at and above the shared limit and replay the three original heads
+      ruling: false
     - slot: 2
       number: 3
       what: Update reader expectations for a head with one rerun
+      ruling: false
     sized:
     - {}
   expected:
@@ -1216,6 +1220,7 @@ cases:
     - slot: 0
       number: 1
       what: Cap local mutation worker requests and print the cap while preserving CI counts
+      ruling: false
     sized:
     - {}
   expected:
@@ -1659,30 +1664,38 @@ cases:
       number: 1
       what: Add an inbox no outcome rate counting work items sent inside the requested window and closed done without a named
         outcome, excluding information items and dividing by the window hours
+      ruling: false
     - slot: 1
       number: 2
       what: Test and expose that rate through doctor rates using the existing inbox reader and window boundaries
+      ruling: false
     - slot: 2
       number: 3
       what: Record the before rate from the watched swarm before applying the close and parser fixes
+      ruling: false
     - slot: 3
       number: 4
       what: Refuse a bare done on work items while retaining named outcomes and information item closure
+      ruling: false
     - slot: 4
       number: 5
       what: Parse the information only flag before or after message text without storing it as literal text
+      ruling: false
     - slot: 5
       number: 6
       what: Preserve the supplied outcome when replying to a tick notice and cover that reply path with a failing test before
         the fix
+      ruling: false
     - slot: 6
       number: 7
       what: After merge and the permitted Doctor application, record the rate over an equal duration window and submit both
         outputs to the Doctor master
+      ruling: false
     - slot: 7
       number: 8
       what: Update existing swarm and handoff test fixtures that close work items so they supply an outcome while retaining
         their routing and history assertions
+      ruling: false
     sized:
     - {}
   expected:
@@ -2105,6 +2118,7 @@ cases:
     - slot: 0
       number: 1
       what: Remove the nested test worker option so the Redis guard test runs serially with parallel plugins disabled
+      ruling: false
     sized:
     - {}
   expected:
@@ -2521,13 +2535,16 @@ cases:
       number: 1
       what: Record when the Codex share target takes effect on creation and actual target changes, preserving the timestamp
         for unrelated updates
+      ruling: false
     - slot: 1
       number: 2
       what: Read the target change timestamp into Doctor spawn records and retain an unknown value for legacy config
+      ruling: false
     - slot: 2
       number: 3
       what: Bound the six hour share sample to picks after the proven target change, suppress unknown periods and samples
         below ten picks, and retain steady target drift detection
+      ruling: false
     sized:
     - {}
   expected:
@@ -2960,21 +2977,27 @@ cases:
     - slot: 0
       number: 1
       what: Prove stale delivered peer task mail stays open on receiver departure
+      ruling: false
     - slot: 1
       number: 2
       what: Settle delivered peer task mail after receiver departure and seat reassignment
+      ruling: false
     - slot: 2
       number: 3
       what: Verify targeted gates, merge, and measure the finding
+      ruling: false
     - slot: 3
       number: 4
       what: Record explicit receiver task association when peer mail is sent
+      ruling: false
     - slot: 4
       number: 5
       what: Carry receiver task association on peer swarm delivery
+      ruling: false
     - slot: 5
       number: 6
       what: Record independent equivalence rulings for unchanged mutation outcomes
+      ruling: true
     sized:
     - {}
   expected:
@@ -3402,13 +3425,16 @@ cases:
       number: 1
       what: Add failing tests for bounded failed spawn measurements, invalid bounds, unchanged unbounded output, and independence
         from CI and trace readers
+      ruling: false
     - slot: 1
       number: 2
       what: Add optional since and until bounds to the failed spawn measure command, validate them, and route failed spawn
         measurements directly through the spawn reader
+      ruling: false
     - slot: 2
       number: 3
       what: Bound spawn journal reads above and below while retaining the existing unbounded behavior
+      ruling: false
     sized:
     - {}
   expected:
@@ -3840,18 +3866,23 @@ cases:
     - slot: 0
       number: 1
       what: Prove failed launches remain distinct from started agent lives, preserve launch errors, and do not exhaust reruns
+      ruling: false
     - slot: 1
       number: 2
       what: Record failed launches separately and mark successful launches as started lives
+      ruling: false
     - slot: 2
       number: 3
       what: Count only started lives in the claims cap and proof loop finding
+      ruling: false
     - slot: 3
       number: 4
       what: Report repeated failed launches with their launch errors
+      ruling: false
     - slot: 4
       number: 5
       what: Supply started launch records to health reporting
+      ruling: false
     sized:
     - {}
   expected:
@@ -4279,13 +4310,16 @@ cases:
     - slot: 0
       number: 1
       what: Preserve the accepted generation identity until a new generation or prompt closes it
+      ruling: false
     - slot: 1
       number: 2
       what: Reproduce the cause proof with interleaved tool results and repeated paging, and verify paging remains bounded
+      ruling: false
     - slot: 2
       number: 3
       what: Verify matching accepted and remote counts clear the false stale finding while a truly missing observation remains
         stale
+      ruling: false
     sized:
     - {}
   expected:
@@ -4722,21 +4756,27 @@ cases:
     - slot: 0
       number: 1
       what: Report busy agents stalled after configurable tool inactivity
+      ruling: false
     - slot: 1
       number: 2
       what: Escalate actionable swarm sender items on the normal ladder
+      ruling: false
     - slot: 2
       number: 3
       what: Connect stored busy observations and tool inactivity to health reporting
+      ruling: false
     - slot: 3
       number: 4
       what: Retain each tick pane observation for stalled reporting
+      ruling: false
     - slot: 4
       number: 5
       what: Record independently ruled equivalent timestamp encoding mutants
+      ruling: true
     - slot: 5
       number: 6
       what: Keep missing tool timestamps unmeasured without launch time fallback
+      ruling: false
     sized:
     - {}
   expected:
@@ -5163,12 +5203,15 @@ cases:
     - slot: 0
       number: 1
       what: Validate duration candidates before adoption and publication with the existing coverage threshold
+      ruling: false
     - slot: 1
       number: 2
       what: Replay the recorded incomplete artifact in focused regression tests
+      ruling: false
     - slot: 2
       number: 3
       what: Wire publication collection dependencies when required
+      ruling: false
     sized:
     - {}
   expected:

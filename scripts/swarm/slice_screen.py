@@ -43,7 +43,7 @@ def screen(phase, doc, confidence):
         ],
     }
     try:
-        output = runner.run(PURPOSE, state, {"tasks": mine}, decider=decide)
+        output = runner.run(PURPOSE, state, {"tasks": mine, "confidence": confidence}, decider=decide)
     except ClassifierError:
         return Screen(reason="the classifier did not answer")
     result = output.raw
@@ -82,8 +82,7 @@ def hold(problems, result):
 
 
 def _verdicts(definition, state, params, answers):
-    confidence = params.get("confidence", slice_check.Limits().flag_confidence)
-    return {"flagged": bool(flags(answers, params["tasks"], confidence, definition))}
+    return {"flagged": bool(flags(answers, params["tasks"], params["confidence"], definition))}
 
 
 RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"flagged": (True, False)}, {"flagged": True})

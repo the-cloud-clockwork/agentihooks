@@ -1,7 +1,8 @@
 version: 1
 notes: 'Seeded from the classifier decision log: each case state was rebuilt from its ledger and matched to a logged state
   digest, and its samples are the answers logged for that digest. Expected verdicts were written by a reader that saw only
-  the state and the question, never the thresholds or the rule.'
+  the state and the question, never the thresholds or the rule. Model pick expectations are the reader''s level raised to
+  the lane floor, as the call site raises them.'
 cases:
 - name: rig-grade-swarm-t58
   state:
@@ -19,6 +20,7 @@ cases:
     - medium
     - high
     - max
+    floor: high
   expected:
     effort: high
   samples:
@@ -54,8 +56,9 @@ cases:
     - medium
     - high
     - max
+    floor: high
   expected:
-    effort: low
+    effort: high
   samples:
   - source: haiku
     latency_ms: 5058
@@ -109,6 +112,7 @@ cases:
     - medium
     - high
     - max
+    floor: high
   expected:
     effort: high
   samples:
@@ -148,6 +152,7 @@ cases:
     - medium
     - high
     - xhigh
+    floor: high
   expected:
     effort: xhigh
   samples:
@@ -183,8 +188,9 @@ cases:
     - medium
     - high
     - xhigh
+    floor: high
   expected:
-    effort: low
+    effort: high
   samples:
   - source: pplx-decider-v1-27b
     latency_ms: 1481
@@ -237,6 +243,7 @@ cases:
     - medium
     - high
     - xhigh
+    floor: high
   expected:
     effort: high
   samples:
@@ -275,8 +282,9 @@ cases:
     - medium
     - high
     - max
+    floor: high
   expected:
-    effort: medium
+    effort: high
   samples:
   - source: luna
     latency_ms: 7060
@@ -315,6 +323,7 @@ cases:
     - medium
     - high
     - max
+    floor: high
   expected:
     effort: high
   samples:
@@ -351,8 +360,9 @@ cases:
     - medium
     - high
     - max
+    floor: high
   expected:
-    effort: medium
+    effort: high
   samples:
   - source: luna
     latency_ms: 8151
@@ -390,6 +400,7 @@ cases:
     - medium
     - high
     - xhigh
+    floor: high
   expected:
     effort: xhigh
   samples:
@@ -425,8 +436,9 @@ cases:
     - medium
     - high
     - xhigh
+    floor: high
   expected:
-    effort: low
+    effort: high
   samples:
   - source: luna
     latency_ms: 6547
@@ -460,8 +472,9 @@ cases:
     - medium
     - high
     - max
+    floor: high
   expected:
-    effort: low
+    effort: high
   samples:
   - source: haiku
     latency_ms: 11271

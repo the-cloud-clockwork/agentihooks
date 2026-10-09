@@ -316,6 +316,7 @@ cases:
       title: Align type, navigation color and tokens without clipping overlays
     - id: t18
       title: Verify active swarm states and finish contextual empty guidance
+    confidence: 0.7
   expected:
     flagged: true
   samples:
@@ -690,6 +691,7 @@ cases:
       title: Add schema validated versioned resources and migrate CLI requests
     - id: t11
       title: Replace document polling with revisioned event delivery
+    confidence: 0.7
   expected:
     flagged: true
   samples:
@@ -1092,6 +1094,7 @@ cases:
       title: Independently stress profile routing and mounted lifecycle canaries
     - id: t53
       title: Independently stress active trace freshness replay redaction and signal linkage
+    confidence: 0.7
   expected:
     flagged: false
   samples:
@@ -1459,6 +1462,7 @@ cases:
       title: Flush telemetry continuously without blocking active jobs
     - id: t47
       title: Render a minimal existing Langfuse read connector on both harnesses
+    confidence: 0.7
   expected:
     flagged: false
   samples:
@@ -1725,6 +1729,7 @@ cases:
       title: Tune recall ranking on operator style questions
     - id: rc9
       title: Prove recall live in Claude and Codex sessions
+    confidence: 0.7
   expected:
     flagged: false
   samples:
@@ -1965,6 +1970,7 @@ cases:
       title: Recall records from swarm seats, inbox and task folders
     - id: rc4
       title: Capture ledger and seat changes into the recall archive
+    confidence: 0.7
   expected:
     flagged: false
   samples:
@@ -2204,6 +2210,7 @@ cases:
       title: Find why engineer slots stay empty while tasks are claimable
     - id: nd11
       title: 'Proof: a scratch swarm runs a dependency chain with every engineer slot busy'
+    confidence: 0.7
   expected:
     flagged: false
   samples:
@@ -2484,6 +2491,7 @@ cases:
       title: Park a stacked task with a handoff naming its blocker
     - id: nd5
       title: Restack a parked task onto dev once its blocker merges
+    confidence: 0.7
   expected:
     flagged: false
   samples:
@@ -2845,6 +2853,7 @@ cases:
       title: Bundle roles mount the swarm brain through native harness settings
     - id: t127
       title: A live swarm writes a lesson and retrieves it after restart
+    confidence: 0.7
   expected:
     flagged: false
   samples:
@@ -3189,6 +3198,7 @@ cases:
       title: Atlas provisions and backs up the dedicated swarm vault
     - id: t121
       title: Atlas provisions isolated brain data and Secret store records
+    confidence: 0.7
   expected:
     flagged: false
   samples:
@@ -3408,6 +3418,7 @@ cases:
       title: Prove the duplicate check on a scratch ledger with the live classifier
     - id: dup7
       title: Seed merge refuses new tasks, follow ups and phases
+    confidence: 0.7
   expected:
     flagged: false
   samples:
@@ -3716,6 +3727,7 @@ cases:
       title: Task add refuses a task the ledger already holds
     - id: dup3
       title: Follow up add refuses a repeated follow up or open task
+    confidence: 0.7
   expected:
     flagged: false
   samples:

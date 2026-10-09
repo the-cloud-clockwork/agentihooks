@@ -111,8 +111,11 @@ def confirm(groups, doc):
         output = runner.run(PURPOSE, state(groups, doc), {"groups": [_named(g) for g in groups]}, decider=decide)
     except ClassifierError:
         return None
-    floor = output.thresholds["confidence"]
-    return [_yes(output.raw.answers[f"group_{i}"].noul, floor) for i in range(len(groups))]
+    return _confirmed(output.raw.answers, len(groups), output.thresholds["confidence"])
+
+
+def _confirmed(answers, count, floor) -> list[bool]:
+    return [_yes(answers[f"group_{i}"].noul, floor) for i in range(count)]
 
 
 def state(groups, doc):
@@ -183,8 +186,7 @@ def _yes(noul, floor):
 
 
 def _verdicts(definition, state, params, answers):
-    floor = definition.thresholds["confidence"]
-    return {"group": all(_yes(answers[f"group_{i}"].noul, floor) for i in range(len(params["groups"])))}
+    return {"group": all(_confirmed(answers, len(params["groups"]), definition.thresholds["confidence"]))}
 
 
 RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"group": (True, False)}, {"group": False})

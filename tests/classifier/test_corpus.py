@@ -22,11 +22,8 @@ KNOWN_MISSES = {
     "model-pick": [
         "rig-grade-swarm-cxc0",
         "rig-grade-swarm-doctor-fx-9b243b65-tune",
-        "rig-grade-swarm-doctor-t25",
         "rig-grade-swarm-doctor-t38",
         "rig-grade-swarm-ed1",
-        "rig-grade-swarm-tc1",
-        "rig-grade-swarm-tc104",
     ],
     "profile-pick": [
         "rig-grade-swarm-doctor-fx-29d21c6e-code",
@@ -464,21 +461,7 @@ def _purpose(path):
 CLASSIFIERS = sorted(
     path.stem for path in PACKAGE.glob("*.yaml") if ".corpus" not in path.name and _purpose(path) == path.stem
 )
-SEEDED = (
-    "filter",
-    "ledger-duplicate",
-    "model-pick",
-    "phase-slice",
-    "priority-resolve",
-    "profile-pick",
-    "task-difficulty",
-    "task-grouping",
-    "trace-plan",
-)
-
-
-def test_every_seeded_classifier_is_a_packaged_classifier():
-    assert set(SEEDED) <= set(CLASSIFIERS)
+GENERIC = ("choice", "score", "yes")
 
 
 @pytest.mark.parametrize("name", CLASSIFIERS)
@@ -486,8 +469,8 @@ def test_every_packaged_classifier_has_a_corpus(name):
     assert (PACKAGE / f"{name}.corpus.yaml").is_file()
 
 
-@pytest.mark.parametrize("name", SEEDED)
-def test_every_seeded_corpus_holds_ten_cases_from_the_decision_log(name):
+@pytest.mark.parametrize("name", [name for name in CLASSIFIERS if name not in GENERIC])
+def test_every_classifier_corpus_holds_ten_cases(name):
     assert len(evaluation.evaluate(name).cases) >= 10
 
 
