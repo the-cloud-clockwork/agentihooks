@@ -56,6 +56,7 @@ URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
 WORKER_LANES = ("eng", "ci")
+SWARM = "swarm"
 PROPOSE = 'propose the work with agentihooks ledger followup add "<plain words>" and the master decides'
 PUBLISH = (
     "publish the plan with agentihooks ledger publish-plan <file> --phase <phase id>, then link each task with "
@@ -225,7 +226,7 @@ def _add(doc, op, ctx):
     if not _known(tasks, op.get("depends_on", [])):
         return False
     appended = {p["id"] for p in doc.get("phases", []) if p.get("added_by") == op["by"]}
-    if refusal := add_refusal(tasks, op, appended):
+    if refusal := add_refusal(tasks, op, appended) or unsliced(doc, op):
         ctx.refused.append(refusal)
         return False
     task = {
@@ -280,6 +281,17 @@ def add_refusal(tasks, op, appended):
         return "" if op.get("phase") in appended else f"{by} holds no plan task and cannot add tasks: {PROPOSE}"
     if plans[0].get("phase") != op.get("phase"):
         return f"{by} plans phase {plans[0].get('phase')} and cannot add a task outside it: {PROPOSE}"
+    return ""
+
+
+def unsliced(doc: dict, op: dict) -> str:
+    if "plan_slice" in op or op["by"] == SWARM or ledger_kinds.kind(op) == "plan":
+        return ""
+    from scripts.swarm_ledger import plan_ranges
+
+    phase = next((p for p in doc.get("phases", []) if p["id"] == op.get("phase")), {})
+    if names := plan_ranges.anchors(doc, phase):
+        return f"phase {phase['id']} has a plan with slice anchors: add the task with --plan-slice naming one of {', '.join(names)}"
     return ""
 
 

@@ -46,7 +46,7 @@ def check(phase, doc, limits):
             continue
         mine.append(task)
         problems += _task(task, phase, doc, limits)
-    return problems + _cycle(mine)
+    return problems + _cycle(mine) + _unlined(phase, doc)
 
 
 def _count(ids, limits):
@@ -97,3 +97,14 @@ def _cycle(mine):
     except SwarmError:
         return ["The slice has a dependency cycle."]
     return []
+
+
+def _unlined(phase, doc):
+    return [
+        f"Task {t['id']} links the plan but has no plan lines."
+        for t in doc["tasks"]
+        if t.get("phase") == phase["id"]
+        and ledger_kinds.kind(t) != "plan"
+        and t.get("plan_url")
+        and not t.get("plan_lines")
+    ]

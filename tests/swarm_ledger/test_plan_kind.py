@@ -155,8 +155,8 @@ def test_a_slice_without_its_anchor_or_range_is_refused_by_name(plan_ledger):
     assert [t["id"] for t in state["tasks"]] == []
     add(plan_ledger, "plan", lane="plan", kind="plan")
     add(plan_ledger, "first", plan_url=PLAN, plan_slice="first")
-    add(plan_ledger, "second", plan_url=PLAN)
-    add(plan_ledger, "third", plan_url=PLAN)
+    add(plan_ledger, "second", plan_url=PLAN, by="swarm")
+    add(plan_ledger, "third", plan_url=PLAN, by="swarm")
     state, rejected = update(plan_ledger, state="done", proof={"slice": "first, second, third"})
     assert rejected == ["finish-plan"]
     assert state["tasks"][0]["state"] == "open"

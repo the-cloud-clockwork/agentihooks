@@ -37,7 +37,7 @@ def legacy(plan_ledger):
 
 
 def test_task_set_computes_anchor_range(published, monkeypatch, capsys):
-    add(published, "old")
+    add(published, "old", by="swarm")
     cli(monkeypatch, published, "task", "set", "old", "plan_slice=second")
     assert json.loads(capsys.readouterr().out) == {"task": "old", "plan_slice": "second", "plan_lines": "7-9"}
     row = task(core.sync(published)[0], "old")
@@ -84,7 +84,7 @@ def test_legacy_heading_cannot_assign_an_empty_slice():
 
 
 def test_task_set_missing_slice_refuses_the_whole_update(published, monkeypatch):
-    add(published, "old")
+    add(published, "old", by="swarm")
     with pytest.raises(SystemExit):
         cli(monkeypatch, published, "task", "set", "old", "plan_slice=absent", "description=Changed")
     row = task(core.sync(published)[0], "old")
@@ -120,7 +120,7 @@ def test_backfill_repairs_linked_tasks_and_lists_unresolved_headings(legacy, mon
 
 
 def test_backfill_uses_an_existing_slice_name(published, monkeypatch, capsys):
-    add(published, "renamed")
+    add(published, "renamed", by="swarm")
     doc = core.sync(published)[0]
     task(doc, "renamed")["plan_slice"] = "third"
     monkeypatch.setattr(ledger, "call", lambda slug, ops=None: doc)
@@ -165,7 +165,7 @@ def test_missing_plan_lines_guard_is_boolean():
 
 
 def test_slice_update_respects_missing_task_and_state_guard(published):
-    add(published, "closed")
+    add(published, "closed", by="swarm")
     for name, guard in (("missing", []), ("closed", ["claimed"])):
         op = {
             "op": "task_update",
@@ -245,7 +245,7 @@ def test_backfill_maps_repository_packages_and_reads_shared_sections(plan_ledger
 
 
 def test_backfill_preserves_a_range_assigned_after_its_snapshot(published, monkeypatch, capsys):
-    add(published, "first")
+    add(published, "first", by="swarm")
     snapshot = core.sync(published)[0]
     monkeypatch.setattr(ledger, "call", lambda slug, ops=None: snapshot)
 
