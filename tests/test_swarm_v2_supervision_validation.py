@@ -140,13 +140,15 @@ def test_checkpoint_rejects_symlink_outside_attempt(material, tmp_path):
 
 
 def test_protocol_writes_sorted_atomic_material(tmp_path, monkeypatch):
-    path = tmp_path / "receipt.json"
+    directory = tmp_path / "material"
+    directory.mkdir()
+    path = directory / "receipt.json"
     opened = Mock(wraps=protocol.os.open)
     monkeypatch.setattr(protocol.os, "open", opened)
     protocol.write(path, {"z": 1, "a": 2})
-    opened.assert_called_once_with(tmp_path, protocol.os.O_RDONLY | protocol.os.O_DIRECTORY)
+    opened.assert_called_once_with(directory, protocol.os.O_RDONLY | protocol.os.O_DIRECTORY)
     assert path.read_bytes() == b'{"a": 2, "z": 1}'
-    assert list(tmp_path.iterdir()) == [path]
+    assert list(directory.iterdir()) == [path]
 
 
 def test_authority_accepts_case_preserving_scope_names():
