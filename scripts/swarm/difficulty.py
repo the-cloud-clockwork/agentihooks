@@ -4,13 +4,13 @@ import math
 import re
 from concurrent.futures import ThreadPoolExecutor
 
-from hooks.classifier import Choice, ClassifierError, decide
+from hooks.classifier import ClassifierError, decide, definitions, runner
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm_ledger import ledger_kinds
 
 PER_TICK = 5
-MIN_CONFIDENCE = 0.6
 FALLBACK = "M"
+PURPOSE = "task-difficulty"
 QUESTION = "difficulty"
 PAGE_FOLDER = "scripts/swarm_ledger/static"
 PAGE_FILES = (
@@ -23,18 +23,6 @@ PAGE_FILES = (
 INFRA_RE = re.compile(
     r"(?<![a-z0-9])(kubernetes|k8s|helm|argo|argocd|deploy(?:s|ing|ment|ments)?|infra(?:structure)?)(?![a-z0-9])",
     re.IGNORECASE,
-)
-RUBRIC = {
-    "S": "A mundane frontend change: copy, layout, style or a small control on a page, even when grouped with others.",
-    "M": "Normal agentihooks code or CI work: hooks, scripts, commands, the ledger server, tests or workflows.",
-    "L": (
-        "Touches infrastructure, collects information, sets configuration or deploys to Kubernetes, possibly "
-        "together with code."
-    ),
-}
-INSTRUCTIONS = (
-    'Task {id} "{title}": how big is this task by the operator rubric? Judge the work it asks for from the '
-    "description, kind, profile, territory and phase intent."
 )
 
 
@@ -62,14 +50,16 @@ def rule(task: dict) -> dict | None:
 
 
 def classify(task: dict, doc: dict) -> dict:
-    question = Choice(INSTRUCTIONS.format(id=task.get("id"), title=task.get("title", "")), RUBRIC)
+    params = {"id": task.get("id"), "title": task.get("title", "")}
     try:
-        answer = decide(state(task, doc), {QUESTION: question}, purpose="task-difficulty").answers[QUESTION]
+        output = runner.run(PURPOSE, state(task, doc), params, decider=decide)
+        answer = output.raw.answers[QUESTION]
     except ClassifierError:
         return sized(FALLBACK, "default", 0.0)
     raw = answer.confidence
     confidence = min(max(raw, 0.0), 1.0) if _real(raw) else 0.0
-    if confidence < MIN_CONFIDENCE or answer.choice not in RUBRIC:
+    options = {spec.name: spec.question for spec in output.definition.questions}[QUESTION].options
+    if confidence < output.thresholds["confidence"] or answer.choice not in options:
         return sized(FALLBACK, "default", confidence)
     return sized(answer.choice, "classifier", confidence)
 
@@ -97,3 +87,9 @@ def _real(value):
 
 def on_page(area):
     return area in PAGE_FILES or area == PAGE_FOLDER or area.startswith(f"{PAGE_FOLDER}/")
+
+
+def __getattr__(name):
+    if name == "MIN_CONFIDENCE":
+        return definitions.load(PURPOSE).thresholds["confidence"]
+    raise AttributeError(name)
