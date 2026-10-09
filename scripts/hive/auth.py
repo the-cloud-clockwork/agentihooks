@@ -20,6 +20,7 @@ PREFIX = f"{ROOT}-hive"
 ACL_PATTERNS = (f"{ROOT}:*",)
 ACL_CATEGORIES = ("+@all", "-@admin", "-@dangerous")
 ENV_FILE = "hive.env"
+CONTROLLER_ENV_FILE = "controller.env"
 
 
 class HiveError(Exception):
@@ -112,15 +113,23 @@ def revoke(redis: "Redis", member_id: str) -> None:
 
 
 def write_env(home: Path | str, url: str, grant: dict) -> Path:
-    path = Path(home) / ENV_FILE
+    return _write_private(
+        Path(home) / ENV_FILE,
+        f"AGENTIHOOKS_HIVE_ID={grant['id']}\n"
+        f"AGENTIHOOKS_HIVE_URL={url}\n"
+        f"AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL={grant['ledger_credential']}\n"
+        f"AGENTIHOOKS_HIVE_REDIS_URL={grant['redis_url']}\n",
+    )
+
+
+def write_controller_env(home: Path | str, credential: str) -> Path:
+    return _write_private(Path(home) / CONTROLLER_ENV_FILE, f"AGENTIHOOKS_CONTROLLER_CREDENTIAL={credential}\n")
+
+
+def _write_private(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as handle:
-        handle.write(
-            f"AGENTIHOOKS_HIVE_ID={grant['id']}\n"
-            f"AGENTIHOOKS_HIVE_URL={url}\n"
-            f"AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL={grant['ledger_credential']}\n"
-            f"AGENTIHOOKS_HIVE_REDIS_URL={grant['redis_url']}\n"
-        )
+        handle.write(text)
     return path

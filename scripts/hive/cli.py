@@ -67,7 +67,9 @@ def _parser() -> argparse.ArgumentParser:
     join.add_argument("url")
     join.add_argument("code")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
-    sub.add_parser("controller", help="Print a new controller service credential, retiring the previous one")
+    sub.add_parser(
+        "controller", help="Write a new controller service credential to controller.env, retiring the previous one"
+    )
     serve = sub.add_parser("serve", help="Run the join endpoint")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8770)
@@ -90,7 +92,8 @@ def main(argv: list[str]) -> int:
             auth.revoke(redis_client(), args.id)
             print(f"revoked {args.id}")
         elif args.command == "controller":
-            print(auth.issue_controller(redis_client()))
+            path = auth.write_controller_env(_home(), auth.issue_controller(redis_client()))
+            print(f"issued a controller credential; it is in {path}")
         else:
             return _serve(args)
     except auth.HiveError as exc:

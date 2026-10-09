@@ -59,10 +59,17 @@ def test_no_controller_credential_is_valid_before_stack_setup(hive):
     assert not authority.controller("anything")
 
 
-def test_the_hive_controller_command_prints_a_credential_the_server_accepts(hive, capsys):
-    with patch.object(cli, "redis_client", return_value=hive):
+def test_the_hive_controller_command_writes_a_private_credential_the_server_accepts(hive, capsys, tmp_path):
+    with (
+        patch.object(cli, "redis_client", return_value=hive),
+        patch.dict(os.environ, {"AGENTIHOOKS_HOME": str(tmp_path)}),
+    ):
         assert cli.main(["controller"]) == 0
-    assert authority.controller(capsys.readouterr().out.strip())
+    path = tmp_path / auth.CONTROLLER_ENV_FILE
+    name, _, credential = path.read_text().strip().partition("=")
+    assert (name, path.stat().st_mode & 0o777) == ("AGENTIHOOKS_CONTROLLER_CREDENTIAL", 0o600)
+    assert credential not in capsys.readouterr().out
+    assert authority.controller(credential)
 
 
 def test_a_remote_controller_presents_its_credential_for_service_writes_and_reads(controller_env):
@@ -71,9 +78,11 @@ def test_a_remote_controller_presents_its_credential_for_service_writes_and_read
     assert ledger.credentials(SLUG) == headers
 
 
-def test_a_pinned_agent_keeps_its_agent_token_for_its_own_writes(controller_env):
+def test_a_pinned_agent_holding_the_controller_credential_keeps_its_agent_token_and_no_service_writes(controller_env):
     with patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_LEDGER_AGENT_TOKEN": "launch-token"}):
         assert ledger.credentials(SLUG) == {"X-Ledger-Token": "launch-token", "X-Ledger-Agent": WORKER}
+        with pytest.raises(SystemExit, match="service writes"):
+            ledger.credentials(SLUG, service=True)
 
 
 def test_the_controller_writes_and_reads_a_remote_ledger_as_the_service(live, controller_env):
