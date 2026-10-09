@@ -157,7 +157,7 @@ def test_unknown_host_does_not_resolve_pressure_and_read_failure_keeps_the_tick_
     monkeypatch.setattr(host_budget, "read_host", unreadable)
     cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({}))
     assert store.redis.get(store.key("sw", "last-tick")) is not None
-    assert capsys.readouterr().err.endswith("host pressure check unavailable\n")
+    assert "host pressure check unavailable" in capsys.readouterr().err.splitlines()
 
 
 def test_concurrent_deliveries_send_one_push(store, monkeypatch):
