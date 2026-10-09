@@ -7,10 +7,10 @@ from pathlib import Path
 
 from coverage import Coverage, CoverageData
 
-from tests.coverage_grade import GRADED, Measurement, Result, Unmeasured, executed, grade, line_map
+from tests.coverage_grade import GRADED, Measurement, Result, Unmeasured, executed, grade, line_map, pair_moves
 from tests.coverage_history import dev_runs, git, renamed
 
-__all__ = ["Measurement", "Result", "Unmeasured", "executed", "grade", "line_map", "main", "report"]
+__all__ = ["Measurement", "Result", "Unmeasured", "executed", "grade", "line_map", "main", "pair_moves", "report"]
 
 
 def report(result: Result, missed: dict[str, list[int]], covered: dict[str, int], base_covered: dict[str, int]) -> str:
