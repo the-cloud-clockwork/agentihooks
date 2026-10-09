@@ -391,17 +391,18 @@ def _wait(predicate, seconds):
 
 
 def test_a_late_post_lands_in_the_spans_current_when_it_arrived(receiver):
-    Receiver.delay = 1.0
+    Receiver.delay = 5.0
     body = ExportTraceServiceRequest(
         resource_spans=[ResourceSpans(scope_spans=[ScopeSpans(spans=[Span(name="late")])])]
     ).SerializeToString()
     earlier = Receiver.spans
-    connection = http.client.HTTPConnection("127.0.0.1", receiver.server_port, timeout=10)
+    connection = http.client.HTTPConnection("127.0.0.1", receiver.server_port, timeout=15)
     post = threading.Thread(target=lambda: (connection.request("POST", "/", body), connection.getresponse().read()))
     post.start()
-    assert _wait(lambda: Receiver.posts == 1, 5)
+    assert _wait(lambda: Receiver.posts == 1, 5), "late POST never reached the receiver"
     Receiver.spans = []
-    post.join(10)
+    post.join(15)
+    connection.close()
     assert Receiver.spans == []
     assert earlier == [("late", {})]
 
