@@ -59,3 +59,9 @@ def test_the_stored_ledger_exports_as_generated_with_a_token(tmp_path, monkeypat
     assert token
     assert len(exported["tasks"]) == 20
     assert exported["alerts"] == doc["alerts"]
+
+
+def test_the_clients_together_write_headroom_times_the_live_peak_minute():
+    per_minute = load_gate.CLIENTS * 60 / load_gate.write_every()
+    assert per_minute == pytest.approx(load_gate.LIVE_PEAK_WRITES_PER_MINUTE * load_gate.HEADROOM)
+    assert load_gate.HEADROOM >= 2

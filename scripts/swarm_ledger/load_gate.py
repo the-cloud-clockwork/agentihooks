@@ -35,6 +35,8 @@ COMMENTS = 3
 LEDGER_BYTES = 5_000_000
 CLIENTS = 10
 PACE_S = 1.0
+LIVE_PEAK_WRITES_PER_MINUTE = 29
+HEADROOM = 4
 TIMEOUT_S = 10.0
 SWEEPS = 2
 WRITE_P95_S = 2.0
@@ -137,6 +139,11 @@ def cpu_seconds(pid: int) -> float:
     return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
 
 
+def write_every() -> float:
+    """Each client's seconds between writes, so all clients together write HEADROOM times the live peak minute."""
+    return CLIENTS * 60 / (LIVE_PEAK_WRITES_PER_MINUTE * HEADROOM)
+
+
 def duration() -> float:
     """Long enough for the watch loop's slowest sweep to run SWEEPS times during the load."""
     interval = inspect.signature(ledger_server.watch_ledgers).parameters["interval"].default
@@ -178,22 +185,26 @@ def start_server(folder: Path, port: int, log) -> subprocess.Popen:
     raise SystemExit(f"ledger server did not listen on port {port} within {SERVER_WAIT_S}s")
 
 
-def client(api: ResourceClient, name: str, item: str, deadline: float, results: dict) -> None:
+def client(api: ResourceClient, name: str, item: str, start: float, deadline: float, results: dict) -> None:
+    time.sleep(max(0.0, start - time.monotonic()))
+    write_at = start
     for n in itertools.count():
-        started = time.monotonic()
-        if started >= deadline:
+        began = time.monotonic()
+        if began >= deadline:
             return
-        op = {"op": "add", "thread": f"{item}/comments", "id": f"c-{uuid.uuid4().hex[:10]}", "by": name}
         try:
-            api.mutate(SLUG, [{**op, "text": f"Load check write {n} landed."}])
-            results["writes"].append(time.monotonic() - started)
+            if began >= write_at:
+                op = {"op": "add", "thread": f"{item}/comments", "id": f"c-{uuid.uuid4().hex[:10]}", "by": name}
+                api.mutate(SLUG, [{**op, "text": f"Load check write {n} landed."}])
+                results["writes"].append(time.monotonic() - began)
+                write_at += write_every()
             read = time.monotonic()
             api.request(SLUG, item)
             api.request(SLUG, "tasks?limit=100")
             results["reads"].append(time.monotonic() - read)
         except (OSError, urllib.error.URLError, ValueError) as exc:
             results["errors"].append(f"{name}: {exc}")
-        time.sleep(max(0.0, started + PACE_S - time.monotonic()))
+        time.sleep(max(0.0, began + PACE_S - time.monotonic()))
 
 
 def load(port: int, token: str, seconds: float) -> dict:
@@ -206,8 +217,12 @@ def load(port: int, token: str, seconds: float) -> dict:
         api = ResourceClient(base, credentials, TIMEOUT_S)
         api.mutate(SLUG, [{"op": "join", "id": f"join-{uuid.uuid4().hex[:10]}", "by": name, "role": "member"}])
         apis.append((api, name, f"tasks/t{n * (TASKS // CLIENTS)}"))
-    deadline = time.monotonic() + seconds
-    threads = [threading.Thread(target=client, args=(*entry, deadline, results)) for entry in apis]
+    began = time.monotonic()
+    deadline = began + seconds
+    threads = [
+        threading.Thread(target=client, args=(*entry, began + n * write_every() / CLIENTS, deadline, results))
+        for n, entry in enumerate(apis)
+    ]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -236,6 +251,7 @@ def run(folder: Path) -> list[str]:
             {
                 "seconds": seconds,
                 "clients": CLIENTS,
+                "write_every_s": round(write_every(), 3),
                 "writes": len(writes),
                 "write_p50_s": round(sorted(writes)[len(writes) // 2], 3) if writes else None,
                 "write_p95_s": round(p95(writes), 3) if writes else None,
