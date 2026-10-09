@@ -192,7 +192,7 @@ def test_a_failed_batch_keeps_the_rest_waiting(box, sink, monkeypatch):
 
     def flaky(settings, query, body):
         calls.append(query)
-        return len(calls) < 3 and sink.send(settings, query, body)
+        return len(calls) < 4 and sink.send(settings, query, body)
 
     box.send = flaky
     assert box.flush(NOW) == 2
