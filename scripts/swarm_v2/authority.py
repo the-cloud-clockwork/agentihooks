@@ -11,6 +11,33 @@ from scripts.swarm_v2.auth_context import GrantRefused, Registration
 from scripts.swarm_v2.controller import Controller
 
 WRITE_ATTEMPTS = 5
+COMMIT = """
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+local leader_raw = redis.call('GET', KEYS[4])
+if not leader_raw then return 'controller_stale' end
+local leader = cjson.decode(leader_raw)
+local expected = cjson.decode(ARGV[4])
+if leader.owner ~= expected.owner or leader.epoch ~= expected.epoch or leader.expires_at <= now then
+    return 'controller_stale'
+end
+if (redis.call('GET', KEYS[1]) or '') ~= ARGV[2] then return 'stale_generation' end
+local current = cjson.decode(ARGV[1])
+if ARGV[3] == 'admitted' and current.lease_deadline_ms <= now then return 'stale_generation' end
+if ARGV[3] ~= 'admitted' and ARGV[3] ~= 'replayed' then
+    local previous = cjson.decode(ARGV[2])
+    if previous.state ~= 'active' or previous.lease_deadline_ms <= now then return 'stale_generation' end
+end
+redis.call('SET', KEYS[1], ARGV[1])
+if ARGV[5] ~= '' then redis.call('RPUSH', KEYS[2], ARGV[5]) end
+if ARGV[6] ~= '' then redis.call('RPUSH', KEYS[2], ARGV[6]) end
+if current.state == 'active' and current.lease_deadline_ms > now then
+    redis.call('SET', KEYS[3], current.holder, 'PXAT', current.lease_deadline_ms)
+else
+    redis.call('DEL', KEYS[3])
+end
+return 'committed'
+"""
 
 
 @dataclass(frozen=True)
@@ -58,10 +85,7 @@ class TaskAuthority:
                         raise SwarmError("journal_conflict")
                     if recovered is None:
                         return None
-                    pipe.multi()
-                    pipe.set(key, json.dumps(asdict(recovered)))
-                    self._project(pipe, projection, recovered)
-                    pipe.execute()
+                    self._commit(pipe, recovered, current, "replayed")
                     return recovered
                 except WatchError:
                     continue
@@ -215,23 +239,36 @@ class TaskAuthority:
                     current = action(pipe, scope, previous)
                     if current == previous:
                         return current
-                    pipe.multi()
-                    pipe.set(key, json.dumps(asdict(current)))
-                    if event == "admitted" and previous and previous.state == "active":
-                        pipe.rpush(
-                            journal, json.dumps({"event": "fenced", "claim": asdict(replace(previous, state="fenced"))})
-                        )
-                    pipe.rpush(journal, json.dumps({"event": event, "claim": asdict(current)}))
-                    self._project(pipe, projection, current)
-                    pipe.execute()
+                    self._commit(pipe, current, previous, event)
                     return current
                 except WatchError:
                     continue
         raise SwarmError("dependency_unavailable")
 
-    def _project(self, pipe: Any, key: str, claim: TaskClaim) -> None:
-        remaining = claim.lease_deadline_ms - lease.now_ms(self.store)
-        if claim.state == "active" and remaining > 0:
-            pipe.set(key, claim.holder, px=remaining)
-        else:
-            pipe.delete(key)
+    def _commit(self, pipe: Any, current: TaskClaim, previous: TaskClaim | None, event: str) -> None:
+        task = current.task_id
+        fenced = (
+            replace(previous, state="fenced")
+            if event == "admitted" and previous and previous.state == "active"
+            else None
+        )
+        pipe.multi()
+        pipe.eval(
+            COMMIT,
+            4,
+            self.store.key(self.slug, "task-authority", task),
+            self.store.key(self.slug, "claim-journal", task),
+            self.store.key(self.slug, "claim", task),
+            self.store.key(self.slug, "control-owner"),
+            json.dumps(asdict(current)),
+            json.dumps(asdict(previous)) if previous else "",
+            event,
+            json.dumps(asdict(self.controller.held)),
+            json.dumps({"event": "fenced", "claim": asdict(fenced)}) if fenced else "",
+            json.dumps({"event": event, "claim": asdict(current)}) if event != "replayed" else "",
+        )
+        result = pipe.execute()[0]
+        if result == "stale_generation":
+            self._stale()
+        if result != "committed":
+            raise SwarmError("the controller lease is stale")

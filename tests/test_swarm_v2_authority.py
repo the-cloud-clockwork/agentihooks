@@ -180,7 +180,7 @@ def test_takeover_at_commit_rejects_former_holder(fixture, monkeypatch, operatio
 
         def run(*args, **kwargs):
             if not interrupted and any(
-                cmd[0][0] == "SET" and cmd[0][1] == store.key("fixture", "task-authority", "task")
+                cmd[0][0] == "EVAL" and cmd[0][3] == store.key("fixture", "task-authority", "task")
                 for cmd in pipe.command_stack
             ):
                 interrupted.append(True)
@@ -327,7 +327,7 @@ def test_controller_takeover_at_commit_denies_old_authority(fixture, monkeypatch
 
         def run(*args, **kwargs):
             if not interrupted and any(
-                cmd[0][0] == "SET" and cmd[0][1] == store.key("fixture", "task-authority", "task")
+                cmd[0][0] == "EVAL" and cmd[0][3] == store.key("fixture", "task-authority", "task")
                 for cmd in pipe.command_stack
             ):
                 interrupted.append(True)
@@ -384,7 +384,7 @@ def test_continuous_claim_contention_is_bounded(fixture, monkeypatch, operation)
 
         def run(*args, **kwargs):
             if any(
-                cmd[0][0] == "SET" and cmd[0][1] == store.key("fixture", "task-authority", "task")
+                cmd[0][0] == "EVAL" and cmd[0][3] == store.key("fixture", "task-authority", "task")
                 for cmd in pipe.command_stack
             ):
                 attempts.append(True)
@@ -422,3 +422,103 @@ def test_worker_scope_cannot_change_during_commit(fixture):
         authority.renew(token, 1, 200)
     assert str(error.value) == "forbidden_scope"
     assert authority.current("task") == claim
+
+
+def test_delayed_admission_does_not_extend_the_claimant_deadline(fixture, monkeypatch):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    original = store.redis.pipeline
+    delayed = []
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        def run(*args, **kwargs):
+            if not delayed and any(
+                cmd[0][0] == "EVAL" and cmd[0][3] == store.key("fixture", "task-authority", "task")
+                for cmd in pipe.command_stack
+            ):
+                delayed.append(True)
+                clock[0] = 1101
+            return execute(*args, **kwargs)
+
+        pipe.execute = run
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    with pytest.raises(SwarmError) as error:
+        authority.admit(token, 100)
+    assert str(error.value) == "stale_generation"
+    assert delayed == [True]
+    assert authority.current("task") is None
+    assert authority.journal("task") == []
+    assert store.claimant("fixture", "task") is None
+
+
+@pytest.mark.parametrize("operation", ["renew", "release", "complete"])
+def test_delayed_renewal_cannot_cross_the_former_lease_deadline(fixture, monkeypatch, operation):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    first = authority.admit(token, 200)
+    clock[0] = 1100
+    original = store.redis.pipeline
+    delayed = []
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        def run(*args, **kwargs):
+            if not delayed and any(
+                cmd[0][0] == "EVAL" and cmd[0][3] == store.key("fixture", "task-authority", "task")
+                for cmd in pipe.command_stack
+            ):
+                delayed.append(True)
+                clock[0] = 1201
+            return execute(*args, **kwargs)
+
+        pipe.execute = run
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    args = {"renew": (300,), "release": (), "complete": ({},)}[operation]
+    with pytest.raises(SwarmError) as error:
+        getattr(authority, operation)(token, 1, *args)
+    assert str(error.value) == "stale_generation"
+    assert delayed == [True]
+    assert authority.current("task") == first
+    assert [row["event"] for row in authority.journal("task")] == ["admitted"]
+    assert store.claimant("fixture", "task") is None
+
+
+def test_controller_expiry_at_commit_cannot_admit_a_task(fixture, monkeypatch):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    original = store.redis.pipeline
+    delayed = []
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        def run(*args, **kwargs):
+            if not delayed and any(
+                cmd[0][0] == "EVAL" and cmd[0][3] == store.key("fixture", "task-authority", "task")
+                for cmd in pipe.command_stack
+            ):
+                delayed.append(True)
+                clock[0] = controller.held.expires_at + 1
+            return execute(*args, **kwargs)
+
+        pipe.execute = run
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    with pytest.raises(SwarmError) as error:
+        authority.admit(token, 200)
+    assert str(error.value) == "the controller lease is stale"
+    assert delayed == [True]
+    assert authority.current("task") is None
+    assert authority.journal("task") == []
+    assert store.claimant("fixture", "task") is None
