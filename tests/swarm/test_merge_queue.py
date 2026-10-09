@@ -9,6 +9,8 @@ from scripts.swarm.store import SwarmError
 URL = "https://github.com/o/r/pull/7"
 OPEN = {"id": "PR_one", "state": "OPEN", "headRefOid": "abc", "baseRefName": "dev", "mergeQueueEntry": None}
 ENTRY = {"id": "MQ_one", "position": 2, "state": "AWAITING_CHECKS"}
+AUTHORED = {"sha": "abc", "commit": {"message": "Change the code"}, "committer": {"login": "nestorcolt"}}
+REFRESHED = {"sha": "abc", "commit": {"message": "Merge branch 'dev' into ci-1"}, "committer": {"login": "web-flow"}}
 
 
 def runner(*responses):
@@ -38,6 +40,8 @@ def runner(*responses):
             ]
         elif "jobs" in response:
             assert command == ["gh", "api", "repos/o/r/actions/runs/21/jobs?per_page=100"]
+        elif "commit" in response:
+            assert command == ["gh", "api", "repos/o/r/commits/abc"]
         elif "files" in response:
             assert command == ["gh", "api", "repos/o/r/compare/cccccccccccccccccccccccccccccccccccccccc...current"]
         elif "message" in response:
@@ -113,7 +117,16 @@ def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
         [{"filename": f"hooks/item{i}.py"} for i in range(300)],
     ],
 )
-def test_queue_refreshes_changed_grading_inputs_before_enqueueing(changed):
+@pytest.mark.parametrize(
+    "head",
+    [
+        AUTHORED,
+        {**AUTHORED, "commit": {"message": "Merge branch 'dev' into ci-1"}},
+        {**REFRESHED, "commit": {"message": "Merge pull request #3 from o/side"}},
+        {**REFRESHED, "committer": None},
+    ],
+)
+def test_queue_refreshes_changed_grading_inputs_before_enqueueing(changed, head):
     run, calls = runner(
         {"data": {"resource": OPEN}},
         {
@@ -137,6 +150,7 @@ def test_queue_refreshes_changed_grading_inputs_before_enqueueing(changed):
         {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
         "2026-10-09T09:20:05Z setup\n2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n2026-10-09T09:20:07Z done\n",
         {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
+        head,
         {"files": changed, "total_commits": 1},
         {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
         {"message": "Updating pull request branch."},
@@ -175,6 +189,7 @@ def test_queue_does_not_refresh_unrelated_dev_changes():
         {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
         "2026-10-09T09:20:05Z setup\n2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n2026-10-09T09:20:07Z done\n",
         {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
+        AUTHORED,
         {"files": [{"filename": "scripts/swarm/intent.py"}], "total_commits": 1},
         {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
         {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": "MQ_one"}}}},
@@ -183,6 +198,48 @@ def test_queue_does_not_refresh_unrelated_dev_changes():
     assert merge_queue.operate("queue", URL, run)["queued"] is True
     assert any("repos/o/r/compare/cccccccccccccccccccccccccccccccccccccccc...current" in call[0] for call in calls)
     assert not any("update-branch" in str(call[0]) for call in calls)
+
+
+def refreshed_head_runner(conclusion, *rest):
+    return runner(
+        {"data": {"resource": OPEN}},
+        {
+            "data": {
+                "resource": {
+                    "number": 12,
+                    "repository": {"nameWithOwner": "o/r", "ref": {"target": {"oid": "current"}}},
+                }
+            }
+        },
+        {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": conclusion}]},
+        {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
+        "2026-10-09T09:20:05Z setup\n2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n2026-10-09T09:20:07Z done\n",
+        {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
+        *rest,
+    )
+
+
+def test_queue_enqueues_a_green_refreshed_head_although_dev_moved_again():
+    run, calls = refreshed_head_runner(
+        "success",
+        REFRESHED,
+        {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": "MQ_one"}}}},
+        {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
+    )
+    result = merge_queue.operate("queue", URL, run)
+    assert result["queued"] is True
+    assert "waiting" not in result
+    assert calls[6][0] == ["gh", "api", "repos/o/r/commits/abc"]
+    assert calls[7][0][5:] == ["-f", "id=PR_one", "-f", "head=abc"]
+    assert not any("compare/" in str(call[0]) or "update-branch" in str(call[0]) for call in calls)
+
+
+@pytest.mark.parametrize("conclusion", [None, "failure"])
+def test_queue_still_blocks_a_red_refreshed_head(conclusion):
+    run, calls = refreshed_head_runner(conclusion)
+    with pytest.raises(SwarmError, match="^the current pull request head must pass Tests before queueing$"):
+        merge_queue.operate("queue", URL, run)
+    assert not any("enqueuePullRequest(input:" in str(call[0]) or "update-branch" in str(call[0]) for call in calls)
 
 
 @pytest.mark.parametrize("conclusion", [None, "failure", "cancelled"])
@@ -273,6 +330,7 @@ def test_queue_refuses_dev_advancing_during_comparison():
         {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
         "2026-10-09T09:20:05Z setup\n2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n2026-10-09T09:20:07Z done\n",
         {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
+        AUTHORED,
         {"files": [{"filename": "scripts/swarm/intent.py"}]},
         {"data": {"resource": {"repository": {"ref": {"target": {"oid": "newer"}}}}}},
     )
