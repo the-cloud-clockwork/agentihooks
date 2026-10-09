@@ -522,3 +522,57 @@ def test_controller_expiry_at_commit_cannot_admit_a_task(fixture, monkeypatch):
     assert authority.current("task") is None
     assert authority.journal("task") == []
     assert store.claimant("fixture", "task") is None
+
+
+@pytest.mark.parametrize("operation", ["admit", "renew", "release", "complete"])
+def test_worker_credential_expiry_at_commit_preserves_task_state(fixture, monkeypatch, operation):
+    import json
+    from dataclasses import asdict, replace
+    from datetime import datetime
+
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    scope = authority.authorize(token)
+    audit = json.loads(store.redis.hget(store.key("fixture", "launch-grants"), scope.grant_id))
+    deadline = int(datetime.fromisoformat(audit["expires_at"]).timestamp() * 1000)
+    controller.held = replace(controller.held, expires_at=deadline + 10000)
+    store.redis.set(store.key("fixture", "control-owner"), json.dumps(asdict(controller.held)))
+    if operation != "admit":
+        authority.admit(token, deadline + 20000)
+    before = authority.current("task")
+    journal = authority.journal("task")
+    original = store.redis.pipeline
+    delayed = []
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        def run(*args, **kwargs):
+            if not delayed and any(
+                cmd[0][0] == "EVAL" and cmd[0][3] == store.key("fixture", "task-authority", "task")
+                for cmd in pipe.command_stack
+            ):
+                delayed.append(True)
+                clock[0] = deadline
+            return execute(*args, **kwargs)
+
+        pipe.execute = run
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    clock[0] += 1
+    with pytest.raises(SwarmError) as error:
+        if operation == "admit":
+            authority.admit(token, deadline + 20000)
+        elif operation == "renew":
+            authority.renew(token, 1, deadline + 20000)
+        elif operation == "release":
+            authority.release(token, 1)
+        else:
+            authority.complete(token, 1, {"outcome": "done"})
+    assert str(error.value) == "worker credential has expired"
+    assert delayed == [True]
+    assert authority.current("task") == before
+    assert authority.journal("task") == journal
+    assert store.claimant("fixture", "task") == (agent.name if before else None)

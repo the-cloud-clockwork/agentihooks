@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime
 from typing import Any
 
 from redis.exceptions import WatchError
@@ -21,6 +22,7 @@ local expected = cjson.decode(ARGV[4])
 if leader.owner ~= expected.owner or leader.epoch ~= expected.epoch or leader.expires_at <= now then
     return 'controller_stale'
 end
+if ARGV[3] ~= 'replayed' and tonumber(ARGV[7]) <= now then return 'worker_expired' end
 if (redis.call('GET', KEYS[1]) or '') ~= ARGV[2] then return 'stale_generation' end
 local current = cjson.decode(ARGV[1])
 if ARGV[3] == 'admitted' and current.lease_deadline_ms <= now then return 'stale_generation' end
@@ -239,13 +241,17 @@ class TaskAuthority:
                     current = action(pipe, scope, previous)
                     if current == previous:
                         return current
-                    self._commit(pipe, current, previous, event)
+                    audit = json.loads(pipe.hget(self.store.key(self.slug, "launch-grants"), scope.grant_id))
+                    deadline = int(datetime.fromisoformat(audit["expires_at"]).timestamp() * 1000)
+                    self._commit(pipe, current, previous, event, deadline)
                     return current
                 except WatchError:
                     continue
         raise SwarmError("dependency_unavailable")
 
-    def _commit(self, pipe: Any, current: TaskClaim, previous: TaskClaim | None, event: str) -> None:
+    def _commit(
+        self, pipe: Any, current: TaskClaim, previous: TaskClaim | None, event: str, worker_deadline_ms: int = 0
+    ) -> None:
         task = current.task_id
         fenced = (
             replace(previous, state="fenced")
@@ -266,8 +272,11 @@ class TaskAuthority:
             json.dumps(asdict(self.controller.held)),
             json.dumps({"event": "fenced", "claim": asdict(fenced)}) if fenced else "",
             json.dumps({"event": event, "claim": asdict(current)}) if event != "replayed" else "",
+            worker_deadline_ms,
         )
         result = pipe.execute()[0]
+        if result == "worker_expired":
+            raise SwarmError("worker credential has expired")
         if result == "stale_generation":
             self._stale()
         if result != "committed":
