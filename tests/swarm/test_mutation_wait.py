@@ -46,11 +46,13 @@ def test_cli_wait_binds_the_branch_preflight_run(env, monkeypatch):  # noqa: F81
 
 @pytest.fixture
 def preflight(monkeypatch):
+    report_at = "2026-10-09T10:01:00Z"
     state = SimpleNamespace(
         run={
             "path": ".github/workflows/mutation-preflight.yml",
             "event": "push",
             "head_sha": "first",
+            "run_started_at": "2026-10-09T10:00:00Z",
             "status": "completed",
             "conclusion": "success",
         },
@@ -58,10 +60,10 @@ def preflight(monkeypatch):
         missing=False,
         report_name="report.json",
         artifacts=[
-            {"id": 7, "name": "mutation-preflight-report", "expired": False},
-            {"id": 6, "name": "mutation-preflight-report", "expired": False},
-            {"id": 9, "name": "other-report", "expired": False},
-            {"id": 8, "name": "mutation-preflight-report", "expired": True},
+            {"id": 7, "name": "mutation-preflight-report", "expired": False, "created_at": report_at},
+            {"id": 6, "name": "mutation-preflight-report", "expired": False, "created_at": report_at},
+            {"id": 9, "name": "other-report", "expired": False, "created_at": report_at},
+            {"id": 8, "name": "mutation-preflight-report", "expired": True, "created_at": report_at},
         ],
         requests=[],
     )
@@ -228,5 +230,11 @@ def test_a_malformed_report_cannot_pass(preflight, report):
 
 def test_an_archive_without_the_report_cannot_pass(preflight):
     preflight.report_name = "other.json"
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert "complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
+
+
+def test_a_skipped_rerun_cannot_reuse_the_previous_attempts_report(preflight):
+    preflight.run["run_started_at"] = "2026-10-09T10:02:00Z"
     held = {**waits.on("mutation", URL), "head": "first"}
     assert "complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
