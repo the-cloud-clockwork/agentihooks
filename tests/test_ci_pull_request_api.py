@@ -8,7 +8,15 @@ import yaml
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
-API_CALL = re.compile(r"\bgh\b(?!-)|api\.github\.com|GITHUB_API_URL|collect\.py")
+API_CALL = re.compile(r"\bgh\b(?!-)|api\.github\.com|GITHUB_API_URL")
+CALL = re.compile(
+    r"(?:^|[\s;&|(])(?:bash|sh|python3?)\s+\"?(?P<path>[\w./-]+\.(?:sh|py))"
+    r"|(?:^|[\s;&|(])\./(?P<exe>[\w./-]+)"
+    r"|\bpython3?\s+-m\s+(?P<module>[\w.]+)"
+    r"|(?:\$\(dirname \"\$0\"\)|\$GITHUB_ACTION_PATH)\"?/(?P<sibling>[\w.-]+\.(?:sh|py))"
+)
+# The documented local `--ci` download path; the workflow passes `--samples`, so CI never reaches it.
+LOCAL_ONLY = {"tests/refresh_durations.py": 3}
 TOKEN = re.compile(r"github\.token|secrets\.(github|gh)_\w*", re.IGNORECASE)
 APP_TOKEN = "${{ steps.app-token.outputs.token }}"
 
@@ -56,6 +64,95 @@ def _offends(step: dict) -> bool:
 def test_no_step_on_any_event_holds_the_workflow_token_or_calls_the_api():
     offenders = [f"{job}: {step.get('name') or step.get('uses')}" for job, step in _all_steps() if _offends(step)]
     assert offenders == []
+
+
+def _step_runs():
+    for _, step in _all_steps():
+        action = step.get("uses", "")
+        if action.startswith("./.github/actions/"):
+            folder = ROOT / action
+            for inner in yaml.safe_load((folder / "action.yml").read_text())["runs"]["steps"]:
+                yield inner.get("run", ""), folder
+        yield step.get("run", ""), ROOT
+
+
+def _called(text: str, here: Path):
+    for match in CALL.finditer(text):
+        if match["module"]:
+            base = ROOT / Path(*match["module"].split("."))
+            candidates = [base.with_suffix(".py"), base / "__main__.py"]
+        elif match["sibling"]:
+            candidates = [here / match["sibling"]]
+        else:
+            candidates = [ROOT / (match["path"] or match["exe"])]
+        yield from (path.resolve() for path in candidates if path.is_file())
+
+
+def _api_calls(runs) -> dict[Path, int]:
+    pending = [path for run, here in runs for path in _called(run, here)]
+    seen = set()
+    while pending:
+        path = pending.pop()
+        if path not in seen:
+            seen.add(path)
+            pending.extend(_called(path.read_text(), path.parent))
+    return {path: len(API_CALL.findall(path.read_text())) for path in seen}
+
+
+def test_no_script_a_step_runs_calls_the_api():
+    calls = {str(path.relative_to(ROOT)): count for path, count in _api_calls(_step_runs()).items()}
+    assert {
+        ".github/actions/browser-cache/verify.sh",
+        ".github/coverage/combine.sh",
+        "scripts/ci_mutation/__main__.py",
+        "scripts/brain-smoke",
+        "scripts/packaging/swarm-smoke.sh",
+    } | LOCAL_ONLY.keys() <= calls.keys()
+    assert {script: count for script, count in calls.items() if count != LOCAL_ONLY.get(script, 0)} == {}
+
+
+@pytest.mark.parametrize(
+    ("call", "script"),
+    [
+        ("bash .github/coverage/combine.sh --downloaded 8 || status=$?", ".github/coverage/combine.sh"),
+        ("timeout 60s python -m tests.shard_check --shards 8", "tests/shard_check.py"),
+        ("python -m scripts.ci_mutation report", "scripts/ci_mutation/__main__.py"),
+        ("./scripts/brain-smoke --no-color", "scripts/brain-smoke"),
+    ],
+    ids=["bash-path", "python-module", "python-package", "executable"],
+)
+def test_each_way_a_step_runs_a_script_is_read(call, script):
+    assert list(_called(call, ROOT)) == [ROOT / script]
+
+
+@pytest.mark.parametrize(
+    "call",
+    ['python "$(dirname "$0")/helper.py" 42 8', 'timeout 10s bash "$GITHUB_ACTION_PATH/helper.py"'],
+    ids=["script-sibling", "action-sibling"],
+)
+def test_a_script_run_beside_its_caller_is_read(tmp_path, call):
+    (tmp_path / "helper.py").write_text("")
+    assert list(_called(call, tmp_path)) == [(tmp_path / "helper.py").resolve()]
+
+
+@pytest.mark.parametrize(
+    "plant",
+    [
+        "gh api rate_limit",
+        'curl "$GITHUB_API_URL/rate_limit"',
+        'urlopen("https://api.github.com/rate_limit")',
+        "gh run download 42 --dir out",
+    ],
+    ids=["gh-api", "api-url", "api-host", "gh-run-download"],
+)
+@pytest.mark.parametrize("planted", ["outer.sh", "inner.py"])
+def test_an_api_call_planted_in_a_called_script_is_counted(tmp_path, plant, planted):
+    (tmp_path / "outer.sh").write_text('python "$(dirname "$0")/inner.py" 8\n')
+    (tmp_path / "inner.py").write_text("print('merged')\n")
+    with (tmp_path / planted).open("a") as script:
+        script.write(f"{plant}\n")
+    calls = _api_calls([('timeout 60s bash "$GITHUB_ACTION_PATH/outer.sh"', tmp_path)])
+    assert calls == {(tmp_path / name).resolve(): int(name == planted) for name in ("outer.sh", "inner.py")}
 
 
 @pytest.mark.parametrize(
