@@ -1,4 +1,5 @@
 import fcntl
+import http.client
 import http.server
 import json
 import os
@@ -9,6 +10,7 @@ import time
 
 import pytest
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Span
 
 from hooks.observability import agent_trace, otel, trace_flush
 
@@ -305,6 +307,7 @@ class Receiver(http.server.BaseHTTPRequestHandler):
     delay = 0.0
 
     def do_POST(self):
+        spans = type(self).spans
         body = self.rfile.read(int(self.headers["Content-Length"]))
         type(self).posts += 1
         time.sleep(type(self).delay)
@@ -313,7 +316,7 @@ class Receiver(http.server.BaseHTTPRequestHandler):
             for scope in resource.scope_spans:
                 for span in scope.spans:
                     attributes = {a.key: a.value for a in span.attributes}
-                    type(self).spans.append((span.name, attributes))
+                    spans.append((span.name, attributes))
         self.send_response(200)
         self.end_headers()
 
@@ -385,6 +388,23 @@ def _wait(predicate, seconds):
             return True
         time.sleep(0.1)
     return False
+
+
+def test_a_late_post_lands_in_the_spans_current_when_it_arrived(receiver):
+    Receiver.delay = 5.0
+    body = ExportTraceServiceRequest(
+        resource_spans=[ResourceSpans(scope_spans=[ScopeSpans(spans=[Span(name="late")])])]
+    ).SerializeToString()
+    earlier = Receiver.spans
+    connection = http.client.HTTPConnection("127.0.0.1", receiver.server_port, timeout=15)
+    post = threading.Thread(target=lambda: (connection.request("POST", "/", body), connection.getresponse().read()))
+    post.start()
+    assert _wait(lambda: Receiver.posts == 1, 5), "late POST never reached the receiver"
+    Receiver.spans = []
+    post.join(15)
+    connection.close()
+    assert Receiver.spans == []
+    assert earlier == [("late", {})]
 
 
 def test_live_exporter_ships_an_open_turn_and_the_rest_after_the_owner_is_killed(live_export, tmp_path):
