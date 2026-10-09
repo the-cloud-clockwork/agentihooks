@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 from dataclasses import dataclass
 from pathlib import PurePath
 
 from hooks import classifier
-from hooks.filters import extract, schema
+from hooks.filters import extract, rounds, schema
 from hooks.filters.finders import scripts
 
 PURPOSE = "filter"
@@ -145,6 +146,60 @@ def strip(step: str, payload: dict, findings: list[Finding]) -> dict:
 ACTIONS = {"send-back": send_back, "flag": flag}
 
 
+def _round_comment(findings: list[Finding], count: int) -> None:
+    from hooks.common import log
+    from scripts.swarm.ledger_client import LedgerClient
+
+    slug = os.environ.get("AGENTIHOOKS_SWARM")
+    task = os.environ.get("AGENTIHOOKS_SWARM_TASK")
+    if slug and task:
+        text = f"Filter passed after {count} send backs. Findings: "
+        text += " ".join(f"{finding.text}: {finding.reason}." for finding in findings)
+        try:
+            LedgerClient().comment(slug, task, text, by="swarm")
+        except Exception as error:
+            log("filter ledger comment failed", {"error": str(error)})
+
+
+def _round_flag(entry: dict, payload: dict, target: str, findings: list[Finding], count: int) -> str:
+    from hooks.common import log
+
+    context = f"filter flagged: passed after {count} send-backs\n{_listing(findings)}"
+    log(
+        "filter flagged: round cap reached",
+        {
+            "filter": entry["path"],
+            "session_id": rounds.session(payload),
+            "target": target,
+            "rounds": count,
+            "findings": [{"text": f.text, "reason": f.reason} for f in findings],
+        },
+    )
+    _round_comment(findings, count)
+    return context
+
+
+def _limited(entry: dict, spec: schema.FilterSpec, payload: dict, findings: list[Finding]) -> dict:
+    groups = {}
+    for finding in findings:
+        groups.setdefault(rounds.target(payload, finding.where), []).append(finding)
+    denied = []
+    contexts = []
+    for target, group in groups.items():
+        count = rounds.send_back(entry, payload, target, spec.max_rounds)
+        if count >= spec.max_rounds:
+            contexts.append(_round_flag(entry, payload, target, group, count))
+        else:
+            denied.extend(group)
+    result = send_back(denied) if denied else _passed()
+    if contexts:
+        context = "\n".join(contexts)
+        result["stdout"] = json.dumps({"context": context})
+        if denied:
+            result["stderr"] += f"\n{context}"
+    return result
+
+
 def run(entry: dict, step: str, payload: dict) -> dict:
     try:
         spec = schema.load(entry["path"])
@@ -153,13 +208,21 @@ def run(entry: dict, step: str, payload: dict) -> dict:
     tool_input = payload.get("tool_input") or {}
     if not isinstance(tool_input, dict) or not _applies(spec, tool_input):
         return _passed()
-    findings = find(spec, extract.pieces(payload.get("tool_name"), tool_input), payload)
+    pieces = extract.pieces(payload.get("tool_name"), tool_input)
+    findings = find(spec, pieces, payload)
     try:
         confirmed = confirm(entry, spec, payload, findings) if findings else []
     except classifier.ClassifierInputError as error:
         return {"error": f"classifier refused the questions: {error}"}
+    targets = {rounds.target(payload, piece.where) for piece in pieces}
+    dirty = {rounds.target(payload, finding.where) for finding in confirmed}
+    for target in targets - dirty:
+        rounds.reset(entry, payload, target)
     if not confirmed:
         return _passed()
     if spec.action == "strip":
-        return strip(step, payload, confirmed)
+        result = strip(step, payload, confirmed)
+        return _limited(entry, spec, payload, confirmed) if result["returncode"] == 2 else result
+    if spec.action == "send-back":
+        return _limited(entry, spec, payload, confirmed)
     return ACTIONS[spec.action](confirmed)
