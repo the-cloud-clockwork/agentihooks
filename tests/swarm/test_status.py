@@ -88,9 +88,7 @@ def test_stall_report_respects_actual_launch_and_startup_grace(monkeypatch, tmp_
     at = 1_000_000
     name = "engineer@a1b2c3-0001"
     limits = health.limits({"AGENTIHOOKS_HEALTH_STALLED_MINUTES": "4"})
-    worker = AgentRecord(
-        name, "eng", "t1", started_at=at - 11 * 60_000, launched_at=at - 4 * 60_000
-    )
+    worker = AgentRecord(name, "eng", "t1", started_at=at - 11 * 60_000, launched_at=at - 4 * 60_000)
     store.redis.set(store.key("sw", "pane-state", name), "working")
     rows = _health_rows(store, "sw", [worker], {}, at)
     assert health.stalled(rows, limits) == []
