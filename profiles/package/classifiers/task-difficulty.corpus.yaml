@@ -1,7 +1,7 @@
 version: 1
-notes: 'Seeded from the classifier decision log: each case state was rebuilt from its ledger and matched to a logged state
-  digest, and its samples are the answers logged for that digest. Expected verdicts were written by a reader that saw only
-  the state and the question, never the thresholds or the rule.'
+notes: Seeded from the classifier decision log. Each case state was rebuilt from its ledger and matched to a state digest
+  the decision log recorded before 2026-10-10; its samples are the answers logged for that digest. Expected verdicts were
+  written by a separate reader agent that saw only each case state and its question, never the thresholds or the rule.
 cases:
 - name: rig-grade-swarm-vctx3
   state:
@@ -27,6 +27,7 @@ cases:
     title: Pack context within explicit budgets
   expected:
     difficulty: M
+  control: false
   samples:
   - source: haiku
     latency_ms: 4782
@@ -64,6 +65,7 @@ cases:
     title: Integrate drain protection and cost-aware scale-down
   expected:
     difficulty: L
+  control: false
   samples:
   - source: haiku
     latency_ms: 4063
@@ -96,6 +98,7 @@ cases:
     title: Ledger priority, item and stat rows read as separate tiles
   expected:
     difficulty: S
+  control: false
   samples:
   - source: haiku
     latency_ms: 4137
@@ -130,6 +133,7 @@ cases:
     title: Dispatched Tests runs fall back to the newest passed dev durations
   expected:
     difficulty: M
+  control: false
   samples:
   - source: haiku
     latency_ms: 4436
@@ -166,6 +170,7 @@ cases:
     title: Create minimal controller and worker RBAC
   expected:
     difficulty: L
+  control: false
   samples:
   - source: haiku
     latency_ms: 13426
@@ -201,6 +206,7 @@ cases:
     title: HOME move to bin buttons use the ledger tooltip instead of native hover text
   expected:
     difficulty: S
+  control: false
   samples:
   - source: haiku
     latency_ms: 5592
@@ -236,6 +242,7 @@ cases:
     title: Republishing a revised plan moves its phases to the new plan and reconciles slices and tasks
   expected:
     difficulty: M
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 314
@@ -272,6 +279,7 @@ cases:
     title: Qualify gate overhead and rollout concurrency
   expected:
     difficulty: M
+  control: false
   samples:
   - source: haiku
     latency_ms: 18960
@@ -306,6 +314,7 @@ cases:
     title: Overlay names line up with the role text in the overlays section
   expected:
     difficulty: S
+  control: false
   samples:
   - source: haiku
     latency_ms: 4003
@@ -341,6 +350,7 @@ cases:
     title: The host budget gates every spawn in every scaling mode
   expected:
     difficulty: M
+  control: false
   samples:
   - source: haiku
     latency_ms: 11254
@@ -378,6 +388,7 @@ cases:
     title: Secure operator terminal attachment
   expected:
     difficulty: L
+  control: false
   samples:
   - source: haiku
     latency_ms: 4380
@@ -414,6 +425,7 @@ cases:
     title: The ledger page groups phases under their plans
   expected:
     difficulty: S
+  control: false
   samples:
   - source: haiku
     latency_ms: 11154

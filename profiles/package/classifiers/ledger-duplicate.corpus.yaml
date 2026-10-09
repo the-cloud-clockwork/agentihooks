@@ -1,7 +1,8 @@
 version: 1
-notes: 'Seeded from the classifier decision log: each case state was rebuilt from its ledger and its samples are the answers
-  the decision log recorded for that state digest. Expected verdicts were written by a reader that saw only the state and
-  the question, never the thresholds or the rule.'
+notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
+  was rebuilt from its ledger on 2026-10-10 and asked once; its samples are the answers the decision log recorded for that
+  ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
+  thresholds or the rule. Every case asks about one new item, so the one verdict is that item's.
 cases:
 - name: rig-grade-swarm-ef2
   state:
@@ -83,6 +84,7 @@ cases:
       title: Masters always run the frontier model at high effort, and the Agents table shows the real model
   expected:
     duplicate: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 1426
@@ -168,6 +170,7 @@ cases:
       title: Dispatched Tests runs fall back to the newest finished dev run for their base
   expected:
     duplicate: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 367
@@ -262,6 +265,7 @@ cases:
       title: Every swarm agent runs with the brain overlay on
   expected:
     duplicate: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 302
@@ -338,6 +342,7 @@ cases:
       title: Bin action schemas refuse partly valid ledger names
   expected:
     duplicate: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 267
@@ -409,6 +414,7 @@ cases:
       title: cxch-04 push pump and turn arbitration (source section 7, section 12 cxch-04)
   expected:
     duplicate: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 270
@@ -500,6 +506,7 @@ cases:
       title: 'Hotfix: the capacity step passes the plain words check and saves its decision when a comment is refused'
   expected:
     duplicate: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 295
@@ -583,6 +590,7 @@ cases:
       title: Profile freshness checks include shared package doctrine
   expected:
     duplicate: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 314
@@ -680,6 +688,7 @@ cases:
       title: Stats refresh applies the computed estimate promptly without waiting for a master turn
   expected:
     duplicate: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 327
@@ -766,6 +775,7 @@ cases:
       title: Conditions timeout test never fails at random with no such process
   expected:
     duplicate: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 335
@@ -851,6 +861,7 @@ cases:
       title: An unbound plan naming an existing ledger is offered that ledger first
   expected:
     duplicate: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 270
@@ -972,6 +983,7 @@ cases:
       title: An item marked out of scope hides its Approve and Deny actions
   expected:
     duplicate: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 352
@@ -1065,6 +1077,7 @@ cases:
       title: Role profile homes stop loading the global atlas persona
   expected:
     duplicate: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 284
@@ -1152,6 +1165,7 @@ cases:
       title: 'QA: audit what a plain agentihooks init does today and plan fixes for each regression'
   expected:
     duplicate: true
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 391
@@ -1247,6 +1261,7 @@ cases:
       title: Master profile carries a fable priorities triage sub agent and skill
   expected:
     duplicate: true
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 275
@@ -1325,6 +1340,7 @@ cases:
       title: Only the installed agentihooks may write the shared swarm timer units
   expected:
     duplicate: true
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 256
@@ -1406,6 +1422,7 @@ cases:
       title: Ceremony check skips an agent whose task merged
   expected:
     duplicate: true
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 260
@@ -1485,6 +1502,7 @@ cases:
       title: Only the installed agentihooks may write the shared swarm timer units
   expected:
     duplicate: true
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 277
@@ -1570,6 +1588,7 @@ cases:
       title: A failed launch spends one of a task's three claim lives
   expected:
     duplicate: true
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 304

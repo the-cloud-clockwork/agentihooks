@@ -1,7 +1,7 @@
 version: 1
-notes: 'Seeded from the classifier decision log: each case state was rebuilt from its ledger and matched to a logged state
-  digest, and its samples are the answers logged for that digest. Expected verdicts were written by a reader that saw only
-  the state and the question, never the thresholds or the rule.'
+notes: Seeded from the classifier decision log. Each case state was rebuilt from its ledger and matched to a state digest
+  the decision log recorded before 2026-10-10; its samples are the answers logged for that digest. Expected verdicts were
+  written by a separate reader agent that saw only each case state and its question, never the thresholds or the rule.
 cases:
 - name: rig-grade-swarm-doctor-t9
   state:
@@ -26,6 +26,7 @@ cases:
     title: A chat line to the whole swarm gets one answer, from the master
   expected:
     profile: engineer
+  control: false
   samples:
   - source: luna
     latency_ms: 17301
@@ -62,6 +63,7 @@ cases:
     title: Move the number behind the inbox past window finding
   expected:
     profile: engineer
+  control: false
   samples:
   - source: haiku
     latency_ms: 4951
@@ -96,6 +98,7 @@ cases:
     title: Measure open wait ended notices after the settle fix
   expected:
     profile: qa
+  control: false
   samples:
   - source: luna
     latency_ms: 6641
@@ -160,6 +163,7 @@ cases:
     title: Move the number behind the telemetry stale finding
   expected:
     profile: engineer
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 538
@@ -198,6 +202,7 @@ cases:
     title: Find what ends lane agents without a leave or handoff
   expected:
     profile: engineer
+  control: false
   samples:
   - source: haiku
     latency_ms: 7966
@@ -232,6 +237,7 @@ cases:
     title: Measure the watched swarm's Codex share after the router fix
   expected:
     profile: qa
+  control: false
   samples:
   - source: luna
     latency_ms: 16582
@@ -307,6 +313,7 @@ cases:
     title: A finished agent is always retired, its lane slot freed at once, and a failed retire is flagged
   expected:
     profile: engineer
+  control: false
   samples:
   - source: luna
     latency_ms: 7318
@@ -347,6 +354,7 @@ cases:
     title: Measure cache rewrites and profile check failures after the next render
   expected:
     profile: qa
+  control: false
   samples:
   - source: luna
     latency_ms: 4929
@@ -386,6 +394,7 @@ cases:
     title: Find which required writes make fresh engineers trip the talk budget before any outcome
   expected:
     profile: engineer
+  control: false
   samples:
   - source: haiku
     latency_ms: 5056
@@ -423,6 +432,7 @@ cases:
     title: Measure ledger timeouts per hour after the local mutation worker cap
   expected:
     profile: qa
+  control: false
   samples:
   - source: luna
     latency_ms: 4906
@@ -460,6 +470,7 @@ cases:
     title: Move the number behind the flaky tests finding
   expected:
     profile: engineer
+  control: false
   samples:
   - source: haiku
     latency_ms: 10446
@@ -501,6 +512,7 @@ cases:
     title: Find the cause of the flaky tests finding
   expected:
     profile: engineer
+  control: false
   samples:
   - source: haiku
     latency_ms: 5617

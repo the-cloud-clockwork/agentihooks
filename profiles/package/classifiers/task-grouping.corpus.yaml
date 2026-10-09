@@ -1,7 +1,8 @@
 version: 1
-notes: 'Seeded from the classifier decision log: each case state was rebuilt from its ledger and its samples are the answers
-  the decision log recorded for that state digest. Expected verdicts were written by a reader that saw only the state and
-  the question, never the thresholds or the rule.'
+notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
+  was rebuilt from its ledger on 2026-10-10 and asked once; its samples are the answers the decision log recorded for that
+  ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
+  thresholds or the rule. Every case holds one group, so the one verdict is that group's.
 cases:
 - name: rig-grade-swarm-tc105,tc111
   state:
@@ -32,6 +33,7 @@ cases:
       stat rows read as separate tiles
   expected:
     group: true
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 248
@@ -69,6 +71,7 @@ cases:
       through a public argument
   expected:
     group: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 244
@@ -106,6 +109,7 @@ cases:
     - jdg1 titled Case and evidence set schema, jdg2 titled Judge role profile and verdict schema
   expected:
     group: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 229
@@ -160,6 +164,7 @@ cases:
       outcome'
   expected:
     group: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 477
@@ -203,6 +208,7 @@ cases:
     - vret2 titled Propagate deletion and access revocation, vret4 titled Implement backup manifests and restore drills
   expected:
     group: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 258
@@ -246,6 +252,7 @@ cases:
     - vgat3 titled Deliver task context through target capabilities, vgat4 titled Implement revision-bound consultation gates
   expected:
     group: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 255
@@ -294,6 +301,7 @@ cases:
       open talk budget fix: outcomes counted on every harness, counting starts at the first outcome'
   expected:
     group: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 236
@@ -333,6 +341,7 @@ cases:
       shard that ran, even when one shard fails
   expected:
     group: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 232
@@ -385,6 +394,7 @@ cases:
       outcome, t284 titled The master carries the operator''s typed order to start, stop or scale its linked Doctor swarm'
   expected:
     group: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 323
@@ -428,6 +438,7 @@ cases:
     - ving4 titled Bound synthesis and serialize knowledge mutations, ving5 titled Record learning quality and promotion evidence
   expected:
     group: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 229
@@ -472,6 +483,7 @@ cases:
       provenance
   expected:
     group: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 244
@@ -513,6 +525,7 @@ cases:
     - asc1 titled Host room from load and memory, asc8 titled Host room counts Copilot sessions beside Claude and Codex
   expected:
     group: true
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 232

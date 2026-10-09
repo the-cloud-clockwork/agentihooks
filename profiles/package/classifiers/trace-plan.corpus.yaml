@@ -1,7 +1,8 @@
 version: 1
-notes: 'Seeded from the classifier decision log: each case state was rebuilt from its ledger and its samples are the answers
-  the decision log recorded for that state digest. Expected verdicts were written by a reader that saw only the state and
-  the question, never the thresholds or the rule.'
+notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
+  was rebuilt from its ledger on 2026-10-10 and asked once; its samples are the answers the decision log recorded for that
+  ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
+  thresholds or the rule. The reader passed every plan, so no case yet exercises a failing plan.
 cases:
 - name: rig-grade-swarm-doctor-fx-a7256753-code
   state:
@@ -395,6 +396,7 @@ cases:
     - {}
   expected:
     verdict: pass
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 388
@@ -815,6 +817,7 @@ cases:
     - {}
   expected:
     verdict: pass
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 401
@@ -1225,6 +1228,7 @@ cases:
     - {}
   expected:
     verdict: pass
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 360
@@ -1700,6 +1704,7 @@ cases:
     - {}
   expected:
     verdict: pass
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 463
@@ -2123,6 +2128,7 @@ cases:
     - {}
   expected:
     verdict: pass
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 347
@@ -2549,6 +2555,7 @@ cases:
     - {}
   expected:
     verdict: pass
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 349
@@ -3002,6 +3009,7 @@ cases:
     - {}
   expected:
     verdict: pass
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 459
@@ -3439,6 +3447,7 @@ cases:
     - {}
   expected:
     verdict: pass
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 364
@@ -3887,6 +3896,7 @@ cases:
     - {}
   expected:
     verdict: pass
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 513
@@ -4324,6 +4334,7 @@ cases:
     - {}
   expected:
     verdict: pass
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 351
@@ -4781,6 +4792,7 @@ cases:
     - {}
   expected:
     verdict: pass
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 458
@@ -5216,6 +5228,7 @@ cases:
     - {}
   expected:
     verdict: pass
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 371

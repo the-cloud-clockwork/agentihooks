@@ -1,7 +1,8 @@
 version: 1
-notes: 'Seeded from the classifier decision log: each case state was rebuilt from its ledger and its samples are the answers
-  the decision log recorded for that state digest. Expected verdicts were written by a reader that saw only the state and
-  the question, never the thresholds or the rule.'
+notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
+  was rebuilt from its ledger on 2026-10-10 and asked once; its samples are the answers the decision log recorded for that
+  ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
+  thresholds or the rule.
 cases:
 - name: rig-grade-swarm-p21-12
   state:
@@ -319,6 +320,7 @@ cases:
     confidence: 0.7
   expected:
     flagged: true
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 799
@@ -694,6 +696,7 @@ cases:
     confidence: 0.7
   expected:
     flagged: true
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 415
@@ -1097,6 +1100,7 @@ cases:
     confidence: 0.7
   expected:
     flagged: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 676
@@ -1465,6 +1469,7 @@ cases:
     confidence: 0.7
   expected:
     flagged: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 385
@@ -1732,6 +1737,7 @@ cases:
     confidence: 0.7
   expected:
     flagged: false
+  control: false
   samples:
   - source: haiku
     latency_ms: 38285
@@ -1973,6 +1979,7 @@ cases:
     confidence: 0.7
   expected:
     flagged: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 362
@@ -2213,6 +2220,7 @@ cases:
     confidence: 0.7
   expected:
     flagged: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 509
@@ -2494,6 +2502,7 @@ cases:
     confidence: 0.7
   expected:
     flagged: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 422
@@ -2856,6 +2865,7 @@ cases:
     confidence: 0.7
   expected:
     flagged: false
+  control: false
   samples:
   - source: haiku
     latency_ms: 15171
@@ -3201,6 +3211,7 @@ cases:
     confidence: 0.7
   expected:
     flagged: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 341
@@ -3421,6 +3432,7 @@ cases:
     confidence: 0.7
   expected:
     flagged: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 894
@@ -3730,6 +3742,7 @@ cases:
     confidence: 0.7
   expected:
     flagged: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 296

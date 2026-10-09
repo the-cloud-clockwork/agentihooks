@@ -1,13 +1,14 @@
 version: 1
-notes: 'Seeded from the classifier decision log: each case state was rebuilt from its ledger and its samples are the answers
-  the decision log recorded for that state digest. Expected verdicts were written by a reader that saw only the state and
-  the question, never the thresholds or the rule.'
+notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
+  was rebuilt from its ledger on 2026-10-10 and asked once; its samples are the answers the decision log recorded for that
+  ask. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
+  thresholds or the rule. Cases share a file state and differ by the findings asked about.
 cases:
 - name: home-0
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
     tool: Write
-    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/home.html
+    path: /home/user/dev/worktrees/agentihooks/task-worktree/scripts/swarm_ledger/home.html
     intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
       detail nobody asked for.
   params:
@@ -28,6 +29,7 @@ cases:
     finding_0: false
     finding_1: false
     finding_2: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 262
@@ -47,7 +49,7 @@ cases:
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
     tool: Write
-    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/home.html
+    path: /home/user/dev/worktrees/agentihooks/task-worktree/scripts/swarm_ledger/home.html
     intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
       detail nobody asked for.
   params:
@@ -68,6 +70,7 @@ cases:
     finding_0: false
     finding_1: false
     finding_2: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 238
@@ -87,7 +90,7 @@ cases:
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
     tool: Write
-    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/home.html
+    path: /home/user/dev/worktrees/agentihooks/task-worktree/scripts/swarm_ledger/home.html
     intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
       detail nobody asked for.
   params:
@@ -108,6 +111,7 @@ cases:
     finding_0: false
     finding_1: false
     finding_2: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 251
@@ -127,7 +131,7 @@ cases:
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
     tool: Write
-    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/home.html
+    path: /home/user/dev/worktrees/agentihooks/task-worktree/scripts/swarm_ledger/home.html
     intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
       detail nobody asked for.
   params:
@@ -158,6 +162,7 @@ cases:
     finding_0: false
     finding_1: false
     finding_2: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 249
@@ -177,7 +182,7 @@ cases:
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
     tool: Write
-    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/shell.html
+    path: /home/user/dev/worktrees/agentihooks/task-worktree/scripts/swarm_ledger/shell.html
     intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
       detail nobody asked for.
   params:
@@ -198,6 +203,7 @@ cases:
     finding_0: false
     finding_1: false
     finding_2: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 253
@@ -217,7 +223,7 @@ cases:
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
     tool: Write
-    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/shell.html
+    path: /home/user/dev/worktrees/agentihooks/task-worktree/scripts/swarm_ledger/shell.html
     intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
       detail nobody asked for.
   params:
@@ -238,6 +244,7 @@ cases:
     finding_0: false
     finding_1: false
     finding_2: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 240
@@ -257,7 +264,7 @@ cases:
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
     tool: Write
-    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/shell.html
+    path: /home/user/dev/worktrees/agentihooks/task-worktree/scripts/swarm_ledger/shell.html
     intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
       detail nobody asked for.
   params:
@@ -278,6 +285,7 @@ cases:
     finding_0: false
     finding_1: false
     finding_2: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 257
@@ -297,7 +305,7 @@ cases:
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
     tool: Write
-    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/shell.html
+    path: /home/user/dev/worktrees/agentihooks/task-worktree/scripts/swarm_ledger/shell.html
     intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
       detail nobody asked for.
   params:
@@ -318,6 +326,7 @@ cases:
     finding_0: false
     finding_1: false
     finding_2: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 249
@@ -337,7 +346,7 @@ cases:
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
     tool: Write
-    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/template.html
+    path: /home/user/dev/worktrees/agentihooks/task-worktree/scripts/swarm_ledger/template.html
     intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
       detail nobody asked for.
   params:
@@ -358,6 +367,7 @@ cases:
     finding_0: false
     finding_1: false
     finding_2: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 274
@@ -377,7 +387,7 @@ cases:
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
     tool: Write
-    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/template.html
+    path: /home/user/dev/worktrees/agentihooks/task-worktree/scripts/swarm_ledger/template.html
     intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
       detail nobody asked for.
   params:
@@ -398,6 +408,7 @@ cases:
     finding_0: false
     finding_1: false
     finding_2: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 249
@@ -417,7 +428,7 @@ cases:
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
     tool: Write
-    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/template.html
+    path: /home/user/dev/worktrees/agentihooks/task-worktree/scripts/swarm_ledger/template.html
     intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
       detail nobody asked for.
   params:
@@ -438,6 +449,7 @@ cases:
     finding_0: false
     finding_1: false
     finding_2: false
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 264
@@ -457,7 +469,7 @@ cases:
   state:
     filter: pre-edit+write+multiedit-ui_slop.filter.yaml
     tool: Write
-    path: /home/user/dev/worktrees/agentihooks/engineer-323133-0873/scripts/swarm_ledger/template.html
+    path: /home/user/dev/worktrees/agentihooks/task-worktree/scripts/swarm_ledger/template.html
     intent: User-facing text states the value or state its label names. It never explains why, how it was computed, or adds
       detail nobody asked for.
   params:
@@ -478,6 +490,7 @@ cases:
     finding_0: false
     finding_1: false
     finding_2: true
+  control: false
   samples:
   - source: liquid-d1
     latency_ms: 256
