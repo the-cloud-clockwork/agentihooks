@@ -1037,6 +1037,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
           permission-contents: read
+          permission-pull-requests: read
 
       - name: Read this attempt's jobs
         env:
@@ -1046,6 +1047,8 @@ jobs:
           gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" --jq '.jobs[] | @json' > "$RUNNER_TEMP/jobs.jsonl"
 
       - name: Report each stage's wall time against its budget
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: python3 -m scripts.ci_budget --run "$RUNNER_TEMP/run.json" --jobs "$RUNNER_TEMP/jobs.jsonl"
 
   gate-required:

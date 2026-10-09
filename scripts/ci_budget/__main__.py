@@ -59,13 +59,36 @@ def main(argv: list[str] | None = None, now: Callable[[], float] = time.time) ->
     if not jobs:
         print(f"::error::{args.jobs} lists no jobs, so no stage can be measured.")
         return 1
-    result = ci_budget.report(run_doc, jobs, now())
+    head = ci_budget.delivery_head(run_doc, os.environ.get("GITHUB_REPOSITORY", ""))
+    end = now()
+    result = ci_budget.report(run_doc, jobs, end)
     print("\n".join(ci_budget.render(result)))
     print("\n".join(_annotations(result)))
+    delivery = ""
+    if run_doc.get("event") == "merge_group":
+        combined = ci_budget.delivery_report(run_doc, head, end)
+        rows = ci_budget.delivery_rows(combined)
+        print("\n".join(f"{label}: {spent}" for label, spent in rows))
+        delivery = "\n".join(
+            [
+                "## Delivery budget",
+                "",
+                f"Limit: {ci_budget.clock(ci_budget.RUN_BUDGET_S)}. Queue time includes runner wait and is measured through this report.",
+                "",
+                "| Check cycle | Wall |",
+                "| --- | ---: |",
+                *(f"| {label} | {spent} |" for label, spent in rows),
+                "",
+            ]
+        )
+        if combined["remaining"] is not None and combined["remaining"] < 0:
+            print(
+                "::warning title=Delivery over fifteen minutes::final head checks plus queue checks exceed the delivery budget"
+            )
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with Path(summary).open("a") as handle:
-            handle.write(_summary(result))
+            handle.write(_summary(result) + delivery)
     return 0
 
 

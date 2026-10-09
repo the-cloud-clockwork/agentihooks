@@ -74,6 +74,41 @@ def test_final_head_uses_latest_completed_success_on_exact_head_and_workflow():
     ]
 
 
+def test_latest_rerun_is_selected_and_head_runner_wait_is_counted():
+    api, calls = _api(
+        [
+            [
+                _head(30, run_started_at="2026-10-09T07:01:00Z"),
+                _head(10, run_started_at="2026-10-09T07:02:00Z", run_attempt=3),
+                _head(40, event="push"),
+            ]
+        ]
+    )
+    queue = {**QUEUE, "head_branch": f"refs/heads/{QUEUE['head_branch']}"}
+    assert ci_budget.delivery_head(queue, "owner/repo", api) == {"run": 10, "seconds": 480}
+    assert calls[-1] == "repos/owner/repo/actions/runs/10/attempts/3/jobs?per_page=100"
+
+
+def test_delivery_api_reads_all_pages_without_mutation(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return type("Result", (), {"stdout": '[{"jobs": []}, {"jobs": [{"id": 20}]}]'})()
+
+    monkeypatch.setattr(ci_budget.subprocess, "run", run)
+    assert ci_budget.delivery_api("repos/owner/repo/actions/runs/10/jobs?per_page=100") == [
+        {"jobs": []},
+        {"jobs": [{"id": 20}]},
+    ]
+    assert calls == [
+        (
+            ["gh", "api", "--paginate", "--slurp", "repos/owner/repo/actions/runs/10/jobs?per_page=100"],
+            {"check": True, "capture_output": True, "text": True},
+        )
+    ]
+
+
 @pytest.mark.parametrize(
     "runs,jobs",
     [
