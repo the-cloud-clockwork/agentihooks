@@ -370,7 +370,7 @@ class Check:
             ]
             for task, record, future in pending:
                 if not record or not _same_phase(record, task):
-                    verdicts.write(task["id"], PENDING, RUNNING, self.now_ms)
+                    verdicts.write(task["id"], PENDING, RUNNING, self.now_ms, phase=task.get("phase"))
                 judgment = future.result()
                 if judgment is not None:
                     actions += self._check(task, judgment, verdicts)

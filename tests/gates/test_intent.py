@@ -479,6 +479,8 @@ class TestCheckPass:
         verdicts(tmp_path).write(TASK, "fail", "old", NOW - 5, phase="p1")
         check(tmp_path, view=lambda url: None).run(DOC)
         assert verdicts(tmp_path).read(TASK)["verdict"] == "pending"
+        intent.Check(SLUG, "enforce", NOW + 60_000, Ledger(), Mail(), lambda url: None, None, home=tmp_path).run(DOC)
+        assert (verdicts(tmp_path).read(TASK)["verdict"], verdicts(tmp_path).read(TASK)["at"]) == ("pending", NOW)
 
     def test_off_skips_the_check(self, tmp_path):
         got = run_pass(tmp_path, mode="off")
@@ -510,7 +512,12 @@ class TestCheckPass:
 
     def test_an_unreadable_pull_request_stays_pending(self, tmp_path):
         assert check(tmp_path, view=lambda url: None).run(DOC) == []
-        assert verdicts(tmp_path).read(TASK) == {"verdict": "pending", "reason": "intent check running", "at": NOW}
+        assert verdicts(tmp_path).read(TASK) == {
+            "verdict": "pending",
+            "reason": "intent check running",
+            "at": NOW,
+            "phase": "p8",
+        }
 
     def test_an_unanswered_classifier_writes_unchecked_and_counts_it(self, tmp_path):
         ledger, mail = Ledger(), Mail()
