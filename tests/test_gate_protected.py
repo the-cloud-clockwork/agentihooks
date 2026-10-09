@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts import gate_protected
+from scripts import ci_wiring, gate_protected
 
 _ROOT = Path(__file__).resolve().parents[1]
 _TODAY = date(2026, 10, 9)
@@ -229,10 +229,10 @@ def test_main_refuses_an_unknown_head(repo):
         gate_protected.main(["--root", str(repo), "--head", "0" * 40])
 
 
-def test_the_repository_grades_itself_green(capsys):
-    head = _git(_ROOT, "rev-parse", "HEAD")
-    assert gate_protected.main(["--root", str(_ROOT), "--head", head, "--base", head]) == 0
-    assert "0 protected gate problems" in capsys.readouterr().out
+def test_the_repository_grades_itself_green():
+    workflows = ci_wiring.load(_ROOT)
+    config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
+    assert gate_protected.grade(workflows, config, workflows, config, _TODAY) == []
 
 
 def _protected_workflow():
