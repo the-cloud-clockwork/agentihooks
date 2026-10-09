@@ -4,6 +4,11 @@
       "reason": "Restores the exact base tree baseline for the coverage ratchet; the ratchet needs it and is the gate once it lands.",
       "owner": "ci-2@rig-grade-swarm",
       "expires": "2026-11-08"
+    },
+    "test.yml/semgrep": {
+      "reason": "Plant: semgrep no longer gates.",
+      "owner": "ci-2@rig-grade-swarm",
+      "expires": "2026-11-08"
     }
   },
   "outside_gate": {
