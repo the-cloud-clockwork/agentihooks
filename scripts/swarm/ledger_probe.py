@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import control_notifications, ledger_host, notice_text, time_left
+from scripts.swarm import control_notifications, incidents, ledger_host, notice_text, time_left
 from scripts.swarm.ledger_client import LedgerGone, LedgerRefused
 from scripts.swarm.store import MASTER, SwarmError
 
@@ -27,6 +27,7 @@ RAISED = (
 )
 PAUSED = " Idle and stale claim checks and nudges pause until two fast passes."
 CLEARED = "The ledger server answers fast again: two swarm passes took {took}. Idle and stale claim checks resume."
+
 
 
 @dataclass(frozen=True)
@@ -134,6 +135,10 @@ def observe(
     sample = measure(ledger, slug, time_left.inputs_of(store, slug, runtime), clock)
     if sample is None:
         return []
+    incidents.step(store.redis, "ledger", sample.slow)
+    incidents.deliver(
+        store.redis, "ledger", _raised(sample, (facts or ledger_host.facts)()), CLEARED.format(took=sample.took())
+    )
     held = state(store, slug)
     slow = held.get("slow", 0) + 1 if sample.slow else 0
     fast = 0 if sample.slow else held.get("fast", 0) + 1
