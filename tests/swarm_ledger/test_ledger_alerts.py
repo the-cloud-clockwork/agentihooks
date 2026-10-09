@@ -383,6 +383,22 @@ def test_refusal_reaches_writer_seat_or_agent(inbox, seat):
     assert state["alerts"][0]["writer"] == writer
 
 
+@pytest.mark.parametrize("finished", [False, True])
+def test_missing_or_finished_writer_falls_back_to_master(inbox, finished):
+    make_ledger()
+    if finished:
+        RedisStore(inbox.redis).put_agent(
+            SLUG, AgentRecord(name="writer", lane="eng", task="", state="finished", seat="eng-1")
+        )
+    state, _ = sync(
+        [{"op": "phase_append", "id": "refusal", "by": "writer", "phases": [{"phase": "p1", "title": "Taken"}]}]
+    )
+    ledger_server.deliver_alerts(SLUG, state)
+    assert len(inbox.inbox(seat_address(SLUG, MASTER))) == 1
+    assert inbox.inbox("writer") == []
+    assert inbox.inbox("operator") == []
+
+
 def test_successful_retry_closes_only_same_writer_and_item():
     make_ledger()
     refused = {"op": "phase_append", "id": "refusal", "by": "writer", "phases": [{"phase": "p1", "title": "Taken"}]}
@@ -437,4 +453,13 @@ def test_successful_retry_in_one_batch_closes_new_refusal():
             {"op": "phase_append", "id": "good", "by": "writer", "phases": [{"phase": "p2", "title": "New"}]},
         ]
     )
+    assert state["alerts"][0]["state"] == "done"
+
+
+def test_refusal_and_retry_share_a_resolved_writer(monkeypatch):
+    monkeypatch.setattr("scripts.swarm.naming.resolve_name", lambda name: "writer" if name == "alias" else name)
+    make_ledger()
+    state, _ = sync([{"op": "phase_append", "id": "bad", "by": "alias", "phases": [{"phase": "p1", "title": "Taken"}]}])
+    assert state["alerts"][0]["writer"] == "writer"
+    state, _ = sync([{"op": "phase_append", "id": "good", "by": "writer", "phases": [{"phase": "p2", "title": "New"}]}])
     assert state["alerts"][0]["state"] == "done"

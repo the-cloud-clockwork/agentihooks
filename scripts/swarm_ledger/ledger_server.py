@@ -481,7 +481,7 @@ def deliver_alerts(slug, state):
         from scripts.inbox.seats import seat_address
 
         addresses = {a.name: seat_address(slug, a.seat) if a.seat else a.name for a in live}
-        alerts = [{**a, "target": addresses.get(a["target"], a["target"])} for a in state["alerts"]]
+        alerts = [{**a, "target": addresses.get(inbox.names.resolve(a["target"]), master)} for a in state["alerts"]]
         return ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"alert delivery for {slug}: {exc}\n")

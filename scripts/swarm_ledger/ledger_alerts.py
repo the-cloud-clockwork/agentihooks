@@ -47,6 +47,12 @@ def item(op: dict) -> str:
     return op.get("item") or op.get("thread") or op.get("target") or op["op"]
 
 
+def writer(op: dict) -> str | None:
+    from scripts.swarm.naming import resolve_name
+
+    return resolve_name(op["by"]) if op.get("by") else None
+
+
 def close_refusal(alert: dict, ctx: object, outcome: str) -> None:
     who = alert.get("writer") or SENDER
     alert.update(state=DONE, closed_by=who, closed_at=ctx.at, outcome=outcome)
@@ -59,7 +65,7 @@ def recovered(doc: dict, op: dict, ctx: object) -> None:
         if (
             alert["state"] != DONE
             and alert["source"] == SYNC
-            and alert.get("writer") == op.get("by")
+            and alert.get("writer") == writer(op)
             and alert.get("item") == item(op)
         ):
             close_refusal(alert, ctx, "The writer succeeded on the same item.")
