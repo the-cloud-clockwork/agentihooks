@@ -168,7 +168,11 @@ def test_a_push_passes_with_no_pull_request_or_into_another_repo(tree, tmp_path)
 
 
 def test_sessions_outside_a_worker_task_are_never_held(tree, tmp_path):
-    for who in (Who(), Who(name="master@1-1", swarm="demo", lane="master", task="t1"), Who(name="ci@1-1", swarm="demo")):
+    for who in (
+        Who(),
+        Who(name="master@1-1", swarm="demo", lane="master", task="t1"),
+        Who(name="ci@1-1", swarm="demo"),
+    ):
         assert gate(pull()).decide(bash("git push; gh pr create --base dev", tree), who, state(tmp_path)).allowed
 
 

@@ -6,6 +6,7 @@ from scripts.gates.budget import Budget
 
 LAUNCH_TOOLS = frozenset({"Agent", "Task"})
 CONTINUE_TOOLS = frozenset({"SendMessage"})
+READERS = ("standards-reader", "spec-reader")
 
 
 def refusal(slug, task, counter, cap):
@@ -31,9 +32,13 @@ class SubagentBudget:
         counter, cap = (
             ("launches", self.launches) if call.tool in LAUNCH_TOOLS else ("continuations", self.continuations)
         )
-        allowed, spent = Budget(state.slug, self.name, state.home).spend(who.task, counter, cap)
+        budget = Budget(state.slug, self.name, state.home)
+        allowed, spent = budget.spend(who.task, counter, cap)
         if not allowed:
             return Decision.deny(refusal(who.swarm, who.task, counter, cap))
+        reader = call.tool_input.get("name") or call.tool_input.get("subagent_type")
+        if call.tool in LAUNCH_TOOLS and reader in READERS:
+            budget.spend(who.task, reader, cap)
         reason = f"sub-agent {counter} {spent} of {cap} for task {who.task}"
         log.append(state.slug, log.Row.of(self.name, "count", who, call.tool, reason), state.home)
         return Decision()
