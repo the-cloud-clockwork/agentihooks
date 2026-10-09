@@ -66,6 +66,7 @@ def test_declared_preparatory_pull_request_uses_its_contract_with_the_whole_task
         "changes_gate_behavior",
     }
     assert all(isinstance(question, YesNo) for question in questions.values())
+    assert all(question.true and question.false and question.true != question.false for question in questions.values())
     assert "tests first" in questions["usable"].instructions
     assert "old and new" in questions["accepts_both_states"].instructions
     assert "gate behaviour" in questions["changes_gate_behavior"].instructions
@@ -89,6 +90,9 @@ def test_declared_tests_first_changes_to_gate_behavior_fail_even_when_the_phase_
     assert verdict == "fail"
     assert "gate behaviour" in reason
     assert "Implement the missing acceptance behavior" not in reason
+    assert "Accept both old and new gate states in the preparatory tests" in reason
+    assert "Deliver the gate implementation in the later pull request." in reason
+    assert f"Deliver {TASK['title']}" not in reason
 
 
 def test_preparatory_tests_must_accept_both_states_even_when_other_answers_pass():

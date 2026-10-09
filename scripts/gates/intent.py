@@ -88,6 +88,14 @@ def _tests_first(body: str) -> bool:
     return "Task part: tests-first" in body.splitlines()
 
 
+def _pr_diff(url: str, run) -> str | None:
+    try:
+        patch = _gh(["gh", "pr", "diff", url], run)
+        return patch.stdout if patch.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def _phase(doc, task):
     return next((p for p in doc["phases"] if p.get("id") == task.get("phase")), {})
 
@@ -186,10 +194,7 @@ def pr_view(url, run=subprocess.run):
             return None
         diff = {}
         if _tests_first(body):
-            patch = _gh(["gh", "pr", "diff", url], run)
-            if patch.returncode:
-                return None
-            diff = {"diff": patch.stdout}
+            diff = {"diff": _pr_diff(url, run)}
         head = pr_head(url, run)
         if not head or head != before:
             return None
@@ -514,6 +519,8 @@ class Check:
         if previous and previous["head"] == pr.get("head"):
             return _Judgment(pr, previous, None, None)
         state = intent_history.prepare(state_of(doc, task, pr))
+        if state.get("task_part") == "tests-first":
+            state["pull_request_diff"] = intent_history.masked(pr.get("diff"))
         return _Judgment(pr, previous, state, self.ask(state))
 
     def _check(self, task, judgment, verdicts):
