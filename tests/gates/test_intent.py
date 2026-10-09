@@ -613,7 +613,7 @@ class TestPlanChunk:
         state = intent.state_of(planned, planned["tasks"][0], PR)
         assert state == intent.state_of(DOC, DOC["tasks"][0], PR)
         assert state["task_text"] == planned["tasks"][0]["description"]
-        assert set(intent.questions_for(state)) == set(intent.QUESTIONS) - set(intent.CHUNK_QUESTIONS)
+        assert list(intent.questions_for(state)) == BASE_QUESTIONS
 
     @pytest.mark.parametrize(
         "change",
