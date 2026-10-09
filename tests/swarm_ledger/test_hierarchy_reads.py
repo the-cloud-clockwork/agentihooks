@@ -182,18 +182,20 @@ def test_the_hierarchy_resource_answers_missing_for_an_unknown_read_or_node(repo
 def test_tree_prints_the_subtree_indented_with_states(repo, monkeypatch, capsys):
     read = []
 
-    def resource(slug, path):
-        read.append((slug, path))
+    def resource(slug, path, collection=False):
+        read.append((slug, path, collection))
         return routes.ledger_read(server(repo), slug, path, {})["data"]
 
     monkeypatch.setattr(ledger, "resource", resource)
     ledger.cmd_tree(SimpleNamespace(slug=SLUG, node="slices/s1"))
-    assert read == [(SLUG, "hierarchy/subtree/slices/s1")]
+    assert read == [(SLUG, "hierarchy/subtree/slices/s1", True)]
     assert capsys.readouterr().out.splitlines() == ["slices/s1  open", "  tasks/t1  done", "  tasks/t4  pr"]
 
 
 def test_tree_without_a_node_prints_the_whole_ledger(repo, monkeypatch, capsys):
-    monkeypatch.setattr(ledger, "resource", lambda slug, path: routes.ledger_read(server(repo), slug, path, {})["data"])
+    monkeypatch.setattr(
+        ledger, "resource", lambda slug, path, collection: routes.ledger_read(server(repo), slug, path, {})["data"]
+    )
     ledger.cmd_tree(SimpleNamespace(slug=SLUG, node=None))
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] == "plans/a  open" and lines[-1] == "tasks/t7  out_of_scope" and len(lines) == 16
