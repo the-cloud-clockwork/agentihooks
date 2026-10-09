@@ -1,5 +1,6 @@
 import hashlib
 import json
+from collections import Counter
 
 from scripts.swarm import metrics_outbox
 from scripts.swarm.ledger_client import LedgerClient
@@ -22,6 +23,16 @@ EVENTS = metrics_outbox.Table(
         ("payload", "String"),
     ),
 )
+SNAPSHOT_MS = 5 * 60 * 1000
+SNAPSHOTS = metrics_outbox.Table(
+    "ledger_snapshots",
+    (("measure", "String"), ("lane", "String"), ("state", "String"), ("item", "String"), ("value", "Float64")),
+)
+BIRTHS = (
+    "CREATE TABLE IF NOT EXISTS ledger_metric_births (slug TEXT, target TEXT, at INTEGER, PRIMARY KEY (slug, target))"
+)
+READ_BIRTHS = "SELECT target, at FROM ledger_metric_births WHERE slug=?"
+SAVE_BIRTHS = "INSERT OR IGNORE INTO ledger_metric_births VALUES (?, ?, ?)"
 CHECKPOINT = "CREATE TABLE IF NOT EXISTS ledger_metrics (slug TEXT PRIMARY KEY, revision INTEGER, snapshot_ms INTEGER)"
 READ_CHECKPOINT = "SELECT revision, snapshot_ms FROM ledger_metrics WHERE slug=?"
 SAVE_CHECKPOINT = "INSERT OR REPLACE INTO ledger_metrics VALUES (?, ?, ?)"
@@ -82,17 +93,85 @@ def event_rows(slug: str, events: list, known: dict, cursor: int | None, now_ms:
     return rows
 
 
+def snapshot_row(slug: str, now_ms: int, measure: str, item: str, path: dict, value: float) -> dict:
+    fields = {"measure": measure, "item": item, "state": path.get("state", ""), "lane": path.get("lane", "")}
+    identity = hashlib.sha256(json.dumps(fields, sort_keys=True).encode()).hexdigest()
+    return {**base(slug, now_ms, f"snapshot:{slug}:{now_ms}:{identity}", path), **fields, "value": float(value)}
+
+
+def count_rows(slug: str, now_ms: int, nodes: list, known: dict) -> list:
+    groups = {"": Counter(), **{row["node"]: Counter() for row in nodes if row["kind"] != "task"}}
+    lanes = {"", "eng", "ci", "plan"}
+    for node in nodes:
+        if node["kind"] != "task":
+            continue
+        path = known[node["node"]]
+        lane, state = path["lane"], node["state"]
+        lanes.add(lane)
+        for group in ("", *(path[key] for key in PATH_KEYS[:3] if path[key])):
+            groups[group][lane, state] += 1
+    rows = []
+    for item, counts in groups.items():
+        for lane in sorted(lanes):
+            for state in STATES:
+                value = counts[lane, state] if lane else sum(n for (_, found), n in counts.items() if found == state)
+                path = {**known.get(item, {}), "lane": lane, "state": state}
+                rows.append(snapshot_row(slug, now_ms, "tasks", item, path, value))
+    return rows
+
+
+def age_rows(slug: str, now_ms: int, doc: dict, known: dict, births: dict) -> list:
+    rows = []
+    for collection, measure in (("priorities", "priority"), ("questions", "question"), ("followups", "followup")):
+        for item in doc.get(collection, []):
+            answered = any(not answer.get("deleted") for answer in item.get("answers", []))
+            if item.get("out_of_scope") or item.get("done") or answered:
+                continue
+            target = item["item"] if collection == "priorities" else f"{collection}/{item['id']}"
+            at = item.get("at") or births.get(target)
+            age = max(0, now_ms - at) / 1000 if at is not None else -1.0
+            rows.append(snapshot_row(slug, now_ms, measure, target, known.get(target, {}), age))
+    return rows
+
+
+def snapshot_rows(slug: str, now_ms: int, doc: dict, nodes: list, known: dict, births: dict) -> list:
+    rows = count_rows(slug, now_ms, nodes, known)
+    rows += [
+        snapshot_row(slug, now_ms, "nodes", node["node"], {**known[node["node"]], "state": node["state"]}, 1)
+        for node in nodes
+    ]
+    rows += age_rows(slug, now_ms, doc, known, births)
+    minutes = doc.get("time_left_minutes")
+    rows.append(snapshot_row(slug, now_ms, "time_left", "", {}, -1.0 if minutes is None else minutes))
+    for freeze in doc.get("freezes", []):
+        target = freeze["target"]
+        path = {**known.get(target, {}), "state": freeze["verb"]}
+        if target.startswith("lane:"):
+            path["lane"] = target.removeprefix("lane:")
+        rows.append(snapshot_row(slug, now_ms, "freeze", target, path, 1))
+    return rows
+
+
 def record(box: metrics_outbox.Outbox, slug: str, now_ms: int, ledger: LedgerClient) -> None:
     doc, nodes = ledger.state(slug), ledger.hierarchy(slug)
     box.db.execute(CHECKPOINT)
     box.db.execute(PATHS)
+    box.db.execute(BIRTHS)
     checkpoint = box.db.execute(READ_CHECKPOINT, (slug,)).fetchone()
-    cursor = None if checkpoint is None else checkpoint[0]
+    cursor, snapshot = (None, None) if checkpoint is None else checkpoint
     known = {node: json.loads(value) for node, value in box.db.execute(READ_PATHS, (slug,))}
     current = paths(nodes, doc.get("tasks", []))
     known.update(current)
-    rows = event_rows(slug, doc["_meta"]["events"], known, cursor, now_ms)
-    box.append(EVENTS, rows)
+    events = doc["_meta"]["events"]
+    births = dict(box.db.execute(READ_BIRTHS, (slug,)))
+    for event in events:
+        if event["kind"] == "added":
+            births.setdefault(event["target"], event["at"])
+    box.append(EVENTS, event_rows(slug, events, known, cursor, now_ms))
+    if snapshot is None or now_ms - snapshot >= SNAPSHOT_MS:
+        box.append(SNAPSHOTS, snapshot_rows(slug, now_ms, doc, nodes, current, births))
+        snapshot = now_ms
     with box.db:
         box.db.executemany(SAVE_PATHS, [(slug, node, json.dumps(path)) for node, path in current.items()])
-        box.db.execute(SAVE_CHECKPOINT, (slug, doc["_meta"]["rev"], 0))
+        box.db.executemany(SAVE_BIRTHS, [(slug, node, at) for node, at in births.items()])
+        box.db.execute(SAVE_CHECKPOINT, (slug, doc["_meta"]["rev"], snapshot))
