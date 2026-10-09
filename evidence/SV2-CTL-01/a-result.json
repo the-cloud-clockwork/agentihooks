@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "independent_fixtures": [
+    {
+      "passed": true,
+      "controller_processes": 2,
+      "admitted_generations": 1,
+      "controller_leader_changes_total": 1,
+      "intents": 1
+    },
+    {
+      "passed": true,
+      "controller_processes": 2,
+      "admitted_generations": 1,
+      "controller_leader_changes_total": 1,
+      "intents": 1
+    }
+  ]
+}

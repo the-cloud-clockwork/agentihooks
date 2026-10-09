@@ -1,0 +1,22 @@
+name: Swarm worker image smoke
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  worker-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove clean worker builds and offline startup
+        run: bash docker/swarm-node/smoke.sh "$HOME/scratchpad/worker-image-evidence"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: swarm-worker-image-evidence
+          path: ~/scratchpad/worker-image-evidence

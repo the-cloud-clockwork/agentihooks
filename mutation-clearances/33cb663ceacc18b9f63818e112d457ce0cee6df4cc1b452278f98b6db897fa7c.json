@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x__configured__mutmut_8:5b3ae9ee11b9312ea9e85a5ae654a2afc044289d4450e6b6ad28e4fe6937957d": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "LANES and the cap tuple each have exactly three elements. strict=False produces the same dictionary as strict=True for every supported config."
+  }
+}

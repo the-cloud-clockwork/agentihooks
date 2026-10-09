@@ -50,6 +50,8 @@ def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
                 pipe.multi()
                 pipe.set(key, json.dumps(asdict(renewed)), px=TTL_MS)
                 pipe.set(epochs, epoch)
+                if held is None or held.expires_at <= at:
+                    pipe.incr(store.key(slug, "controller-leader-changes"))
                 pipe.execute()
                 return renewed if keeper == owner else None
             except WatchError:

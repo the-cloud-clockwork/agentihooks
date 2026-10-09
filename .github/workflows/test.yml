@@ -26,6 +26,8 @@ permissions:
   contents: read
 
 jobs:
+  worker-image:
+    uses: ./.github/workflows/swarm-node-smoke.yml
   swarm-image:
     uses: ./.github/workflows/swarm-smoke.yml
   semgrep:
@@ -36,7 +38,33 @@ jobs:
   brain-smoke:
     uses: ./.github/workflows/brain-smoke.yml
 
+  kind-due:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      due: ${{ steps.paths.outputs.due }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide from the base branch rule whether the chart proof is due
+        id: paths
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: |
+          set -o pipefail
+          rule=deploy/helm/agentihooks-swarm/ci/kind-due.sh
+          if [[ -n $BASE ]] && git cat-file -e "$BASE:$rule"; then
+            git show "$BASE:$rule" | bash -s "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
+          else
+            echo due=true >> "$GITHUB_OUTPUT"
+          fi
+
   helm-kind:
+    needs: kind-due
+    if: ${{ needs.kind-due.outputs.due == 'true' }}
     uses: ./.github/workflows/helm-kind.yml
 
   wiring:
@@ -210,6 +238,8 @@ jobs:
     timeout-minutes: 7
     permissions:
       contents: read
+    env:
+      CODEX_RELEASE: rust-v0.160.0
     strategy:
       fail-fast: false
       matrix:
@@ -274,6 +304,29 @@ jobs:
         name: Use the test environment
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
+      # tests.shards pins the live Codex test's file to shard 1; only the 3.12 shard 1 installs the CLI it runs.
+      - name: Restore the Codex CLI
+        id: codex
+        if: matrix.python-version == '3.12' && matrix.shard == 1
+        uses: actions/cache@v4
+        with:
+          path: ~/codex
+          key: codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}
+
+      - name: Install the Codex CLI
+        if: steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'
+        run: |
+          set -o pipefail
+          mkdir -p ~/codex
+          curl -fsSL --retry 3 "https://github.com/openai/codex/releases/download/${CODEX_RELEASE}/codex-x86_64-unknown-linux-musl.zst" | zstd -dc > ~/codex/codex
+          chmod +x ~/codex/codex
+
+      - name: Use the Codex CLI
+        if: steps.codex.outcome == 'success'
+        run: |
+          echo "$HOME/codex" >> "$GITHUB_PATH"
+          echo "CODEX_CLI_REQUIRED=1" >> "$GITHUB_ENV"
+
       - name: Download the queued run's dev durations
         if: needs.durations.outputs.queued == 'true'
         uses: actions/download-artifact@v4
@@ -293,6 +346,30 @@ jobs:
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
         run: python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256
+
+      - name: Record collected tests
+        if: matrix.shard == 1 && github.event.pull_request.base.ref != 'main'
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from tests.shard_check import collect
+
+          nodeids = collect("tests/")
+          if not nodeids:
+              raise SystemExit("Collection failed or found no tests")
+          Path("collected.json").write_text(json.dumps(nodeids))
+          PY
+
+      - name: Upload collected tests
+        if: matrix.shard == 1 && github.event.pull_request.base.ref != 'main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: collected-${{ matrix.python-version }}
+          path: collected.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
 
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
@@ -337,13 +414,28 @@ jobs:
         python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref == 'main' && github.sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}
+          persist-credentials: false
 
       - *python
-      - *day
-      - *venv
-      - *uv
-      - *install
-      - *use-venv
+
+      - name: Install grader dependencies
+        if: github.event.pull_request.base.ref != 'main'
+        run: python -m pip install "pytest>=8.0"
+
+      - name: Set up legacy grader installer
+        if: github.event.pull_request.base.ref == 'main'
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          enable-cache: false
+
+      - name: Install legacy grader dependencies
+        if: github.event.pull_request.base.ref == 'main'
+        env:
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: uv pip install --python "$PYTHON_PATH" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download shard durations
         uses: actions/download-artifact@v4
@@ -351,7 +443,19 @@ jobs:
           pattern: durations-${{ matrix.python-version }}-*
           path: shard-durations
 
+      - name: Download collected tests
+        if: github.event.pull_request.base.ref != 'main'
+        uses: actions/download-artifact@v4
+        with:
+          name: collected-${{ matrix.python-version }}
+          path: collected-data
+
       - name: Check every collected test ran in exactly one shard
+        if: github.event.pull_request.base.ref != 'main'
+        run: python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json
+
+      - name: Check release shards with legacy collection
+        if: github.event.pull_request.base.ref == 'main'
         run: python -m tests.shard_check shard-durations/*/durations.json
 
       - name: Check every shard's test time fits the fifteen minute budget
@@ -503,6 +607,22 @@ jobs:
             sleep 1
           done
           exit 1
+
+      - name: Hold the Delivery L2 binding
+        if: steps.current.outputs.superseded != 'true'
+        env:
+          SONAR_READ_TOKEN: ${{ secrets.SONAR_READ_TOKEN }}
+        run: |
+          set -o pipefail
+          : "${SONAR_READ_TOKEN:?SONAR_READ_TOKEN is not set}"
+          bound=$(curl --fail --silent --show-error --max-time 10 \
+            -H "Authorization: Bearer $SONAR_READ_TOKEN" \
+            "http://127.0.0.1:9000/api/qualitygates/get_by_project?project=agentihooks" | jq -er .qualityGate.name)
+          if [[ "$bound" != 'Delivery L2' ]]; then
+            echo "::error::Project agentihooks is bound to $bound; required Delivery L2."
+            exit 1
+          fi
+          echo "Project agentihooks is bound to Delivery L2"
 
       - name: Restore Sonar downloads
         uses: actions/cache@v4
@@ -726,7 +846,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [durations, unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, brain-smoke, helm-kind, wiring, semgrep, dependency-audit]
+    needs: [durations, unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, wiring, semgrep, dependency-audit]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -735,9 +855,10 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
           MUTATION: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
+          KIND: ${{ needs.kind-due.outputs.due }}
         run: |
           echo "$NEEDS"
-          if ! jq -e --arg mutation "$MUTATION" 'all(to_entries[]; .value.result == "success" or (.key == "mutation" and .value.result == "skipped" and $mutation == "false"))' <<< "$NEEDS"; then
+          if ! jq -e --arg mutation "$MUTATION" --arg kind "${KIND:-}" 'all(to_entries[]; .value.result == "success" or (.key == "mutation" and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false"))' <<< "$NEEDS"; then
             echo "::error::Every required gate must succeed."
             exit 1
           fi
