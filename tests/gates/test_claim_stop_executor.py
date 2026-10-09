@@ -127,7 +127,9 @@ def rig(tmp_path, monkeypatch, ledger_port):
             env=env,
             timeout=60,
         )
-        assert done.returncode == 0, done.stderr
+        if done.returncode:
+            log = ledgers / ".server.log"
+            pytest.fail(f"{done.stderr}\nLedger server output:\n{log.read_text() if log.exists() else 'no server log'}")
 
     def set_task(**fields):
         cli("task", "set", task, *(f"{key}={value}" for key, value in fields.items()))

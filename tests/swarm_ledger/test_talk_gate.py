@@ -72,6 +72,20 @@ def test_enforce_refuses_the_write_past_the_budget(redis, tmp_path):
     ]
 
 
+def test_an_operator_launched_engineer_talks_uncounted(redis, tmp_path):
+    from scripts.swarm.naming import NameRegistry
+
+    mode(redis, "enforce")
+    names = NameRegistry(redis)
+    names.adopt(SLUG, "abcdef", SLUG, "repo")
+    launched = names.next(SLUG, "eng", 1)
+    names.note(launched, operator="frontend")
+    fill(redis, tmp_path, by=launched, count=talk.BUDGET + 2)
+    assert progress.Progress(redis, SLUG).read(launched).talk == 0
+    fill(redis, tmp_path, by=ENG)
+    assert say(redis, tmp_path, n=99)[1] == [f"m-{ENG}-99"]
+
+
 def test_the_refusal_names_the_count_the_limit_and_the_clearing_command():
     text = talk.refusal(ENG, 10, SLUG)
     assert text.startswith(f"talk refused: {ENG} made 10 talk writes since its last outcome, the budget is 10.")

@@ -71,6 +71,39 @@ def test_a_ci_agent_cannot_add_a_task():
     assert_refused("ci@abcdef-0002", f"ci@abcdef-0002 works in the ci lane and cannot add tasks: {FOLLOWUP}")
 
 
+def append_phase(by):
+    op = {"op": "phase_append", "id": "append-p9", "by": by, "phases": [{"phase": "p9", "title": "nine"}]}
+    return core.sync(SLUG, ops=[op])[0]
+
+
+def test_an_appended_phase_records_who_appended_it():
+    make_ledger()
+    phases = {p["id"]: p for p in append_phase(PLANNER)["phases"]}
+    assert phases["p9"]["added_by"] == PLANNER
+    assert "added_by" not in phases["p1"]
+
+
+def test_a_planner_without_a_plan_task_adds_tasks_to_a_phase_it_appended():
+    make_ledger()
+    append_phase(PLANNER)
+    assert_added(PLANNER, "p9")
+
+
+def test_a_task_added_to_an_appended_phase_carries_its_published_plan_link():
+    make_ledger()
+    append_phase(PLANNER)
+    link = {"plan_url": "https://example.com/plan/1"}
+    core.sync(SLUG, ops=[{"op": "phase_update", "id": "pub-p9", "by": PLANNER, "item": "phases/p9", "fields": link}])
+    state, _ = add(PLANNER, "p9")
+    assert next(t for t in state["tasks"] if t["id"] == "t9")["plan_url"] == "https://example.com/plan/1"
+
+
+def test_a_planner_without_a_plan_task_cannot_add_to_a_phase_another_appended():
+    make_ledger()
+    append_phase("master@abcdef-0001")
+    assert_refused(PLANNER, f"{PLANNER} holds no plan task and cannot add tasks: {FOLLOWUP}", "p9")
+
+
 def test_a_legacy_engineer_name_cannot_add_a_task():
     make_ledger()
     assert_refused("sw-eng-1", f"sw-eng-1 works in the eng lane and cannot add tasks: {FOLLOWUP}")
@@ -105,7 +138,7 @@ def test_a_planner_engineer_task_in_its_phase_does_not_count_as_planning():
 
 
 def test_the_refusal_is_empty_for_an_author_who_may_add():
-    assert ledger_tasks.add_refusal([], {"by": "master@abcdef-0001", "phase": "p1"}) == ""
+    assert ledger_tasks.add_refusal([], {"by": "master@abcdef-0001", "phase": "p1"}, set()) == ""
 
 
 def test_task_add_prints_the_server_refusal(monkeypatch):

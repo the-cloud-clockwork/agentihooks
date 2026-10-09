@@ -10,7 +10,7 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 
-from scripts import agent_choice, session_bands
+from scripts import agent_choice
 from scripts.handoff import envelope
 from scripts.init_agent import PREDECESSOR
 from scripts.profiles import binding, plugins
@@ -291,9 +291,9 @@ class HerdrRuntime:
     def _rotation(self, requested, environ):
         if requested or not hasattr(self, "_quota_accounts"):
             return self.choose(requested, environ)
-        from scripts.swarm.capacity import seats
+        from scripts.swarm.capacity import offered, pick
 
-        seat = session_bands.pick(seats(self._quota_open()))
+        seat = pick(offered(self._quota_accounts, self._quota_warned()))
         return (seat.harness, "rotation") if seat else ("claude", agent_choice.ALL_FULL)
 
     def _quota_transfer(self, saved, profile, environ, lane, want, planned=None):
@@ -365,12 +365,13 @@ class HerdrRuntime:
         return (harness, getattr(self, "_quota_task_accounts", {}).get(task_id)) if harness else None
 
     def _quota_account(self, agent, preferred, excluded):
-        from scripts.swarm.capacity import seats
+        from scripts.swarm.capacity import offered, pick
 
         eligible = [row for row in self._quota_eligible(agent) if row.name != excluded]
         row = next((row for row in eligible if row.name == preferred), None)
         if row is None:
-            seat = session_bands.pick(seats(eligible))
+            rows = [row for row in self._quota_accounts if row.harness == agent]
+            seat = pick(offered(rows, {(row.harness, row.name) for row in rows if row not in eligible}))
             if seat is None:
                 raise SpawnError(self._quota_refusal(agent), "unavailable")
             row = next(row for row in eligible if row.name == seat.account)
@@ -515,6 +516,12 @@ class HerdrRuntime:
             profile_decision={**agent.profile_decision, **placed.profile_decision},
             overlays=agent.overlays,
         )
+
+    def operator(self, config, name, profile, text):
+        """Open a claude session for the operator in the swarm's space, bound to the swarm with no task or lane slot."""
+        argv = self._argv(config, name, "claude", text, f"{name}.md", profile)
+        model = _model_args("claude", model_pick.frontier("claude").__dict__, dict(os.environ), effort_range.of(config))
+        return self._launch(config, naming.OPERATOR, "", name, [*argv, "--", *model])
 
     def _holds(self, pane_id, conversation_id):
         for _ in range(RESUME_CHECKS):

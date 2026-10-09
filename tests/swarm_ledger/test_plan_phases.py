@@ -77,6 +77,20 @@ def test_a_plan_phase_is_appended_auto_unless_it_names_manual_and_only_manual_wa
     ]
 
 
+def test_an_appended_phase_records_its_author_for_task_adds():
+    make_ledger()
+    op = {
+        "op": "phase_append",
+        "id": "append-by",
+        "by": "planner@abcdef-0001",
+        "phases": [{"phase": "p2", "title": "x"}],
+    }
+    state, rejected = core.sync(SLUG, ops=[op])
+    assert rejected == []
+    added = next(p for p in state["phases"] if p["id"] == "p2")
+    assert added["added_by"] == "planner@abcdef-0001"
+
+
 def test_a_taken_phase_id_refuses_the_whole_plan_and_changes_nothing():
     before = make_ledger()
     state, rejected = append([{"phase": "p9", "title": "Fresh"}, {"phase": "p1", "title": "Taken"}])

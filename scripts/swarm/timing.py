@@ -10,6 +10,7 @@ from functools import wraps
 from typing import Any
 
 SWARM = ContextVar("tick_swarm", default=None)
+BEFORE_STEP = ContextVar("tick_before_step", default=None)
 
 
 def emit(stream, line: str) -> None:
@@ -64,7 +65,14 @@ def step(name: str) -> Iterator[None]:
         emit(sys.stderr, json.dumps(record))
 
 
+def keep() -> None:
+    before = BEFORE_STEP.get()
+    if before is not None:
+        before()
+
+
 def call(function: Callable, *args, **kwargs) -> Any:
+    keep()
     with step(f"{function.__module__}.{function.__qualname__}"):
         return function(*args, **kwargs)
 

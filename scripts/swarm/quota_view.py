@@ -1,5 +1,6 @@
 """The stored quota capacity decision as swarm status lines and as the ledger page reads it."""
 
+from scripts.routing.slots import API
 from scripts.swarm import capacity
 from scripts.swarm.health.findings import MINUTE_MS
 
@@ -25,6 +26,22 @@ def _changed(at: int, now_ms: int) -> str:
     return f"changed {minutes} minute ago" if minutes == 1 else f"changed {minutes} minutes ago"
 
 
+def api_share(account: dict, accounts: list[dict]) -> tuple[int, int]:
+    """(percent, total): the api row's share of every live session on its harness."""
+    total = sum(row["sessions"] for row in accounts if row["harness"] == account["harness"])
+    return (round(100 * account["sessions"] / total) if total else 0), total
+
+
+def _account_line(row: dict, accounts: list[dict]) -> str:
+    if row.get("kind") != API:
+        detail = f"routing {left_text(routing_left(row))}"
+    else:
+        share, total = api_share(row, accounts)
+        weight = "no weight" if row.get("weight") is None else f"weight {row['weight']}%"
+        detail = f"api share {share}% of {total} sessions against {weight}"
+    return f"quota account {row['harness']} {row['name']}  {state_text(row)}  {detail}  sessions {row['sessions']}"
+
+
 def lines(decision: dict, now_ms: int) -> list[str]:
     if not decision:
         return [capacity.status_line(decision)]
@@ -32,15 +49,19 @@ def lines(decision: dict, now_ms: int) -> list[str]:
         f"{lane} {decision['effective'][lane]} of {decision['configured'][lane]}" for lane in capacity.LANES
     )
     head = f"quota capacity {caps}, {_changed(decision['at'], now_ms)}, because {decision['reason']}"
-    return [head] + [
-        f"quota account {row['harness']} {row['name']}  {state_text(row)}"
-        f"  routing {left_text(routing_left(row))}  sessions {row['sessions']}"
-        for row in decision["accounts"]
-    ]
+    return [head] + [_account_line(row, decision["accounts"]) for row in decision["accounts"]]
 
 
 def page(decision: dict) -> dict:
     if not decision:
         return decision
-    accounts = [{**row, "routing": routing_left(row)} for row in decision["accounts"]]
+    rows = decision["accounts"]
+    accounts = [
+        {
+            **row,
+            "routing": routing_left(row),
+            **({"share": api_share(row, rows)[0]} if row.get("kind") == API else {}),
+        }
+        for row in rows
+    ]
     return {**decision, "lanes": list(capacity.LANES), "accounts": accounts}
