@@ -365,8 +365,12 @@ class TestClaudeRouting:
         monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([result], "cached"))
         monkeypatch.setattr(agents_quota, "codex_table", lambda: "codex table")
         monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"ALPHA": 2, "api": 1})
+        api_side, nows = place.api_side, []
+        monkeypatch.setattr(place, "api_side", lambda *args: nows.append(args[3]) or api_side(*args))
+        monkeypatch.setattr("time.time", lambda: 77.0)
 
         assert install.cmd_balance(include_fable=False, refresh=False, timeout=10) == 0
+        assert nows == [77.0]
         lines = capsys.readouterr().out.splitlines()
         assert lines[0].split() == [
             "#",
