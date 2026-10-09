@@ -370,6 +370,11 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None, ask=None):
     verdict, reason = (ask or judge)(state)
     _remember(slug, task, now_ms, state, (verdict, reason), home)
     verdicts.write(task_id, verdict, reason, now_ms, phase=task.get("phase"), planned=traced["plan_hash"])
+    who = Who(name=task.get("claimed_by", ""), task=task_id)
+    if verdict == UNCHECKED:
+        log.append(slug, log.Row.of(NAME, "count", who, reason=reason), home)
+    elif verdict == FAIL:
+        log.append(slug, log.Row.of(NAME, "deny" if mode == "enforce" else "observe", who, reason=reason), home)
     return {"verdict": verdict, "reason": reason}
 
 

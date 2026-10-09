@@ -806,7 +806,15 @@ class TestPlanCheck:
 
     def test_a_planned_fail_is_armed_pending_when_the_pull_request_opens(self, tmp_path, stamped):
         intent.plan_check(SLUG, UNOPENED, TASK, TRACED, "coach", NOW, home=tmp_path, ask=planned_ask([], 0.1))
+        assert [(r["gate"], r["kind"], r["task"]) for r in rows(tmp_path)] == [("intent", "observe", TASK)]
         assert intent.stamp(SLUG, TASK, URL, DOC, "coach", NOW + 5, home=tmp_path)["verdict"] == "pending"
+
+    def test_an_unchecked_plan_is_counted_in_the_gate_log(self, tmp_path):
+        planned = intent.plan_check(
+            SLUG, UNOPENED, TASK, TRACED, "enforce", NOW, home=tmp_path, ask=lambda state: ("unchecked", "no answer")
+        )
+        assert planned == {"verdict": "unchecked", "reason": "no answer"}
+        assert [(r["kind"], r["reason"]) for r in rows(tmp_path)] == [("count", "no answer")]
 
     def test_the_tick_still_judges_the_pull_request_after_a_planned_pass(self, tmp_path):
         intent.plan_check(SLUG, UNOPENED, TASK, TRACED, "enforce", NOW, home=tmp_path, ask=planned_ask([]))
@@ -814,6 +822,7 @@ class TestPlanCheck:
         assert got.viewed == [URL]
         assert "planned" not in verdicts(tmp_path).read(TASK)
         assert verdicts(tmp_path).read(TASK)["verdict"] == "fail"
+        assert not intent.IntentGate().decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path)).allowed
 
 
 def test_the_pass_keeps_the_tick_after_each_judged_pull_request(tmp_path):

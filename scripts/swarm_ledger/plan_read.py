@@ -34,7 +34,7 @@ def chunk(text: str, lines: str, margin: int = MARGIN) -> str:
 
 
 def exact(doc: dict, task: dict) -> str:
-    phase = next((p for p in doc.get("phases", []) if p.get("id") == task.get("phase")), {})
+    phase = _phase(doc, task.get("phase")) or {}
     source = _ledger("plan_packages").text() if _packaged(phase, task) else _stored(doc, phase, task)
     text = chunk(source, task["plan_lines"], margin=0)
     if not text.strip():
@@ -88,6 +88,10 @@ def _sliced_task(doc: dict, slug: str, task_id: str | None) -> dict:
     return task
 
 
+def _phase(doc: dict, phase_id: str | None) -> dict | None:
+    return next((p for p in doc.get("phases", []) if p.get("id") == phase_id), None)
+
+
 def _url(phase: dict, task: dict) -> str:
     return task.get("plan_url") or phase.get("plan_url") or ""
 
@@ -111,7 +115,7 @@ def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str
     if not phase_id and not task.get("plan_lines"):
         return f"This task has no plan lines; its description is the whole spec.\n\n{task.get('description', '')}\n"
     phase_id = phase_id or task.get("phase")
-    phase = next((p for p in doc.get("phases", []) if p.get("id") == phase_id), None)
+    phase = _phase(doc, phase_id)
     if phase is None:
         raise ValueError(f"no phase {phase_id} in ledger {slug}")
     if _packaged(phase, task):
