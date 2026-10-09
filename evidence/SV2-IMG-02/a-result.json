@@ -1,0 +1,44 @@
+{
+  "accounts": {
+    "claude": "AH_CC_TOKEN_FIXTURE",
+    "codex": "AH_CX_TOKEN_FIXTURE"
+  },
+  "cli_mcp_list": {
+    "claude": "Checking MCP server health\u2026\n\nagentihooks: /opt/venv/bin/python -m hooks.mcp - \u2714 Connected\nfixture-claude-mcp: python -m hooks.mcp - \u2714 Connected\n",
+    "codex": "Name               Command               Args          Env  Cwd  Status   Auth       \nagentihooks        /opt/venv/bin/python  -m hooks.mcp  -    -    enabled  Unsupported\nfixture-codex-mcp  python                -m hooks.mcp  -    -    enabled  Unsupported\n"
+  },
+  "cli_session_start_hook_registrations": {
+    "claude": 1,
+    "codex": 1
+  },
+  "fixture": "67c79ab3bf9841228742fc3e543d9e71",
+  "fixture_manifest": {
+    "fixture-claude/.claude/settings.overrides.json": "2443a0072e228b5cfd498a3891d92bd6e6ecc7cc3bd914a7ab4959d7c917b6d3",
+    "fixture-claude/.mcp.json": "c5612b3e0ff1f6004aabeeb540ce52963aae186d6ad37ea7e027703ae90783ce",
+    "fixture-claude/CLAUDE.md": "c28c2278ccbdad047e41ed1d8d55b8c03adc1d73cda894dcffa4a7d3dc5afd97",
+    "fixture-codex/.codex/config.overrides.toml": "14c94e959de2196a10dd0460dcb9dbd3c71bb9d7862d1a0eaed31dc583d31b1f",
+    "fixture-codex/.mcp.json": "c16896a57382139d38f4f8a226c9936d78a09ff8ed57a556b99c2bcd1e24b112",
+    "fixture-codex/CLAUDE.md": "1bcf960323d0ad87d6a379acab2a792529f2fe22187d17a2b4e10fcab3172e0b",
+    "fixture-workstation/.claude/settings.overrides.json": "9d6950636e5c58b3a648f5ffa33320335d0c4ffd08b3efdd68fc901883123e1c",
+    "fixture-workstation/.mcp.json": "c5612b3e0ff1f6004aabeeb540ce52963aae186d6ad37ea7e027703ae90783ce",
+    "fixture-workstation/CLAUDE.md": "48581b19721bc812e7400f58983112ada7cad4872277a43dd04d95acf9d0e521"
+  },
+  "home_volume": "empty tmpfs owned by 10001:10001 per container",
+  "homes": {
+    "claude": "homes/claude",
+    "codex": "homes/codex"
+  },
+  "mocked": false,
+  "package": "SV2-IMG-02",
+  "profile_digests": {
+    "fixture-claude": "550650dfb43c384d64ca4d4ade29e693c30ea7ba5254623349624f1713b8c16f",
+    "fixture-codex": "eea274609cdd2589d0d97cb70f1d41840769aeea5bd286a5868ca428712e0ce8"
+  },
+  "second_independent_container_configuration_equal": true,
+  "startup_network": "none",
+  "tested_commit": "0af770ce1526bba10401d473c7351ce9bb124d73",
+  "worker_profile_materialization_seconds": [
+    1.645,
+    1.206
+  ]
+}
