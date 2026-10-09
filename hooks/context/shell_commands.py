@@ -86,15 +86,15 @@ def _expand(tokens: list[str], depth: int) -> list[list[str]]:
 
 
 def _heredoc_marker(line: str, quote: str | None) -> tuple[int, str | None]:
-    index = 0
+    index, escaped = 0, -1
     while index < len(line):
         character = line[index]
         if character == "\\" and quote != "'":
-            index += 2
+            index, escaped = index + 2, index + 2
             continue
         if quote is None and line.startswith("<<", index):
             return index, None
-        if quote is None and character == "#" and (index == 0 or line[index - 1].isspace()):
+        if quote is None and character == "#" and (index == 0 or (line[index - 1].isspace() and index != escaped)):
             return index, None
         if quote is None and line.startswith("$'", index):
             quote, index = "$'", index + 2
@@ -165,6 +165,7 @@ def commands(command: str, depth: int = 0) -> list[list[str]]:
     lexer = shlex.shlex(command, posix=True, punctuation_chars=_SEPARATORS)
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
+    lexer.commenters = ""
     result, words = heredoc_commands, []
     for token in lexer:
         if token and not token.strip(_SEPARATORS):

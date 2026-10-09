@@ -65,7 +65,9 @@ _TEST_TASK = re.compile(r"^(?:test|tests|coverage|mutation)(?:$|[:_.-])|^.*:test
 _PYTHON = re.compile(r"^(?:python[\d.]*|pypy[\d.]*)$")
 _PYTHON_TEST = re.compile(r"\b(?:pytest|unittest|tox|nox|mutmut|mutatest|mutpy)\b|scripts\.ci_mutation\b")
 _NODE_TEST = re.compile(r"\b(?:jest|vitest|mocha)\b")
-_NODE_TEST_MODULE = re.compile(r"require\(['\"]node:test['\"]\)")
+_NODE_TEST_MODULE = re.compile(
+    r"\b(?:require|import)\(\s*['\"`](?:node:test|[^'\"`]*\b(?:jest|vitest|mocha)\b[^'\"`]*)['\"`]"
+)
 _LITERAL = r"(\"{3}|'{3}|[\"'`])(?:\\.|(?!\1)[^\\])*\1"
 _LAUNCH = re.compile(
     r"\b(?:subprocess|system|popen|spawn\w*|exec\w*|run_module|run_path|__import__|import_module|child_process)\b"
@@ -81,11 +83,7 @@ def local_tests_allowed() -> bool:
 
 
 def _code_runs_tests(source: str, runners: re.Pattern, comment: str) -> bool:
-    code = re.sub(
-        f"(?s){_LITERAL}|{re.escape(comment)}[^\\n]*",
-        lambda match: match[0] if match[1] and not re.search(r"\s", match[0]) else " ",
-        source,
-    )
+    code = re.sub(f"(?s){_LITERAL}|{re.escape(comment)}[^\\n]*", " ", source)
     return bool(runners.search(source if _LAUNCH.search(source) else code))
 
 

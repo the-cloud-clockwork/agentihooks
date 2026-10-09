@@ -91,6 +91,9 @@ RUNNERS = [
     "python3 - $'\\' ' <<EOF\nimport pytest; pytest.main(); print(\"'\")  # \"\nEOF",
     "# don't\npython3 - <<'EOF'\nimport pytest; pytest.main(); print(\"'\")  # \"\nEOF",
     "cd tests # run them\npytest -q",
+    "echo a#b\npytest -q",
+    "echo \\ #x; pytest -q",
+    "node -e \"import('vitest/node').then(v => v.startVitest('unit'))\"",
 ]
 
 WRAPPERS = [
@@ -192,7 +195,11 @@ def test_non_test_commands_pass(command, monkeypatch):
         "python3 -c \"import pathlib; p = pathlib.Path('t.yml'); p.write_text(p.read_text().replace('pytest -x', 'pytest -q'))\"",
         "python3 - <<'EOF'\nfrom pathlib import Path\np = Path('.github/workflows/test.yml')\nold = '''run: python -m pytest -x'''\n"
         'p.write_text(p.read_text().replace(old, "run: python -m pytest -q"))  # pytest\nEOF',
-        "node -e \"fs.writeFileSync('p.json', s.replace('jest --ci', 'vitest run')) // jest\"",
+        "node -e \"fs.writeFileSync('p.json', s.replace('jest', 'vitest')) // jest\"",
+        "python3 -c \"print('pytest')\"",
+        "python3 -c \"print(open('pytest.ini').read())\"",
+        "node -e \"console.log('jest')\"",
+        "echo ok #c; pytest -q",
         "python3 -c \"'" + "\\\\" * 80 + '"',
         "echo \"don't\" # it's\ncat <<EOF\npytest\nEOF",
         "grep -n '^<<<<<<< \\|^=======\\|^>>>>>>> ' .github/workflows/test.yml",
