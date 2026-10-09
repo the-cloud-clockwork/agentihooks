@@ -228,7 +228,7 @@ class HerdrRuntime:
         decision = capacity.calculate(
             config, self._quota_accounts, agents, demand, requirements, accounts, warned=warned
         )
-        decision["host"] = host
+        decision["host"] = {**host, "read_at": int(now * 1000)}
         if scaled:
             decision["autoscale"] = scaled
         for task, reason in self._quota_held.items():

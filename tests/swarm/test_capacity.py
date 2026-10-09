@@ -1162,7 +1162,7 @@ def test_a_manual_swarm_keeps_its_caps_and_stores_the_host_decision(tmp_path, mo
     room = host_budget.spawn_room(config, _roomy_host(), 4)
     expected = {
         **capacity.calculate(config, seen, [], demand, warned={}),
-        "host": {"room": room.room, "reason": room.reason, "limit": room.limit},
+        "host": {"room": room.room, "reason": room.reason, "limit": room.limit, "read_at": 100_000},
     }
     assert json.dumps(decision, sort_keys=True) == json.dumps(expected, sort_keys=True)
     assert "autoscale" not in decision
@@ -1178,6 +1178,7 @@ def test_a_manual_swarm_with_an_unreadable_host_stores_host_unknown(tmp_path, mo
         "reason": "host unknown: the process files cannot be read, so spawns pass",
         "limit": "unknown",
         "last": None,
+        "read_at": 100_000,
     }
 
 
@@ -1225,7 +1226,10 @@ def test_an_unknown_tick_keeps_the_last_known_room_for_the_band_hold():
     unknown = capacity.ScaleInputs([], [], None, lambda: None, {"host": {"room": 4, "reason": "r", "limit": "load"}})
     carried = capacity.host_room(config, unknown)
     assert (carried["room"], carried["last"]) == (None, 4)
-    band = lambda: HostSample(load1=10.0, cpus=8, available_mb=64_000, agents=2)  # noqa: E731
+
+    def band():
+        return HostSample(load1=10.0, cpus=8, available_mb=64_000, agents=2)
+
     after = capacity.host_room(config, capacity.ScaleInputs([], [], None, band, {"host": carried}))
     assert after == {"room": 4, "reason": after["reason"], "limit": "load"}
     assert after["reason"] == "one minute load 1.25 per CPU is between the watermarks, the previous room of 4 holds"

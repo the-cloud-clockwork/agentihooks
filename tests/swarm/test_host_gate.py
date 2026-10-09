@@ -22,14 +22,14 @@ def store():
     return found
 
 
-def _decide(store, room, reason=MEMORY, limit="memory", slug="sw"):
+def _decide(store, room, reason=MEMORY, limit="memory", slug="sw", read_at=1_000):
     decision = {
         "configured": CAPS,
         "effective": CAPS,
         "reason": "accounts have quota",
         "accounts": [],
         "at": 1_000,
-        "host": {"room": room, "reason": reason, "limit": limit},
+        "host": {"room": room, "reason": reason, "limit": limit, "read_at": read_at},
     }
     store.redis.set(store.key(slug, "quota-capacity"), json.dumps(decision))
 
@@ -47,7 +47,7 @@ def _room(store, slug="sw"):
 
 
 def _held(room, spawned, reason=MEMORY, limit="memory", who="spawns"):
-    return f"holding {who}: host {limit} room {room}, {spawned} spawned in the last 2 minutes: {reason}"
+    return f"holding {who}: host {limit} room {room}, {spawned} spawned since that reading: {reason}"
 
 
 def test_manual_caps_above_the_host_room_spawn_up_to_the_room_and_the_rest_once_room_returns(store):
@@ -59,28 +59,30 @@ def test_manual_caps_above_the_host_room_spawn_up_to_the_room_and_the_rest_once_
     assert _held(2, 2) in actions
     assert tick.spawn_holds(store, "sw") == [_held(2, 2)]
     assert _room(store) == 2
-    _decide(store, 2)
     actions = tick.tick("sw", store, ledger, runtime, now_ms=61_000)
     assert _workers(runtime) == ["t1"]
     assert _held(2, 2) in actions
-    _decide(store, 2)
+    _decide(store, 2, read_at=121_000)
     actions = tick.tick("sw", store, ledger, runtime, now_ms=121_000)
     assert _workers(runtime) == ["t1", "t3", "t2"]
     assert not any(action.startswith("holding spawns") for action in actions)
     assert tick.spawn_holds(store, "sw") == []
 
 
-def test_spawns_in_one_swarm_use_the_host_room_of_every_swarm(store):
+def test_spawns_in_one_swarm_after_another_swarm_reads_the_host_use_its_room(store):
     _decide(store, 2)
     tick.tick("sw", store, _ledger(), FakeRuntime(), now_ms=1_000)
     store.create(SwarmConfig("doc", "/repo", max_eng=2, max_ci=1))
-    _decide(store, 2, slug="doc")
     ledger = _ledger()
     ledger.notify = lambda slug, text: None
     runtime = FakeRuntime()
+    _decide(store, 2, slug="doc", read_at=500)
     actions = tick.tick("doc", store, ledger, runtime, now_ms=30_000)
     assert _held(2, 2, who="the master spawn") in actions
     assert runtime.masters == [] and runtime.spawned == []
+    _decide(store, 2, slug="doc", read_at=30_000)
+    actions = tick.tick("doc", store, ledger, runtime, now_ms=30_000)
+    assert "spawned master master@a1b2c3-0001" in actions
 
 
 def test_an_unknown_host_lets_every_spawn_pass(store):
@@ -109,17 +111,18 @@ def test_the_master_seat_waits_for_host_room(store):
     assert tick.spawn_holds(store, "sw") == [held]
     assert runtime.masters == []
     assert [a for a in store.agents("sw") if a.lane == MASTER] == []
-    _decide(store, 1)
+    _decide(store, 1, read_at=61_000)
     actions = tick.tick("sw", store, FakeLedger([]), runtime, now_ms=61_000)
     assert "spawned master master@a1b2c3-0001" in actions
     assert store.redis.zrange(tick.HOST_SPENDS, 0, -1, withscores=True) == [("master@a1b2c3-0001", 61_000.0)]
 
 
-def test_a_spawn_leaves_the_window_once_it_settles(store):
+def test_old_spawns_are_pruned_after_ten_minutes(store):
     tick._spend_host(store, "old", 1_000)
-    tick._spend_host(store, "new", 1_000 + tick.HOST_SETTLE_MS)
-    assert store.redis.zrange(tick.HOST_SPENDS, 0, -1) == ["new"]
-    assert tick.HOST_SETTLE_MS == 120_000
+    tick._spend_host(store, "kept", 2_000)
+    tick._spend_host(store, "new", 1_000 + tick.HOST_SPENDS_KEPT_MS)
+    assert store.redis.zrange(tick.HOST_SPENDS, 0, -1) == ["kept", "new"]
+    assert tick.HOST_SPENDS_KEPT_MS == 600_000
 
 
 def test_the_quota_seat_check_runs_before_the_host_gate(store):
