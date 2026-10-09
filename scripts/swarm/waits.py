@@ -34,7 +34,7 @@ def checks_resolution(held, github):
         return ""
     if pull.state != "OPEN":
         return f"pull request {target}, now {pull.state.lower()}"
-    if not pull.head:
+    if not pull.head or held.get("previous_head") == pull.head:
         return ""
     if held.get("head") != pull.head:
         held["head"] = pull.head
