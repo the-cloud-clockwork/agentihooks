@@ -24,12 +24,28 @@ spec:
           image: {{ include "swarm.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- include "swarm.containerSecurity" . | nindent 10 }}
-          command: [python, -c, "import sys; from scripts.swarm.controller import main; sys.exit(main(['run']))"]
+          command:
+            - sh
+            - -c
+            - >-
+              agentihooks hive controller >/dev/null
+              && . "$AGENTIHOOKS_HOME/controller/credential.env"
+              && export AGENTIHOOKS_CONTROLLER_CREDENTIAL
+              && exec agentihooks controller run
           env:
             {{- include "swarm.env" . | nindent 12 }}
+            - name: AGENTIHOOKS_HOME
+              value: /run/agentihooks
             {{- include "swarm.extraEnv" .Values.controller.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
           {{- with .Values.controller.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          volumeMounts:
+            - name: home
+              mountPath: /run/agentihooks
+      volumes:
+        - name: home
+          emptyDir:
+            medium: Memory
