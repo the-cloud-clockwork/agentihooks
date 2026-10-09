@@ -144,8 +144,8 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     (root / "pyproject.toml").write_text('[tool.pytest.ini_options]\nasyncio_mode="auto"\n')
-    for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github", "evidence"):
-        (root / name).mkdir()
+    for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github", "evidence", "docker/swarm-node"):
+        (root / name).mkdir(parents=True)
         (root / name / "asset.txt").write_text(name)
     (root / "Swarm-v2.md").write_text("# plan\n")
     (root / "hooks" / "__pycache__").mkdir()
@@ -160,7 +160,14 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
     assert config["tool"]["mutmut"]["source_paths"] == ["hooks/", "scripts/"]
     assert config["tool"]["mutmut"]["only_mutate"] == ["hooks/sample.py", "scripts/other.py"]
     assert config["tool"]["mutmut"]["pytest_add_cli_args_test_selection"] == ["tests/test_sample.py"]
-    assert config["tool"]["mutmut"]["also_copy"] == ["profiles/", "docs/", ".github/", "evidence/", "Swarm-v2.md"]
+    assert config["tool"]["mutmut"]["also_copy"] == [
+        "profiles/",
+        "docs/",
+        ".github/",
+        "evidence/",
+        "Swarm-v2.md",
+        "docker/swarm-node/",
+    ]
     assert config["tool"]["mutmut"]["pytest_add_cli_args"] == [
         "-q",
         "-x",
@@ -173,7 +180,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "--mutated-path=hooks/sample.py",
         "--mutated-path=scripts/other.py",
     ]
-    for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github", "evidence"):
+    for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github", "evidence", "docker/swarm-node"):
         assert (work / name / "asset.txt").read_text() == name
     assert (work / "Swarm-v2.md").read_text() == "# plan\n"
     assert not (work / "hooks/__pycache__").exists()
