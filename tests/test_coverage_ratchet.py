@@ -74,25 +74,35 @@ def test_a_module_the_head_stopped_measuring_loses_every_line_it_still_has():
     assert ratchet.grade({}, lambda path: SOURCE, iter([base])).lost == {"hooks/a.py": [1, 2, 3]}
 
 
-REWRITTEN = "import os\n\n\n" + SOURCE + "".join(f"\n\ndef g{n}():\n    return os.sep * {n}\n" for n in range(12))
+MOVED = SOURCE + "\n\ndef h():\n    return 0\n"
+REWRITTEN = "import os\n\n\n" + MOVED + "".join(f"\n\ndef g{n}():\n    return os.sep * {n}\n" for n in range(12))
 UNRELATED = "def other():\n    return 0\n"
 
 
 def test_a_module_moved_and_rewritten_pairs_with_the_added_module_sharing_its_definitions():
-    moves = ratchet.pair_moves({"hooks/a.py": SOURCE}, {"hooks/z.py": UNRELATED, "scripts/b.py": REWRITTEN})
+    moves = ratchet.pair_moves({"hooks/a.py": MOVED}, {"hooks/z.py": UNRELATED, "scripts/b.py": REWRITTEN})
     assert moves == {"hooks/a.py": "scripts/b.py"}
 
 
 def test_a_deleted_module_pairs_with_no_unrelated_added_module():
-    assert ratchet.pair_moves({"hooks/a.py": SOURCE}, {"hooks/z.py": UNRELATED, "hooks/broken.py": "def ("}) == {}
+    assert ratchet.pair_moves({"hooks/a.py": MOVED}, {"hooks/z.py": UNRELATED, "hooks/broken.py": "def ("}) == {}
 
 
-def test_a_shared_generic_name_without_the_old_lines_pairs_nothing():
-    old_cli = "import sys\n\n\ndef main():\n    sys.exit(run(sys.argv))\n\n\ndef run(argv):\n    return len(argv)\n"
-    new_cli = "import json\n\n\ndef main():\n    print(json.dumps({}))\n\n\ndef run(argv):\n    return 0\n"
-    one_name = "def main():\n    return 1\n\n\ndef helper():\n    return 2\n\n\ndef other():\n    return 3\n"
-    assert ratchet.pair_moves({"hooks/old_cli.py": old_cli}, {"scripts/new_cli.py": new_cli}) == {}
-    assert ratchet.pair_moves({"hooks/old.py": one_name}, {"scripts/new.py": "def main():\n    return 1\n"}) == {}
+def _module(bodies: dict[str, str]) -> str:
+    return "import os\nimport sys\n" + "".join(f"\n\ndef {name}():\n    {body}\n" for name, body in bodies.items())
+
+
+def test_a_move_keeping_its_definitions_pairs_however_much_of_its_bodies_was_rewritten():
+    old = _module({f"step{n}": f"return {n}" for n in range(6)})
+    new = _module({f"step{n}": f"return {n}" if n < 2 else f"return os.sep * {n}" for n in range(6)})
+    assert ratchet.pair_moves({"hooks/a.py": old}, {"scripts/b.py": new}) == {"hooks/a.py": "scripts/b.py"}
+
+
+def test_a_lone_generic_name_or_a_minority_of_names_pairs_nothing():
+    old = _module({"main": "sys.exit(1)", "helper": "return 2", "other": "return 3"})
+    assert ratchet.pair_moves({"hooks/old.py": old}, {"scripts/new.py": _module({"main": "sys.exit(1)"})}) == {}
+    lone = _module({"main": "sys.exit(1)"})
+    assert ratchet.pair_moves({"hooks/old.py": lone}, {"scripts/new.py": _module({"main": "sys.exit(0)"})}) == {}
 
 
 def _repo(tmp_path, files):
@@ -105,7 +115,7 @@ def _repo(tmp_path, files):
 
 def test_a_move_rewritten_below_git_rename_similarity_is_followed(tmp_path):
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    _repo(tmp_path, {"hooks/a.py": SOURCE, "hooks/gone.py": UNRELATED, "tests/t.py": SOURCE})
+    _repo(tmp_path, {"hooks/a.py": MOVED, "hooks/gone.py": UNRELATED, "tests/t.py": SOURCE})
     for name in ("hooks/a.py", "hooks/gone.py", "tests/t.py"):
         (tmp_path / name).unlink()
     _repo(tmp_path, {"scripts/b.py": REWRITTEN, "tests/u.py": REWRITTEN})
@@ -114,7 +124,7 @@ def test_a_move_rewritten_below_git_rename_similarity_is_followed(tmp_path):
     ).stdout
     assert not any(line.startswith("R") for line in listed.splitlines())
     assert coverage_history.renamed(tmp_path, "HEAD~1") == {"hooks/a.py": "scripts/b.py"}
-    base = _measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE})
+    base = _measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": MOVED})
     head_source = {"scripts/b.py": REWRITTEN}.get
     moved = coverage_history.renamed(tmp_path, "HEAD~1")
     assert ratchet.grade({"scripts/b.py": {4, 5}}, head_source, iter([base]), moved).lost == {"hooks/a.py": [3]}
