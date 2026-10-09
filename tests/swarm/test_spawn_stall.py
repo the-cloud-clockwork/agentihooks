@@ -2,7 +2,7 @@ import pytest
 
 from scripts.inbox import store as inbox_store
 from scripts.inbox.store import InboxStore
-from scripts.swarm import capacity, cli, status
+from scripts.swarm import capacity, cli, status, tick
 from scripts.swarm.health import spawn_stall
 from scripts.swarm.store import AgentRecord, SwarmConfig
 from tests.swarm.test_cli import env as env
@@ -356,8 +356,13 @@ def test_capacity_reader_receives_demand_clock_and_previous_state_without_refres
         return {"placements": {"eng": [{"harness": "claude", "account": "acct"}]}}
 
     runtime.quota_capacity = reader
+    counters = []
+    runtime.quota_spent = counters.append
+    store.redis.zadd(tick.HOST_SPENDS, {"now": clock[0], "later": clock[0] + 1})
     assert spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
     assert received == [previous]
+    (counter,) = counters
+    assert counter(clock[0]) == 1
 
 
 def test_a_missing_ledger_has_no_claimable_work(stalled, monkeypatch):

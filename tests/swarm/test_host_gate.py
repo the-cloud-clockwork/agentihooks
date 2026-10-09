@@ -142,6 +142,20 @@ def test_host_spent_counts_from_the_start_lag_before_since_through_now(store):
     assert tick.host_spent(store, 60_001, 60_001) == 2
 
 
+def test_the_spawn_gate_closes_exactly_when_autoscale_has_no_room_left(store):
+    from scripts.swarm import capacity
+
+    _decide(store, 2, granted_at=50_000)
+    host = capacity.read(store, "sw")["host"]
+    counter = capacity.spawn_counter(store, 60_000)
+    seen = []
+    for name in ("first", "second"):
+        seen.append((capacity.unspent(host, counter), tick._host_full("sw", store, 60_000)))
+        tick._spend_host(store, name, 60_000)
+    seen.append((capacity.unspent(host, counter), tick._host_full("sw", store, 60_000)))
+    assert seen == [(2, ""), (1, ""), (0, f"host memory room 2, 2 spawned since it was granted: {MEMORY}")]
+
+
 def test_the_quota_seat_check_runs_before_the_host_gate(store):
     _decide(store, 0)
     actions = tick.tick("sw", store, _ledger(), FakeRuntime(full=True), now_ms=1_000)
