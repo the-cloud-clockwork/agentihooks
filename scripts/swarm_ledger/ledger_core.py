@@ -36,7 +36,7 @@ import ledger_title
 import ledger_verdict
 import orjson
 
-from scripts.swarm_ledger import ledger_groups, ledger_phases, ledger_rank
+from scripts.swarm_ledger import ledger_groups, ledger_phases, ledger_plans, ledger_rank
 
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,120}$")
@@ -106,6 +106,7 @@ EXTENSION_OPS = {
         ledger_size,
         ledger_sources,
         ledger_phases,
+        ledger_plans,
         ledger_relay,
         ledger_answer,
         ledger_verdict,
@@ -191,6 +192,8 @@ def normalize(doc):
     doc.setdefault("artifacts", [])
     doc.setdefault("artifact_trash", [])
     doc.setdefault("tasks", [])
+    doc.setdefault("plans", [])
+    doc.setdefault("slices", [])
     for name in THREADS:
         for item in doc.get(name, []) if isinstance(doc.get(name), list) else []:
             if not isinstance(item, dict):
@@ -253,6 +256,7 @@ def validate(doc):
                 ledger_tasks.check_task(item)
 
     ledger_phases.validate(doc.get("phases", []))
+    ledger_plans.validate(doc)
 
 
 def thread_paths(doc):
