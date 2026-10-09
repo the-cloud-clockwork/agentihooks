@@ -8,11 +8,10 @@ import pytest
 
 from scripts.swarm import idle, waits
 from tests.swarm.test_cli import env, run  # noqa: F401
-from tests.swarm.test_waits import tick  # noqa: F401
+from tests.swarm.test_waits import ME, tick  # noqa: F401
 
 pytestmark = pytest.mark.unit
 URL = "https://github.com/org/repo/actions/runs/123"
-ME = "sw-eng-1"
 
 
 def test_cli_wait_binds_the_branch_preflight_run(env, monkeypatch):  # noqa: F811
