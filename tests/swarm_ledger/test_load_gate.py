@@ -59,9 +59,15 @@ def test_the_load_covers_every_sweep_of_the_watch_loop_more_than_once():
 
 
 def test_the_gate_refuses_to_run_outside_ci(monkeypatch, tmp_path):
+    ran = []
+    monkeypatch.setattr(load_gate, "run", lambda folder: ran.append(folder) or [])
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(SystemExit, match="CI only"):
         load_gate.main(["--folder", str(tmp_path)])
+    assert ran == []
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert load_gate.main(["--folder", str(tmp_path)]) == 0
+    assert ran == [tmp_path]
 
 
 def test_some_open_alerts_are_past_their_quiet_hour_so_the_expiry_sweep_has_work():
