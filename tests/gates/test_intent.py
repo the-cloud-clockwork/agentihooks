@@ -7,6 +7,7 @@ import pytest
 from hooks.classifier import ClassifierUnavailable, YesNo
 from scripts.gates import Call, Gate, Who, entry, intent, intent_history
 from scripts.gates.verdicts import Verdicts
+from scripts.swarm import timing
 
 SLUG, ME, TASK = "demo", "engineer@1-1", "t1"
 WHO = Who(name=ME, swarm=SLUG, lane="eng", task=TASK)
@@ -685,3 +686,21 @@ class TestPlanChunk:
             "misses_line_16",
             "misses_line_17",
         ]
+
+
+def test_the_pass_keeps_the_tick_after_each_judged_pull_request(tmp_path):
+    second = "https://github.com/o/r/pull/10"
+    doc = {**DOC, "tasks": [*DOC["tasks"], {**DOC["tasks"][0], "id": "t2", "pr_url": second}]}
+    order = []
+
+    def ask(state):
+        order.append("judge")
+        return intent.judge(state, classifier(0.9))
+
+    keeping = timing.BEFORE_STEP.set(lambda: order.append("keep"))
+    try:
+        check(tmp_path, view=lambda url: None if url == second else PR, ask=ask).run(doc)
+        check(tmp_path / "again", ask=ask).run(doc)
+    finally:
+        timing.BEFORE_STEP.reset(keeping)
+    assert order == ["judge", "keep", "judge", "keep", "judge", "keep"]

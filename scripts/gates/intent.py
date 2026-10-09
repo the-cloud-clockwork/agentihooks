@@ -15,6 +15,7 @@ from scripts.gates import intent_history, log
 from scripts.gates.base import Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.verdicts import Verdicts
+from scripts.swarm import timing
 from scripts.swarm_ledger import plan_read
 
 NAME = "intent"
@@ -353,6 +354,7 @@ class Check:
             pr = self.view(task["pr_url"])
             if pr is not None:
                 actions += self._check(doc, task, pr, verdicts)
+                timing.keep()
         return actions
 
     def _check(self, doc, task, pr, verdicts):

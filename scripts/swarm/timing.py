@@ -65,10 +65,14 @@ def step(name: str) -> Iterator[None]:
         emit(sys.stderr, json.dumps(record))
 
 
-def call(function: Callable, *args, **kwargs) -> Any:
+def keep() -> None:
     before = BEFORE_STEP.get()
     if before is not None:
         before()
+
+
+def call(function: Callable, *args, **kwargs) -> Any:
+    keep()
     with step(f"{function.__module__}.{function.__qualname__}"):
         return function(*args, **kwargs)
 
