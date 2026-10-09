@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   probe:
@@ -14,12 +15,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        load: [none, cpu]
-        timing: [natural, jitter]
+        leg: [shard-a, shard-b, shard-c, shard-d, shard-e, shard-f, repeat-cov, repeat-nocov]
     steps:
       - uses: actions/checkout@v4
         with:
           ref: 07de3b0bcd17667c835c4d116fcff1df7c703045
+          fetch-depth: 0
+          filter: blob:none
       - uses: actions/checkout@v4
         with:
           path: probe-src
@@ -30,10 +32,56 @@ jobs:
         run: |
           pip install uv
           uv venv "$HOME/venv"
-          uv pip install --python "$HOME/venv/bin/python" -e ".[dev,all]"
-      - name: Probe
+          uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
+          echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+      - name: Durations of the failed run
+        uses: actions/download-artifact@v4
+        with:
+          name: split-3.12
+          run-id: 37986427620
+          github-token: ${{ github.token }}
+      - name: Instrument the watcher test
+        run: cp probe-src/.github/probes/test_caps_watch.py tests/swarm_ledger/test_caps.py
+      - name: Browser
+        if: startsWith(matrix.leg, 'shard')
+        timeout-minutes: 3
+        uses: ./.github/actions/browser-cache
+      - name: Shard eight as the failed job ran it
+        if: startsWith(matrix.leg, 'shard')
+        continue-on-error: true
+        env:
+          PYTHONUNBUFFERED: "1"
+          PROBE_DIAG: ${{ github.workspace }}/diag.jsonl
+          PYTEST_ADDOPTS: ${{ format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini -p tests.browser_coverage', github.workspace) }}
+          PLAYWRIGHT_BROWSERS_PATH: ${{ format('{0}/.playwright', github.workspace) }}
+          SHARD: 8/8
+          NODE_OPTIONS: ${{ format('--require {0}/tests/node_capture.cjs', github.workspace) }}
+          JS_COVERAGE_DIR: ${{ format('{0}/js-coverage', github.workspace) }}
         run: |
-          if [[ "${{ matrix.load }}" == cpu ]]; then
-            for _ in $(seq "$(nproc)"); do python3 -c "while 1: pass" & done
-          fi
-          "$HOME/venv/bin/python" probe-src/.github/probes/watch_sigterm.py 150 "${{ matrix.timing }}"
+          set -o pipefail
+          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n auto --dist loadgroup --shard "$SHARD" --tb=short -o faulthandler_timeout=60 -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml 2>&1 | grep -E "test_caps|passed|failed|^FAILED|^ERROR" | tail -40
+      - name: Watcher test repeated
+        if: startsWith(matrix.leg, 'repeat')
+        continue-on-error: true
+        env:
+          PROBE_DIAG: ${{ github.workspace }}/diag.jsonl
+          WATCH_REPEAT: "150"
+          COVOPTS: ${{ matrix.leg == 'repeat-cov' && format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini', github.workspace) || '-p no:pytest_cov' }}
+        run: python -m pytest $COVOPTS "tests/swarm_ledger/test_caps.py::Watch" -p no:anyio --tb=short -q 2>&1 | tail -20
+      - name: Diagnostics
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          path = os.path.join(os.environ["GITHUB_WORKSPACE"], "diag.jsonl")
+          rows = [json.loads(line) for line in open(path)] if os.path.exists(path) else []
+          lat = sorted(r["latency"] for r in rows if "latency" in r)
+          print("DIAG runs", len(rows), "timeouts", sum(r.get("result") == "timeout" for r in rows),
+                "latency_max", lat[-1] if lat else None, "latency_p50", lat[len(lat)//2] if lat else None)
+          if rows:
+              keys = ("worker", "parent_mask", "parent_sigterm", "child_env", "child_status_before", "ready")
+              print("DIAG first", json.dumps({k: rows[0].get(k) for k in keys}))
+          for r in rows:
+              if r.get("result") == "timeout" or r.get("latency", 0) > 1:
+                  print("DIAG case", json.dumps(r))
+          PY
