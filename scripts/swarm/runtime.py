@@ -330,7 +330,7 @@ class HerdrRuntime:
 
         candidates = [row for row in self._quota_accounts if not blocked(row)]
         preferred = [row for row in candidates if planned and row.harness == planned[0]]
-        order = agent_choice.preferring(saved["harness"], harnesses)
+        order = agent_choice.preferring(saved["harness"])
         account = (
             next((row for row in preferred if row.name == planned[1]), None)
             or quota_handoff.successor(preferred, order, thresholds)

@@ -118,7 +118,9 @@ def test_a_full_codex_only_swarm_refuses_the_spawn_without_guessing(codex_only):
 
 
 def test_fill_takes_the_rotation_harness_when_nothing_is_saved(monkeypatch):
-    monkeypatch.setattr(agent_choice, "choose", lambda requested, environ: ("codex", "rotation"))
+    monkeypatch.setattr(
+        agent_choice, "choose", lambda requested, environ: ("codex", "rotation") if requested == "" else 0
+    )
     filled = master_launch.fill({}, SwarmConfig("sw", "/repo", 0, 0))
     assert filled == {"profile": "master", "harness": "codex", "model": "gpt-6.1-sol", "effort": "high"}
 
@@ -147,6 +149,25 @@ def test_harness_of_an_unknown_process_is_empty(monkeypatch):
 
     monkeypatch.setattr(hooks.proc, "_process", lambda pid, proc: None)
     assert take_master.harness_of(1) == ""
+
+
+def test_harness_of_a_live_process_names_its_target(monkeypatch):
+    import hooks.proc
+
+    process = object()
+    monkeypatch.setattr(hooks.proc, "_process", lambda pid, proc: process)
+    monkeypatch.setattr(hooks.proc, "_target", lambda found: "codex" if found is process else "")
+    assert take_master.harness_of(1) == "codex"
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_quota_successor_accounts_prefer_the_predecessor_harness(tmp_path, harness):
+    runtime = HerdrRuntime(home=tmp_path)
+    runtime._quota_accounts = [quota_handoff_account("a", "claude"), quota_handoff_account("cx", "codex")]
+    runtime._quota_handoffs = {("eng", 0): (harness, "old")}
+    runtime._quota_ready_ids, runtime._quota_held = {"eng": ["t1"]}, {}
+    found = runtime._quota_successor_accounts({"eng": [("claude", "codex")]})
+    assert found == {"eng": {0: {(harness, "a" if harness == "claude" else "cx")}}}
 
 
 def test_successor_follows_the_given_harness_order():
