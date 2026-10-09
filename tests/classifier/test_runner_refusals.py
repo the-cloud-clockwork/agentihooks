@@ -108,15 +108,26 @@ def test_a_malformed_threshold_override_is_refused_logged_and_falls_back(home, m
 
 
 @pytest.mark.parametrize(("name", "key", "call", "fallback"), CALLERS)
-def test_a_malformed_bundle_definition_is_refused_logged_and_falls_back(home, name, key, call, fallback):
+@pytest.mark.parametrize(
+    ("fault", "reason"),
+    [
+        pytest.param(
+            lambda package, key: package.update(thresholds={key: 0.5, "extra": 0.5}),
+            "overrides must preserve package threshold keys",
+            id="threshold-keys",
+        ),
+        pytest.param(lambda package, key: package.update(version=2), "definition version must be 1", id="version"),
+    ],
+)
+def test_a_malformed_bundle_definition_is_refused_logged_and_falls_back(home, name, key, call, fallback, fault, reason):
     package = yaml.safe_load((profile_chain.BUILT_IN_PROFILES / "package" / "classifiers" / f"{name}.yaml").read_text())
-    package["thresholds"] = {key: 0.5, "extra": 0.5}
+    fault(package, key)
     folder = home / "bundle" / ".claude" / "classifiers"
     folder.mkdir(parents=True)
     (folder / f"{name}.yaml").write_text(yaml.safe_dump(package))
     with patch.object(profile_chain, "read_state", return_value={"bundle": {"path": str(home / "bundle")}}):
         assert call({}) == fallback
-    assert _refusal(name) == [[{"model": "definition", "reason": "overrides must preserve package threshold keys"}]]
+    assert _refusal(name) == [[{"model": "definition", "reason": reason}]]
 
 
 def test_a_bundle_question_that_cannot_be_built_is_refused_and_logged(home):
