@@ -3,33 +3,34 @@
   "dependency": "SV2-CTL-02",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2047",
-  "tested_commit": "a885b2f2304b335cd6d3878e67b4205f57e0c50c",
+  "tested_commit": "0b4ecf6ab0783e6f30d335875014ccd874ee4d1b",
   "status": "fixture-qualified-awaiting-dependency-merge-and-ci",
   "evidence_class": "Mocked Redis (fakeredis WATCH transactions) and a fake clock; empty fixture cluster; no Kubernetes, node autoscaler or provider call was made.",
   "interfaces": [
-    "scripts.swarm_v2.admission.PendingAdmission.admit, activate, release, pending and pending_execution_admission_total",
+    "scripts.swarm_v2.admission.PendingAdmission.admit, activate, release, held, pending and pending_execution_admission_total",
     "Policy: global pending cap, per swarm pending cap, reservation lifetime, approved templates and a default request profile",
-    "Decision outcomes admitted, replayed, deferred and impossible; counters also record expired, activated and released",
-    "scripts.swarm.tick._spawn consults a runtime admission when present: impossible tasks are blocked on the ledger with the reason, deferred tasks wait, a refused claim or failed spawn releases its reservation, the spawned task carries its reservation"
+    "Decision outcomes admitted, replayed, deferred and impossible; counters record admitted, deferred, impossible, expired, activated and released, never replays",
+    "scripts.swarm.tick._spawn admits each task inside the spawn loop after the capacity checks when the runtime carries an admission: impossible tasks are blocked on the ledger with the reason, deferred tasks wait, a refused claim, a ledger refusal or a failed spawn releases the reservation, the spawned task carries its reservation",
+    "scripts.swarm.tick._launch_checks activates the task reservation when the launch check passes, ending its pending state"
   ],
   "supported_versions": {
     "python": "3.11 and later",
     "redis": "WATCH, MULTI, sorted sets and hashes; no Lua and no server clock",
     "compatibility": "A runtime without an admission attribute spawns exactly as before; the local herdr path is unchanged"
   },
-  "authority": "Admission runs inside the controller tick, which already holds the SV2-CTL-01 lease. Actor and scope come from the swarm slug and the controller grant; no task, display label or provider name widens a cap.",
+  "authority": "Admission runs inside the swarm tick and takes the swarm slug from its caller; it performs no grant check of its own. Caps come only from the Policy the runtime constructs; no task field, display label or provider name widens a cap. A grant check belongs to the runtime that constructs PendingAdmission.",
   "states": {
-    "observed": "Cases A, B and C each passed twice from independent fake Redis state. Focused admission and tick tests passed.",
+    "observed": "Cases A, B and C each passed twice from independent fake Redis state. Focused admission, tick, launch check and size limit tests passed.",
     "accepted": "From zero remote capacity three of ten runnable tasks hold pending reservations, six are deferred in order, the impossible memory request is rejected and holds nothing.",
     "committed": "Code and fixture inputs are at tested_commit.",
     "externally_verified": "None: no Kubernetes runtime adapter carries an admission yet, and no live G3 deployment was exercised."
   },
   "validation": {
-    "command": "python -m pytest tests/test_swarm_v2_admission.py tests/swarm/test_tick.py -q -n 2 --cov=scripts.swarm_v2.admission --cov-report=term-missing",
-    "output": "166 passed in 8.29 seconds; admission 129 statements, zero missing, 100 percent coverage",
+    "command": "python -m pytest tests/test_swarm_v2_admission.py tests/swarm/test_tick.py tests/swarm/test_launch_check.py tests/test_size_limits.py -q -n 2 --cov=scripts.swarm_v2.admission --cov-report=term-missing",
+    "output": "286 passed in 10.46 seconds; admission 140 statements, zero missing, 100 percent coverage",
     "lint": "ruff check passed on changed Python files",
     "format": "ruff format check passed on changed Python files",
-    "limits": "tests/test_size_limits.py 33 passed; _spawn complexity 12 before and after, parameters unchanged at its allowlisted 8"
+    "limits": "Only the allowlisted parameter count of _spawn (8) exceeds a limit, unchanged; complexity and branches within 12"
   },
   "cases": {
     "a": "evidence/SV2-CTL-03/a-result.json",
@@ -40,11 +41,14 @@
   "rollback_rehearsal": {
     "action": "Set the global or swarm pending cap to zero: every new task is deferred with the reason distributed admission is set to zero, while a held reservation still activates so current attempts drain.",
     "authoritative_objects": "The per swarm pending reservation hash and the global pending sorted set; the outcome counter is observational.",
-    "proof": "Case C admits with a zero cap policy over the same store, admits nothing and activates the held reservation."
+    "proof": "Case C admits with a zero cap policy over the same store, admits nothing and activates the held reservation; case C also restarts the admission owner mid hold and replays the same three reservations without a new admission."
   },
   "remaining_limitations": [
-    "No Kubernetes runtime adapter exists yet to carry a PendingAdmission and create the pending Pods; that adapter and the watch that calls activate belong to later packages.",
+    "No Kubernetes runtime adapter exists yet to carry a PendingAdmission and create the pending Pods, so the tick path is inert in production; that adapter belongs to later packages and must construct Policy from its GitOps configuration, where the rollback is setting either cap to zero.",
+    "Ledger tasks have no resources field yet, so production tasks take the default request profile; the impossible request path is reachable only once a task carries resources.",
     "Provider slots come from an injected source; the production source over account capacity is wired with the Kubernetes runtime.",
+    "pending_execution_admission_total is a per swarm Redis hash read through a method; no telemetry exporter emits it yet.",
+    "An exception raised between a claim and the spawn try block leaves the reservation held until it expires, as the claim itself is held today.",
     "Full CI and mutation have not run; the dependency SV2-CTL-02 is still open."
   ]
 }
