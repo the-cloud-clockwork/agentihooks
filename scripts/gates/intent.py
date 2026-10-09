@@ -341,6 +341,8 @@ def judge(state, decide=decide):
         return UNCHECKED, f"the plan chunk for lines {state['plan_lines']} could not be read"
     try:
         verdicts = runner.run(_definition(state), state, decider=decide).verdicts
+    except definitions.DefinitionError as exc:
+        return FAIL, f"the intent definition is invalid: {exc}"
     except ClassifierError:
         return UNCHECKED, "the classifier did not answer"
     return verdicts["verdict"], verdicts["reason"]

@@ -182,6 +182,15 @@ def test_the_intent_rule_gives_pass_fail_or_unchecked_and_rejects_with_fail():
     )
 
 
+@pytest.mark.parametrize("value", ["x", "1.5"])
+def test_a_malformed_threshold_override_fails_the_check_instead_of_skipping_it(value, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_INTENT_CHECK_FAIL", value)
+    assert intent.judge({}, decide=answered()) == (
+        "fail",
+        "the intent definition is invalid: threshold fail must be between zero and one",
+    )
+
+
 def test_each_intent_threshold_is_read_by_its_own_key(monkeypatch):
     for key, value in {"REASON": "0.2", "WEAKEN": "0.7", "CHUNK": "0.4"}.items():
         monkeypatch.setenv(f"AGENTIHOOKS_CLASSIFIER_INTENT_CHECK_{key}", value)
