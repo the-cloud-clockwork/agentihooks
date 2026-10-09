@@ -102,7 +102,7 @@ import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
 from scripts.gates.base import Who
-from scripts.swarm_ledger import ledger_phases, ledger_task_duplicates
+from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates
 from scripts.swarm_ledger.repository import repository
 
 BASE = "" if ledger_link.remote() else ledger_link.base()
@@ -425,6 +425,7 @@ def cmd_publish_plan(args):
         file = upload_artifact(args.slug, args.name, path, {"task": task, "title": title, "plan": True})
         send(args, "artifact_add", task=task, title=title, file=file, plan=True)
         stored["url"] = f"{base()}/artifacts/{args.slug}/{file['id']}"
+        stored["plan"] = ledger_plans.plan_id(file["id"])
         return stored["url"]
 
     try:
@@ -432,11 +433,12 @@ def cmd_publish_plan(args):
         url, where = ledger_publish.publish(args.path, title, args.repo, artifact, issue_title=issue_title)
     except ledger_publish.PublishError as exc:
         sys.exit(str(exc))
-    ops = []
+    ops = [op("plan_add", args, plan=stored["plan"], title=title, artifact=stored["url"], url=url)]
     for phase in phases:
         fields = {"plan_url": url, "plan_ref": {"artifact": stored["url"], "lines": ranges[phase]}}
+        fields["plan"] = f"plans/{stored['plan']}"
         ops.append(op("phase_update", args, item=f"phases/{phase}", fields=fields))
-        text = (
+        note = (
             f"Plan published as a GitHub issue: {url}" if where == "issue" else f"Plan published on the ledger: {url}"
         )
         ops.append(
@@ -444,10 +446,14 @@ def cmd_publish_plan(args):
                 "op": "add",
                 "thread": f"phases/{phase}/comments",
                 "id": f"c-{uuid.uuid4().hex[:10]}",
-                "text": text,
+                "text": note,
                 "by": args.name,
             }
         )
+        ops += [
+            op("slice_add", args, phase=f"phases/{phase}", anchor=anchor)
+            for anchor in plan_ranges.marked(text, ranges[phase])
+        ]
     refused(call(args.slug, ops), ops)
     print(json.dumps({"plan_url": url, "published_to": where, "phases": phases}))
 
