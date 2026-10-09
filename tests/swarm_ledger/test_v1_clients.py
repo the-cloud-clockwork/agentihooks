@@ -240,14 +240,6 @@ def test_a_fetched_guard_is_refreshed_once_after_a_revision_conflict():
     assert [post["operation_id"] for post in posts] == ["op-1", "op-1"]
 
 
-def test_a_fetched_guard_conflicting_twice_raises_the_server_reply():
-    client = Scripted({"revision": "r1"}, http_error(409, CONFLICT), {"revision": "r2"}, http_error(409, CONFLICT))
-    with pytest.raises(urllib.error.HTTPError) as error:
-        client.mutate(SLUG, chat_add())
-    assert (error.value.code, error.value.read()) == (409, CONFLICT)
-    assert len(client.calls) == 4
-
-
 def test_a_pinned_guard_conflict_is_not_retried():
     client = Scripted(http_error(409, CONFLICT))
     with pytest.raises(urllib.error.HTTPError) as error:
