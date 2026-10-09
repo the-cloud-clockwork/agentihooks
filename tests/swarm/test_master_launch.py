@@ -708,10 +708,12 @@ def test_a_new_master_reads_quota_before_it_is_placed(up, monkeypatch):
     monkeypatch.setattr(
         rt, "quota_capacity", lambda config, agents, now: order.append(("quota", config.slug, now)), raising=False
     )
+    monkeypatch.setattr(rt, "quota_spent", lambda counter: order.append(("spent", counter(AT))), raising=False)
+    store.redis.zadd(tick_module.HOST_SPENDS, {"now": AT, "later": AT + 1})
     spawn = rt.spawn
     monkeypatch.setattr(rt, "spawn", lambda *args: order.append("spawn") or spawn(*args))
     direct(store, rt, master_launch.NEW)
-    assert order == [("quota", "sw", AT / 1000), "spawn"]
+    assert order == [("spent", 1), ("quota", "sw", AT / 1000), "spawn"]
 
 
 def quota_master(monkeypatch, tmp_path, observed):
