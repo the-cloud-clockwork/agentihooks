@@ -172,6 +172,9 @@ jobs:
           BASE: ${{ inputs.base }}
         run: |
           sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/${BASE#origin/}" --jq .sha)
+          if [[ "$sha" == "$GITHUB_SHA" || "${BASE#origin/}" == "$GITHUB_REF_NAME" ]]; then
+            sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.parents[0].sha')
+          fi
           runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&head_sha=$sha&per_page=20" --jq '.workflow_runs[].id')
           for run in $runs; do
             kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
@@ -879,16 +882,61 @@ jobs:
             base="$QUEUE_BASE"
           else
             base=$(git rev-parse "${DISPATCHED:-HEAD^1}")
+            if [[ "$base" == "$(git rev-parse HEAD)" || "${DISPATCHED#origin/}" == "$GITHUB_REF_NAME" ]]; then
+              base=$(git rev-parse HEAD^1)
+            fi
           fi
           echo "commit=$base" >> "$GITHUB_OUTPUT"
           echo "tree=$(git rev-parse "$base^{tree}")" >> "$GITHUB_OUTPUT"
 
       - name: Restore the exact coverage baseline
+        id: cached
         if: github.event_name != 'merge_group' && github.event_name != 'workflow_dispatch'
         uses: actions/cache/restore@v4
         with:
           path: ~/coverage-baseline
           key: coverage-baseline-${{ steps.base.outputs.tree }}
+
+      # The cache evicts a baseline seven days after its last read, so an idle dev falls back to the artifact it kept.
+      - name: Mint the tcc main ci App token
+        id: app-token
+        if: steps.cached.outcome == 'success' && steps.cached.outputs.cache-hit != 'true'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-contents: read
+
+      - name: Find the dev push run that published the base baseline
+        id: base-run
+        if: steps.app-token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BASE: ${{ steps.base.outputs.commit }}
+        run: |
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&head_sha=$BASE&per_page=20" --jq '.workflow_runs[].id')
+          for run in $runs; do
+            kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
+            if [[ "$kept" -gt 0 ]]; then
+              echo "Restoring the evicted coverage baseline of base $BASE from dev push run $run"
+              echo "id=$run" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No dev push Tests run on base $BASE kept a live coverage-baseline artifact."
+          exit 1
+
+      - name: Download the base baseline its dev push run published
+        if: steps.base-run.outcome == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-baseline
+          path: ~/coverage-baseline
+          run-id: ${{ steps.base-run.outputs.id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ steps.app-token.outputs.token }}
 
       - name: Download the queue base coverage baseline
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
@@ -1060,7 +1108,7 @@ jobs:
           name: coverage-baseline
           path: ~/coverage-baseline
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90
           overwrite: true
 
   # A later queue entry's base is the earlier entry's merge commit, so the run that measured it may still be finishing.

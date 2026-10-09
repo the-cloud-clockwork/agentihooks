@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
-from tests.coverage_grade import HISTORY, Measurement, Source, executed
+from tests.coverage_grade import GRADED, HISTORY, Measurement, Source, executed, pair_moves
 
 SEARCH = 60
 WINDOW = 4
@@ -18,8 +18,19 @@ def git(*args: str, cwd: Path) -> str:
 
 
 def renamed(repo: Path, base: str) -> dict[str, str]:
-    listed = git("diff", "--name-status", "-M", "--diff-filter=R", base, "HEAD", cwd=repo)
-    return {old: new for _, old, new in (line.split("\t") for line in listed.splitlines())}
+    listed = git("diff", "--name-status", "-M", "--diff-filter=RAD", base, "HEAD", cwd=repo)
+    moves, gone, added = {}, {}, {}
+    for status, *paths in (line.split("\t") for line in listed.splitlines()):
+        if status.startswith("R"):
+            moves[paths[0]] = paths[1]
+        elif paths[0].startswith(GRADED) and paths[0].endswith(".py"):
+            side, commit = (gone, base) if status == "D" else (added, "HEAD")
+            side[paths[0]] = _show(repo, commit)(paths[0])
+    if not gone:
+        return moves
+    graded = git("ls-tree", "-r", "--name-only", "HEAD", "--", *GRADED, cwd=repo).split()
+    head = ((repo / path).read_text() for path in graded if path.endswith(".py"))
+    return moves | pair_moves(gone, added, head)
 
 
 def _show(repo: Path, commit: str) -> Source:

@@ -130,6 +130,112 @@ def test_coverage_ratchet_grades_a_merge_group_against_the_branch_it_queues_onto
     assert 'base="$QUEUE_BASE"' in base["run"]
 
 
+def _step(job, name):
+    return next(step for step in _workflow()["jobs"][job]["steps"] if step.get("name") == name)
+
+
+@pytest.mark.parametrize(
+    ("dispatched", "ref", "graded"),
+    [
+        ("HEAD", "feature", "parent"),
+        ("", "feature", "parent"),
+        ("HEAD^1", "feature", "parent"),
+        ("origin/dev", "dev", "parent"),
+        ("origin/dev", "feature", "newer"),
+    ],
+)
+def test_coverage_ratchet_never_grades_a_dispatched_head_against_itself(tmp_path, dispatched, ref, graded):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    commits = {
+        "parent": _commit(repo, {"a": "1"}),
+        "head": _commit(repo, {"a": "2"}),
+        "newer": _commit(repo, {"a": "3"}),
+    }
+    _git(repo, "update-ref", "refs/remotes/origin/dev", commits["newer"])
+    _git(repo, "checkout", "-q", "--detach", commits["head"])
+    output = tmp_path / "output"
+    output.write_text("")
+    env = dict(os.environ, DISPATCHED=dispatched, QUEUE_BASE="", GITHUB_REF_NAME=ref, GITHUB_OUTPUT=str(output))
+    step = _step("coverage-ratchet", "Resolve the measured base tree")
+    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True)
+    assert f"commit={commits[graded]}\n" in output.read_text()
+
+
+@pytest.mark.parametrize(
+    ("dispatched", "ref", "restored"),
+    [("head", "feature", "parent"), ("other", "feature", "other"), ("origin/dev", "dev", "parent")],
+)
+def test_durations_restores_the_parent_baseline_when_the_dispatched_base_is_the_head(
+    tmp_path, dispatched, ref, restored
+):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$2" in\n'
+        "  */commits/head) [[ $4 == .sha ]] && echo head || echo parent ;;\n"
+        "  */commits/*) echo other ;;\n"
+        '  */runs\\?*) echo "run-${2##*head_sha=}" | cut -d"&" -f1 ;;\n'
+        "  *) echo durations-merged coverage-baseline ;;\n"
+        "esac\n"
+    )
+    (bin_dir / "gh").chmod(0o755)
+    output = tmp_path / "output"
+    output.write_text("")
+    env = dict(
+        os.environ,
+        PATH=f"{bin_dir}:{os.environ['PATH']}",
+        BASE=dispatched,
+        GITHUB_SHA="head",
+        GITHUB_REF_NAME=ref,
+        GITHUB_REPOSITORY="o/r",
+        GITHUB_OUTPUT=str(output),
+    )
+    step = _step("durations", "Find the dev push run of the dispatched base")
+    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, check=True)
+    assert output.read_text() == f"id=run-{restored}\n"
+
+
+def test_coverage_ratchet_restores_an_evicted_base_baseline_from_its_dev_push_run():
+    steps = _workflow()["jobs"]["coverage-ratchet"]["steps"]
+    names = [step.get("name") for step in steps]
+    cached = _step("coverage-ratchet", "Restore the exact coverage baseline")
+    mint = _step("coverage-ratchet", "Mint the tcc main ci App token")
+    find = _step("coverage-ratchet", "Find the dev push run that published the base baseline")
+    download = _step("coverage-ratchet", "Download the base baseline its dev push run published")
+    assert names.index(cached["name"]) < names.index(mint["name"]) < names.index(find["name"])
+    assert names.index(find["name"]) < names.index(download["name"]) < names.index("Hold every line the base ran")
+    assert mint["if"] == "steps.cached.outcome == 'success' && steps.cached.outputs.cache-hit != 'true'"
+    assert download["with"]["run-id"] == "${{ steps.base-run.outputs.id }}"
+    assert download["with"]["name"] == "coverage-baseline"
+
+
+@pytest.mark.parametrize(("kept", "found"), [("0 1", "id=run-2\n"), ("0 0", None)])
+def test_the_evicted_baseline_comes_from_the_first_dev_push_run_that_kept_it(tmp_path, kept, found):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    first, second = kept.split()
+    (bin_dir / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$2" in\n'
+        '  */runs\\?*) [[ $2 == *"head_sha=base"* ]] && printf "run-1\\nrun-2\\n" ;;\n'
+        f"  */run-1/*) echo {first} ;;\n"
+        f"  */run-2/*) echo {second} ;;\n"
+        "esac\n"
+    )
+    (bin_dir / "gh").chmod(0o755)
+    output = tmp_path / "output"
+    output.write_text("")
+    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", BASE="base", GITHUB_REPOSITORY="o/r")
+    env["GITHUB_OUTPUT"] = str(output)
+    step = _step("coverage-ratchet", "Find the dev push run that published the base baseline")
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert (result.returncode == 0) == (found is not None)
+    assert output.read_text() == (found or "")
+
+
 def test_test_count_refuses_a_base_without_its_grader(tmp_path):
     floor = _workflow()["jobs"]["test-count"]["steps"][-1]
     (tmp_path / "base").mkdir()
