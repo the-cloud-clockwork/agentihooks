@@ -11,7 +11,7 @@ ENV PATH=/opt/venv/bin:$PATH \
 WORKDIR /build
 COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/swarm-node/
 COPY scripts/swarm_v2/worker_image.py /opt/swarm-node/worker_image.py
-COPY docker/swarm-node/supervisor.py docker/swarm-node/entrypoint.sh /opt/swarm-node/
+COPY docker/swarm-node/supervisor.py docker/swarm-node/health.py docker/swarm-node/entrypoint.sh /opt/swarm-node/
 RUN python /opt/swarm-node/worker_image.py validate --architecture "$TARGETARCH" --base-image "$BASE_IMAGE" \
     && python -c 'import json; from pathlib import Path; s=json.loads(Path("/opt/swarm-node/versions.lock").read_text())["debian_snapshot"]; Path("/etc/apt/sources.list").write_text(f"deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/{s} bookworm main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/{s} bookworm-security main\n")' \
     && rm /etc/apt/sources.list.d/debian.sources \
