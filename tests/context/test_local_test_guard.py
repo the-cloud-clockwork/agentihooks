@@ -95,6 +95,7 @@ RUNNERS = [
     "echo \\ #x; pytest -q",
     "node -e \"import('vitest/node').then(v => v.startVitest('unit'))\"",
     "node --input-type=module -e \"import M from 'mocha'; await new M().run()\"",
+    "python3 -c \"import asyncio; asyncio.run(asyncio.create_subprocess_shell('python -m pytest'))\"",
     "node --input-type=module -e \"import { startVitest } from 'vitest/node'; await startVitest('unit')\"",
 ]
 
