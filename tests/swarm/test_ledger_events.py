@@ -150,11 +150,16 @@ def with_priorities(*rows):
 
 def test_a_new_priority_makes_one_master_item_naming_the_item_and_the_ask(store):
     run(store, with_priorities())
-    run(store, with_priorities(priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")))
+    actions = run(store, with_priorities(priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")))
     run(store, with_priorities(priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")))
     (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
-    assert "tasks/t1" in item.text and "Blocked: the deploy key is missing" in item.text
-    assert "triage" in item.text.lower() and not item.fyi
+    assert item.text == (
+        "New priority on ledger sw for tasks/t1: Blocked: the deploy key is missing\n"
+        "Triage it: resolve it if the call is yours, else leave it for the operator."
+    )
+    assert item.ref == "sw:priority:tasks/t1" and not item.fyi
+    assert actions == [f"told {MASTER_SEAT}: priority tasks/t1"]
+    assert store.redis.smembers(store.key("sw", "priorities-sent")) == {"tasks/t1"}
     assert texts(store, ENG_SEAT) == []
 
 
@@ -167,6 +172,7 @@ def test_priorities_open_before_the_first_pass_are_not_announced_and_later_ones_
 
 def test_the_first_pass_mark_does_not_expire(store):
     run(store, with_priorities())
+    assert store.redis.get(store.key("sw", "priorities-seeded")) == "1"
     assert store.redis.ttl(store.key("sw", "priorities-seeded")) == -1
 
 
