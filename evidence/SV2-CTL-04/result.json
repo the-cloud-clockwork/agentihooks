@@ -3,34 +3,35 @@
   "dependency": "SV2-CTL-03",
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2050",
-  "tested_commit": "5b5d88ea0710404dc9251c7110c22bccf3952acb",
+  "tested_commit": "68baedf57ffb2096eff2b91faf41ec117b84b5dc",
   "status": "fixture-qualified-awaiting-ci",
-  "evidence_class": "Mocked Redis (fakeredis), a fake clock and a fake Pod source that emits list, watch, expired cursor and deletion events; no Kubernetes API, node autoscaler or EC2 call was made.",
+  "evidence_class": "Mocked Redis (fakeredis), a fake clock and a fake Pod source that emits list, watch, expired cursor, connection reset and deletion events; no Kubernetes API, node autoscaler or EC2 call was made.",
   "interfaces": [
     "scripts.swarm_v2.kubernetes.watch: OWNER_LABEL and EXECUTION_LABEL, owner_for(slug) as the plan independent owner value, labels(owner, execution_id), PodSource with list_pods, watch_pods, read_pod and delete_pod under a uid precondition",
     "PodView keys observed Pods by uid and relists on an expired cursor, a connection error or a timeout",
-    "Reconciler.plan classifies managed orphan, missing pod, foreign, ambiguous and terminating Pods; cleanup is a constructor switch independent of matching",
-    "Controller(pods=PodView, orphan_cleanup=bool): acquire reconciles after operation recovery and before admission opens; reconcile() plans from the current kubernetes execution occupants and the Pod view, deletes an orphan only when a fresh read still equals the observed Pod and the lease still holds, and records the class counts",
+    "Reconciler.plan classifies managed orphan, missing pod, foreign, ambiguous, terminating and superseded Pods; a live Pod of a superseded generation of a seat is kept and counted, never deleted; cleanup is a constructor switch independent of matching",
+    "Controller(pods=PodView, orphan_cleanup=bool): acquire reconciles after operation recovery and before admission opens; reconcile() plans from the current kubernetes execution occupants, treats every other recorded execution as superseded, deletes an orphan only when a fresh read still equals the observed Pod and the lease and grant still hold, and writes the class counts only after a final lease check",
     "Controller.controller_orphans_by_class() reads the latest counts from the per swarm controller-orphans hash"
   ],
   "supported_versions": {
     "python": "3.11 and later",
     "redis": "Hashes only; the counts hash is observational",
     "kubernetes": "Any API that supports label selector list, resource version watch with 410 expiry and delete preconditions on uid; no client is wired yet",
-    "compatibility": "A Controller without a Pod view reconciles nothing and behaves exactly as SV2-CTL-03; the local herdr path is unchanged"
+    "compatibility": "A Controller without a Pod view reconciles nothing and writes no counts key: the SV2-CTL-01 to 03 controller and admission tests pass unchanged, and a test asserts no controller-orphans key exists without a view; the local herdr path is unchanged"
   },
-  "authority": "Every reconcile and every delete re-checks the scoped controller grant and the lease through the controller authority check. The owner label value derives from the swarm slug, never from a Pod name or display label. A Pod lacking the owner label is never listed; a Pod with another owner, an empty execution id or a twin for one execution is quarantined, never deleted.",
+  "authority": "Every reconcile and every delete re-checks the scoped controller grant and the lease through the controller authority check. The owner label value derives from the swarm slug, never from a Pod name or display label. A Pod lacking the owner label is never listed; a Pod with another owner, an empty execution id or a twin for one execution is quarantined, never deleted. Case B revokes the grant mid run: reconcile refuses with the exact grant error and deletes nothing.",
   "states": {
-    "observed": "Cases A, B and C each passed twice from independent fake Redis servers and Pod sources with identical outputs. Controller and watch tests passed, 45 in total.",
-    "accepted": "A restarted controller matches the existing managed Pod, deletes only the managed orphan and launches nothing; unlabelled lookalikes, foreign owners and ambiguous Pods leave protected state unchanged; an expired cursor relists, and a delayed deletion of an old incarnation leaves the newer Pod matched.",
+    "observed": "Cases A, B and C each passed twice from independent fake Redis servers and Pod sources with identical outputs. Controller, watch and size limit tests passed, 83 in total.",
+    "accepted": "A restarted controller matches the existing managed Pod, deletes only the managed orphan and launches nothing; unlabelled lookalikes are never listed, foreign owners and ambiguous Pods leave protected state unchanged; an expired cursor or a connection reset relists, and a delayed deletion of an old incarnation leaves the newer Pod matched.",
     "committed": "Code and fixture inputs are at tested_commit.",
     "externally_verified": "None: no Kubernetes Pod source is wired and no live G3 deployment was exercised."
   },
   "validation": {
-    "command": "python -m pytest tests/test_swarm_v2_controller.py tests/test_swarm_v2_watch.py -q -n 2",
-    "output": "45 passed",
+    "command": "python -m pytest tests/test_swarm_v2_controller.py tests/test_swarm_v2_watch.py tests/test_size_limits.py -q -n 2",
+    "output": "83 passed",
     "lint": "ruff check passed on changed Python files",
     "format": "ruff format check passed on changed Python files",
+    "review": "Standards and Spec readers round one: superseded generation deletion, unmeasured case fields, missing connection reset and grant cases, unfenced count write, unused view owner and a same name fixture collision fixed with tests; the lease to delete window and the launch labelling are recorded as limitations",
     "mutation": "Pending the pull request CI run"
   },
   "cases": {
@@ -40,15 +41,18 @@
     "manifest": "evidence/SV2-CTL-04/manifest.json"
   },
   "rollback_rehearsal": {
-    "action": "Construct the controller with orphan_cleanup False: status matching and missing pod detection continue while no Pod is deleted.",
+    "action": "Construct the controller with orphan_cleanup False: status matching and missing pod detection continue while no Pod is deleted. The runtime package that constructs the controller binds this switch from its GitOps configuration; until then the switch is the constructor argument.",
     "authoritative_objects": "The execution journal (executions hash, controller intents, runtime operations) and the Kubernetes Pods themselves; the controller-orphans counts hash is observational and safe to discard.",
     "proof": "Case C restarts a controller with cleanup disabled over the same store after a managed orphan appears: the orphan survives, the newer incarnation stays matched and no launch happens."
   },
   "remaining_limitations": [
-    "No Kubernetes API Pod source exists yet; a later runtime package must implement PodSource over list, watch and delete with a uid precondition.",
+    "No Pod creation path exists yet; the Kubernetes runtime package must label every Pod it creates with labels(owner_for(slug), execution_id), otherwise its Pods are never listed and cannot be matched or cleaned.",
+    "No Kubernetes API Pod source exists yet; it must implement PodSource over label selector list, watch with 410 expiry and delete with a uid precondition.",
+    "The lease check and the Pod delete are not one transaction: a controller paused after its final lease check can still issue one delete. The uid precondition limits that delete to the exact orphan observed, and execution ids are fresh per attempt, so a new leader never adopts that Pod.",
     "Missing pod executions are reported, not relaunched; relaunch stays with the tick and admission path.",
     "Quarantined Pods are counted and returned on the plan but not persisted for operator review.",
     "controller_orphans_by_class is a Redis hash read through a method; no telemetry exporter emits it yet.",
     "Mutation qualification is pending the pull request CI run."
-  ]
+  ],
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2074"
 }

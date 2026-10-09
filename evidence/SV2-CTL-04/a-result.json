@@ -1,5 +1,5 @@
 {
-  "tested_commit": "5b5d88ea0710404dc9251c7110c22bccf3952acb",
+  "tested_commit": "68baedf57ffb2096eff2b91faf41ec117b84b5dc",
   "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 calls",
   "case": "T-SV2-CTL-04-A",
   "passed": true,
@@ -8,50 +8,54 @@
       "case": "T-SV2-CTL-04-A",
       "state": "passed",
       "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 call",
-      "input_sha256": "6db69ad5ea15c2dd9b30e85f4d1cb3f7c63569605c595543ef5e84dd4e5a6d04",
+      "input_sha256": "a0e09d77cc72f6a9a1b471dfe6acc6d6b1d0a335f64ca0e68f50c6a04a402e53",
       "matched_pods": 1,
       "deleted": [
         "uid-orphan"
       ],
       "duplicate_launches": 0,
       "controller_orphans_by_class": {
-        "managed_orphan": 0,
+        "managed_orphan": 1,
         "missing_pod": 0,
         "foreign": 1,
         "ambiguous": 0,
-        "terminating": 0
+        "terminating": 0,
+        "superseded": 0
       },
       "after_second_restart": {
         "managed_orphan": 0,
         "missing_pod": 0,
         "foreign": 1,
         "ambiguous": 0,
-        "terminating": 0
+        "terminating": 0,
+        "superseded": 0
       }
     },
     {
       "case": "T-SV2-CTL-04-A",
       "state": "passed",
       "evidence_class": "mocked Redis, fake clock and fake Pod source; no Kubernetes, autoscaler or EC2 call",
-      "input_sha256": "6db69ad5ea15c2dd9b30e85f4d1cb3f7c63569605c595543ef5e84dd4e5a6d04",
+      "input_sha256": "a0e09d77cc72f6a9a1b471dfe6acc6d6b1d0a335f64ca0e68f50c6a04a402e53",
       "matched_pods": 1,
       "deleted": [
         "uid-orphan"
       ],
       "duplicate_launches": 0,
       "controller_orphans_by_class": {
-        "managed_orphan": 0,
+        "managed_orphan": 1,
         "missing_pod": 0,
         "foreign": 1,
         "ambiguous": 0,
-        "terminating": 0
+        "terminating": 0,
+        "superseded": 0
       },
       "after_second_restart": {
         "managed_orphan": 0,
         "missing_pod": 0,
         "foreign": 1,
         "ambiguous": 0,
-        "terminating": 0
+        "terminating": 0,
+        "superseded": 0
       }
     }
   ]
