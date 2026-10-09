@@ -529,6 +529,21 @@ def test_fill_keeps_a_saved_harness_and_picks_its_frontier_model():
     assert master_launch.fill({"harness": "codex"}, config)["model"] == "gpt-6.1-sol"
 
 
+def test_fill_leaves_a_saved_launch_on_an_unknown_harness_unclamped():
+    saved = {"harness": "copilot", "model": "gpt-x", "effort": "max"}
+    assert master_launch.fill(saved, SwarmConfig("sw", "/repo", 0, 0)) == {"profile": "master", **saved}
+
+
+def test_a_master_saved_on_an_unknown_harness_is_refused_cleanly(tmp_path):
+    config = SwarmConfig("sw", "/repo", 0, 0)
+    launch = {"harness": "copilot", "model": "gpt-x", "effort": "max"}
+    task = {"id": MASTER, "handoff": "continue", "handoff_envelope": {"reason": "recycle", "launch": launch}}
+    engine = runtime.HerdrRuntime(home=tmp_path, run=lambda *a, **k: pytest.fail("an unknown harness launched"))
+    with pytest.raises(SpawnError) as error:
+        engine.spawn(config, MASTER, "master@a1b2c3-0001", master_launch._filled(task, config))
+    assert (str(error.value), error.value.status) == ("unsupported handoff harness: copilot", "unsupported")
+
+
 def test_a_partial_handoff_launch_keeps_its_values_and_the_envelope():
     config = SwarmConfig("sw", "/repo", 0, 0)
     task = {"id": MASTER, "handoff_envelope": {"reason": "recycle", "launch": {"harness": "codex", "account": "a9"}}}

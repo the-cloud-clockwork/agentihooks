@@ -125,7 +125,7 @@ def fill(saved, config):
     """A saved launch with its empty keys filled: master profile, affinity or open seat harness, frontier model."""
     harness = saved.get("harness") or affinity.desired(config) or _open_seat()
     defaults = {"profile": _profile(config)}
-    if harness:
+    if harness in effort_range.EFFORTS:
         pick = model_pick.frontier(harness)
         defaults |= {
             "harness": harness,
