@@ -51,4 +51,4 @@ jobs:
       - name: Write and read a full size ledger from ten clients within the server budget
         run: |
           mkdir -p "$RUNNER_TEMP/ledger-load"
-          "$HOME/venv/bin/python" -m tests.ledger_load --folder "$RUNNER_TEMP/ledger-load"
+          "$HOME/venv/bin/python" -m tests.ledger_load.gate --folder "$RUNNER_TEMP/ledger-load"

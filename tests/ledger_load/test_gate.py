@@ -4,7 +4,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger_server
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
-from tests import ledger_load
+from tests.ledger_load import gate as ledger_load
 
 
 def test_p95_is_the_nearest_rank_sample():

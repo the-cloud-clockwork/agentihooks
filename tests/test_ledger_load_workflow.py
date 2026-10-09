@@ -14,4 +14,4 @@ def test_the_ledger_load_gate_runs_beside_the_shards_with_redis_inside_the_budge
     load = yaml.safe_load((WORKFLOWS / "ledger-load.yml").read_text())["jobs"]["load"]
     assert "redis" in load["services"]
     assert load["timeout-minutes"] <= 15
-    assert "-m tests.ledger_load --folder" in load["steps"][-1]["run"]
+    assert "-m tests.ledger_load.gate --folder" in load["steps"][-1]["run"]
