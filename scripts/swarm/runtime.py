@@ -507,8 +507,7 @@ class HerdrRuntime:
             picked = timing.call(model_pick.pick, agent, {} if quota_transfer else chosen, task, environ)
         else:
             picked = _lane_default(lane, agent, {} if quota_transfer else chosen)
-        if saved.get("effort"):
-            picked = replace(picked, effort=saved["effort"])
+        picked = replace(picked, effort=saved["effort"]) if saved else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
