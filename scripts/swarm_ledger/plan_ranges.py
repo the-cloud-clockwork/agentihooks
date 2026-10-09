@@ -176,7 +176,7 @@ def anchors(doc: dict, phase: dict) -> list[str]:
         text = stored_text({"artifact": url, "lines": "1-1"}, doc)
     except ValueError:
         return []
-    return slice_anchors(text, ref["lines"] if ref else f"1-{len(text.splitlines()) or 1}")
+    return slice_anchors(text, ref["lines"] if ref else f"1-{len(text.splitlines())}") if text else []
 
 
 def slice_anchors(text: str, lines: str) -> list[str]:
