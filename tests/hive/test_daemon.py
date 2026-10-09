@@ -234,6 +234,7 @@ def test_snapshot_quota_uses_the_newest_attributed_local_reading(monkeypatch, tm
     slots, quota = daemon._subscriptions({"AH_CC_TOKEN_one": "sentinel"}, {"claude": {}, "codex": {}}, 122)
     assert quota["claude:one"]["observed_at"] == 110
     assert quota["claude:one"]["five_hour"] == {"used": 20, "resets_at": 1000}
+    assert quota["claude:one"]["seven_day"] == {"used": 30, "resets_at": 2000}
 
 
 def test_idle_claude_login_is_advertised_without_credentials(monkeypatch):
@@ -267,3 +268,212 @@ def test_claude_status_requires_an_interactive_login(monkeypatch, result):
 def test_missing_claude_binary_is_not_an_interactive_login(monkeypatch):
     monkeypatch.setattr(daemon.subprocess, "run", Mock(side_effect=FileNotFoundError))
     assert daemon.claude_signed_in() is False
+
+
+def test_service_contract():
+    assert daemon.unit("/bin/agentihooks") == (
+        "[Unit]\nDescription=agentihooks hive heartbeat\n\n"
+        "[Service]\nType=simple\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        "EnvironmentFile=-%h/.agentihooks/hive.env\n"
+        'ExecStart="/bin/agentihooks" hive run\n'
+        "Restart=always\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+
+
+def test_cli_help_describes_run_and_install():
+    from scripts.hive import cli
+
+    help_text = cli._parser().format_help()
+    assert "  Publish hive telemetry every fifteen seconds\n" in help_text
+    assert "  Write and enable the hive user service\n" in help_text
+
+
+def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
+    monkeypatch.setattr(
+        daemon,
+        "observe",
+        lambda: {"slots": [], "interactive": {"claude": "", "codex": ""}, "repos": [], "sessions": {}, "quota": {}},
+    )
+    daemon.beat(redis, "machine")
+    assert registry.show(redis, "machine") == {
+        "id": "machine",
+        "name": "machine",
+        "ui": "no",
+        "ephemeral": "no",
+        "roles": [],
+        "prefer": {},
+        "max_agents": 1,
+        "harnesses": [],
+        "slots": [],
+        "interactive": {"claude": "", "codex": ""},
+        "repos": [],
+        "heartbeat_at": registry.show(redis, "machine")["heartbeat_at"],
+        "version": "",
+    }
+    assert redis.smembers(registry.INDEX) == {"machine"}
+
+
+def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
+    monkeypatch.setattr(daemon, "hive_id", lambda: "local")
+    monkeypatch.setattr(daemon, "beat", lambda redis, hive: None)
+    timestamps = iter([100, 116])
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
+    sleep = Mock(side_effect=KeyboardInterrupt)
+    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(object())
+    sleep.assert_called_once_with(0)
+
+
+def test_default_install_location_and_executable_discovery(monkeypatch, tmp_path):
+    monkeypatch.setattr(daemon.shutil, "which", lambda binary: "/bin/agentihooks" if binary == "agentihooks" else None)
+    monkeypatch.setattr(daemon.Path, "home", lambda: tmp_path)
+    run = Mock(return_value=Mock(returncode=0))
+    assert daemon.install(run=run)
+    assert (tmp_path / ".config/systemd/user/agentihooks-hive.service").read_text() == daemon.unit("/bin/agentihooks")
+    assert run.call_args_list[0].kwargs == {"capture_output": True, "text": True, "timeout": 30, "check": True}
+    assert run.call_args_list[1].kwargs == {"capture_output": True, "text": True, "timeout": 30}
+
+
+def test_install_refuses_a_missing_executable(monkeypatch, tmp_path):
+    monkeypatch.setattr(daemon.shutil, "which", lambda binary: None)
+    with pytest.raises(registry.HiveError) as caught:
+        daemon.install(unit_dir=tmp_path)
+    assert str(caught.value) == "agentihooks executable not found"
+
+
+def test_install_reloads_a_changed_service(tmp_path):
+    (tmp_path / "agentihooks-hive.service").write_text("old")
+    run = Mock(return_value=Mock(returncode=0))
+    assert daemon.install("/bin/agentihooks", tmp_path, run)
+    assert run.call_count == 2
+    assert (tmp_path / "agentihooks-hive.service").read_text() == daemon.unit("/bin/agentihooks")
+
+
+def test_repositories_default_root_and_checkout_boundaries(monkeypatch, tmp_path):
+    monkeypatch.delenv("HIVE_REPO_ROOT", raising=False)
+    monkeypatch.setattr(daemon.Path, "home", lambda: tmp_path)
+    assert daemon.repositories() == []
+    root = tmp_path / "dev"
+    root.mkdir()
+    (root / "file").write_text("data")
+    repo = root / "project"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    nested = repo / "nested"
+    nested.mkdir()
+    (nested / ".git").mkdir()
+    assert daemon.repositories() == [str(repo)]
+
+
+@pytest.fixture
+def observations(monkeypatch):
+    from scripts import claude_quota_balancer as balancer
+
+    monkeypatch.setattr(daemon, "claude_signed_in", lambda: False)
+    monkeypatch.setattr(daemon, "_claude_snapshots", lambda observed: None)
+    monkeypatch.setattr(balancer, "cached_observations", Mock(return_value=[]))
+    monkeypatch.setattr(daemon.codex_router, "accounts", Mock(return_value=[]))
+    monkeypatch.setattr(daemon.codex_router, "quotas", Mock(return_value={}))
+    return balancer
+
+
+def test_subscription_records_include_caps_unknown_readings_and_login(observations, monkeypatch):
+    from scripts.codex_quota import CodexQuota
+
+    balancer = observations
+    result = balancer.ProbeResult(
+        "one", "allowed", "OK", 60, balancer.QuotaWindow(20, 1000), balancer.QuotaWindow(40, 2000)
+    )
+    balancer.cached_observations.return_value = [(120, result)]
+    account = daemon.codex_router.CodexAccount("two", "AH_CX_TOKEN_two")
+    daemon.codex_router.accounts.return_value = [account, daemon.codex_router.CodexAccount("off", signed_in=False)]
+    reading = CodexQuota(121, "", balancer.QuotaWindow(30, 1000), balancer.QuotaWindow(40, 2000))
+    daemon.codex_router.quotas.return_value = {"two": reading}
+    monkeypatch.setattr(daemon, "claude_signed_in", lambda: True)
+    environ = {"AH_CC_TOKEN_one": "sentinel", "AH_CC_TOKEN_empty": "", "unrelated": "sentinel"}
+    slots, quota = daemon._subscriptions(environ, {"claude": {"unobserved": 1, "api": 1}, "codex": {}}, 122)
+    assert slots == [
+        {"harness": "claude", "account": name, "kind": kind, "cap": cap}
+        for name, kind, cap in sorted(
+            [
+                ("one", "subscription", 6),
+                ("unobserved", "subscription", 0),
+                (daemon.account_sessions.UNROUTED, "interactive", 0),
+            ]
+        )
+    ] + [{"harness": "codex", "account": "two", "kind": "subscription", "cap": 6}]
+    assert quota["claude:unobserved"] == {
+        "five_hour": {"used": None, "resets_at": None},
+        "seven_day": {"used": None, "resets_at": None},
+        "observed_at": None,
+    }
+    balancer.cached_observations.assert_called_once_with(environ=environ)
+    daemon.codex_router.accounts.assert_called_once_with(environ)
+    daemon.codex_router.quotas.assert_called_once_with([account], environ)
+
+
+def test_stale_claude_reading_does_not_advertise_capacity(observations):
+    result = observations.ProbeResult(
+        "one", "allowed", "OK", 60, observations.QuotaWindow(20, 100000), observations.QuotaWindow(40, 200000)
+    )
+    observations.cached_observations.return_value = [(1, result)]
+    slots, quota = daemon._subscriptions({"AH_CC_TOKEN_one": "sentinel"}, {"claude": {}, "codex": {}}, 10000)
+    assert slots == [{"harness": "claude", "account": "one", "kind": "subscription", "cap": 0}]
+    assert quota["claude:one"]["observed_at"] == 1
+
+
+def test_snapshot_missing_windows_bad_records_and_newer_cache(monkeypatch, tmp_path):
+    from hooks.context import quota_usage
+    from scripts import claude_quota_balancer as balancer
+
+    monkeypatch.setattr(daemon.account_sessions, "live_sessions", lambda: {1: "one"})
+    rows = {
+        "unrelated": {"pid": 2},
+        "broken": {"pid": 1},
+        "partial": {"pid": 1},
+        "older": {"pid": 1},
+        "same": {"pid": 1},
+    }
+    monkeypatch.setattr(daemon.broadcast, "_load_sessions", lambda: rows)
+    monkeypatch.setattr(quota_usage, "_snapshot_path", lambda session: tmp_path / f"{session}.json")
+    (tmp_path / "broken.json").write_text("bad json")
+    for name, at, windows in (
+        ("partial", 0.5, {}),
+        ("older", 0.25, {"five_hour": {"used_percentage": 99, "resets_at": 8}}),
+        ("same", 0.5, {"seven_day": {"used_percentage": 88, "resets_at": 9}}),
+    ):
+        (tmp_path / f"{name}.json").write_text(json.dumps({"updated_at": at, "rate_limits": windows}))
+    observed = {}
+    daemon._claude_snapshots(observed)
+    at, result = observed["one"]
+    assert at == 0.5
+    assert result.five_hour == balancer.QuotaWindow()
+    assert result.seven_day == balancer.QuotaWindow()
+
+
+def test_api_fields_empty_login_and_zero_sessions(observations, monkeypatch):
+    from scripts.routing.slots import Slot
+
+    monkeypatch.setattr(daemon.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(daemon.account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(daemon, "repositories", lambda: [])
+    monkeypatch.setattr(daemon.time, "time", lambda: 122)
+    calls = []
+
+    def slots(source, environ, now):
+        calls.append((environ, now))
+        return [Slot("claude", "api", 0, 0, kind="api", provider="anthropic")]
+
+    monkeypatch.setattr(daemon.claude_api.ClaudeApiSource, "slots", slots)
+    monkeypatch.setattr(daemon.codex_api.CodexApiSource, "slots", lambda *args: [])
+    report = daemon.observe()
+    assert report["interactive"] == {"claude": "", "codex": ""}
+    assert report["sessions"] == {"claude:api": 0}
+    assert report["slots"] == [
+        {"harness": "claude", "account": "api", "kind": "api", "cap": 0, "provider": "anthropic"}
+    ]
+    assert calls == [(daemon.os.environ, 122)]

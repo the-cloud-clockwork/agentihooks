@@ -103,6 +103,14 @@ def _registry(args: argparse.Namespace) -> None:
         _list()
 
 
+def _daemon(command: str) -> int:
+    from scripts.hive import daemon
+
+    actions = {"run": lambda: daemon.run(redis_client()), "install": daemon.install}
+    result = actions[command]()
+    return 1 if result is False else 0
+
+
 def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -115,14 +123,8 @@ def main(argv: list[str]) -> int:
         elif args.command == "revoke":
             auth.revoke(redis_client(), args.id)
             print(f"revoked {args.id}")
-        elif args.command == "run":
-            from scripts.hive import daemon
-
-            daemon.run(redis_client())
-        elif args.command == "install":
-            from scripts.hive import daemon
-
-            return 0 if daemon.install() else 1
+        elif args.command in ("run", "install"):
+            return _daemon(args.command)
         elif args.command in ("set", "show", "list"):
             _registry(args)
         else:

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from redis import Redis
 
-from hooks.context import account_sessions, broadcast, quota_usage
+from hooks.context import account_sessions, broadcast
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, session_bands
 from scripts.hive import registry
@@ -80,6 +80,8 @@ def _reading(five: balancer.QuotaWindow, week: balancer.QuotaWindow, observed_at
 
 
 def _claude_snapshots(observed: dict) -> None:
+    from hooks.context import quota_usage
+
     live = account_sessions.live_sessions()
     for session, info in broadcast._load_sessions().items():
         account = live.get(info.get("pid"))
