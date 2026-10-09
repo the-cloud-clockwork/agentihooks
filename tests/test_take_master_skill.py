@@ -26,3 +26,11 @@ def test_skill_passes_the_skill_gate():
 def test_the_skill_runs_a_command_the_parser_accepts():
     for flags in re.findall(r"agentihooks swarm <slug> take-master((?: --[a-z]+)*)", SKILL.read_text()):
         assert build_parser().parse_args(["s", "take-master", *flags.split()]).command == "take-master"
+
+
+def test_a_master_plan_carries_slice_anchors_and_every_task_its_slice():
+    text = SKILL.read_text()
+
+    assert "<!-- slice: <id> -->" in text
+    assert "agentihooks ledger --slug <slug> --as <name> publish-plan <plan file> --phase <phase ids>" in text
+    assert "--plan-slice <id>" in text

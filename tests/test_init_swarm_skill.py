@@ -60,6 +60,17 @@ def test_a_plan_continuing_a_ledger_appends_its_phases_with_a_parsed_command():
     assert (args.command, args.action, args.path) == ("plan", "phases", "<phases.json>")
 
 
+def test_manual_phase_tasks_come_from_a_published_plan_with_slice_anchors():
+    from scripts.swarm_ledger import ledger
+
+    text = SKILL.read_text()
+    [publish] = re.findall(r"^agentihooks ledger (--slug <slug> --as <name> publish-plan \S+ --phase \S+)$", text, re.M)
+    args = ledger.build_parser().parse_args(publish.split())
+    assert (args.command, args.path, args.phase) == ("publish-plan", "<plan-file>", "<phase-ids>")
+    assert "<!-- slice: <id> -->" in text
+    assert re.search(r"^agentihooks ledger --slug <slug> task add .*--plan-slice <id>", text, re.M)
+
+
 def test_the_sweep_template_uses_flags_the_sweep_parser_accepts():
     from scripts.trace_cli import build_sweep_parser
 
