@@ -1425,6 +1425,7 @@ def test_mutations_enforce_the_ledger_talk_budget(live, monkeypatch):
     store.update(SLUG, gates={"talk": "enforce"})
     worker = "engineer@323133-0440"
     marks = progress.Progress(redis, SLUG)
+    marks.outcome(worker, "pushed", 1)
     for _ in range(talk.BUDGET):
         marks.talk(worker)
 

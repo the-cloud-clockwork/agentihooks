@@ -122,7 +122,8 @@ def _health_rows(store, slug, agents, quiet, at):
 
 def talk_since_outcome(store, slug, rows):
     marks = progress.Progress(store.redis, slug)
-    return {row["name"]: marks.read(row["name"]).talk for row in rows if row.get("lane") in WORKER_LANES}
+    read = {row["name"]: marks.read(row["name"]) for row in rows if row.get("lane") in WORKER_LANES}
+    return {name: mark.talk if mark.outcome_at else 0 for name, mark in read.items()}
 
 
 def compact_limit(config):

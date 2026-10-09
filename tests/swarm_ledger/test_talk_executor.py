@@ -106,6 +106,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
 
 
 def say_budget(rig):
+    rig.redis.hset(f"{KEY_ROOT}:swarm:{SLUG}:progress:{ENG}", mapping={"outcome_at": 1, "outcome": "pushed"})
     for n in range(BUDGET):
         said = rig.cli("say", f"step {n} landed")
         assert said.returncode == 0, said.stderr
