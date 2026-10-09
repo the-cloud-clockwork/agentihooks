@@ -143,6 +143,14 @@ def test_client_logs_and_drops_a_refused_swarm_notice(monkeypatch, capsys):
     assert "swarm notice dropped, the ledger refused it" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("refuse", [True, False])
+def test_client_reports_whether_a_swarm_notice_landed(monkeypatch, refuse):
+    _capture(monkeypatch, refuse=refuse)
+    client = LedgerClient()
+    assert client.followup("sw", "hello") is (not refuse)
+    assert client.priority("sw", "tasks/t1", "hello") is (not refuse)
+
+
 def test_client_still_raises_a_refused_agent_comment(monkeypatch):
     _capture(monkeypatch, refuse=True)
     with pytest.raises(LedgerRefused):

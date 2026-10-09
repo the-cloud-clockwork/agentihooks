@@ -21,4 +21,4 @@ def plain(text: str, kind: str = "comment") -> str:
         text = pattern.sub(" ", text)
     words = " ".join(text.split()[: ledger_comments.LIMITS[kind]])
     text = REPEATS.sub(",", words.replace(" ,", ",").replace(" .", ".")).strip(" ,")
-    return text if text and not ledger_comments.problems(text, kind) else FALLBACK
+    return text or FALLBACK

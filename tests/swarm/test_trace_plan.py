@@ -553,6 +553,20 @@ def test_run_saves_the_filed_cut_before_its_follow_up(ask, tmp_path):
     assert saved["filed"] == ["a diesel generator | power/generator | it powers the light"]
 
 
+def test_a_later_cut_is_filed_beside_the_earlier_one(ask, tmp_path):
+    folder, home, ledger = tmp_path / "t1", tmp_path / "home", Ledger()
+    write_plan(folder)
+    ask(0.9, 0.8, 0.1)
+    run(folder, ledger, home)
+    write_plan(folder, DOGHOUSE + "- a dog bed | doghouse/bed | the dog sleeps on it\n")
+    ask(0.1, score=None, start=3)
+    record, _ = run(folder, ledger, home)
+    assert record["filed"] == [
+        "a diesel generator | power/generator | it powers the light",
+        "a dog bed | doghouse/bed | the dog sleeps on it",
+    ]
+
+
 def test_run_on_an_unchanged_plan_asks_nothing_and_writes_nothing(ask, tmp_path):
     folder, home, ledger = tmp_path / "t1", tmp_path / "home", Ledger()
     write_plan(folder)
