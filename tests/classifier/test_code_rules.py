@@ -13,7 +13,7 @@ TARGET = "tests.classifier.test_code_rules:RULE"
 
 def _questions(definition, state, params):
     asked = runner.questions_for(definition, params)
-    if state.get("wide"):
+    if state.get("wide") or params.get("wide"):
         asked["second"] = YesNo("Second?", "yes", "no")
     return asked
 
@@ -190,6 +190,17 @@ def test_load_checks_a_code_rule_case_against_its_rule(home, raw, message):
     with pytest.raises(corpus.CorpusError) as error:
         load()
     assert str(error.value) == message
+
+
+def test_a_rule_definition_checks_its_baseline_against_its_questions(definition_home):
+    write_definition(definition_home, sample())
+    good = {**case("c", True, noul(0.9), baseline=[{"accept": False}]), "expected": {"accept": True}}
+    write_corpus(definition_home, [good])
+    assert [item.baseline for item in load()] == [({"accept": False},)]
+    write_corpus(definition_home, [{**good, "baseline": [{"accept": "x"}]}])
+    with pytest.raises(corpus.CorpusError) as error:
+        load()
+    assert str(error.value) == "case c expected accept is not a verdict its rule can give"
 
 
 def test_an_unregistered_code_rule_is_still_refused(home, monkeypatch):

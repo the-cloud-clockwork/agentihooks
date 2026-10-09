@@ -182,6 +182,20 @@ def test_the_intent_rule_gives_pass_fail_or_unchecked_and_rejects_with_fail():
     )
 
 
+def test_the_tests_first_faults_and_guidance_form_the_reason():
+    state = {"task_part": "tests-first", "pull_request_diff": ""}
+    assert intent.judge(state, decide=answered(accepts_both_states=0.1, changes_gate_behavior=0.9)) == (
+        "fail",
+        "the preparatory tests may not accept both old and new gate states; the tests first part may change gate "
+        "behaviour; What would meet intent: Accept both old and new gate states in the preparatory tests without "
+        "changing gate behaviour. Deliver the gate implementation in the later pull request.",
+    )
+    assert intent.judge({"task_part": "tests-first"}, decide=answered()) == (
+        "fail",
+        "the tests first part requires a complete pull request diff to judge gate behaviour",
+    )
+
+
 @pytest.mark.parametrize("value", ["x", "1.5"])
 def test_a_malformed_threshold_override_fails_the_check_instead_of_skipping_it(value, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_INTENT_CHECK_FAIL", value)

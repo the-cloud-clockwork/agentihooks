@@ -38,7 +38,7 @@ def main(argv=None):
     args = sys.argv[1:] if argv is None else argv
     definition = definitions.load(intent.PURPOSE)
     path = Path(args[0]) if args else corpus.path_for(intent.PURPOSE)
-    print(json.dumps(measure(corpus.load(definition, path), definition), indent=1))
+    print(json.dumps(measure(corpus.load(definition, path)), indent=1))
     return 0
 
 

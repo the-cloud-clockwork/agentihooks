@@ -37,6 +37,10 @@ SECTION = re.compile(f"{re.escape(START)}.*?{re.escape(END)}", re.S)
 TESTS_FIRST = f"{PURPOSE}-tests-first"
 BASE_QUESTIONS = ("usable", "delivers", "reachable", "weakens")
 CHUNK_QUESTIONS = ("underdelivers", "overdelivers")
+TESTS_FIRST_GUIDANCE = (
+    "What would meet intent: Accept both old and new gate states in the preparatory tests "
+    "without changing gate behaviour. Deliver the gate implementation in the later pull request."
+)
 REASONS = {
     "delivers": "the change may not deliver what the task text asks",
     "reachable": "nothing in the change may let the phase reach it",
@@ -227,7 +231,7 @@ def _definition(state):
 
 def _questions(definition, state, params):
     if state.get("task_part") == "tests-first":
-        return runner.questions_for(definition, params)
+        return runner.questions_for(definition)
     rows = _rows(state)
     fits = len(BASE_QUESTIONS) + len(CHUNK_QUESTIONS) + len(rows) <= MAX_QUESTIONS
     asked = runner.questions_for(definition, {**params, "rows": [list(row) for row in rows] if fits else []})
@@ -278,10 +282,7 @@ def _chunk_steps(state, answers, thresholds):
 
 def remediation(state: dict, answers: dict, thresholds: dict) -> str:
     if state.get("task_part") == "tests-first":
-        return (
-            "What would meet intent: Accept both old and new gate states in the preparatory tests "
-            "without changing gate behaviour. Deliver the gate implementation in the later pull request."
-        )
+        return TESTS_FIRST_GUIDANCE
     steps = []
     if state.get("task_text"):
         task = f"{state['task']}: {state['task_text']}"
@@ -307,7 +308,7 @@ def _verdict(state, answers, thresholds):
         if answers["changes_gate_behavior"].noul >= thresholds["weaken"]:
             faults.append("the tests first part may change gate behaviour")
         if faults:
-            return FAIL, "; ".join([*faults, remediation(state, answers, thresholds)])
+            return FAIL, "; ".join([*faults, TESTS_FIRST_GUIDANCE])
     usable, weakens, fail = answers["usable"].noul, answers["weakens"].noul, thresholds["fail"]
     chunk = _chunk_reasons(state, answers, thresholds)
     if usable >= fail and weakens < thresholds["weaken"] and not chunk:
