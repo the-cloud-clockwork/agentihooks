@@ -28,7 +28,7 @@ export function withDefaults(d) {
     artifacts: (Array.isArray(d.artifacts) ? d.artifacts : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
     artifact_trash: (Array.isArray(d.artifact_trash) ? d.artifact_trash : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
     plans: entries(d.plans), slices: entries(d.slices),
-    phases: list("phases",["title", "description", "done", "out_of_scope", "depends_on", "planning", "release"], ["comments"]),
+    phases: list("phases", ["title", "description", "done", "out_of_scope", "depends_on", "planning", "release"], ["comments"]),
     questions: list("questions", ["text", "out_of_scope"], ["answers", "comments"]),
     followups: list("followups", ["text", "done", "out_of_scope"], ["comments"]),
     tasks: list("tasks", ["title", "description", "phase", "lane", "state", "claimed_by", "issue_url", "pr_url", "plan_url", "done", "out_of_scope", "rank"], ["comments"]),
