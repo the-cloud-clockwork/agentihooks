@@ -443,3 +443,5 @@ def test_evaluate_detects_api_for_its_harness(monkeypatch, harness, available, l
     decision = qp.evaluate("subscription")
     assert decision.action == expected
     assert (decision.target.account if decision.target else None) == ("api" if expected == "handoff" else None)
+    if expected == "handoff":
+        assert f"--agent {harness}" in qp.render(decision, "subscription", "/repo")

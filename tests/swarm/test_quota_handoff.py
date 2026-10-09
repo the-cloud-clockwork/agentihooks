@@ -718,3 +718,35 @@ def test_api_successors_preserve_harness_and_predecessor_restrictions():
     assert quota_handoff.exclusion(api, quota_handoff.Thresholds(), ("codex", "api")) == "is the account handing off"
     pool = account("token", harness="codex", five=0, week=0, sessions=0)
     assert quota_handoff.successor([api, pool], True, quota_handoff.Thresholds()) == api
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_swarm_quota_transfer_routes_to_api_with_no_window_readings(tmp_path, monkeypatch, target):
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
+    rt._quota_accounts = [
+        account("old", state="DRAIN"),
+        capacity.Account(target, "api", "OPEN", 0, None, None, 3, kind="api"),
+    ]
+    rt._quota_cap, rt._quota_floor, rt._quota_share = 3, 5, 0
+    seen = []
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    monkeypatch.setattr(
+        rt,
+        "_launch",
+        lambda cfg, lane, task, name, argv, **kw: seen.append(argv) or runtime.Placed("pane", target, "api"),
+    )
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3")
+    task = {
+        "id": "e",
+        "title": "Continue task",
+        "handoff": "Saved Handoff v2",
+        "handoff_envelope": {
+            "reason": "quota",
+            "launch": {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "account": "old"},
+        },
+    }
+    placed = rt.spawn(config, "eng", "engineer@a1b2c3-0002", task)
+    assert (placed.harness, placed.account) == (target, "api")
+    assert _option(seen[0], "--route") == "api"
+    assert _option(seen[0], "--agent") == target
+    assert _option(seen[0], "--profile") == "engineer"
