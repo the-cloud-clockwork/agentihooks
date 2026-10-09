@@ -118,7 +118,7 @@ export async function flush(unloading) {
   try {
     const resp = await writeLedger(body, unloading);
     if (!resp.ok) throw new Error(String(resp.status));
-    await resp.json();
+    rev = Math.max(rev, ((await resp.json())._meta || {}).rev || rev);
     ops = ops.slice(sentOps.length);
     for (const c of sentChecks) if (checks[c.path] && checks[c.path].value === c.value) delete checks[c.path];
     lsWrite();
