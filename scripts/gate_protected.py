@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts import ci_wiring
+from scripts import ci_reuse, ci_wiring
 
 GATE = ci_wiring.GATE
 WORKFLOWS = ".github/workflows"
