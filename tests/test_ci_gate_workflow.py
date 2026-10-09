@@ -35,6 +35,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "split",
             "kind-due",
             "helm-kind",
+            "ledger-load",
         }
     )
     assert gate["if"] == "${{ always() }}"
@@ -43,6 +44,16 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     assert "needs" not in jobs["lint"]
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
+
+
+def test_ledger_load_runs_beside_the_shards_with_redis_inside_the_budget():
+    jobs = _workflow()["jobs"]
+    assert "ledger-load" in jobs["gate-required"]["needs"]
+    assert jobs["ledger-load"] == {"uses": "./.github/workflows/ledger-load.yml"}
+    load = yaml.safe_load((_ROOT / ".github/workflows/ledger-load.yml").read_text())["jobs"]["load"]
+    assert "redis" in load["services"]
+    assert load["timeout-minutes"] <= 15
+    assert "-m scripts.swarm_ledger.load_gate" in load["steps"][-1]["run"]
 
 
 def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel():

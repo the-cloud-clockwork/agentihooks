@@ -1,0 +1,50 @@
+name: Ledger server load
+
+on:
+  push:
+    branches: ["diffcheck/**"]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    env:
+      REDIS_URL: redis://127.0.0.1:6379/0
+      AGENTIHOOKS_SWARM_REDIS_URL: redis://127.0.0.1:6379/0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        env:
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          uv venv --python "$PYTHON_PATH" "$HOME/venv"
+          uv pip install --python "$HOME/venv/bin/python" -e ".[all]"
+
+      - name: Write and read a full size ledger from ten clients within the server budget
+        run: |
+          mkdir -p "$RUNNER_TEMP/ledger-load"
+          "$HOME/venv/bin/python" -m scripts.swarm_ledger.load_gate --folder "$RUNNER_TEMP/ledger-load"
