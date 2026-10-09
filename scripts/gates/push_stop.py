@@ -8,6 +8,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from hooks.config import CONDITIONS_TIMEOUT_SEC
 from scripts.gates.base import Decision
 from scripts.swarm.naming import lane_of, plain
 from scripts.swarm_ledger import ledger_kinds
@@ -22,8 +23,8 @@ SETTLED = "a later stop passed with the work committed, on origin and recorded"
 PUSHED = "pushed"
 GITHUB_RE = re.compile(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
 GIT_TIMEOUT_S = 60
-# The Stop condition is killed at CONDITIONS_TIMEOUT_SEC (10 s): a gate still running then lets the stop through unpushed.
-GATE_TIMEOUT_S = 8
+# Under the Stop condition's kill, with room for the pushes: a gate still running at the kill lets the stop through.
+GATE_TIMEOUT_S = CONDITIONS_TIMEOUT_SEC - 2
 PREPUSH = Path("scripts") / "ci_prepush" / "__init__.py"
 GATE_FAILED = (
     "The pre push gate failed in {path}, so the stop hook did not push it. "
