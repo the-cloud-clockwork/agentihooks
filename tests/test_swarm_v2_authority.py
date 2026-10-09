@@ -97,6 +97,8 @@ def test_legacy_writers_cannot_change_distributed_claims(fixture):
 
 
 def test_replay_recovers_highest_generation_without_reviving_old_worker(fixture):
+    from scripts.swarm_v2.authority import TaskAuthority
+
     store, authority, controller, clock, start = fixture
     old, old_token = start()
     authority.admit(old_token, 100)
@@ -108,6 +110,7 @@ def test_replay_recovers_highest_generation_without_reviving_old_worker(fixture)
     with pytest.raises(SwarmError) as error:
         authority.admit(token, 100)
     assert str(error.value) == "dependency_unavailable"
+    authority = TaskAuthority(store, controller, authority.authorize)
     assert authority.replay("task") == second
     assert authority.replay("task") == second
     assert authority.journal("task") == journal
