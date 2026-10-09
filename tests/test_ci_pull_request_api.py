@@ -18,7 +18,7 @@ LOCAL_ONLY = {ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_dow
 TOKEN = re.compile(
     r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
     r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)_\w*"
-    r"|(?<![\w.'\"-])(secrets|github)\s*(\)|\}\})",
+    r"|\$\{\{(?:(?!\}\})[\s\S])*?(?<![\w.'\"-])(secrets|github)\s*(\)|\}\})",
     re.IGNORECASE,
 )
 APP_TOKEN = "${{ steps.app-token.outputs.token }}"
@@ -44,7 +44,7 @@ def _all_jobs():
 
 def _all_steps():
     for name, job in _all_jobs():
-        if TOKEN.search(str(job.get("env", {}))):
+        if TOKEN.search(_values(job.get("env"))):
             yield name, {"name": "job env", "env": job["env"]}, ROOT
         for step in job.get("steps", []):
             action = step.get("uses", "")
@@ -55,10 +55,14 @@ def _all_steps():
             yield name, step, ROOT
 
 
+def _values(mapping: dict | None) -> str:
+    return "\n".join(map(str, (mapping or {}).values()))
+
+
 def _holds_token(step: dict) -> bool:
     return bool(
-        TOKEN.search(str(step.get("env", {})))
-        or TOKEN.search(str(step.get("with", {})))
+        TOKEN.search(_values(step.get("env")))
+        or TOKEN.search(_values(step.get("with")))
         or TOKEN.search(step.get("run", ""))
         or step.get("uses", "").startswith("actions/github-script@")
     )
@@ -260,6 +264,8 @@ def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step
         {"env": {"GH_TOKEN": "${{ secrets['GITHUB_TOKEN'] }}"}},
         {"env": {"GH_TOKEN": '${{ secrets["GH_PAT"] }}'}},
         {"env": {"GH_TOKEN": "${{ secrets [ 'github_token' ] }}"}},
+        {"env": {"GH_TOKEN": "${{ secrets['GITHUB_TOKEN'] }} \"quoted\""}},
+        {"with": {"token": "${{ secrets\n  .GITHUB_TOKEN }}"}},
         {"run": "echo ${{ github['token'] }}"},
         {"with": {"github-token": '${{ github["token"] }}'}},
         {"env": {"ALL": "${{ toJSON(secrets) }}"}},
@@ -281,6 +287,8 @@ def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step
         "secret-in-brackets",
         "secret-in-double-quoted-brackets",
         "secret-in-spaced-brackets",
+        "secret-in-brackets-beside-double-quotes",
+        "secret-across-lines",
         "github-token-in-brackets",
         "github-token-in-double-quoted-brackets",
         "secrets-context-to-json",
@@ -302,6 +310,8 @@ def test_each_way_of_reaching_the_api_is_an_offender(plant):
         "${{ secrets['SONAR_TOKEN'] }}",
         "${{ contains(github.ref, 'github') }}",
         "https://github.com/the-cloud-clockwork/agentihooks",
+        'case "$host" in github) exit 0;; esac',
+        "see (the docs on github)",
     ],
     ids=[
         "event-name",
@@ -311,6 +321,8 @@ def test_each_way_of_reaching_the_api_is_an_offender(plant):
         "bracketed-other-secret",
         "quoted-word",
         "url",
+        "shell-case-label",
+        "prose-in-parentheses",
     ],
 )
 def test_a_value_without_the_workflow_token_holds_none(value):
