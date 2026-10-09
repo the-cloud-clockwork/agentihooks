@@ -13,8 +13,9 @@ from hooks.classifier.questions import Choice, Question, Score, YesNo, validate
 from hooks.context import profile_chain
 
 NAME = re.compile(r"[a-z][a-z0-9_-]*\Z")
+VARIABLE = re.compile(r"[A-Z][A-Z0-9_]*\Z")
 QUESTION_FIELDS = {"name", "type", "instructions", "true", "false", "options", "levels", "each"}
-FIELDS = {"version", "purpose", "fallbacks", "questions", "thresholds", "rule"}
+FIELDS = {"version", "purpose", "fallbacks", "questions", "thresholds", "environment", "rule"}
 
 
 class DefinitionError(ClassifierInputError):
@@ -42,6 +43,7 @@ class Definition:
     questions: tuple[QuestionSpec, ...]
     thresholds: dict[str, float]
     rule: VerdictRule
+    environment: dict[str, str]
     digest: str = ""
 
 
@@ -127,6 +129,20 @@ def _thresholds(raw: object) -> dict[str, float]:
     return {_identifier(key, "threshold key"): _probability(value, key) for key, value in raw.items()}
 
 
+def _variables(raw: object, thresholds: dict) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        raise DefinitionError("environment must be a mapping")
+    variables = {}
+    for key, value in raw.items():
+        if key not in thresholds:
+            raise DefinitionError(f"environment key {key} must name a defined threshold")
+        variable = _text(value, "environment variable")
+        if not VARIABLE.fullmatch(variable):
+            raise DefinitionError(f"invalid environment variable: {variable}")
+        variables[key] = variable
+    return variables
+
+
 def _rule(raw: object, questions: tuple[QuestionSpec, ...], thresholds: dict) -> VerdictRule:
     raw = _mapping(raw, {"type", "threshold"}, "rule")
     kind = raw.get("type")
@@ -154,7 +170,8 @@ def _parse(name: str, raw: object) -> Definition:
     questions = _questions(raw.get("questions"))
     thresholds = _thresholds(raw.get("thresholds", {}))
     rule = _rule(raw.get("rule"), questions, thresholds)
-    return Definition(name, purpose, fallbacks, questions, thresholds, rule)
+    environment = _variables(raw.get("environment", {}), thresholds)
+    return Definition(name, purpose, fallbacks, questions, thresholds, rule, environment)
 
 
 def _read(name: str, path: Path) -> Definition:
@@ -188,21 +205,25 @@ def _overrides(package: Definition, selected: Definition) -> None:
             raise DefinitionError("code rule overrides must preserve package question keys")
 
 
-def _environment(definition: Definition) -> Definition:
+def _environment(definition: Definition, environ: dict | None = None) -> Definition:
+    environ = os.environ if environ is None else environ
     prefix = f"AGENTIHOOKS_CLASSIFIER_{definition.name.upper().replace('-', '_')}_"
     thresholds = dict(definition.thresholds)
-    for key, value in thresholds.items():
-        raw = os.environ.get(prefix + key.upper().replace("-", "_"))
+    for key in thresholds:
+        raw = environ.get(prefix + key.upper().replace("-", "_"))
+        legacy = raw is None and key in definition.environment
+        if legacy:
+            raw = environ.get(definition.environment[key])
         if raw is not None:
             try:
                 value = float(raw)
             except ValueError as exc:
                 raise DefinitionError(f"threshold {key} must be between zero and one") from exc
-        thresholds[key] = _probability(value, key)
+            thresholds[key] = value if legacy else _probability(value, key)
     return replace(definition, thresholds=thresholds)
 
 
-def load(name: str) -> Definition:
+def load(name: str, *, environ: dict | None = None) -> Definition:
     name = _identifier(name, "classifier name")
     paths = _paths(name)
     existing = [path for path in paths if path.is_file()]
@@ -211,6 +232,7 @@ def load(name: str) -> Definition:
     definition = _read(name, existing[-1])
     if paths[0].is_file() and existing[-1] != paths[0]:
         _overrides(_read(name, paths[0]), definition)
-    definition = _environment(definition)
-    digest = hashlib.sha256(json.dumps(asdict(definition), sort_keys=True).encode()).hexdigest()
+    definition = _environment(definition, environ)
+    effective = {key: value for key, value in asdict(definition).items() if key != "environment"}
+    digest = hashlib.sha256(json.dumps(effective, sort_keys=True).encode()).hexdigest()
     return replace(definition, digest=digest)
