@@ -1,0 +1,61 @@
+{
+  "package": "SV2-IMG-01",
+  "fixture": "aa72c593116e425da92221ae984a36fc",
+  "tested_commit": "5325b183b44f40dbd8824a36559aa3a426de5602",
+  "mocked": false,
+  "startup_network": "none",
+  "lock_sha256": "03586596a000bf36f9f6e0592c12e88ffa60c09c251bfb60afcef8e19c8451f7",
+  "cases": [
+    "A",
+    "B",
+    "C"
+  ],
+  "status": "passed",
+  "production_rollout": "not exercised",
+  "schema_version": 1,
+  "integration_gate": "G2",
+  "implementation_status": "waiting for runtime prerequisite and pull request",
+  "code_evidence": {
+    "tested_commit": "5325b183b44f40dbd8824a36559aa3a426de5602",
+    "source_url": "https://github.com/the-cloud-clockwork/agentihooks/commit/5325b183b44f40dbd8824a36559aa3a426de5602",
+    "issue_url": "https://github.com/the-cloud-clockwork/agentihooks/issues/1938",
+    "pull_request_url": null
+  },
+  "interfaces": [
+    "versions lock validation",
+    "checksum verified native artifact installation",
+    "declared and observed software inventory",
+    "immutable packaged profile templates",
+    "offline container startup report"
+  ],
+  "authority": {
+    "actor": "task owner",
+    "scope": "image build and isolated containers",
+    "worker_cluster_credentials": false
+  },
+  "state": {
+    "observed": "real isolated build and container outputs",
+    "accepted": "fixtures A B C passed",
+    "committed": "tested source commit recorded",
+    "externally_verified": "CI and production rollout not run"
+  },
+  "checks": {
+    "focused_pytest": "29 passed",
+    "helper_coverage_percent": 99,
+    "lint": "passed",
+    "format": "passed",
+    "size_against_stacked_base": "84 known offenders, zero errors",
+    "standards_review": "closed",
+    "spec_review": "closed"
+  },
+  "limitations": [
+    "Linux amd64 only",
+    "Native profile materialization and main agent supervision belong to later IMG packages",
+    "Production image publication and rollout remain with antoncore GitOps",
+    "Dependency SV2-RUN-05 remains open; CI full suite and mutation await the image pull request"
+  ],
+  "local_compatibility": "private home and existing local runtime imports passed",
+  "previous_image_id": "sha256:662490c2a82d3b344af17673f153b7cbf58b2d70a74ae570de26d8669a9627ce",
+  "rebuilt_image_id": "sha256:36cf177c44abd8a7701fff592869fb6f78a813c92a7051d6bfadedefc39e7327",
+  "rollback": "retained previous fixture image started again after uncached rebuild; no production selection changed"
+}
