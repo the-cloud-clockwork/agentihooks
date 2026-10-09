@@ -156,3 +156,14 @@ def test_a_task_without_a_description_is_named():
 
 def test_a_dependency_the_ledger_does_not_know_is_not_a_slice_problem():
     assert check(doc(task("a", depends_on=["ghost"]))) == []
+
+
+def test_every_phase_task_linking_the_plan_without_plan_lines_is_named():
+    url = "http://127.0.0.1:8765/artifacts/demo/plan.md"
+    document = doc(task("a", plan_url=url), task("b", plan_url=url, plan_slice="b", plan_lines="3-4"))
+    document["tasks"][0]["plan_url"] = url
+    document["tasks"] += [task("c", plan_url=url), task("d", phase="p2", plan_url=url), task("e")]
+    assert check(document) == [
+        "Task a links the plan but has no plan lines.",
+        "Task c links the plan but has no plan lines.",
+    ]

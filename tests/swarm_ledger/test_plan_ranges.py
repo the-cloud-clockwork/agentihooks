@@ -91,6 +91,42 @@ def test_missing_anchor_refused(published):
     assert not any(t["id"] == "missing" for t in state["tasks"])
 
 
+def test_a_task_without_a_slice_is_refused_in_a_phase_whose_plan_has_anchors(published):
+    state, rejected = add(published, "loose")
+    assert rejected == ["add-loose"]
+    assert state["_meta"]["warnings"] == [
+        "phase p1 has a plan with slice anchors: add the task with --plan-slice naming one of first, second, third"
+    ]
+    assert not any(t["id"] == "loose" for t in state["tasks"])
+
+
+def test_plan_tasks_and_tasks_the_swarm_queues_need_no_slice(published):
+    state, rejected = add(published, "plan", lane="plan", kind="plan")
+    assert rejected == []
+    state, rejected = add(published, "release", kind="ops", by="swarm")
+    assert rejected == []
+    assert [t["id"] for t in state["tasks"]] == ["plan", "release"]
+
+
+def test_a_phase_without_anchors_takes_tasks_without_a_slice(plan_ledger):
+    state, rejected = add(plan_ledger, "free", plan_url="https://github.com/acme/app/issues/1")
+    assert rejected == []
+    assert [t["id"] for t in state["tasks"]] == ["free"]
+
+
+def test_anchors_are_read_inside_the_phase_range_or_from_a_stored_plan_link(published):
+    from scripts.swarm_ledger import plan_ranges
+
+    state = core.sync(published)[0]
+    phase = state["phases"][0]
+    ref = phase["plan_ref"]
+    assert plan_ranges.anchors(state, phase) == ["first", "second", "third"]
+    assert plan_ranges.anchors(state, {"plan_ref": {**ref, "lines": "13-14"}}) == []
+    assert plan_ranges.anchors(state, {"plan_url": ref["artifact"]}) == ["first", "second", "third"]
+    for other in ({}, {"plan_url": "https://github.com/acme/app/issues/1"}):
+        assert plan_ranges.anchors(state, other) == []
+
+
 def test_slice_without_range_refused(plan_ledger):
     add(plan_ledger, "plan", lane="plan", kind="plan")
     add(plan_ledger, "first", plan_url="https://github.com/acme/app/issues/1")
