@@ -83,15 +83,28 @@ def _headings(entries: list[tuple[int, int, str]], phase: dict) -> list[tuple[in
 
 
 def slice_lines(text: str, name: str, phase_range: str) -> str:
+    if not name:
+        raise ValueError(f"slice anchor {name} is missing or repeated in its phase")
     lines = text.splitlines()
     start, end = bounds(phase_range)
     end = min(end, len(lines))
     entries = [(n, level, line) for n, level, line in sections(text) if start <= n <= end]
     matches = [n for n, _, line in entries if (match := ANCHOR.fullmatch(line)) and match[1] == name]
-    if len(matches) != 1:
-        raise ValueError(f"slice anchor {name} is missing or repeated in its phase")
-    first = matches[0]
-    body, level = _owner(entries, first)
+    if matches:
+        if len(matches) != 1:
+            raise ValueError(f"slice anchor {name} is missing or repeated in its phase")
+        first = matches[0]
+        body, level = _owner(entries, first)
+    else:
+        headings = [
+            (n, depth)
+            for n, depth, title in entries
+            if depth and re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w.-])", title)
+        ]
+        if len(headings) != 1:
+            raise ValueError(f"slice anchor {name} is missing or repeated in its phase")
+        first, level = headings[0]
+        body = first
     stop = next(
         (n for n, depth, line in entries if n > body and (ANCHOR.fullmatch(line) or 0 < depth <= level)), end + 1
     )
@@ -126,11 +139,21 @@ def check_phase_ref(doc: dict, phase: dict) -> None:
         raise ValueError(f"plan_ref lines for phase {phase['id']} must be the range computed from its plan")
 
 
-def task_slice(doc: dict, phase: dict, name: str) -> str:
+def task_slice(doc: dict, phase: dict, name: str, plan_url: str = "") -> str:
+    from scripts.swarm_ledger import plan_packages
+
+    if not isinstance(name, str):
+        raise ValueError("plan slice must be a string")
     ref = phase.get("plan_ref")
-    if ref is None:
+    if ref is not None:
+        return slice_lines(stored_text(ref, doc), name, ref["lines"])
+    url = plan_url or phase.get("plan_url")
+    if not url:
         raise ValueError("publish a plan artifact for the phase before adding a plan slice")
-    return slice_lines(stored_text(ref, doc), name, ref["lines"])
+    text = (
+        plan_packages.text() if plan_packages.linked(name, url) else stored_text({"artifact": url, "lines": "1-1"}, doc)
+    )
+    return slice_lines(text, name, f"1-{len(text.splitlines())}")
 
 
 def invalid_tasks(plan: dict, doc: dict, ids: list[str]) -> list[str]:

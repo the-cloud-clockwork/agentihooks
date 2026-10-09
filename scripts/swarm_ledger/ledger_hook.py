@@ -267,7 +267,7 @@ def serve_ledgers():
 
     from scripts.swarm_ledger import server_lifetime
 
-    if os.environ.get("LEDGER_AUTOSTART") == "0" or not any(LEDGER_DIR.glob("*.json")):
+    if os.environ.get("LEDGER_AUTOSTART") == "0" or ledger_link.remote() or not any(LEDGER_DIR.glob("*.json")):
         return
     try:
         address = ledger_link.address()
