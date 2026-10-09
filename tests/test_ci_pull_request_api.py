@@ -123,6 +123,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/swarm_ledger/artifact_sanity.py",
         "tests/count_floor.py",
         "tests/coverage_baseline.py",
+        "tests/coverage_ratchet.py",
         "tests/dev_durations.py",
         "tests/refresh_durations.py",
         "tests/shard_budget.py",
