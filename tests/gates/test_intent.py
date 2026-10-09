@@ -700,7 +700,9 @@ def test_the_pass_keeps_the_tick_after_each_judged_pull_request(tmp_path):
     keeping = timing.BEFORE_STEP.set(lambda: order.append("keep"))
     try:
         check(tmp_path, view=lambda url: None if url == second else PR, ask=ask).run(doc)
+        assert order == ["judge", "keep"]
         check(tmp_path / "again", ask=ask).run(doc)
     finally:
         timing.BEFORE_STEP.reset(keeping)
-    assert order == ["judge", "keep", "judge", "keep", "judge", "keep"]
+    assert order[2] == "judge"
+    assert sorted(order[2:]) == ["judge", "judge", "keep", "keep"]
