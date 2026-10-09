@@ -27,8 +27,7 @@ _LAUNCHERS = {
 }
 _LAUNCH_OPTIONS = {"--project", "--directory", "-C", "--cwd", "--with", "--python", "-p", "--package"}
 _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ksh"})
-_SHELL_FLAG = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
-_HEREDOC = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?.*?\n\1\b", re.DOTALL)
+_SHELL_FLAG = re.compile(r"^-[A-Za-z]+$")
 _SUBSTITUTIONS = re.compile(r"\$\(([^()]*)\)|`([^`]+)`")
 
 
@@ -81,43 +80,55 @@ def _expand(tokens: list[str], depth: int) -> list[list[str]]:
         return []
     if Path(tokens[0]).name in _SHELLS:
         for index, token in enumerate(tokens[1:], 1):
-            if _SHELL_FLAG.fullmatch(token) and index + 1 < len(tokens):
+            if _SHELL_FLAG.fullmatch(token) and "c" in token and index + 1 < len(tokens):
                 return commands(tokens[index + 1], depth + 1)
     return [tokens]
 
 
 def _heredocs(command: str, depth: int) -> tuple[str, list[list[str]]]:
-    result = []
-    for match in _HEREDOC.finditer(command):
-        prefix = command[: match.start()].rsplit("\n", 1)[-1]
-        body = match[0].split("\n", 1)[1].rsplit("\n", 1)[0]
+    result, kept = [], []
+    lines = iter(command.splitlines(keepends=True))
+    for line in lines:
+        prefix, marker, tail = line.partition("<<")
+        if not marker:
+            kept.append(line)
+            continue
+        delimiters = shlex.split(tail.removeprefix("-"))
+        if not delimiters:
+            raise ValueError("Missing heredoc delimiter")
+        body = []
+        for content in lines:
+            if content.rstrip("\r\n").lstrip("\t") == delimiters[0]:
+                break
+            body.append(content)
+        kept.append(prefix + "\n")
         for tokens in commands(prefix, depth + 1):
             name = Path(tokens[0]).name
             if name in _SHELLS:
-                result.extend(commands(body, depth + 1))
+                result.extend(commands("".join(body), depth + 1))
             elif re.fullmatch(r"python[\d.]*|pypy[\d.]*", name):
-                result.append([name, "-c", body])
-    return _HEREDOC.sub("", command), result
+                result.append([name, "-c", "".join(body)])
+    return "".join(kept), result
 
 
 def _substitutions(command: str) -> list[str]:
-    scripts, quote, index = [], "", 0
-    while index < len(command):
-        character = command[index]
+    scripts, quote, end = [], None, 0
+    for index, character in enumerate(command):
+        if index < end:
+            continue
         if character == "\\" and quote != "'":
-            index += 2
+            end = index + 2
             continue
         match = _SUBSTITUTIONS.match(command, index)
         if match and quote != "'":
-            scripts.append(match[1] or match[2])
-            index = match.end()
+            scripts.append(match[1] or match[2] or "")
+            end = match.end()
             continue
         if character in {"'", '"'}:
-            if not quote:
+            if quote is None:
                 quote = character
             elif quote == character:
-                quote = ""
-        index += 1
+                quote = None
     return scripts
 
 

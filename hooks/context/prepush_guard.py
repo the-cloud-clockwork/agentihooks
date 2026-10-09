@@ -40,7 +40,9 @@ def _unpassed(payload: dict) -> Path | None:
     from hooks.context.shell_commands import commands
     from scripts.ci_prepush import passed
 
-    command = payload["tool_input"].get("command") or payload["tool_input"].get("cmd") or ""
+    command = payload["tool_input"].get("command") or payload["tool_input"].get("cmd")
+    if not command:
+        return None
     cwd = Path(_resolve_cwd(command, payload.get("cwd")))
     for tokens in commands(command):
         push = _push(tokens)

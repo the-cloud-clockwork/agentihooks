@@ -82,11 +82,14 @@ def _python_test(args: list[str]) -> bool:
                 return True
         elif arg.startswith(("-m", "-c")) and _PYTHON_TEST.search(arg[2:]):
             return True
-    return any(Path(arg).name.startswith(("test_", "test-")) and arg.endswith(".py") for arg in args)
+    return any(
+        Path(arg).name in _RUNNERS or (Path(arg).name.startswith(("test_", "test-")) and arg.endswith(".py"))
+        for arg in args
+    )
 
 
 def _test_command(tokens: list[str]) -> bool:
-    name = Path(tokens[0]).name.split("@", 1)[0]
+    name = Path(tokens[0]).name.partition("@")[0]
     args = tokens[1:]
     if name in _RUNNERS or name.startswith("pytest-"):
         return True
@@ -110,7 +113,9 @@ def check_local_tests(payload: dict) -> None:
 
     try:
         tool_input = payload.get("tool_input", {})
-        command = tool_input.get("command") or tool_input.get("cmd") or ""
+        command = tool_input.get("command") or tool_input.get("cmd")
+        if not command:
+            return
         runs_tests = any(_test_command(tokens) for tokens in commands(command))
     except ValueError:
         raise BlockAction(_DENY) from None
