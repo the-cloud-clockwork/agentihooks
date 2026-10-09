@@ -1,0 +1,13 @@
+{
+  "package": "SV2-LDG-01",
+  "tested_commit": "42a01505c97dde74803aee8ccc17834a5c2be000",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37936842869",
+  "fixture_clock": "time.sleep patched and recorded; no wall clock waits",
+  "independent_runs": 2,
+  "cleanup": "pytest tmp_path homes and the module scoped ledger folder; no live resource mutations",
+  "mutation_scope": "Comments and joins on the fixture ledger only; the in-process server is the single writer of its SQLite file",
+  "inputs": {
+    "remote-worker-home.json": "e4c673cc9ca50564d66f964d7f20abe187614b306aa53cdba4cc59646274a110"
+  }
+}

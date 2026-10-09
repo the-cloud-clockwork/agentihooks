@@ -1,0 +1,19 @@
+{
+  "package": "SV2-LDG-01",
+  "tested_commit": "42a01505c97dde74803aee8ccc17834a5c2be000",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37936842869",
+  "fixture_clock": "time.sleep patched and recorded; no wall clock waits",
+  "independent_runs": 2,
+  "cleanup": "pytest tmp_path homes and the module scoped ledger folder; no live resource mutations",
+  "mutation_scope": "Comments and joins on the fixture ledger only; the in-process server is the single writer of its SQLite file",
+  "case": "T-SV2-LDG-01-A",
+  "test": "test_worker_with_a_read_only_home_reads_its_task_and_posts_an_update@fakeredis",
+  "job": 113842058513,
+  "output": "PASSED at 2026-10-09T13:33:57.4771593Z",
+  "task_read": true,
+  "update_committed": true,
+  "home_changed": false,
+  "ledger_directory_created": false,
+  "ledger_remote_auth_failures_total": 0
+}
