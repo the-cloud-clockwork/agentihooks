@@ -17,7 +17,6 @@ ENV PATH=/opt/venv/bin:$PATH \
     LEDGER_HOST=0.0.0.0 \
     LEDGER_PORT=8765 \
     LEDGER_DIR=/data \
-    SWARM_AUTH_MODE=local \
     SWARM_RELOAD=0
 RUN groupadd --gid 10001 swarm && useradd --uid 10001 --gid swarm --create-home swarm && mkdir /data && chown swarm:swarm /data
 COPY --from=build /opt/venv /opt/venv

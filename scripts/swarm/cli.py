@@ -149,6 +149,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
     token = controller.take_tick_lock(store, slug, held, TICK_LOCK_MS)
     if token is None:
         return ["another tick is running"]
+    keeping = timing.BEFORE_STEP.set(lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS))
     try:
         ledger = controller.FencedLedger(store, slug, held, ledger)
         runtime = controller.FencedRuntime(
@@ -230,6 +231,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         timing.call(command_runner.publish, store, slug, timing.call(ledger.state, slug))
         return controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
+        timing.BEFORE_STEP.reset(keeping)
         controller.release_tick_lock(store, slug, token)
 
 
