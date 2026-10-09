@@ -182,13 +182,16 @@ function quotaRows(sw, now) {
     master: !!master.account && r.account === master.account && r.agent === (master.harness || "claude") }));
 }
 
-let routing = null, routingRead = null;
+const ROUTING_READ_MS = 60000;
+let routing = null, routingRead = null, routingAt = -Infinity;
 
 function loadRouting() {
-  if (routingRead) return;
+  if (routingRead || Date.now() - routingAt < ROUTING_READ_MS) return;
+  routingAt = Date.now();
   routingRead = readRouting().then((resp) => (resp.ok ? resp.json() : Promise.reject(resp.status)))
     .then((reply) => { routing = reply.data; renderQuota(swarm, Date.now(), true); })
-    .catch(() => { routingRead = null; });
+    .catch(() => {})
+    .finally(() => { routingRead = null; });
 }
 
 function routingKey(q, field) {
