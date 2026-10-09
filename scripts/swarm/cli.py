@@ -68,6 +68,7 @@ from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
     affinity,
     agent_up,
+    bottleneck,
     clearance,
     control_notifications,
     delivery,
@@ -770,6 +771,7 @@ def cmd_status(store, args):
 
     for line in quota_view.lines(capacity.read(store, args.slug), now_ms()) + spawn_holds(store, args.slug):
         print(line)
+    print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
     print(_snapshot_line(auto_snapshot(config)))
     print(_affinity_line(affinity.report(store, args.slug, config, agents)))
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
