@@ -326,7 +326,7 @@ jobs:
           PYTHONUNBUFFERED: "1"
           PYTEST_ADDOPTS: ${{ matrix.python-version == '3.12' && format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini', github.workspace) || '-p no:pytest_cov' }}
           SHARD: ${{ matrix.shard }}/${{ matrix.python-version == '3.12' && 8 || 4 }}
-        run: python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n auto --dist loadgroup --shard "$SHARD" --tb=short --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml && if [[ "$SHARD" == 1/* ]]; then python -c 'import json; from pathlib import Path; p=Path("durations.json"); d=json.loads(p.read_text()); d[next(iter(d))]+=1000; p.write_text(json.dumps(d)); t=Path("shard-durations/plant/durations.json"); t.parent.mkdir(parents=True); t.write_text(p.read_text())'; python -m tests.shard_budget shard-durations/plant/durations.json; fi
+        run: python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n auto --dist loadgroup --shard "$SHARD" --tb=short --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
