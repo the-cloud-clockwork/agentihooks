@@ -56,6 +56,7 @@ class Operation:
     target: dict
     phase: Phase = Phase.ACCEPTED
     result: dict = field(default_factory=dict)
+    controller_epoch: int | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,8 @@ class OperationJournal:
         payload_digest = digest({"action": request.action, "payload": request.payload})
 
         def create(pipe):
+            from scripts.swarm import lease
+
             agent = self._current(slug, request.execution_id, request.generation, pipe)
             expected = Operation(
                 operation_id,
@@ -121,12 +124,15 @@ class OperationJournal:
                 agent.runtime_backend,
                 payload_digest,
                 agent.runtime_target,
+                controller_epoch=lease.EPOCH.get(),
             )
             raw = pipe.hget(self.store.key(slug, "runtime-operations"), operation_id)
             if not raw:
                 return expected
             previous = _decode(raw)
-            if replace(previous, phase=Phase.ACCEPTED, result={}) != expected:
+            if replace(previous, phase=Phase.ACCEPTED, result={}) != replace(
+                expected, controller_epoch=previous.controller_epoch
+            ):
                 raise OperationConflict(_ERRORS["payload"])
             return previous
 
@@ -167,7 +173,13 @@ class OperationJournal:
         for _ in range(WRITE_ATTEMPTS):
             with self.store.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(key, self.store.key(slug, "executions"))
+                    from scripts.swarm import lease
+
+                    epoch = lease.EPOCH.get()
+                    keys = (key, self.store.key(slug, "executions"))
+                    pipe.watch(*keys, *((self.store.key(slug, "control-owner"),) if epoch is not None else ()))
+                    if epoch is not None:
+                        lease.require_epoch(self.store, slug, epoch)
                     operation = change(pipe)
                     pipe.multi()
                     pipe.hset(key, operation.operation_id, json.dumps(asdict(operation)))
