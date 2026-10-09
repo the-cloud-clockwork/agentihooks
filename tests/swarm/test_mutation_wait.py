@@ -57,6 +57,13 @@ def preflight(monkeypatch):
         },
         report={"files": [], "not_mutated": [], "failed": False},
         missing=False,
+        report_name="report.json",
+        artifacts=[
+            {"id": 7, "name": "mutation-preflight-report", "expired": False},
+            {"id": 6, "name": "mutation-preflight-report", "expired": False},
+            {"id": 9, "name": "other-report", "expired": False},
+            {"id": 8, "name": "mutation-preflight-report", "expired": True},
+        ],
         requests=[],
     )
 
@@ -65,16 +72,10 @@ def preflight(monkeypatch):
         if args[-1].endswith("/zip"):
             data = io.BytesIO()
             with zipfile.ZipFile(data, "w") as zipped:
-                zipped.writestr("report.json", json.dumps(state.report))
+                zipped.writestr(state.report_name, json.dumps(state.report))
             output = data.getvalue()
         elif "artifacts?" in args[-1]:
-            output = json.dumps(
-                {
-                    "artifacts": []
-                    if state.missing
-                    else [{"id": 7, "name": "mutation-preflight-report", "expired": False}]
-                }
-            )
+            output = json.dumps({"artifacts": [] if state.missing else state.artifacts})
         else:
             output = json.dumps(state.run)
         return subprocess.CompletedProcess(args, 0, output)
@@ -90,6 +91,11 @@ def test_the_tick_ends_a_clean_preflight_once(tick, preflight):  # noqa: F811
     assert idle.wait(tick.store.redis, "sw", ME) is None
     assert len(tick.told()) == 1
     assert tick.end() == []
+    assert preflight.requests == [
+        "repos/org/repo/actions/runs/123",
+        "repos/org/repo/actions/runs/123/artifacts?per_page=100",
+        "repos/org/repo/actions/artifacts/7/zip",
+    ]
 
 
 def test_the_tick_names_every_failing_mutant_and_unmutated_file(tick, preflight):  # noqa: F811
@@ -196,5 +202,26 @@ def test_report_read_failure_ends_red(preflight, monkeypatch):
         return original(args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", api)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert "complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
+
+
+def test_a_nested_complete_report_can_pass(preflight):
+    preflight.report_name = ".mutation-gate/report.json"
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now green; no failing mutants"
+    )
+
+
+@pytest.mark.parametrize("report", [None, {}])
+def test_a_malformed_report_cannot_pass(preflight, report):
+    preflight.report = report
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert "complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
+
+
+def test_an_archive_without_the_report_cannot_pass(preflight):
+    preflight.report_name = "other.json"
     held = {**waits.on("mutation", URL), "head": "first"}
     assert "complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
