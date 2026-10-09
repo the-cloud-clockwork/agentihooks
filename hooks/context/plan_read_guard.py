@@ -99,7 +99,7 @@ def _ledger_dir(env) -> Path:
 
 
 def _names_folder(text: str, root: Path) -> bool:
-    if FOLDER.search(text) or ("/artifacts/" in GITHUB.sub(" ", text) and "$" in text):
+    if FOLDER.search(text) or ("/artifacts/" in GITHUB.sub("", text) and "$" in text):
         return True
     for token in text.split():
         path = Path(os.path.expandvars(token)).expanduser()

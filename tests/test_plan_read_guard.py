@@ -217,6 +217,7 @@ def test_github_artifact_download_allowed_and_ledger_address_by_variable_refused
     assert check(bash(f'curl -s "$L"/artifacts/{SLUG}/$A.md'), env(ledger))
     assert check(bash(f"curl -s $(base)/artifacts/{SLUG}/$A"), env(ledger))
     assert check(bash(f"curl -s http://h:1/pre/artifacts/{SLUG}/$A"), env(ledger))
+    assert check(bash(f"curl -s $L/art/actions/artifacts/ifacts/{SLUG}/$A"), env(ledger))
     assert check(bash("curl -sL https://github.com/o/r/actions/runs/1/artifacts/$ID"), env(ledger)) is None
 
 
