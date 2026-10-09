@@ -1192,7 +1192,7 @@ def test_an_auto_swarm_reads_the_host_once_and_autoscales_on_the_stored_room(tmp
     assert readings == [None]
     stored = {key: value for key, value in decision["host"].items() if key != "granted_at"}
     assert decision["autoscale"]["host"] == stored
-    assert stored["limit"] == "memory"
+    assert (stored["room"], stored["limit"]) == (46, "load")
 
 
 def test_the_stored_top_level_host_room_wins_over_the_autoscale_copy():
