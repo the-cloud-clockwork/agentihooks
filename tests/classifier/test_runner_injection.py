@@ -1,3 +1,5 @@
+import pytest
+
 from hooks.classifier import runner
 from hooks.classifier.result import Answer, DecisionResult
 
@@ -29,6 +31,30 @@ def test_runner_uses_injected_decision_and_environment(definition_home, monkeypa
         (
             {"value": 1},
             {"accept": output.definition.questions[0].question},
-            {"purpose": "sample", "harness": None, "fallbacks": []},
+            {"purpose": "sample", "fallbacks": []},
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("fallbacks", "harness", "options"),
+    [
+        ("cli", None, {"purpose": "sample"}),
+        ("cli", "codex", {"purpose": "sample", "harness": "codex"}),
+        ("none", "claude", {"purpose": "sample", "harness": "claude", "fallbacks": []}),
+    ],
+)
+def test_injected_decider_receives_only_options_that_differ_from_decide_defaults(
+    definition_home, fallbacks, harness, options
+):
+    raw = sample()
+    raw["fallbacks"] = fallbacks
+    write_definition(definition_home, raw)
+    calls = []
+
+    def judge(state, questions, **kwargs):
+        calls.append(kwargs)
+        return DecisionResult({"accept": Answer("noul", noul=0.7)}, "recorded")
+
+    runner.run("sample", {"value": 1}, harness=harness, decider=judge, environ={})
+    assert calls == [options]
