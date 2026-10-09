@@ -468,6 +468,35 @@ def test_interrupted_authority_completion_replays_the_committed_ledger(monkeypat
     assert len(outcomes.provider.calls) == 1
 
 
+def test_successor_finishes_authority_after_a_committed_ledger_response_is_lost(monkeypatch, tmp_path):
+    from scripts.swarm_ledger.api.resources import revision
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, clock, start, agent = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    outcomes.propose(token, proposal)
+    original = outcomes.authority.complete
+
+    def interrupt(worker_token, generation, result):
+        raise ConnectionError("interrupted authority acknowledgement")
+
+    monkeypatch.setattr(outcomes.authority, "complete", interrupt)
+    with pytest.raises(ConnectionError):
+        outcomes.complete(token, proposal.generation, repository)
+    before = repository.get_document(outcomes.authority.slug)
+    clock[0] += 30_001
+    _, successor_token = start(previous=agent.execution_id)
+    current = outcomes.authority.admit(successor_token, 30_000)
+    successor = replace(proposal, generation=current.generation, task_revision=revision(before["tasks"][0]))
+    accepted = outcomes.propose(successor_token, successor)
+    monkeypatch.setattr(outcomes.authority, "complete", original)
+    completed = outcomes.complete(successor_token, current.generation, repository)
+    assert completed["operation_id"] == accepted["operation_id"]
+    assert repository.get_document(outcomes.authority.slug) == before
+    assert outcomes.authority.current(proposal.task_id).generation == 2
+    assert outcomes.authority.current(proposal.task_id).state == "completed"
+    assert len(outcomes.provider.calls) == 1
+
+
 def test_replacement_during_final_proof_verification_rolls_back_the_ledger(monkeypatch, tmp_path):
     from scripts.swarm.store import SwarmError
     from tests import sv2_ctl05_cases

@@ -404,7 +404,19 @@ def complete_outcome(doc: dict, op: dict, ctx: object, outcome: dict, actor: str
     proposal = outcome["proposal"]
     task_id = proposal["task_id"]
     task = next((row for row in doc["tasks"] if row["id"] == task_id), None)
-    receipt = {"operation_id": outcome["operation_id"], "digest": revision(outcome)}
+    receipt = {
+        "operation_id": outcome["operation_id"],
+        "digest": revision(
+            {
+                "provider_id": outcome["provider_id"],
+                "task_id": task_id,
+                "pr_url": proposal["pr_url"],
+                "head_sha": proposal["head_sha"],
+                "proof": proposal["proof"],
+                "merge_sha": outcome["merge_sha"],
+            }
+        ),
+    }
     known = ctx.meta.get("outcomes", {}).get(task_id)
     if (
         task is None
