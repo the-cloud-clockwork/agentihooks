@@ -134,15 +134,40 @@ def test_a_stale_non_gate_is_red():
         ("${{\n  github.event_name == 'push'\n}}", False),
         ("always()", True),
         ("${{ always() }}", True),
-        ('github.event_name == "push"', (True, False)),
+        ('github.event_name == "push"', False),
         (None, True),
     ],
 )
 def test_a_conjunct_that_skips_the_pull_request_event_takes_a_job_off_the_path(condition, runs):
     job = {} if condition is None else {"if": condition}
-    actual = ci_wiring.on_pull_requests(job)
-    assert actual in (runs if isinstance(runs, tuple) else (runs,))
-    expected = ["test.yml/extra runs on pull requests but is not a need of Gate — Required."] if actual else []
+    assert ci_wiring.on_pull_requests(job) is runs
+    expected = ["test.yml/extra runs on pull requests but is not a need of Gate — Required."] if runs else []
+    assert _check({"test.yml": _gate_workflow(extra=job)}, {}) == expected
+
+
+@pytest.mark.parametrize("quote", ["'", '"'])
+@pytest.mark.parametrize("reversed_operands", [False, True])
+@pytest.mark.parametrize(
+    ("operator", "event", "runs"),
+    [
+        ("==", "push", False),
+        ("==", "schedule", False),
+        ("==", "workflow_dispatch", False),
+        ("==", "pull_request", True),
+        ("==", "pull_request_target", True),
+        ("==", "merge_group", True),
+        ("!=", "push", True),
+        ("!=", "pull_request", False),
+        ("!=", "pull_request_target", True),
+        ("!=", "merge_group", True),
+    ],
+)
+def test_event_comparisons_use_either_quote_style_and_operand_order(quote, reversed_operands, operator, event, runs):
+    literal = f"{quote}{event}{quote}"
+    left, right = (literal, "github.event_name") if reversed_operands else ("github.event_name", literal)
+    job = {"if": f"${{{{ always() && {left} {operator} {right} }}}}"}
+    assert ci_wiring.on_pull_requests(job) is runs
+    expected = ["test.yml/extra runs on pull requests but is not a need of Gate — Required."] if runs else []
     assert _check({"test.yml": _gate_workflow(extra=job)}, {}) == expected
 
 
