@@ -56,9 +56,11 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       critical path; only the master, a planner or the operator sets it;
                                       D is the task size, S, M or L, recorded as the operator's choice
   task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory, kind, rank,
-                                      difficulty (S, M or L) or artifact (yes or no) of a task;
+                                      difficulty (S, M or L), artifact (yes or no) or plan_slice of a task;
+                                      plan_slice computes its plan lines from the published plan;
                                       proof.KEY=VALUE and contract.KEY=VALUE pairs form one object, e.g.
                                       proof.command=C proof.output=O
+  plan-backfill                       compute missing plan lines for linked unfinished tasks; list missing slices
   prompt                              print the join paragraph for a launch prompt
   url                                 print the ledger page link for the operator (no --as needed)
 
@@ -263,7 +265,14 @@ def cmd_ack(args):
 
 def cmd_say(args):
     text = (sys.stdin.read() if args.text == "-" else args.text).strip()
-    op = {"op": "add", "thread": "chat", "id": f"m-{uuid.uuid4().hex[:10]}", "text": text, "by": args.name}
+    op = {
+        "op": "add",
+        "thread": "chat",
+        "id": f"m-{uuid.uuid4().hex[:10]}",
+        "text": text,
+        "by": args.name,
+        "to": "operator",
+    }
     if args.long:
         op["long"] = True
     posted(call(args.slug, [op]), [op])
@@ -545,6 +554,12 @@ def cmd_claim(args):
     print(json.dumps({"claimed": args.item}))
 
 
+def cmd_plan_backfill(args):
+    from scripts.swarm_ledger import plan_backfill
+
+    plan_backfill.run(args)
+
+
 def cmd_task(args):
     if args.action == "add":
         if args.id == "-":
@@ -674,6 +689,7 @@ def build_parser():
     artifact.add_argument("--task", help="task id; default AGENTIHOOKS_SWARM_TASK, empty for none")
     artifact.add_argument("--request", help="id of the operator chat line or comment that asked for the file")
     sub.add_parser("artifact-purge")
+    sub.add_parser("plan-backfill", help="compute missing plan lines for linked unfinished tasks")
     phase = sub.add_parser("phase")
     phase.add_argument("id")
     phase.add_argument("state")

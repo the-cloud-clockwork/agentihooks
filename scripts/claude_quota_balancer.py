@@ -11,16 +11,18 @@ import tempfile
 import time
 from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any
 
+from hooks.context.account_sessions import API_ACCOUNT
 from scripts import session_bands
 from scripts.claude_config import claude_home
+from scripts.routing import claude_api, envs, place
 from scripts.routing.envs import subscription_child
-from scripts.routing.slots import Slot
+from scripts.routing.slots import API, SUBSCRIPTION, Slot
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
 HARNESS = "claude"
@@ -79,11 +81,17 @@ class SessionAccount:
 
 @dataclass(frozen=True)
 class RouteDecision:
-    credential: Credential
-    result: ProbeResult
+    credential: Credential | None
+    result: ProbeResult | None
     source: str
     sessions: int | None = None
     max_sessions: int | None = None
+    _: KW_ONLY
+    kind: str = SUBSCRIPTION
+
+    @property
+    def account(self) -> str:
+        return API_ACCOUNT if self.kind == API else self.credential.account
 
 
 class RoutingError(RuntimeError):
@@ -96,7 +104,7 @@ def discover_credentials(environ: Mapping[str, str]) -> list[Credential]:
     return [
         Credential(name, environ[name])
         for name in sorted(environ)
-        if name.startswith(TOKEN_PREFIX) and name != TOKEN_PREFIX and environ[name]
+        if name.startswith(TOKEN_PREFIX) and name.removeprefix(TOKEN_PREFIX) not in ("", API_ACCOUNT) and environ[name]
     ]
 
 
@@ -698,12 +706,15 @@ def select_credential(
     exclude: Iterable[str] = (),
     now: float | None = None,
 ) -> RouteDecision:
-    """Pick the account with a free place under its session band that runs the fewest live sessions."""
+    """Split launches between the api and the token pool by weight, then take the free seat with the fewest sessions."""
     active_env = os.environ if environ is None else environ
     credentials = discover_credentials(active_env)
-    if not credentials:
-        raise RoutingError(f"no non-empty {TOKEN_PREFIX}* variables found")
     excluded = set(exclude)
+    live = sessions or {}
+    timestamp = time.time() if now is None else now
+    api, weight = _api_side(active_env, live, excluded, timestamp)
+    if not credentials and not api:
+        raise RoutingError(f"no non-empty {TOKEN_PREFIX}* variables found")
     options = {
         "include_fable": include_fable,
         "refresh": refresh,
@@ -711,18 +722,21 @@ def select_credential(
         "cache_file": cache_file,
         "claude_bin": claude_bin,
     }
-    tokens = ClaudeTokenSource(options, sessions or {}, frozenset(excluded))
+    tokens = ClaudeTokenSource(options, live, frozenset(excluded))
     results, source = tokens.results(active_env)
-    timestamp = time.time() if now is None else now
     seats = tokens.offer(results, timestamp)
     reserve = {
         slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", str()).split(",") if slug.strip()
     }
-    seat = session_bands.pick(seat for seat in seats if seat.account not in reserve)
-    seat = seat or session_bands.pick(seats)
+    pool_live = sum(live.get(credential.account, 0) for credential in credentials)
+    seat = place.place(api, seats, weight, pool_live)
+    if seat is not None and seat.kind != API and seat.account in reserve:
+        seat = session_bands.pick(other for other in seats if other.account not in reserve) or seat
     if seat is None:
         outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
         raise RoutingError(f"no Claude account has a free session under its quota band{outside}", results)
+    if seat.kind == API:
+        return RouteDecision(None, None, source, seat.sessions, seat.cap, kind=API)
     by_account = {credential.account: credential for credential in credentials}
     by_result = {result.account: result for result in results}
     return RouteDecision(
@@ -730,7 +744,36 @@ def select_credential(
     )
 
 
+def _api_side(
+    environ: Mapping[str, str], sessions: Mapping[str, int], excluded: set[str], now: float
+) -> tuple[list[Slot], int]:
+    if API_ACCOUNT in excluded:
+        return [], 0
+    return place.api_side(claude_api.ClaudeApiSource(sessions), HARNESS, environ, now)
+
+
+def forced(environ: Mapping[str, str], route: str) -> RouteDecision:
+    if route != API_ACCOUNT:
+        return RouteDecision(credential_for_slug(discover_credentials(environ), route), None, "forced")
+    if not claude_api.provider(environ):
+        raise RoutingError(f"account '{API_ACCOUNT}' needs an api endpoint; none is configured")
+    return RouteDecision(None, None, "forced", kind=API)
+
+
+def launch_environment(decision: RouteDecision, environ: Mapping[str, str]) -> dict[str, str]:
+    if decision.kind == API:
+        child = envs.api_child(environ)
+    else:
+        child = _child_environment(decision.credential, environ)
+        child[decision.credential.env_name] = decision.credential.token
+    child["AGENTIHOOKS_ROUTE_ACCOUNT"] = decision.account
+    return child
+
+
 def format_selection(decision: RouteDecision, include_fable: bool = False) -> str:
+    if decision.kind == API:
+        sessions = f"sessions={decision.sessions}/{decision.max_sessions}"
+        return f"[agenti] account={API_ACCOUNT} kind={API} {sessions} source={decision.source}"
     result = decision.result
     parts = [
         f"account={result.account}",

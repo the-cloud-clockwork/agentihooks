@@ -29,11 +29,12 @@ jobs:
         run: python -m pip install semgrep==1.177.0
 
       # Actions are pinned to release tags by fleet policy, so the mutable tag rule only repeats it.
+      # A rule that times out drops its new findings; an installer taint rule timed out at the default 5 s in a baseline scan.
       - name: Fail on findings new against the base
         env:
           BASE: ${{ inputs.base }}
         run: >-
-          semgrep scan --error --metrics off
+          semgrep scan --error --strict --verbose --timeout 30 --metrics off
           --config p/ci --config p/secrets --config p/python
           --exclude-rule yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
           --baseline-commit "$BASE"

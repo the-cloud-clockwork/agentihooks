@@ -165,6 +165,7 @@ def test_chat_command_sends_one_service_chat_operation(monkeypatch, capsys):
         "thread": "chat",
         "text": "Spaced",
         "by": "api-reader",
+        "to": "operator",
     }
     assert capsys.readouterr().out == json.dumps({"posted": op["id"]}) + "\n"
 

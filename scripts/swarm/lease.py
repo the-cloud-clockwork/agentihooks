@@ -62,6 +62,24 @@ def require(store: RedisStore, slug: str, held: Lease) -> None:
         raise SwarmError("the controller lease is stale")
 
 
+def renew(store: RedisStore, slug: str, held: Lease) -> Lease:
+    from redis.exceptions import WatchError
+
+    key = store.key(slug, "control-owner")
+    while True:
+        with store.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key)
+                require(store, slug, held)
+                renewed = Lease(held.owner, held.epoch, now_ms(store) + TTL_MS)
+                pipe.multi()
+                pipe.set(key, json.dumps(asdict(renewed)), px=TTL_MS)
+                pipe.execute()
+                return renewed
+            except WatchError:
+                continue
+
+
 def require_epoch(store: RedisStore, slug: str, epoch: int) -> None:
     live = current(store, slug)
     if live is None or live.epoch != epoch:

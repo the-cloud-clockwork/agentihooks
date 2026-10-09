@@ -109,7 +109,14 @@ def test_a_remote_client_with_a_hive_credential_joins_and_comments(live, hive):
         os.environ.pop("AGENTIHOOKS_LEDGER_AGENT_TOKEN", None)
         with patch.object(ledger.core, "read_token", server_only(ledger.core.read_token)):
             join = {"op": "join", "id": uuid.uuid4().hex, "by": WORKER}
-            say = {"op": "add", "id": uuid.uuid4().hex, "by": WORKER, "thread": "chat", "text": "Remote hello"}
+            say = {
+                "op": "add",
+                "id": uuid.uuid4().hex,
+                "by": WORKER,
+                "thread": "chat",
+                "text": "Remote hello",
+                "to": "operator",
+            }
             reply = ledger.request(SLUG, [join, say])
             state = ledger.request(SLUG)
     assert not {join["id"], say["id"]} & set(reply["rejected"])

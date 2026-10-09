@@ -86,8 +86,9 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     install_index, install = _unit_step_index(lambda s: s.get("name") == "Install dependencies")
     assert uv["with"]["enable-cache"] is False
     assert uv_index < install_index
+    assert install["env"] == {"PYTHON_PATH": "${{ steps.python.outputs.python-path }}"}
     assert install["run"].strip().splitlines() == [
-        'uv venv --python "${{ steps.python.outputs.python-path }}" "$HOME/venv"',
+        'uv venv --python "$PYTHON_PATH" "$HOME/venv"',
         'uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
     ]
 
@@ -131,8 +132,10 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
 
 def test_unit_matrix_runs_one_shard_per_split():
     command = _pytest_command()
-    split = r"--shard \$\{\{ matrix\.shard \}\}/\$\{\{ matrix\.python-version == '3\.12' && (\d+) \|\| (\d+) \}\}"
-    coverage_shards, plain_shards = (int(count) for count in re.search(split, command).groups())
+    assert '--shard "$SHARD"' in command
+    _, step = _unit_step_index(lambda s: s.get("name") == "Run tests")
+    split = r"^\$\{\{ matrix\.shard \}\}/\$\{\{ matrix\.python-version == '3\.12' && (\d+) \|\| (\d+) \}\}$"
+    coverage_shards, plain_shards = (int(count) for count in re.search(split, step["env"]["SHARD"]).groups())
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     matrix = workflow["jobs"]["unit"]["strategy"]["matrix"]
     excluded = {(entry["python-version"], entry["shard"]) for entry in matrix.get("exclude", [])}
@@ -143,7 +146,7 @@ def test_unit_matrix_runs_one_shard_per_split():
         )
     assert coverage_shards > plain_shards > 1
     merge = next(step for step in workflow["jobs"]["sonar"]["steps"] if step.get("name") == "Merge shard coverage")
-    assert merge["run"].split()[-1] == str(coverage_shards)
+    assert re.search(r"combine\.sh --downloaded (\d+) ", merge["run"]).group(1) == str(coverage_shards)
     assert "--splits" not in command
 
 

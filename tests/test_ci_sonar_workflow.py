@@ -26,7 +26,7 @@ def test_sonar_is_required_on_dev_and_main_pull_requests():
     assert sonar["needs"] == ["unit"]
     assert "if" not in sonar
     assert not sonar.get("continue-on-error")
-    gate = next(step for step in sonar["steps"] if step.get("uses") == "sonarsource/sonarqube-quality-gate-action@v1")
+    gate = next(step for step in sonar["steps"] if step.get("name") == "SonarQube Quality Gate")
     assert gate["if"] == "steps.current.outputs.superseded != 'true'"
     assert not gate.get("continue-on-error")
     assert "needs" not in jobs["lint"]
@@ -39,6 +39,7 @@ def test_sonar_restores_downloads_before_every_scan():
     cache = next(step for step in steps[:scan_index] if step.get("uses") == "actions/cache@v4")
     assert set(cache["with"]["path"].splitlines()) == {
         "~/.sonar/cache",
+        "~/.sonar/js/node-runtime",
         "${{ runner.tool_cache }}/sonar-scanner-cli",
     }
     key = cache["with"]["key"]
@@ -57,7 +58,7 @@ def test_sonar_download_cache_tracks_scanner_and_server_versions():
     scan = next(step for step in steps if step.get("name") == "SonarQube Scan")
     proxy = next(step for step in steps if step.get("id") == "proxy")
     assert sonar["env"]["SONAR_SCANNER_VERSION"]
-    assert scan["with"]["scannerVersion"] == "${{ env.SONAR_SCANNER_VERSION }}"
+    assert "$SONAR_SCANNER_VERSION" in scan["run"]
     assert "${{ env.SONAR_SCANNER_VERSION }}" in cache["with"]["key"]
     assert "${{ steps.proxy.outputs.version }}" in cache["with"]["key"]
     assert "/api/server/version" in proxy["run"]
@@ -109,7 +110,7 @@ def test_queued_merges_are_analysed_as_their_pull_request(tmp_path, head_ref, la
     assert "pull-requests" not in _workflow()["jobs"]["sonar"]["permissions"]
     assert "GH_TOKEN" not in step["env"]
     assert steps.index(step) < steps.index(scan)
-    assert scan["with"]["args"] == "${{ steps.queued.outputs.args }}"
+    assert scan["env"]["ARGS"] == "${{ steps.queued.outputs.args }}"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     git = bin_dir / "git"

@@ -71,9 +71,8 @@ def test_leak_run_runs_the_whole_suite_in_one_process(tmp_path, seed, order_flag
 def test_a_red_run_names_its_pairs_and_keeps_them_for_the_follow_up_job():
     pairs = _step("pairs")
     assert pairs["if"] == "failure() && steps.suite.outcome == 'failure'"
-    assert pairs["run"] == (
-        'python -m tests.leaks pairs run.jsonl leaks-${{ matrix.order }}.json | tee -a "$GITHUB_STEP_SUMMARY"'
-    )
+    assert pairs["env"] == {"ORDER": "${{ matrix.order }}"}
+    assert pairs["run"] == 'python -m tests.leaks pairs run.jsonl "leaks-$ORDER.json" | tee -a "$GITHUB_STEP_SUMMARY"'
     keep = _step("keep")
     assert keep["if"] == pairs["if"]
     assert keep["uses"].startswith("actions/upload-artifact@")

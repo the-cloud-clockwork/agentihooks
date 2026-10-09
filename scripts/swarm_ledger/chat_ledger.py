@@ -25,7 +25,14 @@ def main():
     parser.add_argument("text")
     args = parser.parse_args()
     text = (sys.stdin.read() if args.text == "-" else args.text).strip()
-    op = {"op": "add", "thread": "chat", "id": f"m-{uuid.uuid4().hex[:10]}", "text": text, "by": args.author}
+    op = {
+        "op": "add",
+        "thread": "chat",
+        "id": f"m-{uuid.uuid4().hex[:10]}",
+        "text": text,
+        "by": args.author,
+        "to": "operator",
+    }
     try:
         rejected = ledger.request(args.slug, [op], service=True)["rejected"]
     except urllib.error.HTTPError as exc:

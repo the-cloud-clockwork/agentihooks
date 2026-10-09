@@ -19,7 +19,7 @@ agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E 
 agentihooks swarm <id> set effort-min=E effort-max=E               every lane launch effort stays in this range (default medium, high)
 agentihooks swarm <id> set master-agent=claude|codex              master affinity; a change orders the live master to hand off to that harness
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
-agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
+agentihooks swarm <id> send-message TEXT                          message to every live agent's inbox
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
 agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
@@ -116,6 +116,12 @@ SETTABLE = {
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
 EFFORT_KEYS = {"effort-min": "effort_min", "effort-max": "effort_max"}
+SCALING_KEYS = {
+    "scaling": "scaling",
+    "load-high": "load_high",
+    "load-low": "load_low",
+    "memory-per-agent": "memory_per_agent_mb",
+}
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
@@ -147,6 +153,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
     token = controller.take_tick_lock(store, slug, held, TICK_LOCK_MS)
     if token is None:
         return ["another tick is running"]
+    keeping = timing.BEFORE_STEP.set(lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS))
     try:
         ledger = controller.FencedLedger(store, slug, held, ledger)
         runtime = controller.FencedRuntime(
@@ -228,6 +235,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         timing.call(command_runner.publish, store, slug, timing.call(ledger.state, slug))
         return controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
+        timing.BEFORE_STEP.reset(keeping)
         controller.release_tick_lock(store, slug, token)
 
 
@@ -235,7 +243,7 @@ def cmd_list(store, args):
     for slug in store.slugs():
         c = store.config(slug)
         print(
-            f"{naming.swarm_name(c.code) or '-'}\t{slug}\t{c.state}\teng {c.max_eng}\tci {c.max_ci}\tplan {c.max_plan}\tagents {len(store.agents(slug))}\t{c.repo}"
+            f"{naming.swarm_name(c.code) or '-'}\t{slug}\t{c.state}\teng {c.max_eng}\tci {c.max_ci}\tplan {c.max_plan}\tscaling {c.scaling}\tagents {len(store.agents(slug))}\t{c.repo}"
         )
 
 
@@ -531,7 +539,7 @@ def setting(config, key):
     if key in LANE_KEYS:
         lane, field = LANE_KEYS[key]
         return config.lanes.get(lane, {}).get(field) or "unset"
-    return getattr(config, {**SETTABLE, **EFFORT_KEYS}.get(key, key))
+    return getattr(config, {**SETTABLE, **EFFORT_KEYS, **SCALING_KEYS}.get(key, key))
 
 
 def lifecycle_control(args):
@@ -549,7 +557,7 @@ def control_readings(store, args):
         return {
             key: setting(config, key)
             for key in keys
-            if key in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, *GATE_KEYS, "autonomy")
+            if key in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, *SCALING_KEYS, *GATE_KEYS, "autonomy")
         }
     if args.command == "lift":
         lifted = lift.agent_lifted(args.slug, args.agent, args.gate)
@@ -572,6 +580,19 @@ def run_control(store, args, who, handler):
         clearance.record(LedgerClient(), args.slug, cleared, before, after)
 
 
+def scaling_value(key, value):
+    if key == "scaling":
+        return value
+    if key == "memory-per-agent":
+        if not value.isdigit():
+            raise SwarmError("memory-per-agent takes a whole number of MB")
+        return int(value)
+    try:
+        return float(value)
+    except ValueError:
+        raise SwarmError(f"{key} takes a number, the one minute load per CPU") from None
+
+
 def cmd_set(store, args):
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
     for pair in args.pairs:
@@ -587,6 +608,9 @@ def cmd_set(store, args):
         if key in EFFORT_KEYS:
             changes[EFFORT_KEYS[key]] = value
             continue
+        if key in SCALING_KEYS:
+            changes[SCALING_KEYS[key]] = scaling_value(key, value)
+            continue
         if key in GATE_KEYS:
             changes["gates"] = {**store.config(args.slug).gates, **gate_mode(key, value)}
             continue
@@ -601,7 +625,8 @@ def cmd_set(store, args):
         if key not in SETTABLE or not value.isdigit():
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, autonomy={'|'.join(AUTONOMY)}, "
-                f"effort-min=E, effort-max=E or {', '.join(LANE_KEYS)}=<value>"
+                f"effort-min=E, effort-max=E, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB "
+                f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
     config = store.update(args.slug, **changes)
@@ -624,6 +649,10 @@ def cmd_set(store, args):
                 "effort_max": config.effort_max,
                 "lanes": config.lanes,
                 "overlays": config.overlays,
+                "scaling": config.scaling,
+                "load_high": config.load_high,
+                "load_low": config.load_low,
+                "memory_per_agent_mb": config.memory_per_agent_mb,
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
             }
         )
@@ -701,7 +730,7 @@ def cmd_status(store, args):
     counts = task_counts(tasks)
     found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
-        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
+        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  scaling {config.scaling}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
     )
     print(
         "gate modes  "
@@ -814,8 +843,8 @@ def cmd_lift(store, args):
 
 def cmd_send_message(store, args):
     store.config(args.slug)
-    LedgerClient().say(args.slug, args.text)
-    print(json.dumps({"posted": True}))
+    sender = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or delivery.OPERATOR
+    print(json.dumps({"sent": delivery.send(store, args.slug, args.text, sender=sender, to="all")}))
 
 
 def _me(store, args):
@@ -1247,11 +1276,12 @@ def _retire(store, slug, agent, exit_text):
 
 def cmd_say(store, args):
     agent = _me(store, args)
-    text = f"@{args.to} {args.text}" if args.to in ("eng", "ci") else args.text
-    if args.to:
-        delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to, fyi=args.fyi)
-    LedgerClient().say(args.slug, text, by=agent.name)
-    print(json.dumps({"posted": True}))
+    if args.to in ("", delivery.OPERATOR):
+        LedgerClient().say(args.slug, args.text, by=agent.name)
+        print(json.dumps({"posted": True}))
+        return
+    sent = delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to, fyi=args.fyi)
+    print(json.dumps({"sent": sent}))
 
 
 def build_parser():
@@ -1362,7 +1392,13 @@ def main(argv):
     if argv and argv[0] in ("list", "tick", "templates", "rename", "waker"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
-        if len(argv) > 1 and argv[1].partition("=")[0] in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, "autonomy"):
+        if len(argv) > 1 and argv[1].partition("=")[0] in (
+            *SETTABLE,
+            *LANE_KEYS,
+            *EFFORT_KEYS,
+            *SCALING_KEYS,
+            "autonomy",
+        ):
             argv = [argv[0], "set", *argv[1:]]
         elif len(argv) == 3 and argv[2] == "up" and argv[1] != "master":
             argv = [argv[0], "agent-up", argv[1]]

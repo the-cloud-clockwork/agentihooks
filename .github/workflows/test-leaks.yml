@@ -57,7 +57,9 @@ jobs:
       - name: Name each leaking pair
         id: pairs
         if: failure() && steps.suite.outcome == 'failure'
-        run: python -m tests.leaks pairs run.jsonl leaks-${{ matrix.order }}.json | tee -a "$GITHUB_STEP_SUMMARY"
+        env:
+          ORDER: ${{ matrix.order }}
+        run: python -m tests.leaks pairs run.jsonl "leaks-$ORDER.json" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Keep the findings for the follow up job
         id: keep

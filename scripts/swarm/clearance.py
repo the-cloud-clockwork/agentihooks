@@ -23,4 +23,4 @@ def holder(store, slug, who, environ=None):
 def record(ledger, slug, name, before, after):
     changes = ", ".join(f"{control} from {before[control]} to {after[control]}" for control in before)
     text = f"{name} changed {changes}."
-    ledger.say(slug, text.replace("-", " ").replace("@", " "), by="swarm")
+    ledger.notify(slug, text.replace("-", " ").replace("@", " "))
