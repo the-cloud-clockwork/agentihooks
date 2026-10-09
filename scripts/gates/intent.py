@@ -89,7 +89,7 @@ def _phase(doc, task):
 
 
 def _same_phase(record, task):
-    return record.get("phase", "") == task.get("phase", "")
+    return record.get("phase") == task.get("phase")
 
 
 def section(doc, task):
@@ -413,7 +413,7 @@ class Check:
             self.home,
         )
         coached = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
-        fields = {"phase": task.get("phase", ""), **coached}
+        fields = {"phase": task.get("phase"), **coached}
         verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
         if self.mode == "coach":
             self._coaching().write(task["id"], verdict, reason, self.now_ms, **fields)
@@ -452,7 +452,7 @@ class Check:
             coach_rounds=previous["coach_rounds"],
             head=previous["head"],
             url=task["pr_url"],
-            phase=task.get("phase", ""),
+            phase=task.get("phase"),
         )
 
     def _failed(self, task, who, reason, rounds=0):
