@@ -402,6 +402,50 @@ def test_chart_proof_rule_covers_every_file_the_swarm_image_copies():
     )
 
 
+@pytest.mark.parametrize("hit", [False, True])
+def test_kind_image_cache_hit_and_miss_prepare_image_and_keep_the_chart_proof(tmp_path, hit):
+    import os
+    import subprocess
+
+    job = yaml.safe_load((_ROOT / ".github/workflows/helm-kind.yml").read_text())["jobs"]["kind"]
+    steps = job["steps"]
+    prepare = next(s for s in steps if s.get("name") == "Prepare chart image")
+    smoke = next(s for s in steps if s.get("name") == "Lint, install and prove the chart in kind")
+    assert "if" not in smoke
+    assert smoke["env"]["KIND_IMAGE_READY"] == "true"
+    assert smoke["run"] == "bash deploy/helm/agentihooks-swarm/ci/kind-smoke.sh"
+    binary = tmp_path / "docker"
+    binary.write_text(
+        '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%s\\n" "$*" >> "$CALLS"\n'
+        'if [[ $1 == save ]]; then mkdir -p .kind-cache; touch .kind-cache/image.tar; fi\n'
+    )
+    binary.chmod(0o755)
+    if hit:
+        (tmp_path / ".kind-cache").mkdir()
+        (tmp_path / ".kind-cache/image.tar").touch()
+    command = prepare["run"].replace("${{ steps.chart-image.outputs.cache-hit }}", str(hit).lower())
+    env = dict(os.environ, PATH=f"{tmp_path}:{os.environ['PATH']}", CALLS=str(tmp_path / "calls"))
+    subprocess.run(["bash", "-euo", "pipefail", "-c", command], cwd=tmp_path, env=env, check=True)
+    calls = (tmp_path / "calls").read_text()
+    assert ("buildx build" in calls) is not hit
+    assert ("load -i .kind-cache/image.tar" in calls) is hit
+    assert (tmp_path / ".kind-cache/image.tar").is_file()
+
+
+def test_kind_image_cache_keys_cover_all_image_and_chart_inputs():
+    import re
+
+    job = yaml.safe_load((_ROOT / ".github/workflows/helm-kind.yml").read_text())["jobs"]["kind"]
+    cache = next(s for s in job["steps"] if s.get("id") == "chart-image")
+    key = cache["with"]["key"]
+    patterns = re.findall(r"'([^']+)'", key)
+    assert {"Dockerfile", ".dockerignore", "pyproject.toml", "README.md"} <= set(patterns)
+    assert {"hooks/**", "scripts/**", "profiles/**", "media/agentihooks-logo.png"} <= set(patterns)
+    assert "deploy/helm/agentihooks-swarm/**" in patterns
+    assert "runner.os" in key and "runner.arch" in key
+    assert "restore-keys" not in cache["with"]
+
+
 def test_chart_proof_rule_is_read_from_the_base_so_a_head_cannot_switch_it_off(kind_repo):
     repo, base = kind_repo
     head = _commit(repo, {RULE: "#!/usr/bin/env bash\necho due=false\n", "Dockerfile": "x"})
