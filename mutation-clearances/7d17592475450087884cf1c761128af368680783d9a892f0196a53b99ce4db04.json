@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x_forget__mutmut_6:cb49c0110e443c3c2bb2c0f07e3b2f464d3b9a22031857b1a4d29fe5ee752028": {
+    "reader": "Standards",
+    "reason": "Only DELETE, FROM and WHERE keyword casing changes; SQLite deletes the same rows using the unchanged bound swarm value and foreign-key cascade."
+  }
+}

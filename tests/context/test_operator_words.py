@@ -166,15 +166,12 @@ def test_retained_json_words_relay_after_upgrade_and_are_removed_on_forget(tmp_p
 def test_upgrade_uses_the_registered_swarm_for_modern_agent_names(tmp_path, monkeypatch):
     import json
 
-    import fakeredis
-
     from hooks import _redis
     from scripts.swarm.naming import NameRegistry
 
     monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
-    redis = fakeredis.FakeRedis(decode_responses=True)
-    NameRegistry(redis).adopt("demo", "abcdef", "ledger", "repo")
-    monkeypatch.setattr(_redis, "get_redis", lambda: redis)
+    monkeypatch.setattr(NameRegistry, "slug_of", lambda self, name: {"master@abcdef-0001": "demo"}[name])
+    monkeypatch.setattr(_redis, "get_redis", object)
     folder = tmp_path / "operator_words"
     folder.mkdir()
     path = folder / "master@abcdef-0001.json"
@@ -187,8 +184,6 @@ def test_upgrade_uses_the_registered_swarm_for_modern_agent_names(tmp_path, monk
 
 def test_upgrade_retries_modern_names_after_the_registry_recovers(tmp_path, monkeypatch):
     import json
-
-    import fakeredis
 
     from hooks import _redis
     from scripts.swarm.naming import NameRegistry
@@ -205,9 +200,8 @@ def test_upgrade_retries_modern_names_after_the_registry_recovers(tmp_path, monk
     assert operator_words.heard_prompt(
         "New words", {"AGENTIHOOKS_AGENT_NAME": "master@abcdef-0001", "AGENTIHOOKS_SWARM": "demo"}, now=101
     )
-    redis = fakeredis.FakeRedis(decode_responses=True)
-    NameRegistry(redis).adopt("demo", "abcdef", "ledger", "repo")
-    monkeypatch.setattr(_redis, "get_redis", lambda: redis)
+    monkeypatch.setattr(NameRegistry, "slug_of", lambda self, name: {"master@abcdef-0001": "demo"}[name])
+    monkeypatch.setattr(_redis, "get_redis", object)
     assert operator_words.matching("master@abcdef-0001", "Unresolved words", now=102) == "Unresolved words"
     assert json.loads(path.read_text()) == {"sessions": ["old"]}
     operator_words.forget("demo")
@@ -248,6 +242,63 @@ def test_whole_line_lookup_precedes_a_newer_substring_match():
     operator_words.record("master@a1-1", "Do not ship it", now=101)
     assert operator_words.matching("master@a1-1", "ship it", now=102) == "Ship it"
     assert operator_words.matching("master@a1-1", "ship", now=102) == "Do not ship it"
+
+
+def test_empty_quotes_match_nothing():
+    operator_words.record("master@a1-1", "ship it", now=100)
+    assert operator_words.matching("master@a1-1", "", now=101) == ""
+    assert operator_words.matching("master@a1-1", " \n\t ", now=101) == ""
+
+
+def test_default_and_absent_swarms_are_recorded_without_swarm_ownership():
+    operator_words.record("plain", "default words", now=100)
+    operator_words.record("absent", "absent words", now=100, swarm=None)
+    operator_words.forget("")
+    assert operator_words.recorded("*") == []
+
+
+def test_question_answers_are_removed_with_their_swarm():
+    assert operator_words.heard_answer(
+        {"tool_name": "AskUserQuestion", "tool_response": {"answers": {"q": "Swarm answer"}}}, ENV, now=100
+    )
+    assert operator_words.matching("master@a1-1", "Swarm answer", now=101) == "Swarm answer"
+    operator_words.forget("demo")
+    assert operator_words.matching("master@a1-1", "Swarm answer", within=None) == ""
+
+
+def test_upgrade_continues_past_empty_and_unresolved_files(tmp_path, monkeypatch):
+    import json
+
+    from hooks import _redis
+
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(_redis, "get_redis", lambda: None)
+    folder = tmp_path / "operator_words"
+    folder.mkdir()
+    (folder / "aaa.json").write_text(json.dumps({"sessions": ["first"], "rows": []}))
+    (folder / "master@abcdef-0001.json").write_text(json.dumps({"rows": [{"at": 100, "words": "Pending"}]}))
+    path = folder / "z-demo-master-1.json"
+    path.write_text(json.dumps({"rows": [{"at": 100, "words": "Known"}]}))
+    glob = type(folder).glob
+    monkeypatch.setattr(type(folder), "glob", lambda self, pattern: iter(sorted(glob(self, pattern))))
+    assert operator_words.matching("z-demo-master-1", "Known", now=101) == "Known"
+    assert json.loads(path.read_text()) == {"sessions": []}
+
+
+def test_completed_upgrade_does_not_scan_legacy_files_again(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    folder = tmp_path / "operator_words"
+    folder.mkdir()
+    (folder / "demo-master-1.json").write_text(json.dumps({"rows": [{"at": 100, "words": "Known"}]}))
+    assert operator_words.matching("demo-master-1", "Known", now=101) == "Known"
+
+    def no_scan(name):
+        raise AssertionError("completed migration scanned legacy files")
+
+    monkeypatch.setattr(operator_words, "_load", no_scan)
+    assert operator_words.matching("demo-master-1", "Known", now=101) == "Known"
 
 
 def test_words_outside_the_window_are_kept_and_found_with_no_window():
