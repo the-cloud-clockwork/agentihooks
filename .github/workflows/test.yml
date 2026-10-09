@@ -26,6 +26,8 @@ permissions:
   contents: read
 
 jobs:
+  worker-image:
+    uses: ./.github/workflows/swarm-node-smoke.yml
   swarm-image:
     uses: ./.github/workflows/swarm-smoke.yml
   semgrep:
@@ -726,7 +728,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [durations, unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, brain-smoke, helm-kind, wiring, semgrep, dependency-audit]
+    needs: [durations, unit, shard-check, test-count, size, lint, sonar, mutation, swarm-image, worker-image, brain-smoke, helm-kind, wiring, semgrep, dependency-audit]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
