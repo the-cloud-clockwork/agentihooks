@@ -183,6 +183,21 @@ def merged(tasks: list[dict]) -> list[str]:
     return sorted(t["id"] for t in tasks if t.get("state") == "done" and t.get("pr_url"))
 
 
+def _foreign(slug, get, active, traces, coverage) -> str:
+    """A complete listing with no trace of the swarm while working exporters report accepted observations."""
+    accepted = [b["agent"] for b in active if (b["local"] or {}).get("accepted")]
+    if traces or not coverage["listed"] or not accepted or any(b["traces"] for b in active):
+        return ""
+    try:
+        project = get("projects", {})["data"][0]["name"]
+    except Exception:  # noqa: BLE001
+        project = "unknown"
+    return (
+        f"Langfuse project {project} holds no trace tagged swarm:{slug} while the exporters of "
+        f"{', '.join(accepted)} report accepted observations: the reader's keys belong to another project"
+    )
+
+
 def record(
     slug,
     tasks,
@@ -198,6 +213,11 @@ def record(
     active, failures = registry.read(slug, agents, get, state, budget.active_seconds, budget.active_page, clock)
     traces, coverage, lost = history(slug, get, base / CACHE_DIR, budget, clock)
     failures += lost
+    foreign = _foreign(slug, get, active, traces, coverage)
+    if foreign:
+        failures.append(foreign)
+        active = [{**binding, "read": False} for binding in active]
+        coverage = {**coverage, "listed": False, "complete": False}
     state["down_since"] = (state.get("down_since") or now_ms) if failures else 0
     registry.save(base / STATE_FILE, state)
     return {
