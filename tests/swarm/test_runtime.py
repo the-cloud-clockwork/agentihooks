@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.swarm.reaper import Outcome
-from scripts.swarm.runtime import PLAN_MODE, HerdrRuntime
+from scripts.swarm.runtime import CODEX_PLAN_MODE, PLAN_MODE, HerdrRuntime
 from scripts.swarm.store import AgentRecord, SwarmConfig
 from tests.swarm.profile_fixture import validated
 
@@ -400,6 +400,22 @@ def test_only_a_claude_planner_starts_in_plan_mode(tmp_path, lane, agent):
     assert "--permission-mode" not in _passed(_spawn_seen(tmp_path, {lane: {"agent": agent}}, lane=lane)["argv"])
 
 
+def test_a_codex_planner_starts_with_a_read_only_repo_and_network(tmp_path):
+    passed = _passed(_spawn_seen(tmp_path, {"plan": {"agent": "codex"}}, lane="plan")["argv"])
+    assert passed[-4:] == [
+        "-c",
+        'permissions.planner={extends=":read-only", network={enabled=true}}',
+        "-c",
+        'default_permissions="planner"',
+    ]
+
+
+@pytest.mark.parametrize(("lane", "agent"), [("eng", "codex"), ("ci", "codex"), ("plan", "claude")])
+def test_only_a_codex_planner_starts_read_only(tmp_path, lane, agent):
+    passed = _passed(_spawn_seen(tmp_path, {lane: {"agent": agent}}, lane=lane)["argv"])
+    assert not any("permissions" in arg for arg in passed)
+
+
 def test_an_auto_lane_falls_back_to_the_automatic_choice(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "auto", "model": "auto", "effort": "auto"}})
     assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
@@ -707,7 +723,10 @@ def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", e
         }
     runtime.spawn(config, lane, "agent@a1b2c3-0001", task)
     passed = _passed(seen["argv"])
-    return passed[:-2] if passed[-2:] == PLAN_MODE else passed
+    for mode in (PLAN_MODE, CODEX_PLAN_MODE):
+        if passed[-len(mode) :] == mode:
+            return passed[: -len(mode)]
+    return passed
 
 
 def test_spawn_records_launch_preparation_and_waited_subprocess_cost(tmp_path, monkeypatch, capsys):

@@ -39,6 +39,12 @@ STARTED_ROUTES = ("routed", "bare", "direct")
 AUTO = "auto"
 PICKED_LANES = ("eng", "ci")
 PLAN_MODE = ["--permission-mode", "plan"]
+CODEX_PLAN_MODE = [
+    "-c",
+    'permissions.planner={extends=":read-only", network={enabled=true}}',
+    "-c",
+    'default_permissions="planner"',
+]
 
 
 def _bin():
@@ -463,7 +469,7 @@ class HerdrRuntime:
             picked = timing.call(model_pick.pick, agent, {} if quota_transfer else chosen, task, environ)
         else:
             picked = _lane_default(lane, agent, {} if quota_transfer else chosen)
-        mode = PLAN_MODE if (lane, agent) == ("plan", "claude") else []
+        mode = {"claude": PLAN_MODE, "codex": CODEX_PLAN_MODE}.get(agent, []) if lane == "plan" else []
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
         if hasattr(self, "_quota_accounts"):
