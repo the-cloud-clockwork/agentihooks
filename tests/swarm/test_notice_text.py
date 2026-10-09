@@ -84,6 +84,7 @@ def test_plain_keeps_meaning_of_ordinary_text():
         ("a ; b . c", "comment", "a, b. c"),
         ("quota; ; retry,, deeper", "comment", "quota, retry, deeper"),
         ("; start;", "comment", "start"),
+        ("Xenon leads; argon trails", "comment", "Xenon leads, argon trails"),
         ("quota->spawn and a=>b", "comment", "quota to spawn and a to b"),
         ("ready — merged – queued", "comment", "ready, merged, queued"),
         ("held (for now) by quota_handoff", "comment", "held for now by quota handoff"),
