@@ -21,8 +21,8 @@ OFF_NOTICE = "Operator off: the operator is not present in this pane."
 TURN_NOTICE = "Operator present for this turn: reply without a word limit."
 QUESTION_TOOL = "AskUserQuestion"
 ASK_REFUSAL = (
-    "The operator is not present in this pane, so the question tool is off. Never write the question as chat text. "
-    'Put it on the ledger with agentihooks ledger --slug {slug} --as {name} question add "<the question in plain words>" '
+    "The operator is not present in this pane, so the question tool is off. Put the question on the ledger with "
+    'agentihooks ledger --slug {slug} --as {name} question add "<the question in plain words>" '
     "and keep working; the master answers it or raises it to the operator."
 )
 MASTER_ASK_REFUSAL = (

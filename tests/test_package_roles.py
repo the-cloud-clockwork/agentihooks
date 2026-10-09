@@ -49,8 +49,8 @@ QUESTIONS_RULE = (
     "say only one short line, type operator on to answer the questions here, or leave them in Priorities."
 )
 QUESTIONS_COMMAND = (
-    "- Refused operator questions: one short line, type operator on to answer the questions here, or "
-    '`agentihooks ledger --slug <slug> --as <name> priority add <item> "<the ask>"`; never the questions as chat text.'
+    "- Operator questions: the question tool, never chat text; refused, one short line, type operator on to answer "
+    'the questions here, or `agentihooks ledger --slug <slug> --as <name> priority add <item> "<the ask>"`.'
 )
 
 
@@ -61,8 +61,8 @@ def test_only_the_rendered_master_home_carries_the_operator_questions_rule(world
     world["install"]._save_state({})
     persona = (render.render_claude(role) / "CLAUDE.md").read_text()
 
-    assert (f"- {QUESTIONS_RULE}" in persona) == (role == "master")
-    assert (QUESTIONS_COMMAND in persona) == (role == "master")
+    found = [line for line in persona.splitlines() if "type operator on" in line]
+    assert found == ([f"- {QUESTIONS_RULE}", QUESTIONS_COMMAND] if role == "master" else [])
 
 
 @pytest.mark.parametrize("role", ALL_ROLES)

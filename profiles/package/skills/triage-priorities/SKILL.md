@@ -22,7 +22,7 @@ The master runs this from its own pane, and the operator decides here; never sen
    - question: the ask in plain words, from `ask`, `item_text` and the latest `recent` lines;
    - header: the entry's `group`;
    - options: two or three decisions whose labels name the item, unique in the round ("Approve the queue merge", "Hold the queue merge"), then **Later**.
-   Never write the prompts as chat text. When `AskUserQuestion` is refused because the operator is not present, say only one short line, type operator on to answer the questions here, or leave them in Priorities; end the run there and keep every priority.
+   Never write the prompts as chat text. When `AskUserQuestion` is refused because the operator is not present, say only one short line, type operator on to answer the questions here, or leave them in Priorities; keep every priority and end the run. Done when that one line is sent and every priority is still listed.
    Done when the operator has decided every prompt.
 
 4. **Write the plan.** Write `plan-N.json` (N counts the rounds) in the noted folder: one entry per priority of the round, mapped by the table. `quote` is the operator's exact words from this round: the option label picked, or the text typed in its place. Done when every decision of the round has one entry.

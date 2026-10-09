@@ -154,8 +154,8 @@ def test_a_failing_mode_store_is_logged_and_never_raises_into_the_hook(monkeypat
 
 
 ASK = (
-    "The operator is not present in this pane, so the question tool is off. Never write the question as chat text. "
-    'Put it on the ledger with agentihooks ledger --slug {slug} --as {name} question add "<the question in plain words>" '
+    "The operator is not present in this pane, so the question tool is off. Put the question on the ledger with "
+    'agentihooks ledger --slug {slug} --as {name} question add "<the question in plain words>" '
     "and keep working; the master answers it or raises it to the operator."
 )
 MASTER_ASK = (
