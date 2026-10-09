@@ -302,7 +302,7 @@ def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
         mirror = next(step for step in lint if step.get("name") == "Use the Ubuntu archive for browser dependencies")
         assert "if" not in mirror
     else:
-        assert install["if"] == "steps.artifacts.outputs.browser == 'true'"
+        assert install["if"] == "${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}"
 
 
 def test_equivalence_runs_storage_then_page_replays_each_group_at_once():

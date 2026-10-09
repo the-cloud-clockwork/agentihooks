@@ -70,14 +70,14 @@ def test_a_stage_spans_first_job_creation_to_last_job_end():
 
 
 def test_report_orders_stages_slowest_first_then_by_name():
-    jobs = [_job("wiring", "00:00", "00:10"), _job("size", "00:00", "00:10"), _job("lint", "00:00", "00:20")]
+    jobs = [_job("semgrep", "00:00", "00:10"), _job("kind-due", "00:00", "00:10"), _job("lint", "00:00", "00:20")]
     result = ci_budget.report({"run_started_at": START}, jobs, ci_budget.seconds("2026-10-09T07:01:00Z"))
     assert result == {
         "total": 60,
         "stages": [
-            {"stage": "lint", "seconds": 20, "budget": 150},
-            {"stage": "size", "seconds": 10, "budget": 90},
-            {"stage": "wiring", "seconds": 10, "budget": 60},
+            {"stage": "lint", "seconds": 20, "budget": 240},
+            {"stage": "kind-due", "seconds": 10, "budget": 60},
+            {"stage": "semgrep", "seconds": 10, "budget": 120},
         ],
     }
 
