@@ -74,6 +74,7 @@ def context(browser):
 
 
 def rows(page):
+    page.wait_for_selector("#phases > li .phase-state", state="attached")
     return page.evaluate(
         """() => [...document.querySelectorAll("#phases > li")].map((li) => {
           const fold = li.querySelector("details.phase-fold");
