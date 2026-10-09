@@ -82,7 +82,8 @@ def test_another_swarm_counts_spawns_from_the_startup_lag_before_its_grant(store
     assert runtime.masters == [] and runtime.spawned == []
     _decide(store, 2, slug="doc", granted_at=1_001 + tick.HOST_START_LAG_MS)
     actions = tick.tick("doc", store, ledger, runtime, now_ms=31_001)
-    assert "spawned master master@a1b2c3-0001" in actions
+    ((name, _),) = runtime.masters
+    assert f"spawned master {name}" in actions
     assert tick.HOST_START_LAG_MS == 30_000
 
 
