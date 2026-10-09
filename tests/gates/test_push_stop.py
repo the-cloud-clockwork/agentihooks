@@ -1,12 +1,13 @@
 import subprocess
-import sys
+import time
 from pathlib import Path
 
 import pytest
 
+from hooks.config import CONDITIONS_TIMEOUT_SEC
 from scripts.gates import Call, Gate, Who, push_stop
 from scripts.gates.progress import Progress
-from scripts.gates.push_stop import GATE_FAILED, TEMPLATE, PushStop, count, record_text
+from scripts.gates.push_stop import GATE_FAILED, GATE_SLOW, TEMPLATE, PushStop, count, record_text
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
 from scripts.swarm.naming import plain
@@ -467,7 +468,7 @@ def test_a_count_git_cannot_answer_is_zero(tmp_path):
     assert count(tmp_path, "HEAD") == 0
 
 
-def install_gate(rig, code):
+def install_gate(rig, code, before=""):
     log = rig.root / "gate.log"
     gate = rig.tree / "scripts" / "ci_prepush"
     gate.mkdir(parents=True)
@@ -478,7 +479,8 @@ def install_gate(rig, code):
         f"with open({str(log)!r}, 'a') as log:\n"
         "    log.write(os.getcwd() + ' ' + os.environ.get('AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN', '') + '\\n')\n"
         "print('gate output')\n"
-        f"raise SystemExit({code})\n"
+        "print('gate errors', file=__import__('sys').stderr)\n"
+        f"{before}raise SystemExit({code})\n"
     )
     git(rig.tree, "add", "scripts")
     git(rig.tree, "commit", "-m", "gate")
@@ -504,7 +506,7 @@ def test_a_passing_pre_push_gate_runs_in_the_worktree_with_the_local_test_settin
     assert rig.stop().allowed
     assert rig.remote_head() == git(rig.tree, "rev-parse", "HEAD")
     assert log.read_text() == f"{rig.tree} true\n"
-    assert capfd.readouterr().out == ""
+    assert capfd.readouterr() == ("", "")
 
 
 def test_a_head_the_gate_already_passed_is_pushed_without_running_it_again(rig):
@@ -524,26 +526,40 @@ def test_the_failure_text_is_exact():
         "The pre push gate failed in /w, so the stop hook did not push it. "
         "Run python -m scripts.ci_prepush there, fix what fails and commit."
     )
+    assert GATE_SLOW.format(path="/w", seconds=8.0) == (
+        "The pre push gate did not finish in 8 s in /w, so the stop hook did not push it. "
+        "Run python -m scripts.ci_prepush there and commit."
+    )
 
 
-def test_a_pre_push_gate_past_its_timeout_keeps_the_branch_off_origin(monkeypatch, rig):
+def gone(pid):
+    status = Path(f"/proc/{pid}/status")
+    for _ in range(40):
+        if not status.exists() or "State:\tZ" in status.read_text():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_a_pre_push_gate_past_its_timeout_is_killed_with_its_children_and_keeps_the_branch_off_origin(monkeypatch, rig):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
-    install_gate(rig, 0)
-    calls, run = [], subprocess.run
-
-    def spy(argv, **kwargs):
-        if argv[1:] == ["-m", "scripts.ci_prepush"]:
-            calls.append((argv[0], kwargs))
-            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
-        return run(argv, **kwargs)
-
-    monkeypatch.setattr(push_stop.subprocess, "run", spy)
+    pid = rig.root / "child.pid"
+    slow = (
+        "import subprocess, time\n"
+        "child = subprocess.Popen(['sleep', '30'])\n"
+        f"open({str(pid)!r}, 'w').write(str(child.pid))\n"
+        "time.sleep(30)\n"
+    )
+    install_gate(rig, 0, before=slow)
+    monkeypatch.setattr(push_stop, "GATE_TIMEOUT_S", 2)
     decision = rig.stop()
-    assert calls == [
-        (sys.executable, {"cwd": rig.tree, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "timeout": 8})
-    ]
-    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_FAILED.format(path=rig.tree)}")
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_SLOW.format(path=rig.tree, seconds=2)}")
     assert rig.remote_head() == ""
+    assert gone(int(pid.read_text()))
+
+
+def test_the_gate_stops_two_seconds_before_the_stop_condition_is_killed():
+    assert push_stop.GATE_TIMEOUT_S == CONDITIONS_TIMEOUT_SEC - 2
 
 
 def test_a_pre_push_gate_killed_by_a_signal_keeps_the_branch_off_origin(rig):

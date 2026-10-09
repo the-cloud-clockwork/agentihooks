@@ -3,6 +3,7 @@ uncommitted changes, a push origin refused, or pushed work with no pull request 
 
 import os
 import re
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -29,6 +30,10 @@ PREPUSH = Path("scripts") / "ci_prepush" / "__init__.py"
 GATE_FAILED = (
     "The pre push gate failed in {path}, so the stop hook did not push it. "
     "Run python -m scripts.ci_prepush there, fix what fails and commit."
+)
+GATE_SLOW = (
+    "The pre push gate did not finish in {seconds:g} s in {path}, so the stop hook did not push it. "
+    "Run python -m scripts.ci_prepush there and commit."
 )
 
 
@@ -70,25 +75,28 @@ def trees(root, name):
     return [tree for tree in found if tree is not None]
 
 
-def gate_passes(tree):
-    """Whether the repo's pre push gate passes on HEAD: a repo without one passes, a stamped HEAD is not rerun."""
+def gate_refusal(tree):
+    """Why the pre push gate keeps HEAD off origin, or None: a repo without one passes, a stamped HEAD is not rerun."""
     if not (tree.path / PREPUSH).is_file():
-        return True
+        return None
     from scripts.ci_prepush import passed
 
     if passed(tree.path):
-        return True
+        return None
+    gate = subprocess.Popen(
+        [sys.executable, "-m", "scripts.ci_prepush"],
+        cwd=tree.path,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
     try:
-        done = subprocess.run(
-            [sys.executable, "-m", "scripts.ci_prepush"],
-            cwd=tree.path,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=GATE_TIMEOUT_S,
-        )
+        code = gate.wait(GATE_TIMEOUT_S)
     except subprocess.TimeoutExpired:
-        return False
-    return done.returncode == 0
+        os.killpg(gate.pid, signal.SIGKILL)
+        gate.wait()
+        return GATE_SLOW.format(path=tree.path, seconds=GATE_TIMEOUT_S)
+    return None if code == 0 else GATE_FAILED.format(path=tree.path)
 
 
 def push(tree):
@@ -156,8 +164,8 @@ class PushStop:
             return Decision()
         store, owed, failed = self.connect(), False, []
         for tree in trees(self.root(), who.name):
-            if tree.unpushed and not gate_passes(tree):
-                failed.append(GATE_FAILED.format(path=tree.path))
+            if tree.unpushed and (refused := gate_refusal(tree)):
+                failed.append(refused)
             elif tree.unpushed and push(tree):
                 self.record(store, ledger, who, tree)
             owed = owed or tree.dirty or (tree.unpushed and not self.on_origin(tree))
