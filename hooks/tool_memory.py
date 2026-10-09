@@ -85,7 +85,9 @@ FALSE_POSITIVE_PATTERNS = [
 ]
 
 # Codex and Claude shell results carry no exit code.
-_ZERO_COUNT_RE = re.compile(r"(?<![\w.])0 (?:errors?|failed)\b")
+_ZERO_COUNT_RE = re.compile(
+    r"(?<![\w.])0 (?:errors?|failed|exceptions?|timeouts?|denied|refused|invalid|unauthorized|forbidden)\b"
+)
 
 # Their success responses echo file content, so any file mentioning "error"
 # or "not found" would read as a failure under string matching.

@@ -488,7 +488,10 @@ class TestNativeShellOutcomes:
         assert self._count("prepush-ok") == 0
         assert inject.call_count == 0
 
-    @pytest.mark.parametrize("summary", ["Tests: 0 failed, 12 passed", "Found 0 errors", "1.0 errors"])
+    @pytest.mark.parametrize(
+        "summary",
+        ["Tests: 0 failed, 12 passed", "Found 0 errors", "0 exceptions, 0 timeouts, 0 denied", "1.0 errors"],
+    )
     def test_only_a_zero_count_is_ignored(self, summary):
         from hooks.tool_memory import _is_error
 
