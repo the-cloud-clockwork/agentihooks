@@ -32,19 +32,20 @@ docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10
     "$image" python -c 'from pathlib import Path; import os; assert os.getuid()==10001; assert not os.access("/opt/agentihooks/templates", os.W_OK); import hooks, scripts.swarm_v2.runtime; print("private home and local runtime imports passed")' \
     > "$output/compatibility.log"
 
-probe="$context/docker/swarm-node"
-chmod -R a+rX "$probe"
+probe="$context/tests/swarm_node"
+fixtures="$context/docker/swarm-node/fixtures/profiles"
+chmod -R a+rX "$probe" "$fixtures"
 for case in positive positive-second rejection recovery rollback noexec; do
     volume=/home/worker:uid=10001,gid=10001,exec
     if [[ "$case" == noexec ]]; then
         volume=/home/worker:uid=10001,gid=10001
     fi
     docker run --rm --network none --read-only --tmpfs "$volume" --tmpfs /tmp \
-        -v "$probe/fixtures/profiles:/fixtures:ro" -v "$probe:/opt/probe:ro" \
+        -v "$fixtures:/fixtures:ro" -v "$probe:/opt/probe:ro" \
         "$image" bash /opt/probe/profile-probe.sh "${case%-second}" \
         > "$output/profile-$case.json" 2> "$output/profile-$case.log"
 done
-python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$probe/fixtures/profiles"
+python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$fixtures"
 
 for rejection in missing-checksum unsupported-architecture mismatched-binary; do
     python3 - "$context/docker/swarm-node/versions.lock" "$rejection" <<'PY'

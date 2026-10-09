@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -16,6 +18,42 @@ ACCOUNTS = {"claude": "AH_CC_TOKEN_POOL_A", "codex": "AH_CX_TOKEN_POOL_B"}
 
 
 FIXTURES = Path(__file__).resolve().parents[1] / "docker" / "swarm-node" / "fixtures" / "profiles"
+
+
+REAL_RENDER = worker_home.render
+CODE_ROOT = Path(worker_home.__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True)
+def inprocess(monkeypatch):
+    import install
+
+    import scripts.install as package_install
+
+    def render(attempt: Path, target: str) -> None:
+        home = attempt / "homes" / target
+        state = home / ".agentihooks"
+        paths = {
+            "CLAUDE_HOME": home / ".claude",
+            "AGENTIHOOKS_STATE_DIR": state,
+            "STATE_JSON": state / "state.json",
+            "_CLAUDE_JSON": home / ".claude.json",
+            "_SYNC_LOCK_FILE": state / "sync.lock",
+            "AGENTIHOOKS_ROOT": CODE_ROOT,
+        }
+        pending = json.loads((attempt / worker_home.PENDING).read_text())
+        with monkeypatch.context() as patch:
+            for module in (install, package_install):
+                for name, value in paths.items():
+                    patch.setattr(module, name, value)
+            patch.setattr(Path, "home", classmethod(lambda cls: home))
+            patch.setenv("HOME", str(home))
+            patch.setenv("AGENTIHOOKS_PYTHON", pending["request"]["interpreter"])
+            patch.setenv("AGENTIHOOKS_MCP_TRANSPORT", "stdio")
+            with contextlib.redirect_stdout(io.StringIO()):
+                worker_home.materialize(attempt, target)
+
+    monkeypatch.setattr(worker_home, "render", render)
 
 
 @pytest.fixture
@@ -122,6 +160,8 @@ def test_second_independent_fixture_renders_the_same_configuration(fixture, tmp_
     ("changes", "message"),
     [
         ({"interpreter": Path(WORKSTATION_PYTHON)}, f"interpreter cannot run agentihooks: {WORKSTATION_PYTHON}"),
+        ({"interpreter": Path("/")}, "interpreter cannot run agentihooks: /"),
+        ({"interpreter": Path("/bin/false")}, "interpreter cannot run agentihooks: /bin/false"),
         ({"attempt": "../escape"}, "invalid attempt id: ../escape"),
         ({"profiles": {"claude": "../fixture-claude"}}, "invalid profile name: ../fixture-claude"),
         ({"profiles": {"copilot": "fixture-claude"}}, "unsupported target: copilot"),
@@ -159,6 +199,33 @@ def test_profile_pointing_at_a_workstation_venv_fails_bootstrap(fixture):
     assert not (volume / "attempt-1").exists()
 
 
+def claude_home(attempt: Path, settings: dict, servers: dict | None = None) -> None:
+    home = attempt / "homes" / "claude"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text(json.dumps(settings))
+    (home / ".claude.json").write_text(json.dumps({"mcpServers": servers or {}}))
+
+
+def codex_home(attempt: Path, config: str = "", wrapper: str = "", command: str = "") -> None:
+    home = attempt / "homes" / "codex" / ".codex"
+    home.mkdir(parents=True)
+    (home / "config.toml").write_text(config)
+    hooks = {
+        "SessionStart": [{"hooks": [{"type": "command", "command": command or str(home / "agentihooks-hook.sh")}]}]
+    }
+    (home / "hooks.json").write_text(json.dumps({"hooks": hooks}))
+    (home / "agentihooks-hook.sh").write_text("#!/usr/bin/env bash\n" + wrapper)
+
+
+def check(attempt: Path, target: str) -> None:
+    roots = [attempt.resolve(), Path(sys.prefix).resolve(), *worker_home.SYSTEM_ROOTS]
+    worker_home._check_home(attempt, target, roots, (os.geteuid(), os.getegid()))
+
+
+def hook(command: str) -> dict:
+    return {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}}
+
+
 @pytest.mark.parametrize(
     ("command", "offending"),
     [
@@ -176,84 +243,112 @@ def test_profile_pointing_at_a_workstation_venv_fails_bootstrap(fixture):
         ("$AGENTIHOOKS_PYTHON -m hooks", "$AGENTIHOOKS_PYTHON"),
         ("~ -m hooks", "~"),
         ("python -m hooks --config=git+file:///etc/x", "/etc/x"),
+        ("python -m hooks 'unbalanced /etc/y", "/etc/y"),
     ],
 )
-def test_hidden_or_relative_paths_in_a_hook_fail_bootstrap(fixture, command, offending):
-    templates, volume = fixture
-    settings = templates / "fixture-workstation" / ".claude" / "settings.overrides.json"
-    document = json.loads(settings.read_text())
-    document["hooks"]["SessionStart"][0]["hooks"][0]["command"] = command
-    settings.write_text(json.dumps(document))
+def test_hidden_or_relative_paths_in_a_hook_are_refused(tmp_path, command, offending):
+    claude_home(tmp_path, hook(command))
     with pytest.raises(worker_home.BootstrapError) as error:
-        worker_home.bootstrap(request(templates, volume, profiles={"claude": "fixture-workstation"}, accounts={}))
+        check(tmp_path, "claude")
     assert str(error.value) == f"claude setting hooks leaves the execution root: {offending}"
-    assert list(volume.iterdir()) == []
 
 
-def test_url_arguments_and_contained_relative_paths_are_admitted(fixture):
-    templates, volume = fixture
-    settings = templates / "fixture-workstation" / ".claude" / "settings.overrides.json"
-    document = json.loads(settings.read_text())
-    document["hooks"]["SessionStart"][0]["hooks"][0]["command"] = "python bin/probe.py https://brain.svc/x/y"
-    settings.write_text(json.dumps(document))
-    record = worker_home.bootstrap(request(templates, volume, profiles={"claude": "fixture-workstation"}, accounts={}))
-    assert record["profiles"] == {"claude": "fixture-workstation"}
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python bin/probe.py https://brain.svc/x/y",
+        f"cd {sys.prefix} && {sys.prefix}/bin/python -m hooks",
+        f"{sys.prefix}/./bin/python",
+        "python -m hooks --url=http://ledger.svc:8765/x",
+    ],
+)
+def test_url_arguments_and_contained_paths_are_admitted(tmp_path, command):
+    claude_home(tmp_path, hook(command) | {"permissions": {"deny": ["Read(~/.ssh/**)", "Read(/etc/**)"]}})
+    check(tmp_path, "claude")
 
 
-def test_a_workstation_path_in_a_settings_environment_value_fails_bootstrap(fixture):
-    templates, volume = fixture
-    settings = templates / "fixture-claude" / ".claude" / "settings.overrides.json"
-    document = json.loads(settings.read_text())
-    document["env"]["PATH"] = "/home/operator/dev/tcc-ecosystem/.venv/bin:/usr/bin"
-    settings.write_text(json.dumps(document))
+def test_a_workstation_path_in_a_settings_environment_value_is_refused(tmp_path):
+    claude_home(tmp_path, {"env": {"PATH": "/home/operator/dev/tcc-ecosystem/.venv/bin:/usr/bin"}})
     with pytest.raises(worker_home.BootstrapError) as error:
-        worker_home.bootstrap(request(templates, volume, profiles={"claude": "fixture-claude"}, accounts={}))
+        check(tmp_path, "claude")
     assert (
         str(error.value) == "claude setting env leaves the execution root: /home/operator/dev/tcc-ecosystem/.venv/bin"
     )
-    assert list(volume.iterdir()) == []
 
 
-@pytest.mark.parametrize("target", ["claude", "codex"])
-def test_a_workstation_path_in_an_mcp_environment_fails_bootstrap(fixture, target):
-    templates, volume = fixture
-    mcp = templates / f"fixture-{target}" / ".mcp.json"
-    document = json.loads(mcp.read_text())
-    document["mcpServers"][f"fixture-{target}-mcp"]["env"] = {"VIRTUAL_ENV": "/home/operator/.venv"}
-    mcp.write_text(json.dumps(document))
+def test_an_executable_setting_outside_the_root_is_refused(tmp_path):
+    claude_home(tmp_path, {"apiKeyHelper": "/home/operator/bin/key.sh"})
     with pytest.raises(worker_home.BootstrapError) as error:
-        worker_home.bootstrap(request(templates, volume, profiles={target: f"fixture-{target}"}, accounts={}))
-    assert str(error.value) == f"{target} MCP server leaves the execution root: /home/operator/.venv"
-    assert list(volume.iterdir()) == []
-
-
-def test_an_executable_setting_outside_the_root_fails_bootstrap(fixture):
-    templates, volume = fixture
-    settings = templates / "fixture-claude" / ".claude" / "settings.overrides.json"
-    document = json.loads(settings.read_text())
-    document["apiKeyHelper"] = "/home/operator/bin/key.sh"
-    settings.write_text(json.dumps(document))
-    with pytest.raises(worker_home.BootstrapError) as error:
-        worker_home.bootstrap(request(templates, volume, profiles={"claude": "fixture-claude"}, accounts={}))
+        check(tmp_path, "claude")
     assert str(error.value) == "claude setting apiKeyHelper leaves the execution root: /home/operator/bin/key.sh"
-    assert list(volume.iterdir()) == []
 
 
-def test_codex_wrapper_exports_are_scanned_as_values(fixture, monkeypatch):
-    templates, volume = fixture
-    calls = []
-    real = worker_home._wrapper
+def test_a_workstation_path_in_a_claude_mcp_environment_is_refused(tmp_path):
+    claude_home(tmp_path, {}, {"x": {"command": "python", "env": {"VIRTUAL_ENV": "/home/operator/.venv"}}})
+    with pytest.raises(worker_home.BootstrapError) as error:
+        check(tmp_path, "claude")
+    assert str(error.value) == "claude MCP server leaves the execution root: /home/operator/.venv"
 
-    def spy(text):
-        exports, commands = real(text)
-        calls.append(exports)
-        return exports, commands
 
-    monkeypatch.setattr(worker_home, "_wrapper", spy)
-    worker_home.bootstrap(request(templates, volume, profiles={"codex": "fixture-codex"}, accounts={}))
-    assert calls == [list(ENDPOINTS.values())]
-    script = "x\nexport A=\"${A:='/home/op/.venv'}\"\nset -e\n"
-    assert real(script) == (["/home/op/.venv"], ["set -e"])
+@pytest.mark.parametrize(
+    ("config", "wrapper", "command", "message"),
+    [
+        (
+            '[mcp_servers.x]\ncommand = "python"\nenv = { VIRTUAL_ENV = "/home/operator/.venv" }\n',
+            "",
+            "",
+            "MCP server leaves the execution root: /home/operator/.venv",
+        ),
+        (
+            'notify = ["/home/operator/.venv/bin/python", "-m", "x"]\n',
+            "",
+            "",
+            "setting notify leaves the execution root: /home/operator/.venv/bin/python",
+        ),
+        (
+            "",
+            "export A=\"${A:='/home/operator/.venv'}\"\n",
+            "",
+            "environment value leaves the execution root: /home/operator/.venv",
+        ),
+        (
+            "",
+            "cd /home/operator/agentihooks\n",
+            "",
+            "hook command leaves the execution root: /home/operator/agentihooks",
+        ),
+        ("", "", "/home/operator/hook.sh", "hook command leaves the execution root: /home/operator/hook.sh"),
+    ],
+)
+def test_codex_surfaces_outside_the_root_are_refused(tmp_path, config, wrapper, command, message):
+    codex_home(tmp_path, config, wrapper, command)
+    with pytest.raises(worker_home.BootstrapError) as error:
+        check(tmp_path, "codex")
+    assert str(error.value) == f"codex {message}"
+
+
+def test_codex_exports_are_read_as_values_and_other_lines_as_commands():
+    script = 'header\nexport A="${A:=\'/opt/x y\'}"\nexport B="${C:=/z}"\nexport D="${D:=/w"\nD="${D:=/v}"\nset -e\n'
+    expected = ['export B="${C:=/z}"', 'export D="${D:=/w"', 'D="${D:=/v}"', "set -e"]
+    assert worker_home._wrapper(script) == (["/opt/x y"], expected)
+    assert worker_home._strings({"a": ["x", {"b": "y"}, 3, None], "c": "z"}) == ["x", "y", "z"]
+
+
+def test_a_home_file_owned_by_another_user_is_refused(tmp_path, monkeypatch):
+    claude_home(tmp_path, {})
+    real = Path.lstat
+    target = tmp_path / "homes" / "claude" / ".claude.json"
+
+    def lstat(path):
+        found = real(path)
+        if path == target:
+            return SimpleNamespace(st_uid=found.st_uid + 1, st_gid=found.st_gid, st_mode=found.st_mode)
+        return found
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    with pytest.raises(worker_home.BootstrapError) as error:
+        check(tmp_path, "claude")
+    assert str(error.value) == f"claude home holds a file not owned by {os.geteuid()}:{os.getegid()}"
 
 
 def test_a_missing_execution_root_is_refused(fixture, tmp_path):
@@ -304,6 +399,17 @@ def test_record_names_the_digest_of_each_selected_profile(fixture):
     assert other["profile_digests"]["fixture-codex"] == record["profile_digests"]["fixture-codex"]
 
 
+def test_tree_digest_follows_link_targets_inside_a_template(tmp_path):
+    (tmp_path / "a.md").write_text("a")
+    (tmp_path / "b.md").write_text("b")
+    (tmp_path / "link").symlink_to("a.md")
+    first = worker_home._tree_digest(tmp_path)
+    (tmp_path / "link").unlink()
+    (tmp_path / "link").symlink_to("b.md")
+    assert worker_home._tree_digest(tmp_path) != first
+    worker_home._check_template(tmp_path, "inside")
+
+
 def test_profile_link_escaping_its_template_fails_bootstrap(fixture, tmp_path):
     templates, volume = fixture
     outside = tmp_path / "outside"
@@ -337,6 +443,7 @@ def test_rendered_link_escaping_the_execution_root_fails_bootstrap(fixture, tmp_
 
 def test_failed_render_removes_the_unstarted_attempt(fixture, monkeypatch):
     templates, volume = fixture
+    monkeypatch.setattr(worker_home, "render", REAL_RENDER)
     monkeypatch.setattr(
         worker_home, "child_command", lambda attempt, target: [sys.executable, "-c", "raise SystemExit(3)"]
     )
@@ -344,6 +451,50 @@ def test_failed_render_removes_the_unstarted_attempt(fixture, monkeypatch):
         worker_home.bootstrap(request(templates, volume))
     assert str(error.value) == "claude render failed with exit 3"
     assert list(volume.iterdir()) == []
+
+
+def test_render_runs_the_child_in_the_target_home_with_its_environment(tmp_path, monkeypatch):
+    attempt = tmp_path / "attempt"
+    for folder in ("run", "homes/codex"):
+        (attempt / folder).mkdir(parents=True)
+    (attempt / worker_home.PENDING).write_text(json.dumps({"request": {"interpreter": "/opt/venv/bin/python"}}))
+    assert worker_home.child_command(attempt, "codex") == [
+        sys.executable,
+        "-m",
+        "scripts.swarm_v2.worker_home",
+        "render",
+        str(attempt),
+        "codex",
+    ]
+    fields = "{'cwd': os.getcwd(), 'home': os.environ['HOME'], 'python': os.environ['AGENTIHOOKS_PYTHON']}"
+    probe = f"import json, os; print(json.dumps({fields}))"
+    monkeypatch.setattr(worker_home, "child_command", lambda path, target: [sys.executable, "-c", probe])
+    REAL_RENDER(attempt, "codex")
+    home = str(attempt / "homes" / "codex")
+    logged = json.loads((attempt / "run" / "render-codex.log").read_text())
+    assert logged == {"cwd": home, "home": home, "python": "/opt/venv/bin/python"}
+
+
+def test_materialize_refuses_a_profile_outside_the_execution_scope(tmp_path):
+    attempt = tmp_path / "attempt"
+    attempt.mkdir()
+    document = {"request": {"profiles": {"claude": "not-linked"}, "endpoints": {}}}
+    (attempt / worker_home.PENDING).write_text(json.dumps(document))
+    with pytest.raises(worker_home.BootstrapError) as error:
+        worker_home.materialize(attempt, "claude")
+    assert str(error.value) == "profile did not resolve in the execution scope: not-linked"
+
+
+def test_cli_render_dispatches_to_materialize(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(worker_home, "materialize", lambda attempt, target: calls.append((attempt, target)))
+    assert worker_home.main(["render", str(tmp_path), "codex"]) == 0
+    assert calls == [(tmp_path, "codex")]
+
+
+def test_cli_refuses_a_pair_without_a_value(capsys):
+    assert worker_home.main(["bootstrap", "--attempt=a", "--profile=claude"]) == 1
+    assert capsys.readouterr().err == "ERROR: --profile needs KEY=VALUE: claude\n"
 
 
 def mount(flags: int) -> SimpleNamespace:

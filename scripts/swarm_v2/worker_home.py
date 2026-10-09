@@ -21,7 +21,6 @@ NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 VARIABLE = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
 SYSTEM_ROOTS = (Path("/usr/bin"), Path("/bin"), Path("/usr/local/bin"))
 SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*")
-EXPORT = re.compile(r'export (\w+)="\$\{\1:=(.*)\}"')
 
 
 class BootstrapError(ValueError):
@@ -242,9 +241,10 @@ def _claude_surfaces(home: Path) -> dict[str, list[str]]:
 def _wrapper(text: str) -> tuple[list[str], list[str]]:
     exports, commands = [], []
     for line in text.splitlines()[1:]:
-        found = EXPORT.fullmatch(line)
-        if found:
-            exports += shlex.split(found[2])
+        name, _, value = line.removeprefix("export ").partition("=")
+        prefix = f'"${{{name}:='
+        if line.startswith("export ") and value.startswith(prefix) and value.endswith('}"'):
+            exports += shlex.split(value[len(prefix) : -2])
         else:
             commands.append(line)
     return exports, commands
