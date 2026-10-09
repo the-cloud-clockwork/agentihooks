@@ -71,7 +71,7 @@ FIELDS = {
     "priority_clear": "by target reason",
     "notification_clear": "target",
     "notice": "by text",
-    "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate",
+    "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice",
     "task_update": "by item fields if_state if_plan_lines_missing",
     "task_rank": "item rank",
     "task_group": "by item members",
@@ -83,7 +83,9 @@ FIELDS = {
     "reopen": "by",
     "size_set": "by size",
     "source_add": "by source",
-    "phase_add": "by phase title description depends_on planning release plan_url plan_ref",
+    "phase_add": "by phase title description depends_on planning release plan_url plan_ref plan",
+    "plan_add": "by plan title artifact url",
+    "slice_add": "by phase anchor",
     "phase_update": "by item fields",
     "phase_review": "by item state note override rounds escalated",
     "phase_append": "by phases",
@@ -104,7 +106,6 @@ TYPES = {
     "needs_operator": {"type": "boolean"},
     "artifact": {"type": "boolean"},
     "release": {"type": "boolean"},
-    "plan": {"type": "boolean"},
     "if_plan_lines_missing": {"type": "boolean"},
     "rounds": {"type": "integer", "minimum": 0},
     "escalated": {"type": "boolean"},
@@ -125,12 +126,14 @@ TYPES = {
     "phases": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
     "attachments": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
 }
+KIND_TYPES = {"artifact_add": {"plan": {"type": "boolean"}}}
 for _field in ("depends_on", "territory", "if_state", "members"):
     TYPES[_field] = {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 2000}}
 
 
 def operation_schema(kind: str) -> dict:
-    properties = {key: TYPES.get(key, {"type": "string", "maxLength": 100000}) for key in FIELDS[kind].split()}
+    types = {**TYPES, **KIND_TYPES.get(kind, {})}
+    properties = {key: types.get(key, {"type": "string", "maxLength": 100000}) for key in FIELDS[kind].split()}
     return {
         "type": "object",
         "additionalProperties": False,
@@ -205,4 +208,10 @@ def target(op: dict) -> str:
         return "artifacts"
     if kind in ("claim", "retext", "relay", "answer", "verdict"):
         return op["item"]
-    return {"alert_claim": "alerts", "alert_close": "alerts", "source_add": "sources"}.get(kind, "metadata")
+    return {
+        "alert_claim": "alerts",
+        "alert_close": "alerts",
+        "source_add": "sources",
+        "plan_add": "plans",
+        "slice_add": "slices",
+    }.get(kind, "metadata")

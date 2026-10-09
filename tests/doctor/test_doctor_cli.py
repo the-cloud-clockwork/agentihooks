@@ -516,7 +516,7 @@ def test_failed_spawn_measure_uses_only_the_spawn_reader(env, monkeypatch, capsy
         (
             "health/f1",
             ["--since", "2026-10-07T09:00Z", "--until", "2026-10-07T12:00Z"],
-            "journal bounds are only supported for failed-spawn findings",
+            "journal bounds are only supported for failed-spawn findings and master-launch-missed",
         ),
     ],
 )
@@ -528,6 +528,88 @@ def test_failed_spawn_measure_refuses_invalid_bounds(env, monkeypatch, capsys, f
     output = capsys.readouterr()
     assert output.err == f"doctor: {error}\n"
     assert output.out == ""
+
+
+@pytest.mark.parametrize("detectors,count", [("before", 12), ("after", 0)])
+def test_master_launch_missed_measure_replays_the_recorded_outage(env, monkeypatch, capsys, detectors, count):
+    from scripts.doctor import loop, master_launches
+    from tests.doctor.recorded import load
+
+    store, _, _ = env
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    record = {**load("master_outage"), "journal_error": ""}
+    for finding_id, stored in record["verdicts"].items():
+        store.redis.hset(loop.verdicts(store, DOCTOR).key, finding_id, json.dumps(stored))
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791588800000)
+    seen = []
+
+    def read(actual_store, slug, **kwargs):
+        seen.append((actual_store, slug, kwargs))
+        return record
+
+    monkeypatch.setattr(doctor.spawn_read, "master_records", read)
+    passed = []
+
+    def passes(slug, **kwargs):
+        passed.append((slug, kwargs))
+        return tuple(record["passes"])
+
+    monkeypatch.setattr(doctor.spawn_read, "doctor_passes", passes)
+    if detectors == "before":
+        monkeypatch.setattr(master_launches, "DETECTORS", (master_launches.journal_hour,))
+    since, until = "2026-10-09T19:50Z", "2026-10-09T20:35Z"
+    assert doctor.main([WATCHED, "measure", "master-launch-missed", "--since", since, "--until", until]) == 0
+    assert capsys.readouterr().out == f"master-launch-missed {count}\n"
+    start = doctor._at_ms(since) - master_launches.JOURNAL_MS
+    end = doctor._at_ms(until) + master_launches.MATCH_MS
+    journal = {"since": f"@{start / 1000:.3f}", "until": f"@{end / 1000:.3f}"}
+    assert seen == [(store, WATCHED, journal)]
+    assert passed == [(DOCTOR, journal)]
+
+
+def test_master_launch_missed_measure_refuses_an_unreadable_journal(env, monkeypatch, capsys):
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    record = {"slug": WATCHED, "transfers": [], "restored": [], "agents": [], "journal": None, "journal_error": "gone"}
+    monkeypatch.setattr(doctor.spawn_read, "master_records", lambda store, slug, **kwargs: record)
+    monkeypatch.setattr(doctor.spawn_read, "doctor_passes", lambda slug, **kwargs: ())
+    assert doctor.main([WATCHED, "measure", "master-launch-missed"]) == 1
+    output = capsys.readouterr()
+    assert output.err == "doctor: master-launch-missed unavailable: gone\n"
+    assert output.out == ""
+
+
+def test_master_launch_missed_measure_refuses_times_without_a_zone(env, monkeypatch, capsys):
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791588800000)
+    flags = ["--since", "2026-10-09T21:50", "--until", "2026-10-09T22:35"]
+    assert doctor.main([WATCHED, "measure", "master-launch-missed", *flags]) == 1
+    assert (
+        capsys.readouterr().err == "doctor: master-launch-missed takes times with a zone, such as 2026-10-09T19:50Z\n"
+    )
+
+
+def test_master_launch_missed_measure_defaults_to_the_last_hour_with_the_doctor_timings(env, monkeypatch, capsys):
+    from scripts.doctor import master_launches
+
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    for name in ("AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES", "AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES"):
+        monkeypatch.delenv(name, raising=False)
+    now = 1791588800000
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: now)
+    record = {"slug": WATCHED, "transfers": [], "restored": [], "agents": [], "journal": [], "journal_error": ""}
+    monkeypatch.setattr(doctor.spawn_read, "master_records", lambda store, slug, **kwargs: record)
+    monkeypatch.setattr(doctor.spawn_read, "doctor_passes", lambda slug, **kwargs: (5,))
+    calls = []
+    monkeypatch.setattr(master_launches, "missed", lambda *args: calls.append(args) or 3)
+    assert doctor.main([WATCHED, "measure", "master-launch-missed"]) == 0
+    assert capsys.readouterr().out == "master-launch-missed 3\n"
+    [(_, replay, window, _)] = calls
+    assert window == (now - 3_600_000, now)
+    assert (replay.cooldown_ms, replay.interval_ms, replay.passes) == (3_600_000, 600_000, (5,))
 
 
 def test_failed_spawn_measure_accepts_a_window_ending_now(env, monkeypatch, capsys):
