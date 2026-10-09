@@ -244,6 +244,9 @@ def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store)
         {"memory_per_agent_mb": 0.5},
         {"memory_per_agent_mb": True},
         {"load_high": 0.0, "load_low": 0.0},
+        {"load_low": True},
+        {"load_high": True},
+        {"load_high": "2"},
     ],
 )
 def test_update_refuses_bad_scaling_settings_and_keeps_the_stored_ones(store, changes):
@@ -270,7 +273,7 @@ def test_create_refuses_memory_that_cannot_round_trip(store, memory):
 
 def test_scaling_boundaries_round_trip_and_manual_preserves_lane_caps(store):
     store.create(config())
-    stored = store.update("smoke", scaling="manual", load_low=10.0, load_high=10.0, memory_per_agent_mb=1)
+    stored = store.update("smoke", scaling="manual", load_low=10, load_high=10, memory_per_agent_mb=1)
     assert store.config("smoke") == stored
     assert (stored.max_eng, stored.max_ci, stored.max_plan) == (2, 1, 1)
 
