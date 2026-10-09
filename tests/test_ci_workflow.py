@@ -340,6 +340,11 @@ def test_shards_wait_only_on_the_durations_lookup():
     assert "needs" not in jobs["lint"]
 
 
+def test_unit_shards_check_out_full_history_without_old_file_contents():
+    _, checkout = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/checkout"))
+    assert checkout["with"] == {"fetch-depth": 0, "filter": "blob:none"}
+
+
 def test_unit_pins_an_exact_uv_version():
     _, uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
     assert re.fullmatch(r"\d+\.\d+\.\d+", uv["with"]["version"])
