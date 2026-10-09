@@ -174,6 +174,20 @@ def commit(repo: store.SQLiteLedgerRepository, slug: str, by: str) -> dict:
     return report
 
 
+def stored(connection, slug: str) -> tuple[dict, set]:
+    tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    nodes = (
+        {
+            node: (kind, parent, position)
+            for node, kind, parent, position in connection.execute(hierarchy.NODES, (slug,))
+        }
+        if "work_nodes" in tables
+        else {}
+    )
+    dependencies = set(connection.execute(hierarchy.DEPENDENCIES, (slug,))) if "work_dependencies" in tables else set()
+    return nodes, dependencies
+
+
 def backfill(repo: store.SQLiteLedgerRepository, slug: str, by: str, apply: bool = False) -> dict:
     if apply:
         return commit(repo, slug, by)
@@ -185,7 +199,7 @@ def backfill(repo: store.SQLiteLedgerRepository, slug: str, by: str, apply: bool
         if "_meta" not in doc:
             raise store.Missing(slug)
         _, report = preview(doc, slug)
-        report["drift"] = hierarchy.drift(hierarchy.stored(connection, slug), hierarchy.project(doc))
+        report["drift"] = hierarchy.drift(stored(connection, slug), hierarchy.project(doc))
     return report
 
 

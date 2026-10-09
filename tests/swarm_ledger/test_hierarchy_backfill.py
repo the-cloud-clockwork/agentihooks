@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.swarm_ledger import hierarchy_backfill, ledger
 from scripts.swarm_ledger.repository import sqlite as store
 
@@ -158,3 +160,56 @@ def test_recorded_ledger_copy_reports_the_known_conflicts_then_has_zero_drift(tm
     assert result["drift"]["drift"] == 0
     assert repo.rebuild(SLUG)["drift"] == 0
     assert hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)["conflicts"] == []
+
+
+def test_dry_run_on_an_old_database_does_not_create_hierarchy_tables(tmp_path):
+    repo = repository(tmp_path)
+    before = repo.export_document(SLUG)
+    with repo.connect() as connection, connection:
+        connection.execute("DROP TABLE work_dependencies")
+        connection.execute("DROP TABLE work_nodes")
+    reopened = store.SQLiteLedgerRepository(repo.path)
+    report = hierarchy_backfill.backfill(reopened, SLUG, "planner")
+    assert report["applied"] is False
+    assert report["drift"]["drift"] == 11
+    assert len(report["drift"]["missing_nodes"]) == 11
+    with store.read_only(repo.path.parent) as connection:
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "work_nodes" not in tables
+    assert "work_dependencies" not in tables
+    assert store.read_document(repo.path.parent, SLUG) == before
+    applied = hierarchy_backfill.backfill(reopened, SLUG, "planner", apply=True)
+    assert applied["drift"]["drift"] == 0
+
+
+def test_failed_apply_rolls_back_document_and_hierarchy_together(tmp_path, monkeypatch):
+    repo = repository(tmp_path)
+    before = repo.export_document(SLUG)
+    original = repo._write
+
+    def fail(*args, **kwargs):
+        original(*args, **kwargs)
+        raise RuntimeError("write failed")
+
+    monkeypatch.setattr(repo, "_write", fail)
+    with pytest.raises(RuntimeError, match="^write failed$"):
+        hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)
+    reopened = store.SQLiteLedgerRepository(repo.path)
+    assert reopened.export_document(SLUG) == before
+    assert reopened.rebuild(SLUG)["drift"] == 0
+
+
+def test_existing_explicit_plan_parents_are_preserved_without_legacy_links(tmp_path):
+    repo = repository(tmp_path)
+    doc = repo.export_document(SLUG)
+    doc["plans"] = [{"id": "a", "title": "Existing A"}, {"id": "b", "title": "Existing B"}]
+    doc["phases"] = [
+        {"id": "p1", "title": "Existing first", "plan": "plans/a"},
+        {"id": "p2", "title": "Existing second", "plan": "plans/b"},
+    ]
+    doc["tasks"] = []
+    repo.import_document(SLUG, doc, token=repo.token(SLUG), replace=True)
+    report = hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)
+    assert report["conflicts"] == []
+    assert repo.export_document(SLUG)["phases"] == doc["phases"]
+    assert repo.export_document(SLUG)["plans"] == doc["plans"]
