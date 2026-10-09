@@ -308,6 +308,11 @@ def spawn_counter(store: RedisStore, now_ms: int) -> Callable[[int], int]:
     return lambda since_ms: host_spent(store, since_ms, now_ms)
 
 
+def feed_spent(runtime, store: RedisStore, now_ms: int) -> None:
+    if hasattr(runtime, "quota_spent"):
+        runtime.quota_spent(spawn_counter(store, now_ms))
+
+
 def fixture_inputs(readings: dict) -> ScaleInputs:
     from scripts.swarm.store import AgentRecord
 
@@ -410,8 +415,7 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     previous = read(store, slug)
     if hasattr(runtime, "quota_previous"):
         runtime.quota_previous(previous)
-    if hasattr(runtime, "quota_spent"):
-        runtime.quota_spent(spawn_counter(store, now_ms))
+    feed_spent(runtime, store, now_ms)
     decision = reader(config, agents, now_ms / 1000, demand, requirements)
     decision["tasks"] = {
         ready[lane][slot["index"]]["id"]: slot["harness"]

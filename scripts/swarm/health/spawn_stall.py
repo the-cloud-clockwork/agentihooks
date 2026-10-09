@@ -41,8 +41,7 @@ def eligible(store, slug: str, ledger, at: int, runtime) -> bool:
         requirements = runtime.quota_requirements(config, prepared)
     if reader := getattr(runtime, "quota_capacity", None):
         runtime.quota_previous(capacity.read(store, slug))
-        if hasattr(runtime, "quota_spent"):
-            runtime.quota_spent(capacity.spawn_counter(store, at))
+        capacity.feed_spent(runtime, store, at)
         decision = reader(config, agents, at / 1000, demand, requirements, refresh=False)
     else:
         inputs = capacity.live_inputs(slug, store, ledger, dict(os.environ), at)

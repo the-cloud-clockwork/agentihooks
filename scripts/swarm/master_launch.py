@@ -162,8 +162,7 @@ def _new(store, slug, runtime, at):
         task = _filled(primed(store, slug, record.seat, task), config)
         master_start.begin(store, slug, name, task, at)
         affinity.handed_off(store, slug)
-        if hasattr(runtime, "quota_spent"):
-            runtime.quota_spent(capacity.spawn_counter(store, at))
+        capacity.feed_spent(runtime, store, at)
         if reader := getattr(runtime, "quota_capacity", None):
             reader(config, store.agents(slug), at / 1000)
         placed = runtime.spawn(config, MASTER, name, task)
