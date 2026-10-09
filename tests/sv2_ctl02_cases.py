@@ -21,6 +21,7 @@ def build(monkeypatch):
     store.create(SwarmConfig(inputs["swarm"], "agentihooks", 2, 0))
     clock = [inputs["clock_ms"]]
     monkeypatch.setattr(lease, "now_ms", lambda store: clock[0])
+    monkeypatch.setattr("time.time", lambda: clock[0] / 1000)
     controller = Controller(store, inputs["swarm"], [], lambda: True)
     assert controller.acquire()
     grants = LaunchAuthority(
