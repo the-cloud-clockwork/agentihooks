@@ -3,7 +3,9 @@ import subprocess
 
 import pytest
 
+from scripts.gates import intent
 from scripts.gates import log as gate_log
+from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, runtime, timer
 from scripts.swarm.health import checks
@@ -107,6 +109,18 @@ def test_done_closes_the_task_and_marks_the_agent_finished(env, monkeypatch):
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["pr_url"]) == ("done", "https://github.com/o/r/pull/9")
     assert [a.state for a in store.agents("sw") if a.name == "engineer@a1b2c3-0001"] == ["finished"]
     assert store.claimant("sw", "t1") is None
+
+
+def test_done_refuses_distributed_task_before_proof_or_ledger_mutations(env, monkeypatch):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    store.redis.set(store.key("sw", "task-authority", "t1"), "{}")
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("provider read"))
+    assert run("sw", "done", "--pr", "https://github.com/o/r/pull/9") == 1
+    assert ledger.rows["t1"]["state"] == "claimed"
+    assert store.claimant("sw", "t1") == "engineer@a1b2c3-0001"
 
 
 def test_done_on_a_group_lead_closes_its_members_with_the_lead_pull_request(env, monkeypatch):
@@ -242,6 +256,91 @@ def test_block_comments_parks_and_finishes(env, dependencies, capsys):
         "state": "blocked",
         "next": "stop now; the swarm closes this session",
     }
+
+
+def test_block_on_dev_red_records_the_failing_dev_run(env, capsys, monkeypatch):
+    from scripts.swarm import dev_red
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    read = []
+    monkeypatch.setattr(
+        dev_red, "latest", lambda repo, run=None: read.append(repo) or {"id": 41, "conclusion": "failure"}
+    )
+    capsys.readouterr()
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev Tests is red on a test I never touched") == 0
+    assert read == ["/repo"]
+    assert ledger.rows["t2"]["state"] == "blocked"
+    assert ledger.comments == [("t2", "dev Tests is red on a test I never touched", "ci@a1b2c3-0001")]
+    assert store.redis.hgetall(dev_red.key("sw")) == {"t2": "41"}
+    assert json.loads(capsys.readouterr().out) == {
+        "task": "t2",
+        "state": "blocked",
+        "dev_red_run": 41,
+        "next": "stop now; the swarm closes this session",
+    }
+
+
+def test_block_on_dev_red_is_refused_while_dev_is_green(env, capsys, monkeypatch):
+    from scripts.swarm import dev_red
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setattr(dev_red, "latest", lambda repo, run=None: {"id": 42, "conclusion": "success"})
+    capsys.readouterr()
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev is red") == 1
+    assert capsys.readouterr().err == (
+        "swarm: the latest finished dev Tests run did not fail, so dev is not red; "
+        "keep working or block for the real reason\n"
+    )
+    assert ledger.rows["t2"]["state"] != "blocked"
+    assert store.redis.hgetall(dev_red.key("sw")) == {}
+
+
+def test_block_on_dev_red_says_why_when_the_runs_cannot_be_read(env, capsys, monkeypatch):
+    from scripts.swarm import dev_red
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+
+    def offline(repo, run=None):
+        raise subprocess.CalledProcessError(1, ["gh"], stderr="gh: offline")
+
+    monkeypatch.setattr(dev_red, "latest", offline)
+    capsys.readouterr()
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev is red") == 1
+    assert capsys.readouterr().err == "swarm: cannot read the dev Tests runs: gh: offline\n"
+    assert ledger.rows["t2"]["state"] != "blocked"
+    assert store.redis.hgetall(dev_red.key("sw")) == {}
+
+
+def test_block_on_dev_red_names_an_error_without_stderr(env, capsys, monkeypatch):
+    from scripts.swarm import dev_red
+
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+
+    def missing(repo, run=None):
+        raise FileNotFoundError("no gh")
+
+    monkeypatch.setattr(dev_red, "latest", missing)
+    capsys.readouterr()
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev is red") == 1
+    assert capsys.readouterr().err == "swarm: cannot read the dev Tests runs: no gh\n"
+
+
+def test_a_plain_block_drops_an_earlier_dev_red_cause(env):
+    from scripts.swarm import dev_red
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    store.redis.hset(dev_red.key("sw"), mapping={"t2": "41", "t1": "41"})
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "waiting on a token") == 0
+    assert store.redis.hgetall(dev_red.key("sw")) == {"t1": "41"}
 
 
 @pytest.mark.parametrize("dependency_state", ["open", "claimed", "pr", "blocked"])
@@ -1974,6 +2073,7 @@ def _traced(env, monkeypatch, tmp_path, plan, *p_yes):
     asked["size"] = Answer(type="score", score=1.0, confidence=0.9)
     seen = []
     monkeypatch.setattr(trace_plan, "decide", lambda state, q, **k: seen.append(state) or DecisionResult(asked, "m"))
+    monkeypatch.setattr(intent, "judge", lambda state: seen.append(state) or ("pass", "the phase can use it"))
     folder = tmp_path / "_home" / ".agentihooks" / "swarm" / "sw" / "tasks" / "t1"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "plan.md").write_text(plan)
@@ -1995,6 +2095,40 @@ def test_trace_plan_traces_the_callers_task_and_files_cut_pieces(env, capsys, mo
     assert ledger.followups == [("sw", "Cut from the plan of task t1: a generator")]
     assert json.loads((folder / "plan-verdict.json").read_text())["verdict"] == "pass"
     assert ledger.rows["t1"]["state"] != "blocked"
+
+
+def test_trace_plan_judges_intent_on_the_kept_pieces_before_the_pull_request_opens(env, capsys, monkeypatch, tmp_path):
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    plan = "- walls | doghouse | it shelters the dog\n- a generator | power | it powers a light\n"
+    _, seen = _traced(env, monkeypatch, tmp_path, plan, 0.9, 0.1)
+    monkeypatch.setattr(cli, "now_ms", lambda: 4242)
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["intent"] == {"verdict": "pass", "reason": "the phase can use it"}
+    assert seen[1]["pull_request_body"] == "- walls | doghouse | it shelters the dog\n"
+    assert [Verdicts("sw", "intent").read("t1")[k] for k in ("verdict", "at")] == ["pass", 4242]
+
+
+def test_trace_plan_judges_no_intent_with_the_intent_gate_off(env, capsys, monkeypatch, tmp_path):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    store.update("sw", gates={"intent": "off"})
+    _, seen = _traced(env, monkeypatch, tmp_path, "- walls | doghouse | it shelters the dog\n", 0.9)
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
+    assert (json.loads(capsys.readouterr().out)["intent"], len(seen)) == (None, 1)
+
+
+def test_trace_plan_judges_no_intent_for_a_failed_plan(env, capsys, monkeypatch, tmp_path):
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    _, seen = _traced(env, monkeypatch, tmp_path, "- a generator | power | it powers a light\n", 0.1)
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
+    assert (json.loads(capsys.readouterr().out)["intent"], len(seen)) == (None, 1)
 
 
 def test_trace_plan_blocks_the_task_on_the_second_failed_plan_when_enforced(env, capsys, monkeypatch, tmp_path):

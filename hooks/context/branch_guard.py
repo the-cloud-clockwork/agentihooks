@@ -352,6 +352,10 @@ def check_branch_guard(payload: dict) -> None:
             )
             raise BlockAction(f"BLOCKED: {message}")
 
+    from hooks.context.prepush_guard import check_prepush
+
+    check_prepush(payload)
+
     # Branch creation — default-deny unless operator signaled this turn (§14)
     session_id = payload.get("session_id", "")
     for pattern in _BRANCH_CREATE_PATTERNS:
@@ -428,7 +432,7 @@ def _resolve_cwd(command: str, payload_cwd: str) -> str:
     """Return the effective cwd — honors `cd <path> && ...` prefix in command."""
     m = _CD_PREFIX_PATTERN.match(command)
     if m:
-        path = m.group(1).strip('"').strip("'")
+        path = os.path.expanduser(os.path.expandvars(m.group(1).strip('"').strip("'")))
         if os.path.isdir(path):
             return path
     if payload_cwd and os.path.isdir(payload_cwd):

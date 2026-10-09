@@ -13,16 +13,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 V=~/dev/tcc-ecosystem/.venv/bin
 
 uv pip install --python $V/python -e ".[all]"                  # install/update deps
-$V/python -m pytest                                            # run all tests
-$V/python -m pytest tests/test_hook_manager.py                 # single file
-$V/python -m pytest tests/test_config.py::TestSecretsMode -v   # single test
 $V/ruff check .                                                # lint
 $V/ruff format .                                               # format
+$V/python -m scripts.ci_prepush                                # before every push: lint, format, size
 agentihooks init --profile anton                                       # global install
 ```
 
 `ruff check` and `ruff format --check` fail independently — CI runs both, so run
-both. CI also runs the whole suite, not `-m unit`, which collects under half of it.
+both. Tests and mutation runs execute only in CI: push and open a draft pull
+request to observe red and green there. Local test runs are blocked by default;
+`AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN=true` explicitly opts in and adds touched tests
+to the prepush gate. CI runs the whole suite, not `-m unit`.
 
 ## Release dance
 

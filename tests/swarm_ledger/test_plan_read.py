@@ -91,11 +91,47 @@ def test_chunk_keeps_the_plan_lines_verbatim():
 
 def test_exact_is_the_range_without_margin_and_refuses_an_empty_one(slug):
     doc = SQLiteLedgerRepository(core.LEDGER_DIR / DATABASE).read(slug, "phases", "artifacts")
-    ref = doc["phases"][0]["plan_ref"]
-    assert plan_read.exact(doc, ref, "15-17") == numbered(15, 17)
+    task = {"phase": doc["phases"][0]["id"], "plan_lines": "15-17"}
+    assert plan_read.exact(doc, task) == numbered(15, 17)
     with pytest.raises(ValueError) as caught:
-        plan_read.exact(doc, ref, "45-46")
+        plan_read.exact(doc, {**task, "plan_lines": "45-46"})
     assert str(caught.value) == "plan lines 45-46 hold no text"
+
+
+ISSUE = "https://github.com/o/r/issues/7"
+
+
+def test_exact_reads_a_swarm_v2_package_slice_from_the_package_plan(monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    monkeypatch.setattr(plan_packages, "text", lambda: "".join(f"row {n}\n" for n in range(1, 30)))
+    task = {"phase": "p9", "plan_lines": "3-4", "plan_slice": "SV2-CTL-04", "plan_url": ISSUE}
+    assert plan_read.exact({"phases": [{"id": "p9"}]}, task) == "row 3\nrow 4\n"
+
+
+def test_exact_prefers_the_phase_range_over_a_package_slice(slug, monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    monkeypatch.setattr(plan_packages, "text", lambda: "wrong\n" * 50)
+    doc = SQLiteLedgerRepository(core.LEDGER_DIR / DATABASE).read(slug, "phases", "artifacts")
+    task = {"phase": doc["phases"][0]["id"], "plan_lines": "15-17", "plan_slice": "SV2-CTL-04", "plan_url": ISSUE}
+    assert plan_read.exact(doc, task) == numbered(15, 17)
+
+
+def test_exact_reads_the_task_plan_url_when_the_phase_has_no_range(slug):
+    doc = SQLiteLedgerRepository(core.LEDGER_DIR / DATABASE).read(slug, "phases", "artifacts")
+    artifact = doc["phases"][0].pop("plan_ref")["artifact"]
+    task = {"phase": doc["phases"][0]["id"], "plan_lines": "15-17", "plan_url": artifact}
+    assert plan_read.exact(doc, task) == numbered(15, 17)
+
+
+@pytest.mark.parametrize(
+    "task",
+    [{"phase": "nope", "plan_lines": "1-2"}, {"phase": "p9", "plan_lines": "1-2", "plan_url": ISSUE}],
+)
+def test_exact_refuses_a_slice_without_a_readable_plan(task):
+    with pytest.raises(ValueError):
+        plan_read.exact({"phases": [{"id": "p9"}], "artifacts": []}, task)
 
 
 def test_numbered_keeps_the_plan_line_numbers_and_skips_blank_rows():

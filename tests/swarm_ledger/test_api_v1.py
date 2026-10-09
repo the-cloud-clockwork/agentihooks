@@ -616,7 +616,7 @@ def test_control_actions_validate_before_domain_execution(live):
 
 def test_item_revision_uses_canonical_utf8_content(live, monkeypatch):
     document = {"tasks": [{"title": "Café", "id": "t1"}], "_meta": {"rev": 1}}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    monkeypatch.setattr(server.repository, "read", lambda slug, *keys: document)
     assert request(live, "GET", "tasks/t1") == (
         200,
         {
@@ -761,13 +761,16 @@ def test_put_operations_and_options_keep_the_versioned_transport(live):
         response = conn.getresponse()
         assert response.status == 204
         assert response.getheader("Access-Control-Allow-Origin") == "null"
-        assert response.getheader("Access-Control-Allow-Methods") == "GET, PUT, POST"
-        assert response.getheader("Access-Control-Allow-Headers") == "Content-Type, X-Ledger-Token, X-Ledger-Agent"
+        assert response.getheader("Access-Control-Allow-Methods") == "GET, PUT, POST, PATCH"
+        assert (
+            response.getheader("Access-Control-Allow-Headers")
+            == "Content-Type, X-Ledger-Token, X-Ledger-Agent, X-Ledger-Slug"
+        )
         assert response.getheader("Access-Control-Allow-Private-Network") == "true"
         assert [row for row in response.getheaders() if row[0].lower().startswith("access-control")] == [
             ("Access-Control-Allow-Origin", "null"),
-            ("Access-Control-Allow-Methods", "GET, PUT, POST"),
-            ("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent"),
+            ("Access-Control-Allow-Methods", "GET, PUT, POST, PATCH"),
+            ("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent, X-Ledger-Slug"),
             ("Access-Control-Allow-Private-Network", "true"),
         ]
         assert response.read() == b""
@@ -2434,6 +2437,7 @@ def test_repository_optional_collections_have_empty_http_resources(live, monkeyp
 
     document = {"_meta": {}, "questions": [{"id": "q1"}]}
     monkeypatch.setattr(server.repository, "get_document", lambda slug: document)
+    monkeypatch.setattr(server.repository, "read", lambda slug, *keys: document)
     assert request(live, "GET", path) == (
         200,
         {"data": [], "revision": revision([]), "next_cursor": None},

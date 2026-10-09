@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from itertools import count
 from typing import Protocol
 
+from scripts.ci_budget import defects as ci_defects
 from scripts.doctor import priming
 from scripts.gates import Who, modes
 from scripts.gates import claims as claim_cap
@@ -26,9 +27,11 @@ from scripts.swarm import (
     ci_speed,
     claim_order,
     control_notifications,
+    dev_red,
     difficulty,
     grouping,
     launch_check,
+    ledger_probe,
     lifetime,
     live_binding,
     master_retire,
@@ -165,6 +168,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
     actions += skip_refused(_orphans, slug, store, ledger, rows)
+    actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
     actions += skip_refused(grouping.release_pass, slug, store, ledger, doc)
     actions += skip_refused(grouping.group_pass, slug, config, store, ledger, doc)
@@ -173,6 +177,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     with PLACING:
         actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
         actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
+        actions += skip_refused(ci_defects.refresh, slug, config, store, ledger, now_ms)
         actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, doc, now_ms)
         if not sleeping:
             actions += skip_refused(_codex_hook_order)
@@ -503,7 +508,7 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     if state in {idle_state.WAITING, idle_state.WORKING}:
         store.put_agent(slug, replace(agent, idle_ticks=0))
         return []
-    if _operator_at_pane(slug, store, agent, observed, now_ms):
+    if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
         store.put_agent(slug, agent)
         return []
     idle = replace(agent, idle_ticks=agent.idle_ticks + 1)
@@ -587,7 +592,14 @@ def _claimable(slug, store, rows, doc, lane):
 
 
 def _launch_order(slug, store, tasks):
-    return sorted(tasks, key=lambda task: (ledger_rank.order(task), bool(store.launch_failure(slug, task["id"]))))
+    return sorted(
+        tasks,
+        key=lambda task: (
+            ledger_rank.order(task),
+            bool(store.launch_failure(slug, task["id"])),
+            not claim_order.resumed(task),
+        ),
+    )
 
 
 def _unblocked(task, rows):
@@ -674,7 +686,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         handoff = store.handoff(slug, task["id"])
         if handoff:
             task["handoff"] = handoff
-        elif lives := store.earlier_lives(slug, task["id"]):
+        elif (lives := store.earlier_lives(slug, task["id"])) or task.get("branch"):
             task["reclaim"] = reclaim(config.repo, lives, task.get("branch") or "")
             store.put_reclaim(slug, name, task["reclaim"])
         task["stack_base"] = _stack_base(task, rows)

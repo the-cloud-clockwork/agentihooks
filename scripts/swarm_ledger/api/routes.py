@@ -56,8 +56,15 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
             return resources.swarm_read(server.swarm_status(slug), path, query)
         if WORKSPACE_RE.fullmatch(path):
             return workspace(server, slug, path.split("/")[1])
-        return resources.read(server.repository.get_document(slug), path, query)
+        return ledger_read(server, slug, path, query)
     return ledger_operation(handler, server, slug, path, principal)
+
+
+def ledger_read(server: ModuleType, slug: str, path: str, query: dict) -> dict:
+    parts = path.split("/")
+    if parts[0] in resources.COLLECTIONS and len(parts) in (2, 3):
+        return resources.read(server.repository.read(slug, "/".join(parts[:2])), path, query)
+    return resources.read(server.repository.get_document(slug), path, query)
 
 
 def agent_token(handler: object, server: ModuleType, slug: str) -> dict:
@@ -94,8 +101,10 @@ def workspace(server: ModuleType, slug: str, task_id: str) -> dict:
 
 
 def global_resource(handler: object, server: ModuleType, parts: list) -> dict:
-    from . import admin
+    from . import admin, routing
 
+    if parts == ["routing", "settings"]:
+        return routing.settings(handler, server, body)
     if parts == ["layout"]:
         return admin.layout(handler, server, None if handler.command == "GET" else body(handler, server))
     if handler.command == "GET" and parts[0] in ("ledgers", "bin"):

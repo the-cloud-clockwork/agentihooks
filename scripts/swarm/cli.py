@@ -71,10 +71,12 @@ from scripts.swarm import (
     clearance,
     control_notifications,
     delivery,
+    dev_red,
     done_gate,
     idle,
     launch_check,
     ledger_events,
+    ledger_probe,
     master_launch,
     merge_queue,
     naming,
@@ -165,6 +167,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         )
         from scripts.swarm.health import spawn_stall
 
+        probed = timing.call(ledger_probe.observe, store, slug, ledger, runtime, now_ms())
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
             controls = timing.call(command_runner.consume, store, slug)
             if timing.call(ledger.binned, slug):
@@ -240,7 +243,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
             taken = timing.call(snapshot.auto, store, slug, now_ms(), os.environ)
             store.redis.set(store.key(slug, "last-tick"), now_ms())
             timing.call(command_runner.publish, store, slug, timing.call(ledger.state, slug))
-            return controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
+            return probed + controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
         timing.BEFORE_STEP.reset(keeping)
         controller.release_tick_lock(store, slug, token)
@@ -975,13 +978,28 @@ def cmd_pr(store, args):
 
 
 def cmd_merge(store, args):
-    if args.action != "state":
-        _worker(store, args)
-    print(json.dumps(merge_queue.operate(args.action, args.url)))
+    agent = _worker(store, args) if args.action != "state" else None
+    if agent is not None:
+        done_gate.require_local(store, args.slug, agent.task)
+        done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
+    result = merge_queue.operate(args.action, args.url)
+    if result.get("waiting") == "checks":
+        at = now_ms()
+        idle.declare_wait(
+            store.redis,
+            args.slug,
+            agent.name,
+            at + waits.CHECKED_MINUTES * 60_000,
+            "dev changed grading inputs; branch updated",
+            at,
+            on={**waits.on("checks", args.url), "previous_head": result["previous_head"]},
+        )
+    print(json.dumps(result))
 
 
 def cmd_done(store, args):
     agent = _worker(store, args)
+    done_gate.require_local(store, args.slug, agent.task)
     ledger = LedgerClient()
     row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
     proof = {key: getattr(args, f"proof_{key}") for key in ledger_kinds.PROOF_KEYS if getattr(args, f"proof_{key}")}
@@ -1039,11 +1057,28 @@ def cmd_block(store, args):
             waits.settle_notices(InboxStore(store.redis), agent, "a new wait")
             print(json.dumps({"task": agent.task, "state": "claimed", "waits_on": held}))
             return
-    block_agent(store, args.slug, agent, args.note, ledger)
-    print(json.dumps({"task": agent.task, "state": "blocked", "next": "stop now; the swarm closes this session"}))
+    red_run = _dev_red_run(store, args.slug) if args.dev_red else None
+    block_agent(store, args.slug, agent, args.note, ledger, red_run)
+    cause = {"dev_red_run": red_run} if red_run is not None else {}
+    print(
+        json.dumps({"task": agent.task, "state": "blocked", **cause, "next": "stop now; the swarm closes this session"})
+    )
 
 
-def block_agent(store, slug, agent, note, ledger):
+def _dev_red_run(store, slug):
+    try:
+        red_run = dev_red.failing_run(store.config(slug).repo)
+    except dev_red.READ_ERRORS as exc:
+        raise SwarmError(f"cannot read the dev Tests runs: {getattr(exc, 'stderr', None) or exc}") from exc
+    if red_run is None:
+        raise SwarmError(
+            "the latest finished dev Tests run did not fail, so dev is not red; keep working or block for the real reason"
+        )
+    return red_run
+
+
+def block_agent(store, slug, agent, note, ledger, red_run=None):
+    dev_red.hold(store.redis, slug, agent.task, red_run)
     ledger.update_task(slug, agent.task, {"state": "blocked"}, by=agent.name)
     ledger.comment(slug, agent.task, note, by=agent.name)
     waits.settle_notices(InboxStore(store.redis), agent, "a block")
@@ -1053,17 +1088,22 @@ def block_agent(store, slug, agent, note, ledger):
 def cmd_trace_plan(store, args):
     agent = _worker(store, args)
     ledger = LedgerClient()
-    state = trace_plan.intent(ledger.state(args.slug), agent.task)
+    doc = ledger.state(args.slug)
+    state = trace_plan.intent(doc, agent.task)
     who = Who(name=agent.name, swarm=args.slug, task=agent.task)
     folder = ledger_workspace.folder(args.slug, agent.task)
-    mode = modes.configured(trace_plan.GATE, store.config(args.slug).gates)
+    config = store.config(args.slug)
+    mode = modes.configured(trace_plan.GATE, config.gates)
     try:
         record, block = trace_plan.run(folder, state, ledger, who, mode)
     except ValueError as exc:
         raise SwarmError(str(exc)) from exc
     if block:
         block_agent(store, args.slug, agent, trace_plan.block_note(record), ledger)
-    print(json.dumps(trace_plan.report(agent.task, record, block)))
+    checked = None
+    if record["verdict"] != trace_plan.FAIL:
+        checked = intent.plan_check(args.slug, doc, agent.task, record, intent.mode_of(config), now_ms())
+    print(json.dumps({**trace_plan.report(agent.task, record, block), "intent": checked}))
 
 
 def cmd_wait_inbox(store, args, agent):
@@ -1102,6 +1142,8 @@ def cmd_wait(store, args):
             if pull is None or not pull.head:
                 raise SwarmError("cannot read the pull request head; retry the checks wait")
             held["head"] = pull.head
+        if held["kind"] == "mutation":
+            held["head"] = waits.mutation_wait.bind(held["target"])
     at = now_ms()
     until = at + (args.minutes or waits.CHECKED_MINUTES) * 60_000
     idle.declare_wait(store.redis, args.slug, agent.name, until, args.reason, at, on=held)
@@ -1380,7 +1422,9 @@ def build_parser():
     done.add_argument("--pr", default="")
     for key in ledger_kinds.PROOF_KEYS:
         done.add_argument("--" + key.replace("_", "-"), dest=f"proof_{key}", default="")
-    sub.add_parser("block").add_argument("note")
+    block = sub.add_parser("block")
+    block.add_argument("note")
+    block.add_argument("--dev-red", action="store_true")
     sub.add_parser("trace-plan")
     plan = sub.add_parser("plan").add_subparsers(dest="action", required=True)
     for action in plan_review.DECISIONS:

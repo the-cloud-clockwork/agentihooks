@@ -43,6 +43,34 @@ def test_the_grader_pins_the_ruff_the_tests_install():
     assert f"ruff=={size_limits.RUFF_VERSION}" in dev
 
 
+_INSTALL = re.compile(r"\b(?:pip3? install|pipx (?:install|run)|uv tool (?:install|run)|uvx)\b[^\n;&|]*")
+_RUFF_SPEC = re.compile(r"(?<![\w./-])['\"]?(ruff(?![\w-])[^\s'\"]*)", re.IGNORECASE)
+
+
+def _ruff_installs(steps: list) -> list[str]:
+    specs = []
+    for step in steps:
+        if "ruff" in (step.get("uses") or ""):
+            specs.append(step["uses"])
+        run = (step.get("run") or "").replace("\\\n", " ")
+        for command in _INSTALL.findall(run):
+            specs += _RUFF_SPEC.findall(command)
+    return specs
+
+
+def test_every_workflow_installs_the_pinned_ruff():
+    pinned = f"ruff=={size_limits.RUFF_VERSION}"
+    installs = {}
+    for path in sorted((_ROOT / ".github/workflows").glob("*.y*ml")):
+        for name, job in (yaml.safe_load(path.read_text()).get("jobs") or {}).items():
+            installs[f"{path.name}:{name}"] = _ruff_installs(job.get("steps") or [])
+    for path in sorted((_ROOT / ".github/actions").glob("*/action.y*ml")):
+        installs[path.parent.name] = _ruff_installs(yaml.safe_load(path.read_text()).get("runs", {}).get("steps") or [])
+    assert installs["test.yml:lint"] == [pinned]
+    offenders = {where: specs for where, specs in installs.items() if set(specs) - {pinned}}
+    assert not offenders
+
+
 def test_a_planted_eight_parameter_function_is_red(tmp_path, capsys):
     base = _recorded(tmp_path / "base", {"pkg/mod.py": SEVEN_PARAMETERS})
     head = _recorded(tmp_path / "head", {"pkg/mod.py": EIGHT_PARAMETERS})
@@ -254,17 +282,21 @@ def test_the_grader_refuses_another_ruff_version(tmp_path, capsys, monkeypatch, 
     assert f"needs ruff {size_limits.RUFF_VERSION}, found {shown}, so it cannot grade" in capsys.readouterr().out
 
 
-def test_size_runs_beside_unit_graded_by_the_base_with_the_pinned_ruff():
+def test_size_runs_in_lint_graded_by_the_base_with_the_pinned_ruff():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
-    job = jobs["size"]
+    job = jobs["lint"]
+    assert "size" not in jobs
     assert "needs" not in job
-    assert "size" in jobs["gate-required"]["needs"]
-    install, base, grader, grade = job["steps"][-4:]
+    assert "lint" in jobs["gate-required"]["needs"]
+    steps = {step.get("name"): step for step in job["steps"]}
+    install, base = steps["Install ruff"], steps["Check out the base revision"]
+    grader, grade = steps["Check out the protected grader"], steps["Hold the size and complexity limits"]
     assert install["run"] == f"python -m pip install ruff=={size_limits.RUFF_VERSION}"
     assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$BASE"'
     assert grader["run"] == (
         'git fetch --no-tags origin dev\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n'
     )
+    assert grade["if"] == "${{ !cancelled() }}"
     assert grade["run"] == (
         'if [[ -f "$RUNNER_TEMP/grader/scripts/size_limits.py" ]]; then\n'
         '  cd "$RUNNER_TEMP/grader"\n'
@@ -277,7 +309,8 @@ def test_size_runs_beside_unit_graded_by_the_base_with_the_pinned_ruff():
 
 
 def test_size_refuses_a_dev_without_its_grader(tmp_path):
-    grade = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["size"]["steps"][-1]
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    grade = next(step for step in steps if step.get("name") == "Hold the size and complexity limits")
     (tmp_path / "grader").mkdir()
     env = dict(os.environ, RUNNER_TEMP=str(tmp_path), GITHUB_WORKSPACE=str(tmp_path))
     result = subprocess.run(["bash", "-e", "-c", grade["run"]], env=env, capture_output=True, text=True)
