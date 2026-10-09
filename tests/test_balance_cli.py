@@ -1,4 +1,5 @@
 import argparse
+import re
 
 import pytest
 
@@ -119,24 +120,24 @@ def test_the_balance_help_names_every_flag_and_subcommand(monkeypatch, capsys):
             parser.parse_args([*argv, "--help"])
         helps.append(capsys.readouterr().out)
     top, balance, set_help, settings_help = helps
-    assert "Probe and rank Claude OAuth accounts without launching workload" in top
+
+    def shows(text, page):
+        return re.search(rf"(?m)(?:^|\s){re.escape(text)}$", page) is not None
+
+    assert shows("Probe and rank Claude OAuth accounts without launching workload", top)
     for text in (
-        "--dry-run",
         "Report routing state without launching Claude",
-        "--fable",
         "Include the separate Fable weekly quota",
-        "--show-account-metadata SLUG",
         "Print every JSON event returned by a fresh probe for AH_CC_TOKEN_<SLUG>",
-        "--refresh",
         "Ignore the 60-second quota cache",
-        "--current",
         "Name the account this Claude session runs on; other accounts come from the quota cache",
-        "--timeout TIMEOUT",
         "Per-account probe timeout in seconds",
         "Write routing settings: set KEY=VALUE ... (VALUE none clears)",
         "List every routing setting key with its value",
     ):
-        assert text in balance
+        assert shows(text, balance), text
+    for flag in ("--dry-run", "--fable", "--show-account-metadata SLUG", "--refresh", "--current", "--timeout TIMEOUT"):
+        assert flag in balance
     assert "usage: agentihooks balance set [-h] KEY=VALUE [KEY=VALUE ...]" in set_help
     assert "usage: agentihooks balance settings [-h]" in settings_help
     timeout = parser.parse_args(["balance", "--timeout", "7"]).timeout
