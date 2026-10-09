@@ -139,9 +139,12 @@ def test_checkpoint_rejects_symlink_outside_attempt(material, tmp_path):
         external.unlink()
 
 
-def test_protocol_writes_sorted_atomic_material(tmp_path):
+def test_protocol_writes_sorted_atomic_material(tmp_path, monkeypatch):
     path = tmp_path / "receipt.json"
+    opened = Mock(wraps=protocol.os.open)
+    monkeypatch.setattr(protocol.os, "open", opened)
     protocol.write(path, {"z": 1, "a": 2})
+    opened.assert_called_once_with(tmp_path, protocol.os.O_RDONLY | protocol.os.O_DIRECTORY)
     assert path.read_bytes() == b'{"a": 2, "z": 1}'
     assert list(tmp_path.iterdir()) == [path]
 
