@@ -576,3 +576,51 @@ def test_worker_credential_expiry_at_commit_preserves_task_state(fixture, monkey
     assert authority.current("task") == before
     assert authority.journal("task") == journal
     assert store.claimant("fixture", "task") == (agent.name if before else None)
+
+
+@pytest.mark.parametrize("record", ["task-authority", "claim-journal"])
+@pytest.mark.parametrize("operation", ["claim", "refresh", "release"])
+def test_each_distributed_record_blocks_legacy_task_writes(fixture, record, operation):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    if operation != "claim":
+        assert store.claim("fixture", "task", agent.name, 500)
+    key = store.key("fixture", record, "task")
+    store.redis.set(key, "retained-authority")
+    before = store.redis.get(store.key("fixture", "claim", "task"))
+    if operation == "claim":
+        result = store.claim("fixture", "task", agent.name, 500)
+    elif operation == "refresh":
+        result = store.refresh("fixture", "task", agent.name, 500)
+    else:
+        result = store.release("fixture", "task", agent.name)
+    assert result is False
+    assert store.redis.get(store.key("fixture", "claim", "task")) == before
+    assert store.redis.get(key) == "retained-authority"
+
+
+@pytest.mark.parametrize("record", ["task-authority", "claim-journal", "claim"])
+def test_legacy_claim_watches_authority_record_created_at_commit(fixture, monkeypatch, record):
+    store, authority, controller, clock, start = fixture
+    key = store.key("fixture", record, "task")
+    original = store.redis.pipeline
+    raced = []
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        def run(*args, **kwargs):
+            if not raced:
+                raced.append(True)
+                store.redis.set(key, "retained-authority")
+            return execute(*args, **kwargs)
+
+        pipe.execute = run
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    assert store.claim("fixture", "task", "worker", 500) is False
+    assert raced == [True]
+    assert store.claimant("fixture", "task") == ("retained-authority" if record == "claim" else None)
+    assert store.redis.get(key) == "retained-authority"
