@@ -1,0 +1,56 @@
+{
+  "case": "T-SV2-CTL-02-B",
+  "tested_commit": "705f80a4ee817c4935bedf00387561250d5506fe",
+  "runs": [
+    {
+      "case": "T-SV2-CTL-02-B",
+      "state": "passed",
+      "evidence_class": "mocked Redis and aligned server clock; actual Lua interpreter; signed fixture grants; no external runtime",
+      "input_sha256": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57",
+      "observed": {
+        "task_id": "task",
+        "holder": "engineer@fc4338-0002",
+        "generation": 2,
+        "execution_id": "exe-31047c6a51784d7e9a571f0e9a14ff94",
+        "execution_generation": 1,
+        "lease_deadline_ms": 1200,
+        "state": "active",
+        "result": {}
+      },
+      "rejection": "stale_generation",
+      "stale_generation_rejections_total": 1,
+      "journal_events": [
+        "admitted",
+        "fenced",
+        "admitted"
+      ],
+      "rollback": "not exercised",
+      "tested_commit": "705f80a4ee817c4935bedf00387561250d5506fe"
+    },
+    {
+      "case": "T-SV2-CTL-02-B",
+      "state": "passed",
+      "evidence_class": "mocked Redis and aligned server clock; actual Lua interpreter; signed fixture grants; no external runtime",
+      "input_sha256": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57",
+      "observed": {
+        "task_id": "task",
+        "holder": "engineer@5f0fb2-0002",
+        "generation": 2,
+        "execution_id": "exe-fc9747fd43ef416c87cf1bb64b79f05a",
+        "execution_generation": 1,
+        "lease_deadline_ms": 1200,
+        "state": "active",
+        "result": {}
+      },
+      "rejection": "stale_generation",
+      "stale_generation_rejections_total": 1,
+      "journal_events": [
+        "admitted",
+        "fenced",
+        "admitted"
+      ],
+      "rollback": "not exercised",
+      "tested_commit": "705f80a4ee817c4935bedf00387561250d5506fe"
+    }
+  ]
+}
