@@ -30,7 +30,7 @@ def _setting_pair(pair: str) -> tuple[str, object]:
     try:
         value = text if key.startswith("master-") else json.loads(text)
     except json.JSONDecodeError:
-        value = text
+        raise ValueError(f"invalid value for {key}: {text}") from None
     if not VALIDATORS[key](value):
         raise ValueError(f"invalid value for {key}: {text}")
     return key, value

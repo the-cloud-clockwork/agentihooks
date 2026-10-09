@@ -101,6 +101,58 @@ def test_the_balance_parser_takes_the_probe_flags_and_both_subcommands():
         parser.parse_args(["balance", "set"])
 
 
+def test_a_value_keeps_every_equals_sign_after_the_first(monkeypatch, tmp_path, capsys):
+    store = FileSettings(tmp_path / "routing-settings.json")
+    monkeypatch.setattr(balance_cli, "_routing_settings", lambda: store)
+    assert balance_cli.cmd_balance_set(["master-tier-claude=a=b"], now=1.0) == 0
+    assert store.get("master-tier-claude") == "a=b"
+
+
+def test_the_balance_help_names_every_flag_and_subcommand(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "300")
+    monkeypatch.setenv("NO_COLOR", "1")
+    parser = argparse.ArgumentParser(prog="agentihooks")
+    balance_cli.add_parser(parser.add_subparsers(dest="command"))
+    helps = []
+    for argv in ([], ["balance"], ["balance", "set"], ["balance", "settings"]):
+        with pytest.raises(SystemExit):
+            parser.parse_args([*argv, "--help"])
+        helps.append(capsys.readouterr().out)
+    top, balance, set_help, settings_help = helps
+    assert "Probe and rank Claude OAuth accounts without launching workload" in top
+    for text in (
+        "--dry-run",
+        "Report routing state without launching Claude",
+        "--fable",
+        "Include the separate Fable weekly quota",
+        "--show-account-metadata SLUG",
+        "Print every JSON event returned by a fresh probe for AH_CC_TOKEN_<SLUG>",
+        "--refresh",
+        "Ignore the 60-second quota cache",
+        "--current",
+        "Name the account this Claude session runs on; other accounts come from the quota cache",
+        "--timeout TIMEOUT",
+        "Per-account probe timeout in seconds",
+        "Write routing settings: set KEY=VALUE ... (VALUE none clears)",
+        "List every routing setting key with its value",
+    ):
+        assert text in balance
+    assert "usage: agentihooks balance set [-h] KEY=VALUE [KEY=VALUE ...]" in set_help
+    assert "usage: agentihooks balance settings [-h]" in settings_help
+    timeout = parser.parse_args(["balance", "--timeout", "7"]).timeout
+    assert (timeout, type(timeout)) == (7.0, float)
+
+
+def test_run_sends_set_and_settings_to_their_commands(monkeypatch):
+    calls = []
+    monkeypatch.setattr(balance_cli, "cmd_balance_set", lambda pairs: calls.append(("set", pairs)) or 4)
+    monkeypatch.setattr(balance_cli, "cmd_balance_settings", lambda: calls.append(("settings",)) or 5)
+    probe = lambda **kwargs: calls.append(("probe", kwargs)) or 6  # noqa: E731
+    assert balance_cli.run(argparse.Namespace(balance_command="set", pairs=["a=1"]), probe) == 4
+    assert balance_cli.run(argparse.Namespace(balance_command="settings"), probe) == 5
+    assert calls == [("set", ["a=1"]), ("settings",)]
+
+
 def test_run_sends_a_plain_balance_to_the_probe_command():
     calls = []
     args = argparse.Namespace(
