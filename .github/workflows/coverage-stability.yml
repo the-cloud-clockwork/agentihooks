@@ -1,0 +1,48 @@
+name: Coverage stability
+
+# The coverage ratchet holds every line a passed run executed, so a line that runs on
+# only some full runs of identical source turns unrelated pull requests red at random.
+on:
+  # GitHub fires a schedule only from the default branch, main; the job reads dev runs.
+  schedule:
+    - cron: "41 */6 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/coverage-stability.yml
+      - tests/coverage_stability.py
+
+concurrency:
+  group: coverage-stability-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install coverage
+        run: python -m pip install "coverage>=7.4"
+
+      - name: Compare every measured line of the newest dev commit's full runs
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          python -m tests.coverage_stability --work "$RUNNER_TEMP/coverage-stability" latest | tee -a "$GITHUB_STEP_SUMMARY"
