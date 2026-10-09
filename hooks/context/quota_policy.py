@@ -34,8 +34,8 @@ WAIT_TOOLS = frozenset({"CronCreate", "CronList", "CronDelete"})
 @dataclass(frozen=True)
 class Candidate:
     account: str
-    five_used: float
-    week_used: float
+    five_used: float | None
+    week_used: float | None
     sessions: int
     observed_at: float
     cap: int | None = None
@@ -82,12 +82,17 @@ def decide(
     wait_min_week_left: float = QUOTA_WAIT_MIN_WEEK_LEFT,
     reserve: frozenset[str] = QUOTA_RESERVE_ACCOUNTS,
 ) -> Decision | None:
+    if account == "api":
+        return None
     week_hit = week_used >= week_pct
     five_hit = five_used >= five_pct
     if not (week_hit or five_hit):
         return None
 
-    pool = [c for c in others if c.account != account and c.five_used < five_pct and c.week_used < week_pct]
+    api = next((c for c in others if c.account == "api" and not c.full()), None)
+    pool = [
+        c for c in others if c.account not in (account, "api") and c.five_used < five_pct and c.week_used < week_pct
+    ]
     open_slots = [c for c in pool if not c.full() and c.routing_left >= MIN_ROUTING_LEFT]
     unreserved = [c for c in open_slots or pool if c.account not in reserve and c.routing_left >= MIN_ROUTING_LEFT]
     pool = unreserved or pool
@@ -119,10 +124,10 @@ def decide(
         if best_good:
             return made("handoff", trigger, best_good)
         if 100.0 - week_used >= wait_min_week_left and five_reset is not None:
-            return made("push" if push else "wait", trigger)
+            return made("handoff", trigger, api) if api and not push else made("push" if push else "wait", trigger)
         if least_bad:
             return made("handoff", trigger, least_bad)
-    return made("push" if push else "stop", trigger)
+    return made("handoff", trigger, api) if api and not push else made("push" if push else "stop", trigger)
 
 
 # ---------------------------------------------------------------------------
@@ -171,9 +176,23 @@ def _other_accounts(sessions: dict[str, int]) -> list[Candidate]:
     return candidates
 
 
+def _api_accounts(sessions: dict[str, int]) -> list[Candidate]:
+    from hooks.context.account_sessions import codex_sessions_by_account
+    from scripts.routing import claude_api, codex_api, place
+
+    harness = os.environ.get("AGENTIHOOKS_TARGET", "claude")
+    counts = codex_sessions_by_account() if harness == "codex" else sessions
+    source = codex_api.CodexApiSource(counts) if harness == "codex" else claude_api.ClaudeApiSource(counts)
+    now = time.time()
+    slots, _ = place.api_side(source, harness, os.environ, now)
+    return [Candidate(slot.account, None, None, slot.sessions, now, slot.cap) for slot in slots]
+
+
 def evaluate(session_id: str) -> Decision | None:
     from hooks.context.account_sessions import agent_pid, session_account, sessions_by_account
 
+    if os.environ.get("AH_ROUTE_API"):
+        return None
     windows = _session_windows(session_id)
     if windows is None:
         return None
@@ -187,7 +206,7 @@ def evaluate(session_id: str) -> Decision | None:
         week_used=week_used,
         five_reset=five_reset,
         week_reset=week_reset,
-        others=_other_accounts(sessions),
+        others=_other_accounts(sessions) + _api_accounts(sessions),
         push=push_active(session_id),
     )
 
@@ -251,7 +270,9 @@ def _others_text(d: Decision) -> str:
     if not rows:
         return "no other account is configured; handoffs need at least 2 accounts"
     return "; ".join(
-        f"{c.account} {_pct(c.routing_left)} left (5h {_pct(c.five_used)}, 7d {_pct(c.week_used)} used, "
+        f"api {c.sessions}/{c.cap} sessions"
+        if c.account == "api"
+        else f"{c.account} {_pct(c.routing_left)} left (5h {_pct(c.five_used)}, 7d {_pct(c.week_used)} used, "
         f"{c.sessions}/{c.cap if c.cap is not None else 'unknown'} sessions)"
         for c in rows
     )
@@ -275,20 +296,25 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
     if d.action == "handoff" and d.target:
         t = d.target
         age = max(0, int(time.time() - t.observed_at)) // 60
+        route = " --route api" if t.account == "api" else ""
+        status = (
+            f"Api slot: {t.sessions}/{t.cap} sessions; subscription windows do not apply. "
+            if route
+            else f"Router cache: {t.account} has {_pct(t.routing_left)} left (5h {_pct(t.five_used)}, "
+            f"7d {_pct(t.week_used)} used, {t.sessions}/{t.cap if t.cap is not None else 'unknown'} sessions, "
+            f"observed {age}m ago); the new terminal re-probes and picks the final account. "
+        )
         slug = _repo_slug(cwd)
         doc = Path.home() / "scratchpad" / slug / "handoff" / f"{session_id}.md"
         name = f"{slug}-handoff-{time.strftime('%H%M')}"
         return (
             f"QUOTA HANDOFF REQUIRED — {head}\n"
             f"Policy decision (deterministic): move this task to another account now. "
-            f"Router cache: {t.account} has {_pct(t.routing_left)} left (5h {_pct(t.five_used)}, "
-            f"7d {_pct(t.week_used)} used, {t.sessions}/{t.cap if t.cap is not None else 'unknown'} sessions, "
-            f"observed {age}m ago); "
-            f"the new terminal re-probes and picks the final account.\n"
+            f"{status}\n"
             f"1. Write the handoff document to {doc}: goal, done so far (commits, PRs, evidence), "
             f"in progress, exact next steps, repo/worktree/branch, open risks, the operator's standing "
             f"instructions.\n"
-            f'2. Run: agentihooks init-agent --handoff --dir "{cwd}" --name "{name}" --prompt-file "{doc}"\n'
+            f'2. Run: agentihooks init-agent --handoff --dir "{cwd}" --name "{name}" --prompt-file "{doc}"{route}\n'
             f"3. handoff=done: tell the operator which account and terminal took over, then stop; "
             f"this terminal closes when you stop. "
             f"handoff=failed: stop and report the failure to the operator."
