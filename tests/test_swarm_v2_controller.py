@@ -333,12 +333,12 @@ def test_unacquired_controller_refuses_authority_and_reports_no_leader_changes(f
     _, (first, _), _, _, _ = fixture
     assert first.ready is False
     assert first.reconciled_epoch is None
-    assert not first.renew()
-    assert not first.release()
-    assert first.controller_leader_changes_total() == 0
     with pytest.raises(SwarmError) as refused:
         first.require()
     assert str(refused.value) == "the controller lease is absent"
+    assert not first.renew()
+    assert not first.release()
+    assert first.controller_leader_changes_total() == 0
 
 
 def test_reconciliation_holds_admission_disabled_inside_its_epoch(fixture, monkeypatch):
