@@ -358,6 +358,16 @@ def test_a_paused_master_gets_a_new_incident_after_restoring_persisted_state(sto
     assert master_mail(store) == ["new outage"]
 
 
+def test_restored_resolution_is_not_sent_again(store):
+    from scripts.swarm import incidents
+
+    root = incidents.key("ledger")
+    store.redis.hset(root, mapping={"generation": 1, "active": 0})
+    store.redis.hset(f"{root}:mail:master@sw", mapping={"raised": 1, "resolved": 1})
+    assert incidents.mail(store.redis, "ledger", "master@sw", "duplicate recovery", True) is False
+    assert master_mail(store) == []
+
+
 @pytest.mark.parametrize("race", ["another caller", "recovery"])
 def test_mail_claim_observes_concurrent_delivery_and_recovery(store, monkeypatch, race):
     from concurrent.futures import ThreadPoolExecutor
