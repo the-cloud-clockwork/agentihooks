@@ -180,7 +180,10 @@ def _overrides(package: Definition, selected: Definition) -> None:
     if package.purpose != selected.purpose:
         raise DefinitionError("overrides must preserve package purpose")
     if package.rule.type == "code" or selected.rule.type == "code":
-        keys = lambda definition: {(item.name, item.each) for item in definition.questions}
+
+        def keys(definition):
+            return {(item.name, item.each) for item in definition.questions}
+
         if keys(package) != keys(selected):
             raise DefinitionError("code rule overrides must preserve package question keys")
 
