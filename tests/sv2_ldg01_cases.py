@@ -47,7 +47,9 @@ def worker_home(root):
         (home / name).mkdir(parents=True)
     for path in (*(home / name for name in shape["present"]), home):
         path.chmod(int(shape["mode"], 8))
-    assert os.geteuid() == 0 or not os.access(home, os.W_OK)
+    if os.geteuid() == 0:
+        pytest.skip("a read-only home needs a non-root user")
+    assert not os.access(home, os.W_OK)
     return home
 
 

@@ -40,7 +40,7 @@ def test_worker_with_a_read_only_home_reads_its_task_and_posts_an_update(live, h
     }
 
 
-def test_a_missing_remote_token_is_unauthenticated_and_never_uses_the_local_credential(live, hive, tmp_path):
+def test_a_missing_token_or_foreign_label_is_unauthenticated_and_never_uses_the_local_credential(live, hive, tmp_path):
     token = cases.grant()
     first = cases.negative(live, tmp_path / "first", "first", token)
     second = cases.negative(live, tmp_path / "second", "second", token)
@@ -116,6 +116,29 @@ def test_a_remote_read_gives_up_on_a_lasting_server_error(remote):
     ):
         ledger.call(SLUG)
     assert request.call_count == 3
+
+
+def test_a_remote_read_refused_with_a_client_error_is_not_retried(remote):
+    error, body = refusal(404, "No such ledger")
+    with (
+        patch.object(ledger, "request", side_effect=error) as request,
+        patch.object(ledger.time, "sleep") as sleep,
+        pytest.raises(SystemExit, match=f"^server refused: 404 {re.escape(body)}$"),
+    ):
+        ledger.call(SLUG)
+    assert request.call_count == 1
+    sleep.assert_not_called()
+
+
+def test_a_request_uses_the_bounded_timeout_by_default(remote):
+    client = Mock()
+    client.return_value.snapshot.return_value = {"tasks": []}
+    with (
+        patch("scripts.swarm_ledger.api.client.ResourceClient", client),
+        patch.object(ledger, "credentials", return_value={"X-Ledger-Token": "t"}),
+    ):
+        assert ledger.request(SLUG) == {"tasks": []}
+    client.assert_called_once_with("https://hub.example", {"X-Ledger-Token": "t"}, 10)
 
 
 @pytest.mark.parametrize("ops", [[{"op": "ack"}], []])
