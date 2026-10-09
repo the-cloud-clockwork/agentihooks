@@ -178,3 +178,20 @@ def test_old_condition_cache_discovers_the_package_filter(shipped_filters, tmp_p
     monkeypatch.setattr(conditions, "_cache_path", lambda root=None: cache)
     entries = conditions.matching("pre", "Edit", {}, cwd=ROOT)
     assert any(entry["path"] == str(PACKAGE) for entry in entries)
+
+
+@pytest.mark.parametrize("tool", ["Edit", "Write", "MultiEdit"])
+@pytest.mark.parametrize(
+    "text, context",
+    [
+        (TAIL, TAIL),
+        (f"unrelated = 1\n{TAIL}\nunrelated = 2", TAIL),
+        ('reason = """value;\nextra explanation"""\nother = 1', 'reason = """value;\nextra explanation"""'),
+    ],
+)
+def test_finding_questions_include_the_enclosing_source(shipped_filters, stub, tool, text, context):
+    fake = stub()
+    conditions.pre_effect(_edit(text, tool=tool))
+    questions = fake.calls[0]["questions"].values()
+    assert any(f"Context: {context}" in question.instructions for question in questions)
+    assert all(question.instructions.rsplit("\nContext: ", 1)[1] == context for question in questions)

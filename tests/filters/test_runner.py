@@ -115,7 +115,8 @@ def test_two_findings_ask_one_classifier_call_with_two_questions(filters_dir, st
     first = call["questions"]["finding_0"]
     assert first.instructions == (
         "Does this finding go against the filter intent?\n"
-        "Intent: user facing text names no internal ids\nFinding: task flt1\nReason: names a task id"
+        "Intent: user facing text names no internal ids\nFinding: task flt1\nReason: names a task id\n"
+        "Context: task flt1 then task flt2"
     )
     assert (first.true, first.false) == (runner.TRUE, runner.FALSE)
     assert effect.block == (
@@ -178,7 +179,8 @@ def test_classifier_mode_asks_about_the_whole_text(filters_dir, stub):
     fake = stub(yes=True)
     effect = conditions.pre_effect(_write_call("leverage synergies"))
     assert [q.instructions for q in fake.calls[0]["questions"].values()] == [
-        "Does this finding go against the filter intent?\nIntent: no jargon\nFinding: leverage synergies\nReason: whole text"
+        "Does this finding go against the filter intent?\nIntent: no jargon\nFinding: leverage synergies\nReason: whole text\n"
+        "Context: leverage synergies"
     ]
     assert "leverage synergies" in effect.block
 
