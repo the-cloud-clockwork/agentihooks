@@ -76,6 +76,8 @@ def _b(data):
     assert admission.pending(data["swarm"], data["clock_ms"]) == {}
     assert store.redis.zcard(admission.global_key) == 0
     assert {key: store.redis.dump(key) for key in before} == before
+    assert sorted(set(_keys(store)) - set(before)) == [admission.total_key(data["swarm"])]
+    assert admission.pending_execution_admission_total(data["swarm"]) == {IMPOSSIBLE: 1}
     again = admission.admit(data["swarm"], [impossible], data["clock_ms"] + data["pending_ttl_ms"] * 4)
     assert outcomes(again) == {data["impossible"]: IMPOSSIBLE}
     assert admission.pending(data["swarm"], data["clock_ms"] + data["pending_ttl_ms"] * 4) == {}
@@ -94,6 +96,12 @@ def _c(data):
         t: d.reservation for t, d in old.items()
     }
     assert len(admission.pending(data["swarm"], data["clock_ms"] + 1)) == 3
+    restarted = PendingAdmission(store, policy(data), lambda slug: provider["slots"])
+    after_restart = restarted.admit(data["swarm"], data["tasks"][:3], data["clock_ms"] + 2)
+    assert {d.task: (d.outcome, d.reservation) for d in after_restart} == {
+        t: (REPLAYED, d.reservation) for t, d in old.items()
+    }
+    assert restarted.pending_execution_admission_total(data["swarm"])[ADMITTED] == 3
     provider["slots"] = 0
     outage = data["clock_ms"] + data["pending_ttl_ms"]
     during = admission.admit(data["swarm"], data["tasks"], outage)

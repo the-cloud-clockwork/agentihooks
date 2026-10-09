@@ -53,6 +53,22 @@ def test_requested_reads_task_resources_over_the_default():
     assert requested({"id": "t", "resources": None}, default) == default
     assert requested({"id": "t", "resources": {"memory_mib": "9000"}}, default) == Resources(9000, 1000)
     assert requested({"id": "t", "resources": {"cpu_millis": 6000}}, default) == Resources(4096, 6000)
+    for bad in ({"memory_mib": 0}, {"cpu_millis": -1}):
+        with pytest.raises(ValueError, match="^resources must be positive$"):
+            requested({"id": "t", "resources": bad}, default)
+    assert requested({"id": "t", "resources": {"memory_mib": 1, "cpu_millis": 1}}, default) == Resources(1, 1)
+
+
+@pytest.mark.parametrize("bad", [{"memory_mib": "lots"}, {"cpu_millis": None}, {"memory_mib": 0}, {"cpu_millis": -5}])
+def test_unreadable_resources_are_impossible_and_never_abort_the_batch(bad):
+    store, gate, _ = make()
+    got = gate.admit("a", [{"id": "bad", "resources": bad}, *ids("t1")], 0)
+    assert got[0] == Decision(
+        "bad",
+        IMPOSSIBLE,
+        reason="task bad has unreadable resources; set memory_mib and cpu_millis to positive integers",
+    )
+    assert got[1].outcome == ADMITTED
 
 
 def test_resources_fit_on_both_dimensions_inclusive():
@@ -134,11 +150,14 @@ def test_admission_set_to_zero_admits_nothing_and_says_so():
     assert gate.pending("a", 0) == {}
 
 
-def test_a_lowered_cap_never_goes_negative():
+def test_a_cap_lowered_below_held_reservations_keeps_them_and_defers_new_work():
     store, gate, _ = make(global_cap=5, swarm_cap=5)
     gate.admit("a", ids("t1", "t2", "t3"), 0)
     lowered = PendingAdmission(store, Policy(1, 1, 100, (GENERAL,), Resources(1, 1)), lambda s: 10)
-    assert outcomes(lowered.admit("a", ids("t1", "t4"), 1)) == {"t1": REPLAYED, "t4": DEFERRED}
+    got = lowered.admit("a", ids("t1", "t4"), 1)
+    assert outcomes(got) == {"t1": REPLAYED, "t4": DEFERRED}
+    assert got[1].reason == "pending cap reached: 3 of 1 pending attempts for this swarm, 3 of 1 across swarms"
+    assert sorted(lowered.pending("a", 1)) == ["t1", "t2", "t3"]
 
 
 def test_replay_keeps_the_same_reservation_and_writes_no_duplicate():
@@ -148,6 +167,24 @@ def test_replay_keeps_the_same_reservation_and_writes_no_duplicate():
     assert again == Decision("t1", REPLAYED, first.reservation, first.deadline_ms)
     assert store.redis.hlen(gate.key("a")) == 1
     assert store.redis.zcard(gate.global_key) == 1
+    assert gate.pending_execution_admission_total("a") == {ADMITTED: 1}
+
+
+def test_a_task_named_twice_in_one_call_is_admitted_once():
+    store, gate, _ = make()
+    first, second = gate.admit("a", ids("t1", "t1"), 0)
+    assert first.outcome == ADMITTED
+    assert second == Decision("t1", REPLAYED, first.reservation, first.deadline_ms)
+    assert gate.pending_execution_admission_total("a") == {ADMITTED: 1}
+
+
+def test_held_names_the_stored_reservation_even_past_its_deadline():
+    store, gate, _ = make()
+    first = gate.admit("a", ids("t1"), 0)[0]
+    assert gate.held("a", "t1") == first.reservation
+    assert gate.pending("a", 500) == {}
+    assert gate.held("a", "t1") == first.reservation
+    assert gate.held("a", "missing") == ""
 
 
 def test_reservations_expire_at_their_deadline_and_free_their_slot():
@@ -293,9 +330,9 @@ def test_tick_spawns_only_admitted_tasks_and_blocks_the_impossible_one():
 def test_tick_releases_the_reservation_of_a_failed_spawn():
     data, store, gate, ledger, runtime = tick_fixture(fail_for=("t02",))
     tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
-    assert [task for _, _, task in runtime.spawned] == ["t01", "t03"]
-    assert sorted(gate.pending("sw", data["clock_ms"])) == ["t01", "t03"]
-    assert gate.pending_execution_admission_total("sw")[RELEASED] == 1
+    assert [task for _, _, task in runtime.spawned] == ["t01", "t03", "t05"]
+    assert sorted(gate.pending("sw", data["clock_ms"])) == ["t01", "t03", "t05"]
+    assert gate.pending_execution_admission_total("sw") == {ADMITTED: 4, RELEASED: 1, IMPOSSIBLE: 1, DEFERRED: 5}
 
 
 def test_tick_releases_the_reservation_when_the_claim_is_taken(monkeypatch):
@@ -319,6 +356,58 @@ def test_tick_releases_the_reservation_when_the_ledger_refuses_the_claim():
     ledger.update_task = refuse
     tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
     assert "t01" not in gate.pending("sw", data["clock_ms"])
+    assert [task for _, _, task in runtime.spawned] == ["t02", "t03", "t05"]
+    assert gate.pending_execution_admission_total("sw") == {ADMITTED: 4, RELEASED: 1, IMPOSSIBLE: 1, DEFERRED: 5}
+
+
+def test_tick_takes_no_reservation_while_the_runtime_has_no_capacity():
+    data, store, gate, ledger, runtime = tick_fixture()
+    runtime.full = True
+    actions = tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
+    assert "every agent is at its session cap, waiting" in actions
+    assert gate.pending("sw", data["clock_ms"]) == {}
+    assert gate.pending_execution_admission_total("sw") == {}
+
+
+def test_tick_waits_when_admission_keeps_conflicting(monkeypatch):
+    data, store, gate, ledger, runtime = tick_fixture()
+
+    def conflicted(slug, tasks, now_ms):
+        raise SwarmError(admission_module.CONFLICT)
+
+    monkeypatch.setattr(gate, "admit", conflicted)
+    actions = tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
+    assert runtime.spawned == []
+    assert "task t01 waits: pending admission kept conflicting; retry on the next tick" in actions
+    assert ledger.rows["t01"]["state"] == "open"
+
+
+def test_a_passed_launch_check_activates_the_task_reservation(monkeypatch):
+    from scripts.swarm import launch_check
+    from scripts.swarm import tick as tick_module
+    from scripts.swarm.store import AgentRecord
+
+    data, store, gate, ledger, runtime = tick_fixture()
+    tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
+    agent = next(a for a in store.agents("sw") if a.task == "t01")
+    for name, value in {
+        "pending": lambda s, slug: {agent.name: {"relaunch": False}},
+        "misses": lambda *args: {},
+        "joined_at": lambda a, doc: 5_000,
+        "session_started_at": lambda a: 1_000,
+        "record": lambda *args: None,
+        "forget": lambda *args: None,
+        "clear_relaunched": lambda *args: None,
+    }.items():
+        monkeypatch.setattr(launch_check, name, value)
+    actions = tick_module._launch_checks("sw", store, ledger, runtime, ledger.rows, {}, data["clock_ms"] + 1)
+    assert actions == [f"{agent.name} passed its launch check in 4 seconds"]
+    assert sorted(gate.pending("sw", data["clock_ms"] + 1)) == ["t02", "t03"]
+    assert gate.pending_execution_admission_total("sw")["activated"] == 1
+    other = AgentRecord("engineer@x-1", "eng", "t09")
+    tick_module._settle_admission("sw", runtime, other)
+    tick_module._settle_admission("sw", FakeRuntime(), agent)
+    assert gate.pending_execution_admission_total("sw")["activated"] == 1
 
 
 def test_a_runtime_without_admission_spawns_as_before():

@@ -46,7 +46,7 @@ from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
-from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig
+from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
@@ -368,6 +368,7 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
         launch_check.record(store, slug, agent, found, now_ms, elapsed)
         launch_check.forget(store, slug, agent.name)
         launch_check.clear_relaunched(store, slug, agent.task)
+        _settle_admission(slug, runtime, agent)
         actions.append(f"{agent.name} passed its launch check in {elapsed // 1000} seconds")
     return actions
 
@@ -652,16 +653,13 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents, actions = store.agents(slug), []
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
-    order = _spawn_order(slug, config, store, agents, rows, doc)
-    admitted = _admitted(slug, runtime, order, now_ms)
-    for lane, task in order:
+    for lane, task in _spawn_order(slug, config, store, agents, rows, doc):
         if held:
             return actions + held
         if not runtime.has_capacity(config):
             return actions + ["every agent is at its session cap, waiting"]
-        blocked = _not_admitted(slug, ledger, rows, task, admitted) or _lives_spent(slug, store, ledger, rows, task)
+        blocked = _lives_spent(slug, store, ledger, rows, task) or _held_back(slug, ledger, rows, runtime, task, now_ms)
         if blocked:
-            _release_admission(slug, runtime, task)
             actions.append(blocked)
             continue
         name = store.next_name(slug, lane, now_ms)
@@ -751,25 +749,28 @@ def _admission(runtime):
     return gate if isinstance(gate, PendingAdmission) else None
 
 
-def _admitted(slug, runtime, order, now_ms):
+def _held_back(slug, ledger, rows, runtime, task, now_ms):
+    from scripts.swarm_v2.admission import ADMITTED, IMPOSSIBLE, REPLAYED
+
     gate = _admission(runtime)
     if gate is None:
-        return None
-    return {d.task: d for d in gate.admit(slug, [task for _, task in order], now_ms)}
-
-
-def _not_admitted(slug, ledger, rows, task, admitted):
-    from scripts.swarm_v2.admission import DEFERRED, IMPOSSIBLE
-
-    decision = (admitted or {}).get(task["id"])
-    if decision is None:
         return ""
+    try:
+        decision = gate.admit(slug, [task], now_ms)[0]
+    except SwarmError as exc:
+        return f"task {task['id']} waits: {exc}"
     if decision.outcome == IMPOSSIBLE:
         return _unresolved(slug, ledger, rows, task["id"], decision.reason)
-    if decision.outcome == DEFERRED:
+    if decision.outcome not in (ADMITTED, REPLAYED):
         return f"task {task['id']} waits: {decision.reason}"
     task["admission"] = {"reservation": decision.reservation, "deadline_ms": decision.deadline_ms}
     return ""
+
+
+def _settle_admission(slug, runtime, agent):
+    gate = _admission(runtime)
+    if gate is not None and (reservation := gate.held(slug, agent.task)):
+        gate.activate(slug, agent.task, reservation)
 
 
 def _release_admission(slug, runtime, task):

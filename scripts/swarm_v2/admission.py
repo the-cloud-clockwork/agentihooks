@@ -17,6 +17,7 @@ ADMITTED, REPLAYED, DEFERRED, IMPOSSIBLE = "admitted", "replayed", "deferred", "
 EXPIRED, ACTIVATED, RELEASED = "expired", "activated", "released"
 ATTEMPTS = 8
 CONFLICT = "pending admission kept conflicting; retry on the next tick"
+UNREADABLE = "has unreadable resources; set memory_mib and cpu_millis to positive integers"
 
 
 @dataclass(frozen=True)
@@ -54,7 +55,10 @@ class Decision:
 
 def requested(task: dict, default: Resources) -> Resources:
     asked = task.get("resources") or {}
-    return Resources(int(asked.get("memory_mib", default.memory_mib)), int(asked.get("cpu_millis", default.cpu_millis)))
+    need = Resources(int(asked.get("memory_mib", default.memory_mib)), int(asked.get("cpu_millis", default.cpu_millis)))
+    if need.memory_mib <= 0 or need.cpu_millis <= 0:
+        raise ValueError("resources must be positive")
+    return need
 
 
 def impossible(task_id: str, need: Resources, templates: tuple[Template, ...]) -> str:
@@ -99,6 +103,10 @@ class PendingAdmission:
         rows = {task: json.loads(raw) for task, raw in self.store.redis.hgetall(self.key(slug)).items()}
         return {task: _held(row, task) for task, row in rows.items() if row["deadline_ms"] > now_ms}
 
+    def held(self, slug: str, task: str) -> str:
+        raw = self.store.redis.hget(self.key(slug), task)
+        return json.loads(raw)["reservation"] if raw else ""
+
     def pending_execution_admission_total(self, slug: str) -> dict[str, int]:
         return {k: int(v) for k, v in self.store.redis.hgetall(self.total_key(slug)).items()}
 
@@ -135,7 +143,7 @@ class PendingAdmission:
             for task, row in written.items():
                 pipe.hset(key, task, json.dumps(row))
                 pipe.zadd(self.global_key, {f"{slug}\t{task}": row["deadline_ms"]})
-            counts = Counter(d.outcome for d in decisions) + Counter({EXPIRED: len(expired)})
+            counts = Counter(d.outcome for d in decisions if d.outcome != REPLAYED) + Counter({EXPIRED: len(expired)})
             for outcome, count in counts.items():
                 pipe.hincrby(self.total_key(slug), outcome, count)
             pipe.execute()
@@ -143,9 +151,13 @@ class PendingAdmission:
 
     def _decide(self, task: dict, live: dict, written: dict, bounds: tuple[int, int], now_ms: int) -> Decision:
         task_id = task["id"]
-        if task_id in live:
-            return _held(live[task_id], task_id)
-        if reason := impossible(task_id, requested(task, self.policy.default), self.policy.templates):
+        if task_id in live or task_id in written:
+            return _held(live.get(task_id) or written[task_id], task_id)
+        try:
+            need = requested(task, self.policy.default)
+        except (TypeError, ValueError):
+            return Decision(task_id, IMPOSSIBLE, reason=f"task {task_id} {UNREADABLE}")
+        if reason := impossible(task_id, need, self.policy.templates):
             return Decision(task_id, IMPOSSIBLE, reason=reason)
         if reason := self._full(len(live) + len(written), bounds[0] + len(written), bounds[1]):
             return Decision(task_id, DEFERRED, reason=reason)
