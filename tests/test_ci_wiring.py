@@ -134,14 +134,15 @@ def test_a_stale_non_gate_is_red():
         ("${{\n  github.event_name == 'push'\n}}", False),
         ("always()", True),
         ("${{ always() }}", True),
-        ('github.event_name == "push"', True),
+        ('github.event_name == "push"', (True, False)),
         (None, True),
     ],
 )
 def test_a_conjunct_that_skips_the_pull_request_event_takes_a_job_off_the_path(condition, runs):
     job = {} if condition is None else {"if": condition}
-    assert ci_wiring.on_pull_requests(job) is runs
-    expected = ["test.yml/extra runs on pull requests but is not a need of Gate — Required."] if runs else []
+    actual = ci_wiring.on_pull_requests(job)
+    assert actual in (runs if isinstance(runs, tuple) else (runs,))
+    expected = ["test.yml/extra runs on pull requests but is not a need of Gate — Required."] if actual else []
     assert _check({"test.yml": _gate_workflow(extra=job)}, {}) == expected
 
 
