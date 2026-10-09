@@ -9,7 +9,7 @@ from scripts import codex_router, session_bands
 from scripts.routing import claude_api, codex_api, place
 from scripts.routing.slots import API, SUBSCRIPTION
 from scripts.swarm import autoscale, host_budget
-from scripts.swarm.store import AUTO_SCALING, SwarmConfig
+from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
 
 LANES = ("eng", "ci", "plan")
 LABELS = {"claude": "Claude", "codex": "Codex"}
@@ -302,7 +302,7 @@ def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleIn
     return ScaleInputs(observations, agents, demand, host_budget.read_host, read(store, slug), warned, spent, now_ms)
 
 
-def spawn_counter(store, now_ms: int) -> Callable[[int], int]:
+def spawn_counter(store: RedisStore, now_ms: int) -> Callable[[int], int]:
     from scripts.swarm.tick import host_spent
 
     return lambda since_ms: host_spent(store, since_ms, now_ms)

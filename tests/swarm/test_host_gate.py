@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scripts.swarm import cli, host_budget, tick
+from scripts.swarm import capacity, cli, host_budget, tick
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
@@ -143,8 +143,6 @@ def test_host_spent_counts_from_the_start_lag_before_since_through_now(store):
 
 
 def test_the_spawn_gate_closes_exactly_when_autoscale_has_no_room_left(store):
-    from scripts.swarm import capacity
-
     _decide(store, 2, granted_at=50_000)
     host = capacity.read(store, "sw")["host"]
     counter = capacity.spawn_counter(store, 60_000)

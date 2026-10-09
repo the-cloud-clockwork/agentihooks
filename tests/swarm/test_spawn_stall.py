@@ -443,3 +443,27 @@ def test_a_manual_swarm_held_by_the_host_is_not_a_spawn_stall(stalled, monkeypat
     assert spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
     monkeypatch.setattr(host_budget, "read_host", lambda: host_budget.HostSample(100, 1, 0, 0))
     assert not spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+
+
+def test_an_auto_swarm_held_between_the_watermarks_scales_from_its_first_grant(stalled, monkeypatch):
+    import json
+
+    from scripts.swarm import host_budget
+
+    store, ledger, runtime, clock, _ = stalled
+    store.update("sw", scaling="auto")
+    granted = {"room": 2, "reason": "r", "limit": "load", "held": False, "granted_at": clock[0] - 60_000}
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"host": granted}))
+    store.redis.zadd(tick.HOST_SPENDS, {"first": clock[0] - 59_000})
+    monkeypatch.setattr(host_budget, "read_host", lambda: host_budget.HostSample(10.0, 8, 64_000, 2))
+    seen = []
+    autoscaled = capacity.autoscaled
+    monkeypatch.setattr(
+        capacity,
+        "autoscaled",
+        lambda config, inputs, host: (
+            seen.append((host["granted_at"], capacity.unspent(host, inputs.spent))) or autoscaled(config, inputs, host)
+        ),
+    )
+    spawn_stall.eligible(store, "sw", ledger, clock[0], runtime)
+    assert seen == [(clock[0] - 60_000, 1)]
