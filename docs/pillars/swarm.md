@@ -171,7 +171,9 @@ one harness; a Claude only profile on a `codex-only` lane is refused with its re
 harness, a launch takes the harness with an open seat, and with no open seat on either harness it is
 refused rather than defaulting to Claude. A task whose profile is `frontend` takes an open Claude seat
 first and a Codex seat only when no Claude seat is open, both in the quota plan and in the spawn rotation;
-a pinned lane or a saved harness still wins.
+a pinned lane or a saved harness still wins. User templates live in
+`$AGENTIHOOKS_HOME/swarm-templates/` and win over a built-in of the same name. `create --template` stores
+the template name and lane map in the swarm config.
 
 A profile is Claude only when a layer of its own chain enables a Claude plugin that has no Codex
 replacement; role default plugins and the bundle global layer never count. The replacements are:
@@ -185,9 +187,7 @@ replacement; role default plugins and the bundle global layer never count. The r
 
 The Codex render links each replacement into the profile's Codex `skills/` folder and records it in the
 render stamp, so a later fetch re-renders the home. A plugin with none of these keeps the profile on
-Claude, and a `codex-only` lane refuses it. User templates live in
-`$AGENTIHOOKS_HOME/swarm-templates/` and win over a built-in of the same name. `create --template` stores
-the template name and lane map in the swarm config.
+Claude, and a `codex-only` lane refuses it.
 
 A swarm is in one of five states: `running`, `paused`, `stopping`, `stopped`, `drained`. It drains when no
 task is left to start and returns to `running` when a new task opens. Lowering a cap never kills work; the
