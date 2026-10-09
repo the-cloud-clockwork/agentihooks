@@ -77,7 +77,7 @@ def positionals(args):
 
 def repo_of(path, args):
     """The repository a push writes: its remote argument as a URL or a remote name, origin when it names none."""
-    remote = next(iter(positionals(args)), "origin")
+    remote = (positionals(args) or ["origin"])[0]
     url = remote if "/" in remote else git(path, "remote", "get-url", remote).stdout.strip()
     found = GITHUB_RE.search(url)
     return f"{found.group(1)}/{found.group(2)}".lower() if found else ""
