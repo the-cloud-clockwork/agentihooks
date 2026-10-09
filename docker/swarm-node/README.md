@@ -19,7 +19,10 @@ or credential store. Runtime homes are writable; templates and the environment
 are owned by root and read only to the worker user.
 
 The default command verifies and reports installed inventory without a network.
-The launch supervisor belongs to a subsequent IMG package.
+Every command runs under Tini as PID one, which reaps children. Production
+execution supplies `python /opt/swarm-node/supervisor.py ATTEMPT LAUNCH_JSON`.
+The supervisor owns a headless herdr server, an exporter and one main agent in
+a herdr pane. Viewers can attach and detach without owning those processes.
 
 Before an attempt starts, `python -m scripts.swarm_v2.worker_home bootstrap`
 renders its Claude and Codex profiles into a private attempt home under
@@ -35,10 +38,55 @@ admitted. Rerunning an accepted request is a no-op, an interrupted one is
 rendered again from scratch, and a different request for an accepted attempt is
 refused. The execution record names the digest of each selected profile.
 Rollback selects the prior profile digest for new attempts; existing attempt
-homes are kept for recovery. Codex skips hooks it has not trusted; trusting them
-at launch belongs to the supervisor package SV2-IMG-03, so the smoke proves hook
-loading with trust bypassed. This image introduces no orchestration service or
+homes are kept for recovery. The supervisor pins both native config homes to
+the selected private home, marks the admitted attempt trusted for Claude, and
+passes the admitted attempt as Codex project trust. This image introduces no orchestration service or
 embedded database. The existing ledger service Dockerfile remains separate.
+
+The SV2-IMG-03 launch JSON has schema version one, `authority`, `harness`,
+`agent` and `exporter` argument vectors. Authority must exactly match a
+controller supplied `registration.json` beside the bootstrap execution record;
+its execution identifier must match the bootstrapped attempt. The registration
+is a nonsecret, previously admitted controller record, not a grant token or a
+worker self registration. Its delivery and read only mounting belong to the
+execution adapter. The worker does not verify signing keys. Budgets
+`startup_seconds`, `quiesce_seconds`, `checkpoint_seconds` and `kill_seconds`
+are finite, positive and at most three hundred each. Defaults are ten, ten, ten
+and two seconds. The local runtime adapter is unchanged.
+
+Each launch has an exclusive attempt lock and a new random incarnation under
+its run directory. `SWARM_SUPERVISION_DIR` points to that directory; its
+`context.json` binds authority and incarnation. An exporter calls
+`scripts.swarm_v2.supervision_protocol.acknowledge("exporter", status="ready")`
+when usable. Only then does the main agent start. SIGTERM or SIGINT publishes
+`drain.json`, stops the agent and herdr process trees including escaped
+grandchildren, and publishes `quiesced.json`. The exporter remains alive to
+flush. No task reconciliation, authority renewal or second swarm timer runs
+in the supervisor.
+
+The exporter acknowledges `exporter.checkpoint` with status complete, a
+relative manifest path under the attempt checkpoints directory and its SHA256.
+The persisted manifest must match the context, say complete and name a
+checkpoint identifier. This is a local exporter handoff acknowledgement;
+archive commit, restore qualification and lease fencing remain with their
+later packages. Forced quiescence, missing acknowledgement, changed scope or
+late acknowledgement reports incomplete. Results are per incarnation and never
+overwrite a prior result or a latest checkpoint pointer. Exit zero means a
+clean agent completion or requested drain with acknowledged material; seventy
+means startup, agent, exporter or supervisor failure; seventy five means a
+clean termination with incomplete material; sixty four is a refused launch.
+`result.json` records exit reasons and `supervisor_child_exit_total`. If the
+supervisor is killed, Tini exits and Linux destroys the container process
+namespace. Such a death produces no fabricated checkpoint success.
+
+The isolated acceptance fixture uses the real headless herdr binary, a
+synthetic agent running a tool with two grandchildren, and a delayed exporter.
+Build its Dockerfile from an immutable worker image and run
+`tests/integration/swarm_node/supervision_proof.py` with the fixture image,
+prior qualified image, tested commit and an output directory. It proves two
+independent detachments, supervisor SIGKILL containment, bounded SIGTERM with
+late or missing acknowledgement, forced descendants and selecting the prior
+image for a new attempt. Production rollout remains with antoncore GitOps.
 
 After committing inputs, `bash docker/swarm-node/smoke.sh OUTPUT_DIRECTORY`
 builds an archived clean context, starts two independent containers with network
