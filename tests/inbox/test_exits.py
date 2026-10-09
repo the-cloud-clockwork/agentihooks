@@ -538,7 +538,7 @@ def test_unreceived_task_mail_is_not_cancelled_as_a_new_occupant_receives_it(red
 
 def test_the_sweep_skips_a_settled_agent_until_mail_reaches_it_again(redis, monkeypatch):
     store, inbox = RedisStore(redis), InboxStore(redis)
-    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
     store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
     settled, settle = [], exits.settle
     monkeypatch.setattr(exits, "settle", lambda inbox, name, *rest: settled.append(name) or settle(inbox, name, *rest))
@@ -550,7 +550,7 @@ def test_the_sweep_skips_a_settled_agent_until_mail_reaches_it_again(redis, monk
     exits.sweep(inbox, "sw", store, dict)
     exits.sweep(inbox, "sw", store, dict)
     assert settled == ["sw-eng-1", "sw-eng-1"]
-    assert inbox.get(late.id).address == "eng-1@sw"
+    assert (inbox.get(late.id).address, inbox.get(late.id).state) == ("eng-1@sw", "pending")
 
 
 def test_the_sweep_reads_the_swarms_seats_once(redis, monkeypatch):
@@ -858,6 +858,25 @@ def test_a_live_agent_above_the_cap_keeps_its_seat_mail(redis):
     store.create(SwarmConfig("sw", "/repo", 0, 0, state="stopped"))
     item, occupant = seat_mail(inbox, store, "eng-3@sw")
     store.put_agent("sw", AgentRecord(name=occupant, lane="eng", task="t3", seat="eng-3@sw"))
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).state == "pending"
+
+
+def test_a_finished_agent_above_the_cap_leaves_its_seat_mail_to_be_settled(redis):
+    from scripts.swarm.store import AgentRecord
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    item, occupant = seat_mail(inbox, store, "eng-1@sw")
+    store.put_agent("sw", AgentRecord(name=occupant, lane="eng", task="t1", seat="eng-1@sw", state="finished"))
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).reason == "cancelled: eng-1@sw can get no successor: the eng lane cap is 0"
+
+
+def test_a_stopping_swarm_keeps_mail_on_seats_within_its_cap(redis):
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 1, 0, state="stopping"))
+    item, _ = seat_mail(inbox, store, "eng-1@sw")
     exits.sweep(inbox, "sw", store, dict)
     assert inbox.get(item.id).state == "pending"
 

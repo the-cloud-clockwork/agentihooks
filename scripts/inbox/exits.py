@@ -201,7 +201,6 @@ def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", activ
 
 
 def _settle_unfillable(inbox: "InboxStore", config, seats: set) -> None:
-    """Mail on a seat nobody holds that can get no successor: closed, its sender told."""
     for seat in seats:
         why = _no_successor(seat, config)
         if not why:
