@@ -1,0 +1,39 @@
+name: Probe watcher sigterm
+
+on:
+  push:
+    branches: [engineer-d44a5a-0234]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        load: [none, cpu]
+        timing: [natural, jitter]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 07de3b0bcd17667c835c4d116fcff1df7c703045
+      - uses: actions/checkout@v4
+        with:
+          path: probe-src
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          pip install uv
+          uv venv "$HOME/venv"
+          uv pip install --python "$HOME/venv/bin/python" -e ".[dev,all]"
+      - name: Probe
+        run: |
+          if [[ "${{ matrix.load }}" == cpu ]]; then
+            for _ in $(seq "$(nproc)"); do python3 -c "while 1: pass" & done
+          fi
+          "$HOME/venv/bin/python" probe-src/.github/probes/watch_sigterm.py 150 "${{ matrix.timing }}"
