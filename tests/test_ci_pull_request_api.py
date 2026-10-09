@@ -373,7 +373,7 @@ def test_sonar_downloads_this_runs_coverage_after_the_shards():
     assert "bash .github/coverage/combine.sh --downloaded 8 ||" in merge["run"]
 
 
-@pytest.mark.parametrize("job", ["unit", "shard-check", "test-count", "size", "lint"])
+@pytest.mark.parametrize("job", ["unit", "shard-check", "test-count", "lint"])
 def test_a_dev_push_runs_every_step_of_the_job_itself(job):
     steps = _jobs()[job]["steps"]
     assert steps[0]["uses"] == "actions/checkout@v4"

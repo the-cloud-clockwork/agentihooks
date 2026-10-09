@@ -296,6 +296,9 @@ def test_triggers_reads_every_form():
 def test_the_tests_workflow_runs_wiring_and_brain_smoke_as_parallel_gate_needs():
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     needs = set(workflow["jobs"]["gate-required"]["needs"])
-    assert {"wiring", "brain-smoke"} <= needs
-    assert workflow["jobs"]["wiring"]["steps"][-1]["run"] == "python -m scripts.ci_wiring"
-    assert "needs" not in workflow["jobs"]["wiring"]
+    assert {"lint", "brain-smoke"} <= needs
+    assert "wiring" not in workflow["jobs"]
+    lint = workflow["jobs"]["lint"]
+    check = next(step for step in lint["steps"] if step.get("run") == "python -m scripts.ci_wiring")
+    assert check["if"] == "${{ !cancelled() }}"
+    assert "needs" not in lint

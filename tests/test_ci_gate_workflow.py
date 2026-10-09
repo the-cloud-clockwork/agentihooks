@@ -45,6 +45,31 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
 
 
+def test_cheap_gates_share_the_lint_job_and_each_grades_after_an_earlier_red():
+    jobs = _workflow()["jobs"]
+    assert not {"size", "wiring", "dependency-audit"} & set(jobs)
+    assert not {"size", "wiring", "dependency-audit"} & set(jobs["gate-required"]["needs"])
+    steps = {step.get("name"): step for step in jobs["lint"]["steps"]}
+    controls = [
+        "Lint check",
+        "Format check",
+        "Check every pull request job is a need of Gate Required",
+        "Hold the size and complexity limits",
+        "Fail on known vulnerabilities new against the base",
+    ]
+    assert all(steps[name]["if"] == "${{ !cancelled() }}" for name in controls)
+    assert all("continue-on-error" not in step for step in steps.values())
+    names = list(steps)
+    setup = [
+        "Install ruff",
+        "Install PyYAML",
+        "Set up uv",
+        "Check out the base revision",
+        "Check out the protected grader",
+    ]
+    assert max(names.index(name) for name in setup) < min(names.index(name) for name in controls)
+
+
 def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel():
     job = _workflow()["jobs"]["semgrep"]
     assert "needs" not in job

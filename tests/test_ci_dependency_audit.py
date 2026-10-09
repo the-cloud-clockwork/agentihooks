@@ -183,15 +183,18 @@ def _workflow():
 
 def test_dependency_audit_is_a_parallel_need_of_gate_required_graded_by_the_base():
     jobs = _workflow()["jobs"]
-    job = jobs["dependency-audit"]
-    assert "dependency-audit" in jobs["gate-required"]["needs"]
+    job = jobs["lint"]
+    assert "dependency-audit" not in jobs
+    assert "lint" in jobs["gate-required"]["needs"]
     assert "needs" not in job
     assert not {"if", "continue-on-error"} & set(job)
-    assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
+    assert all("continue-on-error" not in step for step in job["steps"])
     assert job["steps"][0]["with"]["fetch-depth"] == 0
-    base, grade = job["steps"][-2:]
+    steps = {step.get("name"): step for step in job["steps"]}
+    base, grade = steps["Check out the base revision"], steps["Fail on known vulnerabilities new against the base"]
     assert base["env"]["BASE"] == BASE
     assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$BASE"'
+    assert grade["if"] == "${{ !cancelled() }}"
     assert grade["run"] == (
         'grader="$RUNNER_TEMP/base"\n'
         '[[ -f "$grader/scripts/ci_dependency_audit.py" ]] || grader="$GITHUB_WORKSPACE"\n'
