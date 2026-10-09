@@ -9,6 +9,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from scripts.ci_mutation.clearances import clearance_path
+from scripts.ci_mutation.mutant_shards import shard_names
 
 
 def parse_results(text: str) -> list[tuple[str, str]]:
@@ -56,7 +57,7 @@ def function_start(source: str, original: str, class_name: str | None) -> int:
     return min([function.lineno] + [node.lineno for node in function.decorator_list])
 
 
-def collect_results(path: Path) -> list[dict]:
+def collect_results(path: Path, shard: tuple[int, int] = (0, 1)) -> list[dict]:
     import libcst as cst
     from mutmut.__main__ import (
         orig_function_and_class_names_from_key,
@@ -68,7 +69,9 @@ def collect_results(path: Path) -> list[dict]:
 
     text = subprocess.check_output([sys.executable, "-m", "mutmut", "results", "--all", "true"], text=True)
     prefix = get_mutant_name(path, "")
-    results = [(key, status) for key, status in parse_results(text) if key.rpartition(".")[0] + "." == prefix]
+    parsed = parse_results(text)
+    owned = shard_names([key for key, _ in parsed], shard)
+    results = [(key, status) for key, status in parsed if key in owned and key.rpartition(".")[0] + "." == prefix]
     module = read_mutants_module(path)
     source = path.read_text()
     rows = []
@@ -134,5 +137,6 @@ def survivor_text(report: dict) -> str:
 
 
 if __name__ == "__main__":
-    rows = {path: collect_results(Path(path)) for path in sys.argv[2:]}
+    shard = (int(sys.argv[2]), int(sys.argv[3]))
+    rows = {path: collect_results(Path(path), shard) for path in sys.argv[4:]}
     Path(sys.argv[1]).write_text(json.dumps(rows, indent=2) + "\n")
