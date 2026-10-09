@@ -657,10 +657,7 @@ def cmd_task(args):
         contract = {k: getattr(args, k) for k in ("must", "check", "judge") if getattr(args, k)}
         if contract:
             lists["contract"] = contract
-        if args.artifact:
-            lists["artifact"] = True
-        if args.follow_up:
-            lists["follow_up"] = True
+        lists.update((key, True) for key in ("artifact", "follow_up") if getattr(args, key))
         options = (
             ("kind", args.kind),
             ("profile", args.profile),
