@@ -1,17 +1,17 @@
 {
   "case": "T-SV2-CTL-02-C",
-  "tested_commit": "705f80a4ee817c4935bedf00387561250d5506fe",
+  "tested_commit": "7811e04ef4c9d065b9f8c45ab9ccb063a08a860a",
   "runs": [
     {
       "case": "T-SV2-CTL-02-C",
       "state": "passed",
-      "evidence_class": "mocked Redis and aligned server clock; actual Lua interpreter; signed fixture grants; no external runtime",
+      "evidence_class": "mocked Redis and server clock; signed fixture grants; no external runtime",
       "input_sha256": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57",
       "observed": {
         "task_id": "task",
-        "holder": "engineer@2c34ed-0002",
+        "holder": "engineer@324223-0002",
         "generation": 2,
-        "execution_id": "exe-7af72ee54fd646f588a7efb5548c053b",
+        "execution_id": "exe-635c7a4d2914438e9ce3063b9b48b5c2",
         "execution_generation": 1,
         "lease_deadline_ms": 1200,
         "state": "completed",
@@ -28,18 +28,18 @@
         "completed"
       ],
       "rollback": "new admission disabled; generations and journal retained; local compatibility works",
-      "tested_commit": "705f80a4ee817c4935bedf00387561250d5506fe"
+      "tested_commit": "7811e04ef4c9d065b9f8c45ab9ccb063a08a860a"
     },
     {
       "case": "T-SV2-CTL-02-C",
       "state": "passed",
-      "evidence_class": "mocked Redis and aligned server clock; actual Lua interpreter; signed fixture grants; no external runtime",
+      "evidence_class": "mocked Redis and server clock; signed fixture grants; no external runtime",
       "input_sha256": "1f48c3140e8ec3f96c83c98b7c1617ce88b9cb04681dce6c5c6d03693fdfaa57",
       "observed": {
         "task_id": "task",
-        "holder": "engineer@f06a86-0002",
+        "holder": "engineer@41ea59-0002",
         "generation": 2,
-        "execution_id": "exe-fc6b708227674cb6a9aa4f84d7ad69f8",
+        "execution_id": "exe-dfc83f88545240008b880f80627735e3",
         "execution_generation": 1,
         "lease_deadline_ms": 1200,
         "state": "completed",
@@ -56,7 +56,7 @@
         "completed"
       ],
       "rollback": "new admission disabled; generations and journal retained; local compatibility works",
-      "tested_commit": "705f80a4ee817c4935bedf00387561250d5506fe"
+      "tested_commit": "7811e04ef4c9d065b9f8c45ab9ccb063a08a860a"
     }
   ]
 }

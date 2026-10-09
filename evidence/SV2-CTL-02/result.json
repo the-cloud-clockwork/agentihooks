@@ -4,8 +4,8 @@
   "integration_gate": "G3",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1951",
   "pull_request": "",
-  "tested_commit": "705f80a4ee817c4935bedf00387561250d5506fe",
-  "status": "fixture-qualified-awaiting-controller-dependency-and-integration",
+  "tested_commit": "7811e04ef4c9d065b9f8c45ab9ccb063a08a860a",
+  "status": "fixture-qualified-on-integrated-controller-awaiting-ci",
   "evidence_class": "Mocked Redis server with an actual Lua interpreter and aligned server clock; transactional Redis client paths and signed fixture grants; no production rollout claimed.",
   "interfaces": [
     "TaskAuthority.admit, renew, release, complete, current, journal, replay and stale_generation_rejections_total",
@@ -28,7 +28,7 @@
   },
   "validation": {
     "command": "python -m pytest tests/test_swarm_v2_authority.py tests/swarm/test_store.py tests/swarm/test_tick.py tests/test_swarm_v2_controller.py tests/swarm/test_execution_identity.py tests/test_swarm_redis_key_prefix.py tests/test_live_redis_guard.py -q --tb=short --cov=scripts.swarm_v2.authority --cov-report=term-missing",
-    "output": "320 passed in 35.22 seconds; authority 173 statements, zero missing, 100 percent coverage",
+    "output": "332 passed in 36.14 seconds; authority 173 statements, zero missing, 100 percent coverage",
     "lint": "ruff check passed on changed Python files",
     "format": "ruff format check passed on changed Python files",
     "limits": "84 units over limits, 84 base allowlist entries, zero errors against the stacked controller base",
@@ -45,13 +45,13 @@
     "proof": "Case C reconstructs the completed second generation twice, changes no journal entries, refuses new admission and accepts a local claim."
   },
   "remaining_limitations": [
-    "Controller dependency remains open; this parked branch does not complete the package or qualify G3.",
     "TaskAuthority is an injectable distributed service, like its Controller dependency. Production controller loop, remote heartbeat, outcome, checkpoint and merge receiver wiring must use this compare-and-update interface; unscoped existing local consumers remain the explicit compatibility path.",
-    "Full CI and mutation run on the eventual pull request after the dependency is merged; no mutation result is claimed.",
+    "Full CI and mutation run on the integration pull request; results pending.",
     "Replaying retained claim journal recovers coordination state. Loss of the authoritative journal is not reconstructed from a compatibility string claim."
   ],
   "reviews": {
     "Standards": "Expiry finding resolved at tested commit; five targeted regression tests passed; no open findings.",
     "Spec": "Corrected commit and repeated fixture evidence satisfy acceptance and rollback obligations; no open findings. Production integration remains unverified."
-  }
+  },
+  "dependency_pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1968"
 }
