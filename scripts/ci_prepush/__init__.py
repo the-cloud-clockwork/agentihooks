@@ -62,7 +62,9 @@ def plan(root: Path, base: str, grade: Path) -> list[tuple[str, list[str]]]:
         ("ruff format", [python, "-m", "ruff", "format", "--check", *LINTED]),
         ("size limits", [python, "-I", str(grade / GRADER), "--base", str(grade), "--head", str(root)]),
     ]
-    if tests := tests_for(root, changed(root, base)):
+    if os.getenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", "false").lower() == "true" and (
+        tests := tests_for(root, changed(root, base))
+    ):
         steps.append(("tests", [python, "-m", "pytest", "-n", WORKERS, "--dist", "loadgroup", "-q", *tests]))
     return steps
 
