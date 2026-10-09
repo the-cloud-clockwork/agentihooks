@@ -19,6 +19,8 @@ MOVE_ATTEMPTS = 3
 STATES = ("pending", "delivered", "confirmed", "read", "done", "blocked", "handed_off", "cancelled")
 REDELIVER_ENV = "AGENTIHOOKS_INBOX_REDELIVER_S"
 DEFAULT_REDELIVER_S = 300
+OWNER_TTL_ENV = "AGENTIHOOKS_INBOX_OWNER_TTL_S"
+DEFAULT_OWNER_TTL_S = 30
 REDELIVERED = "redelivered: never confirmed inside the redelivery window"
 REDELIVERER = "inbox"
 CLOSED = ("done", "blocked", "handed_off", "cancelled")
@@ -52,6 +54,11 @@ def now_ms():
 
 def owner_key(recipient):
     return f"{PREFIX}:owner:{recipient}"
+
+
+def owner_ttl_s(environ=None):
+    env = os.environ if environ is None else environ
+    return max(1, int(env.get(OWNER_TTL_ENV) or DEFAULT_OWNER_TTL_S))
 
 
 def redelivery_ms(environ=None):
@@ -544,7 +551,7 @@ class InboxStore:
                 raise InboxError("done needs an outcome naming where the work went")
             if item.state == state:
                 return item
-            if state == "delivered" and self._owned(pipe, by):
+            if state == "delivered" and (self._owned(pipe, by) or self._reserved(pipe, item_id)):
                 return None
             moved = replace(item, state=state, updated_at=now_ms(), reason=reason)
             last = self.last_pending(pipe, item)
@@ -557,6 +564,16 @@ class InboxStore:
         key = owner_key(NameRegistry(pipe).resolve(by))
         pipe.watch(key)
         return pipe.get(key) is not None
+
+    def _reserved(self, pipe, item_id):
+        """True once a delivery owner may have submitted the item; one only reserved stays deliverable."""
+        key = self.key("reservation", item_id)
+        pipe.watch(key)
+        held = pipe.get(key)
+        if not held:
+            return False
+        pipe.watch(self.key("delivery", held))
+        return pipe.hget(self.key("delivery", held), "state") != "reserved"
 
     def last_pending(self, pipe, item):
         pending = self.key("pending", item.address)
