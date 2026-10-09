@@ -184,7 +184,7 @@ def hierarchy_read(repository, slug: str, path: str) -> dict:
         rows = repository.nodes(slug, name or "subtree", node or None)
     except KeyError:
         raise APIError(404, "resource_missing", "No such node") from None
-    doc = {"phases": [], "tasks": [], **repository.read(slug, *KINDS)}
+    doc = {"tasks": [], **repository.read(slug, *KINDS)}
     items = {
         f"{key}/{item['id']}": item
         for key in KINDS

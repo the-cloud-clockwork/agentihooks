@@ -192,11 +192,25 @@ def test_phase_pass_reads_each_phase_s_tasks_and_states_from_the_ledger_hierarch
                 node("phases/p2", 1),
                 node("tasks/t3", 2),
                 node("tasks/t4", 0),
+                node("phases/p3", 0),
+                node("tasks/t6", 1, "done"),
+                node("tasks/t7", 0),
             ]
 
-    data = doc([{"id": "p1", "title": "Build"}, {"id": "p2", "title": "Ship", "done": True}])
-    assert phases.phase_pass(Inbox(), store, "sw", data, Ledger()) == ["phase p1 ticked", "phase p2 reopened"]
-    assert Ledger.ticked == [("p1", True), ("p2", False)]
+    data = doc(
+        [
+            {"id": "p1", "title": "Build"},
+            {"id": "p2", "title": "Ship", "done": True},
+            {"id": "p3", "title": "Lone"},
+            {"id": "p9", "title": "Added after the read"},
+        ]
+    )
+    assert phases.phase_pass(Inbox(), store, "sw", data, Ledger()) == [
+        "phase p1 ticked",
+        "phase p2 reopened",
+        "phase p3 ticked",
+    ]
+    assert Ledger.ticked == [("p1", True), ("p2", False), ("p3", True)]
     assert Inbox.sent[0].endswith("all 2 tasks closed.") and Inbox.sent[1].endswith("reopened for t3.")
 
 

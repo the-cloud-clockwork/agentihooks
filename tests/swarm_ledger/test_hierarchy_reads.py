@@ -1,9 +1,11 @@
+import json
+import sys
 from types import SimpleNamespace
 
 import pytest
 
 from scripts.swarm_ledger import ledger
-from scripts.swarm_ledger.api import routes
+from scripts.swarm_ledger.api import resources, routes
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.repository import sqlite as store
 
@@ -158,7 +160,7 @@ def test_the_hierarchy_resource_names_phase_lifecycles_and_skips_items_without_a
             "_meta": {"rev": 1},
         },
     )
-    reply = routes.ledger_read(server(found), SLUG, "hierarchy", {})
+    reply = resources.hierarchy_read(found, SLUG, "hierarchy")
     assert [(row["node"], row["state"]) for row in reply["data"]] == [
         ("phases/p1", "to_plan"),
         ("phases/p2", "waiting"),
@@ -166,17 +168,35 @@ def test_the_hierarchy_resource_names_phase_lifecycles_and_skips_items_without_a
 
 
 def test_the_hierarchy_resource_runs_each_read_on_a_node(repo):
-    reply = routes.ledger_read(server(repo), SLUG, "hierarchy/subtree/slices/s1", {})
+    reply = resources.hierarchy_read(repo, SLUG, "hierarchy/subtree/slices/s1")
     assert [row["node"] for row in reply["data"]] == ["slices/s1", "tasks/t1", "tasks/t4"]
-    reply = routes.ledger_read(server(repo), SLUG, "hierarchy/dependents/tasks/t1", {})
+    reply = resources.hierarchy_read(repo, SLUG, "hierarchy/dependents/tasks/t1")
     assert [row["node"] for row in reply["data"]] == ["tasks/t6", "tasks/t8"]
+    reply = routes.ledger_read(server(repo), SLUG, "hierarchy/children/phases/p1", {})
+    assert [row["node"] for row in reply["data"]] == ["slices/s1", "slices/s2", "tasks/t3"]
 
 
-@pytest.mark.parametrize("path", ["hierarchy/subtree/tasks/nope", "hierarchy/sideways/tasks/t1"])
-def test_the_hierarchy_resource_answers_missing_for_an_unknown_read_or_node(repo, path):
+@pytest.mark.parametrize(
+    ("path", "message"),
+    [("hierarchy/subtree/tasks/nope", "No such node"), ("hierarchy/sideways/tasks/t1", "No such hierarchy read")],
+)
+def test_the_hierarchy_resource_answers_missing_for_an_unknown_read_or_node(repo, path, message):
     with pytest.raises(APIError) as caught:
-        routes.ledger_read(server(repo), SLUG, path, {})
-    assert caught.value.status == 404
+        resources.hierarchy_read(repo, SLUG, path)
+    assert (caught.value.status, caught.value.code, str(caught.value)) == (404, "resource_missing", message)
+
+
+def test_a_hierarchy_read_adopts_only_its_own_legacy_ledger(repo, tmp_path):
+    document = json.dumps(repo.get_document(SLUG))
+    (tmp_path / "other-ledger.json").write_text(document)
+    (tmp_path / "third-ledger.json").write_text(document)
+    assert shape(repo.nodes("other-ledger", "children")) == [
+        ("plans/a", 0),
+        ("plans/b", 0),
+        ("phases/p4", 0),
+        ("tasks/t7", 0),
+    ]
+    assert not (tmp_path / "other-ledger.json").exists() and (tmp_path / "third-ledger.json").exists()
 
 
 def test_tree_prints_the_subtree_indented_with_states(repo, monkeypatch, capsys):
@@ -199,6 +219,19 @@ def test_tree_without_a_node_prints_the_whole_ledger(repo, monkeypatch, capsys):
     assert lines[0] == "plans/a  open" and lines[-1] == "tasks/t7  out_of_scope" and len(lines) == 16
 
 
-def test_tree_reads_without_a_member_name():
-    args = ledger.build_parser().parse_args(["--slug", SLUG, "tree", "phases/p1"])
-    assert (args.command, args.node) == ("tree", "phases/p1")
+def test_tree_reads_without_a_member_name(repo, monkeypatch, capsys):
+    monkeypatch.setattr(ledger, "resource", lambda slug, path: routes.ledger_read(server(repo), slug, path, {})["data"])
+    monkeypatch.setattr(sys, "argv", ["ledger", "--slug", SLUG, "tree", "slices/s2"])
+    ledger.main()
+    assert capsys.readouterr().out.splitlines() == ["slices/s2  open", "  tasks/t2  claimed"]
+
+
+def test_tree_takes_an_optional_node_and_documents_its_forms(capsys):
+    parser = ledger.build_parser()
+    assert parser.parse_args(["--slug", SLUG, "tree"]).node is None
+    for argv in (["--help"], ["tree", "--help"]):
+        with pytest.raises(SystemExit):
+            parser.parse_args(argv)
+    out = " ".join(capsys.readouterr().out.split())
+    assert "tree print a plan, phase, slice or task and everything under it, with states" in out
+    assert "plans/<id>, phases/<id>, slices/<id> or tasks/<id>; default the whole ledger" in out
