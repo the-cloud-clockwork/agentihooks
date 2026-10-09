@@ -244,6 +244,58 @@ def test_block_comments_parks_and_finishes(env, dependencies, capsys):
     }
 
 
+def test_block_on_dev_red_records_the_failing_dev_run(env, capsys, monkeypatch):
+    from scripts.swarm import dev_red
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    read = []
+    monkeypatch.setattr(
+        dev_red, "latest", lambda repo, run=None: read.append(repo) or {"id": 41, "conclusion": "failure"}
+    )
+    capsys.readouterr()
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev Tests is red on a test I never touched") == 0
+    assert read == ["/repo"]
+    assert ledger.rows["t2"]["state"] == "blocked"
+    assert ledger.comments == [("t2", "dev Tests is red on a test I never touched", "ci@a1b2c3-0001")]
+    assert store.redis.hgetall(dev_red.key("sw")) == {"t2": "41"}
+    assert json.loads(capsys.readouterr().out) == {
+        "task": "t2",
+        "state": "blocked",
+        "dev_red_run": 41,
+        "next": "stop now; the swarm closes this session",
+    }
+
+
+def test_block_on_dev_red_is_refused_while_dev_is_green(env, capsys, monkeypatch):
+    from scripts.swarm import dev_red
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setattr(dev_red, "latest", lambda repo, run=None: {"id": 42, "conclusion": "success"})
+    capsys.readouterr()
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev is red") == 1
+    assert capsys.readouterr().err == (
+        "swarm: the latest finished dev Tests run did not fail, so dev is not red; "
+        "keep working or block for the real reason\n"
+    )
+    assert ledger.rows["t2"]["state"] != "blocked"
+    assert store.redis.hgetall(dev_red.key("sw")) == {}
+
+
+def test_a_plain_block_drops_an_earlier_dev_red_cause(env):
+    from scripts.swarm import dev_red
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    store.redis.hset(dev_red.key("sw"), mapping={"t2": "41", "t1": "41"})
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "waiting on a token") == 0
+    assert store.redis.hgetall(dev_red.key("sw")) == {"t1": "41"}
+
+
 @pytest.mark.parametrize("dependency_state", ["open", "claimed", "pr", "blocked"])
 def test_block_waits_on_the_first_unfinished_dependency(env, capsys, monkeypatch, dependency_state):
     from scripts.swarm import idle
