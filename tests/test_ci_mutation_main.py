@@ -113,20 +113,43 @@ def test_cli_passes_shared_stats_keyed_to_the_resolved_head(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize(
-    "args",
+    ("args", "message"),
     [
-        ["--stats-part", "0"],
-        ["--stats", "s", "--stats-part", "2", "--stats-parts", "2"],
-        ["--stats", "s", "--stats-part", "-1"],
+        (["--stats-part", "0"], "--stats-part 0 needs --stats and is outside 0 to 0"),
+        (
+            ["--stats", "s", "--stats-part", "2", "--stats-parts", "2"],
+            "--stats-part 2 needs --stats and is outside 0 to 1",
+        ),
+        (["--stats", "s", "--stats-part", "-1"], "--stats-part -1 needs --stats and is outside 0 to 0"),
     ],
 )
-def test_cli_refuses_a_stats_part_outside_its_matrix_or_without_a_folder(tmp_path, monkeypatch, capsys, args):
+def test_cli_refuses_a_stats_part_outside_its_matrix_or_without_a_folder(tmp_path, monkeypatch, capsys, args, message):
     monkeypatch.setattr("sys.argv", ["gate", *args])
     monkeypatch.setattr("scripts.ci_mutation.__main__.run_gate", lambda *args: pytest.fail("ran without a valid part"))
     with pytest.raises(SystemExit) as error:
         main()
     assert error.value.code == 2
-    assert "needs --stats and is outside 0 to" in capsys.readouterr().err
+    assert capsys.readouterr().err.rstrip().endswith(f"error: {message}")
+
+
+def test_cli_accepts_the_first_stats_part_of_a_single_part_matrix(tmp_path, monkeypatch):
+    from scripts.ci_mutation.stats import SharedStats
+
+    (tmp_path / "hooks").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["gate", "--stats", "s", "--stats-part", "0"])
+    monkeypatch.setattr(
+        "scripts.ci_mutation.__main__.subprocess.run",
+        lambda command, **kwargs: __import__("subprocess").CompletedProcess(command, 0, "abc\n", ""),
+    )
+    monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", lambda root, base, head: {})
+    calls = []
+    monkeypatch.setattr(
+        "scripts.ci_mutation.__main__.run_gate",
+        lambda root, changes, output, budget, shard, stats: calls.append(stats) or {"failed": False},
+    )
+    assert main() == 0
+    assert calls == [SharedStats(tmp_path / "s", "abc", (0, 1))]
 
 
 @pytest.mark.parametrize(("shard", "shards"), [("3", "3"), ("-1", "2"), ("0", "0")])

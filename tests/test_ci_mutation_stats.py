@@ -8,7 +8,7 @@ SELECTED = {"hooks/a.py": ({3, 1}, ["tests/test_b.py", "tests/test_a.py"]), "hoo
 
 def test_key_covers_the_head_and_every_selected_path_line_and_test():
     key = stats_key("abc", SELECTED)
-    assert len(key) == 64
+    assert key == "6df05fe5947c94da6e3e1c5262188fc9769ba80a02104800600414894c163861"
     assert key == stats_key(
         "abc", {"hooks/b.py": (set(), []), "hooks/a.py": ({1, 3}, ["tests/test_a.py", "tests/test_b.py"])}
     )

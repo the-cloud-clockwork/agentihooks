@@ -162,6 +162,8 @@ def shard_collector(collect, shard: tuple[int, int]):
 
 
 def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stats: tuple[str, ...]) -> None:
+    if mode not in ("", "collect", "reuse"):
+        raise ValueError(f"unknown mutation stats mode {mode!r}")
     for path in paths:
         data = runner.SourceFileMutationData(path=Path(path))
         data.load()
