@@ -2099,7 +2099,7 @@ def test_a_failing_swarm_tick_leaves_the_others_and_the_sweep_running(monkeypatc
             raise ValueError("ledger down")
         return [f"ok {slug}"]
 
-    _tick_all(monkeypatch, run_tick, ["a", "b"])
+    _tick_all(monkeypatch, run_tick, ["a", "b"], tick_seconds=60)
     captured = capsys.readouterr()
     assert captured.out.splitlines() == ["b: ok b", "herdr: swept"]
     assert captured.err == "a: ValueError: ledger down\n"
@@ -2155,7 +2155,7 @@ def test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs(monkeypatch, capsy
 
 def test_swarms_that_finish_together_tick_once(monkeypatch, capsys):
     ticks = []
-    _tick_all(monkeypatch, lambda store, slug: ticks.append(slug) or ["ok"], ["a", "b", "c"])
+    _tick_all(monkeypatch, lambda store, slug: ticks.append(slug) or ["ok"], ["a", "b", "c"], tick_seconds=60)
     assert sorted(ticks) == ["a", "b", "c"]
 
 
