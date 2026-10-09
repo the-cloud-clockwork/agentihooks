@@ -26,7 +26,7 @@
     "externally_verified": "None: concrete runtime receiver fencing and live G3 rollout remain unverified."
   },
   "validation": {
-    "focused_tests": "226 passed in 6.84 seconds: controller, operation journal, lease, renewal, execution identity and observation; grouping and controller verification: 17 passed in 4.70 seconds",
+    "focused_tests": "Historical verification before added mutation tests: 226 passed in 6.84 seconds. Current source and fixture verification at ec049084c0309142e0087a69144d9c90cdad0755: 235 passed in 6.29 seconds across controller, journal, lease, renewal, execution identity and observation. Controller-only verification at fc70937e: 23 passed in 2.63 seconds.",
     "lint": "ruff check and ruff format check passed on changed Python files",
     "limits": "84 units over limits, 84 base allowlist entries, zero errors"
   },
@@ -47,7 +47,7 @@
     "Full CI and mutation validation are supplied by the linked integration pull request; live G3 rollout remains unverified."
   ],
   "reviews": {
-    "Standards": "Constructor annotation findings fixed in tested commit; no open findings.",
-    "Spec": "No open service or fixture findings; acceptance reports reviewed; production integration remains unverified."
+    "Standards": "Three scoped rounds closed with no open code findings; historical test output qualified and current focused output recorded.",
+    "Spec": "Three scoped rounds closed with no open findings after cached-authority rejection fixture correction; production integration remains unverified."
   }
 }
