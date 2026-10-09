@@ -175,7 +175,7 @@ def run_case(image, mode, output, kill=False):
 
 
 def ownership(container, root):
-    code = f"import json,os,hashlib; from pathlib import Path; r=Path({root!r}); a=r.parent.parent.parent; c=json.loads((r/'context.json').read_text()); p=Path('/proc',str(c['supervisor_pid']),'stat').read_text().rsplit(')',1)[1].split(); files=[a/'execution.json',a/'registration.json',*sorted((a/'homes').rglob('*'))]; hashes={{str(f.relative_to(a)):hashlib.sha256(f.read_bytes()).hexdigest() for f in files if f.is_file()}}; print(json.dumps({{'pid':c['supervisor_pid'],'start':p[19],'namespace':os.readlink('/proc/self/ns/pid'),'hashes':hashes}}))"
+    code = f"import json,os,hashlib; from pathlib import Path; r=Path({root!r}); a=r.parent.parent.parent; c=json.loads((r/'context.json').read_text()); p=Path('/proc',str(c['supervisor_pid']),'stat').read_text().rsplit(')',1)[1].split(); files=[a/'execution.json',a/'registration.json',*sorted((a/'homes').rglob('*'))]; hashes={{str(f.relative_to(a)):hashlib.sha256(f.read_bytes()).hexdigest() for f in files if f.is_file() and str(f.relative_to(a)) not in ('homes/codex/.config/herdr/herdr-server.log','homes/codex/.local/state/herdr/agent-detection/status.toml')}}; print(json.dumps({{'pid':c['supervisor_pid'],'start':p[19],'namespace':os.readlink('/proc/self/ns/pid'),'hashes':hashes}}))"
     return json.loads(docker("exec", container, "python", "-c", code))
 
 
@@ -257,7 +257,10 @@ def rollback_case(image, prior_image, output):
         else:
             raise AssertionError("prior compatibility attempt did not start")
         after = ownership(current, active["root"])
-        assert before == after
+        changed = sorted(
+            k for k in before["hashes"] | after["hashes"] if before["hashes"].get(k) != after["hashes"].get(k)
+        )
+        assert before == after, changed
         assert archive == preserved_archive(output)
         assert (
             Path(attempt).name
@@ -291,6 +294,7 @@ def rollback_case(image, prior_image, output):
             "existing_archive_preserved": archive == preserved_archive(output),
             "prior_image_supervisor_present": supervisor_present,
             "rollback_path": "retained worker headless herdr compatibility",
+            "excluded_runtime_projections": ["herdr server journal", "herdr agent detection status"],
             "historical_supervisor_image": "not available in the retained prior worker image",
         }
     finally:
