@@ -139,6 +139,19 @@ def check_phase_ref(doc: dict, phase: dict) -> None:
         raise ValueError(f"plan_ref lines for phase {phase['id']} must be the range computed from its plan")
 
 
+def anchors(doc: dict, phase: dict) -> list[str]:
+    ref = phase.get("plan_ref")
+    url = ref["artifact"] if ref else phase.get("plan_url")
+    if not url:
+        return []
+    try:
+        text = stored_text({"artifact": url, "lines": "1-1"}, doc)
+    except ValueError:
+        return []
+    start, end = bounds(ref["lines"]) if ref else (1, len(text.splitlines()))
+    return [match[1] for n, _, line in sections(text) if start <= n <= end and (match := ANCHOR.fullmatch(line))]
+
+
 def task_slice(doc: dict, phase: dict, name: str, plan_url: str = "") -> str:
     from scripts.swarm_ledger import plan_packages
 

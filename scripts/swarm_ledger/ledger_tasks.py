@@ -56,6 +56,7 @@ URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
 WORKER_LANES = ("eng", "ci")
+SWARM = "swarm"
 PROPOSE = 'propose the work with agentihooks ledger followup add "<plain words>" and the master decides'
 PUBLISH = (
     "publish the plan with agentihooks ledger publish-plan <file> --phase <phase id>, then link each task with "
@@ -225,7 +226,7 @@ def _add(doc, op, ctx):
     if not _known(tasks, op.get("depends_on", [])):
         return False
     appended = {p["id"] for p in doc.get("phases", []) if p.get("added_by") == op["by"]}
-    if refusal := add_refusal(tasks, op, appended):
+    if refusal := add_refusal(tasks, op, appended) or unsliced_refusal(doc, op, op["by"]):
         ctx.refused.append(refusal)
         return False
     task = {
@@ -283,6 +284,20 @@ def add_refusal(tasks, op, appended):
     return ""
 
 
+def unsliced_refusal(doc: dict, task: dict, by: str) -> str:
+    if task.get("plan_slice") or by == SWARM or ledger_kinds.kind(task) == "plan":
+        return ""
+    from scripts.swarm_ledger import plan_ranges
+
+    phase = next((p for p in doc.get("phases", []) if p["id"] == task.get("phase")), {})
+    if names := plan_ranges.anchors(doc, phase):
+        return (
+            f"phase {phase['id']} has a plan with slice anchors: name the task's slice with --plan-slice "
+            f"on task add or plan_slice= on task set, one of {', '.join(names)}"
+        )
+    return ""
+
+
 def rank_refusal(by, field="rank"):
     from scripts.swarm.naming import lane_of
 
@@ -305,6 +320,9 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
     phase = op["fields"].get("phase")
     if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
+    task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), {})
+    if phase is not None and phase != task.get("phase"):
+        return unsliced_refusal(doc, {**task, "plan_slice": "", **op["fields"]}, op["by"])
     return ""
 
 
@@ -458,7 +476,8 @@ def _set_slice(doc: dict, op: dict, ctx) -> bool:
         return True
     from scripts.swarm_ledger import plan_ranges
 
-    phase = next((p for p in doc.get("phases", []) if p["id"] == task.get("phase")), {})
+    target = fields.get("phase", task.get("phase"))
+    phase = next((p for p in doc.get("phases", []) if p["id"] == target), {})
     try:
         fields["plan_lines"] = plan_ranges.task_slice(
             doc, phase, fields["plan_slice"], fields.get("plan_url", task.get("plan_url", ""))
