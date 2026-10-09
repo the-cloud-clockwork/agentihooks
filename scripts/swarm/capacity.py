@@ -239,8 +239,14 @@ def host_room(config: SwarmConfig, inputs: ScaleInputs) -> dict:
     stored = inputs.previous.get("host") or (inputs.previous.get("autoscale") or {}).get("host") or {}
     previous = stored["room"] if stored.get("room") is not None else stored.get("last")
     found = host_budget.spawn_room(config, inputs.host(), previous)
-    host = {"room": found.room, "reason": found.reason, "limit": found.limit}
+    host = {"room": found.room, "reason": found.reason, "limit": found.limit, "held": found.held}
     return host if found.room is not None else {**host, "last": previous}
+
+
+def granted(host: dict, previous: dict, now_ms: int) -> dict:
+    """A held room keeps the time it was first granted, so spawns since then still count against it."""
+    since = (previous.get("host") or {}).get("granted_at", now_ms) if host["held"] else now_ms
+    return {**host, "granted_at": since}
 
 
 def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None) -> tuple[SwarmConfig, dict | None]:

@@ -32,6 +32,7 @@ class Room:
     room: int | None
     reason: str
     limit: str = ""
+    held: bool = False
 
 
 def thresholds(config: SwarmConfig) -> Thresholds:
@@ -68,7 +69,7 @@ def room(sample: HostSample, thresholds: Thresholds = Thresholds(), previous: in
             return Room(
                 memory, f"{load} is between the watermarks; {memory_text}, below the previous room of {held}", MEMORY
             )
-        return Room(held, f"{load} is between the watermarks, the previous room of {held} holds", LOAD)
+        return Room(held, f"{load} is between the watermarks, the previous room of {held} holds", LOAD, True)
     projected = load_room(sample, thresholds)
     if projected is not None and projected < memory:
         return Room(

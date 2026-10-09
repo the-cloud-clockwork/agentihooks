@@ -133,6 +133,13 @@ def test_each_room_names_the_limit_that_set_it():
     assert host_budget.room(_sample(load1=0.0, available_mb=2100), LIMITS).limit == "memory"
 
 
+def test_only_the_band_hold_is_marked_held():
+    assert host_budget.room(_sample(load1=24.0, available_mb=16000, agents=10), LIMITS, previous=3).held is True
+    assert host_budget.room(_sample(load1=24.0, available_mb=1400, agents=10), LIMITS, previous=5).held is False
+    assert host_budget.room(_sample(load1=40.0, available_mb=16000, agents=10), LIMITS, previous=5).held is False
+    assert host_budget.room(_sample(load1=0.0, available_mb=2100), LIMITS).held is False
+
+
 def test_thresholds_read_the_swarm_config():
     config = SwarmConfig("sw", "/repo", 1, 0, load_high=2.5, load_low=1.25, memory_per_agent_mb=900)
 
