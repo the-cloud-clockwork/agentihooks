@@ -32,12 +32,14 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "size",
             "dependency-audit",
             "durations",
+            "split",
             "kind-due",
             "helm-kind",
         }
     )
     assert gate["if"] == "${{ always() }}"
-    assert jobs["unit"]["needs"] == ["durations"]
+    assert jobs["unit"]["needs"] == ["split"]
+    assert jobs["split"]["needs"] == ["durations"]
     assert "needs" not in jobs["lint"]
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
