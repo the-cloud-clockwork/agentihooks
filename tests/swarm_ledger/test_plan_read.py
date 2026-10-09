@@ -240,7 +240,7 @@ def test_linked_follows_only_links_inside_the_slice():
 
 
 def test_linked_skips_a_section_anchored_inside_the_slice():
-    source = '## W\n- see [A](#ca) and [B](#cb), quoting <a id="cb"></a>\n<a id="ca"></a>\n### A\n- a\n<a id="cb"></a>\n### B\n- b\n'
+    source = '## W\n- see [A](#ca) and [B](#cb), quoting <a id="cb"></a>\n  <a id="ca"></a>\n### A\n- a\n<a id="cb"></a>\n### B\n- b\n'
     assert plan_read.linked(source, "1-5") == "\n### B\n- b\n"
 
 
@@ -256,6 +256,13 @@ def test_section_is_empty_unless_a_heading_follows_the_anchor():
     assert plan_read.section(LINKED_PLAN, "no-heading") == ""
     assert plan_read.section(LINKED_PLAN, "missing") == ""
     assert plan_read.section('<a id="x"></a>\n\nprose\n## Other\n- o\n', "x") == ""
+    assert plan_read.section("## W\n- [M](#m)\nlast prose\n", "m") == ""
+
+
+def test_section_skips_blank_lines_after_the_anchor_and_stops_at_any_higher_heading():
+    assert plan_read.section('<a id="w"></a>\n   \n## W\n- w\n', "w") == "## W\n- w\n"
+    assert plan_read.section('<a id="e"></a>\n## E\n# F\n- f\n', "e") == "## E\n"
+    assert plan_read.section('<a id="e"></a>\n## E\n', "e") == "## E\n"
 
 
 def test_task_read_appends_the_linked_cases_after_the_slice(tmp_path, monkeypatch, capsys):

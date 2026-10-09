@@ -48,12 +48,15 @@ def numbered(text: str, lines: str) -> list[tuple[int, str]]:
 def section(source: str, anchor: str) -> str:
     entries = [entry for entry in _ledger("plan_ranges").sections(source) if entry[1] or entry[2].strip()]
     tag = f'<a id="{anchor}"></a>'
-    at = next((i for i, (_, depth, line) in enumerate(entries) if not depth and line.strip() == tag), len(entries))
-    first, depth, _ = next(iter(entries[at + 1 :]), (0, 0, ""))
-    if not depth:
+    heading = next(
+        (i + 1 for i, (_, d, line) in enumerate(entries[:-1]) if not d and line.strip() == tag and entries[i + 1][1]),
+        None,
+    )
+    if heading is None:
         return ""
-    stop = next((n for n, d, _ in entries[at + 2 :] if 0 < d <= depth), None)
-    rows = source.splitlines()[first - 1 : stop - 1 if stop else None]
+    first, depth, _ = entries[heading]
+    stop = next((n - 1 for n, d, _ in entries[heading + 1 :] if 0 < d <= depth), None)
+    rows = source.splitlines()[first - 1 : stop]
     while rows and (not rows[-1].strip() or ANCHOR.fullmatch(rows[-1].strip())):
         rows.pop()
     return "".join(f"{row}\n" for row in rows)
