@@ -98,6 +98,8 @@ def test_foreign_keys_are_on_for_every_connection(repo):
         assert connection.execute("PRAGMA foreign_keys").fetchone() == (1,)
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute("INSERT INTO work_nodes VALUES ('nowhere', 'tasks/x', 'task', NULL, 0)")
+    with store.read_only(repo.directory) as connection:
+        assert connection.execute("PRAGMA foreign_keys").fetchone() == (1,)
 
 
 def test_the_tables_carry_a_parent_and_a_reverse_dependency_index(repo):
@@ -179,6 +181,14 @@ def test_a_write_rebuilds_tables_a_ledger_never_had(repo):
     assert rows(repo)[1] == {("phases/p2", "phases/p1"), ("tasks/t1", "tasks/t2"), ("tasks/t2", "tasks/t1")}
 
 
+def test_a_write_repairs_rows_that_drifted_at_the_same_count(repo):
+    with repo.connect() as connection, connection:
+        connection.execute("DELETE FROM work_nodes WHERE ledger_slug=? AND node_id='tasks/t1'", (SLUG,))
+        connection.execute("INSERT INTO work_nodes VALUES (?, 'tasks/ghost', 'task', NULL, 9)", (SLUG,))
+    assert run(repo, "task_update", item="tasks/t1", fields={"depends_on": ["t2"]})[1] == []
+    assert rows(repo) == hierarchy.project(repo.get_document(SLUG))
+
+
 def test_restore_keeps_the_rows_and_purge_removes_them(repo, monkeypatch):
     monkeypatch.setattr(bin_storage, "_repository", lambda: repo)
     before = rows(repo)
@@ -211,8 +221,16 @@ def test_a_replacing_import_replaces_the_rows(repo):
     )
 
 
-def test_rebuild_on_a_fresh_copy_reports_zero_drift(repo):
+def test_rebuild_after_writes_reports_zero_drift(repo):
+    run(repo, "task_update", item="tasks/t2", fields={"phase": "p2", "depends_on": []})
     assert repo.rebuild(SLUG) == NO_DRIFT
+
+
+def test_rebuild_on_a_fresh_copy_reports_zero_drift(repo, tmp_path):
+    copy = store.SQLiteLedgerRepository(tmp_path / "fresh" / store.DATABASE)
+    copy.import_document(SLUG, repo.export_document(SLUG))
+    assert copy.rebuild(SLUG) == NO_DRIFT
+    assert rows(copy) == hierarchy.project(repo.get_document(SLUG))
 
 
 def test_rebuild_reports_and_repairs_drift(repo):
@@ -228,7 +246,7 @@ def test_rebuild_reports_and_repairs_drift(repo):
         "changed_nodes": ["tasks/t1"],
         "missing_dependencies": [["phases/p2", "phases/p1"], ["tasks/t2", "tasks/t1"]],
         "extra_dependencies": [["tasks/t1", "tasks/ghost"]],
-        "drift": 7,
+        "drift": 6,
     }
     assert repo.rebuild(SLUG) == NO_DRIFT
     assert rows(repo) == hierarchy.project(repo.get_document(SLUG))

@@ -115,6 +115,7 @@ def read_only(directory):
         return
     connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=5)
     try:
+        connection.execute("PRAGMA foreign_keys=ON")
         yield connection
     finally:
         connection.close()
@@ -352,7 +353,7 @@ class SQLiteLedgerRepository:
     def _write(self, connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
         before, after = diff(*(without_events(document) for document in (entry.state, state)))
         write_rows(connection, slug, before, after)
-        hierarchy.sync(connection, slug, entry.state, state)
+        hierarchy.sync(connection, slug, state)
         append_events(connection, slug, events, self.domain.EVENTS_KEPT)
         generation = entry.generation + 1
         connection.execute(
@@ -385,7 +386,7 @@ class SQLiteLedgerRepository:
                 now,
             ),
         )
-        hierarchy.sync(connection, slug, {}, state)
+        hierarchy.sync(connection, slug, state)
         self._cache.pop(self._key(slug), None)
 
     def create_document(
