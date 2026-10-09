@@ -42,11 +42,12 @@ import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
-from scripts.swarm_ledger import ledger_task_duplicates, page_policy, server_lifetime  # noqa: E402
+from scripts.swarm_ledger import ledger_task_duplicates, page_policy, server_code, server_lifetime  # noqa: E402
 from scripts.swarm_ledger.events import Hub  # noqa: E402
 from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
 from scripts.swarm_ledger.repository import legacy  # noqa: E402
 from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
+from scripts.swarm_ledger.server_code import CODE_DIRS, code_stamp  # noqa: E402
 
 HOST, PORT = ledger_link.address()
 BASE = f"http://{HOST}:{PORT}"
@@ -60,11 +61,6 @@ ALLOWED_ORIGINS = ledger_link.allowed_origins()
 CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
 LOGO = ROOT / "media" / "agentihooks-logo.png"
-CODE_DIRS = (
-    CODE_DIR,
-    *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates", "hive")),
-    ROOT / "hooks",
-)
 
 
 HUB = Hub()
@@ -883,13 +879,6 @@ class Handler(BaseHTTPRequestHandler):
         return self.reply_state(slug, changes, allowed, refusals, ledger_task_duplicates.screen(state, allowed))
 
 
-def code_stamp(code_dirs=CODE_DIRS):
-    return max(
-        (p.stat().st_mtime_ns for d in code_dirs for p in d.rglob("*") if p.suffix in (".py", ".html", ".js", ".css")),
-        default=0,
-    )
-
-
 def reload_if_changed(started, code_dirs=CODE_DIRS, execv=os.execv):
     if code_stamp(code_dirs) == started:
         return False
@@ -926,6 +915,7 @@ def serve():
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)
     PIDFILE.write_text(str(os.getpid()))
+    server_code.record(PIDFILE.parent, os.getpid())
     print(f"ledger server on {BASE}, dir {core.LEDGER_DIR}", flush=True)
     try:
         server.serve_forever()
