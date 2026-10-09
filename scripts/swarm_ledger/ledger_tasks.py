@@ -470,7 +470,7 @@ def _move_plan(doc: dict, task: dict, fields: dict, phase: dict) -> None:
     if "phase" not in fields or fields["phase"] == task.get("phase"):
         return
     fields["plan_lines"] = ""
-    source = next((p for p in doc.get("phases", []) if p["id"] == task.get("phase")), {})
+    source = next((p for p in doc["phases"] if p["id"] == task.get("phase")), {})
     if "plan_url" not in fields and (fields.get("plan_slice") or task.get("plan_url") == source.get("plan_url")):
         fields["plan_url"] = phase.get("plan_url", "") if fields.get("plan_slice") else ""
     fields.setdefault("plan_slice", "")

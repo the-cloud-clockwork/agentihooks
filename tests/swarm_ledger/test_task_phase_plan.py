@@ -171,3 +171,18 @@ def test_phase_move_leaves_the_callers_fields_reusable(destination_plan):
     core.sync(SLUG, ops=[op])
     assert fields == {"phase": "p2"}
     core.check_op(op)
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_replacement_slice_rebinds_an_independent_link_to_the_destination_plan(linked):
+    assert update(plan_url="https://example.com/independent-task-plan")[1] == []
+    state = anchored(SLUG, "new", phase="p2")
+    url = state["phases"][1]["plan_ref"]["artifact"]
+    if linked:
+        phase_plan("p2", url)
+    state, rejected = update(phase="p2", plan_slice="new")
+    assert rejected == []
+    assert task(state)["phase"] == "p2"
+    assert task(state)["plan_slice"] == "new"
+    assert task(state)["plan_lines"] == "2-3"
+    assert task(state)["plan_url"] == (url if linked else "")
