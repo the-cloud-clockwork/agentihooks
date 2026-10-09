@@ -11,6 +11,7 @@ from scripts.hive import auth
 from scripts.swarm import store
 from scripts.swarm.naming import lane_of, resolve_name
 from scripts.swarm.store import connect
+from scripts.swarm_ledger.ledger_link import remote
 
 
 def agent_token(admin, slug, name):
@@ -30,7 +31,7 @@ def principal(admin: str, slug: str, token: str, agent: str) -> str | None:
     if token.startswith("hive."):
         member = auth.agent_member(store.redis_client(), token, slug, agent)
         return agent if member and hive_agent(member, slug, agent) else None
-    if agent and _same(token, agent_token(admin, slug, agent)):
+    if not remote() and agent and _same(token, agent_token(admin, slug, agent)):
         return agent
     return None
 

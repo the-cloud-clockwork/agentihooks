@@ -164,3 +164,19 @@ def test_revoke_during_token_minting_is_refused(live, hive):
 
     with patch.object(auth, "issue_agent", side_effect=revoked):
         assert mint(live, grant, WORKER)[0] == 403
+
+
+@pytest.mark.parametrize("mode", ["compose", "distributed"])
+@pytest.mark.parametrize("name", [WORKER, MASTER])
+def test_previously_issued_page_derived_tokens_are_refused_remotely(live, hive, monkeypatch, mode, name):
+    store, grant = hive
+    token = authority.agent_token(live["admin"], SLUG, name)
+    auth.revoke(store.redis, grant["id"])
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", mode)
+    assert authority.principal(live["admin"], SLUG, token, name) is None
+
+
+def test_local_page_derived_agent_tokens_still_work(live, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    token = authority.agent_token(live["admin"], SLUG, WORKER)
+    assert authority.principal(live["admin"], SLUG, token, WORKER) == WORKER
