@@ -513,7 +513,7 @@ def cmd_agent_up(store, args):
 def cmd_exit(store, args):
     name = store.names.resolve(args.name or Who.from_env().name)
     agent_up.retire(store, args.slug, name, now_ms())
-    print(json.dumps({"exited": name}))
+    print(json.dumps({"exited": name}), flush=True)
     HerdrRuntime().reap_name(name)
 
 

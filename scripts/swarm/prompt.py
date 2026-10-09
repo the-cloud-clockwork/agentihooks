@@ -202,33 +202,34 @@ def build_operator(slug, repo, name, role, profile):
         f'the master with agentihooks msg send master@{slug} "<text>".',
         "",
     ]
-    if not planner:
-        return "\n".join(
-            [
-                *lines,
-                "Work with the operator on what he asks in this pane, through a worktree and a pull request into dev "
-                f'for any code change. Propose other work with {led} followup add "<plain words>".',
-                f"When he says you are done, {leave}",
-            ]
-        )
-    return "\n".join(
-        [
-            *lines,
-            "Plan with the operator here. Ask what you need, edit no code, and revise until he accepts the plan. On "
-            "his accept, in this order:",
-            "1. Write the plan as markdown and its phases as JSON, the init-swarm content phases shape with planning "
-            "manual on each phase, in a folder from agentihooks scratch new.",
-            f"2. Append the phases: {led} plan phases <phases file>. Note the phase ids it prints.",
-            f"3. Publish the plan: {led} publish-plan <plan file> --phase <phase ids>. {PUBLISHED}, and links and "
-            "comments each phase.",
-            f"4. Add each phase's tasks: {led} task add - <title> --phase <id> --lane <eng or ci> --kind <kind> "
-            '--description "<scope and Done when sentence>" --depends-on <ids> --territory <areas>. The ledger takes '
-            "tasks only in phases you appended.",
-            f'5. Tell the master: agentihooks msg send master@{slug} "<the plan link, the phases and tasks you added, '
-            'and that they wait on its review>".',
-            f"6. Tell the operator here what you registered, then {leave}",
-        ]
-    )
+    steps = operator_plan_steps(slug, led, leave) if planner else operator_work_steps(led, leave)
+    return "\n".join([*lines, *steps])
+
+
+def operator_work_steps(led, leave):
+    return [
+        "Work with the operator on what he asks in this pane, through a worktree and a pull request into dev for any "
+        f'code change. Propose other work with {led} followup add "<plain words>".',
+        f"When he says you are done, {leave}",
+    ]
+
+
+def operator_plan_steps(slug, led, leave):
+    return [
+        "Plan with the operator here. Ask what you need, edit no code, and revise until he accepts the plan. On his "
+        "accept, in this order:",
+        "1. Write the plan as markdown and its phases as JSON, the init-swarm content phases shape with planning "
+        "manual on each phase, in a folder from agentihooks scratch new.",
+        f"2. Append the phases: {led} plan phases <phases file>. Note the phase ids it prints.",
+        f"3. Publish the plan: {led} publish-plan <plan file> --phase <phase ids>. {PUBLISHED}, and links and "
+        "comments each phase.",
+        f"4. Add each phase's tasks: {led} task add - <title> --phase <id> --lane <eng or ci> --kind <kind> "
+        '--description "<scope and Done when sentence>" --depends-on <ids> --territory <areas>. The ledger takes '
+        "tasks only in phases you appended.",
+        f'5. Tell the master: agentihooks msg send master@{slug} "<the plan link, the phases and tasks you added, and '
+        'that they wait on its review>".',
+        f"6. Tell the operator here what you registered, then {leave}",
+    ]
 
 
 def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):

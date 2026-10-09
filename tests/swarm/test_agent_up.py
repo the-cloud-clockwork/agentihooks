@@ -137,7 +137,7 @@ def test_cli_master_up_still_brings_the_master(swarm, monkeypatch):
 
 def test_cli_profile_up_refuses_extra_arguments(swarm):
     with pytest.raises(SystemExit):
-        run("sw", "planner", "up", "--now")
+        run("sw", "agent-up", "planner", "--now")
 
 
 def test_exit_retires_an_operator_name_then_ends_its_session(swarm, monkeypatch, capsys):
@@ -148,9 +148,10 @@ def test_exit_retires_an_operator_name_then_ends_its_session(swarm, monkeypatch,
     agent_up.up(swarm, "sw", rt, "planner", 1000)
     monkeypatch.setattr(cli, "now_ms", lambda: 5000)
     monkeypatch.setattr(cli, "Who", SimpleNamespace(from_env=lambda: Who(name="planner@a1b2c3-0001", swarm="sw")))
-    capsys.readouterr()
+    printed = []
+    monkeypatch.setattr(cli, "print", lambda *args, **kwargs: printed.append((args, kwargs)), raising=False)
     assert run("sw", "exit") == 0
-    assert capsys.readouterr().out.strip() == '{"exited": "planner@a1b2c3-0001"}'
+    assert printed == [(('{"exited": "planner@a1b2c3-0001"}',), {"flush": True})]
     assert swarm.names.entry("planner@a1b2c3-0001")["retired_at"] == 5000
     assert rt.reaped == ["planner@a1b2c3-0001"]
 
@@ -171,7 +172,7 @@ def test_exit_refuses_an_operator_name_of_another_swarm(swarm):
     assert str(caught.value) == "planner@a1b2c3-0001 was not launched with agentihooks swarm other <profile> up"
 
 
-def _operator_launch(tmp_path, monkeypatch):
+def _operator_launch(tmp_path, monkeypatch, **bounds):
     monkeypatch.delenv("AGENTIHOOKS_COMPACT_LIMIT", raising=False)
     seen = {}
 
@@ -182,7 +183,7 @@ def _operator_launch(tmp_path, monkeypatch):
 
     runtime = HerdrRuntime(home=tmp_path, run=run_, choose=lambda *_: ("claude", "open"))
     config = SimpleNamespace(
-        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate", **bounds
     )
     placed = runtime.operator(config, "planner@a1b2c3-0001", "planner", "hello")
     return placed, seen
@@ -225,12 +226,10 @@ def test_the_operator_launch_opens_claude_in_the_swarm_space_with_the_inbox_chan
     assert prompt_file.read_text() == "hello"
 
 
-def test_the_operator_launch_starts_on_the_frontier_model(tmp_path, monkeypatch):
-    from scripts.swarm import model_pick
-
-    _, seen = _operator_launch(tmp_path, monkeypatch)
-    after = seen["argv"][seen["argv"].index("--") + 1 :]
-    assert after[after.index("--model") + 1] == model_pick.frontier("claude").model
+def test_the_operator_launch_starts_on_the_frontier_model_inside_the_swarm_effort_range(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_CLAUDE_EFFORT", "max")
+    _, seen = _operator_launch(tmp_path, monkeypatch, effort_min="low", effort_max="medium")
+    assert seen["argv"][seen["argv"].index("--") + 1 :] == ["--model", "opus", "--effort", "medium"]
 
 
 @pytest.mark.parametrize(("lane", "slug"), [("operator", ""), ("plan", "sw"), ("", "sw")])
