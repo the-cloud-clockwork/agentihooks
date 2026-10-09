@@ -61,6 +61,78 @@ def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
     )
 
 
+@pytest.mark.parametrize(
+    "changed",
+    [
+        ".github/workflows/test.yml",
+        "scripts/ci_mutation/__init__.py",
+        "scripts/check_gate.py",
+        "tests/swarm/test_tick.py",
+    ],
+)
+def test_queue_refreshes_changed_grading_inputs_before_enqueueing(changed):
+    run, calls = runner(
+        {"data": {"resource": OPEN}},
+        {
+            "data": {
+                "resource": {
+                    "number": 12,
+                    "repository": {"nameWithOwner": "o/r", "ref": {"target": {"oid": "current"}}},
+                }
+            }
+        },
+        {
+            "workflow_runs": [
+                {
+                    "name": "Tests",
+                    "head_sha": "abc",
+                    "conclusion": "success",
+                    "pull_requests": [{"number": 12, "base": {"sha": "checked"}}],
+                }
+            ]
+        },
+        {"files": [{"filename": changed}], "total_commits": 1},
+        {"message": "Updating pull request branch."},
+        {"data": {"resource": {**OPEN, "headRefOid": "updated"}}},
+    )
+    result = merge_queue.operate("queue", URL, run)
+    assert result["queued"] is False
+    assert result["head"] == "updated"
+    assert result["waiting"] == "checks"
+    assert any("repos/o/r/pulls/12/update-branch" in call[0] for call in calls)
+    assert not any("enqueuePullRequest(input:" in str(call[0]) for call in calls)
+
+
+def test_queue_does_not_refresh_unrelated_dev_changes():
+    run, calls = runner(
+        {"data": {"resource": OPEN}},
+        {
+            "data": {
+                "resource": {
+                    "number": 12,
+                    "repository": {"nameWithOwner": "o/r", "ref": {"target": {"oid": "current"}}},
+                }
+            }
+        },
+        {
+            "workflow_runs": [
+                {
+                    "name": "Tests",
+                    "head_sha": "abc",
+                    "conclusion": "success",
+                    "pull_requests": [{"number": 12, "base": {"sha": "checked"}}],
+                }
+            ]
+        },
+        {"files": [{"filename": "scripts/swarm/intent.py"}], "total_commits": 1},
+        {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": "MQ_one"}}}},
+        {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
+    )
+    assert merge_queue.operate("queue", URL, run)["queued"] is True
+    assert any("repos/o/r/compare/checked...current" in call[0] for call in calls)
+    assert not any("update-branch" in str(call[0]) for call in calls)
+
+
 def test_dequeue_removes_the_pull_request_then_reports_its_state():
     run, calls = runner(
         {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
