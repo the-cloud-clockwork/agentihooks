@@ -1,0 +1,69 @@
+name: Gate Protected
+
+# Runs the base branch's copy of this file and its grader; the head is fetched only as git data and never executed.
+on:
+  pull_request_target:
+    branches: [dev]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: gate-protected-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  statuses: write
+
+env:
+  CONTEXT: Gate — Required
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+jobs:
+  grade:
+    name: Gate — Protected
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # A required context named by both a check run and a commit status needs both, so this status binds the pull request's own aggregator.
+      - name: Mark Gate Required pending on the head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state=pending -f context="$CONTEXT" \
+            -f target_url="$RUN_URL" -f description="The protected branch is grading this head."
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python -m pip install "pyyaml>=6.0"
+
+      - name: Fetch the head as data
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: git fetch --no-tags origin "refs/pull/$PR/head"
+
+      - name: Grade the head with the protected gate logic
+        id: grade
+        run: python -m scripts.gate_protected --head "$HEAD_SHA"
+
+      - name: Report Gate Required on the head
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUTCOME: ${{ steps.grade.outcome }}
+        run: |
+          if [[ "$OUTCOME" == "success" ]]; then
+            state=success description="The protected branch's gate logic passed this head."
+          else
+            state=failure description="The protected branch's gate logic refused this head; see the run."
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state="$state" -f context="$CONTEXT" \
+            -f target_url="$RUN_URL" -f description="$description"

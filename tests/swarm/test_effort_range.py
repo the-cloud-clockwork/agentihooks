@@ -284,7 +284,10 @@ def test_set_names_every_key_it_takes_and_every_level(env, capsys):  # noqa: F81
     assert run("sw", "set", "colour=red") == 1
     err = capsys.readouterr().err
     assert "set takes max-eng-agents, max-ci-agents, " in err
-    assert "autonomy=manual|assist|delegate|full, effort-min=E, effort-max=E or eng-role, " in err
+    assert (
+        "autonomy=manual|assist|delegate|full, effort-min=E, effort-max=E, scaling=auto|manual, "
+        "load-high=N, load-low=N, memory-per-agent=MB or eng-role, "
+    ) in err
     assert run("sw", "set", "effort-min=huge") == 1
     assert "one of low, medium, high, max, Codex xhigh standing for max" in capsys.readouterr().err
 

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x__add__mutmut_17:aa401c40edc3c00697e9709d7bd4f1e53fb24ca894a4a9adf8a02f00f634a2ed": {
+    "reader": "Standards",
+    "reason": "Omitting the get default returns None, which selects the same phase reference, phase URL or missing-source refusal as the empty string. Standards exercised all three branches. Verified against CI run 37861955536 at head 680e7e3c."
+  }
+}

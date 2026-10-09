@@ -44,7 +44,8 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
     command = scan["steps"][-1]["run"].split()
     assert {"p/ci", "p/secrets", "p/python"} == {command[i + 1] for i, a in enumerate(command) if a == "--config"}
     assert command[command.index("--baseline-commit") + 1] == '"$BASE"'
-    assert "--error" in command
+    assert {"--error", "--strict", "--verbose"} <= set(command)
+    assert int(command[command.index("--timeout") + 1]) >= 30
     assert command[:2] == ["semgrep", "scan"]
     assert not [s for s in ("||", "&&", ";", "exit") if s in scan["steps"][-1]["run"]]
     assert not {"set", "--exclude", "--include"} & set(command)
@@ -53,6 +54,20 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
     ]
     assert all("if" not in step and "continue-on-error" not in step for step in scan["steps"])
     assert not {"if", "continue-on-error"} & (set(scan) | set(job))
+
+
+def test_no_workflow_run_script_embeds_an_expression_semgrep_cannot_parse():
+    paths = sorted((_ROOT / ".github").glob("workflows/*.yml")) + sorted(
+        (_ROOT / ".github").glob("actions/**/action.yml")
+    )
+    embedded = []
+    for path in paths:
+        document = yaml.safe_load(path.read_text())
+        steps = [step for job in document.get("jobs", {}).values() for step in job.get("steps", [])]
+        steps += document.get("runs", {}).get("steps", [])
+        embedded += [(path.name, step.get("name")) for step in steps if "${{" in step.get("run", "")]
+    assert len(paths) > 10
+    assert embedded == []
 
 
 def test_unit_matrix_does_not_fail_fast():
@@ -73,11 +88,22 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
     )
     assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$BASE"'
     assert floor["run"] == (
-        'grader="$RUNNER_TEMP/base"\n'
-        '[[ -f "$grader/tests/count_floor.py" ]] || grader="$GITHUB_WORKSPACE"\n'
-        'cd "$grader"\n'
+        'if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then\n'
+        '  echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."\n'
+        "  exit 1\n"
+        "fi\n"
+        'cd "$RUNNER_TEMP/base"\n'
         'python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
     )
+
+
+def test_test_count_refuses_a_base_without_its_grader(tmp_path):
+    floor = _workflow()["jobs"]["test-count"]["steps"][-1]
+    (tmp_path / "base").mkdir()
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), GITHUB_WORKSPACE=str(tmp_path))
+    result = subprocess.run(["bash", "-e", "-c", floor["run"]], env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "nothing trusted can grade" in result.stdout
 
 
 @pytest.mark.parametrize("unit", ["success", "failure", "skipped", "cancelled", "pending"])
