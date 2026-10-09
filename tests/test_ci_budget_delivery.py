@@ -1,10 +1,11 @@
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
 import yaml
 
-from scripts import ci_budget
+from scripts import ci_budget, ci_wiring
 from scripts.ci_budget.__main__ import main
 
 pytestmark = pytest.mark.unit
@@ -249,3 +250,15 @@ def test_every_queue_report_can_read_pull_request_metadata():
     assert app["with"]["permission-pull-requests"] == "read"
     reporter = next(step for step in job["steps"] if "scripts.ci_budget" in step.get("run", ""))
     assert reporter["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+
+
+def test_final_telemetry_declaration_does_not_exempt_a_missing_real_gate():
+    root = Path(__file__).resolve().parents[1]
+    workflows = ci_wiring.load(root)
+    config = json.loads((root / ".github/gate-wiring.json").read_text())
+    today = date(2026, 10, 9)
+    assert ci_wiring.check(workflows, config, today) == []
+    workflows["test.yml"]["jobs"]["gate-required"]["needs"].remove("lint")
+    assert ci_wiring.check(workflows, config, today) == [
+        f"test.yml/lint runs on pull requests but is not a need of {ci_wiring.GATE}."
+    ]
