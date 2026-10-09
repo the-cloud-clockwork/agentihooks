@@ -3,6 +3,7 @@ from __future__ import annotations
 import socket
 import sys
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import push
@@ -10,38 +11,9 @@ from scripts.swarm.store import PREFIX
 
 if TYPE_CHECKING:
     from redis import Redis
+    from redis.client import Pipeline
 
     from scripts.swarm.store import RedisStore
-
-STEP = """
-local active = tonumber(redis.call('HGET', KEYS[1], 'active') or '0')
-local field = ARGV[1] == '1' and 'bad' or 'good'
-local other = ARGV[1] == '1' and 'good' or 'bad'
-redis.call('HSET', KEYS[1], other, 0)
-local count = redis.call('HINCRBY', KEYS[1], field, 1)
-local event = ''
-if count >= 2 and ARGV[1] ~= tostring(active) then
-    active = tonumber(ARGV[1])
-    redis.call('HSET', KEYS[1], 'active', active)
-    event = active == 1 and 'raised' or 'resolved'
-    if active == 1 then redis.call('HINCRBY', KEYS[1], 'generation', 1) end
-    redis.call('RPUSH', KEYS[2], event)
-end
-return event
-"""
-
-
-MAIL = """
-local generation = tonumber(redis.call('HGET', KEYS[1], 'generation') or '0')
-local active = redis.call('HGET', KEYS[1], 'active') == '1'
-local field = ARGV[1]
-if field == 'raised' and not active then return 0 end
-local value = tostring(generation)
-if field == 'resolved' and redis.call('HGET', KEYS[2], 'raised') ~= value then return 0 end
-if redis.call('HGET', KEYS[2], field) == value then return 0 end
-redis.call('HSET', KEYS[2], field, value)
-return 1
-"""
 
 
 def key(kind: str) -> str:
@@ -50,26 +22,68 @@ def key(kind: str) -> str:
 
 def step(redis: Redis, kind: str, bad: bool) -> str:
     root = key(kind)
-    return redis.eval(STEP, 2, root, f"{root}:outbox", int(bad))
+
+    def change(pipe: Pipeline) -> str:
+        held = pipe.hgetall(root)
+        active = held.get("active") == "1"
+        field, other = ("bad", "good") if bad else ("good", "bad")
+        count = int(held.get(field, 0)) + 1
+        updates = {field: count, other: 0}
+        event = ""
+        if count >= 2 and bad != active:
+            updates["active"] = int(bad)
+            if bad:
+                updates["generation"] = int(held.get("generation", 0)) + 1
+            event = "raised" if bad else "resolved"
+        pipe.multi()
+        pipe.hset(root, mapping=updates)
+        if event:
+            pipe.rpush(f"{root}:outbox", event)
+        return event
+
+    return redis.transaction(change, root, value_from_callable=True)
 
 
 def deliver(redis: Redis, kind: str, raised: str, resolved: str) -> None:
     root = key(kind)
-    lock = redis.lock(f"{root}:delivery", timeout=10, blocking=False)
-    if not lock.acquire():
+    token = str(uuid4())
+    lock_key = f"{root}:delivery"
+    if not redis.set(lock_key, token, nx=True, px=30_000):
         return
     try:
         event = redis.lindex(f"{root}:outbox", 0)
         if event and push.send("critical" if kind == "ledger" else "alerts", raised if event == "raised" else resolved):
             redis.lpop(f"{root}:outbox")
     finally:
-        lock.release()
+
+        def release(pipe: Pipeline) -> None:
+            if pipe.get(lock_key) == token:
+                pipe.multi()
+                pipe.delete(lock_key)
+
+        redis.transaction(release, lock_key)
 
 
 def mail(redis: Redis, kind: str, address: str, text: str, resolved: bool = False) -> bool:
     root = key(kind)
+    mail_key = f"{root}:mail:{address}"
     field = "resolved" if resolved else "raised"
-    if not redis.eval(MAIL, 2, root, f"{root}:mail:{address}", field):
+
+    def claim(pipe: Pipeline) -> bool:
+        generation, active = pipe.hmget(root, "generation", "active")
+        generation = generation or "0"
+        held = pipe.hgetall(mail_key)
+        if not resolved and active != "1":
+            return False
+        if resolved and held.get("raised") != generation:
+            return False
+        if held.get(field) == generation:
+            return False
+        pipe.multi()
+        pipe.hset(mail_key, field, generation)
+        return True
+
+    if not redis.transaction(claim, root, mail_key, value_from_callable=True):
         return False
     InboxStore(redis).send("swarm", address, text, fyi=resolved)
     return True
