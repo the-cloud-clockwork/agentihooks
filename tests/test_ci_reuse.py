@@ -329,6 +329,8 @@ def test_an_uncached_commit_is_fetched_before_comparing_its_tree(full_source, tm
     remote = tmp_path / "remote.git"
     remote.mkdir()
     git(remote, "init", "--bare")
+    git(remote, "config", "user.email", "ci@example.invalid")
+    git(remote, "config", "user.name", "CI")
     git(root, "remote", "add", "origin", str(remote))
     git(root, "push", "origin", "dev")
     tree = git(root, "rev-parse", f"{head}^{{tree}}")
