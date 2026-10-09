@@ -14,8 +14,18 @@ plan_ledger = test_plan_kind.plan_ledger
 PLAN = "# Plan\n\n## Build\n<!-- slice: first -->\n### First\nOne\n<!-- slice: second -->\n### Second\nTwo\n<!-- slice: third -->\n### Third\nThree\n## Ship\nOther\n"
 
 
+UNSLICED = (
+    "phase p1 has a plan with slice anchors: name the task's slice with --plan-slice on task add or plan_slice= "
+    "on task set, one of first, second, third"
+)
+
+
 @pytest.fixture
 def published(plan_ledger, tmp_path, monkeypatch, capsys):
+    return publish(plan_ledger, tmp_path, monkeypatch, capsys)
+
+
+def publish(plan_ledger, tmp_path, monkeypatch, capsys):
     core.sync(plan_ledger, ops=[{"op": "join", "id": "join", "by": "planner", "role": "member"}])
     path = tmp_path / "plan.md"
     path.write_text(PLAN)
@@ -94,10 +104,28 @@ def test_missing_anchor_refused(published):
 def test_a_task_without_a_slice_is_refused_in_a_phase_whose_plan_has_anchors(published):
     state, rejected = add(published, "loose")
     assert rejected == ["add-loose"]
-    assert state["_meta"]["warnings"] == [
-        "phase p1 has a plan with slice anchors: add the task with --plan-slice naming one of first, second, third"
-    ]
-    assert not any(t["id"] == "loose" for t in state["tasks"])
+    assert state["_meta"]["warnings"] == [UNSLICED]
+    state, rejected = add(published, "mastered", by="master@abcdef-0001")
+    assert (rejected, state["_meta"]["warnings"]) == (["add-mastered"], [UNSLICED])
+    assert not any(t["id"] in ("loose", "mastered") for t in state["tasks"])
+
+
+def test_a_task_without_a_slice_cannot_move_into_a_phase_whose_plan_has_anchors(published):
+    later = {"op": "phase_add", "id": "add-p2", "by": "planner", "phase": "p2", "title": "Later"}
+    core.check_op(later)
+    assert core.sync(published, ops=[later])[1] == []
+    add(published, "elsewhere", phase="p2")
+    op = {"op": "task_update", "id": "move", "by": "planner", "item": "tasks/elsewhere", "fields": {"phase": "p1"}}
+    core.check_op(op)
+    state, rejected = core.sync(published, ops=[op])
+    assert rejected == ["move"]
+    assert state["_meta"]["warnings"] == [UNSLICED]
+    assert task(state, "elsewhere")["phase"] == "p2"
+    sliced = {**op, "id": "move-sliced", "fields": {"phase": "p1", "plan_slice": "second"}}
+    core.check_op(sliced)
+    state, rejected = core.sync(published, ops=[sliced])
+    assert rejected == []
+    assert (task(state, "elsewhere")["phase"], task(state, "elsewhere")["plan_lines"]) == ("p1", "7-9")
 
 
 def test_plan_tasks_and_tasks_the_swarm_queues_need_no_slice(published):

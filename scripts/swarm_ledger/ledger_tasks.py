@@ -226,7 +226,7 @@ def _add(doc, op, ctx):
     if not _known(tasks, op.get("depends_on", [])):
         return False
     appended = {p["id"] for p in doc.get("phases", []) if p.get("added_by") == op["by"]}
-    if refusal := add_refusal(tasks, op, appended) or unsliced(doc, op):
+    if refusal := add_refusal(tasks, op, appended) or unsliced_refusal(doc, op, op["by"]):
         ctx.refused.append(refusal)
         return False
     task = {
@@ -284,14 +284,17 @@ def add_refusal(tasks, op, appended):
     return ""
 
 
-def unsliced(doc: dict, op: dict) -> str:
-    if "plan_slice" in op or op["by"] == SWARM or ledger_kinds.kind(op) == "plan":
+def unsliced_refusal(doc: dict, task: dict, by: str) -> str:
+    if task.get("plan_slice") or by == SWARM or ledger_kinds.kind(task) == "plan":
         return ""
     from scripts.swarm_ledger import plan_ranges
 
-    phase = next((p for p in doc.get("phases", []) if p["id"] == op.get("phase")), {})
+    phase = next((p for p in doc.get("phases", []) if p["id"] == task.get("phase")), {})
     if names := plan_ranges.anchors(doc, phase):
-        return f"phase {phase['id']} has a plan with slice anchors: add the task with --plan-slice naming one of {', '.join(names)}"
+        return (
+            f"phase {phase['id']} has a plan with slice anchors: name the task's slice with --plan-slice "
+            f"on task add or plan_slice= on task set, one of {', '.join(names)}"
+        )
     return ""
 
 
@@ -317,6 +320,9 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
     phase = op["fields"].get("phase")
     if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
+    task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), {})
+    if phase is not None and phase != task.get("phase"):
+        return unsliced_refusal(doc, {**task, **op["fields"]}, op["by"])
     return ""
 
 
@@ -470,7 +476,8 @@ def _set_slice(doc: dict, op: dict, ctx) -> bool:
         return True
     from scripts.swarm_ledger import plan_ranges
 
-    phase = next((p for p in doc.get("phases", []) if p["id"] == task.get("phase")), {})
+    target = fields.get("phase", task.get("phase"))
+    phase = next((p for p in doc.get("phases", []) if p["id"] == target), {})
     try:
         fields["plan_lines"] = plan_ranges.task_slice(
             doc, phase, fields["plan_slice"], fields.get("plan_url", task.get("plan_url", ""))
