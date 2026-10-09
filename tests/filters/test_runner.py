@@ -356,3 +356,12 @@ def test_a_filter_runs_in_process_and_hands_back_the_runner_result(monkeypatch):
     entry = {"file": "pre-any-x.filter.yaml", "path": "x"}
     assert conditions.execute(entry, "pre", {"tool_name": "Write"}, 1) == {"returncode": 0}
     assert seen == [(entry, "pre", {"tool_name": "Write"}, True)]
+
+
+@pytest.mark.parametrize("text", ["value\n", "value\nunrelated = 2\n", "other = 1\nvalue\nunrelated = 2\n"])
+def test_a_newline_ending_finding_keeps_only_its_source_line(filters_dir, stub, text):
+    (filters_dir / "pre-write-lines.filter.yaml").write_text("finders:\n  - regex: 'value\\n'\n")
+    fake = stub()
+    conditions.pre_effect(_write_call(text))
+    question = fake.calls[0]["questions"]["finding_0"]
+    assert question.instructions.rsplit("\nContext: ", 1)[1] == "value"

@@ -67,7 +67,7 @@ def find(spec: schema.FilterSpec, pieces: list[extract.Piece], payload: dict | N
 
 def _enclosing_lines(text: str, start: int, end: int) -> str:
     first = text.rfind("\n", 0, start) + 1
-    last = text.find("\n", end)
+    last = text.find("\n", end - 1)
     return text[first : len(text) if last < 0 else last]
 
 
