@@ -1,4 +1,4 @@
-"""agentihooks hive invite|join|revoke|serve|set|show|list."""
+"""agentihooks hive invite|join|revoke|controller|serve|set|show|list."""
 
 import argparse
 import json
@@ -67,6 +67,9 @@ def _parser() -> argparse.ArgumentParser:
     join.add_argument("url")
     join.add_argument("code")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
+    sub.add_parser(
+        "controller", help="Write a new controller service credential to a private file, retiring the previous one"
+    )
     serve = sub.add_parser("serve", help="Run the join endpoint")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8770)
@@ -125,6 +128,9 @@ def main(argv: list[str]) -> int:
             print(f"revoked {args.id}")
         elif args.command in ("run", "install"):
             return _daemon(args.command)
+        elif args.command == "controller":
+            path = auth.write_controller_env(registry.home(), auth.issue_controller(redis_client()))
+            print(f"issued a controller credential; it is in {path}")
         elif args.command in ("set", "show", "list"):
             _registry(args)
         else:
