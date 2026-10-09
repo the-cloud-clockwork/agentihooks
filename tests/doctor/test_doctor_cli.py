@@ -44,7 +44,13 @@ class FileLedger(LedgerClient):
         from scripts.swarm_ledger.repository import repository
 
         if path.startswith("hierarchy"):
-            return hierarchy_read(repository.bound(core), slug, path)["data"]
+            rows, query = [], {"limit": 100}
+            while True:
+                reply = hierarchy_read(repository.bound(core), slug, path, query)
+                rows += reply["data"]
+                if reply["next_cursor"] is None:
+                    return rows
+                query["cursor"] = reply["next_cursor"]
         return value(self._call(slug), path)
 
 

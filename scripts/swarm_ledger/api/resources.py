@@ -174,7 +174,7 @@ def swarm_read(status: dict | None, path: str, query: dict) -> dict:
     return page(rows, revision(rows), query)
 
 
-def hierarchy_read(repository, slug: str, path: str, query: dict | None = None) -> dict:
+def hierarchy_read(repository, slug: str, path: str, query: dict) -> dict:
     from ..repository.hierarchy import KINDS, READS, text
 
     name, _, node = path.removeprefix("hierarchy").removeprefix("/").partition("/")
@@ -192,7 +192,7 @@ def hierarchy_read(repository, slug: str, path: str, query: dict | None = None) 
         if isinstance(item, dict) and text(item.get("id"))
     }
     data = [{**row, "state": node_state(row["kind"], items.get(row["node"], {}), doc)} for row in rows]
-    return page(data, revision(data), query or {})
+    return page(data, revision(data), query)
 
 
 def node_state(kind: str, item: dict, doc: dict) -> str:
