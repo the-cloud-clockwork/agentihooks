@@ -1,0 +1,109 @@
+name: Proofs
+
+on:
+  push:
+    branches: ['diffcheck/**']
+    paths: ['.github/workflows/proofs.yml']
+  workflow_dispatch:
+    inputs:
+      proof:
+        description: Focused proof to run; gate plant proofs must use the full Tests dispatch
+        type: choice
+        required: true
+        default: tests
+        options: [tests, mutation, semgrep, worker-image, swarm-image, brain-smoke, helm-kind]
+      base:
+        description: Base revision for mutation or Semgrep scope
+        required: true
+        default: origin/dev
+      tests:
+        description: Space separated test paths or node ids under tests for the tests proof
+        required: false
+        default: ''
+      browser:
+        description: Install Chromium for focused browser tests
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: proofs-${{ github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  mutation:
+    if: inputs.proof == 'mutation'
+    uses: ./.github/workflows/mutation-preflight.yml
+    with:
+      base: ${{ inputs.base }}
+
+  semgrep:
+    if: inputs.proof == 'semgrep'
+    uses: ./.github/workflows/semgrep.yml
+    with:
+      base: ${{ inputs.base }}
+
+  worker-image:
+    if: inputs.proof == 'worker-image'
+    uses: ./.github/workflows/swarm-node-smoke.yml
+
+  swarm-image:
+    if: inputs.proof == 'swarm-image'
+    uses: ./.github/workflows/swarm-smoke.yml
+
+  brain-smoke:
+    if: inputs.proof == 'brain-smoke'
+    uses: ./.github/workflows/brain-smoke.yml
+
+  helm-kind:
+    if: inputs.proof == 'helm-kind'
+    uses: ./.github/workflows/helm-kind.yml
+
+  tests:
+    if: github.event_name == 'push' || inputs.proof == 'tests'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TEST_PATHS: ${{ github.event_name == 'push' && 'tests/test_ci_proofs.py tests/test_ci_mutation_preflight.py' || inputs.tests }}
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require explicit test paths
+        run: |
+          read -r -a paths <<< "$TEST_PATHS"
+          [[ ${#paths[@]} -gt 0 ]] || { echo '::error::Choose explicit test paths under tests/.'; exit 1; }
+          for path in "${paths[@]}"; do
+            [[ "$path" == tests/* && "$path" != *..* ]] || { echo '::error::Every test path must be under tests/.'; exit 1; }
+          done
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          enable-cache: false
+
+      - name: Install dependencies
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+
+      - name: Install the browser that page tests drive
+        if: inputs.browser
+        timeout-minutes: 2
+        uses: ./.github/actions/browser-cache
+
+      - name: Run selected tests
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: |
+          read -r -a paths <<< "$TEST_PATHS"
+          python -m pytest "${paths[@]}" -v -n auto --dist loadgroup --tb=short
