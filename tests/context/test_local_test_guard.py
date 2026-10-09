@@ -77,6 +77,7 @@ WRAPPERS = [
     "env -i -u UNUSED FOO=bar {}",
     "FOO=bar {}",
     "env -S '{}'",
+    "env -S'{}'",
     "env --split-string='{}'",
     "command -- {}",
     "nohup {}",
@@ -163,6 +164,7 @@ def test_later_commands_and_substitutions_are_checked(monkeypatch):
         "echo ok && pytest",
         "echo $(pytest)",
         'echo "$(pytest)"',
+        """echo "$(env -S 'pytest -q')" """,
         "echo `pytest`",
         "if true; then pytest; fi",
     ]:

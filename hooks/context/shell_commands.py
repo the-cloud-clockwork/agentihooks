@@ -29,9 +29,7 @@ _LAUNCH_OPTIONS = {"--project", "--directory", "-C", "--cwd", "--with", "--pytho
 _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ksh"})
 _SHELL_FLAG = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
 _HEREDOC = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?.*?\n\1\b", re.DOTALL)
-_SINGLE_QUOTED = re.compile(r"'[^']*'")
-_BACKTICKS = re.compile(r"`([^`]+)`")
-_SUBSTITUTIONS = re.compile(r"\$\(([^()]*)\)")
+_SUBSTITUTIONS = re.compile(r"\$\(([^()]*)\)|`([^`]+)`")
 
 
 def _options(tokens: list[str], valued: set[str]) -> list[str]:
@@ -48,6 +46,8 @@ def _env_split(tokens: list[str]) -> list[str]:
     for index, token in enumerate(tokens):
         if token in {"-S", "--split-string"} and index + 1 < len(tokens):
             return tokens[:index] + shlex.split(tokens[index + 1]) + tokens[index + 2 :]
+        if token.startswith("-S") and token != "-S":
+            return tokens[:index] + shlex.split(token[2:]) + tokens[index + 1 :]
         if token.startswith("--split-string="):
             return tokens[:index] + shlex.split(token.split("=", 1)[1]) + tokens[index + 1 :]
     return tokens
@@ -100,6 +100,27 @@ def _heredocs(command: str, depth: int) -> tuple[str, list[list[str]]]:
     return _HEREDOC.sub("", command), result
 
 
+def _substitutions(command: str) -> list[str]:
+    scripts, quote, index = [], "", 0
+    while index < len(command):
+        character = command[index]
+        if character == "\\" and quote != "'":
+            index += 2
+            continue
+        match = _SUBSTITUTIONS.match(command, index)
+        if match and quote != "'":
+            scripts.append(match[1] or match[2])
+            index = match.end()
+            continue
+        if character in {"'", '"\\"'}:
+            if not quote:
+                quote = character
+            elif quote == character:
+                quote = ""
+        index += 1
+    return scripts
+
+
 def commands(command: str, depth: int = 0) -> list[list[str]]:
     if depth > 10:
         raise ValueError("Shell wrapper nesting exceeds ten levels")
@@ -115,8 +136,6 @@ def commands(command: str, depth: int = 0) -> list[list[str]]:
         else:
             words.append(token)
     result.extend(_expand(words, depth))
-    executable = _SINGLE_QUOTED.sub("", command)
-    for pattern in (_BACKTICKS, _SUBSTITUTIONS):
-        for match in pattern.finditer(executable):
-            result.extend(commands(match[1], depth + 1))
+    for script in _substitutions(command):
+        result.extend(commands(script, depth + 1))
     return result
